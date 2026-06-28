@@ -1,0 +1,502 @@
+Part III - Administrative, Procedural, and Miscellaneous
+
+
+
+
+Reporting and Penalty Relief for Brokers for Certain Digital Asset Transactions Under
+Section 6045
+
+
+
+
+Notice 2024-57
+
+
+SECTION 1. PURPOSE
+
+    This notice provides that brokers are not required to file information returns and
+
+furnish payee statements with respect to certain transactions involving digital assets
+
+identified in this notice and that the Internal Revenue Service (IRS) will not assert
+
+penalties under section 6721 (failure to file correct information returns) or section 6722
+
+(failure to furnish correct payee statements) of the Internal Revenue Code (Code) 1 with
+
+respect to these identified transactions.
+
+SECTION 2. BACKGROUND
+
+    .01 Section 6045
+
+    Section 6045(a) provides that every person doing business as a broker shall make a
+
+return to the IRS showing the name and address of each customer, with details
+
+regarding gross proceeds and other information as required. These rules apply when
+
+
+
+1
+ Unless otherwise specified, all “section” or “§” references are to sections of the Internal Revenue Code
+or the Income Tax Regulations (26 CFR part 1).
+                                                    1
+required by the Secretary of the Treasury or her delegate (Secretary) and in accordance
+
+with regulations prescribed by the Secretary. Brokers required to make returns under
+
+section 6045 with respect to digital assets do so by filing Form 1099-DA, Digital Asset
+
+Proceeds From Broker Transactions.
+
+   Section 80603 of the Infrastructure Investment and Jobs Act, Pub. L. No. 117-58,
+
+135 Stat. 429, 1339 (2021) (Infrastructure Act) made several changes to the broker
+
+reporting provisions under section 6045 to clarify the rules regarding how certain digital
+
+asset transactions should be reported by brokers and to expand the categories of
+
+assets for which basis reporting is required to include all digital assets. On June 28,
+
+2024, final regulations (TD 10000) were filed for public inspection with the Federal
+
+Register (XX FR XXXXX) (final regulations) to require brokers, including certain digital
+
+asset trading platforms, certain processors of digital asset payments, certain digital
+
+asset hosted wallet providers, and digital asset kiosks, to file information returns and
+
+furnish payee statements reporting gross proceeds and in certain circumstances
+
+adjusted basis on sales of digital assets effected for customers.
+
+   Section 1.6045-1(c)(2) provides that a broker generally is required to make an
+
+information return for each sale by a customer of the broker if, in the ordinary course of
+
+a trade or business in which the broker stands ready to effect sales to be made by
+
+others, the broker effects the sale or closes the short position opened by the sale.
+
+   Section 6045(c) defines a broker to include a dealer, a barter exchange, any person
+
+who (for consideration) regularly acts as a middleman with respect to property or
+
+services, and any person who (for consideration) is responsible for regularly providing
+
+any service effectuating transfers of digital assets on behalf of another person. Pursuant
+
+
+
+                                             2
+to § 1.6045-1(a)(1), the term broker includes any person that in the ordinary course of a
+
+trade or business stands ready to effect sales made by others. Sections 1.6045-1(a)(10)
+
+and (21) define, in part, the term effect to mean, with respect to a sale, to act as: an
+
+agent for a party wherein the nature of the agency is such that the agent ordinarily
+
+would know the gross proceeds from the sale; an obligor retiring its own debt
+
+obligations, a corporation redeeming its own stock, or an issuer of digital assets
+
+redeeming those issued digital assets; a principal that is a dealer; or a digital asset
+
+middleman who provides a facilitative service.
+
+   Section 1.6045-1(a)(9)(i) defines the term sale to include any disposition of
+
+securities, commodities, options, regulated futures contracts, securities futures
+
+contracts, or forward contracts, and includes a redemption of stock, a retirement of debt
+
+instruments, and entering into short sales, but only to the extent any of these actions
+
+are conducted for cash. Section 1.6045-1(a)(9)(ii) defines the term sale to also include
+
+any disposition of a digital asset in exchange for cash or stored-value cards; any
+
+disposition of digital assets in exchange for a different digital asset; and the delivery of a
+
+digital asset pursuant to the settlement of a forward contract, option, regulated futures
+
+contract, any similar instrument, or any other executory contract which would be treated
+
+as a sale of a digital asset if the contract had not been executory.
+
+   Section 6045(g)(3)(D) and § 1.6045-1(a)(19) define the term digital asset to mean
+
+any digital representation of value that is recorded on a cryptographically secured
+
+distributed ledger (or any similar technology), without regard to whether each individual
+
+transaction involving that digital asset is recorded on that ledger, and that is not cash.
+
+   .02 Sections 6721 and 6722
+
+
+
+                                              3
+   Section 6721 imposes a penalty for any failure to file an information return on or
+
+before the required filing date, and for any failure to include all the information required
+
+to be shown on a return or the inclusion of incorrect information. Section
+
+6724(d)(1)(B)(iii) defines an information return for this purpose as a return required by
+
+section 6045(a) or (d).
+
+   Section 6722 imposes a penalty for any failure to furnish a payee statement on or
+
+before the required furnishing date to the person to whom such statement is required to
+
+be furnished, and for any failure to include all the information required to be shown on a
+
+payee statement or the inclusion of incorrect information. Section 6724(d)(2)(H) defines
+
+a payee statement for this purpose as a statement required by section 6045(b) or (d).
+
+SECTION 3. SCOPE
+
+   .01 The Treasury Department and the IRS have determined that certain digital asset
+
+transactions identified in sections 3.02, 3.03, 3.04, 3.05, 3.06, and 3.07 of this notice
+
+(identified transactions) require further study to determine how to facilitate appropriate
+
+reporting. Accordingly, until that determination is made, brokers are not required to
+
+make a return on these identified transactions under section 6045(a), and the IRS will
+
+not impose penalties under section 6721 or section 6722 for failure to file correct
+
+information returns or failure to furnish correct payee statements with respect to these
+
+identified transactions. The description of the transactions in sections 3.02, 3.03, 3.04,
+
+3.05, 3.06, and 3.07 does not constitute or reflect a substantive analysis for Federal
+
+income tax purposes of any of the identified transactions or their component steps and
+
+no inference is intended as to how an identified transaction, or its component steps, is
+
+treated for substantive Federal income tax purposes. The descriptions are provided
+
+
+
+                                              4
+solely for the purpose of describing the scope of the identified transactions covered by
+
+sections 3.02, 3.03, 3.04, 3.05, 3.06, and 3.07 of this notice and solely for purposes of
+
+determining the application of the broker reporting requirements under section 6045
+
+pursuant to this notice. The inclusion of a transaction in section 3.02, 3.03, 3.04, 3.05,
+
+3.06, or 3.07 of this notice is not intended to create an inference that the identified
+
+transaction is or is not a sale of a digital asset or that it would be required to be reported
+
+under section 6045(a) but for this notice.
+
+   .02 Wrapping and unwrapping transactions.
+
+       (1) An identified transaction described in this section 3.02 is:
+
+       (a) The transfer of a single type of digital asset that is native to one
+
+cryptographically-secured distributed ledger (or that cannot be used in certain
+
+automatically executing contracts) (digital asset A) in return for another digital asset
+
+(digital asset B) that is: (i) redeemable solely for digital asset A except as provided in
+
+section 3.02(1)(b) of this notice; and (ii) identical to digital asset A except that it is
+
+“wrapped” using an automatically executing contract (which may be referred to as a
+
+“smart contract”) or similar technology allowing it to be digitally represented and
+
+tradeable on a cryptographically-secured distributed ledger other than the one to which
+
+digital asset A is native (or that can be used in the smart contracts that digital asset A
+
+could not be used in); and
+
+       (b) The transfer or redemption of digital asset B described in section 3.02(1)(a) of
+
+this notice in return for digital asset A described in such section, regardless of whether
+
+airdrops or other digital assets attributable to the possession of digital asset A prior to
+
+such a transfer or redemption are also received or credited for the period during which
+
+
+
+                                                5
+digital asset A was wrapped in a transaction described in section 3.02(1)(a) of this
+
+notice. The processes described in section 3.02(1)(a) and this paragraph (1)(b) may be
+
+referred to as “wrapping” and “unwrapping” or as exchanging a “wrapped digital asset”
+
+for an “unwrapped digital asset of the same type” and vice versa.
+
+       (2) The treatment of a transfer or redemption transaction described in section
+
+3.02(1)(b) of this notice does not affect whether the receipt or crediting of airdrops, or
+
+other digital assets attributable to the possession of digital asset A for the period during
+
+which digital asset A was wrapped in a transaction described in section 3.02(1)(a) of
+
+this notice, should be treated as otherwise subject to information reporting under
+
+another Code section as rent, salaries, wages, premiums, annuities, compensations,
+
+remunerations, emoluments, interest, or other fixed or determinable income.
+
+   .03 Liquidity provider transactions.
+
+       (1) An identified transaction described in this section 3.03 is:
+
+       (a) The transfer of one or more digital assets (for example, digital assets C and
+
+D) into an automatically executing contract and receipt of a different digital asset (digital
+
+asset L) that represents an interest in a pool of those digital assets that are used by an
+
+automatically executing contract to facilitate the trading (or to facilitate what digital asset
+
+market participants describe as lending) of those digital assets in an automated market
+
+maker system; and
+
+       (b) The redemption of digital asset L in return for a proportional share of the
+
+digital assets in the pool, regardless of whether the digital assets received or credited in
+
+the redemption include the same proportion of the units of digital assets in the pool that
+
+were previously deposited into the automatically executing contract in a transaction
+
+
+
+                                               6
+described in section 3.03(1)(a) of this notice.
+
+       (2) The treatment of a redemption transaction described in section 3.03(1)(b) of
+
+this notice does not affect whether the receipt or crediting of digital assets or any other
+
+payment as compensation for the use of units of digital assets transferred to the pool is
+
+otherwise subject to information reporting under another Code section as rent, salaries,
+
+wages, premiums, annuities, compensations, remunerations, emoluments, interest, or
+
+other fixed or determinable income.
+
+   .04 Staking transactions.
+
+       (1) An identified transaction described in this section 3.04 is:
+
+       (a)(i) The transfer of one digital asset (digital asset E) into an automatically
+
+executing contract for the purpose of being used as part of a proof-of-stake consensus
+
+mechanism to validate transactions on a distributed ledger in return for the opportunity
+
+to receive the transferred digital asset back plus validation rewards (if any);
+
+       (ii) The receipt of digital asset E from the automatically executing contract as
+
+described in section 3.04(1)(a)(i) of this notice, regardless of whether the receipt also
+
+includes the receipt or crediting of additional digital assets as a validation reward for the
+
+use of digital asset E that was previously transferred into the automatically executing
+
+contract.
+
+       (b)(i) The transfer of one digital asset (digital asset E) into an automatically
+
+executing contract in return for a different digital asset (digital asset S) that represents
+
+an interest in a pool of digital asset E that is used to validate transactions on a
+
+distributed ledger as part of a proof-of-stake consensus mechanism; and
+
+       (b)(ii) The redemption of digital asset S in return for a proportional share of digital
+
+
+
+                                              7
+asset E, regardless of whether the redemption includes the receipt or crediting of
+
+additional digital assets as a validation reward for the use of digital asset E that was
+
+previously transferred into an automatically executing contract as described in section
+
+3.04(1)(b)(i) of this notice.
+
+       (2) The treatment of a transfer or redemption transaction described in section
+
+3.04(1)(a)(ii) or (1)(b)(ii) of this notice does not affect whether the receipt or crediting of
+
+validation rewards for the use of the disposed digital assets is otherwise subject to
+
+information reporting under another Code section as rent, salaries, wages, premiums,
+
+annuities, compensations, remunerations, emoluments, interest, or other fixed or
+
+determinable income.
+
+   .05 Transactions described by digital asset market participants as lending of digital
+
+assets (type 1 transactions).
+
+       (1) An identified transaction described in this section 3.05 is a transaction
+
+described by digital asset market participants as lending of digital assets (type 1
+
+transaction). In a type 1 transaction, a taxpayer (the original digital asset owner)
+
+transfers a digital asset to a third party (transferee) either directly or indirectly (such as
+
+through a centralized platform, or through the use of an automatically executing
+
+contract), subject to an obligation for the transferee to deliver the same type of digital
+
+asset back to the original digital asset owner in the future. At a later date, the transferee
+
+delivers the same type of digital asset to the original digital asset owner. The transferee
+
+may also deliver or credit additional digital assets or other consideration to the original
+
+digital asset owner as compensation for the use of the digital asset during the type 1
+
+transaction or in respect of airdrops or other digital assets received or credited with
+
+
+
+                                               8
+respect to the obtained digital asset during the type 1 transaction.
+
+       (2) The treatment of a type 1 transaction described in section 3.05(1) of this
+
+notice does not affect whether the delivery or crediting to the original digital asset owner
+
+of airdrops, or other digital assets attributable to the period during which the original
+
+digital asset owner did not hold the digital assets pursuant to the type 1 transaction
+
+should be treated as otherwise subject to information reporting under another Code
+
+section as rent, salaries, wages, premiums, annuities, compensations, remunerations,
+
+emoluments, interest, or other fixed or determinable income.
+
+   .06 Transactions described by digital asset market participants as short sales of
+
+digital assets (type 2 transactions).
+
+       (1) An identified transaction described in this section 3.06 is a transaction
+
+described by digital asset market participants as a short sale of digital assets (type 2
+
+transaction). In a type 2 transaction, a taxpayer obtains a digital asset from a third party
+
+(original digital asset owner), subject to an obligation to deliver the same type of digital
+
+asset to the original digital asset owner in the future. The taxpayer immediately sells the
+
+digital asset to an unrelated market participant. To satisfy its obligation to deliver the
+
+same type of digital asset to the original digital asset owner, the taxpayer may buy a
+
+replacement digital asset and deliver it to the original digital asset owner. Alternatively,
+
+the taxpayer may instead deliver a digital asset that it holds at that time to the original
+
+digital asset owner. The taxpayer may also deliver or credit additional digital assets or
+
+other consideration to the original digital asset owner as compensation for the use of the
+
+obtained digital asset (or in respect of airdrops or other digital assets received or
+
+credited with respect to the obtained digital asset) for the period between the time it is
+
+
+
+                                              9
+obtained from the original digital asset owner and the time when the same type of unit is
+
+delivered to the original digital asset owner.
+
+        (2) The treatment of a type 2 transaction described in section 3.06(1) of this
+
+notice does not affect whether the delivery or crediting to the original digital asset owner
+
+of consideration for the use of the obtained digital asset, airdrops, or other digital assets
+
+attributable to the period during which the original digital asset owner did not hold the
+
+digital assets pursuant to the type 2 transaction should be treated as otherwise subject
+
+to information reporting under another Code section as rent, salaries, wages, premiums,
+
+annuities, compensations, remunerations, emoluments, interest, or other fixed or
+
+determinable income.
+
+   .07 Notional principal contract transactions.
+
+        An identified transaction described in this section 3.07 is the transfer of a digital
+
+asset as a payment under, or on sale of, assignment of, or similar transaction with
+
+respect to a notional principal contract as defined in § 1.446-3 (whether or not the
+
+notional principal contract itself is a digital asset). An identified transaction described in
+
+this section 3.07 also includes a termination of a notional principal contract that is a
+
+digital asset.
+
+SECTION 4. EFFECTIVE DATE
+
+   This notice is effective for identified transactions occurring on or after January 1,
+
+2025.
+
+SECTION 5. DRAFTING INFORMATION
+
+   The principal author of this notice is the Office of the Associate Chief Counsel
+
+(Procedure and Administration). For further information regarding sections 3.02, 3.03,
+
+
+
+                                              10
+and 3.04 of this notice contact the Office of the Associate Chief Counsel (Income Tax
+
+and Accounting) at (202) 317-4718. For further information regarding sections 3.05,
+
+3.06, and 3.07 of this notice, contact the Office of the Associate Chief Counsel
+
+(Financial Institutions and Products) at (202) 317-4520. For further information
+
+regarding the reporting rules, contact the Office of the Associate Chief Counsel
+
+(Procedure and Administration) at (202) 317-5436 (not toll-free numbers).
+
+
+
+
+                                           11
+

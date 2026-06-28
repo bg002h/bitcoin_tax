@@ -1,0 +1,150 @@
+           Office of Chief Counsel
+           Internal Revenue Service
+           Memorandum
+           Number: 202124008
+           Release Date: 6/18/2021
+           CC:ITA:B04:JYu
+           PRENO-112294-21
+
+ UILC:     1031.00-00, 1031.02-00
+
+  date:    June 08, 2021
+
+     to:   Michael Fiore
+           Area Counsel
+           (Small Business/Self-Employed)
+
+  from:    Ronald J. Goldstein
+           Senior Technician Reviewer, Branch 4
+           (Income Tax & Accounting)
+
+
+subject:   Applicability of Section 1031 to Exchanges of Bitcoin (BTC) for Ether (ETH), Bitcoin
+           for Litecoin (LTC), and Ether for Litecoin
+
+           This responds to your request for non-taxpayer specific advice regarding the
+           applicability of § 1031 of the Internal Revenue Code (“Code”) to exchanges of certain
+           cryptocurrencies completed prior to January 1, 2018.
+
+                                                      ISSUE
+
+           If completed prior to January 1, 2018, does an exchange of (i) Bitcoin for Ether, (ii)
+           Bitcoin for Litecoin, or (iii) Ether for Litecoin qualify as a like-kind exchange under
+           § 1031 of the Code?
+
+                                                  CONCLUSION
+
+           No. If completed prior to January 1, 2018, an exchange of (i) Bitcoin for Ether, (ii)
+           Bitcoin for Litecoin, or (iii) Ether for Litecoin does not qualify as a like-kind exchange
+           under § 1031 of the Code.
+
+                                                 BACKGROUND
+
+           Virtual currency is a digital representation of value that functions as a medium of
+           exchange, a unit of account, or a store of value other than a representation of the U.S.
+           dollar or a foreign currency. Notice 2014-21; Rev. Rul. 2019-24. Virtual currency that
+           has an equivalent value in real currency, or acts as a substitute for real currency, such
+PRENO-112294-21                              2
+
+as Bitcoin, is referred to as “convertible” virtual currency and is considered property for
+federal income tax purposes. Notice 2014-21. Accordingly, general tax principles
+applicable to property transactions apply to transactions involving convertible virtual
+currency. Id.
+
+Bitcoin, Ether, and Litecoin are all forms of cryptocurrency, a type of virtual currency
+that utilizes cryptography to secure transactions that are digitally recorded on a
+distributed ledger, such as a blockchain. Rev. Rul. 2019-24 at 2. Distributed ledger
+technology uses independent digital systems to record, share, and synchronize
+transactions, the details of which are recorded in multiple places at the same time with
+no central data store or administration functionality. Id. Cryptocurrencies may be used
+as a method of payment; however, many taxpayers transact in cryptocurrency for
+investment or other purposes.
+
+Cryptocurrency exchanges are digital platforms that allow users to trade one
+cryptocurrency for another cryptocurrency, as well as for fiat currencies such as the
+U.S. dollar. The possible combinations supported by the exchange are known as
+trading pairs. Major cryptocurrencies like Bitcoin and Ether typically may be traded for
+any other cryptocurrency and vice versa. However, some cryptocurrencies on a
+cryptocurrency exchange can be traded for only a limited number of other
+cryptocurrencies and cannot be traded for fiat currency at all. For example, one popular
+cryptocurrency exchange supported more than 30 different cryptocurrencies, but almost
+all of them could be acquired with or traded for only Bitcoin, Ether, or fiat currency. In
+2017, there were more than 1,000 different cryptocurrencies in existence.
+
+                                       DISCUSSION
+
+Section 1031(a)(1) of the Code provides that no gain or loss shall be recognized on the
+exchange of property held for productive use in a trade or business or for investment if
+such property is exchanged solely for property of like-kind which is to be held either for
+productive use in a trade or business or for investment. The nonrecognition of gain or
+loss under § 1031 is intended to apply to transactions where the taxpayer's economic
+situation following the exchange is essentially the same as it had been before the
+transaction. H. Rept. 704, 73d Cong., 2d Sess. (1934), 1939-1 C.B. (Part 2) 554, 564.
+The Tax Cuts and Jobs Act, P.L. 115-97, amended § 1031 to limit like-kind exchange
+treatment after December 31, 2017, to exchanges of real property. Prior to 2018,
+section 1031 also applied to certain exchanges of personal property.
+
+Treas. Reg. § 1.1031(a)-1(b) defines “like kind” to mean the nature or character of the
+property and not the grade or quality. One kind or class of property may not be
+exchanged for property of a different kind or class. For example, an investor who
+exchanged gold bullion for silver bullion was required to recognize gain in part because
+silver is primarily used as an industrial commodity while gold is primarily used as an
+investment. Rev. Rul. 82-166. Similarly, an investor who exchanged one kind of gold
+coin for another kind of gold coin was required to recognize a gain because one coin’s
+PRENO-112294-21                               3
+
+value was derived from its collectability while the other’s value was derived from its
+metal content. Rev. Rul. 79-143.
+
+       BTC/LTC and ETH/LTC
+
+In 2016 and 2017, Bitcoin, and to a lesser extent Ether, held a special position within
+the cryptocurrency market because the vast majority of cryptocurrency-to-fiat trading
+pairs offered by cryptocurrency exchanges had either Bitcoin or Ether as part of the
+pair. In other words, an individual seeking to invest in a cryptocurrency other than
+Bitcoin or Ether, such as Litecoin, would generally need to acquire either Bitcoin or
+Ether first. Similarly, an individual seeking to liquidate his or her holdings in a
+cryptocurrency other than Bitcoin or Ether, such as Litecoin, generally would need to
+exchange those holdings for Bitcoin or Ether first. In contrast, Litecoin’s trading pair
+availability at the time was substantially more limited.
+
+Thus, Bitcoin and Ether played a fundamentally different role from other
+cryptocurrencies within the broader cryptocurrency market during 2016 and 2017.
+Unlike other cryptocurrencies, Bitcoin and Ether acted as an on and off-ramp for
+investments and transactions in other cryptocurrencies. Because of this difference,
+Bitcoin and Ether each differed in both nature and character from Litecoin. Therefore,
+Bitcoin and Litecoin (BTC/LTC) do not qualify as like-kind property for purposes of
+section 1031; nor do Ether and Litecoin (ETH/LTC).
+
+       BTC/ETH
+
+As discussed above, Bitcoin and Ether shared a special role in the cryptocurrency
+market that made them fundamentally different from Litecoin during the relevant years.
+However, while both cryptocurrencies share similar qualities and uses, they are also
+fundamentally different from each other because of the difference in overall design,
+intended use, and actual use. The Bitcoin network is designed to act as a payment
+network for which Bitcoin acts as the unit of payment. The Ethereum blockchain, on the
+other hand, was intended to act as a payment network and as a platform for operating
+smart contracts and other applications, with Ether working as the “fuel” for these
+features. Thus, although Ether and Bitcoin may both be used to make payments,
+Ether’s additional functionality differentiates Ether from Bitcoin in both nature and
+character. Therefore, Bitcoin and Ether do not qualify as like-kind property under
+section 1031.
+
+                                      CONCLUSION
+
+If completed prior to January 1, 2018, an exchange of (i) Bitcoin for Ether, (ii) Bitcoin for
+Litecoin, or (iii) Ether for Litecoin does not qualify as a like-kind exchange under § 1031.
+
+This chief counsel advice is limited to the exchanges involving Bitcoin, Ether, or Litecoin
+discussed above. This chief counsel advice does not address any other
+PRENO-112294-21                            4
+
+cryptocurrencies, or any other analyses not discussed in this advice. Accordingly, no
+inferences should be made based on this chief counsel advice that are not explicitly set
+forth in this advice.
+
+This chief counsel advice may not be used or cited as precedent.
+
+Please contact James Yu at (202) 317-4718 if you have any further questions.
+

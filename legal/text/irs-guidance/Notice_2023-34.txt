@@ -1,0 +1,132 @@
+Modification of Notice 2014-21
+
+Notice 2023-34
+
+SECTION 1. PURPOSE
+
+        Notice 2014-21, 2014-16 I.R.B. 938, provides that convertible virtual currency is
+
+treated as property for federal tax purposes and that general tax principles applicable to
+
+property transactions apply to transactions using convertible virtual currency. This
+
+Notice modifies Notice 2014-21 by revising a sentence in the Background section of that
+
+Notice to remove the statement that virtual currency does not have legal tender status in
+
+any jurisdiction and to make other changes. This Notice also explains that the revision
+
+to the Background section of Notice 2014-21 does not affect the answers to the
+
+frequently asked questions (FAQs) set forth in section 4 of Notice 2014-21.
+
+SECTION 2. BACKGROUND
+
+        Notice 2014-21 describes how existing general tax principles apply to
+
+transactions using convertible virtual currency. 1 The Notice provides the guidance in the
+
+form of FAQs.
+
+        Notice 2014-21 provides that convertible virtual currency is treated as property
+
+for federal tax purposes and that general tax principles applicable to property
+
+transactions apply to transactions using convertible virtual currency. The Background
+
+section of Notice 2014-21 defines virtual currency as a digital representation of value
+
+that functions as a medium of exchange, a unit of account, and/or a store of value. The
+
+Background section also states that virtual currency does not have legal tender status in
+
+
+1
+ While the Background section of Notice 2014-21 describes both virtual currency and convertible virtual currency,
+Section 3 of Notice 2014-21 explains that the term “virtual currency” as used in section 4 of the Notice refers only
+to convertible virtual currency.
+any jurisdiction. Rev. Rul. 2019-24, 2019-44 I.R.B. 1004, subsequently clarified that
+
+virtual currency does not include a representation of the United States dollar or a foreign
+
+currency.
+
+        The Background section of Notice 2014-21 describes convertible virtual currency
+
+as virtual currency that has an equivalent value in real currency, or that acts as a
+
+substitute for real currency. The Background section of the Notice also identifies Bitcoin
+
+as an example of a convertible virtual currency and explains that Bitcoin can be digitally
+
+traded between users and can be purchased for, or exchanged into, U.S. dollars, Euros,
+
+and other real or virtual currencies.
+
+SECTION 3. MODIFICATION OF NOTICE 2014-21
+
+        The Department of the Treasury and the Internal Revenue Service are aware
+
+that certain foreign jurisdictions have enacted laws that characterize Bitcoin as legal
+
+tender. Thus, the sentence in the Background section of Notice 2014-21 stating that
+
+virtual currency does not have legal tender status in any jurisdiction is no longer
+
+accurate as to Bitcoin. In addition, the Background section of Notice 2014-21 may be
+
+misinterpreted as overstating the similarity between convertible virtual currency and
+
+“real” currency because the use of convertible virtual currency, including Bitcoin, to
+
+perform “real” currency functions is limited. 2 Accordingly, Notice 2014-21 is modified by
+
+
+
+
+2
+ See U.S. Department of the Treasury, Crypto-Assets: Implications for Consumers, Investors and Businesses at 1
+and 20 (September 2022), available at https://home.treasury.gov/system/files/136/CryptoAsset_EO5.pdf. See also
+OECD, Taxing Virtual Currencies: An Overview of Tax Treatments and Emerging Tax Policy Issues, at 20 (Oct. 12,
+2020), available at https://www.oecd.org/tax/tax-policy/taxing-virtual-currencies-an-overview-of-tax-treatments-
+and-emerging-tax-policy-issues.pdf.
+
+
+                                                       2
+revising the third sentence in the first paragraph of the Background section to read as
+
+follows:
+
+             In certain contexts, virtual currency may serve one or more
+             of the functions of “real” currency -- i.e., the coin and paper
+             money of the United States or of any other country that is
+             designated as legal tender, circulates, and is customarily
+             used and accepted as a medium of exchange in the country
+             of issuance -- but the use of virtual currency to perform “real”
+             currency functions is limited.
+
+       This change to the Background section of Notice 2014-21 does not affect the
+
+answers to the FAQs set forth in section 4 of Notice 2014-21, including Q&A-2, which
+
+concludes that convertible virtual currency is not treated as currency that could generate
+
+foreign currency gain or loss for U.S. federal tax purposes.
+
+SECTION 4. EFFECT ON OTHER DOCUMENTS
+
+       This Notice modifies Notice 2014-21 by revising its “Background” section.
+
+SECTION 5. DRAFTING INFORMATION
+
+       The principal author of this Notice is Raphael J. Cohen of the Office of Associate
+
+Chief Counsel (International). For further information regarding this Notice, contact
+
+Raphael J. Cohen at (202) 317-6938 (not a toll-free call).
+
+
+
+
+                                            3
+

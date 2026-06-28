@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────
+# bitcoin_tax — NEVER commit personal/tax data or secrets.
+# Real exchange exports live OUTSIDE this repo (e.g. ~/Documents/BitcoinTax/ReadOnly).
+# ─────────────────────────────────────────────────────────────
+
+# Encrypted vault and ANY decrypted/exported user data
+*.pgp
+*.gpg
+*.asc
+vault*
+*.vault
+*-snapshot.*
+snapshot.*
+*.sqlite
+*.sqlite3
+*.db
+
+# Raw exchange exports / personal tax data (keep out of the repo entirely)
+/data/
+/samples/
+*.xlsx
+transaction_history*
+trades-personal-*
+transfers-personal-*
+withdrawals-personal-*
+*_Bitcoin_Activity_*
+*.coinbase.*.csv
+
+# Rust build
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Local tooling / settings (not shared)
+.claude/settings.local.json
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~

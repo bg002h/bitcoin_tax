@@ -1,0 +1,412 @@
+Part III – Administrative, Procedural, Miscellaneous
+
+
+
+
+EXTENSION OF TEMPORARY RELIEF UNDER SECTION 1.1012-1(j)(3)(ii)
+
+
+
+
+Notice 2026-20
+
+
+SECTION 1. PURPOSE
+
+   This notice extends the temporary relief provided in section 4.02 of Notice 2025-7,
+
+2025-5 I.R.B. 524 (January 27, 2025), for an additional year. Specifically, this notice
+
+allows eligible taxpayers to use certain alternative methods for making an adequate
+
+identification, within the meaning of § 1.1012-1(j)(3)(ii), 1 with respect to units of a digital
+
+asset held in the custody of a broker that are sold, disposed of, or transferred during the
+
+relief period specified in this notice.
+
+SECTION 2. BACKGROUND
+
+   Section 1012(c)(1) provides that, in the case of the sale, exchange, or other
+
+disposition of a specified security on or after the applicable date, the conventions
+
+prescribed by regulations under that section must be applied on an account-by-account
+
+basis. Section 1012(c)(3) provides that, for purposes of section 1012, the terms
+
+“specified security” and “applicable date” have the same definitions given to those terms
+
+
+
+1 Unless otherwise specified, all “section” or “§” references are to sections of the Internal Revenue Code
+
+(Code) or the Income Tax Regulations (26 CFR part 1).
+in section 6045(g)(3). Section 80603 of the Infrastructure Investment and Jobs Act,
+
+Pub. L. No. 117-58, 135 Stat. 429, 1339 (2021), expanded the definition of a specified
+
+security in section 6045(g)(3) to include digital assets. Section 80603 had an applicable
+
+date of January 1, 2023. Section 6045(g)(3)(D) generally defines a digital asset, for
+
+purposes of information reporting by brokers, as any digital representation of value
+
+which is recorded on a cryptographically secured distributed ledger or any similar
+
+technology as specified by the Secretary.
+
+   On August 29, 2023, the Department of the Treasury (Treasury Department) and the
+
+Internal Revenue Service (IRS) published in the Federal Register (88 FR 59576)
+
+proposed regulations (2023 proposed regulations) under sections 6045, 1001, 1012,
+
+and other sections of the Code. The 2023 proposed regulations, in part, would have
+
+clarified the statutory requirements for determining and identifying the cost basis of
+
+digital assets. Consistent with section 1012(c), the proposed regulations would have
+
+required basis determinations on an account-by-account basis.
+
+   On July 9, 2024, the Treasury Department and the IRS published in the Federal
+
+Register (89 FR 56480) T.D. 10000 (final regulations). Section 1.1012-1(j) of the final
+
+regulations provides ordering rules for determining which units of the same digital asset
+
+should be treated as sold, disposed of, or transferred when a taxpayer holds multiple
+
+units of that same digital asset within the same wallet that were acquired on different
+
+dates or at different prices. Paragraph (j) generally applies separate rules depending on
+
+whether or not the units are held by the taxpayer in the custody of a broker.
+
+   For digital asset units held in the custody of a taxpayer’s broker, § 1.1012-1(j)(3)(ii)
+
+generally permits a taxpayer to make an adequate identification of the units to be sold,
+                                             2
+disposed of, or transferred. Adequate identification is made if, no later than the date
+
+and time of the sale, disposition, or transfer, the taxpayer specifies to the custodial
+
+broker with custody of the digital assets the particular units of the digital asset to be
+
+sold, disposed of, or transferred. The taxpayer may identify units by reference to any
+
+identifier, such as purchase date and time or purchase price, that the broker designates
+
+as sufficiently specific to identify the units sold, disposed of, or transferred. Section
+
+1.1012-1(j)(3)(ii) also permits taxpayers to make an adequate identification of such units
+
+by using a standing order or instruction communicated to their custodial broker. Further,
+
+if the custodial broker offers taxpayers only one method of making a specific
+
+identification—for example, by the earliest date on which units of the same digital asset
+
+were acquired, the latest date on which units of the same digital asset were acquired, or
+
+the highest basis—§ 1.1012-1(j)(3)(ii) treats such method as a standing order or
+
+instruction.
+
+   For units held in the custody of a broker for which the taxpayer does not make an
+
+adequate identification of the units sold, disposed of, or transferred in accordance with
+
+§ 1.1012-1(j)(3)(ii), § 1.1012-1(j)(3)(i) treats such units as sold, disposed of, or
+
+transferred in order of time from the earliest date on which units of that same digital
+
+asset held in the custody of the broker were acquired by the taxpayer (“FIFO rule”).
+
+Regardless of whether the taxpayer makes an adequate identification, in the case of
+
+digital assets exchanged for different digital assets, § 1.1012-1(j)(3)(iii) deems any units
+
+withheld, either for the broker’s backup withholding obligations under section 3406, or
+
+for payment of services described in § 1.1001-7(b)(1)(ii) (digital asset transaction costs),
+
+as coming from the units received in the exchange.
+                                              3
+   Separate ordering rules, found in § 1.1012-1(j)(1) and (2), prescribe how units not
+
+held in the custody of a broker are identified as the units sold, disposed of, or
+
+transferred. Section 1.1012-1(j)(6) provides that § 1.1012-1(j) applies to all acquisitions
+
+and dispositions of digital assets on or after January 1, 2025.
+
+   Contemporaneously with the issuance of § 1.1012-1(j), the IRS issued Rev. Proc.
+
+2024-28, 2024-31 I.R.B. 326 (July 29, 2024), which provides guidance to taxpayers
+
+regarding how to transition from a universal or multi-wallet basis allocation methodology
+
+to a wallet-by-wallet or account-by-account basis allocation methodology. Specifically,
+
+subject to certain requirements, Rev. Proc. 2024-28 provides a safe harbor for
+
+taxpayers to allocate their units of unattached basis in digital assets acquired before
+
+January 1, 2025, to a digital asset wallet or account that holds the same number of
+
+remaining digital asset units based on the taxpayer's records of such unattached basis
+
+and remaining units so long as the allocation is reasonable. Rev. Proc. 2024-28 permits
+
+taxpayers either to make a specific unit allocation or to make a global allocation in order
+
+to allocate units of unattached basis, subject to various conditions. For each type of
+
+digital asset, the allocation generally is required to be completed by the date of the first
+
+sale of that type of digital asset on or after January 1, 2025.
+
+   In response to concerns expressed by some custodial brokers, the IRS issued
+
+Notice 2025-7, which temporarily allows taxpayers to use additional methods for making
+
+an adequate identification within the meaning of § 1.1012-1(j)(3)(ii). Notice 2025-7
+
+provides that, during calendar year 2025, which the notice refers to as the relief period,
+
+taxpayers can make adequate identifications of units of digital assets sold, disposed of,
+
+or transferred from the taxpayer’s units held in the custody of a broker by identifying the
+                                              4
+particular units or recording a standing order in the taxpayer’s books and records,
+
+temporarily relieving taxpayers of the requirement in § 1.1012-1(j)(3)(ii) to communicate
+
+identifications to the broker. The notice also provides that if a taxpayer makes an
+
+adequate identification under the notice, the rule in § 1.1012-1(j)(3)(ii), which treats
+
+taxpayers whose broker offers only one method of making a specific identification as
+
+having made a standing order or instruction, does not apply. Taxpayers relying on the
+
+safe harbor under Rev. Proc. 2024-28 can rely on the temporary relief in the notice only
+
+after the requirements of Rev. Proc. 2024-28 have been satisfied. The temporary relief
+
+described in Notice 2025-7 does not apply to digital asset units not held in the custody
+
+of a broker.
+
+   Certain digital asset custodial brokers have informed the Treasury Department and
+
+the IRS that they have built and implemented systems and procedures to report gross
+
+proceeds for digital asset transactions carried out in 2025 and will report those
+
+transactions to the IRS and customers in 2026, and that those brokers also have made
+
+good faith efforts to build and implement systems and procedures that will enable those
+
+brokers to accept and process specific identification or standing order instructions from
+
+customers in 2026. The Treasury Department and the IRS understand that many
+
+custodial brokers have substantially completed much of the work necessary to accept
+
+specific identifications from customers but are not currently ready to accept specific
+
+identifications (other than standing orders) from customers. Notwithstanding the
+
+temporary relief provided in Notice 2025-7, some of those custodial brokers do not have
+
+in place the technology needed to accept specific instructions communicated by
+
+taxpayers but are expected to complete building and implementing the systems
+                                              5
+necessary to do so during 2026. Consequently, some taxpayers may be temporarily
+
+unable to make adequate identifications in conformity with § 1.1012-1(j)(3)(ii), with the
+
+result that any units in the custody of such brokers that are sold, disposed of, or
+
+transferred before the necessary systems are in place would be determined under the
+
+FIFO rule without further temporary relief. To avoid this result, this notice extends the
+
+relief period specified in Notice 2025-7 through December 31, 2026.
+
+   This notice extends the temporary relief provided by Notice 2025-7, allowing
+
+taxpayers to use additional methods for making an adequate identification within the
+
+meaning of § 1.1012-1(j)(3)(ii) during the relief period, as defined in section 3.03 of this
+
+notice. This notice does not prohibit taxpayers from complying with the requirements of
+
+§ 1.1012-1(j)(3)(ii). In addition, this notice does not affect how the safe harbor
+
+described in Rev. Proc. 2024-28 applies and does not affect the requirement for brokers
+
+to report gross proceeds on the Form 1099-DA beginning in 2025. Taxpayers relying on
+
+the safe harbor described in Rev. Proc. 2024-28 may also rely on the temporary relief
+
+described in section 4.02 of this notice once the applicable requirements of Rev. Proc.
+
+2024-28 have been satisfied, including, in the case of taxpayers making a global
+
+allocation, the completion of the global allocation.
+
+   A method of specifically identifying the units of a digital asset sold, disposed of, or
+
+transferred (for example, by the earliest acquired, the latest acquired, or the highest
+
+basis) is not a method of accounting to which section 446 or section 481 apply. See §
+
+1.1012-1(j)(4).
+
+  As with the temporary relief provided in Notice 2025-7, the temporary relief described
+
+in this notice does not apply for purposes of the § 1.6045-1 information reporting rules
+                                              6
+for digital assets. Consequently, for 2026 transactions, the acquisition date and basis
+
+reported by a broker to a taxpayer with respect to a sale, disposition or transfer of digital
+
+assets may not match the lot identification and basis of that sale, disposition or transfer
+
+on the taxpayer’s books and records. Similarly, as with the temporary relief provided in
+
+Notice 2025-7, the relief provided under this notice does not apply to digital asset units
+
+not held in the custody of a broker.
+
+SECTION 3. DEFINITIONS
+
+    Except as otherwise provided, the following definitions apply solely for purposes of
+
+this notice:
+
+        .01 Digital Asset. The term “digital asset” has the meaning provided in § 1.1012-
+
+1(j).
+
+        .02 Broker. The term “broker” has the meaning provided in § 1.1012-1(j).
+
+        .03 Relief Period. The term “relief period” means the period beginning on
+
+January 1, 2025, and ending on December 31, 2026.
+
+SECTION 4. TEMPORARY RELIEF
+
+        .01 Scope. The temporary relief described in section 4.02 of this notice is
+
+available only with respect to units of a digital asset held in the custody of a broker that
+
+are sold, disposed of, or transferred during the relief period.
+
+        .02 Temporary Relief under § 1.1012-1(j)(3)(ii). A taxpayer may make an
+
+adequate identification during the relief period of a taxpayer’s units of a digital asset to
+
+be sold, disposed of, or transferred from the taxpayer’s units held in the custody of a
+
+broker by:
+
+
+
+                                              7
+       (1) Identifying, no later than the date and time of the sale, disposition, or transfer,
+
+             on the taxpayer’s books and records, the particular units to be sold, disposed
+
+             of, or transferred by reference to any identifier, such as purchase date and
+
+             time or the purchase price for the unit, that is sufficient to identify the basis
+
+             and holding period of the units sold, disposed of, or transferred; or
+
+       (2) Recording a standing order on the taxpayer’s books and records, provided
+
+             that the recorded standing order includes sufficient information to identify any
+
+             digital asset units sold, disposed of, or transferred and is entered into the
+
+             taxpayer’s books and records before the units covered by the order are sold,
+
+             disposed of, or transferred.
+
+       .03 Nonapplication of § 1.1012-1(j)(3)(ii). If a taxpayer makes an adequate
+
+identification under subsection 4.02 of this notice, the rule in § 1.1012-1(j)(3)(ii), which
+
+treats taxpayers whose broker offers only one method of making a specific identification
+
+as having made a standing order or instruction, does not apply during the relief period.
+
+       .04 Safe harbor under Rev. Proc. 2024-28. Taxpayers relying on the safe harbor
+
+under Rev. Proc. 2024-28 may rely on the temporary relief described in section 4.02 of
+
+this notice only after the applicable requirements of Rev. Proc. 2024-28 have been
+
+satisfied.
+
+       .05 Adequate Identification. If the taxpayer has made an adequate identification
+
+on its books and records of the digital asset units sold, disposed of or transferred during
+
+2026 pursuant to sections 4.01-4.04 of this notice, for Federal income tax purposes the
+
+units sold, disposed of or transferred by the taxpayer are the ones identified in the
+
+taxpayer’s books and records regardless of whether the information reported by the
+                                                 8
+broker to the taxpayer matches the taxpayer’s books and records. If the taxpayer has
+
+instead specified to its broker, no later than the date and time of the sale, disposition, or
+
+transfer, the particular units of the digital asset to be sold, disposed of, or transferred by
+
+reference to any identifier that the broker designates as sufficiently specific to allow it to
+
+determine the basis and holding period of those units (including by communicating a
+
+standing order to the broker), for Federal income tax purposes the units sold, disposed
+
+of or transferred by the taxpayer are the ones specified by the taxpayer to the broker
+
+SECTION 5. RELIANCE
+
+   Taxpayers may rely on the temporary relief described in section 4.02 of this notice
+
+only for the duration of the relief period, as defined in section 3.03 of this notice.
+
+Accordingly, taxpayers may not rely on the temporary relief described in section 4.02 of
+
+this notice to identify units held in the custody of the broker as the units sold, disposed
+
+of, or transferred in the case of sales, dispositions and transfers made after the relief
+
+period ends.
+
+SECTION 6. EFFECT ON OTHER DOCUMENTS
+
+       Notice 2025-7 is modified.
+
+SECTION 7. DRAFTING INFORMATION
+
+   The principal author of this notice is Thomas Brown of the Office of Associate Chief
+
+Counsel (Income Tax and Accounting). For further information regarding this notice,
+
+contact Mr. Brown at (202) 317-4718 (not a toll-free number).
+
+
+
+
+                                              9
+

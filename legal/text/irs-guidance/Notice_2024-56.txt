@@ -1,0 +1,691 @@
+Part III - Administrative, Procedural, and Miscellaneous
+
+
+
+
+Transitional Relief Under Sections 3403, 3406, 6721, 6722, 6651, and 6656 with
+Respect to the Reporting of Information and Backup Withholding on Digital Assets by
+Brokers under Section 6045
+
+
+
+
+Notice 2024-56
+
+
+SECTION 1. PURPOSE
+
+    This notice provides transitional relief from penalties for brokers who fail to report
+
+sales of digital assets, as defined in § 1.6045-1(a)(19) 1 other than digital assets not
+
+required to be reported as digital assets pursuant to § 1.6045-1(c)(8)(ii), (iii), or (iv), on
+
+information returns (Form 1099-DA, Digital Asset Proceeds From Broker Transactions),
+
+or fail to furnish payee statements, under section 6045. The penalty relief provided by
+
+this notice is available for information returns required to be filed and payee statements
+
+required to be furnished in 2026 for sales of digital assets effected in calendar year
+
+2025, provided that the broker makes a good faith effort to file the appropriate
+
+information return and furnish the associated payee statement accurately.
+
+    In addition, this notice provides transitional relief from the liability for the payment of
+
+
+
+
+1
+  Unless otherwise specified, all “section” or “§” references are to sections of the Internal Revenue Code,
+the Income Tax Regulations (26 CFR part 1), or to the Employment Taxes and Collection of Income Tax
+at Source Regulations (26 CFR part 31).
+                                                     1
+backup withholding tax required to be withheld under section 3406 and its
+
+accompanying regulations as well as from penalties for brokers who fail to pay that tax
+
+with respect to certain sales of digital assets required to be reported under section
+
+6045. Specifically, this notice provides certain relief from penalties and backup
+
+withholding: (1) for any sale of a digital asset effected by a broker during calendar year
+
+2025; (2) for any sale of a digital asset effected by a broker during calendar year 2026
+
+for a customer (payee) if the broker submits that payee’s name and tax identification
+
+number (TIN) combination to the Internal Revenue Service’s (IRS) TIN Matching
+
+Program and receives a response that the name and TIN combination furnished by the
+
+payee matches the name and TIN combination for that payee in IRS records; (3) for any
+
+sale of a digital asset effected by a broker in return for specified nonfungible tokens
+
+(specified NFTs); (4) for any digital asset for real property sale effected by a real estate
+
+reporting person; and (5) for certain sales of digital assets effected by processors of
+
+digital asset payments (PDAPs).
+
+   This notice also provides transitional relief from penalties for brokers who fail to
+
+backup withhold and pay the full backup withholding tax due if such failure is due to a
+
+decrease in the value of withheld digital assets in a sale of digital assets in return for
+
+different digital assets effected on or before December 31, 2026, and the broker
+
+immediately liquidates the withheld digital assets for cash.
+
+   Finally, this notice sets forth when a broker may treat another broker as a U.S. digital
+
+asset broker under § 1.6045-1(c)(3)(i)(C)(3) prior to the publication of a revised Form
+
+W-9, Request for Taxpayer Identification Number and Certification, providing for the
+
+certification of U.S. digital asset broker status.
+
+
+
+                                               2
+SECTION 2. BACKGROUND
+
+   .01 Section 6045 and Final Regulations
+
+   Section 6045(a) provides that every person doing business as a broker shall make a
+
+return to the IRS showing the name and address of each customer, with details
+
+regarding gross proceeds and other information as required. These rules apply when
+
+required by the Secretary of the Treasury or her delegate (Secretary) and in accordance
+
+with regulations prescribed by the Secretary. Other subsections of section 6045 require
+
+a broker to furnish a payee statement to customers, define the term broker, require
+
+basis reporting for specified securities that are also covered securities, and provide
+
+other applicable rules.
+
+   Section 80603 of the Infrastructure Investment and Jobs Act, Pub. L. No. 117-58,
+
+135 Stat. 429, 1339 (2021) (Infrastructure Act) made several changes to the broker
+
+reporting provisions under section 6045 to clarify the rules regarding how certain digital
+
+asset transactions should be reported by brokers and to expand the categories of
+
+assets for which basis reporting is required to include all digital assets. On June 28,
+
+2024, final regulations (TD 10000) were filed for public inspection with the Federal
+
+Register (XX FR XXXXX) (final regulations) to require brokers, including certain digital
+
+asset trading platforms, certain PDAPs, certain digital asset hosted wallet providers,
+
+and digital asset kiosks, to file information returns and furnish payee statements
+
+reporting gross proceeds and in certain circumstances adjusted basis on sales of digital
+
+assets effected for customers beginning for sales of digital assets effected on or after
+
+January 1, 2025. For purposes of the final regulations and this notice, a sale of a digital
+
+asset includes a disposition of a digital asset in return for cash and different digital
+
+
+
+                                              3
+assets. Additionally, a sale of a digital asset includes a disposition of a digital asset in
+
+return for certain broker services, securities and other property that is otherwise subject
+
+to reporting, and real estate if the sale is effected by a real estate reporting person (real
+
+estate sale) on or after January 1, 2026. Finally, a sale of a digital asset also includes a
+
+payment by a party of a digital asset to a PDAP in return for the payment of that digital
+
+asset, cash, or a different digital asset to a second party, provided that the transaction is
+
+not otherwise a sale (PDAP sale).
+
+   A broker is not required to make a report of information with respect to a sale
+
+effected for a customer that is an exempt recipient. The final regulations added U.S.
+
+digital asset brokers (other than certain registered investment advisers) to the list of
+
+exempt recipients, but do not permit a broker to treat a customer as a U.S. digital asset
+
+broker unless the broker obtains from that customer a certification on a properly
+
+completed exemption certificate (as provided in § 31.3406(h)-3, generally a Form W-9)
+
+that the customer is a U.S. digital asset broker. Additionally, if more than one broker
+
+effects a sale of a digital asset on behalf of a customer, the broker responsible for first
+
+crediting the gross proceeds on the sale to the customer’s wallet or account is required
+
+to report the sale. The broker that did not first credit the gross proceeds on the sale to
+
+the customer’s wallet or account is not required to report the sale if prior to the sale that
+
+broker obtains a certification on a properly completed exemption certificate that the
+
+broker first crediting the gross proceeds on the sale is a U.S. digital asset broker (other
+
+than a registered investment adviser) (multiple broker rule).
+
+   .02 Sections 6721, 6722, and 6724
+
+   Section 6721 imposes a penalty for any failure to file an information return on or
+
+
+
+                                              4
+before the required filing date, and for any failure to include all the information required
+
+to be shown on a return or the inclusion of incorrect information. Section
+
+6724(d)(1)(B)(iii) defines an information return for this purpose as a return required by
+
+section 6045(a) or (d).
+
+   Section 6722 imposes a penalty for any failure to furnish a payee statement on or
+
+before the required furnishing date to the person to whom such statement is required to
+
+be furnished, and for any failure to include all the information required to be shown on a
+
+payee statement or the inclusion of incorrect information. Section 6724(d)(2)(H) defines
+
+a payee statement for this purpose as a statement required by section 6045(b) or (d).
+
+   Section 6724 provides that no penalty shall be imposed under sections 6721 and
+
+6722 if the filer (payor) shows that the failure was due to reasonable cause and was not
+
+due to willful neglect.
+
+   .03 Sections 3403 and 3406
+
+   Section 3406(a)(1) requires certain payors of reportable payments to deduct and
+
+withhold a tax on a payment at the statutory backup withholding rate (backup
+
+withholding tax) if the payee fails to furnish the payee’s TIN to the payor in the manner
+
+required. Pursuant to section 3406(b)(3)(C), a reportable payment includes payments
+
+made by a broker that are required to be shown on an information return under section
+
+6045. Section 1.6045-1(g)(1) provides an exception to a broker’s reporting of a sale
+
+effected for a customer that is an exempt foreign person. Under § 1.6045-1(g)(4)(ii)(B)
+
+and (g)(4)(vi)(A)(1), a U.S. digital asset broker may treat a customer as an exempt
+
+foreign person if the broker receives valid documentation upon which it may rely for this
+
+purpose (for example, Form W-8BEN, Certificate of Foreign Status of Beneficial Owner
+
+
+
+                                              5
+for United States Tax Withholding and Reporting (Individuals)). Pursuant to
+
+§§ 31.3406(d)-1 and 31.3406(h)-3(a)(1), a payee that is not an exempt foreign person
+
+must generally furnish to the broker on a Form W-9 the payee’s TIN and certify under
+
+penalties of perjury that the furnished TIN is correct (certified TIN). However, to provide
+
+additional time for brokers to collect the necessary documentation to treat preexisting
+
+customers as exempt foreign persons with respect to digital asset sales effected prior to
+
+January 1, 2027, § 1.6045-1(g)(4)(vi)(F) permits a broker to treat a customer with an
+
+account established prior to January 1, 2026, as an exempt foreign person if the
+
+customer has not been previously classified as a U.S. person by the broker and the
+
+information the broker has for the customer includes a residence address that is not a
+
+U.S. address.
+
+   Section 3406(a) provides that the current applicable rate of backup withholding is the
+
+fourth lowest rate of tax applicable under section 1(c) (currently 24 percent). A payor is
+
+also required to report the amount of backup withholding tax the payor withheld from the
+
+payee on Form 945, Annual Return of Withheld Federal Income Tax, and on the
+
+information return filed with the IRS and furnished to the payee. In the case of the Form
+
+1099-DA, once approved by the Office of Management and Budget (OMB) for
+
+information collection under the Paperwork Reduction Act, the backup withholding tax
+
+withheld from the payee will be required to be reported in accordance with the
+
+instructions for that form. The payee may then report this tax as an income tax payment
+
+on the payee’s Federal income tax return.
+
+   Section 3406(a)(1)(B) also requires the payor to deduct and withhold the backup
+
+withholding tax if the IRS notifies the payor that the payee has provided an incorrect
+
+
+
+                                             6
+name and TIN combination. The IRS notifies a payor of an incorrect name and TIN
+
+combination by sending the payor a CP2100 Notice, Please Check Your Backup
+
+Withholding List ("Large" Payers), or a CP2100A Notice, Please Check Your Backup
+
+Withholding, Contact Your Payee, and/or Update Your Records. The CP2100 and
+
+CP2100A Notices list each payee with an incorrect name and TIN combination reported
+
+on information returns filed by the payor. Upon receiving a CP2100 Notice or a
+
+CP2100A Notice, payors must send a copy of the notice identifying the incorrect name
+
+and TIN combination to the payee and request a corrected TIN (or name) from the
+
+payee before beginning backup withholding. See § 31.3406(d)-5 (describing these
+
+procedures, which are commonly known as B Notice procedures).
+
+   Section 3406(h)(10) provides that payments subject to withholding under section
+
+3406 shall be treated as if they were wages paid by an employer to an employee and
+
+amounts deducted and withheld under section 3406 shall be treated as if deducted and
+
+withheld under section 3402. Accordingly, a payor of reportable payments subject to
+
+backup withholding under section 3406 is liable under section 3403 for the payment of
+
+the backup withholding tax required to be withheld.
+
+   .04 TIN Matching Program
+
+   Section 31.3406(j)-1(a) provides that the Commissioner of Internal Revenue
+
+(Commissioner) has the authority to establish TIN matching programs and may
+
+prescribe by revenue procedure or other guidance the scope and terms and conditions
+
+for participating in such programs.
+
+   Section 31.3406(j)-1(b) provides that none of the matching details received by a
+
+payor through a matching program will constitute an IRS notification regarding incorrect
+
+
+
+                                           7
+name and TIN combination for purposes of imposing backup withholding under section
+
+3406(a)(1)(B).
+
+   Section 31.3406(j)-1(d) provides that the IRS will not use a payor’s decision not to
+
+participate in the TIN Matching Program as a basis to assert that the payor lacks
+
+reasonable cause under section 6724(a) for failure to file a correct information return
+
+under section 6721 or to furnish a correct payee statement under section 6722.
+
+   Revenue Procedure 97-31, 1997-26 I.R.B. 6 (June 30, 1997), established
+
+procedures under which Federal agencies could submit the payee name and TINs and
+
+the IRS would inform the agency whether the names and TINs matched the information
+
+in the IRS’s database for the program. Revenue Procedure 2003-9, 2003-8 I.R.B. 516
+
+(February 24, 2003), established a TIN Matching Program that permits payors to verify
+
+name and TIN combinations provided by payees that are required to be reported on
+
+information returns and payee statements. To participate in the TIN Matching Program,
+
+the payor must complete an application. Then, prior to filing an information return, a TIN
+
+Matching Program participant may check the name and TIN combination furnished by
+
+the payee against the name and TIN combination contained in the IRS-maintained
+
+database. More information is available at https://www.irs.gov/tax-
+
+professionals/taxpayer-identification-number-tin-matching. Publication 2108A, On-Line
+
+Taxpayer Identification Number (TIN) Matching Program, has complete program
+
+information.
+
+   .05 Sections 6651 and 6656
+
+   A payor who fails to withhold and pay backup withholding tax when required may be
+
+subject to civil penalties under sections 6651 and 6656. Section 6651 generally imposes
+
+
+
+                                            8
+an addition to the tax owed by a taxpayer for the failure to pay the amount shown as
+
+tax, including backup withholding tax, on a return required to be filed by the taxpayer
+
+unless the failure is due to reasonable cause and not due to willful neglect. Section
+
+6656 provides that in the case of any failure by any person to deposit taxes on the
+
+prescribed date in an authorized government depository, a penalty applies unless the
+
+failure is due to reasonable cause and not due to willful neglect. A failure to deposit
+
+backup withholding tax as required under section 6302 would generally subject a payor
+
+to the section 6656 penalty.
+
+SECTION 3. DISCUSSION
+
+   .01 Sales Effected in Calendar Year 2025
+
+   The final regulations under section 6045 require brokers to make information returns
+
+and furnish payee statements with respect to sales of digital assets effected on or after
+
+January 1, 2025. Sections 6721 and 6722 are applicable to brokers that fail to file those
+
+information returns and furnish those payee statements. In order to provide brokers
+
+additional time to develop appropriate procedures to comply with the reporting
+
+requirements described in the final regulations, which apply to sales of digital assets
+
+effected on or after January 1, 2025, the IRS will not impose penalties under sections
+
+6721 and 6722 on brokers that fail to file information returns and furnish payee
+
+statements under the final regulations with respect to sales of digital assets effected
+
+during calendar year 2025, provided that such brokers make good faith efforts to file
+
+accurate and timely Forms 1099-DA and furnish accurate and timely payee statements.
+
+For purposes of this notice, good faith efforts do not include any filing of returns or
+
+furnishing of payee statements made by the broker after the later of the date that the
+
+
+
+                                              9
+IRS first contacts the broker concerning an examination of such broker or one year after
+
+the original due date for filing such returns.
+
+   The final regulations under section 3406 and § 31.3406(b)(3)-2 apply to reportable
+
+payments by a broker to a payee with respect to sales of digital assets on or after
+
+January 1, 2025, that are required to be reported under section 6045. Because the final
+
+regulations require brokers to report digital asset sales effected during calendar year
+
+2025 and because brokers may not have enough time to obtain a certified TIN from a
+
+payee prior to the date of a digital asset sale by that payee during 2025 that is subject to
+
+reporting, the Department of the Treasury (Treasury Department) and the IRS are
+
+postponing the application of backup withholding with respect to sales of digital assets
+
+for an additional year to provide brokers with additional time to develop appropriate
+
+procedures for collecting certified TINs from customers and to otherwise comply with
+
+the backup withholding requirements on digital asset sales. Accordingly, backup
+
+withholding under section 3406 will not be required on any digital asset sale effected by
+
+brokers during calendar year 2025.
+
+   .02 Sales Effected in Calendar Year 2026
+
+   Section 3406 backup withholding applies to reportable digital asset sales if the
+
+broker has not obtained the payee’s certified TIN. The IRS is aware that brokers subject
+
+to section 6045 reporting for digital asset sales may experience challenges in obtaining
+
+certified TINs from all payees that are existing customers. Accordingly, for digital asset
+
+sales effected in calendar year 2026, the IRS will permit brokers to rely on TINs
+
+provided by payees that are not certified if those uncertified TINs were provided by
+
+payees that opened accounts with the broker prior to January 1, 2026, (preexisting
+
+
+
+                                                 10
+customers) and if the broker, prior to effecting the digital asset sale transaction, submits
+
+the payee’s name and TIN combination to the IRS’s TIN Matching Program and
+
+receives a response that the name and TIN combination furnished by the payee
+
+matches the name and TIN combination for that payee in the IRS records. See
+
+§ 1.6045-1(g)(4)(vi)(F) discussed in section 2.03 of this notice regarding the relief
+
+provided to brokers in treating certain customers with established accounts as exempt
+
+foreign persons under certain circumstances.
+
+   .03 Sales of Digital Assets for Specified NFTs
+
+   The final regulations require brokers to report sales of digital assets, including sales
+
+of digital assets that are disposed of in consideration for specified NFTs, on Form 1099-
+
+DA. Section 1.6045-1(d)(10)(iv)(A) and (B) provides that a specified NFT is a digital
+
+asset that is indivisible (that is, the digital asset cannot be subdivided into smaller units
+
+without losing its intrinsic value or function) and unique as determined by the inclusion
+
+in the digital asset itself of a unique digital identifier, other than a digital asset address,
+
+that distinguishes that digital asset from all other digital assets (unique digital identifier).
+
+In addition, § 1.6045-1(d)(10)(iv)(C) provides that, to be a specified NFT, the digital
+
+asset must not directly (or indirectly) provide the holder with an interest in certain
+
+excluded property. The IRS is aware that brokers effectuating sales of digital assets in
+
+consideration for specified NFTs may experience challenges satisfying their backup
+
+withholding obligations because the proceeds received by the payee with respect to that
+
+sale is an indivisible specified NFT. Accordingly, the Treasury Department and the IRS
+
+have determined that backup withholding under section 3406 will not be required on any
+
+digital asset sale effected by a broker where the reportable proceeds is a specified NFT
+
+
+
+                                               11
+until further guidance is issued.
+
+   .04 Sales Effected by Real Estate Reporting Persons
+
+   Section 1.6045-1(a)(9)(ii)(B) requires real estate reporting persons to file and furnish
+
+Form 1099-DA with respect to a real property buyer that disposes of digital assets in full
+
+or partial consideration for real property in a real estate transaction (digital asset for real
+
+property sale) if the real estate reporting person has actual knowledge, or ordinarily
+
+would know, that digital assets were received by the real estate seller. The IRS is aware
+
+that real estate reporting persons effectuating sales of digital assets in consideration for
+
+real estate may experience challenges satisfying their backup withholding obligations
+
+because the real estate reporting persons generally do not have possession of the real
+
+estate proceeds. Accordingly, the Treasury Department and the IRS have determined
+
+that backup withholding under section 3406 will not be required on any digital asset for
+
+real property sale effected by a real estate reporting person until further guidance is
+
+issued.
+
+   .05 Certain Sales Effected by PDAPs
+
+   In the case of PDAP sales effected by PDAPs, the Treasury Department and IRS are
+
+aware that PDAPs generally do not take custody of the proceeds, for example goods or
+
+services acquired with digital assets, and as such may experience difficulties deducting
+
+and withholding the backup withholding tax. Accordingly, the Treasury Department and
+
+the IRS have determined that backup withholding under section 3406 will not be
+
+required on any PDAP sale effected by a PDAP until further guidance is issued.
+
+   .06 Amount of Backup Withholding
+
+   In the case of a sale of a digital asset for different digital assets other than specified
+
+
+
+                                              12
+NFTs addressed in section 3.03 of this notice, the Treasury Department and the IRS are
+
+aware that brokers may need time to implement new backup withholding procedures
+
+because the value of the digital assets received in such sales can change between the
+
+time of the transaction and the time the received digital assets are liquidated into U.S.
+
+dollars for depositing with the IRS. To provide brokers additional time to develop
+
+appropriate procedures, the amount of backup withholding tax required to be withheld
+
+and paid as a tax under section 3406 shall be limited to the amount that the broker
+
+receives upon the liquidation of 24 percent of the customer’s received digital assets,
+
+notwithstanding that such amount may be less than 24 percent of customer’s received
+
+digital assets at the time of the transaction giving rise to the backup withholding
+
+obligation, provided such liquidation is undertaken immediately after the transaction
+
+giving rise to the backup withholding liability. The amount that the broker receives upon
+
+liquidation should be reported as Federal income tax withheld on Form 1099-DA. This
+
+amount should also be included on the broker’s Form 945. Accordingly, the IRS will not
+
+impose penalties under section 6651 or 6656 with respect to any decrease in the value
+
+of received digital assets between the time of the transaction giving rise to the backup
+
+withholding obligation and the time the broker liquidates 24 percent of the received
+
+digital assets. Finally, the IRS will not impose penalties on brokers that are required to
+
+file Form 945 with respect to the backup withholding tax due as described in this section
+
+3.06 with respect to digital asset sales, provided the broker pays and reports the
+
+amount of backup withholding tax that is withheld and deposited with the IRS in
+
+accordance with this section 3.06. For this purpose, a broker that systemically liquidates
+
+the received digital assets when received as part of its process to perform the
+
+
+
+                                            13
+underlying sale transaction will be treated as immediately liquidating the received digital
+
+assets.
+
+   The relief provided by this section 3.06 applies only to the amount required to be
+
+withheld and paid as described in this section 3.06 and the requirement to file
+
+information returns and payee statements pertaining to reportable digital asset sales
+
+effected before January 1, 2027.
+
+   .07 Treatment of Brokers as U.S. Digital Asset Brokers
+
+   The IRS is aware that the existing Form W-9 does not provide a box that would
+
+facilitate a broker obtaining certification from another broker that the other broker is a
+
+U.S. digital asset broker within the meaning of § 1.6045-1(g)(4)(i)(A)(1) (other than a
+
+registered investment adviser) that is an exempt recipient under § 1.6045-
+
+1(c)(3)(i)(B)(12). To allow a broker to treat a second broker as a U.S. digital asset
+
+broker (other than a registered investment adviser) prior to the publication of a revised
+
+Form W-9, the first broker may rely upon a written statement that a second broker is a
+
+U.S. digital asset broker within the meaning of § 1.6045-1(g)(4)(i)(A)(1) (other than a
+
+registered investment adviser) if the written statement is associated with the Form W-9,
+
+or is separately signed by that second broker under penalties of perjury, until one-year
+
+from the end of the month shown as the revision date on the Form W-9 that it is revised
+
+to accommodate this certification.
+
+SECTION 4. EFFECTIVE DATE
+
+   This notice is effective for digital asset sales effected on or after January 1, 2025.
+
+SECTION 5. DRAFTING INFORMATION
+
+   The principal author of this notice is the Office of the Associate Chief Counsel
+
+
+
+                                             14
+(Procedure and Administration). For further information regarding this notice, please call
+
+(202) 317-5436 (not a toll-free number).
+
+
+
+
+                                           15
+

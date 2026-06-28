@@ -1,0 +1,201 @@
+           Office of Chief Counsel
+           Internal Revenue Service
+           Memorandum
+           Number: 202302012
+           Release Date: 1/13/2023
+
+           CC:ITA:B02
+           POSTN-114643-22
+
+ UILC:     170.12-09
+
+  date:    January 10, 2023
+
+     to:   Michael R. Fiore
+           Area Counsel, 1 (Boston)
+           (Small Business/Self-Employed)
+
+  from:    Ronald J. Goldstein
+           Senior Technician Reviewer, Branch 2
+           (Income Tax & Accounting)
+
+
+subject:   Qualified appraisal requirement for charitable contributions of cryptocurrency
+
+                 This Chief Counsel Advice responds to your request for non-taxpayer specific
+           advice regarding the applicability of section 170(f)(11)(C) of the Internal Revenue Code
+           (“Code”) to charitable contributions of cryptocurrency. This document should not be
+           used or cited as precedent.
+
+                                                     Issues
+
+           1. Is Taxpayer A required to obtain a qualified appraisal under section 170(f)(11)(C) of
+              the Code for contributions of cryptocurrency for which Taxpayer A claims a
+              charitable contribution deduction of more than $5,000?
+
+           2. If Taxpayer A is required to obtain a qualified appraisal under section 170(f)(11)(C)
+              of the Code and fails to do so, does the reasonable cause exception provided in
+              section 170(f)(11)(A)(ii)(II) apply if Taxpayer A determines the value of the
+              cryptocurrency based on the value reported by a cryptocurrency exchange on which
+              the cryptocurrency is traded?
+
+                                                 Conclusions
+
+           1. Yes. If Taxpayer A donates cryptocurrency for which a charitable contribution
+              deduction of more than $5,000 is claimed, a qualified appraisal is required under
+              section 170(f)(11)(C) to qualify for a deduction under section 170(a).
+POSTN-114643-22                                       2
+
+2. No. If Taxpayer A determines the value of the donated cryptocurrency based on the
+   value reported by a cryptocurrency exchange on which the cryptocurrency is traded
+   rather than by obtaining a qualified appraisal, the reasonable cause exception
+   provided in section 170(f)(11)(A)(ii)(II) will not excuse noncompliance with the
+   qualified appraisal requirement, and Taxpayer A will not be allowed the charitable
+   contribution deduction under section 170(a).
+
+                                                   Facts
+
+       Taxpayer A is an individual who purchased units of Cryptocurrency B for
+personal investment purposes. Taxpayer A acquired units of Cryptocurrency B in a
+transaction on a cryptocurrency exchange. Taxpayer A later transferred all of her units
+of Cryptocurrency B to Charity, a charitable organization described in section 170(c).
+On her self-prepared Federal income tax return for the year of the donation, Taxpayer A
+completed Part I, Section B of Form 8283 and attached it to her return and claimed a
+charitable contribution deduction of $10,000. The claimed $10,000 deduction was
+based on a value listed at the cryptocurrency exchange on which Cryptocurrency B was
+traded at the date and time of the donation. Taxpayer A did not obtain, or attempt to
+obtain, a qualified appraisal for the donation, and Taxpayer A argues that no appraisal
+is required because Cryptocurrency B had a readily ascertainable value based on the
+value published by the cryptocurrency exchange.
+
+                                               Discussion
+
+       Digital assets are defined under section 6045(g)(3)(D) as digital representations
+of value that are recorded on a cryptographically secured distributed ledger.1 Digital
+assets do not exist in physical form and include, but are not limited to, property the
+Service has previously referred to as convertible virtual currency and cryptocurrency.
+See Notice 2014-21, 2014-16 I.R.B. 938; Rev. Rul. 2019-24, 2019-44 I.R.B. 1004.
+Notice 2014–21 provides that convertible virtual currency is treated as property and that
+general tax principles applicable to property transactions apply to convertible virtual
+currency.
+
+       Cryptocurrency is a type of virtual currency that utilizes cryptography to secure
+transactions that are digitally recorded on a distributed ledger, such as a blockchain.
+Units of cryptocurrency are generally referred to as coins or tokens. Distributed ledger
+technology uses independent digital systems to record, share, and synchronize
+transactions, the details of which are recorded in multiple places at the same time with
+no central data store or administration functionality. See Rev. Rul. 2019-24.
+
+
+1 The Infrastructure Investment and Jobs Act (“the Act”), Pub. L. 117-58, div. H, title VI, section
+
+80603(b)(1)(B), added new section 6045(g)(3)(D), which uses this definition of a digital asset for purposes
+of information reporting by brokers effective January 1, 2023. The Act provides the Secretary with the
+authority to further define the term “digital asset.”
+POSTN-114643-22                                       3
+
+       Section 170 of the Code generally allows a deduction for charitable contributions,
+as defined in section 170(c), for the taxable year the contribution is made.2 A charitable
+contribution deduction is generally allowable only if it is verified under regulations
+prescribed by the Secretary. Section 170(a)(1).
+
+       To claim a charitable contribution deduction, a taxpayer must satisfy certain
+substantiation requirements. See, e.g., section 170(f)(8) and (f)(11). In general, for
+contributions of property for which a deduction of more than $5,000 is claimed, the
+taxpayer must obtain a qualified appraisal of such property for the taxable year in which
+the contribution is claimed and provide such information regarding the property and the
+appraisal as the Secretary may require. Section 170(f)(11)(C).
+
+       Section 170(f)(11)(E)(i) provides that the term “qualified appraisal” means an
+appraisal that is (1) treated as a qualified appraisal under regulations or other guidance
+prescribed by the Secretary, and (2) conducted by a qualified appraiser in accordance
+with generally accepted appraisal standards and any regulations or other guidance
+prescribed by the Secretary. See also Treas. Reg. sections 1.170A-17 and 1.170A-13,
+as applicable.
+
+       Section 170(f)(11)(E)(ii) provides that the term “qualified appraiser” means an
+individual who (1) has earned an appraisal designation from a recognized professional
+appraiser organization or has otherwise met minimum education and experience
+requirements set forth in regulations prescribed by the Secretary, (2) regularly performs
+appraisals for which the individual receives compensation, and (3) meets such other
+requirements as may be prescribed by the Secretary in regulations or other guidance.
+See also Treas. Reg. section 1.170A-17(b).
+
+        A qualified appraisal is not required for donations of certain readily valued
+property specifically set forth in the Code and regulations, namely: cash, stock in trade,
+inventory, property primarily held for sale to customers in the ordinary course of
+business, publicly traded securities, intellectual property, and certain vehicles. See
+section 170(f)(11)(A)(ii)(I); Treas. Reg. section 1.170A-16(d)(2)(i). Section 1.170A-
+13(c)(7)(xi) defines the term “publicly traded securities” for purposes of section 170 to
+mean securities as defined by section 165(g)(2). Section 165(g)(2) defines a security
+as a share of stock in a corporation; a right to subscribe for, or to receive, a share of
+stock in a corporation; or a bond, debenture, note, or certificate, or other evidence of
+indebtedness, issued by a corporation or a government or political subdivision thereof,
+with interest coupons or in registered form. Cryptocurrency B is none of the items listed
+in section 165(g)(2), and therefore does not satisfy the definition of a security in section
+165(g)(2).
+
+
+
+2 A charitable contribution of cryptocurrency is, in general, considered to be made at the date and time the
+
+cryptocurrency is transferred, as evidenced by its recording on the blockchain, or at the time legal title
+passes.
+POSTN-114643-22                              4
+
+       In this case, no exception to the qualified appraisal requirements of section
+170(f)(11) applies. Cryptocurrency B is not cash, a publicly traded security, or any other
+type of property listed in sections 170(f)(11)(A)(ii)(I) and 1.170A-16(d)(2)(i).
+Accordingly, since Taxpayer A claimed a charitable contribution deduction of over
+$5,000 for the donated cryptocurrency, a qualified appraisal is required.
+
+       Section 170(f)(11)(A)(ii)(II) provides that failure to meet the requirements of
+section 170(f)(11)(B), (C), or (D), as applicable, shall not result in denial of the
+deduction if it is shown that the failure to meet such requirements is due to reasonable
+cause and not to willful neglect. “Reasonable cause requires that the taxpayer have
+exercised ordinary business care and prudence as to the challenged item.” See Crimi
+v. Commissioner, T.C. Memo. 2013-51 at *99 (citing United States v. Boyle, 469 U.S.
+241 (1985)).
+
+       In Pankratz v. Commissioner, T.C. Memo. 2021-26, the taxpayer claimed
+charitable contribution deductions but failed to attach qualified appraisals of the donated
+property to his tax returns. The taxpayer claimed that he relied on the advice of
+professionals in preparing his return, but the Tax Court held that the reasonable cause
+exception would not apply because the taxpayer did not rely on qualified professionals
+and if he had reviewed his return, the language on the Form 8283 would have indicated
+to him appraisals were necessary. Id. at *27.
+
+        Taxpayer A attached a partially completed Form 8283 to her self-prepared return
+but like the taxpayer in Pankratz, did not obtain, or attempt to obtain, a qualified
+appraisal. As the Tax Court stated, “[w]e think that four mentions of ‘appraisal’,
+‘appraiser’, or ‘appraised’ on one page of one form is pretty good notice that substantial
+noncash donations need to be backed up by an appraisal.” Id. at *16. The reasonable
+cause exception was not intended to provide taxpayers with the choice of whether to
+obtain a qualified appraisal, but to provide relief where an unsuccessful attempt was
+made in good faith to comply with the requirements of section 170. See, e.g.,
+Schweizer v. Commissioner, T.C. Memo. 2022-102; Pankratz, T.C. Memo. 2021-26;
+Crimi, T.C. Memo. 2013-51. As such, claims that Cryptocurrency B has a readily
+ascertainable value because it is listed on a cryptocurrency exchange does not
+establish reasonable cause for failing to obtain, or attempting to obtain, a qualified
+appraisal.
+
+        Section 170(f)(11)(C) applies to contributions of cryptocurrency for which a
+charitable contribution deduction of more than $5,000 is claimed and requires a
+qualified appraisal for Taxpayer A’s contribution to be allowable as a charitable
+contribution deduction under section 170(a). Taxpayer A’s use of a value reported on a
+cryptocurrency exchange to value the contribution does not satisfy the qualified
+appraisal requirement or satisfy the reasonable cause exception to that requirement;
+therefore, Taxpayer A’s deduction must be disallowed.
+POSTN-114643-22                         5
+
+     If you have any questions, please contact Morgan Lawrence at (202) 317-7011.
+
+                                  Sincerely,
+
+
+
+                                  _____________________________
+                                  Ronald J. Goldstein
+                                  Senior Technician Reviewer, Branch 2
+                                  (Income Tax & Accounting)
+
