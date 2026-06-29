@@ -9,6 +9,7 @@ pub mod normalize;
 pub mod parse;
 pub mod price;
 pub mod read;
+pub mod sources;
 
 pub use adapter::{Adapter, FileGroup, FileReport, GroupOutput, IngestBatch, SourceFile};
 pub use price::BundledPrices;
