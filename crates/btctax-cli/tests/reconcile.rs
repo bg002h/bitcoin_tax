@@ -1,7 +1,7 @@
 mod fixtures;
 use btctax_cli::{cmd, Session};
 use btctax_core::{
-    DisposeKind, EventPayload, InboundClass, IncomeKind, OutflowClass, TransferTarget,
+    BlockerKind, DisposeKind, EventPayload, InboundClass, IncomeKind, OutflowClass, TransferTarget,
 };
 use btctax_store::Passphrase;
 use time::macros::datetime;
@@ -208,4 +208,145 @@ fn set_fmv_appends_a_manual_fmv_decision() {
     assert!(events
         .iter()
         .any(|e| e.id == id && matches!(e.payload, EventPayload::ManualFmv(_))));
+}
+
+// ── Task 12: classify-raw + accept/reject-conflict ──────────────────────────
+
+fn coinbase_with_order(dir: &std::path::Path) -> std::path::PathBuf {
+    let p = dir.join("cb_order.csv");
+    std::fs::write(&p, "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-ord,2025-03-01 12:00:00 UTC,Order,BTC,0.01000000,USD,84000.00,840.00,845.00,5.00,,,\r\n").unwrap();
+    p
+}
+
+/// A second Coinbase CSV with the same ID `cb-ord` but different amounts → ImportConflict on re-import.
+fn coinbase_with_order_v2(dir: &std::path::Path) -> std::path::PathBuf {
+    let p = dir.join("cb_order_v2.csv");
+    std::fs::write(&p, "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-ord,2025-03-01 12:00:00 UTC,Order,BTC,0.01000000,USD,84000.00,840.00,860.00,20.00,,,\r\n").unwrap();
+    p
+}
+
+#[test]
+fn classify_raw_resolves_an_unclassified_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(&vault, &pp(), &[coinbase_with_order(dir.path())]).unwrap();
+
+    let target = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::Unclassified(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+    // Supply an Acquire payload as JSON (EventPayload is Deserialize).
+    let json = r#"{"Acquire":{"sat":1000000,"usd_cost":"845.00","fee_usd":"5.00","basis_source":"ComputedFromCost"}}"#;
+    cmd::reconcile::classify_raw(&vault, &pp(), &target, json, now()).unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    // No Unclassified blocker remains; a lot now exists.
+    assert!(state
+        .blockers
+        .iter()
+        .all(|b| b.kind != btctax_core::BlockerKind::Unclassified));
+    assert_eq!(state.lots.len(), 1);
+}
+
+#[test]
+fn classify_raw_rejects_decision_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(&vault, &pp(), &[coinbase_with_order(dir.path())]).unwrap();
+
+    let target = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::Unclassified(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+    // A decision payload (ManualFmv) must be rejected by the is_imported guard.
+    let bad_json = r#"{"ManualFmv":{"event":"d:1","usd_fmv":"100.00"}}"#;
+    let err = cmd::reconcile::classify_raw(&vault, &pp(), &target, bad_json, now());
+    assert!(err.is_err(), "expected Err for non-imported payload");
+}
+
+#[test]
+fn accept_conflict_clears_import_conflict_blocker() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    // First import creates the Acquire (Order→Acquire via classify-raw, but here we import a Buy
+    // to get a clean initial import, then re-import the same ID with different data).
+    cmd::import::run(&vault, &pp(), &[coinbase_with_order(dir.path())]).unwrap();
+    // Re-import the same source_ref with different amounts → ImportConflict.
+    cmd::import::run(&vault, &pp(), &[coinbase_with_order_v2(dir.path())]).unwrap();
+
+    // Verify the ImportConflict blocker exists.
+    let conflict_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::ImportConflict(_)))
+            .expect("ImportConflict must exist after re-import with changed content")
+            .id
+            .canonical()
+    };
+
+    cmd::reconcile::accept_conflict(&vault, &pp(), &conflict_ref, now()).unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert!(
+        state
+            .blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::ImportConflict),
+        "ImportConflict blocker must be cleared after accept"
+    );
+}
+
+#[test]
+fn reject_conflict_clears_import_conflict_blocker() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(&vault, &pp(), &[coinbase_with_order(dir.path())]).unwrap();
+    cmd::import::run(&vault, &pp(), &[coinbase_with_order_v2(dir.path())]).unwrap();
+
+    let conflict_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::ImportConflict(_)))
+            .expect("ImportConflict must exist after re-import with changed content")
+            .id
+            .canonical()
+    };
+
+    cmd::reconcile::reject_conflict(&vault, &pp(), &conflict_ref, now()).unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert!(
+        state
+            .blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::ImportConflict),
+        "ImportConflict blocker must be cleared after reject"
+    );
 }

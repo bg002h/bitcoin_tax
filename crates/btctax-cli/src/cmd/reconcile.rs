@@ -5,8 +5,9 @@
 use crate::{CliError, Session};
 use btctax_core::persistence::append_decision;
 use btctax_core::{
-    ClassifyInbound, EventId, EventPayload, InboundClass, ManualFmv, OutflowClass,
-    ReclassifyOutflow, TransferLink, TransferTarget, Usd, VoidDecisionEvent,
+    ClassifyInbound, ClassifyRaw, EventId, EventPayload, InboundClass, ManualFmv, OutflowClass,
+    ReclassifyOutflow, RejectImport, SupersedeImport, TransferLink, TransferTarget, Usd,
+    VoidDecisionEvent,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -97,6 +98,66 @@ pub fn void(
     append_and_save(
         &mut session,
         EventPayload::VoidDecisionEvent(VoidDecisionEvent { target_event_id }),
+        now,
+    )
+}
+
+/// FR2/§7.3: resolve an `Unclassified` row to a real imported payload (preserving the target EventId).
+/// The payload is supplied as JSON (`EventPayload` is `Deserialize`) — e.g. `{"Acquire":{…}}`.
+pub fn classify_raw(
+    vault_path: &Path,
+    pp: &Passphrase,
+    target_ref: &str,
+    payload_json: &str,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let target = parse_event_id(target_ref)?;
+    let as_: EventPayload = serde_json::from_str(payload_json)
+        .map_err(|e| CliError::Usage(format!("bad --payload-json: {e}")))?;
+    if !as_.is_imported() {
+        return Err(CliError::Usage(
+            "classify-raw payload must be an imported variant (Acquire/Income/Dispose/TransferOut/TransferIn/Unclassified)".into(),
+        ));
+    }
+    let mut session = Session::open(vault_path, pp)?;
+    append_and_save(
+        &mut session,
+        EventPayload::ClassifyRaw(ClassifyRaw {
+            target,
+            as_: Box::new(as_),
+        }),
+        now,
+    )
+}
+
+/// FR1/FR8: accept an `ImportConflict` (apply the new payload to the target, keeping its EventId).
+pub fn accept_conflict(
+    vault_path: &Path,
+    pp: &Passphrase,
+    conflict_ref: &str,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let conflict_event = parse_event_id(conflict_ref)?;
+    let mut session = Session::open(vault_path, pp)?;
+    append_and_save(
+        &mut session,
+        EventPayload::SupersedeImport(SupersedeImport { conflict_event }),
+        now,
+    )
+}
+
+/// FR1/FR8: reject an `ImportConflict` (keep the original; clear the blocker).
+pub fn reject_conflict(
+    vault_path: &Path,
+    pp: &Passphrase,
+    conflict_ref: &str,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let conflict_event = parse_event_id(conflict_ref)?;
+    let mut session = Session::open(vault_path, pp)?;
+    append_and_save(
+        &mut session,
+        EventPayload::RejectImport(RejectImport { conflict_event }),
         now,
     )
 }
