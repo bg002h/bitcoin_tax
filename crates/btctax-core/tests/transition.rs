@@ -561,6 +561,22 @@ fn calendar_date_boundary_keeps_a_2024_local_disposition_pre_2025() {
     ];
     let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
     assert!(has(&st, BlockerKind::Pre2025MethodNote)); // the 2024-local sale folded pre-2025
+                                                       // Verify the Pre2025MethodNote detail is actionable: contains FIFO assumption and verification guidance.
+    let note = st
+        .blockers
+        .iter()
+        .find(|b| b.kind == BlockerKind::Pre2025MethodNote)
+        .expect("Pre2025MethodNote blocker should exist");
+    assert!(
+        note.detail.contains("FIFO"),
+        "Pre2025MethodNote detail must mention FIFO assumption, got: {}",
+        note.detail
+    );
+    assert!(
+        note.detail.contains("verify"),
+        "Pre2025MethodNote detail must mention verification guidance, got: {}",
+        note.detail
+    );
     assert!(!has(&st, BlockerKind::SafeHarborTimebar)); // it is NOT a first-2025 disposition -> bar not tripped
     assert!(st
         .lots
