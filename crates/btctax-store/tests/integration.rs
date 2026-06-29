@@ -1,4 +1,5 @@
 use btctax_store::{Passphrase, StoreError, Vault};
+use sequoia_openpgp::parse::Parse;
 
 #[test]
 fn create_save_reopen() {
@@ -112,4 +113,34 @@ fn open_recovers_from_bak_if_target_missing() {
             .unwrap(),
         5
     );
+}
+
+#[test]
+fn export_snapshot_is_readable_sqlite() {
+    let d = tempfile::tempdir().unwrap();
+    let vp = d.path().join("vault.pgp");
+    let mut v = Vault::create(&vp, &Passphrase::new("pw".into())).unwrap();
+    v.conn()
+        .execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES(9);")
+        .unwrap();
+    v.save().unwrap();
+    let snap = v.export_snapshot(d.path()).unwrap();
+    let c = rusqlite::Connection::open(&snap).unwrap();
+    assert_eq!(
+        c.query_row("SELECT x FROM t", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        9
+    );
+}
+
+#[test]
+fn backup_key_is_armored_and_parseable() {
+    let d = tempfile::tempdir().unwrap();
+    let vp = d.path().join("vault.pgp");
+    let v = Vault::create(&vp, &Passphrase::new("pw".into())).unwrap();
+    let kp = d.path().join("backup.asc");
+    v.backup_key(&kp).unwrap();
+    let bytes = std::fs::read(&kp).unwrap();
+    assert!(bytes.starts_with(b"-----BEGIN PGP")); // armored
+    assert!(sequoia_openpgp::Cert::from_bytes(&bytes).is_ok());
 }

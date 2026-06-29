@@ -6,7 +6,7 @@ use crate::{
     paths, sqlite_io, StoreError, SCHEMA_VERSION,
 };
 use openpgp::parse::Parse;
-use openpgp::serialize::Serialize;
+use openpgp::serialize::{Serialize, SerializeInto};
 use rusqlite::Connection;
 use sequoia_openpgp as openpgp;
 use std::path::{Path, PathBuf};
@@ -102,5 +102,22 @@ impl Vault {
         let image = sqlite_io::db_to_bytes(&self.conn)?;
         let ct = crypto::encrypt_to(&self.cert, &blob::encode_blob(SCHEMA_VERSION, &image))?;
         atomic::atomic_write(&self.path, &ct)
+    }
+    pub fn export_snapshot(&self, out_dir: &Path) -> Result<PathBuf, StoreError> {
+        std::fs::create_dir_all(out_dir)?;
+        let image = sqlite_io::db_to_bytes(&self.conn)?;
+        let out = out_dir.join("snapshot.sqlite");
+        std::fs::write(&out, &image)?;
+        Ok(out)
+    }
+    pub fn backup_key(&self, out_path: &Path) -> Result<(), StoreError> {
+        let armored = self
+            .cert
+            .as_tsk()
+            .armored()
+            .to_vec()
+            .map_err(StoreError::Crypto)?;
+        std::fs::write(out_path, &armored)?;
+        Ok(())
     }
 }
