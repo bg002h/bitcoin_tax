@@ -1,9 +1,9 @@
-use crate::conventions::{tax_date, Sat, TaxDate, Usd};
+use crate::conventions::{tax_date, Sat, TaxDate, Usd, TRANSITION_DATE, TY2025_RETURN_DUE};
 use crate::event::*;
-use crate::identity::{EventId, SourceRef, WalletId};
+use crate::identity::{EventId, LotId, SourceRef, WalletId};
 use crate::price::PriceProvider;
-use crate::project::ProjectionConfig;
-use crate::state::{Blocker, BlockerKind};
+use crate::project::{FeeTreatment, ProjectionConfig};
+use crate::state::{Blocker, BlockerKind, Lot};
 use std::collections::{BTreeMap, BTreeSet};
 use time::{OffsetDateTime, UtcOffset};
 
@@ -101,8 +101,9 @@ pub enum TransitionMode {
     PathB { seed: Vec<crate::state::Lot> },
 }
 
-/// A `VoidDecisionEvent` whose target is a `SafeHarborAllocation` — collected in pass-1 step 1a
-/// and deferred to Task 12 (effective allocation → conflict; inert allocation → apply void).
+/// A `VoidDecisionEvent` whose target is a `SafeHarborAllocation` — collected in pass-1 step 1a and
+/// adjudicated by §7.4 effectiveness (step 3): a void of an EFFECTIVE allocation → `DecisionConflict`
+/// (irrevocable, it stays in force); a void of an inert allocation simply applies (no conflict, Path A).
 /// `void_id`: the `VoidDecisionEvent`'s `EventId`; `target`: the `SafeHarborAllocation`'s `EventId`.
 #[derive(Debug, Clone)]
 pub struct AllocationVoid {
@@ -114,8 +115,6 @@ pub struct Resolution {
     pub timeline: Vec<Eff>,
     pub transition: TransitionMode,
     pub blockers: Vec<Blocker>,
-    /// Voids of `SafeHarborAllocation` events, deferred for Task 12 consumption.
-    pub allocation_voids: Vec<AllocationVoid>,
 }
 
 /// Private outcome of resolving an `ImportConflict` via a decision.
@@ -242,15 +241,15 @@ fn build_op(
     }
 }
 
-/// PASS 1. Task 7: staged decision resolution (§7.2 step 1).
+/// PASS 1. Task 7: staged decision resolution (§7.2 step 1); Task 12: §7.4 transition effectiveness.
 ///
-/// `_prices`/`_config` are unused until Task 12 (transition effectiveness needs `config` for the TP8(b)
-/// first-2025-disposition trigger and `prices` for the pre-2025 basis snapshot); they are part of the
-/// signature from the START so `resolve`/`project` never change shape across tasks (I-2).
+/// `prices`/`config` are USED by the Task-12 transition: `config` keys the TP8(b) first-2025-disposition
+/// trigger, and `prices` feeds the allocation-independent pre-2025 Universal snapshot that the safe-harbor
+/// conservation guard checks against (`transition::universal_snapshot`, I-1).
 pub fn resolve(
     events: &[LedgerEvent],
-    _prices: &dyn PriceProvider,
-    _config: &ProjectionConfig,
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
 ) -> Resolution {
     // Index events by id for O(log n) lookup.
     let by_id: BTreeMap<EventId, &LedgerEvent> = events.iter().map(|e| (e.id.clone(), e)).collect();
@@ -498,11 +497,148 @@ pub fn resolve(
         });
     }
 
+    // ── 3. §7.4 / TP6 transition effectiveness ───────────────────────────────────────────────────
+    // Re-evaluated deterministically on every rebuild; reads ONLY the pre-2025 Universal snapshot, the
+    // allocations, and `first_2025_disposition` — none of which depend on `transition` (acyclic, I-1/§7.2).
+    //
+    // (1) Earliest tax-date among 2025 effective DISPOSITION ops. Provisional `PendingOut` and confirmed
+    //     (c) self-transfers do NOT count; under TP8 (b) a self-transfer fee-sat mini-disposition DOES.
+    let first_2025_disposition: Option<TaxDate> = timeline
+        .iter()
+        .filter(|e| e.date() >= TRANSITION_DATE)
+        .filter(|e| is_disposition_op(&e.op, config))
+        .map(|e| e.date())
+        .min();
+
+    // (3-prereq) The pre-2025 Universal residue is allocation-INDEPENDENT — compute it ONCE.
+    let snap = crate::project::transition::universal_snapshot(&timeline, prices, config);
+
+    let due = TY2025_RETURN_DUE;
+    let mut effective: Vec<(EventId, Vec<Lot>)> = Vec::new(); // (allocation id, pre-built seed lots)
+    for (_seq, d) in &decisions {
+        if voided.contains(&d.id) {
+            continue;
+        }
+        let EventPayload::SafeHarborAllocation(a) = &d.payload else {
+            continue;
+        };
+        let made = tax_date(d.utc_timestamp, d.original_tz); // §6.1 calendar-date made-date
+
+        // (2) Method-keyed deadline bar; `timely_allocation_attested` bypasses BOTH prongs.
+        //     ActualPosition: barred past the EARLIER-of (first disposition, return-due).
+        //     ProRata:        barred past the LATER-of, and additionally requires its pre-2025 method
+        //                     description (modeled as the same attestation) — unattested ProRata is barred.
+        let bar = match a.method {
+            AllocMethod::ActualPosition => min_opt(first_2025_disposition, Some(due)),
+            AllocMethod::ProRata => max_opt(first_2025_disposition, Some(due)),
+        };
+        let timebarred = (!a.timely_allocation_attested && bar.is_some_and(|b| made > b))
+            || (a.method == AllocMethod::ProRata && !a.timely_allocation_attested);
+
+        // (3) Conservation vs the pre-2025 Universal snapshot. HARD on failure; attestation cannot bypass it.
+        let alloc_sat: Sat = a.lots.iter().map(|l| l.sat).sum();
+        let alloc_basis: Usd = a.lots.iter().map(|l| l.usd_basis).sum();
+        let unconservable = alloc_sat != snap.held_sat || alloc_basis != snap.basis;
+        if unconservable {
+            blockers.push(Blocker {
+                kind: BlockerKind::SafeHarborUnconservable,
+                event: Some(d.id.clone()),
+                detail: "allocation totals != Universal remainder at 2025-01-01".into(),
+            });
+            continue; // inert → Path A
+        }
+        if timebarred {
+            blockers.push(Blocker {
+                kind: BlockerKind::SafeHarborTimebar,
+                event: Some(d.id.clone()),
+                detail: "allocation made past its method-keyed §5.02(4) bar".into(),
+            });
+            continue; // inert → Path A
+        }
+
+        // (4) Capital-asset eligibility (§4.02): assumed for a personal investor (no Phase-1 dealer flag).
+        let seed = a
+            .lots
+            .iter()
+            .enumerate()
+            .map(|(i, l)| Lot {
+                lot_id: LotId {
+                    origin_event_id: d.id.clone(),
+                    split_sequence: i as u32,
+                },
+                wallet: l.wallet.clone(),
+                acquired_at: l.acquired_at,
+                original_sat: l.sat,
+                remaining_sat: l.sat,
+                usd_basis: l.usd_basis,
+                basis_source: BasisSource::SafeHarborAllocated,
+                dual_loss_basis: None,
+                donor_acquired_at: None,
+                basis_pending: false,
+            })
+            .collect();
+        effective.push((d.id.clone(), seed));
+    }
+
+    // (5) Irrevocability (§7.4(2)): a Void of an EFFECTIVE allocation → conflict (it stays in force); a
+    //     Void of an inert/absent allocation simply applies (no conflict; Path A already governs).
+    for v in &allocation_voids {
+        if effective.iter().any(|(id, _)| id == &v.target) {
+            blockers.push(Blocker {
+                kind: BlockerKind::DecisionConflict,
+                event: Some(v.void_id.clone()),
+                detail: "void targets an effective SafeHarborAllocation (irrevocable, §7.4)".into(),
+            });
+        }
+    }
+
+    // Multiple effective allocations → conflict; exactly one governs Path B; none → Path A default.
+    let transition = match effective.len() {
+        0 => TransitionMode::PathA,
+        1 => TransitionMode::PathB {
+            seed: effective.into_iter().next().expect("len == 1").1,
+        },
+        _ => {
+            blockers.push(Blocker {
+                kind: BlockerKind::DecisionConflict,
+                event: None,
+                detail: "multiple effective SafeHarborAllocations".into(),
+            });
+            TransitionMode::PathA
+        }
+    };
+
     Resolution {
         timeline,
-        transition: TransitionMode::PathA,
+        transition,
         blockers,
-        allocation_voids,
+    }
+}
+
+/// Earlier-of two optional tax-dates (`None` = "this prong is absent").
+fn min_opt(a: Option<TaxDate>, b: Option<TaxDate>) -> Option<TaxDate> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x.min(y)),
+        (x, None) | (None, x) => x,
+    }
+}
+/// Later-of two optional tax-dates (`None` = "this prong is absent").
+fn max_opt(a: Option<TaxDate>, b: Option<TaxDate>) -> Option<TaxDate> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x.max(y)),
+        (x, None) | (None, x) => x,
+    }
+}
+/// §7.4: which 2025 ops count toward the "first-2025-disposition" deadline prong. Confirmed (c)
+/// self-transfers and provisional `PendingOut` do NOT count; under TP8 (b) a self-transfer fee-sat
+/// mini-disposition does.
+fn is_disposition_op(op: &Op, config: &ProjectionConfig) -> bool {
+    match op {
+        Op::Dispose { .. } | Op::GiftOut { .. } | Op::Donate { .. } => true,
+        Op::SelfTransfer { fee_sat, .. } => {
+            config.self_transfer_fee == FeeTreatment::TreatmentB && fee_sat.unwrap_or(0) > 0
+        }
+        _ => false,
     }
 }
 
