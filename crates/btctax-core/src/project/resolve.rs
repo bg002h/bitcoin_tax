@@ -17,7 +17,13 @@ pub enum Op {
         fee_usd: Usd,
         kind: DisposeKind,
     },
-    // (Task 6) Income, (Task 8) SelfTransfer/PendingOut/GiftReceived/IncomeInbound,
+    Income {
+        sat: Sat,
+        fmv: Option<Usd>,
+        kind: IncomeKind,
+        business: bool,
+    },
+    // (Task 8) SelfTransfer/PendingOut/GiftReceived/IncomeInbound,
     // (Task 9) GiftOut/Donate, (Task 12) seeded — added as those tasks land.
     Unclassified,
     Skip, // e.g. a TransferIn consumed by a TransferLink; folds to nothing
@@ -78,8 +84,14 @@ pub fn resolve(
                 fee_usd: d.fee_usd,
                 kind: d.kind,
             },
+            EventPayload::Income(x) => Op::Income {
+                sat: x.sat,
+                fmv: x.usd_fmv.filter(|_| x.fmv_status != FmvStatus::Missing),
+                kind: x.kind,
+                business: x.business,
+            },
             EventPayload::Unclassified(_) => Op::Unclassified,
-            _ => Op::Skip, // other imported variants land in Tasks 6/8
+            _ => Op::Skip, // other imported variants land in Tasks 8+
         };
         timeline.push(Eff {
             id: ev.id.clone(),

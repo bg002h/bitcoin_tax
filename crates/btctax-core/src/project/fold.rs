@@ -1,10 +1,11 @@
 use crate::conventions::{is_long_term, round_cents, split_pro_rata, Sat, TaxDate, Usd};
+use crate::event::BasisSource;
 use crate::identity::{EventId, LotId};
 use crate::price::PriceProvider;
 use crate::project::pools::{pool_key, Consumed, PoolSet};
 use crate::project::resolve::{sort_canonical, Op, Resolution};
 use crate::state::{
-    BlockerKind, Disposal, DisposalLeg, FoldStats, GiftZone, LedgerState, Lot, Term,
+    BlockerKind, Disposal, DisposalLeg, FoldStats, GiftZone, IncomeRecord, LedgerState, Lot, Term,
 };
 use crate::ProjectionConfig;
 use std::collections::BTreeMap;
@@ -148,6 +149,62 @@ pub fn fold(
                         fee_mini_disposition: false,
                     });
                 }
+            }
+            Op::Income {
+                sat,
+                fmv,
+                kind,
+                business,
+            } => {
+                let wallet = match &eff.wallet {
+                    Some(w) => w.clone(),
+                    None => {
+                        st.add_blocker(
+                            BlockerKind::FmvMissing,
+                            Some(eff.id.clone()),
+                            "income without wallet",
+                        );
+                        continue;
+                    }
+                };
+                let (basis, pending) = match fmv {
+                    Some(v) => {
+                        st.income_recognized.push(IncomeRecord {
+                            event: eff.id.clone(),
+                            recognized_at: date,
+                            sat: *sat,
+                            usd_fmv: *v,
+                            kind: *kind,
+                            business: *business,
+                        });
+                        (*v, false)
+                    }
+                    None => {
+                        st.add_blocker(
+                            BlockerKind::FmvMissing,
+                            Some(eff.id.clone()),
+                            "income FMV missing",
+                        );
+                        (Usd::ZERO, true) // basis pending; lot still created so Σsat conservation holds (§7.3)
+                    }
+                };
+                let lot = Lot {
+                    lot_id: LotId {
+                        origin_event_id: eff.id.clone(),
+                        split_sequence: 0,
+                    },
+                    wallet: wallet.clone(),
+                    acquired_at: date,
+                    original_sat: *sat,
+                    remaining_sat: *sat,
+                    usd_basis: basis,
+                    basis_source: BasisSource::FmvAtIncome,
+                    dual_loss_basis: None,
+                    donor_acquired_at: None,
+                    basis_pending: pending,
+                };
+                pools.new_origin_lot(pool_key(date, &wallet), lot);
+                stats.sigma_in += *sat; // FR9 Σin: income is externally-sourced (counts even while FMV is pending)
             }
             Op::Unclassified => {
                 st.add_blocker(

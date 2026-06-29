@@ -91,6 +91,66 @@ fn same_day_sell_is_short_term() {
 }
 
 #[test]
+fn income_creates_fmv_basis_lot_and_records_income() {
+    let inc = ev(
+        "INC",
+        datetime!(2025-05-01 00:00:00 UTC),
+        EventPayload::Income(Income {
+            sat: 100_000,
+            usd_fmv: Some(dec!(50.00)),
+            fmv_status: FmvStatus::PriceDataset,
+            kind: IncomeKind::Interest,
+            business: false,
+        }),
+    );
+    let st = project(
+        &[inc],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st.income_recognized.len(), 1);
+    assert_eq!(st.income_recognized[0].usd_fmv, dec!(50.00));
+    assert_eq!(st.lots[0].usd_basis, dec!(50.00));
+    assert_eq!(st.lots[0].basis_source, BasisSource::FmvAtIncome);
+}
+
+#[test]
+fn income_missing_fmv_creates_lot_but_blocks_and_gates_downstream() {
+    let inc = ev(
+        "INC",
+        datetime!(2025-05-01 00:00:00 UTC),
+        EventPayload::Income(Income {
+            sat: 100_000,
+            usd_fmv: None,
+            fmv_status: FmvStatus::Missing,
+            kind: IncomeKind::Mining,
+            business: true,
+        }),
+    );
+    let sell = ev(
+        "SELL",
+        datetime!(2025-06-01 00:00:00 UTC),
+        EventPayload::Dispose(Dispose {
+            sat: 100_000,
+            usd_proceeds: dec!(70.00),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    );
+    let st = project(
+        &[inc, sell],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(st
+        .blockers
+        .iter()
+        .any(|b| b.kind == BlockerKind::FmvMissing)); // both the income AND the downstream disposal gate
+    assert_eq!(st.holdings_by_wallet.get(&wal()), None); // sats existed for conservation, then disposed
+    assert!(st.income_recognized.is_empty()); // no recognized income amount while FMV missing
+}
+
+#[test]
 fn oversell_raises_uncovered_disposal_and_never_panics() {
     let buy = ev(
         "BUY",
