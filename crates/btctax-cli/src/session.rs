@@ -24,7 +24,18 @@ impl Session {
     /// Create a brand-new encrypted vault, then initialize the core event schema and the CLI config
     /// table, and persist. (`Vault::create` already saved once; we re-save after the DDL.)
     pub fn create(vault_path: &Path, pp: &Passphrase) -> Result<Session, CliError> {
-        let mut vault = Vault::create(vault_path, pp)?;
+        Self::from_fresh_vault(Vault::create(vault_path, pp)?)
+    }
+
+    /// Like `create`, but first clears a half-created vault (orphan key, no pgp/bak) under
+    /// explicit `--repair` consent. Delegates to `Vault::repair` which refuses if a real or
+    /// recoverable vault is present (see `Vault::repair` safety invariant).
+    pub fn repair(vault_path: &Path, pp: &Passphrase) -> Result<Session, CliError> {
+        Self::from_fresh_vault(Vault::repair(vault_path, pp)?)
+    }
+
+    /// Initialize the core schema + CLI config on a freshly-created vault, then persist.
+    fn from_fresh_vault(mut vault: Vault) -> Result<Session, CliError> {
         init_schema(vault.conn())?;
         config::init_config_table(vault.conn())?;
         vault.save()?;

@@ -27,6 +27,9 @@ enum Command {
     Init {
         #[arg(long)]
         key_backup: PathBuf,
+        /// Clear an interrupted/half-created init (orphan `vault.key`, no encrypted store) and start fresh.
+        #[arg(long, default_value_t = false)]
+        repair: bool,
     },
     /// Import one or more export files (auto-groups Swan).
     Import { files: Vec<PathBuf> },
@@ -180,10 +183,15 @@ fn run() -> Result<ExitCode, CliError> {
     let now = OffsetDateTime::now_utc();
 
     match cli.command {
-        Command::Init { key_backup } => {
-            cmd::init::run(vault, &passphrase(true)?, &key_backup)?;
+        Command::Init { key_backup, repair } => {
+            cmd::init::run_with_repair(vault, &passphrase(true)?, &key_backup, repair)?;
             println!(
-                "Initialized vault {} (key backed up to {})",
+                "{} vault {} (key backed up to {})",
+                if repair {
+                    "Repaired + initialized"
+                } else {
+                    "Initialized"
+                },
                 vault.display(),
                 key_backup.display()
             );
