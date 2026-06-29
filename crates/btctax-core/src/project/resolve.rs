@@ -1,6 +1,6 @@
 use crate::conventions::{tax_date, Sat, TaxDate, Usd};
 use crate::event::*;
-use crate::identity::{EventId, SourceRef};
+use crate::identity::{EventId, SourceRef, WalletId};
 use crate::price::PriceProvider;
 use crate::project::ProjectionConfig;
 use crate::state::{Blocker, BlockerKind};
@@ -24,7 +24,36 @@ pub enum Op {
         kind: IncomeKind,
         business: bool,
     },
-    // (Task 8) SelfTransfer/PendingOut/GiftReceived/IncomeInbound,
+    // Task 8:
+    /// Unmatched TransferOut: sats leave holdings into pending_reconciliation; advisory UnmatchedOutflows blocker.
+    PendingOut {
+        sat: Sat,
+        fee_sat: Option<Sat>,
+    },
+    /// Confirmed self-transfer (TransferLink): principal relocates from source pool to dest pool; non-taxable.
+    SelfTransfer {
+        sat: Sat,
+        fee_sat: Option<Sat>,
+        dest: WalletId,
+    },
+    /// Unclassified TransferIn: hard UnknownBasisInbound blocker; no lot (sats not yet in the ledger, FR9/§7.3).
+    UnknownInbound {
+        sat: Sat,
+    },
+    /// ClassifyInbound::Income applied to a TransferIn: income lot at FMV + IncomeRecord.
+    IncomeInbound {
+        sat: Sat,
+        fmv: Option<Usd>,
+        kind: IncomeKind,
+        business: bool,
+    },
+    /// ClassifyInbound::GiftReceived applied to a TransferIn: gift lot (dual-basis in Task 10).
+    GiftReceived {
+        sat: Sat,
+        donor_basis: Option<Usd>,
+        donor_acquired_at: Option<TaxDate>,
+        fmv_at_gift: Usd,
+    },
     // (Task 9) GiftOut/Donate, (Task 12) seeded — added as those tasks land.
     Unclassified,
     Skip, // e.g. a TransferIn consumed by a TransferLink; folds to nothing
@@ -81,9 +110,17 @@ enum Resolved {
     Reject,
 }
 
-/// Map an effective imported payload → `Op`, applying any `ManualFmv` override.
+/// Map an effective imported payload → `Op`, applying any `ManualFmv` override and Task 8 classification maps.
 /// ManualFmv on an `Income` replaces the FMV and clears the would-be `fmv_missing` gate.
-fn build_op(id: &EventId, payload: &EventPayload, manual_fmv: &BTreeMap<EventId, Usd>) -> Op {
+fn build_op(
+    id: &EventId,
+    payload: &EventPayload,
+    manual_fmv: &BTreeMap<EventId, Usd>,
+    links: &BTreeMap<EventId, TransferTarget>,
+    consumed_ins: &BTreeSet<EventId>,
+    inbound_class: &BTreeMap<EventId, InboundClass>,
+    by_id: &BTreeMap<EventId, &LedgerEvent>,
+) -> Op {
     match payload {
         EventPayload::Acquire(a) => Op::Acquire(a.clone()),
         EventPayload::Dispose(d) => Op::Dispose {
@@ -104,8 +141,63 @@ fn build_op(id: &EventId, payload: &EventPayload, manual_fmv: &BTreeMap<EventId,
                 business: x.business,
             }
         }
+        EventPayload::TransferOut(t) => {
+            if let Some(target) = links.get(id) {
+                // Confirmed self-transfer via TransferLink.
+                let dest = match target {
+                    TransferTarget::InEvent(in_id) => {
+                        by_id.get(in_id).and_then(|e| e.wallet.clone())
+                    }
+                    TransferTarget::Wallet(w) => Some(w.clone()),
+                };
+                if let Some(dest_wallet) = dest {
+                    return Op::SelfTransfer {
+                        sat: t.sat,
+                        fee_sat: t.fee_sat,
+                        dest: dest_wallet,
+                    };
+                }
+                // Link target has no resolvable wallet — fall through to PendingOut.
+            }
+            // Task 9: elif in outflow_class → GiftOut/Donate/Dispose
+            Op::PendingOut {
+                sat: t.sat,
+                fee_sat: t.fee_sat,
+            }
+        }
+        EventPayload::TransferIn(t) => {
+            if consumed_ins.contains(id) {
+                // Consumed by a TransferLink — do nothing (the link relocates the lots).
+                Op::Skip
+            } else if let Some(cls) = inbound_class.get(id) {
+                match cls {
+                    InboundClass::Income {
+                        kind,
+                        fmv,
+                        business,
+                    } => Op::IncomeInbound {
+                        sat: t.sat,
+                        fmv: *fmv,
+                        kind: *kind,
+                        business: *business,
+                    },
+                    InboundClass::GiftReceived {
+                        donor_basis,
+                        donor_acquired_at,
+                        fmv_at_gift,
+                    } => Op::GiftReceived {
+                        sat: t.sat,
+                        donor_basis: *donor_basis,
+                        donor_acquired_at: *donor_acquired_at,
+                        fmv_at_gift: *fmv_at_gift,
+                    },
+                }
+            } else {
+                Op::UnknownInbound { sat: t.sat }
+            }
+        }
         EventPayload::Unclassified(_) => Op::Unclassified,
-        _ => Op::Skip, // other imported variants (TransferOut/In) land in Tasks 8+
+        _ => Op::Skip,
     }
 }
 
@@ -257,8 +349,45 @@ pub fn resolve(
     }
 
     // ── 1e. Classification decisions ────────────────────────────────────────────────────────────
-    // TransferLink / ReclassifyOutflow / ClassifyInbound: wired in Tasks 8–9.
-    // Contradiction detection for same-target multi-class also deferred.
+    // TransferLink → links + consumed_ins; ClassifyInbound → inbound_class.
+    // ReclassifyOutflow (outflow_class) is Task 9; contradiction detection (same-target multi-class) here.
+    let mut links: BTreeMap<EventId, TransferTarget> = BTreeMap::new();
+    let mut consumed_ins: BTreeSet<EventId> = BTreeSet::new();
+    let mut inbound_class: BTreeMap<EventId, InboundClass> = BTreeMap::new();
+
+    for (_seq, d) in &decisions {
+        if voided.contains(&d.id) {
+            continue;
+        }
+        match &d.payload {
+            EventPayload::TransferLink(tl) => {
+                if links.contains_key(&tl.out_event) {
+                    blockers.push(Blocker {
+                        kind: BlockerKind::DecisionConflict,
+                        event: Some(d.id.clone()),
+                        detail: "duplicate TransferLink for the same out_event".into(),
+                    });
+                } else {
+                    if let TransferTarget::InEvent(in_id) = &tl.in_event_or_wallet {
+                        consumed_ins.insert(in_id.clone());
+                    }
+                    links.insert(tl.out_event.clone(), tl.in_event_or_wallet.clone());
+                }
+            }
+            EventPayload::ClassifyInbound(ci) => {
+                if inbound_class.contains_key(&ci.transfer_in_event) {
+                    blockers.push(Blocker {
+                        kind: BlockerKind::DecisionConflict,
+                        event: Some(d.id.clone()),
+                        detail: "duplicate ClassifyInbound for the same TransferIn event".into(),
+                    });
+                } else {
+                    inbound_class.insert(ci.transfer_in_event.clone(), ci.as_.clone());
+                }
+            }
+            _ => {}
+        }
+    }
 
     // ── 2. Build the effective imported timeline ─────────────────────────────────────────────────
     // For each imported event, apply `applied` overrides then `manual_fmv`, emit an `Eff`.
@@ -271,7 +400,15 @@ pub fn resolve(
             _ => continue,
         };
         let effective_payload = applied.get(&e.id).unwrap_or(&e.payload);
-        let op = build_op(&e.id, effective_payload, &manual_fmv);
+        let op = build_op(
+            &e.id,
+            effective_payload,
+            &manual_fmv,
+            &links,
+            &consumed_ins,
+            &inbound_class,
+            &by_id,
+        );
         timeline.push(Eff {
             id: e.id.clone(),
             utc: e.utc_timestamp,

@@ -28,7 +28,8 @@ pub struct PoolSet {
 
 impl PoolSet {
     /// Assign the next split_sequence for an origin (origin's first lot uses 0 via `new_origin`).
-    fn bump_split(&mut self, origin: &EventId) -> u32 {
+    /// Exposed as `pub` so the SelfTransfer fold arm can allocate IDs for relocated lot fragments.
+    pub fn bump_split(&mut self, origin: &EventId) -> u32 {
         let e = self.next_split.entry(origin.clone()).or_insert(0);
         let v = *e;
         *e += 1;

@@ -5,7 +5,8 @@ use crate::price::PriceProvider;
 use crate::project::pools::{pool_key, Consumed, PoolSet};
 use crate::project::resolve::{sort_canonical, Op, Resolution};
 use crate::state::{
-    BlockerKind, Disposal, DisposalLeg, FoldStats, GiftZone, IncomeRecord, LedgerState, Lot, Term,
+    BlockerKind, Disposal, DisposalLeg, FoldStats, GiftZone, IncomeRecord, LedgerState, Lot,
+    PendingLeg, PendingTransfer, Term,
 };
 use crate::ProjectionConfig;
 use std::collections::BTreeMap;
@@ -205,6 +206,208 @@ pub fn fold(
                 };
                 pools.new_origin_lot(pool_key(date, &wallet), lot);
                 stats.sigma_in += *sat; // FR9 Σin: income is externally-sourced (counts even while FMV is pending)
+            }
+            Op::PendingOut { sat, fee_sat } => {
+                let wallet = match &eff.wallet {
+                    Some(w) => w.clone(),
+                    None => {
+                        st.add_blocker(
+                            BlockerKind::UncoveredDisposal,
+                            Some(eff.id.clone()),
+                            "pending out without wallet",
+                        );
+                        continue;
+                    }
+                };
+                let key = pool_key(date, &wallet);
+                let total_sat = *sat + fee_sat.unwrap_or(0);
+                let (consumed, shortfall) = pools.consume_fifo(&key, total_sat);
+                if shortfall > 0 {
+                    st.add_blocker(
+                        BlockerKind::UncoveredDisposal,
+                        Some(eff.id.clone()),
+                        format!("pending out short by {shortfall} sat"),
+                    );
+                }
+                let legs: Vec<PendingLeg> = consumed
+                    .iter()
+                    .map(|c| PendingLeg {
+                        lot_id: c.lot_id.clone(),
+                        sat: c.sat,
+                        usd_basis: c.gain_basis,
+                        acquired_at: c.acquired_at,
+                    })
+                    .collect();
+                st.pending_reconciliation.push(PendingTransfer {
+                    event: eff.id.clone(),
+                    principal_sat: *sat,
+                    fee_sat: *fee_sat,
+                    legs,
+                });
+                // Advisory blocker: unmatched outflow (may be resolved by a later TransferLink in Task 8+).
+                st.add_blocker(
+                    BlockerKind::UnmatchedOutflows,
+                    Some(eff.id.clone()),
+                    "unmatched transfer out",
+                );
+            }
+            Op::SelfTransfer {
+                sat,
+                fee_sat: _,
+                dest,
+            } => {
+                let wallet = match &eff.wallet {
+                    Some(w) => w.clone(),
+                    None => {
+                        st.add_blocker(
+                            BlockerKind::UncoveredDisposal,
+                            Some(eff.id.clone()),
+                            "self transfer without source wallet",
+                        );
+                        continue;
+                    }
+                };
+                let key = pool_key(date, &wallet);
+                let (consumed, shortfall) = pools.consume_fifo(&key, *sat);
+                if shortfall > 0 {
+                    st.add_blocker(
+                        BlockerKind::UncoveredDisposal,
+                        Some(eff.id.clone()),
+                        format!("self transfer short by {shortfall} sat"),
+                    );
+                }
+                // Relocate consumed fragments to the destination pool: carry basis, HP, donor_acquired_at.
+                // Non-taxable (TP7): no Disposal or Removal records. basis_source = CarriedFromTransfer.
+                let mut relocated: Vec<Lot> = Vec::new();
+                for c in &consumed {
+                    let seq = pools.bump_split(&c.lot_id.origin_event_id);
+                    relocated.push(Lot {
+                        lot_id: LotId {
+                            origin_event_id: c.lot_id.origin_event_id.clone(),
+                            split_sequence: seq,
+                        },
+                        wallet: dest.clone(),
+                        acquired_at: c.acquired_at,
+                        original_sat: c.sat,
+                        remaining_sat: c.sat,
+                        usd_basis: c.gain_basis,
+                        basis_source: BasisSource::CarriedFromTransfer,
+                        dual_loss_basis: c.loss_basis,
+                        donor_acquired_at: c.donor_acquired_at,
+                        basis_pending: c.basis_pending,
+                    });
+                }
+                // Task 11: fee handling (TP8 (c) basis re-home / (b) mini-disposition) slots in here,
+                // between building `relocated` and pushing to the destination pool.
+                let dest_key = pool_key(date, dest);
+                for lot in relocated {
+                    pools.push_lot(dest_key.clone(), lot);
+                }
+            }
+            Op::UnknownInbound { sat: _ } => {
+                // Hard blocker: basis is unknown. NO lot — sats not yet in the ledger (FR9/§7.3).
+                st.add_blocker(
+                    BlockerKind::UnknownBasisInbound,
+                    Some(eff.id.clone()),
+                    "unclassified TransferIn — basis unknown",
+                );
+            }
+            Op::IncomeInbound {
+                sat,
+                fmv,
+                kind,
+                business,
+            } => {
+                // Identical to Op::Income: income lot at FMV + IncomeRecord. sigma_in += sat.
+                let wallet = match &eff.wallet {
+                    Some(w) => w.clone(),
+                    None => {
+                        st.add_blocker(
+                            BlockerKind::FmvMissing,
+                            Some(eff.id.clone()),
+                            "income inbound without wallet",
+                        );
+                        continue;
+                    }
+                };
+                let (basis, pending) = match fmv {
+                    Some(v) => {
+                        st.income_recognized.push(IncomeRecord {
+                            event: eff.id.clone(),
+                            recognized_at: date,
+                            sat: *sat,
+                            usd_fmv: *v,
+                            kind: *kind,
+                            business: *business,
+                        });
+                        (*v, false)
+                    }
+                    None => {
+                        st.add_blocker(
+                            BlockerKind::FmvMissing,
+                            Some(eff.id.clone()),
+                            "income inbound FMV missing",
+                        );
+                        (Usd::ZERO, true)
+                    }
+                };
+                let lot = Lot {
+                    lot_id: LotId {
+                        origin_event_id: eff.id.clone(),
+                        split_sequence: 0,
+                    },
+                    wallet: wallet.clone(),
+                    acquired_at: date,
+                    original_sat: *sat,
+                    remaining_sat: *sat,
+                    usd_basis: basis,
+                    basis_source: BasisSource::FmvAtIncome,
+                    dual_loss_basis: None,
+                    donor_acquired_at: None,
+                    basis_pending: pending,
+                };
+                pools.new_origin_lot(pool_key(date, &wallet), lot);
+                stats.sigma_in += *sat;
+            }
+            Op::GiftReceived {
+                sat,
+                donor_basis,
+                donor_acquired_at,
+                fmv_at_gift: _,
+            } => {
+                // Gift lot: Task 10 fills dual-basis logic; here: known donor_basis → carryover lot.
+                let wallet = match &eff.wallet {
+                    Some(w) => w.clone(),
+                    None => {
+                        st.add_blocker(
+                            BlockerKind::FmvMissing,
+                            Some(eff.id.clone()),
+                            "gift received without wallet",
+                        );
+                        continue;
+                    }
+                };
+                let (basis, pending) = match donor_basis {
+                    Some(b) => (*b, false),
+                    None => (Usd::ZERO, true),
+                };
+                let lot = Lot {
+                    lot_id: LotId {
+                        origin_event_id: eff.id.clone(),
+                        split_sequence: 0,
+                    },
+                    wallet: wallet.clone(),
+                    acquired_at: date,
+                    original_sat: *sat,
+                    remaining_sat: *sat,
+                    usd_basis: basis,
+                    basis_source: BasisSource::GiftCarryover,
+                    dual_loss_basis: None, // Task 10 fills dual-basis
+                    donor_acquired_at: *donor_acquired_at,
+                    basis_pending: pending,
+                };
+                pools.new_origin_lot(pool_key(date, &wallet), lot);
+                stats.sigma_in += *sat; // classified GiftReceived is externally-sourced (FR9)
             }
             Op::Unclassified => {
                 st.add_blocker(
