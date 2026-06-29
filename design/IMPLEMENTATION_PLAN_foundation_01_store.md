@@ -82,8 +82,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-# crypto-rust = pure-Rust backend (no system crypto lib) → cross-platform (NFR8); allow-variable-time-crypto needed for RSA.
-sequoia-openpgp = { version = "1", default-features = false, features = ["crypto-rust", "allow-variable-time-crypto"] }
+# crypto-rust = pure-Rust backend (no system crypto lib) → cross-platform (NFR8).
+# allow-variable-time-crypto = required for RSA interoperability (the `rsa` crate is always compiled in under
+#   crypto-rust, even though the storage subkey uses Cv25519/ECDH).
+# allow-experimental-crypto  = REQUIRED: sequoia-openpgp's build script gates the RustCrypto backend behind it,
+#   refusing to compile without it (confirmed by the Task-0 spike — FOLLOWUPS §crypto-rust, 2026-06-28).
+sequoia-openpgp = { version = "1", default-features = false, features = ["crypto-rust", "allow-variable-time-crypto", "allow-experimental-crypto"] }
 rusqlite = { version = "0.31", features = ["bundled", "serialize"] }
 fs2 = "0.4"            # cross-platform exclusive single-instance lock (flock on Unix / LockFileEx on Windows) — NFR8
 zeroize = "1"
@@ -152,7 +156,7 @@ fn sequoia_roundtrip_with_shared_unlock_flag_and_strong_s2k() {
                     eprintln!("secret-key S2K = Iterated{{hash={:?}, hash_bytes={}}}", hash, hash_bytes);
                     saw_iterated = true;
                 }
-                other => panic!("weak S2K {:?}; pin a stronger one before proceeding", other),
+                other => panic!("unexpected S2K {:?} — spec requires Iterated (or Argon2 if a future Sequoia adds it); confirm acceptability and update this assertion", other),
             }
         }
     }
@@ -575,7 +579,10 @@ impl VaultLock {
         let f = OpenOptions::new().create(true).write(true).open(paths::lock_of(vault))?;
         match f.try_lock_exclusive() {
             Ok(()) => Ok(VaultLock(f)),
-            // fs2 returns an Io error whose kind is WouldBlock when the lock is held.
+            // On contention fs2 surfaces WouldBlock: Unix EWOULDBLOCK; Windows ERROR_LOCK_VIOLATION(33)
+            // mapped to WouldBlock by Rust >=1.64's decode_error_kind (PR #95306) — MSRV 1.74 satisfies this.
+            // If MSRV is ever lowered below 1.64, fall back to e.raw_os_error()==Some(33). (fs2 0.4 is dormant;
+            // fd-lock is a maintained alternative that normalizes this mapping — see FOLLOWUPS.)
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Err(StoreError::Locked),
             Err(e) => Err(StoreError::Io(e)),
         }
@@ -614,6 +621,7 @@ impl SecretBuf {
     pub fn as_slice(&self) -> &[u8] { &self.bytes }
     pub fn is_locked(&self) -> bool { self.locked }
     #[cfg(unix)] fn try_mlock(b: &[u8]) -> bool { if b.is_empty() { return true; } unsafe { rustix::mm::mlock(b.as_ptr() as *mut _, b.len()).is_ok() } }
+    // VirtualLock takes LPVOID (mut void*) but does not write through it; casting *const→*mut is safe. BOOL != 0 = success.
     #[cfg(windows)] fn try_mlock(b: &[u8]) -> bool { if b.is_empty() { return true; } unsafe { windows_sys::Win32::System::Memory::VirtualLock(b.as_ptr() as *mut _, b.len()) != 0 } } // NFR8
     #[cfg(not(any(unix, windows)))] fn try_mlock(_b: &[u8]) -> bool { false }
 }
