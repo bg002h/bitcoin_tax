@@ -25,6 +25,37 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
   TP8 treatment is applied correctly per the existing TreatmentC/B config; any further
   guidance-specific nuance is deferred).
 
+## btctax-adapters (Plan 3) — confirmed real schemas folded into §9.1 (2026-06-29)
+- **CROSS-CRATE GAP — inbound `TransferIn` cannot carry cost-basis / acquisition-date (record clearly).**
+  Swan `transfers` `deposit` rows carry **`USD Cost Basis` + `Acquisition Date`**, and Coinbase `Receive` /
+  Gemini `Credit`(BTC) inbound rows may carry basis context, but core's
+  `TransferIn { sat, src_addr?, txid? }` has **no field to hold a cost-basis or acquisition-date**. So at
+  ingest every inbound on-chain row becomes a **plain `TransferIn`** and the exchange-supplied basis/date are
+  **dropped from the event**. They must be **re-supplied by reconciliation (Plan 4)** — e.g. a
+  `ClassifyInbound` decision (`GiftReceived{donor_basis, donor_acquired_at, …}`) or a future
+  `ClassifyInbound`-style "external-acquisition" decision that records basis+date for an externally-sourced
+  inbound. For a confirmed **self-transfer** the source lot is authoritative anyway (the Swan basis is only
+  relevant for externally-sourced coins), so no data is lost there. **Candidate fix (Phase-2):** a
+  reconciliation-hints side-table (or extra optional fields on `TransferIn`) so the adapter can persist the
+  exchange-provided basis/date as a *hint* the reconciler can accept, instead of re-keying it by hand. —
+  OPEN (Plan 4 reconciliation / Phase-2). — adapters §9.1 / plan FOUND GAP.
+- **Swan withdrawals `source_ref` — native-vs-semantic owner question.** The confirmed withdrawals schema
+  carries a `Transaction ID` column, but per the owner it is **not a stable per-row id** (the schema-only
+  doc shows the column but not values; cf. Swan-trades' present-but-empty `Tag`). The adapter therefore
+  treats withdrawals as **id-less** (synthesized `(source, direction, utc_ms, type, sat)` + occurrence_index,
+  §6.2). If the withdrawals `Transaction ID` turns out to be stable/unique, switch to a native ref (one-line
+  change). — OPEN (owner confirm). — adapters §9.1 / plan Schema-items.
+- **Swan `Total/Transaction USD` purchase-cost semantics.** Swan transfers `purchase`→`Acquire` uses
+  `Transaction USD` (principal) + `Fee USD` (fee), with `Total USD` as the basis cross-check (`Total ==
+  Transaction + Fee`); confirm by fixture once real values are available. — OPEN (confirm). — adapters §9.1.
+- **Coinbase internal-move default.** `Exchange/Pro Deposit/Withdrawal` (Coinbase↔Coinbase-Pro) are routed to
+  `Unclassified` (likely self-transfers, but user-confirmed via reconciliation rather than auto-`TransferIn`/
+  `TransferOut`). Confirm this conservative default is desired. — OPEN (owner confirm). — adapters §9.1.
+- **XLSX-float→decimal precision bound; id-less `occurrence_index` file-order fragility** (River, Swan trades,
+  Swan withdrawals, Gemini `Credit`/`Debit`) — both already noted; carry forward. **Pin** the resolved
+  `csv`/`calamine`/`rust_xlsxwriter` versions + re-verify the `calamine::Data` variant list after first build.
+  — OPEN. — plan Notes for Plan 4.
+
 ## Deferred to later phases (out of Phase-1 scope by design)
 - **Forms generation (Phase 2):** filled IRS 8949 + Schedule D PDFs; §170(e) charitable-deduction computation (FMV vs basis); Form 8283 (>$5k qualified appraisal — §170(f)(11)(C), CCA 202302012); Form 709 routing for gifts. — *Phase 1 captures the metadata (FMV, ST/LT, appraisal-required, donor carryover) so Phase 2 can compute.* — OPEN (Phase 2). — tax-review N1/M-(donation), spec §16.
 - **Rate/limit mechanics (Phase 2/3):** 0/15/20% (§1(h)), 3.8% NIIT (§1411), $3,000 loss limit + carryforward (§1211/§1212). — Confirmed safe to defer (downstream of per-lot basis/gain/ST-LT). — OPEN (Phase 2/3). — tax-review "Positions confirmed".
@@ -76,6 +107,15 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 See the spec's "Fold record (v0.2)" section for the 1:1 mapping of each Critical/Important to its fix. Round-1 reviews: `reviews/spec-review-phase1-tax-round-1.md`, `reviews/spec-review-phase1-engineering-round-1.md`, `reviews/architecture-review-phase1-foundation-round-1.md`.
 
 - **N-2 (export_snapshot silently overwrites snapshot.sqlite):** Current behaviour matches the brief (no mention of rotation); future improvement: timestamped filenames (e.g. `snapshot-20260628T120000Z.sqlite`) to avoid clobbering a previous export. **Windows owner-only perms** for both `export_snapshot` and `backup_key` rely on user-profile directory ACL inheritance (no explicit DACL set); verify under Windows CI that the written files are not world-readable.
+
+## btctax-adapters plan — deferred Minors (review-green; 2026-06-29)
+
+Non-blocking items raised during the round-1 review of `btctax-adapters` (IP-1 and all code-level Minors folded inline into the plan on 2026-06-29). These are deferred observations for implementation time or later phases.
+
+- **River `Income`→`IncomeKind::Reward` documentation + `business: false` immutability (tax M1/M2).** River's `Income` tag maps to `IncomeKind::Reward` (non-business yield/reward); `business: false` is hard-coded at ingest. At implementation, add a module-doc note that `business: false` is immutable at the adapter layer — the Plan-4 reconciler cannot flip it without a re-import. If the owner's River income is business income (e.g., from professional mining operations), the `IncomeKind` / `business` mapping must be confirmed before implementing the River parser. — OPEN (confirm at River-parser implementation). — adapters tax-review M1/M2.
+- **Swan zero-sat-withdrawal defensive counter (tax Nit).** The Swan withdrawals arm currently increments `dropped_no_btc` for a `sat == 0` row (defensive guard; Swan is BTC-only). At implementation, consider whether a zero-sat Swan withdrawal should be counted under a separate `skipped_zero_sat` field rather than the FR2 `dropped_no_btc` counter, since the two cases are semantically different. — OPEN (implementation note). — adapters tax-review Nit.
+- **Coinbase internal-move = Unclassified decision (tax-review endorsed).** `Order` + `Exchange/Pro Deposit/Withdrawal` → `Unclassified` is the correct conservative default. The tax reviewer explicitly endorsed keeping this (over auto-routing to `TransferIn`/`TransferOut`), since these Coinbase↔Coinbase-Pro internal moves require user confirmation via reconciliation. No change to the plan; noted here so Plan-4 docs know the decision is reviewed and intentional. — RESOLVED (decision retained; no action needed). — adapters tax-review.
+- **Swan withdrawals `Transaction ID` stability — treated id-less; confirm later.** The withdrawals file carries a `Transaction ID` column but the adapter treats it as non-stable (semantic `source_ref`). If confirmed stable/unique, switch to native ref (one-line change in `Swan::normalize` withdrawals arm). Cross-referenced with the existing schema-items entry above. — OPEN (owner confirm). — adapters plan Schema-items / tax-review Nit.
 
 ## btctax-core (Task 0) — dependency versions pinned for reproducibility
 - btctax-core pinned `rust_decimal` 1.42.1 / `rust_decimal_macros` 1.40.0 (independent Cargo entries; `dec!` literals binary-compatible with the 1.42 `Decimal`) / `time` 0.3.51 — R3 pin record.
