@@ -4,6 +4,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub mod atomic;
 pub mod blob;
 pub mod crypto;
+pub mod lock;
 pub mod paths;
 pub mod sqlite_io;
 
