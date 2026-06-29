@@ -2,17 +2,62 @@
 
 Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status · pointer.
 
-## btctax-cli whole-branch review (2026-06-29) — open Minor
+---
 
-- **`safe_harbor_status` goes dark when ALL Path-B allocated lots are fully consumed (Minor, OPEN).**
-  `render.rs::safe_harbor_status` derives `effective_path_b` from `state.lots` (presence of a
-  `BasisSource::SafeHarborAllocated` lot). `finalize` only retains lots with `remaining_sat > 0`,
-  so if every allocated lot has been disposed/removed before `verify` runs AND a stale
-  `SafeHarborTimebar` advisory is still present (from a voided inert prior), `verify` again
-  mislabels effective Path B as "time-barred → using Path A". Display-only (dollars + exit code
-  correct); narrower than the CLI-I2 happy-path case already fixed. **Fix:** also OR in
-  `state.disposals[*].legs[*].basis_source` and `state.removals[*].legs[*].basis_source`
-  (both carry `basis_source` and are not filtered by `remaining_sat`).
+## ✅ Burndown pass (2026-06-29) — actionable Phase-1 items resolved
+
+Branch `chore/followups-burndown`, each fix independently reviewed to 0 Critical / 0 Important;
+workspace gate green. What was closed:
+
+**btctax-cli (commits f6880e6, 39e09e0, 282ae20, 4a78727):**
+- **RESOLVED — `safe_harbor_status` goes dark when all Path-B lots consumed.** Now ORs in
+  `state.disposals[*].legs[*].basis_source` + `removals[*].legs[*].basis_source == SafeHarborAllocated`
+  (legs are not filtered by `remaining_sat`), so an effective Path B reports "effective" even after every
+  allocated lot is disposed. Test added (all-consumed + stale advisory → still "effective"). Reviewer
+  confirmed it cannot mask a genuine time-bar or unconservable state (those never seed SafeHarborAllocated lots).
+- **RESOLVED — `verify` double-loads events (recon M-1 / eng M1).** Added
+  `Session::load_events_and_project() -> (Vec<LedgerEvent>, LedgerState, ProjectionConfig)`; `verify` and
+  `safe_harbor_attest` routed through it. Behavior-preserving; unit-tested.
+- **RESOLVED — `{:?}` Debug enums in CSV (eng-M2).** Six stable snake_case `*_tag()` fns
+  (`term`→`short`/`long`, `dispose_kind`→`sell`/`spend`, `basis_source`→`exchange`/`cost`/`safe_harbor`/…,
+  etc.); all four CSV writers + text renderers switched off `{:?}`. CSV columns are now a stable contract.
+  Export test asserts column values. (Exhaustive matches — no `_` fallback masking a real variant.)
+- **RESOLVED — weak `set-fmv` test (recon N-1).** Repointed to an FMV-missing `Income` target; asserts the
+  `FmvMissing` hard blocker present BEFORE and cleared AFTER `set-fmv` (+ income recognized at the manual FMV).
+- **RESOLVED — attest leaves a stale `safe_harbor_timebar` advisory (Plan-4 fold I-2 follow-on).** Subsumed by
+  the `safe_harbor_status` fix above (status now keyed on the effective-Path-B signal, not the advisory).
+
+**btctax-adapters (commit 614d43a):**
+- **RESOLVED — Swan zero-sat withdrawal counted under `dropped_no_btc` (tax Nit).** Added a distinct
+  `skipped_zero_sat` counter to `GroupOutput`/`FileReport` (+ `merge`/`ingest` threading); the Swan arm now
+  increments it instead of `dropped_no_btc`. Bucket-neutral (`parsed_rows = rows.len()` counted once), so the
+  FR2 identity `parsed_rows = events + dropped_no_btc + unclassified + skipped_zero_sat` holds exactly. Test added.
+  CLI import render reads named fields → no CLI change needed.
+- **RESOLVED — River `business: false` immutability (tax M2).** Doc note added at both `Income` construction
+  sites: `business: false` is hard-coded + immutable post-ingest (Income is not `ClassifyRaw`-able); SE-tax
+  exposure requires confirming/changing the mapping at the adapter layer.
+
+**btctax-core (verified by read-only survey — NO code change needed):**
+- **VERIFIED already-handled — tax m1 (loss-basis cross-lot edge).** The `loss_basis` drop on a non-dual
+  survivor is deliberate + taxpayer-conservative (promoting `None→Some` would misclassify a later sale as a
+  §1015(a) dual-basis disposition — a far larger error). KAT `self_transfer_fee_c_cross_lot_normal_survivor_stays_non_dual` (kat_tax.rs:1204).
+- **VERIFIED already-handled — tax m3 (principal==0 fee'd transfer).** All four fee arms raise an
+  `UncoveredDisposal` blocker (not a silent drop) when there's no surviving leg/lot (fold.rs:569/394/770/836);
+  fee-sats still consumed so conservation holds.
+- **VERIFIED already-handled — 2025-transition timezone straddle.** Timeline partitioned at the **tax-date**
+  boundary (`fold.rs:281` stable sort on `e.date() >= TRANSITION_DATE`); `universal_snapshot` + `pool_key` use
+  the same tax-date predicate, so the pre-seed residue matches. KAT `reversed_offset_straddle_seeds_on_tax_date_not_utc_order` (transition.rs:546).
+- **VERIFIED already-handled — `allocation_voids`.** Properly declared (resolve.rs:270), populated (286-289),
+  consumed in the pass-3 irrevocability check (591-599) — the void-of-allocation behavior the CLI attest relies on.
+- **ACCEPTED de-minimis tradeoff — tax m2 (exact-boundary fee holding-period attribution).** When principal
+  drains exactly to a lot boundary, the fee-cents basis (from the next lot) rides the earlier lot's holding
+  period. Total basis is conserved; only the HP anchor of a few cents shifts, only in the exact-boundary case.
+  Fixing it requires splitting fee basis into a separate micro-leg/lot in the conservation-critical fold —
+  not worth the complexity/risk for a cents-scale effect. WONTFIX (Phase-1); revisit only if shown material.
+
+---
+
+## ✅ RESOLVED earlier (kept for record)
 
 ## btctax-core whole-branch fixes (2026-06-29) — both Important findings resolved
 
@@ -179,35 +224,19 @@ M3, N-2) were folded into the plan (see its "Fold record (round 1)"). These rema
   Path-B seed in `transition::seed_transition`) to carry `dual_loss_basis` + `donor_acquired_at`. — OPEN
   (Phase 2; spec change required). — recon review M-2.
 
-- **M-1 (recon) / M1 (eng) — `verify` double-loads events.** `cmd::inspect::verify` calls
-  `session.project()` (which itself runs `load_all`) AND then `load_all(session.conn())` again for the
-  safe-harbor status detection. Efficiency only (correct + deterministic). **Fix:** add a
-  `Session::load_events_and_project() -> Result<(Vec<LedgerEvent>, LedgerState, ProjectionConfig), CliError>`
-  that loads once and returns both the events and the projection, and route `verify` through it. (The new
-  `safe_harbor_allocate`/`safe_harbor_attest` also load + project; they could share the same helper once it
-  exists.) — OPEN (implementation-time refactor). — recon M-1 / eng M1.
+- **M-1 (recon) / M1 (eng) — `verify` double-loads events.** — **RESOLVED (burndown 2026-06-29, commit 39e09e0):**
+  added `Session::load_events_and_project()`; `verify` + `safe_harbor_attest` routed through it. See the
+  burndown section above.
 
-- **eng-M2 — render + CSV use `{:?}` (Debug) for enums** (`BasisSource`/`DisposeKind`/`Term`/`IncomeKind`/
-  `GiftZone`/`BlockerKind`/removal+disposal `kind`). FR10 CSV columns (Task 15 `write_csv_exports`) and the
-  text renderers (Task 5/6) therefore serialize the Rust Debug representation, which is not a stable wire
-  format. Acceptable for the Phase-1 human-readable export, but **before any downstream consumer parses the
-  CSVs**, add a `Display` impl or a `fn tag(&self) -> &'static str` per enum (mirroring `Source::tag()`) and
-  switch the CSV writers to it, so the column values are a committed contract. — OPEN (before CSV consumers).
-  — eng review M2.
+- **eng-M2 — render + CSV use `{:?}` (Debug) for enums.** — **RESOLVED (burndown 2026-06-29, commit 282ae20):**
+  six stable snake_case `*_tag()` fns; all CSV writers + text renderers switched off `{:?}`; export test
+  asserts column values. CSV columns are now a committed contract. See the burndown section above.
 
-- **N-1 (recon) — strengthen the `set-fmv` test.** The Task-11 `set_fmv_appends_a_manual_fmv_decision` test
-  targets an `Acquire` event, but the engine applies `ManualFmv` only to `Income` (resolve.rs `build_op`
-  `EventPayload::Income` arm). So the test confirms the decision is appended but does NOT confirm it clears a
-  blocker. **Fix:** add/repoint a test to an `Income{fmv_status: Missing}` target (a pre-classified income
-  inbound or a native Income with no FMV) and assert the `fmv_missing`/`UnknownBasisInbound`-style blocker
-  clears after `set-fmv`. — OPEN (test hardening, Task 11). — recon N-1.
+- **N-1 (recon) — strengthen the `set-fmv` test.** — **RESOLVED (burndown 2026-06-29, commit 4a78727):**
+  repointed to an FMV-missing `Income` target; asserts the `FmvMissing` blocker present before and cleared
+  after `set-fmv` (+ income recognized at the manual FMV). See the burndown section above.
 
-- **attest leaves a stale `safe_harbor_timebar` advisory (follow-on of the I-2 fold).** `safe_harbor_attest`
-  cures a time-bar by appending `Void(prior) + re-attested copy`. resolve.rs routes a void of a
-  `SafeHarborAllocation` into `allocation_voids` (NOT the `voided` set), so the original allocation is STILL
-  evaluated in pass-1 step 3 and still emits its advisory `safe_harbor_timebar`. The re-attested copy governs
-  (Path B effective), but the lingering advisory means `render::safe_harbor_status` (Task 6) can mislabel an
-  effective Path B as "time-barred → Path A." Display-only, advisory (does not gate FR9). **Fix options:**
-  have `safe_harbor_status` prefer the effective-Path-B signal over the advisory, or (engine) suppress
-  re-evaluation of an allocation that an attestation supersedes. — OPEN (display polish). — Plan-4 fold I-2
-  follow-on.
+- **attest leaves a stale `safe_harbor_timebar` advisory (follow-on of the I-2 fold).** — **RESOLVED**
+  (the CLI-I2 whole-branch fix made `safe_harbor_status` prefer the effective-Path-B signal over the advisory;
+  the burndown fix (commit f6880e6) extended that signal to disposal/removal legs for the all-lots-consumed
+  case). `verify` no longer mislabels an effective Path B as time-barred. See the burndown section above.
