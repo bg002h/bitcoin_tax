@@ -2,7 +2,10 @@
 pub const SCHEMA_VERSION: u32 = 1;
 
 pub mod blob;
+pub mod crypto;
 pub mod sqlite_io;
+
+pub use crypto::Passphrase;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
