@@ -1,6 +1,6 @@
 use btctax_adapters::price::BundledPrices;
 use btctax_adapters::{ingest_files, ingest_files_bundled, AdapterError};
-use btctax_core::{EventPayload, Source};
+use btctax_core::{EventPayload, IncomeKind, Source};
 use rust_xlsxwriter::Workbook;
 
 #[test]
@@ -68,7 +68,13 @@ fn write_gemini(path: &std::path::Path) {
     ];
     for (r, row) in rows.iter().enumerate() {
         for (c, v) in row.iter().enumerate() {
-            ws.write_string((r + 1) as u32, c as u16, *v).unwrap();
+            // IP-1: For Buy row (r=0), write Date as numeric serial to exercise calamine's Float→serial→UTC path
+            if r == 0 && c == 0 {
+                ws.write_number((r + 1) as u32, c as u16, 45717.5_f64)
+                    .unwrap();
+            } else {
+                ws.write_string((r + 1) as u32, c as u16, *v).unwrap();
+            }
         }
     }
     wb.save(path).unwrap();
@@ -156,20 +162,55 @@ Created At,Timezone,Transaction ID,Executed At,Canceled At,Status,Bitcoin Amount
         .any(|e| matches!(&e.payload, EventPayload::Income(_)))); // River interest
 
     // Stable, source-scoped EventIds across all four venues coexist.
+    // M-1: Coinbase trade with payload type verification
     assert!(batch
         .events
         .iter()
-        .any(|e| e.id.canonical() == "import|coinbase|trade|cb-1"));
+        .any(|e| e.id.canonical() == "import|coinbase|trade|cb-1"
+            && matches!(&e.payload, EventPayload::Acquire(_))));
+
+    // M-1: Gemini trade with payload type verification; IP-1: exercises numeric-serial Date path
     assert!(batch
         .events
         .iter()
-        .any(|e| e.id.canonical() == "import|gemini|trade|GT-1.GO-1"));
+        .any(|e| e.id.canonical() == "import|gemini|trade|GT-1.GO-1"
+            && matches!(&e.payload, EventPayload::Acquire(_))));
+
+    // IP-1: Assert Gemini Buy's utc_timestamp reflects parsed serial date (2025-03-01 12:00:00 UTC)
+    let gemini_buy = batch
+        .events
+        .iter()
+        .find(|e| e.id.canonical() == "import|gemini|trade|GT-1.GO-1")
+        .unwrap();
+    assert_eq!(
+        gemini_buy.utc_timestamp,
+        time::macros::datetime!(2025-03-01 12:00:00 UTC)
+    );
+
     assert!(batch
         .events
         .iter()
         .any(|e| e.id.canonical() == "import|swan|in|sw-x1"));
+
+    // M-1: Swan trade (Buy) with payload type verification
     assert!(batch
         .events
         .iter()
-        .any(|e| e.id.canonical().starts_with("import|river|in|")));
+        .any(|e| e.id.canonical().starts_with("import|swan|trade|")
+            && matches!(&e.payload, EventPayload::Acquire(_))));
+
+    // M-2: Swan withdrawal assertion
+    assert!(batch
+        .events
+        .iter()
+        .any(|e| e.id.canonical().starts_with("import|swan|out|")
+            && matches!(&e.payload, EventPayload::TransferOut(_))));
+
+    // N-2: River interest with occurrence-indexed semantic source_ref (hence starts_with prefix check)
+    // N-1: Payload type verification with interest kind
+    assert!(batch
+        .events
+        .iter()
+        .any(|e| e.id.canonical().starts_with("import|river|in|")
+            && matches!(&e.payload, EventPayload::Income(x) if x.kind == IncomeKind::Interest)));
 }
