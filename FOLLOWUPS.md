@@ -54,7 +54,14 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 - **XLSX-float→decimal precision bound; id-less `occurrence_index` file-order fragility** (River, Swan trades,
   Swan withdrawals, Gemini `Credit`/`Debit`) — both already noted; carry forward. **Pin** the resolved
   `csv`/`calamine`/`rust_xlsxwriter` versions + re-verify the `calamine::Data` variant list after first build.
-  — OPEN. — plan Notes for Plan 4.
+  RESOLVED (versions pinned 2026-06-29): `csv` 1.4.0, `calamine` 0.26.1, `rust_xlsxwriter` 0.79.4.
+  `calamine::Data` variant audit deferred to Task 2 (first build confirmed 0.26.1 resolves; no variant
+  references in Task 0). — OPEN (Task 2 Data-variant audit). — plan Notes for Plan 4.
+- **`AdapterError.source` field rename (thiserror compat, 2026-06-29).** The brief's `lib.rs` stub used
+  `source: &'static str` (the adapter name) in `MissingColumn`/`Parse`/`FractionalSat` variants. Both
+  thiserror 1.x and 2.x auto-treat any field named `source` as `Error::source()`, requiring `impl Error`.
+  Field renamed to `adapter: &'static str`; format strings updated to `{adapter}`. Parse functions updated
+  to construct with `adapter: source`. Display output unchanged. — RESOLVED (Task 0).
 
 ## Deferred to later phases (out of Phase-1 scope by design)
 - **Forms generation (Phase 2):** filled IRS 8949 + Schedule D PDFs; §170(e) charitable-deduction computation (FMV vs basis); Form 8283 (>$5k qualified appraisal — §170(f)(11)(C), CCA 202302012); Form 709 routing for gifts. — *Phase 1 captures the metadata (FMV, ST/LT, appraisal-required, donor carryover) so Phase 2 can compute.* — OPEN (Phase 2). — tax-review N1/M-(donation), spec §16.

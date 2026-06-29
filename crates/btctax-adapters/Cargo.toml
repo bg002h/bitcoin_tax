@@ -1,0 +1,20 @@
+[package]
+name = "btctax-adapters"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+btctax-core = { path = "../btctax-core" }
+# Exact decimal money (NFR5); same pin as core. serde-str unused here but keeps the feature set aligned.
+rust_decimal = { version = "1.36", default-features = false, features = ["std"] }
+# Timestamp parse → OffsetDateTime + UtcOffset (§6.1).
+time = { version = "0.3", features = ["macros", "parsing", "formatting"] }
+csv = "1.3"            # RFC4180 reader; Coinbase/River CSV; CRLF + preamble handling
+calamine = "0.26"      # read-only XLSX reader (Gemini ledger; any .xlsx source)
+thiserror = "1"
+
+[dev-dependencies]
+rust_decimal_macros = "1.36"
+rust_xlsxwriter = "0.79"   # build SYNTHETIC .xlsx fixtures in-test (writes invented data only)
+tempfile = "3"
