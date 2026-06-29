@@ -1,9 +1,11 @@
 mod fixtures;
 use btctax_cli::{cmd, Session};
 use btctax_core::{
-    BlockerKind, DisposeKind, EventPayload, InboundClass, IncomeKind, OutflowClass, TransferTarget,
+    BlockerKind, DisposeKind, EventId, EventPayload, InboundClass, IncomeKind, ManualFmv,
+    OutflowClass, TransferTarget,
 };
 use btctax_store::Passphrase;
+use rust_decimal_macros::dec;
 use time::macros::datetime;
 
 fn pp() -> Passphrase {
@@ -277,10 +279,55 @@ fn classify_raw_rejects_decision_payload() {
             .id
             .canonical()
     };
-    // A decision payload (ManualFmv) must be rejected by the is_imported guard.
-    let bad_json = r#"{"ManualFmv":{"event":"d:1","usd_fmv":"100.00"}}"#;
-    let err = cmd::reconcile::classify_raw(&vault, &pp(), &target, bad_json, now());
-    assert!(err.is_err(), "expected Err for non-imported payload");
+    // Build a real decision payload (ManualFmv) and serialize it to guarantee valid JSON that
+    // parses correctly. This proves the is_imported guard rejects it, not a JSON parse error.
+    let decision = EventPayload::ManualFmv(ManualFmv {
+        event: EventId::decision(1),
+        usd_fmv: dec!(100.00),
+    });
+    let bad_json = serde_json::to_string(&decision).unwrap();
+    // Verify is_imported() returns false for this decision variant (the guard's condition).
+    assert!(!decision.is_imported(), "ManualFmv must not be imported");
+    // Call classify_raw with the decision payload and assert the error is the guard's message.
+    let err = cmd::reconcile::classify_raw(&vault, &pp(), &target, &bad_json, now())
+        .unwrap_err()
+        .to_string();
+    // Assert the guard's specific error message, not a JSON parse error (which would not contain "imported").
+    assert!(
+        err.contains("imported"),
+        "expected is_imported guard error, got: {}",
+        err
+    );
+}
+
+#[test]
+fn classify_raw_rejects_malformed_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(&vault, &pp(), &[coinbase_with_order(dir.path())]).unwrap();
+
+    let target = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::Unclassified(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+    // Malformed JSON should trigger the parse-error path, distinct from the is_imported guard.
+    let malformed = "not json";
+    let err = cmd::reconcile::classify_raw(&vault, &pp(), &target, malformed, now())
+        .unwrap_err()
+        .to_string();
+    // Parse errors mention "bad --payload-json", not the guard's "imported" message.
+    assert!(
+        err.contains("bad --payload-json"),
+        "expected parse error, got: {}",
+        err
+    );
 }
 
 #[test]
@@ -288,7 +335,7 @@ fn accept_conflict_clears_import_conflict_blocker() {
     let dir = tempfile::tempdir().unwrap();
     let vault = dir.path().join("vault.pgp");
     cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
-    // First import creates the Acquire (Order→Acquire via classify-raw, but here we import a Buy
+    // First import creates the Acquire (Order→Acquire via classify-raw, but here we import an Order
     // to get a clean initial import, then re-import the same ID with different data).
     cmd::import::run(&vault, &pp(), &[coinbase_with_order(dir.path())]).unwrap();
     // Re-import the same source_ref with different amounts → ImportConflict.
