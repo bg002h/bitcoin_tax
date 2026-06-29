@@ -1,7 +1,7 @@
 use crate::conventions::{is_long_term, round_cents, split_pro_rata, Sat, TaxDate, Usd};
 use crate::event::BasisSource;
 use crate::identity::{EventId, LotId};
-use crate::price::PriceProvider;
+use crate::price::{fmv_of, PriceProvider};
 use crate::project::pools::{pool_key, Consumed, PoolSet};
 use crate::project::resolve::{sort_canonical, Op, Resolution};
 use crate::state::{
@@ -49,19 +49,53 @@ fn make_disposal_legs(
                 "disposal consumes a basis-pending lot",
             );
         }
-        // Task 10 replaces this block with the four-zone dual-basis computation:
-        let basis = c.gain_basis;
-        let gain = proceeds - basis;
-        let term = term_for(c.gain_hp_start, disposed);
+        // Task 10: four-zone §1015(a) dual-basis computation (TP11).
+        // When `c.dual = false` (no dual basis): simple single-carryover path.
+        // When `c.dual = true` (dual-basis gift, FMV-at-gift < donor-basis at gift date):
+        //   Gain zone  : proceeds > gain_basis  → basis = gain_basis, term tacks (gain_hp_start).
+        //   Loss zone  : proceeds < loss_basis  → basis = loss_basis, HP from gift date (loss_hp_start).
+        //   NoGainNoLoss: otherwise             → reported basis = proceeds, gain = 0, term from gain_hp_start.
+        // Note: in the NoGainNoLoss zone, `lot.usd_basis` was already reduced by pro-rata `gain_basis`
+        // on consume (pools.rs), so Σbasis is conserved exactly even though we report basis = proceeds.
+        let (basis, gain, term, gift_zone) = if c.dual {
+            let loss_basis = c.loss_basis.expect("dual=true implies loss_basis is Some");
+            if proceeds > c.gain_basis {
+                // Gain zone: basis = gain_basis (tacks, gain_hp_start).
+                let t = term_for(c.gain_hp_start, disposed);
+                (
+                    c.gain_basis,
+                    round_cents(proceeds - c.gain_basis),
+                    t,
+                    Some(GiftZone::Gain),
+                )
+            } else if proceeds < loss_basis {
+                // Loss zone: basis = FMV-at-gift (loss_basis), HP from gift date.
+                let t = term_for(c.loss_hp_start, disposed);
+                (
+                    loss_basis,
+                    round_cents(proceeds - loss_basis),
+                    t,
+                    Some(GiftZone::Loss),
+                )
+            } else {
+                // NoGainNoLoss zone: reported basis = proceeds → gain = 0; term from gain_hp_start.
+                let t = term_for(c.gain_hp_start, disposed);
+                (proceeds, Usd::ZERO, t, Some(GiftZone::NoGainNoLoss))
+            }
+        } else {
+            let basis = c.gain_basis;
+            let t = term_for(c.gain_hp_start, disposed);
+            (basis, round_cents(proceeds - basis), t, None)
+        };
         legs.push(DisposalLeg {
             lot_id: c.lot_id.clone(),
             sat: c.sat,
             proceeds,
             basis,
-            gain: round_cents(gain),
+            gain,
             term,
             basis_source: c.basis_source,
-            gift_zone: None::<GiftZone>,
+            gift_zone,
         });
     }
     legs
@@ -111,7 +145,7 @@ fn make_removal_legs(
 
 pub fn fold(
     mut res: Resolution,
-    _prices: &dyn PriceProvider,
+    prices: &dyn PriceProvider,
     _config: &ProjectionConfig,
 ) -> LedgerState {
     sort_canonical(&mut res.timeline);
@@ -415,9 +449,14 @@ pub fn fold(
                 sat,
                 donor_basis,
                 donor_acquired_at,
-                fmv_at_gift: _,
+                fmv_at_gift,
             } => {
-                // Gift lot: Task 10 fills dual-basis logic; here: known donor_basis → carryover lot.
+                // Task 10: §1015(a) dual-basis lot construction (TP11).
+                // Four cases by (donor_basis, donor_acquired_at) × (fmv_at_gift vs donor_basis):
+                //   1. donor_basis=Some(b), fmv_at_gift >= b  → single carryover (Gain zone only); tacks.
+                //   2. donor_basis=Some(b), fmv_at_gift < b   → dual basis; tacks on gain side.
+                //   3. donor_basis=None, donor_acquired_at=Some(d) → GiftFmvFallback: look up price at d.
+                //   4. donor_basis=None, donor_acquired_at=None    → basis unknown; hard blocker + pending lot.
                 let wallet = match &eff.wallet {
                     Some(w) => w.clone(),
                     None => {
@@ -429,17 +468,42 @@ pub fn fold(
                         continue;
                     }
                 };
-                let (basis, pending) = match donor_basis {
-                    Some(b) => (*b, false),
-                    None => {
-                        // I-2: donor_basis unknown → immediate hard blocker (mirrors IncomeInbound FmvMissing).
-                        st.add_blocker(
-                            BlockerKind::UnknownBasisInbound,
-                            Some(eff.id.clone()),
-                            "gift received with unknown donor basis",
-                        );
-                        (Usd::ZERO, true)
+                let (usd_basis, dual_loss_basis, basis_source, pending) = match donor_basis {
+                    Some(b) => {
+                        if *fmv_at_gift >= *b {
+                            // Case 1: FMV ≥ donor basis — single carryover; no dual.
+                            (*b, None, BasisSource::GiftCarryover, false)
+                        } else {
+                            // Case 2: FMV < donor basis — dual: gain basis = donor basis, loss basis = FMV.
+                            (*b, Some(*fmv_at_gift), BasisSource::GiftCarryover, false)
+                        }
                     }
+                    None => match donor_acquired_at {
+                        Some(d) => {
+                            // Case 3: GiftFmvFallback — derive basis from BTC price at donor's acquisition date.
+                            match fmv_of(prices, *d, *sat) {
+                                Some(fmv) => (fmv, None, BasisSource::GiftFmvFallback, false),
+                                None => {
+                                    // Price unavailable at donor acquisition date → basis indeterminate.
+                                    st.add_blocker(
+                                        BlockerKind::UnknownBasisInbound,
+                                        Some(eff.id.clone()),
+                                        "gift received: donor basis unknown and price unavailable at donor acquisition date",
+                                    );
+                                    (Usd::ZERO, None, BasisSource::GiftFmvFallback, true)
+                                }
+                            }
+                        }
+                        None => {
+                            // Case 4: both donor basis and acquisition date unknown — hard blocker.
+                            st.add_blocker(
+                                BlockerKind::UnknownBasisInbound,
+                                Some(eff.id.clone()),
+                                "gift received: donor basis and acquisition date both unknown",
+                            );
+                            (Usd::ZERO, None, BasisSource::GiftCarryover, true)
+                        }
+                    },
                 };
                 let lot = Lot {
                     lot_id: LotId {
@@ -450,9 +514,9 @@ pub fn fold(
                     acquired_at: date,
                     original_sat: *sat,
                     remaining_sat: *sat,
-                    usd_basis: basis,
-                    basis_source: BasisSource::GiftCarryover,
-                    dual_loss_basis: None, // Task 10 fills dual-basis
+                    usd_basis,
+                    basis_source,
+                    dual_loss_basis,
                     donor_acquired_at: *donor_acquired_at,
                     basis_pending: pending,
                 };

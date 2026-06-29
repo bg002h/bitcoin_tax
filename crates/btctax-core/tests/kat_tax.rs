@@ -765,6 +765,161 @@ fn duplicate_transfer_link_same_in_event_is_decision_conflict() {
     assert!(st.disposals.is_empty() && st.removals.is_empty());
 }
 
+// ── Task 10: received-gift dual basis (TP11, §1015(a) + §1223(2) tacking) ───────────────────
+
+fn gift_lot(
+    donor_basis: Option<rust_decimal::Decimal>,
+    donor_acq: Option<time::Date>,
+    fmv_at_gift: rust_decimal::Decimal,
+    recv: time::OffsetDateTime,
+) -> Vec<LedgerEvent> {
+    let in_ev = LedgerEvent {
+        id: EventId::import(Source::Swan, SourceRef::new("GIN")),
+        utc_timestamp: recv,
+        original_tz: offset!(+00:00),
+        wallet: Some(wal()),
+        payload: EventPayload::TransferIn(TransferIn {
+            sat: 100_000,
+            src_addr: None,
+            txid: None,
+        }),
+    };
+    let cls = dec_ev(
+        1,
+        datetime!(2026-12-31 00:00:00 UTC),
+        EventPayload::ClassifyInbound(ClassifyInbound {
+            transfer_in_event: EventId::import(Source::Swan, SourceRef::new("GIN")),
+            as_: InboundClass::GiftReceived {
+                donor_basis,
+                donor_acquired_at: donor_acq,
+                fmv_at_gift,
+            },
+        }),
+    );
+    vec![in_ev, cls]
+}
+
+fn sell(ts: time::OffsetDateTime, proceeds: rust_decimal::Decimal) -> LedgerEvent {
+    ev(
+        "S",
+        ts,
+        EventPayload::Dispose(Dispose {
+            sat: 100_000,
+            usd_proceeds: proceeds,
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    )
+}
+
+/// TP11 case 1: FMV-at-gift ≥ donor basis → single carryover, no dual, §1223(2) tacking from donor_acquired_at.
+#[test]
+fn tp11_case_no_dual_basis_fmv_ge_donor_basis_tacks() {
+    let mut evs = gift_lot(
+        Some(dec!(40.00)),
+        Some(time::macros::date!(2024 - 01 - 01)),
+        dec!(60.00),
+        datetime!(2025-06-01 00:00:00 UTC),
+    );
+    evs.push(sell(datetime!(2025-07-01 00:00:00 UTC), dec!(80.00)));
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    let leg = &st.disposals[0].legs[0];
+    assert_eq!(leg.basis, dec!(40.00));
+    assert_eq!(leg.gain, dec!(40.00));
+    assert_eq!(leg.term, Term::LongTerm); // tacks from donor 2024-01-01
+    assert_eq!(leg.gift_zone, None);
+}
+
+/// TP11 case 2: FMV-at-gift < donor basis → dual basis; proceeds > gain_basis → Gain zone, §1223(2) tacking.
+#[test]
+fn tp11_case_gain_zone_with_tacking() {
+    let mut evs = gift_lot(
+        Some(dec!(100.00)),
+        Some(time::macros::date!(2024 - 01 - 01)),
+        dec!(60.00), // dual: fmv < basis
+        datetime!(2025-06-01 00:00:00 UTC),
+    );
+    evs.push(sell(datetime!(2025-07-01 00:00:00 UTC), dec!(120.00))); // proceeds > gain basis (100)
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    let leg = &st.disposals[0].legs[0];
+    assert_eq!(leg.gift_zone, Some(GiftZone::Gain));
+    assert_eq!(leg.basis, dec!(100.00));
+    assert_eq!(leg.gain, dec!(20.00));
+    assert_eq!(leg.term, Term::LongTerm); // tacks from donor 2024-01-01
+}
+
+/// TP11 case 3: proceeds < loss_basis (FMV-at-gift) → Loss zone; HP from gift date (no tacking on loss side).
+#[test]
+fn tp11_case_loss_zone_hp_from_gift_date() {
+    let mut evs = gift_lot(
+        Some(dec!(100.00)),
+        Some(time::macros::date!(2024 - 01 - 01)),
+        dec!(60.00), // dual
+        datetime!(2025-06-01 00:00:00 UTC),
+    );
+    evs.push(sell(datetime!(2025-07-01 00:00:00 UTC), dec!(40.00))); // proceeds < loss basis (60)
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    let leg = &st.disposals[0].legs[0];
+    assert_eq!(leg.gift_zone, Some(GiftZone::Loss));
+    assert_eq!(leg.basis, dec!(60.00));
+    assert_eq!(leg.gain, dec!(-20.00));
+    assert_eq!(leg.term, Term::ShortTerm); // HP from gift date 2025-06-01
+}
+
+/// TP11 case 4: proceeds between loss_basis and gain_basis → NoGainNoLoss; gain = 0.
+#[test]
+fn tp11_case_middle_zone_zero_gain() {
+    let mut evs = gift_lot(
+        Some(dec!(100.00)),
+        Some(time::macros::date!(2024 - 01 - 01)),
+        dec!(60.00), // dual: loss=60, gain=100
+        datetime!(2025-06-01 00:00:00 UTC),
+    );
+    evs.push(sell(datetime!(2025-07-01 00:00:00 UTC), dec!(80.00))); // 60 <= 80 <= 100
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    let leg = &st.disposals[0].legs[0];
+    assert_eq!(leg.gift_zone, Some(GiftZone::NoGainNoLoss));
+    assert_eq!(leg.gain, dec!(0));
+}
+
+/// TP11 GiftFmvFallback: donor_basis=None with a known donor_acquired_at and an available price →
+/// basis = FMV of sat at donor acquisition date; basis_source = GiftFmvFallback; no blocker.
+#[test]
+fn tp11_unknown_donor_basis_uses_fmv_at_donor_acquisition_date() {
+    let mut prices = StaticPrices::default();
+    prices
+        .0
+        .insert(time::macros::date!(2023 - 03 - 15), dec!(28000.00)); // BTC/USD at donor acq date
+    let mut evs = gift_lot(
+        None,
+        Some(time::macros::date!(2023 - 03 - 15)),
+        dec!(60.00),
+        datetime!(2025-06-01 00:00:00 UTC),
+    );
+    evs.push(sell(datetime!(2025-07-01 00:00:00 UTC), dec!(100.00)));
+    let st = project(&evs, &prices, &ProjectionConfig::default());
+    // 100_000 sat @ 28000/BTC = 28.00 basis (GiftFmvFallback)
+    assert_eq!(st.disposals[0].legs[0].basis, dec!(28.00));
+    assert_eq!(
+        st.disposals[0].legs[0].basis_source,
+        BasisSource::GiftFmvFallback
+    );
+}
+
+/// TP11 unknown basis + unknown date: both indeterminate → UnknownBasisInbound blocker;
+/// sat-bearing lot still created for conservation (basis_pending=true).
+#[test]
+fn tp11_unknown_donor_basis_and_date_creates_basis_pending_lot() {
+    let evs = gift_lot(None, None, dec!(60.00), datetime!(2025-06-01 00:00:00 UTC));
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    assert!(st
+        .blockers
+        .iter()
+        .any(|b| b.kind == BlockerKind::UnknownBasisInbound));
+    assert_eq!(st.lots[0].remaining_sat, 100_000); // sat-bearing lot exists (conservation)
+    assert!(st.lots[0].basis_pending);
+}
+
 /// I-1 Task 9: Two ReclassifyOutflow decisions both targeting the same transfer_out_event:
 /// exactly one DecisionConflict blocker on the duplicate (second decision); outflow classified
 /// once by first decision (no double-processing).
