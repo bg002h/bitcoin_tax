@@ -6,7 +6,9 @@ use btctax_core::{
     conservation_report, Blocker, BlockerKind, ConservationReport, DisposalLeg, EventPayload,
     LedgerEvent, LedgerState, RemovalLeg, Severity, Term, WalletId,
 };
+use csv::Writer;
 use std::fmt::Write as _;
+use std::path::Path;
 
 /// FR1/FR2: per-source drop/unclassified counts + the append/duplicate/conflict tally.
 pub fn render_file_reports(reports: &[FileReport], import: &ImportReport) -> String {
@@ -264,6 +266,127 @@ pub fn build_verify(state: &LedgerState, events: &[LedgerEvent]) -> VerifyReport
         unknown_basis_inbounds,
         safe_harbor: safe_harbor_status(state, events),
     }
+}
+
+/// FR10: write the projected ledger as CSV (the NFR2 plaintext exception). One row per disposal/removal
+/// leg (flattened) + one per lot/income record. Exact values (Decimal/i64) as strings (NFR5).
+/// C1: every `Writer::from_path`/`write_record`/`flush` returns `Result<_, csv::Error>`; the `?`
+/// operator converts via `CliError::Csv(#[from] csv::Error)` (Task 0).
+pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crate::CliError> {
+    std::fs::create_dir_all(out_dir)?;
+
+    let mut w = Writer::from_path(out_dir.join("lots.csv"))?;
+    w.write_record([
+        "origin_event",
+        "split",
+        "wallet",
+        "acquired_at",
+        "remaining_sat",
+        "usd_basis",
+        "basis_source",
+        "basis_pending",
+    ])?;
+    for l in &state.lots {
+        w.write_record([
+            l.lot_id.origin_event_id.canonical(),
+            l.lot_id.split_sequence.to_string(),
+            wallet_label(&l.wallet),
+            l.acquired_at.to_string(),
+            l.remaining_sat.to_string(),
+            l.usd_basis.to_string(),
+            format!("{:?}", l.basis_source),
+            l.basis_pending.to_string(),
+        ])?;
+    }
+    w.flush()?;
+
+    let mut w = Writer::from_path(out_dir.join("disposals.csv"))?;
+    w.write_record([
+        "event",
+        "kind",
+        "disposed_at",
+        "lot",
+        "sat",
+        "proceeds",
+        "basis",
+        "gain",
+        "term",
+        "gift_zone",
+    ])?;
+    for d in &state.disposals {
+        for leg in &d.legs {
+            w.write_record([
+                d.event.canonical(),
+                format!("{:?}", d.kind),
+                d.disposed_at.to_string(),
+                format!(
+                    "{}#{}",
+                    leg.lot_id.origin_event_id.canonical(),
+                    leg.lot_id.split_sequence
+                ),
+                leg.sat.to_string(),
+                leg.proceeds.to_string(),
+                leg.basis.to_string(),
+                leg.gain.to_string(),
+                format!("{:?}", leg.term),
+                leg.gift_zone.map(|z| format!("{z:?}")).unwrap_or_default(),
+            ])?;
+        }
+    }
+    w.flush()?;
+
+    let mut w = Writer::from_path(out_dir.join("removals.csv"))?;
+    w.write_record([
+        "event",
+        "kind",
+        "removed_at",
+        "lot",
+        "sat",
+        "basis",
+        "fmv_at_transfer",
+        "term",
+    ])?;
+    for r in &state.removals {
+        for leg in &r.legs {
+            w.write_record([
+                r.event.canonical(),
+                format!("{:?}", r.kind),
+                r.removed_at.to_string(),
+                format!(
+                    "{}#{}",
+                    leg.lot_id.origin_event_id.canonical(),
+                    leg.lot_id.split_sequence
+                ),
+                leg.sat.to_string(),
+                leg.basis.to_string(),
+                leg.fmv_at_transfer.to_string(),
+                format!("{:?}", leg.term),
+            ])?;
+        }
+    }
+    w.flush()?;
+
+    let mut w = Writer::from_path(out_dir.join("income.csv"))?;
+    w.write_record([
+        "event",
+        "kind",
+        "recognized_at",
+        "sat",
+        "usd_fmv",
+        "business",
+    ])?;
+    for i in &state.income_recognized {
+        w.write_record([
+            i.event.canonical(),
+            format!("{:?}", i.kind),
+            i.recognized_at.to_string(),
+            i.sat.to_string(),
+            i.usd_fmv.to_string(),
+            i.business.to_string(),
+        ])?;
+    }
+    w.flush()?;
+    Ok(())
 }
 
 pub fn render_verify(r: &VerifyReport) -> String {
