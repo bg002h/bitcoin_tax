@@ -1,6 +1,8 @@
 mod fixtures;
 use btctax_cli::{cmd, Session};
-use btctax_core::{EventPayload, InboundClass, IncomeKind, TransferTarget};
+use btctax_core::{
+    DisposeKind, EventPayload, InboundClass, IncomeKind, OutflowClass, TransferTarget,
+};
 use btctax_store::Passphrase;
 use time::macros::datetime;
 
@@ -85,4 +87,75 @@ fn link_transfer_clears_pending_and_relocates_lots() {
     assert!(events
         .iter()
         .any(|e| matches!(e.payload, EventPayload::TransferLink(_))));
+}
+
+#[test]
+fn reclassify_outflow_to_sell_creates_a_disposal() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, out_ref) = vault_with_pending(dir.path());
+
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::Dispose {
+            kind: DisposeKind::Sell,
+        },
+        btctax_cli::eventref::parse_usd_arg("2000.00").unwrap(),
+        Some(btctax_cli::eventref::parse_usd_arg("3.00").unwrap()),
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert!(state.pending_reconciliation.is_empty()); // outflow resolved
+    assert_eq!(state.disposals.len(), 2); // the fixture Sell + the reclassified Send
+}
+
+#[test]
+fn reclassify_outflow_to_gift_creates_a_removal() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, out_ref) = vault_with_pending(dir.path());
+
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::GiftOut,
+        btctax_cli::eventref::parse_usd_arg("2040.00").unwrap(),
+        None,
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert!(state.pending_reconciliation.is_empty()); // outflow resolved
+    assert_eq!(state.removals.len(), 1); // GiftOut → Removal, zero gain
+}
+
+#[test]
+fn reclassify_outflow_to_donate_creates_a_removal_with_appraisal_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, out_ref) = vault_with_pending(dir.path());
+
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::Donate {
+            appraisal_required: true,
+        },
+        btctax_cli::eventref::parse_usd_arg("2040.00").unwrap(),
+        None,
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert!(state.pending_reconciliation.is_empty()); // outflow resolved
+    assert_eq!(state.removals.len(), 1);
+    assert!(state.removals[0].appraisal_required);
 }

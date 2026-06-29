@@ -5,7 +5,8 @@
 use crate::{CliError, Session};
 use btctax_core::persistence::append_decision;
 use btctax_core::{
-    ClassifyInbound, EventId, EventPayload, InboundClass, TransferLink, TransferTarget,
+    ClassifyInbound, EventId, EventPayload, InboundClass, OutflowClass, ReclassifyOutflow,
+    TransferLink, TransferTarget, Usd,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -39,6 +40,29 @@ pub fn classify_inbound(
     let payload = EventPayload::ClassifyInbound(ClassifyInbound {
         transfer_in_event,
         as_: class,
+    });
+    append_and_save(&mut session, payload, now)
+}
+
+/// FR6: reclassify a pending `TransferOut` as a Sell/Spend disposition, a Gift out, or a Donation.
+/// `principal` is the gross proceeds (Dispose) or FMV-at-transfer (Gift/Donate); `fee_usd` is the
+/// optional disposition fee (TP8 / TP2). The engine applies the configured TP8 (c)/(b) fee treatment.
+pub fn reclassify_outflow(
+    vault_path: &Path,
+    pp: &Passphrase,
+    out_ref: &str,
+    class: OutflowClass,
+    principal: Usd,
+    fee_usd: Option<Usd>,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let transfer_out_event = parse_event_id(out_ref)?;
+    let mut session = Session::open(vault_path, pp)?;
+    let payload = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+        transfer_out_event,
+        as_: class,
+        principal_proceeds_or_fmv: principal,
+        fee_usd,
     });
     append_and_save(&mut session, payload, now)
 }
