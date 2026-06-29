@@ -33,6 +33,7 @@ enum Command {
     /// FR9 integrity check (non-zero exit on hard blockers).
     Verify,
     /// Show holdings + realized disposals/removals/income.
+    #[command(alias = "show")]
     Report {
         #[arg(long)]
         year: Option<i32>,
