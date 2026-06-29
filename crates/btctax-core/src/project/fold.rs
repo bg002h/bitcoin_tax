@@ -6,7 +6,7 @@ use crate::project::pools::{pool_key, Consumed, PoolSet};
 use crate::project::resolve::{sort_canonical, Op, Resolution};
 use crate::state::{
     BlockerKind, Disposal, DisposalLeg, FoldStats, GiftZone, IncomeRecord, LedgerState, Lot,
-    PendingLeg, PendingTransfer, Term,
+    PendingLeg, PendingTransfer, Removal, RemovalKind, RemovalLeg, Term,
 };
 use crate::ProjectionConfig;
 use std::collections::BTreeMap;
@@ -65,6 +65,48 @@ fn make_disposal_legs(
         });
     }
     legs
+}
+
+/// Build removal legs from consumed fragments and a TOTAL FMV amount, allocated pro-rata by sat
+/// (remainder-takes-the-rest so Σfmv is exact). Zero recognized gain (TP10): no Disposal emitted.
+/// Returns (legs, donor_acquired_at) where donor_acquired_at is the first non-None across lots.
+fn make_removal_legs(
+    consumed: &[Consumed],
+    total_fmv: Usd,
+    removed: TaxDate,
+    st: &mut LedgerState,
+    ev: &EventId,
+) -> (Vec<RemovalLeg>, Option<TaxDate>) {
+    let total_sat: i64 = consumed.iter().map(|c| c.sat).sum();
+    let mut legs = Vec::new();
+    let mut allocated = Usd::ZERO;
+    let mut donor = None;
+    for (i, c) in consumed.iter().enumerate() {
+        if c.basis_pending {
+            st.add_blocker(
+                BlockerKind::UnknownBasisInbound,
+                Some(ev.clone()),
+                "removal consumes a basis-pending lot",
+            );
+        }
+        let fmv = if i + 1 == consumed.len() {
+            total_fmv - allocated
+        } else {
+            let (f, _) = split_pro_rata(total_fmv, c.sat, total_sat);
+            allocated += f;
+            f
+        };
+        donor = donor.or(c.donor_acquired_at);
+        legs.push(RemovalLeg {
+            lot_id: c.lot_id.clone(),
+            sat: c.sat,
+            basis: c.gain_basis,
+            fmv_at_transfer: fmv,
+            term: term_for(c.gain_hp_start, removed),
+            basis_source: c.basis_source,
+        });
+    }
+    (legs, donor)
 }
 
 pub fn fold(
@@ -416,6 +458,83 @@ pub fn fold(
                 };
                 pools.new_origin_lot(pool_key(date, &wallet), lot);
                 stats.sigma_in += *sat; // classified GiftReceived is externally-sourced (FR9)
+            }
+            Op::GiftOut { sat, fmv, .. } => {
+                // TP10: gift outbound → Removal with zero recognized gain; no Disposal.
+                let wallet = match &eff.wallet {
+                    Some(w) => w.clone(),
+                    None => {
+                        st.add_blocker(
+                            BlockerKind::UncoveredDisposal,
+                            Some(eff.id.clone()),
+                            "gift out without wallet",
+                        );
+                        continue;
+                    }
+                };
+                let key = pool_key(date, &wallet);
+                let (consumed, shortfall) = pools.consume_fifo(&key, *sat);
+                if shortfall > 0 {
+                    st.add_blocker(
+                        BlockerKind::UncoveredDisposal,
+                        Some(eff.id.clone()),
+                        format!("gift out short by {shortfall} sat"),
+                    );
+                }
+                if !consumed.is_empty() {
+                    let (legs, donor_acquired_at) =
+                        make_removal_legs(&consumed, *fmv, date, &mut st, &eff.id);
+                    // Task 11: fee step (TP8 (c) fee-sat basis carry) slots in here between legs and push.
+                    st.removals.push(Removal {
+                        event: eff.id.clone(),
+                        kind: RemovalKind::Gift,
+                        removed_at: date,
+                        legs,
+                        appraisal_required: false,
+                        donor_acquired_at,
+                    });
+                }
+            }
+            Op::Donate {
+                sat,
+                fmv,
+                appraisal_required,
+                ..
+            } => {
+                // TP10: donation outbound → Removal with zero recognized gain; no Disposal.
+                let wallet = match &eff.wallet {
+                    Some(w) => w.clone(),
+                    None => {
+                        st.add_blocker(
+                            BlockerKind::UncoveredDisposal,
+                            Some(eff.id.clone()),
+                            "donate without wallet",
+                        );
+                        continue;
+                    }
+                };
+                let key = pool_key(date, &wallet);
+                let (consumed, shortfall) = pools.consume_fifo(&key, *sat);
+                if shortfall > 0 {
+                    st.add_blocker(
+                        BlockerKind::UncoveredDisposal,
+                        Some(eff.id.clone()),
+                        format!("donate short by {shortfall} sat"),
+                    );
+                }
+                if !consumed.is_empty() {
+                    let (legs, donor_acquired_at) =
+                        make_removal_legs(&consumed, *fmv, date, &mut st, &eff.id);
+                    // Task 11: fee step (TP8 (c) fee-sat basis carry) slots in here between legs and push.
+                    st.removals.push(Removal {
+                        event: eff.id.clone(),
+                        kind: RemovalKind::Donation,
+                        removed_at: date,
+                        legs,
+                        appraisal_required: *appraisal_required,
+                        donor_acquired_at,
+                    });
+                }
             }
             Op::Unclassified => {
                 st.add_blocker(

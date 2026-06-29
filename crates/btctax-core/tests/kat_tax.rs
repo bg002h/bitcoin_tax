@@ -530,6 +530,149 @@ fn gift_received_no_donor_basis_raises_unknown_basis_blocker() {
     assert_eq!(st.holdings_by_wallet[&wal()], 50_000);
 }
 
+// ── Task 9: gift/donation outbound (TP10) — ReclassifyOutflow ───────────────────────────────
+
+/// Gift out: Removal with zero recognized gain, per-lot basis, FMV-at-transfer, and ST/LT term.
+/// No Disposal emitted (TP10: gift is a non-recognition event for the donor).
+#[test]
+fn gift_out_is_zero_gain_with_basis_fmv_and_term() {
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2026-06-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl = dec_ev(
+        1,
+        datetime!(2026-06-15 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::GiftOut,
+            principal_proceeds_or_fmv: dec!(150.00),
+            fee_usd: None,
+        }),
+    );
+    let st = project(
+        &[buy, out, recl],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(st.disposals.is_empty());
+    let leg = &st.removals[0].legs[0];
+    assert_eq!(leg.basis, dec!(60.00));
+    assert_eq!(leg.fmv_at_transfer, dec!(150.00));
+    assert_eq!(leg.term, Term::LongTerm); // bought 2025-03-01, gifted 2026-06-01
+    assert_eq!(st.removals[0].kind, RemovalKind::Gift);
+}
+
+/// Donation over $5k: appraisal_required flag passes through; Removal with zero recognized gain.
+#[test]
+fn donation_over_5k_flags_appraisal_required() {
+    let buy = ev(
+        "BUY",
+        datetime!(2025-01-05 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000_000,
+            usd_cost: dec!(1000.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2026-02-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl = dec_ev(
+        1,
+        datetime!(2026-02-02 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::Donate {
+                appraisal_required: true,
+            },
+            principal_proceeds_or_fmv: dec!(60000.00),
+            fee_usd: None,
+        }),
+    );
+    let st = project(
+        &[buy, out, recl],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(st.removals[0].appraisal_required);
+    assert_eq!(st.removals[0].kind, RemovalKind::Donation);
+}
+
+/// ReclassifyOutflow{as: Dispose} creates a real Disposal (proceeds−fee, basis, gain, ST/LT).
+/// Reuses the existing Task 5 Dispose fold path.
+#[test]
+fn reclassify_outflow_as_dispose_creates_disposal_with_gain() {
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2026-06-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl = dec_ev(
+        1,
+        datetime!(2026-06-15 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::Dispose {
+                kind: DisposeKind::Sell,
+            },
+            principal_proceeds_or_fmv: dec!(150.00),
+            fee_usd: Some(dec!(1.00)),
+        }),
+    );
+    let st = project(
+        &[buy, out, recl],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(st.removals.is_empty());
+    assert_eq!(st.disposals.len(), 1);
+    let leg = &st.disposals[0].legs[0];
+    assert_eq!(leg.proceeds, dec!(149.00)); // 150.00 gross − 1.00 fee (TP2)
+    assert_eq!(leg.basis, dec!(60.00));
+    assert_eq!(leg.gain, dec!(89.00));
+    assert_eq!(leg.term, Term::LongTerm); // bought 2025-03-01, sold 2026-06-01 (>1yr)
+}
+
 /// M-3: Two TransferLink decisions both targeting the same in-event: exactly one
 /// DecisionConflict blocker on the duplicate (second link); in-event consumed only once
 /// (first link wins, no double-consumption).

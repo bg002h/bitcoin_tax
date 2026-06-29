@@ -54,7 +54,23 @@ pub enum Op {
         donor_acquired_at: Option<TaxDate>,
         fmv_at_gift: Usd,
     },
-    // (Task 9) GiftOut/Donate, (Task 12) seeded — added as those tasks land.
+    // Task 9: gift/donation outbound (TP10) and reclassified disposal.
+    /// ReclassifyOutflow{GiftOut}: Removal with zero recognized gain; per-lot basis + FMV + ST/LT.
+    GiftOut {
+        sat: Sat,
+        fmv: Usd,
+        fee_sat: Option<Sat>, // Task 11: on-chain fee consumed per TP8 (c)
+        fee_usd: Option<Usd>, // Task 11: USD fee from ReclassifyOutflow
+    },
+    /// ReclassifyOutflow{Donate}: Removal with zero recognized gain + appraisal_required flag.
+    Donate {
+        sat: Sat,
+        fmv: Usd,
+        appraisal_required: bool,
+        fee_sat: Option<Sat>, // Task 11: on-chain fee consumed per TP8 (c)
+        fee_usd: Option<Usd>, // Task 11: USD fee from ReclassifyOutflow
+    },
+    // (Task 12) seeded — added as those tasks land.
     Unclassified,
     Skip, // e.g. a TransferIn consumed by a TransferLink; folds to nothing
 }
@@ -110,8 +126,9 @@ enum Resolved {
     Reject,
 }
 
-/// Map an effective imported payload → `Op`, applying any `ManualFmv` override and Task 8 classification maps.
+/// Map an effective imported payload → `Op`, applying any `ManualFmv` override and Task 8/9 classification maps.
 /// ManualFmv on an `Income` replaces the FMV and clears the would-be `fmv_missing` gate.
+#[allow(clippy::too_many_arguments)]
 fn build_op(
     id: &EventId,
     payload: &EventPayload,
@@ -119,6 +136,7 @@ fn build_op(
     links: &BTreeMap<EventId, TransferTarget>,
     consumed_ins: &BTreeSet<EventId>,
     inbound_class: &BTreeMap<EventId, InboundClass>,
+    outflow_class: &BTreeMap<EventId, ReclassifyOutflow>,
     by_id: &BTreeMap<EventId, &LedgerEvent>,
 ) -> Op {
     match payload {
@@ -157,9 +175,32 @@ fn build_op(
                         dest: dest_wallet,
                     };
                 }
-                // Link target has no resolvable wallet — fall through to PendingOut.
+                // Link target has no resolvable wallet — fall through.
             }
             // Task 9: elif in outflow_class → GiftOut/Donate/Dispose
+            if let Some(ro) = outflow_class.get(id) {
+                return match &ro.as_ {
+                    OutflowClass::GiftOut => Op::GiftOut {
+                        sat: t.sat,
+                        fmv: ro.principal_proceeds_or_fmv,
+                        fee_sat: t.fee_sat,
+                        fee_usd: ro.fee_usd,
+                    },
+                    OutflowClass::Donate { appraisal_required } => Op::Donate {
+                        sat: t.sat,
+                        fmv: ro.principal_proceeds_or_fmv,
+                        appraisal_required: *appraisal_required,
+                        fee_sat: t.fee_sat,
+                        fee_usd: ro.fee_usd,
+                    },
+                    OutflowClass::Dispose { kind } => Op::Dispose {
+                        sat: t.sat,
+                        proceeds: ro.principal_proceeds_or_fmv,
+                        fee_usd: ro.fee_usd.unwrap_or(Usd::ZERO),
+                        kind: *kind,
+                    },
+                };
+            }
             Op::PendingOut {
                 sat: t.sat,
                 fee_sat: t.fee_sat,
@@ -349,11 +390,12 @@ pub fn resolve(
     }
 
     // ── 1e. Classification decisions ────────────────────────────────────────────────────────────
-    // TransferLink → links + consumed_ins; ClassifyInbound → inbound_class.
-    // ReclassifyOutflow (outflow_class) is Task 9; contradiction detection (same-target multi-class) here.
+    // TransferLink → links + consumed_ins; ClassifyInbound → inbound_class; ReclassifyOutflow → outflow_class.
+    // Contradiction detection (same-target multi-class) for all three.
     let mut links: BTreeMap<EventId, TransferTarget> = BTreeMap::new();
     let mut consumed_ins: BTreeSet<EventId> = BTreeSet::new();
     let mut inbound_class: BTreeMap<EventId, InboundClass> = BTreeMap::new();
+    let mut outflow_class: BTreeMap<EventId, ReclassifyOutflow> = BTreeMap::new();
 
     for (_seq, d) in &decisions {
         if voided.contains(&d.id) {
@@ -409,6 +451,17 @@ pub fn resolve(
                     inbound_class.insert(ci.transfer_in_event.clone(), ci.as_.clone());
                 }
             }
+            EventPayload::ReclassifyOutflow(ro) => {
+                if outflow_class.contains_key(&ro.transfer_out_event) {
+                    blockers.push(Blocker {
+                        kind: BlockerKind::DecisionConflict,
+                        event: Some(d.id.clone()),
+                        detail: "duplicate ReclassifyOutflow for the same TransferOut event".into(),
+                    });
+                } else {
+                    outflow_class.insert(ro.transfer_out_event.clone(), ro.clone());
+                }
+            }
             _ => {}
         }
     }
@@ -431,6 +484,7 @@ pub fn resolve(
             &links,
             &consumed_ins,
             &inbound_class,
+            &outflow_class,
             &by_id,
         );
         timeline.push(Eff {
