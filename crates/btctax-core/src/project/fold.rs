@@ -35,7 +35,7 @@ fn note_pre2025_once(st: &mut LedgerState, date: TaxDate, ev: &EventId) {
         st.add_blocker(
             BlockerKind::Pre2025MethodNote,
             Some(ev.clone()),
-            "pre-2025 disposal consumed the Universal FIFO pool (§7.4)",
+            "pre-2025 lots reconstructed under FIFO (the legal default, §7.4); if your filed pre-2025 returns used a different lot method, your carryforward basis may differ — verify against those filings",
         );
     }
 }
