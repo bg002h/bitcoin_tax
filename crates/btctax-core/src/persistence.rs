@@ -5,6 +5,7 @@ use crate::event::*;
 use crate::identity::{EventId, Fingerprint, Source, SourceRef, WalletId};
 use crate::CoreError;
 use rusqlite::Connection;
+use rusqlite::OptionalExtension;
 use time::{OffsetDateTime, UtcOffset};
 
 const KIND_IMPORT: &str = "import";
@@ -193,7 +194,7 @@ pub fn append_import_batch(
                 rusqlite::params![KIND_IMPORT, source.tag(), source_ref.0],
                 |r| r.get(0),
             )
-            .ok();
+            .optional()?;
         match existing_fp {
             None => {
                 insert(&tx, ev, KIND_IMPORT, Some(&fp))?;
@@ -324,4 +325,36 @@ pub fn load_all(conn: &Connection) -> Result<Vec<LedgerEvent>, CoreError> {
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_tag_round_trip_all_variants() {
+        // Ensure that every Source variant can round-trip through tag() -> source_tag().
+        // Adding a new Source variant without updating source_tag() will fail this test.
+        let variants = [
+            Source::Swan,
+            Source::Coinbase,
+            Source::Gemini,
+            Source::River,
+        ];
+
+        for variant in &variants {
+            let tag_str = variant.tag();
+            let recovered = source_tag(tag_str).unwrap_or_else(|| {
+                panic!(
+                    "source_tag('{}') should round-trip from variant {:?}",
+                    tag_str, variant
+                )
+            });
+            assert_eq!(
+                recovered, *variant,
+                "source_tag round-trip failed for {:?}",
+                variant
+            );
+        }
+    }
 }
