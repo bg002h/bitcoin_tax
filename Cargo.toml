@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = ["crates/btctax-store"]
+[workspace.package]
+edition = "2021"
+license = "MIT OR Unlicense"
+rust-version = "1.74"

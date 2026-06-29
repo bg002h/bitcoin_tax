@@ -8,6 +8,7 @@
 *.gpg
 *.asc
 vault*
+!/crates/btctax-store/src/vault.rs
 *.vault
 *-snapshot.*
 snapshot.*
