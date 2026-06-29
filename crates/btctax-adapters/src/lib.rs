@@ -6,6 +6,7 @@
 //! ~/Documents/BitcoinTax/ReadOnly are NEVER read by this crate or its tests.
 pub mod parse;
 pub mod price;
+pub mod read;
 
 pub use price::BundledPrices;
 
