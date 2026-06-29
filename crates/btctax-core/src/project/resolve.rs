@@ -578,8 +578,8 @@ pub fn resolve(
                 remaining_sat: l.sat,
                 usd_basis: l.usd_basis,
                 basis_source: BasisSource::SafeHarborAllocated,
-                dual_loss_basis: None,
-                donor_acquired_at: None,
+                dual_loss_basis: l.dual_loss_basis,
+                donor_acquired_at: l.donor_acquired_at,
                 basis_pending: false,
             })
             .collect();
