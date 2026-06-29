@@ -256,13 +256,16 @@ pub fn safe_harbor_allocate(
 /// allocation and re-append it with `timely_allocation_attested = true`. Attestation only cures a
 /// §5.02(4) TIME-BAR; it is NOT valid on an already-effective allocation (which needs nothing) nor on one
 /// that fails CONSERVATION (which needs a corrected allocation, not an attestation).
+///
+/// Uses `Session::load_events_and_project` to load the event log exactly once — the old pattern
+/// (separate `load_all(session.conn())` + `session.project()`) loaded the same DB rows twice.
 pub fn safe_harbor_attest(
     vault_path: &Path,
     pp: &Passphrase,
     now: OffsetDateTime,
 ) -> Result<EventId, CliError> {
     let mut session = Session::open(vault_path, pp)?;
-    let events = load_all(session.conn())?;
+    let (events, state, _cfg) = session.load_events_and_project()?;
 
     // Eng-I1 / I-2(a): EXCLUDE voided allocations from the single-allocation guard, so the legitimate
     // allocate→inert→void→re-allocate→attest workflow (which leaves an OLD, voided allocation in the log)
@@ -300,14 +303,14 @@ pub fn safe_harbor_attest(
         return Err(CliError::Usage("allocation is already attested".into()));
     }
 
-    // I-2(b) / N-2: classify the prior allocation's CURRENT status via a re-projection of the live log,
-    // reading the engine's own effectiveness verdict (the blockers it stamps onto `prior_id`):
+    // I-2(b) / N-2: classify the prior allocation's CURRENT status via the projection loaded above
+    // (`load_events_and_project`), reading the engine's own effectiveness verdict (the blockers it
+    // stamps onto `prior_id`):
     //   * `SafeHarborUnconservable` (hard) → attestation CANNOT cure it (only a corrected allocation can).
     //   * `SafeHarborTimebar` (advisory)   → inert PURELY because of the §5.02(4) bar → attestation cures it.
     //   * neither                          → ALREADY EFFECTIVE → attesting would Void an effective allocation
     //     (→ irrevocable `decision_conflicts`, §7.4) AND append a second effective allocation (→ two effective
     //     → Path A, irrecoverable). Refuse and advise `verify` (NOT "void the effective one").
-    let (state, _cfg) = session.project()?;
     let blocked_with = |k: BlockerKind| {
         state
             .blockers
