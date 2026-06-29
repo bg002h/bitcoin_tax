@@ -104,7 +104,60 @@ fn alloc_lot(w: WalletId, sat: i64, basis: rust_decimal::Decimal, acq: time::Dat
         sat,
         usd_basis: basis,
         acquired_at: acq,
+        dual_loss_basis: None,
+        donor_acquired_at: None,
     }
+}
+fn alloc_lot_dual(
+    w: WalletId,
+    sat: i64,
+    basis: rust_decimal::Decimal,
+    acq: time::Date,
+    dual_loss_basis: Option<rust_decimal::Decimal>,
+    donor_acquired_at: Option<time::Date>,
+) -> AllocLot {
+    AllocLot {
+        wallet: w,
+        sat,
+        usd_basis: basis,
+        acquired_at: acq,
+        dual_loss_basis,
+        donor_acquired_at,
+    }
+}
+fn gift_recv(src_ref: &str, ts: time::OffsetDateTime, sat: i64) -> LedgerEvent {
+    imp(
+        Source::Coinbase,
+        src_ref,
+        ts,
+        cb(),
+        EventPayload::TransferIn(TransferIn {
+            sat,
+            src_addr: None,
+            txid: None,
+        }),
+    )
+}
+fn classify_gift(
+    seq: u64,
+    ts: time::OffsetDateTime,
+    src_ref: &str,
+    donor_basis: Option<rust_decimal::Decimal>,
+    fmv_at_gift: rust_decimal::Decimal,
+    donor_acq: Option<time::Date>,
+) -> LedgerEvent {
+    dec_ev(
+        seq,
+        ts,
+        EventPayload::ClassifyInbound(ClassifyInbound {
+            transfer_in_event: EventId::import(Source::Coinbase, SourceRef::new(src_ref)),
+            as_: InboundClass::GiftReceived {
+                donor_basis,
+                donor_acquired_at: donor_acq,
+                fmv_at_gift,
+            },
+        }),
+    )
 }
 fn has(st: &LedgerState, k: BlockerKind) -> bool {
     st.blockers.iter().any(|b| b.kind == k)
@@ -753,4 +806,167 @@ fn path_b_seeded_lot_relocation_no_lotid_collision() {
     assert_eq!(report.sigma_held, 100_000);
     assert_eq!(st.holdings_by_wallet[&cb()], 70_000); // 30k (lot 0 remainder) + 40k (lot 1)
     assert_eq!(st.holdings_by_wallet[&cold()], 30_000); // relocated fragment
+}
+
+// ── Slug 1: AllocLot dual-basis + tacking preservation ─────────────────────────────────────────
+
+/// Path-B seed must preserve the §1015(a) dual basis (GAIN=donor carryover, LOSS=FMV-at-gift) so
+/// a post-2025 loss-zone disposal uses the FMV-at-gift loss basis, not the donor/gain basis.
+/// Scenario: gift lot (100k sat, donor basis $100, FMV-at-gift $40). Dispose at $30 (loss zone:
+/// $30 < $40). Expected: loss = $10 (basis=$40), NOT $70 (which would result from single basis=$100).
+/// Under the OLD code `dual_loss_basis: None` ⇒ single-basis ⇒ loss $70 — this test proves the fix.
+#[test]
+fn path_b_preserves_gift_dual_loss_basis() {
+    let evs = vec![
+        // Pre-2025 gift received (TransferIn + ClassifyInbound → GiftReceived dual lot):
+        // gain basis = $100 (donor carryover), loss basis = $40 (FMV-at-gift), gift date = 2024-06-01.
+        gift_recv("gift1", datetime!(2024-06-01 00:00:00 UTC), 100_000),
+        classify_gift(
+            1,
+            datetime!(2024-06-15 00:00:00 UTC),
+            "gift1",
+            Some(dec!(100.00)),    // donor (gain) basis
+            dec!(40.00),           // FMV-at-gift (loss basis, since < donor basis)
+            Some(date!(2021 - 01 - 01)), // donor_acquired_at
+        ),
+        // Path-B allocation made timely (2024-12-01 is before any 2025 dispose).
+        // The AllocLot carries the dual basis fields.
+        alloc(
+            2,
+            datetime!(2024-12-01 00:00:00 UTC),
+            AllocMethod::ActualPosition,
+            false,
+            vec![alloc_lot_dual(
+                cb(),
+                100_000,
+                dec!(100.00),           // usd_basis = GAIN basis = donor carryover
+                date!(2024 - 06 - 01), // acquired_at = gift date (loss-zone HP start)
+                Some(dec!(40.00)),      // dual_loss_basis = LOSS basis = FMV-at-gift
+                Some(date!(2021 - 01 - 01)), // donor_acquired_at for gain-zone tacking
+            )],
+        ),
+        // Post-2025 disposal in the LOSS zone: proceeds $30 < FMV-at-gift $40.
+        sell("D1", datetime!(2025-09-01 00:00:00 UTC), 100_000, dec!(30.00)),
+    ];
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+
+    // No blockers: allocation is effective (timely, conserved); no uncovered disposals.
+    assert!(
+        st.blockers.is_empty(),
+        "unexpected blockers: {:?}",
+        st.blockers
+    );
+
+    // The Path-B seed must have preserved dual_loss_basis and donor_acquired_at.
+    // (In Path B, original lots are discarded and the seeded lots govern; no residual lots.)
+    assert_eq!(st.disposals.len(), 1, "one disposal");
+    let leg = &st.disposals[0].legs[0];
+
+    // Loss zone: basis must be the FMV-at-gift LOSS basis ($40), not the donor/gain basis ($100).
+    assert_eq!(
+        leg.basis,
+        dec!(40.00),
+        "loss-zone basis must be FMV-at-gift $40, not donor basis $100; got {}",
+        leg.basis
+    );
+    // Loss = proceeds $30 - loss basis $40 = -$10.
+    assert_eq!(
+        leg.gain,
+        dec!(-10.00),
+        "loss must be $10 (proceeds $30 - FMV-at-gift basis $40); got {}",
+        leg.gain
+    );
+    // Zone is confirmed Loss.
+    assert_eq!(leg.gift_zone, Some(GiftZone::Loss));
+}
+
+/// Path-B seed must preserve §1223(2) donor tacking (`donor_acquired_at`) so that a gain-zone
+/// disposal uses the donor's HP start date, not the gift date.
+/// Scenario: same dual gift lot (donor_acquired_at=2021-01-01, gift_date=2024-06-01).
+/// Dispose on 2025-03-01 in the GAIN zone (proceeds $150 > gain basis $100 → gain $50).
+/// 2025-03-01 is >1yr after donor_acquired_at (2021-01-01) → LONG-TERM via tacking.
+/// Without tacking (old code, donor_acquired_at=None): 2025-03-01 < 2025-06-01 → SHORT-TERM.
+#[test]
+fn path_b_preserves_gift_tacking() {
+    let evs = vec![
+        gift_recv("gift2", datetime!(2024-06-01 00:00:00 UTC), 100_000),
+        classify_gift(
+            1,
+            datetime!(2024-06-15 00:00:00 UTC),
+            "gift2",
+            Some(dec!(100.00)),
+            dec!(40.00),
+            Some(date!(2021 - 01 - 01)),
+        ),
+        // Alloc made at 2024-12-01, before the 2025-03-01 disposal → timely (ActualPosition bar =
+        // earlier of first-2025-dispose 2025-03-01 and return-due 2026-04-15 = 2025-03-01).
+        alloc(
+            2,
+            datetime!(2024-12-01 00:00:00 UTC),
+            AllocMethod::ActualPosition,
+            false,
+            vec![alloc_lot_dual(
+                cb(),
+                100_000,
+                dec!(100.00),
+                date!(2024 - 06 - 01),
+                Some(dec!(40.00)),
+                Some(date!(2021 - 01 - 01)),
+            )],
+        ),
+        // Post-2025 disposal in the GAIN zone on 2025-03-01:
+        //   proceeds $150 > gain basis $100 → gain $50.
+        //   HP from donor_acquired_at 2021-01-01 to 2025-03-01: >1yr → LONG-TERM.
+        //   HP from gift date 2024-06-01 to 2025-03-01: <1yr → SHORT-TERM (old, wrong behavior).
+        sell("D2", datetime!(2025-03-01 00:00:00 UTC), 100_000, dec!(150.00)),
+    ];
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+
+    assert!(
+        st.blockers.is_empty(),
+        "unexpected blockers: {:?}",
+        st.blockers
+    );
+    assert_eq!(st.disposals.len(), 1);
+    let leg = &st.disposals[0].legs[0];
+
+    // Gain zone: basis = gain basis $100, gain = $50.
+    assert_eq!(leg.basis, dec!(100.00), "gain-zone basis must be $100; got {}", leg.basis);
+    assert_eq!(leg.gain, dec!(50.00), "gain must be $50; got {}", leg.gain);
+    assert_eq!(leg.gift_zone, Some(GiftZone::Gain));
+
+    // LONG-TERM via tacking: donor_acquired_at 2021-01-01 → >1yr before 2025-03-01.
+    // Under old code (donor_acquired_at: None) this would be SHORT-TERM (gift_date 2024-06-01 → <1yr).
+    assert_eq!(
+        leg.term,
+        Term::LongTerm,
+        "must be LONG-TERM via §1223(2) tacking from donor_acquired_at 2021-01-01; \
+         without tacking (gift date 2024-06-01) this would be SHORT-TERM"
+    );
+}
+
+/// Round-trip an `AllocLot` with `Some(..)` dual fields; and verify that JSON omitting the new
+/// fields deserializes to `None` (backward compat for pre-existing persisted events, [R0-N1]).
+#[test]
+fn alloc_lot_serde_backward_compat() {
+    let lot = alloc_lot_dual(
+        cb(),
+        100_000,
+        dec!(100.00),
+        date!(2024 - 06 - 01),
+        Some(dec!(40.00)),
+        Some(date!(2021 - 01 - 01)),
+    );
+    // Round-trip with Some values.
+    let json = serde_json::to_string(&lot).unwrap();
+    let round_tripped: AllocLot = serde_json::from_str(&json).unwrap();
+    assert_eq!(lot, round_tripped);
+
+    // Old persisted format (fields absent) → both None; `#[serde(default)]` makes this work.
+    let mut val: serde_json::Value = serde_json::from_str(&json).unwrap();
+    val.as_object_mut().unwrap().remove("dual_loss_basis");
+    val.as_object_mut().unwrap().remove("donor_acquired_at");
+    let old: AllocLot = serde_json::from_value(val).unwrap();
+    assert_eq!(old.dual_loss_basis, None);
+    assert_eq!(old.donor_acquired_at, None);
 }
