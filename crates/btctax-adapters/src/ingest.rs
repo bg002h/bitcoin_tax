@@ -2,6 +2,7 @@
 //! parser, and aggregate FR2 counts into one `FileReport` per group. Produces events only — the CLI
 //! (Plan 4) persists them via `btctax_core::persistence::append_import_batch`.
 use crate::adapter::{Adapter, FileReport, IngestBatch, SourceFile};
+use crate::price::BundledPrices;
 use crate::sources::{coinbase::Coinbase, gemini::Gemini, river::River, swan::Swan};
 use crate::AdapterError;
 use btctax_core::{PriceProvider, Source};
@@ -21,6 +22,12 @@ fn adapters() -> Vec<Box<dyn Adapter>> {
         Box::new(River),
         Box::new(Gemini),
     ]
+}
+
+/// FR3-wired entrypoint: resolve ingest-time FMV against the bundled daily-close dataset (§9.2).
+pub fn ingest_files_bundled(paths: &[PathBuf]) -> Result<IngestBatch, AdapterError> {
+    let prices = BundledPrices::load()?;
+    ingest_files(paths, &prices)
 }
 
 /// FR2 capstone. Detect → bucket → group → parse → normalize → report (dropped/unclassified per group).
