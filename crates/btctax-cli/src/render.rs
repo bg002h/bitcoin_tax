@@ -3,9 +3,10 @@
 use btctax_adapters::FileReport;
 use btctax_core::persistence::ImportReport;
 use btctax_core::{
-    conservation_report, Blocker, BlockerKind, ConservationReport, DisposalLeg, EventPayload,
+    conservation_report, BasisSource, Blocker, BlockerKind, ConservationReport, DisposalLeg,
     LedgerEvent, LedgerState, RemovalLeg, Severity, Term, WalletId,
 };
+use btctax_store::fsperms;
 use csv::Writer;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -218,11 +219,17 @@ impl VerifyReport {
     }
 }
 
-/// 2025-transition status for display: detect an allocation event + the safe-harbor blockers (§7.4).
-fn safe_harbor_status(state: &LedgerState, events: &[LedgerEvent]) -> String {
-    let has_alloc = events
+/// 2025-transition status for display: detect effective Path B via lot basis-source, then
+/// advisory blockers (§7.4). Prefer the effective-state signal (SafeHarborAllocated lots) over
+/// the advisory blocker so the attest happy-path (void-prior → re-attest) is not
+/// misreported as time-barred when a stale SafeHarborTimebar advisory remains in state.blockers
+/// from the now-voided inert allocation.
+fn safe_harbor_status(state: &LedgerState, _events: &[LedgerEvent]) -> String {
+    // Effective Path B: the fold seeded SafeHarborAllocated lots at the 2025-01-01 boundary.
+    let effective_path_b = state
+        .lots
         .iter()
-        .any(|e| matches!(e.payload, EventPayload::SafeHarborAllocation(_)));
+        .any(|l| l.basis_source == BasisSource::SafeHarborAllocated);
     let unconservable = state
         .blockers
         .iter()
@@ -231,13 +238,16 @@ fn safe_harbor_status(state: &LedgerState, events: &[LedgerEvent]) -> String {
         .blockers
         .iter()
         .any(|b| b.kind == BlockerKind::SafeHarborTimebar);
+    // SafeHarborUnconservable is a hard blocker; resolve never seeds effective lots when it fires,
+    // so unconservable wins unconditionally. effective_path_b next: if the engine is on Path B
+    // (lots are present), report it regardless of any stale timebar advisory.
     if unconservable {
         "Path B allocation FAILS conservation/eligibility (hard, §7.4) — fix the allocation"
             .to_string()
+    } else if effective_path_b {
+        "Path B safe-harbor allocation is effective (§7.4)".to_string()
     } else if timebar {
         "Path B time-barred -> using Path A (advisory); `reconcile safe-harbor attest` if timely in your books".to_string()
-    } else if has_alloc {
-        "Path B safe-harbor allocation is effective (§7.4)".to_string()
     } else {
         "Path A (actual per-wallet reconstruction; default, no election)".to_string()
     }
@@ -270,12 +280,14 @@ pub fn build_verify(state: &LedgerState, events: &[LedgerEvent]) -> VerifyReport
 
 /// FR10: write the projected ledger as CSV (the NFR2 plaintext exception). One row per disposal/removal
 /// leg (flattened) + one per lot/income record. Exact values (Decimal/i64) as strings (NFR5).
-/// C1: every `Writer::from_path`/`write_record`/`flush` returns `Result<_, csv::Error>`; the `?`
-/// operator converts via `CliError::Csv(#[from] csv::Error)` (Task 0).
+/// Each CSV is opened via `fsperms::open_owner_only` (0o600 on Unix) so decrypted PII matches the
+/// hardened permissions already applied to `snapshot.sqlite` by the store crate. The out-dir is
+/// created owner-only (0o700) if absent; when the dir PRE-EXISTS, open_owner_only still forces 0o600
+/// on each new CSV file (the hole that `Writer::from_path` + umask would leave).
 pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crate::CliError> {
-    std::fs::create_dir_all(out_dir)?;
+    fsperms::mkdir_owner_only(out_dir)?;
 
-    let mut w = Writer::from_path(out_dir.join("lots.csv"))?;
+    let mut w = Writer::from_writer(fsperms::open_owner_only(&out_dir.join("lots.csv"))?);
     w.write_record([
         "origin_event",
         "split",
@@ -300,7 +312,7 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
     }
     w.flush()?;
 
-    let mut w = Writer::from_path(out_dir.join("disposals.csv"))?;
+    let mut w = Writer::from_writer(fsperms::open_owner_only(&out_dir.join("disposals.csv"))?);
     w.write_record([
         "event",
         "kind",
@@ -335,7 +347,7 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
     }
     w.flush()?;
 
-    let mut w = Writer::from_path(out_dir.join("removals.csv"))?;
+    let mut w = Writer::from_writer(fsperms::open_owner_only(&out_dir.join("removals.csv"))?);
     w.write_record([
         "event",
         "kind",
@@ -366,7 +378,7 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
     }
     w.flush()?;
 
-    let mut w = Writer::from_path(out_dir.join("income.csv"))?;
+    let mut w = Writer::from_writer(fsperms::open_owner_only(&out_dir.join("income.csv"))?);
     w.write_record([
         "event",
         "kind",

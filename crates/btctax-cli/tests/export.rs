@@ -68,3 +68,41 @@ fn export_snapshot_writes_sqlite_and_csvs_and_backup_key() {
     cmd::admin::backup_key(&vault, &pp(), &key).unwrap();
     assert!(key.exists());
 }
+
+/// CLI-I1 fix: exported CSVs are owner-only (0o600) even when the out-dir PRE-EXISTS.
+/// The old `Writer::from_path` path created files at the process umask (typically 0o644 —
+/// world-readable). The fix routes each CSV through `fsperms::open_owner_only` (0o600 on
+/// Unix create-or-truncate) so the mode is hardened regardless of umask or dir pre-existence.
+#[cfg(unix)]
+#[test]
+fn csv_exports_are_owner_only_on_pre_existing_dir() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(
+        &vault,
+        &pp(),
+        &[fixtures::coinbase_buy_sell_send(dir.path())],
+    )
+    .unwrap();
+
+    // Create the out-dir BEFORE the export so it pre-exists — this is the hole the fix closes.
+    let out = dir.path().join("exports_pre");
+    std::fs::create_dir_all(&out).unwrap();
+
+    cmd::admin::export_snapshot(&vault, &pp(), &out).unwrap();
+
+    for name in ["lots.csv", "disposals.csv", "removals.csv", "income.csv"] {
+        let path = out.join(name);
+        assert!(path.exists(), "{name} must exist");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "{name} must be owner-only (0o600), got {:#o}",
+            mode & 0o777
+        );
+    }
+}
