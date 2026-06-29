@@ -148,3 +148,54 @@ Non-blocking items raised during the round-1 review of `btctax-adapters` (IP-1 a
 
 ## btctax-core (Task 0) — dependency versions pinned for reproducibility
 - btctax-core pinned `rust_decimal` 1.42.1 / `rust_decimal_macros` 1.40.0 (independent Cargo entries; `dec!` literals binary-compatible with the 1.42 `Decimal`) / `time` 0.3.51 — R3 pin record.
+
+## btctax-cli plan (Plan 4) — deferred items from round-1 reviews (2026-06-29)
+
+Non-blocking items raised in the round-1 reviews of `IMPLEMENTATION_PLAN_foundation_04_cli.md`
+(`reviews/plan-foundation-04-cli-engineering-round-1.md`,
+`reviews/plan-foundation-04-cli-reconciliation-round-1.md`). The blocking findings (C1, I-1, I-2/Eng-I1,
+M3, N-2) were folded into the plan (see its "Fold record (round 1)"). These remain open.
+
+- **M-2 (recon) — `AllocLot` carries no `dual_loss_basis` → a pre-2025 received-GIFT lot loses its
+  §1015(a) dual basis under Path B.** A safe-harbor `SafeHarborAllocation.lots` entry is
+  `{wallet, sat, usd_basis, acquired_at}` — single-basis. So when a pre-2025 gift lot (which under TP11
+  carries a separate loss-basis = donor basis vs gain-basis = FMV-at-gift) is re-seeded via Path B, the
+  loss-leg basis collapses to the single `usd_basis`. This is **spec-faithful** (the spec defines
+  `AllocLot` without a dual-basis field), and Path A (the default) preserves the dual basis correctly, so
+  the loss only arises when a taxpayer *elects* Path B over a gift lot. Effect: a future loss-zone
+  disposition of that seeded lot could mis-state basis. **Phase-2 refinement:** extend `AllocLot` (and the
+  Path-B seed in `transition::seed_transition`) to carry `dual_loss_basis` + `donor_acquired_at`. — OPEN
+  (Phase 2; spec change required). — recon review M-2.
+
+- **M-1 (recon) / M1 (eng) — `verify` double-loads events.** `cmd::inspect::verify` calls
+  `session.project()` (which itself runs `load_all`) AND then `load_all(session.conn())` again for the
+  safe-harbor status detection. Efficiency only (correct + deterministic). **Fix:** add a
+  `Session::load_events_and_project() -> Result<(Vec<LedgerEvent>, LedgerState, ProjectionConfig), CliError>`
+  that loads once and returns both the events and the projection, and route `verify` through it. (The new
+  `safe_harbor_allocate`/`safe_harbor_attest` also load + project; they could share the same helper once it
+  exists.) — OPEN (implementation-time refactor). — recon M-1 / eng M1.
+
+- **eng-M2 — render + CSV use `{:?}` (Debug) for enums** (`BasisSource`/`DisposeKind`/`Term`/`IncomeKind`/
+  `GiftZone`/`BlockerKind`/removal+disposal `kind`). FR10 CSV columns (Task 15 `write_csv_exports`) and the
+  text renderers (Task 5/6) therefore serialize the Rust Debug representation, which is not a stable wire
+  format. Acceptable for the Phase-1 human-readable export, but **before any downstream consumer parses the
+  CSVs**, add a `Display` impl or a `fn tag(&self) -> &'static str` per enum (mirroring `Source::tag()`) and
+  switch the CSV writers to it, so the column values are a committed contract. — OPEN (before CSV consumers).
+  — eng review M2.
+
+- **N-1 (recon) — strengthen the `set-fmv` test.** The Task-11 `set_fmv_appends_a_manual_fmv_decision` test
+  targets an `Acquire` event, but the engine applies `ManualFmv` only to `Income` (resolve.rs `build_op`
+  `EventPayload::Income` arm). So the test confirms the decision is appended but does NOT confirm it clears a
+  blocker. **Fix:** add/repoint a test to an `Income{fmv_status: Missing}` target (a pre-classified income
+  inbound or a native Income with no FMV) and assert the `fmv_missing`/`UnknownBasisInbound`-style blocker
+  clears after `set-fmv`. — OPEN (test hardening, Task 11). — recon N-1.
+
+- **attest leaves a stale `safe_harbor_timebar` advisory (follow-on of the I-2 fold).** `safe_harbor_attest`
+  cures a time-bar by appending `Void(prior) + re-attested copy`. resolve.rs routes a void of a
+  `SafeHarborAllocation` into `allocation_voids` (NOT the `voided` set), so the original allocation is STILL
+  evaluated in pass-1 step 3 and still emits its advisory `safe_harbor_timebar`. The re-attested copy governs
+  (Path B effective), but the lingering advisory means `render::safe_harbor_status` (Task 6) can mislabel an
+  effective Path B as "time-barred → Path A." Display-only, advisory (does not gate FR9). **Fix options:**
+  have `safe_harbor_status` prefer the effective-Path-B signal over the advisory, or (engine) suppress
+  re-evaluation of an allocation that an attestation supersedes. — OPEN (display polish). — Plan-4 fold I-2
+  follow-on.
