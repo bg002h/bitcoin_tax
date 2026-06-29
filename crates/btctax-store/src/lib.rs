@@ -32,6 +32,9 @@ pub enum StoreError {
     UnsupportedSchema(u32),
     #[error("vault already exists at this path")]
     AlreadyExists,
+    #[error("vault initialization was interrupted: key '{0}' exists but the encrypted store was never written — \
+rerun `init --repair` to clear it and start fresh, or delete that .key file manually")]
+    HalfCreatedVault(std::path::PathBuf),
     #[error("invalid vault path (must not end in .key)")]
     InvalidVaultPath,
 }
