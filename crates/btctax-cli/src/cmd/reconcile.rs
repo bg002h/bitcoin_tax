@@ -3,10 +3,13 @@
 //! append-only and re-projectable; the engine resolves precedence (latest-`decision_seq`, Void-first).
 //! `now` is the injected decision creation-time / safe-harbor made-date (§6.2) — deterministic in tests.
 use crate::{CliError, Session};
-use btctax_core::persistence::append_decision;
+use btctax_adapters::BundledPrices;
+use btctax_core::conventions::{tax_date, TRANSITION_DATE};
+use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::{
-    ClassifyInbound, ClassifyRaw, EventId, EventPayload, InboundClass, ManualFmv, OutflowClass,
-    ReclassifyOutflow, RejectImport, SupersedeImport, TransferLink, TransferTarget, Usd,
+    project, AllocLot, AllocMethod, BlockerKind, ClassifyInbound, ClassifyRaw, EventId,
+    EventPayload, InboundClass, LedgerEvent, ManualFmv, OutflowClass, ReclassifyOutflow,
+    RejectImport, SafeHarborAllocation, SupersedeImport, TransferLink, TransferTarget, Usd,
     VoidDecisionEvent,
 };
 use btctax_store::Passphrase;
@@ -178,4 +181,175 @@ pub fn link_transfer(
         in_event_or_wallet: target,
     });
     append_and_save(&mut session, payload, now)
+}
+
+/// FR7/§7.4: build a Path-B safe-harbor allocation that seeds from the **pre-2025 residue** (the
+/// 2025-01-01 Universal-pool position), so it conserves against the engine's allocation-independent
+/// conservation guard.
+///
+/// I-1: the engine's guard compares `Σ alloc.lots.sat`/`usd_basis` to `transition::universal_snapshot`
+/// — a pre-2025-ONLY fold of the Universal pool (resolve.rs §7.4, step 3). The FULL projection's
+/// `state.lots` reflects POST-2025-disposal residuals (a 2025 Sell consumes pre-2025 lots in FIFO), so
+/// seeding from them would yield `alloc_sat < snap.held_sat` → hard `SafeHarborUnconservable` → Path A,
+/// breaking the normal workflow. Instead we re-project a pre-2025-only event subset and read ITS lots:
+///   - keep ONLY import events whose tax-date `< 2025-01-01` (drop every 2025+ acquire/dispose/transfer);
+///   - keep ALL reconciliation decisions/conflicts — they SHAPE the residue (a 2026 `ClassifyInbound`
+///     supplies a pre-2025 `TransferIn`'s basis; `ReclassifyOutflow`/`TransferLink` consume/relocate a
+///     pre-2025 lot) — and carry a 2026 made-date, so they must NOT be tax-date-filtered;
+///   - DROP any prior `SafeHarborAllocation` so the residue stays allocation-INDEPENDENT (matches
+///     `universal_snapshot`, which never applies a seed) → re-allocation is idempotent.
+///
+/// This subset re-runs the IDENTICAL `fold_event` arms the engine's snapshot uses, so the totals match
+/// exactly (the only difference, Path A's per-wallet relocation, preserves sat/basis 1:1; `finalize`
+/// attributes Universal-pool lots by `lot.wallet`). For `ActualPosition` the per-wallet assignment falls
+/// out of those residue lots' `wallet` (= the wallet holding each lot at 2025-01-01). `ProRata` still
+/// seeds from these actuals; a true cross-wallet pro-rata redistribution is a manual-input refinement
+/// (Open question O4). The engine's `SafeHarborUnconservable` guard remains the backstop for any residual
+/// drift (e.g. a rare self-transfer straddling the 2025 boundary) — fails closed, never silent wrong tax.
+pub fn safe_harbor_allocate(
+    vault_path: &Path,
+    pp: &Passphrase,
+    method: AllocMethod,
+    attested: bool,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let mut session = Session::open(vault_path, pp)?;
+
+    // Pre-2025-only event subset (see the I-1 note above).
+    let pre2025: Vec<LedgerEvent> = load_all(session.conn())?
+        .into_iter()
+        .filter(|e| match &e.id {
+            EventId::Import { .. } => tax_date(e.utc_timestamp, e.original_tz) < TRANSITION_DATE,
+            _ => !matches!(e.payload, EventPayload::SafeHarborAllocation(_)),
+        })
+        .collect();
+    let cfg = session.config()?.to_projection();
+    let prices = BundledPrices::load()?;
+    let residue = project(&pre2025, &prices, &cfg); // == the 2025-01-01 Universal residue
+
+    let lots: Vec<AllocLot> = residue
+        .lots
+        .iter()
+        .filter(|l| l.remaining_sat > 0)
+        .map(|l| AllocLot {
+            wallet: l.wallet.clone(),
+            sat: l.remaining_sat,
+            usd_basis: l.usd_basis,
+            acquired_at: l.acquired_at,
+        })
+        .collect();
+    if lots.is_empty() {
+        return Err(CliError::Usage(
+            "no pre-2025 lots to allocate (Path A applies; safe harbor unnecessary)".into(),
+        ));
+    }
+    let payload = EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+        lots,
+        as_of_date: TRANSITION_DATE,
+        method,
+        timely_allocation_attested: attested,
+    });
+    append_and_save(&mut session, payload, now)
+}
+
+/// FR7: attest an existing allocation. Events are immutable, so attestation = void the single live prior
+/// allocation and re-append it with `timely_allocation_attested = true`. Attestation only cures a
+/// §5.02(4) TIME-BAR; it is NOT valid on an already-effective allocation (which needs nothing) nor on one
+/// that fails CONSERVATION (which needs a corrected allocation, not an attestation).
+pub fn safe_harbor_attest(
+    vault_path: &Path,
+    pp: &Passphrase,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let mut session = Session::open(vault_path, pp)?;
+    let events = load_all(session.conn())?;
+
+    // Eng-I1 / I-2(a): EXCLUDE voided allocations from the single-allocation guard, so the legitimate
+    // allocate→inert→void→re-allocate→attest workflow (which leaves an OLD, voided allocation in the log)
+    // is not blocked by "multiple allocations present." Build the voided-target set from `VoidDecisionEvent`s
+    // (mirrors resolve.rs pass-1 step 1a) and keep only LIVE (non-voided) allocations.
+    let voided: std::collections::BTreeSet<EventId> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::VoidDecisionEvent(v) => Some(v.target_event_id.clone()),
+            _ => None,
+        })
+        .collect();
+    let allocs: Vec<(&EventId, &SafeHarborAllocation)> = events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .filter_map(|e| match &e.payload {
+            EventPayload::SafeHarborAllocation(a) => Some((&e.id, a)),
+            _ => None,
+        })
+        .collect();
+    let (prior_id, prior) = match allocs.as_slice() {
+        [one] => (one.0.clone(), one.1.clone()),
+        [] => {
+            return Err(CliError::Usage(
+                "no allocation to attest; run `safe-harbor allocate` first".into(),
+            ))
+        }
+        _ => {
+            return Err(CliError::Usage(
+                "multiple live allocations present; void the stale one before attesting".into(),
+            ))
+        }
+    };
+    if prior.timely_allocation_attested {
+        return Err(CliError::Usage("allocation is already attested".into()));
+    }
+
+    // I-2(b) / N-2: classify the prior allocation's CURRENT status via a re-projection of the live log,
+    // reading the engine's own effectiveness verdict (the blockers it stamps onto `prior_id`):
+    //   * `SafeHarborUnconservable` (hard) → attestation CANNOT cure it (only a corrected allocation can).
+    //   * `SafeHarborTimebar` (advisory)   → inert PURELY because of the §5.02(4) bar → attestation cures it.
+    //   * neither                          → ALREADY EFFECTIVE → attesting would Void an effective allocation
+    //     (→ irrevocable `decision_conflicts`, §7.4) AND append a second effective allocation (→ two effective
+    //     → Path A, irrecoverable). Refuse and advise `verify` (NOT "void the effective one").
+    let (state, _cfg) = session.project()?;
+    let blocked_with = |k: BlockerKind| {
+        state
+            .blockers
+            .iter()
+            .any(|b| b.event.as_ref() == Some(&prior_id) && b.kind == k)
+    };
+    let unconservable = blocked_with(BlockerKind::SafeHarborUnconservable);
+    let timebarred = blocked_with(BlockerKind::SafeHarborTimebar);
+    // (closure's borrow of `prior_id` ends here, so the move into the Void below is sound.)
+    if unconservable {
+        return Err(CliError::Usage(
+            "allocation fails conservation (not a time-bar); re-run `safe-harbor allocate` to rebuild it — attestation cannot cure conservation".into(),
+        ));
+    }
+    if !timebarred {
+        return Err(CliError::Usage(
+            "allocation already effective; no attestation needed — run `verify`".into(),
+        ));
+    }
+
+    // Inert PURELY due to a time-bar → attestation cures it. Append Void(prior) + a re-attested copy.
+    // (N2: same `now` for both; `decision_seq` orders/distinguishes them — Void first, then re-attest.)
+    append_decision(
+        session.conn(),
+        EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+            target_event_id: prior_id,
+        }),
+        now,
+        UtcOffset::UTC,
+        None,
+    )?;
+    let attested = SafeHarborAllocation {
+        timely_allocation_attested: true,
+        ..prior
+    };
+    let id = append_decision(
+        session.conn(),
+        EventPayload::SafeHarborAllocation(attested),
+        now,
+        UtcOffset::UTC,
+        None,
+    )?;
+    session.save()?;
+    Ok(id)
 }
