@@ -5,6 +5,9 @@
 //! PRIVACY: only SYNTHETIC fixtures are used in tests; the real exports in
 //! ~/Documents/BitcoinTax/ReadOnly are NEVER read by this crate or its tests.
 pub mod parse;
+pub mod price;
+
+pub use price::BundledPrices;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AdapterError {
