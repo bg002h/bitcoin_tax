@@ -45,6 +45,13 @@ impl PoolSet {
     pub fn push_lot(&mut self, key: PoolKey, lot: Lot) {
         self.pools.entry(key).or_default().push(lot);
     }
+    /// Seed the per-origin split counter to `next`, so the next `bump_split(origin)` returns
+    /// `next`. Used for Path-B seed lots (I-2): seed lots occupy indices 0..seed_len-1; without
+    /// initialising here, a later `SelfTransfer` relocation's `bump_split` returns 0 — colliding
+    /// with seed-lot index 0. Calling this once with `next = seed.len()` claims those indices.
+    pub fn init_split_counter(&mut self, origin: &EventId, next: u32) {
+        self.next_split.insert(origin.clone(), next);
+    }
 
     /// FIFO-consume `need` sats from `key`. Returns the consumed (lot_id, sat, gain_basis, loss_basis, term-anchors)
     /// fragments and a shortfall (>0 if the pool could not cover `need` — caller raises uncovered_disposal).

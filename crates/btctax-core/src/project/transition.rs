@@ -66,9 +66,16 @@ pub fn seed_transition(mode: &TransitionMode, pools: &mut PoolSet, _st: &mut Led
         }
         TransitionMode::PathB { seed } => {
             // Discard the Universal remainder; seed fresh per-wallet lots from the effective allocation.
+            let seed_len = seed.len() as u32;
             for lot in seed.iter().cloned() {
                 let key = PoolKey::Wallet(lot.wallet.clone());
                 pools.push_lot(key, lot);
+            }
+            // I-2: Claim split indices 0..seed_len-1 in the counter so a later SelfTransfer
+            // relocation's bump_split(allocation_id) returns seed_len, seed_len+1, ... — no
+            // collision with the seeded lots' own split_sequence values.
+            if let Some(first) = seed.first() {
+                pools.init_split_counter(&first.lot_id.origin_event_id, seed_len);
             }
         }
     }

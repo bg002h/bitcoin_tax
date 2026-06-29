@@ -200,6 +200,15 @@ impl FeeCarry {
     fn rehome_onto_removal_leg(&self, leg: &mut RemovalLeg) {
         leg.basis += self.gain_basis;
     }
+
+    /// Re-home the fee-sat gain basis onto the last disposal leg (I-1: Dispose+fee_sat, TP8 (c)).
+    /// Under (c): adds gain_basis to the reported leg basis → gain decreases by carry amount.
+    /// Under (b): carry is empty (gain_basis = 0) so this is a no-op; the fee-sat basis rode the
+    /// mini-disposition emitted by consume_fee instead.
+    fn rehome_onto_disposal_leg(&self, leg: &mut DisposalLeg) {
+        leg.basis += self.gain_basis;
+        leg.gain = round_cents(leg.proceeds - leg.basis);
+    }
 }
 
 /// Consume `fee_sat` FIFO from the source pool, record them in the FR9 fee-sat home, and (per config)
@@ -339,6 +348,7 @@ pub(crate) fn fold_event(
             sat,
             proceeds,
             fee_usd,
+            fee_sat,
             kind,
         } => {
             let wallet = match &eff.wallet {
@@ -364,7 +374,33 @@ pub(crate) fn fold_event(
             }
             if !consumed.is_empty() {
                 let net = round_cents(*proceeds - *fee_usd); // TP2: disposition fee reduces proceeds
-                let legs = make_disposal_legs(&consumed, net, date, st, &eff.id);
+                let mut legs = make_disposal_legs(&consumed, net, date, st, &eff.id);
+                // I-1: Task 11 fee step — consume fee_sat FIFO from source pool AFTER principal.
+                // Mirrors the gift/SelfTransfer pattern; native Dispose passes fee_sat=None (no-op).
+                // (c) default: re-home carry onto last disposal leg; fee-sat basis rolls into the
+                //     disposition (reported basis increases → gain decreases); fee non-taxable.
+                // (b) config:  emits mini-disposition; returns empty carry; leg basis unchanged.
+                let carry = consume_fee(
+                    pools,
+                    &key,
+                    fee_sat.unwrap_or(0),
+                    config,
+                    prices,
+                    date,
+                    stats,
+                    st,
+                    &eff.id,
+                );
+                if let Some(last) = legs.last_mut() {
+                    carry.rehome_onto_disposal_leg(last);
+                } else if carry.gain_basis > Usd::ZERO {
+                    // m3: degenerate guard — no surviving leg (principal == 0); unreachable for real events.
+                    st.add_blocker(
+                        BlockerKind::UncoveredDisposal,
+                        Some(eff.id.clone()),
+                        "fee carry has no surviving disposal leg to re-home onto (principal == 0)",
+                    );
+                }
                 st.disposals.push(Disposal {
                     event: eff.id.clone(),
                     kind: *kind,

@@ -2,7 +2,7 @@ use btctax_core::conventions::Usd;
 use btctax_core::event::*;
 use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
-use btctax_core::project::{project, ProjectionConfig};
+use btctax_core::project::{conservation_report, project, FeeTreatment, ProjectionConfig};
 use btctax_core::state::*;
 use rust_decimal_macros::dec;
 use time::macros::{datetime, offset};
@@ -1356,5 +1356,182 @@ fn self_transfer_fee_c_cross_lot_normal_survivor_stays_non_dual() {
         leg.gain,
         dec!(130.00),
         "gain = proceeds $200 − basis $70 via normal path"
+    );
+}
+
+// ── I-1 fix: ReclassifyOutflow{Dispose} with on-chain fee_sat — whole-branch Important ──────
+// The fee-sats MUST be consumed (not left in holdings), conservation must balance honestly,
+// and the TP8 treatment (c/b) applies to the disposal just as it does for gift/SelfTransfer.
+
+/// I-1 (c): TransferOut{sat=99_800, fee_sat=Some(200)} reclassified as Dispose.
+/// Under (c): fee-sats consumed; their basis re-homed onto the last disposal leg so the
+/// reported basis = full $60.00 (not $59.88), holdings = 0, conservation balanced.
+#[test]
+fn reclassify_dispose_fee_sat_treatment_c_conservation_honest() {
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2026-06-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 99_800,
+            fee_sat: Some(200),
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl = dec_ev(
+        1,
+        datetime!(2026-06-15 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::Dispose {
+                kind: DisposeKind::Sell,
+            },
+            principal_proceeds_or_fmv: dec!(150.00),
+            fee_usd: Some(dec!(1.00)),
+        }),
+    );
+    let st = project(
+        &[buy, out, recl],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+
+    // (1) fee-sats consumed — holdings NOT overstated.
+    assert!(
+        st.holdings_by_wallet.is_empty(),
+        "holdings must be empty: fee-sats consumed, not stranded in the pool"
+    );
+    assert_eq!(
+        st.stats.fee_sats_consumed, 200,
+        "FR9: 200 fee-sats in sole conservation home"
+    );
+
+    // (2) conservation honest — balanced and no uncovered disposal.
+    let report = conservation_report(&st);
+    assert!(!report.has_uncovered, "no uncovered disposals");
+    assert!(
+        report.balanced,
+        "conservation must be balanced (fee-sats consumed, not phantom-held): {report:?}"
+    );
+    assert_eq!(report.sigma_in, 100_000);
+    assert_eq!(report.sigma_disposed, 99_800); // principal disposal legs only
+    assert_eq!(report.sigma_fee_sats, 200); // fee-sat sole conservation home
+    assert_eq!(report.sigma_held, 0);
+
+    // (3) TP8 (c): fee-sat basis rolled onto last disposal leg.
+    // Buy: 100k sats @ $60.00. Principal 99_800 → raw basis $59.88 (pro-rata).
+    // Fee 200 sats → carry.gain_basis = $0.12, re-homed → leg.basis = $60.00.
+    // Net proceeds: $150.00 − $1.00 fee_usd = $149.00. Gain: $149.00 − $60.00 = $89.00.
+    assert_eq!(st.disposals.len(), 1);
+    assert!(!st.disposals[0].fee_mini_disposition);
+    let leg = &st.disposals[0].legs[0];
+    assert_eq!(
+        leg.basis,
+        dec!(60.00),
+        "(c): fee-sat basis ($0.12) re-homed onto last disposal leg → full $60.00 basis"
+    );
+    assert_eq!(
+        leg.proceeds,
+        dec!(149.00),
+        "net proceeds = $150.00 gross − $1.00 fee_usd"
+    );
+    assert_eq!(
+        leg.gain,
+        dec!(89.00),
+        "gain = $149.00 − $60.00 (fee basis re-homed)"
+    );
+}
+
+/// I-1 (b): same TransferOut reclassified as Dispose under TreatmentB.
+/// Under (b): fee-sats become a mini-disposition recognition record; conservation balanced;
+/// principal disposal leg keeps principal-only basis ($59.88, not re-homed).
+#[test]
+fn reclassify_dispose_fee_sat_treatment_b_mini_disposition() {
+    let mut prices = StaticPrices::default();
+    prices
+        .0
+        .insert(time::macros::date!(2026 - 06 - 01), dec!(50000.00));
+    let cfg = ProjectionConfig {
+        self_transfer_fee: FeeTreatment::TreatmentB,
+        ..ProjectionConfig::default()
+    };
+
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2026-06-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 99_800,
+            fee_sat: Some(200),
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl = dec_ev(
+        1,
+        datetime!(2026-06-15 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::Dispose {
+                kind: DisposeKind::Sell,
+            },
+            principal_proceeds_or_fmv: dec!(150.00),
+            fee_usd: Some(dec!(1.00)),
+        }),
+    );
+    let st = project(&[buy, out, recl], &prices, &cfg);
+
+    // (b): fee-sats are a taxable mini-disposition recognition record.
+    let mini: Vec<_> = st
+        .disposals
+        .iter()
+        .filter(|d| d.fee_mini_disposition)
+        .collect();
+    assert_eq!(
+        mini.len(),
+        1,
+        "(b): exactly one fee mini-disposition for the 200 fee-sats"
+    );
+
+    // Conservation balanced (fee-sats in fee_sats_consumed, NOT double-counted in sigma_disposed).
+    let report = conservation_report(&st);
+    assert!(
+        report.balanced,
+        "conservation balanced under (b): {report:?}"
+    );
+    assert_eq!(report.sigma_fee_sats, 200);
+    assert_eq!(report.sigma_disposed, 99_800); // principal disposal legs only (mini excluded)
+    assert!(st.holdings_by_wallet.is_empty());
+
+    // (b) CONTRAST with (c): basis NOT re-homed onto principal disposal leg.
+    let principal_disposal: &_ = st
+        .disposals
+        .iter()
+        .find(|d| !d.fee_mini_disposition)
+        .expect("one real disposal");
+    let leg = &principal_disposal.legs[0];
+    assert_eq!(
+        leg.basis,
+        dec!(59.88),
+        "(b): principal leg basis stays at $59.88 (fee basis rode the mini-disposition)"
     );
 }

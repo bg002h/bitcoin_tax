@@ -16,6 +16,10 @@ pub enum Op {
         sat: Sat,
         proceeds: Usd,
         fee_usd: Usd,
+        /// Task 11: on-chain fee-sats consumed per TP8. Set from `TransferOut.fee_sat` when a
+        /// `ReclassifyOutflow{Dispose}` is applied; `None` for a native `EventPayload::Dispose`
+        /// (exchange disposals carry no on-chain fee-sat field — their fee is already in `fee_usd`).
+        fee_sat: Option<Sat>,
         kind: DisposeKind,
     },
     Income {
@@ -144,6 +148,7 @@ fn build_op(
             sat: d.sat,
             proceeds: d.usd_proceeds,
             fee_usd: d.fee_usd,
+            fee_sat: None, // native exchange disposal: no on-chain fee_sat (fee already in fee_usd)
             kind: d.kind,
         },
         EventPayload::Income(x) => {
@@ -196,6 +201,7 @@ fn build_op(
                         sat: t.sat,
                         proceeds: ro.principal_proceeds_or_fmv,
                         fee_usd: ro.fee_usd.unwrap_or(Usd::ZERO),
+                        fee_sat: t.fee_sat, // I-1: pass on-chain fee through (was silently dropped)
                         kind: *kind,
                     },
                 };

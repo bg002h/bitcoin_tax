@@ -1,9 +1,10 @@
 use btctax_core::event::*;
 use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
-use btctax_core::project::{project, FeeTreatment, ProjectionConfig};
+use btctax_core::project::{conservation_report, project, FeeTreatment, ProjectionConfig};
 use btctax_core::state::*;
 use rust_decimal_macros::dec;
+use std::collections::BTreeSet;
 use time::macros::{date, datetime, offset};
 
 fn cb() -> WalletId {
@@ -654,4 +655,102 @@ fn tp8b_self_transfer_fee_mini_disposition_trips_the_bar() {
         .lots
         .iter()
         .all(|l| l.basis_source != BasisSource::SafeHarborAllocated));
+}
+
+// (xiv) I-2 fix: Path-B seeded lots + post-2025 SelfTransfer relocation — no LotId collision.
+// Seed lots occupy split_sequence 0..seed_len-1. Without the fix, bump_split(allocation_id)
+// returns 0 (colliding with seed lot 0). With the fix, it returns seed_len (fresh unique index).
+#[test]
+fn path_b_seeded_lot_relocation_no_lotid_collision() {
+    let evs = vec![
+        // Pre-2025 buy: feeds the Universal snapshot for conservation (100k sats / $60).
+        buy(
+            "B",
+            datetime!(2024-06-01 00:00:00 UTC),
+            100_000,
+            dec!(60.00),
+        ),
+        // Effective Path-B allocation (attested): two lots totalling 100k sats / $60 (conserves).
+        alloc(
+            1,
+            datetime!(2025-02-01 00:00:00 UTC),
+            AllocMethod::ActualPosition,
+            true, // attested → effective regardless of first-disposition timing
+            vec![
+                alloc_lot(cb(), 60_000, dec!(36.00), date!(2024 - 01 - 01)),
+                alloc_lot(cb(), 40_000, dec!(24.00), date!(2024 - 06 - 01)),
+            ],
+        ),
+        // Post-2025 SelfTransfer: partially relocate 30k sats from cb() to cold().
+        // FIFO consumes from seed lot 0 (seq=0, 60k sats); the relocated fragment
+        // must get split_sequence >= seed.len() = 2 (I-2 fix).
+        imp(
+            Source::Coinbase,
+            "OUT",
+            datetime!(2025-06-01 00:00:00 UTC),
+            cb(),
+            EventPayload::TransferOut(TransferOut {
+                sat: 30_000,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        ),
+        imp(
+            Source::Swan,
+            "IN",
+            datetime!(2025-06-01 01:00:00 UTC),
+            cold(),
+            EventPayload::TransferIn(TransferIn {
+                sat: 30_000,
+                src_addr: None,
+                txid: None,
+            }),
+        ),
+        dec_ev(
+            2,
+            datetime!(2026-01-01 00:00:00 UTC),
+            EventPayload::TransferLink(TransferLink {
+                out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+                in_event_or_wallet: TransferTarget::InEvent(EventId::import(
+                    Source::Swan,
+                    SourceRef::new("IN"),
+                )),
+            }),
+        ),
+    ];
+
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+
+    // Path-B effective; no blocking errors.
+    assert!(!has(&st, BlockerKind::SafeHarborTimebar));
+    assert!(!has(&st, BlockerKind::UncoveredDisposal));
+    assert!(!has(&st, BlockerKind::DecisionConflict));
+    assert!(st.disposals.is_empty() && st.removals.is_empty()); // non-taxable self-transfer
+
+    // I-2: All LotIds in final state must be UNIQUE (no collision between seeded and relocated).
+    // Expected: {alloc_id, seq=0} (30k rem in cb), {alloc_id, seq=1} (40k in cb),
+    //           {alloc_id, seq=2} (30k in cold). seq=2 = seed.len(), NOT 0.
+    let lot_ids: Vec<_> = st.lots.iter().map(|l| l.lot_id.clone()).collect();
+    let unique: BTreeSet<_> = lot_ids.iter().collect();
+    assert_eq!(
+        unique.len(),
+        lot_ids.len(),
+        "I-2: all LotIds must be unique after Path-B seed + SelfTransfer relocation (no collision)"
+    );
+    assert_eq!(
+        st.lots.len(),
+        3,
+        "seed lot 0 (partial), seed lot 1, relocated fragment"
+    );
+
+    // Conservation holds: all 100k sats still tracked across both wallets.
+    let report = conservation_report(&st);
+    assert!(
+        report.balanced,
+        "conservation balanced after Path-B seed + SelfTransfer: {report:?}"
+    );
+    assert_eq!(report.sigma_held, 100_000);
+    assert_eq!(st.holdings_by_wallet[&cb()], 70_000); // 30k (lot 0 remainder) + 40k (lot 1)
+    assert_eq!(st.holdings_by_wallet[&cold()], 30_000); // relocated fragment
 }
