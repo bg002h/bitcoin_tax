@@ -1,8 +1,10 @@
 //! btctax-store: PGP-encrypted local vault for the bitcoin_tax ledger.
 pub const SCHEMA_VERSION: u32 = 1;
 
+pub mod atomic;
 pub mod blob;
 pub mod crypto;
+pub mod paths;
 pub mod sqlite_io;
 
 pub use crypto::Passphrase;
