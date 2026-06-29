@@ -1187,3 +1187,174 @@ fn self_transfer_fee_config_b_is_a_mini_disposition_recognition_record() {
     );
     assert_eq!(st.stats.fee_sats_consumed, 200);
 }
+
+/// M1 regression — cross-lot (c) fee: principal exhausts a NORMAL lot; fee crosses into a
+/// DUAL-BASIS received-gift lot. Survivor (`relocated.last()`) is the NORMAL lot.
+///
+/// Setup:
+///   Lot A (FIFO first, normal buy): 500 sats @ $30.00 in wal().
+///   Lot B (FIFO second, dual-basis gift): 500 sats, donor_basis=$100, fmv_at_gift=$60 in wal().
+///   Transfer: 500 principal (exhausts Lot A exactly) + 200 fee (crosses into Lot B).
+///   Fee carry from Lot B: gain_basis=$40 (=$100×200/500), loss_basis=Some($24) (=$60×200/500).
+///
+/// Assertions:
+///   (1) C1 intact: survivor usd_basis = $30 + $40 = $70 (full gain-basis carries).
+///   (2) dual_loss_basis stays None — NORMAL lot NOT promoted to §1015(a) dual-basis.
+///   (3) later sale routes through normal (gift_zone=None) single-basis path, not four-zone logic.
+#[test]
+fn self_transfer_fee_c_cross_lot_normal_survivor_stays_non_dual() {
+    let cold = WalletId::SelfCustody {
+        label: "cold".into(),
+    };
+
+    // Lot A: normal purchased lot, 500 sats @ $30.00 total, into wal() on 2025-01-01 (FIFO slot 0).
+    let buy = ev(
+        "BUY",
+        datetime!(2025-01-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 500,
+            usd_cost: dec!(30.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+
+    // Lot B: dual-basis received-gift lot, 500 sats into wal() on 2025-02-01 (FIFO slot 1).
+    // donor_basis=$100 > fmv_at_gift=$60 → dual; usd_basis=$100, dual_loss_basis=Some($60).
+    let gift_in = LedgerEvent {
+        id: EventId::import(Source::Swan, SourceRef::new("GIN")),
+        utc_timestamp: datetime!(2025-02-01 00:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(wal()),
+        payload: EventPayload::TransferIn(TransferIn {
+            sat: 500,
+            src_addr: None,
+            txid: None,
+        }),
+    };
+    let classify_gift = dec_ev(
+        1,
+        datetime!(2026-12-31 00:00:00 UTC),
+        EventPayload::ClassifyInbound(ClassifyInbound {
+            transfer_in_event: EventId::import(Source::Swan, SourceRef::new("GIN")),
+            as_: InboundClass::GiftReceived {
+                donor_basis: Some(dec!(100.00)),
+                donor_acquired_at: Some(time::macros::date!(2024 - 01 - 01)),
+                fmv_at_gift: dec!(60.00), // fmv < donor_basis → dual-basis lot
+            },
+        }),
+    );
+
+    // Self-transfer: 500 principal (exhausts Lot A exactly) + 200 fee (crosses into Lot B).
+    // After principal: relocated=[Lot A (500 sats, $30)]. Fee: 200 from Lot B → carry gain=$40, loss=Some($24).
+    let out = ev(
+        "OUT",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 500,
+            fee_sat: Some(200),
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let in_ev = LedgerEvent {
+        id: EventId::import(Source::Swan, SourceRef::new("IN")),
+        utc_timestamp: datetime!(2025-03-01 01:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(cold.clone()),
+        payload: EventPayload::TransferIn(TransferIn {
+            sat: 500,
+            src_addr: None,
+            txid: None,
+        }),
+    };
+    let link = dec_ev(
+        2,
+        datetime!(2026-01-01 00:00:00 UTC),
+        EventPayload::TransferLink(TransferLink {
+            out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            in_event_or_wallet: TransferTarget::InEvent(EventId::import(
+                Source::Swan,
+                SourceRef::new("IN"),
+            )),
+        }),
+    );
+
+    // Phase 1: check survivor lot state (no sale yet).
+    let evs_no_sale = [
+        buy.clone(),
+        gift_in.clone(),
+        classify_gift.clone(),
+        out.clone(),
+        in_ev.clone(),
+        link.clone(),
+    ];
+    let st = project(
+        &evs_no_sale,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(st.disposals.is_empty(), "(c): no recognition event on fee");
+    let cold_lot = st
+        .lots
+        .iter()
+        .find(|l| l.wallet == cold)
+        .expect("survivor lot must exist in cold wallet after transfer");
+    // (1) C1: gain_basis carries fully — Lot A $30.00 + fee contribution ($100×200/500) = $40.00 → $70.00.
+    assert_eq!(
+        cold_lot.usd_basis,
+        dec!(70.00),
+        "C1: full gain-basis must carry onto survivor (Lot A $30 + fee $40)"
+    );
+    // (2) dual_loss_basis stays None — NORMAL lot must NOT be promoted to §1015(a) dual-basis.
+    assert_eq!(
+        cold_lot.dual_loss_basis, None,
+        "survivor must remain non-dual (§1015 misclassification guard)"
+    );
+
+    // Phase 2: sell all survivor sats; verify disposal uses normal (single-basis) path.
+    let sale = LedgerEvent {
+        id: EventId::import(Source::Coinbase, SourceRef::new("SELL")),
+        utc_timestamp: datetime!(2027-01-01 00:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(cold.clone()),
+        payload: EventPayload::Dispose(Dispose {
+            sat: 500,
+            usd_proceeds: dec!(200.00),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    };
+    let evs_with_sale = [buy, gift_in, classify_gift, out, in_ev, link, sale];
+    let st2 = project(
+        &evs_with_sale,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    let real_disposals: Vec<_> = st2
+        .disposals
+        .iter()
+        .filter(|d| !d.fee_mini_disposition)
+        .collect();
+    assert_eq!(
+        real_disposals.len(),
+        1,
+        "exactly one real disposal from the sale"
+    );
+    let leg = &real_disposals[0].legs[0];
+    // (3) Normal single-basis path: gift_zone must be None (NOT routed through §1015 four-zone logic).
+    assert_eq!(
+        leg.gift_zone, None,
+        "survivor sale must use normal (non-dual) path, not §1015(a) four-zone logic"
+    );
+    assert_eq!(
+        leg.basis,
+        dec!(70.00),
+        "basis must be the carried gain_basis (C1)"
+    );
+    assert_eq!(
+        leg.gain,
+        dec!(130.00),
+        "gain = proceeds $200 − basis $70 via normal path"
+    );
+}

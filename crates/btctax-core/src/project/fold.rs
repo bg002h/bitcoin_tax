@@ -153,14 +153,24 @@ struct FeeCarry {
 
 impl FeeCarry {
     /// Re-home the fee-sat basis onto the surviving destination lot (C1: full basis carries).
-    /// m1: when `lot.dual_loss_basis` is None but carry has `loss_basis`, promote it (don't drop silently).
+    /// `gain_basis` always carries onto `lot.usd_basis` (C1 invariant; must not be dropped).
+    /// `loss_basis` carries onto `lot.dual_loss_basis` ONLY when the survivor is ALREADY a
+    /// dual-basis lot (`Some(existing)` → add to existing). When the survivor is non-dual
+    /// (`None`), the `loss_basis` fragment is dropped instead of promoting the lot to `Some`:
+    /// promoting would set `dual_loss_basis.is_some() == true`, causing a later disposition to
+    /// route through the §1015(a) four-zone logic (`make_disposal_legs` keys on this field)
+    /// and misclassify a normal purchased/transferred lot as a received-gift dual-basis lot —
+    /// a worse error than the cents-scale conservative loss-basis understatement that results
+    /// from the drop. Conservative: future loss-zone basis understated by fee-cents; gain basis
+    /// fully conserved (C1 intact).
     fn rehome_onto_lot(&self, lot: &mut Lot) {
         lot.usd_basis += self.gain_basis;
         if let Some(l) = self.loss_basis {
-            match lot.dual_loss_basis.as_mut() {
-                Some(dl) => *dl += l,
-                // m1: fee originates on a dual-basis lot but the survivor is non-dual — promote the loss_basis.
-                None => lot.dual_loss_basis = Some(l),
+            // Add to existing dual_loss_basis only; when None (non-dual survivor) the fragment
+            // is dropped — promoting None → Some would misroute a later disposition through the
+            // §1015(a) four-zone logic (see doc comment above for full rationale).
+            if let Some(dl) = lot.dual_loss_basis.as_mut() {
+                *dl += l;
             }
         }
     }
