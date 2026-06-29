@@ -389,7 +389,15 @@ pub fn fold(
                 };
                 let (basis, pending) = match donor_basis {
                     Some(b) => (*b, false),
-                    None => (Usd::ZERO, true),
+                    None => {
+                        // I-2: donor_basis unknown → immediate hard blocker (mirrors IncomeInbound FmvMissing).
+                        st.add_blocker(
+                            BlockerKind::UnknownBasisInbound,
+                            Some(eff.id.clone()),
+                            "gift received with unknown donor basis",
+                        );
+                        (Usd::ZERO, true)
+                    }
                 };
                 let lot = Lot {
                     lot_id: LotId {

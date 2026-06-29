@@ -288,10 +288,15 @@ fn transfer_link_relocates_lots_non_taxably_carrying_basis_and_hp() {
     assert_eq!(st.lots[0].acquired_at, time::macros::date!(2025 - 03 - 01)); // HP carries
     assert_eq!(st.lots[0].usd_basis, dec!(60.00));
     assert!(st.pending_reconciliation.is_empty());
-    assert!(st
-        .blockers
-        .iter()
-        .all(|b| b.kind != BlockerKind::UnknownBasisInbound)); // dest TransferIn consumed
+    // No unexpected blockers: confirmed link must leave no unmatched-outflow, uncovered-disposal,
+    // or unknown-basis-inbound noise.
+    assert!(st.blockers.iter().all(|b| {
+        b.kind != BlockerKind::UnmatchedOutflows
+            && b.kind != BlockerKind::UncoveredDisposal
+            && b.kind != BlockerKind::UnknownBasisInbound
+    }));
+    // Self-transfer does NOT increment sigma_in — only externally-sourced acquisitions count (FR9).
+    assert_eq!(st.stats.sigma_in, 100_000); // from the BUY Acquire only
 }
 
 #[test]
@@ -351,4 +356,124 @@ fn classify_inbound_as_income_creates_fmv_lot() {
     );
     assert_eq!(st.income_recognized[0].usd_fmv, dec!(45.00));
     assert_eq!(st.lots[0].usd_basis, dec!(45.00));
+}
+
+// ── M-1/M-2/N-1: GiftReceived baseline + malformed-link + sigma_in ──────────────────────────
+
+/// GiftReceived with known donor_basis: carryover lot, GiftCarryover basis_source,
+/// donor_acquired_at carried, sigma_in += sat. Baseline before Task 10 dual-basis overlay.
+#[test]
+fn gift_received_fold_creates_carryover_lot_and_counts_sigma_in() {
+    let donor_date = time::macros::date!(2023 - 06 - 15);
+    let in_ev = LedgerEvent {
+        id: EventId::import(Source::Gemini, SourceRef::new("GIFT")),
+        utc_timestamp: datetime!(2025-07-01 00:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(wal()),
+        payload: EventPayload::TransferIn(TransferIn {
+            sat: 50_000,
+            src_addr: None,
+            txid: None,
+        }),
+    };
+    let cls = dec_ev(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        EventPayload::ClassifyInbound(ClassifyInbound {
+            transfer_in_event: EventId::import(Source::Gemini, SourceRef::new("GIFT")),
+            as_: InboundClass::GiftReceived {
+                donor_basis: Some(dec!(25.00)),
+                donor_acquired_at: Some(donor_date),
+                fmv_at_gift: dec!(30.00),
+            },
+        }),
+    );
+    let st = project(
+        &[in_ev, cls],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st.lots.len(), 1);
+    let lot = &st.lots[0];
+    assert_eq!(lot.usd_basis, dec!(25.00));
+    assert_eq!(lot.basis_source, BasisSource::GiftCarryover);
+    assert_eq!(lot.donor_acquired_at, Some(donor_date));
+    assert_eq!(lot.remaining_sat, 50_000);
+    // No UnknownBasisInbound — donor_basis is known.
+    assert!(st
+        .blockers
+        .iter()
+        .all(|b| b.kind != BlockerKind::UnknownBasisInbound));
+    assert_eq!(st.stats.sigma_in, 50_000); // GiftReceived counts as externally-sourced (FR9)
+}
+
+/// I-1: a TransferLink whose in-event has wallet:None must NOT silently discard the inbound sats.
+/// Expected: DecisionConflict hard blocker on the link; UnknownBasisInbound on the in-event
+/// (which surfaces as Op::UnknownInbound because it is NOT consumed); out-event falls to PendingOut.
+#[test]
+fn malformed_transfer_link_no_dest_wallet_raises_blocker_not_silent_drop() {
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2025-04-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    // TransferIn with wallet:None — no destination wallet can be resolved from this event.
+    let in_ev = LedgerEvent {
+        id: EventId::import(Source::Swan, SourceRef::new("IN")),
+        utc_timestamp: datetime!(2025-04-01 01:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: None,
+        payload: EventPayload::TransferIn(TransferIn {
+            sat: 100_000,
+            src_addr: None,
+            txid: None,
+        }),
+    };
+    let link = dec_ev(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        EventPayload::TransferLink(TransferLink {
+            out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            in_event_or_wallet: TransferTarget::InEvent(EventId::import(
+                Source::Swan,
+                SourceRef::new("IN"),
+            )),
+        }),
+    );
+    let st = project(
+        &[buy, out, in_ev, link],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    // Hard blocker: malformed link raises DecisionConflict.
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::DecisionConflict),
+        "expected DecisionConflict blocker for unroutable link"
+    );
+    // Inbound sats NOT silently Skipped: in-event becomes Op::UnknownInbound → UnknownBasisInbound fires.
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::UnknownBasisInbound),
+        "expected UnknownBasisInbound blocker — inbound must not be silently dropped"
+    );
+    // No residual lots: buy's sats consumed into pending, in-event (UnknownInbound) creates no lot.
+    assert!(st.lots.is_empty());
 }

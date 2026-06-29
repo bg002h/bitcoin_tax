@@ -368,10 +368,34 @@ pub fn resolve(
                         detail: "duplicate TransferLink for the same out_event".into(),
                     });
                 } else {
+                    let mut link_ok = true;
                     if let TransferTarget::InEvent(in_id) = &tl.in_event_or_wallet {
-                        consumed_ins.insert(in_id.clone());
+                        if consumed_ins.contains(in_id) {
+                            // M-3: two distinct TransferLinks name the same in-event → conflict.
+                            blockers.push(Blocker {
+                                kind: BlockerKind::DecisionConflict,
+                                event: Some(d.id.clone()),
+                                detail: "duplicate TransferLink targeting the same in_event".into(),
+                            });
+                            link_ok = false;
+                        } else if by_id.get(in_id).and_then(|e| e.wallet.as_ref()).is_none() {
+                            // I-1: linked in-event has no resolvable destination wallet → hard blocker.
+                            // Do NOT add to consumed_ins so the in-event is NOT silently Skipped.
+                            blockers.push(Blocker {
+                                kind: BlockerKind::DecisionConflict,
+                                event: Some(d.id.clone()),
+                                detail:
+                                    "TransferLink in-event has no resolvable destination wallet"
+                                        .into(),
+                            });
+                            link_ok = false;
+                        } else {
+                            consumed_ins.insert(in_id.clone());
+                        }
                     }
-                    links.insert(tl.out_event.clone(), tl.in_event_or_wallet.clone());
+                    if link_ok {
+                        links.insert(tl.out_event.clone(), tl.in_event_or_wallet.clone());
+                    }
                 }
             }
             EventPayload::ClassifyInbound(ci) => {
