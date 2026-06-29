@@ -74,3 +74,24 @@ fn verify_surfaces_hard_blocker_and_signals_nonzero_exit() {
         "unknown_basis_inbounds counter reflects the hard blocker count"
     );
 }
+
+#[test]
+fn config_set_fee_treatment_b_persists_and_affects_projection_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    let before = cmd::admin::show_config(&vault, &pp()).unwrap();
+    assert_eq!(before.fee_treatment, btctax_core::FeeTreatment::TreatmentC); // default (c)
+
+    let after =
+        cmd::admin::set_config(&vault, &pp(), Some(btctax_core::FeeTreatment::TreatmentB)).unwrap();
+    assert_eq!(after.fee_treatment, btctax_core::FeeTreatment::TreatmentB);
+
+    // Reopen: persisted across sessions; projection picks it up.
+    let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+    assert_eq!(
+        s.config().unwrap().fee_treatment,
+        btctax_core::FeeTreatment::TreatmentB
+    );
+}
