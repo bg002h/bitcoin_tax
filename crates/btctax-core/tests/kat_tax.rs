@@ -995,3 +995,195 @@ fn duplicate_reclassify_outflow_same_target_is_decision_conflict() {
     // No double-processing: only one removal, not two.
     assert!(st.disposals.is_empty());
 }
+
+// ── Task 11: self-transfer network fee (TP8) — default (c) and config (b) ──────────────────────
+
+fn cfg_b() -> ProjectionConfig {
+    ProjectionConfig {
+        self_transfer_fee: btctax_core::project::FeeTreatment::TreatmentB,
+        ..ProjectionConfig::default()
+    }
+}
+
+/// TP8 default (c): fee-sats are NON-TAXABLE; their basis is re-homed onto the surviving relocated lot
+/// so the destination holds the FULL $60.00 basis (C1) while holding only 99,800 principal sats.
+#[test]
+fn self_transfer_fee_default_c_is_non_taxable() {
+    let cold = WalletId::SelfCustody {
+        label: "cold".into(),
+    };
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2025-04-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 99_800,
+            fee_sat: Some(200),
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let in_ev = LedgerEvent {
+        id: EventId::import(Source::Swan, SourceRef::new("IN")),
+        utc_timestamp: datetime!(2025-04-01 01:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(cold.clone()),
+        payload: EventPayload::TransferIn(TransferIn {
+            sat: 99_800,
+            src_addr: None,
+            txid: None,
+        }),
+    };
+    let link = dec_ev(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        EventPayload::TransferLink(TransferLink {
+            out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            in_event_or_wallet: TransferTarget::InEvent(EventId::import(
+                Source::Swan,
+                SourceRef::new("IN"),
+            )),
+        }),
+    );
+    let st = project(
+        &[buy, out, in_ev, link],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(st.disposals.is_empty()); // (c): no recognition
+    assert_eq!(st.holdings_by_wallet[&cold], 99_800); // 100_000 − 200 fee
+                                                      // C1: the destination lot carries the FULL $60.00 basis (the 200 fee-sats' $0.12 re-homed, NOT dropped to $59.88).
+    assert_eq!(st.lots.len(), 1);
+    assert_eq!(st.lots[0].wallet, cold);
+    assert_eq!(st.lots[0].remaining_sat, 99_800);
+    assert_eq!(st.lots[0].usd_basis, dec!(60.00));
+    assert_eq!(st.lots[0].basis_source, BasisSource::CarriedFromTransfer);
+    assert_eq!(st.stats.fee_sats_consumed, 200); // FR9: fee-sats' sole conservation home
+}
+
+/// Gift/donation fee BY ANALOGY (§7.3): under (c) the fee-sats' basis is re-homed onto the removal leg,
+/// so the donee's carried-over basis is the FULL $60.00 (not $59.88). C1 analogue.
+#[test]
+fn gift_out_fee_default_c_carries_full_basis_onto_the_removal() {
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2026-06-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 99_800,
+            fee_sat: Some(200),
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl = dec_ev(
+        1,
+        datetime!(2026-06-15 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::GiftOut,
+            principal_proceeds_or_fmv: dec!(150.00),
+            fee_usd: None,
+        }),
+    );
+    let st = project(
+        &[buy, out, recl],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(st.disposals.is_empty()); // (c): non-recognition on the fee
+    assert_eq!(st.removals.len(), 1);
+    let removal_basis: rust_decimal::Decimal = st.removals[0].legs.iter().map(|l| l.basis).sum();
+    let removal_sat: i64 = st.removals[0].legs.iter().map(|l| l.sat).sum();
+    assert_eq!(removal_sat, 99_800); // principal only; fee burned
+    assert_eq!(removal_basis, dec!(60.00)); // FULL basis carries (200 fee-sats' $0.12 re-homed, not dropped)
+    assert_eq!(st.stats.fee_sats_consumed, 200);
+}
+
+/// TP8 config (b): fee-sats ARE a taxable mini-disposition — a recognition record with `fee_mini_disposition=true`.
+/// CONTRAST with (c): the fee basis rides the mini-disposition, so the destination lot is $59.88 NOT $60.00.
+#[test]
+fn self_transfer_fee_config_b_is_a_mini_disposition_recognition_record() {
+    let mut prices = StaticPrices::default();
+    prices
+        .0
+        .insert(time::macros::date!(2025 - 04 - 01), dec!(50000.00));
+    let cold = WalletId::SelfCustody {
+        label: "cold".into(),
+    };
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2025-04-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 99_800,
+            fee_sat: Some(200),
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let in_ev = LedgerEvent {
+        id: EventId::import(Source::Swan, SourceRef::new("IN")),
+        utc_timestamp: datetime!(2025-04-01 01:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(cold.clone()),
+        payload: EventPayload::TransferIn(TransferIn {
+            sat: 99_800,
+            src_addr: None,
+            txid: None,
+        }),
+    };
+    let link = dec_ev(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        EventPayload::TransferLink(TransferLink {
+            out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            in_event_or_wallet: TransferTarget::InEvent(EventId::import(
+                Source::Swan,
+                SourceRef::new("IN"),
+            )),
+        }),
+    );
+    let st = project(&[buy, out, in_ev, link], &prices, &cfg_b());
+    let mini: Vec<_> = st
+        .disposals
+        .iter()
+        .filter(|d| d.fee_mini_disposition)
+        .collect();
+    assert_eq!(mini.len(), 1); // recognition record for the 200 fee-sats
+    assert_eq!(st.holdings_by_wallet[&cold], 99_800);
+    // (b) CONTRAST with (c): the fee basis rides the mini-disposition, so the destination lot is the
+    // principal-only basis $59.88 (NOT re-homed). The mini-disposition is excluded from FR9 Σdisposed.
+    assert_eq!(
+        st.lots.iter().find(|l| l.wallet == cold).unwrap().usd_basis,
+        dec!(59.88)
+    );
+    assert_eq!(st.stats.fee_sats_consumed, 200);
+}

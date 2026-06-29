@@ -1,14 +1,14 @@
 use crate::conventions::{is_long_term, round_cents, split_pro_rata, Sat, TaxDate, Usd};
-use crate::event::BasisSource;
+use crate::event::{BasisSource, DisposeKind};
 use crate::identity::{EventId, LotId};
 use crate::price::{fmv_of, PriceProvider};
-use crate::project::pools::{pool_key, Consumed, PoolSet};
+use crate::project::pools::{pool_key, Consumed, PoolKey, PoolSet};
 use crate::project::resolve::{sort_canonical, Op, Resolution};
 use crate::state::{
     BlockerKind, Disposal, DisposalLeg, FoldStats, GiftZone, IncomeRecord, LedgerState, Lot,
     PendingLeg, PendingTransfer, Removal, RemovalKind, RemovalLeg, Term,
 };
-use crate::ProjectionConfig;
+use crate::{FeeTreatment, ProjectionConfig};
 use std::collections::BTreeMap;
 
 /// TP4 term for a consumed fragment given the disposition date (gain side / no-dual uses gain_hp_start).
@@ -143,10 +143,95 @@ fn make_removal_legs(
     (legs, donor)
 }
 
+/// Carried basis of the burned fee-sats, to be RE-HOMED onto a surviving destination lot / removal leg
+/// under TP8 (c) so the FULL basis carries (C1). Under (b) this is empty (basis rode the mini-disposition).
+#[derive(Default)]
+struct FeeCarry {
+    gain_basis: Usd,
+    loss_basis: Option<Usd>,
+}
+
+impl FeeCarry {
+    /// Re-home the fee-sat basis onto the surviving destination lot (C1: full basis carries).
+    /// m1: when `lot.dual_loss_basis` is None but carry has `loss_basis`, promote it (don't drop silently).
+    fn rehome_onto_lot(&self, lot: &mut Lot) {
+        lot.usd_basis += self.gain_basis;
+        if let Some(l) = self.loss_basis {
+            match lot.dual_loss_basis.as_mut() {
+                Some(dl) => *dl += l,
+                // m1: fee originates on a dual-basis lot but the survivor is non-dual — promote the loss_basis.
+                None => lot.dual_loss_basis = Some(l),
+            }
+        }
+    }
+
+    /// Re-home the fee-sat gain basis onto the last removal leg (C1: full basis carries to donee).
+    /// Note: `loss_basis` is a donor's private tax attribute and does not carry onto removal legs.
+    fn rehome_onto_removal_leg(&self, leg: &mut RemovalLeg) {
+        leg.basis += self.gain_basis;
+    }
+}
+
+/// Consume `fee_sat` FIFO from the source pool, record them in the FR9 fee-sat home, and (per config)
+/// either return their carried basis for re-homing (c) or emit a mini-disposition recognition record (b).
+/// §7.1 totality: a fee shortfall raises `uncovered_disposal`, never panics.
+#[allow(clippy::too_many_arguments)]
+fn consume_fee(
+    pools: &mut PoolSet,
+    key: &PoolKey,
+    fee_sat: Sat,
+    config: &ProjectionConfig,
+    prices: &dyn PriceProvider,
+    date: TaxDate,
+    stats: &mut FoldStats,
+    st: &mut LedgerState,
+    ev: &EventId,
+) -> FeeCarry {
+    if fee_sat <= 0 {
+        return FeeCarry::default();
+    }
+    let (consumed, shortfall) = pools.consume_fifo(key, fee_sat);
+    if shortfall > 0 {
+        st.add_blocker(
+            BlockerKind::UncoveredDisposal,
+            Some(ev.clone()),
+            format!("self-transfer/gift fee short by {shortfall} sat"),
+        );
+    }
+    stats.fee_sats_consumed += consumed.iter().map(|c| c.sat).sum::<Sat>(); // sole FR9 home
+    match config.self_transfer_fee {
+        FeeTreatment::TreatmentC => {
+            // Non-taxable: return the fee-sat basis for re-homing onto the survivor (C1: full basis carries).
+            let gain_basis: Usd = consumed.iter().map(|c| c.gain_basis).sum();
+            let has_loss = consumed.iter().any(|c| c.loss_basis.is_some());
+            let loss_basis = has_loss.then(|| consumed.iter().filter_map(|c| c.loss_basis).sum());
+            FeeCarry {
+                gain_basis,
+                loss_basis,
+            }
+        }
+        FeeTreatment::TreatmentB => {
+            // mini-disposition recognition record; proceeds = FMV(fee_sat); basis rides it (NOT re-homed).
+            if !consumed.is_empty() {
+                let net = fmv_of(prices, date, fee_sat).unwrap_or(Usd::ZERO);
+                let legs = make_disposal_legs(&consumed, net, date, st, ev);
+                st.disposals.push(Disposal {
+                    event: ev.clone(),
+                    kind: DisposeKind::Spend,
+                    disposed_at: date,
+                    legs,
+                    fee_mini_disposition: true,
+                });
+            }
+            FeeCarry::default()
+        }
+    }
+}
+
 pub fn fold(
     mut res: Resolution,
     prices: &dyn PriceProvider,
-    _config: &ProjectionConfig,
+    config: &ProjectionConfig,
 ) -> LedgerState {
     sort_canonical(&mut res.timeline);
     let mut st = LedgerState {
@@ -327,11 +412,7 @@ pub fn fold(
                     "unmatched transfer out",
                 );
             }
-            Op::SelfTransfer {
-                sat,
-                fee_sat: _,
-                dest,
-            } => {
+            Op::SelfTransfer { sat, fee_sat, dest } => {
                 let wallet = match &eff.wallet {
                     Some(w) => w.clone(),
                     None => {
@@ -373,8 +454,31 @@ pub fn fold(
                         basis_pending: c.basis_pending,
                     });
                 }
-                // Task 11: fee handling (TP8 (c) basis re-home / (b) mini-disposition) slots in here,
-                // between building `relocated` and pushing to the destination pool.
+                // Task 11: fee handling — consume fee_sat FIFO from source pool AFTER principal (FIFO order).
+                // (c) default: returns FeeCarry to re-home onto relocated.last(), so FULL basis carries (C1).
+                // (b) config:  emits mini-disposition; returns empty carry; destination lot stays at principal basis.
+                let carry = consume_fee(
+                    &mut pools,
+                    &key,
+                    fee_sat.unwrap_or(0),
+                    config,
+                    prices,
+                    date,
+                    &mut stats,
+                    &mut st,
+                    &eff.id,
+                );
+                if let Some(last) = relocated.last_mut() {
+                    carry.rehome_onto_lot(last);
+                } else if carry.gain_basis > Usd::ZERO {
+                    // m3: degenerate guard — no surviving lot to re-home onto (principal == 0).
+                    // Unreachable for a real TransferLink (always moves principal > 0), but never silent.
+                    st.add_blocker(
+                        BlockerKind::UncoveredDisposal,
+                        Some(eff.id.clone()),
+                        "fee carry has no surviving lot to re-home onto (principal == 0)",
+                    );
+                }
                 let dest_key = pool_key(date, dest);
                 for lot in relocated {
                     pools.push_lot(dest_key.clone(), lot);
@@ -523,7 +627,9 @@ pub fn fold(
                 pools.new_origin_lot(pool_key(date, &wallet), lot);
                 stats.sigma_in += *sat; // classified GiftReceived is externally-sourced (FR9)
             }
-            Op::GiftOut { sat, fmv, .. } => {
+            Op::GiftOut {
+                sat, fmv, fee_sat, ..
+            } => {
                 // TP10: gift outbound → Removal with zero recognized gain; no Disposal.
                 let wallet = match &eff.wallet {
                     Some(w) => w.clone(),
@@ -546,9 +652,32 @@ pub fn fold(
                     );
                 }
                 if !consumed.is_empty() {
-                    let (legs, donor_acquired_at) =
+                    let (mut legs, donor_acquired_at) =
                         make_removal_legs(&consumed, *fmv, date, &mut st, &eff.id);
-                    // Task 11: fee step (TP8 (c) fee-sat basis carry) slots in here between legs and push.
+                    // Task 11: fee step — consume fee_sat FIFO from source pool AFTER principal.
+                    // (c) default: re-home carry onto last removal leg so donee carries FULL basis (C1).
+                    // (b) config:  emits mini-disposition; empty carry; donee gets principal-only basis.
+                    let carry = consume_fee(
+                        &mut pools,
+                        &key,
+                        fee_sat.unwrap_or(0),
+                        config,
+                        prices,
+                        date,
+                        &mut stats,
+                        &mut st,
+                        &eff.id,
+                    );
+                    if let Some(last) = legs.last_mut() {
+                        carry.rehome_onto_removal_leg(last);
+                    } else if carry.gain_basis > Usd::ZERO {
+                        // m3: degenerate guard (unreachable for real gifts, which always move principal > 0).
+                        st.add_blocker(
+                            BlockerKind::UncoveredDisposal,
+                            Some(eff.id.clone()),
+                            "fee carry has no surviving removal leg to re-home onto (principal == 0)",
+                        );
+                    }
                     st.removals.push(Removal {
                         event: eff.id.clone(),
                         kind: RemovalKind::Gift,
@@ -563,6 +692,7 @@ pub fn fold(
                 sat,
                 fmv,
                 appraisal_required,
+                fee_sat,
                 ..
             } => {
                 // TP10: donation outbound → Removal with zero recognized gain; no Disposal.
@@ -587,9 +717,32 @@ pub fn fold(
                     );
                 }
                 if !consumed.is_empty() {
-                    let (legs, donor_acquired_at) =
+                    let (mut legs, donor_acquired_at) =
                         make_removal_legs(&consumed, *fmv, date, &mut st, &eff.id);
-                    // Task 11: fee step (TP8 (c) fee-sat basis carry) slots in here between legs and push.
+                    // Task 11: fee step — consume fee_sat FIFO from source pool AFTER principal.
+                    // (c) default: re-home carry onto last removal leg so donee carries FULL basis (C1).
+                    // (b) config:  emits mini-disposition; empty carry; donee gets principal-only basis.
+                    let carry = consume_fee(
+                        &mut pools,
+                        &key,
+                        fee_sat.unwrap_or(0),
+                        config,
+                        prices,
+                        date,
+                        &mut stats,
+                        &mut st,
+                        &eff.id,
+                    );
+                    if let Some(last) = legs.last_mut() {
+                        carry.rehome_onto_removal_leg(last);
+                    } else if carry.gain_basis > Usd::ZERO {
+                        // m3: degenerate guard (unreachable for real donations, which always move principal > 0).
+                        st.add_blocker(
+                            BlockerKind::UncoveredDisposal,
+                            Some(eff.id.clone()),
+                            "fee carry has no surviving removal leg to re-home onto (principal == 0)",
+                        );
+                    }
                     st.removals.push(Removal {
                         event: eff.id.clone(),
                         kind: RemovalKind::Donation,
