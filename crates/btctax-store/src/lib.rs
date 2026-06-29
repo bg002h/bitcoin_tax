@@ -5,6 +5,7 @@ pub mod atomic;
 pub mod blob;
 pub mod crypto;
 pub mod lock;
+pub mod memlock;
 pub mod paths;
 pub mod sqlite_io;
 
