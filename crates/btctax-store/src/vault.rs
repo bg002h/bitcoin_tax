@@ -11,6 +11,50 @@ use rusqlite::Connection;
 use sequoia_openpgp as openpgp;
 use std::path::{Path, PathBuf};
 
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+/// Write `data` to `path` with owner-only permissions (mode 0o600 on Unix).
+/// On non-Unix platforms the file inherits the user-profile directory ACL.
+#[cfg(unix)]
+fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), StoreError> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .and_then(|mut f| f.write_all(data))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), StoreError> {
+    std::fs::write(path, data)?;
+    Ok(())
+}
+
+/// Create `path` (and all parents) with owner-only permissions (mode 0o700 on Unix).
+/// On non-Unix platforms uses `create_dir_all`.
+#[cfg(unix)]
+fn mkdir_owner_only(path: &Path) -> Result<(), StoreError> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn mkdir_owner_only(path: &Path) -> Result<(), StoreError> {
+    std::fs::create_dir_all(path)?;
+    Ok(())
+}
+
+// ── Vault ─────────────────────────────────────────────────────────────────────
+
 pub struct Vault {
     path: PathBuf,
     cert: openpgp::Cert,
@@ -104,20 +148,28 @@ impl Vault {
         atomic::atomic_write(&self.path, &ct)
     }
     pub fn export_snapshot(&self, out_dir: &Path) -> Result<PathBuf, StoreError> {
-        std::fs::create_dir_all(out_dir)?;
+        // [MEDIUM security] restricted directory + owner-only file (plaintext tax data)
+        mkdir_owner_only(out_dir)?;
         let image = sqlite_io::db_to_bytes(&self.conn)?;
         let out = out_dir.join("snapshot.sqlite");
-        std::fs::write(&out, &image)?;
+        write_owner_only(&out, &image)?;
         Ok(out)
     }
     pub fn backup_key(&self, out_path: &Path) -> Result<(), StoreError> {
+        // N-1: ensure parent directory exists before writing (restricted on Unix)
+        if let Some(parent) = out_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                mkdir_owner_only(parent)?;
+            }
+        }
+        // [HIGH security] write S2K-encrypted private key owner-only (mode 0o600 on Unix)
         let armored = self
             .cert
             .as_tsk()
             .armored()
             .to_vec()
             .map_err(StoreError::Crypto)?;
-        std::fs::write(out_path, &armored)?;
+        write_owner_only(out_path, &armored)?;
         Ok(())
     }
 }

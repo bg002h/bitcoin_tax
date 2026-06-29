@@ -124,13 +124,33 @@ fn export_snapshot_is_readable_sqlite() {
         .execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES(9);")
         .unwrap();
     v.save().unwrap();
-    let snap = v.export_snapshot(d.path()).unwrap();
+    let out_dir = d.path().join("snap_out");
+    let snap = v.export_snapshot(&out_dir).unwrap();
     let c = rusqlite::Connection::open(&snap).unwrap();
     assert_eq!(
         c.query_row("SELECT x FROM t", [], |r| r.get::<_, i64>(0))
             .unwrap(),
         9
     );
+    // Verify owner-only permissions on Unix (dir 0o700, file 0o600)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let dir_mode = std::fs::metadata(&out_dir).unwrap().mode();
+        assert_eq!(
+            dir_mode & 0o777,
+            0o700,
+            "snapshot dir must be owner-only (0o700), got {:04o}",
+            dir_mode & 0o777
+        );
+        let file_mode = std::fs::metadata(&snap).unwrap().mode();
+        assert_eq!(
+            file_mode & 0o777,
+            0o600,
+            "snapshot file must be owner-only (0o600), got {:04o}",
+            file_mode & 0o777
+        );
+    }
 }
 
 #[test]
@@ -141,6 +161,39 @@ fn backup_key_is_armored_and_parseable() {
     let kp = d.path().join("backup.asc");
     v.backup_key(&kp).unwrap();
     let bytes = std::fs::read(&kp).unwrap();
-    assert!(bytes.starts_with(b"-----BEGIN PGP")); // armored
-    assert!(sequoia_openpgp::Cert::from_bytes(&bytes).is_ok());
+
+    // M-1: full armored header (not just a prefix)
+    assert!(
+        bytes.starts_with(b"-----BEGIN PGP PRIVATE KEY BLOCK-----"),
+        "backup must open with the PGP private-key armor header"
+    );
+
+    // I-1: parse and assert the key is STILL S2K-encrypted
+    let cert = sequoia_openpgp::Cert::from_bytes(&bytes).unwrap();
+    // (a) the backup must be a TSK (carries secret key material)
+    assert!(
+        cert.is_tsk(),
+        "backed-up key must contain secret key material"
+    );
+    // (b) every secret-bearing key must have ENCRYPTED (passphrase-protected) secrets —
+    //     has_unencrypted_secret() == false means the secret is not in plaintext
+    for ka in cert.keys().secret() {
+        assert!(
+            !ka.key().has_unencrypted_secret(),
+            "backed-up key material must be S2K-encrypted, not plaintext"
+        );
+    }
+
+    // Verify owner-only file permissions on Unix (mode 0o600)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let mode = std::fs::metadata(&kp).unwrap().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "backup file must be owner-only (0o600), got {:04o}",
+            mode & 0o777
+        );
+    }
 }
