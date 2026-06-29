@@ -57,25 +57,27 @@ pub struct ReadOpts {
 pub fn read_csv(
     path: &Path,
     role: TableRole,
+    adapter: &'static str,
     opts: &ReadOpts,
 ) -> Result<Vec<RawRow>, AdapterError> {
     let text = std::fs::read_to_string(path).map_err(|e| AdapterError::Io {
         path: path.display().to_string(),
         source: e,
     })?;
-    read_csv_str(&text, role, opts).map_err(|e| with_path(e, path))
+    read_csv_str(&text, role, adapter, opts).map_err(|e| with_path(e, path))
 }
 
 /// CSV-from-string (used by `read_csv` and tests).
 pub fn read_csv_str(
     text: &str,
     role: TableRole,
+    adapter: &'static str,
     opts: &ReadOpts,
 ) -> Result<Vec<RawRow>, AdapterError> {
     let start = if !opts.header_signature.is_empty() {
         text.lines()
             .position(|l| opts.header_signature.iter().all(|t| l.contains(t)))
-            .unwrap_or(0)
+            .ok_or(AdapterError::HeaderNotFound { adapter })?
     } else {
         opts.skip_preamble_lines
     };
@@ -133,6 +135,7 @@ pub fn read_xlsx(path: &Path, role: TableRole) -> Result<Vec<RawRow>, AdapterErr
 pub fn read_table(
     path: &Path,
     role: TableRole,
+    adapter: &'static str,
     opts: &ReadOpts,
 ) -> Result<Vec<RawRow>, AdapterError> {
     match path
@@ -142,7 +145,7 @@ pub fn read_table(
         .as_deref()
     {
         Some("xlsx") | Some("xls") => read_xlsx(path, role),
-        _ => read_csv(path, role, opts),
+        _ => read_csv(path, role, adapter, opts),
     }
 }
 
@@ -240,7 +243,7 @@ mod tests {
             header_signature: &["ID", "Total"],
             ..Default::default()
         };
-        let rows = read_csv_str(text, TableRole::Single, &opts).unwrap();
+        let rows = read_csv_str(text, TableRole::Single, "test", &opts).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].get("t", "ID").unwrap(), "X1");
         assert_eq!(rows[0].get("t", "Total").unwrap(), "100.00");
@@ -249,7 +252,13 @@ mod tests {
 
     #[test]
     fn missing_column_is_a_typed_error() {
-        let rows = read_csv_str("A,B\n1,2\n", TableRole::Single, &ReadOpts::default()).unwrap();
+        let rows = read_csv_str(
+            "A,B\n1,2\n",
+            TableRole::Single,
+            "test",
+            &ReadOpts::default(),
+        )
+        .unwrap();
         let e = rows[0].get("t", "C").unwrap_err();
         assert!(matches!(e, crate::AdapterError::MissingColumn { .. }));
         assert_eq!(rows[0].opt("B"), Some("2"));
@@ -263,9 +272,23 @@ mod tests {
             skip_preamble_lines: 2,
             ..Default::default()
         };
-        let rows = read_csv_str(text, TableRole::Single, &opts).unwrap();
+        let rows = read_csv_str(text, TableRole::Single, "test", &opts).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].get("t", "A").unwrap(), "1");
+    }
+
+    #[test]
+    fn nonmatching_header_signature_returns_error() {
+        // Header signature specified but no line contains all the tokens.
+        let text = "ID,Amount\n1,100\n2,200\n";
+        let opts = ReadOpts {
+            header_signature: &["NonExistentToken"],
+            ..Default::default()
+        };
+        let err = read_csv_str(text, TableRole::Single, "test", &opts).unwrap_err();
+        assert!(
+            matches!(err, crate::AdapterError::HeaderNotFound { adapter } if adapter == "test")
+        );
     }
 
     /// Gemini exports Date/Time as numeric Excel serials in .xlsx files.

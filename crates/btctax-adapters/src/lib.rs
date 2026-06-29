@@ -63,6 +63,8 @@ pub enum AdapterError {
         "unrecognized Swan file role (header did not match trades/transfers/withdrawals): {path}"
     )]
     UnrecognizedSwanRole { path: String },
+    #[error("{adapter}: header signature not found in file")]
+    HeaderNotFound { adapter: &'static str },
     #[error("price dataset: {0}")]
     PriceDataset(String),
 }
