@@ -77,6 +77,7 @@ mod tests {
         assert_eq!(round_cents(dec!(1.005)), dec!(1.00)); // ties-to-even: 0 is even
         assert_eq!(round_cents(dec!(1.015)), dec!(1.02)); // ties-to-even: 2 is even
         assert_eq!(round_cents(dec!(2.675)), dec!(2.68));
+        assert_eq!(round_cents(dec!(1.234)), dec!(1.23)); // non-tie case
     }
 
     #[test]
@@ -85,6 +86,33 @@ mod tests {
         let (part, rest) = split_pro_rata(dec!(100.00), 333, 1000);
         assert_eq!(part + rest, dec!(100.00));
         assert_eq!(part, dec!(33.30)); // 100 * 333/1000 = 33.3 -> 33.30
+    }
+
+    #[test]
+    fn split_pro_rata_edges() {
+        // Edge case: part_sat == 0 → (ZERO, total), conserves exactly
+        let (part, rest) = split_pro_rata(dec!(10.00), 0, 1000);
+        assert_eq!(part, Usd::ZERO);
+        assert_eq!(rest, dec!(10.00));
+        assert_eq!(part + rest, dec!(10.00));
+
+        // Edge case: part_sat == whole_sat → (total, ZERO), conserves exactly
+        let (part, rest) = split_pro_rata(dec!(10.00), 500, 500);
+        assert_eq!(part, dec!(10.00));
+        assert_eq!(rest, Usd::ZERO);
+        assert_eq!(part + rest, dec!(10.00));
+
+        // Edge case: part_sat > whole_sat → (total, ZERO), conserves exactly
+        let (part, rest) = split_pro_rata(dec!(10.00), 600, 500);
+        assert_eq!(part, dec!(10.00));
+        assert_eq!(rest, Usd::ZERO);
+        assert_eq!(part + rest, dec!(10.00));
+
+        // Edge case: whole_sat == 0 → (ZERO, total), conserves exactly
+        let (part, rest) = split_pro_rata(dec!(10.00), 100, 0);
+        assert_eq!(part, Usd::ZERO);
+        assert_eq!(rest, dec!(10.00));
+        assert_eq!(part + rest, dec!(10.00));
     }
 
     #[test]
