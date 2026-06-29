@@ -1,11 +1,69 @@
-use crate::conventions::Sat;
-use crate::identity::LotId;
+use crate::conventions::{is_long_term, round_cents, split_pro_rata, Sat, TaxDate, Usd};
+use crate::identity::{EventId, LotId};
 use crate::price::PriceProvider;
-use crate::project::pools::{pool_key, PoolSet};
+use crate::project::pools::{pool_key, Consumed, PoolSet};
 use crate::project::resolve::{sort_canonical, Op, Resolution};
-use crate::state::{BlockerKind, FoldStats, LedgerState, Lot};
+use crate::state::{
+    BlockerKind, Disposal, DisposalLeg, FoldStats, GiftZone, LedgerState, Lot, Term,
+};
 use crate::ProjectionConfig;
 use std::collections::BTreeMap;
+
+/// TP4 term for a consumed fragment given the disposition date (gain side / no-dual uses gain_hp_start).
+fn term_for(start: TaxDate, disposed: TaxDate) -> Term {
+    if is_long_term(start, disposed) {
+        Term::LongTerm
+    } else {
+        Term::ShortTerm
+    }
+}
+
+/// Build disposal legs from consumed fragments and a TOTAL net proceeds amount, allocated pro-rata by sat
+/// (remainder-takes-the-rest so Σproceeds is exact). Dual-basis gift logic (TP11) is added in Task 10;
+/// here every leg is the simple `gift_zone = None` path.
+fn make_disposal_legs(
+    consumed: &[Consumed],
+    total_net_proceeds: Usd,
+    disposed: TaxDate,
+    st: &mut LedgerState,
+    ev: &EventId,
+) -> Vec<DisposalLeg> {
+    let total_sat: i64 = consumed.iter().map(|c| c.sat).sum();
+    let mut legs = Vec::new();
+    let mut allocated = Usd::ZERO;
+    for (i, c) in consumed.iter().enumerate() {
+        let proceeds = if i + 1 == consumed.len() {
+            total_net_proceeds - allocated
+        } else {
+            let (p, _) = split_pro_rata(total_net_proceeds, c.sat, total_sat);
+            allocated += p;
+            p
+        };
+        if c.basis_pending {
+            // FMV-missing income / unknown-basis gift in this lot's history → gate the gain (§7.3).
+            st.add_blocker(
+                BlockerKind::FmvMissing,
+                Some(ev.clone()),
+                "disposal consumes a basis-pending lot",
+            );
+        }
+        // Task 10 replaces this block with the four-zone dual-basis computation:
+        let basis = c.gain_basis;
+        let gain = proceeds - basis;
+        let term = term_for(c.gain_hp_start, disposed);
+        legs.push(DisposalLeg {
+            lot_id: c.lot_id.clone(),
+            sat: c.sat,
+            proceeds,
+            basis,
+            gain: round_cents(gain),
+            term,
+            basis_source: c.basis_source,
+            gift_zone: None::<GiftZone>,
+        });
+    }
+    legs
+}
 
 pub fn fold(
     mut res: Resolution,
@@ -52,6 +110,44 @@ pub fn fold(
                 };
                 pools.new_origin_lot(pool_key(date, &wallet), lot);
                 stats.sigma_in += a.sat; // FR9 Σin: externally-sourced acquisition
+            }
+            Op::Dispose {
+                sat,
+                proceeds,
+                fee_usd,
+                kind,
+            } => {
+                let wallet = match &eff.wallet {
+                    Some(w) => w.clone(),
+                    None => {
+                        st.add_blocker(
+                            BlockerKind::UncoveredDisposal,
+                            Some(eff.id.clone()),
+                            "dispose without wallet",
+                        );
+                        continue;
+                    }
+                };
+                let key = pool_key(date, &wallet);
+                let (consumed, shortfall) = pools.consume_fifo(&key, *sat);
+                if shortfall > 0 {
+                    st.add_blocker(
+                        BlockerKind::UncoveredDisposal,
+                        Some(eff.id.clone()),
+                        format!("dispose short by {shortfall} sat"),
+                    );
+                }
+                if !consumed.is_empty() {
+                    let net = round_cents(*proceeds - *fee_usd); // TP2: disposition fee reduces proceeds
+                    let legs = make_disposal_legs(&consumed, net, date, &mut st, &eff.id);
+                    st.disposals.push(Disposal {
+                        event: eff.id.clone(),
+                        kind: *kind,
+                        disposed_at: date,
+                        legs,
+                        fee_mini_disposition: false,
+                    });
+                }
             }
             Op::Unclassified => {
                 st.add_blocker(

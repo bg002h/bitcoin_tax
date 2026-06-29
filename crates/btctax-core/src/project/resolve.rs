@@ -1,4 +1,4 @@
-use crate::conventions::{tax_date, TaxDate};
+use crate::conventions::{tax_date, Sat, TaxDate, Usd};
 use crate::event::*;
 use crate::identity::{EventId, SourceRef};
 use crate::price::PriceProvider;
@@ -11,7 +11,13 @@ use time::{OffsetDateTime, UtcOffset};
 #[derive(Debug, Clone)]
 pub enum Op {
     Acquire(Acquire),
-    // (Task 5) Dispose, (Task 6) Income, (Task 8) SelfTransfer/PendingOut/GiftReceived/IncomeInbound,
+    Dispose {
+        sat: Sat,
+        proceeds: Usd,
+        fee_usd: Usd,
+        kind: DisposeKind,
+    },
+    // (Task 6) Income, (Task 8) SelfTransfer/PendingOut/GiftReceived/IncomeInbound,
     // (Task 9) GiftOut/Donate, (Task 12) seeded — added as those tasks land.
     Unclassified,
     Skip, // e.g. a TransferIn consumed by a TransferLink; folds to nothing
@@ -66,8 +72,14 @@ pub fn resolve(
         };
         let op = match &ev.payload {
             EventPayload::Acquire(a) => Op::Acquire(a.clone()),
+            EventPayload::Dispose(d) => Op::Dispose {
+                sat: d.sat,
+                proceeds: d.usd_proceeds,
+                fee_usd: d.fee_usd,
+                kind: d.kind,
+            },
             EventPayload::Unclassified(_) => Op::Unclassified,
-            _ => Op::Skip, // other imported variants land in Tasks 5/6/8
+            _ => Op::Skip, // other imported variants land in Tasks 6/8
         };
         timeline.push(Eff {
             id: ev.id.clone(),
