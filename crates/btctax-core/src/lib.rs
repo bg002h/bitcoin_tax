@@ -5,7 +5,7 @@ pub mod event;
 pub mod identity;
 
 pub use conventions::{Sat, TaxDate, Usd};
-pub use event::{EventPayload, LedgerEvent};
+pub use event::*;
 pub use identity::{EventId, Fingerprint, LotId, Source, SourceRef, WalletId};
 
 #[derive(Debug, thiserror::Error)]

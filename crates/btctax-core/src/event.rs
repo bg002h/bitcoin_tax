@@ -247,6 +247,7 @@ mod tests {
     #[test]
     fn every_variant_serde_round_trips() {
         let payloads = vec![
+            // ---- imported (6 variants) ----
             EventPayload::Acquire(Acquire {
                 sat: 100_000,
                 usd_cost: dec!(60.00),
@@ -280,6 +281,91 @@ mod tests {
             EventPayload::Unclassified(Unclassified {
                 raw: "weird row".into(),
             }),
+            // ---- system (1 variant) ----
+            EventPayload::ImportConflict(ImportConflict {
+                target: EventId::import(Source::Coinbase, SourceRef::new("Y")),
+                new_payload: Box::new(EventPayload::Acquire(Acquire {
+                    sat: 50_000,
+                    usd_cost: dec!(30.00),
+                    fee_usd: dec!(0.75),
+                    basis_source: BasisSource::ComputedFromCost,
+                })),
+                new_fingerprint: Fingerprint::of_bytes(&[1u8; 32]),
+            }),
+            // ---- decision (9 variants) ----
+            EventPayload::TransferLink(TransferLink {
+                out_event: EventId::import(Source::Coinbase, SourceRef::new("Z")),
+                in_event_or_wallet: TransferTarget::Wallet(crate::identity::WalletId::Exchange {
+                    provider: "kraken".into(),
+                    account: "trading".into(),
+                }),
+            }),
+            EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("W")),
+                as_: OutflowClass::Dispose {
+                    kind: DisposeKind::Spend,
+                },
+                principal_proceeds_or_fmv: dec!(150.00),
+                fee_usd: Some(dec!(2.50)),
+            }),
+            EventPayload::ClassifyInbound(ClassifyInbound {
+                transfer_in_event: EventId::import(Source::Coinbase, SourceRef::new("V")),
+                as_: InboundClass::Income {
+                    kind: IncomeKind::Staking,
+                    fmv: Some(dec!(45.50)),
+                    business: true,
+                },
+            }),
+            EventPayload::ManualFmv(ManualFmv {
+                event: EventId::import(Source::Coinbase, SourceRef::new("U")),
+                usd_fmv: dec!(125.75),
+            }),
+            EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+                lots: vec![
+                    AllocLot {
+                        wallet: crate::identity::WalletId::Exchange {
+                            provider: "coinbase".into(),
+                            account: "cold".into(),
+                        },
+                        sat: 50_000,
+                        usd_basis: dec!(35.00),
+                        acquired_at: time::Date::from_calendar_date(2024, time::Month::January, 15)
+                            .unwrap(),
+                    },
+                    AllocLot {
+                        wallet: crate::identity::WalletId::Exchange {
+                            provider: "kraken".into(),
+                            account: "main".into(),
+                        },
+                        sat: 30_000,
+                        usd_basis: dec!(21.00),
+                        acquired_at: time::Date::from_calendar_date(2024, time::Month::February, 1)
+                            .unwrap(),
+                    },
+                ],
+                as_of_date: time::Date::from_calendar_date(2025, time::Month::January, 1).unwrap(),
+                method: AllocMethod::ProRata,
+                timely_allocation_attested: true,
+            }),
+            EventPayload::SupersedeImport(SupersedeImport {
+                conflict_event: EventId::import(Source::Coinbase, SourceRef::new("T")),
+            }),
+            EventPayload::RejectImport(RejectImport {
+                conflict_event: EventId::import(Source::Coinbase, SourceRef::new("S")),
+            }),
+            EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+                target_event_id: EventId::import(Source::Coinbase, SourceRef::new("R")),
+            }),
+            EventPayload::ClassifyRaw(ClassifyRaw {
+                target: EventId::import(Source::Coinbase, SourceRef::new("Q")),
+                as_: Box::new(EventPayload::Income(Income {
+                    sat: 100_000,
+                    usd_fmv: Some(dec!(65.00)),
+                    fmv_status: FmvStatus::ManualEntry,
+                    kind: IncomeKind::Mining,
+                    business: true,
+                })),
+            }),
         ];
         for p in payloads {
             let ev = sample(p);
@@ -299,5 +385,22 @@ mod tests {
         }));
         let json = serde_json::to_string(&ev).unwrap();
         assert!(json.contains("\"0.10\"")); // serde-str: exact, not a 0.1 float
+    }
+
+    #[test]
+    fn ledger_event_round_trips_with_non_standard_utc_offset() {
+        // Test with non-standard UtcOffset (not half-hour aligned) to pin timezone serde
+        let mut ev = sample(EventPayload::Acquire(Acquire {
+            sat: 75_000,
+            usd_cost: dec!(50.00),
+            fee_usd: dec!(0.25),
+            basis_source: BasisSource::FmvAtIncome,
+        }));
+        ev.original_tz = offset!(+05:45); // Nepal Standard Time, unusual offset
+
+        let json = serde_json::to_string(&ev).unwrap();
+        let back: LedgerEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(ev, back);
+        assert_eq!(back.original_tz, offset!(+05:45));
     }
 }
