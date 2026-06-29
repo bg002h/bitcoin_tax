@@ -5,8 +5,8 @@
 use crate::{CliError, Session};
 use btctax_core::persistence::append_decision;
 use btctax_core::{
-    ClassifyInbound, EventId, EventPayload, InboundClass, OutflowClass, ReclassifyOutflow,
-    TransferLink, TransferTarget, Usd,
+    ClassifyInbound, EventId, EventPayload, InboundClass, ManualFmv, OutflowClass,
+    ReclassifyOutflow, TransferLink, TransferTarget, Usd, VoidDecisionEvent,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -65,6 +65,40 @@ pub fn reclassify_outflow(
         fee_usd,
     });
     append_and_save(&mut session, payload, now)
+}
+
+/// FR3: set a manual FMV on an event (`ManualEntry`), clearing its `fmv_missing` blocker.
+pub fn set_fmv(
+    vault_path: &Path,
+    pp: &Passphrase,
+    event_ref: &str,
+    usd_fmv: Usd,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let event = parse_event_id(event_ref)?;
+    let mut session = Session::open(vault_path, pp)?;
+    append_and_save(
+        &mut session,
+        EventPayload::ManualFmv(ManualFmv { event, usd_fmv }),
+        now,
+    )
+}
+
+/// FR8: void a revocable decision. Voiding a non-revocable / effective-allocation target raises
+/// `decision_conflicts` in the projection (no effect) — the CLI only appends; the engine adjudicates.
+pub fn void(
+    vault_path: &Path,
+    pp: &Passphrase,
+    target_ref: &str,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let target_event_id = parse_event_id(target_ref)?;
+    let mut session = Session::open(vault_path, pp)?;
+    append_and_save(
+        &mut session,
+        EventPayload::VoidDecisionEvent(VoidDecisionEvent { target_event_id }),
+        now,
+    )
 }
 
 /// FR6/TP7: confirm a self-transfer. `target` is a destination `TransferIn` event (`--to-event`) or a

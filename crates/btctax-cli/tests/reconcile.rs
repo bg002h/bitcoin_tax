@@ -159,3 +159,53 @@ fn reclassify_outflow_to_donate_creates_a_removal_with_appraisal_flag() {
     assert_eq!(state.removals.len(), 1);
     assert!(state.removals[0].appraisal_required);
 }
+
+#[test]
+fn void_drops_a_revocable_decision() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, out_ref) = vault_with_pending(dir.path());
+    let link = cmd::reconcile::link_transfer(
+        &vault,
+        &pp(),
+        &out_ref,
+        TransferTarget::Wallet(btctax_cli::eventref::parse_wallet_id("self:cold").unwrap()),
+        now(),
+    )
+    .unwrap();
+
+    // Void the link by its decision eventref; the outflow returns to pending.
+    cmd::reconcile::void(&vault, &pp(), &link.canonical(), now()).unwrap();
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert_eq!(state.pending_reconciliation.len(), 1);
+}
+
+#[test]
+fn set_fmv_appends_a_manual_fmv_decision() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _out_ref) = vault_with_pending(dir.path());
+    // Target the Buy event (any event id parses); the decision is appended + persisted.
+    let target = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::Acquire(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+    let id = cmd::reconcile::set_fmv(
+        &vault,
+        &pp(),
+        &target,
+        btctax_cli::eventref::parse_usd_arg("123.45").unwrap(),
+        now(),
+    )
+    .unwrap();
+    let s = Session::open(&vault, &pp()).unwrap();
+    let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+    assert!(events
+        .iter()
+        .any(|e| e.id == id && matches!(e.payload, EventPayload::ManualFmv(_))));
+}
