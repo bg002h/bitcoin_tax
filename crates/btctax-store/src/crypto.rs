@@ -168,4 +168,21 @@ mod tests {
             Err(StoreError::WrongPassphrase)
         ));
     }
+
+    #[test]
+    fn corrupted_ciphertext_with_correct_pass_is_crypto_err_not_wrongpass() {
+        let pp = Passphrase::new("correct horse".into());
+        let cert = generate_cert(&pp).unwrap();
+        let mut ct = encrypt_to(&cert, b"payload").unwrap();
+        // Damage the ciphertext body by flipping bits
+        if !ct.is_empty() {
+            let i = ct.len() / 2;
+            ct[i] ^= 0xFF;
+        }
+        let err = decrypt_with(&cert, &pp, &ct).unwrap_err();
+        assert!(
+            matches!(err, StoreError::Crypto(_)),
+            "expected Crypto, got {err:?}"
+        );
+    }
 }
