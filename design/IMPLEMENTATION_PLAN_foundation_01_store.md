@@ -1,8 +1,8 @@
-# btctax-store (Encrypted Vault) Implementation Plan — Foundation Plan 1 of 4 (v2)
+# btctax-store (Encrypted Vault) Implementation Plan — Foundation Plan 1 of 4 (v3)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Revision:** v2 folds the round-1 plan review (`reviews/plan-foundation-01-store-round-1.md`): rusqlite `OwnedData`/`sqlite3_malloc64` FFI (C1), crash-safe copy-before-rename atomic write + `.bak` recovery (C2), `Encryptor2` (I1), shared-flag wrong-passphrase detection (I2), strongest-S2K pinned at keygen (I3), `create()` no-clobber guard (I4), append-not-replace temp/bak names (I5), and minors.
+**Revision:** v2 folded round-1 (rusqlite `OwnedData`/`sqlite3_malloc64` FFI C1; crash-safe copy-before-rename atomic write + `.bak` recovery C2; `Encryptor2` I1; shared-flag wrong-passphrase I2; `create()` no-clobber I4; append-not-replace paths I5). **v3 folds round-2 (`reviews/plan-foundation-01-store-round-2.md`):** honest S2K — Sequoia 1.21 has **no Argon2**, so the spike asserts/records the iterated-salted SHA-256 default (the spec's documented fallback; R3/§8/Important-1); `paths` made **public** (the `testing` module was unreachable from integration tests and its undefined `cfg` failed `clippy -D warnings`; Important-2); first-create crash cleanup + lock-first (Minor-1/Nit-1); `suffixed_key` folded into Task 4 (Minor-3); Drop wording (Minor-4); `db_from_bytes` OOM mislabel (Minor-5); `backup_key` plain write + `export_snapshot` parent-dir (Nit-2).
 
 **Goal:** Build `btctax-store`, the PGP-encrypted local vault that persists an opaque `[schema_version][SQLite image]` blob and exposes a live in-memory SQLite handle — durable (crash-safe atomic write), single-instance-safe (flock), and key/passphrase-protected — with no dependency on the domain model.
 
@@ -52,7 +52,7 @@ crates/btctax-store/
   - `fn save(&mut self) -> Result<(), StoreError>`
   - `fn export_snapshot(&self, out_dir: &Path) -> Result<PathBuf, StoreError>` (returns the written path)
   - `fn backup_key(&self, out_path: &Path) -> Result<(), StoreError>` (ASCII-armored TSK)
-  - `Drop`: releases the flock and drops the decrypted `SecretBuf`s (zeroized). *(SQLite's internal heap is not zeroized — R1.)*
+  - `Drop`: releases the flock. (The transient decrypt buffers were zeroized in `open`; the live data in SQLite's internal heap is **not** zeroized — R1.)
 
 ---
 
@@ -130,11 +130,25 @@ fn sequoia_roundtrip_with_shared_unlock_flag_and_strong_s2k() {
         .set_password(Some("hunter2".into()))
         .generate().unwrap();
 
-    // R3: inspect the S2K actually applied to the secret key. Record the variant in FOLLOWUPS.
-    // If it is not Argon2, Task 3 must re-protect the secret with Argon2id explicitly.
+    // R3: EXTRACT and ASSERT the S2K actually applied to the secret key (record in FOLLOWUPS).
+    // Sequoia 1.21 has no Argon2 S2K variant; the strongest available is iterated-salted SHA-256
+    // (the spec §8 "else high-work-factor iterated-salted" fallback). Confirm it is Iterated, not
+    // a weaker simple/salted-only S2K. (Confirm the exact accessor `Encrypted::s2k()` in the pinned ver.)
+    use openpgp::packet::key::SecretKeyMaterial;
+    use openpgp::crypto::S2K;
+    let mut saw_iterated = false;
     for ka in cert.keys().secret() {
-        eprintln!("secret-key S2K = {:?}", ka.key().secret()); // inspect; assert Argon2 if available
+        if let SecretKeyMaterial::Encrypted(e) = ka.key().secret() {
+            match e.s2k() {
+                S2K::Iterated { hash, hash_bytes, .. } => {
+                    eprintln!("secret-key S2K = Iterated{{hash={:?}, hash_bytes={}}}", hash, hash_bytes);
+                    saw_iterated = true;
+                }
+                other => panic!("weak S2K {:?}; pin a stronger one before proceeding", other),
+            }
+        }
     }
+    assert!(saw_iterated, "expected an encrypted secret key protected by an Iterated S2K");
 
     // encrypt (Encryptor2)
     let recips = cert.keys().with_policy(&p, None).supported()
@@ -206,7 +220,7 @@ fn rusqlite_serialize_deserialize_roundtrip_via_owneddata() {
 - [ ] **Step 5: Run the spike; pin exact symbols/S2K to the resolved versions**
 
 Run: `cargo test -p btctax-store --test smoke -- --nocapture`
-Expected: both PASS. If a symbol/arity differs (e.g., `Data::to_vec`, `OwnedData::from_raw_nonnull` signature, `decrypt_secret` name), fix to the compiler and **record the confirmed S2K variant** from the eprintln in FOLLOWUPS (R3). If the default S2K is not Argon2id, note that Task 3 must set it explicitly.
+Expected: both PASS. If a symbol/arity differs (e.g., `Data::to_vec`, `OwnedData::from_raw_nonnull` signature, `Encrypted::s2k()`, `decrypt_secret` name), fix to the compiler. **Record the confirmed S2K (Iterated, hash, hash_bytes) in FOLLOWUPS (R3)** and note that Argon2 is unavailable in 1.21, so the iterated-salted SHA-256 default is the strongest available via the supported API (spec §8 fallback). If a future Sequoia exposes Argon2 or a public S2K-work-factor setter, that is the upgrade path (FOLLOWUPS).
 
 - [ ] **Step 6: Commit**
 ```bash
@@ -292,7 +306,7 @@ pub fn db_from_bytes(image: &[u8]) -> Result<Connection, StoreError> {
     let owned = unsafe {
         let n = image.len();
         let p = rusqlite::ffi::sqlite3_malloc64(n as u64) as *mut u8;
-        if p.is_null() { return Err(StoreError::Corrupt("sqlite3_malloc64 failed".into())); }
+        if p.is_null() { return Err(StoreError::Io(std::io::Error::new(std::io::ErrorKind::OutOfMemory, "sqlite3_malloc64 failed"))); } // Minor-5: OOM, not corruption
         std::ptr::copy_nonoverlapping(image.as_ptr(), p, n);
         OwnedData::from_raw_nonnull(std::ptr::NonNull::new(p).unwrap(), n)
     };
@@ -346,8 +360,10 @@ impl Passphrase { pub fn new(s: String) -> Self { Self(s) } fn pw(&self) -> open
 impl Drop for Passphrase { fn drop(&mut self){ self.0.zeroize(); } }
 
 pub fn generate_cert(pp: &Passphrase) -> Result<openpgp::Cert, StoreError> {
-    // NOTE: if Task-0 confirmed set_password's default S2K is weaker than Argon2id,
-    // re-protect each secret key here via Key::encrypt_secret with an Argon2id S2K.
+    // S2K: Sequoia 1.21 exposes no Argon2 and no public S2K-work-factor setter on
+    // set_password/encrypt_secret; set_password uses the library default, which the Task-0
+    // spike asserts is an S2K::Iterated (iterated-salted SHA-256) — the strongest available
+    // via the supported API (spec §8 "else high-work-factor iterated-salted" fallback / R3).
     let (cert, _rev) = CertBuilder::new()
         .add_userid("vault@btctax.local")
         .add_storage_encryption_subkey()
@@ -416,7 +432,7 @@ pub fn decrypt_with(cert: &openpgp::Cert, pp: &Passphrase, ct: &[u8]) -> Result<
 
 **Files:** Create `src/paths.rs`, `src/atomic.rs`; Modify `src/lib.rs`. Test in-module (`tempfile`).
 
-**Interfaces:** Produces `paths::{tmp_of, bak_of}` (APPEND `.tmp`/`.bak` to the full filename); `atomic::atomic_write(&Path,&[u8])->Result<(),StoreError>`; `atomic::reap_tmp(&Path)->Result<(),StoreError>`; `atomic::recover_target(&Path)->Result<(),StoreError>` (restores from `.bak` if target missing).
+**Interfaces:** Produces **`pub mod paths`** (declared `pub mod paths;` in lib.rs so integration tests can use it) with `{tmp_of, bak_of, lock_of, suffixed_key}` — append `.tmp`/`.bak`/`.lock` to the full filename; `suffixed_key` maps `vault.pgp`→`vault.key`. Plus `atomic::{atomic_write, reap_tmp, recover_target}`.
 
 - [ ] **Step 1: Failing tests (rotation; crash windows; name-append; recovery)**
 ```rust
@@ -425,6 +441,9 @@ pub fn decrypt_with(cert: &openpgp::Cert, pp: &Passphrase, ct: &[u8]) -> Result<
     let p = std::path::Path::new("/x/vault.key");
     assert_eq!(crate::paths::tmp_of(p).file_name().unwrap(), "vault.key.tmp");
     assert_eq!(crate::paths::bak_of(p).file_name().unwrap(), "vault.key.bak");
+  }
+  #[test] fn suffixed_key_maps_pgp_to_key(){
+    assert_eq!(crate::paths::suffixed_key(std::path::Path::new("/x/vault.pgp")).file_name().unwrap(), "vault.key");
   }
   #[test] fn write_keeps_prev_in_bak_and_target_never_absent(){
     let d=tempfile::tempdir().unwrap(); let t=d.path().join("vault.pgp");
@@ -460,7 +479,16 @@ fn suffixed(p: &Path, suffix: &str) -> PathBuf {
 pub fn tmp_of(p: &Path) -> PathBuf { suffixed(p, ".tmp") }
 pub fn bak_of(p: &Path) -> PathBuf { suffixed(p, ".bak") }
 pub fn lock_of(p: &Path) -> PathBuf { suffixed(p, ".lock") }
+/// Sidecar key path: `vault.pgp` -> `vault.key`. Replacing the extension is safe here
+/// (`.key` is distinct from the appended `.tmp`/`.bak`/`.lock` families). Guards against a
+/// vault literally named `*.key` (which would collide with its own key file).
+pub fn suffixed_key(p: &Path) -> PathBuf {
+    let k = p.with_extension("key");
+    assert_ne!(k, p, "vault path must not already end in .key");
+    k
+}
 ```
+(Declare `pub mod paths;` in `src/lib.rs`.)
 - [ ] **Step 4: Implement `atomic.rs`** (copy-bak BEFORE a single atomic rename — fixes C2; target is never absent)
 ```rust
 use std::fs::{self, File, OpenOptions};
@@ -626,13 +654,13 @@ use btctax_store::{Vault, Passphrase, StoreError};
     { let mut v=Vault::create(&vp,&Passphrase::new("pw".into())).unwrap();
       v.conn().execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES(5);").unwrap(); v.save().unwrap(); v.save().unwrap(); }
     // simulate a crash that left only the .bak (newest committed copy is in target; older in .bak):
-    std::fs::copy(&vp, btctax_store::testing::bak_of(&vp)).unwrap();
+    std::fs::copy(&vp, btctax_store::paths::bak_of(&vp)).unwrap();
     std::fs::remove_file(&vp).unwrap();
     let v=Vault::open(&vp,&Passphrase::new("pw".into())).unwrap();
     assert_eq!(v.conn().query_row("SELECT x FROM t",[],|r|r.get::<_,i64>(0)).unwrap(), 5);
 }
 ```
-(Expose `pub mod testing { pub use crate::paths::bak_of; }` behind `#[cfg(any(test, feature="testing"))]` so the integration test can name the bak path.)
+(The test uses the public `btctax_store::paths::bak_of` — `paths` is `pub mod` from Task 4, so it is reachable from the integration-test crate without any `cfg`/feature hack.)
 - [ ] **Step 2: Run → FAIL.** `cargo test -p btctax-store --test integration`
 - [ ] **Step 3: Implement `vault.rs`**
 ```rust
@@ -644,27 +672,38 @@ use openpgp::serialize::Serialize;
 use crate::{blob, sqlite_io, crypto::{self, Passphrase}, atomic, paths, lock::VaultLock, memlock::SecretBuf, StoreError, SCHEMA_VERSION};
 
 pub struct Vault { path: PathBuf, cert: openpgp::Cert, conn: Connection, _lock: VaultLock }
-fn key_path(v: &Path) -> PathBuf { paths::suffixed_key(v) } // = v with ".key" appended-by-stem; see note
 
 impl Vault {
     pub fn create(vault: &Path, pp: &Passphrase) -> Result<Vault, StoreError> {
-        let kp = key_path(vault);
+        let lock = VaultLock::acquire(vault)?;                 // lock FIRST — no TOCTOU (Nit-1)
+        let kp = paths::suffixed_key(vault);
         if vault.exists() || kp.exists() { return Err(StoreError::AlreadyExists); }
-        let lock = VaultLock::acquire(vault)?;
-        let cert = crypto::generate_cert(pp)?;
-        let mut tsk = Vec::new();
-        cert.as_tsk().serialize(&mut tsk).map_err(StoreError::Crypto)?;
-        atomic::atomic_write(&kp, &tsk)?;
-        let conn = sqlite_io::open_in_memory()?;
+        // on ANY failure, remove partial artifacts so a retry isn't wedged (Minor-1)
+        let cleanup = || {
+            for f in [&kp, &paths::tmp_of(&kp), &vault.to_path_buf(), &paths::tmp_of(vault)] {
+                let _ = std::fs::remove_file(f);
+            }
+        };
+        let built = (|| -> Result<(openpgp::Cert, Connection), StoreError> {
+            let cert = crypto::generate_cert(pp)?;
+            let mut tsk = Vec::new();
+            cert.as_tsk().serialize(&mut tsk).map_err(StoreError::Crypto)?;
+            atomic::atomic_write(&kp, &tsk)?;
+            Ok((cert, sqlite_io::open_in_memory()?))
+        })();
+        let (cert, conn) = match built { Ok(x) => x, Err(e) => { cleanup(); return Err(e); } };
         let mut v = Vault { path: vault.to_path_buf(), cert, conn, _lock: lock };
-        v.save()?;
+        if let Err(e) = v.save() { cleanup(); return Err(e); }
         Ok(v)
     }
     pub fn open(vault: &Path, pp: &Passphrase) -> Result<Vault, StoreError> {
         let lock = VaultLock::acquire(vault)?;
-        atomic::recover_target(vault)?;   // restore from .bak if a crash left target missing
-        atomic::reap_tmp(vault)?;
-        let cert = openpgp::Cert::from_bytes(&std::fs::read(key_path(vault))?).map_err(StoreError::Crypto)?;
+        let kp = paths::suffixed_key(vault);
+        for f in [vault, kp.as_path()] {        // crash-safety for BOTH sidecars (Minor-2)
+            atomic::recover_target(f)?;
+            atomic::reap_tmp(f)?;
+        }
+        let cert = openpgp::Cert::from_bytes(&std::fs::read(&kp)?).map_err(StoreError::Crypto)?;
         let plaintext = SecretBuf::new(crypto::decrypt_with(&cert, pp, &std::fs::read(vault)?)?);
         let (ver, image) = blob::decode_blob(plaintext.as_slice())?;
         let image = SecretBuf::new(blob::migrate(ver, image.to_vec())?);
@@ -679,7 +718,6 @@ impl Vault {
     }
 }
 ```
-*Note for `key_path`:* add `paths::suffixed_key(v: &Path) -> PathBuf` that yields `<dir>/<stem-of-vault>.key` — i.e., for `vault.pgp` → `vault.key`. Implement it in `paths.rs` (Task 4) using `with_extension("key")` (safe here because `.key` is a single distinct extension, not the `.pgp.tmp` collision class). Add a unit test `assert_eq!(suffixed_key(Path::new("/x/vault.pgp")).file_name().unwrap(), "vault.key")`.
 - [ ] **Step 4: Run → PASS.** `cargo test -p btctax-store --test integration`
 - [ ] **Step 5: Full gate.** `cargo test -p btctax-store && cargo clippy --all-targets -p btctax-store -- -D warnings && cargo fmt --check`
 - [ ] **Step 6: Commit.** `git commit -am "feat(store): Vault session (no-clobber create, bak-recovering open, save)"`
@@ -717,6 +755,7 @@ impl Vault {
 use openpgp::serialize::SerializeInto;
 impl Vault {
     pub fn export_snapshot(&self, out_dir: &Path) -> Result<PathBuf, StoreError> {
+        std::fs::create_dir_all(out_dir)?;            // Nit-2: ensure the dir exists
         let image = sqlite_io::db_to_bytes(&self.conn)?;
         let out = out_dir.join("snapshot.sqlite");
         std::fs::write(&out, &image)?; // raw SQLite image = a valid standalone db file
@@ -724,7 +763,8 @@ impl Vault {
     }
     pub fn backup_key(&self, out_path: &Path) -> Result<(), StoreError> {
         let armored = self.cert.as_tsk().armored().to_vec().map_err(StoreError::Crypto)?;
-        atomic::atomic_write(out_path, &armored)
+        std::fs::write(out_path, &armored)?;          // plain write to a user-chosen path (no stray .bak — Nit-2)
+        Ok(())
     }
 }
 ```
@@ -735,7 +775,8 @@ impl Vault {
 
 ---
 
-## Self-Review (v2, against spec §8/§16 step 1 + round-1 plan review)
+## Self-Review (v3, against spec §8/§16 step 1 + round-1/2 plan reviews)
+**Round-2 findings folded:** Important-1 (honest S2K — spike asserts the iterated-salted SHA-256 default; Argon2 N/A in 1.21; recorded per R3) → Tasks 0/3 + FOLLOWUPS; Important-2 (`paths` made public; unreachable `testing` module removed) → Tasks 4/7; Minor-1 (lock-first + cleanup-on-failed-create) → Task 7; Minor-2 (key-sidecar recover/reap in open) → Task 7; Minor-3 (`suffixed_key` + guard folded into Task 4) → Task 4; Minor-4 (Drop wording) → interface; Minor-5 (`db_from_bytes` OOM ≠ Corrupt) → Task 2; Nit-1 (lock-first) → Task 7; Nit-2 (backup_key plain write + export_snapshot mkdir) → Task 8.
 **Round-1 findings folded:** C1 (rusqlite OwnedData/sqlite3_malloc64 + spike round-trip) → Task 0 Step 4, Task 2; C2 (copy-bak→rename + recover + safe reap + recovery test) → Task 4, Task 7; I1 (Encryptor2) → Tasks 0/3; I2 (shared-flag decrypt) → Tasks 0/3; I3 (S2K inspected/pinned at keygen) → Task 0/3 + FOLLOWUPS; I4 (no-clobber create) → Task 7; I5 (append-not-replace paths) → Task 4 `paths.rs`; M1 (dead vault.pub text removed) → Design Note; M2/M8 (two-artifact + unsigned ack) → Design Note + FOLLOWUPS; M3 (export_snapshot → PathBuf consistent) → interface + Task 8; M4 (mlock/munlock same len) → Task 6; M5 (Drop wording) → interface; M6 (armored key) → Task 8; M7 (anyhow dep, no unused zeroize feature) → Task 0.
 **Placeholder scan:** none. **Type consistency:** `Passphrase`, `StoreError` (now incl. `AlreadyExists`), `paths::{tmp_of,bak_of,lock_of,suffixed_key}`, `atomic::{atomic_write,reap_tmp,recover_target}`, `crypto::{generate_cert,encrypt_to,decrypt_with}`, `sqlite_io::{db_to_bytes,db_from_bytes}`, `SecretBuf` — all match their `vault.rs` call sites.
 **Still deferred (FOLLOWUPS, non-blocking):** an OS-level process-kill-mid-save fuzz harness (Task 4 tests the three on-disk crash states deterministically; a kill harness is added hardening); sign-on-save (M8); re-lock-on-timeout (N3, a CLI/session concern).
