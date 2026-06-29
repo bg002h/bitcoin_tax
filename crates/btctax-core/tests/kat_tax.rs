@@ -1,3 +1,4 @@
+use btctax_core::conventions::Usd;
 use btctax_core::event::*;
 use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
@@ -476,4 +477,146 @@ fn malformed_transfer_link_no_dest_wallet_raises_blocker_not_silent_drop() {
     );
     // No residual lots: buy's sats consumed into pending, in-event (UnknownInbound) creates no lot.
     assert!(st.lots.is_empty());
+}
+
+// ── Task 8 closures: I-2, M-3 ───────────────────────────────────────────────────────────────
+
+/// I-2: GiftReceived with unknown donor_basis (None): blocker must fire, lot still created for
+/// sat conservation with basis_pending=true and usd_basis=Usd::ZERO.
+#[test]
+fn gift_received_no_donor_basis_raises_unknown_basis_blocker() {
+    let in_ev = LedgerEvent {
+        id: EventId::import(Source::Gemini, SourceRef::new("GIFT")),
+        utc_timestamp: datetime!(2025-07-01 00:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(wal()),
+        payload: EventPayload::TransferIn(TransferIn {
+            sat: 50_000,
+            src_addr: None,
+            txid: None,
+        }),
+    };
+    let cls = dec_ev(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        EventPayload::ClassifyInbound(ClassifyInbound {
+            transfer_in_event: EventId::import(Source::Gemini, SourceRef::new("GIFT")),
+            as_: InboundClass::GiftReceived {
+                donor_basis: None,
+                donor_acquired_at: Some(time::macros::date!(2023 - 06 - 15)),
+                fmv_at_gift: dec!(30.00),
+            },
+        }),
+    );
+    let st = project(
+        &[in_ev, cls],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    // UnknownBasisInbound blocker must fire.
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::UnknownBasisInbound),
+        "expected UnknownBasisInbound blocker for gift with donor_basis=None"
+    );
+    // Lot is still created for sat conservation.
+    assert_eq!(st.lots.len(), 1);
+    let lot = &st.lots[0];
+    assert!(lot.basis_pending, "basis_pending must be true");
+    assert_eq!(lot.usd_basis, Usd::ZERO, "usd_basis must be ZERO");
+    assert_eq!(lot.remaining_sat, 50_000);
+    // Holdings reflect received sats.
+    assert_eq!(st.holdings_by_wallet[&wal()], 50_000);
+}
+
+/// M-3: Two TransferLink decisions both targeting the same in-event: exactly one
+/// DecisionConflict blocker on the duplicate (second link); in-event consumed only once
+/// (first link wins, no double-consumption).
+#[test]
+fn duplicate_transfer_link_same_in_event_is_decision_conflict() {
+    let cold = WalletId::SelfCustody {
+        label: "cold".into(),
+    };
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2025-04-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let in_ev = LedgerEvent {
+        id: EventId::import(Source::Swan, SourceRef::new("IN")),
+        utc_timestamp: datetime!(2025-04-01 01:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(cold.clone()),
+        payload: EventPayload::TransferIn(TransferIn {
+            sat: 100_000,
+            src_addr: None,
+            txid: None,
+        }),
+    };
+    // First TransferLink: valid link to the in-event.
+    let link1 = dec_ev(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        EventPayload::TransferLink(TransferLink {
+            out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            in_event_or_wallet: TransferTarget::InEvent(EventId::import(
+                Source::Swan,
+                SourceRef::new("IN"),
+            )),
+        }),
+    );
+    // Second TransferLink: duplicate targeting the same in-event.
+    let link2 = dec_ev(
+        2,
+        datetime!(2026-01-01 00:00:00 UTC),
+        EventPayload::TransferLink(TransferLink {
+            out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            in_event_or_wallet: TransferTarget::InEvent(EventId::import(
+                Source::Swan,
+                SourceRef::new("IN"),
+            )),
+        }),
+    );
+    let st = project(
+        &[buy, out, in_ev, link1, link2],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    // Exactly one DecisionConflict blocker for the duplicate.
+    let decision_conflicts: Vec<_> = st
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::DecisionConflict)
+        .collect();
+    assert_eq!(
+        decision_conflicts.len(),
+        1,
+        "expected exactly one DecisionConflict blocker for duplicate link"
+    );
+    // In-event consumed only once: holdings in cold wallet should reflect 100_000 (first link wins).
+    assert_eq!(st.holdings_by_wallet[&cold], 100_000);
+    // Single lot, transferred to cold wallet (basis carried).
+    assert_eq!(st.lots.len(), 1);
+    let lot = &st.lots[0];
+    assert_eq!(lot.wallet, cold);
+    assert_eq!(lot.remaining_sat, 100_000);
+    assert_eq!(lot.usd_basis, dec!(60.00));
+    // No disposals or removals: non-taxable transfer.
+    assert!(st.disposals.is_empty() && st.removals.is_empty());
 }
