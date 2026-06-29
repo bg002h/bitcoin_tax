@@ -1,4 +1,4 @@
-use crate::{paths, StoreError};
+use crate::{fsperms, paths, StoreError};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
@@ -6,11 +6,10 @@ use std::path::Path;
 pub fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), StoreError> {
     let tmp = paths::tmp_of(target);
     {
-        let mut f = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&tmp)?;
+        // Open .tmp with owner-only mode (0o600 on Unix) so the renamed target
+        // inherits the correct inode permissions; on non-Unix the file is opened
+        // with default ACL-inherited permissions.
+        let mut f = fsperms::open_owner_only(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
     }
@@ -18,6 +17,8 @@ pub fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), StoreError> {
         // keep a fsync'd backup BEFORE we touch the live file
         let bak = paths::bak_of(target);
         fs::copy(target, &bak)?;
+        // fs::copy carries source permissions, but set 0o600 explicitly for robustness.
+        fsperms::restrict_file_to_owner(&bak)?;
         OpenOptions::new().write(true).open(&bak)?.sync_all()?;
     }
     fs::rename(&tmp, target)?; // atomic replace; target never absent. (NFR8: std::fs::rename replaces an

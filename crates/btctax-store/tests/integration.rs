@@ -153,6 +153,63 @@ fn export_snapshot_is_readable_sqlite() {
     }
 }
 
+/// Verify that all canonical secret artifacts written by `Vault::create` + `save` are
+/// owner-only on Unix (mode 0o600 for files, 0o700 for the vault parent dir).
+/// Gate: `#[cfg(unix)]` — Windows relies on ACL inheritance (FOLLOWUPS M-3).
+#[cfg(unix)]
+#[test]
+fn vault_artifacts_are_owner_only() {
+    use btctax_store::paths;
+    use std::os::unix::fs::MetadataExt as _;
+
+    let d = tempfile::tempdir().unwrap();
+    // Put the vault in a sub-directory so we can assert its parent's mode.
+    let sub = d.path().join("vaultdir");
+    let vp = sub.join("vault.pgp");
+    let kp = paths::suffixed_key(&vp); // vault.key
+
+    // create() writes vault.key (via atomic_write) then vault.pgp (via save()).
+    let mut v = Vault::create(&vp, &Passphrase::new("pw".into())).unwrap();
+
+    // ── parent directory ──────────────────────────────────────────────────────
+    let dir_mode = std::fs::metadata(&sub).unwrap().mode();
+    assert_eq!(
+        dir_mode & 0o777,
+        0o700,
+        "vault parent dir must be owner-only (0o700), got {:04o}",
+        dir_mode & 0o777
+    );
+
+    // ── vault.key ─────────────────────────────────────────────────────────────
+    let key_mode = std::fs::metadata(&kp).unwrap().mode();
+    assert_eq!(
+        key_mode & 0o777,
+        0o600,
+        "vault.key must be owner-only (0o600), got {:04o}",
+        key_mode & 0o777
+    );
+
+    // ── vault.pgp ─────────────────────────────────────────────────────────────
+    let pgp_mode = std::fs::metadata(&vp).unwrap().mode();
+    assert_eq!(
+        pgp_mode & 0o777,
+        0o600,
+        "vault.pgp must be owner-only (0o600), got {:04o}",
+        pgp_mode & 0o777
+    );
+
+    // ── .bak files (created on second save) ───────────────────────────────────
+    v.save().unwrap(); // second save → vault.pgp.bak is created
+    let pgp_bak = paths::bak_of(&vp);
+    let bak_mode = std::fs::metadata(&pgp_bak).unwrap().mode();
+    assert_eq!(
+        bak_mode & 0o777,
+        0o600,
+        "vault.pgp.bak must be owner-only (0o600), got {:04o}",
+        bak_mode & 0o777
+    );
+}
+
 #[test]
 fn backup_key_is_armored_and_parseable() {
     let d = tempfile::tempdir().unwrap();

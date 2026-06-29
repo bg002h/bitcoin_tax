@@ -4,6 +4,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub mod atomic;
 pub mod blob;
 pub mod crypto;
+pub mod fsperms;
 pub mod lock;
 pub mod memlock;
 pub mod paths;

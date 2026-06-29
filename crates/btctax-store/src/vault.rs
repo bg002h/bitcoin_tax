@@ -1,6 +1,7 @@
 use crate::{
     atomic, blob,
     crypto::{self, Passphrase},
+    fsperms::{mkdir_owner_only, write_owner_only},
     lock::VaultLock,
     memlock::SecretBuf,
     paths, sqlite_io, StoreError, SCHEMA_VERSION,
@@ -10,48 +11,6 @@ use openpgp::serialize::{Serialize, SerializeInto};
 use rusqlite::Connection;
 use sequoia_openpgp as openpgp;
 use std::path::{Path, PathBuf};
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-/// Write `data` to `path` with owner-only permissions (mode 0o600 on Unix).
-/// On non-Unix platforms the file inherits the user-profile directory ACL.
-#[cfg(unix)]
-fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), StoreError> {
-    use std::io::Write as _;
-    use std::os::unix::fs::OpenOptionsExt as _;
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)
-        .and_then(|mut f| f.write_all(data))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), StoreError> {
-    std::fs::write(path, data)?;
-    Ok(())
-}
-
-/// Create `path` (and all parents) with owner-only permissions (mode 0o700 on Unix).
-/// On non-Unix platforms uses `create_dir_all`.
-#[cfg(unix)]
-fn mkdir_owner_only(path: &Path) -> Result<(), StoreError> {
-    use std::os::unix::fs::DirBuilderExt as _;
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(path)?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn mkdir_owner_only(path: &Path) -> Result<(), StoreError> {
-    std::fs::create_dir_all(path)?;
-    Ok(())
-}
 
 // ── Vault ─────────────────────────────────────────────────────────────────────
 
@@ -69,9 +28,9 @@ impl Vault {
         } // M1
         if let Some(parent) = vault.parent() {
             if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
+                mkdir_owner_only(parent)?; // M3 — 0o700 on Unix, ACL-inherited on non-Unix
             }
-        } // M3
+        }
         let lock = VaultLock::acquire(vault)?; // lock FIRST — no TOCTOU (Nit-1)
         let kp = paths::suffixed_key(vault);
         if vault.exists() || kp.exists() {
