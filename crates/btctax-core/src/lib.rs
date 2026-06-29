@@ -4,10 +4,16 @@ pub mod conventions;
 pub mod event;
 pub mod identity;
 pub mod persistence;
+pub mod price;
+pub mod project;
+pub mod state;
 
 pub use conventions::{Sat, TaxDate, Usd};
 pub use event::*;
 pub use identity::{EventId, Fingerprint, LotId, Source, SourceRef, WalletId};
+pub use price::PriceProvider;
+pub use project::{project, FeeTreatment, LotMethod, ProjectionConfig};
+pub use state::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
