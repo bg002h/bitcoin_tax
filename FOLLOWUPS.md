@@ -2,6 +2,18 @@
 
 Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status · pointer.
 
+## btctax-cli whole-branch review (2026-06-29) — open Minor
+
+- **`safe_harbor_status` goes dark when ALL Path-B allocated lots are fully consumed (Minor, OPEN).**
+  `render.rs::safe_harbor_status` derives `effective_path_b` from `state.lots` (presence of a
+  `BasisSource::SafeHarborAllocated` lot). `finalize` only retains lots with `remaining_sat > 0`,
+  so if every allocated lot has been disposed/removed before `verify` runs AND a stale
+  `SafeHarborTimebar` advisory is still present (from a voided inert prior), `verify` again
+  mislabels effective Path B as "time-barred → using Path A". Display-only (dollars + exit code
+  correct); narrower than the CLI-I2 happy-path case already fixed. **Fix:** also OR in
+  `state.disposals[*].legs[*].basis_source` and `state.removals[*].legs[*].basis_source`
+  (both carry `basis_source` and are not filtered by `remaining_sat`).
+
 ## btctax-core whole-branch fixes (2026-06-29) — both Important findings resolved
 
 - **I-1 — `ReclassifyOutflow → Dispose` on-chain `fee_sat` silently dropped (FIXED).**
