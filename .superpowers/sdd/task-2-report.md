@@ -1,165 +1,71 @@
-# Task 2 Report: Format-agnostic table reading (RawRow, CSV preamble/CRLF, XLSX)
+# Task 2 Report — `cli_config` side-table (`CliConfig` ⇄ `ProjectionConfig`, TP8 (c)/(b))
 
-**Status:** DONE  
-**Commit:** `bab7ffd`  
-**Branch:** feat/btctax-adapters
+**Status:** DONE
+**Branch:** feat/btctax-cli
 
 ---
 
 ## Files Touched
 
-- `crates/btctax-adapters/src/read.rs` — created (306 lines after `cargo fmt`)
-- `crates/btctax-adapters/src/lib.rs` — added `pub mod read;`
+- `crates/btctax-cli/src/config.rs` — full rewrite per brief (was a partial skeleton missing `set_fee_treatment`, using wrong field name, and wrong DB key)
+- `crates/btctax-cli/src/lib.rs` — added `CliError::BadConfigValue { key, value }` variant (M1)
 
 ---
 
 ## Test Command and Output
 
 ```
-cargo test -p btctax-adapters
+cargo test -p btctax-cli
 ```
 
 ```
-running 14 tests
-test parse::tests::btc_to_sat_is_exact_integer ... ok
-test parse::tests::excel_serial_and_flex_parse ... ok
-test parse::tests::fractional_satoshi_is_an_error_never_a_silent_round ... ok
-test parse::tests::timestamp_rfc3339_keeps_offset_then_normalizes_to_utc ... ok
-test parse::tests::parses_usd_exactly_no_float ... ok
-test price::tests::fmv_of_uses_provider_for_sat_quantity ... ok
-test price::tests::timestamp_naive_assumed_utc ... ok
-test price::tests::looks_up_daily_close_exact_date ... ok
-test price::tests::parses_exact_decimals_not_floats ... ok
-test parse::tests::timestamp_confirmed_export_formats ... ok
-test read::tests::fixed_skip_preamble_count_works_when_no_signature ... ok
-test read::tests::missing_column_is_a_typed_error ... ok
-test read::tests::skips_preamble_via_header_signature_and_handles_crlf ... ok
-test read::tests::xlsx_numeric_serial_date_roundtrip ... ok
+running 7 tests
+test config::tests::default_is_treatment_c_user_mandated ... ok
+test config::tests::to_projection_carries_treatment_and_fifo ... ok
+test config::tests::bad_stored_value_is_an_error_not_silent_default ... ok
+test config::tests::read_config_on_table_less_vault_returns_default ... ok
+test config::tests::set_then_read_b_opt_in_round_trips ... ok
+test session::tests::create_then_open_round_trips_over_a_temp_vault ... ok
+test session::tests::wrong_passphrase_is_surfaced_not_a_panic ... ok
 
-test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.32s
 ```
 
-`cargo clippy -p btctax-adapters --all-targets -- -D warnings` — clean.  
-`cargo fmt --check -p btctax-adapters` — clean (applied `cargo fmt` before check).
+`cargo clippy -p btctax-cli --all-targets -- -D warnings` — clean (0 warnings)
+`cargo fmt --check -p btctax-cli` — clean
 
 ---
 
-## IP-1 Resolution: calamine 0.26.1 Data Variants + Serial Accessor
+## M1 Handling (unrecognized stored config value)
 
-### Verified Data variants in calamine 0.26.1 (`src/datatype.rs`)
-
-All 9 variants exist exactly as stated in the brief. No arm was deleted.
-
-| Variant | Inner type |
-|---|---|
-| `Data::Int` | `i64` |
-| `Data::Float` | `f64` |
-| `Data::String` | `String` |
-| `Data::Bool` | `bool` |
-| `Data::DateTime` | `ExcelDateTime` |
-| `Data::DateTimeIso` | `String` |
-| `Data::DurationIso` | `String` |
-| `Data::Error` | `CellErrorType` |
-| `Data::Empty` | — |
-
-### Serial accessor used: `ExcelDateTime::as_f64()`
-
-Confirmed in calamine 0.26.1 `src/datatype.rs`:
-```rust
-/// Converting data type into a float
-pub fn as_f64(&self) -> f64 {
-    self.value
-}
-```
-Returns the raw Excel serial (`self.value: f64`). No `#[cfg(feature = "dates")]` guard — always available.
-
-The `cell_to_string` arm:
-```rust
-Data::DateTime(dt) => format!("{}", dt.as_f64()),
-```
-Produces the serial string (e.g. `"25569.5"`) which flows through `parse_timestamp_flex` →
-`excel_serial_to_utc`. Note: calamine's `ExcelDateTime::Display` already writes `self.value`,
-so `dt.to_string()` would yield the same result in 0.26.1 — but `as_f64()` is used explicitly
-to be self-documenting and decouple from Display behaviour (the brief's IP-1 requirement).
+Added `CliError::BadConfigValue { key: String, value: String }` to `lib.rs`. In `read_config`, the `match v.as_str()` arm for `fee_treatment` returns `Err(CliError::BadConfigValue { key: "fee_treatment".into(), value: v })` for any tag that is neither `"c"` nor `"b"`. Test `bad_stored_value_is_an_error_not_silent_default` inserts `'z'` directly and asserts the correct variant is returned.
 
 ---
 
-## Deviations from Brief (both compile-time only, no logic change)
+## M2 Handling (vault created without the table)
 
-1. **`MissingColumn` field name:** The brief's `RawRow::get` used `source` as the field name
-   in the struct literal, but the existing `AdapterError::MissingColumn` (Task 0/1) uses
-   `adapter`. Fixed to `adapter: source`. No change to `AdapterError` definition.
-
-2. **Type annotation on `open_workbook` closure:** Rustc could not infer the closure parameter
-   type in `open_workbook(path).map_err(|e| ...)` with `e.into()`. Added
-   `|e: calamine::XlsxError|` annotation. No API change.
+`init_config_table` uses `CREATE TABLE IF NOT EXISTS` (idempotent DDL). Additionally, `read_config` now calls `init_config_table(conn)?` as its first statement (ensure-table-then-read pattern). Test `read_config_on_table_less_vault_returns_default` opens a bare in-memory connection without calling `init_config_table` first and asserts that `read_config` returns the (c) default cleanly.
 
 ---
 
-## Gemini XLSX Fixture Test
+## API Delta vs. Prior Skeleton
 
-`read::tests::xlsx_numeric_serial_date_roundtrip` exercises the full path:
+The pre-existing `config.rs` skeleton had the following diffs from the brief spec that were corrected:
 
-1. `rust_xlsxwriter::Workbook::add_worksheet()` + `write_number(1, 0, 25569.5_f64)` — writes
-   the Excel serial for 1970-01-01 12:00:00 UTC as a plain number (no date format).
-2. `read_xlsx` reads it back; calamine sees no date format → `Data::Float(25569.5)`.
-3. `cell_to_string` → `format!("{f}")` → `"25569.5"`.
-4. `parse_timestamp_flex("gemini", 1, "25569.5")` → `excel_serial_to_utc(25569.5)`
-   → `datetime!(1970-01-01 12:00:00 UTC)`. ✓
+| Item | Old (skeleton) | New (brief-correct) |
+|------|---------------|---------------------|
+| `CliConfig` field name | `self_transfer_fee` | `fee_treatment` |
+| `CliConfig` derives | `Debug, Clone` | `Debug, Clone, Copy, PartialEq, Eq` |
+| `to_projection` receiver | `&self` | `self` (consuming; `Copy` makes callers unchanged) |
+| DB key | `'self_transfer_fee'` | `'fee_treatment'` |
+| `set_fee_treatment` | missing | added |
+| Silent fallback on unknown value | yes | no (M1 error) |
+| Ensure-table in `read_config` | no | yes (M2) |
 
-The `Data::DateTime` arm (when calamine returns a date-formatted cell from a real Gemini export)
-is covered by the compile-time match exhaustion; the run-time path for it is exercised via the
-confirmed `as_f64()` method body.
+`session.rs` required no changes — it only calls `to_projection()` on the result of `?` and doesn't access `CliConfig` fields directly.
 
 ---
 
-## M-1 Fix: CSV Header Signature Validation (Post-Task-2 Minor)
+## Concerns
 
-**Status:** DONE  
-**Commit:** `d8e2ca1`
-
-### Problem
-When `header_signature` is non-empty but no line matches it, the code silently fell back to row 0
-via `unwrap_or(0)`, which could misparse a changed exchange preamble as valid data.
-
-### Solution
-- **AdapterError:** Added `HeaderNotFound { adapter: &'static str }` variant with error message
-  `"{adapter}: header signature not found in file"`
-- **read_csv_str signature:** Added `adapter: &'static str` parameter (also updated `read_csv` and
-  `read_table` for consistency)
-- **Logic fix:** Replaced `.position(...).unwrap_or(0)` with `.position(...).ok_or(AdapterError::HeaderNotFound { adapter })?`
-- **Test:** Added `nonmatching_header_signature_returns_error` to verify the error is returned
-
-### Validation
-- All 15 tests pass (including new M-1 test)
-- `cargo clippy -p btctax-adapters --all-targets -- -D warnings` — clean
-- `cargo fmt -p btctax-adapters` — clean
-
-### Test Output
-```
-cargo test -p btctax-adapters
-
-running 15 tests
-test parse::tests::btc_to_sat_is_exact_integer ... ok
-test parse::tests::excel_serial_and_flex_parse ... ok
-test price::tests::fmv_of_uses_provider_for_sat_quantity ... ok
-test parse::tests::parses_usd_exactly_no_float ... ok
-test price::tests::fractional_satoshi_is_an_error_never_a_silent_round ... ok
-test parse::tests::timestamp_confirmed_export_formats ... ok
-test parse::tests::timestamp_rfc3339_keeps_offset_then_normalizes_to_utc ... ok
-test price::tests::looks_up_daily_close_exact_date ... ok
-test read::tests::nonmatching_header_signature_returns_error ... ok
-test read::tests::skips_preamble_via_header_signature_and_handles_crlf ... ok
-test parse::tests::timestamp_naive_assumed_utc ... ok
-test price::tests::parses_exact_decimals_not_floats ... ok
-test read::tests::missing_column_is_a_typed_error ... ok
-test read::tests::fixed_skip_preamble_count_works_when_no_signature ... ok
-test read::tests::xlsx_numeric_serial_date_roundtrip ... ok
-
-test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
-```
-
-### Concerns
-None. The signature change is backward-incompatible for external callers of read_csv_str/read_csv,
-but since this is Task 2 and these functions haven't yet been called by any adapter implementations,
-this is acceptable.
+None.
