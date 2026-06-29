@@ -621,6 +621,7 @@ fn donation_over_5k_flags_appraisal_required() {
     );
     assert!(st.removals[0].appraisal_required);
     assert_eq!(st.removals[0].kind, RemovalKind::Donation);
+    assert!(st.disposals.is_empty());
 }
 
 /// ReclassifyOutflow{as: Dispose} creates a real Disposal (proceeds−fee, basis, gain, ST/LT).
@@ -762,4 +763,80 @@ fn duplicate_transfer_link_same_in_event_is_decision_conflict() {
     assert_eq!(lot.usd_basis, dec!(60.00));
     // No disposals or removals: non-taxable transfer.
     assert!(st.disposals.is_empty() && st.removals.is_empty());
+}
+
+/// I-1 Task 9: Two ReclassifyOutflow decisions both targeting the same transfer_out_event:
+/// exactly one DecisionConflict blocker on the duplicate (second decision); outflow classified
+/// once by first decision (no double-processing).
+#[test]
+fn duplicate_reclassify_outflow_same_target_is_decision_conflict() {
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2025-04-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    // First ReclassifyOutflow: classify as GiftOut.
+    let recl1 = dec_ev(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::GiftOut,
+            principal_proceeds_or_fmv: dec!(100.00),
+            fee_usd: None,
+        }),
+    );
+    // Second ReclassifyOutflow: duplicate targeting the same transfer_out_event.
+    let recl2 = dec_ev(
+        2,
+        datetime!(2026-01-01 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::Donate {
+                appraisal_required: false,
+            },
+            principal_proceeds_or_fmv: dec!(150.00),
+            fee_usd: None,
+        }),
+    );
+    let st = project(
+        &[buy, out, recl1, recl2],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    // Exactly one DecisionConflict blocker for the duplicate.
+    let decision_conflicts: Vec<_> = st
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::DecisionConflict)
+        .collect();
+    assert_eq!(
+        decision_conflicts.len(),
+        1,
+        "expected exactly one DecisionConflict blocker for duplicate reclassify"
+    );
+    // Outflow classified once by first decision: one Removal created.
+    assert_eq!(st.removals.len(), 1);
+    let removal = &st.removals[0];
+    // First decision (GiftOut) wins.
+    assert_eq!(removal.kind, RemovalKind::Gift);
+    assert_eq!(removal.legs[0].basis, dec!(60.00));
+    assert_eq!(removal.legs[0].fmv_at_transfer, dec!(100.00));
+    // No double-processing: only one removal, not two.
+    assert!(st.disposals.is_empty());
 }
