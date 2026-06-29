@@ -19,6 +19,22 @@ cb-send,2025-06-20 12:00:00 UTC,Send,BTC,0.03000000,USD,68000.00,,,,,,bc1qsynthe
     p
 }
 
+/// A Coinbase CSV with a Buy + Receive (unclassified TransferIn → hard UnknownBasisInbound blocker).
+/// Receive rows without a ClassifyInbound decision fold as Op::UnknownInbound → hard blocker (§7.3).
+#[allow(dead_code)]
+pub fn coinbase_buy_receive(dir: &Path) -> PathBuf {
+    let p = dir.join("coinbase_recv.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-buy3,2025-04-01 12:00:00 UTC,Buy,BTC,0.05000000,USD,85000.00,4250.00,4265.00,15.00,,,\r\n\
+cb-recv,2025-05-01 12:00:00 UTC,Receive,BTC,0.02000000,USD,90000.00,,,,,,\r\n",
+    )
+    .unwrap();
+    p
+}
+
 /// A Coinbase CSV with a single Buy only (self-contained USD; no price-dataset dependency).
 #[allow(dead_code)] // used in init_import.rs; appears unused in verify_report.rs compilation unit
 pub fn coinbase_single_buy(dir: &Path) -> PathBuf {
