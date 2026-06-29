@@ -8,7 +8,7 @@
 
 **Architecture:** The on-disk artifacts are `vault.pgp` (Sequoia-OpenPGP, encrypted to an app-managed keypair) and `vault.key` (the same keypair's secret material, itself passphrase-encrypted by a strong OpenPGP S2K). At runtime the blob is decrypted into RAM, loaded into an in-memory SQLite database, operated on, then serialized + re-encrypted + atomically rewritten. No plaintext DB is ever written except the explicit `export-snapshot`.
 
-**Tech Stack:** Rust (edition 2021), `sequoia-openpgp` 1.21 (OpenPGP, `Encryptor2`), `rusqlite` 0.31 (bundled SQLite, `serialize` feature, `rusqlite::ffi` for `sqlite3_malloc64`), `rustix` (flock + mlock), `zeroize`, `anyhow`, `thiserror`.
+**Tech Stack:** Rust (edition 2021), `sequoia-openpgp` 1.x (OpenPGP, `Encryptor2`, **`crypto-rust` pure-Rust backend**), `rusqlite` 0.31 (bundled SQLite, `serialize` feature, `rusqlite::ffi` for `sqlite3_malloc64`), **`fs2`** (cross-platform exclusive single-instance lock), `rustix` (Unix `mlock`) / `windows-sys` (Windows `VirtualLock`), `zeroize`, `anyhow`, `thiserror`. **Cross-platform: Linux / macOS / Windows (NFR8).**
 
 ## Global Constraints
 (Spec `design/SPEC_foundation.md`; every task implicitly includes these.)
@@ -73,7 +73,7 @@ license = "MIT OR Unlicense"
 rust-version = "1.74"
 ```
 
-- [ ] **Step 2: `crates/btctax-store/Cargo.toml`** (backend = `crypto-nettle`, the mature default; revisit `crypto-rust` only if a fully-static binary becomes mandatory — log the choice in FOLLOWUPS)
+- [ ] **Step 2: `crates/btctax-store/Cargo.toml`** (backend = **`crypto-rust`** — pure-Rust, cross-platform per NFR8; the dev box's nettle-4.0 is incompatible with `nettle-sys` and Windows can't use nettle; variable-time crypto accepted for local at-rest single-user encryption — logged in FOLLOWUPS. The spike confirms whether `allow-experimental-crypto` is also required.)
 ```toml
 [package]
 name = "btctax-store"
@@ -82,12 +82,19 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-sequoia-openpgp = { version = "1.21", default-features = false, features = ["crypto-nettle"] }
+# crypto-rust = pure-Rust backend (no system crypto lib) → cross-platform (NFR8); allow-variable-time-crypto needed for RSA.
+sequoia-openpgp = { version = "1", default-features = false, features = ["crypto-rust", "allow-variable-time-crypto"] }
 rusqlite = { version = "0.31", features = ["bundled", "serialize"] }
-rustix = { version = "0.38", features = ["fs", "mm"] }
+fs2 = "0.4"            # cross-platform exclusive single-instance lock (flock on Unix / LockFileEx on Windows) — NFR8
 zeroize = "1"
 anyhow = "1"
 thiserror = "1"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "0.38", features = ["mm"] }                       # mlock/munlock
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_Memory", "Win32_Foundation"] } # VirtualLock/VirtualUnlock
 
 [dev-dependencies]
 tempfile = "3"
@@ -507,7 +514,9 @@ pub fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), StoreError> {
         fs::copy(target, &bak)?;
         File::open(&bak)?.sync_all()?;
     }
-    fs::rename(&tmp, target)?; // atomic replace; target is never absent
+    fs::rename(&tmp, target)?; // atomic replace; target never absent. (NFR8: std::fs::rename replaces an
+                               // existing file on Windows via MoveFileExW(MOVEFILE_REPLACE_EXISTING); its
+                               // atomicity is best-effort there, but the fsync'd .bak copied above is the safety net.)
     if let Some(dir) = target.parent() { let _ = File::open(dir).and_then(|d| d.sync_all()); }
     Ok(())
 }
@@ -554,22 +563,25 @@ pub fn reap_tmp(target: &Path) -> Result<(), StoreError> {
 - [ ] **Step 2: Run → FAIL.** `cargo test -p btctax-store lock`
 - [ ] **Step 3: Implement**
 ```rust
+// Cross-platform (NFR8): fs2's try_lock_exclusive maps to flock(LOCK_EX|LOCK_NB) on Unix
+// and LockFileEx(LOCKFILE_EXCLUSIVE_LOCK|LOCKFILE_FAIL_IMMEDIATELY) on Windows.
 use std::fs::{File, OpenOptions};
 use std::path::Path;
-use rustix::fs::{flock, FlockOperation};
+use fs2::FileExt;
 use crate::{paths, StoreError};
 pub struct VaultLock(File);
 impl VaultLock {
     pub fn acquire(vault: &Path) -> Result<VaultLock, StoreError> {
         let f = OpenOptions::new().create(true).write(true).open(paths::lock_of(vault))?;
-        match flock(&f, FlockOperation::NonBlockingLockExclusive) {
+        match f.try_lock_exclusive() {
             Ok(()) => Ok(VaultLock(f)),
-            Err(rustix::io::Errno::WOULDBLOCK) => Err(StoreError::Locked),
-            Err(e) => Err(StoreError::Io(std::io::Error::from(e))),
+            // fs2 returns an Io error whose kind is WouldBlock when the lock is held.
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Err(StoreError::Locked),
+            Err(e) => Err(StoreError::Io(e)),
         }
     }
 }
-impl Drop for VaultLock { fn drop(&mut self){ let _=flock(&self.0, FlockOperation::Unlock); } }
+impl Drop for VaultLock { fn drop(&mut self){ let _ = fs2::FileExt::unlock(&self.0); } }
 ```
 - [ ] **Step 4: Run → PASS.** `cargo test -p btctax-store lock`
 - [ ] **Step 5: Commit.** `git commit -am "feat(store): single-instance flock guard"`
@@ -602,13 +614,15 @@ impl SecretBuf {
     pub fn as_slice(&self) -> &[u8] { &self.bytes }
     pub fn is_locked(&self) -> bool { self.locked }
     #[cfg(unix)] fn try_mlock(b: &[u8]) -> bool { if b.is_empty() { return true; } unsafe { rustix::mm::mlock(b.as_ptr() as *mut _, b.len()).is_ok() } }
-    #[cfg(not(unix))] fn try_mlock(_b: &[u8]) -> bool { false }
+    #[cfg(windows)] fn try_mlock(b: &[u8]) -> bool { if b.is_empty() { return true; } unsafe { windows_sys::Win32::System::Memory::VirtualLock(b.as_ptr() as *mut _, b.len()) != 0 } } // NFR8
+    #[cfg(not(any(unix, windows)))] fn try_mlock(_b: &[u8]) -> bool { false }
 }
 impl Drop for SecretBuf {
     fn drop(&mut self) {
         let len = self.bytes.len();
         self.bytes.zeroize();
         #[cfg(unix)] if self.locked && len > 0 { unsafe { let _=rustix::mm::munlock(self.bytes.as_ptr() as *mut _, len); } }
+        #[cfg(windows)] if self.locked && len > 0 { unsafe { let _=windows_sys::Win32::System::Memory::VirtualUnlock(self.bytes.as_ptr() as *mut _, len); } }
     }
 }
 ```

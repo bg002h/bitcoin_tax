@@ -46,7 +46,7 @@
 - **FR10 Export.** `export-snapshot` writes the decrypted ledger (SQLite + CSV) — the sole explicit exception to NFR2. `backup-key` exports the passphrase-protected key.
 
 ## 4. Non-functional requirements
-- **NFR1 Local & offline.** **NFR2 Encryption at rest:** only the PGP vault is written automatically; no plaintext DB except the explicit `export-snapshot`. **NFR3 Durability:** atomic write + rolling backup. **NFR4 Determinism:** identical event *set* → identical ledger, invariant to storage/load order (with each event's `(source_ref|decision_seq, payload)` fixed), including resolution of all decision/correction events. **NFR5 Exact arithmetic.** **NFR6 Auditability:** all state — including conflicts and the safe-harbor attestation — lives as events; the log is the sole source of truth. **NFR7 Single-user safety.**
+- **NFR1 Local & offline.** **NFR2 Encryption at rest:** only the PGP vault is written automatically; no plaintext DB except the explicit `export-snapshot`. **NFR3 Durability:** atomic write + rolling backup. **NFR4 Determinism:** identical event *set* → identical ledger, invariant to storage/load order (with each event's `(source_ref|decision_seq, payload)` fixed), including resolution of all decision/correction events. **NFR5 Exact arithmetic.** **NFR6 Auditability:** all state — including conflicts and the safe-harbor attestation — lives as events; the log is the sole source of truth. **NFR7 Single-user safety.** **NFR8 Cross-platform: Linux, macOS, and Windows.** OS-specific primitives are abstracted behind portable interfaces: single-instance locking (`flock` on Unix / `LockFileEx` on Windows), best-effort secret-memory locking (`mlock` on Unix / `VirtualLock` on Windows), and atomic save (POSIX `rename` / Windows replace-rename). The crypto backend is **pure-Rust (`crypto-rust`)** so no system crypto library is required on any OS (R3); accepted security trade-off for local at-rest single-user encryption (see §14 R3 / FOLLOWUPS).
 
 ## 5. Architecture
 **Event-sourced core.** Append-only **event log = single source of truth**; all state is a **pure deterministic projection** re-derived from scratch (no caching in Phase 1).
@@ -147,8 +147,9 @@
 - **Pending-at-snapshot:** sats still in `pending_reconciliation` at 2025-01-01 are excluded from allocation (flagged); they enter a pool once reconciled.
 
 ## 8. Encrypted storage & session (`btctax-store`)
-- **On disk:** one `vault.pgp` (Sequoia-PGP; private key passphrase-protected with the **strongest available S2K** — Argon2 if supported, else high-work-factor iterated-salted; FOLLOWUPS). Decrypted layout: `[schema_version:u32][SQLite serialized image]`.
-- **Open:** `flock(LOCK_EX|LOCK_NB)` → fail fast (NFR7); reap orphan `vault.pgp.tmp`; decrypt → `mlock` (best-effort; warn on failure; doesn't fully cover SQLite heap/`Decimal`/`String` — R1); `deserialize` into in-memory SQLite.
+- **Crypto backend:** Sequoia-OpenPGP with the **pure-Rust `crypto-rust` backend** (no system crypto lib on any OS — NFR8/R3). Secret key passphrase-protected with the **strongest available S2K** — Argon2 is not in Sequoia 1.x, so the high-work-factor iterated-salted SHA-256 default (`Iterated`, max work factor) is used and asserted (R3; FOLLOWUPS).
+- **On disk:** one `vault.pgp` + sidecar `vault.key`. Decrypted layout: `[schema_version:u32][SQLite serialized image]`.
+- **Open:** acquire a **portable exclusive single-instance lock** (`flock(LOCK_EX|LOCK_NB)` on Unix / `LockFileEx` on Windows — NFR8) → fail fast (NFR7); recover/reap orphan tmp; decrypt → **best-effort secret-memory lock** (`mlock` on Unix / `VirtualLock` on Windows; warn on failure; doesn't fully cover SQLite heap/`Decimal`/`String` — R1); `deserialize` into in-memory SQLite.
 - **Save:** serialize → prepend version → encrypt → `vault.pgp.tmp` → `fsync` → atomic `rename()`; rotate prior to `vault.pgp.bak`.
 - **Migration:** `migrate(version, …)` spans outer layout + SQLite DDL + event-payload serde.
 - **Session:** unlock once; key+DB in `mlock`ed, `zeroize`-on-drop memory (best-effort); re-lock on exit/timeout.
@@ -190,7 +191,7 @@ TDD. Required:
 ## 14. Risks & assumptions
 - **R1 mlock/zeroize best-effort** (don't fully cover SQLite heap/`Decimal`/`String`); defense-in-depth; docs recommend encrypted/disabled swap.
 - **R2 Adapter semantics to confirm by fixture test:** Coinbase `Order`/`Convert`/reward; Gemini `Credit`; River CRLF + Income/Interest shape. Unresolved → `Unclassified`.
-- **R3** Pin a Sequoia-PGP version + S2K (Argon2 if available) before first build.
+- **R3** Pin a Sequoia-PGP version + crypto backend + S2K before first build. **DECIDED (Task-0 spike):** sequoia-openpgp 1.x, **`crypto-rust`** pure-Rust backend (cross-platform, no system lib — supersedes the earlier `crypto-nettle` choice after the dev box's nettle-4.0 incompatibility + the NFR8 cross-platform requirement); S2K = `Iterated{SHA256, max work factor}` (no Argon2 in 1.x). `crypto-rust` is variable-time (Sequoia "not recommended for general use") — accepted for local at-rest single-user encryption (FOLLOWUPS).
 - **A1** Past tax years filed (no historical forms; pre-2025 FIFO unless `verify` says otherwise).
 - **A2** Four sources are the current venue set; externally-sourced inbounds need `ClassifyInbound`.
 
