@@ -3,6 +3,7 @@
 pub mod conventions;
 pub mod event;
 pub mod identity;
+pub mod persistence;
 
 pub use conventions::{Sat, TaxDate, Usd};
 pub use event::*;
