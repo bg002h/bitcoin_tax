@@ -6,7 +6,7 @@ use btctax_core::{
 };
 use btctax_store::Passphrase;
 use rust_decimal_macros::dec;
-use time::macros::datetime;
+use time::macros::{date, datetime};
 
 fn pp() -> Passphrase {
     Passphrase::new("pw".into())
@@ -620,5 +620,102 @@ cb-pre,2024-01-15 12:00:00 UTC,Buy,BTC,0.20000000,USD,42500.00,8500.00,8550.00,5
             .filter(|e| matches!(e.payload, EventPayload::VoidDecisionEvent(_)))
             .count(),
         0
+    );
+}
+
+// ── Slug 1, Task B: safe_harbor_allocate must carry §1015(a) dual basis ────────────────────────
+
+/// `safe_harbor_allocate` must carry the §1015(a) dual basis fields (`dual_loss_basis`,
+/// `donor_acquired_at`) from the pre-2025 projection's residue lots into the emitted AllocLot.
+/// Under the old code the CLI dropped these fields, collapsing the lot to single-basis.
+///
+/// Scenario: pre-2025 GiftReceived lot with donor (gain) basis = $100 and FMV-at-gift = $40
+/// (FMV < donor → dual). Expected AllocLot: usd_basis=$100, dual_loss_basis=Some($40),
+/// donor_acquired_at=Some(2021-01-01). [R0-I2: loss basis is FMV-at-gift, not donor basis.]
+#[test]
+fn safe_harbor_allocate_carries_gift_dual_basis() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Import a pre-2025 Coinbase Receive (2024-06-01, 100_000 sat = 0.00100000 BTC).
+    let p = dir.path().join("cb_gift.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,\
+Recipient Address\r\n\
+cb-gift-recv,2024-06-01 12:00:00 UTC,Receive,BTC,0.00100000,USD,40000.00,,,,,bc1qsender,\r\n",
+    )
+    .unwrap();
+    cmd::import::run(&vault, &pp(), &[p]).unwrap();
+
+    // Find the TransferIn event id.
+    let in_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+
+    // Classify as GiftReceived: donor (gain) basis = $100, FMV-at-gift (LOSS basis) = $40.
+    // FMV-at-gift $40 < donor basis $100 → dual basis (§1015(a)); donor_acquired_at for tacking.
+    cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &in_ref,
+        InboundClass::GiftReceived {
+            donor_basis: Some(dec!(100.00)),
+            donor_acquired_at: Some(date!(2021 - 01 - 01)),
+            fmv_at_gift: dec!(40.00),
+        },
+        now(),
+    )
+    .unwrap();
+
+    // Allocate via Path B. No 2025 disposition → made-date 2026-02-01 < return-due 2026-04-15
+    // → timely without attestation → effective.
+    cmd::reconcile::safe_harbor_allocate(&vault, &pp(), AllocMethod::ActualPosition, false, now())
+        .unwrap();
+
+    // Load the persisted SafeHarborAllocation and assert the AllocLot carries the dual basis.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+    let alloc = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            EventPayload::SafeHarborAllocation(a) => Some(a.clone()),
+            _ => None,
+        })
+        .expect("SafeHarborAllocation must be persisted");
+
+    assert_eq!(alloc.lots.len(), 1, "one lot in the allocation");
+    let lot = &alloc.lots[0];
+
+    // usd_basis = GAIN basis = donor carryover basis (§1015(a)).
+    assert_eq!(
+        lot.usd_basis,
+        dec!(100.00),
+        "usd_basis (gain basis) must be $100 (donor carryover); got {}",
+        lot.usd_basis
+    );
+    // dual_loss_basis = LOSS basis = FMV-at-gift = $40. Must NOT be None. [R0-I2]
+    assert_eq!(
+        lot.dual_loss_basis,
+        Some(dec!(40.00)),
+        "dual_loss_basis must be Some($40) (FMV-at-gift LOSS basis); got {:?}",
+        lot.dual_loss_basis
+    );
+    // donor_acquired_at carries through for §1223(2) tacking on the gain side.
+    assert_eq!(
+        lot.donor_acquired_at,
+        Some(date!(2021 - 01 - 01)),
+        "donor_acquired_at must be Some(2021-01-01) for §1223(2) tacking; got {:?}",
+        lot.donor_acquired_at
     );
 }

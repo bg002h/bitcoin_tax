@@ -825,8 +825,8 @@ fn path_b_preserves_gift_dual_loss_basis() {
             1,
             datetime!(2024-06-15 00:00:00 UTC),
             "gift1",
-            Some(dec!(100.00)),    // donor (gain) basis
-            dec!(40.00),           // FMV-at-gift (loss basis, since < donor basis)
+            Some(dec!(100.00)),          // donor (gain) basis
+            dec!(40.00),                 // FMV-at-gift (loss basis, since < donor basis)
             Some(date!(2021 - 01 - 01)), // donor_acquired_at
         ),
         // Path-B allocation made timely (2024-12-01 is before any 2025 dispose).
@@ -839,14 +839,19 @@ fn path_b_preserves_gift_dual_loss_basis() {
             vec![alloc_lot_dual(
                 cb(),
                 100_000,
-                dec!(100.00),           // usd_basis = GAIN basis = donor carryover
-                date!(2024 - 06 - 01), // acquired_at = gift date (loss-zone HP start)
-                Some(dec!(40.00)),      // dual_loss_basis = LOSS basis = FMV-at-gift
+                dec!(100.00),                // usd_basis = GAIN basis = donor carryover
+                date!(2024 - 06 - 01),       // acquired_at = gift date (loss-zone HP start)
+                Some(dec!(40.00)),           // dual_loss_basis = LOSS basis = FMV-at-gift
                 Some(date!(2021 - 01 - 01)), // donor_acquired_at for gain-zone tacking
             )],
         ),
         // Post-2025 disposal in the LOSS zone: proceeds $30 < FMV-at-gift $40.
-        sell("D1", datetime!(2025-09-01 00:00:00 UTC), 100_000, dec!(30.00)),
+        sell(
+            "D1",
+            datetime!(2025-09-01 00:00:00 UTC),
+            100_000,
+            dec!(30.00),
+        ),
     ];
     let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
 
@@ -918,7 +923,12 @@ fn path_b_preserves_gift_tacking() {
         //   proceeds $150 > gain basis $100 → gain $50.
         //   HP from donor_acquired_at 2021-01-01 to 2025-03-01: >1yr → LONG-TERM.
         //   HP from gift date 2024-06-01 to 2025-03-01: <1yr → SHORT-TERM (old, wrong behavior).
-        sell("D2", datetime!(2025-03-01 00:00:00 UTC), 100_000, dec!(150.00)),
+        sell(
+            "D2",
+            datetime!(2025-03-01 00:00:00 UTC),
+            100_000,
+            dec!(150.00),
+        ),
     ];
     let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
 
@@ -931,7 +941,12 @@ fn path_b_preserves_gift_tacking() {
     let leg = &st.disposals[0].legs[0];
 
     // Gain zone: basis = gain basis $100, gain = $50.
-    assert_eq!(leg.basis, dec!(100.00), "gain-zone basis must be $100; got {}", leg.basis);
+    assert_eq!(
+        leg.basis,
+        dec!(100.00),
+        "gain-zone basis must be $100; got {}",
+        leg.basis
+    );
     assert_eq!(leg.gain, dec!(50.00), "gain must be $50; got {}", leg.gain);
     assert_eq!(leg.gift_zone, Some(GiftZone::Gain));
 

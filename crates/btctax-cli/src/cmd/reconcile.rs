@@ -236,6 +236,8 @@ pub fn safe_harbor_allocate(
             sat: l.remaining_sat,
             usd_basis: l.usd_basis,
             acquired_at: l.acquired_at,
+            dual_loss_basis: l.dual_loss_basis,
+            donor_acquired_at: l.donor_acquired_at,
         })
         .collect();
     if lots.is_empty() {

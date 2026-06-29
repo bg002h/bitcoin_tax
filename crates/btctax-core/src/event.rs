@@ -145,12 +145,12 @@ pub enum AllocMethod {
 pub struct AllocLot {
     pub wallet: WalletId,
     pub sat: Sat,
-    pub usd_basis: Usd,                                         // GAIN basis = donor carryover basis (§1015(a))
-    pub acquired_at: TaxDate,                                   // gift date = loss-zone HP start (no tacking on loss side)
+    pub usd_basis: Usd,       // GAIN basis = donor carryover basis (§1015(a))
+    pub acquired_at: TaxDate, // gift date = loss-zone HP start (no tacking on loss side)
     #[serde(default)]
-    pub dual_loss_basis: Option<Usd>,                          // §1015(a) LOSS basis = FMV-at-gift; Some only when FMV-at-gift < donor basis
+    pub dual_loss_basis: Option<Usd>, // §1015(a) LOSS basis = FMV-at-gift; Some only when FMV-at-gift < donor basis
     #[serde(default)]
-    pub donor_acquired_at: Option<TaxDate>,                    // §1223(2) tacking; gain/no-dual-zone HP start; None otherwise
+    pub donor_acquired_at: Option<TaxDate>, // §1223(2) tacking; gain/no-dual-zone HP start; None otherwise
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SafeHarborAllocation {
