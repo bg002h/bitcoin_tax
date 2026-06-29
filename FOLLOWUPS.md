@@ -57,6 +57,26 @@ workspace gate green. What was closed:
 
 ---
 
+## ✅ Cycle-prep slug burndown (2026-06-29) — second pass
+
+Ran `cycle-prep` recon (`reviews/cycle-prep-recon-2026-06-29.md`) on four slugs, then burned down one at a time
+(cycle-prep → spec → opus R0 review-to-green → implement (SDD) → whole-slug review → ship). Each shipped at
+0 Critical / 0 Important; PII-clean; workspace gate green throughout.
+
+- **`vault-half-created-autorepair` — SHIPPED** (merge `db9f074`). `StoreError::HalfCreatedVault` + explicit
+  `init --repair` that clears ONLY an orphan key (lock-first `AlreadyExists` guard provably never deletes a
+  real/recoverable key); R0 caught the `init::run` arity blast-radius (fixed via wrapper); safety review 0C/0I.
+- **`reconcile-allocation-dual-loss-basis` — SHIPPED** (merge `dd990f9`). `AllocLot` gains
+  `dual_loss_basis`+`donor_acquired_at` (serde-default); Path-B seed + CLI allocate preserve the §1015(a) dual
+  basis + §1223(2) tacking. R0 caught 3 inverted §1015(a) labels pre-implementation (gain=donor carryover,
+  loss=FMV-at-gift); conservation unchanged.
+- **`pre2025-filed-method-reconciliation` — Phase-1 part SHIPPED** (merge `c881967`). The advisory
+  `Pre2025MethodNote` already existed + is surfaced in `verify`; made its message actionable (FIFO-assumed +
+  reconcile-against-filings). **The runtime reconciliation MECHANISM (declare filed method → adjust
+  reconstructed basis) remains OPEN — Phase-2 feature, deferred.**
+- **`appraisal-trigger-precision` — NO-OP** (cycle-prep found the follow-up structurally wrong: no Phase-1
+  FMV>$5k auto-flag exists; `appraisal_required` is a user CLI bool). Corrected the citation; Phase-2 only.
+
 ## ✅ RESOLVED earlier (kept for record)
 
 ## btctax-core whole-branch fixes (2026-06-29) — both Important findings resolved
