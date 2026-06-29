@@ -4,12 +4,70 @@ use btctax_adapters::FileReport;
 use btctax_core::persistence::ImportReport;
 use btctax_core::{
     conservation_report, BasisSource, Blocker, BlockerKind, ConservationReport, DisposalLeg,
-    LedgerEvent, LedgerState, RemovalLeg, Severity, Term, WalletId,
+    DisposeKind, GiftZone, IncomeKind, LedgerEvent, LedgerState, RemovalKind, RemovalLeg, Severity,
+    Term, WalletId,
 };
 use btctax_store::fsperms;
 use csv::Writer;
 use std::fmt::Write as _;
 use std::path::Path;
+
+// ── Stable CSV/display tags for core enums ──────────────────────────────────────────────────────
+// These are free functions (not inherent methods) because the CLI crate cannot add methods to
+// core types. Values are human-readable and STABLE — changing them breaks the CSV contract.
+
+fn basis_source_tag(bs: BasisSource) -> &'static str {
+    match bs {
+        BasisSource::ExchangeProvided => "exchange",
+        BasisSource::ComputedFromCost => "cost",
+        BasisSource::FmvAtIncome => "income_fmv",
+        BasisSource::CarriedFromTransfer => "transferred",
+        BasisSource::GiftCarryover => "gift_carryover",
+        BasisSource::GiftFmvFallback => "gift_fmv_fallback",
+        BasisSource::SafeHarborAllocated => "safe_harbor",
+        BasisSource::ReconstructedPerWallet => "reconstructed",
+    }
+}
+
+fn dispose_kind_tag(dk: DisposeKind) -> &'static str {
+    match dk {
+        DisposeKind::Sell => "sell",
+        DisposeKind::Spend => "spend",
+    }
+}
+
+fn income_kind_tag(ik: IncomeKind) -> &'static str {
+    match ik {
+        IncomeKind::Mining => "mining",
+        IncomeKind::Staking => "staking",
+        IncomeKind::Interest => "interest",
+        IncomeKind::Airdrop => "airdrop",
+        IncomeKind::Reward => "reward",
+    }
+}
+
+fn gift_zone_tag(gz: GiftZone) -> &'static str {
+    match gz {
+        GiftZone::Gain => "gain",
+        GiftZone::Loss => "loss",
+        GiftZone::NoGainNoLoss => "no_gain_no_loss",
+    }
+}
+
+fn removal_kind_tag(rk: RemovalKind) -> &'static str {
+    match rk {
+        RemovalKind::Gift => "gift",
+        RemovalKind::Donation => "donation",
+    }
+}
+
+/// Stable term tag: "long" or "short" (not the Debug "LongTerm"/"ShortTerm").
+fn term_tag(t: Term) -> &'static str {
+    match t {
+        Term::ShortTerm => "short",
+        Term::LongTerm => "long",
+    }
+}
 
 /// FR1/FR2: per-source drop/unclassified counts + the append/duplicate/conflict tally.
 pub fn render_file_reports(reports: &[FileReport], import: &ImportReport) -> String {
@@ -49,13 +107,6 @@ pub fn wallet_label(w: &WalletId) -> String {
     }
 }
 
-fn term_str(t: Term) -> &'static str {
-    match t {
-        Term::ShortTerm => "ST",
-        Term::LongTerm => "LT",
-    }
-}
-
 fn disposal_year(d: &btctax_core::Disposal) -> i32 {
     d.disposed_at.year()
 }
@@ -80,13 +131,13 @@ pub fn render_report(state: &LedgerState, year: Option<i32>) -> String {
     for l in &state.lots {
         let _ = writeln!(
             out,
-            "  {}#{} {} remaining {} sat | basis {} ({:?}){}",
+            "  {}#{} {} remaining {} sat | basis {} ({}){}",
             l.lot_id.origin_event_id.canonical(),
             l.lot_id.split_sequence,
             wallet_label(&l.wallet),
             l.remaining_sat,
             l.usd_basis,
-            l.basis_source,
+            basis_source_tag(l.basis_source),
             if l.basis_pending {
                 " [basis pending]"
             } else {
@@ -112,8 +163,8 @@ pub fn render_report(state: &LedgerState, year: Option<i32>) -> String {
         for d in disposals {
             let _ = writeln!(
                 out,
-                "  {:?} @ {} ({:?})",
-                d.kind,
+                "  {} @ {} ({})",
+                dispose_kind_tag(d.kind),
                 d.disposed_at,
                 d.event.canonical()
             );
@@ -135,8 +186,8 @@ pub fn render_report(state: &LedgerState, year: Option<i32>) -> String {
         for r in removals {
             let _ = writeln!(
                 out,
-                "  {:?} @ {} ({:?})",
-                r.kind,
+                "  {} @ {} ({})",
+                removal_kind_tag(r.kind),
                 r.removed_at,
                 r.event.canonical()
             );
@@ -158,8 +209,8 @@ pub fn render_report(state: &LedgerState, year: Option<i32>) -> String {
         for i in income {
             let _ = writeln!(
                 out,
-                "  {:?} @ {} {} sat = {} USD{}",
-                i.kind,
+                "  {} @ {} {} sat = {} USD{}",
+                income_kind_tag(i.kind),
                 i.recognized_at,
                 i.sat,
                 i.usd_fmv,
@@ -173,7 +224,7 @@ pub fn render_report(state: &LedgerState, year: Option<i32>) -> String {
 fn render_disposal_leg(out: &mut String, leg: &DisposalLeg) {
     let zone = leg
         .gift_zone
-        .map(|z| format!(" gift-zone {z:?}"))
+        .map(|z| format!(" gift-zone {}", gift_zone_tag(z)))
         .unwrap_or_default();
     let _ = writeln!(
         out,
@@ -182,7 +233,7 @@ fn render_disposal_leg(out: &mut String, leg: &DisposalLeg) {
         leg.proceeds,
         leg.basis,
         leg.gain,
-        term_str(leg.term),
+        term_tag(leg.term),
         zone
     );
 }
@@ -194,7 +245,7 @@ fn render_removal_leg(out: &mut String, leg: &RemovalLeg) {
         leg.sat,
         leg.basis,
         leg.fmv_at_transfer,
-        term_str(leg.term)
+        term_tag(leg.term)
     );
 }
 
@@ -224,12 +275,28 @@ impl VerifyReport {
 /// the advisory blocker so the attest happy-path (void-prior → re-attest) is not
 /// misreported as time-barred when a stale SafeHarborTimebar advisory remains in state.blockers
 /// from the now-voided inert allocation.
+///
+/// Fix: also OR in disposal/removal legs for SafeHarborAllocated basis-source. When ALL
+/// Path-B allocated lots are fully consumed (remaining_sat==0 → filtered out by `finalize`),
+/// `state.lots` has no SafeHarborAllocated entries, but the disposed/removed legs still carry
+/// the correct basis_source and prove Path B was effective at fold time.
 fn safe_harbor_status(state: &LedgerState, _events: &[LedgerEvent]) -> String {
-    // Effective Path B: the fold seeded SafeHarborAllocated lots at the 2025-01-01 boundary.
+    // Effective Path B: seeded SafeHarborAllocated lots at the 2025-01-01 boundary.
+    // Check remaining lots, disposal legs, and removal legs (all three carry basis_source).
     let effective_path_b = state
         .lots
         .iter()
-        .any(|l| l.basis_source == BasisSource::SafeHarborAllocated);
+        .any(|l| l.basis_source == BasisSource::SafeHarborAllocated)
+        || state.disposals.iter().any(|d| {
+            d.legs
+                .iter()
+                .any(|leg| leg.basis_source == BasisSource::SafeHarborAllocated)
+        })
+        || state.removals.iter().any(|r| {
+            r.legs
+                .iter()
+                .any(|leg| leg.basis_source == BasisSource::SafeHarborAllocated)
+        });
     let unconservable = state
         .blockers
         .iter()
@@ -306,7 +373,7 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
             l.acquired_at.to_string(),
             l.remaining_sat.to_string(),
             l.usd_basis.to_string(),
-            format!("{:?}", l.basis_source),
+            basis_source_tag(l.basis_source).to_string(),
             l.basis_pending.to_string(),
         ])?;
     }
@@ -329,7 +396,7 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
         for leg in &d.legs {
             w.write_record([
                 d.event.canonical(),
-                format!("{:?}", d.kind),
+                dispose_kind_tag(d.kind).to_string(),
                 d.disposed_at.to_string(),
                 format!(
                     "{}#{}",
@@ -340,8 +407,10 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
                 leg.proceeds.to_string(),
                 leg.basis.to_string(),
                 leg.gain.to_string(),
-                format!("{:?}", leg.term),
-                leg.gift_zone.map(|z| format!("{z:?}")).unwrap_or_default(),
+                term_tag(leg.term).to_string(),
+                leg.gift_zone
+                    .map(|z| gift_zone_tag(z).to_string())
+                    .unwrap_or_default(),
             ])?;
         }
     }
@@ -362,7 +431,7 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
         for leg in &r.legs {
             w.write_record([
                 r.event.canonical(),
-                format!("{:?}", r.kind),
+                removal_kind_tag(r.kind).to_string(),
                 r.removed_at.to_string(),
                 format!(
                     "{}#{}",
@@ -372,7 +441,7 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
                 leg.sat.to_string(),
                 leg.basis.to_string(),
                 leg.fmv_at_transfer.to_string(),
-                format!("{:?}", leg.term),
+                term_tag(leg.term).to_string(),
             ])?;
         }
     }
@@ -390,7 +459,7 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
     for i in &state.income_recognized {
         w.write_record([
             i.event.canonical(),
-            format!("{:?}", i.kind),
+            income_kind_tag(i.kind).to_string(),
             i.recognized_at.to_string(),
             i.sat.to_string(),
             i.usd_fmv.to_string(),

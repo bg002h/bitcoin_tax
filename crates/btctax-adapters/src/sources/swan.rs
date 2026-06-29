@@ -290,7 +290,10 @@ impl Adapter for Swan {
                     )?
                     .abs();
                     if sat == 0 {
-                        out.dropped_no_btc += 1; // defensive (Swan is BTC-only)
+                        // Swan is BTC-only, so sat==0 is a degenerate BTC row (not a non-BTC-leg
+                        // row). Use `skipped_zero_sat` rather than `dropped_no_btc` to keep the
+                        // two semantically distinct FR2 counters accurate.
+                        out.skipped_zero_sat += 1;
                         continue;
                     }
                     let (utc, tz) =

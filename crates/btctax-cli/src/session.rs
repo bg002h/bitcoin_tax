@@ -5,7 +5,7 @@ use crate::config::{self, CliConfig};
 use crate::CliError;
 use btctax_adapters::BundledPrices;
 use btctax_core::persistence::{init_schema, load_all};
-use btctax_core::{project, LedgerState, ProjectionConfig};
+use btctax_core::{project, LedgerEvent, LedgerState, ProjectionConfig};
 use btctax_store::{Passphrase, Vault};
 use rusqlite::Connection;
 use std::path::Path;
@@ -68,6 +68,20 @@ impl Session {
         let state = project(&events, &prices, &cfg);
         Ok((state, cfg))
     }
+
+    /// Single-load variant: loads events ONCE and returns them alongside the projection. Callers
+    /// that need both the raw event log and the projected state (e.g. `verify`, `safe_harbor_attest`)
+    /// use this to avoid the double `load_all` call that the `project()` + separate `load_all()`
+    /// pattern incurs.
+    pub fn load_events_and_project(
+        &self,
+    ) -> Result<(Vec<LedgerEvent>, LedgerState, ProjectionConfig), CliError> {
+        let events = load_all(self.conn())?;
+        let cfg = self.config()?.to_projection();
+        let prices = BundledPrices::load()?;
+        let state = project(&events, &prices, &cfg);
+        Ok((events, state, cfg))
+    }
 }
 
 #[cfg(test)]
@@ -103,5 +117,30 @@ mod tests {
             err,
             CliError::Store(btctax_store::StoreError::WrongPassphrase)
         ));
+    }
+
+    /// `load_events_and_project` must return the same (events, state, config) triple as calling
+    /// `load_all` + `project` separately. Verifies the single-load contract (no double DB round-trip).
+    #[test]
+    fn load_events_and_project_matches_separate_calls() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        Session::create(&vault, &pp()).unwrap();
+        let s = Session::open(&vault, &pp()).unwrap();
+
+        let (events, state, cfg) = s.load_events_and_project().unwrap();
+
+        // Reference path: separate load_all + project calls.
+        let events2 = btctax_core::persistence::load_all(s.conn()).unwrap();
+        let (state2, cfg2) = s.project().unwrap();
+
+        assert_eq!(events.len(), events2.len(), "event count must match");
+        assert_eq!(state.lots.len(), state2.lots.len(), "lots count must match");
+        assert_eq!(
+            state.blockers.len(),
+            state2.blockers.len(),
+            "blocker count must match"
+        );
+        assert_eq!(cfg, cfg2, "ProjectionConfig must match");
     }
 }

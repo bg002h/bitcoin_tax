@@ -1,6 +1,6 @@
 mod fixtures;
 use btctax_cli::{cmd, render};
-use btctax_core::{AllocMethod, EventPayload};
+use btctax_core::{AllocMethod, BasisSource, BlockerKind, EventPayload};
 use btctax_store::Passphrase;
 
 fn pp() -> Passphrase {
@@ -177,6 +177,99 @@ cb-sell,2025-06-01 12:00:00 UTC,Sell,BTC,0.05000000,USD,90000.00,4500.00,4490.00
     assert!(
         text.contains("Path B safe-harbor allocation is effective"),
         "rendered verify must show 'Path B safe-harbor allocation is effective', got:\n{text}"
+    );
+}
+
+/// Fix for CLI-I3: `safe_harbor_status` went dark (reported "time-barred → Path A") when
+/// ALL Path-B allocated lots were fully consumed (remaining_sat==0 → filtered by `finalize`).
+/// The old code only looked at `state.lots`; the fix also checks disposal/removal legs which
+/// retain the `SafeHarborAllocated` basis_source even after all lots are consumed.
+#[test]
+fn safe_harbor_status_remains_effective_when_all_path_b_lots_are_consumed() {
+    use time::macros::datetime;
+    let now = datetime!(2026-02-01 12:00:00 UTC);
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Pre-2025 Buy 0.10 BTC + 2025 Sell ALL 0.10 BTC.
+    // After Path B seeding at 2025-01-01, the Sell fully consumes every SafeHarborAllocated lot.
+    // state.lots will be empty; state.disposals legs will carry SafeHarborAllocated basis_source.
+    let p = dir.path().join("cb.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-pre,2024-01-15 12:00:00 UTC,Buy,BTC,0.10000000,USD,42500.00,4250.00,4275.00,25.00,,,\r\n\
+cb-sell-all,2025-06-15 12:00:00 UTC,Sell,BTC,0.10000000,USD,67500.00,6750.00,6740.00,10.00,,,\r\n",
+    )
+    .unwrap();
+    cmd::import::run(&vault, &pp(), &[p]).unwrap();
+
+    // Allocate (unattested) → inert: made 2026-02-01 is after the 2025-06-15 ActualPosition bar.
+    let a1 = cmd::reconcile::safe_harbor_allocate(
+        &vault,
+        &pp(),
+        AllocMethod::ActualPosition,
+        false,
+        now,
+    )
+    .unwrap();
+    // Void alloc #1 — a stale SafeHarborTimebar advisory for a1 remains in state.blockers.
+    cmd::reconcile::void(&vault, &pp(), &a1.canonical(), now).unwrap();
+    // Re-allocate (still unattested, still inert).
+    cmd::reconcile::safe_harbor_allocate(&vault, &pp(), AllocMethod::ActualPosition, false, now)
+        .unwrap();
+    // Attest → voids alloc #2, appends attested alloc #3; effective Path B.
+    cmd::reconcile::safe_harbor_attest(&vault, &pp(), now).unwrap();
+
+    // Sanity checks: no SafeHarborAllocated lots remain (all consumed); stale timebar is present;
+    // disposal legs carry SafeHarborAllocated.
+    {
+        let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert!(
+            state
+                .lots
+                .iter()
+                .all(|l| l.basis_source != BasisSource::SafeHarborAllocated),
+            "all SafeHarborAllocated lots must be fully consumed (remaining_sat==0 → filtered)"
+        );
+        assert!(
+            state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::SafeHarborTimebar),
+            "stale SafeHarborTimebar advisory must remain (from voided alloc #1)"
+        );
+        assert!(
+            state.disposals.iter().any(|d| d
+                .legs
+                .iter()
+                .any(|l| l.basis_source == BasisSource::SafeHarborAllocated)),
+            "disposal legs must carry SafeHarborAllocated (the consumed seed lots)"
+        );
+    }
+
+    // The fix: verify reports Path B effective, NOT time-barred.
+    let report = cmd::inspect::verify(&vault, &pp()).unwrap();
+    assert!(
+        report.safe_harbor.contains("effective"),
+        "safe_harbor_status must report 'effective' even when all allocated lots are consumed, \
+         got: {:?}",
+        report.safe_harbor
+    );
+    assert!(
+        !report.safe_harbor.contains("time-barred"),
+        "safe_harbor_status must NOT say 'time-barred' after a successful attest, \
+         got: {:?}",
+        report.safe_harbor
+    );
+    let text = render::render_verify(&report);
+    assert!(
+        text.contains("Path B safe-harbor allocation is effective"),
+        "render_verify text must show 'Path B … effective', got:\n{text}"
     );
 }
 

@@ -1,7 +1,7 @@
-use btctax_adapters::adapter::{Adapter, SourceFile};
+use btctax_adapters::adapter::{Adapter, FileGroup, SourceFile};
 use btctax_adapters::price::BundledPrices;
 use btctax_adapters::sources::swan::Swan;
-use btctax_core::EventPayload;
+use btctax_core::{EventPayload, Source};
 
 // SYNTHETIC Swan 3-file batch: the REAL §9.1 per-role header names, INVENTED values. trades = no
 // preamble + `MM/DD/YYYY` dates; transfers/withdrawals = 2 preamble lines + `…+00` dates. No on-chain
@@ -111,4 +111,48 @@ fn swan_groups_three_files_routes_roles_and_events() {
         .events
         .iter()
         .any(|e| e.id.canonical().starts_with("import|swan|out|"))); // withdrawal (semantic)
+}
+
+/// A zero-sat Swan withdrawal row must increment `skipped_zero_sat` (degenerate BTC row) and must
+/// NOT increment `dropped_no_btc` (which tracks rows with no BTC leg, a semantically distinct case).
+#[test]
+fn swan_withdrawal_zero_sat_increments_skipped_zero_sat_not_dropped_no_btc() {
+    // SYNTHETIC withdrawals file: one normal row (0.02 BTC) + one zero-sat degenerate row.
+    const WITHDRAWALS_ZERO_SAT: &str = "Swan Bitcoin Inc\n\
+        123 Main St · 555-0100\n\
+        Created At,Timezone,Transaction ID,Executed At,Canceled At,Status,Bitcoin Amount,Automatic,IP Address\n\
+        2025-04-01 10:00:00+00,UTC,sw-w1,2025-04-01 10:05:00+00,,settled,0.02000000,true,1.2.3.4\n\
+        2025-04-02 11:00:00+00,UTC,sw-w2,,,pending,0.00000000,false,1.2.3.5\n";
+
+    let dir = tempfile::tempdir().unwrap();
+    let w = dir.path().join("swan_withdrawals.csv");
+    std::fs::write(&w, WITHDRAWALS_ZERO_SAT).unwrap();
+
+    let prices = BundledPrices::load().unwrap();
+    let sw = Swan;
+    let sf = SourceFile::new(&w);
+    assert!(sw.detect(&sf).unwrap());
+
+    let group = FileGroup {
+        source: Source::Swan,
+        label: "swan-batch".to_string(),
+        files: vec![sf],
+    };
+    let rows = sw.parse(&group).unwrap();
+    let out = sw.normalize(&group, rows, &prices).unwrap();
+
+    // The normal row produces one TransferOut event; the zero-sat row is skipped.
+    assert_eq!(
+        out.events.len(),
+        1,
+        "only the non-zero withdrawal should produce an event"
+    );
+    assert_eq!(
+        out.skipped_zero_sat, 1,
+        "zero-sat withdrawal must increment skipped_zero_sat"
+    );
+    assert_eq!(
+        out.dropped_no_btc, 0,
+        "zero-sat BTC row must NOT increment dropped_no_btc (that counter is for non-BTC-leg rows)"
+    );
 }
