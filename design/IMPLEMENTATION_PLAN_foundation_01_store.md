@@ -516,7 +516,7 @@ pub fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), StoreError> {
         // keep a fsync'd backup BEFORE we touch the live file
         let bak = paths::bak_of(target);
         fs::copy(target, &bak)?;
-        File::open(&bak)?.sync_all()?;
+        OpenOptions::new().write(true).open(&bak)?.sync_all()?; // WRITE handle: fsync/FlushFileBuffers needs it on Windows
     }
     fs::rename(&tmp, target)?; // atomic replace; target never absent. (NFR8: std::fs::rename replaces an
                                // existing file on Windows via MoveFileExW(MOVEFILE_REPLACE_EXISTING); its
@@ -530,7 +530,7 @@ pub fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 pub fn recover_target(target: &Path) -> Result<(), StoreError> {
     if !target.exists() {
         let bak = paths::bak_of(target);
-        if bak.exists() { fs::copy(&bak, target)?; }
+        if bak.exists() { fs::copy(&bak, target)?; OpenOptions::new().write(true).open(target)?.sync_all()?; } // durable restore
     }
     Ok(())
 }
