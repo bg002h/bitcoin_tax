@@ -12,7 +12,9 @@ pub use conventions::{Sat, TaxDate, Usd};
 pub use event::*;
 pub use identity::{EventId, Fingerprint, LotId, Source, SourceRef, WalletId};
 pub use price::PriceProvider;
-pub use project::{project, FeeTreatment, LotMethod, ProjectionConfig};
+pub use project::{
+    conservation_report, project, ConservationReport, FeeTreatment, LotMethod, ProjectionConfig,
+};
 pub use state::*;
 
 #[derive(Debug, thiserror::Error)]

@@ -1,7 +1,10 @@
+pub mod conservation;
 pub mod fold;
 pub mod pools;
 pub mod resolve;
 pub mod transition;
+
+pub use conservation::{conservation_report, ConservationReport};
 
 use crate::event::LedgerEvent;
 use crate::price::PriceProvider;
