@@ -224,12 +224,28 @@ impl VerifyReport {
 /// the advisory blocker so the attest happy-path (void-prior → re-attest) is not
 /// misreported as time-barred when a stale SafeHarborTimebar advisory remains in state.blockers
 /// from the now-voided inert allocation.
+///
+/// Fix: also OR in disposal/removal legs for SafeHarborAllocated basis-source. When ALL
+/// Path-B allocated lots are fully consumed (remaining_sat==0 → filtered out by `finalize`),
+/// `state.lots` has no SafeHarborAllocated entries, but the disposed/removed legs still carry
+/// the correct basis_source and prove Path B was effective at fold time.
 fn safe_harbor_status(state: &LedgerState, _events: &[LedgerEvent]) -> String {
-    // Effective Path B: the fold seeded SafeHarborAllocated lots at the 2025-01-01 boundary.
+    // Effective Path B: seeded SafeHarborAllocated lots at the 2025-01-01 boundary.
+    // Check remaining lots, disposal legs, and removal legs (all three carry basis_source).
     let effective_path_b = state
         .lots
         .iter()
-        .any(|l| l.basis_source == BasisSource::SafeHarborAllocated);
+        .any(|l| l.basis_source == BasisSource::SafeHarborAllocated)
+        || state.disposals.iter().any(|d| {
+            d.legs
+                .iter()
+                .any(|leg| leg.basis_source == BasisSource::SafeHarborAllocated)
+        })
+        || state.removals.iter().any(|r| {
+            r.legs
+                .iter()
+                .any(|leg| leg.basis_source == BasisSource::SafeHarborAllocated)
+        });
     let unconservable = state
         .blockers
         .iter()
