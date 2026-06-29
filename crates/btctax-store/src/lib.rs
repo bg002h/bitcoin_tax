@@ -2,6 +2,7 @@
 pub const SCHEMA_VERSION: u32 = 1;
 
 pub mod blob;
+pub mod sqlite_io;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
