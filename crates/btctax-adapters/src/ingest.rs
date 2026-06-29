@@ -71,6 +71,7 @@ pub fn ingest_files(
                 btc_events: out.events.len(),
                 dropped_no_btc: out.dropped_no_btc,
                 unclassified: out.unclassified,
+                skipped_zero_sat: out.skipped_zero_sat,
             });
             batch.events.extend(out.events);
         }

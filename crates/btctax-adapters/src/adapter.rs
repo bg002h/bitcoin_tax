@@ -33,6 +33,11 @@ pub struct GroupOutput {
     /// FR2: BTC-side rows that became `Unclassified` events (NOT dropped).
     pub unclassified: usize,
     pub parsed_rows: usize,
+    /// Rows skipped because they carry a zero satoshi amount (degenerate BTC row; distinct from
+    /// `dropped_no_btc` which tracks rows dropped for having no BTC leg at all). Currently only
+    /// Swan withdrawals can produce this — Swan is BTC-only, so a zero-sat withdrawal is a
+    /// degenerate BTC row rather than a non-BTC-leg row.
+    pub skipped_zero_sat: usize,
 }
 impl GroupOutput {
     pub fn merge(&mut self, o: GroupOutput) {
@@ -40,6 +45,7 @@ impl GroupOutput {
         self.dropped_no_btc += o.dropped_no_btc;
         self.unclassified += o.unclassified;
         self.parsed_rows += o.parsed_rows;
+        self.skipped_zero_sat += o.skipped_zero_sat;
     }
 }
 
@@ -52,6 +58,9 @@ pub struct FileReport {
     pub btc_events: usize,
     pub dropped_no_btc: usize,
     pub unclassified: usize,
+    /// Rows carrying a zero satoshi amount (degenerate BTC row — distinct from `dropped_no_btc`).
+    /// See `GroupOutput::skipped_zero_sat` for details.
+    pub skipped_zero_sat: usize,
 }
 
 /// The whole ingest result: every BTC event across all groups + one report per group.
@@ -91,16 +100,19 @@ mod tests {
             dropped_no_btc: 1,
             unclassified: 2,
             parsed_rows: 3,
+            skipped_zero_sat: 1,
             ..Default::default()
         };
         let b = GroupOutput {
             dropped_no_btc: 4,
             unclassified: 5,
             parsed_rows: 6,
+            skipped_zero_sat: 2,
             events: Vec::new(),
         };
         a.merge(b);
         assert_eq!((a.dropped_no_btc, a.unclassified, a.parsed_rows), (5, 7, 9));
+        assert_eq!(a.skipped_zero_sat, 3);
     }
 
     #[test]
