@@ -108,6 +108,7 @@ pub enum StoreError {
     #[error("sqlite: {0}")] Sqlite(#[from] rusqlite::Error),
     #[error("unsupported schema version {0}")] UnsupportedSchema(u32),
     #[error("vault already exists at this path")] AlreadyExists,
+    #[error("invalid vault path (must not end in .key)")] InvalidVaultPath,
 }
 ```
 
@@ -484,7 +485,7 @@ pub fn lock_of(p: &Path) -> PathBuf { suffixed(p, ".lock") }
 /// vault literally named `*.key` (which would collide with its own key file).
 pub fn suffixed_key(p: &Path) -> PathBuf {
     let k = p.with_extension("key");
-    assert_ne!(k, p, "vault path must not already end in .key");
+    debug_assert_ne!(k, p, "call sites pre-check this; vault path must not end in .key"); // M1: create/open return InvalidVaultPath
     k
 }
 ```
@@ -649,6 +650,16 @@ use btctax_store::{Vault, Passphrase, StoreError};
     Vault::create(&vp,&Passphrase::new("pw".into())).unwrap().save().unwrap();
     assert!(matches!(Vault::create(&vp,&Passphrase::new("pw".into())), Err(StoreError::AlreadyExists)));
 }
+#[test] fn rejects_dot_key_vault_path(){ // M1: typed error, not a panic
+    let d=tempfile::tempdir().unwrap(); let bad=d.path().join("vault.key");
+    assert!(matches!(Vault::create(&bad,&Passphrase::new("pw".into())), Err(StoreError::InvalidVaultPath)));
+    assert!(matches!(Vault::open(&bad,&Passphrase::new("pw".into())), Err(StoreError::InvalidVaultPath)));
+}
+#[test] fn create_makes_missing_parent_dir(){ // M3
+    let d=tempfile::tempdir().unwrap(); let vp=d.path().join("sub/dir/vault.pgp");
+    Vault::create(&vp,&Passphrase::new("pw".into())).unwrap().save().unwrap();
+    assert!(vp.exists());
+}
 #[test] fn open_recovers_from_bak_if_target_missing(){
     let d=tempfile::tempdir().unwrap(); let vp=d.path().join("vault.pgp");
     { let mut v=Vault::create(&vp,&Passphrase::new("pw".into())).unwrap();
@@ -675,6 +686,8 @@ pub struct Vault { path: PathBuf, cert: openpgp::Cert, conn: Connection, _lock: 
 
 impl Vault {
     pub fn create(vault: &Path, pp: &Passphrase) -> Result<Vault, StoreError> {
+        if vault.extension().and_then(|e| e.to_str()) == Some("key") { return Err(StoreError::InvalidVaultPath); } // M1
+        if let Some(parent) = vault.parent() { if !parent.as_os_str().is_empty() { std::fs::create_dir_all(parent)?; } } // M3
         let lock = VaultLock::acquire(vault)?;                 // lock FIRST — no TOCTOU (Nit-1)
         let kp = paths::suffixed_key(vault);
         if vault.exists() || kp.exists() { return Err(StoreError::AlreadyExists); }
@@ -697,6 +710,7 @@ impl Vault {
         Ok(v)
     }
     pub fn open(vault: &Path, pp: &Passphrase) -> Result<Vault, StoreError> {
+        if vault.extension().and_then(|e| e.to_str()) == Some("key") { return Err(StoreError::InvalidVaultPath); } // M1
         let lock = VaultLock::acquire(vault)?;
         let kp = paths::suffixed_key(vault);
         for f in [vault, kp.as_path()] {        // crash-safety for BOTH sidecars (Minor-2)
