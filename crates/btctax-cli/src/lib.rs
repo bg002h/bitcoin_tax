@@ -34,4 +34,8 @@ pub enum CliError {
     /// A CLI argument was malformed (bad USD/date/enum/wallet spec, or a contradictory flag set).
     #[error("usage: {0}")]
     Usage(String),
+    /// M1: a `cli_config` row held an unrecognized value (corrupt DB, future-written value, or manual
+    /// edit gone wrong). Returning an error is safer than silently misreading the stored intent.
+    #[error("unrecognized stored config value: key={key:?} value={value:?}")]
+    BadConfigValue { key: String, value: String },
 }
