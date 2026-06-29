@@ -8,8 +8,10 @@ pub mod lock;
 pub mod memlock;
 pub mod paths;
 pub mod sqlite_io;
+pub mod vault;
 
 pub use crypto::Passphrase;
+pub use vault::Vault;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {

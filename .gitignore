@@ -8,6 +8,7 @@
 *.gpg
 *.asc
 vault*
+!vault.rs
 *.vault
 *-snapshot.*
 snapshot.*
