@@ -4,7 +4,9 @@
 //! `now` is the injected decision creation-time / safe-harbor made-date (§6.2) — deterministic in tests.
 use crate::{CliError, Session};
 use btctax_core::persistence::append_decision;
-use btctax_core::{EventId, EventPayload, TransferLink, TransferTarget};
+use btctax_core::{
+    ClassifyInbound, EventId, EventPayload, InboundClass, TransferLink, TransferTarget,
+};
 use btctax_store::Passphrase;
 use std::path::Path;
 use time::{OffsetDateTime, UtcOffset};
@@ -20,6 +22,25 @@ fn append_and_save(
     let id = append_decision(session.conn(), payload, now, UtcOffset::UTC, None)?;
     session.save()?;
     Ok(id)
+}
+
+/// FR6: classify an externally-sourced inbound `TransferIn` as Income or a received Gift. For Income
+/// this supplies the FMV basis; for Gift it supplies donor basis/date + fmv_at_gift (TP11 dual-basis).
+/// This is the re-supply path for the §9.1 Swan `deposit` basis GAP.
+pub fn classify_inbound(
+    vault_path: &Path,
+    pp: &Passphrase,
+    in_ref: &str,
+    class: InboundClass,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let transfer_in_event = parse_event_id(in_ref)?;
+    let mut session = Session::open(vault_path, pp)?;
+    let payload = EventPayload::ClassifyInbound(ClassifyInbound {
+        transfer_in_event,
+        as_: class,
+    });
+    append_and_save(&mut session, payload, now)
 }
 
 /// FR6/TP7: confirm a self-transfer. `target` is a destination `TransferIn` event (`--to-event`) or a

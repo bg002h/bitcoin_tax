@@ -1,6 +1,6 @@
 mod fixtures;
 use btctax_cli::{cmd, Session};
-use btctax_core::{EventPayload, TransferTarget};
+use btctax_core::{EventPayload, InboundClass, IncomeKind, TransferTarget};
 use btctax_store::Passphrase;
 use time::macros::datetime;
 
@@ -9,6 +9,14 @@ fn pp() -> Passphrase {
 }
 fn now() -> time::OffsetDateTime {
     datetime!(2026-02-01 12:00:00 UTC) // fixed decision clock (NFR4 deterministic tests)
+}
+
+fn coinbase_with_receive(dir: &std::path::Path) -> std::path::PathBuf {
+    let p = dir.join("cb_recv.csv");
+    std::fs::write(&p, "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-recv,2025-03-01 12:00:00 UTC,Receive,BTC,0.05000000,USD,84000.00,,,,,bc1qsender,\r\n").unwrap();
+    p
 }
 
 /// Import the buy/sell/send fixture and return (vault_path, the TransferOut's canonical eventref).
@@ -21,6 +29,41 @@ fn vault_with_pending(dir: &std::path::Path) -> (std::path::PathBuf, String) {
     let (state, _) = s.project().unwrap();
     let out_ref = state.pending_reconciliation[0].event.canonical();
     (vault, out_ref)
+}
+
+#[test]
+fn classify_inbound_income_resolves_unknown_basis() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(&vault, &pp(), &[coinbase_with_receive(dir.path())]).unwrap();
+
+    let in_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+
+    let class = InboundClass::Income {
+        kind: IncomeKind::Reward,
+        fmv: Some(btctax_cli::eventref::parse_usd_arg("4200.00").unwrap()),
+        business: false,
+    };
+    cmd::reconcile::classify_inbound(&vault, &pp(), &in_ref, class, now()).unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    // The classified inbound is recognized income; no unknown-basis blocker remains.
+    assert_eq!(state.income_recognized.len(), 1);
+    assert!(state
+        .blockers
+        .iter()
+        .all(|b| b.kind != btctax_core::BlockerKind::UnknownBasisInbound));
 }
 
 #[test]
