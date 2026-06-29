@@ -20,6 +20,7 @@ cb-send,2025-06-20 12:00:00 UTC,Send,BTC,0.03000000,USD,68000.00,,,,,,bc1qsynthe
 }
 
 /// A Coinbase CSV with a single Buy only (self-contained USD; no price-dataset dependency).
+#[allow(dead_code)] // used in init_import.rs; appears unused in verify_report.rs compilation unit
 pub fn coinbase_single_buy(dir: &Path) -> PathBuf {
     let p = dir.join("coinbase_buy.csv");
     std::fs::write(
