@@ -26,6 +26,7 @@ mod cols {
     // §9.1 CONFIRMED real headers (no OPEN items remain):
     pub const TYPE: &str = "Type";
     pub const DATE: &str = "Date"; // Excel serial (Time (UTC) carries the same instant)
+    pub const SYMBOL: &str = "Symbol"; // trading pair (e.g. "BTCUSD", "ETHBTC") — I-1 gate
     pub const BTC_AMOUNT: &str = "BTC Amount BTC"; // BTC leg amount + presence test
     pub const USD_AMOUNT: &str = "USD Amount USD";
     pub const FEE_USD: &str = "Fee (USD) USD";
@@ -99,36 +100,68 @@ impl Adapter for Gemini {
             let ttype = row.get(SRC, cols::TYPE)?;
             let (utc, tz) = parse_timestamp_flex(SRC, row.line, row.get(SRC, cols::DATE)?)?;
             let txid = row.opt(cols::TX_HASH).map(|s| s.to_string());
+            // I-2: abs-normalize fee magnitude at parse time — Type fixes the field's role
+            // (fee is always a cost regardless of Gemini's sign convention). Applied only in
+            // this Gemini parser; `parse_usd` is unchanged.
             let fee = match row.opt(cols::FEE_USD) {
-                Some(s) => parse_usd(SRC, row.line, "Fee (USD) USD", s)?,
+                Some(s) => parse_usd(SRC, row.line, "Fee (USD) USD", s)?.abs(),
                 None => Usd::ZERO,
             };
-            let usd_amount = row
-                .opt(cols::USD_AMOUNT)
-                .map(|s| parse_usd(SRC, row.line, "USD Amount USD", s))
-                .transpose()?
-                .unwrap_or(Usd::ZERO);
+            // Note: usd_amount is evaluated inside the buy/sell arm so the Symbol gate (I-1)
+            // can inspect the raw opt reference before deciding to parse it.
 
             let lower = ttype.to_ascii_lowercase();
             let (dir, payload): (Direction, EventPayload) = match lower.as_str() {
-                "buy" => (
-                    Direction::Trade,
-                    EventPayload::Acquire(Acquire {
-                        sat,
-                        usd_cost: usd_amount,
-                        fee_usd: fee,
-                        basis_source: BasisSource::ExchangeProvided,
-                    }),
-                ),
-                "sell" => (
-                    Direction::Trade,
-                    EventPayload::Dispose(Dispose {
-                        sat,
-                        usd_proceeds: usd_amount,
-                        fee_usd: fee,
-                        kind: DisposeKind::Sell,
-                    }),
-                ),
+                "buy" | "sell" => {
+                    // I-1: gate Acquire/Dispose on a USD-quoted BTCUSD trade.
+                    // A BTC-quoted pair (e.g. ETHBTC, BCHBTC) disposes BTC in the opposite
+                    // direction from a naive Type=Buy read, and carries no USD amount → falling
+                    // through to usd_cost/proceeds = ZERO would produce a phantom zero-basis lot
+                    // or wrong-direction event. Gate on Symbol=="BTCUSD" (case-insensitive) or
+                    // USD Amount USD present-and-non-empty as a safety net. Any Buy/Sell that
+                    // fails both checks is emitted as Unclassified — never guess direction or basis.
+                    let symbol = row.opt(cols::SYMBOL).unwrap_or("").trim();
+                    let usd_str = row.opt(cols::USD_AMOUNT);
+                    let is_btcusd = symbol.eq_ignore_ascii_case("btcusd");
+                    let has_usd = usd_str.is_some(); // opt already filters blank strings
+                    if !is_btcusd && !has_usd {
+                        // BTC-quoted or crypto-crypto pair → Unclassified; user classifies.
+                        out.unclassified += 1;
+                        (
+                            Direction::Trade,
+                            EventPayload::Unclassified(Unclassified { raw: raw_of(row) }),
+                        )
+                    } else {
+                        // USD-quoted BTCUSD trade confirmed.
+                        // I-2: abs-normalize usd magnitude — Type fixes the field's role.
+                        let usd_abs = usd_str
+                            .map(|s| parse_usd(SRC, row.line, "USD Amount USD", s))
+                            .transpose()?
+                            .unwrap_or(Usd::ZERO)
+                            .abs();
+                        if lower == "buy" {
+                            (
+                                Direction::Trade,
+                                EventPayload::Acquire(Acquire {
+                                    sat,
+                                    usd_cost: usd_abs,
+                                    fee_usd: fee, // already abs from computation above
+                                    basis_source: BasisSource::ExchangeProvided,
+                                }),
+                            )
+                        } else {
+                            (
+                                Direction::Trade,
+                                EventPayload::Dispose(Dispose {
+                                    sat,
+                                    usd_proceeds: usd_abs,
+                                    fee_usd: fee, // already abs from computation above
+                                    kind: DisposeKind::Sell,
+                                }),
+                            )
+                        }
+                    }
+                }
                 "debit" => (
                     Direction::Out,
                     EventPayload::TransferOut(TransferOut {

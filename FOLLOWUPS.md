@@ -25,6 +25,28 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
   TP8 treatment is applied correctly per the existing TreatmentC/B config; any further
   guidance-specific nuance is deferred).
 
+## btctax-adapters whole-branch fixes (2026-06-29) — both Important findings resolved
+
+- **I-1 — Gemini Buy/Sell on BTC-quoted pairs (ETHBTC/BCHBTC) → Unclassified (FIXED).**
+  Added `cols::SYMBOL` and gated `Buy/Sell → Acquire/Dispose` on `Symbol == "BTCUSD"` (case-insensitive)
+  OR `USD Amount USD` present-and-non-empty. Any `Buy`/`Sell` row failing both checks emits `Unclassified`
+  with `raw_of(row)` — never falls through to `usd_cost/proceeds = ZERO`, never guesses direction.
+  KATs: `gemini_btcquoted_pair_buy_is_unclassified` (ETHBTC Buy → Unclassified, not Acquire, not zero-basis).
+  §9.1 updated to state the rule.
+
+- **I-2 — Gemini USD sign: magnitudes abs-normalized (FIXED).**
+  Applied `.abs()` to `fee` at parse time in the Gemini parser and to `usd_abs` inside the Buy/Sell arm.
+  `parse_usd` is unchanged (shared). A negative-encoded Buy no longer produces a negative `usd_cost`;
+  a parenthesized Sell no longer produces a negative `usd_proceeds`. Applied only in `gemini.rs`.
+  KATs: `gemini_negative_usd_normalized_to_positive` (negative USD Amount + parenthesized Fee → positive).
+
+- **Phase-2 refinement note — full crypto↔BTC-pair FMV handling:** For a Gemini `ETHBTC` Buy/Sell the
+  BTC leg IS a taxable disposition at FMV (or acquisition), but Phase 1 cannot auto-compute the BTC FMV
+  for a non-BTCUSD pair without a second price lookup. These rows are conservatively emitted as
+  `Unclassified` and require explicit user classification via reconciliation. Auto-recognizing the BTC
+  disposition at FMV (e.g., by looking up the BTC/ETH rate from an exchange dataset) is a Phase-2
+  refinement. — OPEN (Phase 2). — I-1 fix follow-on.
+
 ## btctax-adapters (Plan 3) — confirmed real schemas folded into §9.1 (2026-06-29)
 - **CROSS-CRATE GAP — inbound `TransferIn` cannot carry cost-basis / acquisition-date (record clearly).**
   Swan `transfers` `deposit` rows carry **`USD Cost Basis` + `Acquisition Date`**, and Coinbase `Receive` /
