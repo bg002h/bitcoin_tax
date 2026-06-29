@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/btctax-store"]
+members = ["crates/btctax-store", "crates/btctax-core"]
 [workspace.package]
 edition = "2021"
 license = "MIT OR Unlicense"

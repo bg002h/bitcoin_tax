@@ -2,6 +2,29 @@
 
 Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status · pointer.
 
+## btctax-core whole-branch fixes (2026-06-29) — both Important findings resolved
+
+- **I-1 — `ReclassifyOutflow → Dispose` on-chain `fee_sat` silently dropped (FIXED).**
+  Added `fee_sat: Option<Sat>` to `Op::Dispose`; `OutflowClass::Dispose` arm now passes
+  `t.fee_sat`; native `EventPayload::Dispose` passes `None`. Fold arm calls `consume_fee`
+  after principal and re-homes carry onto last disposal leg via `rehome_onto_disposal_leg`.
+  Fee-sats are consumed; holdings no longer overstated; conservation is honest.
+  KATs: `reclassify_dispose_fee_sat_treatment_c_conservation_honest` and
+  `reclassify_dispose_fee_sat_treatment_b_mini_disposition` — both pass.
+
+- **I-2 — Path-B seeded-lot `LotId` collision after post-2025 `SelfTransfer` (FIXED).**
+  Added `PoolSet::init_split_counter(origin, next)` and called it in `seed_transition`'s
+  Path-B arm after pushing seed lots, setting `next_split[allocation_id] = seed.len()`.
+  Later `bump_split(allocation_id)` returns `seed_len` (not 0), so relocated fragments get
+  fresh unique split sequences.
+  KAT: `path_b_seeded_lot_relocation_no_lotid_collision` — all LotIds unique, conservation
+  balanced after partial relocation of a seeded lot.
+
+- **Phase-2 refinement note:** The precise fee-sat disposition treatment when a
+  `TransferOut` is reclassified as Dispose is a TP8-adjacent Phase-2 refinement (the Phase-1
+  TP8 treatment is applied correctly per the existing TreatmentC/B config; any further
+  guidance-specific nuance is deferred).
+
 ## Deferred to later phases (out of Phase-1 scope by design)
 - **Forms generation (Phase 2):** filled IRS 8949 + Schedule D PDFs; §170(e) charitable-deduction computation (FMV vs basis); Form 8283 (>$5k qualified appraisal — §170(f)(11)(C), CCA 202302012); Form 709 routing for gifts. — *Phase 1 captures the metadata (FMV, ST/LT, appraisal-required, donor carryover) so Phase 2 can compute.* — OPEN (Phase 2). — tax-review N1/M-(donation), spec §16.
 - **Rate/limit mechanics (Phase 2/3):** 0/15/20% (§1(h)), 3.8% NIIT (§1411), $3,000 loss limit + carryforward (§1211/§1212). — Confirmed safe to defer (downstream of per-lot basis/gain/ST-LT). — OPEN (Phase 2/3). — tax-review "Positions confirmed".
@@ -53,3 +76,6 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 See the spec's "Fold record (v0.2)" section for the 1:1 mapping of each Critical/Important to its fix. Round-1 reviews: `reviews/spec-review-phase1-tax-round-1.md`, `reviews/spec-review-phase1-engineering-round-1.md`, `reviews/architecture-review-phase1-foundation-round-1.md`.
 
 - **N-2 (export_snapshot silently overwrites snapshot.sqlite):** Current behaviour matches the brief (no mention of rotation); future improvement: timestamped filenames (e.g. `snapshot-20260628T120000Z.sqlite`) to avoid clobbering a previous export. **Windows owner-only perms** for both `export_snapshot` and `backup_key` rely on user-profile directory ACL inheritance (no explicit DACL set); verify under Windows CI that the written files are not world-readable.
+
+## btctax-core (Task 0) — dependency versions pinned for reproducibility
+- btctax-core pinned `rust_decimal` 1.42.1 / `rust_decimal_macros` 1.40.0 (independent Cargo entries; `dec!` literals binary-compatible with the 1.42 `Decimal`) / `time` 0.3.51 — R3 pin record.
