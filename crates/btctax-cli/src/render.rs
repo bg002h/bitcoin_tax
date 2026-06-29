@@ -4,8 +4,8 @@ use btctax_adapters::FileReport;
 use btctax_core::persistence::ImportReport;
 use btctax_core::{
     conservation_report, BasisSource, Blocker, BlockerKind, ConservationReport, DisposalLeg,
-    DisposeKind, GiftZone, IncomeKind, LedgerEvent, LedgerState, RemovalKind, RemovalLeg,
-    Severity, Term, WalletId,
+    DisposeKind, GiftZone, IncomeKind, LedgerEvent, LedgerState, RemovalKind, RemovalLeg, Severity,
+    Term, WalletId,
 };
 use btctax_store::fsperms;
 use csv::Writer;

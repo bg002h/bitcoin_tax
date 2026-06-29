@@ -1,8 +1,8 @@
 mod fixtures;
 use btctax_cli::{cmd, CliError, Session};
 use btctax_core::{
-    AllocMethod, BlockerKind, DisposeKind, EventId, EventPayload, InboundClass, IncomeKind,
-    ManualFmv, OutflowClass, TransferTarget,
+    AllocMethod, BlockerKind, DisposeKind, EventId, EventPayload, FmvStatus, InboundClass, Income,
+    IncomeKind, ManualFmv, OutflowClass, Source, SourceRef, TransferTarget, WalletId,
 };
 use btctax_store::Passphrase;
 use rust_decimal_macros::dec;
@@ -182,34 +182,111 @@ fn void_drops_a_revocable_decision() {
     assert_eq!(state.pending_reconciliation.len(), 1);
 }
 
+/// Strengthened test for `set-fmv`. The original test targeted an Acquire event, but
+/// ManualFmv is only applied by `build_op` in the `EventPayload::Income` arm (resolve.rs). This
+/// test uses a SYNTHETIC Income event with `FmvStatus::Missing` and `usd_fmv: None`, appended
+/// directly via `append_import_batch`. It verifies that:
+///   1. The `FmvMissing` blocker is PRESENT before set-fmv.
+///   2. After set-fmv, the blocker is CLEARED and income is recognized at the manual FMV.
 #[test]
-fn set_fmv_appends_a_manual_fmv_decision() {
+fn set_fmv_clears_fmv_missing_blocker_and_recognizes_income() {
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::LedgerEvent;
+    use time::UtcOffset;
+
     let dir = tempfile::tempdir().unwrap();
-    let (vault, _out_ref) = vault_with_pending(dir.path());
-    // Target the Buy event (any event id parses); the decision is appended + persisted.
-    let target = {
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Append a synthetic River Income event with FmvStatus::Missing (no bundled price on
+    // 2025-04-01 — the dataset only has a few fixed dates). The adapter path for River Income
+    // with a missing price sets fmv_status=Missing and usd_fmv=None; here we create it directly.
+    let income_id = EventId::import(Source::River, SourceRef::new("river-income-001"));
+    let income_event = LedgerEvent {
+        id: income_id.clone(),
+        utc_timestamp: datetime!(2025-04-01 12:00:00 UTC),
+        original_tz: UtcOffset::UTC,
+        wallet: Some(WalletId::Exchange {
+            provider: "river".into(),
+            account: "main".into(),
+        }),
+        payload: EventPayload::Income(Income {
+            sat: 50_000,
+            usd_fmv: None,
+            fmv_status: FmvStatus::Missing,
+            kind: IncomeKind::Interest,
+            business: false,
+        }),
+    };
+    // Open a mutable session, append the synthetic event, and save.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        append_import_batch(s.conn(), &[income_event]).unwrap();
+        s.save().unwrap();
+    }
+
+    // BEFORE set-fmv: assert FmvMissing blocker is present.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert!(
+            state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::FmvMissing),
+            "FmvMissing blocker must be present before set-fmv: {:?}",
+            state.blockers
+        );
+        assert!(
+            state.income_recognized.is_empty(),
+            "income must NOT be recognized while FMV is missing"
+        );
+    }
+
+    // Apply set-fmv targeting the Income event's id.
+    let manual_fmv = btctax_cli::eventref::parse_usd_arg("4200.00").unwrap();
+    let decision_id =
+        cmd::reconcile::set_fmv(&vault, &pp(), &income_id.canonical(), manual_fmv, now()).unwrap();
+
+    // Verify the ManualFmv decision was persisted.
+    {
         let s = Session::open(&vault, &pp()).unwrap();
         let events = btctax_core::persistence::load_all(s.conn()).unwrap();
-        events
-            .iter()
-            .find(|e| matches!(e.payload, EventPayload::Acquire(_)))
-            .unwrap()
-            .id
-            .canonical()
-    };
-    let id = cmd::reconcile::set_fmv(
-        &vault,
-        &pp(),
-        &target,
-        btctax_cli::eventref::parse_usd_arg("123.45").unwrap(),
-        now(),
-    )
-    .unwrap();
-    let s = Session::open(&vault, &pp()).unwrap();
-    let events = btctax_core::persistence::load_all(s.conn()).unwrap();
-    assert!(events
-        .iter()
-        .any(|e| e.id == id && matches!(e.payload, EventPayload::ManualFmv(_))));
+        assert!(
+            events
+                .iter()
+                .any(|e| e.id == decision_id && matches!(e.payload, EventPayload::ManualFmv(_))),
+            "ManualFmv decision must be in the event log"
+        );
+    }
+
+    // AFTER set-fmv: assert FmvMissing blocker is CLEARED and income recognized at manual FMV.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert!(
+            state
+                .blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::FmvMissing),
+            "FmvMissing blocker must be CLEARED after set-fmv: {:?}",
+            state.blockers
+        );
+        assert_eq!(
+            state.income_recognized.len(),
+            1,
+            "income must be recognized at the manual FMV"
+        );
+        assert_eq!(
+            state.income_recognized[0].usd_fmv, manual_fmv,
+            "income FMV must equal the manual value supplied to set-fmv"
+        );
+        assert_eq!(
+            state.income_recognized[0].kind,
+            IncomeKind::Interest,
+            "income kind must be preserved"
+        );
+    }
 }
 
 // ── Task 12: classify-raw + accept/reject-conflict ──────────────────────────

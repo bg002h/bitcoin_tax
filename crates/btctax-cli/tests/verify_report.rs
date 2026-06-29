@@ -1,6 +1,6 @@
 mod fixtures;
 use btctax_cli::{cmd, render};
-use btctax_core::{AllocMethod, BlockerKind, BasisSource, EventPayload};
+use btctax_core::{AllocMethod, BasisSource, BlockerKind, EventPayload};
 use btctax_store::Passphrase;
 
 fn pp() -> Passphrase {
@@ -209,7 +209,11 @@ cb-sell-all,2025-06-15 12:00:00 UTC,Sell,BTC,0.10000000,USD,67500.00,6750.00,674
 
     // Allocate (unattested) → inert: made 2026-02-01 is after the 2025-06-15 ActualPosition bar.
     let a1 = cmd::reconcile::safe_harbor_allocate(
-        &vault, &pp(), AllocMethod::ActualPosition, false, now,
+        &vault,
+        &pp(),
+        AllocMethod::ActualPosition,
+        false,
+        now,
     )
     .unwrap();
     // Void alloc #1 — a stale SafeHarborTimebar advisory for a1 remains in state.blockers.
