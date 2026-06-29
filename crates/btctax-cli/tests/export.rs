@@ -64,6 +64,48 @@ fn export_snapshot_writes_sqlite_and_csvs_and_backup_key() {
         expected_remaining_sat
     );
 
+    // Strengthen: verify that disposals.csv uses stable tag strings (not Debug repr).
+    // coinbase_buy_sell_send: Buy 2025-03-01, Sell 2025-06-15 — less than 1 year → short-term.
+    // The `term` column (index 8) must read "short", not the Debug form "ShortTerm".
+    let mut dreader = Reader::from_reader(File::open(&disposals_path).unwrap());
+    let disposal_records: Vec<_> = dreader
+        .records()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("Failed to read disposals.csv records");
+    assert!(
+        !disposal_records.is_empty(),
+        "disposals.csv must contain at least one data record (the Sell event)"
+    );
+    // term column is at index 8 (0-indexed): event,kind,disposed_at,lot,sat,proceeds,basis,gain,term,gift_zone
+    let term_col = disposal_records[0].get(8).expect("term column missing");
+    assert!(
+        term_col == "short" || term_col == "long",
+        "term column must use stable tag ('short'/'long'), got: {:?}",
+        term_col
+    );
+    // The fixture sell is short-term (bought and sold in 2025, within a year).
+    assert_eq!(
+        term_col, "short",
+        "fixture sell (Mar→Jun 2025) must be short-term, got: {:?}",
+        term_col
+    );
+
+    // Verify basis_source column in lots.csv uses stable tags (not Debug repr).
+    // The Buy is via Coinbase adapter → BasisSource::ExchangeProvided → tag "exchange".
+    // Re-read lots.csv (reader was already consumed above; open fresh).
+    let mut lreader2 = Reader::from_reader(File::open(&lots_path).unwrap());
+    let lot_records: Vec<_> = lreader2
+        .records()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("Failed to re-read lots.csv records");
+    // basis_source column is at index 6: origin_event,split,wallet,acquired_at,remaining_sat,usd_basis,basis_source,basis_pending
+    let bs_col = lot_records[0].get(6).expect("basis_source column missing");
+    assert_eq!(
+        bs_col, "exchange",
+        "basis_source column must use stable tag 'exchange' (not Debug 'ExchangeProvided'), got: {:?}",
+        bs_col
+    );
+
     let key = dir.path().join("backup.asc");
     cmd::admin::backup_key(&vault, &pp(), &key).unwrap();
     assert!(key.exists());
