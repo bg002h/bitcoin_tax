@@ -320,8 +320,11 @@ fn run() -> Result<ExitCode, CliError> {
         }
         Command::Report { year, tax_year } => {
             if let Some(y) = tax_year {
-                let outcome = cmd::tax::report_tax_year(vault, &passphrase(false)?, y)?;
-                print!("{}", render::render_tax_outcome(y, &outcome));
+                let (outcome, advisory) = cmd::tax::report_tax_year(vault, &passphrase(false)?, y)?;
+                print!(
+                    "{}",
+                    render::render_tax_outcome(y, &outcome, advisory.as_deref())
+                );
             } else {
                 let state = cmd::inspect::report(vault, &passphrase(false)?, year)?;
                 print!("{}", render::render_report(&state, year));

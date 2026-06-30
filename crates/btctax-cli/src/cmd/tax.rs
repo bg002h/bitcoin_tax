@@ -1,8 +1,9 @@
 //! `tax-profile` command helpers — set/show the per-year `TaxProfile` side-table entry.
 //! `report_tax_year` (Task 9) provides the standalone "tax owed / what-if" calculator.
+//! `report_tax_year` also runs the M4 carryforward-consistency advisory (Task 10).
 use crate::{tax_profile, CliError, Session};
 use btctax_adapters::BundledTaxTables;
-use btctax_core::{compute_tax_year, TaxOutcome, TaxProfile};
+use btctax_core::{carryforward_consistency, compute_tax_year, TaxOutcome, TaxProfile};
 use btctax_store::Passphrase;
 use std::path::Path;
 
@@ -27,19 +28,43 @@ pub fn show_profile(
     tax_profile::get(Session::open(vault, pp)?.conn(), year)
 }
 
-/// Task 9 (B.5): load events + project once, read the year's `TaxProfile` + `BundledTaxTables`,
-/// call `compute_tax_year`, and return the `TaxOutcome` for rendering. Standalone "tax owed /
-/// what-if" calculator; exact Decimal; deterministic (NFR4/NFR5).
-pub fn report_tax_year(vault: &Path, pp: &Passphrase, year: i32) -> Result<TaxOutcome, CliError> {
+/// Task 9 (B.5) + Task 10 (M4): load events + project once, read the year's `TaxProfile` +
+/// `BundledTaxTables`, call `compute_tax_year`, and also run the M4 carryforward-consistency
+/// advisory. Returns `(TaxOutcome, Option<advisory_msg>)`. The advisory is `Some(msg)` iff BOTH
+/// the current-year and the prior-year profiles exist AND the prior-year computes successfully AND
+/// the declared `carryforward_in` does not match the prior year's `carryforward_out`. The advisory
+/// is **never** a hard blocker and does **not** change the exit code (non-gating, Task 10).
+pub fn report_tax_year(
+    vault: &Path,
+    pp: &Passphrase,
+    year: i32,
+) -> Result<(TaxOutcome, Option<String>), CliError> {
     let s = Session::open(vault, pp)?;
     let (events, state, _cfg) = s.load_events_and_project()?;
     let profile = s.tax_profile(year)?;
     let tables = BundledTaxTables::load();
-    Ok(compute_tax_year(
-        &events,
-        &state,
-        year,
-        profile.as_ref(),
-        &tables,
-    ))
+    let outcome = compute_tax_year(&events, &state, year, profile.as_ref(), &tables);
+
+    // M4 carryforward consistency advisory (Task 10): only when both this year's profile AND
+    // the prior year's profile exist AND the prior year is Computed.  Never a hard blocker.
+    let advisory: Option<String> = if let Some(p) = &profile {
+        let prior_profile = s.tax_profile(year - 1)?;
+        if let Some(prev_p) = prior_profile {
+            let prior_out = compute_tax_year(&events, &state, year - 1, Some(&prev_p), &tables);
+            if let TaxOutcome::Computed(prev) = prior_out {
+                carryforward_consistency(
+                    Some(&prev.carryforward_out),
+                    &p.capital_loss_carryforward_in,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    Ok((outcome, advisory))
 }

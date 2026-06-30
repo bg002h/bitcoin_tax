@@ -390,6 +390,24 @@ fn marginal_ordinary_rate(sched: &OrdinarySchedule, taxable: Usd) -> Usd {
     r
 }
 
+/// M4: compare the declared carryforward-in for a year against the prior year's computed
+/// carryforward-out. Returns a human warning when they differ; `None` when they match or the
+/// prior year is unavailable. Non-gating advisory — caller must never use this to block
+/// computation or change the exit code (Task 10 / B.5).
+pub fn carryforward_consistency(
+    prior_out: Option<&Carryforward>,
+    this_in: &Carryforward,
+) -> Option<String> {
+    match prior_out {
+        Some(p) if p != this_in => Some(format!(
+            "carryforward_in (short {} / long {}) does not match prior-year carryforward_out \
+             (short {} / long {}) — verify your prior return",
+            this_in.short, this_in.long, p.short, p.long
+        )),
+        _ => None,
+    }
+}
+
 /// §B.4 (B-I1): the projection-wide Hard-blocker gate. Returns the FIRST unresolved blocker whose
 /// `severity() == Severity::Hard`, anywhere in `state.blockers`. `state.blockers` is in deterministic
 /// projection order (NFR4) and `.find` returns the first, so the chosen blocker — hence the
@@ -560,5 +578,48 @@ mod net_tests {
         assert_eq!(n.loss_deduction, dec!(3000));
         assert_eq!(n.st_carry, dec!(7000));
         assert_eq!(n.lt_carry, dec!(0));
+    }
+}
+
+/// M4 carryforward-consistency unit tests (Task 10).
+#[cfg(test)]
+mod consistency_tests {
+    use super::*;
+    use crate::tax::types::Carryforward;
+    use rust_decimal_macros::dec;
+
+    /// A carryforward_in that matches prior carryforward_out → no warning (None).
+    #[test]
+    fn carryforward_match_is_silent() {
+        let c = Carryforward {
+            short: dec!(2000),
+            long: dec!(2000),
+        };
+        assert_eq!(carryforward_consistency(Some(&c), &c), None);
+    }
+
+    /// A carryforward_in that differs from prior carryforward_out → warning containing "does not match".
+    #[test]
+    fn carryforward_mismatch_warns() {
+        let prior = Carryforward {
+            short: dec!(2000),
+            long: dec!(2000),
+        };
+        let declared = Carryforward {
+            short: dec!(0),
+            long: dec!(2000),
+        };
+        assert!(carryforward_consistency(Some(&prior), &declared)
+            .unwrap()
+            .contains("does not match"));
+    }
+
+    /// No prior-year data (prior_out == None) → None regardless of this_in.
+    #[test]
+    fn no_prior_is_silent() {
+        assert_eq!(
+            carryforward_consistency(None, &Carryforward::default()),
+            None
+        );
     }
 }

@@ -563,10 +563,17 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
     Ok(())
 }
 
-/// Task 9 (B.5): render the `TaxOutcome` for `report --tax-year <y>`. Exact Decimal Display;
-/// no float (NFR5). B-M2 fold: surfaces the ordinary-rate attributable delta so the three printed
-/// attributable components visibly reconcile to `total_federal_tax_attributable`.
-pub fn render_tax_outcome(year: i32, out: &btctax_core::TaxOutcome) -> String {
+/// Task 9 (B.5) + Task 10 (M4): render the `TaxOutcome` for `report --tax-year <y>`. Exact Decimal
+/// Display; no float (NFR5). B-M2 fold: surfaces the ordinary-rate attributable delta so the three
+/// printed attributable components visibly reconcile to `total_federal_tax_attributable`.
+///
+/// `advisory` is the optional M4 carryforward-consistency warning string (Task 10). When `Some`,
+/// it is printed as a non-gating advisory line that does not affect the exit code.
+pub fn render_tax_outcome(
+    year: i32,
+    out: &btctax_core::TaxOutcome,
+    advisory: Option<&str>,
+) -> String {
     use btctax_core::TaxOutcome::*;
     let mut s = String::new();
     let _ = writeln!(s, "Federal tax attributable to crypto — tax year {year}");
@@ -622,6 +629,11 @@ pub fn render_tax_outcome(year: i32, out: &btctax_core::TaxOutcome) -> String {
                 loss — so it MAY UNDERSTATE NIIT; see §5 Phase-2 refinement.)"
             );
         }
+    }
+    // M4 (Task 10): non-gating advisory — render after the main block so it is visible
+    // regardless of whether the outcome is Computed or NotComputable.
+    if let Some(msg) = advisory {
+        let _ = writeln!(s, "  ADVISORY (M4): {msg}");
     }
     s
 }

@@ -6,7 +6,8 @@ pub mod tables;
 pub mod types;
 
 pub use compute::{
-    compute_tax_year, net_1222, ordinary_tax_on, preferential_tax, CapNet, PrefSplit,
+    carryforward_consistency, compute_tax_year, net_1222, ordinary_tax_on, preferential_tax,
+    CapNet, PrefSplit,
 };
 pub use tables::{
     loss_limit, niit_threshold, LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable,

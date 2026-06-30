@@ -88,8 +88,8 @@ fn report_tax_year_renders_golden() {
     let (_dir, vault) = make_vault_with(&csv);
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
 
-    let outcome = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
-    let rendered = render::render_tax_outcome(2025, &outcome);
+    let (outcome, advisory) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
+    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     assert!(
         rendered.contains("TOTAL federal tax attributable to crypto (delta): 1747.50"),
@@ -107,8 +107,8 @@ fn report_tax_year_components_reconcile_to_total() {
     let (_dir, vault) = make_vault_with(&csv);
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
 
-    let outcome = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
-    let rendered = render::render_tax_outcome(2025, &outcome);
+    let (outcome, advisory) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
+    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     // Rendered component lines.  Zero values may display as "0" or "0.00" depending on the
     // rust_decimal scale of the intermediate result; assert on the prefix that's stable.
@@ -152,8 +152,8 @@ fn report_tax_year_without_profile_says_not_computable() {
     let (_dir, vault) = make_vault_with(&csv);
     // Deliberately do NOT set a tax profile for 2025.
 
-    let outcome = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
-    let rendered = render::render_tax_outcome(2025, &outcome);
+    let (outcome, advisory) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
+    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     assert!(
         rendered.contains("NOT COMPUTABLE [TaxProfileMissing]"),
@@ -177,8 +177,8 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
     // Set a profile so the refusal is definitely from the hard blocker (not TaxProfileMissing).
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
 
-    let outcome = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
-    let rendered = render::render_tax_outcome(2025, &outcome);
+    let (outcome, advisory) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
+    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     assert!(
         rendered.contains("NOT COMPUTABLE [TaxYearNotComputable]"),
@@ -188,6 +188,90 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
         !rendered.contains("TOTAL federal tax attributable"),
         "must not print a computed total when hard blockers are present:\n{rendered}"
     );
+}
+
+/// M4 (Task 10): when the declared 2026 `carryforward_in` ≠ 2025's computed `carryforward_out`,
+/// `report --tax-year 2026` renders the advisory line and still exits 0 (non-gating).
+///
+/// Scenario derivation (hand-verified):
+///   2025 vault: buy 1 BTC @ $50,000 on 2025-01-15 (ST); sell 1 BTC @ $40,000 on 2025-06-15 (ST).
+///   → crypto_st = −$10,000; no LT; no carryforward-in declared in the 2025 profile.
+///   net_1222(−10000, 0, 0, 0, 0, 3000):
+///     st_net = −10000; lt_net = 0; both losses cross-net: no cross.
+///     loss_deduction = min(10000, 3000) = 3000; absorbed_st = 3000; absorbed_lt = 0.
+///     st_carry = 10000 − 3000 = 7000; lt_carry = 0.
+///   carryforward_out TY2025 = { short: 7000, long: 0 }.
+///   2026 profile declares carryforward_in = { short: 0, long: 0 } (deliberately wrong).
+///   → Advisory fires: "does not match" is in rendered output.
+///   2026 TaxTable is not bundled → main outcome is NotComputable(TaxTableMissing); exit 0.
+#[test]
+fn carryforward_mismatch_advisory_rendered() {
+    // Synthetic Coinbase CSV: ST buy+sell in 2025 at a loss.
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv_path = csv_dir.path().join("coinbase_st_loss.csv");
+    std::fs::write(
+        &csv_path,
+        "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+st-buy,2025-01-15 12:00:00 UTC,Buy,BTC,1.00000000,USD,50000.00,50000.00,50000.00,0.00,,,\r\n\
+st-sell,2025-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.00,0.00,,,\r\n",
+    )
+    .unwrap();
+    let (_dir, vault) = make_vault_with(&csv_path);
+
+    // 2025 profile: Single, OTI=100k, MAGI=100k, QD=0, carryforward_in=0/0.
+    cmd::tax::set_profile(
+        &vault,
+        &pp(),
+        2025,
+        TaxProfile {
+            filing_status: btctax_core::FilingStatus::Single,
+            ordinary_taxable_income: dec!(100000),
+            magi_excluding_crypto: dec!(100000),
+            qualified_dividends_and_other_pref_income: dec!(0),
+            other_net_capital_gain: dec!(0),
+            capital_loss_carryforward_in: Carryforward::default(),
+        },
+    )
+    .unwrap();
+
+    // 2026 profile: declares carryforward_in={short:0, long:0} — wrong (should be {7000,0}).
+    cmd::tax::set_profile(
+        &vault,
+        &pp(),
+        2026,
+        TaxProfile {
+            filing_status: btctax_core::FilingStatus::Single,
+            ordinary_taxable_income: dec!(100000),
+            magi_excluding_crypto: dec!(100000),
+            qualified_dividends_and_other_pref_income: dec!(0),
+            other_net_capital_gain: dec!(0),
+            capital_loss_carryforward_in: Carryforward::default(), // wrong: {0, 0}
+        },
+    )
+    .unwrap();
+
+    // report --tax-year 2026: main outcome is NotComputable (no TY2026 table); advisory fires.
+    let (outcome, advisory) = cmd::tax::report_tax_year(&vault, &pp(), 2026).unwrap();
+    let rendered = render::render_tax_outcome(2026, &outcome, advisory.as_deref());
+
+    // Advisory must contain the mismatch message.
+    assert!(
+        rendered.contains("does not match"),
+        "expected 'does not match' advisory in rendered output:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("ADVISORY (M4)"),
+        "expected 'ADVISORY (M4)' label in rendered output:\n{rendered}"
+    );
+    // The advisory string must not be None.
+    assert!(
+        advisory.is_some(),
+        "expected Some(advisory) for mismatched carryforward chain"
+    );
+    // Exit 0: report_tax_year returns Ok (no panic, no Err propagation).
+    // (The ExitCode is driven by main.rs, not tested here, but Ok(()) == exit 0 for this path.)
 }
 
 /// Regression: `report --year 2025` (the existing display path) still works after adding
