@@ -7,7 +7,7 @@
 use crate::CliError;
 use btctax_core::EventId;
 use rusqlite::{Connection, OptionalExtension};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Create the `optimize_attestation` side-table if it does not exist (idempotent).
 /// Called by `Session::from_fresh_vault`; also called at the top of every accessor as a
@@ -51,6 +51,33 @@ pub fn get(conn: &Connection, disposal: &EventId) -> Result<Option<String>, CliE
             |r| r.get(0),
         )
         .optional()?)
+}
+
+/// Return all stored attestations as a `BTreeMap<EventId, (String, String)>`, where each value
+/// is `(attestation, attested_at)`, keyed by the disposal `EventId` (NFR4-stable deterministic
+/// order). CREATE-IF-NOT-EXISTS guard first. Mirrors `tax_profile::all` discipline.
+pub fn all(conn: &Connection) -> Result<BTreeMap<EventId, (String, String)>, CliError> {
+    init_table(conn)?;
+    let mut stmt = conn.prepare(
+        "SELECT disposal_event, attestation, attested_at \
+         FROM optimize_attestation ORDER BY disposal_event",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut out = BTreeMap::new();
+    for row in rows {
+        let (disposal_str, attestation, attested_at) = row?;
+        out.insert(
+            crate::eventref::parse_event_id(&disposal_str)?,
+            (attestation, attested_at),
+        );
+    }
+    Ok(out)
 }
 
 /// Return all attested disposal `EventId`s as a sorted `BTreeSet` (NFR4-stable).
@@ -146,20 +173,96 @@ mod tests {
     }
 
     #[test]
-    fn divergent_selection_not_treated_as_attested() {
-        // The stored attestation binds the EXACT selection (R2-I1). Retrieve and compare:
-        // a caller using a different selection string must find it does NOT match.
+    fn all_returns_both_attestations_in_deterministic_order() {
         let c = mem();
-        let disposal = eid(42);
+        let d1 = eid(1);
+        let d2 = eid(2);
+        // Insert in reverse order to verify BTreeMap (not insertion order) drives output.
+        set(&c, &d2, r#"{"lots":["lot2"]}"#, "2025-04-01").unwrap();
+        set(&c, &d1, r#"{"lots":["lot1"]}"#, "2025-03-15").unwrap();
+        let result = all(&c).unwrap();
+        assert_eq!(result.len(), 2);
+        let (sel1, at1) = result.get(&d1).expect("d1 must be present");
+        assert_eq!(sel1, r#"{"lots":["lot1"]}"#);
+        assert_eq!(at1, "2025-03-15");
+        let (sel2, at2) = result.get(&d2).expect("d2 must be present");
+        assert_eq!(sel2, r#"{"lots":["lot2"]}"#);
+        assert_eq!(at2, "2025-04-01");
+        // BTreeMap iteration order is by EventId (deterministic).
+        let mut keys = result.keys();
+        assert_eq!(keys.next().unwrap(), &d1);
+        assert_eq!(keys.next().unwrap(), &d2);
+    }
+
+    #[test]
+    fn all_on_tableless_vault_returns_empty() {
+        let c = rusqlite::Connection::open_in_memory().unwrap(); // no init_table
+        assert!(all(&c).unwrap().is_empty());
+    }
+
+    #[test]
+    fn r2_i1_side_table_to_overlay_enforcement() {
+        // Full side-table → attested_set → compliance_overlay integration (R2-I1).
+        // `e2e_attested_divergent_stays_noncompliant` in btctax-core covers the optimize_year
+        // end-to-end path; this test exercises the enforcement using the actual side-table
+        // accessors (`set` + `attested_set` + `all`) feeding `compliance_overlay` directly.
+        use btctax_core::identity::WalletId;
+        use btctax_core::optimize::compliance_overlay;
+        use btctax_core::project::{ComplianceStatus, DisposalCompliance};
+        use time::macros::date;
+
+        let c = mem();
+        let disposal_d = eid(42);
         let attested_sel = r#"{"lots":[{"lot":"decision|1","sat":100000}]}"#;
-        let divergent_sel = r#"{"lots":[{"lot":"decision|2","sat":100000}]}"#;
-        set(&c, &disposal, attested_sel, "2025-03-15").unwrap();
-        let stored = get(&c, &disposal).unwrap().unwrap();
-        assert_eq!(stored, attested_sel);
-        assert_ne!(
-            stored, divergent_sel,
-            "divergent selection must not match stored attestation"
+
+        // Record attestation in the side-table.
+        set(&c, &disposal_d, attested_sel, "2025-03-15").unwrap();
+
+        // `attested_set` feeds the overlay — must reflect the stored disposal.
+        let attested = attested_set(&c).unwrap();
+        assert!(
+            attested.contains(&disposal_d),
+            "attested_set must reflect the stored attestation"
         );
+
+        let wallet = WalletId::SelfCustody {
+            label: "cold".into(),
+        };
+        let row = DisposalCompliance {
+            disposal: disposal_d.clone(),
+            wallet: wallet.clone(),
+            date: date!(2026 - 06 - 01),
+            status: ComplianceStatus::NonCompliant,
+        };
+
+        // Case 1 — R2-I1 no-laundering: D is attested but the proposed pick DIVERGED from the
+        // persisted one (D ∉ unchanged). `compliance_overlay` must NOT upgrade to AttestedRecording.
+        let unchanged_empty = std::collections::BTreeSet::new();
+        let result_divergent =
+            compliance_overlay(std::slice::from_ref(&row), &attested, &unchanged_empty);
+        assert_eq!(
+            result_divergent[0].status,
+            ComplianceStatus::NonCompliant,
+            "R2-I1: divergent pick (D ∉ unchanged) must stay NonCompliant even when attested"
+        );
+
+        // Case 2 — positive control: D is attested AND the proposed pick equals the persisted
+        // one (D ∈ unchanged, self-custody envelope). Overlay must upgrade to AttestedRecording.
+        let unchanged_with_d: std::collections::BTreeSet<_> = [disposal_d.clone()].into();
+        let result_unchanged =
+            compliance_overlay(std::slice::from_ref(&row), &attested, &unchanged_with_d);
+        assert_eq!(
+            result_unchanged[0].status,
+            ComplianceStatus::AttestedRecording,
+            "positive control: attested + unchanged self-custody must upgrade to AttestedRecording"
+        );
+
+        // Also verify `all` returns the stored record with correct attestation text and timestamp.
+        let all_records = all(&c).unwrap();
+        assert_eq!(all_records.len(), 1);
+        let (stored_sel, stored_at) = all_records.get(&disposal_d).expect("D must be in all");
+        assert_eq!(stored_sel, attested_sel);
+        assert_eq!(stored_at, "2025-03-15");
     }
 
     #[test]
