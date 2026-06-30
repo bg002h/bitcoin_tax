@@ -201,3 +201,105 @@ Resolve the one Important (compliance masking) — a one-branch fix plus the Tas
 that closed, Sub-project A is conservation-sound, deterministic, backward-compatible, and a solid substrate for
 B/C. The Minor/Nit items are safe to carry as FOLLOWUPS, except that **M2** should be tightened before C wires
 `evaluate_disposal`.
+
+---
+
+# Round 2 — fold re-review (2026-06-29)
+
+**Reviewer:** independent fold re-reviewer (round 2).
+**Scope:** the fold `review-0abd9e7..3f4ddbc.diff` (single commit `3f4ddbc`) against the round-1 findings.
+Re-reviews only the Important + the two in-area Minors folded (M2, M3) and checks the fold introduced no new
+defect. The rest of A is accepted from round 1 (not re-litigated).
+**Workspace gate:** accepted as authoritative — 260 pass, clippy/fmt/release clean. Not re-run.
+
+## Verdict
+
+**READY TO MERGE.** The round-1 Important is genuinely closed; M2 and M3 are closed; the fold introduces
+**0 new Critical / 0 new Important** (0 Critical, 0 Important, 2 Nit residuals, all non-blocking).
+
+## 1. IMPORTANT — CLOSED (load-bearing) ✓
+
+`compliance.rs::classify` (`compliance.rs:130-169`) now resolves in the exact priority the finding required:
+
+1. **2027+ broker envelope still fires first** — `compliance.rs:134-137`, unchanged, before any selection check.
+2. **An applied `LotSelection` is judged by ITS OWN timeliness, with early return** — `compliance.rs:144-149`:
+   `made <= date → Contemporaneous`, **`else → return NonCompliant`**. The post-hoc case no longer falls through.
+3. **A `MethodElection` standing order is reachable ONLY when no selection was recorded** — the standing-order
+   block (`compliance.rs:154-165`) sits *after* the `if let Some(made) = sel_made.get(disposal)` block, which
+   returns in **both** arms. There is no longer any control-flow path from a post-hoc selection to
+   `StandingOrder`. A standing order can never rescue a post-hoc pick.
+4. Fall-through `NonCompliant` (`compliance.rs:168`) for the no-envelope/no-selection/no-election case.
+
+No remaining path labels a post-hoc *applied* selection compliant. The new KAT
+`post_hoc_selection_with_in_force_election_is_noncompliant` (`tests/compliance.rs:413-448`) genuinely exercises
+the fixed branch: self-custody 2025 (envelope silent), election effective 2025-06-01 ≤ sale 2025-07-01,
+selection made 2025-09-01 (post-hoc) and principal-conserving (picks A 100k == disposal 100k → applied by the
+fold). Old code: post-hoc → fall-through → in-force election → `StandingOrder` (wrong). New code:
+`NonCompliant`. The test would have failed pre-fix.
+
+**Behavior-preserving for the 8 prior compliance tests** (verified by tracing each through the new branch
+structure): `post_hoc_selection_is_noncompliant` (no election — now `NonCompliant` by the new direct return at
+`:148` rather than fall-through; same result, confirmed `tests/compliance.rs:202-230` has no `MethodElection`);
+`contemporaneous_status_when_selection_made_before_sale` (early return at `:146`, unchanged);
+`standing_order_status_self_custody`, `broker_2026_own_books_election_is_standing_order`,
+`self_custody_2027_with_election_is_standing_order` (no selection → reach the standing-order block, unchanged);
+`noncompliant_when_no_basis` (fall-through, unchanged); `broker_2027_plus_is_noncompliant_even_with_election`
+(envelope fires first, unchanged).
+
+*Observation (not a finding):* `sel_made` keys on selections *recorded* (raw events), not *applied* (fold
+output). The only divergence is a recorded-but-invalid selection (resolve drops it from `res.selections` AND
+raises a Hard `LotSelectionInvalid`); such a disposal is on a fully gated report, and the new label moves it in
+the conservative (`NonCompliant`) direction. No false-compliant path, and this nuance is unchanged by the fold.
+
+## 2. M2 — CLOSED ✓
+
+`evaluate_disposal` existing-event branch (`evaluate.rs:111-124`) now captures the event's **resolved**
+principal via `honoring_sat(&e.op)` from `res.timeline`, and the conservation guard (`evaluate.rs:162-175`)
+compares `Σpicks != principal` (the resolved sat), not `candidate.sat`. The new `honoring_sat`
+(`evaluate.rs:76-84`) is **byte-for-byte identical in logic** to resolve's authoritative `honoring_principal`
+(`resolve.rs:794-802`), and the fold consumes exactly that `sat` for every honoring arm
+(`fold.rs:435/595/815/882` all pass `*sat` to `consume_principal`). So evaluate now validates against the same
+basis resolve guards and fold consumes — a wrong `candidate.sat` can no longer silently under/over-consume. KAT
+`existing_disposal_selection_validated_against_resolved_principal_not_candidate_sat` (`tests/evaluate.rs:188-260`)
+pins it: `candidate.sat = 60k` (real principal 100k) with Σpicks = 60k now raises `LotSelectionInvalid` instead
+of silently mis-consuming. Synthetic path correctly keeps `principal = candidate.sat` (`evaluate.rs:154`).
+
+## 3. M3 — CLOSED ✓
+
+`Command::Config` (`main.rs:252-305`) applies ALL co-passed flags with no early return: the
+`--attest requires --set-pre2025-method` guard is preserved and now checked **first** (`main.rs:264-268`, returns
+a clear `CliError::Usage` before any event/mutation); `--set-forward-method` appends the `MethodElection`
+(`main.rs:275-285`) with the early `return Ok(...)` removed; `--set-pre2025-method` and `--set-fee-treatment`
+then apply independently (`main.rs:290-299`). No silent drop remains. Test
+`config_set_forward_method_and_fee_treatment_both_take_effect` asserts both the persisted HIFO `MethodElection`
+and the `TreatmentB` fee mutation take effect.
+
+## 4. No new defect ✓
+
+- **Early-return restructure dropped nothing.** Envelope, contemporaneous, standing-order (`max_by` on
+  `effective_from` then `decision_seq`), and fall-through logic are all intact; the only delta is the post-hoc
+  early return — exactly the intended fix.
+- **`honoring_sat` is correct** for all four honoring op types (matches resolve's `honoring_principal` and the
+  `*sat` the fold consumes); `None` for non-honoring → `UnknownExistingDisposal`, unchanged.
+- **Conservation / determinism / no-float intact.** Compliance is a read-only labeler (no conservation impact);
+  M2 only adds a blocker on mismatch (conservative); no `f64`/`HashMap`/`now()` introduced; `sel_made` still
+  ascending-seq via `BTreeMap`, output sorted by `EventId`.
+- **Deferrals recorded in FOLLOWUPS**, not silently dropped: M1 (SelfTransfer compliance), Task-4 plan-text
+  doc, Task-7-M2 (shared collector DRY), Task-8 nits (incl. N1), Task-9 nits.
+
+## Residuals (Nit — non-blocking, carry as followups)
+
+- **Nit (deferral-tracking gap):** round-1 Nits **N2** (`evaluate.lots_after` "as-if-inserted" — document for C)
+  and **N3** (B-only per-year gate must not key on disposal-year attribution) are not captured in the new
+  FOLLOWUPS section (N1 was, as Task-8(a)). Add them so they survive into C/B planning. Forward-looking and
+  Nit-severity; does not block A.
+- **Nit (test fidelity):** `config_set_forward_method_and_fee_treatment_both_take_effect` simulates the dispatch
+  at library level (calls `set_forward_method` + `set_config` directly) rather than driving the actual clap
+  `Command::Config` arm — consistent with the existing `attest_pre2025_method_requires_set_pre2025_method`
+  pattern, and the M3 apply-all logic is directly verifiable in `main.rs`. A true binary-level dispatch test
+  would fully retire the round-1 Task-5 note.
+
+## Bottom line
+
+Important closed, M2/M3 closed, no new Critical/Important. **Sub-project A is ready to merge.** Two Nit
+residuals (two un-tracked round-1 Nits; one test-fidelity caveat) are safe to carry as FOLLOWUPS.
