@@ -14,8 +14,8 @@ pub use conventions::{Sat, TaxDate, Usd};
 pub use event::*;
 pub use identity::{EventId, Fingerprint, LotId, Source, SourceRef, WalletId};
 pub use optimize::{
-    optimize_year, score_assignment, ApproxReason, ConsultReport, ConsultRequest, DisposalProposal,
-    OptimizeError, OptimizeProposal, Persistability, TimingInsight,
+    consult_sale, optimize_year, score_assignment, ApproxReason, ConsultReport, ConsultRequest,
+    DisposalProposal, OptimizeError, OptimizeProposal, Persistability, TimingInsight,
 };
 pub use price::PriceProvider;
 pub use project::{

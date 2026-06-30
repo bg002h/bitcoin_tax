@@ -4,16 +4,16 @@
 //! §1.1012-1(j) identification boundary (adequate ID by the time of sale; no compliant post-hoc).
 //! Deterministic (NFR4) + exact (NFR5): BTreeMap/sorted iteration, Decimal/i64 only, no float.
 //! §1091 wash-sale does NOT apply to crypto — loss lots are freely selectable (Task 7; monitor).
-use crate::conventions::{Sat, TaxDate, Usd, TRANSITION_DATE};
+use crate::conventions::{is_long_term, one_year_after, Sat, TaxDate, Usd, TRANSITION_DATE};
 use crate::event::{DisposeKind, LedgerEvent, LotPick};
-use crate::identity::{EventId, LotId, WalletId};
-use crate::price::PriceProvider;
-use crate::project::fold::{fold, pools_before};
+use crate::identity::{EventId, LotId, SourceRef, WalletId};
+use crate::price::{fmv_of, PriceProvider};
+use crate::project::fold::{fold, pools_before, state_as_of};
 use crate::project::pools::{pool_key, PoolKey};
-use crate::project::resolve::resolve;
+use crate::project::resolve::{resolve, Eff, Op};
 use crate::project::{
-    disposal_compliance, project, ComplianceStatus, DisposalCompliance, EvaluateError,
-    ProjectionConfig,
+    disposal_compliance, evaluate_disposal, project, CandidateDisposal, ComplianceStatus,
+    DisposalCompliance, EvaluateError, ProjectionConfig,
 };
 use crate::state::{Blocker, LedgerState, Lot};
 use crate::tax::{compute_tax_year, MarginalRates, TaxOutcome, TaxProfile, TaxResult, TaxTables};
@@ -1046,6 +1046,294 @@ fn coordinate_descent(
         }
     }
     (current, current_total)
+}
+
+// ── Task 6 — Mode-2 pre-trade consult `consult_sale` (synthetic disposal + ST→LT timing) ────────────
+
+/// §C.3 READ-ONLY pre-trade consultation. For a HYPOTHETICAL sale (sell `req.sell_sat` from
+/// `req.wallet` at `req.at`, with `req.proceeds` or dataset FMV) pick the tax-minimizing lot selection,
+/// report the resulting ST/LT split + the year's federal tax, and the ST→LT crossover timing insight.
+///
+/// **Side-effect-free (Mode-2 produces NOTHING — §0).** `events`/`prices`/`config` are borrowed
+/// read-only; every fold is clone-fold-discard (`resolve` → mutate an owned `Resolution` → `fold` →
+/// read → drop). The function appends NO event, writes NO side-table, makes NO decision — it returns a
+/// `ConsultReport` only. It is tax decision-support (consequences), NOT buy/sell advice.
+///
+/// **Scope.** Optimizes ONLY the synthetic disposal's selection (existing disposals keep their current
+/// identification — a single-disposal what-if, not a year-wide re-optimization). Deterministic (NFR4),
+/// exact (NFR5 — every dollar comes straight from B; C never re-rounds).
+///
+/// **Profile threading.** The CLI loads the year's `TaxProfile` and passes it in (`year_profile`) so
+/// core stays clock-free; a missing profile → the underlying `compute_tax_year` returns
+/// `TaxProfileMissing` → `OptimizeError::YearNotComputable`.
+///
+/// **Refusals.** Pre-2025 `at` → `PreTransitionYear` (M7); an empty as-of pool / insufficient holdings →
+/// `NoLots`; a future date with no dataset price AND no `proceeds` → `Evaluate(ProceedsRequired)`; a
+/// `NotComputable` year → `YearNotComputable` (I6).
+pub fn consult_sale(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    year_profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+    req: &ConsultRequest,
+) -> Result<ConsultReport, OptimizeError> {
+    let year = req.at.year();
+    if year < TRANSITION_DATE.year() {
+        return Err(OptimizeError::PreTransitionYear(year));
+    }
+
+    // R0-M3: available lots = the wallet pool AS OF `at` (fold the canonical timeline truncated to
+    // `date() <= at`, seed at the boundary). Correct for an interleaved/past `at`, not only the
+    // forward-looking case. Per-wallet (§1.1012-1(j)); `remaining_sat > 0`; sorted by lot_id (NFR4).
+    let pre = fold_as_of(events, prices, config, req.at);
+    let want = pool_key(req.at, &req.wallet);
+    let mut lots: Vec<Lot> = pre
+        .lots
+        .into_iter()
+        .filter(|l| {
+            l.remaining_sat > 0 && pool_key(req.at, &l.wallet) == want && l.acquired_at <= req.at
+        })
+        .collect();
+    lots.sort_by(|a, b| a.lot_id.cmp(&b.lot_id));
+    if lots.iter().map(|l| l.remaining_sat).sum::<Sat>() < req.sell_sat {
+        return Err(OptimizeError::NoLots);
+    }
+
+    let candidate = CandidateDisposal {
+        existing_event: None, // synthetic (Mode-2)
+        wallet: req.wallet.clone(),
+        date: req.at,
+        sat: req.sell_sat,
+        kind: req.kind,
+        proceeds: req.proceeds, // None on a future date with no dataset price → ProceedsRequired
+    };
+    // Resolve proceeds once up front so a missing future price fails fast with ProceedsRequired
+    // (mirrors A's `evaluate_disposal` proceeds resolution: explicit > dataset FMV > error).
+    if req.proceeds.is_none() && fmv_of(prices, req.at, req.sell_sat).is_none() {
+        return Err(OptimizeError::Evaluate(EvaluateError::ProceedsRequired));
+    }
+
+    // Enumerate candidate selections for the synthetic disposal and score each via the synthetic
+    // evaluate+compute path; pick the deterministic minimum federal tax. R2-C1: Mode-2 reports a what-if
+    // tax-min selection, NOT a "proven global minimum" claim (`ConsultReport` has no `approximate` field
+    // and the renderer never says "the optimum"), so the heuristic-branch flag is not surfaced here — it
+    // governs `OptimizeProposal` (Mode-1), which is what R2-C1 scopes. Every candidate is drawn from the
+    // as-of pool with sufficient remaining, so all are feasible (the `?` below never trips on a generated
+    // candidate).
+    let (cands, _heuristic) = candidate_selections(&lots, req.sell_sat);
+    let mut best: Option<(Usd, Vec<LotPick>, Usd, Usd)> = None; // (total, picks, st, lt)
+    for picks in &cands {
+        let (st, lt, total) = score_synthetic(
+            events,
+            prices,
+            config,
+            year_profile,
+            tables,
+            &candidate,
+            picks,
+        )?;
+        let cand = (total, picks.clone(), st, lt);
+        best = Some(match best {
+            None => cand,
+            Some(b) if (cand.0, &cand.1) < (b.0, &b.1) => cand, // min tax, tie → smallest picks
+            Some(b) => b,
+        });
+    }
+    let (total, proposed_selection, st_gain, lt_gain) = best.ok_or(OptimizeError::NoLots)?;
+
+    // ST→LT timing insight (R0-I4/M4): OMITTED (None) — never `Err` — when no leg is short-term, when a
+    // contributing lot's crossover hits the `next_day` max-date edge, or when the crossover lands outside
+    // `at`'s bundled year/profile. An unbundled crossover year degrades gracefully (the consult still
+    // returns the what-if) instead of failing on a missing future table.
+    let timing = timing_insight(
+        events,
+        prices,
+        config,
+        year_profile,
+        tables,
+        &candidate,
+        &proposed_selection,
+        &lots,
+        total,
+    );
+
+    Ok(ConsultReport {
+        req: req.clone(),
+        proposed_selection,
+        st_gain,
+        lt_gain,
+        total_federal_tax_attributable: total,
+        timing,
+    })
+}
+
+/// As-of-`at` pool: clone-fold the canonical timeline truncated to events with `date() <= at` (R0-M3),
+/// delegating to `fold::state_as_of` (which reuses `fold`'s `sort_canonical` + transition partition and
+/// fires the boundary seed at the correct point). Sibling of `available_lots_before` (which truncates
+/// before a specific disposal id rather than at a date). Read-only: `resolve` yields an owned
+/// `Resolution`, the resulting `LedgerState` is the caller's to read then discard.
+fn fold_as_of(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    at: TaxDate,
+) -> LedgerState {
+    let res = resolve(events, prices, config);
+    state_as_of(res, prices, config, at)
+}
+
+/// Clone-fold of the canonical timeline with a synthetic `Op::Dispose` appended (mirroring
+/// `evaluate.rs`'s synthetic-append) + the candidate selection injected, WITHOUT mutating the ledger.
+/// Returns the resulting `LedgerState` (read then discarded by the caller). The synthetic event uses
+/// the reserved sentinel id `EventId::Decision { seq: u64::MAX }` (unreachable for real sequences,
+/// never persisted — no I/O on this path). Proceeds resolve explicit > dataset FMV > `ProceedsRequired`,
+/// identically to `evaluate_disposal`, so the parallel fold's legs match A's split.
+fn synthetic_state(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    candidate: &CandidateDisposal,
+    picks: &[LotPick],
+) -> Result<LedgerState, EvaluateError> {
+    let mut res = resolve(events, prices, config);
+    let proceeds = match candidate.proceeds {
+        Some(p) => p,
+        None => {
+            fmv_of(prices, candidate.date, candidate.sat).ok_or(EvaluateError::ProceedsRequired)?
+        }
+    };
+    let id = EventId::Decision { seq: u64::MAX };
+    // midnight().assume_utc() → UTC 00:00:00 on `candidate.date`; tax_date(utc, UTC) == candidate.date.
+    let utc = candidate.date.midnight().assume_utc();
+    res.timeline.push(Eff {
+        id: id.clone(),
+        utc,
+        tz: time::UtcOffset::UTC,
+        src_priority: 0,
+        src_ref: SourceRef::new("__synthetic__"),
+        wallet: Some(candidate.wallet.clone()),
+        op: Op::Dispose {
+            sat: candidate.sat,
+            proceeds,
+            fee_usd: Usd::ZERO,
+            fee_sat: None,
+            kind: candidate.kind,
+        },
+    });
+    res.selections.insert(id, picks.to_vec());
+    Ok(fold(res, prices, config))
+}
+
+/// Score one synthetic-disposal selection: A's `evaluate_disposal` gives the per-leg ST/LT split, and a
+/// parallel synthetic fold + `compute_tax_year` gives the YEAR's federal tax (the holistic objective —
+/// cross-netting with any other in-year crypto is captured, matching Mode-1). Both are clone-fold-discard
+/// (no mutation). Returns `(st_gain, lt_gain, total_federal_tax_attributable)`. An infeasible selection
+/// → the fold raises `LotSelectionInvalid` → `compute_tax_year` `NotComputable` → `YearNotComputable`
+/// (generated candidates are always feasible, so this only guards a hand-built call).
+#[allow(clippy::too_many_arguments)]
+fn score_synthetic(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    year_profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+    candidate: &CandidateDisposal,
+    picks: &[LotPick],
+) -> Result<(Usd, Usd, Usd), OptimizeError> {
+    // 1) ST/LT split for THIS disposal via A's side-effect-free entrypoint.
+    let out = evaluate_disposal(events, prices, config, candidate, Some(picks))
+        .map_err(OptimizeError::Evaluate)?;
+    // 2) Full-year federal tax via a parallel synthetic fold (same append + injected selection).
+    let state = synthetic_state(events, prices, config, candidate, picks)
+        .map_err(OptimizeError::Evaluate)?;
+    let year = candidate.date.year();
+    match compute_tax_year(events, &state, year, year_profile, tables) {
+        TaxOutcome::Computed(r) => Ok((out.st_gain, out.lt_gain, r.total_federal_tax_attributable)),
+        TaxOutcome::NotComputable(b) => Err(OptimizeError::YearNotComputable(b)),
+    }
+}
+
+/// ST→LT crossover timing insight — returns `Option<TimingInsight>` (OMIT, never error — R0-I4/M4).
+///
+/// For each pick in the chosen selection, find its source lot; the lot is short-term as of `at` iff
+/// `!is_long_term(lot.gain_hp_start(), at)`. If NONE are short-term → `None`. Otherwise
+/// `st_sat_in_selection` = Σ their sats and `latest_crossover` = max over them of the first STRICTLY
+/// long-term date = `one_year_after(gain_hp_start).next_day()`. **R0-M4:** `Date::next_day()` is `Option`
+/// (Dec-31 / max-date edge) — `None` for any contributing lot ⇒ OMIT (no unwrap).
+///
+/// **R0-I4 (same year/profile, term-flip, degrade).** `tax_if_sold_long_term` is computed WITHIN THE
+/// SAME tax year and profile as `at`: re-score the SAME selection with the SAME proceeds, realized as a
+/// synthetic disposal dated `latest_crossover` — so the short-term legs flip to long-term while the price
+/// is unchanged (lots already LT as of `at` stay LT). Done ONLY when `latest_crossover.year() ==
+/// at.year()` AND `at`'s table + profile are present; OTHERWISE `None` — NEVER re-score in a future
+/// crossover year (a 2026+ re-score would hit a missing bundled table → `NotComputable` and fail the
+/// whole consult). `saving_if_waited = (total_now − tax_if_sold_long_term).max(0)`.
+#[allow(clippy::too_many_arguments)]
+fn timing_insight(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    year_profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+    candidate: &CandidateDisposal,
+    proposed_selection: &[LotPick],
+    lots: &[Lot],
+    total_now: Usd,
+) -> Option<TimingInsight> {
+    let at = candidate.date;
+    let mut st_sat: Sat = 0;
+    let mut crossover: Option<TaxDate> = None;
+    for p in proposed_selection {
+        let lot = lots.iter().find(|l| l.lot_id == p.lot)?;
+        if !is_long_term(lot.gain_hp_start(), at) {
+            st_sat += p.sat;
+            // First strictly-long-term date = anniversary + 1 day; R0-M4: None (max-date edge) ⇒ omit.
+            let lt_date = one_year_after(lot.gain_hp_start()).next_day()?;
+            crossover = Some(crossover.map_or(lt_date, |c: TaxDate| c.max(lt_date)));
+        }
+    }
+    let latest_crossover = crossover?; // no short-term leg ⇒ no insight
+
+    // R0-I4: stay within `at`'s bundled year/profile; degrade (omit) otherwise — never re-score forward.
+    if latest_crossover.year() != at.year()
+        || tables.table_for(at.year()).is_none()
+        || year_profile.is_none()
+    {
+        return None;
+    }
+
+    // tax_if_sold_long_term: the SAME selection + SAME proceeds, dated `latest_crossover` (ST legs now
+    // LT; price unchanged). Resolve proceeds the same way as the headline score (explicit > FMV).
+    let proceeds = candidate
+        .proceeds
+        .or_else(|| fmv_of(prices, at, candidate.sat))?;
+    let lt_candidate = CandidateDisposal {
+        existing_event: None,
+        wallet: candidate.wallet.clone(),
+        date: latest_crossover,
+        sat: candidate.sat,
+        kind: candidate.kind,
+        proceeds: Some(proceeds),
+    };
+    let (_st, _lt, tax_if_sold_long_term) = score_synthetic(
+        events,
+        prices,
+        config,
+        year_profile,
+        tables,
+        &lt_candidate,
+        proposed_selection,
+    )
+    .ok()?; // any unexpected NotComputable ⇒ omit rather than fail the consult
+
+    let saving_if_waited = (total_now - tax_if_sold_long_term).max(Usd::ZERO);
+    Some(TimingInsight {
+        st_sat_in_selection: st_sat,
+        latest_crossover,
+        tax_if_sold_long_term,
+        saving_if_waited,
+    })
 }
 
 #[cfg(test)]
