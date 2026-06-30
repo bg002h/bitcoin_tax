@@ -366,12 +366,12 @@ fn accept_then_divergent_baseline_stays_noncompliant() {
         ComplianceStatus::AttestedRecording
     );
 
-    // Void the persisted decision — the attestation row survives but the selection is revoked.
+    // Void the persisted decision — the fix clears the attestation row atomically.
     cmd::reconcile::void(&vault, &pp(), &decision.canonical(), AFTER_SALE).unwrap();
     assert_eq!(
-        attestation_of(&vault, &disposal).as_deref(),
-        Some("attested P1"),
-        "void does not clear the attestation side-table row (it becomes inert)"
+        attestation_of(&vault, &disposal),
+        None,
+        "void of a LotSelection must clear the attestation row (complete revocation)"
     );
 
     // Re-run: current == FIFO (Lot A), proposed == Lot B (the optimum) → divergent → D ∉ unchanged.
@@ -561,5 +561,115 @@ fn accept_recompute_is_deterministic_and_disposal_scoped() {
         event_count(&vault),
         before,
         "an unmatched scope appends nothing"
+    );
+}
+
+// ── KAT: void-clears-attestation (Minor fix — complete revocation) ───────────────────────────────
+
+/// **KAT for the void-clears-attestation fix.**
+///
+/// `optimize accept` co-persists a `LotSelection` decision + an `optimize_attestation` row.
+/// Before the fix, `reconcile void` removed only the ledger decision; the attestation row
+/// survived. This creates a reachable mislabel: after void, if the FIFO default becomes the
+/// optimum (`proposed==current` for D, so D ∈ `unchanged`), the stale attestation row causes
+/// the compliance overlay to upgrade D to `AttestedRecording` — a selection the user never
+/// actually attested in this context.
+///
+/// Scenario that triggers the mislabel:
+///   1. High-income profile (100 k OTI) → optimizer proposes Lot B (HIFO, ST loss). The
+///      existing `accept_then_divergent_baseline_stays_noncompliant` test covers the DIVERGENT
+///      path (proposed ≠ current after void). THIS test covers the UNCHANGED path:
+///   2. After accept+attest(Lot B) then void, switch to a zero-income profile. With OTI=0
+///      and MAGI=0 the LTCG rate is 0 % (Single, both lots cost $ 0 federal tax); the optimizer
+///      finds no improvement over the FIFO default (Lot A) → proposed==current==Lot A.
+///   3. D ∈ unchanged. WITHOUT the fix D ∈ attested (stale row) → overlay → AttestedRecording
+///      (MISLABEL). WITH the fix void cleared the row → D ∉ attested → NonCompliant (correct).
+///
+/// The `attestation_of` assertion immediately after void is the PRIMARY FAILURE point: it
+/// reads back `None` with the fix and `Some("...")` without it.
+#[test]
+fn void_clears_attestation_row_prevents_mislabel_as_attested_recording() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_tax_saving_csv(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // Phase 1 — high-income profile: optimizer picks Lot B (HIFO) over Lot A (FIFO).
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+
+    let proposal = cmd::optimize::run(&vault, &pp(), 2025, AFTER_SALE).unwrap();
+    let disposal = proposal.per_disposal[0].disposal.clone();
+    let fifo_pick = proposal.per_disposal[0].current_selection.clone(); // Lot A ($30 k, LT)
+    let hifo_pick = proposal.per_disposal[0].proposed_selection.clone(); // Lot B ($80 k, ST)
+    assert_ne!(
+        fifo_pick, hifo_pick,
+        "fixture must have a divergent proposal (proposed ≠ current)"
+    );
+
+    // Accept + attest the HIFO pick (Lot B) for D post-hoc.
+    let out = cmd::optimize::accept(
+        &vault,
+        &pp(),
+        2025,
+        Some(&disposal.canonical()),
+        Some("I identified Lot B at the time of sale in my contemporaneous records"),
+        AFTER_SALE,
+    )
+    .unwrap();
+    assert_eq!(out.persisted.len(), 1);
+    let (_, decision, _) = out.persisted[0].clone();
+    assert_eq!(
+        attestation_of(&vault, &disposal).as_deref(),
+        Some("I identified Lot B at the time of sale in my contemporaneous records"),
+        "pre-void: attestation row must be present after accept+attest"
+    );
+
+    // Void the LotSelection. The fix atomically clears the attestation row in the same save.
+    cmd::reconcile::void(&vault, &pp(), &decision.canonical(), AFTER_SALE).unwrap();
+
+    // PRIMARY assertion: attestation row cleared on void (FAILS without the fix).
+    assert_eq!(
+        attestation_of(&vault, &disposal),
+        None,
+        "void of a LotSelection must clear the attestation row atomically — FAILS without the fix"
+    );
+
+    // Phase 2 — zero-income profile: LTCG rate = 0 % (Single, MAGI = 0 below the 0 %-rate
+    // threshold). Lot A gives $0 LT gain tax; Lot B gives $0 ST loss benefit (no ordinary
+    // income to offset against). The optimizer finds no improvement over the FIFO baseline →
+    // proposed == current == Lot A (the FIFO default after void).
+    let zero_income = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(0),
+        magi_excluding_crypto: dec!(0),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward::default(),
+    };
+    cmd::tax::set_profile(&vault, &pp(), 2025, zero_income).unwrap();
+
+    // Re-run: both lots cost $0 federal tax → optimizer keeps FIFO baseline → proposed == current.
+    let re = cmd::optimize::run(&vault, &pp(), 2025, AFTER_SALE).unwrap();
+    let row = &re.per_disposal[0];
+    assert_eq!(
+        row.proposed_selection, row.current_selection,
+        "zero-income profile: both lots cost $0 → no improvement → proposed == current (D ∈ unchanged)"
+    );
+    assert_eq!(
+        row.current_selection, fifo_pick,
+        "FIFO baseline (Lot A) is in force after void"
+    );
+
+    // COMPLIANCE assertion: D must NOT be AttestedRecording.
+    // WITHOUT fix: stale row + D ∈ unchanged → overlay upgrades → AttestedRecording (mislabel).
+    // WITH fix:    attestation row cleared → D ∉ attested → stays NonCompliant (correct).
+    assert_ne!(
+        row.status,
+        ComplianceStatus::AttestedRecording,
+        "stale void must NOT produce AttestedRecording mislabel — FAILS without the fix"
+    );
+    assert_eq!(
+        row.status,
+        ComplianceStatus::NonCompliant,
+        "D has no in-force explicit selection and no method election → NonCompliant"
     );
 }

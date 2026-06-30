@@ -80,6 +80,18 @@ pub fn all(conn: &Connection) -> Result<BTreeMap<EventId, (String, String)>, Cli
     Ok(out)
 }
 
+/// Delete the `optimize_attestation` row for `disposal` (idempotent — no-op if absent).
+/// Called by `reconcile void` when the voided decision is a `LotSelection`, so that revocation
+/// is COMPLETE: the decision void and the row clear are co-persisted in the same `session.save()`.
+pub fn clear(conn: &Connection, disposal: &EventId) -> Result<(), CliError> {
+    init_table(conn)?;
+    conn.execute(
+        "DELETE FROM optimize_attestation WHERE disposal_event=?1",
+        [disposal.canonical()],
+    )?;
+    Ok(())
+}
+
 /// Return all attested disposal `EventId`s as a sorted `BTreeSet` (NFR4-stable).
 /// Feeds the `compliance_overlay` as its `attested` input. Robust to older vaults.
 pub fn attested_set(conn: &Connection) -> Result<BTreeSet<EventId>, CliError> {

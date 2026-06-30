@@ -90,6 +90,13 @@ pub fn set_fmv(
 
 /// FR8: void a revocable decision. Voiding a non-revocable / effective-allocation target raises
 /// `decision_conflicts` in the projection (no effect) — the CLI only appends; the engine adjudicates.
+///
+/// When the voided decision is a `LotSelection`, also clears that disposal's `optimize_attestation`
+/// row ATOMICALLY (same in-memory DB, one `session.save()`). This closes the revocation-completeness
+/// edge: without the clear, a post-void re-run where the FIFO default equals the optimum
+/// (`proposed==current`, D ∈ unchanged) could mislabel D as `AttestedRecording` from a stale row
+/// the user never attested in this context. Non-LotSelection decisions are unaffected (the
+/// `optimize_attestation` table has no row to clear — the delete is a no-op).
 pub fn void(
     vault_path: &Path,
     pp: &Passphrase,
@@ -98,11 +105,37 @@ pub fn void(
 ) -> Result<EventId, CliError> {
     let target_event_id = parse_event_id(target_ref)?;
     let mut session = Session::open(vault_path, pp)?;
-    append_and_save(
-        &mut session,
+
+    // Determine if the target decision is a LotSelection so we can clear its attestation row.
+    // Load events first; the find is O(n) but n is small and void is infrequent.
+    let events = load_all(session.conn())?;
+    let disposal_to_clear: Option<EventId> = events
+        .iter()
+        .find(|e| e.id == target_event_id)
+        .and_then(|e| match &e.payload {
+            EventPayload::LotSelection(ls) => Some(ls.disposal_event.clone()),
+            _ => None,
+        });
+
+    // Append the VoidDecisionEvent (no save yet — we batch with the attestation clear below).
+    let id = append_decision(
+        session.conn(),
         EventPayload::VoidDecisionEvent(VoidDecisionEvent { target_event_id }),
         now,
-    )
+        UtcOffset::UTC,
+        None,
+    )?;
+
+    // If the voided decision was a LotSelection, clear the attestation row for its disposal
+    // ATOMICALLY — both the void event and the row delete land in the same in-memory Connection
+    // and are flushed together by the single `session.save()` below (mirrors accept's atomic
+    // co-persist). Idempotent: clearing an absent row is Ok (no error).
+    if let Some(disposal) = disposal_to_clear {
+        crate::optimize_attest::clear(session.conn(), &disposal)?;
+    }
+
+    session.save()?;
+    Ok(id)
 }
 
 /// FR2/§7.3: resolve an `Unclassified` row to a real imported payload (preserving the target EventId).
