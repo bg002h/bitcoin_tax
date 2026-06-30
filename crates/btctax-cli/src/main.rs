@@ -44,7 +44,7 @@ enum Command {
     /// Emit a reconciliation decision event.
     #[command(subcommand)]
     Reconcile(Reconcile),
-    /// Show or set projection config (TP8 fee treatment / pre-2025 lot method).
+    /// Show or set projection config (TP8 fee treatment / pre-2025 lot method / forward method).
     Config {
         #[arg(long, value_enum)]
         set_fee_treatment: Option<FeeArg>,
@@ -52,6 +52,14 @@ enum Command {
         set_pre2025_method: Option<MethodLotArg>,
         #[arg(long, default_value_t = false)]
         attest_pre2025_method: bool,
+        /// §A.5(a): append a MethodElection decision (the forward standing order). Not a flag
+        /// mutation — this is an event in the ledger. Use --effective-from to set the date
+        /// (default: today / the decision's made-date).
+        #[arg(long, value_enum)]
+        set_forward_method: Option<MethodLotArg>,
+        /// Effective-from date for --set-forward-method (YYYY-MM-DD). Defaults to made-date.
+        #[arg(long)]
+        effective_from: Option<String>,
     },
     /// FR10: export decrypted SQLite + CSV (the NFR2 plaintext exception).
     ExportSnapshot {
@@ -134,6 +142,14 @@ enum Reconcile {
     },
     /// Attest an existing allocation as timely.
     SafeHarborAttest,
+    /// §A.4 Specific-ID: pick the exact lots a disposal consumes.
+    SelectLots {
+        disposal: String,
+        #[arg(long = "from", required = true)]
+        from: Vec<String>,
+    },
+    /// §A.4 Batch import LotSelections from a CSV (disposal_ref,origin_event_id,split_sequence,sat).
+    ImportSelections { csv: PathBuf },
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -155,6 +171,16 @@ enum OutKindArg {
     Spend,
     Gift,
     Donate,
+}
+
+impl From<MethodLotArg> for LotMethod {
+    fn from(a: MethodLotArg) -> Self {
+        match a {
+            MethodLotArg::Fifo => LotMethod::Fifo,
+            MethodLotArg::Lifo => LotMethod::Lifo,
+            MethodLotArg::Hifo => LotMethod::Hifo,
+        }
+    }
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -227,26 +253,49 @@ fn run() -> Result<ExitCode, CliError> {
             set_fee_treatment,
             set_pre2025_method,
             attest_pre2025_method,
+            set_forward_method,
+            effective_from,
         } => {
             let pp = passphrase(false)?;
-            let cfg = if let Some(m) = set_pre2025_method {
-                let method = match m {
-                    MethodLotArg::Fifo => LotMethod::Fifo,
-                    MethodLotArg::Lifo => LotMethod::Lifo,
-                    MethodLotArg::Hifo => LotMethod::Hifo,
+
+            // M3 / SPEC A.1: --set-forward-method APPENDS a MethodElection decision — it is an
+            // event, not a flag mutation. Handled first because it uses the `now` seam and returns
+            // early (its output is a single decision id, not a config display).
+            if let Some(m) = set_forward_method {
+                let eff = effective_from
+                    .as_deref()
+                    .map(eventref::parse_date_arg)
+                    .transpose()?;
+                let id = cmd::reconcile::set_forward_method(vault, &pp, m.into(), eff, now)?;
+                println!(
+                    "Recorded standing order (MethodElection) {}",
+                    id.canonical()
+                );
+                return Ok(ExitCode::SUCCESS);
+            }
+
+            // Task-1 review Minor: --attest-pre2025-method without --set-pre2025-method would
+            // silently no-op under the old if/else dispatch. Reject with a clear error instead.
+            if attest_pre2025_method && set_pre2025_method.is_none() {
+                return Err(CliError::Usage(
+                    "--attest-pre2025-method requires --set-pre2025-method".into(),
+                ));
+            }
+
+            // Task-1 review Minor (apply-all): apply each provided flag independently — no
+            // silent drops. The old if/else dispatch ignored --set-fee-treatment when
+            // --set-pre2025-method was also provided.
+            if let Some(m) = set_pre2025_method {
+                cmd::admin::set_pre2025_method(vault, &pp, m.into(), attest_pre2025_method)?;
+            }
+            if let Some(f) = set_fee_treatment {
+                let t = match f {
+                    FeeArg::C => FeeTreatment::TreatmentC,
+                    FeeArg::B => FeeTreatment::TreatmentB,
                 };
-                cmd::admin::set_pre2025_method(vault, &pp, method, attest_pre2025_method)?
-            } else {
-                match set_fee_treatment {
-                    Some(FeeArg::C) => {
-                        cmd::admin::set_config(vault, &pp, Some(FeeTreatment::TreatmentC))?
-                    }
-                    Some(FeeArg::B) => {
-                        cmd::admin::set_config(vault, &pp, Some(FeeTreatment::TreatmentB))?
-                    }
-                    None => cmd::admin::show_config(vault, &pp)?,
-                }
-            };
+                cmd::admin::set_config(vault, &pp, Some(t))?;
+            }
+            let cfg = cmd::admin::show_config(vault, &pp)?;
             println!(
                 "fee_treatment: {:?}\npre2025_method: {:?} (attested: {})",
                 cfg.fee_treatment, cfg.pre2025_method, cfg.pre2025_method_attested
@@ -365,6 +414,20 @@ fn dispatch_reconcile(
             cmd::reconcile::safe_harbor_allocate(vault, &pp, m, attest, now)?
         }
         Reconcile::SafeHarborAttest => cmd::reconcile::safe_harbor_attest(vault, &pp, now)?,
+        Reconcile::SelectLots { disposal, from } => {
+            let picks = from
+                .iter()
+                .map(|s| eventref::parse_lot_pick(s))
+                .collect::<Result<Vec<_>, _>>()?;
+            cmd::reconcile::select_lots(vault, &pp, &disposal, picks, now)?
+        }
+        Reconcile::ImportSelections { csv } => {
+            let ids = cmd::reconcile::import_selections(vault, &pp, &csv, now)?;
+            // import-selections emits N decisions (one per disposal); print a summary and return
+            // early (the trailing single-id println does not apply here).
+            println!("Recorded {} LotSelection decision(s)", ids.len());
+            return Ok(());
+        }
     };
     println!("Recorded decision {}", id.canonical());
     Ok(())
