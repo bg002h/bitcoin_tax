@@ -10,7 +10,12 @@
 //! precision** — NOT the IRS binned Tax Tables and NOT whole-dollar rounding — with `ROUND_HALF_EVEN`
 //! to cents applied at the END only (the project's canonical `round_cents`).
 use crate::conventions::{round_cents, Usd};
-use crate::tax::tables::{LtcgBreakpoints, OrdinarySchedule};
+use crate::event::LedgerEvent;
+use crate::state::{Blocker, BlockerKind, LedgerState, Severity, Term};
+use crate::tax::tables::{
+    loss_limit, niit_threshold, LtcgBreakpoints, OrdinarySchedule, TaxTables, NIIT_RATE,
+};
+use crate::tax::types::{Carryforward, MarginalRates, TaxOutcome, TaxProfile, TaxResult};
 
 /// Exact marginal-bracket tax on `taxable` (≥ 0). Sums (min(taxable, next_lower) − lower) × rate over each
 /// bracket the income reaches; the open-ended top bracket has no upper bound. ROUND_HALF_EVEN to cents at
@@ -186,6 +191,214 @@ pub fn net_1222(
         st_carry: net_st_loss - absorbed_st,
         lt_carry: net_lt_loss - absorbed_lt,
     }
+}
+
+/// §B.3/§B.4 ASSEMBLY: compute the crypto-attributable federal tax for `year`.
+///
+/// Returns `Computed(TaxResult)` or `NotComputable(Blocker)`. Refusal precedence is deterministic:
+/// (1) ANY unresolved `severity()==Hard` blocker anywhere in the projection → `TaxYearNotComputable`;
+/// (2) no bundled table for `year` → `TaxTableMissing`; (3) no `TaxProfile` for `year` → `TaxProfileMissing`.
+///
+/// **Incremental delta (I5).** The objective `total_federal_tax_attributable` is the federal tax the crypto
+/// items *cause*: `tax(profile WITH app-computed crypto) − tax(profile WITHOUT)`, ceteris paribus on the
+/// minimal profile. `net_1222` is run twice (with/without crypto), each scenario priced through the §1
+/// ordinary stack + §1(h) preferential stack + §1411 NIIT, and the scenarios are subtracted. By field:
+/// `ltcg_tax`, `niit`, and `total_federal_tax_attributable` are crypto-attributable **deltas**; `st_net`,
+/// `lt_net`, `ordinary_from_crypto`, `loss_deduction`, `carryforward_out`, and `marginal_rates` describe the
+/// **WITH-crypto** filing position (`carryforward_out` MUST be a level — it feeds next year's `carryforward_in`).
+///
+/// **Double-count guard (I5).** `profile.ordinary_taxable_income` EXCLUDES all app-computed crypto items;
+/// crypto ordinary income (mining/staking/etc.) is added onto the ordinary stack exactly **once** (in the WITH
+/// scenario's `bottom`) and is reported back as `ordinary_from_crypto`.
+///
+/// **§1411 (B-M1).** NII is `QD + surviving net capital gains (ST+LT)` — crypto **ordinary** income is in MAGI
+/// but NOT in NII. NIIT = 3.8% × min(NII, MAGI − threshold). MAGI gets only the crypto **delta** added (so the
+/// non-crypto QD/cap-gain already in `magi_excluding_crypto` is never double-counted).
+///
+/// The pinned identity `total == (ord_with − ord_without) + ltcg_tax + niit` holds exactly (all cent-rounded
+/// Decimal sums; no float). `events` is retained for the §0 determinism tuple / a future per-year lot-lineage
+/// refinement; the projection-wide gate consults only `state`.
+pub fn compute_tax_year(
+    events: &[LedgerEvent],
+    state: &LedgerState,
+    year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+) -> TaxOutcome {
+    let _ = events;
+
+    // (1) §B.4 refusal (B-I1): ANY unresolved severity()==Hard blocker ANYWHERE in the projection gates
+    // EVERY year — deliberately conservative. An out-of-year unresolved `ImportConflict`/`DecisionConflict`
+    // can leave a disputed-basis lot that a later disposal consumes (the lot is not `basis_pending`, so it
+    // never re-triggers an in-year `FmvMissing`); any open Hard blocker means the basis foundation is unsound,
+    // so B refuses rather than present an authoritative-but-wrong number.
+    if let Some(b) = first_hard_blocker(state) {
+        let evt = b
+            .event
+            .as_ref()
+            .map(|e| e.canonical())
+            .unwrap_or_else(|| "-".into());
+        return TaxOutcome::NotComputable(Blocker {
+            kind: BlockerKind::TaxYearNotComputable,
+            event: b.event.clone(), // B-N1: carry the structured offending EventId for downstream C
+            detail: format!(
+                "year {year} not computable: unresolved Hard blocker [{:?}] {} :: {}",
+                b.kind, evt, b.detail
+            ),
+        });
+    }
+    // (2) §B.2 missing table.
+    let Some(table) = tables.table_for(year) else {
+        return TaxOutcome::NotComputable(Blocker {
+            kind: BlockerKind::TaxTableMissing,
+            event: None,
+            detail: format!("no bundled tax table for {year}"),
+        });
+    };
+    // (3) §B.1 missing profile.
+    let Some(profile) = profile else {
+        return TaxOutcome::NotComputable(Blocker {
+            kind: BlockerKind::TaxProfileMissing,
+            event: None,
+            detail: format!("no tax_profile set for {year}"),
+        });
+    };
+
+    let status = profile.filing_status;
+    let limit = loss_limit(status);
+    let sched = table.ordinary_for(status);
+    let bp = *table.ltcg_for(status);
+    let thr = niit_threshold(status);
+
+    // ── crypto inputs for the year (this year's disposals, filtered by tax-year) ────────────────────
+    let mut crypto_st = Usd::ZERO;
+    let mut crypto_lt = Usd::ZERO;
+    for d in state
+        .disposals
+        .iter()
+        .filter(|d| d.disposed_at.year() == year)
+    {
+        for leg in &d.legs {
+            match leg.term {
+                Term::ShortTerm => crypto_st += leg.gain,
+                Term::LongTerm => crypto_lt += leg.gain,
+            }
+        }
+    }
+    // Crypto ordinary income (mining/staking/interest/airdrop/reward): every IncomeKind is ordinary at FMV.
+    let crypto_ord: Usd = state
+        .income_recognized
+        .iter()
+        .filter(|i| i.recognized_at.year() == year)
+        .map(|i| i.usd_fmv)
+        .sum();
+
+    let cf = profile.capital_loss_carryforward_in;
+    // ── two scenarios: §1222 netting WITH and WITHOUT crypto ───────────────────────────────────────
+    let with = net_1222(
+        crypto_st,
+        crypto_lt,
+        profile.other_net_capital_gain,
+        cf.short,
+        cf.long,
+        limit,
+    );
+    let without = net_1222(
+        Usd::ZERO,
+        Usd::ZERO,
+        profile.other_net_capital_gain,
+        cf.short,
+        cf.long,
+        limit,
+    );
+
+    let qd = profile.qualified_dividends_and_other_pref_income;
+    // §1 ordinary stack: crypto ordinary income + surviving net ST gain on top of profile ordinary income,
+    // less the §1211 loss deduction. Crypto ordinary income is added EXACTLY ONCE (WITH scenario only).
+    let bottom_with =
+        profile.ordinary_taxable_income + crypto_ord + with.ordinary_gain - with.loss_deduction;
+    let bottom_without =
+        profile.ordinary_taxable_income + without.ordinary_gain - without.loss_deduction;
+    let ord_with = ordinary_tax_on(sched, bottom_with);
+    let ord_without = ordinary_tax_on(sched, bottom_without);
+    // §1(h): QD shares the 0/15/20 preferential stack with surviving net capital gain.
+    let pref_with = preferential_tax(&bp, bottom_with, qd + with.preferential_gain).tax;
+    let pref_without = preferential_tax(&bp, bottom_without, qd + without.preferential_gain).tax;
+
+    // §1411 NIIT. NII = QD + surviving net capital gains (ST+LT). Crypto ORDINARY income is NOT NII
+    // (mining/staking is trade/business or otherwise outside the minimal NII model — B-M1: this can only
+    // ever understate NIIT, recorded as a Phase-2 refinement). NIIT = 3.8% × min(NII, MAGI − threshold).
+    let nii_with = qd + with.ordinary_gain + with.preferential_gain;
+    let nii_without = qd + without.ordinary_gain + without.preferential_gain;
+    // `magi_excluding_crypto` already includes QD + non-crypto cap gain; add ONLY the crypto AGI delta.
+    let crypto_agi = (with.ordinary_gain + with.preferential_gain - with.loss_deduction)
+        - (without.ordinary_gain + without.preferential_gain - without.loss_deduction)
+        + crypto_ord;
+    let magi_without = profile.magi_excluding_crypto;
+    let magi_with = magi_without + crypto_agi;
+    let niit = |nii: Usd, magi: Usd| -> Usd {
+        let over = if magi > thr { magi - thr } else { Usd::ZERO };
+        let base = if nii < over { nii } else { over };
+        round_cents(base * NIIT_RATE)
+    };
+    let niit_with = niit(nii_with, magi_with);
+    let niit_without = niit(nii_without, magi_without);
+
+    // Incremental delta (I5): tax WITH crypto − tax WITHOUT. Exact (cent-rounded Decimal arithmetic).
+    let total = (ord_with + pref_with + niit_with) - (ord_without + pref_without + niit_without);
+
+    let top = bottom_with + qd + with.preferential_gain;
+    let marginal_rates = MarginalRates {
+        ordinary: marginal_ordinary_rate(sched, bottom_with),
+        ltcg: if top <= bp.max_zero {
+            Usd::ZERO
+        } else if top <= bp.max_fifteen {
+            dec_15()
+        } else {
+            dec_20()
+        },
+        niit_applies: niit_with > niit_without,
+    };
+
+    TaxOutcome::Computed(TaxResult {
+        st_net: with.st_net,
+        lt_net: with.lt_net,
+        ordinary_from_crypto: crypto_ord,
+        ltcg_tax: pref_with - pref_without, // crypto-attributable preferential tax (DELTA)
+        niit: niit_with - niit_without,     // crypto-attributable §1411 NIIT (DELTA)
+        loss_deduction: with.loss_deduction, // WITH-scenario level (drives carryforward_out)
+        carryforward_out: Carryforward {
+            short: with.st_carry,
+            long: with.lt_carry,
+        },
+        total_federal_tax_attributable: total, // = (ord_with−ord_without) + ltcg_tax + niit
+        marginal_rates,
+    })
+}
+
+/// Highest ordinary bracket rate the income reaches (the rate on its last dollar). Display-only (B-M4):
+/// uses `taxable > br.lower`, so exactly at a bracket boundary it reports the LOWER bracket's rate.
+fn marginal_ordinary_rate(sched: &OrdinarySchedule, taxable: Usd) -> Usd {
+    let mut r = Usd::ZERO;
+    for br in &sched.brackets {
+        if taxable > br.lower {
+            r = br.rate;
+        } else {
+            break;
+        }
+    }
+    r
+}
+
+/// §B.4 (B-I1): the projection-wide Hard-blocker gate. Returns the FIRST unresolved blocker whose
+/// `severity() == Severity::Hard`, anywhere in `state.blockers`. `state.blockers` is in deterministic
+/// projection order (NFR4) and `.find` returns the first, so the chosen blocker — hence the
+/// `TaxYearNotComputable` detail/event — is deterministic.
+fn first_hard_blocker(state: &LedgerState) -> Option<&Blocker> {
+    state
+        .blockers
+        .iter()
+        .find(|b| b.kind.severity() == Severity::Hard)
 }
 
 #[cfg(test)]
