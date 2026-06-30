@@ -3,6 +3,7 @@
 pub mod conventions;
 pub mod event;
 pub mod identity;
+pub mod optimize;
 pub mod persistence;
 pub mod price;
 pub mod project;
@@ -12,6 +13,10 @@ pub mod tax;
 pub use conventions::{Sat, TaxDate, Usd};
 pub use event::*;
 pub use identity::{EventId, Fingerprint, LotId, Source, SourceRef, WalletId};
+pub use optimize::{
+    ApproxReason, ConsultReport, ConsultRequest, DisposalProposal, OptimizeError, OptimizeProposal,
+    Persistability, TimingInsight,
+};
 pub use price::PriceProvider;
 pub use project::{
     conservation_report, disposal_compliance, evaluate_disposal, project, CandidateDisposal,

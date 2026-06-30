@@ -187,7 +187,7 @@ pub struct ClassifyRaw {
 
 /// A named-lot selection element (§A.4): consume exactly `sat` from lot `lot`.
 /// Used by `PoolSet::consume` (Task 2) and carried by the `LotSelection` decision payload (Task 4).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct LotPick {
     pub lot: LotId,
     pub sat: Sat,
