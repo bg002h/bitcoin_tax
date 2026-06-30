@@ -774,7 +774,12 @@ pub fn optimize_year(
         .collect();
     // Exhaustive (PROVEN optimum, approximate=false) within MAX_COMBOS; else baseline-seeded coordinate
     // descent (a disclosed LOCAL optimum, approximate=true). Both incumbents START at the baseline score.
-    let best: BTreeMap<EventId, Vec<LotPick>> = if product <= MAX_COMBOS {
+    // The tracked `best_total` is the score the search actually selected — baseline-seeded so it is
+    // always ≤ baseline_total by construction (the seed is never evicted unless something strictly lower
+    // is found). We use it directly for `optimized_tax`/`delta` instead of re-folding `best` to avoid a
+    // pro-rata remainder-cent that can shift between ST and LT legs when picks are re-injected in lot-id
+    // order rather than the original fold's FIFO order (a ≤$0.01 delta violation on multi-leg disposals).
+    let (best, best_total): (BTreeMap<EventId, Vec<LotPick>>, Usd) = if product <= MAX_COMBOS {
         exhaustive_min(
             events,
             prices,
@@ -820,6 +825,8 @@ pub fn optimize_year(
         })
     };
 
+    // Re-fold `best` to extract `marginal_rates` (needed for the proposal). We do NOT use this fold's
+    // `.total_federal_tax_attributable` for `optimized_tax` or `delta` — see comment above the search.
     let opt_state = fold_with(events, prices, config, &best);
     let opt = match compute_tax_year(events, &opt_state, year, profile, tables) {
         TaxOutcome::Computed(r) => r,
@@ -887,10 +894,16 @@ pub fn optimize_year(
     Ok(OptimizeProposal {
         year,
         baseline_tax: base.total_federal_tax_attributable,
-        optimized_tax: opt.total_federal_tax_attributable,
-        delta: opt.total_federal_tax_attributable - base.total_federal_tax_attributable,
+        // Use the search's tracked incumbent score, NOT the re-fold's total. The re-fold can shift a
+        // pro-rata remainder cent between an ST and an LT leg (picks are in lot-id order rather than
+        // the original FIFO order), causing `opt.total` to exceed `base.total` by ≤$0.01 and breaking
+        // the "ALWAYS ≤ 0" struct-doc invariant on multi-leg disposals where best==baseline.
+        // `best_total` is baseline-seeded and only evicted by a strict improvement, so it is ≤
+        // `base.total_federal_tax_attributable` by construction (delta ≤ 0 holds exactly).
+        optimized_tax: best_total,
+        delta: best_total - base.total_federal_tax_attributable,
         per_disposal,
-        marginal_rates: opt.marginal_rates,
+        marginal_rates: opt.marginal_rates, // re-fold still needed for this field
         approximate,
         approx_reason,
     })
@@ -934,12 +947,12 @@ fn exhaustive_min(
     group_lists: &[Vec<BTreeMap<EventId, Vec<LotPick>>>],
     baseline_assignment: &BTreeMap<EventId, Vec<LotPick>>,
     base: &TaxResult,
-) -> BTreeMap<EventId, Vec<LotPick>> {
+) -> (BTreeMap<EventId, Vec<LotPick>>, Usd) {
     let mut best_total = base.total_federal_tax_attributable;
     let mut best_assign = baseline_assignment.clone();
     let lens: Vec<usize> = group_lists.iter().map(|g| g.len()).collect();
     if lens.contains(&0) {
-        return best_assign; // a group with no candidates → only the baseline is considered
+        return (best_assign, best_total); // a group with no candidates → only the baseline is considered
     }
     let mut idx = vec![0usize; group_lists.len()];
     loop {
@@ -962,7 +975,7 @@ fn exhaustive_min(
         let mut k = 0;
         loop {
             if k == idx.len() {
-                return best_assign;
+                return (best_assign, best_total);
             }
             idx[k] += 1;
             if idx[k] < lens[k] {
@@ -991,7 +1004,7 @@ fn coordinate_descent(
     group_lists: &[Vec<BTreeMap<EventId, Vec<LotPick>>>],
     baseline_assignment: &BTreeMap<EventId, Vec<LotPick>>,
     base: &TaxResult,
-) -> BTreeMap<EventId, Vec<LotPick>> {
+) -> (BTreeMap<EventId, Vec<LotPick>>, Usd) {
     let mut current = baseline_assignment.clone();
     let mut current_total = base.total_federal_tax_attributable;
     let n_groups = group_lists.len();
@@ -1032,7 +1045,7 @@ fn coordinate_descent(
             }
         }
     }
-    current
+    (current, current_total)
 }
 
 #[cfg(test)]

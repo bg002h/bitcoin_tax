@@ -339,3 +339,20 @@ M3, N-2) were folded into the plan (see its "Fold record (round 1)"). These rema
 - **Minor — `MarginalRates.niit_applies` doc vs code.** Doc says "MAGI exceeds threshold"; code computes "crypto increased NIIT" (niit_with>niit_without). Display-only, feeds no figure. Align doc or rename. — OPEN.
 - **B-M1 (Phase-2) — minimal NII model can understate NIIT** in loss years (NII excludes crypto ordinary income + not reduced by §1211 loss). Disclosed in output. Phase-2 refinement. — OPEN.
 - **Nits (DEFER):** unused `events` param in compute_tax_year; redundant rust_decimal_macros dev-dep (adapters); `{:?}` filing_status in tax-profile --show; advisory-only→Computed KAT; B-R2-N1 stale §4.3 doc line. — OPEN (cosmetic/doc).
+
+## Sub-project C (optimizer) — Task-4 review Nit deferred (2026-06-30)
+
+- **Nit — `proposed_compliance_status` / `persistability` asymmetry for divergent contemporaneous 2027+
+  broker picks.** `proposed_compliance_status` returns `NonCompliant` for a selection that diverges from the
+  current pick AND was made at/before the sale date (`made ≤ sale`, i.e. contemporaneous) when the wallet is a
+  2027+ broker-held account. `persistability` returns `ContemporaneousNow` for the same inputs (made ≤ sale
+  is the only criterion for `persistability`; the 2027+ broker check is only in `ForbiddenBroker2027`). This
+  means the status says "NonCompliant" while the persistability gate says "persists freely" — an unusual
+  combination that a caller would see only for a future-dated existing disposal to a 2027+ broker where the
+  optimizer proposes a pick that differs from the current selection. In practice, the CLI's Task-10
+  2027+ broker refusal prevents this path from being reached (the CLI refuses to persist any divergent pick
+  for 2027+ brokers regardless of persistability). A one-line alignment (either widen
+  `proposed_compliance_status` to return `NonCompliant` from `persistability == ForbiddenBroker2027` even
+  for contemporaneous picks, OR add a `ForbiddenBroker2027` arm to `Persistability` and let the CLI check
+  that instead of `persistability == ContemporaneousNow`) would remove the conceptual gap. — OPEN (future
+  Task 10 / CLI cleanup; no current user-visible bug given the CLI refusal).

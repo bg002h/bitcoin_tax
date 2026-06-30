@@ -1089,3 +1089,99 @@ fn tie_returns_lexicographically_smallest_assignment() {
     };
     assert_eq!(p.per_disposal[0].proposed_selection, vec![want_lot]);
 }
+
+// ── delta ≤ 0 invariant: multi-leg disposal where baseline == best ─────────────────────────────────
+
+/// Regression KAT for the "pro-rata remainder-cent" delta perturbation on a multi-leg disposal whose
+/// legs span ST and LT terms and where the optimizer's best == baseline_assignment.
+///
+/// **Root-cause:** `baseline_selection` sorts picks by lot-id. When `optimize_year` re-folded the
+/// chosen `best` assignment to get `optimized_tax`, it injected those lot-id-sorted picks via
+/// `fold_with` → `consume_picks`. `make_disposal_legs` allocated proceeds pro-rata in that lot-id
+/// order — but the ORIGINAL baseline fold used FIFO temporal order. For this fixture the two orderings
+/// differ (ST lot has an alphabetically earlier source_ref than the LT lot), so the half-cent rounding
+/// remainder shifts between legs:
+///
+///   FIFO (baseline): Z_LT (LT, older) gets round_cents($10.03 / 2) = $5.02 (second decimal 1 is odd
+///   → ROUND_HALF_EVEN rounds UP), A_ST gets remainder $5.01.
+///   Gains: LT $0.05, ST $0.01. Tax: pref($0.05@15%) + ord-delta($0.01@32%) = $0.01 + $0.00 = $0.01.
+///
+///   Lot-id re-fold (A_ST < Z_LT, so A_ST first): A_ST gets $5.02, Z_LT gets $5.01.
+///   Gains: ST $0.02, LT $0.04. Tax: pref($0.04@15%) + ord-delta($0.02@32%) = $0.01 + $0.01 = $0.02.
+///
+/// The only feasible selection for the disposal (needs 2 BTC, pool has exactly 1 BTC per lot) is to
+/// take both lots, so the optimizer finds no improvement: best == baseline. The old re-fold then
+/// produced `optimized_tax = $0.02 > baseline_tax = $0.01` → `delta = +$0.01`, violating "ALWAYS ≤ 0".
+///
+/// **Fix:** `optimized_tax` and `delta` now use the search's tracked `best_total` (baseline-seeded, ≤
+/// baseline by construction) instead of the re-fold's total. For this fixture `best_total` = $0.01 =
+/// `baseline_tax` and `delta` = $0.00 ≤ 0.
+#[test]
+fn multileg_stlt_prorata_rounding_delta_le_zero() {
+    // A_ST (source_ref "A_ST"): acquired recently → short-term at disposal.
+    // Z_LT (source_ref "Z_LT"): acquired >1 yr ago → long-term at disposal.
+    // lot-id order: "A_ST" < "Z_LT" (A < Z) ≠ FIFO order (Z_LT older → FIFO first).
+    let events = vec![
+        buy(
+            "Z_LT",
+            datetime!(2024-01-02 00:00:00 UTC), // LT: >1 yr before disposal
+            cold(),
+            LOT,
+            dec!(4.97), // basis $4.97 → FIFO gain $5.02 − $4.97 = $0.05 LT
+        ),
+        buy(
+            "A_ST",
+            datetime!(2026-05-01 00:00:00 UTC), // ST: <1 yr before disposal
+            cold(),
+            LOT,
+            dec!(5.00), // basis $5.00 → FIFO remainder gain $5.01 − $5.00 = $0.01 ST
+        ),
+        sell(
+            "DISP",
+            datetime!(2026-06-01 00:00:00 UTC),
+            cold(),
+            2 * LOT, // consumes BOTH lots → only 1 feasible selection
+            // $10.03: round_cents($10.03 / 2) = round_cents($5.015) = $5.02
+            // (second decimal 1 is odd → ROUND_HALF_EVEN rounds UP)
+            dec!(10.03),
+        ),
+    ];
+    let prices = StaticPrices::default();
+    let tables = synth(2026);
+    // ordinary = $100k (32% marginal bracket per synth) → a $0.01 ST gain shift causes
+    // ordinary_tax_on to round from $17000.0032 ($0.00 delta) to $17000.0064 ($0.01 delta).
+    let prof = profile(dec!(100000));
+    let p = optimize_year(
+        &events,
+        &prices,
+        &cfg(),
+        2026,
+        Some(&prof),
+        &tables,
+        &no_attest(),
+        made(),
+    )
+    .expect("computable");
+
+    // (1) The only feasible selection is both lots → optimizer finds no improvement: baseline == best.
+    assert_eq!(
+        p.per_disposal[0].proposed_selection, p.per_disposal[0].current_selection,
+        "baseline == best: no strictly better selection exists"
+    );
+    // (2) delta ≤ 0 holds exactly (was +$0.01 under the old re-fold approach).
+    assert!(
+        p.delta <= dec!(0),
+        "delta must be ≤ 0; got {} (invariant violation — re-fold perturbation bug)",
+        p.delta
+    );
+    // (3) With no improvement found, optimized_tax == baseline_tax and delta == 0.
+    assert_eq!(
+        p.delta,
+        dec!(0),
+        "no improvement possible → delta is exactly 0"
+    );
+    assert_eq!(
+        p.optimized_tax, p.baseline_tax,
+        "optimized_tax must equal baseline_tax when best == baseline"
+    );
+}
