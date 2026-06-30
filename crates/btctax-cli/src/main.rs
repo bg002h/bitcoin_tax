@@ -78,6 +78,9 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Lot-specific-identification optimizer (§C — read-only proposal or gated persistence).
+    #[command(subcommand)]
+    Optimize(Optimize),
     /// Set or show the per-tax-year tax profile (filing status, income, MAGI, etc.).
     TaxProfile {
         /// The tax year (e.g. 2025).
@@ -123,6 +126,17 @@ enum Command {
         /// Show the stored profile for `--year` instead of setting it.
         #[arg(long, default_value_t = false)]
         show: bool,
+    },
+}
+
+/// `optimize` subcommand tree.  Task 9 adds `Run`; Tasks 10–11 add `Accept`/`Consult`.
+#[derive(Subcommand)]
+enum Optimize {
+    /// Mode-1 what-if: print the tax-saving lot-selection proposal. NOTHING is filed or bound.
+    Run {
+        /// The tax year to optimize (must be 2025 or later).
+        #[arg(long)]
+        tax_year: i32,
     },
 }
 
@@ -330,6 +344,12 @@ fn run() -> Result<ExitCode, CliError> {
                 print!("{}", render::render_report(&state, year));
             }
         }
+        Command::Optimize(opt) => match opt {
+            Optimize::Run { tax_year } => {
+                let p = cmd::optimize::run(vault, &passphrase(false)?, tax_year, now)?;
+                print!("{}", render::render_optimize_proposal(&p));
+            }
+        },
         Command::Reconcile(r) => dispatch_reconcile(vault, r, now)?,
         Command::Config {
             set_fee_treatment,

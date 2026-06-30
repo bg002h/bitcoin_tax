@@ -638,6 +638,148 @@ pub fn render_tax_outcome(
     s
 }
 
+// ── Sub-project C: optimize run ─────────────────────────────────────────────────────────────────
+
+/// Format a lot-pick slice as comma-separated `"<event>#<split>:<sat>"` entries for proposal display.
+/// Mirrors the grammar `eventref::parse_lot_pick` accepts, so picks are both human-readable and
+/// round-trip-parseable. An empty pick list renders as `"(none)"`.
+fn picks_str(picks: &[btctax_core::LotPick]) -> String {
+    if picks.is_empty() {
+        return "(none)".to_string();
+    }
+    picks
+        .iter()
+        .map(|p| {
+            format!(
+                "{}#{}:{}",
+                p.lot.origin_event_id.canonical(),
+                p.lot.split_sequence,
+                p.sat
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Render a `OptimizeProposal` (Mode-1 what-if) for the `optimize run` command. Returns a String
+/// containing the proposal header, any approximate banner, the aggregate tax delta, per-disposal
+/// rows (with proposed selection + compliance status + persistability), and the R0-M2 caveat footer.
+///
+/// **Approximate banner (R0-C1/C3/R2-C1):** when `p.approximate == true`, a ⚠ APPROXIMATE banner
+/// and the specific `approx_reason` are printed. When `false`, no banner is printed (proven global
+/// minimum — do NOT add a banner for this case).
+///
+/// **R2-M1 no-change rows:** a disposal whose `proposed_selection == current_selection` has nothing
+/// to attest or persist (the optimizer is NOT asking to change it). The persistability line is
+/// suppressed and a "no change — already optimal" note is shown instead, preventing a misleading
+/// "needs --attest" prompt on a row the user does not need to act on.
+pub fn render_optimize_proposal(p: &btctax_core::OptimizeProposal) -> String {
+    use btctax_core::{ApproxReason, Persistability};
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "Optimize (what-if) — tax year {} — NOTHING is filed or bound by running this.",
+        p.year
+    );
+    // R0-C1/C3: a non-fully-enumerated result is NEVER presented as "the optimum" without this banner.
+    if p.approximate {
+        let why = match p.approx_reason {
+            Some(ApproxReason::ComboCapExceeded { combos, cap }) => format!(
+                "input exceeded the exhaustive bound ({combos} combos > {cap}); \
+                 a coordinate-descent fallback ran"
+            ),
+            Some(ApproxReason::ContentionUnenumerated { contended, .. }) => format!(
+                "{contended} contended same-wallet disposal(s) could not be fully joint-enumerated"
+            ),
+            Some(ApproxReason::PoolHeuristic { lots, bound }) => format!(
+                "a pool of {lots} lots exceeds the {bound}-lot exhaustive-enumeration bound; \
+                 only a deterministic heuristic SUBSET of that pool's identifications was searched"
+            ),
+            None => "approximate".to_string(),
+        };
+        let _ = writeln!(
+            s,
+            "  \u{26a0} APPROXIMATE \u{2014} NOT a guaranteed global minimum: {why}."
+        );
+        let _ = writeln!(
+            s,
+            "    The true least-tax assignment may be lower; this is a disclosed improvement over your"
+        );
+        let _ = writeln!(
+            s,
+            "    current filing position (delta \u{2264} 0), NOT \u{2018}the least tax.\u{2019}"
+        );
+    }
+    let _ = writeln!(
+        s,
+        "  current federal tax (attributable): {}",
+        p.baseline_tax
+    );
+    let _ = writeln!(
+        s,
+        "  optimized federal tax (attributable): {}",
+        p.optimized_tax
+    );
+    let _ = writeln!(
+        s,
+        "  delta (optimized \u{2212} current): {}  (negative = saving; always \u{2264} 0)",
+        p.delta
+    );
+    for d in &p.per_disposal {
+        let _ = writeln!(
+            s,
+            "  {} @ {} [{}] :: {:?}",
+            d.disposal.canonical(),
+            d.date,
+            wallet_label(&d.wallet),
+            d.status
+        );
+        // R2-M1: a NO-CHANGE row (proposed == current) has nothing to attest/persist — `accept` SKIPS it
+        // ("already optimal under current identification"). Do NOT print a persistability line here: a
+        // `NeedsAttestation` "needs --attest" line on a disposal the optimizer is NOT asking to change is
+        // misleading and invites a pointless/contradictory attestation. Show a no-change note instead.
+        if d.proposed_selection == d.current_selection {
+            let _ = writeln!(
+                s,
+                "      proposed: {}  [no change \u{2014} already optimal under current identification]",
+                picks_str(&d.proposed_selection)
+            );
+            continue;
+        }
+        let persist = match d.persistable {
+            Persistability::ContemporaneousNow => {
+                "persistable now (made \u{2264} sale \u{2192} Contemporaneous)"
+            }
+            Persistability::NeedsAttestation => {
+                "already executed \u{2014} needs `optimize accept --disposal <ref> \
+                 --attest \"\u{2026}\"` (genuine contemporaneous ID only)"
+            }
+            Persistability::ForbiddenBroker2027 => {
+                "2027+ broker-held \u{2014} CANNOT be persisted (own-books insufficient); \
+                 FIFO is the defensible position"
+            }
+        };
+        let _ = writeln!(
+            s,
+            "      proposed: {}  [{}]",
+            picks_str(&d.proposed_selection),
+            persist
+        );
+    }
+    // R0-M2: surface the vertex-granularity limitation in OUTPUT, not only in docs.
+    let _ = writeln!(
+        s,
+        "  (vertex-granularity identification: a multi-partial split landing exactly on a \
+         tax-bracket kink is out of scope.)"
+    );
+    let _ = writeln!(
+        s,
+        "  (this is the tax IF you had identified thus; adequate ID must exist by the time \
+         of sale \u{2014} \u{a7}1.1012-1(j))"
+    );
+    s
+}
+
 pub fn render_verify(r: &VerifyReport) -> String {
     let mut out = String::new();
     let c = &r.conservation;
