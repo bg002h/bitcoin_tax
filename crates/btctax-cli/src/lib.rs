@@ -5,6 +5,7 @@
 pub mod cmd;
 pub mod config;
 pub mod eventref;
+pub mod optimize_attest;
 pub mod render;
 pub mod session;
 pub mod tax_profile;
