@@ -3,7 +3,7 @@
 //! exit code (non-zero on FR9 hard blockers / on any CliError). NO business logic lives here.
 use btctax_cli::{cmd, eventref, render, CliError};
 use btctax_core::{
-    AllocMethod, DisposeKind, FeeTreatment, InboundClass, OutflowClass, TransferTarget,
+    AllocMethod, DisposeKind, FeeTreatment, InboundClass, LotMethod, OutflowClass, TransferTarget,
 };
 use btctax_store::Passphrase;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -44,10 +44,14 @@ enum Command {
     /// Emit a reconciliation decision event.
     #[command(subcommand)]
     Reconcile(Reconcile),
-    /// Show or set projection config (TP8 fee treatment).
+    /// Show or set projection config (TP8 fee treatment / pre-2025 lot method).
     Config {
         #[arg(long, value_enum)]
         set_fee_treatment: Option<FeeArg>,
+        #[arg(long, value_enum)]
+        set_pre2025_method: Option<MethodLotArg>,
+        #[arg(long, default_value_t = false)]
+        attest_pre2025_method: bool,
     },
     /// FR10: export decrypted SQLite + CSV (the NFR2 plaintext exception).
     ExportSnapshot {
@@ -139,6 +143,13 @@ enum FeeArg {
 }
 
 #[derive(Copy, Clone, ValueEnum)]
+enum MethodLotArg {
+    Fifo,
+    Lifo,
+    Hifo,
+}
+
+#[derive(Copy, Clone, ValueEnum)]
 enum OutKindArg {
     Sell,
     Spend,
@@ -212,20 +223,33 @@ fn run() -> Result<ExitCode, CliError> {
             print!("{}", render::render_report(&state, year));
         }
         Command::Reconcile(r) => dispatch_reconcile(vault, r, now)?,
-        Command::Config { set_fee_treatment } => {
+        Command::Config {
+            set_fee_treatment,
+            set_pre2025_method,
+            attest_pre2025_method,
+        } => {
             let pp = passphrase(false)?;
-            let cfg = match set_fee_treatment {
-                Some(FeeArg::C) => {
-                    cmd::admin::set_config(vault, &pp, Some(FeeTreatment::TreatmentC))?
+            let cfg = if let Some(m) = set_pre2025_method {
+                let method = match m {
+                    MethodLotArg::Fifo => LotMethod::Fifo,
+                    MethodLotArg::Lifo => LotMethod::Lifo,
+                    MethodLotArg::Hifo => LotMethod::Hifo,
+                };
+                cmd::admin::set_pre2025_method(vault, &pp, method, attest_pre2025_method)?
+            } else {
+                match set_fee_treatment {
+                    Some(FeeArg::C) => {
+                        cmd::admin::set_config(vault, &pp, Some(FeeTreatment::TreatmentC))?
+                    }
+                    Some(FeeArg::B) => {
+                        cmd::admin::set_config(vault, &pp, Some(FeeTreatment::TreatmentB))?
+                    }
+                    None => cmd::admin::show_config(vault, &pp)?,
                 }
-                Some(FeeArg::B) => {
-                    cmd::admin::set_config(vault, &pp, Some(FeeTreatment::TreatmentB))?
-                }
-                None => cmd::admin::show_config(vault, &pp)?,
             };
             println!(
-                "fee_treatment: {:?}\nlot_method: {:?}",
-                cfg.fee_treatment, cfg.lot_method
+                "fee_treatment: {:?}\npre2025_method: {:?} (attested: {})",
+                cfg.fee_treatment, cfg.pre2025_method, cfg.pre2025_method_attested
             );
         }
         Command::ExportSnapshot { out } => {

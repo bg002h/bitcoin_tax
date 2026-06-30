@@ -17,22 +17,25 @@ pub enum FeeTreatment {
     /// TP8 config: taxable mini-disposition of fee-sats (recognition record only; not a 2nd conservation entry).
     TreatmentB,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum LotMethod {
-    /// Default per TP5; specific-ID is a future hook (Phase 3 optimizer).
+    #[default]
     Fifo,
+    Lifo,
+    Hifo,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProjectionConfig {
     pub self_transfer_fee: FeeTreatment,
-    pub lot_method: LotMethod,
+    /// Historical identification method for pre-2025 lots (attested via `CliConfig`).
+    pub pre2025_method: LotMethod,
 }
 impl Default for ProjectionConfig {
     fn default() -> Self {
         // DO NOT change: TP8 default is (c); the spec/memory forbid flipping it to (b).
         ProjectionConfig {
             self_transfer_fee: FeeTreatment::TreatmentC,
-            lot_method: LotMethod::Fifo,
+            pre2025_method: LotMethod::Fifo,
         }
     }
 }
