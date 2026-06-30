@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 # Exact decimal money (NFR5). serde-str = (de)serialize Decimal as a string for lossless JSON round-trips.
 rust_decimal = { version = "1.36", default-features = false, features = ["serde-str", "std"] }
+rust_decimal_macros = "1.36"             # dec! macro — used in production code for NIIT_RATE const (tables.rs)
 # UTC instants + fixed-offset calendar dates (§6.1). serde-well-known = RFC3339 (de)serializers.
 time = { version = "0.3", features = ["serde-well-known", "macros", "parsing", "formatting"] }
 serde = { version = "1", features = ["derive"] }

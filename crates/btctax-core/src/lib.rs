@@ -19,7 +19,11 @@ pub use project::{
     FeeTreatment, LotMethod, ProjectionConfig,
 };
 pub use state::*;
-pub use tax::{Carryforward, FilingStatus, MarginalRates, TaxOutcome, TaxProfile, TaxResult};
+pub use tax::{
+    loss_limit, niit_threshold, Carryforward, FilingStatus, LtcgBreakpoints, MarginalRates,
+    OrdinaryBracket, OrdinarySchedule, TaxOutcome, TaxProfile, TaxResult, TaxTable, TaxTables,
+    NIIT_RATE,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
