@@ -22,7 +22,9 @@ use time::UtcOffset;
 /// A candidate disposal to be evaluated (without persisting anything).
 ///
 /// - `existing_event = Some(id)` — re-score an event already in the ledger with a candidate
-///   selection (the event's own proceeds are used; `proceeds` on the candidate is ignored).
+///   selection. The event's own proceeds AND its resolved principal sat are used; both
+///   `proceeds` and `sat` on the candidate are ignored (M2: an injected selection is validated
+///   against the event's resolved principal, so a wrong `candidate.sat` cannot mis-score).
 /// - `existing_event = None` — a synthetic/hypothetical disposal (Mode-2 consultation). The
 ///   engine appends a temporary `Op::Dispose` with the given `proceeds` (or FMV from the
 ///   dataset when `proceeds` is `None`), folds, and discards the result.
@@ -67,12 +69,18 @@ pub enum EvaluateError {
     UnknownExistingDisposal,
 }
 
-/// True when an `Op` is one of the four method-honoring disposal variants.
-fn honoring(op: &Op) -> bool {
-    matches!(
-        op,
-        Op::Dispose { .. } | Op::GiftOut { .. } | Op::Donate { .. } | Op::SelfTransfer { .. }
-    )
+/// The resolved principal sat of a method-honoring disposal op (Dispose / GiftOut / Donate /
+/// SelfTransfer), or `None` for any other op. This is the basis an injected `LotSelection` must
+/// conserve against (M2): for an existing event it is the event's RESOLVED principal, never the
+/// caller-supplied `candidate.sat`.
+fn honoring_sat(op: &Op) -> Option<Sat> {
+    match op {
+        Op::Dispose { sat, .. }
+        | Op::GiftOut { sat, .. }
+        | Op::Donate { sat, .. }
+        | Op::SelfTransfer { sat, .. } => Some(*sat),
+        _ => None,
+    }
 }
 
 /// Side-effect-free evaluation of a candidate disposal + lot selection.
@@ -96,13 +104,23 @@ pub fn evaluate_disposal(
 ) -> Result<EvaluateOutcome, EvaluateError> {
     let mut res = resolve(events, prices, config);
 
-    let target_id = match &candidate.existing_event {
+    // `principal` is the RESOLVED principal sat the fold will actually consume for this disposal —
+    // the basis an injected selection MUST conserve against (M2). For an existing event it is the
+    // event's own resolved sat (NOT `candidate.sat`); for a synthetic disposal it is the
+    // `candidate.sat` we inject below.
+    let (target_id, principal): (EventId, Sat) = match &candidate.existing_event {
         Some(id) => {
-            // Verify the event resolves to a method-honoring disposal op in the current timeline.
-            if !res.timeline.iter().any(|e| &e.id == id && honoring(&e.op)) {
-                return Err(EvaluateError::UnknownExistingDisposal);
-            }
-            id.clone()
+            // Verify the event resolves to a method-honoring disposal op in the current timeline
+            // and capture its resolved principal sat. (M2: a wrong `candidate.sat` must not be
+            // able to silently under/over-consume — we validate against this resolved value, not
+            // `candidate.sat`.)
+            let sat = res
+                .timeline
+                .iter()
+                .find(|e| &e.id == id)
+                .and_then(|e| honoring_sat(&e.op))
+                .ok_or(EvaluateError::UnknownExistingDisposal)?;
+            (id.clone(), sat)
         }
         None => {
             // Synthetic disposal: resolve proceeds (explicit > FMV > error).
@@ -133,22 +151,22 @@ pub fn evaluate_disposal(
                     kind: candidate.kind,
                 },
             });
-            id
+            (id, candidate.sat)
         }
     };
 
     // Inject the candidate selection (overrides any persisted selection for this event), after
-    // mirroring resolve's principal-conservation guard: Σpick.sat MUST equal candidate.sat.
+    // mirroring resolve's principal-conservation guard: Σpick.sat MUST equal the RESOLVED
+    // principal (M2 — for an existing event this is the event's own sat, never `candidate.sat`).
     let mut extra: Vec<Blocker> = Vec::new();
     if let Some(picks) = selection {
         let picked: Sat = picks.iter().map(|p| p.sat).sum();
-        if picked != candidate.sat {
+        if picked != principal {
             extra.push(Blocker {
                 kind: BlockerKind::LotSelectionInvalid,
                 event: Some(target_id.clone()),
                 detail: format!(
-                    "candidate selection must conserve principal: {picked} != {}",
-                    candidate.sat
+                    "candidate selection must conserve principal: {picked} != {principal}"
                 ),
             });
         } else {

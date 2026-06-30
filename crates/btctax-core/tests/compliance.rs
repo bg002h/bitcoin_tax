@@ -399,3 +399,54 @@ fn self_custody_2027_with_election_is_standing_order() {
         "self-custody 2027 disposal with in-force election must be StandingOrder"
     );
 }
+
+/// Whole-branch IMPORTANT (Task-7-M1): a POST-HOC `LotSelection` on a disposal that is ALSO
+/// covered by an in-force `MethodElection` must be `NonCompliant` — NOT rescued to `StandingOrder`.
+///
+/// The fold applies any valid selection regardless of when it was recorded, so the reported
+/// basis/gain come from the cherry-picked lots; a standing order would never produce that set.
+/// Labeling it `StandingOrder` would present a forbidden post-hoc identification as compliant
+/// (§1.1012-1(j), load-bearing cross-cutting rule). Self-custody, 2025 (broker envelope does not
+/// fire); election effective 2025-06-01 (before the 2025-07-01 sale); selection made 2025-09-01
+/// (AFTER the sale → post-hoc). Old behavior: StandingOrder (wrong); fixed behavior: NonCompliant.
+#[test]
+fn post_hoc_selection_with_in_force_election_is_noncompliant() {
+    let evs = vec![
+        buy_in(
+            "A",
+            datetime!(2025-02-01 00:00:00 UTC),
+            &cold(),
+            100_000,
+            dec!(50.00),
+        ),
+        election(
+            1,
+            datetime!(2025-05-01 00:00:00 UTC),
+            date!(2025 - 06 - 01),
+            LotMethod::Hifo,
+        ),
+        sell_in(
+            "D",
+            datetime!(2025-07-01 00:00:00 UTC),
+            &cold(),
+            100_000,
+            dec!(70.00),
+        ),
+        // post-hoc: recorded AFTER the sale → must not be rescued by the in-force election.
+        lot_selection(
+            2,
+            datetime!(2025-09-01 00:00:00 UTC),
+            "D",
+            vec![LotPick {
+                lot: pid("A"),
+                sat: 100_000,
+            }],
+        ),
+    ];
+    assert_eq!(
+        status_of(&evs),
+        ComplianceStatus::NonCompliant,
+        "a post-hoc selection drove the reported result — an in-force election must NOT rescue it \
+         to StandingOrder (would label a forbidden post-hoc identification as compliant)"
+    );
+}

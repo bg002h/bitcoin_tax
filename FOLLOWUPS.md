@@ -98,6 +98,35 @@ Ran `cycle-prep` recon (`reviews/cycle-prep-recon-2026-06-29.md`) on four slugs,
   needs the `CliConfig` (declared `pre2025_method` + `pre2025_method_attested`) for its new surfacing, so the separate
   `session.config()?` read is **required**, not redundant. No change. — R0-plan N3.
 
+## Sub-project A (lot-id substrate) — whole-branch review round 1 deferrals (2026-06-29)
+
+The blocking Important (post-hoc selection + in-force election mis-labeled `StandingOrder`) and in-area Minors
+**M2** (`evaluate_disposal` existing-event principal) + **M3** (`config --set-forward-method` apply-all) were FIXED
+on `feat/lot-id-substrate` (Task-10 fold). The remaining items below are deferred (non-blocking).
+Source: `reviews/whole-branch-review-lot-id-substrate-round-1.md`.
+
+- **M1 (Minor coverage gap) — `disposal_compliance` omits method-honoring SelfTransfers.** SelfTransfers produce no
+  Disposal/Removal record, so they never get a compliance row (`compliance.rs` iterates only `state.disposals` /
+  `state.removals`). A.3 lists SelfTransfer as method-honoring (a §1.1012-1(j) "transfer" that pre-positions lots
+  for future HIFO/gains), so a post-hoc `select-lots` on a self-transfer is never compliance-flagged. Decide
+  explicitly whether transfers belong in the projection; if intentionally excluded, document it. — OPEN. — whole-branch M1.
+
+- **Task-4 plan-text `dec!(90.00)` → `90.25` (doc only).** A KAT-text figure in the Task-4 plan reads `90.00` where
+  the implemented (correct) TP8(c) fee re-home yields `90.25`. Implementation is correct; only the plan doc text is
+  stale. Reconcile the plan text. — OPEN (doc). — whole-branch Task-4 triage.
+
+- **Task-7-M2 — shared election-collector DRY.** `compliance.rs::collect_elections` duplicates resolve's
+  `MethodElectionBackdated` guard (both kept in sync by the shared spec rule). Extract a single shared collector to
+  reduce drift risk (would also have de-risked the M1 classifier fix). DRY only — no behavior change. — OPEN. — whole-branch Task-7-M2.
+
+- **Task-8 nits.** (a) `ComplianceStatus` is rendered with `{:?}` in `render_verify` — compliance-facing output should
+  use a stable `compliance_status_display` (mirrors the burndown `*_tag()` work). (b) `selection_count` lacks a
+  `Decision`-guard; moot in practice (a `LotSelection` payload only ever rides a `Decision` event). — OPEN. — whole-branch N1 / Task-8.
+
+- **Task-9 nits.** (a) `evaluate_disposal`'s synthetic event id uses a `u64::MAX` sentinel — documented and
+  unreachable by real sequences; revisit only if a typed sentinel is preferred. (b) Add a pinning KAT asserting
+  `evaluate_disposal(existing-disposal, no selection) == project()` for that disposal (no-op identity). — OPEN. — whole-branch Task-9.
+
 ## ✅ RESOLVED earlier (kept for record)
 
 ## btctax-core whole-branch fixes (2026-06-29) — both Important findings resolved

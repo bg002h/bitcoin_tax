@@ -258,9 +258,20 @@ fn run() -> Result<ExitCode, CliError> {
         } => {
             let pp = passphrase(false)?;
 
-            // M3 / SPEC A.1: --set-forward-method APPENDS a MethodElection decision — it is an
-            // event, not a flag mutation. Handled first because it uses the `now` seam and returns
-            // early (its output is a single decision id, not a config display).
+            // Task-1 review Minor: --attest-pre2025-method without --set-pre2025-method would
+            // silently no-op under the old if/else dispatch. Reject with a clear error instead.
+            // Checked first so no event/mutation is recorded for an invalid flag combination.
+            if attest_pre2025_method && set_pre2025_method.is_none() {
+                return Err(CliError::Usage(
+                    "--attest-pre2025-method requires --set-pre2025-method".into(),
+                ));
+            }
+
+            // M3 (apply-all, no silent drop): --set-forward-method APPENDS a MethodElection
+            // decision (SPEC A.1 standing order) — it is an event, not a flag mutation. The old
+            // dispatch returned early here, silently dropping any co-passed --set-fee-treatment /
+            // --set-pre2025-method (the same anti-pattern Task 1/5 fixed for the config-flag pair).
+            // Now every provided flag is applied independently; no early return.
             if let Some(m) = set_forward_method {
                 let eff = effective_from
                     .as_deref()
@@ -271,15 +282,6 @@ fn run() -> Result<ExitCode, CliError> {
                     "Recorded standing order (MethodElection) {}",
                     id.canonical()
                 );
-                return Ok(ExitCode::SUCCESS);
-            }
-
-            // Task-1 review Minor: --attest-pre2025-method without --set-pre2025-method would
-            // silently no-op under the old if/else dispatch. Reject with a clear error instead.
-            if attest_pre2025_method && set_pre2025_method.is_none() {
-                return Err(CliError::Usage(
-                    "--attest-pre2025-method requires --set-pre2025-method".into(),
-                ));
             }
 
             // Task-1 review Minor (apply-all): apply each provided flag independently — no

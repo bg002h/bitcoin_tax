@@ -119,10 +119,16 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
     }
 
     // ── 5. Classifier ──────────────────────────────────────────────────────────────────────────
-    // §A.5 priority: envelope check first, then Contemporaneous (§A.5(b)), then StandingOrder
-    // (§A.5(a)), then NonCompliant.
+    // §A.5 priority, with the load-bearing cross-cutting override (SPEC §Cross-cutting: "no
+    // artifact, command, or doc may describe post-hoc selection as compliant"):
+    //   1. 2027+ broker-communication envelope → NonCompliant.
+    //   2. A `LotSelection` APPLIED to this disposal drives the reported basis/gain, so the
+    //      selection's OWN timeliness governs: made-date ≤ sale → Contemporaneous, else →
+    //      NonCompliant. A standing order may NEVER rescue a post-hoc selection.
+    //   3. Only when NO selection was applied: an in-force `MethodElection` → StandingOrder.
+    //   4. Otherwise → NonCompliant.
     let classify = |disposal: &EventId, date: TaxDate| -> ComplianceStatus {
-        // Broker-communication envelope (2027+): own-books identification is insufficient for
+        // (1) Broker-communication envelope (2027+): own-books identification is insufficient for
         // broker-custodied units — the broker side must communicate the basis. `AttestedRecording`
         // (§C.2) is the C gate; A cannot confer it here.
         let broker = matches!(wallet_of.get(disposal), Some(WalletId::Exchange { .. }));
@@ -130,16 +136,21 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
             return ComplianceStatus::NonCompliant;
         }
 
-        // §A.5(b) contemporaneous selection: selection made-date ≤ disposal date.
+        // (2) §A.5(b): a `LotSelection` applied to this disposal drove the reported result, so the
+        // selection's own timeliness governs. A post-hoc selection (made-date AFTER the sale) is
+        // NonCompliant and must NOT fall through to the standing-order check — a standing order
+        // would never produce a cherry-picked post-hoc set, so labeling it StandingOrder would
+        // present a forbidden post-hoc identification as compliant (§1.1012-1(j)).
         if let Some(made) = sel_made.get(disposal) {
             if *made <= date {
                 return ComplianceStatus::Contemporaneous;
             }
-            // made > date: post-hoc; falls through to StandingOrder check, then NonCompliant.
+            return ComplianceStatus::NonCompliant;
         }
 
-        // §A.5(a) standing order: the latest in-force election (by effective_from, tie: decision_seq)
-        // whose effective_from ≤ disposal date.
+        // (3) §A.5(a) standing order — only reachable when NO selection was applied: the latest
+        // in-force election (by effective_from, tie: decision_seq) whose effective_from ≤ disposal
+        // date.
         if let Some(ef) = elections
             .iter()
             .filter(|e| e.effective_from <= date)
@@ -153,6 +164,7 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
             return ComplianceStatus::StandingOrder { effective_from: ef };
         }
 
+        // (4) No envelope hit, no applied selection, no in-force election.
         ComplianceStatus::NonCompliant
     };
 

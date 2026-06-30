@@ -10,6 +10,7 @@ use btctax_core::price::StaticPrices;
 use btctax_core::project::{
     evaluate_disposal, project, CandidateDisposal, EvaluateError, ProjectionConfig,
 };
+use btctax_core::BlockerKind;
 use rust_decimal_macros::dec;
 use time::macros::{date, datetime, offset};
 
@@ -190,4 +191,69 @@ fn existing_disposal_scored_with_an_injected_selection() {
     )
     .unwrap();
     assert_eq!(out.legs[0].basis, dec!(90.00)); // scored against the picked lot B (default FIFO would pick A)
+}
+
+/// M2: for an EXISTING disposal, an injected selection is validated against the event's RESOLVED
+/// principal sat — never the caller-supplied `candidate.sat`. A wrong `candidate.sat` (60k, while
+/// the real disposal is 100k) that happens to match the selection's Σ must NOT silently
+/// under-consume; it must raise a `LotSelectionInvalid` blocker.
+///
+/// Before the fix the guard compared Σpicks == `candidate.sat` (60k == 60k → no blocker), and the
+/// fold then consumed the real 100k principal with a 60k selection — a silent wrong number
+/// (`consume_picks` returns shortfall=0 unconditionally). After the fix Σpicks is compared to the
+/// resolved 100k principal → mismatch → blocker.
+#[test]
+fn existing_disposal_selection_validated_against_resolved_principal_not_candidate_sat() {
+    let evs = vec![
+        buy(
+            "A",
+            datetime!(2025-02-01 00:00:00 UTC),
+            100_000,
+            dec!(50.00),
+        ),
+        buy(
+            "B",
+            datetime!(2025-03-01 00:00:00 UTC),
+            100_000,
+            dec!(90.00),
+        ),
+        sell(
+            "D",
+            datetime!(2025-07-01 00:00:00 UTC),
+            100_000,
+            dec!(95.00),
+        ),
+    ];
+    let cand = CandidateDisposal {
+        existing_event: Some(EventId::import(Source::Coinbase, SourceRef::new("D"))),
+        wallet: w(),
+        date: date!(2025 - 07 - 01),
+        sat: 60_000, // WRONG: the real disposal principal is 100_000.
+        kind: DisposeKind::Sell,
+        proceeds: None,
+    };
+    // Selection Σ = 60_000 — matches the wrong candidate.sat, but NOT the real 100k principal.
+    let picks = vec![LotPick {
+        lot: LotId {
+            origin_event_id: EventId::import(Source::Coinbase, SourceRef::new("B")),
+            split_sequence: 0,
+        },
+        sat: 60_000,
+    }];
+    let out = evaluate_disposal(
+        &evs,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+        &cand,
+        Some(&picks),
+    )
+    .unwrap();
+    assert!(
+        out.blockers
+            .iter()
+            .any(|b| matches!(b.kind, BlockerKind::LotSelectionInvalid)),
+        "a selection whose Σ (60000) != the resolved principal (100000) must raise \
+         LotSelectionInvalid — not silently mis-consume; got {:?}",
+        out.blockers
+    );
 }

@@ -912,6 +912,44 @@ fn config_apply_all_no_silent_drop() {
     );
 }
 
+/// M3 (apply-all incl. forward method): `config --set-forward-method` together with
+/// `--set-fee-treatment` must apply BOTH. The old dispatch returned early after appending the
+/// MethodElection and silently dropped the co-passed fee-treatment flag. Mirrors the fixed
+/// Config dispatch (append the MethodElection AND apply the cli_config mutation, no early return).
+#[test]
+fn config_set_forward_method_and_fee_treatment_both_take_effect() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Simulate the FIXED Config dispatch: append the MethodElection AND apply the fee-treatment
+    // mutation (apply-all — neither silently dropped by an early return).
+    cmd::reconcile::set_forward_method(&vault, &pp(), LotMethod::Hifo, None, now()).unwrap();
+    cmd::admin::set_config(&vault, &pp(), Some(FeeTreatment::TreatmentB)).unwrap();
+
+    // (1) the MethodElection was appended (forward standing order took effect)...
+    let me = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events.iter().find_map(|e| match &e.payload {
+            EventPayload::MethodElection(m) => Some(m.clone()),
+            _ => None,
+        })
+    };
+    assert!(
+        matches!(me, Some(ref m) if m.method == LotMethod::Hifo),
+        "a HIFO MethodElection must be persisted (--set-forward-method not dropped)"
+    );
+
+    // (2) ...AND the fee-treatment mutation took effect (the old early-return dropped it).
+    let cfg = cmd::admin::show_config(&vault, &pp()).unwrap();
+    assert_eq!(
+        cfg.fee_treatment,
+        FeeTreatment::TreatmentB,
+        "fee_treatment must be B — co-passed --set-fee-treatment must not be silently dropped"
+    );
+}
+
 /// Task-1 review Minor: `--attest-pre2025-method` without `--set-pre2025-method` must produce a
 /// `CliError::Usage` (not silently no-op). This test verifies the guard logic directly.
 #[test]
