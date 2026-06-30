@@ -53,9 +53,16 @@ pub struct TaxProfile {
 /// for informational purposes alongside the `TaxResult`. Not serde — internal to the result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MarginalRates {
-    pub ordinary: Usd,      // marginal ordinary rate (Decimal, e.g. dec!(0.22))
-    pub ltcg: Usd,          // marginal LTCG rate (0 / 0.15 / 0.20; Decimal)
-    pub niit_applies: bool, // true iff MAGI (incl. crypto) exceeds the §1411 threshold
+    pub ordinary: Usd, // marginal ordinary rate (Decimal, e.g. dec!(0.22))
+    pub ltcg: Usd,     // marginal LTCG rate (0 / 0.15 / 0.20; Decimal)
+    /// `true` when the crypto items *increased* NIIT (`niit_with > niit_without`).
+    ///
+    /// This is an **incremental** signal, not a raw MAGI-over-threshold flag: it is `false`
+    /// when the taxpayer already pays NIIT without crypto and crypto does not raise NIIT further
+    /// (e.g. when crypto adds only ordinary income while NII stays pinned by unchanged QD and
+    /// MAGI is over the threshold both with and without crypto). Display-only — this field feeds
+    /// no tax figure or delta. The NIIT delta itself is always `TaxResult::niit`.
+    pub niit_applies: bool,
 }
 
 /// The computed result for a single tax year. All `Usd` fields are exact `Decimal`.

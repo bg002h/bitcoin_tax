@@ -16,6 +16,22 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::Path;
 
+// ── Money formatting helper ──────────────────────────────────────────────────────────────────────
+
+/// Format any `Decimal` money value as exactly 2 decimal places (e.g. "0.00", "1747.50").
+///
+/// Load-bearing figures (`ltcg_tax`, `niit`, `total_federal_tax_attributable`) are always
+/// `round_cents`-scaled (scale 2) so they already print with cents. Descriptive level fields
+/// (`st_net`, `lt_net`, `carryforward`, `loss_deduction`, etc.) inherit the source `Decimal`
+/// scale and may print as "7000" or "0" without explicit 2dp formatting. This helper ensures
+/// every dollar figure in the tax report renders consistently with 2 decimal places.
+///
+/// **Equality is unaffected** — this is display only. The underlying `Decimal` value is
+/// unchanged; only the `Display` string gains the forced 2dp format.
+fn fmt_money(d: btctax_core::conventions::Usd) -> String {
+    format!("{d:.2}")
+}
+
 // ── Stable CSV/display tags for core enums ──────────────────────────────────────────────────────
 // These are free functions (not inherent methods) because the CLI crate cannot add methods to
 // core types. Values are human-readable and STABLE — changing them breaks the CSV contract.
@@ -273,6 +289,22 @@ fn render_removal_leg(out: &mut String, leg: &RemovalLeg) {
 }
 
 // ── FR9 verify ──────────────────────────────────────────────────────────────────────────────────
+
+/// Stable display tag for `FilingStatus` (lowercase, matches the CLI value-enum strings).
+///
+/// Values: "single" | "mfj" | "mfs" | "hoh" | "qss". These mirror the `FilingStatusArg`
+/// `ValueEnum` strings accepted by `--filing-status`, so the `tax-profile --show` output
+/// is round-trip-parseable via the same flag.
+pub fn filing_status_tag(fs: btctax_core::FilingStatus) -> &'static str {
+    use btctax_core::FilingStatus::*;
+    match fs {
+        Single => "single",
+        Mfj => "mfj",
+        Mfs => "mfs",
+        HoH => "hoh",
+        Qss => "qss",
+    }
+}
 
 /// Stable display tag for `LotMethod` (FIFO/LIFO/HIFO — uppercase, human-readable).
 fn lot_method_display(m: LotMethod) -> &'static str {
@@ -607,12 +639,13 @@ pub fn render_tax_outcome(
             let _ = writeln!(
                 s,
                 "  net short-term: {}   net long-term: {}",
-                r.st_net, r.lt_net
+                fmt_money(r.st_net),
+                fmt_money(r.lt_net)
             );
             let _ = writeln!(
                 s,
                 "  crypto ordinary income (level): {}",
-                r.ordinary_from_crypto
+                fmt_money(r.ordinary_from_crypto)
             );
             // B-M2: surface the ordinary-rate attributable DELTA so the three attributable components
             // visibly reconcile to TOTAL. By the pinned identity this equals (ord_with − ord_without) exactly.
@@ -620,23 +653,26 @@ pub fn render_tax_outcome(
             let _ = writeln!(
                 s,
                 "  ordinary-rate tax (attributable): {}",
-                ordinary_rate_attributable
+                fmt_money(ordinary_rate_attributable)
             );
             let _ = writeln!(
                 s,
                 "  LTCG tax (attributable): {}   NIIT (attributable): {}",
-                r.ltcg_tax, r.niit
+                fmt_money(r.ltcg_tax),
+                fmt_money(r.niit)
             );
             let _ = writeln!(
                 s,
                 "  TOTAL federal tax attributable to crypto (delta): {}   \
                 (= ordinary-rate + LTCG + NIIT attributable)",
-                r.total_federal_tax_attributable
+                fmt_money(r.total_federal_tax_attributable)
             );
             let _ = writeln!(
                 s,
                 "  §1211 loss deduction (level): {}   carryforward out: short {} / long {}",
-                r.loss_deduction, r.carryforward_out.short, r.carryforward_out.long
+                fmt_money(r.loss_deduction),
+                fmt_money(r.carryforward_out.short),
+                fmt_money(r.carryforward_out.long)
             );
             let _ = writeln!(
                 s,
