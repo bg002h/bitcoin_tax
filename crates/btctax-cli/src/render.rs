@@ -563,6 +563,69 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
     Ok(())
 }
 
+/// Task 9 (B.5): render the `TaxOutcome` for `report --tax-year <y>`. Exact Decimal Display;
+/// no float (NFR5). B-M2 fold: surfaces the ordinary-rate attributable delta so the three printed
+/// attributable components visibly reconcile to `total_federal_tax_attributable`.
+pub fn render_tax_outcome(year: i32, out: &btctax_core::TaxOutcome) -> String {
+    use btctax_core::TaxOutcome::*;
+    let mut s = String::new();
+    let _ = writeln!(s, "Federal tax attributable to crypto — tax year {year}");
+    match out {
+        NotComputable(b) => {
+            let _ = writeln!(s, "  NOT COMPUTABLE [{:?}]: {}", b.kind, b.detail);
+        }
+        Computed(r) => {
+            let _ = writeln!(
+                s,
+                "  net short-term: {}   net long-term: {}",
+                r.st_net, r.lt_net
+            );
+            let _ = writeln!(
+                s,
+                "  crypto ordinary income (level): {}",
+                r.ordinary_from_crypto
+            );
+            // B-M2: surface the ordinary-rate attributable DELTA so the three attributable components
+            // visibly reconcile to TOTAL. By the pinned identity this equals (ord_with − ord_without) exactly.
+            let ordinary_rate_attributable = r.total_federal_tax_attributable - r.ltcg_tax - r.niit;
+            let _ = writeln!(
+                s,
+                "  ordinary-rate tax (attributable): {}",
+                ordinary_rate_attributable
+            );
+            let _ = writeln!(
+                s,
+                "  LTCG tax (attributable): {}   NIIT (attributable): {}",
+                r.ltcg_tax, r.niit
+            );
+            let _ = writeln!(
+                s,
+                "  TOTAL federal tax attributable to crypto (delta): {}   \
+                (= ordinary-rate + LTCG + NIIT attributable)",
+                r.total_federal_tax_attributable
+            );
+            let _ = writeln!(
+                s,
+                "  §1211 loss deduction (level): {}   carryforward out: short {} / long {}",
+                r.loss_deduction, r.carryforward_out.short, r.carryforward_out.long
+            );
+            let _ = writeln!(
+                s,
+                "  marginal rates: ordinary {} / LTCG {} / NIIT {}",
+                r.marginal_rates.ordinary, r.marginal_rates.ltcg, r.marginal_rates.niit_applies
+            );
+            let _ = writeln!(
+                s,
+                "  (incremental ceteris-paribus delta on the minimal profile; \
+                excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. NIIT uses a minimal NII model \
+                — excludes crypto ordinary income from NII and does not reduce NII by the allowed §1211 \
+                loss — so it MAY UNDERSTATE NIIT; see §5 Phase-2 refinement.)"
+            );
+        }
+    }
+    s
+}
+
 pub fn render_verify(r: &VerifyReport) -> String {
     let mut out = String::new();
     let c = &r.conservation;

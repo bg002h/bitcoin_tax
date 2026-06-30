@@ -36,11 +36,17 @@ enum Command {
     Import { files: Vec<PathBuf> },
     /// FR9 integrity check (non-zero exit on hard blockers).
     Verify,
-    /// Show holdings + realized disposals/removals/income.
+    /// Show holdings + realized disposals/removals/income. With --tax-year: standalone TaxResult.
     #[command(alias = "show")]
     Report {
+        /// Filter realized disposals/removals/income to a specific calendar year (display path).
         #[arg(long)]
         year: Option<i32>,
+        /// Compute the crypto-attributable federal tax for the given tax year (B.5 / Task 9).
+        /// Requires a stored tax profile (`tax-profile --year Y ...`) and the bundled TY table.
+        /// Independent of --year; the two flags are not aliased.
+        #[arg(long)]
+        tax_year: Option<i32>,
     },
     /// Emit a reconciliation decision event.
     #[command(subcommand)]
@@ -312,9 +318,14 @@ fn run() -> Result<ExitCode, CliError> {
                 return Ok(ExitCode::from(1));
             }
         }
-        Command::Report { year } => {
-            let state = cmd::inspect::report(vault, &passphrase(false)?, year)?;
-            print!("{}", render::render_report(&state, year));
+        Command::Report { year, tax_year } => {
+            if let Some(y) = tax_year {
+                let outcome = cmd::tax::report_tax_year(vault, &passphrase(false)?, y)?;
+                print!("{}", render::render_tax_outcome(y, &outcome));
+            } else {
+                let state = cmd::inspect::report(vault, &passphrase(false)?, year)?;
+                print!("{}", render::render_report(&state, year));
+            }
         }
         Command::Reconcile(r) => dispatch_reconcile(vault, r, now)?,
         Command::Config {
