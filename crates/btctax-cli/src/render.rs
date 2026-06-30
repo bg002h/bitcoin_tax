@@ -815,6 +815,55 @@ pub fn render_accept_outcome(o: &crate::cmd::optimize::AcceptOutcome) -> String 
     s
 }
 
+/// Render a `ConsultReport` (Task 11 / §C.3 Mode-2 read-only pre-trade what-if) for the
+/// `optimize consult` command. Returns a String with:
+///   - The hypothetical sale header (sat amount, wallet, date).
+///   - The proposed lot selection (the tax-minimizing picks).
+///   - The ST/LT gain split and the federal tax attributable to this contemplated sale.
+///   - When `timing.is_some()`: the ST→LT crossover line (crossover date + saving), OMITTED when None.
+///   - A footer: tax decision-support only, not investment advice.
+///
+/// **READ-ONLY:** this function only renders; it never writes any event or side-table row.
+pub fn render_consult(r: &btctax_core::ConsultReport) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "Consult (read-only what-if): sell {} sat from {} on {}",
+        r.req.sell_sat,
+        wallet_label(&r.req.wallet),
+        r.req.at
+    );
+    let _ = writeln!(
+        s,
+        "  proposed selection: {}",
+        picks_str(&r.proposed_selection)
+    );
+    let _ = writeln!(
+        s,
+        "  short-term gain: {}   long-term gain: {}",
+        r.st_gain, r.lt_gain
+    );
+    let _ = writeln!(
+        s,
+        "  federal tax attributable (estimated): {}",
+        r.total_federal_tax_attributable
+    );
+    if let Some(t) = &r.timing {
+        let _ = writeln!(
+            s,
+            "  timing: {} sat of the best selection is short-term until {}; \
+             selling on/after then would be taxed long-term, a \u{2248} {} difference.",
+            t.st_sat_in_selection, t.latest_crossover, t.saving_if_waited
+        );
+    }
+    let _ = writeln!(
+        s,
+        "Tax decision-support only \u{2014} consequences of a contemplated sale; \
+         not investment advice (no buy/sell/hold recommendation)."
+    );
+    s
+}
+
 pub fn render_verify(r: &VerifyReport) -> String {
     let mut out = String::new();
     let c = &r.conservation;

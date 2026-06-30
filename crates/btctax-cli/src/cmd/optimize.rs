@@ -11,13 +11,19 @@
 //! in the same in-memory DB and are flushed by a SINGLE `session.save()`), so the persisted selection
 //! == the attested selection == the new baseline (closes the Task-8 operational note; R2-I1 holds on a
 //! later re-run). Revocation reuses the existing `reconcile void` on the returned decision id.
+//!
+//! `optimize consult` (Task 11) — §C.3 Mode-2 read-only pre-trade what-if. Opens the vault,
+//! projects, calls `consult_sale`, returns a `ConsultReport`. READ-ONLY: appends NOTHING, no
+//! decision, no side-table write (Mode-2 produces nothing). Tax decision-support (consequences),
+//! NOT buy/sell advice.
 use crate::{CliError, Session};
 use btctax_adapters::{BundledPrices, BundledTaxTables};
 use btctax_core::conventions::tax_date;
 use btctax_core::persistence::append_decision;
 use btctax_core::{
-    optimize_year, EventId, EventPayload, LotPick, LotSelection, OptimizeError, OptimizeProposal,
-    Persistability, TaxTables,
+    consult_sale, optimize_year, ConsultReport, ConsultRequest, DisposeKind, EvaluateError,
+    EventId, EventPayload, LotPick, LotSelection, OptimizeError, OptimizeProposal, Persistability,
+    TaxDate, TaxTables, Usd, WalletId,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -73,8 +79,46 @@ pub(crate) fn map_opt_err(e: OptimizeError) -> CliError {
             CliError::Usage("no method-honoring disposals in that year".into())
         }
         OptimizeError::NoLots => CliError::Usage("no lots available to sell".into()),
+        OptimizeError::Evaluate(EvaluateError::ProceedsRequired) => CliError::Usage(
+            "--proceeds <usd> is required for a date with no bundled dataset price \
+             (--fmv alone cannot resolve proceeds for a future or off-dataset date)"
+                .into(),
+        ),
         OptimizeError::Evaluate(ev) => CliError::Usage(format!("evaluate error: {ev:?}")),
     }
+}
+
+/// `optimize consult` — §C.3 Mode-2 READ-ONLY pre-trade what-if.
+///
+/// Opens the vault, runs the pure deterministic projection, and calls `consult_sale` with the
+/// synthetic `ConsultRequest`. Returns a `ConsultReport` with the tax-minimizing lot selection,
+/// the resulting ST/LT split, the federal tax attributable to the hypothetical sale, and — when
+/// present — the ST→LT timing insight (crossover + saving). **Appends NOTHING, writes NOTHING,
+/// calls no `session.save()`.** The result is tax decision-support (consequences of a contemplated
+/// sale), NOT buy/sell/hold advice (§C.2 scope invariant).
+pub fn consult(
+    vault: &Path,
+    pp: &Passphrase,
+    sell_sat: i64,
+    wallet: WalletId,
+    at: TaxDate,
+    proceeds: Option<Usd>,
+    kind: DisposeKind,
+) -> Result<ConsultReport, CliError> {
+    let s = Session::open(vault, pp)?;
+    let (events, _state, cfg) = s.load_events_and_project()?;
+    let profile = s.tax_profile(at.year())?;
+    let prices = BundledPrices::load()?;
+    let tables = BundledTaxTables::load();
+    let req = ConsultRequest {
+        sell_sat,
+        wallet,
+        at,
+        proceeds,
+        kind,
+    };
+    // consult_sale is READ-ONLY (clone-fold-discard on every call); no save() is ever called.
+    consult_sale(&events, &prices, &cfg, profile.as_ref(), &tables, &req).map_err(map_opt_err)
 }
 
 /// The result of `optimize accept` — what was persisted vs skipped (for rendering). `persisted` carries
