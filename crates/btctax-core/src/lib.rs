@@ -7,6 +7,7 @@ pub mod persistence;
 pub mod price;
 pub mod project;
 pub mod state;
+pub mod tax;
 
 pub use conventions::{Sat, TaxDate, Usd};
 pub use event::*;
@@ -18,6 +19,7 @@ pub use project::{
     FeeTreatment, LotMethod, ProjectionConfig,
 };
 pub use state::*;
+pub use tax::{Carryforward, FilingStatus, MarginalRates, TaxOutcome, TaxProfile, TaxResult};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
