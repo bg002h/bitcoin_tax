@@ -1038,10 +1038,11 @@ fn optimize_year_is_deterministic() {
     assert_eq!(run(), run(), "byte-identical OptimizeProposal across calls");
 }
 
-/// All-equal-tax tie: two equal-basis lots, one sell of one lot's worth → every pick is a tie on the
-/// objective, broken to the lexicographically-smallest assignment (NFR4 §0 total order).
+/// All-equal-tax tie: two equal-basis lots, one sell. C-M1: STRICT-ONLY eviction keeps the baseline
+/// → proposed == current at delta == 0 (no divergent pick, no churn).
+/// FIFO baseline picks lot "A" (acquired 2025-01-02, earlier than "B" at 2025-02-02).
 #[test]
-fn tie_returns_lexicographically_smallest_assignment() {
+fn tie_exact_baseline_kept_proposed_equals_current() {
     let events = vec![
         buy(
             "A",
@@ -1080,14 +1081,90 @@ fn tie_returns_lexicographically_smallest_assignment() {
     )
     .expect("computable");
 
-    // Equal basis ⇒ identical tax ⇒ delta 0; the proposed pick is the smaller-lot-id of {A, B}.
+    // Equal basis ⇒ identical tax ⇒ delta == 0. C-M1 strict-only tie-break: the baseline is kept
+    // → proposed == current (no divergent pick, no churn). FIFO baseline picks lot "A" (acquired first).
     assert_eq!(p.delta, dec!(0));
-    let want_lot = if lid("A") < lid("B") {
-        pick("A", LOT)
-    } else {
-        pick("B", LOT)
-    };
-    assert_eq!(p.per_disposal[0].proposed_selection, vec![want_lot]);
+    assert_eq!(
+        p.per_disposal[0].proposed_selection, p.per_disposal[0].current_selection,
+        "exact tie: baseline kept → proposed == current (no divergent pick)"
+    );
+    // For this fixture, FIFO picks "A" (earliest acquired); confirm the baseline selection is "A".
+    assert_eq!(
+        p.per_disposal[0].current_selection,
+        vec![pick("A", LOT)],
+        "FIFO baseline picks lot A (earlier acquisition date)"
+    );
+}
+
+/// C-M1 regression: exact-tie tie-break KEEPS the baseline even when a lex-SMALLER non-baseline
+/// candidate exists. Under the OLD `total == best_total && assign < best_assign` lex rule, the
+/// lex-smaller candidate would EVICT the baseline → `proposed != current` at `delta == 0` (churn).
+/// Under the NEW strict-only rule (`total < best_total`), the baseline is kept on every tie →
+/// `proposed == current` → no churn, no `--attest` prompt, no needless divergent `LotSelection`.
+///
+/// Fixture: lot "B" acquired FIRST (2025-01-02) → FIFO picks "B" as baseline. Lot "A" acquired
+/// second (2025-02-02) → lid("A") < lid("B") lex-wise (string "A" < "B"). Equal basis ⇒ tie on tax.
+/// Old behavior: assign {D:[pick("A", ...)]} < assign {D:[pick("B", ...)]} on tie → proposed="A" ≠ current="B".
+/// New behavior: strict only → baseline {D:[pick("B", ...)]} kept → proposed == current == [pick("B", ...)].
+#[test]
+fn tie_exact_baseline_kept_when_lex_smaller_is_not_baseline() {
+    // "B" is the FIFO-first lot (earlier acquired); "A" is lex-smaller (lid("A") < lid("B")).
+    let events = vec![
+        buy(
+            "B", // acquired first → FIFO baseline picks "B"
+            datetime!(2025-01-02 00:00:00 UTC),
+            cold(),
+            LOT,
+            dec!(5000), // equal basis
+        ),
+        buy(
+            "A", // acquired second, lex-smaller (lid("A") < lid("B"))
+            datetime!(2025-02-02 00:00:00 UTC),
+            cold(),
+            LOT,
+            dec!(5000), // equal basis → same tax on either pick
+        ),
+        sell(
+            "D",
+            datetime!(2026-06-01 00:00:00 UTC),
+            cold(),
+            LOT,
+            dec!(10000),
+        ),
+    ];
+    let prices = StaticPrices::default();
+    let tables = synth(2026);
+    let prof = profile(dec!(100000));
+    let p = optimize_year(
+        &events,
+        &prices,
+        &cfg(),
+        2026,
+        Some(&prof),
+        &tables,
+        &no_attest(),
+        made(),
+    )
+    .expect("computable");
+
+    // Delta is exactly 0 (tied candidates — neither strictly improves).
+    assert_eq!(p.delta, dec!(0), "delta must be 0 on an exact tie");
+    // C-M1: baseline kept → proposed == current == [pick("B", ...)] (FIFO picks "B" first).
+    assert_eq!(
+        p.per_disposal[0].proposed_selection, p.per_disposal[0].current_selection,
+        "C-M1: proposed must equal current on an exact tie (baseline kept, no churn)"
+    );
+    // Explicitly confirm the baseline is lot "B" (FIFO picks the earlier lot).
+    assert_eq!(
+        p.per_disposal[0].current_selection,
+        vec![pick("B", LOT)],
+        "FIFO baseline picks lot B (earlier acquisition date 2025-01-02)"
+    );
+    // Confirm lid("A") < lid("B") so the old lex rule WOULD have diverged (regression guard).
+    assert!(
+        lid("A") < lid("B"),
+        "lot-id A must be lex-smaller than B for this to be a meaningful C-M1 regression KAT"
+    );
 }
 
 // ── delta ≤ 0 invariant: multi-leg disposal where baseline == best ─────────────────────────────────
