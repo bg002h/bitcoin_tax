@@ -2,9 +2,11 @@
 //! passphrase is ALWAYS a parameter — production resolves it in `main` (prompt/env); tests inject a
 //! constructed `Passphrase`. `project()` runs the pure core projection over the bundled price dataset.
 use crate::config::{self, CliConfig};
+use crate::tax_profile;
 use crate::CliError;
 use btctax_adapters::BundledPrices;
 use btctax_core::persistence::{init_schema, load_all};
+use btctax_core::TaxProfile;
 use btctax_core::{project, LedgerEvent, LedgerState, ProjectionConfig};
 use btctax_store::{Passphrase, Vault};
 use rusqlite::Connection;
@@ -34,10 +36,12 @@ impl Session {
         Self::from_fresh_vault(Vault::repair(vault_path, pp)?)
     }
 
-    /// Initialize the core schema + CLI config on a freshly-created vault, then persist.
+    /// Initialize the core schema + CLI config + tax profile table on a freshly-created vault,
+    /// then persist.
     fn from_fresh_vault(mut vault: Vault) -> Result<Session, CliError> {
         init_schema(vault.conn())?;
         config::init_config_table(vault.conn())?;
+        tax_profile::init_table(vault.conn())?;
         vault.save()?;
         Ok(Session { vault })
     }
@@ -68,6 +72,19 @@ impl Session {
     /// The persisted projection config (TP8 treatment + lot method); default = (c)+FIFO if unset.
     pub fn config(&self) -> Result<CliConfig, CliError> {
         config::read_config(self.conn())
+    }
+
+    /// The stored per-year `TaxProfile` for `year`, or `None` if none has been set.
+    /// Robust to older vaults (calls `tax_profile::init_table` as a defensive guard).
+    pub fn tax_profile(&self, year: i32) -> Result<Option<TaxProfile>, CliError> {
+        tax_profile::get(self.conn(), year)
+    }
+
+    /// All stored `TaxProfile`s, sorted by year ascending.
+    pub fn all_tax_profiles(
+        &self,
+    ) -> Result<std::collections::BTreeMap<i32, TaxProfile>, CliError> {
+        tax_profile::all(self.conn())
     }
 
     /// Load all events and run the pure deterministic projection (NFR4) over the bundled daily-close

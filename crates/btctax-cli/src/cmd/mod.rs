@@ -4,3 +4,4 @@ pub mod import;
 pub mod init;
 pub mod inspect;
 pub mod reconcile;
+pub mod tax;
