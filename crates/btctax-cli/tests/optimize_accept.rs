@@ -452,6 +452,58 @@ fn accept_refuses_2027_broker_held_even_with_attestation() {
     );
 }
 
+/// A 2027 `Exchange` (broker) disposal with CONTEMPORANEOUS timing (`now` BEFORE the sale, so
+/// made ≤ sale) and a DIVERGENT optimizer pick → still `ForbiddenBroker2027`: a bare `accept` (no
+/// `--attest`) persists NOTHING. This is the latent-bug regression (FOLLOWUPS Task-4): before the fix
+/// `persistability` returned `ContemporaneousNow` for a made-≤-sale broker 2027 pick, so a bare
+/// `accept` would have PERSISTED it as "Contemporaneous" (an own-books-insufficient §1.1012-1(j)
+/// record). The broker-envelope check is now authoritative and precedes the contemporaneous branch, so
+/// the pick is categorically refused with no write. FAILS without the fix (it would persist event +1).
+#[test]
+fn accept_refuses_2027_broker_contemporaneous_divergent_no_write() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_broker_2027_csv(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    cmd::tax::set_profile(&vault, &pp(), 2027, single_100k_profile()).unwrap();
+    let tables = synth_tables(2027);
+    // `now` BEFORE the 2027-06-01 sale → made ≤ sale (contemporaneous TIMING) — the trigger for the
+    // old ContemporaneousNow bug. The broker envelope must override it.
+    let now_contemporaneous: OffsetDateTime = datetime!(2027-01-01 12:00:00 UTC);
+
+    let before = event_count(&vault);
+    let out = cmd::optimize::accept_with_tables(
+        &vault,
+        &pp(),
+        2027,
+        None,
+        None,
+        now_contemporaneous,
+        &tables,
+    )
+    .unwrap();
+
+    assert!(
+        out.persisted.is_empty(),
+        "a contemporaneous-timed 2027 broker divergent pick must NEVER persist (own-books insufficient)"
+    );
+    assert_eq!(out.skipped.len(), 1, "the 2027 broker disposal is skipped");
+    let (disposal, reason) = out.skipped[0].clone();
+    assert!(
+        reason.contains("2027+ broker-held") && reason.contains("own-books"),
+        "skip reason must cite the 2027+ broker rule even for a contemporaneous pick: {reason}"
+    );
+    assert_eq!(
+        event_count(&vault),
+        before,
+        "no LotSelection appended — categorical refusal, even with made ≤ sale (no write)"
+    );
+    assert_eq!(
+        attestation_of(&vault, &disposal),
+        None,
+        "no attestation row for a refused 2027 broker pick"
+    );
+}
+
 // ── blanket-attest guard (R2-M5/R0-M5 — fires BEFORE any append) ──────────────────────────────────
 
 /// `accept --attest "..."` WITHOUT `--disposal` → `Err(Usage(... "no blanket attestation" ...))`, and

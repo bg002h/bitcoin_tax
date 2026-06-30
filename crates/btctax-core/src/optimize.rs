@@ -34,6 +34,8 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Persistability {
     /// The selection's made-date is at/before the sale → §A.5(b) `Contemporaneous`; persist freely.
+    /// Reached only when the lot is NOT 2027+ broker-held — the broker envelope is tested first
+    /// (own-books contemporaneous ID is insufficient for a 2027+ broker lot; see `persistability`).
     ContemporaneousNow,
     /// Already-executed (made-date after the sale) but within the own-books envelope → persist ONLY
     /// behind the narrow contemporaneous-ID attestation (→ `AttestedRecording`).
@@ -438,18 +440,31 @@ fn is_broker(w: &WalletId) -> bool {
 }
 
 /// The §C.2 `accept`-gate verdict for one disposal (computed in core; enforced by the CLI, Task 10).
-/// - made-date ≤ sale → §A.5(b) `Contemporaneous` lever; persist freely (`ContemporaneousNow`).
-/// - already-executed (made-date > sale) AND 2027+ broker-held → `ForbiddenBroker2027` (NEVER persist).
-/// - already-executed otherwise (self-custody any year, or broker-held 2025–2026) → `NeedsAttestation`.
+///
+/// **The 2027+ broker envelope is AUTHORITATIVE and tested FIRST**, taking precedence over the
+/// `made ≤ sale` (contemporaneous) lever: for a 2027+ broker-held lot own-books identification is
+/// INSUFFICIENT (Notices 2025-07/2026-20 own-books relief ENDS in 2026; broker-communicated
+/// specific-ID is required 2027+), so even a genuinely contemporaneous (`made ≤ sale`) own-books pick
+/// CANNOT rescue it — it is NEVER `ContemporaneousNow`. This mirrors `proposed_compliance_status`,
+/// which likewise judges 2027+ broker → `NonCompliant` ahead of the contemporaneous branch (the two
+/// functions MUST agree — see the FOLLOWUPS Task-4 asymmetry, now closed). Order:
+/// - 2027+ broker-held (ANY timing, incl. made ≤ sale) → `ForbiddenBroker2027` (NEVER persist; no
+///   attestation can cure it).
+/// - else made-date ≤ sale → §A.5(b) `Contemporaneous` lever; persist freely (`ContemporaneousNow`).
+/// - else already-executed (made > sale; self-custody any year, or broker-held 2025–2026) →
+///   `NeedsAttestation`.
 pub fn persistability(
     wallet: &WalletId,
     sale_date: TaxDate,
     selection_made: TaxDate,
 ) -> Persistability {
-    if selection_made <= sale_date {
-        Persistability::ContemporaneousNow
-    } else if is_broker(wallet) && sale_date.year() >= 2027 {
+    // §1.1012-1(j): the 2027+ broker envelope is authoritative — it precedes the contemporaneous
+    // branch because own-books ID (even made ≤ sale) is insufficient for a 2027+ broker lot. So such a
+    // lot is categorically ForbiddenBroker2027, never ContemporaneousNow (mirrors proposed_compliance_status).
+    if is_broker(wallet) && sale_date.year() >= 2027 {
         Persistability::ForbiddenBroker2027
+    } else if selection_made <= sale_date {
+        Persistability::ContemporaneousNow
     } else {
         Persistability::NeedsAttestation
     }

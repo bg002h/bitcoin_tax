@@ -375,5 +375,54 @@ M3, N-2) were folded into the plan (see its "Fold record (round 1)"). These rema
   for 2027+ brokers regardless of persistability). A one-line alignment (either widen
   `proposed_compliance_status` to return `NonCompliant` from `persistability == ForbiddenBroker2027` even
   for contemporaneous picks, OR add a `ForbiddenBroker2027` arm to `Persistability` and let the CLI check
-  that instead of `persistability == ContemporaneousNow`) would remove the conceptual gap. — OPEN (future
-  Task 10 / CLI cleanup; no current user-visible bug given the CLI refusal).
+  that instead of `persistability == ContemporaneousNow`) would remove the conceptual gap. — **RESOLVED
+  (whole-diff-review fold, 2026-06-30):** `persistability` now tests the 2027+ broker envelope FIRST, ahead
+  of the `made ≤ sale` contemporaneous branch, so a 2027+ broker lot is categorically `ForbiddenBroker2027`
+  (never `ContemporaneousNow`) regardless of timing — matching `proposed_compliance_status` (which already
+  returned `NonCompliant` ahead of the contemporaneous branch). Both core functions now agree, and `accept`'s
+  gate categorically refuses these even when `made ≤ sale` (no own-books-insufficient 2027+ broker record can
+  persist). Covered by `persistability_broker_2027_contemporaneous_is_forbidden`,
+  `persistability_broker_pre_2027_contemporaneous` (regression), and the end-to-end
+  `accept_refuses_2027_broker_contemporaneous_divergent_no_write` (synthetic TY2027 table; fails without the
+  fix). `crates/btctax-core/src/optimize.rs` (`persistability`).
+
+## Sub-project C (optimizer) — whole-branch review round 1 deferrals (2026-06-30)
+
+Source: `reviews/whole-branch-review-optimizer-round-1.md` (VERDICT: READY TO MERGE — 0 Critical / 0
+Important). The review's one MUST-FIX-before-TY2027-table item (the `persistability`/`proposed_compliance_status`
+2027+ broker asymmetry) was folded this cycle (see the Task-4 nit above, now RESOLVED). The remaining three
+new Minors are non-blocking and deferred here.
+
+- **M-1 (Minor) — exact-tie tie-break can emit a `delta == 0` divergent pick.** In `exhaustive_min`
+  (`crates/btctax-core/src/optimize.rs`, the `total == best_total && assign < best_assign` branch) a candidate
+  that TIES the baseline total but is lexicographically smaller than `baseline_assignment` evicts the baseline
+  incumbent (`best_total` stays `== base.total`). Result: `best != baseline_assignment` with `delta == 0`, so a
+  disposal with two equal-basis/equal-term lots can yield `proposed != current` at zero tax benefit → `run`
+  shows a "change … needs `--attest`" line for no benefit, and a future-dated (`made ≤ sale`) disposal would let
+  a bare `accept` auto-persist a no-benefit divergent `LotSelection`. **No invariant is broken** (`delta = 0` is
+  shown, the pick is gated/legally valid, the reported optimum is still a true minimum) — it is needless churn /
+  a pointless attestation prompt. The lex-smallest tie-break is the spec'd §0 total order, so this is a quality
+  choice, not a correctness bug. *Recommend* preferring the baseline on an exact tie (evict only on
+  `total < best_total`). — OPEN (non-blocking polish).
+
+- **M-2 (Minor) — Mode-2 `consult_sale` discards the `candidate_selections` heuristic flag.**
+  `crates/btctax-core/src/optimize.rs` binds `let (cands, _heuristic) = candidate_selections(&lots, req.sell_sat)`.
+  For a wallet pool > `LOT_ENUM_BOUND` (12) — common for weekly-DCA / active-trading wallets — the candidate set
+  is a deterministic INCOMPLETE subset, so the proposed selection may not be the true tax-minimum, with NO
+  disclosure (unlike Mode-1's `PoolHeuristic` banner). Mitigation: `ConsultReport` has no `approximate` field and
+  the renderer hedges ("read-only what-if", "proposed selection", "federal tax attributable (estimated)") rather
+  than claiming "the optimum" — so it is NOT a false-global claim (hence Minor). The plan scoped R2-C1's
+  disclosure to Mode-1. *Recommend* a parallel "heuristic — searched a subset of a large pool" note in
+  `render_consult` for symmetry. — OPEN (non-blocking; add a consult-level approximate disclosure later).
+
+- **M-3 (Minor) — the optimizer's "global" excludes self-transfer lot-selection; scope undocumented.**
+  `optimize_year` (`crates/btctax-core/src/optimize.rs`) targets only `baseline_state.disposals`; SelfTransfers
+  produce no Disposal/Removal record, so a same-year self-transfer's lot routing is held at its baseline. Spec
+  §A.3 lists SelfTransfer as method-honoring and says it "lets the optimizer pre-position lots," so a user could
+  read "proven global minimum" (`approximate == false`) as including self-transfer re-routing. In practice the
+  available-lots pools are still correct (the real fold, incl. self-transfers at baseline, is replayed), and
+  self-transfers are non-taxable so they affect the single-year objective only indirectly via an uncommon
+  intra-year move-then-sell pattern — hence Minor. The `approximate == false` "global" claim is global over
+  taxable-disposal selections only. *Recommend* documenting the scope boundary in the proposal footer (mirroring
+  the R0-M2 vertex-granularity caveat); relates to A's open `disposal_compliance`-omits-SelfTransfers item. —
+  OPEN (non-blocking; document the scope boundary vs spec §A.3).

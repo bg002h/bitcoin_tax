@@ -280,13 +280,52 @@ fn persistability_broker_2027_forbidden() {
     );
 }
 
-/// Broker-held, sale year 2027, made ≤ sale → ContemporaneousNow.
-/// A genuinely contemporaneous standing instruction is compliant even 2027+; C never reaches
-/// this branch for already-executed disposals (proposal_made is always > any past sale date).
+/// Broker-held, sale year ≥ 2027, made ≤ sale → ForbiddenBroker2027 (NOT ContemporaneousNow).
+/// §1.1012-1(j): the 2027+ broker envelope is AUTHORITATIVE and precedes the contemporaneous branch —
+/// own-books identification is INSUFFICIENT for a 2027+ broker lot (own-books relief under
+/// Notices 2025-07/2026-20 ENDS in 2026; broker-communicated specific-ID is required 2027+), so even a
+/// genuinely contemporaneous (made ≤ sale) own-books pick CANNOT rescue it. This kills the latent
+/// asymmetry (FOLLOWUPS Task-4) where `persistability` returned `ContemporaneousNow` while
+/// `proposed_compliance_status` returned `NonCompliant` for the same input. FAILS without the fix.
 #[test]
-fn persistability_broker_2027_contemporaneous() {
+fn persistability_broker_2027_contemporaneous_is_forbidden() {
+    // made == sale (contemporaneous timing) — still forbidden for a 2027+ broker lot.
     assert_eq!(
         persistability(&exchange(), date!(2027 - 06 - 01), date!(2027 - 06 - 01)),
+        Persistability::ForbiddenBroker2027,
+        "2027+ broker, made == sale: own-books contemporaneous ID is insufficient → ForbiddenBroker2027"
+    );
+    // made strictly BEFORE sale (contemporaneous timing) — also forbidden (envelope is authoritative).
+    assert_eq!(
+        persistability(&exchange(), date!(2027 - 06 - 01), date!(2027 - 05 - 01)),
+        Persistability::ForbiddenBroker2027
+    );
+    // 2028 made ≤ sale — also forbidden (≥2027 envelope).
+    assert_eq!(
+        persistability(&exchange(), date!(2028 - 06 - 01), date!(2028 - 06 - 01)),
+        Persistability::ForbiddenBroker2027
+    );
+    // Anti-regression: the broker-envelope precedence means it is NEVER ContemporaneousNow.
+    assert_ne!(
+        persistability(&exchange(), date!(2027 - 06 - 01), date!(2027 - 06 - 01)),
+        Persistability::ContemporaneousNow,
+        "anti-regression: the old made≤sale-first ordering must not surface ContemporaneousNow"
+    );
+}
+
+/// Broker-held, sale year 2026 (pre-2027), made ≤ sale → ContemporaneousNow (REGRESSION).
+/// Own-books relief still applies through 2026, so a genuinely contemporaneous broker pick persists
+/// freely; the 2027+ envelope must NOT capture a pre-2027 broker lot. Confirms the fix is scoped to
+/// 2027+ only (pre-2027 broker behavior is unchanged).
+#[test]
+fn persistability_broker_pre_2027_contemporaneous() {
+    assert_eq!(
+        persistability(&exchange(), date!(2026 - 06 - 01), date!(2026 - 06 - 01)),
+        Persistability::ContemporaneousNow
+    );
+    // made strictly before the 2026 sale → still ContemporaneousNow.
+    assert_eq!(
+        persistability(&exchange(), date!(2026 - 12 - 01), date!(2026 - 03 - 15)),
         Persistability::ContemporaneousNow
     );
 }
