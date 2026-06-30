@@ -1,6 +1,7 @@
 //! The canonical event taxonomy (§6.4). One `EventPayload` enum; imported, system, and decision variants.
 use crate::conventions::{Sat, TaxDate, Usd};
 use crate::identity::{EventId, Fingerprint, LotId, WalletId};
+use crate::LotMethod;
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, UtcOffset};
 
@@ -185,6 +186,16 @@ pub struct LotPick {
     pub sat: Sat,
 }
 
+/// §A.5(a): a dated standing-order method election. `effective_from` binds per-wallet disposals on/after
+/// that tax-date to `method`; it CANNOT be back-dated (must be ≥ its made-date and ≥ TRANSITION_DATE, else
+/// the `MethodElectionBackdated` hard blocker fires in `resolve`). The latest-in-force election (by
+/// `effective_from`, tie `decision_seq`) governs; FIFO is the regulatory default before any election.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MethodElection {
+    pub effective_from: TaxDate,
+    pub method: LotMethod,
+}
+
 /// The single payload sum-type carried by every `LedgerEvent` (§6.3/§6.4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventPayload {
@@ -207,6 +218,7 @@ pub enum EventPayload {
     RejectImport(RejectImport),
     VoidDecisionEvent(VoidDecisionEvent),
     ClassifyRaw(ClassifyRaw),
+    MethodElection(MethodElection),
 }
 
 impl EventPayload {
@@ -382,6 +394,10 @@ mod tests {
                     business: true,
                 })),
             }),
+            EventPayload::MethodElection(MethodElection {
+                effective_from: time::Date::from_calendar_date(2025, time::Month::June, 1).unwrap(),
+                method: crate::LotMethod::Hifo,
+            }),
         ];
         for p in payloads {
             let ev = sample(p);
@@ -389,6 +405,16 @@ mod tests {
             let back: LedgerEvent = serde_json::from_str(&json).unwrap();
             assert_eq!(ev, back);
         }
+    }
+
+    #[test]
+    fn method_election_decision_has_no_fingerprint() {
+        // Global Constraints (§0): new decision events carry `fingerprint = None`.
+        let me = EventPayload::MethodElection(MethodElection {
+            effective_from: time::Date::from_calendar_date(2025, time::Month::June, 1).unwrap(),
+            method: crate::LotMethod::Lifo,
+        });
+        assert!(crate::persistence::fingerprint(&me).is_none());
     }
 
     #[test]

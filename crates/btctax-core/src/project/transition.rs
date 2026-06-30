@@ -5,13 +5,15 @@
 //! allocation-independent pre-2025 Universal snapshot used by the conservation guard, and (b) performs the
 //! one-shot boundary seed during the pass-2 fold.
 use crate::conventions::{Sat, Usd, TRANSITION_DATE};
-use crate::event::BasisSource;
+use crate::event::{BasisSource, LotPick};
+use crate::identity::EventId;
 use crate::price::PriceProvider;
-use crate::project::fold::fold_event; // the SHARED per-event dispatcher (so the pre-fold cannot diverge)
+use crate::project::fold::{fold_event, FoldCtx}; // the SHARED per-event dispatcher (so the pre-fold cannot diverge)
 use crate::project::pools::{PoolKey, PoolSet};
-use crate::project::resolve::{sort_canonical, Eff, TransitionMode};
+use crate::project::resolve::{sort_canonical, Eff, ElectionRec, TransitionMode};
 use crate::state::{FoldStats, LedgerState, Lot};
 use crate::ProjectionConfig;
+use std::collections::BTreeMap;
 
 /// Σ held sat + Σ basis remaining in the single Universal pool at the 2025-01-01 boundary.
 pub struct UniversalSnapshot {
@@ -26,6 +28,8 @@ pub fn universal_snapshot(
     timeline: &[Eff],
     prices: &dyn PriceProvider,
     config: &ProjectionConfig,
+    elections: &[ElectionRec],
+    selections: &BTreeMap<EventId, Vec<LotPick>>,
 ) -> UniversalSnapshot {
     let mut pre: Vec<Eff> = timeline
         .iter()
@@ -36,8 +40,15 @@ pub fn universal_snapshot(
     let mut pools = PoolSet::default();
     let mut sink = LedgerState::default(); // discarded; we only read the pool residue
     let mut stats = FoldStats::default();
+    // Same FoldCtx the real fold uses, so the pre-2025 residue cannot diverge (I-1). Pre-2025 disposals
+    // route through the Universal pool → `pre2025_method`; the elections (forward-only) never apply here.
+    let ctx = FoldCtx {
+        config,
+        elections,
+        selections,
+    };
     for eff in &pre {
-        fold_event(eff, prices, config, &mut pools, &mut sink, &mut stats);
+        fold_event(eff, prices, &ctx, &mut pools, &mut sink, &mut stats);
     }
     let lots = pools
         .pools

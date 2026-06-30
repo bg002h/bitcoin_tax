@@ -31,6 +31,12 @@ pub enum BlockerKind {
     SafeHarborTimebar,
     UnmatchedOutflows,
     Pre2025MethodNote,
+    /// §A.5(a): a `MethodElection` whose `effective_from` precedes its made-date or TRANSITION_DATE —
+    /// a standing order cannot be back-dated (§1.1012-1(j) no post-hoc identification). Hard.
+    MethodElectionBackdated,
+    /// §A.4: a `LotSelection` that fails validation (unknown/cross-wallet/over-drawn lot, or principal
+    /// mismatch). Hard — the named identification is unusable so the disposal's tax is gated.
+    LotSelectionInvalid,
 }
 impl BlockerKind {
     pub fn severity(self) -> Severity {
@@ -42,7 +48,9 @@ impl BlockerKind {
             | DecisionConflict
             | UnknownBasisInbound
             | Unclassified
-            | SafeHarborUnconservable => Severity::Hard,
+            | SafeHarborUnconservable
+            | MethodElectionBackdated
+            | LotSelectionInvalid => Severity::Hard,
             SafeHarborTimebar | UnmatchedOutflows | Pre2025MethodNote => Severity::Advisory,
         }
     }
@@ -181,5 +189,19 @@ impl LedgerState {
             event,
             detail: detail.into(),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_blockers_are_hard() {
+        assert_eq!(
+            BlockerKind::MethodElectionBackdated.severity(),
+            Severity::Hard
+        );
+        assert_eq!(BlockerKind::LotSelectionInvalid.severity(), Severity::Hard);
     }
 }

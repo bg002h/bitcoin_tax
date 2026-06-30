@@ -5,14 +5,66 @@ use crate::event::{BasisSource, DisposeKind};
 use crate::identity::{EventId, LotId};
 use crate::price::{fmv_of, PriceProvider};
 use crate::project::pools::{pool_key, Consumed, PoolKey, PoolSet};
-use crate::project::resolve::{sort_canonical, Eff, Op, Resolution};
+use crate::project::resolve::{sort_canonical, Eff, ElectionRec, Op, Resolution};
 use crate::project::transition;
 use crate::state::{
     BlockerKind, Disposal, DisposalLeg, FoldStats, GiftZone, IncomeRecord, LedgerState, Lot,
     PendingLeg, PendingTransfer, Removal, RemovalKind, RemovalLeg, Term,
 };
-use crate::{FeeTreatment, ProjectionConfig};
+use crate::{FeeTreatment, LotMethod, ProjectionConfig};
 use std::collections::BTreeMap;
+
+/// Read-only context threaded through the PASS-2 fold: the projection config plus the resolved
+/// forward method elections (§A.5(a)) and per-disposal named-lot selections (§A.4). Carried as ONE
+/// borrow so `fold_event` (and `transition::universal_snapshot`, which reuses it) stay in lock-step.
+pub(crate) struct FoldCtx<'a> {
+    pub config: &'a ProjectionConfig,
+    pub elections: &'a [ElectionRec],
+    pub selections: &'a BTreeMap<EventId, Vec<crate::event::LotPick>>,
+}
+
+/// The lot-identification method applicable to a disposal at `date`:
+/// pre-2025 (Universal pool) → the declared `pre2025_method`; post-2025 (Wallet pool) → the
+/// latest-in-force `MethodElection` on/before `date` (total order: `effective_from`, tie `decision_seq`),
+/// FIFO before any election (the §1.1012-1(j)(3) regulatory default).
+fn applicable_method(date: TaxDate, ctx: &FoldCtx) -> LotMethod {
+    if date < TRANSITION_DATE {
+        ctx.config.pre2025_method
+    } else {
+        ctx.elections
+            .iter()
+            .filter(|e| e.effective_from <= date)
+            .max_by(|a, b| {
+                a.effective_from
+                    .cmp(&b.effective_from)
+                    .then(a.decision_seq.cmp(&b.decision_seq))
+            })
+            .map(|e| e.method)
+            .unwrap_or(LotMethod::Fifo)
+    }
+}
+
+/// Consume a method-honoring op's principal: the applicable method plus any `LotSelection` for `ev`.
+/// On a selection-validation failure → hard `LotSelectionInvalid` (carrying the disposal id + reason);
+/// consumption falls back to method order so Σsat conservation holds and the hard blocker gates tax.
+/// (Selections are an empty map this task; the fallback path is exercised once Task 4 populates them.)
+fn consume_principal(
+    pools: &mut PoolSet,
+    key: &PoolKey,
+    need: Sat,
+    date: TaxDate,
+    ctx: &FoldCtx,
+    st: &mut LedgerState,
+    ev: &EventId,
+) -> (Vec<Consumed>, Sat) {
+    let method = applicable_method(date, ctx);
+    let selection = ctx.selections.get(ev).map(|v| v.as_slice());
+    let r = pools.consume(key, need, method, selection);
+    if let Some(reason) = r.selection_error {
+        st.add_blocker(BlockerKind::LotSelectionInvalid, Some(ev.clone()), reason);
+    }
+    (r.consumed, r.shortfall)
+}
 
 /// TP4 term for a consumed fragment given the disposition date (gain side / no-dual uses gain_hp_start).
 fn term_for(start: TaxDate, disposed: TaxDate) -> Term {
@@ -23,19 +75,27 @@ fn term_for(start: TaxDate, disposed: TaxDate) -> Term {
     }
 }
 
-/// §7.4: emit the pre-2025 FIFO disposal advisory ONCE (a Dispose/Removal consumed the Universal pool).
-/// Pre-2025 ⇔ the disposition routed through `PoolKey::Universal` (see `pool_key`).
-fn note_pre2025_once(st: &mut LedgerState, date: TaxDate, ev: &EventId) {
+/// §7.4: emit the pre-2025 disposal advisory ONCE (a Dispose/Removal consumed the Universal pool),
+/// naming the DECLARED `pre2025_method`. Pre-2025 ⇔ the disposition routed through `PoolKey::Universal`.
+fn note_pre2025_once(st: &mut LedgerState, date: TaxDate, ev: &EventId, method: LotMethod) {
     if date < TRANSITION_DATE
         && !st
             .blockers
             .iter()
             .any(|b| b.kind == BlockerKind::Pre2025MethodNote)
     {
+        let m = match method {
+            LotMethod::Fifo => "FIFO",
+            LotMethod::Lifo => "LIFO",
+            LotMethod::Hifo => "HIFO",
+        };
         st.add_blocker(
             BlockerKind::Pre2025MethodNote,
             Some(ev.clone()),
-            "pre-2025 lots reconstructed under FIFO (the legal default, §7.4); if your filed pre-2025 returns used a different lot method, your carryforward basis may differ — verify against those filings",
+            format!(
+                "pre-2025 lots reconstructed under {m} (the declared pre-2025 method; FIFO is the §7.4 legal default); \
+                 if your filed pre-2025 returns used a different lot method, your carryforward basis may differ — verify against those filings"
+            ),
         );
     }
 }
@@ -287,13 +347,20 @@ pub fn fold(
     let mut stats = FoldStats::default(); // M3/FR9: fee_sats_consumed (Task 11), sigma_in here
     let mut seeded = false;
 
+    // Thread the resolved elections/selections (and config) through every per-event arm (NFR4).
+    let ctx = FoldCtx {
+        config,
+        elections: &res.elections,
+        selections: &res.selections,
+    };
+
     for eff in &res.timeline {
         if !seeded && eff.date() >= TRANSITION_DATE {
             // Path A drain / Path B seed of the per-wallet pools from the Universal residue, ONCE (§7.4).
             transition::seed_transition(&res.transition, &mut pools, &mut st);
             seeded = true;
         }
-        fold_event(eff, prices, config, &mut pools, &mut st, &mut stats);
+        fold_event(eff, prices, &ctx, &mut pools, &mut st, &mut stats);
     }
 
     finalize(&mut st, pools, stats); // if no ≥2025 event ever seeds, Universal lots remain (carry their wallet)
@@ -307,7 +374,7 @@ pub fn fold(
 pub(crate) fn fold_event(
     eff: &Eff,
     prices: &dyn PriceProvider,
-    config: &ProjectionConfig,
+    ctx: &FoldCtx,
     pools: &mut PoolSet,
     st: &mut LedgerState,
     stats: &mut FoldStats,
@@ -363,8 +430,9 @@ pub(crate) fn fold_event(
                 }
             };
             let key = pool_key(date, &wallet);
-            note_pre2025_once(st, date, &eff.id); // §7.4: pre-2025 disposal advisory (once)
-            let (consumed, shortfall) = pools.consume_fifo(&key, *sat);
+            note_pre2025_once(st, date, &eff.id, ctx.config.pre2025_method); // §7.4: pre-2025 disposal advisory (once)
+            let (consumed, shortfall) =
+                consume_principal(pools, &key, *sat, date, ctx, st, &eff.id);
             if shortfall > 0 {
                 st.add_blocker(
                     BlockerKind::UncoveredDisposal,
@@ -384,7 +452,7 @@ pub(crate) fn fold_event(
                     pools,
                     &key,
                     fee_sat.unwrap_or(0),
-                    config,
+                    ctx.config,
                     prices,
                     date,
                     stats,
@@ -523,7 +591,8 @@ pub(crate) fn fold_event(
                 }
             };
             let key = pool_key(date, &wallet);
-            let (consumed, shortfall) = pools.consume_fifo(&key, *sat);
+            let (consumed, shortfall) =
+                consume_principal(pools, &key, *sat, date, ctx, st, &eff.id);
             if shortfall > 0 {
                 st.add_blocker(
                     BlockerKind::UncoveredDisposal,
@@ -559,7 +628,7 @@ pub(crate) fn fold_event(
                 pools,
                 &key,
                 fee_sat.unwrap_or(0),
-                config,
+                ctx.config,
                 prices,
                 date,
                 stats,
@@ -741,8 +810,9 @@ pub(crate) fn fold_event(
                 }
             };
             let key = pool_key(date, &wallet);
-            note_pre2025_once(st, date, &eff.id); // §7.4: pre-2025 removal advisory (once)
-            let (consumed, shortfall) = pools.consume_fifo(&key, *sat);
+            note_pre2025_once(st, date, &eff.id, ctx.config.pre2025_method); // §7.4: pre-2025 removal advisory (once)
+            let (consumed, shortfall) =
+                consume_principal(pools, &key, *sat, date, ctx, st, &eff.id);
             if shortfall > 0 {
                 st.add_blocker(
                     BlockerKind::UncoveredDisposal,
@@ -760,7 +830,7 @@ pub(crate) fn fold_event(
                     pools,
                     &key,
                     fee_sat.unwrap_or(0),
-                    config,
+                    ctx.config,
                     prices,
                     date,
                     stats,
@@ -807,8 +877,9 @@ pub(crate) fn fold_event(
                 }
             };
             let key = pool_key(date, &wallet);
-            note_pre2025_once(st, date, &eff.id); // §7.4: pre-2025 removal advisory (once)
-            let (consumed, shortfall) = pools.consume_fifo(&key, *sat);
+            note_pre2025_once(st, date, &eff.id, ctx.config.pre2025_method); // §7.4: pre-2025 removal advisory (once)
+            let (consumed, shortfall) =
+                consume_principal(pools, &key, *sat, date, ctx, st, &eff.id);
             if shortfall > 0 {
                 st.add_blocker(
                     BlockerKind::UncoveredDisposal,
@@ -826,7 +897,7 @@ pub(crate) fn fold_event(
                     pools,
                     &key,
                     fee_sat.unwrap_or(0),
-                    config,
+                    ctx.config,
                     prices,
                     date,
                     stats,

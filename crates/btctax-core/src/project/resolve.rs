@@ -115,10 +115,24 @@ pub struct AllocationVoid {
     pub target: EventId,
 }
 
+/// An in-force forward method election (§A.5(a)). Collected in `resolve` from non-voided, non-backdated
+/// `MethodElection` decisions; the latest-in-force by `(effective_from, decision_seq)` governs per-wallet
+/// disposals on/after `effective_from` (NFR4: a total order, no `Date::now`/RNG).
+#[derive(Debug, Clone)]
+pub struct ElectionRec {
+    pub effective_from: TaxDate,
+    pub method: crate::LotMethod,
+    pub decision_seq: u64,
+}
+
 pub struct Resolution {
     pub timeline: Vec<Eff>,
     pub transition: TransitionMode,
     pub blockers: Vec<Blocker>,
+    /// In-force forward method elections (§A.5(a)); empty ⇒ FIFO default for all per-wallet disposals.
+    pub elections: Vec<ElectionRec>,
+    /// Per-disposal named-lot selections (§A.4). Empty this task; populated in Task 4.
+    pub selections: BTreeMap<EventId, Vec<crate::event::LotPick>>,
 }
 
 /// Private outcome of resolving an `ImportConflict` via a decision.
@@ -503,6 +517,35 @@ pub fn resolve(
         });
     }
 
+    // ── 2b. §A.5(a) MethodElection collection ────────────────────────────────────────────────────
+    // Non-voided forward standing orders. A `MethodElection` whose `effective_from` precedes its
+    // made-date (back-dating) or TRANSITION_DATE (pre-transition) is a HARD `MethodElectionBackdated`
+    // blocker and contributes no in-force record (§1.1012-1(j): no post-hoc identification, ever).
+    let mut elections: Vec<ElectionRec> = Vec::new();
+    for (seq, d) in &decisions {
+        if voided.contains(&d.id) {
+            continue;
+        }
+        if let EventPayload::MethodElection(me) = &d.payload {
+            let made = tax_date(d.utc_timestamp, d.original_tz);
+            if me.effective_from < TRANSITION_DATE || me.effective_from < made {
+                blockers.push(Blocker {
+                    kind: BlockerKind::MethodElectionBackdated,
+                    event: Some(d.id.clone()),
+                    detail: "MethodElection effective_from precedes its made-date or TRANSITION_DATE (2025-01-01) — a standing order cannot be back-dated".into(),
+                });
+                continue;
+            }
+            elections.push(ElectionRec {
+                effective_from: me.effective_from,
+                method: me.method,
+                decision_seq: *seq,
+            });
+        }
+    }
+    // Per-disposal named-lot selections are populated in Task 4; empty for now.
+    let selections: BTreeMap<EventId, Vec<crate::event::LotPick>> = BTreeMap::new();
+
     // ── 3. §7.4 / TP6 transition effectiveness ───────────────────────────────────────────────────
     // Re-evaluated deterministically on every rebuild; reads ONLY the pre-2025 Universal snapshot, the
     // allocations, and `first_2025_disposition` — none of which depend on `transition` (acyclic, I-1/§7.2).
@@ -517,7 +560,13 @@ pub fn resolve(
         .min();
 
     // (3-prereq) The pre-2025 Universal residue is allocation-INDEPENDENT — compute it ONCE.
-    let snap = crate::project::transition::universal_snapshot(&timeline, prices, config);
+    let snap = crate::project::transition::universal_snapshot(
+        &timeline,
+        prices,
+        config,
+        &elections,
+        &selections,
+    );
 
     let due = TY2025_RETURN_DUE;
     let mut effective: Vec<(EventId, Vec<Lot>)> = Vec::new(); // (allocation id, pre-built seed lots)
@@ -618,6 +667,8 @@ pub fn resolve(
         timeline,
         transition,
         blockers,
+        elections,
+        selections,
     }
 }
 
