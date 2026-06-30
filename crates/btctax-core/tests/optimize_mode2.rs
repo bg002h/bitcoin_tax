@@ -24,6 +24,8 @@ use btctax_core::event::*;
 use btctax_core::identity::*;
 use btctax_core::optimize::{consult_sale, ConsultRequest, OptimizeError};
 use btctax_core::price::StaticPrices;
+use btctax_core::project::fold::state_as_of;
+use btctax_core::project::resolve::resolve;
 use btctax_core::project::{evaluate_disposal, project, EvaluateError, ProjectionConfig};
 use btctax_core::tax::tables::{
     LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
@@ -424,6 +426,98 @@ fn consult_pool_is_as_of_at_not_end_of_timeline() {
     assert!(
         !r.proposed_selection.iter().any(|p| p.lot == lid("LATE")),
         "a lot acquired after `at` must never be selectable"
+    );
+}
+
+// ── KAT: state_as_of mixed-tz straddle (fold.rs break→continue fix) ────────────────────────────────
+
+/// Mixed-timezone straddle: an event dated `at+1` in a +14:00 timezone has an EARLIER utc timestamp
+/// than a disposal dated `at` in +00:00. `sort_canonical` (utc-ascending) therefore places the `at+1`
+/// event BEFORE the `at` disposal in the timeline. Under the old `break`, the loop fires on the `at+1`
+/// event (date > at) and exits without processing the `at` disposal — the lot is wrongly still held.
+/// Under the corrected `continue`, the `at+1` event is skipped and the `at` disposal IS processed —
+/// the lot is consumed and absent from `st.lots`.
+///
+/// UTC order after sort_canonical: [ACQ (2025-03-01 00:00Z), NOISE (2025-06-01 12:00Z / +14→date 2025-06-02),
+/// DISP (2025-06-01 23:00Z / +00→date 2025-06-01)].
+/// at = 2025-06-01.  NOISE.date() = 2025-06-02 > at → old break skips DISP; new continue does not.
+///
+/// FAILS under break (st.lots is non-empty; no disposal recorded).
+/// PASSES under continue (lot consumed; one disposal recorded).
+#[test]
+fn state_as_of_mixed_tz_straddle_disposal_not_skipped() {
+    let at = date!(2025 - 06 - 01);
+
+    // ACQ: UTC 2025-03-01 00:00:00 +00:00, tz +00:00  →  tax date 2025-03-01 (well before `at`)
+    let acq = LedgerEvent {
+        id: eid("ACQ"),
+        utc_timestamp: datetime!(2025-03-01 00:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(cold()),
+        payload: EventPayload::Acquire(Acquire {
+            sat: LOT,
+            usd_cost: dec!(50000),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    };
+
+    // NOISE: UTC 2025-06-01 12:00:00, tz +14:00
+    //   local = 2025-06-02 02:00:00 +14:00  →  tax date 2025-06-02 (> at)
+    // Sorts BEFORE DISP in UTC order, triggering the old break.
+    let noise = LedgerEvent {
+        id: eid("NOISE"),
+        utc_timestamp: datetime!(2025-06-01 12:00:00 UTC),
+        original_tz: offset!(+14:00),
+        wallet: Some(cold()),
+        payload: EventPayload::Acquire(Acquire {
+            sat: 1_000,
+            usd_cost: dec!(50),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    };
+
+    // DISP: UTC 2025-06-01 23:00:00 +00:00, tz +00:00  →  tax date 2025-06-01 (= at, must be included)
+    // Sorts AFTER NOISE in UTC order; the old break skipped it.
+    let disp = LedgerEvent {
+        id: eid("DISP"),
+        utc_timestamp: datetime!(2025-06-01 23:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(cold()),
+        payload: EventPayload::Dispose(Dispose {
+            sat: LOT,
+            usd_proceeds: dec!(60000),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    };
+
+    let events = vec![acq, noise, disp];
+    let prices = StaticPrices::default();
+    let config = cfg();
+
+    let res = resolve(&events, &prices, &config);
+    let st = state_as_of(res, &prices, &config, at);
+
+    assert!(
+        st.blockers.is_empty(),
+        "no blockers expected (clean disposal); got: {:?}",
+        st.blockers
+    );
+    // The at-dated disposal (DISP, date = 2025-06-01 = at) must have consumed the lot from ACQ.
+    // Under the old `break` this fails: st.lots has one entry (lot not consumed).
+    assert!(
+        st.lots.is_empty(),
+        "the at-dated disposal must consume the lot: st.lots should be empty but is {:?}",
+        st.lots
+    );
+    // Cross-check: exactly one disposal record must have been produced.
+    assert_eq!(
+        st.disposals.len(),
+        1,
+        "exactly one disposal (DISP, date = at) must be recorded; got {:?}",
+        st.disposals.len()
     );
 }
 

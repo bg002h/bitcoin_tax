@@ -432,8 +432,14 @@ pub fn pools_before(
 /// fires the seed before it. Forcing here makes the as-of pool match that fold under BOTH transition
 /// paths — Path A (residue relocated, lot_ids/basis preserved) and Path B (residue DISCARDED, allocation
 /// seed lots installed). Skipping the force would surface the un-seeded Universal residue (harmless under
-/// Path A, but WRONG under Path B). The break is sound because `sort_canonical` orders by `utc` ascending
-/// and the stable pre-2025 partition keeps the `>= 2025` side monotonic by date.
+/// Path A, but WRONG under Path B). `continue` (not `break`) is required for heterogeneous-timezone
+/// timelines: `sort_canonical` orders by `utc` ascending, but `date() = tax_date(utc, original_tz)`
+/// uses each event's own `original_tz`. Under mixed timezones utc-ascending does NOT imply
+/// date-ascending — an event dated `at+1` in a +14:00 timezone can sort UTC-before one dated `at` in
+/// +00:00. A `break` would fire on the `at+1` event and skip the later-sorted `at` event. `continue`
+/// folds every event with `date() <= at` regardless of its utc position (trivially cheap: timelines
+/// are short). The boundary seed fires exactly once (guarded by `seeded`); the `continue` path does
+/// not re-fire or skip it.
 pub fn state_as_of(
     mut res: Resolution,
     prices: &dyn PriceProvider,
@@ -461,10 +467,12 @@ pub fn state_as_of(
             transition::seed_transition(&res.transition, &mut pools, &mut st);
             seeded = true;
         }
-        // Truncate by TIME: events strictly after `at` are excluded. Order is utc-ascending within the
-        // (stable) >= 2025 partition, so a break is exact.
+        // Truncate by TIME: skip events strictly after `at`. Cannot break early: `sort_canonical`
+        // orders by utc but `date()` uses each event's own `original_tz`, so utc-ascending ≠
+        // date-ascending under heterogeneous timezones (e.g. an event dated `at+1` in +14:00 sorts
+        // UTC-before one dated `at` in +00:00). `continue` ensures every `date() <= at` event is folded.
         if eff.date() > at {
-            break;
+            continue;
         }
         fold_event(eff, prices, &ctx, &mut pools, &mut st, &mut stats);
     }
