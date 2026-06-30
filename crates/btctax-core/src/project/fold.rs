@@ -77,7 +77,15 @@ fn term_for(start: TaxDate, disposed: TaxDate) -> Term {
 
 /// §7.4: emit the pre-2025 disposal advisory ONCE (a Dispose/Removal consumed the Universal pool),
 /// naming the DECLARED `pre2025_method`. Pre-2025 ⇔ the disposition routed through `PoolKey::Universal`.
-fn note_pre2025_once(st: &mut LedgerState, date: TaxDate, ev: &EventId, method: LotMethod) {
+/// `attested` branches the advisory text (D2): unattested → actionable warning; attested → informational.
+/// Severity is always Advisory (never gates `compute_tax_year`).
+fn note_pre2025_once(
+    st: &mut LedgerState,
+    date: TaxDate,
+    ev: &EventId,
+    method: LotMethod,
+    attested: bool,
+) {
     if date < TRANSITION_DATE
         && !st
             .blockers
@@ -89,14 +97,20 @@ fn note_pre2025_once(st: &mut LedgerState, date: TaxDate, ev: &EventId, method: 
             LotMethod::Lifo => "LIFO",
             LotMethod::Hifo => "HIFO",
         };
-        st.add_blocker(
-            BlockerKind::Pre2025MethodNote,
-            Some(ev.clone()),
+        let detail = if attested {
             format!(
-                "pre-2025 lots reconstructed under {m} (the declared pre-2025 method; FIFO is the §7.4 legal default); \
-                 if your filed pre-2025 returns used a different lot method, your carryforward basis may differ — verify against those filings"
-            ),
-        );
+                "pre-2025 lots reconstructed under your DECLARED + ATTESTED filed method {m} (§7.4); \
+                 carryforward basis into 2025 reflects that method"
+            )
+        } else {
+            format!(
+                "pre-2025 lots reconstructed under {m} (FIFO is the §7.4 legal default); \
+                 you have NOT declared your filed pre-2025 lot method — if your filed pre-2025 returns \
+                 used a different method your carryforward basis may differ. \
+                 Declare it: config --set-pre2025-method <m> --attest-pre2025-method"
+            )
+        };
+        st.add_blocker(BlockerKind::Pre2025MethodNote, Some(ev.clone()), detail);
     }
 }
 
@@ -548,7 +562,13 @@ pub(crate) fn fold_event(
                 }
             };
             let key = pool_key(date, &wallet);
-            note_pre2025_once(st, date, &eff.id, ctx.config.pre2025_method); // §7.4: pre-2025 disposal advisory (once)
+            note_pre2025_once(
+                st,
+                date,
+                &eff.id,
+                ctx.config.pre2025_method,
+                ctx.config.pre2025_method_attested,
+            ); // §7.4: pre-2025 disposal advisory (once)
             let (consumed, shortfall) =
                 consume_principal(pools, &key, *sat, date, ctx, st, &eff.id);
             if shortfall > 0 {
@@ -928,7 +948,13 @@ pub(crate) fn fold_event(
                 }
             };
             let key = pool_key(date, &wallet);
-            note_pre2025_once(st, date, &eff.id, ctx.config.pre2025_method); // §7.4: pre-2025 removal advisory (once)
+            note_pre2025_once(
+                st,
+                date,
+                &eff.id,
+                ctx.config.pre2025_method,
+                ctx.config.pre2025_method_attested,
+            ); // §7.4: pre-2025 removal advisory (once)
             let (consumed, shortfall) =
                 consume_principal(pools, &key, *sat, date, ctx, st, &eff.id);
             if shortfall > 0 {
@@ -995,7 +1021,13 @@ pub(crate) fn fold_event(
                 }
             };
             let key = pool_key(date, &wallet);
-            note_pre2025_once(st, date, &eff.id, ctx.config.pre2025_method); // §7.4: pre-2025 removal advisory (once)
+            note_pre2025_once(
+                st,
+                date,
+                &eff.id,
+                ctx.config.pre2025_method,
+                ctx.config.pre2025_method_attested,
+            ); // §7.4: pre-2025 removal advisory (once)
             let (consumed, shortfall) =
                 consume_principal(pools, &key, *sat, date, ctx, st, &eff.id);
             if shortfall > 0 {

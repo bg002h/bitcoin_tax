@@ -33,6 +33,10 @@ pub struct ProjectionConfig {
     pub self_transfer_fee: FeeTreatment,
     /// Historical identification method for pre-2025 lots (attested via `CliConfig`).
     pub pre2025_method: LotMethod,
+    /// Whether the taxpayer has declared + attested their filed pre-2025 lot method.
+    /// `false` (the default) makes the advisory louder and actionable; `true` produces an
+    /// informational acknowledgment. Neither value gates `compute_tax_year` (§D1).
+    pub pre2025_method_attested: bool,
 }
 impl Default for ProjectionConfig {
     fn default() -> Self {
@@ -40,6 +44,7 @@ impl Default for ProjectionConfig {
         ProjectionConfig {
             self_transfer_fee: FeeTreatment::TreatmentC,
             pre2025_method: LotMethod::Fifo,
+            pre2025_method_attested: false,
         }
     }
 }
