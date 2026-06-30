@@ -1,10 +1,15 @@
 mod fixtures;
-use btctax_cli::{cmd, render};
+use btctax_cli::{cmd, render, Session};
 use btctax_core::{AllocMethod, BasisSource, BlockerKind, EventPayload};
 use btctax_store::Passphrase;
+use time::macros::{date, datetime};
 
 fn pp() -> Passphrase {
     Passphrase::new("pw".into())
+}
+
+fn now() -> time::OffsetDateTime {
+    datetime!(2026-02-01 12:00:00 UTC)
 }
 
 #[test]
@@ -270,6 +275,131 @@ cb-sell-all,2025-06-15 12:00:00 UTC,Sell,BTC,0.10000000,USD,67500.00,6750.00,674
     assert!(
         text.contains("Path B safe-harbor allocation is effective"),
         "render_verify text must show 'Path B … effective', got:\n{text}"
+    );
+}
+
+// ── Task 8 tests ────────────────────────────────────────────────────────────────────────────────
+
+/// Task 8: `verify` surfaces the declared `pre2025_method` and whether it is attested.
+/// `render_verify` must include the uppercase method name (e.g. "HIFO") and the word "attested".
+#[test]
+fn verify_reports_declared_method_and_attestation() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::admin::set_pre2025_method(&vault, &pp(), btctax_core::LotMethod::Hifo, true).unwrap();
+    let report = cmd::inspect::verify(&vault, &pp()).unwrap();
+    assert_eq!(report.declared_pre2025_method, btctax_core::LotMethod::Hifo);
+    assert!(report.pre2025_method_attested);
+    let text = render::render_verify(&report);
+    assert!(
+        text.contains("HIFO") && text.contains("attested"),
+        "render_verify must include 'HIFO' and 'attested', got:\n{text}"
+    );
+}
+
+/// Task 8: `verify` reports the standing-order history (election count), the `LotSelection` count,
+/// and a non-empty per-disposal compliance vector when disposals exist.
+#[test]
+fn verify_lists_election_history_and_selection_count_and_compliance() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    // Post-2025 buy + sell (+ send): exactly one 2025 disposal; cb-sell consumes one lot fully ->
+    // a single leg.
+    cmd::import::run(
+        &vault,
+        &pp(),
+        &[fixtures::coinbase_buy_sell_send(dir.path())],
+    )
+    .unwrap();
+    // Forward standing order (MethodElection) effective 2025-06-01.
+    cmd::reconcile::set_forward_method(
+        &vault,
+        &pp(),
+        btctax_core::LotMethod::Hifo,
+        Some(date!(2025 - 06 - 01)),
+        now(),
+    )
+    .unwrap();
+    // Read the 2025 disposal eventref + the lot/sat its single leg consumes; record a
+    // contemporaneous selection.
+    let (disposal_ref, lot_ref, principal) = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        let leg = &state.disposals[0].legs[0];
+        (
+            state.disposals[0].event.canonical(),
+            format!(
+                "{}#{}",
+                leg.lot_id.origin_event_id.canonical(),
+                leg.lot_id.split_sequence
+            ),
+            leg.sat,
+        )
+    };
+    let picks =
+        vec![btctax_cli::eventref::parse_lot_pick(&format!("{lot_ref}:{principal}")).unwrap()];
+    cmd::reconcile::select_lots(&vault, &pp(), &disposal_ref, picks, now()).unwrap();
+
+    let report = cmd::inspect::verify(&vault, &pp()).unwrap();
+    assert_eq!(
+        report.elections.len(),
+        1,
+        "one MethodElection decision expected"
+    );
+    assert_eq!(
+        report.selection_count, 1,
+        "one LotSelection decision expected"
+    );
+    assert!(
+        !report.compliance.is_empty(),
+        "per-disposal compliance must be non-empty (post-2025 sell exists)"
+    );
+}
+
+/// Task 8: a `LotSelection` with a principal mismatch (1 sat != disposal principal) fires a hard
+/// `LotSelectionInvalid` blocker; `verify` partitions it into `report.hard` + signals non-zero (FR9).
+#[test]
+fn verify_partitions_lot_selection_invalid_as_hard() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(
+        &vault,
+        &pp(),
+        &[fixtures::coinbase_buy_sell_send(dir.path())],
+    )
+    .unwrap();
+    let (disposal_ref, lot_ref) = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        let leg = &state.disposals[0].legs[0];
+        (
+            state.disposals[0].event.canonical(),
+            format!(
+                "{}#{}",
+                leg.lot_id.origin_event_id.canonical(),
+                leg.lot_id.split_sequence
+            ),
+        )
+    };
+    // pick 1 sat — deliberately != the disposal principal → conservation violation →
+    // hard LotSelectionInvalid.
+    let picks = vec![btctax_cli::eventref::parse_lot_pick(&format!("{lot_ref}:1")).unwrap()];
+    cmd::reconcile::select_lots(&vault, &pp(), &disposal_ref, picks, now()).unwrap();
+    let report = cmd::inspect::verify(&vault, &pp()).unwrap();
+    assert!(
+        report
+            .hard
+            .iter()
+            .any(|b| b.kind == btctax_core::BlockerKind::LotSelectionInvalid),
+        "LotSelectionInvalid must appear in report.hard; hard blockers: {:?}",
+        report.hard
+    );
+    assert!(
+        report.has_hard_blockers(),
+        "has_hard_blockers() must be true → non-zero exit (FR9)"
     );
 }
 

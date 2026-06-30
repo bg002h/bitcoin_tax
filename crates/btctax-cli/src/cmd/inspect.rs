@@ -24,8 +24,11 @@ pub fn report(
 ///
 /// Uses `Session::load_events_and_project` to load the event log exactly once (avoiding the
 /// double `load_all` that the old `project()` + separate `load_all(conn)` pattern incurred).
+/// Task 8: also reads the CLI config (declared `pre2025_method` + attestation flag) and passes
+/// it to `build_verify` so that `render_verify` can surface them.
 pub fn verify(vault_path: &Path, pp: &Passphrase) -> Result<VerifyReport, CliError> {
     let session = Session::open(vault_path, pp)?;
     let (events, state, _cfg) = session.load_events_and_project()?;
-    Ok(build_verify(&state, &events))
+    let cli = session.config()?;
+    Ok(build_verify(&state, &events, &cli))
 }

@@ -10,7 +10,8 @@ use rusqlite::{Connection, OptionalExtension};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CliConfig {
     pub fee_treatment: FeeTreatment,
-    pub lot_method: LotMethod,
+    pub pre2025_method: LotMethod,
+    pub pre2025_method_attested: bool,
 }
 
 impl Default for CliConfig {
@@ -18,7 +19,8 @@ impl Default for CliConfig {
         // DO NOT change: TP8 default is (c). Spec §2/TP8 + user memory forbid flipping it to (b).
         CliConfig {
             fee_treatment: FeeTreatment::TreatmentC,
-            lot_method: LotMethod::Fifo,
+            pre2025_method: LotMethod::Fifo,
+            pre2025_method_attested: false,
         }
     }
 }
@@ -28,7 +30,7 @@ impl CliConfig {
     pub fn to_projection(self) -> ProjectionConfig {
         ProjectionConfig {
             self_transfer_fee: self.fee_treatment,
-            lot_method: self.lot_method,
+            pre2025_method: self.pre2025_method,
         }
     }
 }
@@ -50,6 +52,14 @@ fn get(conn: &Connection, key: &str) -> Result<Option<String>, CliError> {
             r.get::<_, String>(0)
         })
         .optional()?)
+}
+
+fn lot_method_tag(m: LotMethod) -> &'static str {
+    match m {
+        LotMethod::Fifo => "fifo",
+        LotMethod::Lifo => "lifo",
+        LotMethod::Hifo => "hifo",
+    }
 }
 
 /// Read the persisted config, falling back to the (c)+FIFO default for any *unset* key (so a freshly
@@ -80,7 +90,47 @@ pub fn read_config(conn: &Connection) -> Result<CliConfig, CliError> {
             }
         };
     }
+    if let Some(v) = get(conn, "pre2025_method")? {
+        cfg.pre2025_method = match v.as_str() {
+            "fifo" => LotMethod::Fifo,
+            "lifo" => LotMethod::Lifo,
+            "hifo" => LotMethod::Hifo,
+            _ => {
+                return Err(CliError::BadConfigValue {
+                    key: "pre2025_method".into(),
+                    value: v,
+                })
+            }
+        };
+    }
+    if let Some(v) = get(conn, "pre2025_method_attested")? {
+        cfg.pre2025_method_attested = match v.as_str() {
+            "true" => true,
+            "false" => false,
+            _ => {
+                return Err(CliError::BadConfigValue {
+                    key: "pre2025_method_attested".into(),
+                    value: v,
+                })
+            }
+        };
+    }
     Ok(cfg)
+}
+
+/// Persist the pre-2025 lot identification method and its attestation flag.
+pub fn set_pre2025_method(conn: &Connection, m: LotMethod, attested: bool) -> Result<(), CliError> {
+    conn.execute(
+        "INSERT INTO cli_config(key,value) VALUES('pre2025_method',?1)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        [lot_method_tag(m)],
+    )?;
+    conn.execute(
+        "INSERT INTO cli_config(key,value) VALUES('pre2025_method_attested',?1)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        [if attested { "true" } else { "false" }],
+    )?;
+    Ok(())
 }
 
 /// Persist the TP8 fee treatment. Both (c) and (b) are writable; (b) is opt-in only.
@@ -101,7 +151,7 @@ pub fn set_fee_treatment(conn: &Connection, t: FeeTreatment) -> Result<(), CliEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use btctax_core::FeeTreatment;
+    use btctax_core::{FeeTreatment, LotMethod};
 
     fn mem() -> rusqlite::Connection {
         let c = rusqlite::Connection::open_in_memory().unwrap();
@@ -135,12 +185,33 @@ mod tests {
     }
 
     #[test]
-    fn to_projection_carries_treatment_and_fifo() {
+    fn default_pre2025_method_is_fifo_unattested() {
         let c = mem();
-        set_fee_treatment(&c, FeeTreatment::TreatmentB).unwrap();
-        let proj = read_config(&c).unwrap().to_projection();
-        assert_eq!(proj.self_transfer_fee, FeeTreatment::TreatmentB);
-        assert!(matches!(proj.lot_method, btctax_core::LotMethod::Fifo));
+        let cfg = read_config(&c).unwrap();
+        assert!(!matches!(cfg.pre2025_method, LotMethod::Hifo));
+        assert_eq!(cfg.pre2025_method, LotMethod::Fifo);
+        assert!(!cfg.pre2025_method_attested);
+        assert_eq!(cfg.to_projection().pre2025_method, LotMethod::Fifo);
+    }
+    #[test]
+    fn set_pre2025_method_round_trips_with_attestation() {
+        let c = mem();
+        set_pre2025_method(&c, LotMethod::Hifo, true).unwrap();
+        let cfg = read_config(&c).unwrap();
+        assert_eq!(cfg.pre2025_method, LotMethod::Hifo);
+        assert!(cfg.pre2025_method_attested);
+        assert_eq!(cfg.to_projection().pre2025_method, LotMethod::Hifo);
+    }
+    #[test]
+    fn bad_pre2025_method_value_is_an_error() {
+        let c = mem();
+        c.execute(
+            "INSERT INTO cli_config(key,value) VALUES('pre2025_method','zzz')",
+            [],
+        )
+        .unwrap();
+        assert!(matches!(read_config(&c).unwrap_err(),
+            CliError::BadConfigValue { ref key, .. } if key == "pre2025_method"));
     }
 
     // M2: read_config must not fail with "no such table" on a vault that was created

@@ -31,6 +31,18 @@ pub enum BlockerKind {
     SafeHarborTimebar,
     UnmatchedOutflows,
     Pre2025MethodNote,
+    /// §A.5(a): a `MethodElection` whose `effective_from` precedes its made-date or TRANSITION_DATE —
+    /// a standing order cannot be back-dated (§1.1012-1(j) no post-hoc identification). Hard.
+    MethodElectionBackdated,
+    /// §A.4: a `LotSelection` that fails validation (unknown/cross-wallet/over-drawn lot, or principal
+    /// mismatch). Hard — the named identification is unusable so the disposal's tax is gated.
+    LotSelectionInvalid,
+    /// §A.7 / §7.4: the live `pre2025_method` config differs from the GOVERNING (effective) allocation's
+    /// recorded `pre2025_method`. The allocation conserves under ITS recorded method, so this is a method
+    /// drift — NOT bad data (never `SafeHarborUnconservable`). Hard: a post-attestation method change would
+    /// silently break conservation between the pre-2025 residue and the irrevocable allocation. Clearable by
+    /// reverting the live config to the recorded method; the irrevocable allocation is never rewritten.
+    Pre2025MethodConflictsAllocation,
 }
 impl BlockerKind {
     pub fn severity(self) -> Severity {
@@ -42,7 +54,10 @@ impl BlockerKind {
             | DecisionConflict
             | UnknownBasisInbound
             | Unclassified
-            | SafeHarborUnconservable => Severity::Hard,
+            | SafeHarborUnconservable
+            | MethodElectionBackdated
+            | LotSelectionInvalid
+            | Pre2025MethodConflictsAllocation => Severity::Hard,
             SafeHarborTimebar | UnmatchedOutflows | Pre2025MethodNote => Severity::Advisory,
         }
     }
@@ -181,5 +196,23 @@ impl LedgerState {
             event,
             detail: detail.into(),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_blockers_are_hard() {
+        assert_eq!(
+            BlockerKind::MethodElectionBackdated.severity(),
+            Severity::Hard
+        );
+        assert_eq!(BlockerKind::LotSelectionInvalid.severity(), Severity::Hard);
+        assert_eq!(
+            BlockerKind::Pre2025MethodConflictsAllocation.severity(),
+            Severity::Hard
+        );
     }
 }

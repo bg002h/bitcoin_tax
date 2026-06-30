@@ -1,7 +1,9 @@
 use btctax_core::event::*;
 use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
-use btctax_core::project::{conservation_report, project, FeeTreatment, ProjectionConfig};
+use btctax_core::project::{
+    conservation_report, project, FeeTreatment, LotMethod, ProjectionConfig,
+};
 use btctax_core::state::*;
 use rust_decimal_macros::dec;
 use std::collections::BTreeSet;
@@ -80,11 +82,13 @@ fn sell(
         }),
     )
 }
+#[allow(clippy::too_many_arguments)]
 fn alloc(
     seq: u64,
     made: time::OffsetDateTime,
     method: AllocMethod,
     attested: bool,
+    pre2025_method: LotMethod,
     lots: Vec<AllocLot>,
 ) -> LedgerEvent {
     dec_ev(
@@ -95,6 +99,7 @@ fn alloc(
             as_of_date: date!(2025 - 01 - 01),
             method,
             timely_allocation_attested: attested,
+            pre2025_method,
         }),
     )
 }
@@ -179,6 +184,7 @@ fn actual_position_barred_by_earlier_first_disposition_is_inert_path_a() {
             datetime!(2025-03-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             false, // made AFTER the sell
+            LotMethod::Fifo,
             vec![alloc_lot(cb(), 100_000, dec!(60.00), date!(2024 - 06 - 01))],
         ),
     ];
@@ -213,6 +219,7 @@ fn actual_position_barred_by_return_due_date_is_inert() {
             datetime!(2026-05-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             false, // made after 2026-04-15 (no 2025 disposition -> return-due prong governs)
+            LotMethod::Fifo,
             vec![alloc_lot(cb(), 100_000, dec!(60.00), date!(2024 - 06 - 01))],
         ),
     ];
@@ -245,6 +252,7 @@ fn attestation_bypasses_the_bar_path_b_governs() {
             datetime!(2025-03-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             true, // attested
+            LotMethod::Fifo,
             vec![
                 alloc_lot(cb(), 50_000, dec!(30.00), date!(2024 - 06 - 01)),
                 alloc_lot(cb(), 50_000, dec!(30.00), date!(2024 - 07 - 01)),
@@ -312,6 +320,7 @@ fn confirmed_self_transfer_does_not_trip_the_bar() {
             datetime!(2025-06-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             false,
+            LotMethod::Fifo,
             vec![alloc_lot(cb(), 100_000, dec!(60.00), date!(2024 - 06 - 01))],
         ),
     ];
@@ -338,6 +347,7 @@ fn conservation_mismatch_is_hard_unconservable_not_timebar() {
             datetime!(2025-02-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             false,
+            LotMethod::Fifo,
             vec![alloc_lot(cb(), 90_000, dec!(54.00), date!(2024 - 06 - 01))], // Σsat 90k != 100k
         ),
     ];
@@ -366,6 +376,7 @@ fn void_of_effective_allocation_is_a_decision_conflict() {
             datetime!(2025-02-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             true, // effective
+            LotMethod::Fifo,
             vec![
                 alloc_lot(cb(), 50_000, dec!(30.00), date!(2024 - 06 - 01)),
                 alloc_lot(cb(), 50_000, dec!(30.00), date!(2024 - 07 - 01)),
@@ -403,6 +414,7 @@ fn void_of_inert_allocation_applies_no_conflict() {
             datetime!(2025-03-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             false, // inert (timebar)
+            LotMethod::Fifo,
             vec![alloc_lot(cb(), 100_000, dec!(60.00), date!(2024 - 06 - 01))],
         ),
         dec_ev(
@@ -455,6 +467,7 @@ fn reclassify_creating_a_disposition_flips_effective_to_inert() {
             datetime!(2025-03-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             false,
+            LotMethod::Fifo,
             vec![alloc_lot(cb(), 100_000, dec!(60.00), date!(2024 - 06 - 01))],
         ),
     ];
@@ -556,6 +569,7 @@ fn calendar_date_boundary_keeps_a_2024_local_disposition_pre_2025() {
             datetime!(2025-03-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             false,
+            LotMethod::Fifo,
             vec![alloc_lot(cb(), 80_000, dec!(48.00), date!(2024 - 06 - 01))], // conserves to Universal-after-pre2025 sale
         ),
     ];
@@ -714,6 +728,7 @@ fn tp8b_self_transfer_fee_mini_disposition_trips_the_bar() {
             datetime!(2025-06-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             false,
+            LotMethod::Fifo,
             vec![alloc_lot(cb(), 100_000, dec!(60.00), date!(2024 - 06 - 01))],
         ),
     ];
@@ -745,6 +760,7 @@ fn path_b_seeded_lot_relocation_no_lotid_collision() {
             datetime!(2025-02-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             true, // attested → effective regardless of first-disposition timing
+            LotMethod::Fifo,
             vec![
                 alloc_lot(cb(), 60_000, dec!(36.00), date!(2024 - 01 - 01)),
                 alloc_lot(cb(), 40_000, dec!(24.00), date!(2024 - 06 - 01)),
@@ -852,6 +868,7 @@ fn path_b_preserves_gift_dual_loss_basis() {
             datetime!(2024-12-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             false,
+            LotMethod::Fifo,
             vec![alloc_lot_dual(
                 cb(),
                 100_000,
@@ -926,6 +943,7 @@ fn path_b_preserves_gift_tacking() {
             datetime!(2024-12-01 00:00:00 UTC),
             AllocMethod::ActualPosition,
             false,
+            LotMethod::Fifo,
             vec![alloc_lot_dual(
                 cb(),
                 100_000,

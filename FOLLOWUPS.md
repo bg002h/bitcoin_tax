@@ -77,6 +77,56 @@ Ran `cycle-prep` recon (`reviews/cycle-prep-recon-2026-06-29.md`) on four slugs,
 - **`appraisal-trigger-precision` — NO-OP** (cycle-prep found the follow-up structurally wrong: no Phase-1
   FMV>$5k auto-flag exists; `appraisal_required` is a user CLI bool). Corrected the citation; Phase-2 only.
 
+## Sub-project A (lot-id substrate) — items folded from the R0-plan review round 1 (2026-06-29)
+
+- **Acquisition-date FIFO corrects a latent §1012 foundation deviation for relocated/seeded lots (R0-plan C1).**
+  The shipped foundation's `consume_fifo` walks **insertion (push) order** (`pools.rs:58-100`); Sub-project A's plan
+  makes FIFO **acquisition-date order** (`acquired_at` asc, tie `lot_id` asc) at all six consume sites. For
+  **relocated** (self-transfer, `fold.rs:537-553,580-583`) and **Path-B-seeded** (`resolve.rs:566-586` →
+  `transition.rs:67-73`) lots — which carry an `acquired_at` older than their push position — this is a **material
+  behavior change**, not a no-op: it changes reported basis/term on the affected disposals **and** the safe-harbor
+  conservation residue `snap.basis` (`transition.rs:25-51`; guard `resolve.rs:546-547`). It is the **legally-correct**
+  rule (§1.1012-1(j)(3)(i): earliest *acquisition*; a self-transfer is not a new acquisition, `fold.rs:545`). Landed
+  deliberately in A's plan (Task 2 deliberate-change statement + mandatory fixture-re-verification; RED→GREEN divergence
+  KATs in Tasks 3 and 6), conservation-re-verified across existing self-transfer / Path-B / safe-harbor fixtures.
+  **No real users exist yet (foundation just shipped), so no migration/restatement is owed.** Spec §A.3 reframed
+  (deliberate-correctness note) + the spec M2 fold-record line updated. — RESOLVED-in-design (lands when A is
+  implemented). — R0-plan C1, `reviews/R0-plan-lot-id-substrate-round-1.md`.
+
+- **N3 (verified N/A) — `inspect::verify` "reads config twice."** `Session::load_events_and_project()` returns a
+  **`ProjectionConfig`** as its third tuple element (burndown 2026-06-29, commit 39e09e0), *not* a `CliConfig`. `verify`
+  needs the `CliConfig` (declared `pre2025_method` + `pre2025_method_attested`) for its new surfacing, so the separate
+  `session.config()?` read is **required**, not redundant. No change. — R0-plan N3.
+
+## Sub-project A (lot-id substrate) — whole-branch review round 1 deferrals (2026-06-29)
+
+The blocking Important (post-hoc selection + in-force election mis-labeled `StandingOrder`) and in-area Minors
+**M2** (`evaluate_disposal` existing-event principal) + **M3** (`config --set-forward-method` apply-all) were FIXED
+on `feat/lot-id-substrate` (Task-10 fold). The remaining items below are deferred (non-blocking).
+Source: `reviews/whole-branch-review-lot-id-substrate-round-1.md`.
+
+- **M1 (Minor coverage gap) — `disposal_compliance` omits method-honoring SelfTransfers.** SelfTransfers produce no
+  Disposal/Removal record, so they never get a compliance row (`compliance.rs` iterates only `state.disposals` /
+  `state.removals`). A.3 lists SelfTransfer as method-honoring (a §1.1012-1(j) "transfer" that pre-positions lots
+  for future HIFO/gains), so a post-hoc `select-lots` on a self-transfer is never compliance-flagged. Decide
+  explicitly whether transfers belong in the projection; if intentionally excluded, document it. — OPEN. — whole-branch M1.
+
+- **Task-4 plan-text `dec!(90.00)` → `90.25` (doc only).** A KAT-text figure in the Task-4 plan reads `90.00` where
+  the implemented (correct) TP8(c) fee re-home yields `90.25`. Implementation is correct; only the plan doc text is
+  stale. Reconcile the plan text. — OPEN (doc). — whole-branch Task-4 triage.
+
+- **Task-7-M2 — shared election-collector DRY.** `compliance.rs::collect_elections` duplicates resolve's
+  `MethodElectionBackdated` guard (both kept in sync by the shared spec rule). Extract a single shared collector to
+  reduce drift risk (would also have de-risked the M1 classifier fix). DRY only — no behavior change. — OPEN. — whole-branch Task-7-M2.
+
+- **Task-8 nits.** (a) `ComplianceStatus` is rendered with `{:?}` in `render_verify` — compliance-facing output should
+  use a stable `compliance_status_display` (mirrors the burndown `*_tag()` work). (b) `selection_count` lacks a
+  `Decision`-guard; moot in practice (a `LotSelection` payload only ever rides a `Decision` event). — OPEN. — whole-branch N1 / Task-8.
+
+- **Task-9 nits.** (a) `evaluate_disposal`'s synthetic event id uses a `u64::MAX` sentinel — documented and
+  unreachable by real sequences; revisit only if a typed sentinel is preferred. (b) Add a pinning KAT asserting
+  `evaluate_disposal(existing-disposal, no selection) == project()` for that disposal (no-op identity). — OPEN. — whole-branch Task-9.
+
 ## ✅ RESOLVED earlier (kept for record)
 
 ## btctax-core whole-branch fixes (2026-06-29) — both Important findings resolved
@@ -260,3 +310,8 @@ M3, N-2) were folded into the plan (see its "Fold record (round 1)"). These rema
   (the CLI-I2 whole-branch fix made `safe_harbor_status` prefer the effective-Path-B signal over the advisory;
   the burndown fix (commit f6880e6) extended that signal to disposal/removal legs for the all-lots-consumed
   case). `verify` no longer mislabels an effective Path B as time-barred. See the burndown section above.
+
+## Sub-project A (lot-id substrate) — whole-diff review deferrals (2026-06-29, round 2 residuals)
+- **N2 — `evaluate_disposal` `lots_after` semantics for C.** Confirm the returned post-disposal lots/outcome shape is what Sub-project C (optimizer + Mode-2) needs before C consumes it. — OPEN (C planning).
+- **N3 — B per-year hard-blocker gate.** B must refuse a TaxResult / C must refuse to optimize for a tax year with unresolved Hard blockers (basis-pending/uncovered/LotSelectionInvalid/etc.). — OPEN (B planning).
+- **M3 binary-dispatch test.** The `config` multi-flag apply-all + attest-guard are tested at library level, not by driving the real clap `Command::Config` arm; add a binary-level dispatch test to fully retire the Task-5 note. — OPEN (B/C or a CLI test pass).

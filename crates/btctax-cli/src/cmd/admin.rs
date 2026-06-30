@@ -1,9 +1,9 @@
 //! `config`, `export-snapshot` (FR10), `backup-key` — administrative commands. Config surfaces the TP8
-//! (c)/(b) treatment + the (single-variant) lot method; export/backup arrive in Task 15.
-use crate::config::set_fee_treatment;
+//! (c)/(b) treatment + the pre-2025 lot method; export/backup arrive in Task 15.
+use crate::config::{set_fee_treatment, set_pre2025_method as config_set_pre2025_method};
 use crate::render::write_csv_exports;
 use crate::{CliConfig, CliError, Session};
-use btctax_core::FeeTreatment;
+use btctax_core::{FeeTreatment, LotMethod};
 use btctax_store::Passphrase;
 use std::path::{Path, PathBuf};
 
@@ -22,6 +22,19 @@ pub fn set_config(
         set_fee_treatment(session.conn(), t)?;
         session.save()?;
     }
+    session.config()
+}
+
+/// Persist the pre-2025 lot identification method and attestation flag, then return the resulting config.
+pub fn set_pre2025_method(
+    vault_path: &Path,
+    pp: &Passphrase,
+    m: LotMethod,
+    attested: bool,
+) -> Result<CliConfig, CliError> {
+    let mut session = Session::open(vault_path, pp)?;
+    config_set_pre2025_method(session.conn(), m, attested)?;
+    session.save()?;
     session.config()
 }
 

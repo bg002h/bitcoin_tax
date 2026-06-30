@@ -2,7 +2,7 @@ use crate::conventions::{tax_date, Sat, TaxDate, Usd, TRANSITION_DATE, TY2025_RE
 use crate::event::*;
 use crate::identity::{EventId, LotId, SourceRef, WalletId};
 use crate::price::PriceProvider;
-use crate::project::{FeeTreatment, ProjectionConfig};
+use crate::project::{FeeTreatment, LotMethod, ProjectionConfig};
 use crate::state::{Blocker, BlockerKind, Lot};
 use std::collections::{BTreeMap, BTreeSet};
 use time::{OffsetDateTime, UtcOffset};
@@ -115,10 +115,24 @@ pub struct AllocationVoid {
     pub target: EventId,
 }
 
+/// An in-force forward method election (§A.5(a)). Collected in `resolve` from non-voided, non-backdated
+/// `MethodElection` decisions; the latest-in-force by `(effective_from, decision_seq)` governs per-wallet
+/// disposals on/after `effective_from` (NFR4: a total order, no `Date::now`/RNG).
+#[derive(Debug, Clone)]
+pub struct ElectionRec {
+    pub effective_from: TaxDate,
+    pub method: crate::LotMethod,
+    pub decision_seq: u64,
+}
+
 pub struct Resolution {
     pub timeline: Vec<Eff>,
     pub transition: TransitionMode,
     pub blockers: Vec<Blocker>,
+    /// In-force forward method elections (§A.5(a)); empty ⇒ FIFO default for all per-wallet disposals.
+    pub elections: Vec<ElectionRec>,
+    /// Per-disposal named-lot selections (§A.4). Empty this task; populated in Task 4.
+    pub selections: BTreeMap<EventId, Vec<crate::event::LotPick>>,
 }
 
 /// Private outcome of resolving an `ImportConflict` via a decision.
@@ -503,6 +517,100 @@ pub fn resolve(
         });
     }
 
+    // ── 2b. §A.5(a) MethodElection collection ────────────────────────────────────────────────────
+    // Non-voided forward standing orders. A `MethodElection` whose `effective_from` precedes its
+    // made-date (back-dating) or TRANSITION_DATE (pre-transition) is a HARD `MethodElectionBackdated`
+    // blocker and contributes no in-force record (§1.1012-1(j): no post-hoc identification, ever).
+    let mut elections: Vec<ElectionRec> = Vec::new();
+    for (seq, d) in &decisions {
+        if voided.contains(&d.id) {
+            continue;
+        }
+        if let EventPayload::MethodElection(me) = &d.payload {
+            let made = tax_date(d.utc_timestamp, d.original_tz);
+            if me.effective_from < TRANSITION_DATE || me.effective_from < made {
+                blockers.push(Blocker {
+                    kind: BlockerKind::MethodElectionBackdated,
+                    event: Some(d.id.clone()),
+                    detail: "MethodElection effective_from precedes its made-date or TRANSITION_DATE (2025-01-01) — a standing order cannot be back-dated".into(),
+                });
+                continue;
+            }
+            elections.push(ElectionRec {
+                effective_from: me.effective_from,
+                method: me.method,
+                decision_seq: *seq,
+            });
+        }
+    }
+    // ── 2c. §A.4 LotSelection collection + validation ────────────────────────────────────────────
+    // Per-disposal specific identification, keyed by its target `disposal_event`. Reuses `decisions`
+    // (seq order, NFR4) and `voided`:
+    //   - voided LotSelections are excluded;
+    //   - two non-voided LotSelections targeting the SAME disposal → DecisionConflict (NEITHER applies),
+    //     mirroring the duplicate-ReclassifyOutflow pattern above;
+    //   - a selection targeting a non-honoring/unknown event (only Dispose/GiftOut/Donate/SelfTransfer
+    //     are selectable — NOT PendingOut/fee legs) → hard `LotSelectionInvalid`;
+    //   - principal conservation (§A.4(a)): Σ picked sat MUST equal the disposal's principal sat. The
+    //     on-chain `fee_sat` is excluded and consumes FIFO from the post-selection remainder. NOTE
+    //     (from Task 2): the pool's `consume_picks` returns shortfall=0, so this Σ check MUST live here.
+    // Existence / per-wallet / over-draw are surfaced in the fold (the pool's `selection_error` raises
+    // `LotSelectionInvalid`). Every rejection DROPS the selection so the fold falls back to method
+    // order — Σsat/Σbasis stay conserved on every path.
+    let honoring: BTreeMap<EventId, Sat> = timeline
+        .iter()
+        .filter_map(|e| honoring_principal(&e.op).map(|s| (e.id.clone(), s)))
+        .collect();
+
+    let mut selections: BTreeMap<EventId, Vec<crate::event::LotPick>> = BTreeMap::new();
+    let mut seen: BTreeSet<EventId> = BTreeSet::new(); // disposal_events already claimed (dup detection)
+    let mut dup: BTreeSet<EventId> = BTreeSet::new();
+    for (_seq, d) in &decisions {
+        if voided.contains(&d.id) {
+            continue;
+        }
+        let EventPayload::LotSelection(ls) = &d.payload else {
+            continue;
+        };
+        if !seen.insert(ls.disposal_event.clone()) {
+            blockers.push(Blocker {
+                kind: BlockerKind::DecisionConflict,
+                event: Some(d.id.clone()),
+                detail: "duplicate LotSelection for the same disposal_event".into(),
+            });
+            dup.insert(ls.disposal_event.clone());
+            continue;
+        }
+        selections.insert(ls.disposal_event.clone(), ls.lots.clone());
+    }
+    for id in &dup {
+        selections.remove(id); // a conflicted disposal applies NEITHER selection
+    }
+    // targeting + principal-conservation (§A.4(a)); existence/per-wallet are checked in the fold.
+    selections.retain(|disposal, picks| match honoring.get(disposal) {
+        None => {
+            blockers.push(Blocker {
+                kind: BlockerKind::LotSelectionInvalid,
+                event: Some(disposal.clone()),
+                detail: "LotSelection targets a non-honoring or unknown event (only Dispose/GiftOut/Donate/SelfTransfer — not PendingOut/fee legs)".into(),
+            });
+            false
+        }
+        Some(&principal) => {
+            let picked: Sat = picks.iter().map(|p| p.sat).sum();
+            if picked != principal {
+                blockers.push(Blocker {
+                    kind: BlockerKind::LotSelectionInvalid,
+                    event: Some(disposal.clone()),
+                    detail: format!("LotSelection must conserve principal: picked {picked} sat != disposal principal {principal} sat (on-chain fee_sat is excluded and consumes FIFO from the remainder)"),
+                });
+                false
+            } else {
+                true
+            }
+        }
+    });
+
     // ── 3. §7.4 / TP6 transition effectiveness ───────────────────────────────────────────────────
     // Re-evaluated deterministically on every rebuild; reads ONLY the pre-2025 Universal snapshot, the
     // allocations, and `first_2025_disposition` — none of which depend on `transition` (acyclic, I-1/§7.2).
@@ -516,11 +624,13 @@ pub fn resolve(
         .map(|e| e.date())
         .min();
 
-    // (3-prereq) The pre-2025 Universal residue is allocation-INDEPENDENT — compute it ONCE.
-    let snap = crate::project::transition::universal_snapshot(&timeline, prices, config);
-
+    // (3-prereq) §A.7: the pre-2025 Universal residue is METHOD-aware — each candidate allocation's
+    // conservation is checked against the residue computed under ITS OWN recorded `pre2025_method` (below),
+    // not a single live-config snapshot. So a non-FIFO filer's allocation conserves against the residue it
+    // actually listed; a live-config/recorded-method drift is flagged after Path selection (M2), never here.
     let due = TY2025_RETURN_DUE;
-    let mut effective: Vec<(EventId, Vec<Lot>)> = Vec::new(); // (allocation id, pre-built seed lots)
+    // (allocation id, pre-built seed lots, the allocation's RECORDED pre2025_method)
+    let mut effective: Vec<(EventId, Vec<Lot>, LotMethod)> = Vec::new();
     for (_seq, d) in &decisions {
         if voided.contains(&d.id) {
             continue;
@@ -541,7 +651,18 @@ pub fn resolve(
         let timebarred = (!a.timely_allocation_attested && bar.is_some_and(|b| made > b))
             || (a.method == AllocMethod::ProRata && !a.timely_allocation_attested);
 
-        // (3) Conservation vs the pre-2025 Universal snapshot. HARD on failure; attestation cannot bypass it.
+        // (3) Conservation vs the pre-2025 Universal snapshot, computed under THIS allocation's RECORDED
+        //     method (§A.7) — so a non-FIFO filer conserves against the residue it actually listed. HARD on
+        //     failure; attestation cannot bypass it. (A live-config/recorded drift is NOT a conservation
+        //     failure: it is flagged after Path selection as `Pre2025MethodConflictsAllocation`, M2.)
+        let snap = crate::project::transition::universal_snapshot(
+            &timeline,
+            prices,
+            config,
+            a.pre2025_method,
+            &elections,
+            &selections,
+        );
         let alloc_sat: Sat = a.lots.iter().map(|l| l.sat).sum();
         let alloc_basis: Usd = a.lots.iter().map(|l| l.usd_basis).sum();
         let unconservable = alloc_sat != snap.held_sat || alloc_basis != snap.basis;
@@ -583,13 +704,13 @@ pub fn resolve(
                 basis_pending: false,
             })
             .collect();
-        effective.push((d.id.clone(), seed));
+        effective.push((d.id.clone(), seed, a.pre2025_method));
     }
 
     // (5) Irrevocability (§7.4(2)): a Void of an EFFECTIVE allocation → conflict (it stays in force); a
     //     Void of an inert/absent allocation simply applies (no conflict; Path A already governs).
     for v in &allocation_voids {
-        if effective.iter().any(|(id, _)| id == &v.target) {
+        if effective.iter().any(|(id, _, _)| id == &v.target) {
             blockers.push(Blocker {
                 kind: BlockerKind::DecisionConflict,
                 event: Some(v.void_id.clone()),
@@ -601,10 +722,28 @@ pub fn resolve(
     // Multiple effective allocations → conflict; exactly one governs Path B; none → Path A default.
     let transition = match effective.len() {
         0 => TransitionMode::PathA,
-        1 => TransitionMode::PathB {
-            seed: effective.into_iter().next().expect("len == 1").1,
-        },
+        1 => {
+            let (id, seed, recorded_method) = effective.into_iter().next().expect("len == 1");
+            // §A.7.3 (M2): the conflict is "live config != the GOVERNING allocation's recorded method",
+            // emitted ONCE, only for the single effective allocation. Conservation already passed (the
+            // snapshot used `recorded_method`), so this is NEVER `SafeHarborUnconservable`; Path B stays
+            // effective — the irrevocable allocation (§7.4) pins the method and is never rewritten. Clears
+            // by reverting the live config to the recorded method (no deadlock with irrevocability).
+            if config.pre2025_method != recorded_method {
+                blockers.push(Blocker {
+                    kind: BlockerKind::Pre2025MethodConflictsAllocation,
+                    event: Some(id),
+                    detail: format!(
+                        "live pre2025_method ({:?}) differs from this allocation's recorded method ({:?}); revert the config to the recorded method (the irrevocable allocation pins it, §7.4)",
+                        config.pre2025_method, recorded_method
+                    ),
+                });
+            }
+            TransitionMode::PathB { seed }
+        }
         _ => {
+            // Multiple effective: already hard-blocked by DecisionConflict → Path A. Do NOT evaluate the
+            // method-conflict here (M2: it must fire only in the single-effective arm, never spuriously).
             blockers.push(Blocker {
                 kind: BlockerKind::DecisionConflict,
                 event: None,
@@ -618,6 +757,8 @@ pub fn resolve(
         timeline,
         transition,
         blockers,
+        elections,
+        selections,
     }
 }
 
@@ -645,6 +786,18 @@ fn is_disposition_op(op: &Op, config: &ProjectionConfig) -> bool {
             config.self_transfer_fee == FeeTreatment::TreatmentB && fee_sat.unwrap_or(0) > 0
         }
         _ => false,
+    }
+}
+
+/// §A.4: the principal sat of a method-honoring disposition — the ONLY events a `LotSelection` may
+/// target. `PendingOut`, fee legs, and non-dispositions are not selectable (→ `LotSelectionInvalid`).
+fn honoring_principal(op: &Op) -> Option<Sat> {
+    match op {
+        Op::Dispose { sat, .. }
+        | Op::GiftOut { sat, .. }
+        | Op::Donate { sat, .. }
+        | Op::SelfTransfer { sat, .. } => Some(*sat),
+        _ => None, // PendingOut, fee legs, non-disposals -> not selectable
     }
 }
 

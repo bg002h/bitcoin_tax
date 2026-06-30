@@ -8,9 +8,9 @@ use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::{
     project, AllocLot, AllocMethod, BlockerKind, ClassifyInbound, ClassifyRaw, EventId,
-    EventPayload, InboundClass, LedgerEvent, ManualFmv, OutflowClass, ReclassifyOutflow,
-    RejectImport, SafeHarborAllocation, SupersedeImport, TransferLink, TransferTarget, Usd,
-    VoidDecisionEvent,
+    EventPayload, InboundClass, LedgerEvent, LotId, LotMethod, LotPick, LotSelection, ManualFmv,
+    MethodElection, OutflowClass, ReclassifyOutflow, RejectImport, SafeHarborAllocation,
+    SupersedeImport, TaxDate, TransferLink, TransferTarget, Usd, VoidDecisionEvent,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -250,8 +250,149 @@ pub fn safe_harbor_allocate(
         as_of_date: TRANSITION_DATE,
         method,
         timely_allocation_attested: attested,
+        // §A.7: capture the live attested pre-2025 method at attestation time. The residue above was
+        // projected under this SAME `cfg.pre2025_method`, so the listed lots conserve against the engine's
+        // method-aware snapshot. Immutable thereafter; a later live-config change fires the hard
+        // `Pre2025MethodConflictsAllocation` rather than silently breaking conservation.
+        pre2025_method: cfg.pre2025_method,
     });
     append_and_save(&mut session, payload, now)
+}
+
+/// §A.4 / SPEC Task 5: emit a `LotSelection` decision for a specific disposal. `disposal_ref` is the
+/// canonical `EventId` string of the disposal event; `picks` is at least one `LotPick`. The engine
+/// validates completeness (Σsat == disposal principal) and lot existence in the fold; this function
+/// only appends the decision — it does NOT attempt to validate up-front (that would require a full
+/// projection, which the engine always does). Identification must exist by the time of sale (§1.1012-1(j)).
+pub fn select_lots(
+    vault_path: &Path,
+    pp: &Passphrase,
+    disposal_ref: &str,
+    picks: Vec<LotPick>,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let disposal_event = parse_event_id(disposal_ref)?;
+    if picks.is_empty() {
+        return Err(CliError::Usage(
+            "select-lots needs at least one --from <lot-id>:<sat>".into(),
+        ));
+    }
+    let mut session = Session::open(vault_path, pp)?;
+    append_and_save(
+        &mut session,
+        EventPayload::LotSelection(LotSelection {
+            disposal_event,
+            lots: picks,
+        }),
+        now,
+    )
+}
+
+/// §A.4 / SPEC Task 5: batch-import `LotSelection` decisions from a CSV file.
+///
+/// CSV format: `disposal_ref,origin_event_id,split_sequence,sat` (header required, validated loudly).
+/// Rows sharing a `disposal_ref` are grouped into a single `LotSelection` (one decision per disposal);
+/// grouping is by BTreeMap on the canonical disposal_ref string → deterministic order (NFR4).
+/// All decisions are written in one session → one `save()`.
+pub fn import_selections(
+    vault_path: &Path,
+    pp: &Passphrase,
+    csv_path: &Path,
+    now: OffsetDateTime,
+) -> Result<Vec<EventId>, CliError> {
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .from_path(csv_path)?;
+    {
+        let hdr = rdr.headers()?;
+        let cols: Vec<&str> = hdr.iter().collect();
+        if cols != ["disposal_ref", "origin_event_id", "split_sequence", "sat"] {
+            return Err(CliError::Usage(format!(
+                "import-selections CSV header must be \
+                 disposal_ref,origin_event_id,split_sequence,sat; got {cols:?}"
+            )));
+        }
+    }
+    // Group picks by disposal_ref; BTreeMap gives deterministic iteration order (NFR4).
+    let mut by_disposal: std::collections::BTreeMap<String, Vec<LotPick>> =
+        std::collections::BTreeMap::new();
+    for rec in rdr.records() {
+        let rec = rec?;
+        let disposal_ref = rec
+            .get(0)
+            .ok_or_else(|| CliError::Usage("missing disposal_ref".into()))?
+            .to_string();
+        let origin_str = rec
+            .get(1)
+            .ok_or_else(|| CliError::Usage("missing origin_event_id".into()))?;
+        let split_str = rec
+            .get(2)
+            .ok_or_else(|| CliError::Usage("missing split_sequence".into()))?;
+        let sat_str = rec
+            .get(3)
+            .ok_or_else(|| CliError::Usage("missing sat".into()))?;
+        let origin_event_id = parse_event_id(origin_str)?;
+        let split_sequence = split_str
+            .trim()
+            .parse::<u32>()
+            .map_err(|e| CliError::Usage(format!("bad split_sequence {split_str:?}: {e}")))?;
+        let sat = sat_str
+            .trim()
+            .parse::<i64>()
+            .map_err(|e| CliError::Usage(format!("bad sat {sat_str:?}: {e}")))?;
+        by_disposal.entry(disposal_ref).or_default().push(LotPick {
+            lot: LotId {
+                origin_event_id,
+                split_sequence,
+            },
+            sat,
+        });
+    }
+    let mut session = Session::open(vault_path, pp)?;
+    let mut ids = Vec::new();
+    for (disposal_ref, lots) in by_disposal {
+        let disposal_event = parse_event_id(&disposal_ref)?;
+        let id = append_decision(
+            session.conn(),
+            EventPayload::LotSelection(LotSelection {
+                disposal_event,
+                lots,
+            }),
+            now,
+            UtcOffset::UTC,
+            None,
+        )?;
+        ids.push(id);
+    }
+    session.save()?;
+    Ok(ids)
+}
+
+/// M3 / SPEC A.1: append a `MethodElection` decision — the forward standing order.
+///
+/// This is an EVENT, not a config flag mutation. The standing order is irrevocable (unless voided)
+/// and governs all method-honoring disposals on/after `effective_from`. Back-dating is blocked by
+/// the engine (`MethodElectionBackdated` hard blocker when `effective_from < made-date`).
+///
+/// When `effective_from` is `None`, defaults to the decision's made-date (`now` in UTC), which
+/// satisfies the `effective_from >= made-date` invariant by construction.
+pub fn set_forward_method(
+    vault_path: &Path,
+    pp: &Passphrase,
+    m: LotMethod,
+    effective_from: Option<TaxDate>,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let effective_from = effective_from.unwrap_or_else(|| now.to_offset(UtcOffset::UTC).date());
+    let mut session = Session::open(vault_path, pp)?;
+    append_and_save(
+        &mut session,
+        EventPayload::MethodElection(MethodElection {
+            effective_from,
+            method: m,
+        }),
+        now,
+    )
 }
 
 /// FR7: attest an existing allocation. Events are immutable, so attestation = void the single live prior
