@@ -80,10 +80,12 @@ It overrides the standing order for that one disposal. It selects on the **full 
 
 `select-lots` may target any **method-honoring** op (Dispose/GiftOut/Donate/SelfTransfer); targeting `PendingOut` or a fee leg is rejected with `LotSelectionInvalid`.
 
-Ordering, when no `LotSelection` applies, is by method (a **total order**, NFR4 — see M2):
-- **FIFO** = `acquired_at` asc, tie → `lot_id` asc.
+Ordering, when no `LotSelection` applies, is by method, each a **total order** (NFR4). **FIFO is acquisition-date order, not insertion order** — this is a **deliberate, material adoption of acquisition-date FIFO that replaces the foundation's insertion-order FIFO** at all consume sites, *including for relocated and Path-B-seeded lots*. It is **not merely a tiebreak rule** (see the deliberate-correctness note below):
+- **FIFO** = `acquired_at` asc, tie → `lot_id` asc — earliest *acquisition* (§1.1012-1(j)(3)(i)). A self-transfer-relocated fragment retains its **original** `acquired_at` (TP7/TP8(c) — a self-transfer is **not** a new acquisition), so under FIFO it is consumed in **acquisition order**, NOT in the order it was pushed into the destination pool.
 - **LIFO** = `acquired_at` desc, tie → `lot_id` desc.
 - **HIFO** = **gain basis (`usd_basis`) per sat** desc, tie → oldest `acquired_at` first, tie → `lot_id` asc.
+
+> **Deliberate-correctness note (R0-plan C1).** Adopting acquisition-date FIFO is a **behavior change** — to relocated/seeded-lot consumption **and** to the safe-harbor conservation residue `snap.basis` — **not a no-op**. The foundation today consumes relocated lots in **insertion (push) order**, a **latent §1012 deviation** (a relocated lot legally retains its acquisition date; insertion-order FIFO can therefore consume the wrong lot, changing reported basis/term and the Universal residue against which a Rev. Proc. 2024-28 allocation is conservation-checked). The change is landed deliberately by A's plan: RED→GREEN divergence KATs (self-transfer relocation under FIFO/LIFO/HIFO; Path-B non-`acquired_at` seeding; pre-2025-relocation `universal_snapshot` residue) plus a re-verification of every existing self-transfer/Path-B/safe-harbor fixture under the new order. No real users exist yet (the foundation just shipped); recorded in `FOLLOWUPS.md`.
 
 **HIFO basis key (M1, refined per R2-M1):** the HIFO standing order ranks **every** lot by **gain basis (`usd_basis`) per sat**, descending — ties → oldest `acquired_at` first, then `lot_id` asc (a **total order**, NFR4). **Loss-basis (`dual_loss_basis`) does NOT affect the standing-order ordering**: a **dual-basis gift lot** is keyed on its `usd_basis` (gain basis) regardless of the disposal's gain/loss zone, so the HIFO key is **deterministic and reproducible without consulting the disposal's proceeds/zone**. A **basis-pending** lot (`usd_basis = 0`) sorts **last**. These are documented **standing-order simplifications**: C's scored optimum (A.6 evaluate path) **is** zone-aware (it accounts for `dual_loss_basis` in the loss zone) and may legitimately differ from the manual HIFO order. Pinned + KAT'd.
 
@@ -252,7 +254,7 @@ R0 = `reviews/R0-lot-optimization-program-round-1.md` (2026-06-29). Each Critica
 
 **Minors / Nits**
 - **M1** HIFO basis key for dual-basis (loss-zone → `dual_loss_basis`) / basis-pending (`usd_basis=0` sorts last) lots — documented standing-order simplification + KAT (A.3).
-- **M2** Total-order tiebreaks pinned for FIFO/LIFO/HIFO (A.3).
+- **M2** FIFO/LIFO/HIFO pinned as **total orders** in A.3. **[R0-plan C1 update (2026-06-29):** FIFO is **acquisition-date order**, a **deliberate material adoption replacing insertion-order FIFO** for relocated/seeded lots — *not* a mere tiebreak; it corrects a latent §1012 foundation deviation. See A.3's deliberate-correctness note + `FOLLOWUPS.md`.]
 - **M3** §1212(b) ST-loss-first $3k absorption ordering pinned + KAT (B.3).
 - **M4** `carryforward_in` ↔ prior-year `carryforward_out` consistency check/warn (B — tests).
 - **M5** Optimizer determinism/exactness (Decimal/i64, BTreeMap/sorted, integer-keyed DP/ILP, no float) as a C-plan acceptance criterion (C.4).

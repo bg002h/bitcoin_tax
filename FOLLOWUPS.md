@@ -77,6 +77,27 @@ Ran `cycle-prep` recon (`reviews/cycle-prep-recon-2026-06-29.md`) on four slugs,
 - **`appraisal-trigger-precision` — NO-OP** (cycle-prep found the follow-up structurally wrong: no Phase-1
   FMV>$5k auto-flag exists; `appraisal_required` is a user CLI bool). Corrected the citation; Phase-2 only.
 
+## Sub-project A (lot-id substrate) — items folded from the R0-plan review round 1 (2026-06-29)
+
+- **Acquisition-date FIFO corrects a latent §1012 foundation deviation for relocated/seeded lots (R0-plan C1).**
+  The shipped foundation's `consume_fifo` walks **insertion (push) order** (`pools.rs:58-100`); Sub-project A's plan
+  makes FIFO **acquisition-date order** (`acquired_at` asc, tie `lot_id` asc) at all six consume sites. For
+  **relocated** (self-transfer, `fold.rs:537-553,580-583`) and **Path-B-seeded** (`resolve.rs:566-586` →
+  `transition.rs:67-73`) lots — which carry an `acquired_at` older than their push position — this is a **material
+  behavior change**, not a no-op: it changes reported basis/term on the affected disposals **and** the safe-harbor
+  conservation residue `snap.basis` (`transition.rs:25-51`; guard `resolve.rs:546-547`). It is the **legally-correct**
+  rule (§1.1012-1(j)(3)(i): earliest *acquisition*; a self-transfer is not a new acquisition, `fold.rs:545`). Landed
+  deliberately in A's plan (Task 2 deliberate-change statement + mandatory fixture-re-verification; RED→GREEN divergence
+  KATs in Tasks 3 and 6), conservation-re-verified across existing self-transfer / Path-B / safe-harbor fixtures.
+  **No real users exist yet (foundation just shipped), so no migration/restatement is owed.** Spec §A.3 reframed
+  (deliberate-correctness note) + the spec M2 fold-record line updated. — RESOLVED-in-design (lands when A is
+  implemented). — R0-plan C1, `reviews/R0-plan-lot-id-substrate-round-1.md`.
+
+- **N3 (verified N/A) — `inspect::verify` "reads config twice."** `Session::load_events_and_project()` returns a
+  **`ProjectionConfig`** as its third tuple element (burndown 2026-06-29, commit 39e09e0), *not* a `CliConfig`. `verify`
+  needs the `CliConfig` (declared `pre2025_method` + `pre2025_method_attested`) for its new surfacing, so the separate
+  `session.config()?` read is **required**, not redundant. No change. — R0-plan N3.
+
 ## ✅ RESOLVED earlier (kept for record)
 
 ## btctax-core whole-branch fixes (2026-06-29) — both Important findings resolved
