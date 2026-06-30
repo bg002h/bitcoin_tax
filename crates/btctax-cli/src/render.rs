@@ -780,6 +780,41 @@ pub fn render_optimize_proposal(p: &btctax_core::OptimizeProposal) -> String {
     s
 }
 
+/// Render an `AcceptOutcome` (Task 10 `optimize accept`): one line per persisted `LotSelection`
+/// (with the appended decision id to pass to `reconcile void` for revocation, and the §A.5 basis
+/// label) and one line per skipped disposal (with the gate reason). A persisted attestation is noted
+/// inline on the `AttestedRecording` rows.
+pub fn render_accept_outcome(o: &crate::cmd::optimize::AcceptOutcome) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "Optimize accept \u{2014} {} persisted, {} skipped.",
+        o.persisted.len(),
+        o.skipped.len()
+    );
+    for (disposal, decision, basis) in &o.persisted {
+        let _ = writeln!(
+            s,
+            "  PERSISTED {} \u{2192} LotSelection {} [{}]{}",
+            disposal.canonical(),
+            decision.canonical(),
+            basis,
+            if *basis == "AttestedRecording" {
+                " (+ attestation recorded; revoke with `reconcile void`)"
+            } else {
+                " (revoke with `reconcile void`)"
+            }
+        );
+    }
+    for (disposal, reason) in &o.skipped {
+        let _ = writeln!(s, "  skipped {}: {}", disposal.canonical(), reason);
+    }
+    if o.persisted.is_empty() && o.skipped.is_empty() {
+        let _ = writeln!(s, "  (no disposals matched)");
+    }
+    s
+}
+
 pub fn render_verify(r: &VerifyReport) -> String {
     let mut out = String::new();
     let c = &r.conservation;

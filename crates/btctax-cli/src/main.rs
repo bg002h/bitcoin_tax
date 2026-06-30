@@ -129,7 +129,7 @@ enum Command {
     },
 }
 
-/// `optimize` subcommand tree.  Task 9 adds `Run`; Tasks 10–11 add `Accept`/`Consult`.
+/// `optimize` subcommand tree.  Task 9 adds `Run`; Task 10 adds `Accept`; Task 11 adds `Consult`.
 #[derive(Subcommand)]
 enum Optimize {
     /// Mode-1 what-if: print the tax-saving lot-selection proposal. NOTHING is filed or bound.
@@ -137,6 +137,22 @@ enum Optimize {
         /// The tax year to optimize (must be 2025 or later).
         #[arg(long)]
         tax_year: i32,
+    },
+    /// Mode-1 gated persistence: recompute the optimum and persist the proposed LotSelection(s),
+    /// gated per disposal (§1.1012-1(j)). A genuinely-contemporaneous pick (made ≤ sale) persists
+    /// freely; an already-executed disposal persists ONLY with a narrow per-disposal `--attest`
+    /// scoped to one `--disposal`; a 2027+ broker-held pick is refused. Revoke via `reconcile void`.
+    Accept {
+        /// The tax year to accept (must be 2025 or later).
+        #[arg(long)]
+        tax_year: i32,
+        /// Restrict to ONE disposal (required to carry `--attest`).
+        #[arg(long)]
+        disposal: Option<String>,
+        /// Narrow contemporaneous-ID attestation for an already-executed disposal. Requires
+        /// `--disposal` (no blanket attestation across all disposals).
+        #[arg(long)]
+        attest: Option<String>,
     },
 }
 
@@ -348,6 +364,21 @@ fn run() -> Result<ExitCode, CliError> {
             Optimize::Run { tax_year } => {
                 let p = cmd::optimize::run(vault, &passphrase(false)?, tax_year, now)?;
                 print!("{}", render::render_optimize_proposal(&p));
+            }
+            Optimize::Accept {
+                tax_year,
+                disposal,
+                attest,
+            } => {
+                let outcome = cmd::optimize::accept(
+                    vault,
+                    &passphrase(false)?,
+                    tax_year,
+                    disposal.as_deref(),
+                    attest.as_deref(),
+                    now,
+                )?;
+                print!("{}", render::render_accept_outcome(&outcome));
             }
         },
         Command::Reconcile(r) => dispatch_reconcile(vault, r, now)?,
