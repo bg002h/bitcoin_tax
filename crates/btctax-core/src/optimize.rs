@@ -5,12 +5,17 @@
 //! Deterministic (NFR4) + exact (NFR5): BTreeMap/sorted iteration, Decimal/i64 only, no float.
 //! §1091 wash-sale does NOT apply to crypto — loss lots are freely selectable (Task 7; monitor).
 use crate::conventions::{Sat, TaxDate, Usd};
-use crate::event::{DisposeKind, LotPick};
+use crate::event::{DisposeKind, LedgerEvent, LotPick};
 use crate::identity::{EventId, WalletId};
+use crate::price::PriceProvider;
+use crate::project::fold::fold;
+use crate::project::resolve::resolve;
 use crate::project::ComplianceStatus;
 use crate::project::EvaluateError;
-use crate::state::Blocker;
-use crate::tax::MarginalRates;
+use crate::project::{project, ProjectionConfig};
+use crate::state::{Blocker, LedgerState};
+use crate::tax::{compute_tax_year, MarginalRates, TaxOutcome, TaxProfile, TaxTables};
+use std::collections::BTreeMap;
 
 /// The `accept`-gate verdict for one disposal (computed in core; enforced by the CLI, Task 10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,6 +129,87 @@ pub enum OptimizeError {
     NoLots,
     /// The requested year is pre-2025 — a restatement of a closed year, not an optimization (M7).
     PreTransitionYear(i32),
+}
+
+// ── Task 2 — holistic year scorer ────────────────────────────────────────────────────────────────
+
+/// Fold the canonical timeline with `assignment`'s per-disposal selections injected (overriding any
+/// persisted selection for those events), WITHOUT mutating the ledger. Clone-fold-discard (mirrors
+/// `evaluate.rs`'s `resolve` → inject `selections` → `fold` path): `events`/`prices`/`config` are
+/// borrowed read-only, `resolve` yields an owned `Resolution` we mutate, and the resulting
+/// `LedgerState` is the caller's to read then discard. Iteration is over a `BTreeMap` (NFR4).
+fn fold_with(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    assignment: &BTreeMap<EventId, Vec<LotPick>>,
+) -> LedgerState {
+    let mut res = resolve(events, prices, config);
+    for (disposal, picks) in assignment {
+        // Override any persisted/default selection for this disposal; BTreeMap order = deterministic.
+        res.selections.insert(disposal.clone(), picks.clone());
+    }
+    fold(res, prices, config)
+}
+
+/// R0-M1 precondition check: does every injected pick-set conserve its disposal's principal?
+///
+/// `fold_with` injects straight into `res.selections`, bypassing `resolve`'s `Σ == principal` guard;
+/// and the fold's `consume_picks` hardcodes `shortfall = 0` while `selection_feasible` checks only
+/// per-lot availability — NOT the sum. A non-conserving assignment would therefore under-consume
+/// *silently* (no blocker) → a falsely-low score. So we fold the BASELINE once (no injection), map
+/// each disposal → `Σ legs.sat` (its principal), and require every injected entry's `Σ picks.sat` to
+/// match. A disposal id absent from the baseline, or a zero principal, ⇒ fail.
+fn assignment_conserves_principal(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    assignment: &BTreeMap<EventId, Vec<LotPick>>,
+) -> bool {
+    let base = project(events, prices, config);
+    let mut principal: BTreeMap<EventId, Sat> = BTreeMap::new();
+    for d in &base.disposals {
+        let sum: Sat = d.legs.iter().map(|l| l.sat).sum();
+        principal.insert(d.event.clone(), sum);
+    }
+    assignment.iter().all(|(disposal, picks)| {
+        let picked: Sat = picks.iter().map(|p| p.sat).sum();
+        matches!(principal.get(disposal), Some(&p) if p > 0 && p == picked)
+    })
+}
+
+/// Holistic score: B's federal `TaxOutcome` for `year` under `assignment`. Inject the per-disposal
+/// selections, **fold once**, run `compute_tax_year`. Side-effect-free (clone-fold-discard),
+/// deterministic (NFR4), exact (NFR5 — all dollars come straight from B; C never re-rounds).
+///
+/// An infeasible selection (cross-disposal contention / over-draw / unknown or cross-wallet lot)
+/// folds to a hard `LotSelectionInvalid` (the fold's `consume_principal` maps the selection error)
+/// → `compute_tax_year` refuses with `NotComputable` — the caller skips that combination.
+///
+/// **PRECONDITION — principal conservation (R0-M1).** Each injected pick-set MUST satisfy
+/// `Σ LotPick.sat == the disposal's principal sat`. `fold_with` injects straight into
+/// `res.selections`, bypassing `resolve`'s `Σ == principal` guard, and the fold does NOT enforce the
+/// sum (`consume_picks` hardcodes `shortfall = 0`; `selection_feasible` checks only per-lot
+/// availability), so a NON-conserving assignment under-consumes *silently* → a falsely-low score.
+/// `optimize_year`/`consult_sale` generators always conserve, but this fn is `pub` for reuse + KATs,
+/// so it `debug_assert!`s the sum against the per-disposal principal (looked up from a baseline fold).
+/// The check runs only under `debug_assert!` (zero release cost).
+pub fn score_assignment(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+    assignment: &BTreeMap<EventId, Vec<LotPick>>,
+) -> TaxOutcome {
+    // R0-M1 guard: in debug builds, assert each injected pick-set conserves the disposal's principal.
+    debug_assert!(
+        assignment_conserves_principal(events, prices, config, assignment),
+        "score_assignment: injected assignment violates Σpicks == principal (R0-M1)"
+    );
+    let state = fold_with(events, prices, config, assignment);
+    compute_tax_year(events, &state, year, profile, tables)
 }
 
 #[cfg(test)]
