@@ -1,5 +1,6 @@
 pub mod compliance;
 pub mod conservation;
+pub mod evaluate;
 pub mod fold;
 pub mod pools;
 pub mod resolve;
@@ -7,6 +8,7 @@ pub mod transition;
 
 pub use compliance::{disposal_compliance, ComplianceStatus, DisposalCompliance};
 pub use conservation::{conservation_report, ConservationReport};
+pub use evaluate::{evaluate_disposal, CandidateDisposal, EvaluateError, EvaluateOutcome};
 
 use crate::event::LedgerEvent;
 use crate::price::PriceProvider;
