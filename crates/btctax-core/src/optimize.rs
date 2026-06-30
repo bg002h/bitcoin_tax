@@ -4,19 +4,20 @@
 //! §1.1012-1(j) identification boundary (adequate ID by the time of sale; no compliant post-hoc).
 //! Deterministic (NFR4) + exact (NFR5): BTreeMap/sorted iteration, Decimal/i64 only, no float.
 //! §1091 wash-sale does NOT apply to crypto — loss lots are freely selectable (Task 7; monitor).
-use crate::conventions::{Sat, TaxDate, Usd};
+use crate::conventions::{Sat, TaxDate, Usd, TRANSITION_DATE};
 use crate::event::{DisposeKind, LedgerEvent, LotPick};
-use crate::identity::{EventId, WalletId};
+use crate::identity::{EventId, LotId, WalletId};
 use crate::price::PriceProvider;
 use crate::project::fold::{fold, pools_before};
-use crate::project::pools::pool_key;
+use crate::project::pools::{pool_key, PoolKey};
 use crate::project::resolve::resolve;
-use crate::project::ComplianceStatus;
-use crate::project::EvaluateError;
-use crate::project::{project, ProjectionConfig};
+use crate::project::{
+    disposal_compliance, project, ComplianceStatus, DisposalCompliance, EvaluateError,
+    ProjectionConfig,
+};
 use crate::state::{Blocker, LedgerState, Lot};
-use crate::tax::{compute_tax_year, MarginalRates, TaxOutcome, TaxProfile, TaxTables};
-use std::collections::BTreeMap;
+use crate::tax::{compute_tax_year, MarginalRates, TaxOutcome, TaxProfile, TaxResult, TaxTables};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The `accept`-gate verdict for one disposal (computed in core; enforced by the CLI, Task 10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,8 +237,6 @@ const LOT_ENUM_BOUND: usize = 12;
 /// pre-2025 disposals (Universal), Path-A post-2025 (per-wallet relocated), and Path-B post-2025 (seeded
 /// lots) — for the FIRST 2025 disposal and every later one. R0-I1 canonical ordering is preserved inside
 /// `pools_before`; an absent disposal still yields an empty `Vec` (existence checked here first).
-// (allow dead_code: consumed by `optimize_year`'s candidate assembly in Task 4; tested directly here.)
-#[allow(dead_code)]
 fn available_lots_before(
     events: &[LedgerEvent],
     prices: &dyn PriceProvider,
@@ -246,11 +245,41 @@ fn available_lots_before(
     date: TaxDate,
     wallet: &WalletId,
 ) -> Vec<Lot> {
-    let res = resolve(events, prices, config);
+    available_lots_before_with(
+        events,
+        prices,
+        config,
+        disposal,
+        date,
+        wallet,
+        &BTreeMap::new(),
+    )
+}
+
+/// As `available_lots_before`, but with `injected` per-disposal selections folded in FIRST (so an earlier
+/// group member's chosen candidate is consumed before this disposal's pool is read). This is the engine of
+/// the nested joint enumeration of a contention group (R0-C3): each later disposal draws from the pool left
+/// by the prior members' CHOSEN picks, not the baseline — which is exactly what recovers cross-period
+/// reassignment optima (a lot ST at `D1`'s date but LT at `D2`'s date). An empty `injected` map degenerates
+/// to the plain baseline pre-pass. Deterministic: `injected` is a `BTreeMap` (NFR4).
+fn available_lots_before_with(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    disposal: &EventId,
+    date: TaxDate,
+    wallet: &WalletId,
+    injected: &BTreeMap<EventId, Vec<LotPick>>,
+) -> Vec<Lot> {
+    let mut res = resolve(events, prices, config);
     // "not found ⇒ empty" contract (ordering-independent existence check; `pools_before` would otherwise
     // fold the whole timeline for a missing target).
     if !res.timeline.iter().any(|e| &e.id == disposal) {
         return Vec::new();
+    }
+    // Override the consumption of the already-chosen group members (BTreeMap order = deterministic).
+    for (d, picks) in injected {
+        res.selections.insert(d.clone(), picks.clone());
     }
     // Pool state just before the disposal, with the transition seed already applied at the correct
     // boundary (Path A drain / Path B seed) — matches the real fold under both paths (Task-3 IMPORTANT).
@@ -276,8 +305,6 @@ fn available_lots_before(
 /// flag the proposal `approximate = true, PoolHeuristic { .. }` (a heuristic-pool result is not a proven
 /// global minimum). Without this signal a single `> 12`-lot pool would score `approximate = false` and
 /// render as "the optimum" — the headline-forbidden false-global claim.
-// (allow dead_code: consumed by `optimize_year`'s candidate assembly in Task 4; tested directly here.)
-#[allow(dead_code)]
 fn candidate_selections(lots: &[Lot], need: Sat) -> (Vec<Vec<LotPick>>, bool) {
     let heuristic = lots.len() > LOT_ENUM_BOUND; // R2-C1: did we take the incomplete branch?
     let mut out: std::collections::BTreeSet<Vec<LotPick>> = std::collections::BTreeSet::new();
@@ -384,6 +411,628 @@ fn candidate_selections(lots: &[Lot], need: Sat) -> (Vec<Vec<LotPick>>, bool) {
         }
     }
     (out.into_iter().collect(), heuristic) // (sorted Vec — NFR4, heuristic-branch flag — R2-C1)
+}
+
+// ── Task 5 — pure compliance / persistability helpers (consumed by `optimize_year`'s row build) ────
+//
+// These pure functions are owned by Task 5 (with their dedicated KAT suite); Task 4's per-disposal row
+// construction depends on them (R0-C2), so they live here and are exercised end-to-end by the Mode-1
+// optimality/refusal KATs. `optimize_year` judges a PROPOSED pick by its OWN made-date — a standing order
+// never rescues a divergent post-hoc cherry-pick (§1.1012-1(j)).
+
+/// §A.5 custody → envelope (R2-M5): `Exchange` = broker (own-books insufficient 2027+); `SelfCustody` =
+/// own-books, all years, no relief ever needed.
+fn is_broker(w: &WalletId) -> bool {
+    matches!(w, WalletId::Exchange { .. })
+}
+
+/// The §C.2 `accept`-gate verdict for one disposal (computed in core; enforced by the CLI, Task 10).
+/// - made-date ≤ sale → §A.5(b) `Contemporaneous` lever; persist freely (`ContemporaneousNow`).
+/// - already-executed (made-date > sale) AND 2027+ broker-held → `ForbiddenBroker2027` (NEVER persist).
+/// - already-executed otherwise (self-custody any year, or broker-held 2025–2026) → `NeedsAttestation`.
+pub fn persistability(
+    wallet: &WalletId,
+    sale_date: TaxDate,
+    selection_made: TaxDate,
+) -> Persistability {
+    if selection_made <= sale_date {
+        Persistability::ContemporaneousNow
+    } else if is_broker(wallet) && sale_date.year() >= 2027 {
+        Persistability::ForbiddenBroker2027
+    } else {
+        Persistability::NeedsAttestation
+    }
+}
+
+/// R0-C2: compliance status of a PROPOSED pick, judged by ITS OWN timeliness. The proposed pick is a
+/// would-be `LotSelection` made at `made` (= proposal/now), NOT a persisted selection in `events`;
+/// `disposal_compliance(events, …)` would skip the selection branch and let a standing order RESCUE a
+/// divergent post-hoc cherry-pick as `StandingOrder` (FORBIDDEN — §1.1012-1(j)). So this judges it directly:
+/// - `proposed == current` (no change): keep `baseline_status` — adopting an identical pick binds nothing
+///   new (`accept` skips it). **This is the ONLY path that may report `StandingOrder`.**
+/// - diverges: 2027+ broker → `NonCompliant`; else `made ≤ sale` → `Contemporaneous`; else (post-hoc) →
+///   `NonCompliant`. The overlay may later upgrade a post-hoc `NonCompliant` → `AttestedRecording` ONLY
+///   when attested AND within the own-books envelope AND unchanged.
+pub fn proposed_compliance_status(
+    wallet: &WalletId,
+    sale_date: TaxDate,
+    made: TaxDate,
+    proposed: &[LotPick],
+    current: &[LotPick],
+    baseline_status: &ComplianceStatus,
+) -> ComplianceStatus {
+    if proposed == current {
+        return baseline_status.clone(); // no divergence ⇒ the real, already-established status stands
+    }
+    if is_broker(wallet) && sale_date.year() >= 2027 {
+        return ComplianceStatus::NonCompliant;
+    }
+    if made <= sale_date {
+        ComplianceStatus::Contemporaneous
+    } else {
+        ComplianceStatus::NonCompliant // divergent post-hoc cherry-pick — NEVER StandingOrder
+    }
+}
+
+/// Upgrade A's per-disposal compliance for the `optimize` surface: a `NonCompliant` disposal is upgraded
+/// to `AttestedRecording` IFF (a) it is in `attested`, (b) it is in `unchanged` (the PROPOSED pick equals
+/// the in-force persisted-and-attested selection — R2-I1: an attestation binds only the exact attested
+/// selection, never a divergent re-run pick), AND (c) it is within the envelope (NOT 2027+ broker-held).
+/// `StandingOrder`/`Contemporaneous` rows are left untouched; a non-attested OR divergent post-hoc
+/// selection stays `NonCompliant` (the conservative direction).
+pub fn compliance_overlay(
+    base: &[DisposalCompliance],
+    attested: &BTreeSet<EventId>,
+    unchanged: &BTreeSet<EventId>,
+) -> Vec<DisposalCompliance> {
+    base.iter()
+        .map(|c| {
+            let upgrade = matches!(c.status, ComplianceStatus::NonCompliant)
+                && attested.contains(&c.disposal)
+                && unchanged.contains(&c.disposal) // R2-I1: attestation binds only the attested pick
+                && !(is_broker(&c.wallet) && c.date.year() >= 2027);
+            let mut out = c.clone();
+            if upgrade {
+                out.status = ComplianceStatus::AttestedRecording;
+            }
+            out
+        })
+        .collect()
+}
+
+// ── Task 4 — contention grouping + joint candidate enumeration (R0-C3) ─────────────────────────────
+
+/// Per-group joint-enumeration ceiling (≤ `MAX_COMBOS`). Beyond it a contended group falls back to
+/// per-disposal-independent generation and the proposal is flagged `ContentionUnenumerated`.
+const GROUP_COMBO_BOUND: usize = 4_096;
+
+/// Partition the year's `targets` into contention groups: disposals sharing one `PoolKey::Wallet` pool
+/// whose `available_lots_before` (baseline) lot-id sets OVERLAP are one group; a non-overlapping disposal
+/// is its own singleton group. Deterministic (NFR4): union-find over pre-sorted `targets` (EventId order),
+/// members ascending, groups ordered by their first member's EventId.
+fn contention_groups(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    targets: &[(EventId, WalletId, TaxDate, Sat)],
+) -> Vec<Vec<usize>> {
+    let n = targets.len();
+    // Per-target (pool key, available-lot-id set) under the baseline consumption.
+    let infos: Vec<(PoolKey, BTreeSet<LotId>)> = targets
+        .iter()
+        .map(|(id, wallet, date, _need)| {
+            let lots = available_lots_before(events, prices, config, id, *date, wallet);
+            let ids: BTreeSet<LotId> = lots.into_iter().map(|l| l.lot_id).collect();
+            (pool_key(*date, wallet), ids)
+        })
+        .collect();
+
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]]; // path-halving
+            x = parent[x];
+        }
+        x
+    }
+    let mut parent: Vec<usize> = (0..n).collect();
+    for i in 0..n {
+        for j in (i + 1)..n {
+            // Same wallet pool AND overlapping available lots ⇒ contended (reassignment may help).
+            if infos[i].0 == infos[j].0 && !infos[i].1.is_disjoint(&infos[j].1) {
+                let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
+                if ri != rj {
+                    parent[ri] = rj;
+                }
+            }
+        }
+    }
+    // Group by root; members pushed in ascending index order (== ascending EventId, targets pre-sorted).
+    let mut by_root: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for i in 0..n {
+        let r = find(&mut parent, i);
+        by_root.entry(r).or_default().push(i);
+    }
+    let mut groups: Vec<Vec<usize>> = by_root.into_values().collect();
+    groups.sort_by(|a, b| targets[a[0]].0.cmp(&targets[b[0]].0));
+    groups
+}
+
+/// One alias for the (verbose) joint-enumeration return: the per-sequence partial assignments plus the
+/// largest heuristic pool's lot-count (`Some` ⇒ a nested `candidate_selections` took the `> LOT_ENUM_BOUND`
+/// INCOMPLETE branch, so the caller flags `PoolHeuristic`).
+type JointMaps = (Vec<BTreeMap<EventId, Vec<LotPick>>>, Option<usize>);
+
+/// Per-disposal proposal-row metadata threaded between the status pass and the final `DisposalProposal`
+/// build: `(disposal, wallet, sale date, current picks, proposed picks)`.
+type RowMeta = (EventId, WalletId, TaxDate, Vec<LotPick>, Vec<LotPick>);
+
+/// Joint candidate assignments for ONE contention group, generated by NESTING `candidate_selections` in
+/// canonical (time, then EventId) order: the earliest disposal draws from the pre-group pool; each later
+/// disposal draws from the pool LEFT by the prior members' chosen candidate (via
+/// `available_lots_before_with`, which re-folds with those picks injected). This recovers cross-period
+/// reassignment optima the independent per-disposal product cannot reach. Returns `None` when the joint
+/// count would exceed `GROUP_COMBO_BOUND` (→ caller flags `ContentionUnenumerated`). Deterministic: the
+/// returned maps are sorted + deduped.
+fn group_candidate_assignments(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    group: &[(EventId, WalletId, TaxDate, Sat)],
+) -> Option<JointMaps> {
+    // TIME order (then EventId) so the pool evolution is correct: earlier disposals consume first; later
+    // disposals see the remaining pool PLUS lots acquired between them.
+    let mut order: Vec<usize> = (0..group.len()).collect();
+    order.sort_by(|&a, &b| {
+        group[a]
+            .2
+            .cmp(&group[b].2)
+            .then(group[a].0.cmp(&group[b].0))
+    });
+
+    let mut partials: Vec<BTreeMap<EventId, Vec<LotPick>>> = vec![BTreeMap::new()];
+    let mut max_heur: Option<usize> = None;
+    for &mi in &order {
+        let (id, wallet, date, need) = &group[mi];
+        let mut next: Vec<BTreeMap<EventId, Vec<LotPick>>> = Vec::new();
+        for partial in &partials {
+            let lots =
+                available_lots_before_with(events, prices, config, id, *date, wallet, partial);
+            let (cands, heuristic) = candidate_selections(&lots, *need);
+            if heuristic {
+                max_heur = Some(max_heur.map_or(lots.len(), |m| m.max(lots.len())));
+            }
+            for c in cands {
+                let mut p2 = partial.clone();
+                p2.insert(id.clone(), c);
+                next.push(p2);
+                if next.len() > GROUP_COMBO_BOUND {
+                    return None; // beyond the per-group ceiling → caller flags ContentionUnenumerated
+                }
+            }
+        }
+        partials = next;
+    }
+    partials.sort();
+    partials.dedup();
+    Some((partials, max_heur))
+}
+
+/// Independent per-disposal candidate maps for a group that could NOT be jointly enumerated within the
+/// bound: each member uses its own `available_lots_before` (baseline) candidates; the group's list is the
+/// cartesian product of members' independent lists. Misses cross-period reassignment, hence the caller's
+/// `ContentionUnenumerated` flag — but stays baseline-safe (the baseline picks are still seeded separately).
+fn independent_group_maps(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    baseline_state: &LedgerState,
+    group: &[(EventId, WalletId, TaxDate, Sat)],
+) -> Vec<BTreeMap<EventId, Vec<LotPick>>> {
+    let mut maps: Vec<BTreeMap<EventId, Vec<LotPick>>> = vec![BTreeMap::new()];
+    for (id, wallet, date, need) in group {
+        let lots = available_lots_before(events, prices, config, id, *date, wallet);
+        let (mut cands, _heuristic) = candidate_selections(&lots, *need);
+        if cands.is_empty() {
+            cands.push(baseline_selection(baseline_state, id));
+        }
+        let mut next: Vec<BTreeMap<EventId, Vec<LotPick>>> = Vec::new();
+        for m in &maps {
+            for c in &cands {
+                let mut m2 = m.clone();
+                m2.insert(id.clone(), c.clone());
+                next.push(m2);
+            }
+        }
+        maps = next;
+    }
+    maps.sort();
+    maps.dedup();
+    maps
+}
+
+// ── Task 4 — Mode-1 optimizer `optimize_year` ──────────────────────────────────────────────────────
+
+/// Overall cartesian-product ceiling: exhaustive (PROVEN global minimum) below it, baseline-seeded
+/// coordinate descent (a disclosed LOCAL optimum) above it.
+const MAX_COMBOS: usize = 50_000;
+
+/// §C.1/C.2 holistic single-year optimizer. Assemble per-disposal candidates (grouping + jointly
+/// enumerating contended same-wallet disposals — R0-C3), holistically score the cartesian product through
+/// B (`score_assignment`), pick the deterministic minimum, and build the what-if `OptimizeProposal`.
+///
+/// **Baseline-seeded (R0-C1).** The incumbent starts at the current-method (baseline) assignment scored at
+/// `base.total_federal_tax_attributable`, so `delta ≤ 0` ALWAYS — the optimizer NEVER recommends an
+/// assignment worse than doing nothing, in BOTH the exhaustive and the coordinate-descent path.
+///
+/// **`approximate` honesty (R2-C1/R0-C1/R0-C3).** `approximate == false` ⇔ the vertex set was FULLY
+/// enumerated AND exhaustively scored = a PROVEN global minimum (every pool ≤ `LOT_ENUM_BOUND`, overall
+/// product ≤ `MAX_COMBOS`, every contended pool jointly enumerated). Otherwise `approximate == true` with
+/// the most-severe `ApproxReason` (precedence `ComboCapExceeded` > `ContentionUnenumerated` >
+/// `PoolHeuristic`); `approximate ⇔ approx_reason.is_some()`.
+///
+/// **Refusals.** Pre-2025 → `PreTransitionYear` (a restatement, not an optimization — M7); a
+/// `NotComputable` year → `YearNotComputable` (I6); a year with no method-honoring disposals → `NoDisposals`.
+/// Side-effect-free: computes a proposal; appends NOTHING.
+///
+/// `proposal_made` is the proposed picks' made-date threaded from the CLI seam (core stays clock-free,
+/// NFR4); it drives each row's HONEST compliance + persistability. `attested` is the CLI-supplied attested
+/// disposal set (empty for pure what-if).
+#[allow(clippy::too_many_arguments)]
+pub fn optimize_year(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+    attested: &BTreeSet<EventId>,
+    proposal_made: TaxDate,
+) -> Result<OptimizeProposal, OptimizeError> {
+    if year < TRANSITION_DATE.year() {
+        return Err(OptimizeError::PreTransitionYear(year));
+    }
+    // Baseline = current filing position (no injected selections).
+    let baseline_state = fold_with(events, prices, config, &BTreeMap::new());
+    let base = match compute_tax_year(events, &baseline_state, year, profile, tables) {
+        TaxOutcome::Computed(r) => r,
+        TaxOutcome::NotComputable(b) => return Err(OptimizeError::YearNotComputable(b)),
+    };
+
+    // The year's method-honoring disposals (Disposal records for `year`), in EventId order (NFR4).
+    let mut targets: Vec<(EventId, WalletId, TaxDate, Sat)> = baseline_state
+        .disposals
+        .iter()
+        .filter(|d| !d.fee_mini_disposition && d.disposed_at.year() == year)
+        .filter_map(|d| {
+            let wallet = events
+                .iter()
+                .find(|e| e.id == d.event)
+                .and_then(|e| e.wallet.clone())?;
+            let sat: Sat = d.legs.iter().map(|l| l.sat).sum();
+            Some((d.event.clone(), wallet, d.disposed_at, sat))
+        })
+        .collect();
+    targets.sort_by(|a, b| a.0.cmp(&b.0));
+    if targets.is_empty() {
+        return Err(OptimizeError::NoDisposals);
+    }
+
+    // R0-C3: group into contention groups; each group's candidate list is a Vec of partial assignments
+    // (JOINT where contended, independent for singletons). A contended group that cannot be jointly
+    // enumerated within GROUP_COMBO_BOUND falls back to independent generation AND flags the proposal.
+    let groups = contention_groups(events, prices, config, &targets);
+    let mut group_lists: Vec<Vec<BTreeMap<EventId, Vec<LotPick>>>> = Vec::new();
+    let mut product: usize = 1;
+    let mut approximate = false;
+    let mut contended_unenum = 0usize;
+    // R2-C1: the largest pool that used the `> LOT_ENUM_BOUND` heuristic (INCOMPLETE) branch.
+    let mut pool_heuristic_lots: Option<usize> = None;
+    for g in &groups {
+        let members: Vec<(EventId, WalletId, TaxDate, Sat)> =
+            g.iter().map(|&i| targets[i].clone()).collect();
+        let maps: Vec<BTreeMap<EventId, Vec<LotPick>>> = if members.len() == 1 {
+            let (id, wallet, date, need) = &members[0]; // singleton: today's independent path
+            let lots = available_lots_before(events, prices, config, id, *date, wallet);
+            let (mut cands, heuristic) = candidate_selections(&lots, *need);
+            if heuristic {
+                pool_heuristic_lots =
+                    Some(pool_heuristic_lots.map_or(lots.len(), |m| m.max(lots.len())));
+            }
+            if cands.is_empty() {
+                cands.push(baseline_selection(&baseline_state, id));
+            }
+            cands
+                .into_iter()
+                .map(|p| BTreeMap::from([(id.clone(), p)]))
+                .collect()
+        } else {
+            match group_candidate_assignments(events, prices, config, &members) {
+                Some((joint, heur_lots)) => {
+                    if let Some(n) = heur_lots {
+                        pool_heuristic_lots = Some(pool_heuristic_lots.map_or(n, |m| m.max(n)));
+                    }
+                    joint
+                }
+                None => {
+                    approximate = true;
+                    contended_unenum += members.len();
+                    independent_group_maps(events, prices, config, &baseline_state, &members)
+                }
+            }
+        };
+        product = product.saturating_mul(maps.len());
+        group_lists.push(maps);
+    }
+    if pool_heuristic_lots.is_some() {
+        approximate = true; // R2-C1: a heuristic pool is never a "proven" optimum
+    }
+
+    // R0-C1: BASELINE-SEED so `delta ≤ 0` ALWAYS (never recommend worse-than-doing-nothing).
+    let baseline_assignment: BTreeMap<EventId, Vec<LotPick>> = targets
+        .iter()
+        .map(|(id, ..)| (id.clone(), baseline_selection(&baseline_state, id)))
+        .collect();
+    // Exhaustive (PROVEN optimum, approximate=false) within MAX_COMBOS; else baseline-seeded coordinate
+    // descent (a disclosed LOCAL optimum, approximate=true). Both incumbents START at the baseline score.
+    let best: BTreeMap<EventId, Vec<LotPick>> = if product <= MAX_COMBOS {
+        exhaustive_min(
+            events,
+            prices,
+            config,
+            year,
+            profile,
+            tables,
+            &group_lists,
+            &baseline_assignment,
+            &base,
+        )
+    } else {
+        approximate = true;
+        coordinate_descent(
+            events,
+            prices,
+            config,
+            year,
+            profile,
+            tables,
+            &group_lists,
+            &baseline_assignment,
+            &base,
+        )
+    };
+    // Reason precedence (R2-C1): blown overall product > un-enumerated contention > per-pool heuristic. All
+    // three set `approximate`; precedence only picks which (most-severe) reason is reported.
+    let approx_reason = if product > MAX_COMBOS {
+        Some(ApproxReason::ComboCapExceeded {
+            combos: product,
+            cap: MAX_COMBOS,
+        })
+    } else if contended_unenum > 0 {
+        Some(ApproxReason::ContentionUnenumerated {
+            contended: contended_unenum,
+            combos: product,
+            cap: MAX_COMBOS,
+        })
+    } else {
+        pool_heuristic_lots.map(|lots| ApproxReason::PoolHeuristic {
+            lots,
+            bound: LOT_ENUM_BOUND,
+        })
+    };
+
+    let opt_state = fold_with(events, prices, config, &best);
+    let opt = match compute_tax_year(events, &opt_state, year, profile, tables) {
+        TaxOutcome::Computed(r) => r,
+        TaxOutcome::NotComputable(b) => return Err(OptimizeError::YearNotComputable(b)),
+    };
+
+    // Per-disposal proposal rows. R0-C2: status/persistability are judged by the PROPOSED pick's OWN
+    // timeliness, NOT by `disposal_compliance(events, opt_state)` (which lacks the injected pick → a
+    // divergent post-hoc cherry-pick would fall through to a compliant StandingOrder — FORBIDDEN, §0).
+    // A's `disposal_compliance(events, &baseline_state)` supplies only the BASELINE status, used to
+    // preserve a genuine StandingOrder/Contemporaneous when the proposal does NOT diverge from current.
+    let base_comp = disposal_compliance(events, &baseline_state);
+    let mut rows: Vec<DisposalCompliance> = Vec::new();
+    let mut row_meta: Vec<RowMeta> = Vec::new();
+    for (id, wallet, date, _need) in &targets {
+        let current = baseline_selection(&baseline_state, id);
+        let proposed = best.get(id).cloned().unwrap_or_else(|| current.clone());
+        let baseline_status = base_comp
+            .iter()
+            .find(|c| &c.disposal == id)
+            .map(|c| c.status.clone())
+            .unwrap_or(ComplianceStatus::NonCompliant);
+        let status = proposed_compliance_status(
+            wallet,
+            *date,
+            proposal_made,
+            &proposed,
+            &current,
+            &baseline_status,
+        );
+        rows.push(DisposalCompliance {
+            disposal: id.clone(),
+            wallet: wallet.clone(),
+            date: *date,
+            status,
+        });
+        row_meta.push((id.clone(), wallet.clone(), *date, current, proposed));
+    }
+    // Task-5 overlay: NonCompliant + attested + within envelope + proposed==current → AttestedRecording.
+    let unchanged: BTreeSet<EventId> = row_meta
+        .iter()
+        .filter(|(_, _, _, current, proposed)| proposed == current)
+        .map(|(id, ..)| id.clone())
+        .collect();
+    let rows = compliance_overlay(&rows, attested, &unchanged);
+
+    let per_disposal: Vec<DisposalProposal> = row_meta
+        .into_iter()
+        .zip(rows)
+        .map(
+            |((id, wallet, date, current, proposed), row)| DisposalProposal {
+                disposal: id,
+                wallet: wallet.clone(),
+                date,
+                current_selection: current,
+                proposed_selection: proposed,
+                status: row.status,
+                // R0-C2/N2: the REAL made-date governs persistability — only genuinely-contemporaneous
+                // picks (made ≤ sale) are persistable; 2027+ broker NEVER.
+                persistable: persistability(&wallet, date, proposal_made),
+            },
+        )
+        .collect();
+
+    Ok(OptimizeProposal {
+        year,
+        baseline_tax: base.total_federal_tax_attributable,
+        optimized_tax: opt.total_federal_tax_attributable,
+        delta: opt.total_federal_tax_attributable - base.total_federal_tax_attributable,
+        per_disposal,
+        marginal_rates: opt.marginal_rates,
+        approximate,
+        approx_reason,
+    })
+}
+
+/// The lots the CURRENT projection consumes for `disposal` (its baseline disposal legs), as picks, sorted
+/// by lot id (canonical — matches `candidate_selections`'s ordering so lex tie-breaks are consistent).
+fn baseline_selection(state: &LedgerState, disposal: &EventId) -> Vec<LotPick> {
+    let mut picks: Vec<LotPick> = state
+        .disposals
+        .iter()
+        .find(|d| &d.event == disposal)
+        .map(|d| {
+            d.legs
+                .iter()
+                .map(|l| LotPick {
+                    lot: l.lot_id.clone(),
+                    sat: l.sat,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    picks.sort_by(|a, b| a.lot.cmp(&b.lot));
+    picks
+}
+
+/// Exhaustive cartesian-product minimisation over the per-GROUP candidate lists (odometer, no recursion).
+/// Each combination merges one chosen partial-map per group into a single assignment, scores it via
+/// `score_assignment`, and keeps the minimum `total_federal_tax_attributable`. Infeasible cross-disposal
+/// combinations self-eliminate (`NotComputable` → skipped). R0-C1: the incumbent is SEEDED with
+/// `baseline_assignment` at `base.total_federal_tax_attributable`, so the result can never be worse than
+/// the baseline; ties break to the lexicographically-smallest assignment (NFR4 §0 total order).
+#[allow(clippy::too_many_arguments)]
+fn exhaustive_min(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+    group_lists: &[Vec<BTreeMap<EventId, Vec<LotPick>>>],
+    baseline_assignment: &BTreeMap<EventId, Vec<LotPick>>,
+    base: &TaxResult,
+) -> BTreeMap<EventId, Vec<LotPick>> {
+    let mut best_total = base.total_federal_tax_attributable;
+    let mut best_assign = baseline_assignment.clone();
+    let lens: Vec<usize> = group_lists.iter().map(|g| g.len()).collect();
+    if lens.contains(&0) {
+        return best_assign; // a group with no candidates → only the baseline is considered
+    }
+    let mut idx = vec![0usize; group_lists.len()];
+    loop {
+        let mut assign: BTreeMap<EventId, Vec<LotPick>> = BTreeMap::new();
+        for (gi, &ci) in idx.iter().enumerate() {
+            for (k, v) in &group_lists[gi][ci] {
+                assign.insert(k.clone(), v.clone());
+            }
+        }
+        if let TaxOutcome::Computed(r) =
+            score_assignment(events, prices, config, year, profile, tables, &assign)
+        {
+            let total = r.total_federal_tax_attributable;
+            if total < best_total || (total == best_total && assign < best_assign) {
+                best_total = total;
+                best_assign = assign;
+            }
+        }
+        // odometer increment over the per-group index vector
+        let mut k = 0;
+        loop {
+            if k == idx.len() {
+                return best_assign;
+            }
+            idx[k] += 1;
+            if idx[k] < lens[k] {
+                break;
+            }
+            idx[k] = 0;
+            k += 1;
+        }
+    }
+}
+
+/// Deterministic, BASELINE-SEEDED coordinate descent for products beyond `MAX_COMBOS`. R0-C1: START from
+/// `baseline_assignment` (NOT all-HIFO), so the incumbent is the current filing position and
+/// `optimized_tax ≤ baseline_tax` holds even if every candidate basin is worse than baseline. Then, per
+/// group in order (a singleton group = one disposal), hold the others fixed and pick its best candidate by
+/// full-year score, accepting a move ONLY if it strictly lowers the total; iterate to a fixed point
+/// (bounded passes). No float, no RNG, no clock (NFR4/NFR5).
+#[allow(clippy::too_many_arguments)]
+fn coordinate_descent(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+    group_lists: &[Vec<BTreeMap<EventId, Vec<LotPick>>>],
+    baseline_assignment: &BTreeMap<EventId, Vec<LotPick>>,
+    base: &TaxResult,
+) -> BTreeMap<EventId, Vec<LotPick>> {
+    let mut current = baseline_assignment.clone();
+    let mut current_total = base.total_federal_tax_attributable;
+    let n_groups = group_lists.len();
+    let pass_cap = n_groups + 1; // bounded passes (deterministic termination)
+    let mut passes = 0;
+    let mut changed = true;
+    while changed && passes < pass_cap {
+        changed = false;
+        passes += 1;
+        for group in group_lists.iter() {
+            let mut best: Option<(Usd, BTreeMap<EventId, Vec<LotPick>>)> = None;
+            for cand in group {
+                let mut assign = current.clone();
+                for (k, v) in cand {
+                    assign.insert(k.clone(), v.clone());
+                }
+                if let TaxOutcome::Computed(r) =
+                    score_assignment(events, prices, config, year, profile, tables, &assign)
+                {
+                    let total = r.total_federal_tax_attributable;
+                    match &best {
+                        None => best = Some((total, assign)),
+                        Some((bt, ba)) => {
+                            if total < *bt || (total == *bt && &assign < ba) {
+                                best = Some((total, assign));
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some((bt, ba)) = best {
+                if bt < current_total {
+                    // strict improvement only ⇒ optimized ≤ baseline (delta ≤ 0); deterministic
+                    current = ba;
+                    current_total = bt;
+                    changed = true;
+                }
+            }
+        }
+    }
+    current
 }
 
 #[cfg(test)]
@@ -1001,5 +1650,165 @@ mod candidate_tests {
             &cold(),
         );
         assert_eq!(l1, l2);
+    }
+
+    // ── contention grouping + joint enumeration (R0-C3) ────────────────────────────────────────────
+
+    /// Two same-wallet sells drawing from overlapping lots → ONE contention group, and
+    /// `group_candidate_assignments` yields the cross-period "deviation" sequence (D1 takes the lot the
+    /// baseline gives D2, freeing the other for D2) that the INDEPENDENT per-disposal product cannot reach.
+    #[test]
+    fn contention_groups_one_group_and_joint_reaches_deviation() {
+        // R acquired earlier (LT-able), P acquired later; two 2026 sells of one lot each, FIFO baseline.
+        let events = vec![
+            buy(
+                "R",
+                datetime!(2025-05-01 00:00:00 UTC),
+                cold(),
+                LOT,
+                dec!(5000),
+            ),
+            buy(
+                "P",
+                datetime!(2025-06-15 00:00:00 UTC),
+                cold(),
+                LOT,
+                dec!(5000),
+            ),
+            sell(
+                "D1",
+                datetime!(2026-06-01 00:00:00 UTC),
+                cold(),
+                LOT,
+                dec!(10000),
+            ),
+            sell(
+                "D2",
+                datetime!(2026-06-20 00:00:00 UTC),
+                cold(),
+                LOT,
+                dec!(10000),
+            ),
+        ];
+        let prices = StaticPrices::default();
+        let mut targets = vec![
+            (eid("D1"), cold(), date!(2026 - 06 - 01), LOT),
+            (eid("D2"), cold(), date!(2026 - 06 - 20), LOT),
+        ];
+        targets.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let groups = contention_groups(&events, &prices, &cfg(), &targets);
+        assert_eq!(
+            groups.len(),
+            1,
+            "overlapping same-wallet disposals → one group"
+        );
+        assert_eq!(groups[0].len(), 2);
+
+        let members: Vec<_> = groups[0].iter().map(|&i| targets[i].clone()).collect();
+        let (maps, heur) =
+            group_candidate_assignments(&events, &prices, &cfg(), &members).expect("within bound");
+        assert_eq!(heur, None, "small pools → no heuristic branch");
+        // Joint set = {(D1=R,D2=P), (D1=P,D2=R)} — the second is the deviation unreachable independently.
+        let rp: BTreeMap<EventId, Vec<LotPick>> = [
+            (eid("D1"), vec![pick("R", LOT)]),
+            (eid("D2"), vec![pick("P", LOT)]),
+        ]
+        .into_iter()
+        .collect();
+        let pr: BTreeMap<EventId, Vec<LotPick>> = [
+            (eid("D1"), vec![pick("P", LOT)]),
+            (eid("D2"), vec![pick("R", LOT)]),
+        ]
+        .into_iter()
+        .collect();
+        assert!(maps.contains(&rp), "baseline-consistent sequence present");
+        assert!(
+            maps.contains(&pr),
+            "cross-period deviation sequence present (joint-only)"
+        );
+        assert_eq!(maps.len(), 2);
+    }
+
+    /// Two disposals on DIFFERENT wallets → two singleton groups (disjoint pools, never contended).
+    #[test]
+    fn contention_groups_singletons_for_different_wallets() {
+        let events = vec![
+            buy(
+                "CL",
+                datetime!(2026-05-01 00:00:00 UTC),
+                cold(),
+                LOT,
+                dec!(5000),
+            ),
+            buy(
+                "HL",
+                datetime!(2026-05-01 00:00:00 UTC),
+                hot(),
+                LOT,
+                dec!(5000),
+            ),
+            sell(
+                "DC",
+                datetime!(2026-06-01 00:00:00 UTC),
+                cold(),
+                LOT,
+                dec!(10000),
+            ),
+            sell(
+                "DH",
+                datetime!(2026-06-01 00:00:00 UTC),
+                hot(),
+                LOT,
+                dec!(10000),
+            ),
+        ];
+        let prices = StaticPrices::default();
+        let mut targets = vec![
+            (eid("DC"), cold(), date!(2026 - 06 - 01), LOT),
+            (eid("DH"), hot(), date!(2026 - 06 - 01), LOT),
+        ];
+        targets.sort_by(|a, b| a.0.cmp(&b.0));
+        let groups = contention_groups(&events, &prices, &cfg(), &targets);
+        assert_eq!(groups.len(), 2, "different wallets → two singleton groups");
+        assert!(groups.iter().all(|g| g.len() == 1));
+    }
+
+    /// A contended group whose joint enumeration would exceed `GROUP_COMBO_BOUND` → `None` (caller then
+    /// flags `ContentionUnenumerated`). Four same-wallet 1-lot sells over a 10-lot pool: 10·9·8·7 = 5040.
+    #[test]
+    fn group_candidate_assignments_none_beyond_bound() {
+        let mut events: Vec<LedgerEvent> = (0..10)
+            .map(|i| {
+                buy(
+                    &format!("L{i:02}"),
+                    datetime!(2026-05-01 00:00:00 UTC),
+                    cold(),
+                    LOT,
+                    dec!(5000),
+                )
+            })
+            .collect();
+        let dates = [
+            date!(2026 - 06 - 01),
+            date!(2026 - 06 - 02),
+            date!(2026 - 06 - 03),
+            date!(2026 - 06 - 04),
+        ];
+        for (k, d) in dates.iter().enumerate() {
+            events.push(sell(
+                &format!("D{k}"),
+                datetime!(2026-06-01 00:00:00 UTC).replace_date(*d),
+                cold(),
+                LOT,
+                dec!(10000),
+            ));
+        }
+        let prices = StaticPrices::default();
+        let members: Vec<_> = (0..4)
+            .map(|k| (eid(&format!("D{k}")), cold(), dates[k], LOT))
+            .collect();
+        let res = group_candidate_assignments(&events, &prices, &cfg(), &members);
+        assert!(res.is_none(), "joint count 5040 > GROUP_COMBO_BOUND ⇒ None");
     }
 }
