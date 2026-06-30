@@ -310,3 +310,8 @@ M3, N-2) were folded into the plan (see its "Fold record (round 1)"). These rema
   (the CLI-I2 whole-branch fix made `safe_harbor_status` prefer the effective-Path-B signal over the advisory;
   the burndown fix (commit f6880e6) extended that signal to disposal/removal legs for the all-lots-consumed
   case). `verify` no longer mislabels an effective Path B as time-barred. See the burndown section above.
+
+## Sub-project A (lot-id substrate) — whole-diff review deferrals (2026-06-29, round 2 residuals)
+- **N2 — `evaluate_disposal` `lots_after` semantics for C.** Confirm the returned post-disposal lots/outcome shape is what Sub-project C (optimizer + Mode-2) needs before C consumes it. — OPEN (C planning).
+- **N3 — B per-year hard-blocker gate.** B must refuse a TaxResult / C must refuse to optimize for a tax year with unresolved Hard blockers (basis-pending/uncovered/LotSelectionInvalid/etc.). — OPEN (B planning).
+- **M3 binary-dispatch test.** The `config` multi-flag apply-all + attest-guard are tested at library level, not by driving the real clap `Command::Config` arm; add a binary-level dispatch test to fully retire the Task-5 note. — OPEN (B/C or a CLI test pass).
