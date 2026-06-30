@@ -6,6 +6,7 @@
 use crate::conventions::{tax_date, TaxDate, TRANSITION_DATE};
 use crate::event::{EventPayload, LedgerEvent};
 use crate::identity::{EventId, WalletId};
+use crate::project::resolve::method_election_is_forward;
 use crate::state::LedgerState;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,8 +42,8 @@ struct Election {
 /// Collect all non-voided, non-backdated `MethodElection` decisions that are on or after
 /// `TRANSITION_DATE` and whose `effective_from` ≥ their made-date (the backdating guard).
 ///
-/// Mirrors the guard applied in `resolve.rs` for `MethodElectionBackdated`; kept in sync by the
-/// shared spec rule.  A Minor follow-up may extract a single shared collector.
+/// Uses the shared `method_election_is_forward` predicate from `resolve.rs` so that both callers
+/// stay in sync with the §A.5(a) spec rule without duplicating the guard condition.
 fn collect_elections(events: &[LedgerEvent], voided: &BTreeSet<EventId>) -> Vec<Election> {
     let mut out = Vec::new();
     for e in events {
@@ -54,7 +55,7 @@ fn collect_elections(events: &[LedgerEvent], voided: &BTreeSet<EventId>) -> Vec<
         }
         if let EventPayload::MethodElection(me) = &e.payload {
             let made = tax_date(e.utc_timestamp, e.original_tz);
-            if me.effective_from >= TRANSITION_DATE && me.effective_from >= made {
+            if method_election_is_forward(me, made) {
                 out.push(Election {
                     effective_from: me.effective_from,
                     decision_seq: seq,
@@ -66,6 +67,20 @@ fn collect_elections(events: &[LedgerEvent], voided: &BTreeSet<EventId>) -> Vec<
 }
 
 /// Compute per-disposal compliance status for all post-2025 realized disposals and removals.
+///
+/// **Scope boundary — `SelfTransfer` is intentionally excluded.**
+/// This function flags the §1.1012-1(j) adequacy of identification at a **taxable disposition**
+/// (Dispose / GiftOut / Donate).  A `SelfTransfer` is a non-taxable positioning move — the
+/// taxpayer may choose which lots to relocate via `LotSelection` (§A.3 lists it as
+/// method-honoring), but there is no recognized gain/loss and no §1.1012-1(j) identification
+/// obligation at the self-transfer itself.  Accordingly, a `SelfTransfer` never produces a
+/// `Disposal` or `Removal` record in `LedgerState`, and this function (which iterates only
+/// `state.disposals` / `state.removals`) is **correctly out of scope for self-transfers by
+/// design**.
+///
+/// Note: §A.3 of the spec lists `SelfTransfer` as method-honoring because the lot-routing
+/// choice affects future per-wallet HIFO/LIFO positioning; that is about the *selection
+/// mechanism*, not about compliance-flagging the non-taxable transfer itself.
 ///
 /// **NFR4 determinism:** `sel_made` is built by iterating `LotSelection` decisions in ascending
 /// `decision_seq` order (R0-plan M1).  When a disposal has more than one `LotSelection` (a

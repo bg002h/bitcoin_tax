@@ -7,6 +7,16 @@ use crate::state::{Blocker, BlockerKind, Lot};
 use std::collections::{BTreeMap, BTreeSet};
 use time::{OffsetDateTime, UtcOffset};
 
+/// Shared guard: returns `true` when a `MethodElection` is a valid forward standing order —
+/// non-backdated and on/after `TRANSITION_DATE` (§1.1012-1(j): no post-hoc identification, ever).
+///
+/// Used by both `resolve.rs` (to decide whether to emit a `MethodElectionBackdated` blocker) and
+/// `compliance.rs` (to filter eligible elections for the §A.5(a) standing-order check). Keeping
+/// the condition in one place ensures both callers stay in sync with the shared spec rule.
+pub(crate) fn method_election_is_forward(me: &MethodElection, made: TaxDate) -> bool {
+    me.effective_from >= TRANSITION_DATE && me.effective_from >= made
+}
+
 /// What an imported event behaves as in PASS 2, after decisions are applied. Variants are ADDED across tasks
 /// (Task 7: decisions, Task 8: transfers, Task 9: gift/donation, Task 10: dual-basis, Task 11: fee, Task 12: seed).
 #[derive(Debug, Clone)]
@@ -528,7 +538,7 @@ pub fn resolve(
         }
         if let EventPayload::MethodElection(me) = &d.payload {
             let made = tax_date(d.utc_timestamp, d.original_tz);
-            if me.effective_from < TRANSITION_DATE || me.effective_from < made {
+            if !method_election_is_forward(me, made) {
                 blockers.push(Blocker {
                     kind: BlockerKind::MethodElectionBackdated,
                     event: Some(d.id.clone()),
