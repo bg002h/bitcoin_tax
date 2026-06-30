@@ -13,7 +13,8 @@ pub use event::*;
 pub use identity::{EventId, Fingerprint, LotId, Source, SourceRef, WalletId};
 pub use price::PriceProvider;
 pub use project::{
-    conservation_report, project, ConservationReport, FeeTreatment, LotMethod, ProjectionConfig,
+    conservation_report, disposal_compliance, project, ComplianceStatus, ConservationReport,
+    DisposalCompliance, FeeTreatment, LotMethod, ProjectionConfig,
 };
 pub use state::*;
 

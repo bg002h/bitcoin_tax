@@ -1,9 +1,11 @@
+pub mod compliance;
 pub mod conservation;
 pub mod fold;
 pub mod pools;
 pub mod resolve;
 pub mod transition;
 
+pub use compliance::{disposal_compliance, ComplianceStatus, DisposalCompliance};
 pub use conservation::{conservation_report, ConservationReport};
 
 use crate::event::LedgerEvent;
