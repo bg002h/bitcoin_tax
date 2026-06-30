@@ -835,6 +835,12 @@ pub fn render_optimize_proposal(p: &btctax_core::OptimizeProposal) -> String {
         "  (this is the tax IF you had identified thus; adequate ID must exist by the time \
          of sale \u{2014} \u{a7}1.1012-1(j))"
     );
+    // C-M3: document the optimizer scope boundary (mirrors R0-M2 vertex-granularity caveat).
+    let _ = writeln!(
+        s,
+        "  (scope: global over taxable-disposal lot selections; self-transfer lot routing is \
+         held at its baseline position and is not re-optimized.)"
+    );
     s
 }
 
@@ -891,6 +897,14 @@ pub fn render_consult(r: &btctax_core::ConsultReport) -> String {
         wallet_label(&r.req.wallet),
         r.req.at
     );
+    // C-M2: for large pools (>12 lots) the candidate set is a heuristic subset — disclose it.
+    if r.approximate {
+        let _ = writeln!(
+            s,
+            "  \u{26a0} heuristic \u{2014} searched a subset of a large (>12-lot) pool; \
+             the proposed selection may not be the exact minimum."
+        );
+    }
     let _ = writeln!(
         s,
         "  proposed selection: {}",
