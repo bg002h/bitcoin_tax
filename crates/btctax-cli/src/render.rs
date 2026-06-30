@@ -638,6 +638,232 @@ pub fn render_tax_outcome(
     s
 }
 
+// ── Sub-project C: optimize run ─────────────────────────────────────────────────────────────────
+
+/// Format a lot-pick slice as comma-separated `"<event>#<split>:<sat>"` entries for proposal display.
+/// Mirrors the grammar `eventref::parse_lot_pick` accepts, so picks are both human-readable and
+/// round-trip-parseable. An empty pick list renders as `"(none)"`.
+fn picks_str(picks: &[btctax_core::LotPick]) -> String {
+    if picks.is_empty() {
+        return "(none)".to_string();
+    }
+    picks
+        .iter()
+        .map(|p| {
+            format!(
+                "{}#{}:{}",
+                p.lot.origin_event_id.canonical(),
+                p.lot.split_sequence,
+                p.sat
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Render a `OptimizeProposal` (Mode-1 what-if) for the `optimize run` command. Returns a String
+/// containing the proposal header, any approximate banner, the aggregate tax delta, per-disposal
+/// rows (with proposed selection + compliance status + persistability), and the R0-M2 caveat footer.
+///
+/// **Approximate banner (R0-C1/C3/R2-C1):** when `p.approximate == true`, a ⚠ APPROXIMATE banner
+/// and the specific `approx_reason` are printed. When `false`, no banner is printed (proven global
+/// minimum — do NOT add a banner for this case).
+///
+/// **R2-M1 no-change rows:** a disposal whose `proposed_selection == current_selection` has nothing
+/// to attest or persist (the optimizer is NOT asking to change it). The persistability line is
+/// suppressed and a "no change — already optimal" note is shown instead, preventing a misleading
+/// "needs --attest" prompt on a row the user does not need to act on.
+pub fn render_optimize_proposal(p: &btctax_core::OptimizeProposal) -> String {
+    use btctax_core::{ApproxReason, Persistability};
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "Optimize (what-if) — tax year {} — NOTHING is filed or bound by running this.",
+        p.year
+    );
+    // R0-C1/C3: a non-fully-enumerated result is NEVER presented as "the optimum" without this banner.
+    if p.approximate {
+        let why = match p.approx_reason {
+            Some(ApproxReason::ComboCapExceeded { combos, cap }) => format!(
+                "input exceeded the exhaustive bound ({combos} combos > {cap}); \
+                 a coordinate-descent fallback ran"
+            ),
+            Some(ApproxReason::ContentionUnenumerated { contended, .. }) => format!(
+                "{contended} contended same-wallet disposal(s) could not be fully joint-enumerated"
+            ),
+            Some(ApproxReason::PoolHeuristic { lots, bound }) => format!(
+                "a pool of {lots} lots exceeds the {bound}-lot exhaustive-enumeration bound; \
+                 only a deterministic heuristic SUBSET of that pool's identifications was searched"
+            ),
+            None => "approximate".to_string(),
+        };
+        let _ = writeln!(
+            s,
+            "  \u{26a0} APPROXIMATE \u{2014} NOT a guaranteed global minimum: {why}."
+        );
+        let _ = writeln!(
+            s,
+            "    The true least-tax assignment may be lower; this is a disclosed improvement over your"
+        );
+        let _ = writeln!(
+            s,
+            "    current filing position (delta \u{2264} 0), NOT \u{2018}the least tax.\u{2019}"
+        );
+    }
+    let _ = writeln!(
+        s,
+        "  current federal tax (attributable): {}",
+        p.baseline_tax
+    );
+    let _ = writeln!(
+        s,
+        "  optimized federal tax (attributable): {}",
+        p.optimized_tax
+    );
+    let _ = writeln!(
+        s,
+        "  delta (optimized \u{2212} current): {}  (negative = saving; always \u{2264} 0)",
+        p.delta
+    );
+    for d in &p.per_disposal {
+        let _ = writeln!(
+            s,
+            "  {} @ {} [{}] :: {:?}",
+            d.disposal.canonical(),
+            d.date,
+            wallet_label(&d.wallet),
+            d.status
+        );
+        // R2-M1: a NO-CHANGE row (proposed == current) has nothing to attest/persist — `accept` SKIPS it
+        // ("already optimal under current identification"). Do NOT print a persistability line here: a
+        // `NeedsAttestation` "needs --attest" line on a disposal the optimizer is NOT asking to change is
+        // misleading and invites a pointless/contradictory attestation. Show a no-change note instead.
+        if d.proposed_selection == d.current_selection {
+            let _ = writeln!(
+                s,
+                "      proposed: {}  [no change \u{2014} already optimal under current identification]",
+                picks_str(&d.proposed_selection)
+            );
+            continue;
+        }
+        let persist = match d.persistable {
+            Persistability::ContemporaneousNow => {
+                "persistable now (made \u{2264} sale \u{2192} Contemporaneous)"
+            }
+            Persistability::NeedsAttestation => {
+                "already executed \u{2014} needs `optimize accept --disposal <ref> \
+                 --attest \"\u{2026}\"` (genuine contemporaneous ID only)"
+            }
+            Persistability::ForbiddenBroker2027 => {
+                "2027+ broker-held \u{2014} CANNOT be persisted (own-books insufficient); \
+                 FIFO is the defensible position"
+            }
+        };
+        let _ = writeln!(
+            s,
+            "      proposed: {}  [{}]",
+            picks_str(&d.proposed_selection),
+            persist
+        );
+    }
+    // R0-M2: surface the vertex-granularity limitation in OUTPUT, not only in docs.
+    let _ = writeln!(
+        s,
+        "  (vertex-granularity identification: a multi-partial split landing exactly on a \
+         tax-bracket kink is out of scope.)"
+    );
+    let _ = writeln!(
+        s,
+        "  (this is the tax IF you had identified thus; adequate ID must exist by the time \
+         of sale \u{2014} \u{a7}1.1012-1(j))"
+    );
+    s
+}
+
+/// Render an `AcceptOutcome` (Task 10 `optimize accept`): one line per persisted `LotSelection`
+/// (with the appended decision id to pass to `reconcile void` for revocation, and the §A.5 basis
+/// label) and one line per skipped disposal (with the gate reason). A persisted attestation is noted
+/// inline on the `AttestedRecording` rows.
+pub fn render_accept_outcome(o: &crate::cmd::optimize::AcceptOutcome) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "Optimize accept \u{2014} {} persisted, {} skipped.",
+        o.persisted.len(),
+        o.skipped.len()
+    );
+    for (disposal, decision, basis) in &o.persisted {
+        let _ = writeln!(
+            s,
+            "  PERSISTED {} \u{2192} LotSelection {} [{}]{}",
+            disposal.canonical(),
+            decision.canonical(),
+            basis,
+            if *basis == "AttestedRecording" {
+                " (+ attestation recorded; revoke with `reconcile void`)"
+            } else {
+                " (revoke with `reconcile void`)"
+            }
+        );
+    }
+    for (disposal, reason) in &o.skipped {
+        let _ = writeln!(s, "  skipped {}: {}", disposal.canonical(), reason);
+    }
+    if o.persisted.is_empty() && o.skipped.is_empty() {
+        let _ = writeln!(s, "  (no disposals matched)");
+    }
+    s
+}
+
+/// Render a `ConsultReport` (Task 11 / §C.3 Mode-2 read-only pre-trade what-if) for the
+/// `optimize consult` command. Returns a String with:
+///   - The hypothetical sale header (sat amount, wallet, date).
+///   - The proposed lot selection (the tax-minimizing picks).
+///   - The ST/LT gain split and the federal tax attributable to this contemplated sale.
+///   - When `timing.is_some()`: the ST→LT crossover line (crossover date + saving), OMITTED when None.
+///   - A footer: tax decision-support only, not investment advice.
+///
+/// **READ-ONLY:** this function only renders; it never writes any event or side-table row.
+pub fn render_consult(r: &btctax_core::ConsultReport) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "Consult (read-only what-if): sell {} sat from {} on {}",
+        r.req.sell_sat,
+        wallet_label(&r.req.wallet),
+        r.req.at
+    );
+    let _ = writeln!(
+        s,
+        "  proposed selection: {}",
+        picks_str(&r.proposed_selection)
+    );
+    let _ = writeln!(
+        s,
+        "  short-term gain: {}   long-term gain: {}",
+        r.st_gain, r.lt_gain
+    );
+    let _ = writeln!(
+        s,
+        "  federal tax attributable (estimated): {}",
+        r.total_federal_tax_attributable
+    );
+    if let Some(t) = &r.timing {
+        let _ = writeln!(
+            s,
+            "  timing: {} sat of the best selection is short-term until {}; \
+             selling on/after then would be taxed long-term, a \u{2248} {} difference.",
+            t.st_sat_in_selection, t.latest_crossover, t.saving_if_waited
+        );
+    }
+    let _ = writeln!(
+        s,
+        "Tax decision-support only \u{2014} consequences of a contemplated sale; \
+         not investment advice (no buy/sell/hold recommendation)."
+    );
+    s
+}
+
 pub fn render_verify(r: &VerifyReport) -> String {
     let mut out = String::new();
     let c = &r.conservation;

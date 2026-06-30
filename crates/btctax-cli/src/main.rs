@@ -10,7 +10,7 @@ use btctax_store::Passphrase;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use time::OffsetDateTime;
+use time::{OffsetDateTime, UtcOffset};
 
 #[derive(Parser)]
 #[command(name = "btctax", about = "Offline US Bitcoin tax ledger (Phase 1)")]
@@ -78,6 +78,9 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Lot-specific-identification optimizer (§C — read-only proposal or gated persistence).
+    #[command(subcommand)]
+    Optimize(Optimize),
     /// Set or show the per-tax-year tax profile (filing status, income, MAGI, etc.).
     TaxProfile {
         /// The tax year (e.g. 2025).
@@ -123,6 +126,57 @@ enum Command {
         /// Show the stored profile for `--year` instead of setting it.
         #[arg(long, default_value_t = false)]
         show: bool,
+    },
+}
+
+/// `optimize` subcommand tree.  Task 9 adds `Run`; Task 10 adds `Accept`; Task 11 adds `Consult`.
+#[derive(Subcommand)]
+enum Optimize {
+    /// Mode-1 what-if: print the tax-saving lot-selection proposal. NOTHING is filed or bound.
+    Run {
+        /// The tax year to optimize (must be 2025 or later).
+        #[arg(long)]
+        tax_year: i32,
+    },
+    /// Mode-1 gated persistence: recompute the optimum and persist the proposed LotSelection(s),
+    /// gated per disposal (§1.1012-1(j)). A genuinely-contemporaneous pick (made ≤ sale) persists
+    /// freely; an already-executed disposal persists ONLY with a narrow per-disposal `--attest`
+    /// scoped to one `--disposal`; a 2027+ broker-held pick is refused. Revoke via `reconcile void`.
+    Accept {
+        /// The tax year to accept (must be 2025 or later).
+        #[arg(long)]
+        tax_year: i32,
+        /// Restrict to ONE disposal (required to carry `--attest`).
+        #[arg(long)]
+        disposal: Option<String>,
+        /// Narrow contemporaneous-ID attestation for an already-executed disposal. Requires
+        /// `--disposal` (no blanket attestation across all disposals).
+        #[arg(long)]
+        attest: Option<String>,
+    },
+    /// Mode-2 read-only pre-trade what-if (§C.3): tax-min lots + ST/LT split + federal tax + ST→LT
+    /// timing. NOTHING is written — no event, no side-table row. Tax decision-support only;
+    /// not buy/sell/hold advice.
+    Consult {
+        /// Hypothetical sale amount in satoshis (required).
+        #[arg(long)]
+        sell: String,
+        /// Wallet to sell from, e.g. `self:cold` or `exchange:coinbase:default` (required; per-wallet
+        /// pool is mandatory post-2025).
+        #[arg(long)]
+        wallet: Option<String>,
+        /// Sale date for the what-if (YYYY-MM-DD; defaults to today UTC if omitted).
+        #[arg(long)]
+        at: Option<String>,
+        /// Explicit USD proceeds for the hypothetical sale. Required when `--at` is a future date
+        /// with no bundled dataset price and `--fmv` is not used. Mutually exclusive with `--fmv`.
+        #[arg(long, conflicts_with = "fmv")]
+        proceeds: Option<String>,
+        /// Use the bundled daily-close FMV for `--at` instead of an explicit proceeds amount.
+        /// A future date with no dataset price will return a ProceedsRequired error. Mutually
+        /// exclusive with `--proceeds`.
+        #[arg(long, conflicts_with = "proceeds")]
+        fmv: bool,
     },
 }
 
@@ -330,6 +384,77 @@ fn run() -> Result<ExitCode, CliError> {
                 print!("{}", render::render_report(&state, year));
             }
         }
+        Command::Optimize(opt) => match opt {
+            Optimize::Run { tax_year } => {
+                let p = cmd::optimize::run(vault, &passphrase(false)?, tax_year, now)?;
+                print!("{}", render::render_optimize_proposal(&p));
+            }
+            Optimize::Accept {
+                tax_year,
+                disposal,
+                attest,
+            } => {
+                let outcome = cmd::optimize::accept(
+                    vault,
+                    &passphrase(false)?,
+                    tax_year,
+                    disposal.as_deref(),
+                    attest.as_deref(),
+                    now,
+                )?;
+                print!("{}", render::render_accept_outcome(&outcome));
+            }
+            Optimize::Consult {
+                sell,
+                wallet,
+                at,
+                proceeds,
+                fmv: _,
+                // `--fmv` simply leaves proceeds = None (forces dataset FMV); clap's conflicts_with
+                // enforces that --fmv and --proceeds are never both passed.
+            } => {
+                let pp = passphrase(false)?;
+                // Parse sell amount (satoshis, i64).
+                let sell_sat = sell.trim().parse::<i64>().map_err(|e| {
+                    CliError::Usage(format!(
+                        "bad --sell {sell:?}: expected an integer sat amount: {e}"
+                    ))
+                })?;
+                // --wallet is semantically required: the per-wallet pool is mandatory post-2025.
+                let wallet_id = wallet
+                    .as_deref()
+                    .ok_or_else(|| {
+                        CliError::Usage(
+                            "--wallet is required for `optimize consult` \
+                             (per-wallet pool is mandatory post-2025; use e.g. self:cold or \
+                             exchange:coinbase:default)"
+                                .into(),
+                        )
+                    })
+                    .and_then(eventref::parse_wallet_id)?;
+                // --at defaults to today UTC (the CLI clock seam; core stays clock-free).
+                let at_date = at
+                    .as_deref()
+                    .map(eventref::parse_date_arg)
+                    .transpose()?
+                    .unwrap_or_else(|| btctax_core::conventions::tax_date(now, UtcOffset::UTC));
+                // --proceeds: explicit USD; None when --fmv or neither flag (forces dataset FMV).
+                let proceeds_usd = proceeds
+                    .as_deref()
+                    .map(eventref::parse_usd_arg)
+                    .transpose()?;
+                let report = cmd::optimize::consult(
+                    vault,
+                    &pp,
+                    sell_sat,
+                    wallet_id,
+                    at_date,
+                    proceeds_usd,
+                    DisposeKind::Sell,
+                )?;
+                print!("{}", render::render_consult(&report));
+            }
+        },
         Command::Reconcile(r) => dispatch_reconcile(vault, r, now)?,
         Command::Config {
             set_fee_treatment,

@@ -4,6 +4,45 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## C.5 — Monitor §1091 crypto wash-sale enactment (OPEN)
+
+**What.** §1091 currently disallows losses only on "stock or securities"; crypto is property
+(Notice 2014-21) and is **exempt**. The optimizer therefore selects loss lots freely — there is
+no 30-day disallowance rule in the current code.
+
+**Why monitor.** Recurring Greenbook proposals and legislative bills (e.g. various "Build Back
+Better"-era and subsequent drafts) have proposed extending §1091 to digital assets. None have
+been enacted as of this writing (2026-06-30).
+
+**If enacted:** add a 30-day look-back disallowance guard to loss-lot selection in
+`crates/btctax-core/src/optimize.rs` (the C.5 doc note identifies the attachment point) AND
+update the `## §1091 wash sale (C.5)` module doc note in lockstep. The regression KAT
+`tests/optimize_wash_sale.rs::loss_lot_freely_selectable_no_wash_sale_bar` must also be
+revised to assert the guard (not the current free-selection behavior).
+
+**Pointer.** `optimize.rs` module doc `## §1091 wash sale (C.5)`; KAT
+`tests/optimize_wash_sale.rs`.
+
+---
+
+## Sub-project C (optimizer) — Task-3 review IMPORTANT resolved (2026-06-30)
+
+- **RESOLVED — `available_lots_before` returned the wrong pre-disposal pool for the FIRST 2025 disposal
+  under safe-harbor Path B (FIXED).** The old truncate-then-refold never crossed `TRANSITION_DATE` when the
+  target disposal was the chronologically-first 2025 timeline event, so the re-fold never fired the §7.4
+  transition seed and surfaced the UN-seeded Universal residue — harmless under Path A (residue relocates by
+  wallet; lot_ids/basis preserved) but WRONG under Path B (the seed DISCARDS the residue and installs
+  `SafeHarborAllocation` seed lots with different lot_ids/basis). Fix: new
+  `pub fn fold::pools_before(res, prices, config, target) -> PoolSet` (fold.rs) folds the canonical timeline
+  up to (but not including) the target and fires the real `transition::seed_transition` at the correct
+  boundary (the seed check runs before the target short-circuit, so it fires even when the target is the
+  first ≥2025 event); `available_lots_before` now delegates to it (no duplicated seed logic). KATs added:
+  `available_lots_before_path_b_first_2025_disposal_returns_seeded_lots` (fails without the fix) +
+  `available_lots_before_path_a_first_2025_disposal_relocates_residue`. R0-I1 canonical ordering preserved
+  inside `pools_before`. — RESOLVED (2026-06-30). — optimize.rs / fold.rs; plan §TASK 3 updated.
+
+---
+
 ## ✅ Burndown pass (2026-06-29) — actionable Phase-1 items resolved
 
 Branch `chore/followups-burndown`, each fix independently reviewed to 0 Critical / 0 Important;
@@ -321,3 +360,69 @@ M3, N-2) were folded into the plan (see its "Fold record (round 1)"). These rema
 - **Minor — `MarginalRates.niit_applies` doc vs code.** Doc says "MAGI exceeds threshold"; code computes "crypto increased NIIT" (niit_with>niit_without). Display-only, feeds no figure. Align doc or rename. — OPEN.
 - **B-M1 (Phase-2) — minimal NII model can understate NIIT** in loss years (NII excludes crypto ordinary income + not reduced by §1211 loss). Disclosed in output. Phase-2 refinement. — OPEN.
 - **Nits (DEFER):** unused `events` param in compute_tax_year; redundant rust_decimal_macros dev-dep (adapters); `{:?}` filing_status in tax-profile --show; advisory-only→Computed KAT; B-R2-N1 stale §4.3 doc line. — OPEN (cosmetic/doc).
+
+## Sub-project C (optimizer) — Task-4 review Nit deferred (2026-06-30)
+
+- **Nit — `proposed_compliance_status` / `persistability` asymmetry for divergent contemporaneous 2027+
+  broker picks.** `proposed_compliance_status` returns `NonCompliant` for a selection that diverges from the
+  current pick AND was made at/before the sale date (`made ≤ sale`, i.e. contemporaneous) when the wallet is a
+  2027+ broker-held account. `persistability` returns `ContemporaneousNow` for the same inputs (made ≤ sale
+  is the only criterion for `persistability`; the 2027+ broker check is only in `ForbiddenBroker2027`). This
+  means the status says "NonCompliant" while the persistability gate says "persists freely" — an unusual
+  combination that a caller would see only for a future-dated existing disposal to a 2027+ broker where the
+  optimizer proposes a pick that differs from the current selection. In practice, the CLI's Task-10
+  2027+ broker refusal prevents this path from being reached (the CLI refuses to persist any divergent pick
+  for 2027+ brokers regardless of persistability). A one-line alignment (either widen
+  `proposed_compliance_status` to return `NonCompliant` from `persistability == ForbiddenBroker2027` even
+  for contemporaneous picks, OR add a `ForbiddenBroker2027` arm to `Persistability` and let the CLI check
+  that instead of `persistability == ContemporaneousNow`) would remove the conceptual gap. — **RESOLVED
+  (whole-diff-review fold, 2026-06-30):** `persistability` now tests the 2027+ broker envelope FIRST, ahead
+  of the `made ≤ sale` contemporaneous branch, so a 2027+ broker lot is categorically `ForbiddenBroker2027`
+  (never `ContemporaneousNow`) regardless of timing — matching `proposed_compliance_status` (which already
+  returned `NonCompliant` ahead of the contemporaneous branch). Both core functions now agree, and `accept`'s
+  gate categorically refuses these even when `made ≤ sale` (no own-books-insufficient 2027+ broker record can
+  persist). Covered by `persistability_broker_2027_contemporaneous_is_forbidden`,
+  `persistability_broker_pre_2027_contemporaneous` (regression), and the end-to-end
+  `accept_refuses_2027_broker_contemporaneous_divergent_no_write` (synthetic TY2027 table; fails without the
+  fix). `crates/btctax-core/src/optimize.rs` (`persistability`).
+
+## Sub-project C (optimizer) — whole-branch review round 1 deferrals (2026-06-30)
+
+Source: `reviews/whole-branch-review-optimizer-round-1.md` (VERDICT: READY TO MERGE — 0 Critical / 0
+Important). The review's one MUST-FIX-before-TY2027-table item (the `persistability`/`proposed_compliance_status`
+2027+ broker asymmetry) was folded this cycle (see the Task-4 nit above, now RESOLVED). The remaining three
+new Minors are non-blocking and deferred here.
+
+- **M-1 (Minor) — exact-tie tie-break can emit a `delta == 0` divergent pick.** In `exhaustive_min`
+  (`crates/btctax-core/src/optimize.rs`, the `total == best_total && assign < best_assign` branch) a candidate
+  that TIES the baseline total but is lexicographically smaller than `baseline_assignment` evicts the baseline
+  incumbent (`best_total` stays `== base.total`). Result: `best != baseline_assignment` with `delta == 0`, so a
+  disposal with two equal-basis/equal-term lots can yield `proposed != current` at zero tax benefit → `run`
+  shows a "change … needs `--attest`" line for no benefit, and a future-dated (`made ≤ sale`) disposal would let
+  a bare `accept` auto-persist a no-benefit divergent `LotSelection`. **No invariant is broken** (`delta = 0` is
+  shown, the pick is gated/legally valid, the reported optimum is still a true minimum) — it is needless churn /
+  a pointless attestation prompt. The lex-smallest tie-break is the spec'd §0 total order, so this is a quality
+  choice, not a correctness bug. *Recommend* preferring the baseline on an exact tie (evict only on
+  `total < best_total`). — OPEN (non-blocking polish).
+
+- **M-2 (Minor) — Mode-2 `consult_sale` discards the `candidate_selections` heuristic flag.**
+  `crates/btctax-core/src/optimize.rs` binds `let (cands, _heuristic) = candidate_selections(&lots, req.sell_sat)`.
+  For a wallet pool > `LOT_ENUM_BOUND` (12) — common for weekly-DCA / active-trading wallets — the candidate set
+  is a deterministic INCOMPLETE subset, so the proposed selection may not be the true tax-minimum, with NO
+  disclosure (unlike Mode-1's `PoolHeuristic` banner). Mitigation: `ConsultReport` has no `approximate` field and
+  the renderer hedges ("read-only what-if", "proposed selection", "federal tax attributable (estimated)") rather
+  than claiming "the optimum" — so it is NOT a false-global claim (hence Minor). The plan scoped R2-C1's
+  disclosure to Mode-1. *Recommend* a parallel "heuristic — searched a subset of a large pool" note in
+  `render_consult` for symmetry. — OPEN (non-blocking; add a consult-level approximate disclosure later).
+
+- **M-3 (Minor) — the optimizer's "global" excludes self-transfer lot-selection; scope undocumented.**
+  `optimize_year` (`crates/btctax-core/src/optimize.rs`) targets only `baseline_state.disposals`; SelfTransfers
+  produce no Disposal/Removal record, so a same-year self-transfer's lot routing is held at its baseline. Spec
+  §A.3 lists SelfTransfer as method-honoring and says it "lets the optimizer pre-position lots," so a user could
+  read "proven global minimum" (`approximate == false`) as including self-transfer re-routing. In practice the
+  available-lots pools are still correct (the real fold, incl. self-transfers at baseline, is replayed), and
+  self-transfers are non-taxable so they affect the single-year objective only indirectly via an uncommon
+  intra-year move-then-sell pattern — hence Minor. The `approximate == false` "global" claim is global over
+  taxable-disposal selections only. *Recommend* documenting the scope boundary in the proposal footer (mirroring
+  the R0-M2 vertex-granularity caveat); relates to A's open `disposal_compliance`-omits-SelfTransfers item. —
+  OPEN (non-blocking; document the scope boundary vs spec §A.3).

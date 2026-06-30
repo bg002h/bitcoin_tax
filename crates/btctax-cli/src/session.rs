@@ -2,6 +2,7 @@
 //! passphrase is ALWAYS a parameter — production resolves it in `main` (prompt/env); tests inject a
 //! constructed `Passphrase`. `project()` runs the pure core projection over the bundled price dataset.
 use crate::config::{self, CliConfig};
+use crate::optimize_attest;
 use crate::tax_profile;
 use crate::CliError;
 use btctax_adapters::BundledPrices;
@@ -42,6 +43,7 @@ impl Session {
         init_schema(vault.conn())?;
         config::init_config_table(vault.conn())?;
         tax_profile::init_table(vault.conn())?;
+        optimize_attest::init_table(vault.conn())?;
         vault.save()?;
         Ok(Session { vault })
     }
@@ -85,6 +87,14 @@ impl Session {
         &self,
     ) -> Result<std::collections::BTreeMap<i32, TaxProfile>, CliError> {
         tax_profile::all(self.conn())
+    }
+
+    /// All attested disposal `EventId`s (NFR4-stable `BTreeSet`; feeds `compliance_overlay`).
+    /// Robust to older vaults (defensive `init_table` guard inside `attested_set`).
+    pub fn optimize_attested_set(
+        &self,
+    ) -> Result<std::collections::BTreeSet<btctax_core::EventId>, CliError> {
+        optimize_attest::attested_set(self.conn())
     }
 
     /// Load all events and run the pure deterministic projection (NFR4) over the bundled daily-close
