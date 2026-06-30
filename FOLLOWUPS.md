@@ -4,6 +4,27 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## C.5 — Monitor §1091 crypto wash-sale enactment (OPEN)
+
+**What.** §1091 currently disallows losses only on "stock or securities"; crypto is property
+(Notice 2014-21) and is **exempt**. The optimizer therefore selects loss lots freely — there is
+no 30-day disallowance rule in the current code.
+
+**Why monitor.** Recurring Greenbook proposals and legislative bills (e.g. various "Build Back
+Better"-era and subsequent drafts) have proposed extending §1091 to digital assets. None have
+been enacted as of this writing (2026-06-30).
+
+**If enacted:** add a 30-day look-back disallowance guard to loss-lot selection in
+`crates/btctax-core/src/optimize.rs` (the C.5 doc note identifies the attachment point) AND
+update the `## §1091 wash sale (C.5)` module doc note in lockstep. The regression KAT
+`tests/optimize_wash_sale.rs::loss_lot_freely_selectable_no_wash_sale_bar` must also be
+revised to assert the guard (not the current free-selection behavior).
+
+**Pointer.** `optimize.rs` module doc `## §1091 wash sale (C.5)`; KAT
+`tests/optimize_wash_sale.rs`.
+
+---
+
 ## Sub-project C (optimizer) — Task-3 review IMPORTANT resolved (2026-06-30)
 
 - **RESOLVED — `available_lots_before` returned the wrong pre-disposal pool for the FIRST 2025 disposal

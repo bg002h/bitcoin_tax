@@ -3,7 +3,16 @@
 //! federal `total_federal_tax_attributable` over feasible per-disposal `LotSelection`s, within the
 //! §1.1012-1(j) identification boundary (adequate ID by the time of sale; no compliant post-hoc).
 //! Deterministic (NFR4) + exact (NFR5): BTreeMap/sorted iteration, Decimal/i64 only, no float.
-//! §1091 wash-sale does NOT apply to crypto — loss lots are freely selectable (Task 7; monitor).
+//!
+//! ## §1091 wash sale (C.5) — crypto is currently EXEMPT.
+//! §1091 disallows a loss only on "stock or securities"; the IRS treats convertible virtual currency
+//! as property, not a security (Notice 2014-21; Rev. Rul. 2023-14), and **no statute extending §1091
+//! to crypto has been enacted** (only recurring Greenbook/legislative proposals). The optimizer
+//! therefore selects loss lots **freely** — loss harvesting is unconstrained, and a chosen loss is
+//! never disallowed/deferred here. Form 1099-DA box 1i reports wash-sale disallowances only for
+//! assets that are in fact securities — not a change to crypto. **MONITOR for enactment**; if §1091
+//! is extended, loss-lot selection must add a disallowance rule and this note must change in lockstep
+//! (FOLLOWUPS.md — C.5).
 use crate::conventions::{is_long_term, one_year_after, Sat, TaxDate, Usd, TRANSITION_DATE};
 use crate::event::{DisposeKind, LedgerEvent, LotPick};
 use crate::identity::{EventId, LotId, SourceRef, WalletId};
