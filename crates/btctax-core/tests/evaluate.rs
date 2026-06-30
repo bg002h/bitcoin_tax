@@ -257,3 +257,81 @@ fn existing_disposal_selection_validated_against_resolved_principal_not_candidat
         out.blockers
     );
 }
+
+/// Pinning KAT (A-Task-9b): `evaluate_disposal(existing, no selection)` is the **no-op identity**
+/// — it must produce the SAME legs/gains as a plain `project()` call for that disposal.
+///
+/// This proves that injecting no candidate selection leaves the projection completely unchanged,
+/// and that the evaluate path does not alter any fold output relative to the real projection.
+#[test]
+fn evaluate_disposal_existing_no_selection_is_no_op_identity() {
+    // Simple deterministic ledger: one buy (FIFO lot A) + one sell (consumes A entirely).
+    let evs = vec![
+        buy(
+            "A",
+            datetime!(2025-02-01 00:00:00 UTC),
+            100_000,
+            dec!(50.00),
+        ),
+        sell(
+            "D",
+            datetime!(2025-07-01 00:00:00 UTC),
+            100_000,
+            dec!(95.00),
+        ),
+    ];
+
+    // Reference: what the real projection computes for disposal "D".
+    let state = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    assert_eq!(state.disposals.len(), 1, "setup: exactly one disposal");
+    let ref_legs = state.disposals[0].legs.clone();
+
+    // evaluate_disposal with the same existing event and NO candidate selection.
+    let cand = CandidateDisposal {
+        existing_event: Some(EventId::import(Source::Coinbase, SourceRef::new("D"))),
+        wallet: w(),
+        date: date!(2025 - 07 - 01),
+        sat: 100_000,
+        kind: DisposeKind::Sell,
+        proceeds: None,
+    };
+    let out = evaluate_disposal(
+        &evs,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+        &cand,
+        None, // no injected selection — must equal project() exactly
+    )
+    .unwrap();
+
+    // Legs must be byte-identical to the real projection.
+    assert_eq!(
+        out.legs, ref_legs,
+        "evaluate_disposal with no selection must match project() legs (no-op identity)"
+    );
+    // No blockers expected for a clean single-lot disposal.
+    assert!(
+        out.blockers.is_empty(),
+        "no blockers expected for a clean disposal with no injected selection; got {:?}",
+        out.blockers
+    );
+    // Gains must match (both are derived from the same legs, but assert independently for clarity).
+    let ref_st: rust_decimal::Decimal = ref_legs
+        .iter()
+        .filter(|l| l.term == btctax_core::Term::ShortTerm)
+        .map(|l| l.gain)
+        .sum();
+    let ref_lt: rust_decimal::Decimal = ref_legs
+        .iter()
+        .filter(|l| l.term == btctax_core::Term::LongTerm)
+        .map(|l| l.gain)
+        .sum();
+    assert_eq!(
+        out.st_gain, ref_st,
+        "st_gain must match project() (no-op identity)"
+    );
+    assert_eq!(
+        out.lt_gain, ref_lt,
+        "lt_gain must match project() (no-op identity)"
+    );
+}
