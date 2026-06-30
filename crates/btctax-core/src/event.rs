@@ -159,6 +159,13 @@ pub struct SafeHarborAllocation {
     pub as_of_date: TaxDate, // fixed 2025-01-01 snapshot
     pub method: AllocMethod,
     pub timely_allocation_attested: bool,
+    /// §A.7: the historical lot-consumption method (FIFO/LIFO/HIFO) used to derive the pre-2025
+    /// Universal residue THIS allocation lists — captured at attestation time and IMMUTABLE thereafter.
+    /// `universal_snapshot` conserves under THIS value (not the live config); a later live-config change
+    /// fires the hard `Pre2025MethodConflictsAllocation` (never `SafeHarborUnconservable`) and never
+    /// rewrites the irrevocable allocation (§7.4). `#[serde(default)]` -> Fifo for pre-A.7 records.
+    #[serde(default)]
+    pub pre2025_method: LotMethod,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SupersedeImport {
@@ -389,6 +396,7 @@ mod tests {
                 as_of_date: time::Date::from_calendar_date(2025, time::Month::January, 1).unwrap(),
                 method: AllocMethod::ProRata,
                 timely_allocation_attested: true,
+                pre2025_method: LotMethod::Fifo,
             }),
             EventPayload::SupersedeImport(SupersedeImport {
                 conflict_event: EventId::import(Source::Coinbase, SourceRef::new("T")),

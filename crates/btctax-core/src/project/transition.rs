@@ -12,7 +12,7 @@ use crate::project::fold::{fold_event, FoldCtx}; // the SHARED per-event dispatc
 use crate::project::pools::{PoolKey, PoolSet};
 use crate::project::resolve::{sort_canonical, Eff, ElectionRec, TransitionMode};
 use crate::state::{FoldStats, LedgerState, Lot};
-use crate::ProjectionConfig;
+use crate::{LotMethod, ProjectionConfig};
 use std::collections::BTreeMap;
 
 /// Σ held sat + Σ basis remaining in the single Universal pool at the 2025-01-01 boundary.
@@ -24,13 +24,23 @@ pub struct UniversalSnapshot {
 /// I-1: a TRANSITION-FREE fold of ONLY the pre-2025 effective timeline into the Universal pool. Reuses the
 /// exact pass-2 `fold_event` (so it cannot diverge) and NEVER seeds — so it depends only on pre-2025 history
 /// and can be called from pass-1 effectiveness evaluation without infinite regress (§7.2: not circular).
+///
+/// §A.7: method-aware. The residue is computed under the supplied `method` (an allocation's RECORDED
+/// `pre2025_method`), NOT necessarily the live `config.pre2025_method` — so a non-FIFO filer's safe-harbor
+/// Path B conserves against the residue the allocation actually listed. The conflict between live config and
+/// the recorded method is surfaced separately (`Pre2025MethodConflictsAllocation`), never here.
 pub fn universal_snapshot(
     timeline: &[Eff],
     prices: &dyn PriceProvider,
     config: &ProjectionConfig,
+    method: LotMethod,
     elections: &[ElectionRec],
     selections: &BTreeMap<EventId, Vec<LotPick>>,
 ) -> UniversalSnapshot {
+    let cfg = ProjectionConfig {
+        pre2025_method: method,
+        ..*config
+    }; // method-aware residue (§A.7): fold the pre-2025 Universal pool under the RECORDED method
     let mut pre: Vec<Eff> = timeline
         .iter()
         .filter(|e| e.date() < TRANSITION_DATE)
@@ -41,9 +51,9 @@ pub fn universal_snapshot(
     let mut sink = LedgerState::default(); // discarded; we only read the pool residue
     let mut stats = FoldStats::default();
     // Same FoldCtx the real fold uses, so the pre-2025 residue cannot diverge (I-1). Pre-2025 disposals
-    // route through the Universal pool → `pre2025_method`; the elections (forward-only) never apply here.
+    // route through the Universal pool → the recorded `pre2025_method`; elections (forward-only) never apply.
     let ctx = FoldCtx {
-        config,
+        config: &cfg,
         elections,
         selections,
     };

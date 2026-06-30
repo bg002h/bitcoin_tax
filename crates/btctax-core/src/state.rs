@@ -37,6 +37,12 @@ pub enum BlockerKind {
     /// §A.4: a `LotSelection` that fails validation (unknown/cross-wallet/over-drawn lot, or principal
     /// mismatch). Hard — the named identification is unusable so the disposal's tax is gated.
     LotSelectionInvalid,
+    /// §A.7 / §7.4: the live `pre2025_method` config differs from the GOVERNING (effective) allocation's
+    /// recorded `pre2025_method`. The allocation conserves under ITS recorded method, so this is a method
+    /// drift — NOT bad data (never `SafeHarborUnconservable`). Hard: a post-attestation method change would
+    /// silently break conservation between the pre-2025 residue and the irrevocable allocation. Clearable by
+    /// reverting the live config to the recorded method; the irrevocable allocation is never rewritten.
+    Pre2025MethodConflictsAllocation,
 }
 impl BlockerKind {
     pub fn severity(self) -> Severity {
@@ -50,7 +56,8 @@ impl BlockerKind {
             | Unclassified
             | SafeHarborUnconservable
             | MethodElectionBackdated
-            | LotSelectionInvalid => Severity::Hard,
+            | LotSelectionInvalid
+            | Pre2025MethodConflictsAllocation => Severity::Hard,
             SafeHarborTimebar | UnmatchedOutflows | Pre2025MethodNote => Severity::Advisory,
         }
     }
@@ -203,5 +210,9 @@ mod tests {
             Severity::Hard
         );
         assert_eq!(BlockerKind::LotSelectionInvalid.severity(), Severity::Hard);
+        assert_eq!(
+            BlockerKind::Pre2025MethodConflictsAllocation.severity(),
+            Severity::Hard
+        );
     }
 }

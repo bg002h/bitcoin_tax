@@ -2,7 +2,7 @@ use crate::conventions::{tax_date, Sat, TaxDate, Usd, TRANSITION_DATE, TY2025_RE
 use crate::event::*;
 use crate::identity::{EventId, LotId, SourceRef, WalletId};
 use crate::price::PriceProvider;
-use crate::project::{FeeTreatment, ProjectionConfig};
+use crate::project::{FeeTreatment, LotMethod, ProjectionConfig};
 use crate::state::{Blocker, BlockerKind, Lot};
 use std::collections::{BTreeMap, BTreeSet};
 use time::{OffsetDateTime, UtcOffset};
@@ -624,17 +624,13 @@ pub fn resolve(
         .map(|e| e.date())
         .min();
 
-    // (3-prereq) The pre-2025 Universal residue is allocation-INDEPENDENT — compute it ONCE.
-    let snap = crate::project::transition::universal_snapshot(
-        &timeline,
-        prices,
-        config,
-        &elections,
-        &selections,
-    );
-
+    // (3-prereq) §A.7: the pre-2025 Universal residue is METHOD-aware — each candidate allocation's
+    // conservation is checked against the residue computed under ITS OWN recorded `pre2025_method` (below),
+    // not a single live-config snapshot. So a non-FIFO filer's allocation conserves against the residue it
+    // actually listed; a live-config/recorded-method drift is flagged after Path selection (M2), never here.
     let due = TY2025_RETURN_DUE;
-    let mut effective: Vec<(EventId, Vec<Lot>)> = Vec::new(); // (allocation id, pre-built seed lots)
+    // (allocation id, pre-built seed lots, the allocation's RECORDED pre2025_method)
+    let mut effective: Vec<(EventId, Vec<Lot>, LotMethod)> = Vec::new();
     for (_seq, d) in &decisions {
         if voided.contains(&d.id) {
             continue;
@@ -655,7 +651,18 @@ pub fn resolve(
         let timebarred = (!a.timely_allocation_attested && bar.is_some_and(|b| made > b))
             || (a.method == AllocMethod::ProRata && !a.timely_allocation_attested);
 
-        // (3) Conservation vs the pre-2025 Universal snapshot. HARD on failure; attestation cannot bypass it.
+        // (3) Conservation vs the pre-2025 Universal snapshot, computed under THIS allocation's RECORDED
+        //     method (§A.7) — so a non-FIFO filer conserves against the residue it actually listed. HARD on
+        //     failure; attestation cannot bypass it. (A live-config/recorded drift is NOT a conservation
+        //     failure: it is flagged after Path selection as `Pre2025MethodConflictsAllocation`, M2.)
+        let snap = crate::project::transition::universal_snapshot(
+            &timeline,
+            prices,
+            config,
+            a.pre2025_method,
+            &elections,
+            &selections,
+        );
         let alloc_sat: Sat = a.lots.iter().map(|l| l.sat).sum();
         let alloc_basis: Usd = a.lots.iter().map(|l| l.usd_basis).sum();
         let unconservable = alloc_sat != snap.held_sat || alloc_basis != snap.basis;
@@ -697,13 +704,13 @@ pub fn resolve(
                 basis_pending: false,
             })
             .collect();
-        effective.push((d.id.clone(), seed));
+        effective.push((d.id.clone(), seed, a.pre2025_method));
     }
 
     // (5) Irrevocability (§7.4(2)): a Void of an EFFECTIVE allocation → conflict (it stays in force); a
     //     Void of an inert/absent allocation simply applies (no conflict; Path A already governs).
     for v in &allocation_voids {
-        if effective.iter().any(|(id, _)| id == &v.target) {
+        if effective.iter().any(|(id, _, _)| id == &v.target) {
             blockers.push(Blocker {
                 kind: BlockerKind::DecisionConflict,
                 event: Some(v.void_id.clone()),
@@ -715,10 +722,28 @@ pub fn resolve(
     // Multiple effective allocations → conflict; exactly one governs Path B; none → Path A default.
     let transition = match effective.len() {
         0 => TransitionMode::PathA,
-        1 => TransitionMode::PathB {
-            seed: effective.into_iter().next().expect("len == 1").1,
-        },
+        1 => {
+            let (id, seed, recorded_method) = effective.into_iter().next().expect("len == 1");
+            // §A.7.3 (M2): the conflict is "live config != the GOVERNING allocation's recorded method",
+            // emitted ONCE, only for the single effective allocation. Conservation already passed (the
+            // snapshot used `recorded_method`), so this is NEVER `SafeHarborUnconservable`; Path B stays
+            // effective — the irrevocable allocation (§7.4) pins the method and is never rewritten. Clears
+            // by reverting the live config to the recorded method (no deadlock with irrevocability).
+            if config.pre2025_method != recorded_method {
+                blockers.push(Blocker {
+                    kind: BlockerKind::Pre2025MethodConflictsAllocation,
+                    event: Some(id),
+                    detail: format!(
+                        "live pre2025_method ({:?}) differs from this allocation's recorded method ({:?}); revert the config to the recorded method (the irrevocable allocation pins it, §7.4)",
+                        config.pre2025_method, recorded_method
+                    ),
+                });
+            }
+            TransitionMode::PathB { seed }
+        }
         _ => {
+            // Multiple effective: already hard-blocked by DecisionConflict → Path A. Do NOT evaluate the
+            // method-conflict here (M2: it must fire only in the single-effective arm, never spuriously).
             blockers.push(Blocker {
                 kind: BlockerKind::DecisionConflict,
                 event: None,

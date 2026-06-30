@@ -250,6 +250,11 @@ pub fn safe_harbor_allocate(
         as_of_date: TRANSITION_DATE,
         method,
         timely_allocation_attested: attested,
+        // §A.7: capture the live attested pre-2025 method at attestation time. The residue above was
+        // projected under this SAME `cfg.pre2025_method`, so the listed lots conserve against the engine's
+        // method-aware snapshot. Immutable thereafter; a later live-config change fires the hard
+        // `Pre2025MethodConflictsAllocation` rather than silently breaking conservation.
+        pre2025_method: cfg.pre2025_method,
     });
     append_and_save(&mut session, payload, now)
 }
