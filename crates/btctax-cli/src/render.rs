@@ -1,14 +1,18 @@
 //! Text rendering of CLI outputs (FR9 verify, FR4 report/show) + FR10 CSV export. Pure string-building
 //! over engine data — the CLI displays; the engine computes (NFR4/NFR5).
+use crate::config::CliConfig;
 use btctax_adapters::FileReport;
+use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::ImportReport;
 use btctax_core::{
-    conservation_report, BasisSource, Blocker, BlockerKind, ConservationReport, DisposalLeg,
-    DisposeKind, GiftZone, IncomeKind, LedgerEvent, LedgerState, RemovalKind, RemovalLeg, Severity,
-    Term, WalletId,
+    conservation_report, disposal_compliance, BasisSource, Blocker, BlockerKind,
+    ConservationReport, DisposalCompliance, DisposalLeg, DisposeKind, EventId, EventPayload,
+    GiftZone, IncomeKind, LedgerEvent, LedgerState, LotMethod, RemovalKind, RemovalLeg, Severity,
+    TaxDate, Term, WalletId,
 };
 use btctax_store::fsperms;
 use csv::Writer;
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -251,6 +255,25 @@ fn render_removal_leg(out: &mut String, leg: &RemovalLeg) {
 
 // ── FR9 verify ──────────────────────────────────────────────────────────────────────────────────
 
+/// Stable display tag for `LotMethod` (FIFO/LIFO/HIFO — uppercase, human-readable).
+fn lot_method_display(m: LotMethod) -> &'static str {
+    match m {
+        LotMethod::Fifo => "FIFO",
+        LotMethod::Lifo => "LIFO",
+        LotMethod::Hifo => "HIFO",
+    }
+}
+
+/// One entry in the `MethodElection` standing-order history reported by `verify`.
+#[derive(Debug, Clone)]
+pub struct ElectionLine {
+    pub recorded: TaxDate,
+    pub effective_from: TaxDate,
+    pub method: LotMethod,
+    /// "in force" | "voided" | "backdated/ignored"
+    pub note: &'static str,
+}
+
 /// Structured FR9 outcome (so tests assert on data, not stdout, and `main` keys the exit code).
 #[derive(Debug, Clone)]
 pub struct VerifyReport {
@@ -260,6 +283,15 @@ pub struct VerifyReport {
     pub pending: usize,
     pub unknown_basis_inbounds: usize,
     pub safe_harbor: String,
+    /// Task 8: declared `pre2025_method` from the CLI config (attested or not).
+    pub declared_pre2025_method: LotMethod,
+    pub pre2025_method_attested: bool,
+    /// Task 8: standing-order history (all `MethodElection` decisions, sorted by decision_seq).
+    pub elections: Vec<ElectionLine>,
+    /// Task 8: count of non-voided `LotSelection` decisions.
+    pub selection_count: usize,
+    /// Task 8: per-disposal compliance (post-2025 only).
+    pub compliance: Vec<DisposalCompliance>,
 }
 
 impl VerifyReport {
@@ -320,7 +352,7 @@ fn safe_harbor_status(state: &LedgerState, _events: &[LedgerEvent]) -> String {
     }
 }
 
-pub fn build_verify(state: &LedgerState, events: &[LedgerEvent]) -> VerifyReport {
+pub fn build_verify(state: &LedgerState, events: &[LedgerEvent], cli: &CliConfig) -> VerifyReport {
     let conservation = conservation_report(state);
     let mut hard = Vec::new();
     let mut advisory = Vec::new();
@@ -335,6 +367,62 @@ pub fn build_verify(state: &LedgerState, events: &[LedgerEvent]) -> VerifyReport
         .iter()
         .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
         .count();
+
+    // Build the voided set (for election notes and selection counting).
+    let voided: BTreeSet<EventId> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::VoidDecisionEvent(v) => Some(v.target_event_id.clone()),
+            _ => None,
+        })
+        .collect();
+
+    // Build election history (NFR4: sorted by decision_seq for a stable total order).
+    let mut election_events: Vec<(u64, &LedgerEvent)> = events
+        .iter()
+        .filter_map(|e| {
+            if let EventId::Decision { seq } = e.id {
+                if matches!(e.payload, EventPayload::MethodElection(_)) {
+                    return Some((seq, e));
+                }
+            }
+            None
+        })
+        .collect();
+    election_events.sort_by_key(|(s, _)| *s);
+
+    let elections: Vec<ElectionLine> = election_events
+        .iter()
+        .map(|(_, e)| {
+            let EventPayload::MethodElection(me) = &e.payload else {
+                unreachable!("filtered to MethodElection above")
+            };
+            let recorded = tax_date(e.utc_timestamp, e.original_tz);
+            let note = if voided.contains(&e.id) {
+                "voided"
+            } else if me.effective_from < TRANSITION_DATE || me.effective_from < recorded {
+                "backdated/ignored"
+            } else {
+                "in force"
+            };
+            ElectionLine {
+                recorded,
+                effective_from: me.effective_from,
+                method: me.method,
+                note,
+            }
+        })
+        .collect();
+
+    // Count non-voided LotSelection decisions.
+    let selection_count = events
+        .iter()
+        .filter(|e| matches!(e.payload, EventPayload::LotSelection(_)) && !voided.contains(&e.id))
+        .count();
+
+    // Per-disposal compliance (§A.5): side-effect-free projection.
+    let compliance = disposal_compliance(events, state);
+
     VerifyReport {
         conservation,
         hard,
@@ -342,6 +430,11 @@ pub fn build_verify(state: &LedgerState, events: &[LedgerEvent]) -> VerifyReport
         pending: state.pending_reconciliation.len(),
         unknown_basis_inbounds,
         safe_harbor: safe_harbor_status(state, events),
+        declared_pre2025_method: cli.pre2025_method,
+        pre2025_method_attested: cli.pre2025_method_attested,
+        elections,
+        selection_count,
+        compliance,
     }
 }
 
@@ -521,6 +614,42 @@ pub fn render_verify(r: &VerifyReport) -> String {
             .map(|e| e.canonical())
             .unwrap_or_else(|| "-".to_string());
         let _ = writeln!(out, "  [{:?}] {} :: {}", b.kind, evt, b.detail);
+    }
+    let _ = writeln!(
+        out,
+        "Pre-2025 method (attested historical fact): {} (attested: {})",
+        lot_method_display(r.declared_pre2025_method),
+        r.pre2025_method_attested
+    );
+    let _ = writeln!(
+        out,
+        "Standing orders (MethodElection): {}",
+        r.elections.len()
+    );
+    for e in &r.elections {
+        let _ = writeln!(
+            out,
+            "  recorded {} effective {} -> {} [{}]",
+            e.recorded,
+            e.effective_from,
+            lot_method_display(e.method),
+            e.note
+        );
+    }
+    let _ = writeln!(out, "Lot selections recorded: {}", r.selection_count);
+    let _ = writeln!(
+        out,
+        "Per-disposal compliance (post-2025): {}",
+        r.compliance.len()
+    );
+    for c in &r.compliance {
+        let _ = writeln!(
+            out,
+            "  {} @ {} :: {:?}",
+            c.disposal.canonical(),
+            c.date,
+            c.status
+        );
     }
     out
 }
