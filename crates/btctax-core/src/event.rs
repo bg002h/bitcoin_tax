@@ -1,6 +1,6 @@
 //! The canonical event taxonomy (§6.4). One `EventPayload` enum; imported, system, and decision variants.
 use crate::conventions::{Sat, TaxDate, Usd};
-use crate::identity::{EventId, Fingerprint, WalletId};
+use crate::identity::{EventId, Fingerprint, LotId, WalletId};
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, UtcOffset};
 
@@ -175,6 +175,14 @@ pub struct VoidDecisionEvent {
 pub struct ClassifyRaw {
     pub target: EventId,
     pub as_: Box<EventPayload>, // the supplied imported payload
+}
+
+/// A named-lot selection element (§A.4): consume exactly `sat` from lot `lot`.
+/// Used by `PoolSet::consume` (Task 2) and carried by the `LotSelection` decision payload (Task 4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LotPick {
+    pub lot: LotId,
+    pub sat: Sat,
 }
 
 /// The single payload sum-type carried by every `LedgerEvent` (§6.3/§6.4).
@@ -381,6 +389,20 @@ mod tests {
             let back: LedgerEvent = serde_json::from_str(&json).unwrap();
             assert_eq!(ev, back);
         }
+    }
+
+    #[test]
+    fn lot_pick_round_trips() {
+        let pick = LotPick {
+            lot: LotId {
+                origin_event_id: EventId::import(Source::Coinbase, SourceRef::new("L")),
+                split_sequence: 2,
+            },
+            sat: 123_456,
+        };
+        let json = serde_json::to_string(&pick).unwrap();
+        let back: LotPick = serde_json::from_str(&json).unwrap();
+        assert_eq!(pick, back);
     }
 
     #[test]
