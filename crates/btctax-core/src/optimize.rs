@@ -6,7 +6,9 @@
 //!
 //! ## §1091 wash sale (C.5) — crypto is currently EXEMPT.
 //! §1091 disallows a loss only on "stock or securities"; the IRS treats convertible virtual currency
-//! as property, not a security (Notice 2014-21; Rev. Rul. 2023-14), and **no statute extending §1091
+//! as property, not a security (Notice 2014-21 — the on-point property characterization; property
+//! treatment is reaffirmed generally by Rev. Rul. 2023-14, which itself concerns staking income under
+//! §61 rather than the §1091 "stock or securities" scope), and **no statute extending §1091
 //! to crypto has been enacted** (only recurring Greenbook/legislative proposals). The optimizer
 //! therefore selects loss lots **freely** — loss harvesting is unconstrained, and a chosen loss is
 //! never disallowed/deferred here. Form 1099-DA box 1i reports wash-sale disallowances only for
