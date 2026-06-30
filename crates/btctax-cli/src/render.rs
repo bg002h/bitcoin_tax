@@ -5,7 +5,7 @@ use btctax_adapters::FileReport;
 use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::ImportReport;
 use btctax_core::{
-    conservation_report, disposal_compliance, BasisSource, Blocker, BlockerKind,
+    conservation_report, disposal_compliance, BasisSource, Blocker, BlockerKind, ComplianceStatus,
     ConservationReport, DisposalCompliance, DisposalLeg, DisposeKind, EventId, EventPayload,
     GiftZone, IncomeKind, LedgerEvent, LedgerState, LotMethod, RemovalKind, RemovalLeg, Severity,
     TaxDate, Term, WalletId,
@@ -70,6 +70,25 @@ fn term_tag(t: Term) -> &'static str {
     match t {
         Term::ShortTerm => "short",
         Term::LongTerm => "long",
+    }
+}
+
+/// Stable compliance-status display string, used in `render_verify` and optimizer output
+/// in place of `{:?}` (which would expose unstable Rust Debug formatting).
+///
+/// Values:
+/// - `standing_order:<date>` — in-force standing order effective from `<date>` (YYYY-MM-DD).
+/// - `contemporaneous`       — `LotSelection` recorded on or before the day of sale.
+/// - `attested_recording`    — Mode-1-persisted selection backed by contemporaneous-ID attestation (§C.2).
+/// - `non_compliant`         — no adequate identification; FIFO is the defensible filing position.
+fn compliance_status_tag(cs: &ComplianceStatus) -> String {
+    match cs {
+        ComplianceStatus::StandingOrder { effective_from } => {
+            format!("standing_order:{effective_from}")
+        }
+        ComplianceStatus::Contemporaneous => "contemporaneous".into(),
+        ComplianceStatus::AttestedRecording => "attested_recording".into(),
+        ComplianceStatus::NonCompliant => "non_compliant".into(),
     }
 }
 
@@ -415,6 +434,9 @@ pub fn build_verify(state: &LedgerState, events: &[LedgerEvent], cli: &CliConfig
         .collect();
 
     // Count non-voided LotSelection decisions.
+    // Note: a `Decision`-id guard is intentionally omitted — `LotSelection` payloads are
+    // exclusively carried by `EventId::Decision` events (appended via `append_decision` in the
+    // CLI); filtering by payload alone is equivalent and sufficient.
     let selection_count = events
         .iter()
         .filter(|e| matches!(e.payload, EventPayload::LotSelection(_)) && !voided.contains(&e.id))
@@ -728,11 +750,11 @@ pub fn render_optimize_proposal(p: &btctax_core::OptimizeProposal) -> String {
     for d in &p.per_disposal {
         let _ = writeln!(
             s,
-            "  {} @ {} [{}] :: {:?}",
+            "  {} @ {} [{}] :: {}",
             d.disposal.canonical(),
             d.date,
             wallet_label(&d.wallet),
-            d.status
+            compliance_status_tag(&d.status)
         );
         // R2-M1: a NO-CHANGE row (proposed == current) has nothing to attest/persist — `accept` SKIPS it
         // ("already optimal under current identification"). Do NOT print a persistability line here: a
@@ -946,10 +968,10 @@ pub fn render_verify(r: &VerifyReport) -> String {
     for c in &r.compliance {
         let _ = writeln!(
             out,
-            "  {} @ {} :: {:?}",
+            "  {} @ {} :: {}",
             c.disposal.canonical(),
             c.date,
-            c.status
+            compliance_status_tag(&c.status)
         );
     }
     out
