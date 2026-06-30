@@ -4,13 +4,13 @@
 //! §1.1012-1(j) identification boundary (adequate ID by the time of sale; no compliant post-hoc).
 //! Deterministic (NFR4) + exact (NFR5): BTreeMap/sorted iteration, Decimal/i64 only, no float.
 //! §1091 wash-sale does NOT apply to crypto — loss lots are freely selectable (Task 7; monitor).
-use crate::conventions::{Sat, TaxDate, Usd, TRANSITION_DATE};
+use crate::conventions::{Sat, TaxDate, Usd};
 use crate::event::{DisposeKind, LedgerEvent, LotPick};
 use crate::identity::{EventId, WalletId};
 use crate::price::PriceProvider;
-use crate::project::fold::fold;
+use crate::project::fold::{fold, pools_before};
 use crate::project::pools::pool_key;
-use crate::project::resolve::{resolve, sort_canonical};
+use crate::project::resolve::resolve;
 use crate::project::ComplianceStatus;
 use crate::project::EvaluateError;
 use crate::project::{project, ProjectionConfig};
@@ -221,19 +221,21 @@ pub fn score_assignment(
 /// ceiling — well inside `MAX_COMBOS`.
 const LOT_ENUM_BOUND: usize = 12;
 
-/// Lots available to `disposal` at `date` in `wallet`, computed by a clone-fold of the timeline
-/// TRUNCATED just before the disposal (NFR4: deterministic; no fold modification). Post-2025 → the
+/// Lots available to `disposal` at `date` in `wallet`, computed by a clone-fold of the timeline up to
+/// (but NOT including) the disposal (NFR4: deterministic; no fold modification). Post-2025 → the
 /// disposal's own wallet pool (§1.1012-1(j) per-wallet); pre-2025 → the universal pool. Returns lots
 /// with `remaining_sat > 0`, sorted by `lot_id` (a total order).
 ///
-/// **R0-I1 — sort canonically + partition BEFORE truncating.** `resolve` builds `timeline` in DB/load
-/// order (it does NOT sort); the fold sorts canonically THEN stable-partitions by transition side
-/// (`fold.rs` `sort_canonical` + `sort_by_key(date >= TRANSITION_DATE)`). So we MUST replicate BOTH
-/// orderings before locating/truncating the disposal, else `position`/`truncate` would operate on load
-/// order and drop a lot acquired-before-the-disposal-in-TIME but loaded-after it (→ a missed candidate →
-/// a non-optimal result). The truncated prefix is then re-folded; `fold` re-sorts the prefix, but on an
-/// already-canonical+partitioned contiguous prefix that re-sort is idempotent, so the reconstructed pool
-/// is exactly the pool state the real fold reaches just before the disposal.
+/// **Delegates the fold to `fold::pools_before`** (which mirrors the real fold's canonical + transition
+/// ordering AND fires the §7.4 boundary seed at the correct point). This is the fix for the Task-3 review
+/// IMPORTANT: the previous "truncate-then-refold" never crossed `TRANSITION_DATE` when the target disposal
+/// was the chronologically-first 2025 timeline event, so the re-fold never seeded and returned the
+/// UN-seeded Universal residue — correct under Path A (residue relocates by wallet, lot_ids preserved) but
+/// WRONG under Path B (the seed DISCARDS the residue and installs allocation lots with different
+/// lot_ids/basis). `pools_before` reuses the real `seed_transition`, so the pool matches the live fold for
+/// pre-2025 disposals (Universal), Path-A post-2025 (per-wallet relocated), and Path-B post-2025 (seeded
+/// lots) — for the FIRST 2025 disposal and every later one. R0-I1 canonical ordering is preserved inside
+/// `pools_before`; an absent disposal still yields an empty `Vec` (existence checked here first).
 // (allow dead_code: consumed by `optimize_year`'s candidate assembly in Task 4; tested directly here.)
 #[allow(dead_code)]
 fn available_lots_before(
@@ -244,20 +246,20 @@ fn available_lots_before(
     date: TaxDate,
     wallet: &WalletId,
 ) -> Vec<Lot> {
-    let mut res = resolve(events, prices, config);
-    // R0-I1: mirror the EXACT fold ordering (canonical, then stable transition partition) before we can
-    // trust `position`/`truncate` to cut the timeline at the disposal's real point in the year.
-    sort_canonical(&mut res.timeline); // pub (resolve.rs); §6.2 canonical order
-    res.timeline.sort_by_key(|e| e.date() >= TRANSITION_DATE); // stable pre-2025 partition (fold.rs)
-    let Some(idx) = res.timeline.iter().position(|e| &e.id == disposal) else {
+    let res = resolve(events, prices, config);
+    // "not found ⇒ empty" contract (ordering-independent existence check; `pools_before` would otherwise
+    // fold the whole timeline for a missing target).
+    if !res.timeline.iter().any(|e| &e.id == disposal) {
         return Vec::new();
-    };
-    res.timeline.truncate(idx); // drop the disposal and everything at/after it (canonical order)
-    let pre = fold(res, prices, config); // pool state just before the disposal (fold re-sorts the subset)
+    }
+    // Pool state just before the disposal, with the transition seed already applied at the correct
+    // boundary (Path A drain / Path B seed) — matches the real fold under both paths (Task-3 IMPORTANT).
+    let pools = pools_before(res, prices, config, disposal);
     let want = pool_key(date, wallet); // post-2025 → Wallet(wallet); pre-2025 → Universal
-    let mut lots: Vec<Lot> = pre
-        .lots
-        .into_iter()
+    let mut lots: Vec<Lot> = pools
+        .pools
+        .into_values()
+        .flatten()
         .filter(|l| l.remaining_sat > 0 && pool_key(date, &l.wallet) == want)
         .collect();
     lots.sort_by(|a, b| a.lot_id.cmp(&b.lot_id)); // total order (NFR4)
@@ -455,9 +457,12 @@ mod tests {
 #[cfg(test)]
 mod candidate_tests {
     use super::*;
-    use crate::event::{Acquire, BasisSource, Dispose, EventPayload};
+    use crate::event::{
+        Acquire, AllocLot, AllocMethod, BasisSource, Dispose, EventPayload, SafeHarborAllocation,
+    };
     use crate::identity::{LotId, Source, SourceRef};
     use crate::price::StaticPrices;
+    use crate::LotMethod;
     use rust_decimal_macros::dec;
     use std::collections::BTreeSet;
     use time::macros::{date, datetime, offset};
@@ -557,6 +562,34 @@ mod candidate_tests {
     }
     fn cfg() -> ProjectionConfig {
         ProjectionConfig::default()
+    }
+    /// An effective (attested ⇒ §5.02(4) bar bypassed) `ActualPosition` safe-harbor allocation decision
+    /// event (Path B). `id = EventId::decision(seq)` ⇒ the seed lots' `origin_event_id` is THIS decision,
+    /// distinct from any imported buy's lot id. Recorded method FIFO; `as_of_date` the 2025-01-01 snapshot.
+    fn alloc_event(seq: u64, made: time::OffsetDateTime, lots: Vec<AllocLot>) -> LedgerEvent {
+        LedgerEvent {
+            id: EventId::decision(seq),
+            utc_timestamp: made,
+            original_tz: offset!(+00:00),
+            wallet: None,
+            payload: EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+                lots,
+                as_of_date: date!(2025 - 01 - 01),
+                method: AllocMethod::ActualPosition,
+                timely_allocation_attested: true, // bypass the §5.02(4) bar so Path B governs
+                pre2025_method: LotMethod::Fifo,
+            }),
+        }
+    }
+    fn alloc_lot(w: WalletId, sat: Sat, basis: Usd, acq: TaxDate) -> AllocLot {
+        AllocLot {
+            wallet: w,
+            sat,
+            usd_basis: basis,
+            acquired_at: acq,
+            dual_loss_basis: None,
+            donor_acquired_at: None,
+        }
     }
 
     // ── candidate_selections (pure vertex enumeration) ─────────────────────────────────────────────
@@ -706,13 +739,13 @@ mod candidate_tests {
         }
     }
 
-    // ── available_lots_before (pre-pass: sort_canonical + transition partition BEFORE truncate) ─────
+    // ── available_lots_before (pre-pass: fold::pools_before — canonical + transition seed at boundary) ─
 
     /// R0-I1 — load-order ≠ canonical-order. A lot acquired EARLIER in time but appended LATER in
     /// `events`, and a lot acquired LATER in time but appended EARLIER. `available_lots_before(D)` must
     /// return exactly the lots acquired-before-`D`-in-TIME: the early-time/late-load lot PRESENT, the
-    /// late-time/early-load lot ABSENT. Without the `sort_canonical` + partition replication this fails
-    /// (it would truncate on load order and keep the wrong lot).
+    /// late-time/early-load lot ABSENT. Without the `sort_canonical` + partition replication (now inside
+    /// `fold::pools_before`) this fails (it would cut on load order and keep the wrong lot).
     #[test]
     fn available_lots_before_respects_canonical_not_load_order() {
         // load order: LATE (09-01), D (06-01), EARLY (02-01) — deliberately NOT time order.
@@ -799,6 +832,128 @@ mod candidate_tests {
         assert!(
             !ids.contains(&lid("HL")),
             "cross-wallet lot excluded (per-wallet pool)"
+        );
+    }
+
+    /// Task-3 review IMPORTANT — Path B, the FIRST 2025 timeline event IS the disposal. An effective
+    /// `SafeHarborAllocation` (Path B) DISCARDS the pre-2025 FIFO residue and installs seed lots whose
+    /// `lot_id`s (origin = the allocation decision) and per-lot basis DIFFER from the residue. Because
+    /// decision events are not timeline events (resolve.rs:491), this sell is the chronologically-first
+    /// ≥2025 timeline event, so the boundary seed must STILL fire before it. `available_lots_before` MUST
+    /// return the SEEDED lots (origin = allocation, `basis_source == SafeHarborAllocated`), NOT the
+    /// discarded residue (origin = the pre-2025 buy). FAILS without the `pools_before` seed-at-boundary
+    /// fix (the old truncate-then-refold never crosses TRANSITION_DATE → surfaces the un-seeded residue).
+    #[test]
+    fn available_lots_before_path_b_first_2025_disposal_returns_seeded_lots() {
+        let alloc_id = EventId::decision(1);
+        let events = vec![
+            // pre-2025 buy → Universal residue: 100M sat @ basis 60 (origin = "OLD", ExchangeProvided).
+            buy(
+                "OLD",
+                datetime!(2024-06-01 00:00:00 UTC),
+                cold(),
+                LOT,
+                dec!(60),
+            ),
+            // FIRST 2025 timeline event is THIS disposal (the allocation below is a decision, not a tl event).
+            sell(
+                "D",
+                datetime!(2025-02-01 00:00:00 UTC),
+                cold(),
+                LOT,
+                dec!(80),
+            ),
+            // Effective Path-B allocation: seed = 40M@20 + 60M@40 = 100M @ 60 — conserves vs the residue,
+            // but DIFFERENT lot_ids (origin = decision id) AND per-lot basis than the single residue lot.
+            alloc_event(
+                1,
+                datetime!(2025-03-01 00:00:00 UTC),
+                vec![
+                    alloc_lot(cold(), 40_000_000, dec!(20), date!(2024 - 05 - 01)),
+                    alloc_lot(cold(), 60_000_000, dec!(40), date!(2024 - 06 - 01)),
+                ],
+            ),
+        ];
+        let prices = StaticPrices::default();
+        let lots = available_lots_before(
+            &events,
+            &prices,
+            &cfg(),
+            &eid("D"),
+            date!(2025 - 02 - 01),
+            &cold(),
+        );
+        assert!(!lots.is_empty(), "the post-seed Path-B pool is non-empty");
+        assert!(
+            lots.iter().all(|l| l.lot_id.origin_event_id == alloc_id),
+            "Path-B first-2025-disposal MUST return the SEEDED lots (origin = allocation); got origins {:?}",
+            lots.iter()
+                .map(|l| l.lot_id.origin_event_id.clone())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            lots.iter()
+                .all(|l| l.basis_source == BasisSource::SafeHarborAllocated),
+            "seeded lots carry the SafeHarborAllocated basis_source (not the residue's ExchangeProvided)"
+        );
+        let ids: BTreeSet<LotId> = lots.iter().map(|l| l.lot_id.clone()).collect();
+        assert!(
+            !ids.contains(&lid("OLD")),
+            "the DISCARDED FIFO residue lot must NOT appear in a Path-B pool"
+        );
+        assert_eq!(lots.len(), 2, "both seed lots present");
+        assert_eq!(
+            lots.iter().map(|l| l.remaining_sat).sum::<Sat>(),
+            LOT,
+            "seed conserves principal"
+        );
+        assert_eq!(
+            lots.iter().map(|l| l.usd_basis).sum::<Usd>(),
+            dec!(60),
+            "seed conserves basis"
+        );
+    }
+
+    /// Path-A counterpart of the above — FIRST 2025 event is the disposal, NO allocation (Path A default).
+    /// The pre-2025 Universal residue must be RELOCATED into its wallet pool (lot_id + basis preserved,
+    /// `basis_source == ReconstructedPerWallet`) by the boundary seed before the disposal. Confirms the
+    /// seed fires at the boundary under Path A too — and that `available_lots_before` matches the real fold.
+    #[test]
+    fn available_lots_before_path_a_first_2025_disposal_relocates_residue() {
+        let events = vec![
+            buy(
+                "OLD",
+                datetime!(2024-06-01 00:00:00 UTC),
+                cold(),
+                LOT,
+                dec!(60),
+            ),
+            sell(
+                "D",
+                datetime!(2025-02-01 00:00:00 UTC),
+                cold(),
+                LOT,
+                dec!(80),
+            ),
+        ];
+        let prices = StaticPrices::default();
+        let lots = available_lots_before(
+            &events,
+            &prices,
+            &cfg(),
+            &eid("D"),
+            date!(2025 - 02 - 01),
+            &cold(),
+        );
+        assert_eq!(lots.len(), 1, "the single relocated residue lot");
+        let l = &lots[0];
+        assert_eq!(l.lot_id, lid("OLD"), "Path A preserves the residue lot_id");
+        assert_eq!(l.usd_basis, dec!(60), "Path A preserves basis");
+        assert_eq!(l.remaining_sat, LOT);
+        assert_eq!(
+            l.basis_source,
+            BasisSource::ReconstructedPerWallet,
+            "Path A drains the residue into the per-wallet pool at the boundary seed"
         );
     }
 

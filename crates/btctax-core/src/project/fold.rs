@@ -367,6 +367,57 @@ pub fn fold(
     st
 }
 
+/// Fold the canonical timeline up to (but NOT including) `target`, returning the `PoolSet` exactly as the
+/// real `fold` holds it at the instant it is about to process `target`. Used by the optimizer's
+/// available-lots pre-pass (`optimize::available_lots_before`) so the pool it sees at a disposal matches
+/// the real fold under BOTH transition paths.
+///
+/// **The §7.4 boundary seed fires at the correct boundary.** Exactly as in `fold`, the one-shot seed
+/// (Path A drain / Path B seed) fires when the first `≥ TRANSITION_DATE` event is crossed — CRUCIALLY it
+/// therefore also fires when `target` is ITSELF that first post-2025 event (the seed check runs before the
+/// `target` short-circuit below). The old "truncate-then-refold" approach broke precisely here: when the
+/// target disposal was the chronologically-first 2025 timeline event, the truncated prefix contained no
+/// `≥ TRANSITION_DATE` event, so the re-fold never seeded and `finalize` surfaced the UN-seeded Universal
+/// residue — harmless under Path A (the residue relocates by wallet, lot_ids/basis preserved) but WRONG
+/// under Path B (the seed DISCARDS the residue and installs allocation lots with different lot_ids/basis,
+/// so the residue lot_ids don't exist in the real pool). Reusing the real `seed_transition` (never a
+/// re-implementation of its Path-A/Path-B behavior) guarantees the returned pool matches the live fold.
+///
+/// If `target` is absent from the timeline this folds the whole timeline; callers needing the
+/// "not found ⇒ empty" contract must check existence first (`available_lots_before` does).
+pub fn pools_before(
+    mut res: Resolution,
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    target: &EventId,
+) -> PoolSet {
+    // Mirror `fold`'s exact ordering: canonical FIFO, then the stable pre-2025 (tax-date) partition.
+    sort_canonical(&mut res.timeline);
+    res.timeline.sort_by_key(|e| e.date() >= TRANSITION_DATE);
+    let mut st = LedgerState::default(); // discarded — we only read the pool residue (blockers irrelevant)
+    let mut pools = PoolSet::default();
+    let mut stats = FoldStats::default();
+    let mut seeded = false;
+    let ctx = FoldCtx {
+        config,
+        elections: &res.elections,
+        selections: &res.selections,
+    };
+    for eff in &res.timeline {
+        // Fire the one-shot boundary seed the instant we cross into ≥2025 — BEFORE `target` is reached,
+        // so even a target that is the first post-2025 event reads the POST-seed pool (matches `fold`).
+        if !seeded && eff.date() >= TRANSITION_DATE {
+            transition::seed_transition(&res.transition, &mut pools, &mut st);
+            seeded = true;
+        }
+        if &eff.id == target {
+            return pools; // stop BEFORE folding the target (the seed has already fired if applicable)
+        }
+        fold_event(eff, prices, &ctx, &mut pools, &mut st, &mut stats);
+    }
+    pools
+}
+
 /// PASS-2 per-event dispatcher. Lifted out of `fold` so that BOTH the real fold and the pass-1
 /// `transition::universal_snapshot` pre-fold run the IDENTICAL per-event arms — the conservation guard's
 /// pre-2025 residue therefore provably matches the real fold's pre-seed residue (I-1). Pure: mutates only

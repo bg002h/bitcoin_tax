@@ -4,6 +4,24 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## Sub-project C (optimizer) — Task-3 review IMPORTANT resolved (2026-06-30)
+
+- **RESOLVED — `available_lots_before` returned the wrong pre-disposal pool for the FIRST 2025 disposal
+  under safe-harbor Path B (FIXED).** The old truncate-then-refold never crossed `TRANSITION_DATE` when the
+  target disposal was the chronologically-first 2025 timeline event, so the re-fold never fired the §7.4
+  transition seed and surfaced the UN-seeded Universal residue — harmless under Path A (residue relocates by
+  wallet; lot_ids/basis preserved) but WRONG under Path B (the seed DISCARDS the residue and installs
+  `SafeHarborAllocation` seed lots with different lot_ids/basis). Fix: new
+  `pub fn fold::pools_before(res, prices, config, target) -> PoolSet` (fold.rs) folds the canonical timeline
+  up to (but not including) the target and fires the real `transition::seed_transition` at the correct
+  boundary (the seed check runs before the target short-circuit, so it fires even when the target is the
+  first ≥2025 event); `available_lots_before` now delegates to it (no duplicated seed logic). KATs added:
+  `available_lots_before_path_b_first_2025_disposal_returns_seeded_lots` (fails without the fix) +
+  `available_lots_before_path_a_first_2025_disposal_relocates_residue`. R0-I1 canonical ordering preserved
+  inside `pools_before`. — RESOLVED (2026-06-30). — optimize.rs / fold.rs; plan §TASK 3 updated.
+
+---
+
 ## ✅ Burndown pass (2026-06-29) — actionable Phase-1 items resolved
 
 Branch `chore/followups-burndown`, each fix independently reviewed to 0 Critical / 0 Important;

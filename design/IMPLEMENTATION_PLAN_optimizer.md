@@ -432,7 +432,7 @@ use crate::state::Lot;
 const LOT_ENUM_BOUND: usize = 12; // ≤ this many lots → complete vertex enumeration
 
 /// Lots available to a disposal at `date` in `wallet`, computed by a clone-fold of the timeline
-/// TRUNCATED just before the disposal (NFR4: deterministic; no fold modification). Post-2025 →
+/// up to (but NOT including) the disposal (NFR4: deterministic; no fold modification). Post-2025 →
 /// the disposal's own wallet pool (§1.1012-1(j) per-wallet). Returns lots with remaining_sat > 0.
 fn available_lots_before(
     events: &[LedgerEvent],
@@ -442,27 +442,41 @@ fn available_lots_before(
     date: TaxDate,
     wallet: &WalletId,
 ) -> Vec<Lot> {
-    let mut res = resolve(events, prices, config);
-    // R0-I1: `resolve` builds `timeline` in DB/load order (resolve.rs:492-518) — it does NOT sort.
-    // The fold sorts canonically THEN stable-partitions by transition side (fold.rs:335,341), so we
-    // MUST replicate BOTH before locating/truncating, else `position`/`truncate` operate on load order
-    // and drop a lot acquired-before-`disposal`-in-TIME but loaded-after it (→ missed candidate →
-    // non-optimal). Mirror the exact fold ordering:
-    crate::project::resolve::sort_canonical(&mut res.timeline);     // pub (resolve.rs:805)
-    res.timeline.sort_by_key(|e| e.date() >= TRANSITION_DATE);      // stable pre-2025 partition (fold.rs:341)
-    let Some(idx) = res.timeline.iter().position(|e| &e.id == disposal) else { return Vec::new() };
-    res.timeline.truncate(idx);            // drop the disposal and everything at/after it (canonical order)
-    let pre = fold(res, prices, config);   // pool state just before the disposal (fold re-sorts the subset)
+    let res = resolve(events, prices, config);
+    // "not found => empty" contract (ordering-independent existence check).
+    if !res.timeline.iter().any(|e| &e.id == disposal) { return Vec::new() }
+    // R0-I1 canonical ordering + the transition seed-at-boundary live INSIDE `fold::pools_before`
+    // (see note below); it returns the PoolSet exactly as the real fold holds it just before `disposal`.
+    let pools = fold::pools_before(res, prices, config, disposal);
     let want = pool_key(date, wallet);     // post-2025 → Wallet(wallet); pre-2025 → Universal
-    let mut lots: Vec<Lot> = pre
-        .lots
-        .into_iter()
+    let mut lots: Vec<Lot> = pools
+        .pools
+        .into_values()
+        .flatten()
         .filter(|l| l.remaining_sat > 0 && pool_key(date, &l.wallet) == want)
         .collect();
     lots.sort_by(|a, b| a.lot_id.cmp(&b.lot_id)); // total order (NFR4)
     lots
 }
+```
 
+**Transition-seed boundary (Task-3 review IMPORTANT — fold-side helper).** The pre-pass MUST fold via a
+new `pub fn fold::pools_before(res, prices, config, target) -> PoolSet` rather than a private
+truncate-then-`fold`. `pools_before` mirrors `fold`'s exact ordering (`sort_canonical` then the stable
+`sort_by_key(date >= TRANSITION_DATE)` partition, R0-I1) AND fires the one-shot transition (§7.4) boundary
+seed at the correct point by reusing the real `transition::seed_transition` — the seed check runs *before*
+the `target` short-circuit, so it fires even when `target` is itself the chronologically-first post-2025
+timeline event. The previous truncate-then-refold broke exactly there: truncating just before a
+first-2025 disposal left a prefix with no post-2025 event, so the re-fold never seeded and surfaced the
+UN-seeded Universal residue — harmless under **Path A** (residue relocates by wallet; lot_ids/basis
+preserved) but **wrong under Path B** (the seed DISCARDS the residue and installs `SafeHarborAllocation`
+seed lots with different lot_ids/basis, so the returned residue lot_ids don't exist in the real pool).
+Reusing `seed_transition` (never re-implementing its Path-A/Path-B behavior from the `Resolution`'s
+`TransitionMode`) guarantees the pool matches the live fold for: pre-2025 disposals (Universal), Path-A
+post-2025 (per-wallet relocated), and Path-B post-2025 (seeded lots) — for the FIRST 2025 disposal AND
+every later one.
+
+```rust
 /// All principal-conserving vertex selections of `need` sats over `lots` (same pool): every whole-lot
 /// subset summing to `need`, plus each strict subset (Σ<need) extended by ONE partial lot to reach
 /// `need`. Deduped + sorted (NFR4). On pools > LOT_ENUM_BOUND, a deterministic heuristic set instead.
