@@ -543,8 +543,73 @@ pub fn resolve(
             });
         }
     }
-    // Per-disposal named-lot selections are populated in Task 4; empty for now.
-    let selections: BTreeMap<EventId, Vec<crate::event::LotPick>> = BTreeMap::new();
+    // ── 2c. §A.4 LotSelection collection + validation ────────────────────────────────────────────
+    // Per-disposal specific identification, keyed by its target `disposal_event`. Reuses `decisions`
+    // (seq order, NFR4) and `voided`:
+    //   - voided LotSelections are excluded;
+    //   - two non-voided LotSelections targeting the SAME disposal → DecisionConflict (NEITHER applies),
+    //     mirroring the duplicate-ReclassifyOutflow pattern above;
+    //   - a selection targeting a non-honoring/unknown event (only Dispose/GiftOut/Donate/SelfTransfer
+    //     are selectable — NOT PendingOut/fee legs) → hard `LotSelectionInvalid`;
+    //   - principal conservation (§A.4(a)): Σ picked sat MUST equal the disposal's principal sat. The
+    //     on-chain `fee_sat` is excluded and consumes FIFO from the post-selection remainder. NOTE
+    //     (from Task 2): the pool's `consume_picks` returns shortfall=0, so this Σ check MUST live here.
+    // Existence / per-wallet / over-draw are surfaced in the fold (the pool's `selection_error` raises
+    // `LotSelectionInvalid`). Every rejection DROPS the selection so the fold falls back to method
+    // order — Σsat/Σbasis stay conserved on every path.
+    let honoring: BTreeMap<EventId, Sat> = timeline
+        .iter()
+        .filter_map(|e| honoring_principal(&e.op).map(|s| (e.id.clone(), s)))
+        .collect();
+
+    let mut selections: BTreeMap<EventId, Vec<crate::event::LotPick>> = BTreeMap::new();
+    let mut seen: BTreeSet<EventId> = BTreeSet::new(); // disposal_events already claimed (dup detection)
+    let mut dup: BTreeSet<EventId> = BTreeSet::new();
+    for (_seq, d) in &decisions {
+        if voided.contains(&d.id) {
+            continue;
+        }
+        let EventPayload::LotSelection(ls) = &d.payload else {
+            continue;
+        };
+        if !seen.insert(ls.disposal_event.clone()) {
+            blockers.push(Blocker {
+                kind: BlockerKind::DecisionConflict,
+                event: Some(d.id.clone()),
+                detail: "duplicate LotSelection for the same disposal_event".into(),
+            });
+            dup.insert(ls.disposal_event.clone());
+            continue;
+        }
+        selections.insert(ls.disposal_event.clone(), ls.lots.clone());
+    }
+    for id in &dup {
+        selections.remove(id); // a conflicted disposal applies NEITHER selection
+    }
+    // targeting + principal-conservation (§A.4(a)); existence/per-wallet are checked in the fold.
+    selections.retain(|disposal, picks| match honoring.get(disposal) {
+        None => {
+            blockers.push(Blocker {
+                kind: BlockerKind::LotSelectionInvalid,
+                event: Some(disposal.clone()),
+                detail: "LotSelection targets a non-honoring or unknown event (only Dispose/GiftOut/Donate/SelfTransfer — not PendingOut/fee legs)".into(),
+            });
+            false
+        }
+        Some(&principal) => {
+            let picked: Sat = picks.iter().map(|p| p.sat).sum();
+            if picked != principal {
+                blockers.push(Blocker {
+                    kind: BlockerKind::LotSelectionInvalid,
+                    event: Some(disposal.clone()),
+                    detail: format!("LotSelection must conserve principal: picked {picked} sat != disposal principal {principal} sat (on-chain fee_sat is excluded and consumes FIFO from the remainder)"),
+                });
+                false
+            } else {
+                true
+            }
+        }
+    });
 
     // ── 3. §7.4 / TP6 transition effectiveness ───────────────────────────────────────────────────
     // Re-evaluated deterministically on every rebuild; reads ONLY the pre-2025 Universal snapshot, the
@@ -696,6 +761,18 @@ fn is_disposition_op(op: &Op, config: &ProjectionConfig) -> bool {
             config.self_transfer_fee == FeeTreatment::TreatmentB && fee_sat.unwrap_or(0) > 0
         }
         _ => false,
+    }
+}
+
+/// §A.4: the principal sat of a method-honoring disposition — the ONLY events a `LotSelection` may
+/// target. `PendingOut`, fee legs, and non-dispositions are not selectable (→ `LotSelectionInvalid`).
+fn honoring_principal(op: &Op) -> Option<Sat> {
+    match op {
+        Op::Dispose { sat, .. }
+        | Op::GiftOut { sat, .. }
+        | Op::Donate { sat, .. }
+        | Op::SelfTransfer { sat, .. } => Some(*sat),
+        _ => None, // PendingOut, fee legs, non-disposals -> not selectable
     }
 }
 

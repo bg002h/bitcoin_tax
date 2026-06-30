@@ -196,6 +196,20 @@ pub struct MethodElection {
     pub method: LotMethod,
 }
 
+/// §A.4: a per-disposal specific-identification decision. `disposal_event` names the method-honoring
+/// disposition (Dispose/GiftOut/Donate/SelfTransfer) whose principal is satisfied by EXACTLY these
+/// `lots`. Σ `LotPick.sat` MUST equal the disposal's principal sat — the on-chain `fee_sat` is excluded
+/// and consumes FIFO from the post-selection remainder (§A.4(a)). Validated in `resolve` (targeting,
+/// principal conservation, duplicate→`DecisionConflict`, voided→excluded) and in the fold (existence,
+/// per-wallet, over-draw → hard `LotSelectionInvalid`). On any violation, consumption falls back to
+/// method order so Σsat/Σbasis stay conserved. §1.1012-1(j): the identification must exist by the time
+/// of sale — `LotSelection` contemporaneity is reported truthfully (never back-dated as compliant).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LotSelection {
+    pub disposal_event: EventId,
+    pub lots: Vec<LotPick>,
+}
+
 /// The single payload sum-type carried by every `LedgerEvent` (§6.3/§6.4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventPayload {
@@ -219,6 +233,7 @@ pub enum EventPayload {
     VoidDecisionEvent(VoidDecisionEvent),
     ClassifyRaw(ClassifyRaw),
     MethodElection(MethodElection),
+    LotSelection(LotSelection),
 }
 
 impl EventPayload {
@@ -398,6 +413,25 @@ mod tests {
                 effective_from: time::Date::from_calendar_date(2025, time::Month::June, 1).unwrap(),
                 method: crate::LotMethod::Hifo,
             }),
+            EventPayload::LotSelection(LotSelection {
+                disposal_event: EventId::import(Source::Coinbase, SourceRef::new("P")),
+                lots: vec![
+                    LotPick {
+                        lot: LotId {
+                            origin_event_id: EventId::import(Source::Coinbase, SourceRef::new("O")),
+                            split_sequence: 0,
+                        },
+                        sat: 75_000,
+                    },
+                    LotPick {
+                        lot: LotId {
+                            origin_event_id: EventId::decision(7),
+                            split_sequence: 3,
+                        },
+                        sat: 25_000,
+                    },
+                ],
+            }),
         ];
         for p in payloads {
             let ev = sample(p);
@@ -415,6 +449,22 @@ mod tests {
             method: crate::LotMethod::Lifo,
         });
         assert!(crate::persistence::fingerprint(&me).is_none());
+    }
+
+    #[test]
+    fn lot_selection_decision_has_no_fingerprint() {
+        // Global Constraints (§0): new decision events carry `fingerprint = None`.
+        let ls = EventPayload::LotSelection(LotSelection {
+            disposal_event: EventId::import(Source::Coinbase, SourceRef::new("P")),
+            lots: vec![LotPick {
+                lot: LotId {
+                    origin_event_id: EventId::import(Source::Coinbase, SourceRef::new("O")),
+                    split_sequence: 0,
+                },
+                sat: 100_000,
+            }],
+        });
+        assert!(crate::persistence::fingerprint(&ls).is_none());
     }
 
     #[test]
