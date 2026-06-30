@@ -315,3 +315,9 @@ M3, N-2) were folded into the plan (see its "Fold record (round 1)"). These rema
 - **N2 — `evaluate_disposal` `lots_after` semantics for C.** Confirm the returned post-disposal lots/outcome shape is what Sub-project C (optimizer + Mode-2) needs before C consumes it. — OPEN (C planning).
 - **N3 — B per-year hard-blocker gate.** B must refuse a TaxResult / C must refuse to optimize for a tax year with unresolved Hard blockers (basis-pending/uncovered/LotSelectionInvalid/etc.). — OPEN (B planning).
 - **M3 binary-dispatch test.** The `config` multi-flag apply-all + attest-guard are tested at library level, not by driving the real clap `Command::Config` arm; add a binary-level dispatch test to fully retire the Task-5 note. — OPEN (B/C or a CLI test pass).
+
+## Sub-project B (rate/NIIT/loss engine) — whole-diff review deferrals (2026-06-30)
+- **F1 (Nit) — money "0" vs "0.00" display.** Load-bearing figures (ltcg_tax/niit/total) are round_cents-scaled and always print cents; descriptive level fields inherit source scale → cosmetic inconsistency. Add a `fmt_money` (`{:.2}`) render helper. — OPEN (polish).
+- **Minor — `MarginalRates.niit_applies` doc vs code.** Doc says "MAGI exceeds threshold"; code computes "crypto increased NIIT" (niit_with>niit_without). Display-only, feeds no figure. Align doc or rename. — OPEN.
+- **B-M1 (Phase-2) — minimal NII model can understate NIIT** in loss years (NII excludes crypto ordinary income + not reduced by §1211 loss). Disclosed in output. Phase-2 refinement. — OPEN.
+- **Nits (DEFER):** unused `events` param in compute_tax_year; redundant rust_decimal_macros dev-dep (adapters); `{:?}` filing_status in tax-profile --show; advisory-only→Computed KAT; B-R2-N1 stale §4.3 doc line. — OPEN (cosmetic/doc).
