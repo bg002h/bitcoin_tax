@@ -11,10 +11,12 @@ pub mod parse;
 pub mod price;
 pub mod read;
 pub mod sources;
+pub mod tax_tables;
 
 pub use adapter::{Adapter, FileGroup, FileReport, GroupOutput, IngestBatch, SourceFile};
 pub use ingest::{ingest_files, ingest_files_bundled};
 pub use price::BundledPrices;
+pub use tax_tables::BundledTaxTables;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AdapterError {

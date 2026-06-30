@@ -7,6 +7,7 @@ pub mod config;
 pub mod eventref;
 pub mod render;
 pub mod session;
+pub mod tax_profile;
 
 pub use config::CliConfig;
 pub use session::Session;

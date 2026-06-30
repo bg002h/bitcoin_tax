@@ -3,7 +3,8 @@
 //! exit code (non-zero on FR9 hard blockers / on any CliError). NO business logic lives here.
 use btctax_cli::{cmd, eventref, render, CliError};
 use btctax_core::{
-    AllocMethod, DisposeKind, FeeTreatment, InboundClass, LotMethod, OutflowClass, TransferTarget,
+    AllocMethod, Carryforward, DisposeKind, FeeTreatment, FilingStatus, InboundClass, LotMethod,
+    OutflowClass, TaxProfile, TransferTarget,
 };
 use btctax_store::Passphrase;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -35,11 +36,17 @@ enum Command {
     Import { files: Vec<PathBuf> },
     /// FR9 integrity check (non-zero exit on hard blockers).
     Verify,
-    /// Show holdings + realized disposals/removals/income.
+    /// Show holdings + realized disposals/removals/income. With --tax-year: standalone TaxResult.
     #[command(alias = "show")]
     Report {
+        /// Filter realized disposals/removals/income to a specific calendar year (display path).
         #[arg(long)]
         year: Option<i32>,
+        /// Compute the crypto-attributable federal tax for the given tax year (B.5 / Task 9).
+        /// Requires a stored tax profile (`tax-profile --year Y ...`) and the bundled TY table.
+        /// Independent of --year; the two flags are not aliased.
+        #[arg(long)]
+        tax_year: Option<i32>,
     },
     /// Emit a reconciliation decision event.
     #[command(subcommand)]
@@ -70,6 +77,52 @@ enum Command {
     BackupKey {
         #[arg(long)]
         out: PathBuf,
+    },
+    /// Set or show the per-tax-year tax profile (filing status, income, MAGI, etc.).
+    TaxProfile {
+        /// The tax year (e.g. 2025).
+        #[arg(long)]
+        year: i32,
+        /// IRS filing status.
+        #[arg(long, value_enum)]
+        filing_status: Option<FilingStatusArg>,
+        /// Ordinary taxable income EXCLUDING all app-computed crypto items (net ST gains,
+        /// mining/staking ordinary income). The engine adds the crypto items on top (B.1 / I5).
+        #[arg(long)]
+        ordinary_taxable_income: Option<String>,
+        /// Modified AGI excluding crypto items, for the §1411 NIIT threshold comparison.
+        ///
+        /// IMPORTANT (§1411 contract): this value MUST already include the taxpayer's qualified
+        /// dividends and non-crypto net capital gains (and any other MAGI add-backs from
+        /// §1411(d)). The engine adds ONLY the crypto AGI delta on top (ambiguity #5 in the
+        /// design). Omitting QD or non-crypto cap gains from this figure understates NIIT.
+        #[arg(
+            long,
+            long_help = "Modified AGI excluding crypto items, for the §1411 NIIT \
+            threshold comparison.\n\nIMPORTANT (§1411 contract): this value MUST already \
+            include the taxpayer's qualified dividends and non-crypto net capital gains (and \
+            any other MAGI add-backs from §1411(d)). The engine adds ONLY the crypto AGI \
+            delta on top (ambiguity #5 in the design). Omitting QD or non-crypto cap gains \
+            from this figure understates NIIT."
+        )]
+        magi_excluding_crypto: Option<String>,
+        /// Qualified dividends + other preferential-rate income sharing the §1(h) 0/15/20 LTCG
+        /// rate stack. Required when setting a profile.
+        #[arg(long)]
+        qualified_dividends: Option<String>,
+        /// Non-crypto net LT-character capital gain already in the profile (optional; defaults
+        /// to 0 when omitted).
+        #[arg(long)]
+        other_net_capital_gain: Option<String>,
+        /// §1212(b) short-term capital loss carryforward into this year (optional; defaults to 0).
+        #[arg(long)]
+        carryforward_short: Option<String>,
+        /// §1212(b) long-term capital loss carryforward into this year (optional; defaults to 0).
+        #[arg(long)]
+        carryforward_long: Option<String>,
+        /// Show the stored profile for `--year` instead of setting it.
+        #[arg(long, default_value_t = false)]
+        show: bool,
     },
 }
 
@@ -150,6 +203,27 @@ enum Reconcile {
     },
     /// §A.4 Batch import LotSelections from a CSV (disposal_ref,origin_event_id,split_sequence,sat).
     ImportSelections { csv: PathBuf },
+}
+
+#[derive(Copy, Clone, ValueEnum)]
+enum FilingStatusArg {
+    Single,
+    Mfj,
+    Mfs,
+    Hoh,
+    Qss,
+}
+
+impl From<FilingStatusArg> for FilingStatus {
+    fn from(a: FilingStatusArg) -> Self {
+        match a {
+            FilingStatusArg::Single => FilingStatus::Single,
+            FilingStatusArg::Mfj => FilingStatus::Mfj,
+            FilingStatusArg::Mfs => FilingStatus::Mfs,
+            FilingStatusArg::Hoh => FilingStatus::HoH,
+            FilingStatusArg::Qss => FilingStatus::Qss,
+        }
+    }
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -244,9 +318,17 @@ fn run() -> Result<ExitCode, CliError> {
                 return Ok(ExitCode::from(1));
             }
         }
-        Command::Report { year } => {
-            let state = cmd::inspect::report(vault, &passphrase(false)?, year)?;
-            print!("{}", render::render_report(&state, year));
+        Command::Report { year, tax_year } => {
+            if let Some(y) = tax_year {
+                let (outcome, advisory) = cmd::tax::report_tax_year(vault, &passphrase(false)?, y)?;
+                print!(
+                    "{}",
+                    render::render_tax_outcome(y, &outcome, advisory.as_deref())
+                );
+            } else {
+                let state = cmd::inspect::report(vault, &passphrase(false)?, year)?;
+                print!("{}", render::render_report(&state, year));
+            }
         }
         Command::Reconcile(r) => dispatch_reconcile(vault, r, now)?,
         Command::Config {
@@ -310,6 +392,100 @@ fn run() -> Result<ExitCode, CliError> {
         Command::BackupKey { out } => {
             cmd::admin::backup_key(vault, &passphrase(false)?, &out)?;
             println!("Key backed up to {}", out.display());
+        }
+        Command::TaxProfile {
+            year,
+            filing_status,
+            ordinary_taxable_income,
+            magi_excluding_crypto,
+            qualified_dividends,
+            other_net_capital_gain,
+            carryforward_short,
+            carryforward_long,
+            show,
+        } => {
+            let pp = passphrase(false)?;
+            if show {
+                match cmd::tax::show_profile(vault, &pp, year)? {
+                    Some(p) => println!(
+                        "year: {year}\n\
+                         filing_status: {:?}\n\
+                         ordinary_taxable_income: {}\n\
+                         magi_excluding_crypto: {}\n\
+                         qualified_dividends_and_other_pref_income: {}\n\
+                         other_net_capital_gain: {}\n\
+                         capital_loss_carryforward_in.short: {}\n\
+                         capital_loss_carryforward_in.long: {}",
+                        p.filing_status,
+                        p.ordinary_taxable_income,
+                        p.magi_excluding_crypto,
+                        p.qualified_dividends_and_other_pref_income,
+                        p.other_net_capital_gain,
+                        p.capital_loss_carryforward_in.short,
+                        p.capital_loss_carryforward_in.long,
+                    ),
+                    None => println!("none"),
+                }
+            } else {
+                // Require all mandatory fields.
+                let fs = filing_status.ok_or_else(|| {
+                    CliError::Usage("--filing-status is required when setting a profile".into())
+                })?;
+                let oti = ordinary_taxable_income
+                    .as_deref()
+                    .ok_or_else(|| {
+                        CliError::Usage(
+                            "--ordinary-taxable-income is required when setting a profile".into(),
+                        )
+                    })
+                    .and_then(eventref::parse_usd_arg)?;
+                let magi = magi_excluding_crypto
+                    .as_deref()
+                    .ok_or_else(|| {
+                        CliError::Usage(
+                            "--magi-excluding-crypto is required when setting a profile".into(),
+                        )
+                    })
+                    .and_then(eventref::parse_usd_arg)?;
+                let qd = qualified_dividends
+                    .as_deref()
+                    .ok_or_else(|| {
+                        CliError::Usage(
+                            "--qualified-dividends is required when setting a profile".into(),
+                        )
+                    })
+                    .and_then(eventref::parse_usd_arg)?;
+                // Optional fields default to 0.
+                let oncg = other_net_capital_gain
+                    .as_deref()
+                    .map(eventref::parse_usd_arg)
+                    .transpose()?
+                    .unwrap_or_default();
+                let cf_short = carryforward_short
+                    .as_deref()
+                    .map(eventref::parse_usd_arg)
+                    .transpose()?
+                    .unwrap_or_default();
+                let cf_long = carryforward_long
+                    .as_deref()
+                    .map(eventref::parse_usd_arg)
+                    .transpose()?
+                    .unwrap_or_default();
+
+                let profile = TaxProfile {
+                    filing_status: FilingStatus::from(fs),
+                    ordinary_taxable_income: oti,
+                    magi_excluding_crypto: magi,
+                    qualified_dividends_and_other_pref_income: qd,
+                    other_net_capital_gain: oncg,
+                    capital_loss_carryforward_in: Carryforward {
+                        short: cf_short,
+                        long: cf_long,
+                    },
+                };
+                cmd::tax::set_profile(vault, &pp, year, profile)?;
+                println!("Tax profile for {year} saved.");
+            }
         }
     }
     Ok(ExitCode::SUCCESS)

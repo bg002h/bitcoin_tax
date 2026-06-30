@@ -43,6 +43,15 @@ pub enum BlockerKind {
     /// silently break conservation between the pre-2025 residue and the irrevocable allocation. Clearable by
     /// reverting the live config to the recorded method; the irrevocable allocation is never rewritten.
     Pre2025MethodConflictsAllocation,
+    /// §B.4 / B-I1: the projection carries an unresolved Hard blocker (`severity()==Hard`) anywhere, so B
+    /// refuses to present a number for the year (projection-wide gate). Returns a `TaxOutcome::NotComputable`
+    /// with this kind. Clearable by resolving the underlying Hard blocker. Hard.
+    TaxYearNotComputable,
+    /// §B.1: no `tax_profile` is set for the year being computed. B does not guess the surrounding tax
+    /// context — the user must supply it via `tax-profile set`. Hard.
+    TaxProfileMissing,
+    /// §B.2: no bundled tax table is available for the year being computed. Hard.
+    TaxTableMissing,
 }
 impl BlockerKind {
     pub fn severity(self) -> Severity {
@@ -57,7 +66,10 @@ impl BlockerKind {
             | SafeHarborUnconservable
             | MethodElectionBackdated
             | LotSelectionInvalid
-            | Pre2025MethodConflictsAllocation => Severity::Hard,
+            | Pre2025MethodConflictsAllocation
+            | TaxYearNotComputable
+            | TaxProfileMissing
+            | TaxTableMissing => Severity::Hard,
             SafeHarborTimebar | UnmatchedOutflows | Pre2025MethodNote => Severity::Advisory,
         }
     }
@@ -214,5 +226,8 @@ mod tests {
             BlockerKind::Pre2025MethodConflictsAllocation.severity(),
             Severity::Hard
         );
+        assert_eq!(BlockerKind::TaxProfileMissing.severity(), Severity::Hard);
+        assert_eq!(BlockerKind::TaxTableMissing.severity(), Severity::Hard);
+        assert_eq!(BlockerKind::TaxYearNotComputable.severity(), Severity::Hard);
     }
 }
