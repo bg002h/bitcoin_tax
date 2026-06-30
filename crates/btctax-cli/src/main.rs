@@ -534,14 +534,14 @@ fn run() -> Result<ExitCode, CliError> {
                 match cmd::tax::show_profile(vault, &pp, year)? {
                     Some(p) => println!(
                         "year: {year}\n\
-                         filing_status: {:?}\n\
+                         filing_status: {}\n\
                          ordinary_taxable_income: {}\n\
                          magi_excluding_crypto: {}\n\
                          qualified_dividends_and_other_pref_income: {}\n\
                          other_net_capital_gain: {}\n\
                          capital_loss_carryforward_in.short: {}\n\
                          capital_loss_carryforward_in.long: {}",
-                        p.filing_status,
+                        render::filing_status_tag(p.filing_status),
                         p.ordinary_taxable_income,
                         p.magi_excluding_crypto,
                         p.qualified_dividends_and_other_pref_income,

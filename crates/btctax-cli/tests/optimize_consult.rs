@@ -502,3 +502,102 @@ fn consult_no_lots_is_usage_error() {
         "error must mention 'no lots' when wallet is empty:\n{msg}"
     );
 }
+
+// ── C-M2 KATs: ConsultReport::approximate + render disclosure ────────────────────────────────────
+
+/// Coinbase CSV with 13 lots (> LOT_ENUM_BOUND=12) of equal basis. Any 1-BTC consult over this
+/// wallet uses the heuristic branch → `ConsultReport::approximate == true`.
+fn write_thirteen_lots_csv(dir: &Path) -> PathBuf {
+    let p = dir.join("consult_thirteen_lots.csv");
+    let mut rows = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n".to_string();
+    for i in 1..=13usize {
+        rows.push_str(&format!(
+            "lot{i:02},2025-01-{i:02} 12:00:00 UTC,Buy,BTC,1.00000000,USD,60000.00,60000.00,60000.00,0.00,,,\r\n"
+        ));
+    }
+    std::fs::write(&p, rows).unwrap();
+    p
+}
+
+/// C-M2 KAT: a pool of 13 lots (> LOT_ENUM_BOUND=12) → `ConsultReport::approximate == true`
+/// and `render_consult` includes the heuristic disclosure note.
+#[test]
+fn consult_large_pool_sets_approximate_and_renders_note() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_thirteen_lots_csv(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+
+    let report = cmd::optimize::consult(
+        &vault,
+        &pp(),
+        100_000_000, // sell 1 BTC from a 13-lot pool → heuristic branch
+        coinbase_wallet(),
+        date!(2025 - 06 - 15), // bundled FMV = $67,500
+        None,
+        DisposeKind::Sell,
+    )
+    .unwrap();
+
+    // C-M2: approximate must be true for a >12-lot pool.
+    assert!(
+        report.approximate,
+        "ConsultReport::approximate must be true for a >12-lot pool (heuristic subset)"
+    );
+
+    // render_consult must include the disclosure note.
+    let rendered = render::render_consult(&report);
+    assert!(
+        rendered.contains("heuristic"),
+        "rendered must contain 'heuristic' disclosure for approximate=true:\n{rendered}"
+    );
+    assert!(
+        rendered.contains(">12-lot"),
+        "rendered must mention the >12-lot pool in the disclosure:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("Tax decision-support only"),
+        "rendered must contain the non-investment-advice footer:\n{rendered}"
+    );
+}
+
+/// C-M2 KAT (mirror): a pool of ≤12 lots → `ConsultReport::approximate == false`
+/// and `render_consult` does NOT include the heuristic disclosure note.
+#[test]
+fn consult_small_pool_approximate_false_no_note() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    // The existing two_lots fixture has only 2 lots → complete enumeration.
+    let csv = write_two_lots_csv(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+
+    let report = cmd::optimize::consult(
+        &vault,
+        &pp(),
+        100_000_000,
+        coinbase_wallet(),
+        date!(2025 - 06 - 15),
+        None,
+        DisposeKind::Sell,
+    )
+    .unwrap();
+
+    // approximate must be false for a small (≤12-lot) pool.
+    assert!(
+        !report.approximate,
+        "ConsultReport::approximate must be false for a ≤12-lot pool (complete enumeration)"
+    );
+
+    // render_consult must NOT include the disclosure note.
+    let rendered = render::render_consult(&report);
+    assert!(
+        !rendered.contains("heuristic"),
+        "rendered must NOT contain 'heuristic' for approximate=false:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("Tax decision-support only"),
+        "rendered must contain the non-investment-advice footer:\n{rendered}"
+    );
+}

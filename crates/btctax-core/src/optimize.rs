@@ -130,6 +130,12 @@ pub struct ConsultReport {
     pub lt_gain: Usd,
     pub total_federal_tax_attributable: Usd,
     pub timing: Option<TimingInsight>,
+    /// `true` when the available pool exceeded `LOT_ENUM_BOUND` (12) and `candidate_selections`
+    /// returned a deterministic but INCOMPLETE heuristic subset — the proposed selection may not be
+    /// the true tax-minimum for large pools. `false` for pools ≤ 12 (complete vertex enumeration).
+    /// Symmetric with Mode-1's `PoolHeuristic` banner; carried out of core so the CLI renderer can
+    /// show the disclosure note (core has no renderer — C-M2).
+    pub approximate: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -961,7 +967,11 @@ fn baseline_selection(state: &LedgerState, disposal: &EventId) -> Vec<LotPick> {
 /// `score_assignment`, and keeps the minimum `total_federal_tax_attributable`. Infeasible cross-disposal
 /// combinations self-eliminate (`NotComputable` → skipped). R0-C1: the incumbent is SEEDED with
 /// `baseline_assignment` at `base.total_federal_tax_attributable`, so the result can never be worse than
-/// the baseline; ties break to the lexicographically-smallest assignment (NFR4 §0 total order).
+/// the baseline. **Tie-break: STRICT-ONLY eviction (`total < best_total` only).** On an exact tie the
+/// baseline incumbent is kept → `proposed == current` at delta == 0 (no needless churn; no pointless
+/// `--attest` prompt for a no-benefit divergent pick). Among strictly-better candidates the first
+/// encountered in the deterministic sorted iteration order wins (candidates come from
+/// `BTreeSet`-sorted `candidate_selections`, so the order is stable and deterministic — NFR4).
 #[allow(clippy::too_many_arguments)]
 fn exhaustive_min(
     events: &[LedgerEvent],
@@ -992,7 +1002,9 @@ fn exhaustive_min(
             score_assignment(events, prices, config, year, profile, tables, &assign)
         {
             let total = r.total_federal_tax_attributable;
-            if total < best_total || (total == best_total && assign < best_assign) {
+            // C-M1: strict-only eviction — keep the baseline on exact ties (proposed==current at
+            // delta==0; no needless churn or auto-persist of a no-benefit divergent pick).
+            if total < best_total {
                 best_total = total;
                 best_assign = assign;
             }
@@ -1140,14 +1152,13 @@ pub fn consult_sale(
         return Err(OptimizeError::Evaluate(EvaluateError::ProceedsRequired));
     }
 
-    // Enumerate candidate selections for the synthetic disposal and score each via the synthetic
-    // evaluate+compute path; pick the deterministic minimum federal tax. R2-C1: Mode-2 reports a what-if
-    // tax-min selection, NOT a "proven global minimum" claim (`ConsultReport` has no `approximate` field
-    // and the renderer never says "the optimum"), so the heuristic-branch flag is not surfaced here — it
-    // governs `OptimizeProposal` (Mode-1), which is what R2-C1 scopes. Every candidate is drawn from the
-    // as-of pool with sufficient remaining, so all are feasible (the `?` below never trips on a generated
-    // candidate).
-    let (cands, _heuristic) = candidate_selections(&lots, req.sell_sat);
+    // C-M2: Enumerate candidate selections for the synthetic disposal and score each via the synthetic
+    // evaluate+compute path; pick the deterministic minimum federal tax. The heuristic flag (formerly
+    // discarded as `_heuristic`) is NOW surfaced in `ConsultReport::approximate` so the CLI renderer
+    // can show a disclosure note for large (>12-lot) pools — symmetric with Mode-1's `PoolHeuristic`
+    // banner. Every candidate is drawn from the as-of pool with sufficient remaining, so all are
+    // feasible (the `?` below never trips on a generated candidate).
+    let (cands, heuristic) = candidate_selections(&lots, req.sell_sat);
     let mut best: Option<(Usd, Vec<LotPick>, Usd, Usd)> = None; // (total, picks, st, lt)
     for picks in &cands {
         let (st, lt, total) = score_synthetic(
@@ -1191,6 +1202,7 @@ pub fn consult_sale(
         lt_gain,
         total_federal_tax_attributable: total,
         timing,
+        approximate: heuristic, // C-M2: surface the incomplete-pool flag for the renderer
     })
 }
 

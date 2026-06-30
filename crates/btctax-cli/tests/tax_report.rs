@@ -110,19 +110,18 @@ fn report_tax_year_components_reconcile_to_total() {
     let (outcome, advisory) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
-    // Rendered component lines.  Zero values may display as "0" or "0.00" depending on the
-    // rust_decimal scale of the intermediate result; assert on the prefix that's stable.
+    // B-F1: all dollar figures are now fmt_money-formatted to exactly 2dp; assert the 2dp forms.
     assert!(
-        rendered.contains("ordinary-rate tax (attributable): 0"),
-        "ordinary-rate delta must be zero for a pure-LT vault:\n{rendered}"
+        rendered.contains("ordinary-rate tax (attributable): 0.00"),
+        "ordinary-rate delta must be 0.00 (2dp) for a pure-LT vault:\n{rendered}"
     );
     assert!(
         rendered.contains("LTCG tax (attributable): 1747.50"),
         "LTCG must be 1747.50:\n{rendered}"
     );
     assert!(
-        rendered.contains("NIIT (attributable): 0"),
-        "NIIT must be zero (MAGI below Single threshold):\n{rendered}"
+        rendered.contains("NIIT (attributable): 0.00"),
+        "NIIT must be 0.00 (2dp; MAGI below Single threshold):\n{rendered}"
     );
     assert!(
         rendered.contains("TOTAL federal tax attributable to crypto (delta): 1747.50"),

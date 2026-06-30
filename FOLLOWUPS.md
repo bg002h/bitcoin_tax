@@ -4,6 +4,45 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## Standing roadmap — next program (user-approved 2026-06-30; auto-pick-up after slugs ship)
+
+After the Phase-1 burndown (below) + the two in-flight slugs (pre-2025 filed-method reconciliation
+mechanism; minimal appraisal-trigger FMV>$5k∧basis>$5k) ship, **automatically pick up Phase 2: Forms
+& §170(e) deduction computation** — no re-ask. Sequence: §170(e) charitable-deduction computation
+(FMV-vs-basis, ST/LT reduction) → upgrade the minimal appraisal-trigger to the precise
+>$5k-claimed-deduction trigger (§170(f)(11)(C)); Form 8949 + Schedule D generation; Form 8283 + Form
+709 routing; SE-tax routing (business mining → Schedule SE); slot in **B-M1** (NIIT loss-year
+understatement). Lower/triggered: adapter refinements (TransferIn basis gap, Gemini BTC-pair FMV,
+owner-confirms), hardening + Windows/macOS CI, 2026/2027 tax tables (arms the 2027+ broker gate),
+§1091 wash-sale enactment, multi-year horizon optimization, non-BTC scope. (Mirror of memory
+`phase2-standing-roadmap`.)
+
+## ✅ Burndown pass 2 (2026-06-30) — A/B/C deferrals resolved
+
+Branch `chore/followups-burndown-2`, three groups each independently reviewed to 0 Critical / 0
+Important; workspace gate green (433 tests). Closed:
+
+- **A (lot-id):** A-M1 (`disposal_compliance` SelfTransfer scope — documented intentional exclusion,
+  code doc + SPEC §A.5); A-Task-7-M2 (extracted shared `method_election_is_forward` predicate, DRY,
+  De-Morgan-verified behavior-preserving); A-Task-8a (`compliance_status_tag` stable, both renderers
+  off `{:?}`); A-Task-8b (selection_count guard — moot, documented); A-Task-9b (no-op identity KAT
+  `evaluate_disposal(existing,no-selection)==project()`); A-M3 (binary-level `Command::Config`
+  dispatch tests); A-Task-4 plan doc `90.00`→`90.25`.
+- **A-N2 / A-N3 — RESOLVED:** N2 (evaluate_disposal `lots_after` shape for C) — C shipped and Mode-2
+  `consult_sale` consumes `evaluate_disposal` successfully. N3 (B/C per-year Hard-blocker gate) — B's
+  `compute_tax_year` `first_hard_blocker` gate + C's `PreTransitionYear`/`YearNotComputable` refusal
+  both shipped. No code owed.
+- **B (rate engine):** B-F1 (`fmt_money` 2dp on all tax-report money fields, display-only — no tax
+  figure changed); B-Minor (`niit_applies` doc aligned to code semantic); B-nits (redundant
+  rust_decimal_macros dev-dep removed; `filing_status_tag` stable in tax-profile --show; `events`
+  param kept+documented; advisory-only→Computed KAT; §4.3 stale doc line).
+- **C (optimizer):** C-M1 (exhaustive_min eviction strict-only → baseline wins exact ties, no
+  delta==0 divergent pick; oracle-exactness + delta≤0 + determinism preserved; regression KAT
+  `tie_exact_baseline_kept_when_lex_smaller_is_not_baseline`); C-M2 (`ConsultReport.approximate` from
+  the heuristic flag + ⚠ note in render_consult); C-M3 (proposal scope-boundary footer).
+
+---
+
 ## C.5 — Monitor §1091 crypto wash-sale enactment (OPEN)
 
 **What.** §1091 currently disallows losses only on "stock or securities"; crypto is property

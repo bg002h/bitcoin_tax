@@ -425,6 +425,49 @@ fn hard_blocker_precedes_missing_table_and_profile() {
     );
 }
 
+/// B-Nit (advisory-only → Computed KAT): a projection with ONLY Advisory-severity blockers
+/// — and NO Hard blocker — must still yield `TaxOutcome::Computed(..)`. The refusal gate
+/// (`first_hard_blocker`) matches ONLY `severity()==Hard`; Advisory blockers never gate B.
+///
+/// Fixture: one `Pre2025MethodNote` (Advisory) + one `SafeHarborTimebar` (Advisory),
+/// one 2025 LT disposal. The gate must NOT fire; B must return a `Computed` result.
+#[test]
+fn advisory_only_blockers_do_not_gate_computation() {
+    let mut st = state_with(
+        vec![disposal(date!(2025 - 06 - 01), dec!(10000), Term::LongTerm)],
+        vec![],
+    );
+    st.blockers.push(Blocker {
+        kind: BlockerKind::Pre2025MethodNote,
+        event: None,
+        detail: "pre-2025 FIFO advisory".into(),
+    });
+    st.blockers.push(Blocker {
+        kind: BlockerKind::SafeHarborTimebar,
+        event: None,
+        detail: "safe-harbor timebar advisory".into(),
+    });
+    // Sanity: both blockers are Advisory, none are Hard.
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind.severity() == Severity::Advisory),
+        "fixture sanity: all blockers must be Advisory"
+    );
+    let out = compute_tax_year(
+        &[],
+        &st,
+        2025,
+        Some(&profile(dec!(40000), dec!(40000), dec!(0))),
+        &synth(2025),
+    );
+    // Advisory blockers MUST NOT gate — the result must be Computed.
+    assert!(
+        matches!(out, TaxOutcome::Computed(_)),
+        "expected TaxOutcome::Computed — advisory blockers must not gate computation; got: {out:?}"
+    );
+}
+
 /// NFR4 determinism: identical inputs → identical outcome.
 #[test]
 fn determinism_same_inputs_same_outcome() {

@@ -216,8 +216,12 @@ pub fn net_1222(
 /// non-crypto QD/cap-gain already in `magi_excluding_crypto` is never double-counted).
 ///
 /// The pinned identity `total == (ord_with − ord_without) + ltcg_tax + niit` holds exactly (all cent-rounded
-/// Decimal sums; no float). `events` is retained for the §0 determinism tuple / a future per-year lot-lineage
-/// refinement; the projection-wide gate consults only `state`.
+/// Decimal sums; no float).
+///
+/// **`events` parameter:** accepted for projection-source symmetry with `score_assignment` (the
+/// optimizer's clone-fold-score path), which passes the original event slice through to every
+/// `compute_tax_year` call so callers share a single signature. The refusal gate reads
+/// `state.blockers` (not `events`) — `events` is not consulted in this function.
 pub fn compute_tax_year(
     events: &[LedgerEvent],
     state: &LedgerState,

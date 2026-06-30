@@ -898,7 +898,11 @@ fn fee_bearing_reclassified_disposal_under_selection_consumes_fee_fifo_from_rema
     let report = btctax_core::conservation_report(&st);
     assert!(report.balanced, "{report:?}");
     let leg = &st.disposals[0].legs[0];
-    assert_eq!(leg.basis, dec!(90.00)); // principal picked NEW (selection honored)
+    // TP8(c) re-home: NEW's $90.00 + the 500-sat fee basis from OLD ($30/60k * 500 = $0.25) = $90.25.
+    // (Plan-text note: the implemented value is $90.25, not $90.00 — the fee-sat basis from the OLD
+    // lot is re-homed onto the principal disposal leg under TP8(c). The implementation in
+    // lot_selection.rs is correct; this comment corrects the earlier plan-text figure.)
+    assert_eq!(leg.basis, dec!(90.25)); // principal picked NEW + $0.25 fee-basis re-homed (TP8(c))
     assert_eq!(st.stats.fee_sats_consumed, 500); // fee taken from remainder (OLD), FIFO
 }
 

@@ -16,6 +16,7 @@ calamine = "0.26"      # read-only XLSX reader (Gemini ledger; any .xlsx source)
 thiserror = "1"
 
 [dev-dependencies]
-rust_decimal_macros = "1.36"
+# rust_decimal_macros is NOT listed here — dev code inherits the production dep (already in
+# [dependencies] above). The redundant dev-dep entry was removed (B-Nit burndown-2).
 rust_xlsxwriter = "0.79"   # build SYNTHETIC .xlsx fixtures in-test (writes invented data only)
 tempfile = "3"

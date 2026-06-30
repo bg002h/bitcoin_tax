@@ -5,7 +5,7 @@ use btctax_adapters::FileReport;
 use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::ImportReport;
 use btctax_core::{
-    conservation_report, disposal_compliance, BasisSource, Blocker, BlockerKind,
+    conservation_report, disposal_compliance, BasisSource, Blocker, BlockerKind, ComplianceStatus,
     ConservationReport, DisposalCompliance, DisposalLeg, DisposeKind, EventId, EventPayload,
     GiftZone, IncomeKind, LedgerEvent, LedgerState, LotMethod, RemovalKind, RemovalLeg, Severity,
     TaxDate, Term, WalletId,
@@ -15,6 +15,22 @@ use csv::Writer;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::Path;
+
+// ── Money formatting helper ──────────────────────────────────────────────────────────────────────
+
+/// Format any `Decimal` money value as exactly 2 decimal places (e.g. "0.00", "1747.50").
+///
+/// Load-bearing figures (`ltcg_tax`, `niit`, `total_federal_tax_attributable`) are always
+/// `round_cents`-scaled (scale 2) so they already print with cents. Descriptive level fields
+/// (`st_net`, `lt_net`, `carryforward`, `loss_deduction`, etc.) inherit the source `Decimal`
+/// scale and may print as "7000" or "0" without explicit 2dp formatting. This helper ensures
+/// every dollar figure in the tax report renders consistently with 2 decimal places.
+///
+/// **Equality is unaffected** — this is display only. The underlying `Decimal` value is
+/// unchanged; only the `Display` string gains the forced 2dp format.
+fn fmt_money(d: btctax_core::conventions::Usd) -> String {
+    format!("{d:.2}")
+}
 
 // ── Stable CSV/display tags for core enums ──────────────────────────────────────────────────────
 // These are free functions (not inherent methods) because the CLI crate cannot add methods to
@@ -70,6 +86,25 @@ fn term_tag(t: Term) -> &'static str {
     match t {
         Term::ShortTerm => "short",
         Term::LongTerm => "long",
+    }
+}
+
+/// Stable compliance-status display string, used in `render_verify` and optimizer output
+/// in place of `{:?}` (which would expose unstable Rust Debug formatting).
+///
+/// Values:
+/// - `standing_order:<date>` — in-force standing order effective from `<date>` (YYYY-MM-DD).
+/// - `contemporaneous`       — `LotSelection` recorded on or before the day of sale.
+/// - `attested_recording`    — Mode-1-persisted selection backed by contemporaneous-ID attestation (§C.2).
+/// - `non_compliant`         — no adequate identification; FIFO is the defensible filing position.
+fn compliance_status_tag(cs: &ComplianceStatus) -> String {
+    match cs {
+        ComplianceStatus::StandingOrder { effective_from } => {
+            format!("standing_order:{effective_from}")
+        }
+        ComplianceStatus::Contemporaneous => "contemporaneous".into(),
+        ComplianceStatus::AttestedRecording => "attested_recording".into(),
+        ComplianceStatus::NonCompliant => "non_compliant".into(),
     }
 }
 
@@ -255,6 +290,22 @@ fn render_removal_leg(out: &mut String, leg: &RemovalLeg) {
 
 // ── FR9 verify ──────────────────────────────────────────────────────────────────────────────────
 
+/// Stable display tag for `FilingStatus` (lowercase, matches the CLI value-enum strings).
+///
+/// Values: "single" | "mfj" | "mfs" | "hoh" | "qss". These mirror the `FilingStatusArg`
+/// `ValueEnum` strings accepted by `--filing-status`, so the `tax-profile --show` output
+/// is round-trip-parseable via the same flag.
+pub fn filing_status_tag(fs: btctax_core::FilingStatus) -> &'static str {
+    use btctax_core::FilingStatus::*;
+    match fs {
+        Single => "single",
+        Mfj => "mfj",
+        Mfs => "mfs",
+        HoH => "hoh",
+        Qss => "qss",
+    }
+}
+
 /// Stable display tag for `LotMethod` (FIFO/LIFO/HIFO — uppercase, human-readable).
 fn lot_method_display(m: LotMethod) -> &'static str {
     match m {
@@ -415,6 +466,9 @@ pub fn build_verify(state: &LedgerState, events: &[LedgerEvent], cli: &CliConfig
         .collect();
 
     // Count non-voided LotSelection decisions.
+    // Note: a `Decision`-id guard is intentionally omitted — `LotSelection` payloads are
+    // exclusively carried by `EventId::Decision` events (appended via `append_decision` in the
+    // CLI); filtering by payload alone is equivalent and sufficient.
     let selection_count = events
         .iter()
         .filter(|e| matches!(e.payload, EventPayload::LotSelection(_)) && !voided.contains(&e.id))
@@ -585,12 +639,13 @@ pub fn render_tax_outcome(
             let _ = writeln!(
                 s,
                 "  net short-term: {}   net long-term: {}",
-                r.st_net, r.lt_net
+                fmt_money(r.st_net),
+                fmt_money(r.lt_net)
             );
             let _ = writeln!(
                 s,
                 "  crypto ordinary income (level): {}",
-                r.ordinary_from_crypto
+                fmt_money(r.ordinary_from_crypto)
             );
             // B-M2: surface the ordinary-rate attributable DELTA so the three attributable components
             // visibly reconcile to TOTAL. By the pinned identity this equals (ord_with − ord_without) exactly.
@@ -598,23 +653,26 @@ pub fn render_tax_outcome(
             let _ = writeln!(
                 s,
                 "  ordinary-rate tax (attributable): {}",
-                ordinary_rate_attributable
+                fmt_money(ordinary_rate_attributable)
             );
             let _ = writeln!(
                 s,
                 "  LTCG tax (attributable): {}   NIIT (attributable): {}",
-                r.ltcg_tax, r.niit
+                fmt_money(r.ltcg_tax),
+                fmt_money(r.niit)
             );
             let _ = writeln!(
                 s,
                 "  TOTAL federal tax attributable to crypto (delta): {}   \
                 (= ordinary-rate + LTCG + NIIT attributable)",
-                r.total_federal_tax_attributable
+                fmt_money(r.total_federal_tax_attributable)
             );
             let _ = writeln!(
                 s,
                 "  §1211 loss deduction (level): {}   carryforward out: short {} / long {}",
-                r.loss_deduction, r.carryforward_out.short, r.carryforward_out.long
+                fmt_money(r.loss_deduction),
+                fmt_money(r.carryforward_out.short),
+                fmt_money(r.carryforward_out.long)
             );
             let _ = writeln!(
                 s,
@@ -728,11 +786,11 @@ pub fn render_optimize_proposal(p: &btctax_core::OptimizeProposal) -> String {
     for d in &p.per_disposal {
         let _ = writeln!(
             s,
-            "  {} @ {} [{}] :: {:?}",
+            "  {} @ {} [{}] :: {}",
             d.disposal.canonical(),
             d.date,
             wallet_label(&d.wallet),
-            d.status
+            compliance_status_tag(&d.status)
         );
         // R2-M1: a NO-CHANGE row (proposed == current) has nothing to attest/persist — `accept` SKIPS it
         // ("already optimal under current identification"). Do NOT print a persistability line here: a
@@ -776,6 +834,12 @@ pub fn render_optimize_proposal(p: &btctax_core::OptimizeProposal) -> String {
         s,
         "  (this is the tax IF you had identified thus; adequate ID must exist by the time \
          of sale \u{2014} \u{a7}1.1012-1(j))"
+    );
+    // C-M3: document the optimizer scope boundary (mirrors R0-M2 vertex-granularity caveat).
+    let _ = writeln!(
+        s,
+        "  (scope: global over taxable-disposal lot selections; self-transfer lot routing is \
+         held at its baseline position and is not re-optimized.)"
     );
     s
 }
@@ -833,6 +897,14 @@ pub fn render_consult(r: &btctax_core::ConsultReport) -> String {
         wallet_label(&r.req.wallet),
         r.req.at
     );
+    // C-M2: for large pools (>12 lots) the candidate set is a heuristic subset — disclose it.
+    if r.approximate {
+        let _ = writeln!(
+            s,
+            "  \u{26a0} heuristic \u{2014} searched a subset of a large (>12-lot) pool; \
+             the proposed selection may not be the exact minimum."
+        );
+    }
     let _ = writeln!(
         s,
         "  proposed selection: {}",
@@ -946,10 +1018,10 @@ pub fn render_verify(r: &VerifyReport) -> String {
     for c in &r.compliance {
         let _ = writeln!(
             out,
-            "  {} @ {} :: {:?}",
+            "  {} @ {} :: {}",
             c.disposal.canonical(),
             c.date,
-            c.status
+            compliance_status_tag(&c.status)
         );
     }
     out
