@@ -2,7 +2,7 @@
 //!
 //! STRICTLY READ-ONLY: no Session, no persistence, no mutations.
 
-use btctax_core::event::{BasisSource, DisposeKind, IncomeKind};
+use btctax_core::event::{BasisSource, IncomeKind};
 use btctax_core::project::ComplianceStatus;
 use btctax_core::state::Term;
 
@@ -33,14 +33,6 @@ pub(super) fn income_kind_tag(kind: IncomeKind) -> &'static str {
         IncomeKind::Interest => "interest",
         IncomeKind::Airdrop => "airdrop",
         IncomeKind::Reward => "reward",
-    }
-}
-
-#[allow(dead_code)] // local tag helper, retained for future Forms/Disposals use
-pub(super) fn dispose_kind_tag(kind: DisposeKind) -> &'static str {
-    match kind {
-        DisposeKind::Sell => "sell",
-        DisposeKind::Spend => "spend",
     }
 }
 

@@ -112,7 +112,7 @@ pub fn attempt_open(vault_path: &Path, pp: Passphrase) -> OpenOutcome {
 fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
     // [R0-M2] CliConfig is loaded here (needed by build_verify in Compliance tab)
     // [R0-M3] optimize_attested_set is intentionally omitted
-    let (events, state, config) = session.load_events_and_project()?;
+    let (events, state, _) = session.load_events_and_project()?;
     let profiles = session.all_tax_profiles()?;
     let cli_config = session.config()?;
     let tables = BundledTaxTables::load();
@@ -120,7 +120,6 @@ fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
     let snapshot = Snapshot {
         events,
         state,
-        config,
         cli_config,
         profiles,
         tables,
@@ -262,7 +261,6 @@ mod tests {
                 // Fields must all be accessible (Snapshot is populated)
                 let _ = &snapshot.events;
                 let _ = &snapshot.state;
-                let _ = &snapshot.config;
                 let _ = &snapshot.cli_config;
                 let _ = &snapshot.profiles;
                 let _ = &snapshot.tables;
@@ -302,7 +300,6 @@ mod tests {
         // All Snapshot fields must be present
         let _ = &snap.events;
         let _ = &snap.state;
-        let _ = &snap.config;
         let _ = &snap.cli_config;
         let _ = &snap.profiles;
         let _ = &snap.tables;
@@ -453,7 +450,6 @@ mod tests {
         let snap = app.snapshot.as_ref().unwrap();
         let _ = &snap.events;
         let _ = &snap.state;
-        let _ = &snap.config;
         let _ = &snap.cli_config;
         let _ = &snap.profiles;
         let _ = &snap.tables;

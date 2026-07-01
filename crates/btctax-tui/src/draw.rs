@@ -53,7 +53,7 @@ fn draw_unlock(frame: &mut Frame, app: &App) {
          \n\
          {error_line}\n\
          \n\
-         Enter: unlock    Esc/q: quit"
+         Enter: unlock    Esc: quit"
     );
 
     let msg = Paragraph::new(content).alignment(Alignment::Center);
@@ -117,7 +117,7 @@ fn draw_viewer(frame: &mut Frame, app: &mut App) {
     // ── Footer ───────────────────────────────────────────────────────────────
     let footer = Paragraph::new(
         "Tab/Shift-Tab: switch tab   ←/→: change year   ↑/↓ j/k: scroll   \
-         g/G: top/bottom   r: refresh   q/Esc: quit   ?: help",
+         PgUp/PgDn: page   g/G: top/bottom   q/Esc: quit",
     )
     .alignment(Alignment::Center);
     frame.render_widget(footer, chunks[2]);

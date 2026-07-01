@@ -7,7 +7,7 @@ use crate::unlock;
 use crate::unlock::UnlockState;
 use btctax_adapters::BundledTaxTables;
 use btctax_cli::CliConfig;
-use btctax_core::{LedgerEvent, LedgerState, ProjectionConfig, TaxProfile};
+use btctax_core::{LedgerEvent, LedgerState, TaxProfile};
 use btctax_store::Passphrase;
 use ratatui::widgets::TableState;
 use std::collections::BTreeMap;
@@ -100,11 +100,9 @@ impl Tab {
 ///
 /// [R0-M2] `cli_config` is included because `btctax_cli::render::build_verify` needs it.
 /// [R0-M3] `optimize_attested_set` is intentionally OMITTED — the viewer tabs do not consume it.
-#[allow(dead_code)] // events/config/cli_config/profiles/tables consumed in Task 4
 pub struct Snapshot {
     pub events: Vec<LedgerEvent>,
     pub state: LedgerState,
-    pub config: ProjectionConfig,
     pub cli_config: CliConfig,
     pub profiles: BTreeMap<i32, TaxProfile>,
     pub tables: BundledTaxTables,

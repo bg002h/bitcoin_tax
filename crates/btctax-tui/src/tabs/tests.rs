@@ -9,7 +9,7 @@ use btctax_core::{
     event::{BasisSource, DisposeKind, IncomeKind},
     identity::{EventId, LotId, Source, SourceRef, WalletId},
     state::{BlockerKind, Disposal, DisposalLeg, IncomeRecord, LedgerState, Lot, Severity, Term},
-    Carryforward, FilingStatus, ProjectionConfig, TaxProfile,
+    Carryforward, FilingStatus, TaxProfile,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
@@ -44,7 +44,6 @@ fn make_snapshot(state: LedgerState) -> Snapshot {
     Snapshot {
         events: vec![],
         state,
-        config: ProjectionConfig::default(),
         cli_config: btctax_cli::CliConfig::default(),
         profiles: BTreeMap::new(),
         tables: BundledTaxTables::load(),
@@ -777,7 +776,6 @@ fn make_snapshot_with_profile(state: LedgerState) -> Snapshot {
     Snapshot {
         events: vec![],
         state,
-        config: ProjectionConfig::default(),
         cli_config: btctax_cli::CliConfig::default(),
         profiles,
         tables: BundledTaxTables::load(),
