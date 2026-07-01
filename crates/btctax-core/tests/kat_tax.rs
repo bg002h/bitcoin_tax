@@ -1921,6 +1921,7 @@ fn qualified_appraisal_note_is_advisory_and_does_not_gate_compute() {
             source: "SYNTHETIC",
             ordinary,
             ltcg: ltcg_map,
+            gift_annual_exclusion: dec!(19000),
         },
     );
     let profile = TaxProfile {
@@ -2689,5 +2690,123 @@ fn task1_kat_d_wallet_matches_consuming_lot_wallet() {
     assert_eq!(
         st2.disposals[0].legs[0].wallet, cold,
         "self-custody disposal leg must carry the SelfCustody WalletId"
+    );
+}
+
+// ── P2-C Task 1: RemovalLeg.acquired_at (removals recognize no gain/loss → always gain_hp_start) ──
+
+/// KAT (a): ordinary (purchased-lot) donation — the removal leg's `acquired_at` == the lot's
+/// gain_hp_start (== purchase date when donor_acquired_at is None) and is CONSISTENT with `term`.
+/// Removals recognize no gain/loss (TP10), so there is no loss-zone branching: acquired_at can never
+/// contradict term.
+#[test]
+fn task1_removalleg_kat_a_ordinary_donation_acquired_at_equals_hp_start() {
+    let purchase_date = time::macros::date!(2025 - 03 - 01);
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2026-06-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl = dec_ev(
+        1,
+        datetime!(2026-06-15 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::Donate {
+                appraisal_required: false,
+            },
+            principal_proceeds_or_fmv: dec!(150.00),
+            fee_usd: None,
+        }),
+    );
+    let st = project(
+        &[buy, out, recl],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st.removals.len(), 1);
+    let leg = &st.removals[0].legs[0];
+    // acquired_at == purchase date (gain_hp_start == acquired_at when donor_acquired_at is None)
+    assert_eq!(
+        leg.acquired_at, purchase_date,
+        "ordinary donation leg acquired_at must equal the purchase (gain_hp_start) date"
+    );
+    // consistent with term (2025-03-01 → 2026-06-01 is > 1 year → LT)
+    assert_eq!(
+        leg.term,
+        Term::LongTerm,
+        "acquired_at must never contradict term"
+    );
+}
+
+/// KAT (b): gift-received-then-donated — the removal leg's `acquired_at` == the TACKED donor
+/// acquisition date (§1223), NOT the gift-received date, and is CONSISTENT with `term`. A carryover
+/// gift (fmv_at_gift ≥ donor_basis) tacks the donor's holding period on the gain side; a removal has
+/// only the gain side, so acquired_at == gain_hp_start == donor_acquired_at.
+#[test]
+fn task1_removalleg_kat_b_gift_received_then_donated_acquired_at_equals_donor_date() {
+    let donor_date = time::macros::date!(2024 - 01 - 01);
+    let gift_date = time::macros::date!(2025 - 06 - 01);
+    // fmv_at_gift ($60) ≥ donor_basis ($40) → single carryover lot, tacks from donor_date.
+    let mut evs = gift_lot(
+        Some(dec!(40.00)),
+        Some(donor_date),
+        dec!(60.00),
+        datetime!(2025-06-01 00:00:00 UTC),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2026-02-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl = dec_ev(
+        2, // gift_lot uses decision seq 1 for ClassifyInbound; use 2 here
+        datetime!(2026-02-02 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::Donate {
+                appraisal_required: false,
+            },
+            principal_proceeds_or_fmv: dec!(150.00),
+            fee_usd: None,
+        }),
+    );
+    evs.push(out);
+    evs.push(recl);
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    assert_eq!(st.removals.len(), 1);
+    let leg = &st.removals[0].legs[0];
+    // acquired_at == donor's tacked date (§1223), NOT the gift-received date.
+    assert_eq!(
+        leg.acquired_at, donor_date,
+        "gift-received-then-donated leg acquired_at must equal the tacked donor date ({donor_date}), \
+         not the gift date ({gift_date})"
+    );
+    assert_ne!(leg.acquired_at, gift_date);
+    // consistent with term (tacked from 2024-01-01 → 2026-02-01 is > 1 year → LT)
+    assert_eq!(
+        leg.term,
+        Term::LongTerm,
+        "acquired_at (tacked donor date) must be consistent with term"
     );
 }

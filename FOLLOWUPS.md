@@ -44,6 +44,27 @@ Important; workspace gate green (433 tests). Closed:
 
 ---
 
+## ✅ Phase-2 P2-C: Form 8283 + Form 709 gift advisory — SHIPPED (2026-07-01)
+
+Branch `feat/p2c-8283`; R0 spec 2 rounds to 0C/0I; comprehensive whole-slug review 0C/0I after folding
+an Important (a wrong statutory citation — the deeper review fetched the IRS PDF and caught §2.42→§2.43,
+propagated from the round-1 R0; the $19,000 value was correct). `RemovalLeg.acquired_at` (= gain_hp_start,
+matches term — no loss zone for removals). `forms.rs::form_8283(state, year)`: per-leg Form 8283 rows,
+Section A (≤$5k) / B (>$5k) by `claimed_deduction`; how_acquired from basis_source
+(Purchased/Gift/Other/Review); donee/appraiser/fmv_method BLANK + `needs_review` (honest user-input
+flags, never fabricated); `form8283.csv` (0o600) with a standing §170(f)(11)(F) aggregation caveat + a
+≤$500 note as `#` header comments. `TaxTable.gift_annual_exclusion` (TY2025 $19,000, Rev. Proc. 2024-40
+**§2.43**); `render_gift_advisory` thin Form 709 over-annual-exclusion signal (donee not modeled →
+total-exposure only; emits a note when a year has gifts but no table). Standalone (no engine-B change).
+509 tests.
+
+Deferred (OPEN → later): **§170(f)(11)(F) similar-item YEAR-aggregation** for the Section A/B split
+(disclosed via the standing caveat; aggregate-of-small-donations case not computed); **donee identifier**
+on Donate/GiftOut → full Form 709 (per-donee exclusion + lifetime exemption) + Form 8283 donee/FMV-method
+fields; **Section B appraiser-info struct**; gift-exclusion tables for TY2024/2026+ (year-dependent);
+how_acquired origin-loss for CarriedFromTransfer/SafeHarborAllocated lots; future-interest/non-citizen-
+spouse gift cases.
+
 ## ✅ Phase-2 B-M1: §1411 NIIT net-capital-loss fix — SHIPPED (2026-06-30)
 
 Branch `feat/p2-bm1-niit`; R0 spec 0C/0I with INDEPENDENT primary-source web-verification; comprehensive

@@ -248,8 +248,13 @@ fn make_removal_legs(
             sat: c.sat,
             basis: c.gain_basis,
             fmv_at_transfer: fmv,
+            // acquired_at MUST be the SAME HP-start argument fed to `term_for` below so it can never
+            // contradict `term`. Removals recognize no gain/loss → no loss-zone branching (unlike
+            // disposals): this is always `gain_hp_start` (the tacked donor date for received gifts,
+            // §1223). [D1/R0-M2]
             term: term_for(c.gain_hp_start, removed),
             basis_source: c.basis_source,
+            acquired_at: c.gain_hp_start,
         });
     }
     (legs, donor)

@@ -8,9 +8,14 @@
 //! under test. PRIVACY: synthetic values only; no real user file is read (NFR).
 use btctax_core::conventions::{TaxDate, Usd};
 use btctax_core::event::{BasisSource, DisposeKind};
-use btctax_core::forms::{form_8949, schedule_d, Form8949Box, Form8949Part};
+use btctax_core::forms::{
+    form_8283, form_8949, schedule_d, Form8283HowAcquired, Form8283Section, Form8949Box,
+    Form8949Part,
+};
 use btctax_core::identity::{EventId, LotId, WalletId};
-use btctax_core::state::{Disposal, DisposalLeg, GiftZone, LedgerState, Term};
+use btctax_core::state::{
+    Disposal, DisposalLeg, GiftZone, LedgerState, Removal, RemovalKind, RemovalLeg, Term,
+};
 use rust_decimal_macros::dec;
 use time::macros::date;
 
@@ -487,4 +492,300 @@ fn form_8949_rows_aggregate_to_schedule_d_totals() {
         .sum();
     assert_eq!(st_gain, sd.st.gain);
     assert_eq!(lt_gain, sd.lt.gain);
+}
+
+// ── P2-C Task 2 — Form 8283 rows (`form_8283`) ───────────────────────────────────────────────────
+// Direct-state `Removal`/`RemovalLeg` fixtures (mirroring the disposal builders above) so section,
+// how_acquired, first-leg convention, dates, year filter, and ordering are under exact control.
+
+/// A baseline LT donation leg (100 sat, all-zero money, acquired 2025-01-01, purchased basis-source).
+fn base_removal_leg() -> RemovalLeg {
+    RemovalLeg {
+        lot_id: lot(0, 0),
+        sat: 100,
+        basis: dec!(0),
+        fmv_at_transfer: dec!(0),
+        term: Term::LongTerm,
+        basis_source: BasisSource::ComputedFromCost,
+        acquired_at: date!(2025 - 01 - 01),
+    }
+}
+fn donation(
+    seq: u64,
+    removed_at: TaxDate,
+    claimed_deduction: Usd,
+    legs: Vec<RemovalLeg>,
+) -> Removal {
+    Removal {
+        event: EventId::decision(seq),
+        kind: RemovalKind::Donation,
+        removed_at,
+        legs,
+        appraisal_required: false,
+        donor_acquired_at: None,
+        claimed_deduction: Some(claimed_deduction),
+    }
+}
+fn gift(seq: u64, removed_at: TaxDate, legs: Vec<RemovalLeg>) -> Removal {
+    Removal {
+        event: EventId::decision(seq),
+        kind: RemovalKind::Gift,
+        removed_at,
+        legs,
+        appraisal_required: false,
+        donor_acquired_at: None,
+        claimed_deduction: None,
+    }
+}
+fn state_removals(removals: Vec<Removal>) -> LedgerState {
+    LedgerState {
+        removals,
+        ..Default::default()
+    }
+}
+
+/// A donation with claimed deduction ≤ $5,000 → Section A (on the first/only leg).
+#[test]
+fn form8283_section_a_when_deduction_at_or_below_5k() {
+    let st = state_removals(vec![donation(
+        1,
+        date!(2025 - 03 - 01),
+        dec!(5000), // exactly $5,000 → NOT > threshold → Section A
+        vec![base_removal_leg()],
+    )]);
+    let rows = form_8283(&st, 2025);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].section, Some(Form8283Section::A));
+    // needs_review is always true (unmodeled donee/appraiser/fmv_method).
+    assert!(rows[0].needs_review);
+}
+
+/// A donation with claimed deduction > $5,000 → Section B + needs_review true.
+#[test]
+fn form8283_section_b_when_deduction_above_5k_and_needs_review() {
+    let st = state_removals(vec![donation(
+        1,
+        date!(2025 - 03 - 01),
+        dec!(5000.01), // just over $5,000 → Section B
+        vec![base_removal_leg()],
+    )]);
+    let rows = form_8283(&st, 2025);
+    assert_eq!(rows[0].section, Some(Form8283Section::B));
+    assert!(
+        rows[0].needs_review,
+        "Section B always needs review (appraiser required + unmodeled)"
+    );
+}
+
+/// how_acquired maps from basis_source: Purchased / Gift / Other (income) / Review (ambiguous).
+#[test]
+fn form8283_how_acquired_mapping_incl_income_other_and_ambiguous_review() {
+    let cases = [
+        (
+            BasisSource::ExchangeProvided,
+            Form8283HowAcquired::Purchased,
+        ),
+        (
+            BasisSource::ComputedFromCost,
+            Form8283HowAcquired::Purchased,
+        ),
+        (BasisSource::GiftCarryover, Form8283HowAcquired::Gift),
+        (BasisSource::GiftFmvFallback, Form8283HowAcquired::Gift),
+        // FmvAtIncome → "Other" (NOT "income" — that is not a Form 8283 how-acquired category).
+        (BasisSource::FmvAtIncome, Form8283HowAcquired::Other),
+        // Origin-lost sources → "Review".
+        (
+            BasisSource::CarriedFromTransfer,
+            Form8283HowAcquired::Review,
+        ),
+        (
+            BasisSource::SafeHarborAllocated,
+            Form8283HowAcquired::Review,
+        ),
+        (
+            BasisSource::ReconstructedPerWallet,
+            Form8283HowAcquired::Review,
+        ),
+    ];
+    for (bs, expect) in cases {
+        let st = state_removals(vec![donation(
+            1,
+            date!(2025 - 03 - 01),
+            dec!(1000),
+            vec![RemovalLeg {
+                basis_source: bs,
+                ..base_removal_leg()
+            }],
+        )]);
+        let rows = form_8283(&st, 2025);
+        assert_eq!(
+            rows[0].how_acquired, expect,
+            "basis_source {bs:?} must map to how_acquired {expect:?}"
+        );
+    }
+}
+
+/// Multi-leg donation: section + claimed_deduction appear on the FIRST leg only (`Some`); subsequent
+/// legs are `None` → a naive SUM over the deduction column equals the single per-donation total.
+#[test]
+fn form8283_claimed_deduction_first_leg_only_no_sum_double_count() {
+    let st = state_removals(vec![donation(
+        1,
+        date!(2025 - 03 - 01),
+        dec!(52000), // > $5k → Section B
+        vec![
+            // pushed first, but HIGHER lot split → sorts AFTER; must NOT be the carrier.
+            RemovalLeg {
+                lot_id: lot(0, 1),
+                ..base_removal_leg()
+            },
+            // pushed second, LOWER lot split → sorts FIRST → the carrier row.
+            RemovalLeg {
+                lot_id: lot(0, 0),
+                ..base_removal_leg()
+            },
+        ],
+    )]);
+    let rows = form_8283(&st, 2025);
+    assert_eq!(rows.len(), 2);
+    // Carrier is the smallest lot_id (0,0), which sorts first in the deterministic output.
+    assert_eq!(rows[0].section, Some(Form8283Section::B));
+    assert_eq!(rows[0].claimed_deduction, Some(dec!(52000)));
+    assert_eq!(rows[1].section, None, "subsequent leg carries no section");
+    assert_eq!(
+        rows[1].claimed_deduction, None,
+        "subsequent leg carries no deduction (no SUM double-count)"
+    );
+    // SUM over the deduction column == the single per-donation total.
+    let sum: Usd = rows.iter().filter_map(|r| r.claimed_deduction).sum();
+    assert_eq!(sum, dec!(52000));
+}
+
+/// donee / appraiser / fmv_method are always EMPTY (unmodeled user-input, honestly flagged).
+#[test]
+fn form8283_unmodeled_user_input_fields_are_blank() {
+    let st = state_removals(vec![donation(
+        1,
+        date!(2025 - 03 - 01),
+        dec!(60000),
+        vec![base_removal_leg()],
+    )]);
+    let r = &form_8283(&st, 2025)[0];
+    assert_eq!(r.donee, "");
+    assert_eq!(r.appraiser, "");
+    assert_eq!(r.fmv_method, "");
+    assert!(r.needs_review);
+}
+
+/// date_acquired = leg.acquired_at; date_contributed = removal.removed_at; basis/fmv from the leg.
+#[test]
+fn form8283_dates_and_amounts_match_the_leg_and_removal() {
+    let st = state_removals(vec![donation(
+        1,
+        date!(2025 - 09 - 15),
+        dec!(4000),
+        vec![RemovalLeg {
+            basis: dec!(1000.00),
+            fmv_at_transfer: dec!(4000.00),
+            acquired_at: date!(2024 - 02 - 20),
+            sat: 53_000_000,
+            ..base_removal_leg()
+        }],
+    )]);
+    let r = &form_8283(&st, 2025)[0];
+    assert_eq!(r.date_acquired, date!(2024 - 02 - 20));
+    assert_eq!(r.date_contributed, date!(2025 - 09 - 15));
+    assert_eq!(r.cost_basis, dec!(1000.00));
+    assert_eq!(r.fmv, dec!(4000.00));
+    assert_eq!(r.description, "0.53000000 BTC");
+}
+
+/// Year filter: a prior-year (and future-year) donation is excluded from the year's rows.
+#[test]
+fn form8283_year_filter_excludes_out_of_year_donations() {
+    let st = state_removals(vec![
+        donation(
+            1,
+            date!(2024 - 12 - 31),
+            dec!(9000),
+            vec![base_removal_leg()],
+        ),
+        donation(
+            2,
+            date!(2025 - 06 - 01),
+            dec!(9000),
+            vec![base_removal_leg()],
+        ),
+        donation(
+            3,
+            date!(2026 - 01 - 01),
+            dec!(9000),
+            vec![base_removal_leg()],
+        ),
+    ]);
+    let rows = form_8283(&st, 2025);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].date_contributed, date!(2025 - 06 - 01));
+}
+
+/// Deterministic ordering: sorted by (removed_at, event id, lot_id) regardless of push order.
+#[test]
+fn form8283_deterministic_ordering_by_date_then_event_then_lot() {
+    let st = state_removals(vec![
+        donation(
+            2,
+            date!(2025 - 06 - 01),
+            dec!(1000),
+            vec![RemovalLeg {
+                sat: 300_000_000, // "3.00000000 BTC"
+                ..base_removal_leg()
+            }],
+        ),
+        donation(
+            1,
+            date!(2025 - 03 - 01),
+            dec!(1000),
+            vec![RemovalLeg {
+                sat: 100_000_000, // "1.00000000 BTC"
+                ..base_removal_leg()
+            }],
+        ),
+        donation(
+            3,
+            date!(2025 - 03 - 01),
+            dec!(1000),
+            vec![RemovalLeg {
+                sat: 200_000_000, // "2.00000000 BTC"
+                ..base_removal_leg()
+            }],
+        ),
+    ]);
+    let rows = form_8283(&st, 2025);
+    let order: Vec<&str> = rows.iter().map(|r| r.description.as_str()).collect();
+    // 03-01/dec1 (1 BTC), then 03-01/dec3 (2 BTC), then 06-01/dec2 (3 BTC).
+    assert_eq!(
+        order,
+        vec!["1.00000000 BTC", "2.00000000 BTC", "3.00000000 BTC"]
+    );
+}
+
+/// A Gift (kind == Gift) produces NO Form 8283 row (a gift is not a charitable contribution).
+#[test]
+fn form8283_gift_produces_no_row() {
+    let st = state_removals(vec![
+        gift(1, date!(2025 - 03 - 01), vec![base_removal_leg()]),
+        donation(
+            2,
+            date!(2025 - 04 - 01),
+            dec!(1000),
+            vec![base_removal_leg()],
+        ),
+    ]);
+    let rows = form_8283(&st, 2025);
+    assert_eq!(
+        rows.len(),
+        1,
+        "only the Donation yields a row; the Gift does not"
+    );
+    assert_eq!(rows[0].date_contributed, date!(2025 - 04 - 01));
 }

@@ -121,6 +121,7 @@ fn synth_tables(year: i32) -> OneTable {
         source: "SYNTHETIC",
         ordinary,
         ltcg,
+        gift_annual_exclusion: dec!(19000),
     })
 }
 

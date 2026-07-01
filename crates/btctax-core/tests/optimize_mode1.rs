@@ -65,6 +65,7 @@ fn synth(year: i32) -> OneTable {
         source: "SYNTHETIC",
         ordinary,
         ltcg,
+        gift_annual_exclusion: dec!(19000),
     })
 }
 /// Single filer; ordinary == MAGI so a chosen ordinary income places the marginal rate AND keeps MAGI

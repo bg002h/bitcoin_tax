@@ -268,10 +268,10 @@ fn removals_csv_multi_leg_donation_no_double_count() {
     let removals_path = out.join("removals.csv");
     assert!(removals_path.exists(), "removals.csv must exist");
 
-    // claimed_deduction column index 8:
+    // claimed_deduction column index 9:
     // event(0), kind(1), removed_at(2), lot(3), sat(4), basis(5), fmv_at_transfer(6), term(7),
-    // claimed_deduction(8).
-    const DED_COL: usize = 8;
+    // acquired_at(8), claimed_deduction(9).
+    const DED_COL: usize = 9;
 
     let mut reader = Reader::from_reader(File::open(&removals_path).unwrap());
     let records: Vec<_> = reader
@@ -285,6 +285,28 @@ fn removals_csv_multi_leg_donation_no_double_count() {
         "expected 2 removal leg rows (one per lot consumed by the donation); got {}",
         records.len()
     );
+
+    // Task 1 KAT: removals.csv shows the acquired_at column (index 8), populated with a date on
+    // every leg row (the lots' holding-period starts: lot A 2024-01-01, lot B 2025-12-01).
+    let mut hreader = Reader::from_reader(File::open(&removals_path).unwrap());
+    let header: Vec<String> = hreader
+        .headers()
+        .unwrap()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(
+        header.get(8).map(String::as_str),
+        Some("acquired_at"),
+        "removals.csv must show the acquired_at column at index 8; header = {header:?}"
+    );
+    for rec in &records {
+        let acq = rec.get(8).expect("acquired_at cell missing");
+        assert!(
+            acq.contains('-') && !acq.is_empty(),
+            "acquired_at must be a populated date; got {acq:?}"
+        );
+    }
 
     let row0_ded = records[0]
         .get(DED_COL)
@@ -320,6 +342,186 @@ fn removals_csv_multi_leg_donation_no_double_count() {
         (sum - 52_000.0_f64).abs() < 0.01,
         "SUM of claimed_deduction column must equal $52,000 (no double-count); got {sum}"
     );
+}
+
+/// P2-C Task 2: with `--tax-year`, export also writes `form8283.csv`. Using the two-lot donation
+/// (total deduction $52,000 > $5,000 → Section B) contributed 2026-03-01, exported with Some(2026):
+/// the caveat comment is present, the header is the stable contract, a Section B row exists with
+/// `needs_review=true`, the deduction appears on ONE row only (no SUM double-count), and the
+/// unmodeled donee/appraiser/fmv_method columns are blank.
+#[test]
+fn export_writes_form8283_with_section_b_and_aggregation_caveat() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    let now = datetime!(2026-04-01 12:00:00 UTC);
+
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(
+        &vault,
+        &pp(),
+        &[fixtures::coinbase_two_lot_donation(dir.path())],
+    )
+    .unwrap();
+
+    let out_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        state.pending_reconciliation[0].event.canonical()
+    };
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::Donate {
+            appraisal_required: false,
+        },
+        btctax_cli::eventref::parse_usd_arg("100000.00").unwrap(),
+        None,
+        now,
+    )
+    .unwrap();
+
+    // The donation is contributed 2026-03-01 → export for tax-year 2026.
+    let out = dir.path().join("export_2026");
+    cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2026)).unwrap();
+
+    let f8283 = out.join("form8283.csv");
+    assert!(
+        f8283.exists(),
+        "form8283.csv must be written for --tax-year"
+    );
+
+    // Raw file: the [R0-I1] aggregation caveat comment line must be present.
+    let raw = std::fs::read_to_string(&f8283).unwrap();
+    assert!(
+        raw.contains("AGGREGATES similar crypto items"),
+        "form8283.csv must carry the [R0-I1] aggregation caveat:\n{raw}"
+    );
+    assert!(
+        raw.starts_with("# "),
+        "caveat must be a leading comment line:\n{raw}"
+    );
+    // $52,000 total (> $500) → the [R0-M1] filing-floor note must NOT appear.
+    assert!(
+        !raw.contains("[R0-M1]"),
+        "the $500 note must NOT appear when the total deduction exceeds $500:\n{raw}"
+    );
+
+    // Parse with comment support so the leading `#` line is skipped.
+    let mut rdr = csv::ReaderBuilder::new()
+        .comment(Some(b'#'))
+        .from_reader(File::open(&f8283).unwrap());
+    let headers: Vec<String> = rdr
+        .headers()
+        .unwrap()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(
+        headers,
+        vec![
+            "section",
+            "description",
+            "how_acquired",
+            "date_acquired",
+            "date_contributed",
+            "cost_basis",
+            "fmv",
+            "claimed_deduction",
+            "fmv_method",
+            "donee",
+            "appraiser",
+            "needs_review",
+        ],
+        "form8283.csv columns must be the stable snake_case contract"
+    );
+    let recs: Vec<_> = rdr.records().collect::<Result<Vec<_>, _>>().unwrap();
+    assert_eq!(recs.len(), 2, "two donation legs → two Form 8283 rows");
+
+    // Column indices: section(0), ..., claimed_deduction(7), fmv_method(8), donee(9),
+    // appraiser(10), needs_review(11).
+    let section_b_rows = recs.iter().filter(|r| r.get(0) == Some("B")).count();
+    assert_eq!(
+        section_b_rows, 1,
+        "exactly one (first) leg row carries Section B; got {section_b_rows}"
+    );
+    // needs_review true on every row; donee/appraiser/fmv_method blank on every row.
+    for r in &recs {
+        assert_eq!(r.get(11), Some("true"), "needs_review must be true");
+        assert_eq!(r.get(8), Some(""), "fmv_method blank");
+        assert_eq!(r.get(9), Some(""), "donee blank");
+        assert_eq!(r.get(10), Some(""), "appraiser blank");
+    }
+    // claimed_deduction appears on exactly one row (no SUM double-count) and equals $52,000.
+    let deds: Vec<&str> = recs
+        .iter()
+        .filter_map(|r| r.get(7))
+        .filter(|s| !s.is_empty())
+        .collect();
+    assert_eq!(deds, vec!["52000.00"], "deduction on the first leg only");
+}
+
+/// P2-C Task 2 [R0-M1]: when the year's total noncash donation deduction is ≤ $500, form8283.csv
+/// carries the filing-floor note that Form 8283 is not required at that level (rows still emitted).
+#[test]
+fn export_form8283_small_donation_shows_500_floor_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    let now = datetime!(2025-12-31 12:00:00 UTC);
+
+    // Small donation: buy 0.001 BTC @ $100 (2025-01-01), send 0.001 BTC (2025-06-01),
+    // reclassify as Donate FMV $300 → deduction ≤ $500 regardless of term.
+    let csv_path = dir.path().join("coinbase_small_donation.csv");
+    std::fs::write(
+        &csv_path,
+        "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+sd-buy,2025-01-01 12:00:00 UTC,Buy,BTC,0.00100000,USD,100000.00,100.00,100.00,0.00,,,\r\n\
+sd-send,2025-06-01 12:00:00 UTC,Send,BTC,0.00100000,USD,300.00,,,,,,bc1qsyntheticcharity\r\n",
+    )
+    .unwrap();
+
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(&vault, &pp(), &[csv_path]).unwrap();
+
+    let out_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        state.pending_reconciliation[0].event.canonical()
+    };
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::Donate {
+            appraisal_required: false,
+        },
+        btctax_cli::eventref::parse_usd_arg("300.00").unwrap(),
+        None,
+        now,
+    )
+    .unwrap();
+
+    let out = dir.path().join("export_2025_small");
+    cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2025)).unwrap();
+
+    let raw = std::fs::read_to_string(out.join("form8283.csv")).unwrap();
+    assert!(
+        raw.contains("[R0-M1]") && raw.contains("<= $500"),
+        "small (≤ $500) donation total must carry the filing-floor note:\n{raw}"
+    );
+    // Rows are still emitted (informational).
+    let mut rdr = csv::ReaderBuilder::new()
+        .comment(Some(b'#'))
+        .from_reader(File::open(out.join("form8283.csv")).unwrap());
+    let recs: Vec<_> = rdr.records().collect::<Result<Vec<_>, _>>().unwrap();
+    assert_eq!(
+        recs.len(),
+        1,
+        "the single donation leg row is still emitted"
+    );
+    assert_eq!(recs[0].get(0), Some("A"), "≤ $5k → Section A");
 }
 
 /// CLI-I1 fix: exported CSVs are owner-only (0o600) even when the out-dir PRE-EXISTS.
