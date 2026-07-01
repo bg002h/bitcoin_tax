@@ -1,9 +1,11 @@
 //! `btctax-tui` — ratatui read-only vault viewer.
 //!
 //! Terminal lifecycle: enter raw mode + alternate screen on startup; ALWAYS restore on exit:
-//!   1. Normal exit    — `restore_terminal()` called after `run()` returns `Ok`.
-//!   2. `run()` error  — `restore_terminal()` called after `run()` returns `Err` [R0-M4].
-//!   3. Panic          — panic hook calls `restore_terminal()` before the default hook [R0-M4].
+//!   1. Setup `?` failure — `TerminalGuard` drop restores before propagating the `Err`.
+//!   2. Normal exit       — `TerminalGuard` drop restores on scope exit.
+//!   3. `run()` error     — `TerminalGuard` drop restores before propagating the `Err` [R0-M4].
+//!   4. Panic             — panic hook calls `restore_terminal()` before the default hook [R0-M4].
+//!      (`TerminalGuard` also runs during unwind; having both is belt-and-suspenders.)
 //!
 //! STRICTLY READ-ONLY: this binary MUST NOT call `Session::save()`, `persistence::append_*`,
 //! any `btctax_cli::cmd::*` mutating command, or `Session::conn()`.
@@ -31,6 +33,21 @@ pub fn restore_terminal() {
     // Ignore errors — we're in a teardown path; best-effort is the right contract.
     let _ = disable_raw_mode();
     let _ = execute!(io::stdout(), LeaveAlternateScreen);
+}
+
+/// RAII guard: calls `restore_terminal()` on drop, ensuring the terminal is ALWAYS restored
+/// regardless of how `main` exits — early `?`-return, normal return, or panic unwind.
+///
+/// Created immediately after `enable_raw_mode()` succeeds so that every subsequent failure
+/// point (`EnterAlternateScreen`, `Terminal::new`, `run()`) is covered by the guard's `Drop`.
+/// `restore_terminal()` is idempotent, so the guard's implicit drop and any explicit
+/// `restore_terminal()` call coexist safely.
+struct TerminalGuard;
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        restore_terminal();
+    }
 }
 
 /// Install a panic hook that restores the terminal BEFORE the default hook prints the message.
@@ -87,6 +104,11 @@ fn main() -> io::Result<()> {
     setup_panic_hook();
 
     enable_raw_mode()?;
+    // Guard created immediately after raw mode is enabled.
+    // Its Drop calls restore_terminal() on ANY exit from this scope:
+    // early ? (EnterAlternateScreen, Terminal::new), normal return, or panic unwind.
+    let _guard = TerminalGuard;
+
     execute!(io::stdout(), EnterAlternateScreen)?;
 
     let backend = CrosstermBackend::new(io::stdout());
@@ -94,7 +116,8 @@ fn main() -> io::Result<()> {
 
     let result = run(&mut terminal);
 
-    // Restore on BOTH the Ok and Err paths [R0-M4].
+    // Explicit call is now redundant (the guard's Drop covers it) but kept for clarity.
+    // restore_terminal() is idempotent — calling it twice is safe [R0-M4].
     restore_terminal();
 
     result
@@ -134,6 +157,18 @@ mod tests {
                             // We take it back and replace with a no-op to avoid interfering with other tests.
         let hook = std::panic::take_hook();
         std::panic::set_hook(hook); // restore
+    }
+
+    /// `TerminalGuard`'s Drop must call `restore_terminal()` without panicking, even outside a
+    /// real terminal.  Also verifies that calling `restore_terminal()` again after the guard drops
+    /// is safe (idempotency of double-restore, mirroring the guard + explicit-call pattern in main).
+    #[test]
+    fn terminal_guard_drop_calls_restore_terminal_and_is_idempotent() {
+        {
+            let _guard = TerminalGuard;
+        } // Drop fires here: restore_terminal() called once.
+          // Call a second time to confirm double-call is safe (guard + explicit pattern).
+        restore_terminal();
     }
 
     // ── handle_key: quit ─────────────────────────────────────────────────────
