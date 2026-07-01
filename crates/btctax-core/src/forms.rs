@@ -258,8 +258,10 @@ fn how_acquired_from(bs: BasisSource) -> Form8283HowAcquired {
 /// additionally mandatory (not modeled until Chunk 3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Form8283Row {
-    /// Section A/B — on the FIRST leg row only (`None` on subsequent legs). Driven by the donation's
-    /// `claimed_deduction` (> $5,000 → B).
+    /// Section A/B — on the FIRST leg row only (`None` on subsequent legs). Driven by the
+    /// **§170(f)(11)(F) year-aggregate** claimed deduction over ALL BTC donations in the tax year
+    /// (Section B when the year-aggregate > $5,000; Section A otherwise). The section is UNIFORM
+    /// across all donations in the year — all BTC is one "similar property" class.
     pub section: Option<Form8283Section>,
     /// Column: description — the EXACT BTC amount, 8dp + `" BTC"` (`btc_amount_description`; NFR5).
     pub description: String,
@@ -291,6 +293,29 @@ pub struct Form8283Row {
     pub needs_review: bool,
 }
 
+/// Compute the §170(f)(11)(F) **year-aggregate** claimed deduction over all `Donation` removals in
+/// `year`. Returns `Usd::ZERO` when there are no donations in the year.
+///
+/// Gifts (`kind == Gift`) have `claimed_deduction == None` and are NOT §170; they do not appear
+/// in the filter and cannot enter this aggregate.
+///
+/// This is the **single source of truth** for the year-aggregate sum used by:
+/// - `form_8283` — to determine the uniform Section A/B for all rows in the year.
+/// - The CLI render layer's donation-appraisal advisory — for the D2 year-aggregate advisory.
+///
+/// Centralised here so the two consumers cannot silently diverge (structural guarantee, not a
+/// runtime check): if the Section B decision and the advisory ever disagreed, `form8283.csv` could
+/// show Section A while the advisory shows a Section B warning — extracting the helper into `core`
+/// makes this structurally impossible.
+pub fn year_donation_deduction(state: &LedgerState, year: i32) -> Usd {
+    state
+        .removals
+        .iter()
+        .filter(|r| r.kind == RemovalKind::Donation && r.removed_at.year() == year)
+        .filter_map(|r| r.claimed_deduction)
+        .sum()
+}
+
 /// Build the Form 8283 rows for tax year `year`: **one row per `RemovalLeg`** of a `Donation` whose
 /// `Removal.removed_at.year() == year`. Pure over `state.removals`. Gifts (`kind == Gift`) produce
 /// NO rows (a gift is not a charitable contribution; `claimed_deduction` is `None` and they are NOT
@@ -315,14 +340,9 @@ pub struct Form8283Row {
 /// **Deterministic ordering (NFR4):** rows are sorted by `removed_at`, then the donation's `event`
 /// id, then the leg's `lot_id` — a total order over the (event, lot) space (mirrors `form_8949`).
 pub fn form_8283(state: &LedgerState, year: i32) -> Vec<Form8283Row> {
-    // D1: §170(f)(11)(F) year-aggregate — sum claimed_deduction over ALL Donation removals in year.
+    // D1: §170(f)(11)(F) year-aggregate — use the shared helper (single source of truth).
     // Gifts have claimed_deduction == None and are NOT §170 — they must NOT enter this aggregate.
-    let year_agg_deduction: Usd = state
-        .removals
-        .iter()
-        .filter(|r| r.kind == RemovalKind::Donation && r.removed_at.year() == year)
-        .filter_map(|r| r.claimed_deduction)
-        .sum();
+    let year_agg_deduction: Usd = year_donation_deduction(state, year);
     // §170(f)(11)(C): "more than $5,000" — strict `>` (exactly $5,000 → Section A).
     // The section is UNIFORM across the year: all BTC is "similar property", one aggregate class.
     let section = if year_agg_deduction > QUALIFIED_APPRAISAL_THRESHOLD {
