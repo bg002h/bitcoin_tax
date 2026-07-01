@@ -92,7 +92,11 @@ fn draw_viewer(frame: &mut Frame, app: &mut App) {
     let tab_titles: Vec<&str> = Tab::ALL.iter().map(|t| t.title()).collect();
     let tabs_widget = Tabs::new(tab_titles)
         .select(app.tab.index())
-        .block(Block::default().borders(Borders::ALL).title(" btctax-tui "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" btctax-tui — {} ", app.vault_path.display())),
+        )
         .highlight_style(
             Style::default()
                 .fg(Color::Yellow)

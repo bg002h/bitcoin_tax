@@ -109,7 +109,7 @@ fn parse_vault_path() -> PathBuf {
 /// - **Locked**: `r` → retry (back to Unlock); `q`/`Esc` → quit.
 /// - **Viewer**: `q`/`Esc` → quit; `Tab` → next tab; `BackTab` → prev tab
 ///   (full tab keybindings added in later tasks).
-fn handle_key(app: &mut App, key: KeyEvent) {
+pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
     if key.kind != KeyEventKind::Press {
         return;
     }
