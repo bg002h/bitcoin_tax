@@ -41,15 +41,33 @@ excess base" — strict `>`, $13.99M boundary → remaining $0 not exceeded). Ad
 exist. STANDALONE (compute.rs untouched; goldens unmoved). R0 2 rounds → 0C/0I (legal core web-verified);
 whole-branch review 0C/0I. 611 tests.
 
-Nits to sweep in 3b (non-blocking): KAT-B's remaining-$0 assertion is weak (`contains("0.00")` — boundary
-still locked by `!contains("EXCEEDED")`); `--prior-taxable-gifts` negative-validation runs only inside the
-`--tax-year` branch (ignored with bare `--year`).
+(3a's nits were swept in 3b: the KAT-B assertion now pins `"($0.00 remaining)"`; the
+`--prior-taxable-gifts` negative-validation is always-on, locked by a real binary-level test.)
 
-**Cluster remaining:** **Chunk 3b** — Form 8283 Section-B appraiser/structured-donee-details struct (new
-`set-donation-details` command attaching donee name/address/EIN + appraiser name/TIN/address/PTIN/
-qualification/appraisal-date to a donation; populate Form 8283 Section B). This is the last piece of the
-charitable/gift cluster. Defers real per-row FMV-method (needs FMV provenance on RemovalLeg) unless 3b's
-schema touch adds it.
+---
+
+## ✅ Charitable/gift cluster — Chunk 3b: Form 8283 Section-B appraiser/donee details — SHIPPED (2026-07-01) — CLUSTER COMPLETE
+
+Final piece. `DonationDetails` type in core (`donation.rs`) with section-aware
+`is_review_complete(Form8283Section)` (Section B requires the full §6695A block — appraiser name +
+TIN-or-PTIN + appraisal date + qualifications + donee EIN; Section A complete-on-presence); a
+`donation_details` SIDE-TABLE in cli keyed by `EventId::canonical()` (mirrors `optimize_attestation` —
+idempotent DDL, defensive init, old-vault back-compat); `reconcile set/show-donation-details` (validates
+against the projected removals; Donation-only, Gift-arm error tested). `form_8283(state, year, details)`
+populates structured donee/appraiser, `fmv_method_override` (resolves the Chunk-1 Section-A deferral,
+user-supplied — honest), and the SECTION-AWARE `needs_review` flip (skeletal Section-B stays true — the
+honest-gap lock); 6 new form8283.csv columns; TUI `Snapshot.donation_details` (read-only guarantee
+compile-intact, vault-bytes-unchanged passing). STANDALONE (tax//project//state.rs untouched). R0 2 rounds
+→ 0C/0I; whole-branch review 0C/0I; the final Minors folded (real binary-level negative-guard test; e2e
+side-table→form_8283 seam test). 645 tests.
+
+**The charitable/gift completion cluster is COMPLETE** (Chunks 1, 2, 3a, 3b all shipped). Deferred (OPEN):
+filled-PDF Form 8283 (CSV only); a donee registry (re-use across donations); the §2502 gift-tax rate-
+schedule liability (advisory-only §2505 today); an event-sourced/decision variant of donation details
+(side-table chosen); real FMV provenance on RemovalLeg (the override covers the form need); §2513
+gift-splitting + portability/DSUE.
+
+**Next (user-confirmed queue):** NII interest slice (spec in flight) → SE-tax completion → TY2024 tables.
 
 ---
 
