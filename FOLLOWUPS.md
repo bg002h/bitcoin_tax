@@ -44,6 +44,30 @@ Important; workspace gate green (433 tests). Closed:
 
 ---
 
+## ✅ Phase-2 P2-A: §170(e) charitable-deduction computation — SHIPPED (2026-06-30)
+
+First Phase-2 (Forms & §170(e)) sub-project. Branch `feat/p2a-170e-deduction`; R0 spec 2 rounds to
+0C/0I; impl + comprehensive whole-slug review 0C/0I. `Removal.claimed_deduction: Option<Usd>` = exact
+§170(e)(1)(A) deduction per donation: **LT→FMV, ST→min(FMV,basis)** (depreciated ST deducts at FMV, not
+basis — R0-C1). Drives the appraisal trigger off the exact amount (retired the "proxy"). Surfaced:
+donation header, `removals.csv` `claimed_deduction` column (emitted on the FIRST leg only — no multi-leg
+SUM double-count), per-year charitable-deduction total labeled "BEFORE §170(b) AGI limits / carryover".
+STANDALONE — does NOT feed engine B (Schedule-A figure; `TaxProfile.ordinary_taxable_income` is already
+post-deduction). 468 tests.
+
+Deferred (OPEN → later Phase-2 sub-projects):
+- **Ordinary-income CHARACTER detection** (dealer/inventory §1221(a)(1), self-created) → those deduct at
+  basis even LT; unmodeled (capital-asset investor assumed); disclosed via the retained dealer caveat.
+- **Donee-type modeling (§170(e)(1)(B))** — public charity (LT→FMV) vs non-operating private foundation
+  (appreciated LT crypto → basis; crypto ≠ qualified appreciated stock); unmodeled; retained donee caveat.
+- **§170(b) AGI percentage limits (30%/20%/60%) + 5-yr carryover + OBBBA-2026 0.5% floor / 35% cap** —
+  the surfaced figure is BEFORE these; computing the limited/allowed amount is deferred.
+- **§170(f)(11)(F) cross-donation aggregation** (from the appraisal trigger) — per-event only.
+- **Double-count trap (note):** the §170 deduction is standalone; if a FUTURE sub-project auto-reduces
+  `ordinary_taxable_income` by itemized deductions, it must NOT also expect the user's profile income to
+  be post-deduction — that would be a separate, careful change.
+- **Nit:** legacy "proxy" wording lingers in a few pre-existing test names/comments (cosmetic).
+
 ## ✅ Slug: minimal qualified-appraisal trigger — SHIPPED (2026-06-30)
 
 Branch `feat/appraisal-trigger`; R0 spec 3 rounds to 0C/0I (round-1 corrected the AND-rule →
