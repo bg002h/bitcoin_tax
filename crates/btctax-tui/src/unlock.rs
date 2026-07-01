@@ -116,6 +116,7 @@ fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
     let profiles = session.all_tax_profiles()?;
     let cli_config = session.config()?;
     let tables = BundledTaxTables::load();
+    let donation_details = session.donation_details()?;
     let year = latest_year(&state);
     let snapshot = Snapshot {
         events,
@@ -123,6 +124,7 @@ fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
         cli_config,
         profiles,
         tables,
+        donation_details,
     };
     Ok((snapshot, year))
 }

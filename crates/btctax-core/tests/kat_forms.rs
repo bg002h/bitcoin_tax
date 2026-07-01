@@ -16,7 +16,9 @@ use btctax_core::identity::{EventId, LotId, WalletId};
 use btctax_core::state::{
     Disposal, DisposalLeg, GiftZone, LedgerState, Removal, RemovalKind, RemovalLeg, Term,
 };
+use btctax_core::DonationDetails;
 use rust_decimal_macros::dec;
+use std::collections::BTreeMap;
 use time::macros::date;
 
 // ── direct-state builders ────────────────────────────────────────────────────────────────────────
@@ -555,10 +557,10 @@ fn form8283_section_a_when_deduction_at_or_below_5k() {
         dec!(5000), // exactly $5,000 → NOT > threshold → Section A
         vec![base_removal_leg()],
     )]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].section, Some(Form8283Section::A));
-    // needs_review is always true (unmodeled donee/appraiser/fmv_method).
+    // needs_review is true (no details passed — empty map).
     assert!(rows[0].needs_review);
 }
 
@@ -571,11 +573,11 @@ fn form8283_section_b_when_deduction_above_5k_and_needs_review() {
         dec!(5000.01), // just over $5,000 → Section B
         vec![base_removal_leg()],
     )]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     assert_eq!(rows[0].section, Some(Form8283Section::B));
     assert!(
         rows[0].needs_review,
-        "Section B always needs review (appraiser required + unmodeled)"
+        "Section B needs review when no details are provided"
     );
 }
 
@@ -619,7 +621,7 @@ fn form8283_how_acquired_mapping_incl_income_other_and_ambiguous_review() {
                 ..base_removal_leg()
             }],
         )]);
-        let rows = form_8283(&st, 2025);
+        let rows = form_8283(&st, 2025, &BTreeMap::new());
         assert_eq!(
             rows[0].how_acquired, expect,
             "basis_source {bs:?} must map to how_acquired {expect:?}"
@@ -648,7 +650,7 @@ fn form8283_claimed_deduction_first_leg_only_no_sum_double_count() {
             },
         ],
     )]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     assert_eq!(rows.len(), 2);
     // Carrier is the smallest lot_id (0,0), which sorts first in the deterministic output.
     assert_eq!(rows[0].section, Some(Form8283Section::B));
@@ -676,7 +678,7 @@ fn form8283_unmodeled_user_input_fields_and_fmv_method_honest() {
         dec!(60000),
         vec![base_removal_leg()],
     )]);
-    let r = &form_8283(&st, 2025)[0];
+    let r = &form_8283(&st, 2025, &BTreeMap::new())[0];
     assert_eq!(r.donee, "", "None donee → empty string (unwrap_or_default)");
     assert_eq!(r.appraiser, "");
     assert_eq!(
@@ -692,7 +694,7 @@ fn form8283_unmodeled_user_input_fields_and_fmv_method_honest() {
         dec!(1000),
         vec![base_removal_leg()],
     )]);
-    let r_a = &form_8283(&st_a, 2025)[0];
+    let r_a = &form_8283(&st_a, 2025, &BTreeMap::new())[0];
     assert_eq!(
         r_a.donee, "",
         "None donee → empty string (unwrap_or_default)"
@@ -720,7 +722,7 @@ fn form8283_donee_populated_from_removal_on_carrier_row() {
         )
     };
     let st = state_removals(vec![with_donee]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].donee, "Charity X",
@@ -735,7 +737,7 @@ fn form8283_donee_populated_from_removal_on_carrier_row() {
         vec![base_removal_leg()],
     );
     let st2 = state_removals(vec![no_donee]);
-    let rows2 = form_8283(&st2, 2025);
+    let rows2 = form_8283(&st2, 2025, &BTreeMap::new());
     assert_eq!(
         rows2[0].donee, "",
         "None donee → empty string on carrier row"
@@ -761,7 +763,7 @@ fn form8283_donee_populated_from_removal_on_carrier_row() {
         )
     };
     let st3 = state_removals(vec![multi]);
-    let rows3 = form_8283(&st3, 2025);
+    let rows3 = form_8283(&st3, 2025, &BTreeMap::new());
     assert_eq!(rows3.len(), 2);
     // Carrier (lot 0,0) sorts first due to deterministic ordering.
     assert_eq!(
@@ -789,7 +791,7 @@ fn form8283_dates_and_amounts_match_the_leg_and_removal() {
             ..base_removal_leg()
         }],
     )]);
-    let r = &form_8283(&st, 2025)[0];
+    let r = &form_8283(&st, 2025, &BTreeMap::new())[0];
     assert_eq!(r.date_acquired, date!(2024 - 02 - 20));
     assert_eq!(r.date_contributed, date!(2025 - 09 - 15));
     assert_eq!(r.cost_basis, dec!(1000.00));
@@ -820,7 +822,7 @@ fn form8283_year_filter_excludes_out_of_year_donations() {
             vec![base_removal_leg()],
         ),
     ]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].date_contributed, date!(2025 - 06 - 01));
 }
@@ -857,7 +859,7 @@ fn form8283_deterministic_ordering_by_date_then_event_then_lot() {
             }],
         ),
     ]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     let order: Vec<&str> = rows.iter().map(|r| r.description.as_str()).collect();
     // 03-01/dec1 (1 BTC), then 03-01/dec3 (2 BTC), then 06-01/dec2 (3 BTC).
     assert_eq!(
@@ -878,7 +880,7 @@ fn form8283_gift_produces_no_row() {
             vec![base_removal_leg()],
         ),
     ]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     assert_eq!(
         rows.len(),
         1,
@@ -914,7 +916,7 @@ fn form8283_year_aggregate_triggers_section_b_when_sum_exceeds_5k() {
             vec![base_removal_leg()],
         ),
     ]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     assert_eq!(rows.len(), 3);
     // All three carrier rows must be Section B (uniform year-aggregate applies to all).
     for (i, row) in rows.iter().enumerate() {
@@ -948,7 +950,7 @@ fn form8283_year_aggregate_under_threshold_gives_section_a() {
             vec![base_removal_leg()],
         ),
     ]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     assert_eq!(rows.len(), 2);
     for (i, row) in rows.iter().enumerate() {
         assert_eq!(
@@ -973,7 +975,7 @@ fn form8283_single_large_donation_section_b_regression() {
         dec!(8000),
         vec![base_removal_leg()],
     )]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].section,
@@ -1002,7 +1004,7 @@ fn form8283_exact_5000_aggregate_is_section_a_not_b() {
             vec![base_removal_leg()],
         ),
     ]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     assert_eq!(rows.len(), 2);
     for (i, row) in rows.iter().enumerate() {
         assert_eq!(
@@ -1038,7 +1040,7 @@ fn form8283_gift_fmv_excluded_from_donation_aggregate() {
             vec![base_removal_leg()],
         ),
     ]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     // Only the Donation row appears; Gift has no Form 8283 row.
     assert_eq!(rows.len(), 1);
     assert_eq!(
@@ -1073,7 +1075,7 @@ fn form8283_fmv_method_carrier_only_subsequent_legs_empty() {
             }, // carrier (smallest lot_id)
         ],
     )]);
-    let rows = form_8283(&st, 2025);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
     assert_eq!(rows.len(), 2);
     // Carrier (lot 0,0) sorts first; non-carrier (lot 0,1) sorts second.
     assert_eq!(rows[0].section, Some(Form8283Section::B));
@@ -1085,5 +1087,230 @@ fn form8283_fmv_method_carrier_only_subsequent_legs_empty() {
     assert_eq!(
         rows[1].fmv_method, "",
         "non-carrier row must have fmv_method = '' (carrier convention)"
+    );
+}
+
+// ── Chunk-3b Task 2: form_8283 with DonationDetails ─────────────────────────────────────────
+
+fn full_section_b_details() -> DonationDetails {
+    DonationDetails {
+        donee_name: "Test Charity".into(),
+        donee_address: Some("123 Main St, Anytown USA".into()),
+        donee_ein: Some("12-3456789".into()),
+        appraiser_name: "Test Appraiser".into(),
+        appraiser_address: Some("456 Appraiser Ave".into()),
+        appraiser_tin: Some("987-65-4321".into()),
+        appraiser_ptin: None,
+        appraiser_qualifications: Some("Certified bitcoin appraiser, 10 yrs exp".into()),
+        appraisal_date: Some(date!(2025 - 06 - 01)),
+        fmv_method_override: None,
+    }
+}
+
+fn skeletal_details() -> DonationDetails {
+    DonationDetails {
+        donee_name: "Test Charity".into(),
+        donee_address: None,
+        donee_ein: None,
+        appraiser_name: "Test Appraiser".into(),
+        appraiser_address: None,
+        appraiser_tin: None,
+        appraiser_ptin: None,
+        appraiser_qualifications: None,
+        appraisal_date: None,
+        fmv_method_override: None,
+    }
+}
+
+/// Full Section-B details (all §6695A fields) → needs_review false; names override.
+#[test]
+fn form8283_full_section_b_details_flips_needs_review() {
+    let event = EventId::decision(42);
+    let st = state_removals(vec![Removal {
+        event: event.clone(),
+        ..donation(
+            42,
+            date!(2025 - 03 - 01),
+            dec!(52000),
+            vec![base_removal_leg()],
+        )
+    }]);
+    let mut map = BTreeMap::new();
+    map.insert(event, full_section_b_details());
+    let rows = form_8283(&st, 2025, &map);
+    assert_eq!(rows.len(), 1);
+    let r = &rows[0];
+    assert_eq!(r.appraiser, "Test Appraiser");
+    assert_eq!(r.donee, "Test Charity");
+    assert!(
+        !r.needs_review,
+        "full Section-B details → needs_review must be false"
+    );
+    assert!(r.details.is_some(), "carrier row must embed the details");
+}
+
+/// Full Section-B details with fmv_method_override → override wins over section-derived default.
+#[test]
+fn form8283_full_section_b_with_fmv_override() {
+    let event = EventId::decision(43);
+    let mut d = full_section_b_details();
+    d.fmv_method_override = Some("independent appraisal".into());
+    let st = state_removals(vec![Removal {
+        event: event.clone(),
+        ..donation(
+            43,
+            date!(2025 - 03 - 01),
+            dec!(52000),
+            vec![base_removal_leg()],
+        )
+    }]);
+    let mut map = BTreeMap::new();
+    map.insert(event, d);
+    let rows = form_8283(&st, 2025, &map);
+    assert_eq!(rows[0].fmv_method, "independent appraisal");
+    assert!(!rows[0].needs_review);
+}
+
+/// [R0-I1] Skeletal Section-B details (only names) → needs_review stays true (honest gap).
+/// This is the critical invariant: partial Section-B MUST NOT flip needs_review to false.
+#[test]
+fn form8283_skeletal_section_b_keeps_needs_review_true() {
+    let event = EventId::decision(44);
+    let st = state_removals(vec![Removal {
+        event: event.clone(),
+        ..donation(
+            44,
+            date!(2025 - 03 - 01),
+            dec!(52000),
+            vec![base_removal_leg()],
+        )
+    }]);
+    let mut map = BTreeMap::new();
+    map.insert(event, skeletal_details());
+    let rows = form_8283(&st, 2025, &map);
+    let r = &rows[0];
+    assert_eq!(r.appraiser, "Test Appraiser", "appraiser name present");
+    assert_eq!(r.donee, "Test Charity", "donee name present");
+    assert!(
+        r.needs_review,
+        "[R0-I1] skeletal Section-B must keep needs_review true (honest gap — appraiser declaration incomplete)"
+    );
+}
+
+/// Section-A with details → needs_review false (complete on presence).
+#[test]
+fn form8283_section_a_with_details_flips_needs_review() {
+    let event = EventId::decision(45);
+    let st = state_removals(vec![Removal {
+        event: event.clone(),
+        // ≤ $5,000 → Section A
+        ..donation(
+            45,
+            date!(2025 - 03 - 01),
+            dec!(3000),
+            vec![base_removal_leg()],
+        )
+    }]);
+    let mut map = BTreeMap::new();
+    map.insert(event, skeletal_details()); // skeletal is complete-on-presence for Section A
+    let rows = form_8283(&st, 2025, &map);
+    let r = &rows[0];
+    assert_eq!(r.section, Some(Form8283Section::A));
+    assert!(
+        !r.needs_review,
+        "Section A: details present → needs_review must be false"
+    );
+}
+
+/// Section-A with fmv_method_override → override replaces the section-derived "" empty string.
+#[test]
+fn form8283_section_a_fmv_override_resolves_deferral() {
+    let event = EventId::decision(46);
+    let mut d = skeletal_details();
+    d.fmv_method_override = Some("broker valuation".into());
+    let st = state_removals(vec![Removal {
+        event: event.clone(),
+        ..donation(
+            46,
+            date!(2025 - 03 - 01),
+            dec!(3000),
+            vec![base_removal_leg()],
+        )
+    }]);
+    let mut map = BTreeMap::new();
+    map.insert(event, d);
+    let rows = form_8283(&st, 2025, &map);
+    assert_eq!(rows[0].fmv_method, "broker valuation");
+    assert_eq!(rows[0].section, Some(Form8283Section::A));
+}
+
+/// No details → appraiser empty, needs_review true, donee from Removal.donee label.
+#[test]
+fn form8283_no_details_preserves_existing_behavior() {
+    let event = EventId::decision(47);
+    let st = state_removals(vec![Removal {
+        event: event.clone(),
+        donee: Some("Habitat For Humanity".into()),
+        ..donation(
+            47,
+            date!(2025 - 03 - 01),
+            dec!(52000),
+            vec![base_removal_leg()],
+        )
+    }]);
+    let rows = form_8283(&st, 2025, &BTreeMap::new());
+    let r = &rows[0];
+    assert_eq!(r.appraiser, "");
+    assert!(r.needs_review);
+    assert_eq!(r.donee, "Habitat For Humanity");
+    assert_eq!(
+        r.fmv_method, "qualified appraisal",
+        "Section B: section-derived default"
+    );
+    assert!(r.details.is_none(), "no details → embed must be None");
+}
+
+/// Multi-leg: details embed on the CARRIER row only; non-carrier rows have None.
+#[test]
+fn form8283_details_embed_carrier_only_on_multi_leg() {
+    let event = EventId::decision(48);
+    let st = state_removals(vec![Removal {
+        event: event.clone(),
+        ..donation(
+            48,
+            date!(2025 - 03 - 01),
+            dec!(52000),
+            vec![
+                RemovalLeg {
+                    lot_id: lot(0, 1),
+                    ..base_removal_leg()
+                }, // non-carrier
+                RemovalLeg {
+                    lot_id: lot(0, 0),
+                    ..base_removal_leg()
+                }, // carrier (smallest)
+            ],
+        )
+    }]);
+    let mut map = BTreeMap::new();
+    map.insert(event, full_section_b_details());
+    let rows = form_8283(&st, 2025, &map);
+    assert_eq!(rows.len(), 2);
+    // carrier is rows[0] (lot 0,0 sorts before lot 0,1)
+    assert!(
+        rows[0].details.is_some(),
+        "carrier row must have embedded details"
+    );
+    assert!(
+        rows[1].details.is_none(),
+        "non-carrier row must have None details"
+    );
+    assert!(
+        !rows[0].needs_review,
+        "carrier: full details → needs_review false"
+    );
+    assert!(
+        rows[1].needs_review,
+        "non-carrier: always needs_review true"
     );
 }

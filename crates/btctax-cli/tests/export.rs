@@ -435,6 +435,12 @@ fn export_writes_form8283_with_section_b_and_aggregation_caveat() {
             "donee",
             "appraiser",
             "needs_review",
+            "donee_ein",
+            "donee_address",
+            "appraiser_tin",
+            "appraiser_ptin",
+            "appraiser_qualifications",
+            "appraisal_date",
         ],
         "form8283.csv columns must be the stable snake_case contract"
     );

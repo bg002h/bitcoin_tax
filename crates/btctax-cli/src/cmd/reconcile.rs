@@ -786,4 +786,89 @@ mod tests {
         let stored = show_donation_details(&vault_path, &pp(), &out_id.canonical()).unwrap();
         assert_eq!(stored, None);
     }
+
+    /// Build a vault with a Gift removal (not a Donation). Returns (vault_path, gift_event_id).
+    fn setup_gift_vault(dir: &tempfile::TempDir) -> (std::path::PathBuf, EventId) {
+        use crate::Session;
+        let vault_path = dir.path().join("gift-vault.pgp");
+        let mut session = Session::create(&vault_path, &pp()).unwrap();
+
+        let ts_acq = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let ts_out = time::OffsetDateTime::from_unix_timestamp(1_720_000_000).unwrap();
+        let wallet = WalletId::Exchange {
+            provider: "coinbase".into(),
+            account: "default".into(),
+        };
+
+        let acq_id = EventId::import(Source::Coinbase, SourceRef::new("in|gift-acq-001"));
+        let acq_ev = LedgerEvent {
+            id: acq_id.clone(),
+            utc_timestamp: ts_acq,
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet.clone()),
+            payload: EventPayload::Acquire(Acquire {
+                sat: 2_000_000,
+                usd_cost: dec!(60000),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ComputedFromCost,
+            }),
+        };
+        append_import_batch(session.conn(), &[acq_ev]).unwrap();
+
+        let out_id = EventId::import(Source::Coinbase, SourceRef::new("out|gift-001"));
+        let out_ev = LedgerEvent {
+            id: out_id.clone(),
+            utc_timestamp: ts_out,
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet.clone()),
+            payload: EventPayload::TransferOut(TransferOut {
+                sat: 500_000,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        };
+        append_import_batch(session.conn(), &[out_ev]).unwrap();
+
+        // Reclassify as GiftOut (NOT Donate)
+        let classify_payload = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: out_id.clone(),
+            as_: OutflowClass::GiftOut,
+            principal_proceeds_or_fmv: dec!(15000),
+            fee_usd: None,
+            donee: None,
+        });
+        append_decision(
+            session.conn(),
+            classify_payload,
+            ts_out,
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+
+        session.save().unwrap();
+        (vault_path, out_id)
+    }
+
+    /// `set_donation_details` targeting a Gift removal → "is a Gift removal, not a Donation" error.
+    /// Exercises the `Some(r) if r.kind != RemovalKind::Donation` arm (previously untested).
+    #[test]
+    fn set_donation_details_gift_removal_is_usage_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let (vault_path, gift_out_id) = setup_gift_vault(&dir);
+
+        let err =
+            set_donation_details(&vault_path, &pp(), &gift_out_id.canonical(), test_details())
+                .unwrap_err();
+        assert!(
+            matches!(err, CliError::Usage(_)),
+            "expected Usage error, got: {err}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not a donation") || msg.contains("Gift"),
+            "error must mention 'not a donation' or 'Gift': {msg}"
+        );
+    }
 }

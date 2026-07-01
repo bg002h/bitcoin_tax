@@ -65,7 +65,14 @@ pub fn export_snapshot(
         }
         None => None,
     };
-    write_csv_exports(out_dir, &state, tax_year, se_result.as_ref())?;
+    let donation_details = session.donation_details()?;
+    write_csv_exports(
+        out_dir,
+        &state,
+        tax_year,
+        se_result.as_ref(),
+        &donation_details,
+    )?;
     Ok(sqlite)
 }
 

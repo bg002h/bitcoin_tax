@@ -4,6 +4,7 @@ use crate::config::CliConfig;
 use btctax_adapters::FileReport;
 use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::ImportReport;
+use btctax_core::DonationDetails;
 use btctax_core::{
     conservation_report, disposal_compliance, form_8283, form_8949, schedule_d,
     year_donation_deduction, BasisSource, Blocker, BlockerKind, ComplianceStatus,
@@ -14,7 +15,7 @@ use btctax_core::{
 };
 use btctax_store::fsperms;
 use csv::Writer;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -568,6 +569,7 @@ pub fn write_csv_exports(
     state: &LedgerState,
     tax_year: Option<i32>,
     se_result: Option<&SeTaxResult>,
+    donation_details: &BTreeMap<EventId, DonationDetails>,
 ) -> Result<(), crate::CliError> {
     fsperms::mkdir_owner_only(out_dir)?;
 
@@ -714,7 +716,7 @@ pub fn write_csv_exports(
     if let Some(year) = tax_year {
         write_form8949_csv(out_dir, state, year)?;
         write_schedule_d_csv(out_dir, state, year)?;
-        write_form8283_csv(out_dir, state, year)?;
+        write_form8283_csv(out_dir, state, year, donation_details)?;
         // P2-D: standalone Schedule SE §1401 figure — written only when there IS SE tax (a computed
         // SeTaxResult); omitted when the year has no business SE income (nothing to file).
         if let Some(se) = se_result {
@@ -807,6 +809,7 @@ fn write_form8283_csv(
     out_dir: &Path,
     state: &LedgerState,
     year: i32,
+    details: &BTreeMap<EventId, DonationDetails>,
 ) -> Result<(), crate::CliError> {
     use std::io::Write as _;
     let mut file = fsperms::open_owner_only(&out_dir.join("form8283.csv"))?;
@@ -843,8 +846,16 @@ fn write_form8283_csv(
         "donee",
         "appraiser",
         "needs_review",
+        // NEW Part III/IV detail columns:
+        "donee_ein",
+        "donee_address",
+        "appraiser_tin",
+        "appraiser_ptin",
+        "appraiser_qualifications",
+        "appraisal_date",
     ])?;
-    for row in form_8283(state, year) {
+    for row in form_8283(state, year, details) {
+        let d = row.details.as_ref();
         w.write_record([
             row.section
                 .map(form8283_section_tag)
@@ -863,6 +874,15 @@ fn write_form8283_csv(
             row.donee,
             row.appraiser,
             row.needs_review.to_string(),
+            // NEW:
+            d.and_then(|d| d.donee_ein.clone()).unwrap_or_default(),
+            d.and_then(|d| d.donee_address.clone()).unwrap_or_default(),
+            d.and_then(|d| d.appraiser_tin.clone()).unwrap_or_default(),
+            d.and_then(|d| d.appraiser_ptin.clone()).unwrap_or_default(),
+            d.and_then(|d| d.appraiser_qualifications.clone())
+                .unwrap_or_default(),
+            d.and_then(|d| d.appraisal_date.map(|dt| dt.to_string()))
+                .unwrap_or_default(),
         ])?;
     }
     w.flush()?;
@@ -2383,7 +2403,7 @@ mod schedule_se_tests {
         let out = dir.path().join("export");
         let st = LedgerState::default();
         let r = golden1();
-        write_csv_exports(&out, &st, Some(2025), Some(&r)).unwrap();
+        write_csv_exports(&out, &st, Some(2025), Some(&r), &BTreeMap::new()).unwrap();
 
         let path = out.join("schedule_se.csv");
         assert!(path.exists(), "schedule_se.csv must be written");
@@ -2421,7 +2441,98 @@ mod schedule_se_tests {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("export");
         let st = LedgerState::default();
-        write_csv_exports(&out, &st, Some(2025), None).unwrap();
+        write_csv_exports(&out, &st, Some(2025), None, &BTreeMap::new()).unwrap();
         assert!(!out.join("schedule_se.csv").exists());
+    }
+
+    /// form8283.csv — new Part III/IV detail columns populated when details are present.
+    #[test]
+    fn form8283_csv_detail_columns_present_and_empty() {
+        use btctax_core::{
+            BasisSource, DonationDetails, EventId, LedgerState, Removal, RemovalKind, RemovalLeg,
+            Term,
+        };
+        use time::macros::date;
+
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("export");
+
+        // Build a minimal state with one Section-B donation.
+        let event = EventId::decision(99);
+        let leg = RemovalLeg {
+            lot_id: btctax_core::LotId {
+                origin_event_id: event.clone(),
+                split_sequence: 0,
+            },
+            sat: 100_000_000,
+            basis: rust_decimal::Decimal::ZERO,
+            fmv_at_transfer: rust_decimal::Decimal::from(52000),
+            term: Term::LongTerm,
+            basis_source: BasisSource::ComputedFromCost,
+            acquired_at: date!(2025 - 01 - 01),
+        };
+        let removal = Removal {
+            event: event.clone(),
+            kind: RemovalKind::Donation,
+            removed_at: date!(2025 - 03 - 01),
+            legs: vec![leg],
+            appraisal_required: false,
+            donor_acquired_at: None,
+            claimed_deduction: Some(rust_decimal::Decimal::from(52000)),
+            donee: Some("Habitat".into()),
+        };
+        let st = LedgerState {
+            removals: vec![removal],
+            ..Default::default()
+        };
+
+        let mut dmap: BTreeMap<EventId, DonationDetails> = BTreeMap::new();
+        dmap.insert(
+            event,
+            DonationDetails {
+                donee_name: "Test Charity".into(),
+                donee_ein: Some("12-3456789".into()),
+                donee_address: Some("123 Main".into()),
+                appraiser_name: "Test Appraiser".into(),
+                appraiser_tin: Some("987654321".into()),
+                appraiser_ptin: Some("P01234567".into()),
+                appraiser_qualifications: Some("Certified".into()),
+                appraisal_date: Some(date!(2025 - 06 - 01)),
+                appraiser_address: None,
+                fmv_method_override: None,
+            },
+        );
+
+        write_csv_exports(&out, &st, Some(2025), None, &dmap).unwrap();
+
+        let path = out.join("form8283.csv");
+        assert!(path.exists(), "form8283.csv must exist");
+
+        let mut rdr = csv::ReaderBuilder::new()
+            .comment(Some(b'#'))
+            .from_path(&path)
+            .unwrap();
+        let headers: Vec<String> = rdr.headers().unwrap().iter().map(String::from).collect();
+        let rec = rdr
+            .records()
+            .next()
+            .expect("one data row")
+            .expect("readable");
+        let idx = |name: &str| {
+            headers
+                .iter()
+                .position(|h| h == name)
+                .unwrap_or_else(|| panic!("header {name} not found"))
+        };
+
+        assert_eq!(&rec[idx("donee")], "Test Charity");
+        assert_eq!(&rec[idx("appraiser")], "Test Appraiser");
+        assert_eq!(&rec[idx("donee_ein")], "12-3456789");
+        assert_eq!(&rec[idx("donee_address")], "123 Main");
+        assert_eq!(&rec[idx("appraiser_tin")], "987654321");
+        assert_eq!(&rec[idx("appraiser_ptin")], "P01234567");
+        assert_eq!(&rec[idx("appraiser_qualifications")], "Certified");
+        assert_eq!(&rec[idx("appraisal_date")], "2025-06-01");
+        assert_eq!(&rec[idx("needs_review")], "false");
     }
 }
