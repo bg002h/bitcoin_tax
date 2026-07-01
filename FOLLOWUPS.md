@@ -43,6 +43,30 @@ Important; workspace gate green (433 tests). Closed:
 
 ---
 
+## ✅ Slug: pre-2025 filed-method reconciliation mechanism — SHIPPED (2026-06-30)
+
+Branch `feat/pre2025-reconciliation`; R0 spec 2 rounds to 0C/0I; 2 impl passes each reviewed 0C/0I;
+whole-slug review 0C/0I. Gave the pre-2025 method declaration engine teeth: `ProjectionConfig`
+gains `pre2025_method_attested` (plumbed via `to_projection`); `note_pre2025_once` advisory is
+attestation-aware (unattested "have NOT declared" + guidance / attested "DECLARED + ATTESTED", still
+Advisory — never gates `compute_tax_year`); `safe-harbor-allocate` REFUSES under an undeclared method
+(appends nothing; reads the config flag, not `timely_allocation_attested`). Basis-adjustment math
+unchanged. 441 tests.
+
+Deferred from this slug (OPEN):
+- **Durable Path-A `Pre2025MethodDeclaration` ledger event (R0-I2).** For a Path-A (no-allocation)
+  taxpayer the attested method lives only in mutable `cli_config` (not source-of-truth per NFR6) — no
+  audit trail. Add an append-only, supersede-tracked declaration event so the attestation is auditable
+  in the ledger. Deferred because it changes NO number for Path A (basis recomputes live under the set
+  method; the advisory updates with it) — audit-trail enhancement, not a correctness gap. — OPEN.
+- **N-1 (Nit) — `safe_harbor_allocate` reads `session.config()?` twice** (gate + `to_projection`);
+  collapse to one read. Cleanup, no correctness impact. — OPEN.
+- **N-2 (Nit) — no separate non-FIFO attested-allocate success KAT.** The gate is method-agnostic
+  (`if !attested { refuse }`) and KAT (c) proves attested-FIFO allocate records the method; a
+  LIFO/HIFO-attested allocate test would round out coverage. — OPEN.
+
+---
+
 ## C.5 — Monitor §1091 crypto wash-sale enactment (OPEN)
 
 **What.** §1091 currently disallows losses only on "stock or securities"; crypto is property

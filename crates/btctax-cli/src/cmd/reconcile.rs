@@ -248,6 +248,28 @@ pub fn safe_harbor_allocate(
 ) -> Result<EventId, CliError> {
     let mut session = Session::open(vault_path, pp)?;
 
+    // R-M7b / D3: attestation gate — EARLY, before empty-lots / conservation work.
+    // A SafeHarborAllocation permanently records pre2025_method and is irrevocable; require an
+    // explicit declared+attested pre-2025 method so the commitment is a deliberate, attested choice
+    // rather than a silent FIFO default. Note: the `attested` parameter to this function is
+    // `timely_allocation_attested` (§5.02(4)) — a separate attestation; do not conflate the two.
+    {
+        let cli_cfg = session.config()?;
+        if !cli_cfg.pre2025_method_attested {
+            let m = match cli_cfg.pre2025_method {
+                LotMethod::Fifo => "fifo",
+                LotMethod::Lifo => "lifo",
+                LotMethod::Hifo => "hifo",
+            };
+            return Err(CliError::Usage(format!(
+                "refusing to record a safe-harbor allocation under an UNDECLARED pre-2025 method \
+                 ({m}); a safe-harbor allocation permanently records the method used to reconstruct \
+                 your pre-2025 basis. Declare your filed method first: \
+                 config --set-pre2025-method {m} --attest-pre2025-method"
+            )));
+        }
+    }
+
     // Pre-2025-only event subset (see the I-1 note above).
     let pre2025: Vec<LedgerEvent> = load_all(session.conn())?
         .into_iter()

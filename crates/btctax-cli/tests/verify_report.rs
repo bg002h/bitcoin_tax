@@ -107,8 +107,11 @@ cb-sell,2025-06-01 12:00:00 UTC,Sell,BTC,0.05000000,USD,90000.00,4500.00,4490.00
     )
     .unwrap();
     cmd::import::run(&vault, &pp(), &[p]).unwrap();
+    // D3 (Task 3): attest FIFO (pre2025_method_attested) before the allocate gate.
+    // `timely_allocation_attested` (4th arg, false below) is a separate §5.02(4) attestation.
+    cmd::admin::set_pre2025_method(&vault, &pp(), btctax_core::LotMethod::Fifo, true).unwrap();
 
-    // Step 1: allocate (unattested) → inert due to time-bar.
+    // Step 1: allocate (unattested = timely_allocation_attested=false) → inert due to time-bar.
     let a1 = cmd::reconcile::safe_harbor_allocate(
         &vault,
         &pp(),
@@ -211,8 +214,10 @@ cb-sell-all,2025-06-15 12:00:00 UTC,Sell,BTC,0.10000000,USD,67500.00,6750.00,674
     )
     .unwrap();
     cmd::import::run(&vault, &pp(), &[p]).unwrap();
+    // D3 (Task 3): attest FIFO (pre2025_method_attested) before the allocate gate.
+    cmd::admin::set_pre2025_method(&vault, &pp(), btctax_core::LotMethod::Fifo, true).unwrap();
 
-    // Allocate (unattested) → inert: made 2026-02-01 is after the 2025-06-15 ActualPosition bar.
+    // Allocate (unattested = timely_allocation_attested=false) → inert: made 2026-02-01 is after the 2025-06-15 ActualPosition bar.
     let a1 = cmd::reconcile::safe_harbor_allocate(
         &vault,
         &pp(),
@@ -421,5 +426,108 @@ fn config_set_fee_treatment_b_persists_and_affects_projection_config() {
     assert_eq!(
         s.config().unwrap().fee_treatment,
         btctax_core::FeeTreatment::TreatmentB
+    );
+}
+
+// ── Task 4 (pre-2025 method reconciliation): verify consistency KATs ───────────────────────────
+
+/// Task 4 KAT — ATTESTED vault: `verify` shows "DECLARED + ATTESTED" advisory + "attested: true"
+/// with NO "have NOT declared" warning. Requires a pre-2025 disposal so Pre2025MethodNote fires
+/// (the note fires on the first pre-2025 Dispose/GiftOut/Donate, not on a Buy or post-2025 event).
+#[test]
+fn verify_consistency_attested_vault_shows_declared_attested_advisory() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Pre-2025 Buy + pre-2025 Sell to trigger Pre2025MethodNote (fires on pre-2025 Dispose).
+    let p = dir.path().join("cb_pre_dispose.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,\
+Recipient Address\r\n\
+cb-pre-buy,2024-01-15 12:00:00 UTC,Buy,BTC,0.20000000,USD,42500.00,8500.00,8550.00,50.00,,,\r\n\
+cb-pre-sell,2024-06-15 12:00:00 UTC,Sell,BTC,0.05000000,USD,50000.00,2500.00,2490.00,10.00,,,\r\n",
+    )
+    .unwrap();
+    cmd::import::run(&vault, &pp(), &[p]).unwrap();
+
+    // Attest FIFO: declare the filed pre-2025 method.
+    cmd::admin::set_pre2025_method(&vault, &pp(), btctax_core::LotMethod::Fifo, true).unwrap();
+
+    let report = cmd::inspect::verify(&vault, &pp()).unwrap();
+    let text = render::render_verify(&report);
+
+    // "attested: true" must appear in the Pre-2025 method line (render.rs outputs this field).
+    assert!(
+        text.contains("attested: true"),
+        "render_verify must contain 'attested: true' for an attested vault, got:\n{text}"
+    );
+    // Pre2025MethodNote advisory detail must contain "DECLARED + ATTESTED" (attested branch, D2).
+    assert!(
+        report
+            .advisory
+            .iter()
+            .any(|b| b.kind == BlockerKind::Pre2025MethodNote
+                && b.detail.contains("DECLARED + ATTESTED")),
+        "advisory Pre2025MethodNote detail must contain 'DECLARED + ATTESTED' when attested; \
+         advisories: {:?}",
+        report.advisory
+    );
+    // No "have NOT declared" warning in rendered text (only the attested branch fires).
+    assert!(
+        !text.contains("have NOT declared"),
+        "attested vault must NOT show 'have NOT declared' in render_verify, got:\n{text}"
+    );
+}
+
+/// Task 4 KAT — UNATTESTED vault: `verify` shows "have NOT declared" advisory + "attested: false"
+/// with NO "DECLARED + ATTESTED" text. Requires a pre-2025 disposal so Pre2025MethodNote fires.
+#[test]
+fn verify_consistency_unattested_vault_shows_have_not_declared_advisory() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Same pre-2025 Buy + pre-2025 Sell fixture as the attested KAT above.
+    let p = dir.path().join("cb_pre_dispose.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,\
+Recipient Address\r\n\
+cb-pre-buy,2024-01-15 12:00:00 UTC,Buy,BTC,0.20000000,USD,42500.00,8500.00,8550.00,50.00,,,\r\n\
+cb-pre-sell,2024-06-15 12:00:00 UTC,Sell,BTC,0.05000000,USD,50000.00,2500.00,2490.00,10.00,,,\r\n",
+    )
+    .unwrap();
+    cmd::import::run(&vault, &pp(), &[p]).unwrap();
+    // Default config: pre2025_method_attested = false (NOT attested). Do NOT call set_pre2025_method.
+
+    let report = cmd::inspect::verify(&vault, &pp()).unwrap();
+    let text = render::render_verify(&report);
+
+    // "attested: false" must appear in the Pre-2025 method line.
+    assert!(
+        text.contains("attested: false"),
+        "render_verify must contain 'attested: false' for an unattested vault, got:\n{text}"
+    );
+    // Pre2025MethodNote advisory detail must contain "have NOT declared" (unattested branch, D2).
+    assert!(
+        report
+            .advisory
+            .iter()
+            .any(|b| b.kind == BlockerKind::Pre2025MethodNote
+                && b.detail.contains("have NOT declared")),
+        "advisory Pre2025MethodNote detail must contain 'have NOT declared' when unattested; \
+         advisories: {:?}",
+        report.advisory
+    );
+    // No "DECLARED + ATTESTED" text in the rendered output.
+    assert!(
+        !text.contains("DECLARED + ATTESTED"),
+        "unattested vault must NOT show 'DECLARED + ATTESTED' in render_verify, got:\n{text}"
     );
 }

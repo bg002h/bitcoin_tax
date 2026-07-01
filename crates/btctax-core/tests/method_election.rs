@@ -296,6 +296,238 @@ fn pre2025_method_note_renders_declared_method() {
     );
 }
 
+// ── Task 2 KATs: attestation-aware note_pre2025_once ─────────────────────────────────────────────
+
+/// (a) Unattested: detail contains "have NOT declared" + "config --set-pre2025-method" guidance.
+#[test]
+fn pre2025_note_unattested_detail_is_actionable() {
+    let evs = vec![
+        buy(
+            "A",
+            datetime!(2024-02-01 00:00:00 UTC),
+            100_000,
+            dec!(50.00),
+        ),
+        sell("D", datetime!(2024-09-01 00:00:00 UTC), 50_000, dec!(40.00)),
+    ];
+    // Default: pre2025_method_attested = false
+    let cfg = ProjectionConfig {
+        pre2025_method: LotMethod::Fifo,
+        pre2025_method_attested: false,
+        ..ProjectionConfig::default()
+    };
+    let st = project(&evs, &StaticPrices::default(), &cfg);
+    let note = st
+        .blockers
+        .iter()
+        .find(|b| b.kind == BlockerKind::Pre2025MethodNote)
+        .expect("Pre2025MethodNote must fire on a pre-2025 disposal");
+    assert_eq!(
+        note.kind.severity(),
+        Severity::Advisory,
+        "Pre2025MethodNote must be Advisory (never gates compute_tax_year)"
+    );
+    assert!(
+        note.detail.contains("have NOT declared"),
+        "unattested detail must contain 'have NOT declared', got: {}",
+        note.detail
+    );
+    assert!(
+        note.detail.contains("config --set-pre2025-method"),
+        "unattested detail must contain config guidance, got: {}",
+        note.detail
+    );
+    assert!(
+        note.detail.contains("FIFO"),
+        "unattested detail must name the method, got: {}",
+        note.detail
+    );
+}
+
+/// (b) Attested: detail contains "DECLARED + ATTESTED".
+#[test]
+fn pre2025_note_attested_detail_is_informational() {
+    let evs = vec![
+        buy(
+            "A",
+            datetime!(2024-02-01 00:00:00 UTC),
+            100_000,
+            dec!(50.00),
+        ),
+        sell("D", datetime!(2024-09-01 00:00:00 UTC), 50_000, dec!(40.00)),
+    ];
+    let cfg = ProjectionConfig {
+        pre2025_method: LotMethod::Fifo,
+        pre2025_method_attested: true,
+        ..ProjectionConfig::default()
+    };
+    let st = project(&evs, &StaticPrices::default(), &cfg);
+    let note = st
+        .blockers
+        .iter()
+        .find(|b| b.kind == BlockerKind::Pre2025MethodNote)
+        .expect("Pre2025MethodNote must fire on a pre-2025 disposal");
+    assert_eq!(
+        note.kind.severity(),
+        Severity::Advisory,
+        "Pre2025MethodNote must be Advisory even when attested"
+    );
+    assert!(
+        note.detail.contains("DECLARED + ATTESTED"),
+        "attested detail must contain 'DECLARED + ATTESTED', got: {}",
+        note.detail
+    );
+    assert!(
+        note.detail.contains("FIFO"),
+        "attested detail must name the method, got: {}",
+        note.detail
+    );
+    assert!(
+        !note.detail.contains("have NOT declared"),
+        "attested detail must NOT contain the unattested warning, got: {}",
+        note.detail
+    );
+}
+
+/// (c) Fire-once: a second pre-2025 disposal in the same projection does NOT emit a second note.
+#[test]
+fn pre2025_note_fires_only_once() {
+    let evs = vec![
+        buy(
+            "A",
+            datetime!(2024-01-01 00:00:00 UTC),
+            100_000,
+            dec!(50.00),
+        ),
+        sell(
+            "D1",
+            datetime!(2024-06-01 00:00:00 UTC),
+            30_000,
+            dec!(20.00),
+        ),
+        sell(
+            "D2",
+            datetime!(2024-09-01 00:00:00 UTC),
+            30_000,
+            dec!(20.00),
+        ),
+    ];
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    let notes: Vec<_> = st
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::Pre2025MethodNote)
+        .collect();
+    assert_eq!(
+        notes.len(),
+        1,
+        "Pre2025MethodNote must fire exactly once, got {}",
+        notes.len()
+    );
+}
+
+/// (c) Advisory note does not gate compute_tax_year: a year whose ONLY blocker is Pre2025MethodNote
+/// still yields TaxOutcome::Computed(..) for both attested and unattested configurations.
+#[test]
+fn pre2025_advisory_note_does_not_gate_compute_tax_year() {
+    use btctax_core::tax::compute::compute_tax_year;
+    use btctax_core::tax::tables::{
+        LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
+    };
+    use btctax_core::tax::types::{Carryforward, FilingStatus, TaxOutcome, TaxProfile};
+    use std::collections::BTreeMap;
+
+    struct OneTable(TaxTable);
+    impl TaxTables for OneTable {
+        fn table_for(&self, year: i32) -> Option<&TaxTable> {
+            (year == self.0.year).then_some(&self.0)
+        }
+    }
+    fn synth_2024() -> OneTable {
+        let mut ordinary = BTreeMap::new();
+        ordinary.insert(
+            FilingStatus::Single,
+            OrdinarySchedule {
+                brackets: vec![OrdinaryBracket {
+                    lower: dec!(0),
+                    rate: dec!(0.22),
+                }],
+            },
+        );
+        let mut ltcg = BTreeMap::new();
+        ltcg.insert(
+            FilingStatus::Single,
+            LtcgBreakpoints {
+                max_zero: dec!(40000),
+                max_fifteen: dec!(400000),
+            },
+        );
+        OneTable(TaxTable {
+            year: 2024,
+            source: "SYNTHETIC",
+            ordinary,
+            ltcg,
+        })
+    }
+    let prof = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(0),
+        magi_excluding_crypto: dec!(0),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward {
+            short: dec!(0),
+            long: dec!(0),
+        },
+    };
+    let evs = vec![
+        buy(
+            "A",
+            datetime!(2024-01-01 00:00:00 UTC),
+            100_000,
+            dec!(50.00),
+        ),
+        sell("D", datetime!(2024-06-01 00:00:00 UTC), 50_000, dec!(40.00)),
+    ];
+    let tables = synth_2024();
+
+    // Unattested: note fires with warning, compute_tax_year still returns Computed.
+    let st_unattested = project(
+        &evs,
+        &StaticPrices::default(),
+        &ProjectionConfig {
+            pre2025_method_attested: false,
+            ..ProjectionConfig::default()
+        },
+    );
+    assert!(has(&st_unattested, BlockerKind::Pre2025MethodNote));
+    assert!(
+        matches!(
+            compute_tax_year(&evs, &st_unattested, 2024, Some(&prof), &tables),
+            TaxOutcome::Computed(..)
+        ),
+        "unattested Pre2025MethodNote must not gate compute_tax_year"
+    );
+
+    // Attested: note fires with informational detail, compute_tax_year still returns Computed.
+    let st_attested = project(
+        &evs,
+        &StaticPrices::default(),
+        &ProjectionConfig {
+            pre2025_method_attested: true,
+            ..ProjectionConfig::default()
+        },
+    );
+    assert!(has(&st_attested, BlockerKind::Pre2025MethodNote));
+    assert!(
+        matches!(
+            compute_tax_year(&evs, &st_attested, 2024, Some(&prof), &tables),
+            TaxOutcome::Computed(..)
+        ),
+        "attested Pre2025MethodNote must not gate compute_tax_year"
+    );
+}
+
 // ── C1 divergence KAT (a) — acquisition-date FIFO vs legacy insertion-order on a RELOCATED lot ──
 // A confirmed SelfTransfer relocates the OLDER lot Z (acquired 2025-01-01, basis $40) from COLD into HOT,
 // which already holds the NEWER directly-acquired A (acquired 2025-08-01, basis $80). Z' carries its original

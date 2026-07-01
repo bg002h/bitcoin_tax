@@ -586,9 +586,13 @@ fn calendar_date_boundary_keeps_a_2024_local_disposition_pre_2025() {
         "Pre2025MethodNote detail must mention FIFO assumption, got: {}",
         note.detail
     );
+    // D2 (Task 2): unattested advisory now names the actionable declaration command rather than
+    // generic "verify" guidance — check for the updated actionable text.
+    // M1 (review Minor): fixture uses ProjectionConfig::default() → attested=false, so ONLY the
+    // unattested branch fires; the OR was over-permissive — tighten to the exact expected branch.
     assert!(
-        note.detail.contains("verify"),
-        "Pre2025MethodNote detail must mention verification guidance, got: {}",
+        note.detail.contains("have NOT declared"),
+        "Pre2025MethodNote detail must contain 'have NOT declared' (unattested branch), got: {}",
         note.detail
     );
     assert!(!has(&st, BlockerKind::SafeHarborTimebar)); // it is NOT a first-2025 disposition -> bar not tripped

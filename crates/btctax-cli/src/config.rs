@@ -31,6 +31,7 @@ impl CliConfig {
         ProjectionConfig {
             self_transfer_fee: self.fee_treatment,
             pre2025_method: self.pre2025_method,
+            pre2025_method_attested: self.pre2025_method_attested,
         }
     }
 }
@@ -192,6 +193,8 @@ mod tests {
         assert_eq!(cfg.pre2025_method, LotMethod::Fifo);
         assert!(!cfg.pre2025_method_attested);
         assert_eq!(cfg.to_projection().pre2025_method, LotMethod::Fifo);
+        // KAT (Task 1): to_projection carries attested=false (false→false)
+        assert!(!cfg.to_projection().pre2025_method_attested);
     }
     #[test]
     fn set_pre2025_method_round_trips_with_attestation() {
@@ -201,6 +204,8 @@ mod tests {
         assert_eq!(cfg.pre2025_method, LotMethod::Hifo);
         assert!(cfg.pre2025_method_attested);
         assert_eq!(cfg.to_projection().pre2025_method, LotMethod::Hifo);
+        // KAT (Task 1): to_projection carries attested=true (true→true)
+        assert!(cfg.to_projection().pre2025_method_attested);
     }
     #[test]
     fn bad_pre2025_method_value_is_an_error() {
