@@ -247,14 +247,16 @@ fn how_acquired_from(bs: BasisSource) -> Form8283HowAcquired {
 /// projection of the leg; no gain/basis/deduction math is done here.
 ///
 /// **First-leg convention (no CSV SUM double-count):** the per-DONATION `section`,
-/// `claimed_deduction`, and `fmv_method` appear on the FIRST leg row only; subsequent leg rows carry
-/// `None`/`""` — so a naive SUM over the deduction column equals the correct per-donation total
-/// (mirrors P2-A's removals.csv).
+/// `claimed_deduction`, `fmv_method`, and `donee` appear on the FIRST leg row only; subsequent leg
+/// rows carry `None`/`""` — so a naive SUM over the deduction column equals the correct per-donation
+/// total (mirrors P2-A's removals.csv).
 ///
-/// **Unmodeled user-input (honest gaps, never fabricated):** `donee` and `appraiser` are always EMPTY
-/// (not modeled), so `needs_review` is ALWAYS `true`. `fmv_method` is derived from the section
-/// (Section B → `"qualified appraisal"`; Section A → `""`) — no `FmvStatus` dependency (RemovalLeg
-/// carries no FMV provenance). For a Section B donation the qualified-appraiser signature is
+/// **Partially unmodeled user-input (honest gaps, never fabricated):** `appraiser` is always EMPTY
+/// (Section B appraiser struct deferred to Chunk 3), so `needs_review` is ALWAYS `true`. `fmv_method`
+/// is derived from the section (Section B → `"qualified appraisal"`; Section A → `""`) — no
+/// `FmvStatus` dependency (RemovalLeg carries no FMV provenance). `donee` is now populated from
+/// `Removal.donee` on the carrier row (Chunk 2 free-form label); Section-B structured
+/// name/address/EIN remains Chunk 3. For a Section B donation the qualified-appraiser signature is
 /// additionally mandatory (not modeled until Chunk 3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Form8283Row {
@@ -284,12 +286,16 @@ pub struct Form8283Row {
     /// or `""` for Section A (FMV method is not modeled; honest gap, never fabricated). Empty on
     /// subsequent (non-carrier) leg rows. No `FmvStatus` dependency — derived from the section only.
     pub fmv_method: String,
-    /// Column: donee organization — EMPTY (unmodeled user-input; a donee identifier is deferred).
+    /// Column: donee organization — from `Removal.donee` on the **carrier (first-leg) row**
+    /// (free-form label populated via `reconcile reclassify-outflow --donee`; `""` when `None`).
+    /// Empty on subsequent (non-carrier) legs (first-leg convention). Section-B structured
+    /// name/address/EIN + appraiser remain Chunk 3.
     pub donee: String,
-    /// Column: appraiser — EMPTY (unmodeled user-input; the Section B appraiser struct is deferred).
+    /// Column: appraiser — EMPTY (unmodeled user-input; the Section B appraiser struct is deferred
+    /// to Chunk 3).
     pub appraiser: String,
-    /// ALWAYS `true`: `fmv_method`/`donee`/`appraiser` are unmodeled, so every row needs review
-    /// (and a Section B row additionally requires a qualified appraiser signature).
+    /// ALWAYS `true`: `fmv_method`/`appraiser` are unmodeled (honest gaps), so every row needs
+    /// review (and a Section B row additionally requires a qualified appraiser signature).
     pub needs_review: bool,
 }
 
@@ -388,7 +394,11 @@ pub fn form_8283(state: &LedgerState, year: i32) -> Vec<Form8283Row> {
                 } else {
                     String::new()
                 },
-                donee: String::new(),
+                donee: if is_first {
+                    r.donee.clone().unwrap_or_default()
+                } else {
+                    String::new()
+                },
                 appraiser: String::new(),
                 needs_review: true,
             };

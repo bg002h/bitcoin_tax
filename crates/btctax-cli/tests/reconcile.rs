@@ -106,6 +106,7 @@ fn reclassify_outflow_to_sell_creates_a_disposal() {
         },
         btctax_cli::eventref::parse_usd_arg("2000.00").unwrap(),
         Some(btctax_cli::eventref::parse_usd_arg("3.00").unwrap()),
+        None,
         now(),
     )
     .unwrap();
@@ -127,6 +128,7 @@ fn reclassify_outflow_to_gift_creates_a_removal() {
         &out_ref,
         OutflowClass::GiftOut,
         btctax_cli::eventref::parse_usd_arg("2040.00").unwrap(),
+        None,
         None,
         now(),
     )
@@ -152,6 +154,7 @@ fn reclassify_outflow_to_donate_creates_a_removal_with_appraisal_flag() {
         },
         btctax_cli::eventref::parse_usd_arg("2040.00").unwrap(),
         None,
+        None,
         now(),
     )
     .unwrap();
@@ -161,6 +164,91 @@ fn reclassify_outflow_to_donate_creates_a_removal_with_appraisal_flag() {
     assert!(state.pending_reconciliation.is_empty()); // outflow resolved
     assert_eq!(state.removals.len(), 1);
     assert!(state.removals[0].appraisal_required);
+}
+
+/// [Chunk 2 Task 1] reclassify-outflow gift with --donee "Alice" → Removal.donee == Some("Alice")
+#[test]
+fn reclassify_outflow_gift_with_donee_populates_removal_donee() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, out_ref) = vault_with_pending(dir.path());
+
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::GiftOut,
+        btctax_cli::eventref::parse_usd_arg("2040.00").unwrap(),
+        None,
+        Some("Alice".to_string()),
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert_eq!(state.removals.len(), 1);
+    assert_eq!(
+        state.removals[0].donee,
+        Some("Alice".to_string()),
+        "GiftOut with donee 'Alice' must carry donee on the Removal"
+    );
+}
+
+/// [Chunk 2 Task 1] reclassify-outflow donate with --donee "Charity X" → Removal.donee == Some("Charity X")
+#[test]
+fn reclassify_outflow_donate_with_donee_populates_removal_donee() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, out_ref) = vault_with_pending(dir.path());
+
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::Donate {
+            appraisal_required: false,
+        },
+        btctax_cli::eventref::parse_usd_arg("2040.00").unwrap(),
+        None,
+        Some("Charity X".to_string()),
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert_eq!(state.removals.len(), 1);
+    assert_eq!(
+        state.removals[0].donee,
+        Some("Charity X".to_string()),
+        "Donate with donee 'Charity X' must carry donee on the Removal"
+    );
+}
+
+/// [Chunk 2 Task 1] reclassify-outflow with no --donee → Removal.donee == None
+#[test]
+fn reclassify_outflow_without_donee_has_none_donee() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, out_ref) = vault_with_pending(dir.path());
+
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::GiftOut,
+        btctax_cli::eventref::parse_usd_arg("2040.00").unwrap(),
+        None,
+        None, // no donee
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert_eq!(state.removals.len(), 1);
+    assert_eq!(
+        state.removals[0].donee, None,
+        "GiftOut without donee must have donee: None on the Removal"
+    );
 }
 
 #[test]

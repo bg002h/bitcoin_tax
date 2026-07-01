@@ -173,6 +173,9 @@ pub struct Removal {
     /// `None` for a Gift (not a charitable deduction). Standalone Schedule-A figure — does NOT
     /// feed engine B / `compute_tax_year`. Pre-§170(b) AGI limits and carryover.
     pub claimed_deduction: Option<Usd>,
+    /// Free-form donee identifier (Chunk 2). `None` for legacy events without the field.
+    /// Used by removals.csv and (for Donations) Form 8283. Does NOT feed engine B / tax math.
+    pub donee: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncomeRecord {

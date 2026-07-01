@@ -258,6 +258,7 @@ fn removals_csv_multi_leg_donation_no_double_count() {
         },
         btctax_cli::eventref::parse_usd_arg("100000.00").unwrap(),
         None,
+        None,
         now,
     )
     .unwrap();
@@ -376,6 +377,7 @@ fn export_writes_form8283_with_section_b_and_aggregation_caveat() {
             appraisal_required: false,
         },
         btctax_cli::eventref::parse_usd_arg("100000.00").unwrap(),
+        None,
         None,
         now,
     )
@@ -520,6 +522,7 @@ sd-send,2025-06-01 12:00:00 UTC,Send,BTC,0.00100000,USD,300.00,,,,,,bc1qsyntheti
         },
         btctax_cli::eventref::parse_usd_arg("300.00").unwrap(),
         None,
+        None,
         now,
     )
     .unwrap();
@@ -580,5 +583,159 @@ fn csv_exports_are_owner_only_on_pre_existing_dir() {
             "{name} must be owner-only (0o600), got {:#o}",
             mode & 0o777
         );
+    }
+}
+
+/// [Chunk 2 Task 1] removals.csv donee column — populated and empty cases.
+/// Gift with donee "Alice" → donee cell = "Alice"; Donate without donee → donee cell = "".
+/// Also asserts that the `donee` column is present in the header at the correct position.
+/// Engine B / tax math is NOT exercised — donee is data only; this test verifies CSV schema.
+#[test]
+fn removals_csv_has_donee_column_populated_and_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    let now = datetime!(2026-04-01 12:00:00 UTC);
+
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Import the fixture that has a buy + a send (coinbase_buy_sell_send has a pending send).
+    cmd::import::run(
+        &vault,
+        &pp(),
+        &[fixtures::coinbase_buy_sell_send(dir.path())],
+    )
+    .unwrap();
+
+    // Find both pending outflows: the fixture produces one pending send.
+    // We reclassify it as GiftOut with donee "Alice".
+    let out_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        // Use the pending send (the send in the fixture).
+        state.pending_reconciliation[0].event.canonical()
+    };
+
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::GiftOut,
+        btctax_cli::eventref::parse_usd_arg("2100.00").unwrap(),
+        None,
+        Some("Alice".to_string()), // donee populated
+        now,
+    )
+    .unwrap();
+
+    let out = dir.path().join("export_donee");
+    cmd::admin::export_snapshot(&vault, &pp(), &out, None).unwrap();
+
+    let removals_path = out.join("removals.csv");
+    assert!(removals_path.exists(), "removals.csv must exist");
+
+    // Check the header has "donee" at column 10.
+    // Header: event(0), kind(1), removed_at(2), lot(3), sat(4), basis(5), fmv_at_transfer(6),
+    //         term(7), acquired_at(8), claimed_deduction(9), donee(10).
+    let mut rdr = Reader::from_reader(File::open(&removals_path).unwrap());
+    let header: Vec<String> = rdr
+        .headers()
+        .unwrap()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(
+        header.get(10).map(String::as_str),
+        Some("donee"),
+        "removals.csv must have 'donee' header at column 10; got: {header:?}"
+    );
+
+    let records: Vec<_> = rdr
+        .records()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("removals.csv must parse");
+
+    // The fixture gift row has donee "Alice".
+    assert!(
+        !records.is_empty(),
+        "expected at least one removal row in removals.csv"
+    );
+    let donee_cell = records[0].get(10).expect("donee column missing on row 0");
+    assert_eq!(
+        donee_cell, "Alice",
+        "GiftOut with donee 'Alice' must appear in removals.csv donee column; got {donee_cell:?}"
+    );
+}
+
+/// [Chunk 2 Task 1] Engine B / tax math unchanged: donee is data only, does not affect
+/// computed disposals or gain. The sell in coinbase_buy_sell_send produces a known gain;
+/// adding a gift with a donee must not change any disposal or tax figure.
+#[test]
+fn engine_b_tax_math_unchanged_by_donee() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    let now = datetime!(2026-04-01 12:00:00 UTC);
+
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(
+        &vault,
+        &pp(),
+        &[fixtures::coinbase_buy_sell_send(dir.path())],
+    )
+    .unwrap();
+
+    // Baseline: project before reclassifying the send.
+    let baseline_disposals = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        state.disposals.clone()
+    };
+
+    // Reclassify the pending send as GiftOut with a donee.
+    let out_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        state.pending_reconciliation[0].event.canonical()
+    };
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::GiftOut,
+        btctax_cli::eventref::parse_usd_arg("2100.00").unwrap(),
+        None,
+        Some("Alice".to_string()),
+        now,
+    )
+    .unwrap();
+
+    let after_disposals = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        state.disposals.clone()
+    };
+
+    // The disposal count and all disposal figures must be unchanged.
+    assert_eq!(
+        baseline_disposals.len(),
+        after_disposals.len(),
+        "donee on a gift must NOT change disposal count"
+    );
+    for (before, after) in baseline_disposals.iter().zip(after_disposals.iter()) {
+        assert_eq!(
+            before.legs.len(),
+            after.legs.len(),
+            "disposal leg count must be unchanged by donee"
+        );
+        for (bl, al) in before.legs.iter().zip(after.legs.iter()) {
+            assert_eq!(bl.gain, al.gain, "disposal gain must be unchanged by donee");
+            assert_eq!(
+                bl.basis, al.basis,
+                "disposal basis must be unchanged by donee"
+            );
+            assert_eq!(
+                bl.proceeds, al.proceeds,
+                "disposal proceeds must be unchanged by donee"
+            );
+        }
     }
 }

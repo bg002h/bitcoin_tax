@@ -73,16 +73,18 @@ pub enum Op {
     GiftOut {
         sat: Sat,
         fmv: Usd,
-        fee_sat: Option<Sat>, // Task 11: on-chain fee consumed per TP8 (c)
-        fee_usd: Option<Usd>, // Task 11: USD fee from ReclassifyOutflow
+        fee_sat: Option<Sat>,  // Task 11: on-chain fee consumed per TP8 (c)
+        fee_usd: Option<Usd>,  // Task 11: USD fee from ReclassifyOutflow
+        donee: Option<String>, // Chunk 2: free-form donee label (None for legacy records)
     },
     /// ReclassifyOutflow{Donate}: Removal with zero recognized gain + appraisal_required flag.
     Donate {
         sat: Sat,
         fmv: Usd,
         appraisal_required: bool,
-        fee_sat: Option<Sat>, // Task 11: on-chain fee consumed per TP8 (c)
-        fee_usd: Option<Usd>, // Task 11: USD fee from ReclassifyOutflow
+        fee_sat: Option<Sat>,  // Task 11: on-chain fee consumed per TP8 (c)
+        fee_usd: Option<Usd>,  // Task 11: USD fee from ReclassifyOutflow
+        donee: Option<String>, // Chunk 2: free-form donee label (None for legacy records)
     },
     // (Task 12) seeded — added as those tasks land.
     Unclassified,
@@ -213,6 +215,7 @@ fn build_op(
                         fmv: ro.principal_proceeds_or_fmv,
                         fee_sat: t.fee_sat,
                         fee_usd: ro.fee_usd,
+                        donee: ro.donee.clone(),
                     },
                     OutflowClass::Donate { appraisal_required } => Op::Donate {
                         sat: t.sat,
@@ -220,6 +223,7 @@ fn build_op(
                         appraisal_required: *appraisal_required,
                         fee_sat: t.fee_sat,
                         fee_usd: ro.fee_usd,
+                        donee: ro.donee.clone(),
                     },
                     OutflowClass::Dispose { kind } => Op::Dispose {
                         sat: t.sat,

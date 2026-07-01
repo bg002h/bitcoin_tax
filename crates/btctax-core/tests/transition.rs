@@ -494,6 +494,7 @@ fn reclassify_creating_a_disposition_flips_effective_to_inert() {
             },
             principal_proceeds_or_fmv: dec!(35.00),
             fee_usd: None,
+            donee: None,
         }),
     ));
     let st2 = project(&v2, &StaticPrices::default(), &ProjectionConfig::default());

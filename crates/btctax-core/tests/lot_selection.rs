@@ -386,6 +386,7 @@ fn fee_bearing_reclassified_disposal_under_selection_consumes_fee_fifo_from_rema
                 },
                 principal_proceeds_or_fmv: dec!(120.00),
                 fee_usd: None,
+                donee: None,
             }),
         ),
         // selection picks NEW for the 100k principal; the 500-sat fee then FIFO-consumes OLD.

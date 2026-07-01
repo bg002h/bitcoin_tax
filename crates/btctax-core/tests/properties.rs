@@ -321,6 +321,7 @@ fn golden_kat_cross_boundary_conservation() {
             as_: OutflowClass::GiftOut,
             principal_proceeds_or_fmv: dec!(20.00),
             fee_usd: None,
+            donee: None,
         }),
     );
 
