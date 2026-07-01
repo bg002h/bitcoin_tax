@@ -663,12 +663,13 @@ fn form8283_claimed_deduction_first_leg_only_no_sum_double_count() {
     assert_eq!(sum, dec!(52000));
 }
 
-/// donee / appraiser are always EMPTY (unmodeled user-input, honestly flagged).
-/// fmv_method is "qualified appraisal" for Section B (carrier row) and "" for Section A.
+/// appraiser is always EMPTY (unmodeled; Chunk 3). donee (when `removal.donee == None`) is also
+/// empty. fmv_method is "qualified appraisal" for Section B (carrier row) and "" for Section A.
 /// needs_review is always true.
 #[test]
 fn form8283_unmodeled_user_input_fields_and_fmv_method_honest() {
     // Section B (aggregate $60,000 > $5,000): carrier fmv_method = "qualified appraisal".
+    // Fixture has donee: None → donee column is "" on the carrier row (unwrap_or_default).
     let st = state_removals(vec![donation(
         1,
         date!(2025 - 03 - 01),
@@ -676,7 +677,7 @@ fn form8283_unmodeled_user_input_fields_and_fmv_method_honest() {
         vec![base_removal_leg()],
     )]);
     let r = &form_8283(&st, 2025)[0];
-    assert_eq!(r.donee, "");
+    assert_eq!(r.donee, "", "None donee → empty string (unwrap_or_default)");
     assert_eq!(r.appraiser, "");
     assert_eq!(
         r.fmv_method, "qualified appraisal",
@@ -692,13 +693,85 @@ fn form8283_unmodeled_user_input_fields_and_fmv_method_honest() {
         vec![base_removal_leg()],
     )]);
     let r_a = &form_8283(&st_a, 2025)[0];
-    assert_eq!(r_a.donee, "");
+    assert_eq!(
+        r_a.donee, "",
+        "None donee → empty string (unwrap_or_default)"
+    );
     assert_eq!(r_a.appraiser, "");
     assert_eq!(
         r_a.fmv_method, "",
         "Section A carrier must have fmv_method = '' (FMV method not modeled)"
     );
     assert!(r_a.needs_review);
+}
+
+/// D2 KAT (Chunk 2): `donee` is populated from `removal.donee` on the CARRIER row;
+/// non-carrier legs are empty; `None` donee → `""` on the carrier row (unwrap_or_default).
+#[test]
+fn form8283_donee_populated_from_removal_on_carrier_row() {
+    // ── Donation with donee = Some("Charity X") ─────────────────────────────────────────────────
+    let with_donee = Removal {
+        donee: Some("Charity X".to_string()),
+        ..donation(
+            1,
+            date!(2025 - 03 - 01),
+            dec!(1000),
+            vec![base_removal_leg()],
+        )
+    };
+    let st = state_removals(vec![with_donee]);
+    let rows = form_8283(&st, 2025);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].donee, "Charity X",
+        "carrier row must carry the donee label from removal.donee"
+    );
+
+    // ── Donation with donee = None → carrier row donee == "" ────────────────────────────────────
+    let no_donee = donation(
+        2,
+        date!(2025 - 04 - 01),
+        dec!(1000),
+        vec![base_removal_leg()],
+    );
+    let st2 = state_removals(vec![no_donee]);
+    let rows2 = form_8283(&st2, 2025);
+    assert_eq!(
+        rows2[0].donee, "",
+        "None donee → empty string on carrier row"
+    );
+
+    // ── Multi-leg: carrier has the donee; non-carrier is empty ──────────────────────────────────
+    let multi = Removal {
+        donee: Some("Charity X".to_string()),
+        ..donation(
+            3,
+            date!(2025 - 05 - 01),
+            dec!(52000), // > $5,000 → Section B
+            vec![
+                RemovalLeg {
+                    lot_id: lot(0, 1),
+                    ..base_removal_leg()
+                }, // non-carrier (higher lot_id)
+                RemovalLeg {
+                    lot_id: lot(0, 0),
+                    ..base_removal_leg()
+                }, // carrier (smallest lot_id)
+            ],
+        )
+    };
+    let st3 = state_removals(vec![multi]);
+    let rows3 = form_8283(&st3, 2025);
+    assert_eq!(rows3.len(), 2);
+    // Carrier (lot 0,0) sorts first due to deterministic ordering.
+    assert_eq!(
+        rows3[0].donee, "Charity X",
+        "carrier row must have the donee label"
+    );
+    assert_eq!(
+        rows3[1].donee, "",
+        "non-carrier row must have empty donee (first-leg convention)"
+    );
 }
 
 /// date_acquired = leg.acquired_at; date_contributed = removal.removed_at; basis/fmv from the leg.

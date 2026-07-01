@@ -1179,61 +1179,162 @@ pub fn render_schedule_se(
     }
 }
 
-/// P2-C Task 3 (D3): Form 709 gift over-annual-exclusion **advisory** (thin, total-exposure only).
+/// P2-C Task 3 (D3): Form 709 gift **per-donee advisory** (§2503(b) annual exclusion applied
+/// independently per donee, not in aggregate).
 ///
-/// Sums `Σ fmv_at_transfer` over `Removal{Gift}` legs contributed in `year`, then:
-/// - **`None`** when (a) there are NO gifts in the year, or (b) gifts are present but the total is
-///   ≤ the year's §2503(b) annual exclusion.
-/// - **`Some(advisory)`** when gifts exceed the exclusion — the total + the donee-not-modeled caveat.
-/// - **`Some(note)` [R0-m6]** when gifts ARE present but the year has NO bundled table (the exclusion
-///   is unavailable): Form 709 exposure is NOT evaluated — do NOT silently return `None`.
+/// Groups `Removal{Gift}` legs by their `donee` label for `year`:
+/// - **`None`** when there are NO Gift removals in the year (even with a table present). [R0-I2]
+/// - **`Some(note)` [R0-m6]** when gifts ARE present but the year has NO bundled table (exclusion
+///   unavailable): Form 709 exposure is NOT evaluated — do NOT silently return `None`.
+/// - **`Some(advisory)`** for all other cases: per-labeled-donee §2503(b) breakdown (each donee's
+///   total vs the per-donee exclusion; filing trigger fires when ANY labeled donee exceeds the
+///   exclusion), plus an unlabeled-bucket caveat when any `None`-donee gifts exist.
 ///
-/// Standalone informational artifact — does NOT feed `compute_tax_year` / engine B. Because no donee
-/// identifier is modeled, this is a TOTAL-exposure signal, not a per-donee determination.
+/// **Why per-donee matters (§2503(b)):** the exclusion applies to each recipient independently.
+/// Two donees at $15k each with a $19k exclusion → $0 taxable (the old aggregate was WRONG: it
+/// would flag the $30k combined total, even though neither donee exceeded their exclusion).
+///
+/// **Unlabeled bucket:** `None`-donee gifts cannot have per-donee exclusion applied; a conservative
+/// aggregate-vs-one-exclusion signal is emitted with an explicit caveat. Nothing is silently dropped.
+///
+/// **Donations excluded:** `Removal{Donation}` (§170) must NOT appear here — this advisory is for
+/// §2503(b) Gifts only. `kind == Gift` filter enforces this.
+///
+/// Standalone informational artifact — does NOT feed `compute_tax_year` / engine B.
 pub fn render_gift_advisory(
     state: &LedgerState,
     year: i32,
     tables: &impl btctax_core::TaxTables,
 ) -> Option<String> {
-    // Identify "gifts present" independently of the total (a zero-FMV gift is still a gift).
+    use std::collections::BTreeMap;
+
+    // [R0-I2] Preserve safety: any_gift guard — Donation removals do NOT count here.
     let any_gift = state
         .removals
         .iter()
         .any(|r| r.kind == RemovalKind::Gift && r.removed_at.year() == year);
     if !any_gift {
-        return None; // (a) no gifts in the year
+        return None; // (a) no Gift removals in the year
     }
-    let total: btctax_core::conventions::Usd = state
+
+    // [R0-m6] gifts present but no bundled table → emit the note, never None.
+    let t = match tables.table_for(year) {
+        None => {
+            let total: btctax_core::conventions::Usd = state
+                .removals
+                .iter()
+                .filter(|r| r.kind == RemovalKind::Gift && r.removed_at.year() == year)
+                .flat_map(|r| r.legs.iter())
+                .map(|leg| leg.fmv_at_transfer)
+                .sum();
+            return Some(format!(
+                "Form 709 gift advisory ({year}): gift annual-exclusion table unavailable for \
+                 {year}; Form 709 exposure not evaluated — ${} in gifts recorded.",
+                fmt_money(total)
+            ));
+        }
+        Some(t) => t,
+    };
+    let excl = t.gift_annual_exclusion;
+
+    // Group Gift removals by donee label (BTreeMap → deterministic order; None → unlabeled bucket).
+    let mut labeled: BTreeMap<String, btctax_core::conventions::Usd> = BTreeMap::new();
+    let mut unlabeled_count: usize = 0;
+    let mut unlabeled_total: btctax_core::conventions::Usd = Default::default();
+
+    for r in state
         .removals
         .iter()
         .filter(|r| r.kind == RemovalKind::Gift && r.removed_at.year() == year)
-        .flat_map(|r| r.legs.iter())
-        .map(|leg| leg.fmv_at_transfer)
-        .sum();
-    match tables.table_for(year) {
-        // [R0-m6] gifts present but no bundled table → emit the note, never None (M5).
-        None => Some(format!(
-            "Form 709 gift advisory ({year}): gift annual-exclusion table unavailable for {year}; \
-             Form 709 exposure not evaluated — ${} in gifts recorded.",
-            fmt_money(total)
-        )),
-        Some(t) => {
-            let excl = t.gift_annual_exclusion;
-            if total > excl {
-                Some(format!(
-                    "Form 709 gift advisory ({year}): total gifts in {year}: ${}; the §2503(b) \
-                     annual exclusion is ${} per donee (TY{year}). If any single donee received more \
-                     than ${}, Form 709 may be required. NOTE: donee identity is not modeled — verify \
-                     per-donee totals; this is a total-exposure signal, not a per-donee determination.",
-                    fmt_money(total),
-                    fmt_money(excl),
-                    fmt_money(excl)
-                ))
-            } else {
-                None // (b) gifts present but total ≤ exclusion
+    {
+        let fmv: btctax_core::conventions::Usd = r.legs.iter().map(|l| l.fmv_at_transfer).sum();
+        match &r.donee {
+            Some(label) => {
+                *labeled.entry(label.clone()).or_default() += fmv;
+            }
+            None => {
+                unlabeled_count += 1;
+                unlabeled_total += fmv;
             }
         }
     }
+
+    // Per-donee §2503(b) analysis.
+    let mut filing_required_donees: Vec<String> = Vec::new();
+    let mut total_taxable: btctax_core::conventions::Usd = Default::default();
+    let mut s = format!("Form 709 gift advisory ({year}):");
+
+    if !labeled.is_empty() {
+        s.push_str(&format!(
+            "\n§2503(b) per-donee annual exclusion analysis (TY{year}, exclusion ${}):",
+            fmt_money(excl)
+        ));
+        for (donee, &total) in &labeled {
+            let applied = if total < excl { total } else { excl };
+            let taxable: btctax_core::conventions::Usd = if total > excl {
+                total - excl
+            } else {
+                Default::default()
+            };
+            s.push_str(&format!(
+                "\n  {donee}: total ${}, exclusion applied ${}, taxable ${}",
+                fmt_money(total),
+                fmt_money(applied),
+                fmt_money(taxable)
+            ));
+            if total > excl {
+                filing_required_donees.push(donee.clone());
+                total_taxable += taxable;
+            }
+        }
+        if !filing_required_donees.is_empty() {
+            s.push_str(&format!(
+                "\nForm 709 filing required (donee(s): {}). Total taxable gifts: ${}.",
+                filing_required_donees.join(", "),
+                fmt_money(total_taxable)
+            ));
+        } else {
+            s.push_str(&format!(
+                "\nNo Form 709 filing required based on per-donee totals \
+                 (each ≤ ${} exclusion). Total taxable gifts: $0.00.",
+                fmt_money(excl)
+            ));
+        }
+    }
+
+    if unlabeled_count > 0 {
+        s.push_str(&format!(
+            "\nNOTE: {unlabeled_count} gift(s) totalling ${} have no donee label — the §2503(b) \
+             annual exclusion is PER DONEE and cannot be applied without one; label them via \
+             `reconcile reclassify-outflow --donee`. Shown as a single conservative aggregate.",
+            fmt_money(unlabeled_total)
+        ));
+        // Conservative aggregate signal (old per-bucket logic): keep the signal so nothing is
+        // silently dropped; mark it explicitly as a conservative estimate (may span multiple donees).
+        if unlabeled_total > excl {
+            s.push_str(&format!(
+                "\n  Conservative aggregate ${} > ${} (one exclusion); \
+                 verify per-donee totals after labelling.",
+                fmt_money(unlabeled_total),
+                fmt_money(excl)
+            ));
+        } else {
+            s.push_str(&format!(
+                "\n  Conservative aggregate ${} \u{2264} ${} (one exclusion); \
+                 per-donee exposure unverifiable without labels.",
+                fmt_money(unlabeled_total),
+                fmt_money(excl)
+            ));
+        }
+    }
+
+    s.push_str(
+        "\nCaveats: §2513 gift-splitting (MFJ) not modeled; future-interest gifts (which require \
+         Form 709 filing regardless of amount) not detectable; §2505 lifetime exemption is a \
+         later chunk (Chunk 3).",
+    );
+
+    Some(s)
 }
 
 // ── Sub-project C: optimize run ─────────────────────────────────────────────────────────────────
@@ -1569,9 +1670,11 @@ pub fn render_verify(r: &VerifyReport) -> String {
 
 #[cfg(test)]
 mod gift_advisory_tests {
-    //! P2-C Task 3 KATs — `render_gift_advisory`. Direct-state `Removal{Gift}` fixtures + a
-    //! `BTreeMap<i32, TaxTable>` table double so the exclusion + no-table cases are under exact
-    //! control. PRIVACY: synthetic values only.
+    //! P2-C Task 3 KATs — `render_gift_advisory` (per-donee §2503(b) refactor, Chunk 2).
+    //!
+    //! Direct-state `Removal{Gift}` fixtures + a `BTreeMap<i32, TaxTable>` table double so the
+    //! exclusion + no-table cases are under exact control. Exclusion = $19,000 (TY2025) throughout.
+    //! PRIVACY: synthetic values only.
     use super::*;
     use btctax_core::conventions::Usd;
     use btctax_core::{EventId, LotId, Removal, RemovalLeg, TaxTable};
@@ -1579,6 +1682,7 @@ mod gift_advisory_tests {
     use std::collections::BTreeMap;
     use time::macros::date;
 
+    /// Build an unlabeled (`donee: None`) Gift removal with a single leg of the given FMV.
     fn gift_removal(seq: u64, removed_at: TaxDate, fmv: Usd) -> Removal {
         Removal {
             event: EventId::decision(seq),
@@ -1600,6 +1704,13 @@ mod gift_advisory_tests {
             donor_acquired_at: None,
             claimed_deduction: None,
             donee: None,
+        }
+    }
+    /// Build a labeled Gift removal (donee = `Some(label)`) using the same single-leg structure.
+    fn gift_removal_labeled(seq: u64, removed_at: TaxDate, fmv: Usd, label: &str) -> Removal {
+        Removal {
+            donee: Some(label.to_string()),
+            ..gift_removal(seq, removed_at, fmv)
         }
     }
     fn state_with(removals: Vec<Removal>) -> LedgerState {
@@ -1625,30 +1736,9 @@ mod gift_advisory_tests {
         m
     }
 
-    /// Gifts over the exclusion → advisory with the total + the donee-not-modeled caveat.
-    #[test]
-    fn over_exclusion_emits_advisory_with_total_and_caveat() {
-        let st = state_with(vec![gift_removal(1, date!(2025 - 06 - 01), dec!(20000))]);
-        let tables = tables_with(2025, dec!(19000));
-        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected");
-        assert!(msg.contains("20000.00"), "must show the total: {msg}");
-        assert!(msg.contains("19000.00"), "must show the exclusion: {msg}");
-        assert!(
-            msg.contains("donee identity is not modeled"),
-            "must carry the donee caveat: {msg}"
-        );
-        assert!(msg.contains("total-exposure signal"), "{msg}");
-    }
+    // ── Preserved safety branches ────────────────────────────────────────────────────────────────
 
-    /// Gifts under the exclusion → None.
-    #[test]
-    fn under_exclusion_is_none() {
-        let st = state_with(vec![gift_removal(1, date!(2025 - 06 - 01), dec!(10000))]);
-        let tables = tables_with(2025, dec!(19000));
-        assert!(render_gift_advisory(&st, 2025, &tables).is_none());
-    }
-
-    /// No gifts in the year → None (even with a table present).
+    /// No gifts in the year → None (even with a table present). [R0-I2] safety preserved.
     #[test]
     fn no_gifts_is_none() {
         let st = state_with(vec![]);
@@ -1657,8 +1747,10 @@ mod gift_advisory_tests {
     }
 
     /// [R0-m6] gifts present but NO bundled table → Some(note), NOT None (no silent skip).
+    /// The no-table note records the total gifts so nothing is silently dropped.
     #[test]
     fn gifts_present_but_no_table_emits_note_not_none() {
+        // Unlabeled gift — the no-table branch fires before per-donee grouping.
         let st = state_with(vec![gift_removal(1, date!(2026 - 06 - 01), dec!(50000))]);
         // Table double has 2025 only → table_for(2026) == None.
         let tables = tables_with(2025, dec!(19000));
@@ -1668,6 +1760,214 @@ mod gift_advisory_tests {
         assert!(
             msg.contains("50000.00"),
             "must record the gift total: {msg}"
+        );
+    }
+
+    // ── Labeled-donee over-exclusion ─────────────────────────────────────────────────────────────
+
+    /// A labeled donee over the exclusion → filing required advisory with the per-donee breakdown.
+    /// (Replaces the stale `over_exclusion_emits_advisory_with_total_and_caveat` which asserted the
+    /// now-removed "donee identity is not modeled" / "total-exposure signal" phrases.)
+    #[test]
+    fn labeled_donee_over_exclusion_emits_advisory() {
+        let st = state_with(vec![gift_removal_labeled(
+            1,
+            date!(2025 - 06 - 01),
+            dec!(20000),
+            "Alice",
+        )]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected");
+        assert!(msg.contains("20000.00"), "must show Alice's total: {msg}");
+        assert!(msg.contains("19000.00"), "must show the exclusion: {msg}");
+        assert!(
+            msg.contains("Form 709 filing required"),
+            "must flag filing required: {msg}"
+        );
+        assert!(msg.contains("Alice"), "must name Alice: {msg}");
+        // taxable = 20000 − 19000 = 1000.
+        assert!(msg.contains("1000.00"), "taxable must be $1000.00: {msg}");
+        // The stale "donee identity is not modeled" caveat must be gone.
+        assert!(
+            !msg.contains("donee identity is not modeled"),
+            "stale aggregate caveat must not appear: {msg}"
+        );
+    }
+
+    /// A labeled donee under the exclusion → advisory with "no filing required" (not None).
+    /// (Replaces the stale `under_exclusion_is_none` which tested None for an unlabeled gift.)
+    #[test]
+    fn labeled_donee_under_exclusion_no_filing_required() {
+        let st = state_with(vec![gift_removal_labeled(
+            1,
+            date!(2025 - 06 - 01),
+            dec!(10000),
+            "Alice",
+        )]);
+        let tables = tables_with(2025, dec!(19000));
+        // Gifts present + labeled donee → always Some (per-donee breakdown shown).
+        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected, not None");
+        assert!(
+            msg.contains("No Form 709 filing required"),
+            "must say no filing required: {msg}"
+        );
+        assert!(msg.contains("Alice"), "must mention Alice: {msg}");
+        assert!(msg.contains("10000.00"), "must show Alice's total: {msg}");
+    }
+
+    // ── KATs (hand-verified; TY2025 gift_annual_exclusion $19,000) ──────────────────────────────
+
+    /// KEY LOCK — per-donee under exclusion: Alice $15,000 + Bob $15,000 (aggregate $30,000 > $19k,
+    /// but each < $19k) → NO filing required, $0 taxable. The OLD aggregate rule wrongly flagged
+    /// this — this test proves per-donee §2503(b) is correctly applied.
+    #[test]
+    fn per_donee_under_exclusion_two_donees_no_filing_required() {
+        let st = state_with(vec![
+            gift_removal_labeled(1, date!(2025 - 03 - 01), dec!(15000), "Alice"),
+            gift_removal_labeled(2, date!(2025 - 06 - 01), dec!(15000), "Bob"),
+        ]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected");
+        // No filing required — neither Alice nor Bob exceeds $19,000.
+        assert!(
+            msg.contains("No Form 709 filing required"),
+            "neither donee exceeds exclusion → no filing required: {msg}"
+        );
+        // Both donees appear in the per-donee breakdown.
+        assert!(msg.contains("Alice"), "Alice must appear: {msg}");
+        assert!(msg.contains("Bob"), "Bob must appear: {msg}");
+        // Both totals shown ($15,000 each).
+        assert!(msg.contains("15000.00"), "donee total must appear: {msg}");
+        // No labeled donee triggered the filing trigger.
+        assert!(
+            !msg.contains("Form 709 filing required (donee(s):"),
+            "filing trigger must NOT fire: {msg}"
+        );
+        // Total taxable = $0 for both donees.
+        assert!(
+            msg.contains("Total taxable gifts: $0.00"),
+            "total taxable must be $0.00: {msg}"
+        );
+    }
+
+    /// One labeled donee over exclusion: Alice $25,000 → filing required, taxable $6,000
+    /// (= $25,000 − $19,000). Exact figures are hand-verified KAT values.
+    #[test]
+    fn one_donee_over_exclusion_filing_required() {
+        let st = state_with(vec![gift_removal_labeled(
+            1,
+            date!(2025 - 06 - 01),
+            dec!(25000),
+            "Alice",
+        )]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected");
+        assert!(
+            msg.contains("Form 709 filing required (donee(s): Alice)"),
+            "must trigger filing required for Alice: {msg}"
+        );
+        assert!(msg.contains("25000.00"), "Alice total must appear: {msg}");
+        assert!(
+            msg.contains("19000.00"),
+            "exclusion applied must appear: {msg}"
+        );
+        // taxable = 25000 − 19000 = 6000.
+        assert!(
+            msg.contains("6000.00"),
+            "taxable $6,000.00 must appear: {msg}"
+        );
+    }
+
+    /// Unlabeled bucket: a None-donee gift $30,000 → the unlabeled caveat + conservative aggregate
+    /// signal (per-donee cannot be applied without a label). $30,000 > $19,000 → conservative signal.
+    #[test]
+    fn unlabeled_bucket_caveat_with_conservative_aggregate() {
+        let st = state_with(vec![gift_removal(1, date!(2025 - 06 - 01), dec!(30000))]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected");
+        // Unlabeled caveat must appear.
+        assert!(
+            msg.contains("no donee label"),
+            "unlabeled caveat must appear: {msg}"
+        );
+        assert!(
+            msg.contains("30000.00"),
+            "unlabeled total must appear: {msg}"
+        );
+        // Conservative aggregate signal: $30,000 > $19,000 (one exclusion).
+        assert!(
+            msg.contains("Conservative aggregate"),
+            "conservative aggregate signal must appear: {msg}"
+        );
+        assert!(
+            msg.contains("19000.00"),
+            "one-exclusion comparison must appear: {msg}"
+        );
+        // No labeled-donee filing trigger must have fired.
+        assert!(
+            !msg.contains("Form 709 filing required (donee(s):"),
+            "labeled filing trigger must NOT fire for unlabeled gifts: {msg}"
+        );
+    }
+
+    /// Mixed: Alice $25,000 (over exclusion) + unlabeled $5,000 → filing required for Alice +
+    /// the unlabeled caveat for the $5,000 (which cannot have per-donee exclusion applied).
+    #[test]
+    fn mixed_labeled_over_and_unlabeled_shows_both() {
+        let st = state_with(vec![
+            gift_removal_labeled(1, date!(2025 - 03 - 01), dec!(25000), "Alice"),
+            gift_removal(2, date!(2025 - 06 - 01), dec!(5000)), // unlabeled
+        ]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected");
+        // Alice triggers the filing required signal.
+        assert!(
+            msg.contains("Form 709 filing required"),
+            "filing required for Alice: {msg}"
+        );
+        assert!(msg.contains("Alice"), "Alice must appear: {msg}");
+        // Unlabeled caveat must also appear for the $5,000 gift.
+        assert!(
+            msg.contains("no donee label"),
+            "unlabeled caveat must appear: {msg}"
+        );
+        assert!(
+            msg.contains("5000.00"),
+            "unlabeled total must appear: {msg}"
+        );
+    }
+
+    /// Donations excluded: a `Removal{Donation}` does NOT count as a Gift → advisory returns None
+    /// (no Gift events in the year). Form 709 is §2503(b) — Gifts only; §170 Donations are separate.
+    #[test]
+    fn donations_excluded_from_form709_advisory() {
+        let donation_removal = Removal {
+            event: EventId::decision(1),
+            kind: RemovalKind::Donation,
+            removed_at: date!(2025 - 06 - 01),
+            legs: vec![RemovalLeg {
+                lot_id: LotId {
+                    origin_event_id: EventId::decision(1),
+                    split_sequence: 0,
+                },
+                sat: 100,
+                basis: dec!(0),
+                fmv_at_transfer: dec!(50000), // large FMV — must NOT trigger the advisory
+                term: Term::LongTerm,
+                basis_source: BasisSource::ComputedFromCost,
+                acquired_at: date!(2024 - 01 - 01),
+            }],
+            appraisal_required: false,
+            donor_acquired_at: None,
+            claimed_deduction: Some(dec!(50000)),
+            donee: Some("Charity X".to_string()),
+        };
+        let st = state_with(vec![donation_removal]);
+        let tables = tables_with(2025, dec!(19000));
+        // A Donation is NOT a Gift → any_gift == false → advisory returns None.
+        assert!(
+            render_gift_advisory(&st, 2025, &tables).is_none(),
+            "Donation must be excluded from the Form 709 advisory"
         );
     }
 }
