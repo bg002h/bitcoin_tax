@@ -494,6 +494,9 @@ ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at 
 cb-pre,2024-01-15 12:00:00 UTC,Buy,BTC,0.20000000,USD,42500.00,8500.00,8550.00,50.00,,,\r\n\
 cb-sell,2025-06-01 12:00:00 UTC,Sell,BTC,0.05000000,USD,90000.00,4500.00,4490.00,10.00,,,\r\n").unwrap();
     cmd::import::run(&vault, &pp(), &[p]).unwrap();
+    // D3 (Task 3): attest FIFO before the pre2025_method_attested gate requires it.
+    // `timely_allocation_attested` (4th arg, true below) is a separate §5.02(4) attestation.
+    cmd::admin::set_pre2025_method(&vault, &pp(), LotMethod::Fifo, true).unwrap();
 
     let id = cmd::reconcile::safe_harbor_allocate(
         &vault,
@@ -545,10 +548,13 @@ cb-sell,2025-06-01 12:00:00 UTC,Sell,BTC,0.05000000,USD,90000.00,4500.00,4490.00
 fn safe_harbor_attest_cures_a_timebarred_allocation_excluding_voided_priors() {
     let dir = tempfile::tempdir().unwrap();
     let vault = vault_timebarred(dir.path());
+    // D3 (Task 3): attest FIFO before the pre2025_method_attested gate requires it.
+    cmd::admin::set_pre2025_method(&vault, &pp(), LotMethod::Fifo, true).unwrap();
 
     // alloc #1 (unattested) — inert: time-barred by the 2025 Sell. Then VOID it and re-allocate (alloc #2).
     // This is the legitimate allocate→inert→void→re-allocate→attest workflow (Eng-I1/I-2a). The OLD,
     // voided alloc #1 must NOT count toward attest's single-allocation guard.
+    // ("unattested" = timely_allocation_attested=false, §5.02(4); unrelated to pre2025_method_attested.)
     let a1 = cmd::reconcile::safe_harbor_allocate(
         &vault,
         &pp(),
@@ -596,6 +602,8 @@ fn safe_harbor_attest_refuses_an_already_effective_allocation() {
 ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
 cb-pre,2024-01-15 12:00:00 UTC,Buy,BTC,0.20000000,USD,42500.00,8500.00,8550.00,50.00,,,\r\n").unwrap();
     cmd::import::run(&vault, &pp(), &[p]).unwrap();
+    // D3 (Task 3): attest FIFO before the pre2025_method_attested gate requires it.
+    cmd::admin::set_pre2025_method(&vault, &pp(), LotMethod::Fifo, true).unwrap();
     cmd::reconcile::safe_harbor_allocate(&vault, &pp(), AllocMethod::ActualPosition, false, now())
         .unwrap();
 
@@ -678,6 +686,8 @@ cb-gift-recv,2024-06-01 12:00:00 UTC,Receive,BTC,0.00100000,USD,40000.00,,,,,bc1
         now(),
     )
     .unwrap();
+    // D3 (Task 3): attest FIFO before the pre2025_method_attested gate requires it.
+    cmd::admin::set_pre2025_method(&vault, &pp(), LotMethod::Fifo, true).unwrap();
 
     // Allocate via Path B. No 2025 disposition → made-date 2026-02-01 < return-due 2026-04-15
     // → timely without attestation → effective.
@@ -718,6 +728,103 @@ cb-gift-recv,2024-06-01 12:00:00 UTC,Receive,BTC,0.00100000,USD,40000.00,,,,,bc1
         Some(date!(2021 - 01 - 01)),
         "donor_acquired_at must be Some(2021-01-01) for §1223(2) tacking; got {:?}",
         lot.donor_acquired_at
+    );
+}
+
+// ── Task 3 (pre-2025 method reconciliation): allocate gate KATs ────────────────────────────────
+
+/// Task 3 KAT (a): `safe_harbor_allocate` refuses when `pre2025_method_attested == false`.
+/// The error names the `config --set-pre2025-method … --attest-pre2025-method` remedy and
+/// NO `SafeHarborAllocation` is appended to the event log.
+#[test]
+fn safe_harbor_allocate_refuses_when_pre2025_method_unattested() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    let p = dir.path().join("cb.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,\
+Recipient Address\r\n\
+cb-pre,2024-01-15 12:00:00 UTC,Buy,BTC,0.20000000,USD,42500.00,8500.00,8550.00,50.00,,,\r\n",
+    )
+    .unwrap();
+    cmd::import::run(&vault, &pp(), &[p]).unwrap();
+    // Default config: pre2025_method_attested = false. Do NOT call set_pre2025_method.
+
+    let err = cmd::reconcile::safe_harbor_allocate(
+        &vault,
+        &pp(),
+        AllocMethod::ActualPosition,
+        false,
+        now(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&err, CliError::Usage(m)
+            if m.contains("UNDECLARED pre-2025 method")
+            && m.contains("--attest-pre2025-method")),
+        "expected refusal naming UNDECLARED method and remedy, got: {err}"
+    );
+
+    // NO SafeHarborAllocation appended — event log is unchanged.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+    assert!(
+        events
+            .iter()
+            .all(|e| !matches!(e.payload, EventPayload::SafeHarborAllocation(_))),
+        "event log must NOT contain a SafeHarborAllocation after the refused allocate"
+    );
+}
+
+/// Task 3 KAT (c): explicitly attested FIFO → allocate succeeds and records FIFO.
+/// FIFO is the §7.4 legal default but must be explicitly attested — not silently inherited.
+#[test]
+fn safe_harbor_allocate_succeeds_with_explicitly_attested_fifo() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    let p = dir.path().join("cb.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,\
+Recipient Address\r\n\
+cb-pre,2024-01-15 12:00:00 UTC,Buy,BTC,0.20000000,USD,42500.00,8500.00,8550.00,50.00,,,\r\n",
+    )
+    .unwrap();
+    cmd::import::run(&vault, &pp(), &[p]).unwrap();
+    // Explicitly attest FIFO — an explicit confirmation, not a silent default.
+    cmd::admin::set_pre2025_method(&vault, &pp(), LotMethod::Fifo, true).unwrap();
+
+    let id = cmd::reconcile::safe_harbor_allocate(
+        &vault,
+        &pp(),
+        AllocMethod::ActualPosition,
+        false,
+        now(),
+    )
+    .unwrap();
+    assert!(matches!(id, EventId::Decision { .. }));
+
+    // The allocation records the attested FIFO method.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+    let alloc = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            EventPayload::SafeHarborAllocation(a) => Some(a),
+            _ => None,
+        })
+        .expect("SafeHarborAllocation must be persisted");
+    assert_eq!(
+        alloc.pre2025_method,
+        LotMethod::Fifo,
+        "allocation must record the attested FIFO method"
     );
 }
 
