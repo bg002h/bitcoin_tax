@@ -112,6 +112,12 @@ impl TaxTables for BTreeMap<i32, TaxTable> {
 /// Must never be placed in a `TaxTable`.
 pub const NIIT_RATE: Usd = dec!(0.038);
 
+/// §170(f)(11)(C): qualified-appraisal threshold for charitable contributions of property.
+/// **STATUTORY** — 26 U.S.C. §170(f)(11)(C).  Fixed in the Code; NOT inflation-indexed.
+/// Value: $5,000 (exact Decimal; never a float, NFR5).
+/// Must never be placed in a `TaxTable`.
+pub const QUALIFIED_APPRAISAL_THRESHOLD: Usd = dec!(5000);
+
 /// §1411(b): MAGI threshold above which the NIIT applies.
 /// **STATUTORY** — 26 U.S.C. §1411(b)(1).  The dollar amounts are fixed in the Code and do
 /// NOT move year-over-year (unlike bracket thresholds which are adjusted under §1(f)(3)).
@@ -212,6 +218,8 @@ mod tests {
         assert_eq!(niit_threshold(FilingStatus::HoH), dec!(200000));
         assert_eq!(niit_threshold(FilingStatus::Mfs), dec!(125000));
         assert_eq!(NIIT_RATE, dec!(0.038));
+        // §170(f)(11)(C) statutory threshold — Task 1 KAT.
+        assert_eq!(QUALIFIED_APPRAISAL_THRESHOLD, dec!(5000));
         assert_eq!(loss_limit(FilingStatus::Mfs), dec!(1500));
         assert_eq!(loss_limit(FilingStatus::Single), dec!(3000));
         assert_eq!(loss_limit(FilingStatus::Mfj), dec!(3000));

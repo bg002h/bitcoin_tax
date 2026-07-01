@@ -1,6 +1,6 @@
 mod fixtures;
 use btctax_cli::{cmd, render, Session};
-use btctax_core::{AllocMethod, BasisSource, BlockerKind, EventPayload};
+use btctax_core::{AllocMethod, BasisSource, BlockerKind, EventPayload, OutflowClass};
 use btctax_store::Passphrase;
 use time::macros::{date, datetime};
 
@@ -529,5 +529,159 @@ cb-pre-sell,2024-06-15 12:00:00 UTC,Sell,BTC,0.05000000,USD,50000.00,2500.00,249
     assert!(
         !text.contains("DECLARED + ATTESTED"),
         "unattested vault must NOT show 'DECLARED + ATTESTED' in render_verify, got:\n{text}"
+    );
+}
+
+// ── Task-3 verify KAT: §170(f)(11)(C) QualifiedAppraisalNote surfaced under verify ────────────
+
+/// Task-3 KAT (large): a vault with a >$5k-proxy LT donation shows QualifiedAppraisalNote
+/// under verify's Advisory blockers with the deduction/threshold/§170 detail.
+/// Setup: Buy 2025-01-05 0.10 BTC → Send 2026-01-30 (LT: >1yr after 2025-01-05) → Donate FMV=$90k.
+/// LT proxy = FMV = $90,000 > $5,000 → FLAGGED.
+#[test]
+fn verify_donation_over_5k_proxy_shows_qualified_appraisal_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Write a synthetic Coinbase CSV: Buy 0.10 BTC on 2025-01-05, Send 0.10 BTC on 2026-01-30.
+    // 2026-01-30 vs one_year_after(2025-01-05) = 2026-01-05: 2026-01-30 > 2026-01-05 → LT.
+    let p = dir.path().join("cb_appr.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,\
+Recipient Address\r\n\
+cb-appr-buy,2025-01-05 12:00:00 UTC,Buy,BTC,0.10000000,USD,84000.00,8400.00,8450.00,50.00,,,\r\n\
+cb-appr-send,2026-01-30 12:00:00 UTC,Send,BTC,0.10000000,USD,90000.00,,,,,,bc1qsyntheticdest\r\n",
+    )
+    .unwrap();
+    cmd::import::run(&vault, &pp(), &[p]).unwrap();
+
+    // Get the TransferOut ref from pending and reclassify as Donate with FMV = $90,000.
+    let out_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert_eq!(
+            state.pending_reconciliation.len(),
+            1,
+            "Send must be pending before reclassification"
+        );
+        state.pending_reconciliation[0].event.canonical()
+    };
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::Donate {
+            appraisal_required: false,
+        },
+        btctax_cli::eventref::parse_usd_arg("90000.00").unwrap(), // FMV = $90k → LT proxy > $5k
+        None,
+        now(),
+    )
+    .unwrap();
+
+    // verify must surface QualifiedAppraisalNote in advisory blockers.
+    let report = cmd::inspect::verify(&vault, &pp()).unwrap();
+    let note = report
+        .advisory
+        .iter()
+        .find(|b| b.kind == BlockerKind::QualifiedAppraisalNote);
+    assert!(
+        note.is_some(),
+        "QualifiedAppraisalNote must appear in report.advisory for LT $90k donation; \
+         advisories: {:?}",
+        report.advisory
+    );
+    // Verify the detail references the key statutory items.
+    let detail = &note.unwrap().detail;
+    assert!(
+        detail.contains("90000.00"),
+        "detail must name the deduction proxy ($90k); got: {detail}"
+    );
+    assert!(
+        detail.contains("§170(f)(11)(C)"),
+        "detail must cite §170(f)(11)(C); got: {detail}"
+    );
+    assert!(
+        detail.contains("CCA 202302012"),
+        "detail must cite CCA 202302012 (crypto-specific point); got: {detail}"
+    );
+    assert!(
+        detail.contains("§170(e)"),
+        "detail must cite §170(e) (character caveat); got: {detail}"
+    );
+    assert!(
+        detail.contains("§170(f)(11)(F)"),
+        "detail must cite §170(f)(11)(F) (aggregation caveat); got: {detail}"
+    );
+    // Advisory must not gate: no hard blockers, report is computable.
+    assert!(
+        report.hard.is_empty(),
+        "QualifiedAppraisalNote must not create hard blockers; hard: {:?}",
+        report.hard
+    );
+    // render_verify includes advisory in output.
+    let text = render::render_verify(&report);
+    assert!(
+        text.contains("QualifiedAppraisalNote"),
+        "render_verify must render QualifiedAppraisalNote advisory; got:\n{text}"
+    );
+}
+
+/// Task-3 KAT (small): a vault with a small (<$5k-proxy) ST donation shows NO QualifiedAppraisalNote.
+/// Setup: Buy 2025-07-01 0.01 BTC ($510 cost) → Send 2026-01-15 (ST: <1yr) → Donate FMV=$1k.
+/// ST proxy = basis = $510 < $5,000 → NOT FLAGGED.
+#[test]
+fn verify_donation_under_5k_proxy_shows_no_qualified_appraisal_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Buy 2025-07-01, Send 2026-01-15: 2026-01-15 vs one_year_after(2025-07-01)=2026-07-01 → ST.
+    // Basis = $510 → ST proxy = basis = $510 < $5,000 → NOT FLAGGED.
+    let p = dir.path().join("cb_small_appr.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,\
+Recipient Address\r\n\
+cb-small-buy,2025-07-01 12:00:00 UTC,Buy,BTC,0.01000000,USD,50000.00,500.00,510.00,10.00,,,\r\n\
+cb-small-send,2026-01-15 12:00:00 UTC,Send,BTC,0.01000000,USD,50000.00,,,,,,bc1qsyntheticdest\r\n",
+    )
+    .unwrap();
+    cmd::import::run(&vault, &pp(), &[p]).unwrap();
+
+    // Reclassify as Donate with FMV = $1,000 (FMV doesn't matter for ST — proxy = basis = $510).
+    let out_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        state.pending_reconciliation[0].event.canonical()
+    };
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::Donate {
+            appraisal_required: false,
+        },
+        btctax_cli::eventref::parse_usd_arg("1000.00").unwrap(), // FMV; ST → proxy = basis = $510
+        None,
+        now(),
+    )
+    .unwrap();
+
+    let report = cmd::inspect::verify(&vault, &pp()).unwrap();
+    assert!(
+        !report
+            .advisory
+            .iter()
+            .any(|b| b.kind == BlockerKind::QualifiedAppraisalNote),
+        "small ST donation (proxy = basis $510 < $5k) must NOT show QualifiedAppraisalNote; \
+         advisories: {:?}",
+        report.advisory
     );
 }

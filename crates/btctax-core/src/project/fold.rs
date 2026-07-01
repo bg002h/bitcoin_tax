@@ -1064,6 +1064,44 @@ pub(crate) fn fold_event(
                         "fee carry has no surviving removal leg to re-home onto (principal == 0)",
                     );
                 }
+                // §170(f)(11)(C) qualified-appraisal advisory: term-aware claimed-deduction proxy.
+                // Computed from the FINAL persisted legs (after both make_removal_legs AND
+                // carry.rehome_onto_removal_leg) so the re-homed fee-cent basis is included.
+                // LT legs → FMV (the LT-capital-gain deduction under §170(e));
+                // ST/ordinary legs → basis (§170(e)(1)(A)-reduced deduction).
+                // Emitted per qualifying Donate event (NOT once-per-projection).
+                // Does NOT read or modify the user's `appraisal_required` bool (independent cross-check).
+                let deduction_proxy: Usd = legs
+                    .iter()
+                    .map(|leg| {
+                        if leg.term == Term::LongTerm {
+                            leg.fmv_at_transfer
+                        } else {
+                            leg.basis
+                        }
+                    })
+                    .sum();
+                if deduction_proxy > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD {
+                    st.add_blocker(
+                        BlockerKind::QualifiedAppraisalNote,
+                        Some(eff.id.clone()),
+                        format!(
+                            "Estimated deduction proxy: ${deduction_proxy:.2} exceeds the \
+                             §170(f)(11)(C) $5,000 threshold. Qualified appraisal likely required: \
+                             CCA 202302012 — a crypto donation with a claimed deduction >$5,000 \
+                             requires a qualified appraisal; the exchange-price/readily-valued \
+                             exception does NOT apply to crypto. \
+                             Caveat (over-flag direction): this estimate treats all long-term legs \
+                             at FMV; crypto held as inventory/for sale in a trade or business \
+                             (§1221(a)(1)) or other ordinary-income property is deducted at basis \
+                             under §170(e) REGARDLESS of holding period — the precise determination \
+                             is deferred; verify. \
+                             §170(f)(11)(F) aggregation: this flags a single donation; the $5,000 \
+                             test also aggregates similar donated items across the tax year — \
+                             cross-donation aggregation is not considered here."
+                        ),
+                    );
+                }
                 st.removals.push(Removal {
                     event: eff.id.clone(),
                     kind: RemovalKind::Donation,
