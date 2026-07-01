@@ -12,9 +12,10 @@
 
 mod app;
 mod draw;
+mod tabs;
 mod unlock;
 
-use app::{App, Screen};
+use app::{App, Screen, Tab};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
     execute,
@@ -145,9 +146,169 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
             KeyCode::Tab => app.tab = app.tab.next(),
             KeyCode::BackTab => app.tab = app.tab.prev(),
-            _ => {} // additional viewer keys added in Tasks 3–4
+            KeyCode::Up | KeyCode::Char('k') => scroll_up(app),
+            KeyCode::Down | KeyCode::Char('j') => scroll_down(app),
+            KeyCode::PageUp => page_up(app),
+            KeyCode::PageDown => page_down(app),
+            KeyCode::Char('g') => go_top(app),
+            KeyCode::Char('G') => go_bottom(app),
+            KeyCode::Left => {
+                app.selected_year -= 1;
+                reset_selections(app);
+            }
+            KeyCode::Right => {
+                app.selected_year += 1;
+                reset_selections(app);
+            }
+            _ => {}
         },
     }
+}
+
+// ── Scroll helpers ────────────────────────────────────────────────────────────
+
+/// Return the active `TableState` reference for the currently focused tab.
+///
+/// Only Holdings, Disposals, and Income tabs have a `TableState`.
+/// Other tabs return `None` and scroll is a no-op.
+fn active_state(app: &mut App) -> Option<&mut ratatui::widgets::TableState> {
+    match app.tab {
+        Tab::Holdings => Some(&mut app.holdings_state),
+        Tab::Disposals => Some(&mut app.disposals_state),
+        Tab::Income => Some(&mut app.income_state),
+        _ => None,
+    }
+}
+
+/// Number of data rows (excluding the header, including the TOTAL row) for the active tab.
+fn active_row_count(app: &App) -> usize {
+    let Some(snap) = app.snapshot.as_ref() else {
+        return 0;
+    };
+    match app.tab {
+        Tab::Holdings => {
+            if snap.state.lots.is_empty() {
+                0
+            } else {
+                snap.state.lots.len() + 1 // data rows + TOTAL
+            }
+        }
+        Tab::Disposals => {
+            let yr = app.selected_year;
+            let n: usize = snap
+                .state
+                .disposals
+                .iter()
+                .filter(|d| d.disposed_at.year() == yr)
+                .map(|d| d.legs.len())
+                .sum();
+            if n == 0 {
+                0
+            } else {
+                n + 1
+            }
+        }
+        Tab::Income => {
+            let yr = app.selected_year;
+            let n = snap
+                .state
+                .income_recognized
+                .iter()
+                .filter(|r| r.recognized_at.year() == yr)
+                .count();
+            if n == 0 {
+                0
+            } else {
+                n + 1
+            }
+        }
+        _ => 0,
+    }
+}
+
+/// Move selection up by 1 row.  No-op when at the top or no rows.
+pub(crate) fn scroll_up(app: &mut App) {
+    let Some(state) = active_state(app) else {
+        return;
+    };
+    let next = match state.selected() {
+        Some(i) if i > 0 => Some(i - 1),
+        Some(_) => Some(0),
+        None => None,
+    };
+    state.select(next);
+}
+
+/// Move selection down by 1 row.  Selects index 0 when nothing is selected.
+pub(crate) fn scroll_down(app: &mut App) {
+    let count = active_row_count(app);
+    if count == 0 {
+        return;
+    }
+    let Some(state) = active_state(app) else {
+        return;
+    };
+    let next = match state.selected() {
+        Some(i) => Some((i + 1).min(count - 1)),
+        None => Some(0),
+    };
+    state.select(next);
+}
+
+/// Move selection up by 10 rows (page up).
+fn page_up(app: &mut App) {
+    const PAGE: usize = 10;
+    let Some(state) = active_state(app) else {
+        return;
+    };
+    let next = state.selected().map(|i| i.saturating_sub(PAGE));
+    state.select(next);
+}
+
+/// Move selection down by 10 rows (page down).
+fn page_down(app: &mut App) {
+    const PAGE: usize = 10;
+    let count = active_row_count(app);
+    if count == 0 {
+        return;
+    }
+    let Some(state) = active_state(app) else {
+        return;
+    };
+    let next = match state.selected() {
+        Some(i) => Some((i + PAGE).min(count - 1)),
+        None => Some(PAGE.min(count - 1)),
+    };
+    state.select(next);
+}
+
+/// Move selection to the first row.
+fn go_top(app: &mut App) {
+    let count = active_row_count(app);
+    if count == 0 {
+        return;
+    }
+    if let Some(state) = active_state(app) {
+        state.select(Some(0));
+    }
+}
+
+/// Move selection to the last row.
+fn go_bottom(app: &mut App) {
+    let count = active_row_count(app);
+    if count == 0 {
+        return;
+    }
+    if let Some(state) = active_state(app) {
+        state.select(Some(count - 1));
+    }
+}
+
+/// Reset all table selections to `None` (e.g. after a year change).
+fn reset_selections(app: &mut App) {
+    app.holdings_state.select(None);
+    app.disposals_state.select(None);
+    app.income_state.select(None);
 }
 
 // ── Run loop ─────────────────────────────────────────────────────────────────
@@ -167,7 +328,7 @@ fn run(
     app.try_env_passphrase();
 
     while !app.should_quit {
-        terminal.draw(|f| draw::draw(f, &app))?;
+        terminal.draw(|f| draw::draw(f, &mut app))?;
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 handle_key(&mut app, key);
@@ -439,6 +600,35 @@ mod tests {
             "Tab on Unlock must not append to the passphrase buffer"
         );
         assert!(!app.should_quit, "Tab on Unlock must not quit");
+    }
+
+    /// 12. Left arrow decrements selected_year; Right arrow increments it.
+    ///     Also verifies that table selections are reset on year change.
+    #[test]
+    fn left_right_changes_selected_year() {
+        let mut app = new_app();
+        app.screen = Screen::Viewer;
+        let initial_year = app.selected_year;
+
+        handle_key(&mut app, press(KeyCode::Left));
+        assert_eq!(
+            app.selected_year,
+            initial_year - 1,
+            "Left must decrement selected_year"
+        );
+
+        handle_key(&mut app, press(KeyCode::Right));
+        assert_eq!(
+            app.selected_year, initial_year,
+            "Right must increment selected_year back"
+        );
+
+        handle_key(&mut app, press(KeyCode::Right));
+        assert_eq!(
+            app.selected_year,
+            initial_year + 1,
+            "Right must increment selected_year"
+        );
     }
 
     #[test]

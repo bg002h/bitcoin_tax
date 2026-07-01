@@ -19,6 +19,8 @@ ratatui   = "0.29"
 crossterm = "0.28"
 # Match the workspace-shared versions used in btctax-core / btctax-cli.
 thiserror    = "1"
+rust_decimal = "1"
 
 [dev-dependencies]
 tempfile = "3"
+time = "0.3"

@@ -369,8 +369,10 @@ dependencies = [
  "btctax-store",
  "crossterm",
  "ratatui",
+ "rust_decimal",
  "tempfile",
  "thiserror 1.0.69",
+ "time",
 ]
 
 [[package]]

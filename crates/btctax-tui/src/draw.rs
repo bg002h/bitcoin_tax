@@ -1,16 +1,17 @@
 //! Terminal rendering: dispatches on `Screen`/`Tab` and renders placeholder widgets.
-//! Real tab content is implemented in Tasks 3–4.
+//! Holdings, Disposals, and Income tabs are implemented in Task 3.
 
 use crate::app::{App, Screen, Tab};
+use crate::tabs::{disposals, holdings, income};
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Tabs},
     Frame,
 };
 
 /// Top-level draw entry point.  Called once per iteration of the run loop.
-pub fn draw(frame: &mut Frame, app: &App) {
+pub fn draw(frame: &mut Frame, app: &mut App) {
     match app.screen {
         Screen::Unlock => draw_unlock(frame, app),
         Screen::Locked => draw_locked(frame),
@@ -76,7 +77,7 @@ fn draw_locked(frame: &mut Frame) {
     frame.render_widget(msg, inner);
 }
 
-fn draw_viewer(frame: &mut Frame, app: &App) {
+fn draw_viewer(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -99,13 +100,14 @@ fn draw_viewer(frame: &mut Frame, app: &App) {
         );
     frame.render_widget(tabs_widget, chunks[0]);
 
-    // ── Content placeholder (real content in Tasks 3–4) ──────────────────────
-    let content_block = Block::default()
-        .title(format!(" {} ", app.tab.title()))
-        .borders(Borders::ALL);
-    let placeholder = Paragraph::new(format!("{} — data loads in Tasks 3–4", app.tab.title()))
-        .block(content_block);
-    frame.render_widget(placeholder, chunks[1]);
+    // ── Content pane ─────────────────────────────────────────────────────────
+    let content_area = chunks[1];
+    match app.tab {
+        Tab::Holdings => holdings::draw(frame, content_area, app),
+        Tab::Disposals => disposals::draw(frame, content_area, app),
+        Tab::Income => income::draw(frame, content_area, app),
+        _ => draw_placeholder(frame, content_area, app),
+    }
 
     // ── Footer ───────────────────────────────────────────────────────────────
     let footer = Paragraph::new(
@@ -114,4 +116,14 @@ fn draw_viewer(frame: &mut Frame, app: &App) {
     )
     .alignment(Alignment::Center);
     frame.render_widget(footer, chunks[2]);
+}
+
+/// Placeholder for tabs not yet implemented (Tax, Forms, Compliance).
+fn draw_placeholder(frame: &mut Frame, area: Rect, app: &App) {
+    let content_block = Block::default()
+        .title(format!(" {} ", app.tab.title()))
+        .borders(Borders::ALL);
+    let placeholder = Paragraph::new(format!("{} — coming in a later task", app.tab.title()))
+        .block(content_block);
+    frame.render_widget(placeholder, area);
 }

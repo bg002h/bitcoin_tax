@@ -9,6 +9,7 @@ use btctax_adapters::BundledTaxTables;
 use btctax_cli::CliConfig;
 use btctax_core::{LedgerEvent, LedgerState, ProjectionConfig, TaxProfile};
 use btctax_store::Passphrase;
+use ratatui::widgets::TableState;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -99,7 +100,7 @@ impl Tab {
 ///
 /// [R0-M2] `cli_config` is included because `btctax_cli::render::build_verify` needs it.
 /// [R0-M3] `optimize_attested_set` is intentionally OMITTED — the viewer tabs do not consume it.
-#[allow(dead_code)] // fields are consumed in Tasks 3–4
+#[allow(dead_code)] // events/config/cli_config/profiles/tables consumed in Task 4
 pub struct Snapshot {
     pub events: Vec<LedgerEvent>,
     pub state: LedgerState,
@@ -122,12 +123,14 @@ pub struct App {
     pub tab: Tab,
     pub should_quit: bool,
     /// Populated after a successful `Session::open` + `build_snapshot`.
-    #[allow(dead_code)] // read in Tasks 3–4
     pub snapshot: Option<Snapshot>,
     /// Tax year currently displayed in year-scoped tabs (Disposals/Income/Tax/Forms).
     /// Set to the latest year present in disposals/income after unlock; defaults to 2025.
-    #[allow(dead_code)] // read in Tasks 3–4
     pub selected_year: i32,
+    /// Per-tab table scroll states (mutated by scroll helpers in main.rs).
+    pub holdings_state: TableState,
+    pub disposals_state: TableState,
+    pub income_state: TableState,
 }
 
 impl App {
@@ -140,6 +143,9 @@ impl App {
             should_quit: false,
             snapshot: None,
             selected_year: 2025,
+            holdings_state: TableState::default(),
+            disposals_state: TableState::default(),
+            income_state: TableState::default(),
         }
     }
 
