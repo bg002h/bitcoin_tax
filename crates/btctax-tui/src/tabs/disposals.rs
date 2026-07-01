@@ -10,9 +10,9 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
     Frame,
 };
-use rust_decimal::Decimal;
 
 use super::tags::term_tag;
+use super::utils::sat_to_btc;
 
 /// Render the Disposals tab into `area`.
 pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -24,13 +24,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
     };
 
     let year = app.selected_year;
-    let sat_div = Decimal::from(100_000_000i64);
 
     // Flatten disposals for the selected year into legs.
     let mut rows: Vec<Row> = Vec::new();
-    let mut total_proceeds = Decimal::ZERO;
-    let mut total_basis = Decimal::ZERO;
-    let mut total_gain = Decimal::ZERO;
+    let mut total_proceeds = rust_decimal::Decimal::ZERO;
+    let mut total_basis = rust_decimal::Decimal::ZERO;
+    let mut total_gain = rust_decimal::Decimal::ZERO;
 
     for disposal in &snap.state.disposals {
         if disposal.disposed_at.year() != year {
@@ -42,7 +41,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
             total_basis += leg.basis;
             total_gain += leg.gain;
 
-            let btc = Decimal::from(leg.sat) / sat_div;
+            let btc = sat_to_btc(leg.sat);
             rows.push(Row::new(vec![
                 Cell::from(disposed_str.clone()),
                 Cell::from(leg.acquired_at.to_string()),
@@ -63,7 +62,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    // TOTAL row
+    // TOTAL row — rendered but NEVER selectable (selection capped at data_rows-1 in scroll helpers).
     rows.push(Row::new(vec![
         Cell::from("TOTAL"),
         Cell::from(""),

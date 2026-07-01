@@ -169,58 +169,51 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
 
 /// Return the active `TableState` reference for the currently focused tab.
 ///
-/// Only Holdings, Disposals, and Income tabs have a `TableState`.
+/// Holdings, Disposals, Income, and Forms tabs have a `TableState`.
 /// Other tabs return `None` and scroll is a no-op.
 fn active_state(app: &mut App) -> Option<&mut ratatui::widgets::TableState> {
     match app.tab {
         Tab::Holdings => Some(&mut app.holdings_state),
         Tab::Disposals => Some(&mut app.disposals_state),
         Tab::Income => Some(&mut app.income_state),
+        Tab::Forms => Some(&mut app.forms_state),
         _ => None,
     }
 }
 
-/// Number of data rows (excluding the header, including the TOTAL row) for the active tab.
+/// Number of **selectable** data rows for the active tab.
+///
+/// **[Minor B] TOTAL row is excluded** — the TOTAL row is always rendered but NEVER selectable.
+/// Returning `lots.len()` (not `lots.len() + 1`) means `go_bottom` caps at index `lots.len() - 1`,
+/// which is the last DATA row, not the TOTAL row at `lots.len()`.
 fn active_row_count(app: &App) -> usize {
     let Some(snap) = app.snapshot.as_ref() else {
         return 0;
     };
     match app.tab {
-        Tab::Holdings => {
-            if snap.state.lots.is_empty() {
-                0
-            } else {
-                snap.state.lots.len() + 1 // data rows + TOTAL
-            }
-        }
+        Tab::Holdings => snap.state.lots.len(), // data rows only — TOTAL not selectable
         Tab::Disposals => {
             let yr = app.selected_year;
-            let n: usize = snap
-                .state
+            snap.state
                 .disposals
                 .iter()
                 .filter(|d| d.disposed_at.year() == yr)
                 .map(|d| d.legs.len())
-                .sum();
-            if n == 0 {
-                0
-            } else {
-                n + 1
-            }
+                .sum::<usize>()
+            // no +1 for TOTAL
         }
         Tab::Income => {
             let yr = app.selected_year;
-            let n = snap
-                .state
+            snap.state
                 .income_recognized
                 .iter()
                 .filter(|r| r.recognized_at.year() == yr)
-                .count();
-            if n == 0 {
-                0
-            } else {
-                n + 1
-            }
+                .count()
+            // no +1 for TOTAL
+        }
+        Tab::Forms => {
+            let yr = app.selected_year;
+            btctax_core::form_8949(&snap.state, yr).len() // 8949 rows (no TOTAL row in 8949)
         }
         _ => 0,
     }
@@ -309,6 +302,7 @@ fn reset_selections(app: &mut App) {
     app.holdings_state.select(None);
     app.disposals_state.select(None);
     app.income_state.select(None);
+    app.forms_state.select(None);
 }
 
 // ── Run loop ─────────────────────────────────────────────────────────────────

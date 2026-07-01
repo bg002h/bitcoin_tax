@@ -12,6 +12,7 @@ use ratatui::{
 use rust_decimal::Decimal;
 
 use super::tags::income_kind_tag;
+use super::utils::sat_to_btc;
 
 /// Render the Income tab into `area`.
 pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -23,7 +24,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
     };
 
     let year = app.selected_year;
-    let sat_div = Decimal::from(100_000_000i64);
 
     let mut total_sat: i64 = 0;
     let mut total_fmv = Decimal::ZERO;
@@ -37,7 +37,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
             total_sat += rec.sat;
             total_fmv += rec.usd_fmv;
 
-            let btc = Decimal::from(rec.sat) / sat_div;
+            let btc = sat_to_btc(rec.sat);
             Row::new(vec![
                 Cell::from(rec.recognized_at.to_string()),
                 Cell::from(income_kind_tag(rec.kind)),
@@ -55,8 +55,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    // TOTAL row
-    let total_btc = Decimal::from(total_sat) / sat_div;
+    // TOTAL row — rendered but NEVER selectable (selection capped at data_rows-1 in scroll helpers).
+    let total_btc = sat_to_btc(total_sat);
     rows.push(Row::new(vec![
         Cell::from("TOTAL"),
         Cell::from(""),

@@ -13,6 +13,7 @@ use ratatui::{
 use rust_decimal::Decimal;
 
 use super::tags::basis_source_tag;
+use super::utils::sat_to_btc;
 
 /// Render the Holdings tab into `area`.
 pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -32,8 +33,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    let sat_div = Decimal::from(100_000_000i64);
-
     let mut total_sat: i64 = 0;
     let mut total_basis = Decimal::ZERO;
 
@@ -43,7 +42,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
             total_sat += lot.remaining_sat;
             total_basis += lot.usd_basis;
 
-            let btc = Decimal::from(lot.remaining_sat) / sat_div;
+            let btc = sat_to_btc(lot.remaining_sat);
             Row::new(vec![
                 Cell::from(wallet_label(&lot.wallet)),
                 Cell::from(lot.acquired_at.to_string()),
@@ -55,8 +54,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
         })
         .collect();
 
-    // TOTAL row
-    let total_btc = Decimal::from(total_sat) / sat_div;
+    // TOTAL row — rendered but NEVER selectable (selection capped at data_rows-1 in scroll helpers).
+    let total_btc = sat_to_btc(total_sat);
     rows.push(Row::new(vec![
         Cell::from("TOTAL"),
         Cell::from(""),

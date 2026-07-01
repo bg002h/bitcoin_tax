@@ -131,6 +131,8 @@ pub struct App {
     pub holdings_state: TableState,
     pub disposals_state: TableState,
     pub income_state: TableState,
+    /// Scroll/selection state for the Form 8949 table in the Forms tab.
+    pub forms_state: TableState,
 }
 
 impl App {
@@ -146,6 +148,7 @@ impl App {
             holdings_state: TableState::default(),
             disposals_state: TableState::default(),
             income_state: TableState::default(),
+            forms_state: TableState::default(),
         }
     }
 

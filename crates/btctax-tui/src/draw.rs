@@ -1,10 +1,9 @@
-//! Terminal rendering: dispatches on `Screen`/`Tab` and renders placeholder widgets.
-//! Holdings, Disposals, and Income tabs are implemented in Task 3.
+//! Terminal rendering: dispatches on `Screen`/`Tab` and delegates to per-tab modules.
 
 use crate::app::{App, Screen, Tab};
-use crate::tabs::{disposals, holdings, income};
+use crate::tabs::{compliance, disposals, forms, holdings, income, tax};
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Tabs},
     Frame,
@@ -110,7 +109,9 @@ fn draw_viewer(frame: &mut Frame, app: &mut App) {
         Tab::Holdings => holdings::draw(frame, content_area, app),
         Tab::Disposals => disposals::draw(frame, content_area, app),
         Tab::Income => income::draw(frame, content_area, app),
-        _ => draw_placeholder(frame, content_area, app),
+        Tab::Tax => tax::draw(frame, content_area, app),
+        Tab::Forms => forms::draw(frame, content_area, app),
+        Tab::Compliance => compliance::draw(frame, content_area, app),
     }
 
     // ── Footer ───────────────────────────────────────────────────────────────
@@ -120,14 +121,4 @@ fn draw_viewer(frame: &mut Frame, app: &mut App) {
     )
     .alignment(Alignment::Center);
     frame.render_widget(footer, chunks[2]);
-}
-
-/// Placeholder for tabs not yet implemented (Tax, Forms, Compliance).
-fn draw_placeholder(frame: &mut Frame, area: Rect, app: &App) {
-    let content_block = Block::default()
-        .title(format!(" {} ", app.tab.title()))
-        .borders(Borders::ALL);
-    let placeholder = Paragraph::new(format!("{} — coming in a later task", app.tab.title()))
-        .block(content_block);
-    frame.render_widget(placeholder, area);
 }

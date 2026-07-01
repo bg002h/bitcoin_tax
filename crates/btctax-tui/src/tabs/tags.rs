@@ -3,6 +3,7 @@
 //! STRICTLY READ-ONLY: no Session, no persistence, no mutations.
 
 use btctax_core::event::{BasisSource, DisposeKind, IncomeKind};
+use btctax_core::project::ComplianceStatus;
 use btctax_core::state::Term;
 
 pub(super) fn term_tag(term: Term) -> &'static str {
@@ -35,10 +36,28 @@ pub(super) fn income_kind_tag(kind: IncomeKind) -> &'static str {
     }
 }
 
-#[allow(dead_code)] // used in Task 4 (disposals kind column)
+#[allow(dead_code)] // local tag helper, retained for future Forms/Disposals use
 pub(super) fn dispose_kind_tag(kind: DisposeKind) -> &'static str {
     match kind {
         DisposeKind::Sell => "sell",
         DisposeKind::Spend => "spend",
+    }
+}
+
+/// Stable per-disposal compliance status string (re-implemented locally — btctax-cli's version is
+/// private). Matches the CLI's `compliance_status_tag` output exactly.
+///
+/// - `standing_order:<date>` — in-force standing order effective from `<date>`.
+/// - `contemporaneous`       — `LotSelection` recorded on or before the day of sale.
+/// - `attested_recording`    — Mode-1-persisted selection backed by contemporaneous-ID attestation.
+/// - `non_compliant`         — no adequate identification.
+pub(super) fn compliance_status_tag(cs: &ComplianceStatus) -> String {
+    match cs {
+        ComplianceStatus::StandingOrder { effective_from } => {
+            format!("standing_order:{effective_from}")
+        }
+        ComplianceStatus::Contemporaneous => "contemporaneous".into(),
+        ComplianceStatus::AttestedRecording => "attested_recording".into(),
+        ComplianceStatus::NonCompliant => "non_compliant".into(),
     }
 }

@@ -1,4 +1,4 @@
-//! TestBackend KATs for Holdings, Disposals, and Income tabs.
+//! TestBackend KATs for Holdings, Disposals, Income, Tax, Forms, and Compliance tabs.
 //!
 //! No vault needed — all fixtures build synthetic LedgerState directly.
 //! STRICTLY READ-ONLY: no Session, no persistence, no mutations.
@@ -8,8 +8,8 @@ use btctax_adapters::BundledTaxTables;
 use btctax_core::{
     event::{BasisSource, DisposeKind, IncomeKind},
     identity::{EventId, LotId, Source, SourceRef, WalletId},
-    state::{Disposal, DisposalLeg, IncomeRecord, LedgerState, Lot, Term},
-    ProjectionConfig,
+    state::{BlockerKind, Disposal, DisposalLeg, IncomeRecord, LedgerState, Lot, Severity, Term},
+    Carryforward, FilingStatus, ProjectionConfig, TaxProfile,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
@@ -753,5 +753,416 @@ fn year_change_via_handle_key_updates_filtered_rows() {
     assert!(
         !buffer_has(&buf_2024, "30000.00"),
         "2025 disposal proceeds (30000.00) must NOT appear after year change to 2024"
+    );
+}
+
+// ── Task 4 helpers ────────────────────────────────────────────────────────────
+
+/// Build a `TaxProfile` for Single filer with ordinary income $50,000.
+fn make_tax_profile_single_50k() -> TaxProfile {
+    TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: Decimal::from(50_000i64),
+        magi_excluding_crypto: Decimal::from(50_000i64),
+        qualified_dividends_and_other_pref_income: Decimal::ZERO,
+        other_net_capital_gain: Decimal::ZERO,
+        capital_loss_carryforward_in: Carryforward::default(),
+    }
+}
+
+/// Build a Snapshot with the given state and a 2025 TaxProfile.
+fn make_snapshot_with_profile(state: LedgerState) -> Snapshot {
+    let mut profiles = BTreeMap::new();
+    profiles.insert(2025, make_tax_profile_single_50k());
+    Snapshot {
+        events: vec![],
+        state,
+        config: ProjectionConfig::default(),
+        cli_config: btctax_cli::CliConfig::default(),
+        profiles,
+        tables: BundledTaxTables::load(),
+    }
+}
+
+/// Build an App with the given state and a 2025 TaxProfile, in Viewer screen at year `year`.
+fn make_app_with_profile(state: LedgerState, year: i32) -> App {
+    let mut app = App::new(PathBuf::new());
+    app.screen = Screen::Viewer;
+    app.selected_year = year;
+    app.snapshot = Some(make_snapshot_with_profile(state));
+    app
+}
+
+/// Make a long-term disposal in the given year: 50M sat, proceeds $30,000, basis $20,000, gain $10,000.
+fn make_lt_disposal(year: i32) -> Disposal {
+    Disposal {
+        event: make_event_id(&format!("lt{year}")),
+        kind: DisposeKind::Sell,
+        disposed_at: make_date(year, 6, 15),
+        legs: vec![DisposalLeg {
+            lot_id: make_lot_id(&format!("ltleg{year}")),
+            sat: 50_000_000,
+            proceeds: Decimal::from(30_000i64),
+            basis: Decimal::from(20_000i64),
+            gain: Decimal::from(10_000i64),
+            term: Term::LongTerm,
+            basis_source: BasisSource::ExchangeProvided,
+            gift_zone: None,
+            acquired_at: make_date(year - 2, 1, 1), // > 1 year before disposal
+            wallet: make_wallet(),
+        }],
+        fee_mini_disposition: false,
+    }
+}
+
+fn render_tax(app: &App) -> ratatui::buffer::Buffer {
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            super::tax::draw(f, area, app);
+        })
+        .unwrap();
+    terminal.backend().buffer().clone()
+}
+
+fn render_forms(app: &mut App) -> ratatui::buffer::Buffer {
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            super::forms::draw(f, area, app);
+        })
+        .unwrap();
+    terminal.backend().buffer().clone()
+}
+
+fn render_compliance(app: &App) -> ratatui::buffer::Buffer {
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            super::compliance::draw(f, area, app);
+        })
+        .unwrap();
+    terminal.backend().buffer().clone()
+}
+
+// ── Tax tab tests ─────────────────────────────────────────────────────────────
+
+/// T1. Computed year: Tax tab shows ST/LT/NIIT/LTCG lines with known figures.
+///
+/// Fixture: Single filer, ordinary income $50k, 1 LT disposal gain $10k in 2025.
+/// Expected: lt_net=10000.00, ltcg_tax=1500.00 (15% × $10k), niit=0.00, total=1500.00.
+/// (MAGI = $50k + $10k gain = $60k < $200k NIIT threshold → NIIT = $0.)
+#[test]
+fn tax_tab_computed_year_shows_known_figures() {
+    let mut state = LedgerState::default();
+    state.disposals.push(make_lt_disposal(2025));
+
+    let app = make_app_with_profile(state, 2025);
+    let buf = render_tax(&app);
+
+    // LT net must appear
+    assert!(
+        buffer_has(&buf, "10000.00"),
+        "Tax tab must show LT net 10000.00"
+    );
+    // LTCG tax = 15% × $10k = $1500
+    assert!(
+        buffer_has(&buf, "1500.00"),
+        "Tax tab must show LTCG tax 1500.00"
+    );
+    // Labels for the main sections must appear
+    assert!(buffer_has(&buf, "LTCG"), "Tax tab must show LTCG label");
+    assert!(buffer_has(&buf, "NIIT"), "Tax tab must show NIIT label");
+    assert!(
+        buffer_has(&buf, "TOTAL federal"),
+        "Tax tab must show TOTAL federal label"
+    );
+}
+
+/// T2. NotComputable year (no profile): Tax tab shows blocker reason but NO dollar figure.
+///
+/// profiles map is empty → compute_tax_year returns NotComputable(TaxProfileMissing).
+/// Assert "NOT COMPUTABLE" appears and the specific LT figure 10000.00 does NOT appear.
+#[test]
+fn tax_tab_not_computable_no_profile_shows_blocker_no_numbers() {
+    let mut state = LedgerState::default();
+    state.disposals.push(make_lt_disposal(2025));
+
+    // No profile in the snapshot — uses make_snapshot (empty profiles map).
+    let mut app = make_app(state, 2025);
+    // Set tab to Tax for render
+    app.tab = crate::app::Tab::Tax;
+
+    let buf = render_tax(&app);
+
+    assert!(
+        buffer_has(&buf, "NOT COMPUTABLE"),
+        "Tax tab must show NOT COMPUTABLE when no profile"
+    );
+    assert!(
+        buffer_has(&buf, "TaxProfileMissing"),
+        "Tax tab must name the blocker kind TaxProfileMissing"
+    );
+    // Must NOT show any LT-net dollar figure
+    assert!(
+        !buffer_has(&buf, "10000.00"),
+        "Tax tab must NOT show dollar figures when not computable"
+    );
+}
+
+/// T3. ←/→ year change updates the Tax tab figures.
+///
+/// At 2025 (profile exists): Computed result appears.
+/// After Left → 2024 (no profile): NotComputable appears.
+#[test]
+fn tax_tab_year_change_updates_figures() {
+    let mut state = LedgerState::default();
+    state.disposals.push(make_lt_disposal(2025));
+
+    let mut app = make_app_with_profile(state, 2025);
+    app.tab = crate::app::Tab::Tax;
+
+    // 2025: Computed
+    let buf_2025 = render_tax(&app);
+    assert!(
+        buffer_has(&buf_2025, "1500.00"),
+        "Tax tab at 2025 must show LTCG tax 1500.00"
+    );
+    assert!(
+        !buffer_has(&buf_2025, "NOT COMPUTABLE"),
+        "Tax tab at 2025 must NOT show NOT COMPUTABLE"
+    );
+
+    // Switch to 2024 via Left key
+    crate::handle_key(&mut app, press(KeyCode::Left));
+    assert_eq!(app.selected_year, 2024, "Left key must change year to 2024");
+
+    let buf_2024 = render_tax(&app);
+    assert!(
+        buffer_has(&buf_2024, "NOT COMPUTABLE"),
+        "Tax tab at 2024 (no profile) must show NOT COMPUTABLE"
+    );
+    // 2025 figures must not appear
+    assert!(
+        !buffer_has(&buf_2024, "1500.00"),
+        "Tax tab at 2024 must NOT show 2025 LTCG tax"
+    );
+}
+
+// ── Forms tab tests ───────────────────────────────────────────────────────────
+
+/// F1. Forms tab shows a known 8949 row (part + box) and Schedule D totals.
+///
+/// Fixture: 1 LT disposal in 2025 with proceeds=$30,000, basis=$20,000, gain=$10,000.
+/// Expected: 8949 Part "LT" + Box "F" appear; Schedule D Part II proceeds=$30,000.
+#[test]
+fn forms_tab_shows_known_8949_row_and_schedule_d_totals() {
+    let mut state = LedgerState::default();
+    state.disposals.push(make_lt_disposal(2025));
+
+    let mut app = make_app(state, 2025);
+    app.tab = crate::app::Tab::Forms;
+
+    let buf = render_forms(&mut app);
+
+    // Form 8949 table must show the part and box for the LT disposal
+    assert!(
+        buffer_has(&buf, "LT"),
+        "Forms tab must show Part II (LT) for long-term disposal"
+    );
+    assert!(
+        buffer_has(&buf, "F"),
+        "Forms tab must show Box F for long-term disposal"
+    );
+    // Proceeds $30,000 must appear in the 8949 table
+    assert!(
+        buffer_has(&buf, "30000.00"),
+        "Forms tab must show 8949 row proceeds 30000.00"
+    );
+    // Schedule D section must appear
+    assert!(
+        buffer_has(&buf, "Schedule D"),
+        "Forms tab must show Schedule D section"
+    );
+}
+
+// ── Compliance tab tests ──────────────────────────────────────────────────────
+
+/// C1. Compliance tab shows Hard-vs-Advisory partition and pre-2025/safe-harbor status.
+///
+/// Fixture: 1 hard blocker (Unclassified), 1 advisory blocker (Pre2025MethodNote).
+/// Expected: Hard blockers and Advisory blockers sections appear with their counts;
+/// the CliConfig default (FIFO, unattested) is shown; safe-harbor status appears.
+#[test]
+fn compliance_tab_shows_hard_advisory_partition_and_status() {
+    let mut state = LedgerState::default();
+    // Add a hard blocker
+    state.blockers.push(btctax_core::Blocker {
+        kind: BlockerKind::Unclassified,
+        event: Some(make_event_id("ev1")),
+        detail: "test hard blocker detail".into(),
+    });
+    // Add an advisory blocker
+    state.blockers.push(btctax_core::Blocker {
+        kind: BlockerKind::Pre2025MethodNote,
+        event: None,
+        detail: "test advisory blocker detail".into(),
+    });
+
+    // Verify severity of our test fixtures (KAT: the blockers go to the right partition)
+    assert_eq!(
+        BlockerKind::Unclassified.severity(),
+        Severity::Hard,
+        "Unclassified must be Hard"
+    );
+    assert_eq!(
+        BlockerKind::Pre2025MethodNote.severity(),
+        Severity::Advisory,
+        "Pre2025MethodNote must be Advisory"
+    );
+
+    let app = make_app(state, 2025);
+    let buf = render_compliance(&app);
+
+    // Both partitions must appear
+    assert!(
+        buffer_has(&buf, "Hard blockers"),
+        "Compliance tab must show Hard blockers section"
+    );
+    assert!(
+        buffer_has(&buf, "Advisory blockers"),
+        "Compliance tab must show Advisory blockers section"
+    );
+    // The hard blocker kind must appear
+    assert!(
+        buffer_has(&buf, "Unclassified"),
+        "Compliance tab must show Unclassified hard blocker"
+    );
+    // The advisory blocker kind must appear
+    assert!(
+        buffer_has(&buf, "Pre2025MethodNote"),
+        "Compliance tab must show Pre2025MethodNote advisory blocker"
+    );
+    // Pre-2025 method (FIFO is the default from CliConfig::default)
+    assert!(
+        buffer_has(&buf, "FIFO"),
+        "Compliance tab must show pre-2025 method FIFO"
+    );
+    // Safe-harbor status must appear
+    assert!(
+        buffer_has(&buf, "Safe-harbor"),
+        "Compliance tab must show safe-harbor status"
+    );
+}
+
+// ── Minor B KATs ─────────────────────────────────────────────────────────────
+
+/// MB1. `G` on a populated Holdings tab selects the last DATA row, NOT the TOTAL row.
+///
+/// Fixture: 2 lots → data rows at indices 0 and 1; TOTAL rendered at index 2 but never selectable.
+/// `G` (go_bottom) must cap at index 1 (last data row), not 2 (TOTAL).
+#[test]
+fn total_row_not_selectable_g_selects_last_data_row() {
+    let lot1 = Lot {
+        lot_id: make_lot_id("mb1"),
+        wallet: make_wallet(),
+        acquired_at: make_date(2024, 1, 1),
+        original_sat: 10_000_000,
+        remaining_sat: 10_000_000,
+        usd_basis: Decimal::from(500i64),
+        basis_source: BasisSource::ExchangeProvided,
+        dual_loss_basis: None,
+        donor_acquired_at: None,
+        basis_pending: false,
+    };
+    let lot2 = Lot {
+        lot_id: make_lot_id("mb2"),
+        wallet: make_wallet(),
+        acquired_at: make_date(2024, 6, 1),
+        original_sat: 20_000_000,
+        remaining_sat: 20_000_000,
+        usd_basis: Decimal::from(1000i64),
+        basis_source: BasisSource::ExchangeProvided,
+        dual_loss_basis: None,
+        donor_acquired_at: None,
+        basis_pending: false,
+    };
+    let mut state = LedgerState::default();
+    state.lots.push(lot1);
+    state.lots.push(lot2);
+
+    let mut app = make_app(state, 2025);
+    app.tab = crate::app::Tab::Holdings;
+
+    // No selection initially
+    assert_eq!(app.holdings_state.selected(), None);
+
+    // Press G → go_bottom
+    crate::handle_key(&mut app, press(KeyCode::Char('G')));
+
+    assert_eq!(
+        app.holdings_state.selected(),
+        Some(1), // last DATA row (index 1), NOT the TOTAL row (which would be index 2)
+        "G must select the last DATA row (index 1), not the TOTAL row (index 2)"
+    );
+}
+
+/// MB2. `scroll_down` on Holdings never lands on the TOTAL row even when at the last data row.
+///
+/// Fixture: 2 lots; selection starts at last data row (index 1); another scroll_down must stay at 1.
+#[test]
+fn scroll_down_does_not_advance_past_last_data_row_to_total() {
+    let lot1 = Lot {
+        lot_id: make_lot_id("mb3"),
+        wallet: make_wallet(),
+        acquired_at: make_date(2024, 1, 1),
+        original_sat: 10_000_000,
+        remaining_sat: 10_000_000,
+        usd_basis: Decimal::from(500i64),
+        basis_source: BasisSource::ExchangeProvided,
+        dual_loss_basis: None,
+        donor_acquired_at: None,
+        basis_pending: false,
+    };
+    let lot2 = Lot {
+        lot_id: make_lot_id("mb4"),
+        wallet: make_wallet(),
+        acquired_at: make_date(2024, 6, 1),
+        original_sat: 20_000_000,
+        remaining_sat: 20_000_000,
+        usd_basis: Decimal::from(1000i64),
+        basis_source: BasisSource::ExchangeProvided,
+        dual_loss_basis: None,
+        donor_acquired_at: None,
+        basis_pending: false,
+    };
+    let mut state = LedgerState::default();
+    state.lots.push(lot1);
+    state.lots.push(lot2);
+
+    let mut app = make_app(state, 2025);
+    app.tab = crate::app::Tab::Holdings;
+
+    // Navigate to last data row
+    crate::scroll_down(&mut app); // → 0
+    crate::scroll_down(&mut app); // → 1 (last data row)
+    assert_eq!(
+        app.holdings_state.selected(),
+        Some(1),
+        "scroll_down twice must reach the last data row (index 1)"
+    );
+
+    // One more scroll_down must NOT advance to TOTAL (index 2)
+    crate::scroll_down(&mut app);
+    assert_eq!(
+        app.holdings_state.selected(),
+        Some(1),
+        "scroll_down past last data row must stay at index 1 (TOTAL is not selectable)"
     );
 }
