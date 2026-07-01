@@ -3,7 +3,8 @@
 use crate::config::{set_fee_treatment, set_pre2025_method as config_set_pre2025_method};
 use crate::render::write_csv_exports;
 use crate::{CliConfig, CliError, Session};
-use btctax_core::{FeeTreatment, LotMethod};
+use btctax_adapters::BundledTaxTables;
+use btctax_core::{compute_se_tax, FeeTreatment, LotMethod, TaxTables};
 use btctax_store::Passphrase;
 use std::path::{Path, PathBuf};
 
@@ -50,7 +51,21 @@ pub fn export_snapshot(
     let session = Session::open(vault_path, pp)?;
     let sqlite = session.vault().export_snapshot(out_dir)?; // writes out_dir/snapshot.sqlite
     let (state, _cfg) = session.project()?;
-    write_csv_exports(out_dir, &state, tax_year)?;
+    // P2-D: standalone Schedule SE §1401 figure for the year-scoped export. Needs the year's filing
+    // status (profile) + the year's ss_wage_base (bundled table); `None` when either is absent or
+    // there is no business SE income. The "present but no table" note is a text-report concern
+    // (render_schedule_se) — the CSV carries the computed figure only.
+    let se_result = match tax_year {
+        Some(y) => {
+            let tables = BundledTaxTables::load();
+            session
+                .tax_profile(y)?
+                .and_then(|p| tables.table_for(y).map(|t| (p.filing_status, t)))
+                .and_then(|(status, t)| compute_se_tax(&state, y, status, t))
+        }
+        None => None,
+    };
+    write_csv_exports(out_dir, &state, tax_year, se_result.as_ref())?;
     Ok(sqlite)
 }
 

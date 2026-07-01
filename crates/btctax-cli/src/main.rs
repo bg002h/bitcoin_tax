@@ -378,13 +378,18 @@ fn run() -> Result<ExitCode, CliError> {
         }
         Command::Report { year, tax_year } => {
             if let Some(y) = tax_year {
-                let (outcome, advisory, sched_d, gift_advisory) =
+                let (outcome, advisory, sched_d, gift_advisory, schedule_se) =
                     cmd::tax::report_tax_year(vault, &passphrase(false)?, y)?;
                 print!(
                     "{}",
                     render::render_tax_outcome(y, &outcome, advisory.as_deref())
                 );
                 print!("{}", render::render_schedule_d(y, &sched_d, &outcome));
+                // P2-D Task 2: standalone Schedule SE §1401 SE-tax section (non-gating; STANDALONE —
+                // does NOT feed engine B's total_federal_tax_attributable).
+                if let Some(se) = schedule_se {
+                    print!("{se}");
+                }
                 // P2-C Task 3: standalone Form 709 gift advisory (non-gating; does not feed engine B).
                 if let Some(msg) = gift_advisory {
                     println!("{msg}");

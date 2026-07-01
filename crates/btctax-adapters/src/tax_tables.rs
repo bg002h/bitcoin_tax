@@ -183,6 +183,9 @@ fn ty2025() -> TaxTable {
         ltcg,
         // §2503(b) gift annual exclusion per donee — Rev. Proc. 2024-40 §2.43 (TY2025 = $19,000).
         gift_annual_exclusion: dec!(19000),
+        // §230 SSA (42 U.S.C. §430) Social Security wage base — SSA announced 2024-10-10
+        // (TY2025 = $176,100).
+        ss_wage_base: dec!(176100),
     }
 }
 

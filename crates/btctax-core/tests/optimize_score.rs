@@ -70,6 +70,7 @@ fn synth(year: i32) -> OneTable {
         ordinary,
         ltcg,
         gift_annual_exclusion: dec!(19000),
+        ss_wage_base: dec!(176100),
     })
 }
 fn profile() -> TaxProfile {

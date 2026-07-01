@@ -1922,6 +1922,7 @@ fn qualified_appraisal_note_is_advisory_and_does_not_gate_compute() {
             ordinary,
             ltcg: ltcg_map,
             gift_annual_exclusion: dec!(19000),
+            ss_wage_base: dec!(176100),
         },
     );
     let profile = TaxProfile {
