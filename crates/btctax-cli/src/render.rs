@@ -587,6 +587,9 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
     let mut w = Writer::from_writer(fsperms::open_owner_only(&out_dir.join("removals.csv"))?);
     // claimed_deduction: §170(e)(1)(A) deduction amount (pre-§170(b) AGI limits) for Donation
     // rows; empty for Gift rows. See Removal.claimed_deduction in btctax-core/src/state.rs.
+    // Multi-leg donations: the value is a per-REMOVAL total shown on the FIRST leg row only;
+    // subsequent leg rows carry an empty cell so a naive SUM() equals the correct per-donation
+    // total (no double-counting). Do not divide across legs — that would create rounding artifacts.
     w.write_record([
         "event",
         "kind",
@@ -599,11 +602,14 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
         "claimed_deduction",
     ])?;
     for r in &state.removals {
-        let deduction_str = r
+        let deduction_first = r
             .claimed_deduction
             .map(|d| d.to_string())
             .unwrap_or_default();
-        for leg in &r.legs {
+        for (leg_idx, leg) in r.legs.iter().enumerate() {
+            // Emit claimed_deduction only on leg 0; leave empty on subsequent legs so SUM()
+            // over the column equals the true per-donation total (not N-legs × deduction).
+            let deduction_cell: &str = if leg_idx == 0 { &deduction_first } else { "" };
             w.write_record([
                 r.event.canonical(),
                 removal_kind_tag(r.kind).to_string(),
@@ -617,7 +623,7 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
                 leg.basis.to_string(),
                 leg.fmv_at_transfer.to_string(),
                 term_tag(leg.term).to_string(),
-                deduction_str.clone(),
+                deduction_cell.to_string(),
             ])?;
         }
     }
