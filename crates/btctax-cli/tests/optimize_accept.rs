@@ -123,6 +123,7 @@ fn synth_tables(year: i32) -> OneTable {
         ltcg,
         gift_annual_exclusion: dec!(19000),
         ss_wage_base: dec!(176100),
+        gift_lifetime_exclusion: dec!(13_990_000),
     })
 }
 

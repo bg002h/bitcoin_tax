@@ -14,6 +14,8 @@
 //! - **Rev. Proc. 2024-40 §2.01** — rate tables under §1(j)(2) (ordinary brackets)
 //! - **Rev. Proc. 2024-40 §2.03** — Maximum Capital Gains Rate under §1(h) (LTCG breakpoints)
 //! - **Rev. Proc. 2024-40 §2.43** — §2503(b) gift-tax annual exclusion per donee ($19,000)
+//! - **Rev. Proc. 2024-40 §2.41** — §2010(c)(3) basic exclusion amount / lifetime gift+estate
+//!   exclusion ($13,990,000)
 //!
 //! The **One Big Beautiful Bill Act** (Pub. L. 119-21, 2025) made the TCJA rate structure
 //! permanent and raised the 2025 standard deduction, but did **not** change the 2025 bracket
@@ -177,7 +179,7 @@ fn ty2025() -> TaxTable {
 
     TaxTable {
         year: 2025,
-        source: "Rev. Proc. 2024-40 §2.01/§2.03 + §2.43 (TY2025); OBBBA Pub. L. 119-21 \
+        source: "Rev. Proc. 2024-40 §2.01/§2.03 + §2.43 + §2.41 (TY2025); OBBBA Pub. L. 119-21 \
                  left 2025 brackets/breakpoints unchanged",
         ordinary,
         ltcg,
@@ -186,6 +188,9 @@ fn ty2025() -> TaxTable {
         // §230 SSA (42 U.S.C. §430) Social Security wage base — SSA announced 2024-10-10
         // (TY2025 = $176,100).
         ss_wage_base: dec!(176100),
+        // §2010(c)(3) basic exclusion amount (unified credit / lifetime gift+estate exclusion) —
+        // Rev. Proc. 2024-40 §2.41 (TY2025 = $13,990,000).
+        gift_lifetime_exclusion: dec!(13_990_000),
     }
 }
 
