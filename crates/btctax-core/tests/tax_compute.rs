@@ -79,6 +79,51 @@ fn profile(ord: Usd, magi: Usd, qd: Usd) -> TaxProfile {
         },
     }
 }
+/// Single profile with a non-zero `other_net_capital_gain` (LT-character) — for the B-M1 loss-year KATs.
+fn profile_with_ncg(ord: Usd, magi: Usd, qd: Usd, ncg: Usd) -> TaxProfile {
+    TaxProfile {
+        other_net_capital_gain: ncg,
+        ..profile(ord, magi, qd)
+    }
+}
+/// Synthetic table keyed for MFS (same bracket/breakpoint shape as `synth`) — for the MFS $1,500 KAT.
+/// Only the NII assertion depends on this table; the ordinary/preferential brackets merely need to exist.
+fn synth_mfs(year: i32) -> OneTable {
+    let mut ordinary = BTreeMap::new();
+    ordinary.insert(
+        FilingStatus::Mfs,
+        OrdinarySchedule {
+            brackets: vec![
+                OrdinaryBracket {
+                    lower: dec!(0),
+                    rate: dec!(0.10),
+                },
+                OrdinaryBracket {
+                    lower: dec!(50000),
+                    rate: dec!(0.22),
+                },
+                OrdinaryBracket {
+                    lower: dec!(250000),
+                    rate: dec!(0.32),
+                },
+            ],
+        },
+    );
+    let mut ltcg = BTreeMap::new();
+    ltcg.insert(
+        FilingStatus::Mfs,
+        LtcgBreakpoints {
+            max_zero: dec!(40000),
+            max_fifteen: dec!(400000),
+        },
+    );
+    OneTable(TaxTable {
+        year,
+        source: "SYNTHETIC",
+        ordinary,
+        ltcg,
+    })
+}
 
 // ── direct-state builders (drive compute_tax_year's read path with exact disposals/income) ──────────
 fn disposal(d: time::Date, gain: Usd, term: Term) -> Disposal {
@@ -300,6 +345,119 @@ fn full_worked_example_ordinary_st_lt_qd_niit_delta() {
     assert!(r.marginal_rates.niit_applies);
     assert_eq!(r.marginal_rates.ordinary, dec!(0.32));
     assert_eq!(r.marginal_rates.ltcg, dec!(0.20)); // top 470,000 > max_fifteen 400,000
+}
+
+/// [B-M1 HEADLINE] Loss-year §1411: a net capital loss reduces NII by ONLY the §1211(b)-allowed amount
+/// (≤ $3,000), NOT by preserving other-category gains in NII (Form 8960 line 5a / §1.1411-4(d) Example 1).
+///
+/// Single, threshold $200k. Profile: OTI 270,000; QD 5,000; other_net_capital_gain +15,000 (LT);
+/// MAGI(excl crypto) 290,000 (= 270,000 + 5,000 + 15,000). Crypto: net ST −80,000 (single ST disposal),
+/// crypto_lt 0, crypto_ord 0, zero carryforward-in.
+///
+/// §1222 WITH:  st_net −80,000; lt_net +15,000; cross-net → residual ST loss −65,000 (65k loss > 15k gain).
+///   ordinary_gain 0; preferential_gain 0; net_loss 65,000 → loss_deduction min(65k, 3k) = 3,000.
+/// §1222 WITHOUT: st_net 0; lt_net +15,000 (both gains) → preferential_gain 15,000; loss_deduction 0.
+///
+/// NII (B-M1 fix — subtract loss_deduction):
+///   nii_with    = 5,000 + 0 + 0 − 3,000  = 2,000
+///   nii_without = 5,000 + 0 + 15,000 − 0 = 20,000
+/// MAGI: crypto_agi = (0−3,000) − (0+15,000−0) + 0 = −18,000; magi_with = 290,000 − 18,000 = 272,000.
+/// NIIT: niit_with    = 3.8% × min(2,000,  272,000−200,000=72,000) = 3.8% × 2,000  = 76.00
+///       niit_without = 3.8% × min(20,000, 290,000−200,000=90,000) = 3.8% × 20,000 = 760.00
+///       niit DELTA   = 76.00 − 760.00 = −684.00.  (PRE-FIX this delta was −570.00.)
+///
+/// total: ordinary_delta = tax(267,000)=54,440 − tax(270,000)=55,400 = −960.00 (= 3,000 × 32% saving);
+///        ltcg_tax = pref(bottom 267k, pref 5k)=750.00 − pref(bottom 270k, pref 20k)=3,000.00 = −2,250.00;
+///        niit = −684.00; total = −960 − 2,250 − 684 = −3,894.00.
+#[test]
+fn niit_loss_year_reduces_nii_by_1211_allowed_loss() {
+    let st = state_with(
+        vec![disposal(
+            date!(2025 - 05 - 01),
+            dec!(-80000),
+            Term::ShortTerm,
+        )],
+        vec![],
+    );
+    let p = profile_with_ncg(dec!(270000), dec!(290000), dec!(5000), dec!(15000));
+    let out = compute_tax_year(&[], &st, 2025, Some(&p), &synth(2025));
+    let TaxOutcome::Computed(r) = out else {
+        panic!("computable")
+    };
+    // Headline DELTA: NII reduced by exactly the $3,000 §1211-allowed loss (was −570.00 pre-fix).
+    assert_eq!(r.niit, dec!(-684.00));
+    assert_eq!(r.total_federal_tax_attributable, dec!(-3894.00));
+    // WITH-scenario levels (sanity — not the NIIT figure under test):
+    assert_eq!(r.st_net, dec!(-80000));
+    assert_eq!(r.loss_deduction, dec!(3000));
+}
+
+/// [R0-M2] NIIT base floored at $0 (D2): a net capital loss driving NII negative must NEVER yield a
+/// negative/refundable NIIT. Inputs put BOTH scenarios' NIIT at $0 (MAGI at the threshold → over==0),
+/// so the observable DELTA `r.niit == 0.00` truly pins the `max(0, …)` floor.
+///
+/// Single, threshold $200k. QD 0; other_net_capital_gain 0; MAGI(excl crypto) 200,000 (exactly at the
+/// threshold → over_without = 0). Crypto: net ST −80,000 → loss_deduction 3,000; crypto_lt 0.
+///   nii_with = 0 + 0 + 0 − 3,000 = −3,000 (negative).
+///   crypto_agi = (0−3,000) − 0 + 0 = −3,000; magi_with = 200,000 − 3,000 = 197,000 < 200,000 → over_with 0.
+///   niit_with    = 3.8% × max(0, min(−3,000, 0)) = 3.8% × 0 = 0.00   (WITHOUT the D2 floor: −114.00)
+///   niit_without = 3.8% × max(0, min(0, 0))      = 0.00.  DELTA = 0.00.
+#[test]
+fn niit_base_floored_at_zero_when_nii_negative() {
+    let st = state_with(
+        vec![disposal(
+            date!(2025 - 05 - 01),
+            dec!(-80000),
+            Term::ShortTerm,
+        )],
+        vec![],
+    );
+    let p = profile(dec!(50000), dec!(200000), dec!(0));
+    let out = compute_tax_year(&[], &st, 2025, Some(&p), &synth(2025));
+    let TaxOutcome::Computed(r) = out else {
+        panic!("computable")
+    };
+    // Floored at 0 — must NOT be −114.00 (which is what the pre-D2 `min(nii, over)` would yield).
+    assert_eq!(r.niit, dec!(0.00));
+}
+
+/// [B-M1 MFS] Loss-year §1411 under the MFS §1211(b) limit of $1,500 (NOT $3,000): NII is reduced by only
+/// $1,500. MFS threshold $125,000.
+///
+/// MFS. OTI 50,000; QD 5,000; other_net_capital_gain 0; MAGI(excl crypto) 300,000. Crypto: net ST −80,000
+///   → net loss 80,000 → loss_deduction min(80,000, 1,500) = 1,500 (MFS cap).
+///   nii_with    = 5,000 + 0 + 0 − 1,500 = 3,500;   nii_without = 5,000.
+///   crypto_agi  = (0−1,500) − 0 + 0 = −1,500; magi_with = 300,000 − 1,500 = 298,500.
+///   niit_with    = 3.8% × min(3,500, 298,500−125,000=173,500) = 3.8% × 3,500 = 133.00
+///   niit_without = 3.8% × min(5,000, 300,000−125,000=175,000) = 3.8% × 5,000 = 190.00
+///   niit DELTA   = 133.00 − 190.00 = −57.00  (= 3.8% × −$1,500; a $3,000 cap would give −114.00).
+#[test]
+fn niit_loss_year_mfs_1500_limit() {
+    let st = state_with(
+        vec![disposal(
+            date!(2025 - 05 - 01),
+            dec!(-80000),
+            Term::ShortTerm,
+        )],
+        vec![],
+    );
+    let p = TaxProfile {
+        filing_status: FilingStatus::Mfs,
+        ordinary_taxable_income: dec!(50000),
+        magi_excluding_crypto: dec!(300000),
+        qualified_dividends_and_other_pref_income: dec!(5000),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward {
+            short: dec!(0),
+            long: dec!(0),
+        },
+    };
+    let out = compute_tax_year(&[], &st, 2025, Some(&p), &synth_mfs(2025));
+    let TaxOutcome::Computed(r) = out else {
+        panic!("computable")
+    };
+    assert_eq!(r.loss_deduction, dec!(1500)); // MFS §1211(b) cap
+    assert_eq!(r.niit, dec!(-57.00)); // NII reduced by $1,500 (a $3,000 cap would give −114.00)
 }
 
 /// Only THIS tax-year's disposals/income are counted (out-of-year activity is ignored).

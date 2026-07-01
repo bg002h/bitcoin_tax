@@ -820,9 +820,11 @@ pub fn render_tax_outcome(
             let _ = writeln!(
                 s,
                 "  (incremental ceteris-paribus delta on the minimal profile; \
-                excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. NIIT uses a minimal NII model \
-                — excludes crypto ordinary income from NII and does not reduce NII by the allowed §1211 \
-                loss — so it MAY UNDERSTATE NIIT; see §5 Phase-2 refinement.)"
+                excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the \
+                §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) \
+                and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly \
+                excluded from NII. The only residual understatement is crypto-lending interest (NII under \
+                §1411(c)(1)(A)(i)), which the minimal model cannot yet isolate — a Phase-2 refinement.)"
             );
         }
     }

@@ -121,6 +121,43 @@ fn report_tax_year_renders_golden() {
     );
 }
 
+/// [B-M1 Task 2] The Computed tax-report footer no longer carries the wrong-direction "understate"
+/// disclosure; it accurately states the §1211(b) loss is applied to NII and flags the residual
+/// crypto-lending-interest caveat.
+#[test]
+fn report_tax_year_footer_discloses_1211_loss_and_lending_interest_caveat() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
+
+    let (outcome, advisory, _sched_d) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
+    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
+
+    // Wrong-direction language removed:
+    assert!(
+        !rendered.contains("can only ever understate"),
+        "footer must not claim NIIT can only ever understate:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("MAY UNDERSTATE"),
+        "footer must not carry the wrong-direction MAY UNDERSTATE claim:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("does not reduce NII"),
+        "footer must not claim NII is not reduced by the §1211 loss:\n{rendered}"
+    );
+    // Accurate position present:
+    assert!(
+        rendered.contains("reduces NII by the §1211(b)-allowed net capital loss"),
+        "footer must state the §1211(b) loss is applied to NII:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("crypto-lending interest"),
+        "footer must flag the residual crypto-lending-interest understatement:\n{rendered}"
+    );
+}
+
 /// B-M2 reconciliation KAT: the three printed attributable components sum to TOTAL.
 /// For the Single LT 0→15 golden: ordinary-rate=0.00 + LTCG=1747.50 + NIIT=0.00 = 1747.50.
 /// Also verifies the reconciliation numerically from the raw `TaxResult` fields.
