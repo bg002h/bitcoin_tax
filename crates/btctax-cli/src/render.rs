@@ -2489,10 +2489,35 @@ mod form8283_csv_tests {
             appraisal_required: false,
             donor_acquired_at: None,
             claimed_deduction: Some(rust_decimal::Decimal::from(52000)),
-            donee: Some("Habitat".into()),
+            donee: Some("Test Charity Two".into()),
         };
+        // N1: second removal with NO details in dmap — locks the empty-half of the 6 new columns.
+        let event2 = EventId::decision(100);
+        let leg2 = RemovalLeg {
+            lot_id: btctax_core::LotId {
+                origin_event_id: event2.clone(),
+                split_sequence: 0,
+            },
+            sat: 10_000_000,
+            basis: rust_decimal::Decimal::ZERO,
+            fmv_at_transfer: rust_decimal::Decimal::from(8000),
+            term: Term::LongTerm,
+            basis_source: BasisSource::ComputedFromCost,
+            acquired_at: date!(2025 - 01 - 15),
+        };
+        let removal2 = Removal {
+            event: event2.clone(),
+            kind: RemovalKind::Donation,
+            removed_at: date!(2025 - 05 - 01),
+            legs: vec![leg2],
+            appraisal_required: false,
+            donor_acquired_at: None,
+            claimed_deduction: Some(rust_decimal::Decimal::from(8000)),
+            donee: Some("No Details Org".into()),
+        };
+
         let st = LedgerState {
-            removals: vec![removal],
+            removals: vec![removal, removal2],
             ..Default::default()
         };
 
@@ -2512,6 +2537,7 @@ mod form8283_csv_tests {
                 fmv_method_override: None,
             },
         );
+        // event2 intentionally NOT inserted — exercises the empty-column path.
 
         write_csv_exports(&out, &st, Some(2025), None, &dmap).unwrap();
 
@@ -2523,18 +2549,25 @@ mod form8283_csv_tests {
             .from_path(&path)
             .unwrap();
         let headers: Vec<String> = rdr.headers().unwrap().iter().map(String::from).collect();
-        let rec = rdr
-            .records()
-            .next()
-            .expect("one data row")
-            .expect("readable");
         let idx = |name: &str| {
             headers
                 .iter()
                 .position(|h| h == name)
                 .unwrap_or_else(|| panic!("header {name} not found"))
         };
+        // Collect both rows. form_8283 sorts by (removed_at, event, lot_id):
+        //   records[0] = removal (removed_at 2025-03-01, event decision(99)) — WITH details.
+        //   records[1] = removal2 (removed_at 2025-05-01, event decision(100)) — NO details.
+        let all_recs: Vec<csv::StringRecord> = rdr.records().map(|r| r.unwrap()).collect();
+        assert_eq!(
+            all_recs.len(),
+            2,
+            "must have exactly two data rows (one per removal)"
+        );
+        let rec = &all_recs[0];
+        let no_details_rec = &all_recs[1];
 
+        // WITH-details half: all 6 new columns populated.
         assert_eq!(&rec[idx("donee")], "Test Charity");
         assert_eq!(&rec[idx("appraiser")], "Test Appraiser");
         assert_eq!(&rec[idx("donee_ein")], "12-3456789");
@@ -2544,5 +2577,42 @@ mod form8283_csv_tests {
         assert_eq!(&rec[idx("appraiser_qualifications")], "Certified");
         assert_eq!(&rec[idx("appraisal_date")], "2025-06-01");
         assert_eq!(&rec[idx("needs_review")], "false");
+
+        // N1: EMPTY half — no-details removal has all 6 new columns blank.
+        assert_eq!(
+            &no_details_rec[idx("donee_ein")],
+            "",
+            "no-details row: donee_ein must be empty"
+        );
+        assert_eq!(
+            &no_details_rec[idx("donee_address")],
+            "",
+            "no-details row: donee_address must be empty"
+        );
+        assert_eq!(
+            &no_details_rec[idx("appraiser_tin")],
+            "",
+            "no-details row: appraiser_tin must be empty"
+        );
+        assert_eq!(
+            &no_details_rec[idx("appraiser_ptin")],
+            "",
+            "no-details row: appraiser_ptin must be empty"
+        );
+        assert_eq!(
+            &no_details_rec[idx("appraiser_qualifications")],
+            "",
+            "no-details row: appraiser_qualifications must be empty"
+        );
+        assert_eq!(
+            &no_details_rec[idx("appraisal_date")],
+            "",
+            "no-details row: appraisal_date must be empty"
+        );
+        assert_eq!(
+            &no_details_rec[idx("needs_review")],
+            "true",
+            "no-details carrier row: needs_review must be true"
+        );
     }
 }
