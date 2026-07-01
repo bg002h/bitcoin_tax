@@ -15,13 +15,25 @@ fabrication). Shared core `year_donation_deduction` helper (form + advisory + CS
 STANDALONE (forms.rs + render.rs; engine B/fold/event-schema/state untouched). R0 3 rounds → 0C/0I;
 whole-branch review 0C/0I. 590 tests.
 
-**Cluster remaining:** **Chunk 2** — donee identifier (`Removal.donee: Option<String>` event-schema
-change, `Income.business` precedent, `#[serde(default)]`; + CLI `--donee` on `reclassify-outflow`) →
-Form 8283 donee column → per-donee §2503(b) Form 709 advisory + filing-required trigger. **Chunk 3** —
-§2505 advisory-level lifetime-exemption (year-indexed `gift_lifetime_exclusion` TaxTable field TY2025
-$13.99M + user-supplied prior cumulative taxable gifts → consumption advisory; single-filer, no
-portability/DSUE/§2513) + Form 8283 Section-B appraiser/donee-details struct (new `set-donation-details`
-command). Both defer real per-row FMV-method (needs FMV provenance on RemovalLeg — Chunk 3 touches schema).
+---
+
+## ✅ Charitable/gift cluster — Chunk 2: donee identifier + per-donee Form 709 — SHIPPED (2026-07-01)
+
+Second chunk. `donee: Option<String>` on the `ReclassifyOutflow` STRUCT (`#[serde(default)]` — back-compat
+safe; `GiftOut` stays a unit variant so legacy vaults still open) → `Op::GiftOut`/`Donate` → `Removal.donee`
+→ removals.csv + Form 8283 donee column + CLI `reclassify-outflow --donee`. Form 709 gift advisory
+refactored to PER-DONEE §2503(b) exclusion (TY2025 $19k) — the key correctness fix (two donees at $15k each
+= $0 taxable, no filing, vs the old aggregate rule that wrongly flagged $30k) + filing-required trigger +
+an unlabeled-bucket conservative caveat. STANDALONE (donee is data; `tax/`/engine B untouched — asserted).
+R0 2 rounds → 0C/0I (C1 = the unit-vs-struct-variant vault back-compat trap, empirically caught);
+whole-branch review 0C/0I. 602 tests.
+
+**Cluster remaining:** **Chunk 3** — §2505 advisory-level lifetime-exemption (year-indexed
+`gift_lifetime_exclusion` TaxTable field TY2025 $13.99M + user-supplied prior cumulative taxable gifts →
+consumption advisory; single-filer, no portability/DSUE/§2513) + Form 8283 Section-B appraiser/structured-
+donee-details struct (new `set-donation-details` command). Defers real per-row FMV-method (needs FMV
+provenance on RemovalLeg — Chunk 3 touches schema). Chunk-2 nits (unlabeled aggregate can over-warn across
+distinct recipients — disclosed) folded into Chunk 3's per-donee display if useful.
 
 ---
 
