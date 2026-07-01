@@ -5,9 +5,10 @@ use btctax_adapters::FileReport;
 use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::ImportReport;
 use btctax_core::{
-    conservation_report, disposal_compliance, BasisSource, Blocker, BlockerKind, ComplianceStatus,
-    ConservationReport, DisposalCompliance, DisposalLeg, DisposeKind, EventId, EventPayload,
-    GiftZone, IncomeKind, LedgerEvent, LedgerState, LotMethod, RemovalKind, RemovalLeg, Severity,
+    conservation_report, disposal_compliance, form_8949, schedule_d, BasisSource, Blocker,
+    BlockerKind, ComplianceStatus, ConservationReport, DisposalCompliance, DisposalLeg,
+    DisposeKind, EventId, EventPayload, Form8949Box, Form8949Part, GiftZone, IncomeKind,
+    LedgerEvent, LedgerState, LotMethod, RemovalKind, RemovalLeg, ScheduleDTotals, Severity,
     TaxDate, Term, WalletId,
 };
 use btctax_store::fsperms;
@@ -86,6 +87,23 @@ fn term_tag(t: Term) -> &'static str {
     match t {
         Term::ShortTerm => "short",
         Term::LongTerm => "long",
+    }
+}
+
+/// Stable Form 8949 part tag: "ST" (Part I) / "LT" (Part II). STABLE — part of the form8949.csv contract.
+fn form8949_part_tag(p: Form8949Part) -> &'static str {
+    match p {
+        Form8949Part::ShortTerm => "ST",
+        Form8949Part::LongTerm => "LT",
+    }
+}
+
+/// Stable Form 8949 box tag: "C" (ST) / "F" (LT) — the conservative "not reported on a 1099-B"
+/// default (D4). We never emit A/B/D/E (the model carries no 1099-B / basis-reported signal).
+fn form8949_box_tag(b: Form8949Box) -> &'static str {
+    match b {
+        Form8949Box::C => "C",
+        Form8949Box::F => "F",
     }
 }
 
@@ -519,7 +537,16 @@ pub fn build_verify(state: &LedgerState, events: &[LedgerEvent], cli: &CliConfig
 /// hardened permissions already applied to `snapshot.sqlite` by the store crate. The out-dir is
 /// created owner-only (0o700) if absent; when the dir PRE-EXISTS, open_owner_only still forces 0o600
 /// on each new CSV file (the hole that `Writer::from_path` + umask would leave).
-pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crate::CliError> {
+///
+/// The `lots`/`disposals`/`removals`/`income` CSVs are all-years (a full projection dump). The
+/// **Form 8949 + Schedule D** filing artifacts are inherently per-tax-year (P2-B): when `tax_year`
+/// is `Some(y)`, `form8949.csv` + `schedule_d.csv` are additionally written, year-scoped to `y`;
+/// when `None`, they are omitted.
+pub fn write_csv_exports(
+    out_dir: &Path,
+    state: &LedgerState,
+    tax_year: Option<i32>,
+) -> Result<(), crate::CliError> {
     fsperms::mkdir_owner_only(out_dir)?;
 
     let mut w = Writer::from_writer(fsperms::open_owner_only(&out_dir.join("lots.csv"))?);
@@ -653,6 +680,78 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
         ])?;
     }
     w.flush()?;
+
+    // P2-B: per-tax-year Form 8949 + Schedule D filing artifacts (year-scoped; omitted when None).
+    if let Some(year) = tax_year {
+        write_form8949_csv(out_dir, state, year)?;
+        write_schedule_d_csv(out_dir, state, year)?;
+    }
+    Ok(())
+}
+
+/// P2-B Task 2: write `form8949.csv` — one row per `DisposalLeg` disposed in `year`. Stable
+/// snake_case columns; exact `Decimal`/`i64` string values (NFR5). 0o600 via `open_owner_only`.
+fn write_form8949_csv(
+    out_dir: &Path,
+    state: &LedgerState,
+    year: i32,
+) -> Result<(), crate::CliError> {
+    let mut w = Writer::from_writer(fsperms::open_owner_only(&out_dir.join("form8949.csv"))?);
+    w.write_record([
+        "part",
+        "box",
+        "box_needs_review",
+        "description",
+        "date_acquired",
+        "date_sold",
+        "proceeds",
+        "cost_basis",
+        "adjustment_code",
+        "adjustment_amount",
+        "gain",
+        "wallet",
+        "disposition_kind",
+    ])?;
+    for r in form_8949(state, year) {
+        w.write_record([
+            form8949_part_tag(r.part).to_string(),
+            form8949_box_tag(r.box_).to_string(),
+            r.box_needs_review.to_string(),
+            r.description,
+            r.date_acquired.to_string(),
+            r.date_sold.to_string(),
+            r.proceeds.to_string(),
+            r.cost_basis.to_string(),
+            r.adjustment_code,
+            r.adjustment_amount.to_string(),
+            r.gain.to_string(),
+            wallet_label(&r.wallet),
+            dispose_kind_tag(r.disposition_kind).to_string(),
+        ])?;
+    }
+    w.flush()?;
+    Ok(())
+}
+
+/// P2-B Task 3: write `schedule_d.csv` — the two RAW pre-netting part totals (Part I ST, Part II LT)
+/// for `year`. §1222/§1211/§1212 netting + carryforward is applied by engine B, not here (D3).
+fn write_schedule_d_csv(
+    out_dir: &Path,
+    state: &LedgerState,
+    year: i32,
+) -> Result<(), crate::CliError> {
+    let mut w = Writer::from_writer(fsperms::open_owner_only(&out_dir.join("schedule_d.csv"))?);
+    w.write_record(["part", "proceeds", "cost_basis", "gain"])?;
+    let totals = schedule_d(state, year);
+    for (part, p) in [("ST", &totals.st), ("LT", &totals.lt)] {
+        w.write_record([
+            part.to_string(),
+            p.proceeds.to_string(),
+            p.cost_basis.to_string(),
+            p.gain.to_string(),
+        ])?;
+    }
+    w.flush()?;
     Ok(())
 }
 
@@ -732,6 +831,39 @@ pub fn render_tax_outcome(
     if let Some(msg) = advisory {
         let _ = writeln!(s, "  ADVISORY (M4): {msg}");
     }
+    s
+}
+
+/// P2-B Task 3: render the RAW pre-netting Schedule D part totals (Part I ST, Part II LT) for
+/// `year`, mirroring `render_tax_outcome`. These are the Form 8949/Schedule D part totals BEFORE
+/// §1222/§1211/§1212 netting + carryforward — that netting is applied in the tax computation
+/// (`report --tax-year`), and the netted figures are shown by `render_tax_outcome` above. The note
+/// makes the boundary explicit so the raw part totals are never mistaken for the netted result.
+pub fn render_schedule_d(year: i32, totals: &ScheduleDTotals) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "Schedule D (raw pre-netting part totals) — tax year {year}"
+    );
+    let _ = writeln!(
+        s,
+        "  Part I  (short-term): proceeds {}   cost basis {}   gain {}",
+        fmt_money(totals.st.proceeds),
+        fmt_money(totals.st.cost_basis),
+        fmt_money(totals.st.gain)
+    );
+    let _ = writeln!(
+        s,
+        "  Part II (long-term):  proceeds {}   cost basis {}   gain {}",
+        fmt_money(totals.lt.proceeds),
+        fmt_money(totals.lt.cost_basis),
+        fmt_money(totals.lt.gain)
+    );
+    let _ = writeln!(
+        s,
+        "  Note: §1222/§1211/§1212 netting + carryforward are applied in the tax computation \
+         (report --tax-year); these are the raw pre-netting Form 8949/Schedule D part totals."
+    );
     s
 }
 

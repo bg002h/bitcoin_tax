@@ -39,15 +39,18 @@ pub fn set_pre2025_method(
 }
 
 /// FR10 / NFR2 exception: decrypted SQLite image (via the store) + the projected ledger as CSV.
+/// When `tax_year` is `Some(y)`, the per-tax-year Form 8949 + Schedule D CSVs are also written,
+/// year-scoped to `y` (P2-B); when `None`, only the all-years CSVs are written.
 pub fn export_snapshot(
     vault_path: &Path,
     pp: &Passphrase,
     out_dir: &Path,
+    tax_year: Option<i32>,
 ) -> Result<PathBuf, CliError> {
     let session = Session::open(vault_path, pp)?;
     let sqlite = session.vault().export_snapshot(out_dir)?; // writes out_dir/snapshot.sqlite
     let (state, _cfg) = session.project()?;
-    write_csv_exports(out_dir, &state)?;
+    write_csv_exports(out_dir, &state, tax_year)?;
     Ok(sqlite)
 }
 

@@ -3,7 +3,9 @@
 //! `report_tax_year` also runs the M4 carryforward-consistency advisory (Task 10).
 use crate::{tax_profile, CliError, Session};
 use btctax_adapters::BundledTaxTables;
-use btctax_core::{carryforward_consistency, compute_tax_year, TaxOutcome, TaxProfile};
+use btctax_core::{
+    carryforward_consistency, compute_tax_year, schedule_d, ScheduleDTotals, TaxOutcome, TaxProfile,
+};
 use btctax_store::Passphrase;
 use std::path::Path;
 
@@ -38,12 +40,14 @@ pub fn report_tax_year(
     vault: &Path,
     pp: &Passphrase,
     year: i32,
-) -> Result<(TaxOutcome, Option<String>), CliError> {
+) -> Result<(TaxOutcome, Option<String>, ScheduleDTotals), CliError> {
     let s = Session::open(vault, pp)?;
     let (events, state, _cfg) = s.load_events_and_project()?;
     let profile = s.tax_profile(year)?;
     let tables = BundledTaxTables::load();
     let outcome = compute_tax_year(&events, &state, year, profile.as_ref(), &tables);
+    // P2-B: the RAW pre-netting Schedule D part totals for the same year, from the same projection.
+    let sched_d = schedule_d(&state, year);
 
     // M4 carryforward consistency advisory (Task 10): only when both this year's profile AND
     // the prior year's profile exist AND the prior year is Computed.  Never a hard blocker.
@@ -66,5 +70,5 @@ pub fn report_tax_year(
         None
     };
 
-    Ok((outcome, advisory))
+    Ok((outcome, advisory, sched_d))
 }
