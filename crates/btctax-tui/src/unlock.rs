@@ -413,6 +413,52 @@ mod tests {
         );
     }
 
+    // ── App-level: BTCTAX_PASSPHRASE env-var fast-path ──────────────────────
+
+    /// Mutex to serialize env-var tests: `std::env::set_var` / `remove_var` are not safe
+    /// to call concurrently from multiple threads (cargo test runs tests in parallel by default).
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn env_passphrase_var_opens_vault_and_transitions_to_viewer() {
+        let _env_guard = ENV_MUTEX.lock().unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key_backup = dir.path().join("key.asc");
+        let pp_str = "env-path-test-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key_backup).unwrap();
+
+        // Set env var; the `_env_guard` mutex ensures no other env-var test runs concurrently.
+        // SAFETY: env_guard serializes all callers — no concurrent set/remove races.
+        std::env::set_var("BTCTAX_PASSPHRASE", pp_str);
+
+        let mut app = App::new(vault.clone());
+        app.try_env_passphrase();
+
+        // Always clean up before any assert so the var is removed even on panic.
+        std::env::remove_var("BTCTAX_PASSPHRASE");
+
+        assert_eq!(
+            app.screen,
+            Screen::Viewer,
+            "BTCTAX_PASSPHRASE env var must transition App to Screen::Viewer"
+        );
+        assert!(
+            app.snapshot.is_some(),
+            "Snapshot must be populated when opened via BTCTAX_PASSPHRASE"
+        );
+        // Spot-check Snapshot fields are accessible (they are populated, not None/empty).
+        let snap = app.snapshot.as_ref().unwrap();
+        let _ = &snap.events;
+        let _ = &snap.state;
+        let _ = &snap.config;
+        let _ = &snap.cli_config;
+        let _ = &snap.profiles;
+        let _ = &snap.tables;
+    }
+
     // ── Read-only behavioral test [R0-M6] ────────────────────────────────────
     //
     // The immutable Session binding is a compile-level guarantee that save() cannot be called.

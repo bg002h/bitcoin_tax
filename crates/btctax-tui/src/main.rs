@@ -97,53 +97,56 @@ fn parse_vault_path() -> PathBuf {
 /// Only KEY PRESS events are acted on; repeat/release are ignored (crossterm distinguishes them
 /// on supporting terminals; others always send `Press`).
 ///
+/// Dispatches on `app.screen` FIRST so that `Screen::Unlock` gets full text-input priority:
+/// `q` and other printable chars are appended to the passphrase buffer; only `Esc` quits.
+/// This means passphrases containing `q`, `t`, or any other letter/digit/symbol work correctly.
+///
 /// # Screen dispatch
-/// - **Unlock**: char input → buffer; Backspace → pop; Enter → attempt open.
-/// - **Locked**: r → retry (back to Unlock); q/Esc → quit.
-/// - **Viewer**: q/Esc → quit (full tab keybindings added in later tasks).
-/// - **Global**: Tab/Shift-Tab cycle tabs on any screen; q/Esc quit on any screen.
+/// - **Unlock**: `Esc` → quit; `Tab`/`BackTab` → ignored (no tab bar on this screen);
+///   `Enter` → attempt open; `Backspace` → pop last char;
+///   any `Char` (including `q`) → append to passphrase buffer.
+/// - **Locked**: `r` → retry (back to Unlock); `q`/`Esc` → quit.
+/// - **Viewer**: `q`/`Esc` → quit; `Tab` → next tab; `BackTab` → prev tab
+///   (full tab keybindings added in later tasks).
 fn handle_key(app: &mut App, key: KeyEvent) {
     if key.kind != KeyEventKind::Press {
         return;
     }
 
-    // Global keys that apply on every screen
-    match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => {
-            app.should_quit = true;
-            return;
-        }
-        KeyCode::Tab => {
-            app.tab = app.tab.next();
-            return;
-        }
-        KeyCode::BackTab => {
-            app.tab = app.tab.prev();
-            return;
-        }
-        _ => {}
-    }
-
-    // Screen-specific keys
+    // Screen dispatch FIRST — so Unlock never accidentally fires global quit/tab keys.
     match app.screen {
         Screen::Unlock => match key.code {
+            // Only Esc quits from the Unlock screen — 'q' and all other chars go to buffer.
+            KeyCode::Esc => app.should_quit = true,
+            // Tab / BackTab are ignored: no tab bar on Unlock; must not cycle or consume.
+            KeyCode::Tab | KeyCode::BackTab => {}
+            // Enter submits the passphrase buffer.
+            KeyCode::Enter => app.do_unlock(),
+            // Backspace removes the last character.
+            KeyCode::Backspace => app.unlock.pop_char(),
+            // ALL printable chars — including 'q' and every letter/digit/symbol — go to buffer.
             KeyCode::Char(c) => {
-                // Clear the previous error when the user starts typing again
+                // Clear the previous error when the user starts typing again.
                 app.unlock.error = None;
                 app.unlock.push_char(c);
             }
-            KeyCode::Backspace => app.unlock.pop_char(),
-            KeyCode::Enter => app.do_unlock(),
             _ => {}
         },
-        Screen::Locked => {
-            if let KeyCode::Char('r') = key.code {
-                // Retry: return to Unlock screen
+        Screen::Locked => match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+            KeyCode::Char('r') => {
+                // Retry: return to Unlock screen.
                 app.screen = Screen::Unlock;
                 app.unlock.error = None;
             }
-        }
-        Screen::Viewer => {} // additional viewer keys added in Tasks 3–4
+            _ => {}
+        },
+        Screen::Viewer => match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+            KeyCode::Tab => app.tab = app.tab.next(),
+            KeyCode::BackTab => app.tab = app.tab.prev(),
+            _ => {} // additional viewer keys added in Tasks 3–4
+        },
     }
 }
 
@@ -258,7 +261,9 @@ mod tests {
 
     #[test]
     fn q_sets_should_quit() {
+        // 'q' quits on the Viewer screen (regression guard for global quit on non-Unlock screens).
         let mut app = new_app();
+        app.screen = Screen::Viewer;
         assert!(!app.should_quit);
         handle_key(&mut app, press(KeyCode::Char('q')));
         assert!(app.should_quit);
@@ -266,6 +271,7 @@ mod tests {
 
     #[test]
     fn esc_sets_should_quit() {
+        // Esc quits on both Unlock and Viewer; the Unlock screen is the default.
         let mut app = new_app();
         handle_key(&mut app, press(KeyCode::Esc));
         assert!(app.should_quit);
@@ -286,7 +292,9 @@ mod tests {
 
     #[test]
     fn tab_cycles_forward_through_all_six_and_wraps() {
+        // Tab cycles tabs on Screen::Viewer (regression guard — Tab is ignored on Unlock).
         let mut app = new_app();
+        app.screen = Screen::Viewer;
         assert_eq!(app.tab, Tab::Holdings);
 
         handle_key(&mut app, press(KeyCode::Tab));
@@ -311,7 +319,9 @@ mod tests {
 
     #[test]
     fn shift_tab_cycles_backward_through_all_six_and_wraps() {
+        // BackTab cycles tabs on Screen::Viewer (regression guard — BackTab is ignored on Unlock).
         let mut app = new_app();
+        app.screen = Screen::Viewer;
         assert_eq!(app.tab, Tab::Holdings);
 
         // BackTab is how crossterm reports Shift-Tab.
@@ -371,5 +381,125 @@ mod tests {
         app.screen = Screen::Locked;
         handle_key(&mut app, press(KeyCode::Char('r')));
         assert_eq!(app.screen, Screen::Unlock);
+    }
+
+    // ── handle_key: Unlock screen — full text-input priority ─────────────────
+    //
+    // The bug was: global 'q' / Tab / BackTab fired BEFORE screen dispatch, so on Unlock
+    // pressing 'q' quit the app and Tab cycled tabs instead of going into the passphrase.
+    // After the fix, screen dispatch is FIRST; Unlock gets all printable chars.
+
+    #[test]
+    fn q_on_unlock_screen_appends_to_buffer_not_quit() {
+        let mut app = new_app();
+        // Screen::Unlock is the default — 'q' must go to the passphrase buffer.
+        assert_eq!(app.screen, Screen::Unlock);
+        handle_key(&mut app, press(KeyCode::Char('q')));
+        assert!(
+            !app.should_quit,
+            "'q' on Unlock must NOT quit (only Esc quits from Unlock)"
+        );
+        assert_eq!(
+            app.unlock.buffer.chars().count(),
+            1,
+            "'q' on Unlock must be appended to the passphrase buffer"
+        );
+    }
+
+    #[test]
+    fn char_input_on_unlock_screen_appends_various_chars_including_q() {
+        let mut app = new_app();
+        // All of these are valid passphrase characters; none should quit or be swallowed.
+        for c in ['q', 'a', '1', '!', 'z', 'Q'] {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        assert_eq!(app.unlock.buffer.chars().count(), 6);
+        assert!(!app.should_quit, "no char key must quit from Unlock screen");
+    }
+
+    #[test]
+    fn esc_on_unlock_screen_quits() {
+        let mut app = new_app();
+        assert_eq!(app.screen, Screen::Unlock);
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(app.should_quit, "Esc must quit from Unlock screen");
+    }
+
+    #[test]
+    fn tab_on_unlock_screen_is_ignored() {
+        let mut app = new_app();
+        let initial_tab = app.tab;
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert_eq!(
+            app.tab, initial_tab,
+            "Tab on Unlock must not cycle tabs (no tab bar on Unlock)"
+        );
+        assert!(
+            app.unlock.buffer.is_empty(),
+            "Tab on Unlock must not append to the passphrase buffer"
+        );
+        assert!(!app.should_quit, "Tab on Unlock must not quit");
+    }
+
+    #[test]
+    fn backtab_on_unlock_screen_is_ignored() {
+        let mut app = new_app();
+        let initial_tab = app.tab;
+        handle_key(&mut app, press(KeyCode::BackTab));
+        assert_eq!(
+            app.tab, initial_tab,
+            "BackTab on Unlock must not cycle tabs"
+        );
+        assert!(
+            app.unlock.buffer.is_empty(),
+            "BackTab must not touch the buffer"
+        );
+        assert!(!app.should_quit, "BackTab on Unlock must not quit");
+    }
+
+    #[test]
+    fn enter_on_unlock_screen_calls_do_unlock_clears_buffer() {
+        // Use a well-formed but nonexistent vault path (PathBuf::new() has no file component
+        // and triggers a debug_assert in btctax-store's paths.rs sidecar-key computation).
+        let mut app = App::new(PathBuf::from("/nonexistent/vault.pgp"));
+        app.unlock.push_char('p');
+        app.unlock.push_char('a');
+        app.unlock.push_char('s');
+        assert_eq!(app.unlock.buffer.len(), 3);
+        handle_key(&mut app, press(KeyCode::Enter));
+        // do_unlock consumed buffer via mem::take — buffer must be empty regardless of outcome.
+        assert!(
+            app.unlock.buffer.is_empty(),
+            "Enter on Unlock must call do_unlock (buffer emptied by mem::take)"
+        );
+        // Vault not found → error is set and app does NOT quit.
+        assert!(!app.should_quit, "Enter on Unlock must not quit the app");
+        assert!(
+            app.unlock.error.is_some(),
+            "Enter on Unlock with nonexistent vault must set an error"
+        );
+    }
+
+    // ── handle_key: Viewer / Locked regression guards ────────────────────────
+
+    #[test]
+    fn q_on_viewer_screen_quits() {
+        let mut app = new_app();
+        app.screen = Screen::Viewer;
+        handle_key(&mut app, press(KeyCode::Char('q')));
+        assert!(app.should_quit, "'q' on Viewer must still quit");
+    }
+
+    #[test]
+    fn tab_on_viewer_screen_cycles_forward() {
+        let mut app = new_app();
+        app.screen = Screen::Viewer;
+        assert_eq!(app.tab, Tab::Holdings);
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert_eq!(
+            app.tab,
+            Tab::Disposals,
+            "Tab on Viewer must cycle to next tab"
+        );
     }
 }
