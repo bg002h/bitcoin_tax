@@ -998,6 +998,7 @@ pub(crate) fn fold_event(
                     legs,
                     appraisal_required: false,
                     donor_acquired_at,
+                    claimed_deduction: None,
                 });
             }
         }
@@ -1064,38 +1065,48 @@ pub(crate) fn fold_event(
                         "fee carry has no surviving removal leg to re-home onto (principal == 0)",
                     );
                 }
-                // §170(f)(11)(C) qualified-appraisal advisory: term-aware claimed-deduction proxy.
+                // §170(e)(1)(A) charitable-deduction amount: exact for a non-dealer individual
+                // investor donating a capital asset to a public charity (the modeled universe).
                 // Computed from the FINAL persisted legs (after both make_removal_legs AND
                 // carry.rehome_onto_removal_leg) so the re-homed fee-cent basis is included.
-                // LT legs → FMV (the LT-capital-gain deduction under §170(e));
-                // ST/ordinary legs → basis (§170(e)(1)(A)-reduced deduction).
-                // Emitted per qualifying Donate event (NOT once-per-projection).
+                // LT legs → FMV (the LT-capital-gain deduction under §170(e)); would-be gain is
+                // LTCG → no reduction; also FMV when depreciated (a would-be loss is not a reduction).
+                // ST legs → min(FMV, basis): when appreciated (basis<FMV) the ST gain reduces FMV
+                // to basis; when depreciated (basis>FMV) there is no would-be gain → deduction = FMV.
+                // Stored on the Removal; also drives §170(f)(11)(C) QualifiedAppraisalNote.
                 // Does NOT read or modify the user's `appraisal_required` bool (independent cross-check).
-                let deduction_proxy: Usd = legs
+                let claimed_deduction: Usd = legs
                     .iter()
                     .map(|leg| {
                         if leg.term == Term::LongTerm {
                             leg.fmv_at_transfer
                         } else {
-                            leg.basis
+                            leg.fmv_at_transfer.min(leg.basis)
                         }
                     })
                     .sum();
-                if deduction_proxy > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD {
+                if claimed_deduction > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD {
                     st.add_blocker(
                         BlockerKind::QualifiedAppraisalNote,
                         Some(eff.id.clone()),
                         format!(
-                            "Estimated deduction proxy: ${deduction_proxy:.2} exceeds the \
+                            "Claimed deduction ${claimed_deduction:.2} exceeds the \
                              §170(f)(11)(C) $5,000 threshold. Qualified appraisal likely required: \
                              CCA 202302012 — a crypto donation with a claimed deduction >$5,000 \
                              requires a qualified appraisal; the exchange-price/readily-valued \
                              exception does NOT apply to crypto. \
-                             Caveat (over-flag direction): this estimate treats all long-term legs \
-                             at FMV; crypto held as inventory/for sale in a trade or business \
-                             (§1221(a)(1)) or other ordinary-income property is deducted at basis \
-                             under §170(e) REGARDLESS of holding period — the precise determination \
-                             is deferred; verify. \
+                             This is the exact §170(e) deduction for a non-dealer individual \
+                             investor donating a capital asset (LT→FMV; ST→min(FMV,basis)). \
+                             Caveat (a) dealer/inventory: crypto held as inventory/for sale in a \
+                             trade or business (§1221(a)(1)) or other ordinary-income property \
+                             deducts at basis under §170(e) REGARDLESS of holding period — this \
+                             figure assumes capital-asset (investor) status and would OVER-STATE \
+                             for a dealer; verify. \
+                             Caveat (b) donee type: LT→FMV assumes a public charity (50%-limit org); \
+                             a non-operating private foundation reduces appreciated LT crypto to \
+                             basis (§170(e)(1)(B)(ii); crypto is not qualified appreciated stock) — \
+                             donee type is not modeled; would OVER-STATE for a private-foundation \
+                             gift; verify. \
                              §170(f)(11)(F) aggregation: this flags a single donation; the $5,000 \
                              test also aggregates similar donated items across the tax year — \
                              cross-donation aggregation is not considered here."
@@ -1109,6 +1120,7 @@ pub(crate) fn fold_event(
                     legs,
                     appraisal_required: *appraisal_required,
                     donor_acquired_at,
+                    claimed_deduction: Some(claimed_deduction),
                 });
             }
         }

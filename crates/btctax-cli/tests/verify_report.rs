@@ -685,3 +685,268 @@ cb-small-send,2026-01-15 12:00:00 UTC,Send,BTC,0.01000000,USD,50000.00,,,,,,bc1q
         report.advisory
     );
 }
+
+// ── P2-A Task 2 KATs: render_report charitable total + donation header + CSV column ─────────────
+
+/// (P2-A-T2-a) render_report per-year charitable-deduction total:
+/// - Two donations in year 2026 → total = their sum.
+/// - A prior-year donation (2025) is excluded from the year=2026 total.
+/// - The total line carries "BEFORE §170(b) AGI limits / carryover" qualifier [R0-I2].
+/// - The total line says "Schedule A itemized".
+#[test]
+fn render_report_charitable_total_year_filter_and_qualifier() {
+    use btctax_core::{EventId, LedgerState, Removal, RemovalKind, Source, SourceRef};
+    use rust_decimal_macros::dec;
+    use time::macros::date;
+
+    // Three donations: one in 2025 (prior year), two in 2026.
+    let make_removal = |src_ref: &str, date: time::Date, amount| Removal {
+        event: EventId::import(Source::Coinbase, SourceRef::new(src_ref)),
+        kind: RemovalKind::Donation,
+        removed_at: date,
+        legs: vec![],
+        appraisal_required: false,
+        donor_acquired_at: None,
+        claimed_deduction: Some(amount),
+    };
+    let mut state = LedgerState::default();
+    state
+        .removals
+        .push(make_removal("D-2025", date!(2025 - 12 - 15), dec!(8000.00))); // prior year
+    state.removals.push(make_removal(
+        "D-2026a",
+        date!(2026 - 03 - 01),
+        dec!(10000.00),
+    )); // year 2026
+    state.removals.push(make_removal(
+        "D-2026b",
+        date!(2026 - 06 - 01),
+        dec!(6000.00),
+    )); // year 2026
+
+    // Year 2026: total = $10,000 + $6,000 = $16,000.
+    let text_2026 = render::render_report(&state, Some(2026));
+    assert!(
+        text_2026.contains("16000.00"),
+        "year=2026 charitable total must be $16,000.00; got:\n{text_2026}"
+    );
+    // The prior-year $8k must NOT be included: $8k+$10k+$6k = $24k must not appear.
+    assert!(
+        !text_2026.contains("24000.00"),
+        "year=2026 total must NOT include 2025 donation (prior-year excluded); got:\n{text_2026}"
+    );
+    // [R0-I2] Label carries the §170(b) AGI limit qualifier.
+    assert!(
+        text_2026.contains("BEFORE §170(b) AGI limits / carryover"),
+        "total line must say 'BEFORE §170(b) AGI limits / carryover'; got:\n{text_2026}"
+    );
+    assert!(
+        text_2026.contains("Schedule A itemized"),
+        "total line must say 'Schedule A itemized'; got:\n{text_2026}"
+    );
+
+    // Year 2025: only the $8k donation.
+    let text_2025 = render::render_report(&state, Some(2025));
+    assert!(
+        text_2025.contains("8000.00"),
+        "year=2025 charitable total must be $8,000.00; got:\n{text_2025}"
+    );
+}
+
+/// (P2-A-T2-b) render_report donation header shows [claimed deduction $X].
+/// Gifts show no claimed-deduction annotation.
+#[test]
+fn render_report_donation_header_shows_claimed_deduction() {
+    use btctax_core::{EventId, LedgerState, Removal, RemovalKind, Source, SourceRef};
+    use rust_decimal_macros::dec;
+    use time::macros::date;
+
+    let mut state = LedgerState::default();
+    // Donation with claimed_deduction = $10k.
+    state.removals.push(Removal {
+        event: EventId::import(Source::Coinbase, SourceRef::new("DON")),
+        kind: RemovalKind::Donation,
+        removed_at: date!(2026 - 03 - 01),
+        legs: vec![],
+        appraisal_required: false,
+        donor_acquired_at: None,
+        claimed_deduction: Some(dec!(10000.00)),
+    });
+    // Gift with claimed_deduction = None.
+    state.removals.push(Removal {
+        event: EventId::import(Source::Coinbase, SourceRef::new("GIFT")),
+        kind: RemovalKind::Gift,
+        removed_at: date!(2026 - 04 - 01),
+        legs: vec![],
+        appraisal_required: false,
+        donor_acquired_at: None,
+        claimed_deduction: None,
+    });
+
+    let text = render::render_report(&state, None);
+    // Donation header must carry the claimed-deduction annotation.
+    assert!(
+        text.contains("claimed deduction"),
+        "donation header must show 'claimed deduction'; got:\n{text}"
+    );
+    assert!(
+        text.contains("10000.00"),
+        "donation header must show the deduction amount $10,000.00; got:\n{text}"
+    );
+    // Gift header must NOT carry a claimed-deduction annotation.
+    // We verify the gift line does NOT contain "claimed deduction".
+    // Since the donation line also has it, we check per-line.
+    let gift_line = text
+        .lines()
+        .find(|l| l.contains("gift"))
+        .expect("gift line must appear in report");
+    assert!(
+        !gift_line.contains("claimed deduction"),
+        "gift header must NOT show 'claimed deduction'; got: {gift_line}"
+    );
+}
+
+/// (P2-A-T2-c) CSV removals.csv has `claimed_deduction` column.
+/// Donation row: non-empty (the §170(e) deduction amount). Gift row: empty string.
+/// Uses a full vault with an LT donation reclassification.
+#[test]
+fn csv_removals_has_claimed_deduction_column() {
+    use csv::Reader;
+    use std::fs::File;
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // CSV: Buy 0.10 BTC 2025-01-05 (LT by 2026), Send A 2026-03-01 (→ Donate LT $10k),
+    //      Send B 2026-04-01 (→ GiftOut LT).
+    // Note: only 0.05 BTC for donation + 0.05 BTC for gift = 0.10 BTC total.
+    let p = dir.path().join("cb_don_gift.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,\
+Recipient Address\r\n\
+csv-buy,2025-01-05 12:00:00 UTC,Buy,BTC,0.10000000,USD,50000.00,5000.00,5050.00,50.00,,,\r\n\
+csv-send-a,2026-03-01 12:00:00 UTC,Send,BTC,0.05000000,USD,60000.00,,,,,,bc1qdonation\r\n\
+csv-send-b,2026-04-01 12:00:00 UTC,Send,BTC,0.05000000,USD,62000.00,,,,,,bc1qgiftout\r\n",
+    )
+    .unwrap();
+    cmd::import::run(&vault, &pp(), &[p]).unwrap();
+
+    // Identify the two pending TransferOuts and reclassify them.
+    let (ref_a, ref_b) = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert_eq!(
+            state.pending_reconciliation.len(),
+            2,
+            "two Sends must be pending"
+        );
+        let refs: Vec<_> = state
+            .pending_reconciliation
+            .iter()
+            .map(|p| p.event.canonical())
+            .collect();
+        // The CSV sends are ordered by timestamp: send-a first, send-b second.
+        (refs[0].clone(), refs[1].clone())
+    };
+    // Send A → Donate, FMV = $10,000. (LT: 2025-01-05 → 2026-03-01; >1yr → LT; basis ≈ $2525 pro-rata)
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &ref_a,
+        OutflowClass::Donate {
+            appraisal_required: false,
+        },
+        btctax_cli::eventref::parse_usd_arg("10000.00").unwrap(),
+        None,
+        now(),
+    )
+    .unwrap();
+    // Send B → GiftOut, FMV = $12,000.
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &ref_b,
+        OutflowClass::GiftOut,
+        btctax_cli::eventref::parse_usd_arg("12000.00").unwrap(),
+        None,
+        now(),
+    )
+    .unwrap();
+
+    // Export.
+    let out = dir.path().join("export_p2a");
+    let session = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = session.project().unwrap();
+    btctax_cli::render::write_csv_exports(&out, &state).unwrap();
+
+    // Read removals.csv and check the `claimed_deduction` column.
+    let mut rdr = Reader::from_reader(File::open(out.join("removals.csv")).unwrap());
+    // Header check: `claimed_deduction` must be the 9th column (index 8, 0-based).
+    let headers: Vec<String> = rdr
+        .headers()
+        .unwrap()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert!(
+        headers.contains(&"claimed_deduction".to_string()),
+        "removals.csv must have 'claimed_deduction' header; headers: {headers:?}"
+    );
+    let cd_idx = headers
+        .iter()
+        .position(|h| h == "claimed_deduction")
+        .unwrap();
+
+    let records: Vec<csv::StringRecord> = rdr
+        .records()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("removals.csv records must be readable");
+    assert!(
+        !records.is_empty(),
+        "removals.csv must have at least one data row"
+    );
+
+    // Donation row: claimed_deduction must be non-empty (the LT FMV = $10,000).
+    let donation_rows: Vec<_> = records
+        .iter()
+        .filter(|r| r.get(1) == Some("donation"))
+        .collect();
+    assert!(
+        !donation_rows.is_empty(),
+        "must have at least one donation row"
+    );
+    for row in &donation_rows {
+        let cd = row
+            .get(cd_idx)
+            .expect("claimed_deduction column must exist");
+        assert!(
+            !cd.is_empty(),
+            "donation row claimed_deduction must be non-empty; row: {row:?}"
+        );
+        // LT donation: claimed_deduction = FMV = $10,000 (the full total for this lot).
+        assert!(
+            cd.contains("10000"),
+            "LT donation claimed_deduction must contain '10000'; got: {cd}"
+        );
+    }
+
+    // Gift row: claimed_deduction must be empty.
+    let gift_rows: Vec<_> = records
+        .iter()
+        .filter(|r| r.get(1) == Some("gift"))
+        .collect();
+    assert!(!gift_rows.is_empty(), "must have at least one gift row");
+    for row in &gift_rows {
+        let cd = row
+            .get(cd_idx)
+            .expect("claimed_deduction column must exist");
+        assert!(
+            cd.is_empty(),
+            "gift row claimed_deduction must be empty; got: {cd}"
+        );
+    }
+}

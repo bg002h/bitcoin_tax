@@ -155,6 +155,10 @@ pub struct Removal {
     pub legs: Vec<RemovalLeg>,
     pub appraisal_required: bool, // donation (>$5k FMV over-flag, FOLLOWUPS)
     pub donor_acquired_at: Option<TaxDate>,
+    /// §170(e)(1)(A) charitable-deduction amount for a Donation: `Some(Σ(LT→fmv; ST→min(fmv,basis)))`.
+    /// `None` for a Gift (not a charitable deduction). Standalone Schedule-A figure — does NOT
+    /// feed engine B / `compute_tax_year`. Pre-§170(b) AGI limits and carryover.
+    pub claimed_deduction: Option<Usd>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncomeRecord {
