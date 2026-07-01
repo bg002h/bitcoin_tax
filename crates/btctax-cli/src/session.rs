@@ -2,13 +2,14 @@
 //! passphrase is ALWAYS a parameter — production resolves it in `main` (prompt/env); tests inject a
 //! constructed `Passphrase`. `project()` runs the pure core projection over the bundled price dataset.
 use crate::config::{self, CliConfig};
+use crate::donation_details;
 use crate::optimize_attest;
 use crate::tax_profile;
 use crate::CliError;
 use btctax_adapters::BundledPrices;
 use btctax_core::persistence::{init_schema, load_all};
-use btctax_core::TaxProfile;
 use btctax_core::{project, LedgerEvent, LedgerState, ProjectionConfig};
+use btctax_core::{DonationDetails, EventId, TaxProfile};
 use btctax_store::{Passphrase, Vault};
 use rusqlite::Connection;
 use std::path::Path;
@@ -44,6 +45,7 @@ impl Session {
         config::init_config_table(vault.conn())?;
         tax_profile::init_table(vault.conn())?;
         optimize_attest::init_table(vault.conn())?;
+        donation_details::init_table(vault.conn())?;
         vault.save()?;
         Ok(Session { vault })
     }
@@ -95,6 +97,14 @@ impl Session {
         &self,
     ) -> Result<std::collections::BTreeSet<btctax_core::EventId>, CliError> {
         optimize_attest::attested_set(self.conn())
+    }
+
+    /// All stored `DonationDetails`, keyed by donation `EventId` (NFR4-stable `BTreeMap`).
+    /// Robust to older vaults (defensive `init_table` guard inside `donation_details::all`).
+    pub fn donation_details(
+        &self,
+    ) -> Result<std::collections::BTreeMap<EventId, DonationDetails>, CliError> {
+        donation_details::all(self.conn())
     }
 
     /// Load all events and run the pure deterministic projection (NFR4) over the bundled daily-close

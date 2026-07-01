@@ -8,11 +8,13 @@
 //! gains to B's within-character `st_net`/`lt_net` (before B's carryforward/other-LT netting) so the
 //! forms and the tax engine can never silently diverge.
 use crate::conventions::{Sat, TaxDate, Usd, SATS_PER_BTC};
+use crate::donation::DonationDetails;
 use crate::event::{BasisSource, DisposeKind};
 use crate::identity::{EventId, LotId, WalletId};
 use crate::state::{LedgerState, RemovalKind, RemovalLeg, Term};
 use crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD;
 use rust_decimal::Decimal;
+use std::collections::BTreeMap;
 
 /// Which Form 8949 part / holding-period a row belongs to. **Part I = short-term** (held ≤ 1 yr);
 /// **Part II = long-term** (held > 1 yr). Derived 1:1 from the leg's `Term`.
@@ -251,13 +253,12 @@ fn how_acquired_from(bs: BasisSource) -> Form8283HowAcquired {
 /// rows carry `None`/`""` — so a naive SUM over the deduction column equals the correct per-donation
 /// total (mirrors P2-A's removals.csv).
 ///
-/// **Partially unmodeled user-input (honest gaps, never fabricated):** `appraiser` is always EMPTY
-/// (Section B appraiser struct deferred to Chunk 3), so `needs_review` is ALWAYS `true`. `fmv_method`
-/// is derived from the section (Section B → `"qualified appraisal"`; Section A → `""`) — no
-/// `FmvStatus` dependency (RemovalLeg carries no FMV provenance). `donee` is now populated from
-/// `Removal.donee` on the carrier row (Chunk 2 free-form label); Section-B structured
-/// name/address/EIN remains Chunk 3. For a Section B donation the qualified-appraiser signature is
-/// additionally mandatory (not modeled until Chunk 3).
+/// **Partially unmodeled user-input (honest gaps, never fabricated):** `appraiser` is populated from
+/// `DonationDetails` when present, otherwise empty. `needs_review` is section-aware: for Section B,
+/// `false` only when `DonationDetails` is present and `is_review_complete(Section::B)` returns `true`.
+/// For Section A, `false` when `DonationDetails` is present. `fmv_method` is derived from the
+/// section, overridden by `DonationDetails.fmv_method_override` when present. `donee` is populated
+/// from `DonationDetails.donee_name` when present, falling back to `Removal.donee`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Form8283Row {
     /// Section A/B — on the FIRST leg row only (`None` on subsequent legs). Driven by the
@@ -281,22 +282,27 @@ pub struct Form8283Row {
     /// Column: the per-DONATION §170(e) claimed deduction — on the FIRST leg row only (`None` on
     /// subsequent legs, so a CSV SUM does not double-count).
     pub claimed_deduction: Option<Usd>,
-    /// Column: FMV determination method — on the carrier (first-leg) row: `"qualified appraisal"`
-    /// for Section B (a qualified appraisal IS the required FMV-determination method for Section B),
-    /// or `""` for Section A (FMV method is not modeled; honest gap, never fabricated). Empty on
-    /// subsequent (non-carrier) leg rows. No `FmvStatus` dependency — derived from the section only.
+    /// Column: FMV determination method — on the carrier (first-leg) row: populated from
+    /// `DonationDetails.fmv_method_override` when present, otherwise `"qualified appraisal"`
+    /// for Section B or `""` for Section A (honest gap, never fabricated). Empty on subsequent
+    /// (non-carrier) leg rows. No `FmvStatus` dependency — derived from the section only.
     pub fmv_method: String,
-    /// Column: donee organization — from `Removal.donee` on the **carrier (first-leg) row**
-    /// (free-form label populated via `reconcile reclassify-outflow --donee`; `""` when `None`).
-    /// Empty on subsequent (non-carrier) legs (first-leg convention). Section-B structured
-    /// name/address/EIN + appraiser remain Chunk 3.
+    /// Column: donee organization — from `DonationDetails.donee_name` when present on the carrier
+    /// row, otherwise from `Removal.donee` (free-form label; `""` when `None`). Empty on subsequent
+    /// (non-carrier) legs (first-leg convention).
     pub donee: String,
-    /// Column: appraiser — EMPTY (unmodeled user-input; the Section B appraiser struct is deferred
-    /// to Chunk 3).
+    /// Column: appraiser — from `DonationDetails.appraiser_name` when present on the carrier row;
+    /// empty on non-carrier legs and when no details are stored.
     pub appraiser: String,
-    /// ALWAYS `true`: `fmv_method`/`appraiser` are unmodeled (honest gaps), so every row needs
-    /// review (and a Section B row additionally requires a qualified appraiser signature).
+    /// `true` when the row needs manual review: section-aware. For carrier rows with no details,
+    /// always `true`. For carrier rows with details: `false` when `is_review_complete(section)`
+    /// returns `true` (Section B requires full appraiser declaration; Section A: complete on presence).
+    /// Non-carrier rows: always `true`.
     pub needs_review: bool,
+    /// Full donation details for the carrier (first-leg) row — `None` on non-carrier legs.
+    /// Used by the CSV writer to flatten the Part III/IV extra columns without bloating the
+    /// common row fields. `None` when no details are stored for this donation.
+    pub details: Option<DonationDetails>,
 }
 
 /// Compute the §170(f)(11)(F) **year-aggregate** claimed deduction over all `Donation` removals in
@@ -345,7 +351,11 @@ pub fn year_donation_deduction(state: &LedgerState, year: i32) -> Usd {
 ///
 /// **Deterministic ordering (NFR4):** rows are sorted by `removed_at`, then the donation's `event`
 /// id, then the leg's `lot_id` — a total order over the (event, lot) space (mirrors `form_8949`).
-pub fn form_8283(state: &LedgerState, year: i32) -> Vec<Form8283Row> {
+pub fn form_8283(
+    state: &LedgerState,
+    year: i32,
+    details: &BTreeMap<EventId, DonationDetails>,
+) -> Vec<Form8283Row> {
     // D1: §170(f)(11)(F) year-aggregate — use the shared helper (single source of truth).
     // Gifts have claimed_deduction == None and are NOT §170 — they must NOT enter this aggregate.
     let year_agg_deduction: Usd = year_donation_deduction(state, year);
@@ -380,6 +390,11 @@ pub fn form_8283(state: &LedgerState, year: i32) -> Vec<Form8283Row> {
             .map(|(i, _)| i);
         for (i, leg) in r.legs.iter().enumerate() {
             let is_first = Some(i) == carrier_idx;
+            let d = if is_first {
+                details.get(&r.event)
+            } else {
+                None
+            };
             let row = Form8283Row {
                 section: is_first.then_some(section),
                 description: btc_amount_description(leg.sat),
@@ -390,17 +405,28 @@ pub fn form_8283(state: &LedgerState, year: i32) -> Vec<Form8283Row> {
                 fmv: leg.fmv_at_transfer,
                 claimed_deduction: if is_first { r.claimed_deduction } else { None },
                 fmv_method: if is_first {
-                    carrier_fmv_method.clone()
+                    d.and_then(|d| d.fmv_method_override.clone())
+                        .unwrap_or_else(|| carrier_fmv_method.clone())
                 } else {
                     String::new()
                 },
                 donee: if is_first {
-                    r.donee.clone().unwrap_or_default()
+                    d.map(|d| d.donee_name.clone())
+                        .unwrap_or_else(|| r.donee.clone().unwrap_or_default())
                 } else {
                     String::new()
                 },
-                appraiser: String::new(),
-                needs_review: true,
+                appraiser: if is_first {
+                    d.map(|d| d.appraiser_name.clone()).unwrap_or_default()
+                } else {
+                    String::new()
+                },
+                needs_review: if is_first {
+                    d.is_none_or(|d| !d.is_review_complete(section))
+                } else {
+                    true
+                },
+                details: if is_first { d.cloned() } else { None },
             };
             keyed.push((r.removed_at, &r.event, &leg.lot_id, row));
         }

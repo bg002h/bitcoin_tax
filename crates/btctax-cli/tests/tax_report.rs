@@ -10,12 +10,16 @@
 //!   NIIT: magi_with = 60,000 + 20,000 = 80,000 < 200,000 (Single threshold) → 0.
 //!   ordinary_delta: OTI unchanged by LT gain → 0.
 //!   total = 0 + 1,747.50 + 0 = 1,747.50.
-use btctax_cli::{cmd, render, Session};
-use btctax_core::{Carryforward, EventPayload, FilingStatus, InboundClass, IncomeKind, TaxProfile};
+use btctax_cli::{cmd, eventref, render, Session};
+use btctax_core::persistence::load_all;
+use btctax_core::{
+    form_8283, Carryforward, DonationDetails, EventPayload, FilingStatus, Form8283Section,
+    InboundClass, IncomeKind, OutflowClass, TaxProfile,
+};
 use btctax_store::Passphrase;
 use rust_decimal_macros::dec;
 use std::path::{Path, PathBuf};
-use time::macros::datetime;
+use time::macros::{date, datetime};
 
 fn pp() -> Passphrase {
     Passphrase::new("pw".into())
@@ -475,5 +479,167 @@ fn report_display_year_still_works_unchanged() {
     assert!(
         !rendered.contains("TOTAL federal tax"),
         "display path must not show tax output:\n{rendered}"
+    );
+}
+
+/// [R0-M3] Negative --prior-taxable-gifts WITHOUT --tax-year is rejected at the binary level.
+///
+/// The validation guard in `main.rs` runs BEFORE the `if let Some(y) = tax_year` branch, so
+/// the rejection fires even on the display-only (no --tax-year) path.
+///
+/// **This test FAILS if the guard is moved INSIDE the `if let Some(y) = tax_year` block.**
+/// Without `--tax-year`, the display path would be taken instead of the validation, and the
+/// binary would exit 0 rather than 2 (usage error).
+///
+/// Pattern: `std::process::Command` over the compiled binary (same as `fr9_exit_code.rs`).
+/// `CARGO_BIN_EXE_btctax` is set by Cargo for integration-test binaries.
+#[test]
+fn report_negative_prior_taxable_gifts_rejected_without_tax_year() {
+    // Minimal vault: just init (no events needed — validation fires before any projection).
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Drive the REAL binary: `report --prior-taxable-gifts=-5` with NO `--tax-year`.
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let status = std::process::Command::new(bin)
+        .args([
+            "--vault",
+            vault.to_str().expect("vault path is valid UTF-8"),
+            "report",
+            "--prior-taxable-gifts=-5",
+        ])
+        .env("BTCTAX_PASSPHRASE", "pw")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("btctax binary must execute successfully");
+    assert_ne!(
+        status.code().unwrap_or(0),
+        0,
+        "btctax report --prior-taxable-gifts=-5 (no --tax-year) must exit non-zero; \
+         if it exits 0 the validation guard has regressed into the --tax-year branch"
+    );
+}
+
+/// Write a synthetic Coinbase CSV with an LT buy (2022) and a Send (2024) for the M2 seam test.
+/// The Send becomes a pending TransferOut; once classified as Donate with FMV=$10,000 the LT lot
+/// produces claimed_deduction = FMV = $10,000, which exceeds $5,000 → Section B.
+fn write_lt_buy_send_2024(dir: &Path) -> PathBuf {
+    let p = dir.join("coinbase_donate_seam.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+seam-buy,2022-01-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,30000.00,30000.00,30000.00,0.00,,,\r\n\
+seam-donate-send,2024-03-01 12:00:00 UTC,Send,BTC,0.50000000,USD,20000.00,,,,,,bc1qsyntheticcharity\r\n",
+    )
+    .unwrap();
+    p
+}
+
+/// [M2] End-to-end seam: set-donation-details → session.donation_details() → form_8283 carrier.
+///
+/// Creates a Section-B-scale vault (LT buy 2022; Send classified as Donate FMV=$10,000 on
+/// 2024-03-01; LT lot → claimed_deduction = FMV = $10,000 > $5,000 Section-B threshold).
+/// Stores full §6695A details via `set_donation_details`, reads back via `session.donation_details()`,
+/// drives `form_8283`, and asserts the carrier row:
+///   - `needs_review == false`  (all §6695A fields present → `is_review_complete(B) == true`)
+///   - `appraiser == "Test Appraiser Seam"`
+///   - `donee == "Test Charity Seam"` (from DonationDetails.donee_name, not Removal.donee)
+///   - `section == Some(Form8283Section::B)`
+///
+/// This locks the EventId canonical→reparse seam between the side-table and the form lookup:
+/// the EventId stored in donation_details must match the removal's event in the projected state.
+#[test]
+fn e2e_donation_details_seam_form_8283_carrier() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_buy_send_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // Find the pending TransferOut event (the Send) → get its canonical event ID.
+    let send_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::TransferOut(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+
+    // Classify the Send as Donate with FMV=$10,000 (LT lot → deduction=$10,000 > $5k Section B).
+    let now = datetime!(2024-03-01 12:00:00 UTC);
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &send_ref,
+        OutflowClass::Donate {
+            appraisal_required: true,
+        },
+        dec!(10000),
+        None,
+        Some("Test Charity Seam".into()),
+        now,
+    )
+    .unwrap();
+
+    // Store full §6695A details (all Section-B completeness fields present).
+    let details = DonationDetails {
+        donee_name: "Test Charity Seam".into(),
+        donee_address: Some("456 Charity Ave, Anytown USA".into()),
+        donee_ein: Some("99-1234567".into()),
+        appraiser_name: "Test Appraiser Seam".into(),
+        appraiser_address: Some("789 Appraiser Blvd".into()),
+        appraiser_tin: Some("111223333".into()),
+        appraiser_ptin: Some("P09876543".into()),
+        appraiser_qualifications: Some("Certified digital asset appraiser, 10 yrs".into()),
+        appraisal_date: Some(date!(2024 - 02 - 15)),
+        fmv_method_override: None,
+    };
+    cmd::reconcile::set_donation_details(&vault, &pp(), &send_ref, details).unwrap();
+
+    // Read back via session.donation_details() → locks the EventId canonical→reparse seam.
+    let session = Session::open(&vault, &pp()).unwrap();
+    let stored_map = session.donation_details().unwrap();
+    let send_id = eventref::parse_event_id(&send_ref).unwrap();
+    let stored = stored_map
+        .get(&send_id)
+        .expect("donation details must be present after set");
+    assert_eq!(
+        stored.donee_name, "Test Charity Seam",
+        "donee_name must survive the EventId canonical→reparse seam"
+    );
+    assert_eq!(
+        stored.appraiser_name, "Test Appraiser Seam",
+        "appraiser_name must survive the EventId canonical→reparse seam"
+    );
+
+    // Project state + call form_8283 → assert the carrier row.
+    let (state, _cfg) = session.project().unwrap();
+    let rows = form_8283(&state, 2024, &stored_map);
+    let carrier = rows
+        .iter()
+        .find(|r| r.section.is_some())
+        .expect("one carrier row with Some(section) must be present");
+
+    assert!(
+        !carrier.needs_review,
+        "full §6695A fields must flip needs_review to false on the carrier row: {carrier:?}"
+    );
+    assert_eq!(
+        carrier.appraiser, "Test Appraiser Seam",
+        "appraiser must be populated from DonationDetails on the carrier"
+    );
+    assert_eq!(
+        carrier.donee, "Test Charity Seam",
+        "donee must come from DonationDetails.donee_name (not Removal.donee) on the carrier"
+    );
+    assert_eq!(
+        carrier.section,
+        Some(Form8283Section::B),
+        "LT donation with FMV=$10,000 > $5,000 threshold must be Section B"
     );
 }

@@ -7,7 +7,7 @@ use crate::unlock;
 use crate::unlock::UnlockState;
 use btctax_adapters::BundledTaxTables;
 use btctax_cli::CliConfig;
-use btctax_core::{LedgerEvent, LedgerState, TaxProfile};
+use btctax_core::{DonationDetails, EventId, LedgerEvent, LedgerState, TaxProfile};
 use btctax_store::Passphrase;
 use ratatui::widgets::TableState;
 use std::collections::BTreeMap;
@@ -106,6 +106,7 @@ pub struct Snapshot {
     pub cli_config: CliConfig,
     pub profiles: BTreeMap<i32, TaxProfile>,
     pub tables: BundledTaxTables,
+    pub donation_details: BTreeMap<EventId, DonationDetails>,
 }
 
 /// Top-level application state.

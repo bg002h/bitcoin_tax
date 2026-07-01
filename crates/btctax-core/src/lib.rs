@@ -1,6 +1,7 @@
 //! btctax-core: domain model + pure deterministic event-sourced projection for the bitcoin_tax ledger.
 //! The projection (`project`) is total and never panics (spec §7.1); only `persistence` performs I/O.
 pub mod conventions;
+pub mod donation;
 pub mod event;
 pub mod forms;
 pub mod identity;
@@ -12,6 +13,7 @@ pub mod state;
 pub mod tax;
 
 pub use conventions::{Sat, TaxDate, Usd};
+pub use donation::DonationDetails;
 pub use event::*;
 pub use forms::{
     form_8283, form_8949, schedule_d, year_donation_deduction, Form8283HowAcquired, Form8283Row,

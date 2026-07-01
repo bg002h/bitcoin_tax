@@ -4,6 +4,7 @@ use crate::config::CliConfig;
 use btctax_adapters::FileReport;
 use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::ImportReport;
+use btctax_core::DonationDetails;
 use btctax_core::{
     conservation_report, disposal_compliance, form_8283, form_8949, schedule_d,
     year_donation_deduction, BasisSource, Blocker, BlockerKind, ComplianceStatus,
@@ -14,7 +15,7 @@ use btctax_core::{
 };
 use btctax_store::fsperms;
 use csv::Writer;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -568,6 +569,7 @@ pub fn write_csv_exports(
     state: &LedgerState,
     tax_year: Option<i32>,
     se_result: Option<&SeTaxResult>,
+    donation_details: &BTreeMap<EventId, DonationDetails>,
 ) -> Result<(), crate::CliError> {
     fsperms::mkdir_owner_only(out_dir)?;
 
@@ -714,7 +716,7 @@ pub fn write_csv_exports(
     if let Some(year) = tax_year {
         write_form8949_csv(out_dir, state, year)?;
         write_schedule_d_csv(out_dir, state, year)?;
-        write_form8283_csv(out_dir, state, year)?;
+        write_form8283_csv(out_dir, state, year, donation_details)?;
         // P2-D: standalone Schedule SE §1401 figure — written only when there IS SE tax (a computed
         // SeTaxResult); omitted when the year has no business SE income (nothing to file).
         if let Some(se) = se_result {
@@ -807,6 +809,7 @@ fn write_form8283_csv(
     out_dir: &Path,
     state: &LedgerState,
     year: i32,
+    details: &BTreeMap<EventId, DonationDetails>,
 ) -> Result<(), crate::CliError> {
     use std::io::Write as _;
     let mut file = fsperms::open_owner_only(&out_dir.join("form8283.csv"))?;
@@ -843,8 +846,16 @@ fn write_form8283_csv(
         "donee",
         "appraiser",
         "needs_review",
+        // NEW Part III/IV detail columns:
+        "donee_ein",
+        "donee_address",
+        "appraiser_tin",
+        "appraiser_ptin",
+        "appraiser_qualifications",
+        "appraisal_date",
     ])?;
-    for row in form_8283(state, year) {
+    for row in form_8283(state, year, details) {
+        let d = row.details.as_ref();
         w.write_record([
             row.section
                 .map(form8283_section_tag)
@@ -863,6 +874,15 @@ fn write_form8283_csv(
             row.donee,
             row.appraiser,
             row.needs_review.to_string(),
+            // NEW:
+            d.and_then(|d| d.donee_ein.clone()).unwrap_or_default(),
+            d.and_then(|d| d.donee_address.clone()).unwrap_or_default(),
+            d.and_then(|d| d.appraiser_tin.clone()).unwrap_or_default(),
+            d.and_then(|d| d.appraiser_ptin.clone()).unwrap_or_default(),
+            d.and_then(|d| d.appraiser_qualifications.clone())
+                .unwrap_or_default(),
+            d.and_then(|d| d.appraisal_date.map(|dt| dt.to_string()))
+                .unwrap_or_default(),
         ])?;
     }
     w.flush()?;
@@ -2153,8 +2173,11 @@ mod gift_advisory_tests {
             msg.contains("13990000.00"),
             "cumulative $13,990,000 must appear: {msg}"
         );
-        // remaining = 0
-        assert!(msg.contains("0.00"), "remaining $0.00 must appear: {msg}");
+        // remaining = 0 — assert the exact phrasing so "13990000.00" cannot satisfy this
+        assert!(
+            msg.contains("($0.00 remaining)"),
+            "remaining $0.00 in exact phrasing '($0.00 remaining)' must appear: {msg}"
+        );
         // strict >: at exactly the limit, NOT exceeded
         assert!(
             !msg.contains("EXCEEDED"),
@@ -2383,7 +2406,7 @@ mod schedule_se_tests {
         let out = dir.path().join("export");
         let st = LedgerState::default();
         let r = golden1();
-        write_csv_exports(&out, &st, Some(2025), Some(&r)).unwrap();
+        write_csv_exports(&out, &st, Some(2025), Some(&r), &BTreeMap::new()).unwrap();
 
         let path = out.join("schedule_se.csv");
         assert!(path.exists(), "schedule_se.csv must be written");
@@ -2421,7 +2444,175 @@ mod schedule_se_tests {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("export");
         let st = LedgerState::default();
-        write_csv_exports(&out, &st, Some(2025), None).unwrap();
+        write_csv_exports(&out, &st, Some(2025), None, &BTreeMap::new()).unwrap();
         assert!(!out.join("schedule_se.csv").exists());
+    }
+}
+
+#[cfg(test)]
+mod form8283_csv_tests {
+    //! P2-C / Chunk-3b Task 2 unit KATs — `write_form8283_csv` Part III/IV detail columns.
+    //! Direct-state fixtures; pure unit (no vault). PRIVACY: synthetic values only.
+    use super::*;
+
+    /// form8283.csv — new Part III/IV detail columns populated when details are present.
+    #[test]
+    fn form8283_csv_detail_columns_present_and_empty() {
+        use btctax_core::{
+            BasisSource, DonationDetails, EventId, LedgerState, Removal, RemovalKind, RemovalLeg,
+            Term,
+        };
+        use time::macros::date;
+
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("export");
+
+        // Build a minimal state with one Section-B donation.
+        let event = EventId::decision(99);
+        let leg = RemovalLeg {
+            lot_id: btctax_core::LotId {
+                origin_event_id: event.clone(),
+                split_sequence: 0,
+            },
+            sat: 100_000_000,
+            basis: rust_decimal::Decimal::ZERO,
+            fmv_at_transfer: rust_decimal::Decimal::from(52000),
+            term: Term::LongTerm,
+            basis_source: BasisSource::ComputedFromCost,
+            acquired_at: date!(2025 - 01 - 01),
+        };
+        let removal = Removal {
+            event: event.clone(),
+            kind: RemovalKind::Donation,
+            removed_at: date!(2025 - 03 - 01),
+            legs: vec![leg],
+            appraisal_required: false,
+            donor_acquired_at: None,
+            claimed_deduction: Some(rust_decimal::Decimal::from(52000)),
+            donee: Some("Test Charity Two".into()),
+        };
+        // N1: second removal with NO details in dmap — locks the empty-half of the 6 new columns.
+        let event2 = EventId::decision(100);
+        let leg2 = RemovalLeg {
+            lot_id: btctax_core::LotId {
+                origin_event_id: event2.clone(),
+                split_sequence: 0,
+            },
+            sat: 10_000_000,
+            basis: rust_decimal::Decimal::ZERO,
+            fmv_at_transfer: rust_decimal::Decimal::from(8000),
+            term: Term::LongTerm,
+            basis_source: BasisSource::ComputedFromCost,
+            acquired_at: date!(2025 - 01 - 15),
+        };
+        let removal2 = Removal {
+            event: event2.clone(),
+            kind: RemovalKind::Donation,
+            removed_at: date!(2025 - 05 - 01),
+            legs: vec![leg2],
+            appraisal_required: false,
+            donor_acquired_at: None,
+            claimed_deduction: Some(rust_decimal::Decimal::from(8000)),
+            donee: Some("No Details Org".into()),
+        };
+
+        let st = LedgerState {
+            removals: vec![removal, removal2],
+            ..Default::default()
+        };
+
+        let mut dmap: BTreeMap<EventId, DonationDetails> = BTreeMap::new();
+        dmap.insert(
+            event,
+            DonationDetails {
+                donee_name: "Test Charity".into(),
+                donee_ein: Some("12-3456789".into()),
+                donee_address: Some("123 Main".into()),
+                appraiser_name: "Test Appraiser".into(),
+                appraiser_tin: Some("987654321".into()),
+                appraiser_ptin: Some("P01234567".into()),
+                appraiser_qualifications: Some("Certified".into()),
+                appraisal_date: Some(date!(2025 - 06 - 01)),
+                appraiser_address: None,
+                fmv_method_override: None,
+            },
+        );
+        // event2 intentionally NOT inserted — exercises the empty-column path.
+
+        write_csv_exports(&out, &st, Some(2025), None, &dmap).unwrap();
+
+        let path = out.join("form8283.csv");
+        assert!(path.exists(), "form8283.csv must exist");
+
+        let mut rdr = csv::ReaderBuilder::new()
+            .comment(Some(b'#'))
+            .from_path(&path)
+            .unwrap();
+        let headers: Vec<String> = rdr.headers().unwrap().iter().map(String::from).collect();
+        let idx = |name: &str| {
+            headers
+                .iter()
+                .position(|h| h == name)
+                .unwrap_or_else(|| panic!("header {name} not found"))
+        };
+        // Collect both rows. form_8283 sorts by (removed_at, event, lot_id):
+        //   records[0] = removal (removed_at 2025-03-01, event decision(99)) — WITH details.
+        //   records[1] = removal2 (removed_at 2025-05-01, event decision(100)) — NO details.
+        let all_recs: Vec<csv::StringRecord> = rdr.records().map(|r| r.unwrap()).collect();
+        assert_eq!(
+            all_recs.len(),
+            2,
+            "must have exactly two data rows (one per removal)"
+        );
+        let rec = &all_recs[0];
+        let no_details_rec = &all_recs[1];
+
+        // WITH-details half: all 6 new columns populated.
+        assert_eq!(&rec[idx("donee")], "Test Charity");
+        assert_eq!(&rec[idx("appraiser")], "Test Appraiser");
+        assert_eq!(&rec[idx("donee_ein")], "12-3456789");
+        assert_eq!(&rec[idx("donee_address")], "123 Main");
+        assert_eq!(&rec[idx("appraiser_tin")], "987654321");
+        assert_eq!(&rec[idx("appraiser_ptin")], "P01234567");
+        assert_eq!(&rec[idx("appraiser_qualifications")], "Certified");
+        assert_eq!(&rec[idx("appraisal_date")], "2025-06-01");
+        assert_eq!(&rec[idx("needs_review")], "false");
+
+        // N1: EMPTY half — no-details removal has all 6 new columns blank.
+        assert_eq!(
+            &no_details_rec[idx("donee_ein")],
+            "",
+            "no-details row: donee_ein must be empty"
+        );
+        assert_eq!(
+            &no_details_rec[idx("donee_address")],
+            "",
+            "no-details row: donee_address must be empty"
+        );
+        assert_eq!(
+            &no_details_rec[idx("appraiser_tin")],
+            "",
+            "no-details row: appraiser_tin must be empty"
+        );
+        assert_eq!(
+            &no_details_rec[idx("appraiser_ptin")],
+            "",
+            "no-details row: appraiser_ptin must be empty"
+        );
+        assert_eq!(
+            &no_details_rec[idx("appraiser_qualifications")],
+            "",
+            "no-details row: appraiser_qualifications must be empty"
+        );
+        assert_eq!(
+            &no_details_rec[idx("appraisal_date")],
+            "",
+            "no-details row: appraisal_date must be empty"
+        );
+        assert_eq!(
+            &no_details_rec[idx("needs_review")],
+            "true",
+            "no-details carrier row: needs_review must be true"
+        );
     }
 }

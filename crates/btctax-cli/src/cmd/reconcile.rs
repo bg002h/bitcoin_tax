@@ -2,15 +2,19 @@
 //! variant and appends it via `append_decision` (monotonic `decision_seq`), then saves. Decisions are
 //! append-only and re-projectable; the engine resolves precedence (latest-`decision_seq`, Void-first).
 //! `now` is the injected decision creation-time / safe-harbor made-date (§6.2) — deterministic in tests.
+//!
+//! Also contains the `set-donation-details` / `show-donation-details` side-table commands (no decision
+//! append — these write to the `donation_details` side-table directly, like `tax-profile set`).
 use crate::{CliError, Session};
 use btctax_adapters::BundledPrices;
 use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::{
-    project, AllocLot, AllocMethod, BlockerKind, ClassifyInbound, ClassifyRaw, EventId,
-    EventPayload, InboundClass, LedgerEvent, LotId, LotMethod, LotPick, LotSelection, ManualFmv,
-    MethodElection, OutflowClass, ReclassifyOutflow, RejectImport, SafeHarborAllocation,
-    SupersedeImport, TaxDate, TransferLink, TransferTarget, Usd, VoidDecisionEvent,
+    project, AllocLot, AllocMethod, BlockerKind, ClassifyInbound, ClassifyRaw, DonationDetails,
+    EventId, EventPayload, InboundClass, LedgerEvent, LotId, LotMethod, LotPick, LotSelection,
+    ManualFmv, MethodElection, OutflowClass, ReclassifyOutflow, RejectImport, RemovalKind,
+    SafeHarborAllocation, SupersedeImport, TaxDate, TransferLink, TransferTarget, Usd,
+    VoidDecisionEvent,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -557,4 +561,314 @@ pub fn safe_harbor_attest(
     )?;
     session.save()?;
     Ok(id)
+}
+
+/// Chunk 3b D2: store Form 8283 Section-B donation + appraiser details in the
+/// `donation_details` side-table for the donation identified by `event_ref`.
+///
+/// **[R0-M] Projected-removals validation:** the `event_ref` must resolve to a
+/// `Removal { kind == Donation }` in the PROJECTED `state.removals` — NOT by scanning the raw
+/// event log. A ref to a non-donation removal (Gift) or to an event that produces no removal
+/// (e.g. an Acquire) → `CliError::Usage` with a clear message. No decision is appended; this
+/// is a side-table write (last-write-wins upsert, like `tax_profile::set`).
+pub fn set_donation_details(
+    vault_path: &Path,
+    pp: &Passphrase,
+    event_ref: &str,
+    details: DonationDetails,
+) -> Result<(), CliError> {
+    let event_id = parse_event_id(event_ref)?;
+    let mut session = Session::open(vault_path, pp)?;
+    let (state, _cfg) = session.project()?;
+
+    // [R0-M] Validate against the PROJECTED state.removals.
+    let matched_removal = state.removals.iter().find(|r| r.event == event_id);
+    match matched_removal {
+        None => {
+            return Err(CliError::Usage(format!(
+                "not a donation / not found: {event_ref:?} does not match any removal in the \
+                 projected ledger (check removals.csv 'event' column for the correct ref)"
+            )));
+        }
+        Some(r) if r.kind != RemovalKind::Donation => {
+            return Err(CliError::Usage(format!(
+                "not a donation: {event_ref:?} is a {:?} removal, not a Donation",
+                r.kind
+            )));
+        }
+        Some(_) => {} // confirmed Donation — proceed
+    }
+
+    crate::donation_details::set(session.conn(), &event_id, &details)?;
+    session.save()?;
+    Ok(())
+}
+
+/// Chunk 3b D2: read back stored `DonationDetails` for the donation identified by `event_ref`.
+/// Returns `None` when no details have been stored yet. Read-only — no projection needed.
+pub fn show_donation_details(
+    vault_path: &Path,
+    pp: &Passphrase,
+    event_ref: &str,
+) -> Result<Option<DonationDetails>, CliError> {
+    let event_id = parse_event_id(event_ref)?;
+    let session = Session::open(vault_path, pp)?;
+    crate::donation_details::get(session.conn(), &event_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use btctax_core::event::{Acquire, BasisSource, TransferOut};
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::{
+        EventId, LedgerEvent, OutflowClass, ReclassifyOutflow, Source, SourceRef, WalletId,
+    };
+    use btctax_store::Passphrase;
+    use rust_decimal_macros::dec;
+    use time::macros::date;
+
+    fn pp() -> Passphrase {
+        Passphrase::new("test-pass".into())
+    }
+
+    /// Build a minimal `DonationDetails` for tests (synthetic — no real PII).
+    fn test_details() -> DonationDetails {
+        DonationDetails {
+            donee_name: "Test Charity".into(),
+            donee_address: None,
+            donee_ein: Some("12-3456789".into()),
+            appraiser_name: "Test Appraiser".into(),
+            appraiser_address: None,
+            appraiser_tin: Some("987654321".into()),
+            appraiser_ptin: None,
+            appraiser_qualifications: Some("Certified bitcoin appraiser".into()),
+            appraisal_date: Some(date!(2025 - 06 - 01)),
+            fmv_method_override: None,
+        }
+    }
+
+    /// Create a vault + Acquire + TransferOut + ReclassifyOutflow(Donate). Returns
+    /// (vault_path, donation_event_id, acquire_event_id) where donation_event_id is the
+    /// TransferOut EventId (which becomes the Removal.event in the projected ledger).
+    /// PRIVACY: synthetic values only.
+    fn setup_donation_vault(dir: &tempfile::TempDir) -> (std::path::PathBuf, EventId, EventId) {
+        use crate::Session;
+
+        let vault_path = dir.path().join("vault.pgp");
+        let mut session = Session::create(&vault_path, &pp()).unwrap();
+
+        // Fixed timestamps (deterministic, reproducible). Both pre-2025 (< 2025-01-01 =
+        // Unix 1_735_689_600) to stay in the Universal-pool path (no per-wallet allocation needed).
+        // ts_acq ≈ 2023-11-14, ts_out ≈ 2024-07-03.
+        let ts_acq = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let ts_out = time::OffsetDateTime::from_unix_timestamp(1_720_000_000).unwrap();
+
+        // Both events use the same exchange wallet so lots can be consumed from the same pool.
+        let wallet = WalletId::Exchange {
+            provider: "coinbase".into(),
+            account: "default".into(),
+        };
+
+        // Acquire 2_000_000 sats at $60,000 cost basis.
+        let acq_id = EventId::import(Source::Coinbase, SourceRef::new("in|test-acq-001"));
+        let acq_ev = LedgerEvent {
+            id: acq_id.clone(),
+            utc_timestamp: ts_acq,
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet.clone()),
+            payload: EventPayload::Acquire(Acquire {
+                sat: 2_000_000,
+                usd_cost: dec!(60000),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ComputedFromCost,
+            }),
+        };
+        append_import_batch(session.conn(), &[acq_ev]).unwrap();
+
+        // TransferOut 500_000 sats from the same wallet.
+        let out_id = EventId::import(Source::Coinbase, SourceRef::new("out|test-donation-001"));
+        let out_ev = LedgerEvent {
+            id: out_id.clone(),
+            utc_timestamp: ts_out,
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet.clone()),
+            payload: EventPayload::TransferOut(TransferOut {
+                sat: 500_000,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        };
+        append_import_batch(session.conn(), &[out_ev]).unwrap();
+
+        // ReclassifyOutflow as Donation with explicit FMV (no price lookup needed).
+        let classify_payload = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: out_id.clone(),
+            as_: OutflowClass::Donate {
+                appraisal_required: false,
+            },
+            principal_proceeds_or_fmv: dec!(15000),
+            fee_usd: None,
+            donee: Some("Test Charity".into()),
+        });
+        append_decision(
+            session.conn(),
+            classify_payload,
+            ts_out,
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+
+        session.save().unwrap();
+        (vault_path, out_id, acq_id)
+    }
+
+    /// `set_donation_details` on a real Donation event stores it;
+    /// `show_donation_details` reads it back correctly.
+    #[test]
+    fn set_then_show_round_trips_on_real_donation() {
+        let dir = tempfile::tempdir().unwrap();
+        let (vault_path, out_id, _acq_id) = setup_donation_vault(&dir);
+
+        // Store details.
+        set_donation_details(&vault_path, &pp(), &out_id.canonical(), test_details()).unwrap();
+
+        // Read back.
+        let stored = show_donation_details(&vault_path, &pp(), &out_id.canonical())
+            .unwrap()
+            .expect("details must be present");
+        assert_eq!(stored, test_details());
+    }
+
+    /// Targeting a missing ref → a clear `CliError::Usage` (not a panic).
+    #[test]
+    fn set_donation_details_missing_ref_is_usage_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let (vault_path, _out_id, _acq_id) = setup_donation_vault(&dir);
+
+        let bogus = EventId::import(Source::Coinbase, SourceRef::new("out|no-such-event"));
+        let err = set_donation_details(&vault_path, &pp(), &bogus.canonical(), test_details())
+            .unwrap_err();
+        assert!(
+            matches!(err, CliError::Usage(_)),
+            "expected Usage error, got: {err}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not a donation") || msg.contains("not found"),
+            "error must mention 'not a donation' or 'not found': {msg}"
+        );
+    }
+
+    /// Targeting the Acquire event (not a Donation removal) → a clear `CliError::Usage`.
+    #[test]
+    fn set_donation_details_non_donation_event_is_usage_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let (vault_path, _out_id, acq_id) = setup_donation_vault(&dir);
+
+        // The Acquire event is not a Donation removal in the projected ledger.
+        let err = set_donation_details(&vault_path, &pp(), &acq_id.canonical(), test_details())
+            .unwrap_err();
+        assert!(
+            matches!(err, CliError::Usage(_)),
+            "expected Usage error, got: {err}"
+        );
+    }
+
+    /// `show_donation_details` returns `None` before any details are stored.
+    #[test]
+    fn show_donation_details_returns_none_before_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let (vault_path, out_id, _acq_id) = setup_donation_vault(&dir);
+
+        let stored = show_donation_details(&vault_path, &pp(), &out_id.canonical()).unwrap();
+        assert_eq!(stored, None);
+    }
+
+    /// Build a vault with a Gift removal (not a Donation). Returns (vault_path, gift_event_id).
+    fn setup_gift_vault(dir: &tempfile::TempDir) -> (std::path::PathBuf, EventId) {
+        use crate::Session;
+        let vault_path = dir.path().join("gift-vault.pgp");
+        let mut session = Session::create(&vault_path, &pp()).unwrap();
+
+        let ts_acq = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let ts_out = time::OffsetDateTime::from_unix_timestamp(1_720_000_000).unwrap();
+        let wallet = WalletId::Exchange {
+            provider: "coinbase".into(),
+            account: "default".into(),
+        };
+
+        let acq_id = EventId::import(Source::Coinbase, SourceRef::new("in|gift-acq-001"));
+        let acq_ev = LedgerEvent {
+            id: acq_id.clone(),
+            utc_timestamp: ts_acq,
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet.clone()),
+            payload: EventPayload::Acquire(Acquire {
+                sat: 2_000_000,
+                usd_cost: dec!(60000),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ComputedFromCost,
+            }),
+        };
+        append_import_batch(session.conn(), &[acq_ev]).unwrap();
+
+        let out_id = EventId::import(Source::Coinbase, SourceRef::new("out|gift-001"));
+        let out_ev = LedgerEvent {
+            id: out_id.clone(),
+            utc_timestamp: ts_out,
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet.clone()),
+            payload: EventPayload::TransferOut(TransferOut {
+                sat: 500_000,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        };
+        append_import_batch(session.conn(), &[out_ev]).unwrap();
+
+        // Reclassify as GiftOut (NOT Donate)
+        let classify_payload = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: out_id.clone(),
+            as_: OutflowClass::GiftOut,
+            principal_proceeds_or_fmv: dec!(15000),
+            fee_usd: None,
+            donee: None,
+        });
+        append_decision(
+            session.conn(),
+            classify_payload,
+            ts_out,
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+
+        session.save().unwrap();
+        (vault_path, out_id)
+    }
+
+    /// `set_donation_details` targeting a Gift removal → "is a Gift removal, not a Donation" error.
+    /// Exercises the `Some(r) if r.kind != RemovalKind::Donation` arm (previously untested).
+    #[test]
+    fn set_donation_details_gift_removal_is_usage_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let (vault_path, gift_out_id) = setup_gift_vault(&dir);
+
+        let err =
+            set_donation_details(&vault_path, &pp(), &gift_out_id.canonical(), test_details())
+                .unwrap_err();
+        assert!(
+            matches!(err, CliError::Usage(_)),
+            "expected Usage error, got: {err}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not a donation") || msg.contains("Gift"),
+            "error must mention 'not a donation' or 'Gift': {msg}"
+        );
+    }
 }

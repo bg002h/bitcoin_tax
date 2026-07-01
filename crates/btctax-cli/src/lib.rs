@@ -4,6 +4,7 @@
 //! dispatch. PRIVACY: tests use only temp vaults + synthetic fixtures; no real user file is ever read.
 pub mod cmd;
 pub mod config;
+pub mod donation_details;
 pub mod eventref;
 pub mod optimize_attest;
 pub mod render;

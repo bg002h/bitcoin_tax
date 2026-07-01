@@ -47,6 +47,7 @@ fn make_snapshot(state: LedgerState) -> Snapshot {
         cli_config: btctax_cli::CliConfig::default(),
         profiles: BTreeMap::new(),
         tables: BundledTaxTables::load(),
+        donation_details: BTreeMap::new(),
     }
 }
 
@@ -779,6 +780,7 @@ fn make_snapshot_with_profile(state: LedgerState) -> Snapshot {
         cli_config: btctax_cli::CliConfig::default(),
         profiles,
         tables: BundledTaxTables::load(),
+        donation_details: BTreeMap::new(),
     }
 }
 

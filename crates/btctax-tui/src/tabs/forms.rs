@@ -123,7 +123,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
 
     // ── Schedule D + Form 8283 + footnotes ────────────────────────────────────────────────────
     let sd = schedule_d(&snap.state, year);
-    let rows_8283 = form_8283(&snap.state, year);
+    let rows_8283 = form_8283(&snap.state, year, &snap.donation_details);
 
     let mut bottom = String::new();
     let _ = writeln!(
