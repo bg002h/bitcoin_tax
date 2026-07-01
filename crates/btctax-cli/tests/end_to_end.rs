@@ -46,6 +46,7 @@ fn full_lifecycle_init_import_verify_reconcile_report() {
         },
         btctax_cli::eventref::parse_usd_arg("2050.00").unwrap(),
         Some(btctax_cli::eventref::parse_usd_arg("2.50").unwrap()),
+        None,
         now,
     )
     .unwrap();

@@ -643,6 +643,7 @@ pub fn write_csv_exports(
     // Multi-leg donations: the value is a per-REMOVAL total shown on the FIRST leg row only;
     // subsequent leg rows carry an empty cell so a naive SUM() equals the correct per-donation
     // total (no double-counting). Do not divide across legs — that would create rounding artifacts.
+    // donee: free-form donee label (Chunk 2); empty when not set.
     w.write_record([
         "event",
         "kind",
@@ -654,12 +655,14 @@ pub fn write_csv_exports(
         "term",
         "acquired_at",
         "claimed_deduction",
+        "donee",
     ])?;
     for r in &state.removals {
         let deduction_first = r
             .claimed_deduction
             .map(|d| d.to_string())
             .unwrap_or_default();
+        let donee_cell = r.donee.clone().unwrap_or_default();
         for (leg_idx, leg) in r.legs.iter().enumerate() {
             // Emit claimed_deduction only on leg 0; leave empty on subsequent legs so SUM()
             // over the column equals the true per-donation total (not N-legs × deduction).
@@ -679,6 +682,7 @@ pub fn write_csv_exports(
                 term_tag(leg.term).to_string(),
                 leg.acquired_at.to_string(),
                 deduction_cell.to_string(),
+                donee_cell.clone(),
             ])?;
         }
     }
@@ -1595,6 +1599,7 @@ mod gift_advisory_tests {
             appraisal_required: false,
             donor_acquired_at: None,
             claimed_deduction: None,
+            donee: None,
         }
     }
     fn state_with(removals: Vec<Removal>) -> LedgerState {

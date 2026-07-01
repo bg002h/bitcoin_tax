@@ -225,6 +225,10 @@ enum Reconcile {
         fee: Option<String>,
         #[arg(long)]
         appraisal: bool,
+        /// Free-form donee identifier (e.g. "Alice", "Charity X"). Carried through to
+        /// removals.csv and Form 8283; does not affect tax math.
+        #[arg(long)]
+        donee: Option<String>,
     },
     /// Set a manual FMV on an event.
     SetFmv {
@@ -698,6 +702,7 @@ fn dispatch_reconcile(
             amount,
             fee,
             appraisal,
+            donee,
         } => {
             let class = match as_kind {
                 OutKindArg::Sell => OutflowClass::Dispose {
@@ -713,7 +718,7 @@ fn dispatch_reconcile(
             };
             let principal = eventref::parse_usd_arg(&amount)?;
             let fee = fee.as_deref().map(eventref::parse_usd_arg).transpose()?;
-            cmd::reconcile::reclassify_outflow(vault, &pp, &out, class, principal, fee, now)?
+            cmd::reconcile::reclassify_outflow(vault, &pp, &out, class, principal, fee, donee, now)?
         }
         Reconcile::SetFmv { event, fmv } => {
             cmd::reconcile::set_fmv(vault, &pp, &event, eventref::parse_usd_arg(&fmv)?, now)?

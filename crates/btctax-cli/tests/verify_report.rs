@@ -579,6 +579,7 @@ cb-appr-send,2026-01-30 12:00:00 UTC,Send,BTC,0.10000000,USD,90000.00,,,,,,bc1qs
         },
         btctax_cli::eventref::parse_usd_arg("90000.00").unwrap(), // FMV = $90k → LT proxy > $5k
         None,
+        None,
         now(),
     )
     .unwrap();
@@ -670,6 +671,7 @@ cb-small-send,2026-01-15 12:00:00 UTC,Send,BTC,0.01000000,USD,50000.00,,,,,,bc1q
         },
         btctax_cli::eventref::parse_usd_arg("1000.00").unwrap(), // FMV; ST → proxy = basis = $510
         None,
+        None,
         now(),
     )
     .unwrap();
@@ -708,6 +710,7 @@ fn render_report_charitable_total_year_filter_and_qualifier() {
         appraisal_required: false,
         donor_acquired_at: None,
         claimed_deduction: Some(amount),
+        donee: None,
     };
     let mut state = LedgerState::default();
     state
@@ -771,6 +774,7 @@ fn render_report_donation_header_shows_claimed_deduction() {
         appraisal_required: false,
         donor_acquired_at: None,
         claimed_deduction: Some(dec!(10000.00)),
+        donee: None,
     });
     // Gift with claimed_deduction = None.
     state.removals.push(Removal {
@@ -781,6 +785,7 @@ fn render_report_donation_header_shows_claimed_deduction() {
         appraisal_required: false,
         donor_acquired_at: None,
         claimed_deduction: None,
+        donee: None,
     });
 
     let text = render::render_report(&state, None);
@@ -862,6 +867,7 @@ csv-send-b,2026-04-01 12:00:00 UTC,Send,BTC,0.05000000,USD,62000.00,,,,,,bc1qgif
         },
         btctax_cli::eventref::parse_usd_arg("10000.00").unwrap(),
         None,
+        None,
         now(),
     )
     .unwrap();
@@ -872,6 +878,7 @@ csv-send-b,2026-04-01 12:00:00 UTC,Send,BTC,0.05000000,USD,62000.00,,,,,,bc1qgif
         &ref_b,
         OutflowClass::GiftOut,
         btctax_cli::eventref::parse_usd_arg("12000.00").unwrap(),
+        None,
         None,
         now(),
     )

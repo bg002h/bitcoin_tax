@@ -51,6 +51,8 @@ pub fn classify_inbound(
 /// FR6: reclassify a pending `TransferOut` as a Sell/Spend disposition, a Gift out, or a Donation.
 /// `principal` is the gross proceeds (Dispose) or FMV-at-transfer (Gift/Donate); `fee_usd` is the
 /// optional disposition fee (TP8 / TP2). The engine applies the configured TP8 (c)/(b) fee treatment.
+/// `donee` is the optional free-form donee identifier (Chunk 2); `None` for disposals and legacy records.
+#[allow(clippy::too_many_arguments)]
 pub fn reclassify_outflow(
     vault_path: &Path,
     pp: &Passphrase,
@@ -58,6 +60,7 @@ pub fn reclassify_outflow(
     class: OutflowClass,
     principal: Usd,
     fee_usd: Option<Usd>,
+    donee: Option<String>,
     now: OffsetDateTime,
 ) -> Result<EventId, CliError> {
     let transfer_out_event = parse_event_id(out_ref)?;
@@ -67,6 +70,7 @@ pub fn reclassify_outflow(
         as_: class,
         principal_proceeds_or_fmv: principal,
         fee_usd,
+        donee,
     });
     append_and_save(&mut session, payload, now)
 }

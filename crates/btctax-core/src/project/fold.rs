@@ -956,7 +956,11 @@ pub(crate) fn fold_event(
             stats.sigma_in += *sat; // classified GiftReceived is externally-sourced (FR9)
         }
         Op::GiftOut {
-            sat, fmv, fee_sat, ..
+            sat,
+            fmv,
+            fee_sat,
+            donee,
+            ..
         } => {
             // TP10: gift outbound → Removal with zero recognized gain; no Disposal.
             let wallet = match &eff.wallet {
@@ -1022,6 +1026,7 @@ pub(crate) fn fold_event(
                     appraisal_required: false,
                     donor_acquired_at,
                     claimed_deduction: None,
+                    donee: donee.clone(),
                 });
             }
         }
@@ -1030,6 +1035,7 @@ pub(crate) fn fold_event(
             fmv,
             appraisal_required,
             fee_sat,
+            donee,
             ..
         } => {
             // TP10: donation outbound → Removal with zero recognized gain; no Disposal.
@@ -1144,6 +1150,7 @@ pub(crate) fn fold_event(
                     appraisal_required: *appraisal_required,
                     donor_acquired_at,
                     claimed_deduction: Some(claimed_deduction),
+                    donee: donee.clone(),
                 });
             }
         }

@@ -564,6 +564,7 @@ fn gift_out_is_zero_gain_with_basis_fmv_and_term() {
             as_: OutflowClass::GiftOut,
             principal_proceeds_or_fmv: dec!(150.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     let st = project(
@@ -612,6 +613,7 @@ fn donation_over_5k_flags_appraisal_required() {
             },
             principal_proceeds_or_fmv: dec!(60000.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     let st = project(
@@ -658,6 +660,7 @@ fn reclassify_outflow_as_dispose_creates_disposal_with_gain() {
             },
             principal_proceeds_or_fmv: dec!(150.00),
             fee_usd: Some(dec!(1.00)),
+            donee: None,
         }),
     );
     let st = project(
@@ -954,6 +957,7 @@ fn duplicate_reclassify_outflow_same_target_is_decision_conflict() {
             as_: OutflowClass::GiftOut,
             principal_proceeds_or_fmv: dec!(100.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     // Second ReclassifyOutflow: duplicate targeting the same transfer_out_event.
@@ -967,6 +971,7 @@ fn duplicate_reclassify_outflow_same_target_is_decision_conflict() {
             },
             principal_proceeds_or_fmv: dec!(150.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     let st = project(
@@ -1102,6 +1107,7 @@ fn gift_out_fee_default_c_carries_full_basis_onto_the_removal() {
             as_: OutflowClass::GiftOut,
             principal_proceeds_or_fmv: dec!(150.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     let st = project(
@@ -1398,6 +1404,7 @@ fn reclassify_dispose_fee_sat_treatment_c_conservation_honest() {
             },
             principal_proceeds_or_fmv: dec!(150.00),
             fee_usd: Some(dec!(1.00)),
+            donee: None,
         }),
     );
     let st = project(
@@ -1496,6 +1503,7 @@ fn reclassify_dispose_fee_sat_treatment_b_mini_disposition() {
             },
             principal_proceeds_or_fmv: dec!(150.00),
             fee_usd: Some(dec!(1.00)),
+            donee: None,
         }),
     );
     let st = project(&[buy, out, recl], &prices, &cfg);
@@ -1579,6 +1587,7 @@ fn donate_single(
                 as_: OutflowClass::Donate { appraisal_required },
                 principal_proceeds_or_fmv: fmv,
                 fee_usd: None,
+                donee: None,
             }),
         ),
     ]
@@ -1720,6 +1729,7 @@ fn qualified_appraisal_mixed_legs_above_threshold_flagged() {
             },
             principal_proceeds_or_fmv: dec!(100000.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     let st = project(
@@ -1779,6 +1789,7 @@ fn qualified_appraisal_mixed_legs_below_threshold_not_flagged() {
             },
             principal_proceeds_or_fmv: dec!(1000.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     let st = project(
@@ -1987,6 +1998,7 @@ fn qualified_appraisal_two_qualifying_donations_emit_two_notes() {
             },
             principal_proceeds_or_fmv: dec!(60000.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     let recl2 = dec_ev(
@@ -1999,6 +2011,7 @@ fn qualified_appraisal_two_qualifying_donations_emit_two_notes() {
             },
             principal_proceeds_or_fmv: dec!(60000.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     let st = project(
@@ -2049,6 +2062,7 @@ fn qualified_appraisal_gift_out_never_emits_note() {
             as_: OutflowClass::GiftOut,
             principal_proceeds_or_fmv: dec!(60000.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     let st = project(
@@ -2262,6 +2276,7 @@ fn claimed_deduction_mixed_lt_plus_st() {
             },
             principal_proceeds_or_fmv: dec!(100000.00), // total FMV $100k → pro-rata $50k each
             fee_usd: None,
+            donee: None,
         }),
     );
     let st = project(
@@ -2308,6 +2323,7 @@ fn gift_claimed_deduction_is_none() {
             as_: OutflowClass::GiftOut,
             principal_proceeds_or_fmv: dec!(150.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     let st = project(
@@ -2733,6 +2749,7 @@ fn task1_removalleg_kat_a_ordinary_donation_acquired_at_equals_hp_start() {
             },
             principal_proceeds_or_fmv: dec!(150.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     let st = project(
@@ -2790,6 +2807,7 @@ fn task1_removalleg_kat_b_gift_received_then_donated_acquired_at_equals_donor_da
             },
             principal_proceeds_or_fmv: dec!(150.00),
             fee_usd: None,
+            donee: None,
         }),
     );
     evs.push(out);

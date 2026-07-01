@@ -524,6 +524,7 @@ fn donation(
         appraisal_required: false,
         donor_acquired_at: None,
         claimed_deduction: Some(claimed_deduction),
+        donee: None,
     }
 }
 fn gift(seq: u64, removed_at: TaxDate, legs: Vec<RemovalLeg>) -> Removal {
@@ -535,6 +536,7 @@ fn gift(seq: u64, removed_at: TaxDate, legs: Vec<RemovalLeg>) -> Removal {
         appraisal_required: false,
         donor_acquired_at: None,
         claimed_deduction: None,
+        donee: None,
     }
 }
 fn state_removals(removals: Vec<Removal>) -> LedgerState {

@@ -113,6 +113,11 @@ pub struct ReclassifyOutflow {
     pub as_: OutflowClass,
     pub principal_proceeds_or_fmv: Usd,
     pub fee_usd: Option<Usd>, // TP8: fee handling for a reclassified outflow
+    /// Donee identifier (free-form label; structured name/address/EIN = Chunk 3).
+    /// `#[serde(default)]` ensures existing vault records without this field deserialize to `None`
+    /// — the back-compat guarantee that lets legacy `"GiftOut"` unit-variant JSON still load.
+    #[serde(default)]
+    pub donee: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InboundClass {
@@ -353,6 +358,7 @@ mod tests {
                 },
                 principal_proceeds_or_fmv: dec!(150.00),
                 fee_usd: Some(dec!(2.50)),
+                donee: None,
             }),
             EventPayload::ClassifyInbound(ClassifyInbound {
                 transfer_in_event: EventId::import(Source::Coinbase, SourceRef::new("V")),
@@ -499,6 +505,68 @@ mod tests {
         }));
         let json = serde_json::to_string(&ev).unwrap();
         assert!(json.contains("\"0.10\"")); // serde-str: exact, not a 0.1 float
+    }
+
+    /// [R0-I1] back-compat KAT: legacy `EventPayload::ReclassifyOutflow` JSON records that predate
+    /// the `donee` field (Chunk 2) MUST still deserialize successfully, with `donee: None`.
+    ///
+    /// This is the "existing vault still opens" guarantee: the `#[serde(default)]` on
+    /// `ReclassifyOutflow.donee` makes the field optional in JSON. Crucially, `OutflowClass::GiftOut`
+    /// remains a UNIT variant serialized as the bare string `"GiftOut"` — if donee had been added to
+    /// the variant itself, legacy `"GiftOut"` records would fail to parse. It lives on the struct.
+    #[test]
+    fn reclassify_outflow_legacy_json_back_compat_donee_defaults_to_none() {
+        // Legacy GiftOut: bare unit-variant string, no donee field.
+        // This is exactly the format written by pre-Chunk-2 code.
+        // EventId::Import serializes as {"Import": {"source": "Coinbase", "source_ref": "OUT-1"}}.
+        let gift_json = r#"{
+            "ReclassifyOutflow": {
+                "transfer_out_event": {"Import": {"source": "Coinbase", "source_ref": "OUT-1"}},
+                "as_": "GiftOut",
+                "principal_proceeds_or_fmv": "25000.00",
+                "fee_usd": null
+            }
+        }"#;
+        let parsed: EventPayload =
+            serde_json::from_str(gift_json).expect("legacy GiftOut JSON must deserialize");
+        match parsed {
+            EventPayload::ReclassifyOutflow(ro) => {
+                assert!(
+                    matches!(ro.as_, OutflowClass::GiftOut),
+                    "as_ must be GiftOut"
+                );
+                assert_eq!(
+                    ro.donee, None,
+                    "donee must be None for legacy records without the field"
+                );
+            }
+            other => panic!("expected ReclassifyOutflow, got {other:?}"),
+        }
+
+        // Legacy Donate: struct variant, no donee field.
+        let donate_json = r#"{
+            "ReclassifyOutflow": {
+                "transfer_out_event": {"Import": {"source": "Coinbase", "source_ref": "OUT-2"}},
+                "as_": {"Donate": {"appraisal_required": true}},
+                "principal_proceeds_or_fmv": "60000.00",
+                "fee_usd": null
+            }
+        }"#;
+        let parsed: EventPayload =
+            serde_json::from_str(donate_json).expect("legacy Donate JSON must deserialize");
+        match parsed {
+            EventPayload::ReclassifyOutflow(ro) => {
+                assert!(
+                    matches!(ro.as_, OutflowClass::Donate { .. }),
+                    "as_ must be Donate"
+                );
+                assert_eq!(
+                    ro.donee, None,
+                    "donee must be None for legacy Donate records without the field"
+                );
+            }
+            other => panic!("expected ReclassifyOutflow, got {other:?}"),
+        }
     }
 
     #[test]
