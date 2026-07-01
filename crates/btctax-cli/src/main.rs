@@ -384,7 +384,7 @@ fn run() -> Result<ExitCode, CliError> {
                     "{}",
                     render::render_tax_outcome(y, &outcome, advisory.as_deref())
                 );
-                print!("{}", render::render_schedule_d(y, &sched_d));
+                print!("{}", render::render_schedule_d(y, &sched_d, &outcome));
             } else {
                 let state = cmd::inspect::report(vault, &passphrase(false)?, year)?;
                 print!("{}", render::render_report(&state, year));

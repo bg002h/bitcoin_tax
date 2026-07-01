@@ -837,9 +837,17 @@ pub fn render_tax_outcome(
 /// P2-B Task 3: render the RAW pre-netting Schedule D part totals (Part I ST, Part II LT) for
 /// `year`, mirroring `render_tax_outcome`. These are the Form 8949/Schedule D part totals BEFORE
 /// §1222/§1211/§1212 netting + carryforward — that netting is applied in the tax computation
-/// (`report --tax-year`), and the netted figures are shown by `render_tax_outcome` above. The note
-/// makes the boundary explicit so the raw part totals are never mistaken for the netted result.
-pub fn render_schedule_d(year: i32, totals: &ScheduleDTotals) -> String {
+/// (`report --tax-year`), and the netted figures are shown by `render_tax_outcome` above.
+///
+/// When `outcome` is `Computed`, the standard netting note is shown. When `outcome` is
+/// `NotComputable`, a caveat is printed instead: the raw totals are valid disposal sums but are
+/// informational — no netting or carryforward is applied because the tax is not computable.
+/// The raw totals are ALWAYS shown (never suppressed); only the trailing note differs.
+pub fn render_schedule_d(
+    year: i32,
+    totals: &ScheduleDTotals,
+    outcome: &btctax_core::TaxOutcome,
+) -> String {
     let mut s = String::new();
     let _ = writeln!(
         s,
@@ -859,11 +867,24 @@ pub fn render_schedule_d(year: i32, totals: &ScheduleDTotals) -> String {
         fmt_money(totals.lt.cost_basis),
         fmt_money(totals.lt.gain)
     );
-    let _ = writeln!(
-        s,
-        "  Note: §1222/§1211/§1212 netting + carryforward are applied in the tax computation \
-         (report --tax-year); these are the raw pre-netting Form 8949/Schedule D part totals."
-    );
+    match outcome {
+        btctax_core::TaxOutcome::NotComputable(_) => {
+            let _ = writeln!(
+                s,
+                "  (raw disposition totals shown above; the year's tax is NOT COMPUTABLE until \
+                 the blocker is resolved — these Form 8949/Schedule D part totals are \
+                 informational and are not netted/carried until the tax computes)."
+            );
+        }
+        btctax_core::TaxOutcome::Computed(_) => {
+            let _ = writeln!(
+                s,
+                "  Note: §1222/§1211/§1212 netting + carryforward are applied in the tax \
+                 computation (report --tax-year); these are the raw pre-netting Form \
+                 8949/Schedule D part totals."
+            );
+        }
+    }
     s
 }
 
