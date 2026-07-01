@@ -10,11 +10,12 @@
 //!   NIIT: magi_with = 60,000 + 20,000 = 80,000 < 200,000 (Single threshold) → 0.
 //!   ordinary_delta: OTI unchanged by LT gain → 0.
 //!   total = 0 + 1,747.50 + 0 = 1,747.50.
-use btctax_cli::{cmd, render};
-use btctax_core::{Carryforward, FilingStatus, TaxProfile};
+use btctax_cli::{cmd, render, Session};
+use btctax_core::{Carryforward, EventPayload, FilingStatus, InboundClass, IncomeKind, TaxProfile};
 use btctax_store::Passphrase;
 use rust_decimal_macros::dec;
 use std::path::{Path, PathBuf};
+use time::macros::datetime;
 
 fn pp() -> Passphrase {
     Passphrase::new("pw".into())
@@ -88,7 +89,7 @@ fn report_tax_year_renders_golden() {
     let (_dir, vault) = make_vault_with(&csv);
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
 
-    let (outcome, advisory, sched_d, _gift) =
+    let (outcome, advisory, sched_d, _gift, _se) =
         cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
@@ -122,6 +123,84 @@ fn report_tax_year_renders_golden() {
     );
 }
 
+/// [P2-D Task 2 wiring] A business-mining year → `report_tax_year` surfaces the Schedule SE section
+/// (components + total + §164(f) half + the dual-direction W-2 disclosure + the standalone note),
+/// and the income-tax report's TOTAL is UNCHANGED by SE tax (D5 — SE is standalone).
+#[test]
+fn report_tax_year_renders_schedule_se_for_business_mining() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_buy_receive(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // Classify the unclassified Receive as $100,000 BUSINESS mining income (SE-eligible).
+    let in_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+    let class = InboundClass::Income {
+        kind: IncomeKind::Mining,
+        fmv: Some(dec!(100000.00)),
+        business: true,
+    };
+    cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &in_ref,
+        class,
+        datetime!(2025-06-01 00:00:00 UTC),
+    )
+    .unwrap();
+
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
+
+    let (outcome, _advisory, _sched_d, _gift, se) =
+        cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
+    let se = se.expect("Schedule SE section expected for a business-mining year");
+
+    // Golden 1 components (Single, $100,000 business mining).
+    assert!(se.contains("11451.40"), "SS component: {se}");
+    assert!(se.contains("2678.15"), "Medicare component: {se}");
+    assert!(se.contains("14129.55"), "total SE tax: {se}");
+    assert!(se.contains("7064.78"), "§164(f) deductible half: {se}");
+    // Dual-direction W-2 disclosure + standalone note.
+    assert!(
+        se.contains("OVERSTATED") && se.contains("UNDERSTATED"),
+        "{se}"
+    );
+    assert!(se.contains("SEPARATE federal liability"), "{se}");
+    // [Minor-2] expenses caveat — render must disclose that no Schedule C expenses are modeled.
+    assert!(
+        se.contains("Schedule C deductible business expenses are not modeled"),
+        "expenses caveat must appear in Schedule SE render: {se}"
+    );
+
+    // [D5] the income-tax report TOTAL is UNCHANGED by SE tax — the $14,129.55 SE figure is NOT
+    // added to total_federal_tax_attributable (the mining is taxed only as ordinary income there).
+    // Golden (Single, OTI=40,000, MAGI_excl=60,000, $100,000 business mining, TY2025 real table):
+    //   ordinary_delta = tax(140,000) − tax(40,000) = 26,447.00 − 4,561.50 = 21,885.50; NIIT=0.
+    // This assertion FAILS if SE tax ($14,129.55) were ever folded in (would be 36,015.05).
+    if let btctax_core::TaxOutcome::Computed(r) = &outcome {
+        assert_eq!(
+            r.total_federal_tax_attributable,
+            dec!(21885.50),
+            "[D5] total_federal_tax_attributable must be income-tax delta only (21,885.50), not including SE tax"
+        );
+    } else {
+        panic!("computable (blocker resolved by classify)");
+    }
+    let it = render::render_tax_outcome(2025, &outcome, None);
+    assert!(
+        !it.contains("14129.55"),
+        "SE tax must NOT appear in the income-tax report total (standalone, D5):\n{it}"
+    );
+}
+
 /// [B-M1 Task 2] The Computed tax-report footer no longer carries the wrong-direction "understate"
 /// disclosure; it accurately states the §1211(b) loss is applied to NII and flags the residual
 /// crypto-lending-interest caveat.
@@ -132,7 +211,7 @@ fn report_tax_year_footer_discloses_1211_loss_and_lending_interest_caveat() {
     let (_dir, vault) = make_vault_with(&csv);
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
 
-    let (outcome, advisory, _sched_d, _gift) =
+    let (outcome, advisory, _sched_d, _gift, _se) =
         cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
@@ -170,7 +249,7 @@ fn report_tax_year_components_reconcile_to_total() {
     let (_dir, vault) = make_vault_with(&csv);
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
 
-    let (outcome, advisory, _sched_d, _gift) =
+    let (outcome, advisory, _sched_d, _gift, _se) =
         cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
@@ -215,7 +294,7 @@ fn report_tax_year_without_profile_says_not_computable() {
     let (_dir, vault) = make_vault_with(&csv);
     // Deliberately do NOT set a tax profile for 2025.
 
-    let (outcome, advisory, _sched_d, _gift) =
+    let (outcome, advisory, _sched_d, _gift, _se) =
         cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
@@ -244,7 +323,7 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
     // Set a profile so the refusal is definitely from the hard blocker (not TaxProfileMissing).
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
 
-    let (outcome, advisory, sched_d, _gift) =
+    let (outcome, advisory, sched_d, _gift, _se) =
         cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
@@ -350,7 +429,7 @@ st-sell,2025-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
     .unwrap();
 
     // report --tax-year 2026: main outcome is NotComputable (no TY2026 table); advisory fires.
-    let (outcome, advisory, _sched_d, _gift) =
+    let (outcome, advisory, _sched_d, _gift, _se) =
         cmd::tax::report_tax_year(&vault, &pp(), 2026).unwrap();
     let rendered = render::render_tax_outcome(2026, &outcome, advisory.as_deref());
 

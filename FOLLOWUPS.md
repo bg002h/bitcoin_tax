@@ -18,6 +18,40 @@ owner-confirms), hardening + Windows/macOS CI, 2026/2027 tax tables (arms the 20
 §1091 wash-sale enactment, multi-year horizon optimization, non-BTC scope. (Mirror of memory
 `phase2-standing-roadmap`.)
 
+## ✅ Phase-2 P2-D: self-employment tax routing — SHIPPED (2026-07-01) — Phase-2 program COMPLETE
+
+Fourth + final Phase-2 sub-project. Branch `feat/p2d-se`; R0 spec 3 rounds to 0C/0I (independent
+web-verification caught: deductible must EXCLUDE §1401(b)(2) Additional Medicare per §164(f)(1);
+W-2 disclosure direction — SS overstated but Additional-Medicare UNDERstated; Interest §1402(a)(2)
+carve-out); whole-slug review 0C/0I ($14,935.42 C1-lock re-derived; banker's rounding load-bearing).
+`tax/se.rs::compute_se_tax(state, year, status, table) -> Option<SeTaxResult>`: net_se = Σ(business,
+non-Interest income) × 92.35% (§1402(a)); SS 12.4% capped at `TaxTable.ss_wage_base` (year-indexed,
+TY2025 $176,100 SSA); Medicare 2.9%; Additional-Medicare 0.9% over §1401(b)(2) threshold; deductible_half
+= (ss+medicare)/2 EXCLUDING addl. `render_schedule_se` + `schedule_se.csv` (year-scoped) wired into the
+tax-report; dual-direction W-2 disclosure + "no business expenses modeled" caveat + standalone note.
+**STANDALONE — NOT folded into `total_federal_tax_attributable`** (§164(f) coordination + preserves the
+`total==ord_delta+ltcg+niit` identity; D5 KAT asserts the total is unchanged). 525 tests.
+
+Deferred (OPEN → later): `TaxProfile.w2_ss_wages`/`w2_medicare_wages` field (W-2 coordination for employed
+miners — disclosed via the correct-direction note); a `ReclassifyIncome`/business-flip decision (the River
+`business:false` immutability — a River business-miner must re-import with a patched adapter); Schedule C
+deductible mining EXPENSES (net SE = gross income; conservative/overstates — caveat rendered); §164(f)
+½-SE-deduction auto-coordination into the income-tax total; SS wage base for TY2024/2026+.
+
+---
+
+## ✅ Phase-2 Forms & §170(e) program — COMPLETE (2026-06-30 → 07-01)
+
+The user-approved standing-roadmap program is done: P2-A (§170(e) charitable-deduction) → P2-B (Form
+8949 + Schedule D) → B-M1 (NIIT loss-year correctness fix) → P2-C (Form 8283 + Form 709 advisory) → P2-D
+(SE tax). All shipped to `main`, each spec→R0-to-green→implement→whole-diff→ship at 0C/0I, with
+primary-source tax verification catching multiple directional errors (appraisal AND-rule; B-M1
+over-vs-under; §2.42→§2.43 citation; SE §164(f) deductible; SE W-2 disclosure direction). Remaining
+Phase-2/3 work is all deferred FOLLOWUPS (donee identifier/full Form 709, Section-B appraiser struct,
+§170(f)(11)(F) aggregation, per-IncomeKind NII interest slice, w2-wages/expenses/ReclassifyIncome,
+year-indexed tables for other years) + the standing lower/triggered items (adapter refinements, CI/
+hardening, 2026/2027 income-tax tables, §1091 wash-sale monitor, multi-year optimization, non-BTC).
+
 ## ✅ Burndown pass 2 (2026-06-30) — A/B/C deferrals resolved
 
 Branch `chore/followups-burndown-2`, three groups each independently reviewed to 0 Critical / 0

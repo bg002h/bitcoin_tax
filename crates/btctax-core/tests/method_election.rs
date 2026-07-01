@@ -468,6 +468,7 @@ fn pre2025_advisory_note_does_not_gate_compute_tax_year() {
             ordinary,
             ltcg,
             gift_annual_exclusion: dec!(19000),
+            ss_wage_base: dec!(176100),
         })
     }
     let prof = TaxProfile {

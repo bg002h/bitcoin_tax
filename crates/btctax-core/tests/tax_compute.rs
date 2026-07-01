@@ -65,6 +65,7 @@ fn synth(year: i32) -> OneTable {
         ordinary,
         ltcg,
         gift_annual_exclusion: dec!(19000),
+        ss_wage_base: dec!(176100),
     })
 }
 fn profile(ord: Usd, magi: Usd, qd: Usd) -> TaxProfile {
@@ -124,6 +125,7 @@ fn synth_mfs(year: i32) -> OneTable {
         ordinary,
         ltcg,
         gift_annual_exclusion: dec!(19000),
+        ss_wage_base: dec!(176100),
     })
 }
 
@@ -227,6 +229,47 @@ fn double_count_guard_crypto_ordinary_income_added_exactly_once() {
     assert_eq!(r.total_federal_tax_attributable, dec!(2200.00)); // counted ONCE (not 4,400)
     assert_eq!(r.ltcg_tax, dec!(0.00));
     assert_eq!(r.niit, dec!(0.00));
+}
+
+/// [P2-D D5] STANDALONE: the §1401 SE tax is NOT folded into `total_federal_tax_attributable`.
+/// A Single, $100,000 **business** mining year (OTI 0, synth brackets) has an ordinary-income delta
+/// of tax(100,000) − tax(0) = 0.10·50,000 + 0.22·50,000 = $16,000.00 — the crypto mining is taxed as
+/// ordinary income exactly once (unchanged by P2-D). The §1401 SE tax ($14,129.55) is computed
+/// SEPARATELY by `compute_se_tax` and MUST NOT be added to the engine-B total.
+#[test]
+fn se_tax_is_standalone_not_in_total_federal_tax_attributable() {
+    let biz_mining = IncomeRecord {
+        event: EventId::decision(2),
+        recognized_at: date!(2025 - 03 - 01),
+        sat: 100_000_000,
+        usd_fmv: dec!(100000),
+        kind: IncomeKind::Mining,
+        business: true,
+    };
+    let st = state_with(vec![], vec![biz_mining]);
+    let table = synth(2025);
+    let out = compute_tax_year(
+        &[],
+        &st,
+        2025,
+        Some(&profile(dec!(0), dec!(0), dec!(0))),
+        &table,
+    );
+    let TaxOutcome::Computed(r) = out else {
+        panic!("computable")
+    };
+    // Engine-B total = income-tax delta ONLY (mining as ordinary income): tax(100k) − tax(0) = 16,000.
+    assert_eq!(r.ordinary_from_crypto, dec!(100000));
+    assert_eq!(r.total_federal_tax_attributable, dec!(16000.00));
+    // SE tax computed SEPARATELY (standalone) — NOT added to total_federal_tax_attributable (D5).
+    let se = btctax_core::compute_se_tax(&st, 2025, FilingStatus::Single, &table.0)
+        .expect("SE tax expected");
+    assert_eq!(se.total, dec!(14129.55));
+    assert_ne!(
+        r.total_federal_tax_attributable,
+        dec!(16000.00) + se.total,
+        "SE tax must NOT be folded into total_federal_tax_attributable (D5)"
+    );
 }
 
 /// Net ST gain stacks on the ordinary brackets. OTI 40,000 (10% top is 50,000); crypto ST gain 20,000 →

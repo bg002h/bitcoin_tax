@@ -4,7 +4,8 @@
 use crate::{tax_profile, CliError, Session};
 use btctax_adapters::BundledTaxTables;
 use btctax_core::{
-    carryforward_consistency, compute_tax_year, schedule_d, ScheduleDTotals, TaxOutcome, TaxProfile,
+    carryforward_consistency, compute_se_tax, compute_tax_year, schedule_d, se_net_income,
+    ScheduleDTotals, TaxOutcome, TaxProfile, TaxTables,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -30,17 +31,30 @@ pub fn show_profile(
     tax_profile::get(Session::open(vault, pp)?.conn(), year)
 }
 
-/// Task 9 (B.5) + Task 10 (M4): load events + project once, read the year's `TaxProfile` +
-/// `BundledTaxTables`, call `compute_tax_year`, and also run the M4 carryforward-consistency
-/// advisory. Returns `(TaxOutcome, Option<advisory_msg>)`. The advisory is `Some(msg)` iff BOTH
-/// the current-year and the prior-year profiles exist AND the prior-year computes successfully AND
-/// the declared `carryforward_in` does not match the prior year's `carryforward_out`. The advisory
-/// is **never** a hard blocker and does **not** change the exit code (non-gating, Task 10).
+/// The full `report --tax-year` bundle, in print order:
+/// `(income-tax outcome, M4 carryforward advisory, raw Schedule D part totals, Form 709 gift
+/// advisory, Schedule SE §1401 section)`. Named to satisfy `clippy::type_complexity`; callers still
+/// destructure it as a tuple.
+pub type TaxYearReport = (
+    TaxOutcome,
+    Option<String>,
+    ScheduleDTotals,
+    Option<String>,
+    Option<String>,
+);
+
+/// Task 9 (B.5) + Task 10 (M4) + P2-D Task 2: load events + project once, read the year's
+/// `TaxProfile` + `BundledTaxTables`, call `compute_tax_year`, and assemble the standalone Schedule
+/// D / Form 709 / Schedule SE artifacts + the M4 carryforward-consistency advisory. See
+/// [`TaxYearReport`] for the returned bundle. The advisory is `Some(msg)` iff BOTH the current-year
+/// and the prior-year profiles exist AND the prior-year computes successfully AND the declared
+/// `carryforward_in` does not match the prior year's `carryforward_out`. The advisory and the
+/// Schedule SE figure are **never** hard blockers and do **not** change the exit code (non-gating).
 pub fn report_tax_year(
     vault: &Path,
     pp: &Passphrase,
     year: i32,
-) -> Result<(TaxOutcome, Option<String>, ScheduleDTotals, Option<String>), CliError> {
+) -> Result<TaxYearReport, CliError> {
     let s = Session::open(vault, pp)?;
     let (events, state, _cfg) = s.load_events_and_project()?;
     let profile = s.tax_profile(year)?;
@@ -50,6 +64,20 @@ pub fn report_tax_year(
     let sched_d = schedule_d(&state, year);
     // P2-C Task 3: standalone Form 709 gift over-annual-exclusion advisory (does NOT feed engine B).
     let gift_advisory = crate::render::render_gift_advisory(&state, year, &tables);
+    // P2-D Task 2: standalone Schedule SE §1401 SE-tax figure (STANDALONE — does NOT feed engine B;
+    // `total_federal_tax_attributable` is UNCHANGED by SE tax, D5). Requires the year's filing status
+    // (from the profile). Business SE income present but no bundled table → the render emits a
+    // "wage base unavailable" note (no silent drop); no business SE income → no Schedule SE section.
+    let schedule_se = match profile.as_ref() {
+        Some(p) => {
+            let business_income_present = !se_net_income(&state, year).is_zero();
+            let se_result = tables
+                .table_for(year)
+                .and_then(|t| compute_se_tax(&state, year, p.filing_status, t));
+            crate::render::render_schedule_se(year, se_result.as_ref(), business_income_present)
+        }
+        None => None,
+    };
 
     // M4 carryforward consistency advisory (Task 10): only when both this year's profile AND
     // the prior year's profile exist AND the prior year is Computed.  Never a hard blocker.
@@ -72,5 +100,5 @@ pub fn report_tax_year(
         None
     };
 
-    Ok((outcome, advisory, sched_d, gift_advisory))
+    Ok((outcome, advisory, sched_d, gift_advisory, schedule_se))
 }

@@ -65,6 +65,13 @@ pub struct TaxTable {
     /// `compute_tax_year`. Belongs in the per-year table (not a `tables.rs` statutory constant)
     /// precisely because it moves year-over-year.
     pub gift_annual_exclusion: Usd,
+    /// Social Security **contribution and benefit base** (the SE-tax OASDI wage base) for the year.
+    /// INDEXED — wage-indexed under **§230 of the Social Security Act** (42 U.S.C. §430); announced
+    /// annually by SSA. TY2025 = $176,100 (SSA 2024-10-10). Caps the 12.4% Social-Security portion of
+    /// the §1401(a) SE tax (`ss = 12.4% × min(net SE earnings, ss_wage_base − W-2 SS wages)`). Feeds the
+    /// standalone Schedule SE §1401 figure only; does NOT feed engine B / `compute_tax_year`. Belongs in
+    /// the per-year table (not a `tables.rs` statutory constant) precisely because it moves year-over-year.
+    pub ss_wage_base: Usd,
 }
 
 impl TaxTable {
@@ -117,6 +124,46 @@ impl TaxTables for BTreeMap<i32, TaxTable> {
 /// Value: 3.8% = 0.038 (exact Decimal; never a float, NFR5).
 /// Must never be placed in a `TaxTable`.
 pub const NIIT_RATE: Usd = dec!(0.038);
+
+/// §1401(a): the Social Security (OASDI) portion of the self-employment tax rate.
+/// **STATUTORY** — 26 U.S.C. §1401(a).  Fixed in the Code; NOT inflation-indexed.
+/// Value: 12.4% = 0.124 (exact Decimal; never a float, NFR5).  Applies to net SE earnings up to the
+/// year-indexed SS wage base (`TaxTable::ss_wage_base`, less any W-2 SS wages).
+pub const SE_RATE_SS: Usd = dec!(0.124);
+
+/// §1401(b): the Medicare (HI) portion of the self-employment tax rate.
+/// **STATUTORY** — 26 U.S.C. §1401(b)(1).  Fixed in the Code; NOT inflation-indexed.
+/// Value: 2.9% = 0.029 (exact Decimal; never a float, NFR5).  Uncapped (no wage-base ceiling).
+pub const SE_RATE_MEDICARE: Usd = dec!(0.029);
+
+/// §1401(b)(2): the Additional Medicare Tax rate on high self-employment income.
+/// **STATUTORY** — 26 U.S.C. §1401(b)(2)(A).  Fixed in the Code; NOT inflation-indexed.
+/// Value: 0.9% = 0.009 (exact Decimal; never a float, NFR5).  Applies to net SE earnings above the
+/// `se_addl_medicare_threshold(status)`.  Per §164(f)(1) it is EXCLUDED from the one-half-SE-tax
+/// above-the-line deduction (a Form 8959 item — Schedule SE line 13 counts SS + regular Medicare only).
+pub const SE_RATE_ADDL_MEDICARE: Usd = dec!(0.009);
+
+/// §1402(a): net-earnings-from-self-employment factor (1 − 7.65%).
+/// **STATUTORY** — 26 U.S.C. §1402(a)(12).  Fixed in the Code; NOT inflation-indexed.
+/// Value: 92.35% = 0.9235 (exact Decimal; never a float, NFR5).  Net SE earnings = Schedule C net
+/// income × this factor; the SE-tax rates above are applied to that product.
+pub const SE_NET_EARNINGS_FACTOR: Usd = dec!(0.9235);
+
+/// §1401(b)(2): the net-SE-earnings threshold above which the 0.9% Additional Medicare Tax applies.
+/// **STATUTORY** — 26 U.S.C. §1401(b)(2)(A)/(B).  The dollar amounts are fixed in the Code and do
+/// NOT move year-over-year.  Must never be placed in a `TaxTable`.
+///
+/// Thresholds per filing status:
+/// - MFJ / QSS: $250,000  (§1401(b)(2)(A))
+/// - Single / HoH: $200,000  (§1401(b)(2)(A))
+/// - MFS: $125,000  (§1401(b)(2)(A))
+pub fn se_addl_medicare_threshold(status: FilingStatus) -> Usd {
+    match status {
+        FilingStatus::Mfj | FilingStatus::Qss => dec!(250000),
+        FilingStatus::Single | FilingStatus::HoH => dec!(200000),
+        FilingStatus::Mfs => dec!(125000),
+    }
+}
 
 /// §170(f)(11)(C): qualified-appraisal threshold for charitable contributions of property.
 /// **STATUTORY** — 26 U.S.C. §170(f)(11)(C).  Fixed in the Code; NOT inflation-indexed.
@@ -198,6 +245,8 @@ pub(crate) fn synthetic_table(year: i32) -> TaxTable {
         // Hand-chosen synthetic value (NOT a real IRS figure — real numbers come from
         // BundledTaxTables); happens to equal the TY2025 §2503(b) exclusion for convenience.
         gift_annual_exclusion: dec!(19000),
+        // Hand-chosen synthetic SS wage base (happens to equal the real TY2025 §230 figure).
+        ss_wage_base: dec!(176100),
     }
 }
 

@@ -30,9 +30,11 @@ pub use project::{
 };
 pub use state::*;
 pub use tax::{
-    carryforward_consistency, compute_tax_year, loss_limit, niit_threshold, Carryforward,
-    FilingStatus, LtcgBreakpoints, MarginalRates, OrdinaryBracket, OrdinarySchedule, TaxOutcome,
-    TaxProfile, TaxResult, TaxTable, TaxTables, NIIT_RATE, QUALIFIED_APPRAISAL_THRESHOLD,
+    carryforward_consistency, compute_se_tax, compute_tax_year, loss_limit, niit_threshold,
+    se_addl_medicare_threshold, se_net_income, Carryforward, FilingStatus, LtcgBreakpoints,
+    MarginalRates, OrdinaryBracket, OrdinarySchedule, SeTaxResult, TaxOutcome, TaxProfile,
+    TaxResult, TaxTable, TaxTables, NIIT_RATE, QUALIFIED_APPRAISAL_THRESHOLD,
+    SE_NET_EARNINGS_FACTOR, SE_RATE_ADDL_MEDICARE, SE_RATE_MEDICARE, SE_RATE_SS,
 };
 
 #[derive(Debug, thiserror::Error)]

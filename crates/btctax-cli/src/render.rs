@@ -9,7 +9,7 @@ use btctax_core::{
     Blocker, BlockerKind, ComplianceStatus, ConservationReport, DisposalCompliance, DisposalLeg,
     DisposeKind, EventId, EventPayload, Form8283HowAcquired, Form8283Section, Form8949Box,
     Form8949Part, GiftZone, IncomeKind, LedgerEvent, LedgerState, LotMethod, RemovalKind,
-    RemovalLeg, ScheduleDTotals, Severity, TaxDate, Term, WalletId,
+    RemovalLeg, ScheduleDTotals, SeTaxResult, Severity, TaxDate, Term, WalletId,
 };
 use btctax_store::fsperms;
 use csv::Writer;
@@ -566,6 +566,7 @@ pub fn write_csv_exports(
     out_dir: &Path,
     state: &LedgerState,
     tax_year: Option<i32>,
+    se_result: Option<&SeTaxResult>,
 ) -> Result<(), crate::CliError> {
     fsperms::mkdir_owner_only(out_dir)?;
 
@@ -709,7 +710,39 @@ pub fn write_csv_exports(
         write_form8949_csv(out_dir, state, year)?;
         write_schedule_d_csv(out_dir, state, year)?;
         write_form8283_csv(out_dir, state, year)?;
+        // P2-D: standalone Schedule SE §1401 figure — written only when there IS SE tax (a computed
+        // SeTaxResult); omitted when the year has no business SE income (nothing to file).
+        if let Some(se) = se_result {
+            write_schedule_se_csv(out_dir, se)?;
+        }
     }
+    Ok(())
+}
+
+/// P2-D Task 2: write `schedule_se.csv` — the standalone §1401 SE-tax components for the tax year.
+/// One data row. Stable snake_case columns; exact `Decimal` string values (NFR5). 0o600 via
+/// `open_owner_only`. Written only when a `SeTaxResult` exists (business SE income present + table).
+fn write_schedule_se_csv(out_dir: &Path, se: &SeTaxResult) -> Result<(), crate::CliError> {
+    let mut w = Writer::from_writer(fsperms::open_owner_only(&out_dir.join("schedule_se.csv"))?);
+    w.write_record([
+        "net_se_earnings",
+        "se_base_9235",
+        "ss_component",
+        "medicare_component",
+        "additional_medicare_component",
+        "total_se_tax",
+        "deductible_half",
+    ])?;
+    w.write_record([
+        se.net_se.to_string(),
+        se.base.to_string(),
+        se.ss.to_string(),
+        se.medicare.to_string(),
+        se.addl.to_string(),
+        se.total.to_string(),
+        se.deductible_half.to_string(),
+    ])?;
+    w.flush()?;
     Ok(())
 }
 
@@ -995,6 +1028,115 @@ pub fn render_schedule_d(
         }
     }
     s
+}
+
+/// P2-D Task 2 (D3): render the standalone Schedule SE **§1401 self-employment tax** figure for
+/// `year`. Mirrors `render_schedule_d` / `render_gift_advisory` — a standalone informational block
+/// that does NOT feed engine B (`TaxResult::total_federal_tax_attributable` is UNCHANGED by SE tax).
+///
+/// Three cases (no silent drop — mirrors P2-C's m6):
+/// - `result = Some(r)` → the full Schedule SE section: net SE income, the 92.35% base, the
+///   SS/Medicare/Additional-Medicare components, total §1401 SE tax, the §164(f) deductible half,
+///   the [D4/I2] dual-direction W-2 disclosure, and the [D5] standalone note.
+/// - `result = None` AND `business_income_present` → a "SS wage base unavailable for {year}" note
+///   (business SE income exists but the year has no bundled table → the wage base is unknown; the
+///   §1401 tax is NOT computed rather than silently dropped).
+/// - `result = None` AND NOT `business_income_present` → `None` (no Schedule SE section at all).
+///
+/// `business_income_present` is `!se_net_income(state, year).is_zero()` (computed by the caller —
+/// the single §1402(a) SE-eligibility predicate lives in core).
+pub fn render_schedule_se(
+    year: i32,
+    result: Option<&SeTaxResult>,
+    business_income_present: bool,
+) -> Option<String> {
+    match result {
+        Some(r) => {
+            let mut s = String::new();
+            let _ = writeln!(
+                s,
+                "Schedule SE (§1401 self-employment tax on business crypto income) — tax year {year}"
+            );
+            let _ = writeln!(
+                s,
+                "  net self-employment income (gross mining income \u{2014} no business expenses modeled; business crypto, Interest excluded): {}",
+                fmt_money(r.net_se)
+            );
+            let _ = writeln!(
+                s,
+                "  (caveat) Schedule C deductible business expenses are not modeled; if you have them, your actual SE tax is lower."
+            );
+            let _ = writeln!(
+                s,
+                "  × 92.35% net-earnings factor (§1402(a)) = net SE earnings: {}",
+                fmt_money(r.base)
+            );
+            let _ = writeln!(
+                s,
+                "  Social Security component (12.4%, §1401(a); capped at the SS wage base): {}",
+                fmt_money(r.ss)
+            );
+            let _ = writeln!(
+                s,
+                "  Medicare component (2.9%, §1401(b); uncapped): {}",
+                fmt_money(r.medicare)
+            );
+            let _ = writeln!(
+                s,
+                "  Additional Medicare component (0.9%, §1401(b)(2)): {}",
+                fmt_money(r.addl)
+            );
+            let _ = writeln!(
+                s,
+                "  TOTAL self-employment tax (§1401): {}",
+                fmt_money(r.total)
+            );
+            let _ = writeln!(
+                s,
+                "  §164(f) one-half-SE-tax deduction (above-the-line; EXCLUDES Additional Medicare per \
+                 §164(f)(1)): {}",
+                fmt_money(r.deductible_half)
+            );
+            // [D4/I2] W-2 disclosure — the $0-W-2 assumption moves TWO components in OPPOSITE
+            // directions; state each with the correct direction.
+            let _ = writeln!(
+                s,
+                "  (W-2 assumption) Assumes $0 W-2 wages. If you had a wage job: (1) the 12.4% Social \
+                 Security component may be OVERSTATED — its cap is the wage base LESS your W-2 \
+                 Social-Security wages (a lower cap → less SS); AND (2) the 0.9% Additional Medicare \
+                 component may be UNDERSTATED — the §1401(b)(2)(B)/Form 8959 threshold is REDUCED by \
+                 your W-2 Medicare wages (a lower threshold → MORE income taxed at 0.9%). Adjust each \
+                 accordingly."
+            );
+            // [D5] standalone note — SE tax is a SEPARATE liability, not in the income-tax + NIIT total.
+            let _ = writeln!(
+                s,
+                "  (standalone) This §1401 SE tax is a SEPARATE federal liability, NOT included in the \
+                 income-tax + NIIT total above; the §164(f) one-half-SE-tax deduction is not \
+                 auto-coordinated into that total."
+            );
+            Some(s)
+        }
+        None => {
+            if business_income_present {
+                // Business SE income present but no bundled table → wage base unknown; do NOT drop.
+                let mut s = String::new();
+                let _ = writeln!(
+                    s,
+                    "Schedule SE (§1401 self-employment tax) — tax year {year}"
+                );
+                let _ = writeln!(
+                    s,
+                    "  SS wage base unavailable for {year}: business self-employment income is present \
+                     but no bundled tax table (ss_wage_base) exists for {year}; the §1401 SE tax was \
+                     NOT computed (no silent drop)."
+                );
+                Some(s)
+            } else {
+                None // no business SE income → no Schedule SE section
+            }
+        }
+    }
 }
 
 /// P2-C Task 3 (D3): Form 709 gift over-annual-exclusion **advisory** (thin, total-exposure only).
@@ -1436,6 +1578,7 @@ mod gift_advisory_tests {
                 ordinary: BTreeMap::new(),
                 ltcg: BTreeMap::new(),
                 gift_annual_exclusion: excl,
+                ss_wage_base: dec!(176100),
             },
         );
         m
@@ -1485,5 +1628,138 @@ mod gift_advisory_tests {
             msg.contains("50000.00"),
             "must record the gift total: {msg}"
         );
+    }
+}
+
+#[cfg(test)]
+mod schedule_se_tests {
+    //! P2-D Task 2 KATs — `render_schedule_se` + `schedule_se.csv`. The rendered figures reuse the
+    //! hand-verified Golden 1 `SeTaxResult` (Single $100,000 business mining). PRIVACY: synthetic.
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    /// Golden 1 SeTaxResult (Single, $100,000 business mining) — see btctax-core se.rs KATs.
+    fn golden1() -> SeTaxResult {
+        SeTaxResult {
+            net_se: dec!(100000),
+            base: dec!(92350.00),
+            ss: dec!(11451.40),
+            medicare: dec!(2678.15),
+            addl: dec!(0.00),
+            total: dec!(14129.55),
+            deductible_half: dec!(7064.78),
+        }
+    }
+
+    /// Business-mining year → full Schedule SE section: components + total + deductible half + the
+    /// [I2] dual-direction W-2 disclosure + the [D5] standalone note.
+    #[test]
+    fn business_mining_year_renders_full_section() {
+        let r = golden1();
+        let s = render_schedule_se(2025, Some(&r), true).expect("SE section expected");
+        // Components + total + §164(f) half.
+        assert!(s.contains("92350.00"), "net SE earnings base: {s}");
+        assert!(s.contains("11451.40"), "SS component: {s}");
+        assert!(s.contains("2678.15"), "Medicare component: {s}");
+        assert!(s.contains("14129.55"), "total SE tax: {s}");
+        assert!(s.contains("7064.78"), "§164(f) deductible half: {s}");
+        assert!(
+            s.contains("Additional Medicare"),
+            "addl component labeled: {s}"
+        );
+        // [I2] W-2 disclosure — CORRECT opposite directions.
+        assert!(
+            s.contains("OVERSTATED"),
+            "SS component may be OVERSTATED: {s}"
+        );
+        assert!(
+            s.contains("UNDERSTATED"),
+            "Additional-Medicare component may be UNDERSTATED: {s}"
+        );
+        assert!(
+            s.contains("§1401(b)(2)(B)"),
+            "cites the Form 8959 threshold: {s}"
+        );
+        // [D5] standalone note.
+        assert!(
+            s.contains("SEPARATE federal liability"),
+            "standalone note: {s}"
+        );
+        assert!(
+            s.contains("not") && s.contains("§164(f)"),
+            "notes §164(f) not auto-coordinated: {s}"
+        );
+        // [Minor-2] expenses caveat: labels the net_se figure as gross mining income and discloses
+        // that no Schedule C business expenses are modeled (conservative: SE tax is overstated if
+        // the user has deductible expenses).
+        assert!(
+            s.contains("Schedule C deductible business expenses are not modeled"),
+            "expenses caveat must appear in Schedule SE render: {s}"
+        );
+    }
+
+    /// No business SE income → no Schedule SE section (None).
+    #[test]
+    fn no_business_income_no_section() {
+        assert!(render_schedule_se(2025, None, false).is_none());
+    }
+
+    /// Business SE income present but no bundled table → the "SS wage base unavailable" note (no
+    /// silent drop).
+    #[test]
+    fn business_income_but_no_table_emits_note() {
+        let s = render_schedule_se(2099, None, true).expect("wage-base-unavailable note expected");
+        assert!(s.contains("SS wage base unavailable"), "{s}");
+        assert!(s.contains("2099"), "names the year: {s}");
+        assert!(s.contains("no silent drop"), "{s}");
+    }
+
+    /// `schedule_se.csv` columns + values (year-scoped; written when a SeTaxResult exists).
+    #[test]
+    fn schedule_se_csv_columns_and_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("export");
+        let st = LedgerState::default();
+        let r = golden1();
+        write_csv_exports(&out, &st, Some(2025), Some(&r)).unwrap();
+
+        let path = out.join("schedule_se.csv");
+        assert!(path.exists(), "schedule_se.csv must be written");
+        let mut rdr = csv::Reader::from_reader(std::fs::File::open(&path).unwrap());
+        let headers: Vec<String> = rdr.headers().unwrap().iter().map(String::from).collect();
+        assert_eq!(
+            headers,
+            vec![
+                "net_se_earnings",
+                "se_base_9235",
+                "ss_component",
+                "medicare_component",
+                "additional_medicare_component",
+                "total_se_tax",
+                "deductible_half",
+            ]
+        );
+        let rec = rdr
+            .records()
+            .next()
+            .expect("one data row")
+            .expect("readable");
+        assert_eq!(&rec[0], "100000"); // net_se_earnings
+        assert_eq!(&rec[1], "92350.00"); // se_base_9235
+        assert_eq!(&rec[2], "11451.40"); // ss_component
+        assert_eq!(&rec[3], "2678.15"); // medicare_component
+        assert_eq!(&rec[4], "0.00"); // additional_medicare_component
+        assert_eq!(&rec[5], "14129.55"); // total_se_tax
+        assert_eq!(&rec[6], "7064.78"); // deductible_half
+    }
+
+    /// No SeTaxResult → schedule_se.csv is NOT written (nothing to file).
+    #[test]
+    fn schedule_se_csv_omitted_when_no_se_tax() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("export");
+        let st = LedgerState::default();
+        write_csv_exports(&out, &st, Some(2025), None).unwrap();
+        assert!(!out.join("schedule_se.csv").exists());
     }
 }
