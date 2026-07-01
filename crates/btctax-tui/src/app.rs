@@ -3,14 +3,16 @@
 //! STRICTLY READ-ONLY: this module MUST NOT call `Session::save()`, `persistence::append_*`,
 //! any `btctax_cli::cmd::*` mutating command, or `Session::conn()`.
 
+use crate::unlock;
+use crate::unlock::UnlockState;
 use btctax_adapters::BundledTaxTables;
 use btctax_cli::CliConfig;
 use btctax_core::{LedgerEvent, LedgerState, ProjectionConfig, TaxProfile};
+use btctax_store::Passphrase;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 /// Which top-level screen is active.
-// `Locked` and `Viewer` are constructed in Task 2+; suppress the lint for the Task-1 skeleton.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Screen {
     #[default]
@@ -91,14 +93,13 @@ impl Tab {
     }
 }
 
-/// READ-ONLY snapshot loaded once at unlock (Task 2).
+/// READ-ONLY snapshot loaded once at unlock.
 ///
 /// All fields are read-only projections of vault data; NONE are ever mutated after construction.
 ///
 /// [R0-M2] `cli_config` is included because `btctax_cli::render::build_verify` needs it.
 /// [R0-M3] `optimize_attested_set` is intentionally OMITTED — the viewer tabs do not consume it.
-// All fields are consumed in Tasks 2–4; suppress the Task-1 dead-code lint.
-#[allow(dead_code)]
+#[allow(dead_code)] // fields are consumed in Tasks 3–4
 pub struct Snapshot {
     pub events: Vec<LedgerEvent>,
     pub state: LedgerState,
@@ -111,34 +112,78 @@ pub struct Snapshot {
 /// Top-level application state.
 ///
 /// `handle_key` mutates ONLY UI navigation fields (`screen`, `tab`, `should_quit`,
-/// `selected_year`). It NEVER mutates ledger data.
+/// `selected_year`, `unlock`). It NEVER mutates ledger data.
 pub struct App {
+    /// Path to the encrypted vault file (from CLI arg or default).
+    pub vault_path: PathBuf,
+    /// Unlock screen state (passphrase buffer + error).
+    pub unlock: UnlockState,
     pub screen: Screen,
     pub tab: Tab,
     pub should_quit: bool,
-    /// Populated in Task 2 after a successful `Session::open`.
-    #[allow(dead_code)] // read in Task 2+
+    /// Populated after a successful `Session::open` + `build_snapshot`.
+    #[allow(dead_code)] // read in Tasks 3–4
     pub snapshot: Option<Snapshot>,
     /// Tax year currently displayed in year-scoped tabs (Disposals/Income/Tax/Forms).
-    /// Defaults to 2025; Task 2 sets it to the latest year present in the snapshot.
+    /// Set to the latest year present in disposals/income after unlock; defaults to 2025.
     #[allow(dead_code)] // read in Tasks 3–4
     pub selected_year: i32,
 }
 
-impl Default for App {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl App {
-    pub fn new() -> Self {
+    pub fn new(vault_path: PathBuf) -> Self {
         App {
+            vault_path,
+            unlock: UnlockState::new(),
             screen: Screen::Unlock,
             tab: Tab::Holdings,
             should_quit: false,
             snapshot: None,
             selected_year: 2025,
+        }
+    }
+
+    // ── Unlock flow ───────────────────────────────────────────────────────────
+
+    /// Consume the passphrase buffer (via `mem::take` — never cloned [R0-I2]) and attempt
+    /// to open the vault.  Updates `screen`/`snapshot`/`selected_year`/`unlock.error`
+    /// according to the outcome.
+    pub fn do_unlock(&mut self) {
+        // Move passphrase out of buffer — NEVER clone [R0-I2/M7].
+        // The taken `String` is moved into `Passphrase::new`; `self.unlock.buffer` is left empty.
+        let pp = Passphrase::new(std::mem::take(&mut self.unlock.buffer));
+        let outcome = unlock::attempt_open(&self.vault_path, pp);
+        self.apply_open_outcome(outcome);
+    }
+
+    /// Apply an [`unlock::OpenOutcome`] to `App` state.
+    pub fn apply_open_outcome(&mut self, outcome: unlock::OpenOutcome) {
+        match outcome {
+            unlock::OpenOutcome::Success(snapshot, year) => {
+                self.snapshot = Some(*snapshot);
+                self.selected_year = year;
+                self.screen = Screen::Viewer;
+                self.unlock.error = None;
+            }
+            unlock::OpenOutcome::Locked => {
+                self.screen = Screen::Locked;
+            }
+            unlock::OpenOutcome::Error(msg) => {
+                // Buffer already emptied by mem::take in do_unlock.
+                self.unlock.error = Some(msg);
+            }
+        }
+    }
+
+    /// `BTCTAX_PASSPHRASE` fast-path: if the env var is set, open directly without a prompt.
+    ///
+    /// Mirrors the CLI's non-interactive behaviour.  Called once at startup before the event loop.
+    pub fn try_env_passphrase(&mut self) {
+        if let Ok(pp_str) = std::env::var("BTCTAX_PASSPHRASE") {
+            // pp_str is moved into Passphrase::new — never cloned, never logged [R0-I2].
+            let pp = Passphrase::new(pp_str);
+            let outcome = unlock::attempt_open(&self.vault_path, pp);
+            self.apply_open_outcome(outcome);
         }
     }
 }

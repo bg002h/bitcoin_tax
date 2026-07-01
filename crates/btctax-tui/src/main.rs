@@ -12,8 +12,9 @@
 
 mod app;
 mod draw;
+mod unlock;
 
-use app::App;
+use app::{App, Screen};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
     execute,
@@ -21,6 +22,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
+use std::path::PathBuf;
 use std::time::Duration;
 
 // ── Terminal lifecycle ────────────────────────────────────────────────────────
@@ -60,21 +62,88 @@ fn setup_panic_hook() {
     }));
 }
 
+// ── Argument parsing ──────────────────────────────────────────────────────────
+
+/// Parse the vault path from CLI arguments.
+///
+/// Accepts:
+/// - `--vault <path>` (named flag)
+/// - `<path>` (first positional argument that doesn't start with `-`)
+///
+/// Falls back to `~/Documents/BitcoinTax/vault.pgp` when HOME is set, else `vault.pgp`.
+fn parse_vault_path() -> PathBuf {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--vault" {
+            if i + 1 < args.len() {
+                return PathBuf::from(&args[i + 1]);
+            }
+        } else if !args[i].starts_with('-') {
+            return PathBuf::from(&args[i]);
+        }
+        i += 1;
+    }
+    // Default: ~/Documents/BitcoinTax/vault.pgp (mirrors CLI default)
+    std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join("Documents/BitcoinTax/vault.pgp"))
+        .unwrap_or_else(|| PathBuf::from("vault.pgp"))
+}
+
 // ── Event handling ────────────────────────────────────────────────────────────
 
 /// Map a key press to an `App` state transition.
 ///
 /// Only KEY PRESS events are acted on; repeat/release are ignored (crossterm distinguishes them
 /// on supporting terminals; others always send `Press`).
+///
+/// # Screen dispatch
+/// - **Unlock**: char input → buffer; Backspace → pop; Enter → attempt open.
+/// - **Locked**: r → retry (back to Unlock); q/Esc → quit.
+/// - **Viewer**: q/Esc → quit (full tab keybindings added in later tasks).
+/// - **Global**: Tab/Shift-Tab cycle tabs on any screen; q/Esc quit on any screen.
 fn handle_key(app: &mut App, key: KeyEvent) {
     if key.kind != KeyEventKind::Press {
         return;
     }
+
+    // Global keys that apply on every screen
     match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
-        KeyCode::Tab => app.tab = app.tab.next(),
-        KeyCode::BackTab => app.tab = app.tab.prev(),
+        KeyCode::Char('q') | KeyCode::Esc => {
+            app.should_quit = true;
+            return;
+        }
+        KeyCode::Tab => {
+            app.tab = app.tab.next();
+            return;
+        }
+        KeyCode::BackTab => {
+            app.tab = app.tab.prev();
+            return;
+        }
         _ => {}
+    }
+
+    // Screen-specific keys
+    match app.screen {
+        Screen::Unlock => match key.code {
+            KeyCode::Char(c) => {
+                // Clear the previous error when the user starts typing again
+                app.unlock.error = None;
+                app.unlock.push_char(c);
+            }
+            KeyCode::Backspace => app.unlock.pop_char(),
+            KeyCode::Enter => app.do_unlock(),
+            _ => {}
+        },
+        Screen::Locked => {
+            if let KeyCode::Char('r') = key.code {
+                // Retry: return to Unlock screen
+                app.screen = Screen::Unlock;
+                app.unlock.error = None;
+            }
+        }
+        Screen::Viewer => {} // additional viewer keys added in Tasks 3–4
     }
 }
 
@@ -84,8 +153,16 @@ fn handle_key(app: &mut App, key: KeyEvent) {
 ///
 /// Returns `Err` on I/O failure; the caller is responsible for calling `restore_terminal()`
 /// regardless of the return value [R0-M4].
-fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
-    let mut app = App::new();
+fn run(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    vault_path: PathBuf,
+) -> io::Result<()> {
+    let mut app = App::new(vault_path);
+
+    // `BTCTAX_PASSPHRASE` fast-path: open immediately without displaying the unlock prompt.
+    // Mirrors the CLI's non-interactive behaviour.
+    app.try_env_passphrase();
+
     while !app.should_quit {
         terminal.draw(|f| draw::draw(f, &app))?;
         if event::poll(Duration::from_millis(100))? {
@@ -103,6 +180,8 @@ fn main() -> io::Result<()> {
     // Install the panic hook BEFORE enabling raw mode so any panic restores the terminal.
     setup_panic_hook();
 
+    let vault_path = parse_vault_path();
+
     enable_raw_mode()?;
     // Guard created immediately after raw mode is enabled.
     // Its Drop calls restore_terminal() on ANY exit from this scope:
@@ -114,7 +193,7 @@ fn main() -> io::Result<()> {
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run(&mut terminal);
+    let result = run(&mut terminal, vault_path);
 
     // Explicit call is now redundant (the guard's Drop covers it) but kept for clarity.
     // restore_terminal() is idempotent — calling it twice is safe [R0-M4].
@@ -138,6 +217,10 @@ mod tests {
             kind: KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         }
+    }
+
+    fn new_app() -> App {
+        App::new(PathBuf::new())
     }
 
     // ── restore_terminal / panic hook ─────────────────────────────────────────
@@ -175,7 +258,7 @@ mod tests {
 
     #[test]
     fn q_sets_should_quit() {
-        let mut app = App::new();
+        let mut app = new_app();
         assert!(!app.should_quit);
         handle_key(&mut app, press(KeyCode::Char('q')));
         assert!(app.should_quit);
@@ -183,7 +266,7 @@ mod tests {
 
     #[test]
     fn esc_sets_should_quit() {
-        let mut app = App::new();
+        let mut app = new_app();
         handle_key(&mut app, press(KeyCode::Esc));
         assert!(app.should_quit);
     }
@@ -192,7 +275,7 @@ mod tests {
 
     #[test]
     fn key_release_does_not_set_should_quit() {
-        let mut app = App::new();
+        let mut app = new_app();
         let mut release_q = press(KeyCode::Char('q'));
         release_q.kind = KeyEventKind::Release;
         handle_key(&mut app, release_q);
@@ -203,7 +286,7 @@ mod tests {
 
     #[test]
     fn tab_cycles_forward_through_all_six_and_wraps() {
-        let mut app = App::new();
+        let mut app = new_app();
         assert_eq!(app.tab, Tab::Holdings);
 
         handle_key(&mut app, press(KeyCode::Tab));
@@ -228,7 +311,7 @@ mod tests {
 
     #[test]
     fn shift_tab_cycles_backward_through_all_six_and_wraps() {
-        let mut app = App::new();
+        let mut app = new_app();
         assert_eq!(app.tab, Tab::Holdings);
 
         // BackTab is how crossterm reports Shift-Tab.
@@ -254,10 +337,39 @@ mod tests {
     // ── Snapshot type compiles with read-only fields ──────────────────────────
 
     /// Verify the Snapshot type definition compiles and that App starts with snapshot = None.
-    /// Task 2 populates the snapshot; for Task 1 it is always None.
+    /// Task 2 populates the snapshot; for Task 1 it is always None on a fresh app.
     #[test]
     fn snapshot_is_none_on_new_app() {
-        let app = App::new();
+        let app = new_app();
         assert!(app.snapshot.is_none());
+    }
+
+    // ── handle_key: unlock screen passphrase input ───────────────────────────
+
+    #[test]
+    fn char_keys_on_unlock_screen_go_to_buffer() {
+        let mut app = new_app();
+        // App starts on Screen::Unlock
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Char('b')));
+        handle_key(&mut app, press(KeyCode::Char('c')));
+        assert_eq!(app.unlock.buffer.chars().count(), 3);
+    }
+
+    #[test]
+    fn backspace_on_unlock_screen_removes_last_char() {
+        let mut app = new_app();
+        handle_key(&mut app, press(KeyCode::Char('x')));
+        handle_key(&mut app, press(KeyCode::Char('y')));
+        handle_key(&mut app, press(KeyCode::Backspace));
+        assert_eq!(app.unlock.buffer.chars().count(), 1);
+    }
+
+    #[test]
+    fn r_on_locked_screen_returns_to_unlock() {
+        let mut app = new_app();
+        app.screen = Screen::Locked;
+        handle_key(&mut app, press(KeyCode::Char('r')));
+        assert_eq!(app.screen, Screen::Unlock);
     }
 }

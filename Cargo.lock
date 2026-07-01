@@ -369,6 +369,7 @@ dependencies = [
  "btctax-store",
  "crossterm",
  "ratatui",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
