@@ -28,12 +28,28 @@ an unlabeled-bucket conservative caveat. STANDALONE (donee is data; `tax/`/engin
 R0 2 rounds → 0C/0I (C1 = the unit-vs-struct-variant vault back-compat trap, empirically caught);
 whole-branch review 0C/0I. 602 tests.
 
-**Cluster remaining:** **Chunk 3** — §2505 advisory-level lifetime-exemption (year-indexed
-`gift_lifetime_exclusion` TaxTable field TY2025 $13.99M + user-supplied prior cumulative taxable gifts →
-consumption advisory; single-filer, no portability/DSUE/§2513) + Form 8283 Section-B appraiser/structured-
-donee-details struct (new `set-donation-details` command). Defers real per-row FMV-method (needs FMV
-provenance on RemovalLeg — Chunk 3 touches schema). Chunk-2 nits (unlabeled aggregate can over-warn across
-distinct recipients — disclosed) folded into Chunk 3's per-donee display if useful.
+---
+
+## ✅ Charitable/gift cluster — Chunk 3a: §2505 advisory-level lifetime exemption — SHIPPED (2026-07-01)
+
+Chunk 3 split into 3a (§2505 advisory) + 3b (Section-B appraiser) for shippability. 3a: year-indexed
+`TaxTable.gift_lifetime_exclusion` (TY2025 $13,990,000, Rev. Proc. 2024-40 §2.41) + a `--prior-taxable-gifts`
+CLI flag → the per-donee gift advisory now shows §2505 consumption (cumulative = prior + current labeled
+taxable; remaining floored at 0; "no gift tax due until the lifetime exclusion is exhausted; then the
+excess base" — strict `>`, $13.99M boundary → remaining $0 not exceeded). Advisory-level, single-filer (no
+§2513/portability/DSUE/§2502 rate liability); discloses the labeled-only omission when unlabeled gifts
+exist. STANDALONE (compute.rs untouched; goldens unmoved). R0 2 rounds → 0C/0I (legal core web-verified);
+whole-branch review 0C/0I. 611 tests.
+
+Nits to sweep in 3b (non-blocking): KAT-B's remaining-$0 assertion is weak (`contains("0.00")` — boundary
+still locked by `!contains("EXCEEDED")`); `--prior-taxable-gifts` negative-validation runs only inside the
+`--tax-year` branch (ignored with bare `--year`).
+
+**Cluster remaining:** **Chunk 3b** — Form 8283 Section-B appraiser/structured-donee-details struct (new
+`set-donation-details` command attaching donee name/address/EIN + appraiser name/TIN/address/PTIN/
+qualification/appraisal-date to a donation; populate Form 8283 Section B). This is the last piece of the
+charitable/gift cluster. Defers real per-row FMV-method (needs FMV provenance on RemovalLeg) unless 3b's
+schema touch adds it.
 
 ---
 

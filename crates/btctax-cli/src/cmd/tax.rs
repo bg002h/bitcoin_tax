@@ -5,7 +5,7 @@ use crate::{tax_profile, CliError, Session};
 use btctax_adapters::BundledTaxTables;
 use btctax_core::{
     carryforward_consistency, compute_se_tax, compute_tax_year, schedule_d, se_net_income,
-    ScheduleDTotals, TaxOutcome, TaxProfile, TaxTables,
+    ScheduleDTotals, TaxOutcome, TaxProfile, TaxTables, Usd,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -44,18 +44,22 @@ pub type TaxYearReport = (
     Option<String>,
 );
 
-/// Task 9 (B.5) + Task 10 (M4) + P2-D Task 2 + Chunk-1 D2: load events + project once, read the
-/// year's `TaxProfile` + `BundledTaxTables`, call `compute_tax_year`, and assemble the standalone
-/// Schedule D / Form 709 / Schedule SE artifacts + the M4 carryforward-consistency advisory + the
-/// §170(f)(11)(F) year-aggregate donation appraisal advisory. See [`TaxYearReport`] for the returned
-/// bundle. The advisory is `Some(msg)` iff BOTH the current-year and the prior-year profiles exist
-/// AND the prior-year computes successfully AND the declared `carryforward_in` does not match the
-/// prior year's `carryforward_out`. The advisory and the Schedule SE figure are **never** hard
-/// blockers and do **not** change the exit code (non-gating).
+/// Task 9 (B.5) + Task 10 (M4) + P2-D Task 2 + Chunk-1 D2 + Chunk-3a: load events + project once,
+/// read the year's `TaxProfile` + `BundledTaxTables`, call `compute_tax_year`, and assemble the
+/// standalone Schedule D / Form 709 / Schedule SE artifacts + the M4 carryforward-consistency
+/// advisory + the §170(f)(11)(F) year-aggregate donation appraisal advisory. See [`TaxYearReport`]
+/// for the returned bundle. The advisory is `Some(msg)` iff BOTH the current-year and the prior-year
+/// profiles exist AND the prior-year computes successfully AND the declared `carryforward_in` does
+/// not match the prior year's `carryforward_out`. The advisory and the Schedule SE figure are
+/// **never** hard blockers and do **not** change the exit code (non-gating).
+///
+/// `prior_taxable_gifts`: cumulative prior-year TAXABLE gifts (post-annual-exclusion Form 709
+/// amounts), not gross gifts. Default $0 (caller passes $0 when the flag is not provided).
 pub fn report_tax_year(
     vault: &Path,
     pp: &Passphrase,
     year: i32,
+    prior_taxable_gifts: Usd,
 ) -> Result<TaxYearReport, CliError> {
     let s = Session::open(vault, pp)?;
     let (events, state, _cfg) = s.load_events_and_project()?;
@@ -64,8 +68,10 @@ pub fn report_tax_year(
     let outcome = compute_tax_year(&events, &state, year, profile.as_ref(), &tables);
     // P2-B: the RAW pre-netting Schedule D part totals for the same year, from the same projection.
     let sched_d = schedule_d(&state, year);
-    // P2-C Task 3: standalone Form 709 gift over-annual-exclusion advisory (does NOT feed engine B).
-    let gift_advisory = crate::render::render_gift_advisory(&state, year, &tables);
+    // P2-C Task 3 + Chunk-3a: standalone Form 709 gift advisory + §2505 lifetime-exclusion
+    // consumption (does NOT feed engine B). prior_taxable_gifts comes from the CLI flag.
+    let gift_advisory =
+        crate::render::render_gift_advisory(&state, year, prior_taxable_gifts, &tables);
     // P2-D Task 2: standalone Schedule SE §1401 SE-tax figure (STANDALONE — does NOT feed engine B;
     // `total_federal_tax_attributable` is UNCHANGED by SE tax, D5). Requires the year's filing status
     // (from the profile). Business SE income present but no bundled table → the render emits a

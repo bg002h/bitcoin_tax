@@ -1204,6 +1204,7 @@ pub fn render_schedule_se(
 pub fn render_gift_advisory(
     state: &LedgerState,
     year: i32,
+    prior_taxable_gifts: btctax_core::conventions::Usd,
     tables: &impl btctax_core::TaxTables,
 ) -> Option<String> {
     use std::collections::BTreeMap;
@@ -1328,10 +1329,58 @@ pub fn render_gift_advisory(
         }
     }
 
+    // [D3 / R0-I1] §2505 lifetime (basic) exclusion consumption block.
+    // current_year_taxable = total_taxable (Σ LABELED-donee taxable, per Chunk-2 design).
+    // unlabeled gifts are excluded from this figure (their per-donee taxable is unknown).
+    let lifetime_excl = t.gift_lifetime_exclusion;
+    let cumulative_taxable = prior_taxable_gifts + total_taxable;
+
+    // Emit block only when cumulative > 0 (covers prior-only [M4] and over-annual cases).
+    if cumulative_taxable > btctax_core::conventions::Usd::ZERO {
+        let remaining = if cumulative_taxable >= lifetime_excl {
+            btctax_core::conventions::Usd::ZERO
+        } else {
+            lifetime_excl - cumulative_taxable
+        };
+        s.push_str(&format!(
+            "\n§2505 lifetime (basic) exclusion: you have used ${} of your ${} ({year}) lifetime \
+             exclusion (${} remaining). No gift tax is DUE until cumulative taxable gifts exceed \
+             the lifetime exclusion.",
+            fmt_money(cumulative_taxable),
+            fmt_money(lifetime_excl),
+            fmt_money(remaining),
+        ));
+        // Strict `>`: at exactly the exclusion → remaining $0, NOT exceeded.
+        if cumulative_taxable > lifetime_excl {
+            let excess = cumulative_taxable - lifetime_excl;
+            s.push_str(&format!(
+                "\nlifetime exclusion EXCEEDED — gift tax may be due on ${} \
+                 (the excess base past the unified credit, not a computed tax); \
+                 consult a professional.",
+                fmt_money(excess),
+            ));
+        }
+        // [R0-I2] Unlabeled-omission disclosure: when unlabeled gifts exist, §2505 consumption
+        // is understated (unlabeled gifts could have taxable amounts not reflected here).
+        if unlabeled_count > 0 {
+            s.push_str(&format!(
+                "\n§2505 consumption reflects LABELED-donee taxable gifts only; \
+                 {unlabeled_count} unlabeled gift(s) totalling ${} are NOT included — \
+                 label them via `--donee` for a complete figure; consumption may be \
+                 understated / remaining overstated.",
+                fmt_money(unlabeled_total),
+            ));
+        }
+    }
+
+    // [R0-I1] Updated caveats: stale "§2505 … later chunk (Chunk 3)" removed; §2513 and
+    // future-interest caveats preserved; §2505-specific caveats added.
     s.push_str(
-        "\nCaveats: §2513 gift-splitting (MFJ) not modeled; future-interest gifts (which require \
-         Form 709 filing regardless of amount) not detectable; §2505 lifetime exemption is a \
-         later chunk (Chunk 3).",
+        "\nCaveats: §2513 gift-splitting (MFJ) not modeled (single-filer advisory only); \
+         future-interest gifts (which require Form 709 filing regardless of amount) not \
+         detectable; §2505 figures are advisory only — no portability/DSUE (§2010(c)(4)) \
+         applied; prior cumulative taxable gifts are user-supplied (default $0 if \
+         --prior-taxable-gifts not given).",
     );
 
     Some(s)
@@ -1720,7 +1769,14 @@ mod gift_advisory_tests {
         }
     }
     /// A table double carrying only the gift_annual_exclusion (ordinary/ltcg empty — unread here).
+    /// Uses TY2025 lifetime exclusion ($13,990,000) as default; tests that need a different
+    /// lifetime exclusion can use `tables_with_lifetime`.
     fn tables_with(year: i32, excl: Usd) -> BTreeMap<i32, TaxTable> {
+        tables_with_lifetime(year, excl, dec!(13_990_000))
+    }
+
+    /// Like `tables_with` but with an explicit `lifetime_excl` for §2505 boundary tests.
+    fn tables_with_lifetime(year: i32, excl: Usd, lifetime_excl: Usd) -> BTreeMap<i32, TaxTable> {
         let mut m = BTreeMap::new();
         m.insert(
             year,
@@ -1731,6 +1787,7 @@ mod gift_advisory_tests {
                 ltcg: BTreeMap::new(),
                 gift_annual_exclusion: excl,
                 ss_wage_base: dec!(176100),
+                gift_lifetime_exclusion: lifetime_excl,
             },
         );
         m
@@ -1743,7 +1800,7 @@ mod gift_advisory_tests {
     fn no_gifts_is_none() {
         let st = state_with(vec![]);
         let tables = tables_with(2025, dec!(19000));
-        assert!(render_gift_advisory(&st, 2025, &tables).is_none());
+        assert!(render_gift_advisory(&st, 2025, dec!(0), &tables).is_none());
     }
 
     /// [R0-m6] gifts present but NO bundled table → Some(note), NOT None (no silent skip).
@@ -1754,7 +1811,8 @@ mod gift_advisory_tests {
         let st = state_with(vec![gift_removal(1, date!(2026 - 06 - 01), dec!(50000))]);
         // Table double has 2025 only → table_for(2026) == None.
         let tables = tables_with(2025, dec!(19000));
-        let msg = render_gift_advisory(&st, 2026, &tables).expect("note expected, not None");
+        let msg =
+            render_gift_advisory(&st, 2026, dec!(0), &tables).expect("note expected, not None");
         assert!(msg.contains("unavailable"), "{msg}");
         assert!(msg.contains("Form 709 exposure not evaluated"), "{msg}");
         assert!(
@@ -1777,7 +1835,7 @@ mod gift_advisory_tests {
             "Alice",
         )]);
         let tables = tables_with(2025, dec!(19000));
-        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected");
+        let msg = render_gift_advisory(&st, 2025, dec!(0), &tables).expect("advisory expected");
         assert!(msg.contains("20000.00"), "must show Alice's total: {msg}");
         assert!(msg.contains("19000.00"), "must show the exclusion: {msg}");
         assert!(
@@ -1806,7 +1864,8 @@ mod gift_advisory_tests {
         )]);
         let tables = tables_with(2025, dec!(19000));
         // Gifts present + labeled donee → always Some (per-donee breakdown shown).
-        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected, not None");
+        let msg =
+            render_gift_advisory(&st, 2025, dec!(0), &tables).expect("advisory expected, not None");
         assert!(
             msg.contains("No Form 709 filing required"),
             "must say no filing required: {msg}"
@@ -1827,7 +1886,7 @@ mod gift_advisory_tests {
             gift_removal_labeled(2, date!(2025 - 06 - 01), dec!(15000), "Bob"),
         ]);
         let tables = tables_with(2025, dec!(19000));
-        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected");
+        let msg = render_gift_advisory(&st, 2025, dec!(0), &tables).expect("advisory expected");
         // No filing required — neither Alice nor Bob exceeds $19,000.
         assert!(
             msg.contains("No Form 709 filing required"),
@@ -1861,7 +1920,7 @@ mod gift_advisory_tests {
             "Alice",
         )]);
         let tables = tables_with(2025, dec!(19000));
-        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected");
+        let msg = render_gift_advisory(&st, 2025, dec!(0), &tables).expect("advisory expected");
         assert!(
             msg.contains("Form 709 filing required (donee(s): Alice)"),
             "must trigger filing required for Alice: {msg}"
@@ -1884,7 +1943,7 @@ mod gift_advisory_tests {
     fn unlabeled_bucket_caveat_with_conservative_aggregate() {
         let st = state_with(vec![gift_removal(1, date!(2025 - 06 - 01), dec!(30000))]);
         let tables = tables_with(2025, dec!(19000));
-        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected");
+        let msg = render_gift_advisory(&st, 2025, dec!(0), &tables).expect("advisory expected");
         // Unlabeled caveat must appear.
         assert!(
             msg.contains("no donee label"),
@@ -1919,7 +1978,7 @@ mod gift_advisory_tests {
             gift_removal(2, date!(2025 - 06 - 01), dec!(5000)), // unlabeled
         ]);
         let tables = tables_with(2025, dec!(19000));
-        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected");
+        let msg = render_gift_advisory(&st, 2025, dec!(0), &tables).expect("advisory expected");
         // Alice triggers the filing required signal.
         assert!(
             msg.contains("Form 709 filing required"),
@@ -1966,8 +2025,270 @@ mod gift_advisory_tests {
         let tables = tables_with(2025, dec!(19000));
         // A Donation is NOT a Gift → any_gift == false → advisory returns None.
         assert!(
-            render_gift_advisory(&st, 2025, &tables).is_none(),
+            render_gift_advisory(&st, 2025, dec!(0), &tables).is_none(),
             "Donation must be excluded from the Form 709 advisory"
+        );
+    }
+
+    // ── Chunk-3a §2505 KATs (hand-verified; TY2025: annual $19,000, lifetime $13,990,000) ────────
+
+    /// [KAT-U] Under lifetime — Alice $100,000 gift, prior $0.
+    /// current-year taxable = $81,000 (100k − 19k); used $81,000; remaining $13,909,000.
+    /// No "EXCEEDED" line.
+    #[test]
+    fn section_2505_under_lifetime_shows_used_and_remaining() {
+        let st = state_with(vec![gift_removal_labeled(
+            1,
+            date!(2025 - 06 - 01),
+            dec!(100000),
+            "Alice",
+        )]);
+        let tables = tables_with(2025, dec!(19000)); // lifetime = $13,990,000 via tables_with
+        let msg = render_gift_advisory(&st, 2025, dec!(0), &tables).expect("advisory expected");
+        // current-year taxable = 100000 − 19000 = 81000
+        assert!(
+            msg.contains("81000.00"),
+            "taxable $81,000 must appear: {msg}"
+        );
+        // §2505 block: used $81,000 of $13,990,000
+        assert!(
+            msg.contains("§2505 lifetime (basic) exclusion"),
+            "§2505 block must appear: {msg}"
+        );
+        assert!(
+            msg.contains("13990000.00"),
+            "lifetime exclusion $13,990,000 must appear: {msg}"
+        );
+        // remaining = 13,990,000 − 81,000 = 13,909,000
+        assert!(
+            msg.contains("13909000.00"),
+            "remaining $13,909,000 must appear: {msg}"
+        );
+        // No "EXCEEDED" — still under lifetime
+        assert!(
+            !msg.contains("EXCEEDED"),
+            "must NOT say EXCEEDED when under limit: {msg}"
+        );
+        // [I1] stale Chunk-3 caveat is gone
+        assert!(
+            !msg.contains("later chunk (Chunk 3)"),
+            "stale Chunk-3 caveat must be absent: {msg}"
+        );
+    }
+
+    /// [KAT-P] Prior gifts accumulate — Alice $100,000, prior $13,900,000.
+    /// cumulative = 13,900,000 + 81,000 = 13,981,000; remaining = $9,000; no tax.
+    #[test]
+    fn section_2505_prior_gifts_accumulate() {
+        let st = state_with(vec![gift_removal_labeled(
+            1,
+            date!(2025 - 06 - 01),
+            dec!(100000),
+            "Alice",
+        )]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg =
+            render_gift_advisory(&st, 2025, dec!(13_900_000), &tables).expect("advisory expected");
+        // cumulative = 13,900,000 + 81,000 = 13,981,000
+        assert!(
+            msg.contains("13981000.00"),
+            "cumulative $13,981,000 must appear: {msg}"
+        );
+        // remaining = 13,990,000 − 13,981,000 = 9,000
+        assert!(
+            msg.contains("9000.00"),
+            "remaining $9,000 must appear: {msg}"
+        );
+        assert!(
+            !msg.contains("EXCEEDED"),
+            "must NOT say EXCEEDED when under limit: {msg}"
+        );
+    }
+
+    /// [KAT-E] Exceeds lifetime — Alice $100,000, prior $13,950,000.
+    /// cumulative = 13,950,000 + 81,000 = 14,031,000 > 13,990,000.
+    /// excess = 14,031,000 − 13,990,000 = 41,000.
+    #[test]
+    fn section_2505_exceeds_lifetime_shows_exceeded_and_excess() {
+        let st = state_with(vec![gift_removal_labeled(
+            1,
+            date!(2025 - 06 - 01),
+            dec!(100000),
+            "Alice",
+        )]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg =
+            render_gift_advisory(&st, 2025, dec!(13_950_000), &tables).expect("advisory expected");
+        assert!(
+            msg.contains("14031000.00"),
+            "cumulative $14,031,000 must appear: {msg}"
+        );
+        assert!(
+            msg.contains("EXCEEDED"),
+            "must say EXCEEDED when over lifetime limit: {msg}"
+        );
+        // excess = 41,000
+        assert!(
+            msg.contains("41000.00"),
+            "excess $41,000 must appear: {msg}"
+        );
+    }
+
+    /// [KAT-B / R0-M2] Exact boundary — cumulative EXACTLY $13,990,000.
+    /// Alice $100,000, prior = 13,990,000 − 81,000 = 13,909,000.
+    /// remaining = $0; NOT "EXCEEDED" (strict `>`, not `>=`).
+    #[test]
+    fn section_2505_exact_boundary_remaining_zero_not_exceeded() {
+        let st = state_with(vec![gift_removal_labeled(
+            1,
+            date!(2025 - 06 - 01),
+            dec!(100000),
+            "Alice",
+        )]);
+        let tables = tables_with(2025, dec!(19000));
+        // prior = 13,990,000 − 81,000 = 13,909,000 → cumulative = 13,990,000 exactly
+        let msg =
+            render_gift_advisory(&st, 2025, dec!(13_909_000), &tables).expect("advisory expected");
+        assert!(
+            msg.contains("13990000.00"),
+            "cumulative $13,990,000 must appear: {msg}"
+        );
+        // remaining = 0
+        assert!(msg.contains("0.00"), "remaining $0.00 must appear: {msg}");
+        // strict >: at exactly the limit, NOT exceeded
+        assert!(
+            !msg.contains("EXCEEDED"),
+            "must NOT say EXCEEDED at exactly the limit: {msg}"
+        );
+    }
+
+    /// [KAT-P4 / R0-M4] Prior-only edge — prior $5,000,000, all current donees under annual.
+    /// Alice $10,000 gift (under $19k annual) → current taxable $0.
+    /// cumulative = 5,000,000 + 0 = 5,000,000 > 0 → §2505 block SHOWS.
+    #[test]
+    fn section_2505_prior_only_block_shows_even_when_current_taxable_zero() {
+        let st = state_with(vec![gift_removal_labeled(
+            1,
+            date!(2025 - 06 - 01),
+            dec!(10000), // under $19k annual exclusion → current taxable = 0
+            "Alice",
+        )]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg =
+            render_gift_advisory(&st, 2025, dec!(5_000_000), &tables).expect("advisory expected");
+        // cumulative = 5,000,000 (from prior; current taxable = 0)
+        assert!(
+            msg.contains("5000000.00"),
+            "cumulative $5,000,000 must appear: {msg}"
+        );
+        assert!(
+            msg.contains("§2505 lifetime (basic) exclusion"),
+            "§2505 block must appear for prior-only case: {msg}"
+        );
+        assert!(!msg.contains("EXCEEDED"), "must NOT say EXCEEDED: {msg}");
+    }
+
+    /// [KAT-N] No taxable gifts → no §2505 block.
+    /// Alice $10,000 (under annual), prior $0 → cumulative = $0 → no §2505 line.
+    #[test]
+    fn section_2505_no_block_when_cumulative_zero() {
+        let st = state_with(vec![gift_removal_labeled(
+            1,
+            date!(2025 - 06 - 01),
+            dec!(10000), // under $19k annual exclusion
+            "Alice",
+        )]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg = render_gift_advisory(&st, 2025, dec!(0), &tables).expect("advisory expected");
+        assert!(
+            !msg.contains("§2505 lifetime"),
+            "§2505 block must NOT appear when cumulative = 0: {msg}"
+        );
+    }
+
+    /// [KAT-D0] Default $0 prior — no flag → prior $0 + the new caveats present (no stale Chunk-3).
+    #[test]
+    fn section_2505_default_zero_prior_shows_caveats() {
+        let st = state_with(vec![gift_removal_labeled(
+            1,
+            date!(2025 - 06 - 01),
+            dec!(100000), // taxable $81k
+            "Alice",
+        )]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg = render_gift_advisory(&st, 2025, dec!(0), &tables).expect("advisory expected");
+        // [I1] stale Chunk-3 caveat is ABSENT
+        assert!(
+            !msg.contains("later chunk (Chunk 3)"),
+            "stale 'later chunk (Chunk 3)' must be absent: {msg}"
+        );
+        // New caveats present
+        assert!(
+            msg.contains("§2513 gift-splitting"),
+            "§2513 caveat must be present: {msg}"
+        );
+        assert!(
+            msg.contains("portability/DSUE"),
+            "portability/DSUE caveat must be present: {msg}"
+        );
+        assert!(
+            msg.contains("prior cumulative taxable gifts are user-supplied"),
+            "prior-cumulative disclosure caveat must be present: {msg}"
+        );
+    }
+
+    /// [KAT-I2] Mixed/unlabeled — Alice $100,000 (taxable $81k) + unlabeled $50,000.
+    /// §2505 block shows used $81k AND the unlabeled-omission disclosure line.
+    #[test]
+    fn section_2505_mixed_shows_omission_disclosure_for_unlabeled() {
+        let st = state_with(vec![
+            gift_removal_labeled(1, date!(2025 - 03 - 01), dec!(100000), "Alice"),
+            gift_removal(2, date!(2025 - 06 - 01), dec!(50000)), // unlabeled
+        ]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg = render_gift_advisory(&st, 2025, dec!(0), &tables).expect("advisory expected");
+        // §2505 block shows used $81,000 (LABELED only)
+        assert!(
+            msg.contains("§2505 lifetime (basic) exclusion"),
+            "§2505 block must appear: {msg}"
+        );
+        assert!(
+            msg.contains("81000.00"),
+            "used $81,000 (labeled only) must appear: {msg}"
+        );
+        // [I2] Unlabeled-omission disclosure in §2505 block
+        assert!(
+            msg.contains("§2505 consumption reflects LABELED-donee taxable gifts only"),
+            "omission disclosure must appear: {msg}"
+        );
+        assert!(
+            msg.contains("50000.00"),
+            "unlabeled total $50,000 must appear in omission disclosure: {msg}"
+        );
+        assert!(
+            msg.contains("consumption may be understated"),
+            "under-stated warning must appear: {msg}"
+        );
+    }
+
+    /// [KAT-I1] Absence — the stale "§2505 … later chunk (Chunk 3)" string is GONE from output.
+    #[test]
+    fn section_2505_stale_chunk3_caveat_is_absent() {
+        let st = state_with(vec![gift_removal_labeled(
+            1,
+            date!(2025 - 06 - 01),
+            dec!(20000),
+            "Alice",
+        )]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg = render_gift_advisory(&st, 2025, dec!(0), &tables).expect("advisory expected");
+        assert!(
+            !msg.contains("later chunk (Chunk 3)"),
+            "stale Chunk-3 caveat must be absent: {msg}"
+        );
+        assert!(
+            !msg.contains("§2505 lifetime exemption is a later chunk"),
+            "stale §2505 future-chunk phrase must be absent: {msg}"
         );
     }
 }

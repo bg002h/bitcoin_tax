@@ -72,6 +72,13 @@ pub struct TaxTable {
     /// standalone Schedule SE §1401 figure only; does NOT feed engine B / `compute_tax_year`. Belongs in
     /// the per-year table (not a `tables.rs` statutory constant) precisely because it moves year-over-year.
     pub ss_wage_base: Usd,
+    /// §2010(c)(3) **basic exclusion amount** (the unified-credit equivalent for gift/estate tax).
+    /// INDEXED — inflation-adjusted under §2010(c)(3) and announced annually via Rev. Proc.
+    /// TY2025 = $13,990,000 (**Rev. Proc. 2024-40 §2.41**). Feeds the standalone §2505 lifetime-
+    /// exclusion consumption advisory only; does NOT feed engine B / `compute_tax_year`. Belongs in
+    /// the per-year table (not a `tables.rs` statutory constant) precisely because it moves
+    /// year-over-year.
+    pub gift_lifetime_exclusion: Usd,
 }
 
 impl TaxTable {
@@ -247,6 +254,9 @@ pub(crate) fn synthetic_table(year: i32) -> TaxTable {
         gift_annual_exclusion: dec!(19000),
         // Hand-chosen synthetic SS wage base (happens to equal the real TY2025 §230 figure).
         ss_wage_base: dec!(176100),
+        // Hand-chosen synthetic lifetime exclusion (happens to equal the real TY2025 §2010(c)(3)
+        // figure per Rev. Proc. 2024-40 §2.41).
+        gift_lifetime_exclusion: dec!(13_990_000),
     }
 }
 

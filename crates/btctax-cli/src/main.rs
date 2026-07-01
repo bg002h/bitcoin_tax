@@ -47,6 +47,11 @@ enum Command {
         /// Independent of --year; the two flags are not aliased.
         #[arg(long)]
         tax_year: Option<i32>,
+        /// Cumulative prior-year TAXABLE gifts (post-annual-exclusion Form 709 amounts), not
+        /// gross gifts. Used for the §2505 lifetime-exclusion consumption advisory. Defaults to
+        /// $0 when omitted (the advisory discloses this assumption). Must not be negative.
+        #[arg(long)]
+        prior_taxable_gifts: Option<String>,
     },
     /// Emit a reconciliation decision event.
     #[command(subcommand)]
@@ -380,10 +385,27 @@ fn run() -> Result<ExitCode, CliError> {
                 return Ok(ExitCode::from(1));
             }
         }
-        Command::Report { year, tax_year } => {
+        Command::Report {
+            year,
+            tax_year,
+            prior_taxable_gifts,
+        } => {
             if let Some(y) = tax_year {
+                // [R0-M3] Parse --prior-taxable-gifts as exact Decimal (no float); reject negative;
+                // default $0 when the flag is absent. Uses Decimal::default() == 0; is_sign_negative()
+                // for the non-negative guard (rejects negative; zero is accepted).
+                let ptg_raw = prior_taxable_gifts
+                    .as_deref()
+                    .map(eventref::parse_usd_arg)
+                    .transpose()?
+                    .unwrap_or_default();
+                if ptg_raw.is_sign_negative() {
+                    return Err(CliError::Usage(
+                        "--prior-taxable-gifts must not be negative".into(),
+                    ));
+                }
                 let (outcome, advisory, sched_d, gift_advisory, schedule_se, donation_appraisal) =
-                    cmd::tax::report_tax_year(vault, &passphrase(false)?, y)?;
+                    cmd::tax::report_tax_year(vault, &passphrase(false)?, y, ptg_raw)?;
                 print!(
                     "{}",
                     render::render_tax_outcome(y, &outcome, advisory.as_deref())
@@ -394,7 +416,8 @@ fn run() -> Result<ExitCode, CliError> {
                 if let Some(se) = schedule_se {
                     print!("{se}");
                 }
-                // P2-C Task 3: standalone Form 709 gift advisory (non-gating; does not feed engine B).
+                // P2-C Task 3 + Chunk-3a: standalone Form 709 gift advisory + §2505 lifetime-
+                // exclusion consumption (non-gating; does not feed engine B).
                 if let Some(msg) = gift_advisory {
                     println!("{msg}");
                 }
