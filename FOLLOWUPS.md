@@ -44,6 +44,25 @@ Important; workspace gate green (433 tests). Closed:
 
 ---
 
+## ✅ Phase-2 B-M1: §1411 NIIT net-capital-loss fix — SHIPPED (2026-06-30)
+
+Branch `feat/p2-bm1-niit`; R0 spec 0C/0I with INDEPENDENT primary-source web-verification; comprehensive
+review 0C/0I (headline golden re-derived). **CORRECTS the earlier B-M1 note, which was directionally
+WRONG:** the minimal NII model did not subtract the §1211-allowed capital loss, so in net-capital-loss
+years it **OVERSTATED** NIIT (not understated). Verified vs §1.1411-4(d)(2)+(d)(3)(ii) Example 1 +
+Form 8960 line 5a: all dispositions net together; a net capital loss reduces NII by only the §1211(b)
+loss (≤ $3k/$1.5k). Fix (`compute.rs`): `nii_{with,without} -= loss_deduction`; NIIT base floored at
+`max(0, min(nii, over))`. Golden: Single, crypto ST −$80k + other_lt +$15k → `r.niit` −684.00 (was
+−570.00); NII-negative floor → 0.00; MFS → −57.00. No gain-year regression (loss_deduction==0 → no-op).
+Disclosure corrected (removed "can only ever understate"). 491 tests.
+
+crypto ordinary income confirmed CORRECTLY excluded from NII (mining/staking/airdrops = SE-excluded
+§1411(c)(6) or non-NII "other income"). Deferred (OPEN):
+- **Per-`IncomeKind` NII classification:** add crypto-LENDING **interest** to NII (§1411(c)(1)(A)(i)) —
+  the only residual understatement slice; the model can't yet distinguish it from other `crypto_ord`.
+- **Minor coverage:** a golden pinning the delta path where the no-crypto baseline itself has a §1211
+  loss AND `magi_without > threshold` (fix is symmetric/correct there; untested by an asserting golden).
+
 ## ✅ Phase-2 P2-B: Form 8949 + Schedule D generation — SHIPPED (2026-06-30)
 
 Second Phase-2 sub-project. Branch `feat/p2b-form8949`; R0 spec 2 rounds to 0C/0I; 2 impl passes each
