@@ -559,6 +559,8 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
         "gain",
         "term",
         "gift_zone",
+        "acquired_at",
+        "wallet",
     ])?;
     for d in &state.disposals {
         for leg in &d.legs {
@@ -579,6 +581,8 @@ pub fn write_csv_exports(out_dir: &Path, state: &LedgerState) -> Result<(), crat
                 leg.gift_zone
                     .map(|z| gift_zone_tag(z).to_string())
                     .unwrap_or_default(),
+                leg.acquired_at.to_string(),
+                wallet_label(&leg.wallet),
             ])?;
         }
     }

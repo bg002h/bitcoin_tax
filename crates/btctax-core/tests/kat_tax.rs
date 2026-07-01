@@ -2490,3 +2490,204 @@ fn appraisal_detail_named_claimed_deduction_with_all_caveats() {
         "detail must cite §170(e)(1)(B)(ii) (donee-type reduction rule); got: {detail}"
     );
 }
+
+// ── P2-B Task 1: DisposalLeg.acquired_at (zone-aware) + wallet KATs ─────────────────────────────
+
+/// KAT (a): ordinary (non-gift) disposal — acquired_at == the consumed lot's gain_hp_start
+/// (which equals acquired_at on a purchased lot, since donor_acquired_at is None).
+/// Also verifies wallet matches the exchange wallet the lot was consumed from.
+#[test]
+fn task1_kat_a_ordinary_disposal_acquired_at_equals_purchase_date() {
+    let purchase_date = time::macros::date!(2025 - 03 - 01);
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let sell_ev = ev(
+        "SELL",
+        datetime!(2026-06-01 00:00:00 UTC),
+        EventPayload::Dispose(Dispose {
+            sat: 100_000,
+            usd_proceeds: dec!(100.00),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    );
+    let st = project(
+        &[buy, sell_ev],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st.disposals.len(), 1);
+    let leg = &st.disposals[0].legs[0];
+    // (a) acquired_at == purchase date (gain_hp_start == acquired_at when donor_acquired_at is None)
+    assert_eq!(
+        leg.acquired_at, purchase_date,
+        "ordinary leg acquired_at must equal the purchase (gain_hp_start) date"
+    );
+    // consistent with term (2025-03-01 → 2026-06-01 is > 1 year → LT)
+    assert_eq!(leg.term, Term::LongTerm);
+    // (d) wallet: exchange wallet matches the consuming lot's wallet
+    assert_eq!(
+        leg.wallet,
+        wal(),
+        "wallet must match the consuming lot's exchange wallet"
+    );
+    // existing gain math unchanged
+    assert_eq!(leg.gain, dec!(40.00));
+}
+
+/// KAT (b): §1223(2) tacked gift (Gain zone) — acquired_at == donor's tacked date (NOT gift date).
+/// Dual-basis lot (fmv_at_gift=$60 < donor_basis=$100); proceeds=$120 > gain_basis=$100 → Gain zone.
+/// Tacking: acquired_at = gain_hp_start = donor_acquired_at = 2024-01-01 → LT (consistent with term).
+#[test]
+fn task1_kat_b_gain_zone_gift_acquired_at_equals_donor_date() {
+    let donor_date = time::macros::date!(2024 - 01 - 01);
+    let gift_date = time::macros::date!(2025 - 06 - 01);
+    let mut evs = gift_lot(
+        Some(dec!(100.00)),                 // donor_basis
+        Some(donor_date),                   // donor_acquired_at
+        dec!(60.00),                        // fmv_at_gift < donor_basis → dual
+        datetime!(2025-06-01 00:00:00 UTC), // received
+    );
+    evs.push(sell(
+        datetime!(2025-07-01 00:00:00 UTC),
+        dec!(120.00), // proceeds > gain_basis (100) → Gain zone
+    ));
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    let leg = &st.disposals[0].legs[0];
+    assert_eq!(leg.gift_zone, Some(GiftZone::Gain));
+    // (b) acquired_at == donor's tacked date, NOT the gift date
+    assert_eq!(
+        leg.acquired_at, donor_date,
+        "gain-zone leg acquired_at must equal donor's tacked date ({donor_date}), not gift date ({gift_date})"
+    );
+    // consistent with term (tacked from 2024-01-01 → LT by 2025-07-01)
+    assert_eq!(leg.term, Term::LongTerm);
+    // existing basis/gain math unchanged
+    assert_eq!(leg.basis, dec!(100.00));
+    assert_eq!(leg.gain, dec!(20.00));
+}
+
+/// KAT (c): [R0-C1 LOCK] §1015 dual-basis LOSS-zone gift — acquired_at == GIFT DATE (loss_hp_start),
+/// NOT the donor's tacked date. Loss basis does NOT tack (Pub 551 / §1015(a)).
+/// Dual-basis lot (fmv_at_gift=$60 < donor_basis=$100); proceeds=$40 < loss_basis=$60 → Loss zone.
+/// acquired_at = loss_hp_start = gift date 2025-06-01 → ST (consistent with term).
+#[test]
+fn task1_kat_c_loss_zone_gift_acquired_at_equals_gift_date_not_donor_date() {
+    let donor_date = time::macros::date!(2024 - 01 - 01);
+    let gift_date = time::macros::date!(2025 - 06 - 01);
+    let mut evs = gift_lot(
+        Some(dec!(100.00)),                 // donor_basis
+        Some(donor_date),                   // donor_acquired_at
+        dec!(60.00),                        // fmv_at_gift < donor_basis → dual (loss_basis = $60)
+        datetime!(2025-06-01 00:00:00 UTC), // received — gift date = loss_hp_start
+    );
+    evs.push(sell(
+        datetime!(2025-07-01 00:00:00 UTC),
+        dec!(40.00), // proceeds < loss_basis (60) → Loss zone
+    ));
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    let leg = &st.disposals[0].legs[0];
+    assert_eq!(leg.gift_zone, Some(GiftZone::Loss));
+    // [R0-C1] acquired_at MUST be the gift date (loss_hp_start), NOT the donor's tacked date
+    assert_eq!(
+        leg.acquired_at, gift_date,
+        "loss-zone leg acquired_at must equal gift date ({gift_date}), not donor date ({donor_date}); \
+         loss basis does not tack [R0-C1]"
+    );
+    // MUST NOT be the donor's date (this is the Critical the task exists to prevent)
+    assert_ne!(
+        leg.acquired_at, donor_date,
+        "loss-zone leg acquired_at must NEVER be the donor date — that would contradict the leg's term [R0-C1]"
+    );
+    // consistent with term (HP from gift date 2025-06-01 → 2025-07-01 is < 1 year → ST)
+    assert_eq!(
+        leg.term,
+        Term::ShortTerm,
+        "loss-zone leg term must be ShortTerm (HP from gift date, not tacked)"
+    );
+    // existing basis/gain math unchanged
+    assert_eq!(leg.basis, dec!(60.00));
+    assert_eq!(leg.gain, dec!(-20.00));
+}
+
+/// KAT (d): wallet field matches the consuming lot's wallet for both exchange and self-custody.
+#[test]
+fn task1_kat_d_wallet_matches_consuming_lot_wallet() {
+    // Exchange wallet disposal (uses wal() = Exchange { provider: "cb", account: "m" })
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let sell_ev = ev(
+        "SELL",
+        datetime!(2025-06-01 00:00:00 UTC),
+        EventPayload::Dispose(Dispose {
+            sat: 100_000,
+            usd_proceeds: dec!(80.00),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    );
+    let st = project(
+        &[buy, sell_ev],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(
+        st.disposals[0].legs[0].wallet,
+        wal(),
+        "exchange-wallet disposal leg must carry the exchange WalletId"
+    );
+
+    // Self-custody wallet disposal
+    let cold = WalletId::SelfCustody {
+        label: "cold".into(),
+    };
+    let buy_cold = LedgerEvent {
+        id: EventId::import(Source::Swan, SourceRef::new("BUY_COLD")),
+        utc_timestamp: datetime!(2025-04-01 00:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(cold.clone()),
+        payload: EventPayload::Acquire(Acquire {
+            sat: 50_000,
+            usd_cost: dec!(30.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    };
+    let sell_cold = LedgerEvent {
+        id: EventId::import(Source::Swan, SourceRef::new("SELL_COLD")),
+        utc_timestamp: datetime!(2025-07-01 00:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(cold.clone()),
+        payload: EventPayload::Dispose(Dispose {
+            sat: 50_000,
+            usd_proceeds: dec!(50.00),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    };
+    let st2 = project(
+        &[buy_cold, sell_cold],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(
+        st2.disposals[0].legs[0].wallet, cold,
+        "self-custody disposal leg must carry the SelfCustody WalletId"
+    );
+}

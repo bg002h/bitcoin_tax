@@ -13,7 +13,7 @@ use btctax_adapters::BundledTaxTables;
 use btctax_core::{
     compute_tax_year, BasisSource, BlockerKind, Carryforward, Disposal, DisposalLeg, DisposeKind,
     EventId, FilingStatus, IncomeKind, IncomeRecord, LedgerState, LotId, Source, SourceRef,
-    TaxOutcome, TaxProfile, TaxResult, Term, Usd,
+    TaxOutcome, TaxProfile, TaxResult, Term, Usd, WalletId,
 };
 use rust_decimal_macros::dec;
 use time::macros::date;
@@ -110,6 +110,11 @@ fn leg(gain: Usd, term: Term) -> DisposalLeg {
         term,
         basis_source: BasisSource::ExchangeProvided,
         gift_zone: None,
+        acquired_at: date!(2025 - 01 - 01), // synthetic; compute_tax_year does not read acquired_at
+        wallet: WalletId::Exchange {
+            provider: "cb".into(),
+            account: "m".into(),
+        }, // synthetic
     }
 }
 

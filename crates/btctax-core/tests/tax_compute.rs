@@ -98,6 +98,11 @@ fn disposal(d: time::Date, gain: Usd, term: Term) -> Disposal {
             term,
             basis_source: BasisSource::ComputedFromCost,
             gift_zone: None,
+            acquired_at: date!(2025 - 01 - 01), // synthetic; compute_tax_year does not read acquired_at
+            wallet: WalletId::Exchange {
+                provider: "cb".into(),
+                account: "m".into(),
+            }, // synthetic
         }],
         fee_mini_disposition: false,
     }
