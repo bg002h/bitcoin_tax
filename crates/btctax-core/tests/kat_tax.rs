@@ -2119,3 +2119,374 @@ fn qualified_appraisal_proxy_under_5k_with_flag_true_does_not_emit() {
     // The manual flag is persisted as-is.
     assert!(st.removals[0].appraisal_required);
 }
+
+// ── P2-A: §170(e) claimed_deduction KATs ─────────────────────────────────────────────────────
+
+/// (P2-A-a1) LT-only donation: claimed_deduction = FMV.
+/// §170(e)(1)(A): LT capital-gain property → FMV (no reduction; the would-be gain is LTCG).
+#[test]
+fn claimed_deduction_lt_only_equals_fmv() {
+    // Buy 2025-01-05 → donate 2026-03-01 (LT; >1yr). basis=$5k, FMV=$60k.
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2026-03-01 00:00:00 UTC),
+        datetime!(2026-03-02 00:00:00 UTC),
+        100_000_000,
+        dec!(5000.00),  // basis
+        dec!(60000.00), // FMV
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(
+        st.removals[0].claimed_deduction,
+        Some(dec!(60000.00)),
+        "LT-only donation: claimed_deduction must equal FMV $60k (no §170(e) reduction)"
+    );
+}
+
+/// (P2-A-a2) ST-appreciated donation (basis < FMV): claimed_deduction = basis = min(fmv, basis).
+/// §170(e)(1)(A): the ST gain would not be LTCG → deduction reduced from FMV to basis.
+#[test]
+fn claimed_deduction_st_appreciated_equals_basis() {
+    // Buy 2025-01-05 → donate 2025-06-01 (ST; <1yr). basis=$2k, FMV=$10k.
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2025-06-01 00:00:00 UTC),
+        datetime!(2025-06-02 00:00:00 UTC),
+        100_000_000,
+        dec!(2000.00),  // basis < FMV → appreciated ST
+        dec!(10000.00), // FMV
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(
+        st.removals[0].claimed_deduction,
+        Some(dec!(2000.00)),
+        "ST-appreciated (basis $2k < FMV $10k): claimed_deduction must = basis $2k = min(10k,2k)"
+    );
+}
+
+/// (P2-A-a3) ST-DEPRECIATED donation (basis > FMV): claimed_deduction = FMV, NOT basis. [R0-C1 lock]
+/// §170(e)(1)(A): no would-be gain (loss property) → no reduction → deduction = FMV.
+/// min(FMV, basis) correctly yields FMV when basis > FMV.
+/// The old proxy used `basis` unconditionally for ST, which OVER-stated for depreciated property.
+/// This KAT locks the ST-depreciated behavior:
+///   basis=$8k / fmv=$3k → deduction=$3k → trigger does NOT fire (old basis $8k WOULD have).
+#[test]
+fn claimed_deduction_st_depreciated_equals_fmv_not_basis() {
+    // Buy 2025-06-01 → donate 2025-12-01 (ST; <1yr). basis=$8k (high), FMV=$3k (depreciated).
+    let events = donate_single(
+        datetime!(2025-06-01 00:00:00 UTC),
+        datetime!(2025-12-01 00:00:00 UTC),
+        datetime!(2025-12-02 00:00:00 UTC),
+        100_000_000,
+        dec!(8000.00), // basis > FMV → depreciated ST
+        dec!(3000.00), // FMV = $3k (below basis)
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    // Deduction = min(3000, 8000) = 3000 (FMV), not basis.
+    assert_eq!(
+        st.removals[0].claimed_deduction,
+        Some(dec!(3000.00)),
+        "ST-DEPRECIATED (basis $8k > FMV $3k): claimed_deduction must = FMV $3k, NOT basis $8k"
+    );
+    // ST-depreciated lock: $3k deduction ≤ $5k threshold → trigger must NOT fire.
+    // (The old basis-proxy of $8k WOULD have triggered — that was a false positive now fixed.)
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::QualifiedAppraisalNote),
+        "ST-depreciated deduction $3k (≤ $5k) must NOT trigger QualifiedAppraisalNote \
+         (old proxy used basis $8k and would have fired — corrected to min(fmv,basis)=$3k)"
+    );
+}
+
+/// (P2-A-a4) Mixed LT+ST legs: claimed_deduction = LT→FMV + ST→min(FMV,basis).
+/// Same two-lot setup as qualified_appraisal_mixed_legs_above_threshold_flagged.
+/// LT lot ($5k basis, $50k FMV portion) → $50k; ST lot ($2k basis, $50k FMV portion) → min($50k,$2k) = $2k.
+/// Total claimed_deduction = $52k.
+#[test]
+fn claimed_deduction_mixed_lt_plus_st() {
+    let lot_a_buy = ev(
+        "BA",
+        datetime!(2025-01-05 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000_000,
+            usd_cost: dec!(5000.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let lot_b_buy = ev(
+        "BB",
+        datetime!(2025-12-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000_000,
+            usd_cost: dec!(2000.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OC",
+        datetime!(2026-03-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 200_000_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl = dec_ev(
+        1,
+        datetime!(2026-03-02 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OC")),
+            as_: OutflowClass::Donate {
+                appraisal_required: false,
+            },
+            principal_proceeds_or_fmv: dec!(100000.00), // total FMV $100k → pro-rata $50k each
+            fee_usd: None,
+        }),
+    );
+    let st = project(
+        &[lot_a_buy, lot_b_buy, out, recl],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    // LT leg ($50k FMV) → $50k; ST leg ($2k basis, $50k FMV) → min($50k,$2k) = $2k.
+    assert_eq!(
+        st.removals[0].claimed_deduction,
+        Some(dec!(52000.00)),
+        "mixed LT+ST: claimed_deduction must = LT-FMV $50k + ST-min($50k,$2k) = $52k"
+    );
+}
+
+/// (P2-A-b) Gift removal: claimed_deduction = None (gift is not a charitable deduction).
+#[test]
+fn gift_claimed_deduction_is_none() {
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OUT",
+        datetime!(2026-06-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl = dec_ev(
+        1,
+        datetime!(2026-06-15 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::GiftOut,
+            principal_proceeds_or_fmv: dec!(150.00),
+            fee_usd: None,
+        }),
+    );
+    let st = project(
+        &[buy, out, recl],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st.removals.len(), 1);
+    assert_eq!(st.removals[0].kind, RemovalKind::Gift);
+    assert_eq!(
+        st.removals[0].claimed_deduction, None,
+        "Gift removal must have claimed_deduction = None (not a charitable deduction)"
+    );
+}
+
+/// (P2-A-c) Appraisal trigger fires off stored claimed_deduction: LT $60k → flagged.
+/// Adapts existing appraisal KAT to also assert on the stored field.
+#[test]
+fn appraisal_trigger_lt_60k_fires_and_claimed_deduction_stored() {
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2026-03-01 00:00:00 UTC),
+        datetime!(2026-03-02 00:00:00 UTC),
+        100_000_000,
+        dec!(5000.00),
+        dec!(60000.00),
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    // Trigger fires (stored deduction $60k > $5k threshold).
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::QualifiedAppraisalNote),
+        "LT $60k claimed_deduction must fire QualifiedAppraisalNote"
+    );
+    // Stored field = FMV $60k (LT).
+    assert_eq!(st.removals[0].claimed_deduction, Some(dec!(60000.00)));
+}
+
+/// (P2-A-c) Appraisal trigger: ST $10k/$2k appreciated → NOT flagged.
+/// Stored claimed_deduction = min($10k, $2k) = $2k ≤ $5k.
+#[test]
+fn appraisal_trigger_st_appreciated_not_fired_and_claimed_deduction_stored() {
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2025-06-01 00:00:00 UTC),
+        datetime!(2025-06-02 00:00:00 UTC),
+        100_000_000,
+        dec!(2000.00),
+        dec!(10000.00),
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::QualifiedAppraisalNote),
+        "ST appreciated $2k claimed_deduction must NOT fire QualifiedAppraisalNote"
+    );
+    assert_eq!(st.removals[0].claimed_deduction, Some(dec!(2000.00)));
+}
+
+/// (P2-A-c) Boundary: exactly $5,000.00 → NOT flagged (strict >).
+#[test]
+fn appraisal_trigger_boundary_exactly_5000_not_flagged_with_stored_deduction() {
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2026-03-01 00:00:00 UTC),
+        datetime!(2026-03-02 00:00:00 UTC),
+        100_000_000,
+        dec!(1000.00),
+        dec!(5000.00), // FMV = exactly threshold; LT → claimed_deduction = $5k
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::QualifiedAppraisalNote),
+        "claimed_deduction exactly $5,000.00 must NOT fire (strict >)"
+    );
+    assert_eq!(st.removals[0].claimed_deduction, Some(dec!(5000.00)));
+}
+
+/// (P2-A-c) Boundary: $5,000.01 → flagged.
+#[test]
+fn appraisal_trigger_boundary_5000_01_flagged_with_stored_deduction() {
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2026-03-01 00:00:00 UTC),
+        datetime!(2026-03-02 00:00:00 UTC),
+        100_000_000,
+        dec!(1000.00),
+        dec!(5000.01), // FMV = one cent over; LT → claimed_deduction = $5,000.01
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::QualifiedAppraisalNote),
+        "claimed_deduction $5,000.01 must fire QualifiedAppraisalNote (strict > threshold)"
+    );
+    assert_eq!(st.removals[0].claimed_deduction, Some(dec!(5000.01)));
+}
+
+/// (P2-A-d) Detail text: says "Claimed deduction $X" (not "proxy"), retains all caveats:
+/// dealer/inventory (§1221(a)(1)), donee-type/private foundation (§170(e)(1)(B)(ii)) [NEW],
+/// aggregation (§170(f)(11)(F)), CCA 202302012.
+#[test]
+fn appraisal_detail_named_claimed_deduction_with_all_caveats() {
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2026-03-01 00:00:00 UTC),
+        datetime!(2026-03-02 00:00:00 UTC),
+        100_000_000,
+        dec!(5000.00),
+        dec!(60000.00),
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    let note = st
+        .blockers
+        .iter()
+        .find(|b| b.kind == BlockerKind::QualifiedAppraisalNote)
+        .expect("QualifiedAppraisalNote must be emitted for LT $60k donation");
+    let detail = &note.detail;
+    // Must say "Claimed deduction $..." (exact, not proxy).
+    assert!(
+        detail.contains("Claimed deduction $60000.00"),
+        "detail must open with 'Claimed deduction $60000.00'; got: {detail}"
+    );
+    // Statutory citations.
+    assert!(
+        detail.contains("§170(f)(11)(C)"),
+        "must cite §170(f)(11)(C); got: {detail}"
+    );
+    assert!(
+        detail.contains("CCA 202302012"),
+        "must cite CCA 202302012; got: {detail}"
+    );
+    assert!(
+        detail.contains("§170(e)"),
+        "must cite §170(e); got: {detail}"
+    );
+    assert!(
+        detail.contains("§1221(a)(1)"),
+        "must cite §1221(a)(1) (dealer/inventory caveat); got: {detail}"
+    );
+    assert!(
+        detail.contains("§170(f)(11)(F)"),
+        "must cite §170(f)(11)(F) (aggregation caveat); got: {detail}"
+    );
+    // NEW donee-type caveat: private foundation + §170(e)(1)(B)(ii) [R0-I1].
+    assert!(
+        detail.contains("private foundation"),
+        "detail must mention 'private foundation' (donee-type caveat); got: {detail}"
+    );
+    assert!(
+        detail.contains("§170(e)(1)(B)(ii)"),
+        "detail must cite §170(e)(1)(B)(ii) (donee-type reduction rule); got: {detail}"
+    );
+}

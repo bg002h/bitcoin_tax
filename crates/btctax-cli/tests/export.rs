@@ -1,8 +1,10 @@
 mod fixtures;
-use btctax_cli::cmd;
+use btctax_cli::{cmd, Session};
+use btctax_core::OutflowClass;
 use btctax_store::Passphrase;
 use csv::Reader;
 use std::fs::File;
+use time::macros::datetime;
 
 fn pp() -> Passphrase {
     Passphrase::new("pw".into())
@@ -109,6 +111,119 @@ fn export_snapshot_writes_sqlite_and_csvs_and_backup_key() {
     let key = dir.path().join("backup.asc");
     cmd::admin::backup_key(&vault, &pp(), &key).unwrap();
     assert!(key.exists());
+}
+
+/// (P2-A Minor fix KAT) Multi-leg donation: removals.csv must show `claimed_deduction` on the
+/// FIRST leg row only; subsequent leg rows carry an empty cell so `SUM()` over the column equals
+/// the correct per-donation total without double-counting.
+///
+/// Setup: two lots consumed by one Donation reclassification → `make_removal_legs` yields 2 legs.
+///   Lot A: LT (2024-01-01), 1 BTC, basis $5,000 → FMV pro-rata $50,000 → deduction $50,000.
+///   Lot B: ST (2025-12-01), 1 BTC, basis $2,000 → FMV pro-rata $50,000 → min($50k,$2k) = $2,000.
+///   Total claimed_deduction = $52,000.
+///
+/// Before fix: both rows carried "52000.00" → SUM = $104,000 (double-counted).
+/// After fix:  row 0 = "52000.00", row 1 = "" → SUM = $52,000 (correct).
+#[test]
+fn removals_csv_multi_leg_donation_no_double_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    let now = datetime!(2026-04-01 12:00:00 UTC);
+
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(
+        &vault,
+        &pp(),
+        &[fixtures::coinbase_two_lot_donation(dir.path())],
+    )
+    .unwrap();
+
+    // The 2-BTC Send is pending; retrieve its event ref for reclassification.
+    let out_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert_eq!(
+            state.pending_reconciliation.len(),
+            1,
+            "Send must be pending before reclassification"
+        );
+        state.pending_reconciliation[0].event.canonical()
+    };
+
+    // Reclassify as Donate with total FMV $100,000 (2 BTC × $50k each, pro-rata by sat).
+    // FIFO consumes both lots: LT leg ($50k FMV → $50k deduction) + ST leg ($2k basis,
+    // $50k FMV → min($50k,$2k) = $2k deduction).  Total claimed_deduction = $52,000.
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        OutflowClass::Donate {
+            appraisal_required: false,
+        },
+        btctax_cli::eventref::parse_usd_arg("100000.00").unwrap(),
+        None,
+        now,
+    )
+    .unwrap();
+
+    let out = dir.path().join("export");
+    cmd::admin::export_snapshot(&vault, &pp(), &out).unwrap();
+
+    let removals_path = out.join("removals.csv");
+    assert!(removals_path.exists(), "removals.csv must exist");
+
+    // claimed_deduction column index 8:
+    // event(0), kind(1), removed_at(2), lot(3), sat(4), basis(5), fmv_at_transfer(6), term(7),
+    // claimed_deduction(8).
+    const DED_COL: usize = 8;
+
+    let mut reader = Reader::from_reader(File::open(&removals_path).unwrap());
+    let records: Vec<_> = reader
+        .records()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("Failed to read removals.csv records");
+
+    assert_eq!(
+        records.len(),
+        2,
+        "expected 2 removal leg rows (one per lot consumed by the donation); got {}",
+        records.len()
+    );
+
+    let row0_ded = records[0]
+        .get(DED_COL)
+        .expect("row 0 claimed_deduction missing");
+    let row1_ded = records[1]
+        .get(DED_COL)
+        .expect("row 1 claimed_deduction missing");
+
+    // First leg: full per-donation deduction total.
+    assert_eq!(
+        row0_ded, "52000.00",
+        "first leg row must carry the full claimed_deduction ($52,000); got {row0_ded:?}"
+    );
+
+    // Subsequent legs: empty cell so a naive SUM() does not double-count.
+    assert!(
+        row1_ded.is_empty(),
+        "second leg row must have an empty claimed_deduction (not {row1_ded:?}); \
+         a non-empty value means the deduction is double-counted in a spreadsheet SUM()"
+    );
+
+    // Invariant: SUM over the column == single donation total.
+    let sum: f64 = records
+        .iter()
+        .filter_map(|r| r.get(DED_COL))
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            s.parse::<f64>()
+                .expect("non-empty claimed_deduction must be numeric")
+        })
+        .sum();
+    assert!(
+        (sum - 52_000.0_f64).abs() < 0.01,
+        "SUM of claimed_deduction column must equal $52,000 (no double-count); got {sum}"
+    );
 }
 
 /// CLI-I1 fix: exported CSVs are owner-only (0o600) even when the out-dir PRE-EXISTS.
