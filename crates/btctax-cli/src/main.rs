@@ -432,20 +432,21 @@ fn run() -> Result<ExitCode, CliError> {
             tax_year,
             prior_taxable_gifts,
         } => {
+            // [R0-M3] Parse --prior-taxable-gifts as exact Decimal (no float); reject negative
+            // REGARDLESS of whether --tax-year is present. Validated once, before the branch.
+            // Uses Decimal::default() == 0; is_sign_negative() for the non-negative guard
+            // (rejects negative; zero is accepted).
+            let ptg_raw = prior_taxable_gifts
+                .as_deref()
+                .map(eventref::parse_usd_arg)
+                .transpose()?
+                .unwrap_or_default();
+            if ptg_raw.is_sign_negative() {
+                return Err(CliError::Usage(
+                    "--prior-taxable-gifts must not be negative".into(),
+                ));
+            }
             if let Some(y) = tax_year {
-                // [R0-M3] Parse --prior-taxable-gifts as exact Decimal (no float); reject negative;
-                // default $0 when the flag is absent. Uses Decimal::default() == 0; is_sign_negative()
-                // for the non-negative guard (rejects negative; zero is accepted).
-                let ptg_raw = prior_taxable_gifts
-                    .as_deref()
-                    .map(eventref::parse_usd_arg)
-                    .transpose()?
-                    .unwrap_or_default();
-                if ptg_raw.is_sign_negative() {
-                    return Err(CliError::Usage(
-                        "--prior-taxable-gifts must not be negative".into(),
-                    ));
-                }
                 let (outcome, advisory, sched_d, gift_advisory, schedule_se, donation_appraisal) =
                     cmd::tax::report_tax_year(vault, &passphrase(false)?, y, ptg_raw)?;
                 print!(

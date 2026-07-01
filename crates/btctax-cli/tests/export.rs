@@ -447,8 +447,10 @@ fn export_writes_form8283_with_section_b_and_aggregation_caveat() {
     let recs: Vec<_> = rdr.records().collect::<Result<Vec<_>, _>>().unwrap();
     assert_eq!(recs.len(), 2, "two donation legs → two Form 8283 rows");
 
-    // Column indices: section(0), ..., claimed_deduction(7), fmv_method(8), donee(9),
-    // appraiser(10), needs_review(11).
+    // Column indices: section(0), description(1), how_acquired(2), date_acquired(3),
+    // date_contributed(4), cost_basis(5), fmv(6), claimed_deduction(7), fmv_method(8),
+    // donee(9), appraiser(10), needs_review(11), donee_ein(12), donee_address(13),
+    // appraiser_tin(14), appraiser_ptin(15), appraiser_qualifications(16), appraisal_date(17).
     let section_b_rows = recs.iter().filter(|r| r.get(0) == Some("B")).count();
     assert_eq!(
         section_b_rows, 1,

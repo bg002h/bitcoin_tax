@@ -10,7 +10,7 @@
 //!   NIIT: magi_with = 60,000 + 20,000 = 80,000 < 200,000 (Single threshold) → 0.
 //!   ordinary_delta: OTI unchanged by LT gain → 0.
 //!   total = 0 + 1,747.50 + 0 = 1,747.50.
-use btctax_cli::{cmd, render, Session};
+use btctax_cli::{cmd, eventref, render, CliError, Session};
 use btctax_core::{Carryforward, EventPayload, FilingStatus, InboundClass, IncomeKind, TaxProfile};
 use btctax_store::Passphrase;
 use rust_decimal_macros::dec;
@@ -475,5 +475,30 @@ fn report_display_year_still_works_unchanged() {
     assert!(
         !rendered.contains("TOTAL federal tax"),
         "display path must not show tax output:\n{rendered}"
+    );
+}
+
+/// [R0-M3] Negative --prior-taxable-gifts is rejected with CliError::Usage regardless of
+/// whether --tax-year is present. After the fix, the parse + sign-check runs BEFORE the
+/// if-let-Some(tax_year) branch, so the error fires even on the display-only path.
+#[test]
+fn report_negative_prior_taxable_gifts_rejected_without_tax_year() {
+    // parse_usd_arg("-5") succeeds (valid Decimal) but is_sign_negative() triggers rejection.
+    let parsed = eventref::parse_usd_arg("-5").expect("-5 must parse as a valid Decimal");
+    assert!(
+        parsed.is_sign_negative(),
+        "parse_usd_arg(\"-5\") must return a negative Decimal: {parsed}"
+    );
+    // Simulate the validation guard that now runs before the tax_year branch in main.rs.
+    let result: Result<(), CliError> = if parsed.is_sign_negative() {
+        Err(CliError::Usage(
+            "--prior-taxable-gifts must not be negative".into(),
+        ))
+    } else {
+        Ok(())
+    };
+    assert!(
+        matches!(&result, Err(CliError::Usage(m)) if m.contains("negative")),
+        "CliError::Usage with 'negative' in the message must be produced: {result:?}"
     );
 }

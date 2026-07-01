@@ -2173,8 +2173,11 @@ mod gift_advisory_tests {
             msg.contains("13990000.00"),
             "cumulative $13,990,000 must appear: {msg}"
         );
-        // remaining = 0
-        assert!(msg.contains("0.00"), "remaining $0.00 must appear: {msg}");
+        // remaining = 0 — assert the exact phrasing so "13990000.00" cannot satisfy this
+        assert!(
+            msg.contains("($0.00 remaining)"),
+            "remaining $0.00 in exact phrasing '($0.00 remaining)' must appear: {msg}"
+        );
         // strict >: at exactly the limit, NOT exceeded
         assert!(
             !msg.contains("EXCEEDED"),
@@ -2444,6 +2447,13 @@ mod schedule_se_tests {
         write_csv_exports(&out, &st, Some(2025), None, &BTreeMap::new()).unwrap();
         assert!(!out.join("schedule_se.csv").exists());
     }
+}
+
+#[cfg(test)]
+mod form8283_csv_tests {
+    //! P2-C / Chunk-3b Task 2 unit KATs — `write_form8283_csv` Part III/IV detail columns.
+    //! Direct-state fixtures; pure unit (no vault). PRIVACY: synthetic values only.
+    use super::*;
 
     /// form8283.csv — new Part III/IV detail columns populated when details are present.
     #[test]
