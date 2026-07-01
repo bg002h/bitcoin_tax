@@ -4,6 +4,30 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ GUI sub-project 1: btctax-tui ratatui read-only viewer — SHIPPED (2026-07-01)
+
+First GUI work (user-directed: "work on gui first"). New `btctax-tui` crate — a ratatui terminal UI,
+strictly READ-ONLY: unlock the PGP vault → tabs for Holdings/Disposals/Income/Tax/Forms/Compliance, all
+from the pure read-only builders (`Session::open` + `load_events_and_project` + `compute_tax_year`/
+`compute_se_tax`/`form_8949`/`schedule_d`/`form_8283`/`disposal_compliance`/`build_verify`). Read-only
+enforced at COMPILE level (immutable `Session` binding → `save()` won't compile; `conn()` forbidden) +
+review grep + a byte-identical-vault test. Passphrase moved (`mem::take`, capped, never cloned/rendered);
+offline (only ratatui 0.29 + crossterm 0.28; MSRV 1.74; Cargo.lock committed); terminal restored on
+exit/Err/panic (`TerminalGuard` + panic hook); VaultLock `Locked` handled; `q` typeable in the passphrase.
+Figure parity with the CLI by construction (same builders). Additive only — core/cli/store/adapters
+untouched. Spec R0 2 rounds → 0C/0I; 5 SDD tasks each independently reviewed; whole-branch review 0C/0I.
+584 workspace tests.
+
+Deferred (OPEN → later): **export-from-TUI** (CSV/snapshot); the **mutating flows** (import, reconcile/
+classify, config, tax-profile set, optimize run/accept/consult, safe-harbor attest) — a future interactive
+TUI or the egui/graphical GUI; **`r` refresh (re-project)** + **`?` help overlay** (trimmed from the footer
+until implemented); charts/visualizations; mouse support; concurrent read-only vault open (vs the exclusive
+VaultLock); **CI infra** (no `.github/workflows` exists — add one, incl. the `cargo +1.74` MSRV gate [M5]
+and the PII scan). Next GUI step (when user-directed): either the egui graphical viewer or the
+interactive/mutating TUI.
+
+---
+
 ## Standing roadmap — next program (user-approved 2026-06-30; auto-pick-up after slugs ship)
 
 The Phase-1 burndown (below) + both slugs (pre-2025 filed-method reconciliation mechanism; minimal
