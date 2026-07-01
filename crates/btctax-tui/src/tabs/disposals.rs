@@ -1,0 +1,109 @@
+//! Disposals tab — renders year-filtered disposals as a ratatui Table.
+//!
+//! STRICTLY READ-ONLY: no Session, no persistence, no mutations.
+
+use crate::app::App;
+use btctax_cli::render::wallet_label;
+use ratatui::{
+    layout::{Constraint, Rect},
+    style::{Modifier, Style},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    Frame,
+};
+
+use super::tags::term_tag;
+use super::utils::sat_to_btc;
+
+/// Render the Disposals tab into `area`.
+pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
+    let Some(snap) = app.snapshot.as_ref() else {
+        let p = Paragraph::new("no snapshot loaded")
+            .block(Block::default().title(" Disposals ").borders(Borders::ALL));
+        frame.render_widget(p, area);
+        return;
+    };
+
+    let year = app.selected_year;
+
+    // Flatten disposals for the selected year into legs.
+    let mut rows: Vec<Row> = Vec::new();
+    let mut total_proceeds = rust_decimal::Decimal::ZERO;
+    let mut total_basis = rust_decimal::Decimal::ZERO;
+    let mut total_gain = rust_decimal::Decimal::ZERO;
+
+    for disposal in &snap.state.disposals {
+        if disposal.disposed_at.year() != year {
+            continue;
+        }
+        let disposed_str = disposal.disposed_at.to_string();
+        for leg in &disposal.legs {
+            total_proceeds += leg.proceeds;
+            total_basis += leg.basis;
+            total_gain += leg.gain;
+
+            let btc = sat_to_btc(leg.sat);
+            rows.push(Row::new(vec![
+                Cell::from(disposed_str.clone()),
+                Cell::from(leg.acquired_at.to_string()),
+                Cell::from(format!("{:.8}", btc)),
+                Cell::from(format!("{:.2}", leg.proceeds)),
+                Cell::from(format!("{:.2}", leg.basis)),
+                Cell::from(format!("{:.2}", leg.gain)),
+                Cell::from(term_tag(leg.term)),
+                Cell::from(wallet_label(&leg.wallet)),
+            ]));
+        }
+    }
+
+    if rows.is_empty() {
+        let p = Paragraph::new(format!("no disposals in {year}"))
+            .block(Block::default().title(" Disposals ").borders(Borders::ALL));
+        frame.render_widget(p, area);
+        return;
+    }
+
+    // TOTAL row — rendered but NEVER selectable (selection capped at data_rows-1 in scroll helpers).
+    rows.push(Row::new(vec![
+        Cell::from("TOTAL"),
+        Cell::from(""),
+        Cell::from(""),
+        Cell::from(format!("{:.2}", total_proceeds)),
+        Cell::from(format!("{:.2}", total_basis)),
+        Cell::from(format!("{:.2}", total_gain)),
+        Cell::from(""),
+        Cell::from(""),
+    ]));
+
+    let header = Row::new(vec![
+        Cell::from("Disposed"),
+        Cell::from("Acquired"),
+        Cell::from("BTC"),
+        Cell::from("Proceeds"),
+        Cell::from("Basis"),
+        Cell::from("Gain"),
+        Cell::from("Term"),
+        Cell::from("Wallet"),
+    ]);
+
+    let widths = vec![
+        Constraint::Percentage(13),
+        Constraint::Percentage(13),
+        Constraint::Percentage(13),
+        Constraint::Percentage(12),
+        Constraint::Percentage(12),
+        Constraint::Percentage(12),
+        Constraint::Percentage(8),
+        Constraint::Percentage(17),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(
+            Block::default()
+                .title(format!(" Disposals — {year} "))
+                .borders(Borders::ALL),
+        )
+        .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    frame.render_stateful_widget(table, area, &mut app.disposals_state);
+}
