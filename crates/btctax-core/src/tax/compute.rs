@@ -211,9 +211,13 @@ pub fn net_1222(
 /// crypto ordinary income (mining/staking/etc.) is added onto the ordinary stack exactly **once** (in the WITH
 /// scenario's `bottom`) and is reported back as `ordinary_from_crypto`.
 ///
-/// **§1411 (B-M1).** NII is `QD + surviving net capital gains (ST+LT)` — crypto **ordinary** income is in MAGI
-/// but NOT in NII. NIIT = 3.8% × min(NII, MAGI − threshold). MAGI gets only the crypto **delta** added (so the
-/// non-crypto QD/cap-gain already in `magi_excluding_crypto` is never double-counted).
+/// **§1411 (B-M1).** NII is `QD + surviving net capital gains (ST+LT) − the §1211(b)-allowed net capital
+/// loss` (≤ $3,000 / $1,500 MFS — matching Form 8960 line 5a / §1.1411-4(d)). Crypto **ordinary** income
+/// (mining/staking/airdrops/rewards) is in MAGI but correctly EXCLUDED from NII (SE income per §1411(c)(6),
+/// or non-NII "other income"); the ONLY residual understatement is crypto-lending **interest**
+/// (§1411(c)(1)(A)(i)), which the minimal model cannot yet isolate — a Phase-2 refinement. NIIT =
+/// 3.8% × max(0, min(NII, MAGI − threshold)) (floored at $0; never negative). MAGI gets only the crypto
+/// **delta** added (so the non-crypto QD/cap-gain already in `magi_excluding_crypto` is never double-counted).
 ///
 /// The pinned identity `total == (ord_with − ord_without) + ltcg_tax + niit` holds exactly (all cent-rounded
 /// Decimal sums; no float).
@@ -329,11 +333,17 @@ pub fn compute_tax_year(
     let pref_with = preferential_tax(&bp, bottom_with, qd + with.preferential_gain).tax;
     let pref_without = preferential_tax(&bp, bottom_without, qd + without.preferential_gain).tax;
 
-    // §1411 NIIT. NII = QD + surviving net capital gains (ST+LT). Crypto ORDINARY income is NOT NII
-    // (mining/staking is trade/business or otherwise outside the minimal NII model — B-M1: this can only
-    // ever understate NIIT, recorded as a Phase-2 refinement). NIIT = 3.8% × min(NII, MAGI − threshold).
-    let nii_with = qd + with.ordinary_gain + with.preferential_gain;
-    let nii_without = qd + without.ordinary_gain + without.preferential_gain;
+    // §1411 NIIT. NII = QD + surviving net capital gains (ST+LT) − the §1211(b)-allowed net capital loss
+    // (B-M1). Per Form 8960 line 5a / §1.1411-4(d) (Example 1), a net capital loss reduces NII by ONLY the
+    // §1211-limited amount (≤ $3,000 / $1,500 MFS) — not by wiping out other-category gains. In a gain year
+    // `loss_deduction == 0`, so this is a no-op; in a net-loss year the surviving gains are 0, so NII becomes
+    // `qd − loss_deduction`. Crypto ORDINARY income (mining/staking/airdrops/rewards) is correctly EXCLUDED
+    // from NII — SE income per §1411(c)(6), or non-NII "other income"; the ONLY residual understatement is
+    // crypto-lending INTEREST (NII under §1411(c)(1)(A)(i)), which the minimal model cannot yet isolate from
+    // other `crypto_ord` — a Phase-2 refinement. NIIT = 3.8% × max(0, min(NII, MAGI − threshold)).
+    let nii_with = qd + with.ordinary_gain + with.preferential_gain - with.loss_deduction;
+    let nii_without =
+        qd + without.ordinary_gain + without.preferential_gain - without.loss_deduction;
     // `magi_excluding_crypto` already includes QD + non-crypto cap gain; add ONLY the crypto AGI delta.
     let crypto_agi = (with.ordinary_gain + with.preferential_gain - with.loss_deduction)
         - (without.ordinary_gain + without.preferential_gain - without.loss_deduction)
@@ -342,7 +352,14 @@ pub fn compute_tax_year(
     let magi_with = magi_without + crypto_agi;
     let niit = |nii: Usd, magi: Usd| -> Usd {
         let over = if magi > thr { magi - thr } else { Usd::ZERO };
-        let base = if nii < over { nii } else { over };
+        let capped = if nii < over { nii } else { over };
+        // D2: floor the base at $0 — a negative NII (e.g. `qd < loss_deduction`) must NEVER produce a
+        // negative/refundable NIIT. NIIT = 3.8% × max(0, min(NII, MAGI − threshold)).
+        let base = if capped > Usd::ZERO {
+            capped
+        } else {
+            Usd::ZERO
+        };
         round_cents(base * NIIT_RATE)
     };
     let niit_with = niit(nii_with, magi_with);
