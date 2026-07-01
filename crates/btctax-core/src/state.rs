@@ -52,6 +52,11 @@ pub enum BlockerKind {
     TaxProfileMissing,
     /// §B.2: no bundled tax table is available for the year being computed. Hard.
     TaxTableMissing,
+    /// §170(f)(11)(C): the term-aware claimed-deduction proxy for a charitable donation exceeds
+    /// $5,000 — a qualified appraisal is likely required (CCA 202302012 confirms the
+    /// exchange-price/readily-valued exception does NOT apply to crypto).
+    /// **Advisory** — never gates `compute_tax_year`; emitted per qualifying Donate event.
+    QualifiedAppraisalNote,
 }
 impl BlockerKind {
     pub fn severity(self) -> Severity {
@@ -70,7 +75,9 @@ impl BlockerKind {
             | TaxYearNotComputable
             | TaxProfileMissing
             | TaxTableMissing => Severity::Hard,
-            SafeHarborTimebar | UnmatchedOutflows | Pre2025MethodNote => Severity::Advisory,
+            SafeHarborTimebar | UnmatchedOutflows | Pre2025MethodNote | QualifiedAppraisalNote => {
+                Severity::Advisory
+            }
         }
     }
 }
@@ -229,5 +236,10 @@ mod tests {
         assert_eq!(BlockerKind::TaxProfileMissing.severity(), Severity::Hard);
         assert_eq!(BlockerKind::TaxTableMissing.severity(), Severity::Hard);
         assert_eq!(BlockerKind::TaxYearNotComputable.severity(), Severity::Hard);
+        // Task 1 KAT: QualifiedAppraisalNote MUST be Advisory — never Hard; must never gate compute_tax_year.
+        assert_eq!(
+            BlockerKind::QualifiedAppraisalNote.severity(),
+            Severity::Advisory
+        );
     }
 }

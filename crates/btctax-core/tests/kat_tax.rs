@@ -1535,3 +1535,587 @@ fn reclassify_dispose_fee_sat_treatment_b_mini_disposition() {
         "(b): principal leg basis stays at $59.88 (fee basis rode the mini-disposition)"
     );
 }
+
+// ── Task slug: §170(f)(11)(C) qualified-appraisal advisory KATs ──────────────────────────────
+
+// Helper: build a single-lot Donate via pre/post reclassify-outflow→donate.
+// `buy_ts`: acquisition timestamp; `out_ts`: TransferOut timestamp; `recl_ts`: decision timestamp;
+// `sat`: sats for buy+out; `cost`: buy usd_cost; `fmv`: donation FMV; `appraisal_required`: manual flag.
+fn donate_single(
+    buy_ts: time::OffsetDateTime,
+    out_ts: time::OffsetDateTime,
+    recl_ts: time::OffsetDateTime,
+    sat: i64,
+    cost: Usd,
+    fmv: Usd,
+    appraisal_required: bool,
+) -> Vec<LedgerEvent> {
+    vec![
+        ev(
+            "B",
+            buy_ts,
+            EventPayload::Acquire(Acquire {
+                sat,
+                usd_cost: cost,
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ExchangeProvided,
+            }),
+        ),
+        ev(
+            "O",
+            out_ts,
+            EventPayload::TransferOut(TransferOut {
+                sat,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        ),
+        dec_ev(
+            1,
+            recl_ts,
+            EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("O")),
+                as_: OutflowClass::Donate { appraisal_required },
+                principal_proceeds_or_fmv: fmv,
+                fee_usd: None,
+            }),
+        ),
+    ]
+}
+
+/// (a) LT $60k FMV / $5k basis → FLAGGED (proxy = FMV $60k; the case the AND rule missed).
+/// The proxy for a LT lot is FMV (the LT-capital-gain deduction), not basis.
+#[test]
+fn qualified_appraisal_lt_60k_fmv_5k_basis_flagged() {
+    // Buy 2025-01-05 (LT when donated 2026-03-01, since 2026-03-01 > one_year_after(2025-01-05)=2026-01-05).
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2026-03-01 00:00:00 UTC),
+        datetime!(2026-03-02 00:00:00 UTC),
+        100_000_000,
+        dec!(5000.00),  // basis = $5k
+        dec!(60000.00), // FMV = $60k
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    let notes: Vec<_> = st
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::QualifiedAppraisalNote)
+        .collect();
+    assert_eq!(
+        notes.len(),
+        1,
+        "LT $60k FMV / $5k basis must emit QualifiedAppraisalNote (proxy = FMV $60k > $5k)"
+    );
+    // Verify the detail contains the proxy and key statutory references.
+    let detail = &notes[0].detail;
+    assert!(
+        detail.contains("60000.00"),
+        "detail must name the deduction proxy; got: {detail}"
+    );
+    assert!(
+        detail.contains("§170(f)(11)(C)"),
+        "detail must cite §170(f)(11)(C); got: {detail}"
+    );
+    assert!(
+        detail.contains("CCA 202302012"),
+        "detail must cite CCA 202302012; got: {detail}"
+    );
+    assert!(
+        detail.contains("§170(e)"),
+        "detail must cite §170(e); got: {detail}"
+    );
+    assert!(
+        detail.contains("§1221(a)(1)"),
+        "detail must cite §1221(a)(1) (character-framed caveat); got: {detail}"
+    );
+    assert!(
+        detail.contains("§170(f)(11)(F)"),
+        "detail must cite §170(f)(11)(F) (aggregation caveat); got: {detail}"
+    );
+    // Removal still created; no disposal; no basis/gain change.
+    assert_eq!(st.removals.len(), 1);
+    assert_eq!(st.removals[0].kind, RemovalKind::Donation);
+    assert!(st.disposals.is_empty());
+}
+
+/// (b) ST $10k FMV / $2k basis → NOT flagged (proxy = basis $2k ≤ $5k).
+/// For a ST lot the §170(e)-reduced deduction is basis, not FMV.
+#[test]
+fn qualified_appraisal_st_10k_fmv_2k_basis_not_flagged() {
+    // Buy 2025-01-05 → donate 2025-06-01 (ST: 2025-06-01 < 2026-01-05 = one_year_after).
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2025-06-01 00:00:00 UTC),
+        datetime!(2025-06-02 00:00:00 UTC),
+        100_000_000,
+        dec!(2000.00),  // basis = $2k
+        dec!(10000.00), // FMV = $10k (irrelevant for ST — proxy uses basis)
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::QualifiedAppraisalNote),
+        "ST $10k FMV / $2k basis must NOT emit QualifiedAppraisalNote (proxy = basis $2k ≤ $5k)"
+    );
+}
+
+/// (c) Mixed LT+ST legs: sum > $5k → flagged; sum ≤ $5k → not flagged.
+/// Two lots: Lot A (LT, small), Lot B (ST, larger). FIFO consumes A first.
+#[test]
+fn qualified_appraisal_mixed_legs_above_threshold_flagged() {
+    // Lot A: 100_000_000 sats, $5k cost, bought 2025-01-05 → LT when donated 2026-03-01.
+    // Lot B: 100_000_000 sats, $2k cost, bought 2025-12-01 → ST when donated 2026-03-01.
+    // Total: 200_000_000 sats, FMV = $100k → A's FMV = $50k (LT), B's basis = $2k (ST).
+    // Proxy = $50k + $2k = $52k > $5k → FLAGGED.
+    let lot_a_buy = ev(
+        "BA",
+        datetime!(2025-01-05 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000_000,
+            usd_cost: dec!(5000.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let lot_b_buy = ev(
+        "BB",
+        datetime!(2025-12-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000_000,
+            usd_cost: dec!(2000.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OC",
+        datetime!(2026-03-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 200_000_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl = dec_ev(
+        1,
+        datetime!(2026-03-02 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OC")),
+            as_: OutflowClass::Donate {
+                appraisal_required: false,
+            },
+            principal_proceeds_or_fmv: dec!(100000.00),
+            fee_usd: None,
+        }),
+    );
+    let st = project(
+        &[lot_a_buy, lot_b_buy, out, recl],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::QualifiedAppraisalNote),
+        "mixed LT+ST summing >$5k must emit QualifiedAppraisalNote"
+    );
+}
+
+#[test]
+fn qualified_appraisal_mixed_legs_below_threshold_not_flagged() {
+    // Lot A: 1_000_000 sats, $50 cost, LT. Lot B: 9_000_000 sats, $450 cost, ST.
+    // FMV = $1k → A's FMV = $100 (LT), B's basis = $450 (ST). Proxy = $550 < $5k → NOT FLAGGED.
+    let lot_a_buy = ev(
+        "BA",
+        datetime!(2025-01-05 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 1_000_000,
+            usd_cost: dec!(50.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let lot_b_buy = ev(
+        "BB",
+        datetime!(2025-12-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 9_000_000,
+            usd_cost: dec!(450.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OD",
+        datetime!(2026-03-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 10_000_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl = dec_ev(
+        1,
+        datetime!(2026-03-02 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OD")),
+            as_: OutflowClass::Donate {
+                appraisal_required: false,
+            },
+            principal_proceeds_or_fmv: dec!(1000.00),
+            fee_usd: None,
+        }),
+    );
+    let st = project(
+        &[lot_a_buy, lot_b_buy, out, recl],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::QualifiedAppraisalNote),
+        "mixed LT+ST summing ≤$5k must NOT emit QualifiedAppraisalNote"
+    );
+}
+
+/// (d) Boundary: exactly $5,000.00 → NOT flagged (strict >); $5,000.01 → flagged.
+/// LT lot: proxy = FMV. At-threshold ($5k) must NOT fire; one-cent-over ($5k.01) MUST fire.
+#[test]
+fn qualified_appraisal_boundary_exactly_5000_not_flagged() {
+    // LT donation, FMV = exactly $5,000.00 → proxy = $5,000.00 (NOT > $5,000) → NOT FLAGGED.
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2026-03-01 00:00:00 UTC),
+        datetime!(2026-03-02 00:00:00 UTC),
+        100_000_000,
+        dec!(1000.00),
+        dec!(5000.00), // FMV = exactly threshold
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::QualifiedAppraisalNote),
+        "FMV = exactly $5,000.00 must NOT emit (strict >; exactly-at-threshold is not over)"
+    );
+}
+
+#[test]
+fn qualified_appraisal_boundary_5000_01_flagged() {
+    // LT donation, FMV = $5,000.01 → proxy = $5,000.01 (> $5,000) → FLAGGED.
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2026-03-01 00:00:00 UTC),
+        datetime!(2026-03-02 00:00:00 UTC),
+        100_000_000,
+        dec!(1000.00),
+        dec!(5000.01), // FMV = one cent over threshold
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::QualifiedAppraisalNote),
+        "FMV = $5,000.01 must emit QualifiedAppraisalNote (strict > threshold)"
+    );
+}
+
+/// (e) QualifiedAppraisalNote is Advisory; a year whose only blocker is this note still
+/// yields TaxOutcome::Computed(..) — the advisory MUST NOT gate compute_tax_year.
+#[test]
+fn qualified_appraisal_note_is_advisory_and_does_not_gate_compute() {
+    // Direct severity check (Task 1 KAT mirror).
+    assert_eq!(
+        BlockerKind::QualifiedAppraisalNote.severity(),
+        Severity::Advisory,
+        "QualifiedAppraisalNote must be Advisory (never Hard)"
+    );
+
+    // Build a state with only a QualifiedAppraisalNote advisory (LT donation, no Hard blockers).
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2026-03-01 00:00:00 UTC),
+        datetime!(2026-03-02 00:00:00 UTC),
+        100_000_000,
+        dec!(5000.00),
+        dec!(60000.00),
+        false,
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    // Verify: only advisory blockers, none Hard.
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind.severity() != Severity::Hard),
+        "donation-only projection must have no Hard blockers"
+    );
+    assert_eq!(
+        st.blockers
+            .iter()
+            .filter(|b| b.kind == BlockerKind::QualifiedAppraisalNote)
+            .count(),
+        1,
+        "exactly one QualifiedAppraisalNote advisory expected"
+    );
+
+    // Verify compute_tax_year returns Computed for the donation year (2026) despite the advisory.
+    use btctax_core::compute_tax_year;
+    use btctax_core::{
+        Carryforward, FilingStatus, LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxOutcome,
+        TaxProfile, TaxTable,
+    };
+    use std::collections::BTreeMap;
+    let mut ordinary = BTreeMap::new();
+    ordinary.insert(
+        FilingStatus::Single,
+        OrdinarySchedule {
+            brackets: vec![OrdinaryBracket {
+                lower: dec!(0),
+                rate: dec!(0.10),
+            }],
+        },
+    );
+    let mut ltcg_map = BTreeMap::new();
+    ltcg_map.insert(
+        FilingStatus::Single,
+        LtcgBreakpoints {
+            max_zero: dec!(40000),
+            max_fifteen: dec!(400000),
+        },
+    );
+    let mut tables: BTreeMap<i32, TaxTable> = BTreeMap::new();
+    tables.insert(
+        2026,
+        TaxTable {
+            year: 2026,
+            source: "SYNTHETIC",
+            ordinary,
+            ltcg: ltcg_map,
+        },
+    );
+    let profile = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(0),
+        magi_excluding_crypto: dec!(0),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward {
+            short: dec!(0),
+            long: dec!(0),
+        },
+    };
+    let outcome = compute_tax_year(&events, &st, 2026, Some(&profile), &tables);
+    assert!(
+        matches!(outcome, TaxOutcome::Computed(_)),
+        "Advisory QualifiedAppraisalNote must not gate compute_tax_year; got: {outcome:?}"
+    );
+}
+
+/// (f) Two qualifying donations → TWO QualifiedAppraisalNote blockers (per-event, not single-fire).
+#[test]
+fn qualified_appraisal_two_qualifying_donations_emit_two_notes() {
+    // Buy 200_000_000 sats (2 BTC) → two separate LT donations of 100_000_000 each.
+    let buy = ev(
+        "B",
+        datetime!(2025-01-05 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 200_000_000,
+            usd_cost: dec!(10000.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out1 = ev(
+        "O1",
+        datetime!(2026-03-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let out2 = ev(
+        "O2",
+        datetime!(2026-03-02 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    let recl1 = dec_ev(
+        1,
+        datetime!(2026-03-10 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("O1")),
+            as_: OutflowClass::Donate {
+                appraisal_required: false,
+            },
+            principal_proceeds_or_fmv: dec!(60000.00),
+            fee_usd: None,
+        }),
+    );
+    let recl2 = dec_ev(
+        2,
+        datetime!(2026-03-10 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("O2")),
+            as_: OutflowClass::Donate {
+                appraisal_required: false,
+            },
+            principal_proceeds_or_fmv: dec!(60000.00),
+            fee_usd: None,
+        }),
+    );
+    let st = project(
+        &[buy, out1, out2, recl1, recl2],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    let note_count = st
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::QualifiedAppraisalNote)
+        .count();
+    assert_eq!(
+        note_count, 2,
+        "two qualifying donations must emit TWO QualifiedAppraisalNote blockers (per-event, not single-fire)"
+    );
+}
+
+/// (g) GiftOut (non-donation removal) never emits QualifiedAppraisalNote.
+#[test]
+fn qualified_appraisal_gift_out_never_emits_note() {
+    let buy = ev(
+        "B",
+        datetime!(2025-01-05 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000_000,
+            usd_cost: dec!(5000.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out = ev(
+        "OG",
+        datetime!(2026-03-01 00:00:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000_000,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        }),
+    );
+    // Reclassify as GiftOut (not Donate), FMV = $60k (would be >$5k if it were a donation).
+    let recl = dec_ev(
+        1,
+        datetime!(2026-03-02 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OG")),
+            as_: OutflowClass::GiftOut,
+            principal_proceeds_or_fmv: dec!(60000.00),
+            fee_usd: None,
+        }),
+    );
+    let st = project(
+        &[buy, out, recl],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::QualifiedAppraisalNote),
+        "GiftOut must NEVER emit QualifiedAppraisalNote (only Donate arm emits it)"
+    );
+    assert_eq!(st.removals[0].kind, RemovalKind::Gift);
+}
+
+/// (h) Decoupling from the user's `appraisal_required` bool.
+/// Case 1: proxy>$5k with appraisal_required=false STILL emits the advisory (computed independently).
+#[test]
+fn qualified_appraisal_proxy_over_5k_with_flag_false_still_emits() {
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2026-03-01 00:00:00 UTC),
+        datetime!(2026-03-02 00:00:00 UTC),
+        100_000_000,
+        dec!(5000.00),
+        dec!(60000.00),
+        false, // appraisal_required = false
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::QualifiedAppraisalNote),
+        "proxy >$5k with appraisal_required=false MUST still emit QualifiedAppraisalNote (independent cross-check)"
+    );
+    // The manual flag is persisted as-is; the advisory is the independent cross-check.
+    assert!(!st.removals[0].appraisal_required);
+}
+
+/// (h) Decoupling from the user's `appraisal_required` bool.
+/// Case 2: proxy≤$5k with appraisal_required=true does NOT emit (proxy is the sole gate).
+#[test]
+fn qualified_appraisal_proxy_under_5k_with_flag_true_does_not_emit() {
+    // ST donation → proxy = basis = $2k ≤ $5k → NOT FLAGGED even though appraisal_required=true.
+    let events = donate_single(
+        datetime!(2025-01-05 00:00:00 UTC),
+        datetime!(2025-06-01 00:00:00 UTC), // ST
+        datetime!(2025-06-02 00:00:00 UTC),
+        100_000_000,
+        dec!(2000.00), // basis = $2k; proxy = basis = $2k for ST
+        dec!(60000.00),
+        true, // appraisal_required = true
+    );
+    let st = project(
+        &events,
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::QualifiedAppraisalNote),
+        "proxy ≤$5k with appraisal_required=true must NOT emit (proxy is the sole gate, not the manual flag)"
+    );
+    // The manual flag is persisted as-is.
+    assert!(st.removals[0].appraisal_required);
+}

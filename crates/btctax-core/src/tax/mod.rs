@@ -11,6 +11,6 @@ pub use compute::{
 };
 pub use tables::{
     loss_limit, niit_threshold, LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable,
-    TaxTables, NIIT_RATE,
+    TaxTables, NIIT_RATE, QUALIFIED_APPRAISAL_THRESHOLD,
 };
 pub use types::{Carryforward, FilingStatus, MarginalRates, TaxOutcome, TaxProfile, TaxResult};

@@ -27,7 +27,7 @@ pub use state::*;
 pub use tax::{
     carryforward_consistency, compute_tax_year, loss_limit, niit_threshold, Carryforward,
     FilingStatus, LtcgBreakpoints, MarginalRates, OrdinaryBracket, OrdinarySchedule, TaxOutcome,
-    TaxProfile, TaxResult, TaxTable, TaxTables, NIIT_RATE,
+    TaxProfile, TaxResult, TaxTable, TaxTables, NIIT_RATE, QUALIFIED_APPRAISAL_THRESHOLD,
 };
 
 #[derive(Debug, thiserror::Error)]

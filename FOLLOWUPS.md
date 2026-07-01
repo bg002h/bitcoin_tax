@@ -6,9 +6,10 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ## Standing roadmap — next program (user-approved 2026-06-30; auto-pick-up after slugs ship)
 
-After the Phase-1 burndown (below) + the two in-flight slugs (pre-2025 filed-method reconciliation
-mechanism; minimal appraisal-trigger FMV>$5k∧basis>$5k) ship, **automatically pick up Phase 2: Forms
-& §170(e) deduction computation** — no re-ask. Sequence: §170(e) charitable-deduction computation
+The Phase-1 burndown (below) + both slugs (pre-2025 filed-method reconciliation mechanism; minimal
+appraisal-trigger — a **term-aware claimed-deduction proxy** Σ(LT-legs FMV + ST-legs basis) > $5k, NOT
+the originally-proposed FMV>$5k∧basis>$5k AND-rule which under-flagged the LT-appreciated case) have all
+SHIPPED. **Automatically pick up Phase 2: Forms & §170(e) deduction computation** — no re-ask. Sequence: §170(e) charitable-deduction computation
 (FMV-vs-basis, ST/LT reduction) → upgrade the minimal appraisal-trigger to the precise
 >$5k-claimed-deduction trigger (§170(f)(11)(C)); Form 8949 + Schedule D generation; Form 8283 + Form
 709 routing; SE-tax routing (business mining → Schedule SE); slot in **B-M1** (NIIT loss-year
@@ -42,6 +43,25 @@ Important; workspace gate green (433 tests). Closed:
   the heuristic flag + ⚠ note in render_consult); C-M3 (proposal scope-boundary footer).
 
 ---
+
+## ✅ Slug: minimal qualified-appraisal trigger — SHIPPED (2026-06-30)
+
+Branch `feat/appraisal-trigger`; R0 spec 3 rounds to 0C/0I (round-1 corrected the AND-rule →
+term-aware proxy; round-2/3 fixed a mining-mischaracterized-as-ordinary-income tax error); impl +
+comprehensive whole-slug review 0C/0I. Emits Advisory `QualifiedAppraisalNote` on a donation whose
+term-aware deduction proxy Σ(LT legs' `fmv_at_transfer` + ST legs' `basis`) > `QUALIFIED_APPRAISAL_THRESHOLD`
+($5,000, §170(f)(11)(C), tables.rs) — a conservative upper bound that never under-flags a single donation;
+per-donation-event; never gates `compute_tax_year`; decoupled from the manual `appraisal_required` bool.
+Detail cites §170(f)(11)(C) + CCA 202302012 (crypto >$5k needs a qualified appraisal, no readily-valued
+exception) + character-framed over-flag caveat (§1221(a)(1) inventory/ordinary-income deducts at basis
+regardless of holding period) + §170(f)(11)(F) aggregation caveat. 454 tests.
+
+Deferred (→ Phase-2 forms & §170(e) program):
+- **Precise §170(e) claimed-deduction** (character-based ordinary-income-property detection) — upgrades
+  the proxy from "all LT legs at FMV" to the exact deduction; removes the safe over-flag on LT-held
+  dealer/inventory crypto. — OPEN.
+- **§170(f)(11)(F) cross-donation aggregation** — the $5k test aggregates similar donated items across a
+  tax year; this slug flags per-donation-event only (can miss an aggregate of sub-$5k donations). — OPEN.
 
 ## ✅ Slug: pre-2025 filed-method reconciliation mechanism — SHIPPED (2026-06-30)
 
