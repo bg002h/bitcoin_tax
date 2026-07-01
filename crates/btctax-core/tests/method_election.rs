@@ -467,6 +467,7 @@ fn pre2025_advisory_note_does_not_gate_compute_tax_year() {
             source: "SYNTHETIC",
             ordinary,
             ltcg,
+            gift_annual_exclusion: dec!(19000),
         })
     }
     let prof = TaxProfile {

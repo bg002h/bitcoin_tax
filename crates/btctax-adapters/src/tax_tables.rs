@@ -13,6 +13,7 @@
 //! TY2025 values are encoded verbatim from:
 //! - **Rev. Proc. 2024-40 §2.01** — rate tables under §1(j)(2) (ordinary brackets)
 //! - **Rev. Proc. 2024-40 §2.03** — Maximum Capital Gains Rate under §1(h) (LTCG breakpoints)
+//! - **Rev. Proc. 2024-40 §2.42** — §2503(b) gift-tax annual exclusion per donee ($19,000)
 //!
 //! The **One Big Beautiful Bill Act** (Pub. L. 119-21, 2025) made the TCJA rate structure
 //! permanent and raised the 2025 standard deduction, but did **not** change the 2025 bracket
@@ -176,10 +177,12 @@ fn ty2025() -> TaxTable {
 
     TaxTable {
         year: 2025,
-        source: "Rev. Proc. 2024-40 §2.01/§2.03 (TY2025); OBBBA Pub. L. 119-21 \
+        source: "Rev. Proc. 2024-40 §2.01/§2.03 + §2.42 (TY2025); OBBBA Pub. L. 119-21 \
                  left 2025 brackets/breakpoints unchanged",
         ordinary,
         ltcg,
+        // §2503(b) gift annual exclusion per donee — Rev. Proc. 2024-40 §2.42 (TY2025 = $19,000).
+        gift_annual_exclusion: dec!(19000),
     }
 }
 
@@ -269,6 +272,16 @@ mod tests {
     #[test]
     fn missing_year_returns_none() {
         assert!(BundledTaxTables::load().table_for(2099).is_none());
+    }
+
+    /// P2-C Task 3: TY2025 §2503(b) gift annual exclusion is $19,000 (Rev. Proc. 2024-40 §2.42).
+    #[test]
+    fn ty2025_gift_annual_exclusion_is_19000() {
+        let t = BundledTaxTables::load();
+        assert_eq!(
+            t.table_for(2025).unwrap().gift_annual_exclusion,
+            dec!(19000)
+        );
     }
 
     #[test]

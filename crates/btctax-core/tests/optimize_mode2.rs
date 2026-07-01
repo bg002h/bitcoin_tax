@@ -78,6 +78,7 @@ fn synth(year: i32) -> OneTable {
         source: "SYNTHETIC",
         ordinary,
         ltcg,
+        gift_annual_exclusion: dec!(19000),
     })
 }
 /// Single filer; ordinary == MAGI = 0 so a chosen ST gain stacks cleanly on the 10% band and MAGI

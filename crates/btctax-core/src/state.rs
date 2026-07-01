@@ -153,6 +153,13 @@ pub struct RemovalLeg {
     pub fmv_at_transfer: Usd,
     pub term: Term,
     pub basis_source: BasisSource,
+    /// Holding-period start = the SAME HP-start passed to `term_for` for this leg (`gain_hp_start`).
+    /// A removal (gift/donation) recognizes NO gain/loss (TP10), so there is NO §1015 dual-basis
+    /// loss-zone HP-start divergence like a `DisposalLeg` — this is ALWAYS `gain_hp_start` and can
+    /// never contradict `leg.term`. For a gift-received-then-donated lot, `gain_hp_start` is the
+    /// tacked donor acquisition date (§1223), which is the correct Form 8283 "date acquired" because
+    /// it matches the leg's holding-period `term` [R0-M2]. Must never contradict `leg.term`. [D1]
+    pub acquired_at: TaxDate,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Removal {

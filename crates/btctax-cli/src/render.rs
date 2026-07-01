@@ -5,11 +5,11 @@ use btctax_adapters::FileReport;
 use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::ImportReport;
 use btctax_core::{
-    conservation_report, disposal_compliance, form_8949, schedule_d, BasisSource, Blocker,
-    BlockerKind, ComplianceStatus, ConservationReport, DisposalCompliance, DisposalLeg,
-    DisposeKind, EventId, EventPayload, Form8949Box, Form8949Part, GiftZone, IncomeKind,
-    LedgerEvent, LedgerState, LotMethod, RemovalKind, RemovalLeg, ScheduleDTotals, Severity,
-    TaxDate, Term, WalletId,
+    conservation_report, disposal_compliance, form_8283, form_8949, schedule_d, BasisSource,
+    Blocker, BlockerKind, ComplianceStatus, ConservationReport, DisposalCompliance, DisposalLeg,
+    DisposeKind, EventId, EventPayload, Form8283HowAcquired, Form8283Section, Form8949Box,
+    Form8949Part, GiftZone, IncomeKind, LedgerEvent, LedgerState, LotMethod, RemovalKind,
+    RemovalLeg, ScheduleDTotals, Severity, TaxDate, Term, WalletId,
 };
 use btctax_store::fsperms;
 use csv::Writer;
@@ -104,6 +104,26 @@ fn form8949_box_tag(b: Form8949Box) -> &'static str {
     match b {
         Form8949Box::C => "C",
         Form8949Box::F => "F",
+    }
+}
+
+/// Stable Form 8283 section tag: "A" (deduction ≤ $5,000) / "B" (> $5,000). STABLE — part of the
+/// form8283.csv contract.
+fn form8283_section_tag(s: Form8283Section) -> &'static str {
+    match s {
+        Form8283Section::A => "A",
+        Form8283Section::B => "B",
+    }
+}
+
+/// Stable Form 8283 "how acquired" tag: literal Form 8283 categories (NOT the internal BasisSource
+/// tags). STABLE — part of the form8283.csv contract.
+fn form8283_how_acquired_tag(h: Form8283HowAcquired) -> &'static str {
+    match h {
+        Form8283HowAcquired::Purchased => "Purchased",
+        Form8283HowAcquired::Gift => "Gift",
+        Form8283HowAcquired::Other => "Other",
+        Form8283HowAcquired::Review => "Review",
     }
 }
 
@@ -630,6 +650,7 @@ pub fn write_csv_exports(
         "basis",
         "fmv_at_transfer",
         "term",
+        "acquired_at",
         "claimed_deduction",
     ])?;
     for r in &state.removals {
@@ -654,6 +675,7 @@ pub fn write_csv_exports(
                 leg.basis.to_string(),
                 leg.fmv_at_transfer.to_string(),
                 term_tag(leg.term).to_string(),
+                leg.acquired_at.to_string(),
                 deduction_cell.to_string(),
             ])?;
         }
@@ -682,10 +704,95 @@ pub fn write_csv_exports(
     w.flush()?;
 
     // P2-B: per-tax-year Form 8949 + Schedule D filing artifacts (year-scoped; omitted when None).
+    // P2-C: per-tax-year Form 8283 donation artifact rides the same year-scoped block.
     if let Some(year) = tax_year {
         write_form8949_csv(out_dir, state, year)?;
         write_schedule_d_csv(out_dir, state, year)?;
+        write_form8283_csv(out_dir, state, year)?;
     }
+    Ok(())
+}
+
+/// The standing [R0-I1] Section A/B aggregation caveat — emitted as the first (comment) line of
+/// form8283.csv and reused by any text/advisory path. §170(f)(11)(F) aggregates similar items across
+/// the year; this app's split is per-donation, so a set of small Section-A donations may in AGGREGATE
+/// require Section B + a qualified appraisal (CCA 202302012 confirms this applies to crypto).
+pub const FORM_8283_AGGREGATION_CAVEAT: &str = "Section A/B is per-donation; the $5,000 appraisal \
+    threshold AGGREGATES similar crypto items donated across the year — rows shown as Section A may \
+    require Section B + a qualified appraisal; verify AGGREGATE similar-item totals.";
+
+/// P2-C Task 2: write `form8283.csv` — one row per `Donation` `RemovalLeg` contributed in `year`.
+/// Stable snake_case columns; exact `Decimal`/`i64` string values (NFR5). 0o600 via `open_owner_only`.
+///
+/// The file leads with `#`-prefixed comment lines: the standing [R0-I1] aggregation caveat, and —
+/// when the year's total noncash charitable deduction is ≤ $500 — the [R0-M1] filing-floor note that
+/// Form 8283 is not required at that level (the rows are still emitted, informationally).
+fn write_form8283_csv(
+    out_dir: &Path,
+    state: &LedgerState,
+    year: i32,
+) -> Result<(), crate::CliError> {
+    use std::io::Write as _;
+    let mut file = fsperms::open_owner_only(&out_dir.join("form8283.csv"))?;
+
+    // [R0-I1] STANDING aggregation caveat — CSV header comment line (read with comment=b'#').
+    writeln!(file, "# [R0-I1] {FORM_8283_AGGREGATION_CAVEAT}")?;
+
+    // [R0-M1] $500 form-filing floor: Form 8283 is required only when total noncash contributions
+    // for the year exceed $500. Rows are emitted regardless; add a note when the year's total
+    // donation deduction is ≤ $500 that Form 8283 is not required at that level.
+    let total_deduction: btctax_core::conventions::Usd = state
+        .removals
+        .iter()
+        .filter(|r| r.kind == RemovalKind::Donation && r.removed_at.year() == year)
+        .filter_map(|r| r.claimed_deduction)
+        .sum();
+    if total_deduction <= rust_decimal::Decimal::from(500) {
+        writeln!(
+            file,
+            "# [R0-M1] The year's total noncash charitable deduction ({}) is <= $500; Form 8283 is \
+             NOT required at that level (rows below are informational only).",
+            fmt_money(total_deduction)
+        )?;
+    }
+
+    let mut w = Writer::from_writer(file);
+    w.write_record([
+        "section",
+        "description",
+        "how_acquired",
+        "date_acquired",
+        "date_contributed",
+        "cost_basis",
+        "fmv",
+        "claimed_deduction",
+        "fmv_method",
+        "donee",
+        "appraiser",
+        "needs_review",
+    ])?;
+    for row in form_8283(state, year) {
+        w.write_record([
+            row.section
+                .map(form8283_section_tag)
+                .unwrap_or("")
+                .to_string(),
+            row.description,
+            form8283_how_acquired_tag(row.how_acquired).to_string(),
+            row.date_acquired.to_string(),
+            row.date_contributed.to_string(),
+            row.cost_basis.to_string(),
+            row.fmv.to_string(),
+            row.claimed_deduction
+                .map(|d| d.to_string())
+                .unwrap_or_default(),
+            row.fmv_method,
+            row.donee,
+            row.appraiser,
+            row.needs_review.to_string(),
+        ])?;
+    }
+    w.flush()?;
     Ok(())
 }
 
@@ -888,6 +995,63 @@ pub fn render_schedule_d(
         }
     }
     s
+}
+
+/// P2-C Task 3 (D3): Form 709 gift over-annual-exclusion **advisory** (thin, total-exposure only).
+///
+/// Sums `Σ fmv_at_transfer` over `Removal{Gift}` legs contributed in `year`, then:
+/// - **`None`** when (a) there are NO gifts in the year, or (b) gifts are present but the total is
+///   ≤ the year's §2503(b) annual exclusion.
+/// - **`Some(advisory)`** when gifts exceed the exclusion — the total + the donee-not-modeled caveat.
+/// - **`Some(note)` [R0-m6]** when gifts ARE present but the year has NO bundled table (the exclusion
+///   is unavailable): Form 709 exposure is NOT evaluated — do NOT silently return `None`.
+///
+/// Standalone informational artifact — does NOT feed `compute_tax_year` / engine B. Because no donee
+/// identifier is modeled, this is a TOTAL-exposure signal, not a per-donee determination.
+pub fn render_gift_advisory(
+    state: &LedgerState,
+    year: i32,
+    tables: &impl btctax_core::TaxTables,
+) -> Option<String> {
+    // Identify "gifts present" independently of the total (a zero-FMV gift is still a gift).
+    let any_gift = state
+        .removals
+        .iter()
+        .any(|r| r.kind == RemovalKind::Gift && r.removed_at.year() == year);
+    if !any_gift {
+        return None; // (a) no gifts in the year
+    }
+    let total: btctax_core::conventions::Usd = state
+        .removals
+        .iter()
+        .filter(|r| r.kind == RemovalKind::Gift && r.removed_at.year() == year)
+        .flat_map(|r| r.legs.iter())
+        .map(|leg| leg.fmv_at_transfer)
+        .sum();
+    match tables.table_for(year) {
+        // [R0-m6] gifts present but no bundled table → emit the note, never None (M5).
+        None => Some(format!(
+            "Form 709 gift advisory ({year}): gift annual-exclusion table unavailable for {year}; \
+             Form 709 exposure not evaluated — ${} in gifts recorded.",
+            fmt_money(total)
+        )),
+        Some(t) => {
+            let excl = t.gift_annual_exclusion;
+            if total > excl {
+                Some(format!(
+                    "Form 709 gift advisory ({year}): total gifts in {year}: ${}; the §2503(b) \
+                     annual exclusion is ${} per donee (TY{year}). If any single donee received more \
+                     than ${}, Form 709 may be required. NOTE: donee identity is not modeled — verify \
+                     per-donee totals; this is a total-exposure signal, not a per-donee determination.",
+                    fmt_money(total),
+                    fmt_money(excl),
+                    fmt_money(excl)
+                ))
+            } else {
+                None // (b) gifts present but total ≤ exclusion
+            }
+        }
+    }
 }
 
 // ── Sub-project C: optimize run ─────────────────────────────────────────────────────────────────
@@ -1219,4 +1383,107 @@ pub fn render_verify(r: &VerifyReport) -> String {
         );
     }
     out
+}
+
+#[cfg(test)]
+mod gift_advisory_tests {
+    //! P2-C Task 3 KATs — `render_gift_advisory`. Direct-state `Removal{Gift}` fixtures + a
+    //! `BTreeMap<i32, TaxTable>` table double so the exclusion + no-table cases are under exact
+    //! control. PRIVACY: synthetic values only.
+    use super::*;
+    use btctax_core::conventions::Usd;
+    use btctax_core::{EventId, LotId, Removal, RemovalLeg, TaxTable};
+    use rust_decimal_macros::dec;
+    use std::collections::BTreeMap;
+    use time::macros::date;
+
+    fn gift_removal(seq: u64, removed_at: TaxDate, fmv: Usd) -> Removal {
+        Removal {
+            event: EventId::decision(seq),
+            kind: RemovalKind::Gift,
+            removed_at,
+            legs: vec![RemovalLeg {
+                lot_id: LotId {
+                    origin_event_id: EventId::decision(seq),
+                    split_sequence: 0,
+                },
+                sat: 100,
+                basis: dec!(0),
+                fmv_at_transfer: fmv,
+                term: Term::LongTerm,
+                basis_source: BasisSource::ComputedFromCost,
+                acquired_at: date!(2024 - 01 - 01),
+            }],
+            appraisal_required: false,
+            donor_acquired_at: None,
+            claimed_deduction: None,
+        }
+    }
+    fn state_with(removals: Vec<Removal>) -> LedgerState {
+        LedgerState {
+            removals,
+            ..Default::default()
+        }
+    }
+    /// A table double carrying only the gift_annual_exclusion (ordinary/ltcg empty — unread here).
+    fn tables_with(year: i32, excl: Usd) -> BTreeMap<i32, TaxTable> {
+        let mut m = BTreeMap::new();
+        m.insert(
+            year,
+            TaxTable {
+                year,
+                source: "TEST",
+                ordinary: BTreeMap::new(),
+                ltcg: BTreeMap::new(),
+                gift_annual_exclusion: excl,
+            },
+        );
+        m
+    }
+
+    /// Gifts over the exclusion → advisory with the total + the donee-not-modeled caveat.
+    #[test]
+    fn over_exclusion_emits_advisory_with_total_and_caveat() {
+        let st = state_with(vec![gift_removal(1, date!(2025 - 06 - 01), dec!(20000))]);
+        let tables = tables_with(2025, dec!(19000));
+        let msg = render_gift_advisory(&st, 2025, &tables).expect("advisory expected");
+        assert!(msg.contains("20000.00"), "must show the total: {msg}");
+        assert!(msg.contains("19000.00"), "must show the exclusion: {msg}");
+        assert!(
+            msg.contains("donee identity is not modeled"),
+            "must carry the donee caveat: {msg}"
+        );
+        assert!(msg.contains("total-exposure signal"), "{msg}");
+    }
+
+    /// Gifts under the exclusion → None.
+    #[test]
+    fn under_exclusion_is_none() {
+        let st = state_with(vec![gift_removal(1, date!(2025 - 06 - 01), dec!(10000))]);
+        let tables = tables_with(2025, dec!(19000));
+        assert!(render_gift_advisory(&st, 2025, &tables).is_none());
+    }
+
+    /// No gifts in the year → None (even with a table present).
+    #[test]
+    fn no_gifts_is_none() {
+        let st = state_with(vec![]);
+        let tables = tables_with(2025, dec!(19000));
+        assert!(render_gift_advisory(&st, 2025, &tables).is_none());
+    }
+
+    /// [R0-m6] gifts present but NO bundled table → Some(note), NOT None (no silent skip).
+    #[test]
+    fn gifts_present_but_no_table_emits_note_not_none() {
+        let st = state_with(vec![gift_removal(1, date!(2026 - 06 - 01), dec!(50000))]);
+        // Table double has 2025 only → table_for(2026) == None.
+        let tables = tables_with(2025, dec!(19000));
+        let msg = render_gift_advisory(&st, 2026, &tables).expect("note expected, not None");
+        assert!(msg.contains("unavailable"), "{msg}");
+        assert!(msg.contains("Form 709 exposure not evaluated"), "{msg}");
+        assert!(
+            msg.contains("50000.00"),
+            "must record the gift total: {msg}"
+        );
+    }
 }

@@ -64,6 +64,7 @@ fn synth(year: i32) -> OneTable {
         source: "SYNTHETIC",
         ordinary,
         ltcg,
+        gift_annual_exclusion: dec!(19000),
     })
 }
 fn profile(ord: Usd, magi: Usd, qd: Usd) -> TaxProfile {
@@ -122,6 +123,7 @@ fn synth_mfs(year: i32) -> OneTable {
         source: "SYNTHETIC",
         ordinary,
         ltcg,
+        gift_annual_exclusion: dec!(19000),
     })
 }
 

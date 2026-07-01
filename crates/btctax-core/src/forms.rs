@@ -8,9 +8,10 @@
 //! gains to B's within-character `st_net`/`lt_net` (before B's carryforward/other-LT netting) so the
 //! forms and the tax engine can never silently diverge.
 use crate::conventions::{Sat, TaxDate, Usd, SATS_PER_BTC};
-use crate::event::DisposeKind;
-use crate::identity::WalletId;
-use crate::state::{LedgerState, Term};
+use crate::event::{BasisSource, DisposeKind};
+use crate::identity::{EventId, LotId, WalletId};
+use crate::state::{LedgerState, RemovalKind, RemovalLeg, Term};
+use crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD;
 use rust_decimal::Decimal;
 
 /// Which Form 8949 part / holding-period a row belongs to. **Part I = short-term** (held ≤ 1 yr);
@@ -184,6 +185,160 @@ pub fn schedule_d(state: &LedgerState, year: i32) -> ScheduleDTotals {
         }
     }
     totals
+}
+
+// ── Sub-project C (P2-C): IRS Form 8283 (Noncash Charitable Contributions) ───────────────────────
+//
+// Pure, year-scoped projection over `state.removals` where `kind == Donation`. No tax math is done
+// here (the §170(e) `claimed_deduction` was computed by the fold and lives on the `Removal`). Like
+// Form 8949 this is STANDALONE — it does NOT feed `compute_tax_year` / engine B (Schedule-A-adjacent,
+// §170). Federal-only. No float (NFR5: the BTC-amount description is EXACT `Decimal`).
+
+/// The Form 8283 part a donation is reported in, driven by the engine-computed **claimed deduction**
+/// (NOT the user `appraisal_required` bool — decoupled, as in P2-A):
+/// - **Section A** — claimed deduction ≤ $5,000 (§170(f)(11) / Form 8283 Section A).
+/// - **Section B** — claimed deduction > $5,000: a **qualified appraisal + appraiser signature** is
+///   required (CCA 202302012 confirms the readily-valued exception does NOT apply to crypto).
+///
+/// **[R0-I1] Aggregation caveat (disclosed in the CSV output, NOT implemented here):** this split is
+/// PER-DONATION; §170(f)(11)(F) AGGREGATES similar items across the tax year (two $3,000 crypto gifts
+/// = $6,000 aggregate → Section B). Year-aggregation is a documented FOLLOWUP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Form8283Section {
+    /// Section A — claimed deduction ≤ $5,000.
+    A,
+    /// Section B — claimed deduction > $5,000 (qualified appraisal required).
+    B,
+}
+
+/// The Form 8283 "How acquired by donor" category, derived from the leg's `BasisSource` [R0-N2]:
+/// - `ExchangeProvided` / `ComputedFromCost` → **Purchased**
+/// - `GiftCarryover` / `GiftFmvFallback` → **Gift**
+/// - `FmvAtIncome` → **Other** ("income" is NOT a literal Form 8283 how-acquired category)
+/// - `CarriedFromTransfer` / `SafeHarborAllocated` / `ReconstructedPerWallet` → **Review** (origin
+///   lost — the acquisition provenance cannot be soundly asserted).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Form8283HowAcquired {
+    /// Purchased (basis from an exchange record or a computed cost).
+    Purchased,
+    /// Gift (a received-gift lot with carryover / FMV-fallback basis).
+    Gift,
+    /// Other (income-recognized basis — mining/staking/airdrops/rewards).
+    Other,
+    /// Review — the acquisition origin was lost (transferred/safe-harbor/reconstructed basis).
+    Review,
+}
+
+/// Map a leg's `BasisSource` to its Form 8283 "how acquired" category [R0-N2].
+fn how_acquired_from(bs: BasisSource) -> Form8283HowAcquired {
+    use Form8283HowAcquired as H;
+    match bs {
+        BasisSource::ExchangeProvided | BasisSource::ComputedFromCost => H::Purchased,
+        BasisSource::GiftCarryover | BasisSource::GiftFmvFallback => H::Gift,
+        BasisSource::FmvAtIncome => H::Other,
+        BasisSource::CarriedFromTransfer
+        | BasisSource::SafeHarborAllocated
+        | BasisSource::ReconstructedPerWallet => H::Review,
+    }
+}
+
+/// One Form 8283 row = one `RemovalLeg` of a `Donation` contributed in the tax year. A pure
+/// projection of the leg; no gain/basis/deduction math is done here.
+///
+/// **First-leg convention (no CSV SUM double-count):** the per-DONATION `section` + `claimed_deduction`
+/// appear on the FIRST leg row only (`Some`), and are `None` on subsequent leg rows — so a naive SUM
+/// over the deduction column equals the correct per-donation total (mirrors P2-A's removals.csv).
+///
+/// **Unmodeled user-input (honest gaps, never fabricated):** `fmv_method`, `donee`, and `appraiser`
+/// are always EMPTY (not modeled), so `needs_review` is ALWAYS `true`. For a Section B donation this
+/// is doubly required (a qualified appraiser signature is mandatory and is not modeled).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Form8283Row {
+    /// Section A/B — on the FIRST leg row only (`None` on subsequent legs). Driven by the donation's
+    /// `claimed_deduction` (> $5,000 → B).
+    pub section: Option<Form8283Section>,
+    /// Column: description — the EXACT BTC amount, 8dp + `" BTC"` (`btc_amount_description`; NFR5).
+    pub description: String,
+    /// Column: how the donor acquired the property, from the leg's `BasisSource` [R0-N2].
+    pub how_acquired: Form8283HowAcquired,
+    /// Column: date acquired = the leg's holding-period start (`leg.acquired_at`; §1223 tacked donor
+    /// date for received gifts). Consistent with the leg's `term` by construction (Task 1).
+    pub date_acquired: TaxDate,
+    /// Column: date contributed = the donation's `removed_at`.
+    pub date_contributed: TaxDate,
+    /// Column: donor's cost basis (from the leg).
+    pub cost_basis: Usd,
+    /// Column: fair market value at the contribution (from the leg).
+    pub fmv: Usd,
+    /// Column: the per-DONATION §170(e) claimed deduction — on the FIRST leg row only (`None` on
+    /// subsequent legs, so a CSV SUM does not double-count).
+    pub claimed_deduction: Option<Usd>,
+    /// Column: FMV determination method — EMPTY (unmodeled user-input).
+    pub fmv_method: String,
+    /// Column: donee organization — EMPTY (unmodeled user-input; a donee identifier is deferred).
+    pub donee: String,
+    /// Column: appraiser — EMPTY (unmodeled user-input; the Section B appraiser struct is deferred).
+    pub appraiser: String,
+    /// ALWAYS `true`: `fmv_method`/`donee`/`appraiser` are unmodeled, so every row needs review
+    /// (and a Section B row additionally requires a qualified appraiser signature).
+    pub needs_review: bool,
+}
+
+/// Build the Form 8283 rows for tax year `year`: **one row per `RemovalLeg`** of a `Donation` whose
+/// `Removal.removed_at.year() == year`. Pure over `state.removals`. Gifts (`kind == Gift`) produce
+/// NO rows (a gift is not a charitable contribution). An empty year yields an empty vec.
+///
+/// **Section A/B** is driven by the donation's engine-computed `claimed_deduction` (> $5,000 → B),
+/// and — with the per-donation `claimed_deduction` — is emitted on the FIRST leg row only (the P2-A
+/// first-leg convention, so a naive CSV SUM of the deduction column does not double-count). The
+/// "first leg" is the one with the smallest `lot_id` within the donation, matching the deterministic
+/// output order so the carrier row is the first visible row of that donation.
+///
+/// **Deterministic ordering (NFR4):** rows are sorted by `removed_at`, then the donation's `event`
+/// id, then the leg's `lot_id` — a total order over the (event, lot) space (mirrors `form_8949`).
+pub fn form_8283(state: &LedgerState, year: i32) -> Vec<Form8283Row> {
+    let mut keyed: Vec<(TaxDate, &EventId, &LotId, Form8283Row)> = Vec::new();
+    for r in state
+        .removals
+        .iter()
+        .filter(|r| r.kind == RemovalKind::Donation && r.removed_at.year() == year)
+    {
+        // Section is driven by the per-donation claimed_deduction (> $5,000 → B). §170(f)(11)(C).
+        let deduction = r.claimed_deduction.unwrap_or(Usd::ZERO);
+        let section = if deduction > QUALIFIED_APPRAISAL_THRESHOLD {
+            Form8283Section::B
+        } else {
+            Form8283Section::A
+        };
+        // The FIRST leg (smallest lot_id; `min_by` returns the first minimum, so it is unique even
+        // if two legs shared a lot_id) alone carries the per-donation section + claimed_deduction.
+        let carrier_idx: Option<usize> = r
+            .legs
+            .iter()
+            .enumerate()
+            .min_by(|(_, a): &(usize, &RemovalLeg), (_, b)| a.lot_id.cmp(&b.lot_id))
+            .map(|(i, _)| i);
+        for (i, leg) in r.legs.iter().enumerate() {
+            let is_first = Some(i) == carrier_idx;
+            let row = Form8283Row {
+                section: is_first.then_some(section),
+                description: btc_amount_description(leg.sat),
+                how_acquired: how_acquired_from(leg.basis_source),
+                date_acquired: leg.acquired_at,
+                date_contributed: r.removed_at,
+                cost_basis: leg.basis,
+                fmv: leg.fmv_at_transfer,
+                claimed_deduction: if is_first { r.claimed_deduction } else { None },
+                fmv_method: String::new(),
+                donee: String::new(),
+                appraiser: String::new(),
+                needs_review: true,
+            };
+            keyed.push((r.removed_at, &r.event, &leg.lot_id, row));
+        }
+    }
+    keyed.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(b.1)).then(a.2.cmp(b.2)));
+    keyed.into_iter().map(|(_, _, _, r)| r).collect()
 }
 
 #[cfg(test)]
