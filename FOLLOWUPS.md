@@ -4,6 +4,27 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ Charitable/gift cluster — Chunk 1: §170(f)(11)(F) aggregation + Form 8283 FMV-method — SHIPPED (2026-07-01)
+
+First of three chunks in the user-directed charitable/gift completion cluster (deferred Phase-2/3). Form
+8283 Section A/B now decided on the YEAR aggregate claimed-deduction for similar property (all BTC =
+similar; §170(f)(11)(F)), not per-donation; a year-aggregate qualified-appraisal advisory fires when the
+aggregate > $5k even if no single donation does (CCA 202302012 — no readily-valued exception for crypto).
+`fmv_method` = honest section-derived label (Section B → "qualified appraisal"; Section A → empty — no
+fabrication). Shared core `year_donation_deduction` helper (form + advisory + CSV can't diverge).
+STANDALONE (forms.rs + render.rs; engine B/fold/event-schema/state untouched). R0 3 rounds → 0C/0I;
+whole-branch review 0C/0I. 590 tests.
+
+**Cluster remaining:** **Chunk 2** — donee identifier (`Removal.donee: Option<String>` event-schema
+change, `Income.business` precedent, `#[serde(default)]`; + CLI `--donee` on `reclassify-outflow`) →
+Form 8283 donee column → per-donee §2503(b) Form 709 advisory + filing-required trigger. **Chunk 3** —
+§2505 advisory-level lifetime-exemption (year-indexed `gift_lifetime_exclusion` TaxTable field TY2025
+$13.99M + user-supplied prior cumulative taxable gifts → consumption advisory; single-filer, no
+portability/DSUE/§2513) + Form 8283 Section-B appraiser/donee-details struct (new `set-donation-details`
+command). Both defer real per-row FMV-method (needs FMV provenance on RemovalLeg — Chunk 3 touches schema).
+
+---
+
 ## ✅ GUI sub-project 1: btctax-tui ratatui read-only viewer — SHIPPED (2026-07-01)
 
 First GUI work (user-directed: "work on gui first"). New `btctax-tui` crate — a ratatui terminal UI,

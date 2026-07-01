@@ -33,23 +33,25 @@ pub fn show_profile(
 
 /// The full `report --tax-year` bundle, in print order:
 /// `(income-tax outcome, M4 carryforward advisory, raw Schedule D part totals, Form 709 gift
-/// advisory, Schedule SE §1401 section)`. Named to satisfy `clippy::type_complexity`; callers still
-/// destructure it as a tuple.
+/// advisory, Schedule SE §1401 section, §170(f)(11)(F) donation appraisal advisory)`. Named to
+/// satisfy `clippy::type_complexity`; callers still destructure it as a tuple.
 pub type TaxYearReport = (
     TaxOutcome,
     Option<String>,
     ScheduleDTotals,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
-/// Task 9 (B.5) + Task 10 (M4) + P2-D Task 2: load events + project once, read the year's
-/// `TaxProfile` + `BundledTaxTables`, call `compute_tax_year`, and assemble the standalone Schedule
-/// D / Form 709 / Schedule SE artifacts + the M4 carryforward-consistency advisory. See
-/// [`TaxYearReport`] for the returned bundle. The advisory is `Some(msg)` iff BOTH the current-year
-/// and the prior-year profiles exist AND the prior-year computes successfully AND the declared
-/// `carryforward_in` does not match the prior year's `carryforward_out`. The advisory and the
-/// Schedule SE figure are **never** hard blockers and do **not** change the exit code (non-gating).
+/// Task 9 (B.5) + Task 10 (M4) + P2-D Task 2 + Chunk-1 D2: load events + project once, read the
+/// year's `TaxProfile` + `BundledTaxTables`, call `compute_tax_year`, and assemble the standalone
+/// Schedule D / Form 709 / Schedule SE artifacts + the M4 carryforward-consistency advisory + the
+/// §170(f)(11)(F) year-aggregate donation appraisal advisory. See [`TaxYearReport`] for the returned
+/// bundle. The advisory is `Some(msg)` iff BOTH the current-year and the prior-year profiles exist
+/// AND the prior-year computes successfully AND the declared `carryforward_in` does not match the
+/// prior year's `carryforward_out`. The advisory and the Schedule SE figure are **never** hard
+/// blockers and do **not** change the exit code (non-gating).
 pub fn report_tax_year(
     vault: &Path,
     pp: &Passphrase,
@@ -78,6 +80,11 @@ pub fn report_tax_year(
         }
         None => None,
     };
+    // Chunk-1 D2: §170(f)(11)(F) year-aggregate donation appraisal advisory (STANDALONE — does NOT
+    // enter state.advisory / the blocker set; render-time only, consistent with the standalone-forms
+    // pattern). Non-gating; does not affect the exit code.
+    let donation_appraisal_advisory =
+        crate::render::render_donation_appraisal_advisory(&state, year);
 
     // M4 carryforward consistency advisory (Task 10): only when both this year's profile AND
     // the prior year's profile exist AND the prior year is Computed.  Never a hard blocker.
@@ -100,5 +107,12 @@ pub fn report_tax_year(
         None
     };
 
-    Ok((outcome, advisory, sched_d, gift_advisory, schedule_se))
+    Ok((
+        outcome,
+        advisory,
+        sched_d,
+        gift_advisory,
+        schedule_se,
+        donation_appraisal_advisory,
+    ))
 }

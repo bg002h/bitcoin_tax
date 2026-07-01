@@ -14,8 +14,8 @@ pub mod tax;
 pub use conventions::{Sat, TaxDate, Usd};
 pub use event::*;
 pub use forms::{
-    form_8283, form_8949, schedule_d, Form8283HowAcquired, Form8283Row, Form8283Section,
-    Form8949Box, Form8949Part, Form8949Row, ScheduleDPart, ScheduleDTotals,
+    form_8283, form_8949, schedule_d, year_donation_deduction, Form8283HowAcquired, Form8283Row,
+    Form8283Section, Form8949Box, Form8949Part, Form8949Row, ScheduleDPart, ScheduleDTotals,
 };
 pub use identity::{EventId, Fingerprint, LotId, Source, SourceRef, WalletId};
 pub use optimize::{

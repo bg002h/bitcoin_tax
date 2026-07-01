@@ -661,9 +661,12 @@ fn form8283_claimed_deduction_first_leg_only_no_sum_double_count() {
     assert_eq!(sum, dec!(52000));
 }
 
-/// donee / appraiser / fmv_method are always EMPTY (unmodeled user-input, honestly flagged).
+/// donee / appraiser are always EMPTY (unmodeled user-input, honestly flagged).
+/// fmv_method is "qualified appraisal" for Section B (carrier row) and "" for Section A.
+/// needs_review is always true.
 #[test]
-fn form8283_unmodeled_user_input_fields_are_blank() {
+fn form8283_unmodeled_user_input_fields_and_fmv_method_honest() {
+    // Section B (aggregate $60,000 > $5,000): carrier fmv_method = "qualified appraisal".
     let st = state_removals(vec![donation(
         1,
         date!(2025 - 03 - 01),
@@ -673,8 +676,27 @@ fn form8283_unmodeled_user_input_fields_are_blank() {
     let r = &form_8283(&st, 2025)[0];
     assert_eq!(r.donee, "");
     assert_eq!(r.appraiser, "");
-    assert_eq!(r.fmv_method, "");
+    assert_eq!(
+        r.fmv_method, "qualified appraisal",
+        "Section B carrier must have fmv_method = 'qualified appraisal'"
+    );
     assert!(r.needs_review);
+
+    // Section A (aggregate $1,000 ≤ $5,000): carrier fmv_method = "" (honest gap).
+    let st_a = state_removals(vec![donation(
+        1,
+        date!(2025 - 03 - 01),
+        dec!(1000),
+        vec![base_removal_leg()],
+    )]);
+    let r_a = &form_8283(&st_a, 2025)[0];
+    assert_eq!(r_a.donee, "");
+    assert_eq!(r_a.appraiser, "");
+    assert_eq!(
+        r_a.fmv_method, "",
+        "Section A carrier must have fmv_method = '' (FMV method not modeled)"
+    );
+    assert!(r_a.needs_review);
 }
 
 /// date_acquired = leg.acquired_at; date_contributed = removal.removed_at; basis/fmv from the leg.
@@ -788,4 +810,205 @@ fn form8283_gift_produces_no_row() {
         "only the Donation yields a row; the Gift does not"
     );
     assert_eq!(rows[0].date_contributed, date!(2025 - 04 - 01));
+}
+
+// ── D1 KATs — §170(f)(11)(F) year-aggregate Section A/B ────────────────────────────────────────
+
+/// D1 KAT 1: three donations $2,000+$2,000+$2,000 → aggregate $6,000 > $5,000 → ALL Section B.
+/// This is the core §170(f)(11)(F) lock: each donation is individually < $5,000, but the year
+/// aggregate triggers Section B. Pre-change: all three would have been Section A (per-donation).
+#[test]
+fn form8283_year_aggregate_triggers_section_b_when_sum_exceeds_5k() {
+    let st = state_removals(vec![
+        donation(
+            1,
+            date!(2025 - 02 - 01),
+            dec!(2000),
+            vec![base_removal_leg()],
+        ),
+        donation(
+            2,
+            date!(2025 - 05 - 01),
+            dec!(2000),
+            vec![base_removal_leg()],
+        ),
+        donation(
+            3,
+            date!(2025 - 08 - 01),
+            dec!(2000),
+            vec![base_removal_leg()],
+        ),
+    ]);
+    let rows = form_8283(&st, 2025);
+    assert_eq!(rows.len(), 3);
+    // All three carrier rows must be Section B (uniform year-aggregate applies to all).
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(
+            row.section,
+            Some(Form8283Section::B),
+            "row {i}: expected Section B (aggregate $6,000 > $5,000); got {:?}",
+            row.section
+        );
+        assert_eq!(
+            row.fmv_method, "qualified appraisal",
+            "row {i}: Section B carrier must have fmv_method = 'qualified appraisal'"
+        );
+    }
+}
+
+/// D1 KAT 2: two donations $1,000+$1,500 → aggregate $2,500 ≤ $5,000 → all Section A.
+#[test]
+fn form8283_year_aggregate_under_threshold_gives_section_a() {
+    let st = state_removals(vec![
+        donation(
+            1,
+            date!(2025 - 03 - 01),
+            dec!(1000),
+            vec![base_removal_leg()],
+        ),
+        donation(
+            2,
+            date!(2025 - 07 - 01),
+            dec!(1500),
+            vec![base_removal_leg()],
+        ),
+    ]);
+    let rows = form_8283(&st, 2025);
+    assert_eq!(rows.len(), 2);
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(
+            row.section,
+            Some(Form8283Section::A),
+            "row {i}: expected Section A (aggregate $2,500 ≤ $5,000); got {:?}",
+            row.section
+        );
+        assert_eq!(
+            row.fmv_method, "",
+            "row {i}: Section A carrier must have fmv_method = '' (honest gap)"
+        );
+    }
+}
+
+/// D1 KAT 3 (regression): single donation $8,000 → Section B (unchanged from pre-existing behavior).
+#[test]
+fn form8283_single_large_donation_section_b_regression() {
+    let st = state_removals(vec![donation(
+        1,
+        date!(2025 - 04 - 01),
+        dec!(8000),
+        vec![base_removal_leg()],
+    )]);
+    let rows = form_8283(&st, 2025);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].section,
+        Some(Form8283Section::B),
+        "single $8,000 donation must be Section B"
+    );
+    assert_eq!(rows[0].fmv_method, "qualified appraisal");
+}
+
+/// D1 KAT 4 [R0-I2]: donations aggregating EXACTLY $5,000 → Section A.
+/// §170(f)(11)(C) says "more than $5,000"; exactly $5,000 is NOT "more than" → Section A.
+/// Distinguishes `>` (correct) from `>=` (wrong).
+#[test]
+fn form8283_exact_5000_aggregate_is_section_a_not_b() {
+    let st = state_removals(vec![
+        donation(
+            1,
+            date!(2025 - 01 - 01),
+            dec!(3000),
+            vec![base_removal_leg()],
+        ),
+        donation(
+            2,
+            date!(2025 - 06 - 01),
+            dec!(2000),
+            vec![base_removal_leg()],
+        ),
+    ]);
+    let rows = form_8283(&st, 2025);
+    assert_eq!(rows.len(), 2);
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(
+            row.section,
+            Some(Form8283Section::A),
+            "row {i}: aggregate exactly $5,000 must be Section A (§170(f)(11)(C) is '>'); \
+             got {:?}",
+            row.section
+        );
+    }
+}
+
+/// D1 KAT 5 [R0-I3]: Gift excluded from the aggregate — a Gift $10,000 + Donation $3,000 in the
+/// same year. Gifts have `claimed_deduction == None` and are NOT §170 (they are §2503/Form 709).
+/// They must NOT enter the donation aggregate. The Donation aggregate = $3,000 ≤ $5,000 → Section A.
+#[test]
+fn form8283_gift_fmv_excluded_from_donation_aggregate() {
+    let st = state_removals(vec![
+        // Gift with a large fmv — must NOT inflate the donation aggregate.
+        gift(
+            1,
+            date!(2025 - 02 - 01),
+            vec![RemovalLeg {
+                fmv_at_transfer: dec!(10000),
+                ..base_removal_leg()
+            }],
+        ),
+        // Donation $3,000: aggregate = $3,000 (Gift excluded) → Section A.
+        donation(
+            2,
+            date!(2025 - 05 - 01),
+            dec!(3000),
+            vec![base_removal_leg()],
+        ),
+    ]);
+    let rows = form_8283(&st, 2025);
+    // Only the Donation row appears; Gift has no Form 8283 row.
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].section,
+        Some(Form8283Section::A),
+        "Donation $3,000 must be Section A when Gift FMV is excluded from the aggregate; \
+         got {:?}",
+        rows[0].section
+    );
+    assert_eq!(
+        rows[0].fmv_method, "",
+        "Section A carrier must have fmv_method = '' (honest gap)"
+    );
+}
+
+/// D3 KAT: fmv_method is set on the CARRIER row only — subsequent (non-carrier) legs get "".
+/// For a Section B multi-leg donation: carrier = "qualified appraisal"; subsequent = "".
+#[test]
+fn form8283_fmv_method_carrier_only_subsequent_legs_empty() {
+    let st = state_removals(vec![donation(
+        1,
+        date!(2025 - 03 - 01),
+        dec!(52000), // > $5,000 → Section B
+        vec![
+            RemovalLeg {
+                lot_id: lot(0, 1),
+                ..base_removal_leg()
+            }, // non-carrier (higher lot_id)
+            RemovalLeg {
+                lot_id: lot(0, 0),
+                ..base_removal_leg()
+            }, // carrier (smallest lot_id)
+        ],
+    )]);
+    let rows = form_8283(&st, 2025);
+    assert_eq!(rows.len(), 2);
+    // Carrier (lot 0,0) sorts first; non-carrier (lot 0,1) sorts second.
+    assert_eq!(rows[0].section, Some(Form8283Section::B));
+    assert_eq!(
+        rows[0].fmv_method, "qualified appraisal",
+        "carrier row must have fmv_method = 'qualified appraisal'"
+    );
+    assert_eq!(rows[1].section, None, "non-carrier: section must be None");
+    assert_eq!(
+        rows[1].fmv_method, "",
+        "non-carrier row must have fmv_method = '' (carrier convention)"
+    );
 }

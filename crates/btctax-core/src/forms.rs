@@ -194,20 +194,21 @@ pub fn schedule_d(state: &LedgerState, year: i32) -> ScheduleDTotals {
 // Form 8949 this is STANDALONE — it does NOT feed `compute_tax_year` / engine B (Schedule-A-adjacent,
 // §170). Federal-only. No float (NFR5: the BTC-amount description is EXACT `Decimal`).
 
-/// The Form 8283 part a donation is reported in, driven by the engine-computed **claimed deduction**
-/// (NOT the user `appraisal_required` bool — decoupled, as in P2-A):
-/// - **Section A** — claimed deduction ≤ $5,000 (§170(f)(11) / Form 8283 Section A).
-/// - **Section B** — claimed deduction > $5,000: a **qualified appraisal + appraiser signature** is
+/// The Form 8283 part a donation is reported in, driven by the **§170(f)(11)(F) year-aggregate**
+/// claimed deduction over ALL BTC donations in the tax year (all BTC is "similar property"):
+/// - **Section A** — year-aggregate ≤ $5,000 (§170(f)(11)(C): "more than $5,000" is the threshold;
+///   exactly $5,000 → Section A).
+/// - **Section B** — year-aggregate > $5,000: a **qualified appraisal + appraiser signature** is
 ///   required (CCA 202302012 confirms the readily-valued exception does NOT apply to crypto).
 ///
-/// **[R0-I1] Aggregation caveat (disclosed in the CSV output, NOT implemented here):** this split is
-/// PER-DONATION; §170(f)(11)(F) AGGREGATES similar items across the tax year (two $3,000 crypto gifts
-/// = $6,000 aggregate → Section B). Year-aggregation is a documented FOLLOWUP.
+/// The section is **UNIFORM** across all donations in the year (all BTC is one similar-property
+/// class). This replaces the prior per-donation threshold test (§170(f)(11)(F) aggregates similar
+/// items across the year; a per-donation test under-triggers Section B).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Form8283Section {
-    /// Section A — claimed deduction ≤ $5,000.
+    /// Section A — year-aggregate ≤ $5,000.
     A,
-    /// Section B — claimed deduction > $5,000 (qualified appraisal required).
+    /// Section B — year-aggregate > $5,000 (qualified appraisal required).
     B,
 }
 
@@ -245,17 +246,22 @@ fn how_acquired_from(bs: BasisSource) -> Form8283HowAcquired {
 /// One Form 8283 row = one `RemovalLeg` of a `Donation` contributed in the tax year. A pure
 /// projection of the leg; no gain/basis/deduction math is done here.
 ///
-/// **First-leg convention (no CSV SUM double-count):** the per-DONATION `section` + `claimed_deduction`
-/// appear on the FIRST leg row only (`Some`), and are `None` on subsequent leg rows — so a naive SUM
-/// over the deduction column equals the correct per-donation total (mirrors P2-A's removals.csv).
+/// **First-leg convention (no CSV SUM double-count):** the per-DONATION `section`,
+/// `claimed_deduction`, and `fmv_method` appear on the FIRST leg row only; subsequent leg rows carry
+/// `None`/`""` — so a naive SUM over the deduction column equals the correct per-donation total
+/// (mirrors P2-A's removals.csv).
 ///
-/// **Unmodeled user-input (honest gaps, never fabricated):** `fmv_method`, `donee`, and `appraiser`
-/// are always EMPTY (not modeled), so `needs_review` is ALWAYS `true`. For a Section B donation this
-/// is doubly required (a qualified appraiser signature is mandatory and is not modeled).
+/// **Unmodeled user-input (honest gaps, never fabricated):** `donee` and `appraiser` are always EMPTY
+/// (not modeled), so `needs_review` is ALWAYS `true`. `fmv_method` is derived from the section
+/// (Section B → `"qualified appraisal"`; Section A → `""`) — no `FmvStatus` dependency (RemovalLeg
+/// carries no FMV provenance). For a Section B donation the qualified-appraiser signature is
+/// additionally mandatory (not modeled until Chunk 3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Form8283Row {
-    /// Section A/B — on the FIRST leg row only (`None` on subsequent legs). Driven by the donation's
-    /// `claimed_deduction` (> $5,000 → B).
+    /// Section A/B — on the FIRST leg row only (`None` on subsequent legs). Driven by the
+    /// **§170(f)(11)(F) year-aggregate** claimed deduction over ALL BTC donations in the tax year
+    /// (Section B when the year-aggregate > $5,000; Section A otherwise). The section is UNIFORM
+    /// across all donations in the year — all BTC is one "similar property" class.
     pub section: Option<Form8283Section>,
     /// Column: description — the EXACT BTC amount, 8dp + `" BTC"` (`btc_amount_description`; NFR5).
     pub description: String,
@@ -273,7 +279,10 @@ pub struct Form8283Row {
     /// Column: the per-DONATION §170(e) claimed deduction — on the FIRST leg row only (`None` on
     /// subsequent legs, so a CSV SUM does not double-count).
     pub claimed_deduction: Option<Usd>,
-    /// Column: FMV determination method — EMPTY (unmodeled user-input).
+    /// Column: FMV determination method — on the carrier (first-leg) row: `"qualified appraisal"`
+    /// for Section B (a qualified appraisal IS the required FMV-determination method for Section B),
+    /// or `""` for Section A (FMV method is not modeled; honest gap, never fabricated). Empty on
+    /// subsequent (non-carrier) leg rows. No `FmvStatus` dependency — derived from the section only.
     pub fmv_method: String,
     /// Column: donee organization — EMPTY (unmodeled user-input; a donee identifier is deferred).
     pub donee: String,
@@ -284,34 +293,79 @@ pub struct Form8283Row {
     pub needs_review: bool,
 }
 
+/// Compute the §170(f)(11)(F) **year-aggregate** claimed deduction over all `Donation` removals in
+/// `year`. Returns `Usd::ZERO` when there are no donations in the year.
+///
+/// Gifts (`kind == Gift`) have `claimed_deduction == None` and are NOT §170; they do not appear
+/// in the filter and cannot enter this aggregate.
+///
+/// This is the **single source of truth** for the year-aggregate sum used by:
+/// - `form_8283` — to determine the uniform Section A/B for all rows in the year.
+/// - The CLI render layer's donation-appraisal advisory — for the D2 year-aggregate advisory.
+///
+/// Centralised here so the two consumers cannot silently diverge (structural guarantee, not a
+/// runtime check): if the Section B decision and the advisory ever disagreed, `form8283.csv` could
+/// show Section A while the advisory shows a Section B warning — extracting the helper into `core`
+/// makes this structurally impossible.
+pub fn year_donation_deduction(state: &LedgerState, year: i32) -> Usd {
+    state
+        .removals
+        .iter()
+        .filter(|r| r.kind == RemovalKind::Donation && r.removed_at.year() == year)
+        .filter_map(|r| r.claimed_deduction)
+        .sum()
+}
+
 /// Build the Form 8283 rows for tax year `year`: **one row per `RemovalLeg`** of a `Donation` whose
 /// `Removal.removed_at.year() == year`. Pure over `state.removals`. Gifts (`kind == Gift`) produce
-/// NO rows (a gift is not a charitable contribution). An empty year yields an empty vec.
+/// NO rows (a gift is not a charitable contribution; `claimed_deduction` is `None` and they are NOT
+/// §170 — Gifts must NOT enter the donation aggregate). An empty year yields an empty vec.
 ///
-/// **Section A/B** is driven by the donation's engine-computed `claimed_deduction` (> $5,000 → B),
-/// and — with the per-donation `claimed_deduction` — is emitted on the FIRST leg row only (the P2-A
-/// first-leg convention, so a naive CSV SUM of the deduction column does not double-count). The
-/// "first leg" is the one with the smallest `lot_id` within the donation, matching the deterministic
-/// output order so the carrier row is the first visible row of that donation.
+/// **Section A/B (D1 — §170(f)(11)(F) year-aggregate):** the year's total `claimed_deduction` over
+/// ALL Donation removals determines the section UNIFORMLY (all BTC is "similar property"). The per-
+/// donation threshold test is replaced by this year-aggregate test: if `Σ claimed_deduction > $5,000`
+/// → every carrier row is Section B; otherwise Section A. The `$5,000` threshold is strict `>`
+/// (§170(f)(11)(C): "more than $5,000"; exactly $5,000 → Section A).
+///
+/// **`fmv_method` (D3 — honest, section-derived):** Section B → `"qualified appraisal"` (a qualified
+/// appraisal IS required and IS the FMV-determination method for Section B); Section A → `""` (FMV
+/// method is not modeled for Section A; honest gap, never fabricated). `RemovalLeg` carries no FMV
+/// provenance, so `fmv_method` cannot be sourced from price status without an event-schema change
+/// (out of scope for Chunk 1).
+///
+/// **First-leg convention:** `section`, `claimed_deduction`, and `fmv_method` are emitted on the
+/// FIRST leg row only (carrier = smallest `lot_id`), so a naive CSV SUM of the deduction column does
+/// not double-count. Subsequent legs carry `None`/`""` for these fields.
 ///
 /// **Deterministic ordering (NFR4):** rows are sorted by `removed_at`, then the donation's `event`
 /// id, then the leg's `lot_id` — a total order over the (event, lot) space (mirrors `form_8949`).
 pub fn form_8283(state: &LedgerState, year: i32) -> Vec<Form8283Row> {
+    // D1: §170(f)(11)(F) year-aggregate — use the shared helper (single source of truth).
+    // Gifts have claimed_deduction == None and are NOT §170 — they must NOT enter this aggregate.
+    let year_agg_deduction: Usd = year_donation_deduction(state, year);
+    // §170(f)(11)(C): "more than $5,000" — strict `>` (exactly $5,000 → Section A).
+    // The section is UNIFORM across the year: all BTC is "similar property", one aggregate class.
+    let section = if year_agg_deduction > QUALIFIED_APPRAISAL_THRESHOLD {
+        Form8283Section::B
+    } else {
+        Form8283Section::A
+    };
+    // D3: honest fmv_method — derived from the section only (no FMV provenance on RemovalLeg;
+    // no FmvStatus dependency; no fabrication). Carrier row only; empty on subsequent legs.
+    let carrier_fmv_method = match section {
+        Form8283Section::B => "qualified appraisal".to_string(),
+        Form8283Section::A => String::new(),
+    };
+
     let mut keyed: Vec<(TaxDate, &EventId, &LotId, Form8283Row)> = Vec::new();
     for r in state
         .removals
         .iter()
         .filter(|r| r.kind == RemovalKind::Donation && r.removed_at.year() == year)
     {
-        // Section is driven by the per-donation claimed_deduction (> $5,000 → B). §170(f)(11)(C).
-        let deduction = r.claimed_deduction.unwrap_or(Usd::ZERO);
-        let section = if deduction > QUALIFIED_APPRAISAL_THRESHOLD {
-            Form8283Section::B
-        } else {
-            Form8283Section::A
-        };
         // The FIRST leg (smallest lot_id; `min_by` returns the first minimum, so it is unique even
-        // if two legs shared a lot_id) alone carries the per-donation section + claimed_deduction.
+        // if two legs shared a lot_id) alone carries the per-donation section + claimed_deduction
+        // + fmv_method (the first-leg / carrier-row convention).
         let carrier_idx: Option<usize> = r
             .legs
             .iter()
@@ -329,7 +383,11 @@ pub fn form_8283(state: &LedgerState, year: i32) -> Vec<Form8283Row> {
                 cost_basis: leg.basis,
                 fmv: leg.fmv_at_transfer,
                 claimed_deduction: if is_first { r.claimed_deduction } else { None },
-                fmv_method: String::new(),
+                fmv_method: if is_first {
+                    carrier_fmv_method.clone()
+                } else {
+                    String::new()
+                },
                 donee: String::new(),
                 appraiser: String::new(),
                 needs_review: true,
