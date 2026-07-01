@@ -378,7 +378,7 @@ fn run() -> Result<ExitCode, CliError> {
         }
         Command::Report { year, tax_year } => {
             if let Some(y) = tax_year {
-                let (outcome, advisory, sched_d, gift_advisory, schedule_se) =
+                let (outcome, advisory, sched_d, gift_advisory, schedule_se, donation_appraisal) =
                     cmd::tax::report_tax_year(vault, &passphrase(false)?, y)?;
                 print!(
                     "{}",
@@ -392,6 +392,11 @@ fn run() -> Result<ExitCode, CliError> {
                 }
                 // P2-C Task 3: standalone Form 709 gift advisory (non-gating; does not feed engine B).
                 if let Some(msg) = gift_advisory {
+                    println!("{msg}");
+                }
+                // Chunk-1 D2: §170(f)(11)(F) year-aggregate donation appraisal advisory (non-gating;
+                // render-time only — does not feed engine B or the blocker set).
+                if let Some(msg) = donation_appraisal {
                     println!("{msg}");
                 }
             } else {

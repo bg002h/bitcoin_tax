@@ -391,15 +391,16 @@ fn export_writes_form8283_with_section_b_and_aggregation_caveat() {
         "form8283.csv must be written for --tax-year"
     );
 
-    // Raw file: the [R0-I1] aggregation caveat comment line must be present.
+    // Raw file: the aggregation note comment line must be present (confirms §170(f)(11)(F) year-
+    // aggregate is implemented and the note reflects it).
     let raw = std::fs::read_to_string(&f8283).unwrap();
     assert!(
-        raw.contains("AGGREGATES similar crypto items"),
-        "form8283.csv must carry the [R0-I1] aggregation caveat:\n{raw}"
+        raw.contains("\u{00a7}170(f)(11)(F) year-aggregate"),
+        "form8283.csv must carry the §170(f)(11)(F) year-aggregate aggregation note:\n{raw}"
     );
     assert!(
         raw.starts_with("# "),
-        "caveat must be a leading comment line:\n{raw}"
+        "note must be a leading comment line:\n{raw}"
     );
     // $52,000 total (> $500) → the [R0-M1] filing-floor note must NOT appear.
     assert!(
@@ -445,13 +446,33 @@ fn export_writes_form8283_with_section_b_and_aggregation_caveat() {
         section_b_rows, 1,
         "exactly one (first) leg row carries Section B; got {section_b_rows}"
     );
-    // needs_review true on every row; donee/appraiser/fmv_method blank on every row.
+    // needs_review true on every row; donee/appraiser blank on every row.
+    // fmv_method: "qualified appraisal" on the Section B carrier row; "" on subsequent legs.
     for r in &recs {
         assert_eq!(r.get(11), Some("true"), "needs_review must be true");
-        assert_eq!(r.get(8), Some(""), "fmv_method blank");
         assert_eq!(r.get(9), Some(""), "donee blank");
         assert_eq!(r.get(10), Some(""), "appraiser blank");
     }
+    // Carrier row (Section B, first in output) → fmv_method = "qualified appraisal".
+    let carrier = recs
+        .iter()
+        .find(|r| r.get(0) == Some("B"))
+        .expect("carrier row");
+    assert_eq!(
+        carrier.get(8),
+        Some("qualified appraisal"),
+        "Section B carrier row must have fmv_method = 'qualified appraisal'"
+    );
+    // Non-carrier row (section empty) → fmv_method = "".
+    let non_carrier = recs
+        .iter()
+        .find(|r| r.get(0) == Some(""))
+        .expect("non-carrier row");
+    assert_eq!(
+        non_carrier.get(8),
+        Some(""),
+        "non-carrier row must have fmv_method = '' (carrier convention)"
+    );
     // claimed_deduction appears on exactly one row (no SUM double-count) and equals $52,000.
     let deds: Vec<&str> = recs
         .iter()

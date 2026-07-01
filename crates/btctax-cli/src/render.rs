@@ -746,20 +746,70 @@ fn write_schedule_se_csv(out_dir: &Path, se: &SeTaxResult) -> Result<(), crate::
     Ok(())
 }
 
-/// The standing [R0-I1] Section A/B aggregation caveat — emitted as the first (comment) line of
-/// form8283.csv and reused by any text/advisory path. §170(f)(11)(F) aggregates similar items across
-/// the year; this app's split is per-donation, so a set of small Section-A donations may in AGGREGATE
-/// require Section B + a qualified appraisal (CCA 202302012 confirms this applies to crypto).
-pub const FORM_8283_AGGREGATION_CAVEAT: &str = "Section A/B is per-donation; the $5,000 appraisal \
-    threshold AGGREGATES similar crypto items donated across the year — rows shown as Section A may \
-    require Section B + a qualified appraisal; verify AGGREGATE similar-item totals.";
+/// The standing Section A/B aggregation note — emitted as the first (comment) line of form8283.csv
+/// and reused by any text/advisory path. Reflects the §170(f)(11)(F) year-aggregate implementation:
+/// all BTC is "similar property"; the YEAR-total BTC donation deduction determines Section A/B
+/// uniformly for all rows. CCA 202302012 confirms the readily-valued exception does not apply to
+/// crypto, so a year-aggregate > $5,000 requires a qualified appraisal.
+pub const FORM_8283_AGGREGATION_CAVEAT: &str =
+    "Section A/B reflects the \u{00a7}170(f)(11)(F) year-aggregate for similar property: all BTC \
+     donations in the year are summed (all BTC is 'similar property'); if the year-total claimed \
+     deduction exceeds $5,000 every row is Section B (qualified appraisal required), otherwise \
+     Section A. CCA 202302012: the readily-valued exception does not apply to crypto.";
+
+/// Compute the year-aggregate §170(e) claimed deduction over all `Donation` removals in `year`.
+///
+/// Used by `write_form8283_csv` (for the [R0-M1] $500 form-filing floor note) and by
+/// `render_donation_appraisal_advisory` (for the D2 year-aggregate advisory). Centralized so
+/// neither caller recomputes the sum independently — both reuse this single helper.
+///
+/// Gifts (`kind == Gift`) have `claimed_deduction == None` and are NOT §170; they do not appear
+/// in the filter and cannot enter this aggregate.
+fn year_donation_deduction(state: &LedgerState, year: i32) -> btctax_core::conventions::Usd {
+    state
+        .removals
+        .iter()
+        .filter(|r| r.kind == RemovalKind::Donation && r.removed_at.year() == year)
+        .filter_map(|r| r.claimed_deduction)
+        .sum()
+}
+
+/// §170(f)(11)(F) year-aggregate appraisal advisory (D2) — render-time only.
+///
+/// Emits a standalone advisory when `year_donation_deduction > QUALIFIED_APPRAISAL_THRESHOLD`
+/// ($5,000, strict `>`): even if no single BTC donation exceeds $5,000, the year-aggregate may
+/// require a qualified appraisal (CCA 202302012: the readily-valued exception does not apply to
+/// crypto; all BTC is "similar property").
+///
+/// **Render-time only — does NOT enter `state.advisory` / the blocker set** (consistent with the
+/// standalone-forms pattern; the per-donation `BlockerKind::QualifiedAppraisalNote` in fold.rs
+/// is left as-is — this advisory adds the year-aggregate signal without touching the fold).
+///
+/// Reuses `year_donation_deduction` — the identical sum that `write_form8283_csv` uses for the
+/// [R0-M1] $500 floor note. The sum is NOT recomputed here; it is computed once by that helper.
+///
+/// Returns `None` when the year has no donations or the aggregate ≤ $5,000.
+pub fn render_donation_appraisal_advisory(state: &LedgerState, year: i32) -> Option<String> {
+    use btctax_core::QUALIFIED_APPRAISAL_THRESHOLD;
+    let agg = year_donation_deduction(state, year);
+    if agg <= QUALIFIED_APPRAISAL_THRESHOLD {
+        return None;
+    }
+    Some(format!(
+        "\u{00a7}170(f)(11)(F): your {year} BTC donations aggregate ${} of claimed deduction \
+         (> $5,000) \u{2014} a qualified appraisal is required for the donated BTC even if no \
+         single donation exceeds $5,000 (all BTC is 'similar property'; CCA 202302012 \u{2014} \
+         no readily-valued exception for crypto).",
+        fmt_money(agg)
+    ))
+}
 
 /// P2-C Task 2: write `form8283.csv` — one row per `Donation` `RemovalLeg` contributed in `year`.
 /// Stable snake_case columns; exact `Decimal`/`i64` string values (NFR5). 0o600 via `open_owner_only`.
 ///
-/// The file leads with `#`-prefixed comment lines: the standing [R0-I1] aggregation caveat, and —
-/// when the year's total noncash charitable deduction is ≤ $500 — the [R0-M1] filing-floor note that
-/// Form 8283 is not required at that level (the rows are still emitted, informationally).
+/// The file leads with `#`-prefixed comment lines: the standing aggregation note, and — when the
+/// year's total noncash charitable deduction is ≤ $500 — the [R0-M1] filing-floor note that Form
+/// 8283 is not required at that level (the rows are still emitted, informationally).
 fn write_form8283_csv(
     out_dir: &Path,
     state: &LedgerState,
@@ -768,18 +818,14 @@ fn write_form8283_csv(
     use std::io::Write as _;
     let mut file = fsperms::open_owner_only(&out_dir.join("form8283.csv"))?;
 
-    // [R0-I1] STANDING aggregation caveat — CSV header comment line (read with comment=b'#').
-    writeln!(file, "# [R0-I1] {FORM_8283_AGGREGATION_CAVEAT}")?;
+    // STANDING aggregation note — CSV header comment line (read with comment=b'#').
+    writeln!(file, "# {FORM_8283_AGGREGATION_CAVEAT}")?;
 
     // [R0-M1] $500 form-filing floor: Form 8283 is required only when total noncash contributions
     // for the year exceed $500. Rows are emitted regardless; add a note when the year's total
     // donation deduction is ≤ $500 that Form 8283 is not required at that level.
-    let total_deduction: btctax_core::conventions::Usd = state
-        .removals
-        .iter()
-        .filter(|r| r.kind == RemovalKind::Donation && r.removed_at.year() == year)
-        .filter_map(|r| r.claimed_deduction)
-        .sum();
+    // Reuses `year_donation_deduction` — the same helper used by `render_donation_appraisal_advisory`.
+    let total_deduction = year_donation_deduction(state, year);
     if total_deduction <= rust_decimal::Decimal::from(500) {
         writeln!(
             file,
