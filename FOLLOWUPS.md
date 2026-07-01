@@ -44,6 +44,29 @@ Important; workspace gate green (433 tests). Closed:
 
 ---
 
+## ✅ Phase-2 P2-B: Form 8949 + Schedule D generation — SHIPPED (2026-06-30)
+
+Second Phase-2 sub-project. Branch `feat/p2b-form8949`; R0 spec 2 rounds to 0C/0I; 2 impl passes each
+0C/0I; whole-slug review 0C/0I. New core `forms.rs`: `form_8949(state, year)` → per-leg 8949 rows (ST
+Part I / LT Part II; exact-Decimal BTC description; C/F box default + `box_needs_review` for exchange
+wallets; NoGainNoLoss gift legs → gain 0; adjustment cols blank per §1091-exempt; deterministic order;
+year-filtered) + `schedule_d(state, year)` → raw ST/LT part totals. Two additive `DisposalLeg` fields:
+`acquired_at` (ZONE-AWARE = loss_hp_start in the §1015 loss zone, else gain_hp_start — structurally
+coupled to `term_for`, can never contradict the row's ST/LT term) + `wallet` (from `Consumed.wallet`).
+CLI: `form8949.csv` + `schedule_d.csv` (0o600, year-scoped) + a `render_schedule_d` text section (with a
+NotComputable caveat). Reconciles with engine B (schedule_d ST/LT gain == TaxResult.st_net/lt_net on
+all-gains/zero-carryforward, independent paths). No capital-gains / basis math change. 487 tests.
+
+Deferred (OPEN → later Phase-2):
+- **Per-disposition 1099-B / box (A/B/D/E) user input** — reclassify from the conservative C/F default
+  when a 1099-B/1099-DA was issued (`box_needs_review` flags exchange dispositions today). `Form8949Box`
+  is currently `{C, F}` only — A/B/D/E structurally unrepresentable until this lands.
+- **1099-DA reconciliation** (broker digital-asset reporting: gross proceeds 2025+, basis 2026+) — needs
+  broker-data import; the exchange flag prompts manual reconcile meanwhile.
+- **Filled-PDF Form 8949 / Schedule D** — no PDF dependency in-tree; CSV + text only for now.
+- **Nits:** exchange box flag not year-gated (conservative); ISO vs MM/DD/YYYY dates (defer with PDF);
+  SPEC D2 column list omits `box_needs_review` (doc only — code includes it).
+
 ## ✅ Phase-2 P2-A: §170(e) charitable-deduction computation — SHIPPED (2026-06-30)
 
 First Phase-2 (Forms & §170(e)) sub-project. Branch `feat/p2a-170e-deduction`; R0 spec 2 rounds to

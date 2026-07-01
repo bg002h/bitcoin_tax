@@ -88,12 +88,36 @@ fn report_tax_year_renders_golden() {
     let (_dir, vault) = make_vault_with(&csv);
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
 
-    let (outcome, advisory) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
+    let (outcome, advisory, sched_d) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     assert!(
         rendered.contains("TOTAL federal tax attributable to crypto (delta): 1747.50"),
         "expected total 1747.50 in rendered output:\n{rendered}"
+    );
+
+    // P2-B Task 3 (KAT — Computed): the RAW Schedule D part totals ride the same report path
+    // (same projection). The fixture is a single LT sell (proceeds 50,000; basis 30,000;
+    // gain 20,000), no ST. Computed year → netting note present; no "NOT COMPUTABLE" caveat.
+    assert_eq!(sched_d.lt.proceeds, dec!(50000));
+    assert_eq!(sched_d.lt.cost_basis, dec!(30000));
+    assert_eq!(sched_d.lt.gain, dec!(20000));
+    assert_eq!(sched_d.st.gain, dec!(0));
+    let sd_text = render::render_schedule_d(2025, &sched_d, &outcome);
+    assert!(
+        sd_text.contains("§1222/§1211/§1212 netting + carryforward")
+            && sd_text.contains("raw pre-netting"),
+        "Schedule D text (Computed) must carry the netting note:\n{sd_text}"
+    );
+    assert!(
+        !sd_text.contains("NOT COMPUTABLE"),
+        "Schedule D text (Computed) must NOT carry the NotComputable caveat:\n{sd_text}"
+    );
+    assert!(
+        sd_text.contains(
+            "Part II (long-term):  proceeds 50000.00   cost basis 30000.00   gain 20000.00"
+        ),
+        "Schedule D text must show the LT part totals:\n{sd_text}"
     );
 }
 
@@ -107,7 +131,7 @@ fn report_tax_year_components_reconcile_to_total() {
     let (_dir, vault) = make_vault_with(&csv);
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
 
-    let (outcome, advisory) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
+    let (outcome, advisory, _sched_d) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     // B-F1: all dollar figures are now fmt_money-formatted to exactly 2dp; assert the 2dp forms.
@@ -151,7 +175,7 @@ fn report_tax_year_without_profile_says_not_computable() {
     let (_dir, vault) = make_vault_with(&csv);
     // Deliberately do NOT set a tax profile for 2025.
 
-    let (outcome, advisory) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
+    let (outcome, advisory, _sched_d) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     assert!(
@@ -168,6 +192,9 @@ fn report_tax_year_without_profile_says_not_computable() {
 /// Unresolved hard blocker (UnknownBasisInbound from unclassified Receive) →
 /// `NotComputable(TaxYearNotComputable)` rendered; no dollar amount.
 /// B.4 / I6: ANY hard blocker gates computation projection-wide.
+///
+/// KAT (NotComputable): Schedule D STILL shows the raw part totals AND carries the
+/// "NOT COMPUTABLE / informational" caveat; the §1222/§1211/§1212 netting note is absent.
 #[test]
 fn report_tax_year_with_hard_blocker_says_not_computable() {
     let csv_dir = tempfile::tempdir().unwrap();
@@ -176,7 +203,7 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
     // Set a profile so the refusal is definitely from the hard blocker (not TaxProfileMissing).
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
 
-    let (outcome, advisory) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
+    let (outcome, advisory, sched_d) = cmd::tax::report_tax_year(&vault, &pp(), 2025).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     assert!(
@@ -186,6 +213,35 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
     assert!(
         !rendered.contains("TOTAL federal tax attributable"),
         "must not print a computed total when hard blockers are present:\n{rendered}"
+    );
+
+    // KAT: Schedule D raw totals are shown AND the NotComputable caveat is present.
+    // The fixture (buy + unclassified receive, no sell) has zero disposals → all totals are 0,
+    // but the section header and caveat must still appear.
+    let sd_text = render::render_schedule_d(2025, &sched_d, &outcome);
+    assert!(
+        sd_text.contains("Schedule D (raw pre-netting part totals)"),
+        "Schedule D section header must appear even for a NotComputable year:\n{sd_text}"
+    );
+    assert!(
+        sd_text.contains("Part I  (short-term)"),
+        "Schedule D must show Part I totals even for a NotComputable year:\n{sd_text}"
+    );
+    assert!(
+        sd_text.contains("Part II (long-term)"),
+        "Schedule D must show Part II totals even for a NotComputable year:\n{sd_text}"
+    );
+    assert!(
+        sd_text.contains("NOT COMPUTABLE"),
+        "Schedule D must carry the NOT COMPUTABLE caveat for a NotComputable outcome:\n{sd_text}"
+    );
+    assert!(
+        sd_text.contains("informational"),
+        "Schedule D caveat must include 'informational':\n{sd_text}"
+    );
+    assert!(
+        !sd_text.contains("§1222/§1211/§1212 netting"),
+        "Schedule D must NOT show the netting note for a NotComputable outcome:\n{sd_text}"
     );
 }
 
@@ -252,7 +308,7 @@ st-sell,2025-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
     .unwrap();
 
     // report --tax-year 2026: main outcome is NotComputable (no TY2026 table); advisory fires.
-    let (outcome, advisory) = cmd::tax::report_tax_year(&vault, &pp(), 2026).unwrap();
+    let (outcome, advisory, _sched_d) = cmd::tax::report_tax_year(&vault, &pp(), 2026).unwrap();
     let rendered = render::render_tax_outcome(2026, &outcome, advisory.as_deref());
 
     // Advisory must contain the mismatch message.

@@ -72,6 +72,10 @@ enum Command {
     ExportSnapshot {
         #[arg(long)]
         out: PathBuf,
+        /// Also emit the per-tax-year Form 8949 + Schedule D CSVs (form8949.csv / schedule_d.csv),
+        /// scoped to this calendar year. Omit to write only the all-years projection CSVs.
+        #[arg(long)]
+        tax_year: Option<i32>,
     },
     /// Export the passphrase-protected key.
     BackupKey {
@@ -374,11 +378,13 @@ fn run() -> Result<ExitCode, CliError> {
         }
         Command::Report { year, tax_year } => {
             if let Some(y) = tax_year {
-                let (outcome, advisory) = cmd::tax::report_tax_year(vault, &passphrase(false)?, y)?;
+                let (outcome, advisory, sched_d) =
+                    cmd::tax::report_tax_year(vault, &passphrase(false)?, y)?;
                 print!(
                     "{}",
                     render::render_tax_outcome(y, &outcome, advisory.as_deref())
                 );
+                print!("{}", render::render_schedule_d(y, &sched_d, &outcome));
             } else {
                 let state = cmd::inspect::report(vault, &passphrase(false)?, year)?;
                 print!("{}", render::render_report(&state, year));
@@ -510,8 +516,8 @@ fn run() -> Result<ExitCode, CliError> {
                 cfg.fee_treatment, cfg.pre2025_method, cfg.pre2025_method_attested
             );
         }
-        Command::ExportSnapshot { out } => {
-            let p = cmd::admin::export_snapshot(vault, &passphrase(false)?, &out)?;
+        Command::ExportSnapshot { out, tax_year } => {
+            let p = cmd::admin::export_snapshot(vault, &passphrase(false)?, &out, tax_year)?;
             println!("Exported {} + CSVs to {}", p.display(), out.display());
         }
         Command::BackupKey { out } => {

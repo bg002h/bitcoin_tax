@@ -122,6 +122,13 @@ pub struct DisposalLeg {
     pub term: Term,
     pub basis_source: BasisSource,
     pub gift_zone: Option<GiftZone>,
+    /// Zone-aware holding-period start: the SAME HP-start passed to `term_for` for this leg.
+    /// In the §1015 dual-basis loss zone this is `loss_hp_start` (the gift date — loss basis
+    /// does NOT tack); in all other zones it is `gain_hp_start` (tacked donor date for gifts,
+    /// acquisition date otherwise). Must never contradict `leg.term`. [R0-C1]
+    pub acquired_at: TaxDate,
+    /// The wallet that held the consumed lot at disposal time — the ONLY sound source (D1 [R0-I1]).
+    pub wallet: WalletId,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Disposal {

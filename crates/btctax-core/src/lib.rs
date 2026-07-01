@@ -2,6 +2,7 @@
 //! The projection (`project`) is total and never panics (spec §7.1); only `persistence` performs I/O.
 pub mod conventions;
 pub mod event;
+pub mod forms;
 pub mod identity;
 pub mod optimize;
 pub mod persistence;
@@ -12,6 +13,9 @@ pub mod tax;
 
 pub use conventions::{Sat, TaxDate, Usd};
 pub use event::*;
+pub use forms::{
+    form_8949, schedule_d, Form8949Box, Form8949Part, Form8949Row, ScheduleDPart, ScheduleDTotals,
+};
 pub use identity::{EventId, Fingerprint, LotId, Source, SourceRef, WalletId};
 pub use optimize::{
     consult_sale, optimize_year, score_assignment, ApproxReason, ConsultReport, ConsultRequest,

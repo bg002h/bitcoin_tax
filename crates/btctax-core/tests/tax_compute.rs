@@ -98,6 +98,11 @@ fn disposal(d: time::Date, gain: Usd, term: Term) -> Disposal {
             term,
             basis_source: BasisSource::ComputedFromCost,
             gift_zone: None,
+            acquired_at: date!(2025 - 01 - 01), // synthetic; compute_tax_year does not read acquired_at
+            wallet: WalletId::Exchange {
+                provider: "cb".into(),
+                account: "m".into(),
+            }, // synthetic
         }],
         fee_mini_disposition: false,
     }
@@ -466,6 +471,44 @@ fn advisory_only_blockers_do_not_gate_computation() {
         matches!(out, TaxOutcome::Computed(_)),
         "expected TaxOutcome::Computed — advisory blockers must not gate computation; got: {out:?}"
     );
+}
+
+/// [R0-M3] P2-B ↔ engine-B reconciliation via INDEPENDENT code paths (NOT a tautology).
+///
+/// On an ALL-GAINS fixture (ST gain 20,000 + LT gain 50,000, both 2025; no losses) with a profile
+/// carrying ZERO `capital_loss_carryforward_in` and ZERO `other_net_capital_gain`, §1222 does no
+/// cross-netting, so B's within-character net == the raw part gain. `schedule_d` (P2-B) and
+/// `compute_tax_year` (engine B) are SEPARATE functions that each aggregate the same
+/// `state.disposals`, so `schedule_d(..).st.gain == TaxResult.st_net` (and LT) is a genuine
+/// cross-check — the forms and the tax engine cannot silently diverge. (`profile()` already sets
+/// other_net_capital_gain=0 and carryforward=0; do NOT reconcile against a shared helper.)
+#[test]
+fn schedule_d_reconciles_with_engine_b_on_all_gains_fixture() {
+    let st = state_with(
+        vec![
+            disposal(date!(2025 - 03 - 01), dec!(20000), Term::ShortTerm),
+            disposal(date!(2025 - 07 - 01), dec!(50000), Term::LongTerm),
+        ],
+        vec![],
+    );
+    let p = profile(dec!(100000), dec!(100000), dec!(0));
+    let out = compute_tax_year(&[], &st, 2025, Some(&p), &synth(2025));
+    let TaxOutcome::Computed(r) = out else {
+        panic!("computable")
+    };
+    let sd = btctax_core::forms::schedule_d(&st, 2025);
+    // Independent aggregators agree on the within-character gains (net == raw, all gains, cf=0, other=0).
+    assert_eq!(
+        sd.st.gain, r.st_net,
+        "ST Σgain must reconcile with B.st_net"
+    );
+    assert_eq!(
+        sd.lt.gain, r.lt_net,
+        "LT Σgain must reconcile with B.lt_net"
+    );
+    // Sanity: the raw part gains are exactly the all-gains inputs.
+    assert_eq!(sd.st.gain, dec!(20000));
+    assert_eq!(sd.lt.gain, dec!(50000));
 }
 
 /// NFR4 determinism: identical inputs → identical outcome.

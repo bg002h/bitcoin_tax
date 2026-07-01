@@ -881,7 +881,7 @@ csv-send-b,2026-04-01 12:00:00 UTC,Send,BTC,0.05000000,USD,62000.00,,,,,,bc1qgif
     let out = dir.path().join("export_p2a");
     let session = Session::open(&vault, &pp()).unwrap();
     let (state, _) = session.project().unwrap();
-    btctax_cli::render::write_csv_exports(&out, &state).unwrap();
+    btctax_cli::render::write_csv_exports(&out, &state, None).unwrap();
 
     // Read removals.csv and check the `claimed_deduction` column.
     let mut rdr = Reader::from_reader(File::open(out.join("removals.csv")).unwrap());

@@ -23,7 +23,7 @@ fn export_snapshot_writes_sqlite_and_csvs_and_backup_key() {
     .unwrap();
 
     let out = dir.path().join("export");
-    let sqlite = cmd::admin::export_snapshot(&vault, &pp(), &out).unwrap();
+    let sqlite = cmd::admin::export_snapshot(&vault, &pp(), &out, None).unwrap();
     assert!(sqlite.exists(), "snapshot.sqlite (store)");
 
     let lots_path = out.join("lots.csv");
@@ -113,6 +113,102 @@ fn export_snapshot_writes_sqlite_and_csvs_and_backup_key() {
     assert!(key.exists());
 }
 
+/// P2-B Task 2/3: with `--tax-year`, export additionally writes year-scoped `form8949.csv` +
+/// `schedule_d.csv`. The `coinbase_buy_sell_send` fixture has a single ST sell of 0.02 BTC in 2025
+/// from an exchange wallet → one Form 8949 row (Part I / box C / box_needs_review true) and matching
+/// Schedule D ST part totals. Without `--tax-year` (None) the two files are omitted.
+#[test]
+fn export_writes_year_scoped_form8949_and_schedule_d() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(
+        &vault,
+        &pp(),
+        &[fixtures::coinbase_buy_sell_send(dir.path())],
+    )
+    .unwrap();
+
+    // With None: the year-scoped filing artifacts are NOT written.
+    let out_none = dir.path().join("export_none");
+    cmd::admin::export_snapshot(&vault, &pp(), &out_none, None).unwrap();
+    assert!(
+        !out_none.join("form8949.csv").exists(),
+        "form8949.csv must be omitted without --tax-year"
+    );
+    assert!(!out_none.join("schedule_d.csv").exists());
+
+    // With Some(2025): both are written, year-scoped.
+    let out = dir.path().join("export_2025");
+    cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2025)).unwrap();
+
+    let f8949 = out.join("form8949.csv");
+    let schedd = out.join("schedule_d.csv");
+    assert!(
+        f8949.exists(),
+        "form8949.csv must be written for --tax-year"
+    );
+    assert!(
+        schedd.exists(),
+        "schedule_d.csv must be written for --tax-year"
+    );
+
+    // form8949.csv: header + exactly one data row (the single 2025 ST sell leg).
+    let mut fr = Reader::from_reader(File::open(&f8949).unwrap());
+    let headers: Vec<String> = fr
+        .headers()
+        .unwrap()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(
+        headers,
+        vec![
+            "part",
+            "box",
+            "box_needs_review",
+            "description",
+            "date_acquired",
+            "date_sold",
+            "proceeds",
+            "cost_basis",
+            "adjustment_code",
+            "adjustment_amount",
+            "gain",
+            "wallet",
+            "disposition_kind",
+        ],
+        "form8949.csv columns must be the stable snake_case contract"
+    );
+    let recs: Vec<_> = fr.records().collect::<Result<Vec<_>, _>>().unwrap();
+    assert_eq!(recs.len(), 1, "one ST sell leg → one Form 8949 row");
+    let row = &recs[0];
+    assert_eq!(row.get(0), Some("ST"), "part");
+    assert_eq!(row.get(1), Some("C"), "box (conservative C default)");
+    assert_eq!(
+        row.get(2),
+        Some("true"),
+        "exchange disposition → box_needs_review"
+    );
+    assert_eq!(row.get(3), Some("0.02000000 BTC"), "exact BTC description");
+    assert_eq!(row.get(8), Some(""), "adjustment_code blank");
+    assert_eq!(row.get(9), Some("0"), "adjustment_amount zero");
+
+    // schedule_d.csv: header + two part rows (ST, LT).
+    let mut sr = Reader::from_reader(File::open(&schedd).unwrap());
+    let sheaders: Vec<String> = sr
+        .headers()
+        .unwrap()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(sheaders, vec!["part", "proceeds", "cost_basis", "gain"]);
+    let srecs: Vec<_> = sr.records().collect::<Result<Vec<_>, _>>().unwrap();
+    assert_eq!(srecs.len(), 2, "Schedule D has two part rows (ST, LT)");
+    assert_eq!(srecs[0].get(0), Some("ST"));
+    assert_eq!(srecs[1].get(0), Some("LT"));
+}
+
 /// (P2-A Minor fix KAT) Multi-leg donation: removals.csv must show `claimed_deduction` on the
 /// FIRST leg row only; subsequent leg rows carry an empty cell so `SUM()` over the column equals
 /// the correct per-donation total without double-counting.
@@ -167,7 +263,7 @@ fn removals_csv_multi_leg_donation_no_double_count() {
     .unwrap();
 
     let out = dir.path().join("export");
-    cmd::admin::export_snapshot(&vault, &pp(), &out).unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), &out, None).unwrap();
 
     let removals_path = out.join("removals.csv");
     assert!(removals_path.exists(), "removals.csv must exist");
@@ -249,7 +345,7 @@ fn csv_exports_are_owner_only_on_pre_existing_dir() {
     let out = dir.path().join("exports_pre");
     std::fs::create_dir_all(&out).unwrap();
 
-    cmd::admin::export_snapshot(&vault, &pp(), &out).unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), &out, None).unwrap();
 
     for name in ["lots.csv", "disposals.csv", "removals.csv", "income.csv"] {
         let path = out.join(name);

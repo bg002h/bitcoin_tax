@@ -151,7 +151,9 @@ fn make_disposal_legs(
         //   NoGainNoLoss: otherwise             → reported basis = proceeds, gain = 0, term from gain_hp_start.
         // Note: in the NoGainNoLoss zone, `lot.usd_basis` was already reduced by pro-rata `gain_basis`
         // on consume (pools.rs), so Σbasis is conserved exactly even though we report basis = proceeds.
-        let (basis, gain, term, gift_zone) = if c.dual {
+        // acquired_at is set from the SAME HP-start branch that selects term_for's first arg,
+        // so it can never contradict the leg's ST/LT classification [R0-C1].
+        let (basis, gain, term, gift_zone, acquired_at) = if c.dual {
             let loss_basis = c.loss_basis.expect("dual=true implies loss_basis is Some");
             if proceeds > c.gain_basis {
                 // Gain zone: basis = gain_basis (tacks, gain_hp_start).
@@ -161,6 +163,7 @@ fn make_disposal_legs(
                     round_cents(proceeds - c.gain_basis),
                     t,
                     Some(GiftZone::Gain),
+                    c.gain_hp_start, // tacked donor date
                 )
             } else if proceeds < loss_basis {
                 // Loss zone: basis = FMV-at-gift (loss_basis), HP from gift date.
@@ -170,16 +173,29 @@ fn make_disposal_legs(
                     round_cents(proceeds - loss_basis),
                     t,
                     Some(GiftZone::Loss),
+                    c.loss_hp_start, // gift date — loss basis does NOT tack (Pub 551)
                 )
             } else {
                 // NoGainNoLoss zone: reported basis = proceeds → gain = 0; term from gain_hp_start.
                 let t = term_for(c.gain_hp_start, disposed);
-                (proceeds, Usd::ZERO, t, Some(GiftZone::NoGainNoLoss))
+                (
+                    proceeds,
+                    Usd::ZERO,
+                    t,
+                    Some(GiftZone::NoGainNoLoss),
+                    c.gain_hp_start,
+                )
             }
         } else {
             let basis = c.gain_basis;
             let t = term_for(c.gain_hp_start, disposed);
-            (basis, round_cents(proceeds - basis), t, None)
+            (
+                basis,
+                round_cents(proceeds - basis),
+                t,
+                None,
+                c.gain_hp_start,
+            )
         };
         legs.push(DisposalLeg {
             lot_id: c.lot_id.clone(),
@@ -190,6 +206,8 @@ fn make_disposal_legs(
             term,
             basis_source: c.basis_source,
             gift_zone,
+            acquired_at,
+            wallet: c.wallet.clone(),
         });
     }
     legs
