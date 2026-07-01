@@ -174,13 +174,22 @@ fn report_tax_year_renders_schedule_se_for_business_mining() {
         "{se}"
     );
     assert!(se.contains("SEPARATE federal liability"), "{se}");
+    // [Minor-2] expenses caveat — render must disclose that no Schedule C expenses are modeled.
+    assert!(
+        se.contains("Schedule C deductible business expenses are not modeled"),
+        "expenses caveat must appear in Schedule SE render: {se}"
+    );
 
     // [D5] the income-tax report TOTAL is UNCHANGED by SE tax — the $14,129.55 SE figure is NOT
     // added to total_federal_tax_attributable (the mining is taxed only as ordinary income there).
+    // Golden (Single, OTI=40,000, MAGI_excl=60,000, $100,000 business mining, TY2025 real table):
+    //   ordinary_delta = tax(140,000) − tax(40,000) = 26,447.00 − 4,561.50 = 21,885.50; NIIT=0.
+    // This assertion FAILS if SE tax ($14,129.55) were ever folded in (would be 36,015.05).
     if let btctax_core::TaxOutcome::Computed(r) = &outcome {
-        assert_ne!(
+        assert_eq!(
             r.total_federal_tax_attributable,
-            r.total_federal_tax_attributable + dec!(14129.55),
+            dec!(21885.50),
+            "[D5] total_federal_tax_attributable must be income-tax delta only (21,885.50), not including SE tax"
         );
     } else {
         panic!("computable (blocker resolved by classify)");

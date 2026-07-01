@@ -1059,8 +1059,12 @@ pub fn render_schedule_se(
             );
             let _ = writeln!(
                 s,
-                "  net self-employment income (Schedule C net; business crypto, Interest excluded): {}",
+                "  net self-employment income (gross mining income \u{2014} no business expenses modeled; business crypto, Interest excluded): {}",
                 fmt_money(r.net_se)
+            );
+            let _ = writeln!(
+                s,
+                "  (caveat) Schedule C deductible business expenses are not modeled; if you have them, your actual SE tax is lower."
             );
             let _ = writeln!(
                 s,
@@ -1684,6 +1688,13 @@ mod schedule_se_tests {
         assert!(
             s.contains("not") && s.contains("§164(f)"),
             "notes §164(f) not auto-coordinated: {s}"
+        );
+        // [Minor-2] expenses caveat: labels the net_se figure as gross mining income and discloses
+        // that no Schedule C business expenses are modeled (conservative: SE tax is overstated if
+        // the user has deductible expenses).
+        assert!(
+            s.contains("Schedule C deductible business expenses are not modeled"),
+            "expenses caveat must appear in Schedule SE render: {s}"
         );
     }
 
