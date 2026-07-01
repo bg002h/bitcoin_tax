@@ -3,8 +3,8 @@
 //! exit code (non-zero on FR9 hard blockers / on any CliError). NO business logic lives here.
 use btctax_cli::{cmd, eventref, render, CliError};
 use btctax_core::{
-    AllocMethod, Carryforward, DisposeKind, FeeTreatment, FilingStatus, InboundClass, LotMethod,
-    OutflowClass, TaxProfile, TransferTarget,
+    AllocMethod, Carryforward, DisposeKind, DonationDetails, FeeTreatment, FilingStatus,
+    InboundClass, LotMethod, OutflowClass, TaxProfile, TransferTarget,
 };
 use btctax_store::Passphrase;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -270,6 +270,48 @@ enum Reconcile {
     },
     /// §A.4 Batch import LotSelections from a CSV (disposal_ref,origin_event_id,split_sequence,sat).
     ImportSelections { csv: PathBuf },
+    /// Store Form 8283 Section-B donation + appraiser details for a donation event.
+    /// The event ref is the TransferOut EventId from the removals.csv 'event' column.
+    SetDonationDetails {
+        /// TransferOut event reference for the donation (from removals.csv 'event' column).
+        out_event_ref: String,
+        /// Donee organization name (Part IV; required).
+        #[arg(long, required = true)]
+        donee_name: String,
+        /// Donee mailing address (Part IV; optional).
+        #[arg(long)]
+        donee_address: Option<String>,
+        /// Donee EIN (Part IV; required for Section-B completeness).
+        #[arg(long)]
+        donee_ein: Option<String>,
+        /// Qualified appraiser name (Part III; required).
+        #[arg(long, required = true)]
+        appraiser_name: String,
+        /// Appraiser mailing address (Part III; optional).
+        #[arg(long)]
+        appraiser_address: Option<String>,
+        /// Appraiser TIN/SSN/EIN (Part III §6695A; satisfies the TIN-or-PTIN requirement).
+        #[arg(long)]
+        appraiser_tin: Option<String>,
+        /// Appraiser PTIN (Part III §6695A; satisfies the TIN-or-PTIN requirement).
+        #[arg(long)]
+        appraiser_ptin: Option<String>,
+        /// Appraiser qualifications declaration (§170(f)(11)(E)).
+        #[arg(long)]
+        appraiser_qualifications: Option<String>,
+        /// Date the qualified appraisal was made (YYYY-MM-DD).
+        #[arg(long)]
+        appraisal_date: Option<String>,
+        /// FMV determination method override (overrides the section-derived default on the
+        /// Form 8283 carrier row; resolves the Section-A fmv_method deferral when supplied).
+        #[arg(long)]
+        fmv_method: Option<String>,
+    },
+    /// Show stored Form 8283 donation details for a donation event.
+    ShowDonationDetails {
+        /// TransferOut event reference for the donation (from removals.csv 'event' column).
+        out_event_ref: String,
+    },
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -777,6 +819,77 @@ fn dispatch_reconcile(
             // import-selections emits N decisions (one per disposal); print a summary and return
             // early (the trailing single-id println does not apply here).
             println!("Recorded {} LotSelection decision(s)", ids.len());
+            return Ok(());
+        }
+        Reconcile::SetDonationDetails {
+            out_event_ref,
+            donee_name,
+            donee_address,
+            donee_ein,
+            appraiser_name,
+            appraiser_address,
+            appraiser_tin,
+            appraiser_ptin,
+            appraiser_qualifications,
+            appraisal_date,
+            fmv_method,
+        } => {
+            // Parse the optional appraisal date (YYYY-MM-DD) before building details.
+            let appraisal_date = appraisal_date
+                .as_deref()
+                .map(eventref::parse_date_arg)
+                .transpose()?;
+            let details = DonationDetails {
+                donee_name,
+                donee_address,
+                donee_ein,
+                appraiser_name,
+                appraiser_address,
+                appraiser_tin,
+                appraiser_ptin,
+                appraiser_qualifications,
+                appraisal_date,
+                fmv_method_override: fmv_method,
+            };
+            cmd::reconcile::set_donation_details(vault, &pp, &out_event_ref, details)?;
+            println!("Donation details saved for {out_event_ref}.");
+            return Ok(());
+        }
+        Reconcile::ShowDonationDetails { out_event_ref } => {
+            match cmd::reconcile::show_donation_details(vault, &pp, &out_event_ref)? {
+                None => println!("none"),
+                Some(d) => {
+                    fn opt(v: Option<&str>) -> &str {
+                        v.unwrap_or("none")
+                    }
+                    let appraisal_date_str = d
+                        .appraisal_date
+                        .map(|dt| dt.to_string())
+                        .unwrap_or_else(|| "none".into());
+                    println!(
+                        "donee_name: {}\n\
+                         donee_address: {}\n\
+                         donee_ein: {}\n\
+                         appraiser_name: {}\n\
+                         appraiser_address: {}\n\
+                         appraiser_tin: {}\n\
+                         appraiser_ptin: {}\n\
+                         appraiser_qualifications: {}\n\
+                         appraisal_date: {}\n\
+                         fmv_method_override: {}",
+                        d.donee_name,
+                        opt(d.donee_address.as_deref()),
+                        opt(d.donee_ein.as_deref()),
+                        d.appraiser_name,
+                        opt(d.appraiser_address.as_deref()),
+                        opt(d.appraiser_tin.as_deref()),
+                        opt(d.appraiser_ptin.as_deref()),
+                        opt(d.appraiser_qualifications.as_deref()),
+                        appraisal_date_str,
+                        opt(d.fmv_method_override.as_deref()),
+                    );
+                }
+            }
             return Ok(());
         }
     };
