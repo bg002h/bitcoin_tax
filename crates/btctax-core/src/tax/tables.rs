@@ -60,7 +60,7 @@ pub struct TaxTable {
     /// INDEXED to the year's Rev. Proc. — never NIIT/loss-limit.
     pub ltcg: BTreeMap<FilingStatus, LtcgBreakpoints>,
     /// §2503(b) gift-tax **annual exclusion per donee**. INDEXED — inflation-adjusted under
-    /// §2503(b)(2). TY2025 = $19,000 (**Rev. Proc. 2024-40 §2.42** — NOT §2.01/§2.03). Feeds the
+    /// §2503(b)(2). TY2025 = $19,000 (**Rev. Proc. 2024-40 §2.43** — NOT §2.01/§2.03). Feeds the
     /// standalone Form 709 over-annual-exclusion advisory only; does NOT feed engine B /
     /// `compute_tax_year`. Belongs in the per-year table (not a `tables.rs` statutory constant)
     /// precisely because it moves year-over-year.

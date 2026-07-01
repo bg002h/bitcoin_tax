@@ -885,7 +885,7 @@ csv-send-b,2026-04-01 12:00:00 UTC,Send,BTC,0.05000000,USD,62000.00,,,,,,bc1qgif
 
     // Read removals.csv and check the `claimed_deduction` column.
     let mut rdr = Reader::from_reader(File::open(out.join("removals.csv")).unwrap());
-    // Header check: `claimed_deduction` must be the 9th column (index 8, 0-based).
+    // Header check: `claimed_deduction` must be the 10th column (index 9, 0-based).
     let headers: Vec<String> = rdr
         .headers()
         .unwrap()

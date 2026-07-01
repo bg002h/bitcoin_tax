@@ -83,7 +83,7 @@ claimed_deduction (first leg), fmv_method, donee, appraiser, needs_review`. Wher
 
 ### D3 — Form 709 gift over-annual-exclusion advisory (thin)
 Add `gift_annual_exclusion: Usd` to `TaxTable` (**[R0-M4]** also update the `synthetic_table` test helper
-~tables.rs:187 + any other `TaxTable` literal; cite source **Rev. Proc. 2024-40 §2.42** for the $19,000
+~tables.rs:187 + any other `TaxTable` literal; cite source **Rev. Proc. 2024-40 §2.43** for the $19,000
 TY2025 value — NOT §2.01/§2.03) + populate in `BundledTaxTables` (TY2025 = $19,000; TY2024 = $18,000 only
 if a TY2024 table is added — else the advisory is skipped for years with no bundled table). **[R0-M5] Do
 NOT silently skip:** when the year has gifts but no bundled table (gift_annual_exclusion unavailable),
@@ -122,7 +122,7 @@ tax-report path alongside `render_schedule_d`.
 - KATs: Section A donation (deduction ≤$5k) → section A; Section B (>$5k) → section B + `needs_review=true`; how_acquired mapping (purchased/income/gift + ambiguous→review); claimed_deduction on first leg only (multi-leg → no SUM double-count); donee/appraiser/fmv_method blank + needs_review; date_acquired/date_contributed correct; how_acquired mapping incl. FmvAtIncome→"Other" and ambiguous→"Review"; year-filter (prior-year excluded); deterministic order; a gift (kind=Gift) produces NO 8283 row; **[R0-I1] the aggregation caveat is present in the output**; **[R0-M1] the ≤$500-total note** appears when the year's donation total is ≤ $500.
 
 ### Task 3 — `gift_annual_exclusion` + 709 advisory
-- **Files:** `crates/btctax-core/src/tax/tables.rs` (TaxTable field + `synthetic_table` ~187 + cite §2.42), `crates/btctax-adapters/src/...` (BundledTaxTables TY2025 $19,000), `crates/btctax-cli/src/render.rs` (`render_gift_advisory`), and the wiring sites **[R0-M3]** `crates/btctax-cli/src/cmd/tax.rs::report_tax_year` (has state+tables+year) + `crates/btctax-cli/src/main.rs` (~381-387, the tax-year report dispatch).
+- **Files:** `crates/btctax-core/src/tax/tables.rs` (TaxTable field + `synthetic_table` ~187 + cite §2.43), `crates/btctax-adapters/src/...` (BundledTaxTables TY2025 $19,000), `crates/btctax-cli/src/render.rs` (`render_gift_advisory`), and the wiring sites **[R0-M3]** `crates/btctax-cli/src/cmd/tax.rs::report_tax_year` (has state+tables+year) + `crates/btctax-cli/src/main.rs` (~381-387, the tax-year report dispatch).
 - KATs: gifts over the TY2025 $19,000 exclusion → advisory emitted with the total + the donee-not-modeled caveat; gifts under → None; no gifts → None; **[R0-m6] a year WITH gifts but no bundled table → `Some(note)` = "exclusion table unavailable … Form 709 exposure not evaluated" (NOT None, no panic)**; the $19,000 value asserted against BundledTaxTables. Independently confirm $19,000 = TY2025 §2503(b) annual exclusion.
 
 ### Task 4 — whole-diff review (Phase E) + FOLLOWUPS
