@@ -73,6 +73,45 @@ pub fn persist_classify_inbound(
     Ok(id)
 }
 
+/// Append a `ReclassifyOutflow` decision event and atomically save the vault.
+///
+/// `payload` is the **fully-validated** `EventPayload::ReclassifyOutflow(…)` built by
+/// the reclassify-outflow form.  `now` is the caller-supplied `OffsetDateTime`
+/// (injected at Enter-press for test determinism; never derived inside this fn).
+///
+/// # Strict-append semantics
+/// Calls `append_decision(conn, payload, now, UTC, None)` → the event is assigned
+/// `decision_seq = MAX(existing) + 1`.  After `session.save()` the vault image on
+/// disk contains the new event at the tail.  The KAT-P2b strict-prefix test
+/// verifies this invariant.
+///
+/// # Called only from the reclassify-outflow confirmation modal
+/// Same procedural guarantee as `persist_tax_profile` (see doc there).
+///
+/// # Failed-save + retry semantics [R0-I1]
+/// If `append_decision` succeeds but `save` fails, the in-memory session carries the
+/// committed decision while the on-disk vault remains pre-action. No rollback. A retry
+/// appends an identical-payload DUPLICATE with a new `decision_seq`; resolve is
+/// FIRST-WINS (resolve.rs:600–617) — the FIRST (failed-save) decision stays in force,
+/// and the duplicate fires a Hard `DecisionConflict` on ITS id (resolve.rs:606–614).
+/// The post-persist status surfaces the conflict (D4 step 2); the user clears it via
+/// the CLI (`btctax reconcile void decision|<seq>`) until chunk 2b's void flow.
+pub fn persist_reclassify_outflow(
+    session: &mut btctax_cli::Session,
+    payload: btctax_core::event::EventPayload,
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, btctax_cli::CliError> {
+    let id = btctax_core::persistence::append_decision(
+        session.conn(),
+        payload,
+        now,
+        time::UtcOffset::UTC,
+        None,
+    )?;
+    session.save()?;
+    Ok(id)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -298,6 +337,143 @@ mod tests {
             tail_seq,
             (pre_max_seq + 1) as i64,
             "tail decision_seq must be pre_max+1 (spec KAT-P2a formula)"
+        );
+
+        // Returned EventId matches the tail row's event_id.
+        let tail_event_id = EventId::Decision {
+            seq: tail_seq as u64,
+        };
+        assert_eq!(
+            returned_id, tail_event_id,
+            "returned EventId must equal Decision {{ seq: tail_seq }}"
+        );
+
+        // Payload round-trips: deserialise tail row and compare.
+        let stored_payload: EventPayload =
+            serde_json::from_str(&tail.payload_json).expect("tail payload_json must deserialise");
+        assert_eq!(
+            stored_payload, payload,
+            "stored payload must round-trip equal to the one we appended"
+        );
+
+        // Drop + reopen: same strict-prefix holds on disk.
+        drop(session);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let post_disk = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(
+            post_disk, post,
+            "on-disk image must equal in-memory post after save"
+        );
+    }
+
+    // ── KAT-P2b — append-only strict prefix test (reclassify-outflow append form) ──
+    //
+    // Invariant: persist_reclassify_outflow appends EXACTLY one decision event
+    // to the tail of the event log.
+    //
+    // Strict-prefix formula (spec §D5):
+    //   post == pre ++ [new_event]
+    //   post[pre.len()].decision_seq == Some(pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0) + 1)
+    //
+    // Also asserts: payload round-trips, returned EventId matches appended row.
+
+    #[test]
+    fn kat_p2b_append_only_strict_prefix_reclassify_outflow() {
+        use btctax_core::event::{EventPayload, OutflowClass, ReclassifyOutflow};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, load_all_ordered};
+        use btctax_core::{DisposeKind, EventId};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p2b-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        // Seed 1 import TransferOut event + 1 decision event to create a non-trivial pre-state.
+        let import_event_id: EventId = EventId::import(Source::River, SourceRef::new("ref-p2b"));
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let batch = vec![btctax_core::event::LedgerEvent {
+                id: import_event_id.clone(),
+                utc_timestamp: OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+                original_tz: UtcOffset::UTC,
+                wallet: None,
+                payload: btctax_core::event::EventPayload::TransferOut(
+                    btctax_core::event::TransferOut {
+                        sat: 100_000,
+                        fee_sat: None,
+                        dest_addr: None,
+                        txid: None,
+                    },
+                ),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            // Seed one decision so MAX(decision_seq) == 1 in pre.
+            let now = OffsetDateTime::from_unix_timestamp(1_700_001_000).unwrap();
+            let p = EventPayload::MethodElection(btctax_core::event::MethodElection {
+                effective_from: date!(2024 - 01 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
+            session.save().unwrap();
+        };
+
+        // Open editor session, capture pre-state.
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            pre.len(),
+            2,
+            "pre must have exactly 2 events (1 import + 1 decision)"
+        );
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+        assert_eq!(pre_max_seq, 1, "pre max decision_seq must be 1");
+
+        // Build ReclassifyOutflow payload.
+        let payload = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: import_event_id.clone(),
+            as_: OutflowClass::Dispose {
+                kind: DisposeKind::Sell,
+            },
+            principal_proceeds_or_fmv: dec!(640.00),
+            fee_usd: Some(dec!(2.50)),
+            donee: None,
+        });
+        let now = OffsetDateTime::from_unix_timestamp(1_700_002_000).unwrap();
+
+        let returned_id = persist_reclassify_outflow(&mut session, payload.clone(), now).unwrap();
+
+        // ── Strict-prefix assertion ───────────────────────────────────────────
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post.len(),
+            pre.len() + 1,
+            "post must be exactly pre.len()+1"
+        );
+
+        // Pre-prefix is byte-for-byte identical.
+        assert_eq!(
+            &post[..pre.len()],
+            pre.as_slice(),
+            "first pre.len() rows must be unchanged (strict prefix)"
+        );
+
+        // New tail row: decision_seq == pre_max + 1.
+        let tail = &post[pre.len()];
+        let tail_seq = tail
+            .decision_seq
+            .expect("new tail row must have decision_seq");
+        assert_eq!(
+            tail_seq,
+            (pre_max_seq + 1) as i64,
+            "tail decision_seq must be pre_max+1 (spec KAT-P2b formula)"
         );
 
         // Returned EventId matches the tail row's event_id.

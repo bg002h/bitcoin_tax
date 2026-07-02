@@ -9,11 +9,12 @@
 //! Unlock screen. This module performs no writes.
 
 use crate::edit::form::{
-    income_kind_display, ClassifyInboundModalState, ClassifyInboundStep, InboundVariant,
-    MutationModalState, ProfileFormState, FIELD_LABELS,
+    amount_label, income_kind_display, ClassifyInboundModalState, ClassifyInboundStep,
+    InboundVariant, MutationModalState, OutflowKind, ProfileFormState, ReclassifyOutflowModalState,
+    ReclassifyOutflowStep, FIELD_LABELS,
 };
 use crate::editor::{EditorApp, EditorScreen};
-use btctax_core::InboundClass;
+use btctax_core::{DisposeKind, InboundClass, OutflowClass};
 use btctax_tui::app::Tab;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -168,6 +169,23 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.classify_inbound_modal.as_ref() {
         draw_classify_inbound_modal(frame, area, modal);
+    }
+    // Reclassify-outflow flow overlay.
+    if app.reclassify_outflow_flow.is_some() {
+        let is_list = matches!(
+            app.reclassify_outflow_flow.as_ref().map(|f| &f.step),
+            Some(ReclassifyOutflowStep::List)
+        );
+        if is_list {
+            if let Some(flow) = app.reclassify_outflow_flow.as_mut() {
+                draw_reclassify_outflow_list(frame, area, flow);
+            }
+        } else if let Some(flow) = app.reclassify_outflow_flow.as_ref() {
+            draw_reclassify_outflow_form(frame, area, &flow.step);
+        }
+    }
+    if let Some(modal) = app.reclassify_outflow_modal.as_ref() {
+        draw_reclassify_outflow_modal(frame, area, modal);
     }
 }
 
@@ -600,6 +618,301 @@ fn draw_classify_inbound_modal(frame: &mut Frame, area: Rect, modal: &ClassifyIn
 
     let block = Block::default()
         .title(" Confirm: classify-inbound — WRITES THE VAULT ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+// ── Reclassify-outflow flow draw functions ────────────────────────────────────
+
+/// Render the reclassify-outflow target list overlay.
+///
+/// Receives `&mut ReclassifyOutflowFlowState` to call `render_stateful_widget`.
+fn draw_reclassify_outflow_list(
+    frame: &mut Frame,
+    area: Rect,
+    flow: &mut crate::edit::form::ReclassifyOutflowFlowState,
+) {
+    let modal_width: u16 = 90;
+    let modal_height: u16 = (flow.list.items.len() as u16 + 6).min(area.height.saturating_sub(2));
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Reclassify Outflow — select pending TransferOut target  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let header = Row::new(vec![
+        Cell::from("Date"),
+        Cell::from("Principal Sat"),
+        Cell::from("Wallet"),
+        Cell::from("EventId"),
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
+
+    let rows: Vec<Row> = if flow.list.items.is_empty() {
+        vec![Row::new(vec![Cell::from(
+            "(no pending outbound transfers)",
+        )])]
+    } else {
+        flow.list
+            .items
+            .iter()
+            .map(|item| {
+                let wallet_str = match &item.wallet {
+                    Some(btctax_core::WalletId::Exchange { provider, account }) => {
+                        format!("{provider}/{account}")
+                    }
+                    Some(btctax_core::WalletId::SelfCustody { label }) => label.clone(),
+                    None => "(no wallet)".to_string(),
+                };
+                Row::new(vec![
+                    Cell::from(item.date.to_string()),
+                    Cell::from(item.principal_sat.to_string()),
+                    Cell::from(wallet_str),
+                    Cell::from(item.transfer_out_event.canonical()),
+                ])
+            })
+            .collect()
+    };
+
+    let widths = [
+        Constraint::Length(12),
+        Constraint::Length(14),
+        Constraint::Length(16),
+        Constraint::Min(30),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        )
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.list.table_state);
+
+    // Footer hint
+    let footer_area = Rect {
+        x: modal_rect.x,
+        y: modal_rect.y + modal_rect.height.saturating_sub(1),
+        width: modal_rect.width,
+        height: 1,
+    };
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(footer, footer_area);
+}
+
+/// Render the reclassify-outflow kind picker or field form overlay.
+fn draw_reclassify_outflow_form(frame: &mut Frame, area: Rect, step: &ReclassifyOutflowStep) {
+    let modal_width: u16 = 72;
+    let modal_height: u16 = 18;
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let (title, content) = match step {
+        ReclassifyOutflowStep::KindPicker { item, kind } => {
+            let kind_row = |tag: &str, k: OutflowKind| {
+                if *kind == k {
+                    format!("> {tag}")
+                } else {
+                    format!("  {tag}")
+                }
+            };
+            let c = format!(
+                "  target: {target}\n\
+                 \n\
+                   Select kind (Tab to cycle, Enter to confirm):\n\
+                 \n\
+                 {sell}   {spend}   {gift}   {donate}\n\
+                 \n\
+                 \n  Esc: back to list   q: swallowed",
+                target = item.transfer_out_event.canonical(),
+                sell = kind_row("sell", OutflowKind::Sell),
+                spend = kind_row("spend", OutflowKind::Spend),
+                gift = kind_row("gift", OutflowKind::Gift),
+                donate = kind_row("donate", OutflowKind::Donate),
+            );
+            (" Reclassify Outflow — kind picker  [EDITOR] ", c)
+        }
+        ReclassifyOutflowStep::FieldForm {
+            item,
+            kind,
+            amount_buf,
+            fee_buf,
+            appraisal,
+            donee_buf,
+            focus,
+            error,
+        } => {
+            let lbl = amount_label(*kind);
+            let amount_line = format!(
+                "  {} {lbl}: {}",
+                if *focus == 0 { ">" } else { " " },
+                amount_buf.buf,
+            );
+            let fee_line = format!(
+                "  {} fee (USD, optional): {}",
+                if *focus == 1 { ">" } else { " " },
+                fee_buf.buf,
+            );
+            // Appraisal row: shown only for donate.
+            let appraisal_line = if *kind == OutflowKind::Donate {
+                format!(
+                    "\n  {} appraisal required: {}  (Space: toggle)",
+                    if *focus == 2 { ">" } else { " " },
+                    appraisal,
+                )
+            } else {
+                String::new()
+            };
+            // Donee row: shown for gift and donate.
+            let donee_line = if matches!(kind, OutflowKind::Gift | OutflowKind::Donate) {
+                format!(
+                    "\n  {} donee (free-form, optional): {}",
+                    if *focus == 3 { ">" } else { " " },
+                    donee_buf.buf,
+                )
+            } else {
+                String::new()
+            };
+            let err_line = error
+                .as_deref()
+                .map(|e| format!("\n  Error: {e}"))
+                .unwrap_or_default();
+            let c = format!(
+                "  target: {target}\n\
+                 \n\
+                 {amount_line}\n\
+                 {fee_line}{appraisal_line}{donee_line}\
+                 {err_line}\n\
+                 \n\
+                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move   q: swallowed",
+                target = item.transfer_out_event.canonical(),
+            );
+            (
+                match kind {
+                    OutflowKind::Sell => " Reclassify Outflow — Sell  [EDITOR] ",
+                    OutflowKind::Spend => " Reclassify Outflow — Spend  [EDITOR] ",
+                    OutflowKind::Gift => " Reclassify Outflow — Gift  [EDITOR] ",
+                    OutflowKind::Donate => " Reclassify Outflow — Donate  [EDITOR] ",
+                },
+                c,
+            )
+        }
+        // List step is rendered by draw_reclassify_outflow_list.
+        ReclassifyOutflowStep::List => ("", String::new()),
+    };
+
+    if title.is_empty() {
+        return; // defensive
+    }
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+/// Render the reclassify-outflow confirmation modal.
+///
+/// Shows the complete payload (target, principal_sat, kind, amount, fee, appraisal, donee).
+/// Donee is shown for BOTH gift and donate [R0-I7].
+fn draw_reclassify_outflow_modal(
+    frame: &mut Frame,
+    area: Rect,
+    modal: &ReclassifyOutflowModalState,
+) {
+    let ro = &modal.payload;
+
+    let kind_section = match &ro.as_ {
+        OutflowClass::Dispose {
+            kind: DisposeKind::Sell,
+        } => {
+            let fee_str = ro
+                .fee_usd
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "(none)".to_string());
+            format!(
+                "  as: sell\n    gross_proceeds: {proceeds}\n    fee_usd:        {fee_str}",
+                proceeds = ro.principal_proceeds_or_fmv,
+            )
+        }
+        OutflowClass::Dispose {
+            kind: DisposeKind::Spend,
+        } => {
+            let fee_str = ro
+                .fee_usd
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "(none)".to_string());
+            format!(
+                "  as: spend\n    gross_proceeds: {proceeds}\n    fee_usd:        {fee_str}",
+                proceeds = ro.principal_proceeds_or_fmv,
+            )
+        }
+        OutflowClass::GiftOut => {
+            let fee_str = ro
+                .fee_usd
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "(none)".to_string());
+            let donee_str = ro.donee.as_deref().unwrap_or("(none)");
+            format!(
+                "  as: gift\n    fmv:     {fmv}\n    fee_usd: {fee_str}\n    donee:   {donee_str}",
+                fmv = ro.principal_proceeds_or_fmv,
+            )
+        }
+        OutflowClass::Donate { appraisal_required } => {
+            let fee_str = ro
+                .fee_usd
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "(none)".to_string());
+            let donee_str = ro.donee.as_deref().unwrap_or("(none)");
+            format!(
+                "  as: donate\n    fmv:                {fmv}\n    fee_usd:            {fee_str}\n    appraisal_required: {appraisal_required}\n    donee:              {donee_str}",
+                fmv = ro.principal_proceeds_or_fmv,
+            )
+        }
+    };
+
+    let content = format!(
+        "  target:        {target}  (TransferOut)\n\
+           date:          {date}\n\
+           principal_sat: {sat}\n\
+         \n\
+         {kind_section}\n\
+         \n\
+           Appended as a decision event (append-only log).\n\
+           Saved immediately via the vault's atomic write path.\n\
+         \n\
+         [Enter] Confirm & save     [Esc] Cancel — writes nothing",
+        target = modal.target_event.canonical(),
+        date = modal.target_date,
+        sat = modal.principal_sat,
+    );
+
+    let modal_width: u16 = 70;
+    let content_lines = content.lines().count() as u16 + 2;
+    let modal_height = content_lines.max(12);
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Confirm: reclassify-outflow — WRITES THE VAULT ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Red));
 
