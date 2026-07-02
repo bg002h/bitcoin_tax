@@ -3,9 +3,9 @@
 use crate::app::{App, Screen, Tab};
 use crate::tabs::{compliance, disposals, forms, holdings, income, tax};
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph, Tabs},
+    widgets::{Block, Borders, Clear, Paragraph, Tabs, Wrap},
     Frame,
 };
 
@@ -115,10 +115,67 @@ fn draw_viewer(frame: &mut Frame, app: &mut App) {
     }
 
     // ── Footer ───────────────────────────────────────────────────────────────
-    let footer = Paragraph::new(
+    // When export_status is set, show it; otherwise show the normal keybindings hint.
+    let footer_text = if let Some(status) = app.export_status.as_deref() {
+        status.to_string()
+    } else {
         "Tab/Shift-Tab: switch tab   ←/→: change year   ↑/↓ j/k: scroll   \
-         PgUp/PgDn: page   g/G: top/bottom   q/Esc: quit",
-    )
-    .alignment(Alignment::Center);
+         PgUp/PgDn: page   g/G: top/bottom   e: export CSVs   q/Esc: quit"
+            .to_string()
+    };
+    let footer = Paragraph::new(footer_text).alignment(Alignment::Center);
     frame.render_widget(footer, chunks[2]);
+
+    // ── Export confirmation modal overlay ─────────────────────────────────────
+    if let Some(modal) = app.export_modal.as_ref() {
+        draw_export_modal(frame, area, modal);
+    }
+}
+
+/// Render the export confirmation modal centered over `area`.
+///
+/// Clears the underlying content first, then draws the modal box with the export details.
+/// This is drawn AFTER the tab content so it appears on top.
+fn draw_export_modal(frame: &mut Frame, area: Rect, modal: &crate::export::ExportConfirmState) {
+    // Build modal content text.
+    let file_lines: String = modal.files.iter().map(|f| format!("    {f}\n")).collect();
+
+    let content = format!(
+        "  Output directory:\n  {}\n\n  Files to write:\n{}\n  The vault is never written.\n  \
+         Exported files contain your tax data and are\n  owner-only (0o600 on Unix).\n\n  \
+         [Enter] Confirm     [Esc] Cancel — writes nothing",
+        modal.out_dir.display(),
+        file_lines.trim_end(),
+    );
+
+    // Compute a centered rect: ~62 wide, height based on content line count.
+    let modal_width: u16 = 64;
+    let content_lines = content.lines().count() as u16 + 2; // +2 for block border
+    let modal_height = content_lines.max(10);
+
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    // Clear the background area first (so the modal appears on top of tab content).
+    frame.render_widget(Clear, modal_rect);
+
+    let p = Paragraph::new(content)
+        .block(
+            Block::default()
+                .title(format!(" Export form CSVs for {} ", modal.year))
+                .borders(Borders::ALL),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(p, modal_rect);
+}
+
+/// Compute a horizontally and vertically centered `Rect` of the given dimensions within `area`.
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    Rect {
+        x,
+        y,
+        width: width.min(area.width),
+        height: height.min(area.height),
+    }
 }

@@ -730,6 +730,37 @@ pub fn write_csv_exports(
     Ok(())
 }
 
+/// Write the four year-scoped form CSVs for `year` into `out_dir`.
+///
+/// Creates `out_dir` owner-only (0o700) if absent (tolerant `mkdir_owner_only`, mkdir-p);
+/// each CSV is written via `fsperms::open_owner_only` (0o600).  Only `form8949.csv`,
+/// `schedule_d.csv`, `form8283.csv`, and — when `se_result` is `Some` — `schedule_se.csv`
+/// are written. The all-years dump CSVs (`lots.csv`, `disposals.csv`, `removals.csv`,
+/// `income.csv`) are NOT written; `export_snapshot` / `snapshot.sqlite` are NEVER called
+/// or written.
+///
+/// Path containment is the CALLER's job (matching `write_csv_exports` / `export_snapshot`
+/// / `backup_key`): callers must pass a freshly-created or trusted directory — this
+/// function truncates the four fixed filenames in `out_dir` (`open_owner_only` is
+/// create-or-truncate and follows symlinks). The TUI's `export.rs` satisfies this via
+/// `mkdir_owner_only_exclusive` (D2).
+pub fn write_form_csvs(
+    out_dir: &Path,
+    state: &LedgerState,
+    year: i32,
+    se_result: Option<&SeTaxResult>,
+    donation_details: &BTreeMap<EventId, DonationDetails>,
+) -> Result<(), crate::CliError> {
+    fsperms::mkdir_owner_only(out_dir)?;
+    write_form8949_csv(out_dir, state, year)?;
+    write_schedule_d_csv(out_dir, state, year)?;
+    write_form8283_csv(out_dir, state, year, donation_details)?;
+    if let Some(se) = se_result {
+        write_schedule_se_csv(out_dir, se)?;
+    }
+    Ok(())
+}
+
 /// P2-D Task 2: write `schedule_se.csv` — the standalone §1401 SE-tax components for the tax year.
 /// One data row. Stable snake_case columns; exact `Decimal` string values (NFR5). 0o600 via
 /// `open_owner_only`. Written only when a `SeTaxResult` exists (business SE income present + table).

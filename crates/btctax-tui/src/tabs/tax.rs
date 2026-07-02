@@ -1,11 +1,12 @@
 //! Tax tab — renders the `compute_tax_year` result as a text report.
 //!
-//! STRICTLY READ-ONLY: no Session, no persistence, no mutations.
+//! never writes the vault or any decrypted image of it; writes only the four form CSVs
+//! via `export.rs` on explicit user confirmation. This module performs no writes.
 //! No float — all money values are exact `Decimal` formatted with `{:.2}`.
 
 use crate::app::{App, Snapshot};
 use btctax_core::{
-    compute_se_tax, compute_tax_year, FilingStatus, RemovalKind, Severity, TaxOutcome, TaxTables,
+    compute_se_tax, compute_tax_year, se_net_income, RemovalKind, Severity, TaxOutcome, TaxTables,
 };
 use ratatui::{
     layout::Rect,
@@ -86,45 +87,6 @@ pub(crate) fn render_tax_content(snap: &Snapshot, year: i32) -> String {
                 r.marginal_rates.ordinary, r.marginal_rates.ltcg, r.marginal_rates.niit_applies
             );
 
-            // ── SE-tax block (standalone §1401; not in income-tax+NIIT total) ───────────────────
-            let filing_status = profile
-                .map(|p| p.filing_status)
-                .unwrap_or(FilingStatus::Single);
-            let w2_ss = profile.map(|p| p.w2_ss_wages).unwrap_or_default();
-            let w2_medicare = profile.map(|p| p.w2_medicare_wages).unwrap_or_default();
-            let schedule_c_expenses = profile.map(|p| p.schedule_c_expenses).unwrap_or_default();
-            if let Some(t) = snap.tables.table_for(year) {
-                if let Some(se) = compute_se_tax(
-                    &snap.state,
-                    year,
-                    filing_status,
-                    t,
-                    w2_ss,
-                    w2_medicare,
-                    schedule_c_expenses,
-                ) {
-                    let _ = writeln!(s);
-                    let _ = writeln!(s, "  --- Schedule SE (§1401 self-employment tax) ---");
-                    let _ = writeln!(s, "  Net SE income: {:.2}", se.net_se);
-                    let _ = writeln!(s, "  × 92.35% base: {:.2}", se.base);
-                    let _ = writeln!(
-                        s,
-                        "  SS (12.4%): {:.2}   Medicare (2.9%): {:.2}   Addl Medicare (0.9%): {:.2}",
-                        se.ss, se.medicare, se.addl
-                    );
-                    let _ = writeln!(
-                        s,
-                        "  TOTAL SE tax: {:.2}   §164(f) deductible half: {:.2}",
-                        se.total, se.deductible_half
-                    );
-                    let _ = writeln!(
-                        s,
-                        "  (standalone) This §1401 SE tax is a SEPARATE federal liability, NOT \
-                         included in the income-tax+NIIT total; §164(f) half not auto-coordinated."
-                    );
-                }
-            }
-
             // ── Charitable deduction total for the year ────────────────────────────────────────
             let charitable_total: btctax_core::Usd = snap
                 .state
@@ -140,6 +102,41 @@ pub(crate) fn render_tax_content(snap: &Snapshot, year: i32) -> String {
                 charitable_total
             );
         }
+    }
+
+    // ── SE section — OUTSIDE the outcome match (mirrors cmd/tax.rs:79–106) ──────────────────
+    // PROFILE-GATED: no profile ⇒ no SE section (matches the CLI report AND the export).
+    // Outcome-independent: NotComputable years with a profile + business income still show SE.
+    let se_text = match snap.profiles.get(&year) {
+        Some(p) => {
+            let gross_se = se_net_income(&snap.state, year);
+            let table_opt = snap.tables.table_for(year);
+            let table_prsnt = table_opt.is_some();
+            let se_result = table_opt.and_then(|t| {
+                compute_se_tax(
+                    &snap.state,
+                    year,
+                    p.filing_status,
+                    t,
+                    p.w2_ss_wages,
+                    p.w2_medicare_wages,
+                    p.schedule_c_expenses,
+                )
+            });
+            btctax_cli::render::render_schedule_se(
+                year,
+                se_result.as_ref(),
+                gross_se,
+                table_prsnt,
+                p.schedule_c_expenses,
+                p.w2_ss_wages,
+                p.w2_medicare_wages,
+            )
+        }
+        None => None, // PROFILE-GATED: no profile ⇒ no SE section (mirrors cmd/tax.rs:79–106)
+    };
+    if let Some(text) = se_text {
+        let _ = write!(s, "{text}");
     }
 
     // Advisory blockers — shown for BOTH Computed and NotComputable outcomes.

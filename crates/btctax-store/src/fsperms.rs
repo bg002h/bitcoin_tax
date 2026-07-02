@@ -84,3 +84,24 @@ pub fn mkdir_owner_only(path: &Path) -> Result<(), StoreError> {
     std::fs::create_dir_all(path)?;
     Ok(())
 }
+
+/// Create `path` with owner-only permissions (0o700 on Unix), FAILING if it already
+/// exists (`ErrorKind::AlreadyExists`). NON-recursive: the parent must exist — callers
+/// pass a child of an existing directory (the TUI export passes a child of the vault's
+/// parent, which always exists). Guarantees the caller receives a FRESH, EMPTY,
+/// caller-owned 0o700 directory — the precondition `write_form_csvs` documents.
+#[cfg(unix)]
+pub fn mkdir_owner_only_exclusive(path: &Path) -> Result<(), StoreError> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    std::fs::DirBuilder::new()
+        .recursive(false)
+        .mode(0o700)
+        .create(path)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn mkdir_owner_only_exclusive(path: &Path) -> Result<(), StoreError> {
+    std::fs::DirBuilder::new().recursive(false).create(path)?;
+    Ok(())
+}
