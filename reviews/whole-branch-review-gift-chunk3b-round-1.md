@@ -27,7 +27,7 @@ Explicit confirmations requested by the brief:
 
 6. **CSV integrity — PASS.** `form8283.csv` header adds the 6 new columns (`donee_ein`, `donee_address`, `appraiser_tin`, `appraiser_ptin`, `appraiser_qualifications`, `appraisal_date`) in stable order after `needs_review`; populated on the carrier row from `row.details`, empty on non-carrier legs and when no details. `write_form8283_csv` still opens via `fsperms::open_owner_only` (0o600). The `set`/`show` CLI validate against the PROJECTED `state.removals` (Donation-only): `set_donation_details` errors on missing ref and on a non-Donation removal; the Gift-arm error is tested (`set_donation_details_gift_removal_is_usage_error`).
 
-7. **PII — PASS.** All test data synthetic: `987-65-4321` (SSA-reserved never-issued SSN), `12-3456789` (sequential synthetic EIN), `987654321`/`P01234567` (synthetic TIN/PTIN), `"Test Charity"`/`"Test Appraiser"`. `202302012` is the CCA legal citation in the SPEC, not PII. Exact `Decimal` throughout (no float); determinism via `BTreeMap<EventId, DonationDetails>`.
+7. **PII — PASS.** All test data synthetic: `987·65·4321` (SSA-reserved never-issued SSN), `12·3456789` (sequential synthetic EIN), `987654321`/`P01234567` (synthetic TIN/PTIN), `"Test Charity"`/`"Test Appraiser"`. `202302012` is the CCA legal citation in the SPEC, not PII. Exact `Decimal` throughout (no float); determinism via `BTreeMap<EventId, DonationDetails>`.
 
 ## Findings
 

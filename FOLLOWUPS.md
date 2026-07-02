@@ -4,6 +4,39 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ Export-from-TUI + FOLLOWUPS burndown 3 — SHIPPED IN PARALLEL (2026-07-02)
+
+Two lanes, isolated (main tree + worktree), user-approved parallelization; landed export-first, burndown
+rebased cleanly (the coordination pin held — 6/6, zero conflicts). Combined: **725 workspace tests**.
+
+**Export-from-TUI:** the viewer's first write capability under the re-scoped guarantee ("never the vault
+or any decrypted image; only the four named form CSVs on explicit confirmation"): `e` → a confirmation
+modal → a fresh exclusive 0o700 timestamped dir (the new `fsperms::mkdir_owner_only_exclusive` — closes
+the mkdir-p clobber/symlink vector) → `write_form_csvs` (exactly form8949/schedule_d/form8283/schedule_se,
+0o600). The E10 mechanized source-scan gate (comment-stripping, mutation-tested); profile-gated SE parity
+by calling the pub `render_schedule_se` (the TUI hand-rolled SE block is gone — disclosure drift dead);
+swap-catching hard-coded parity goldens + the donee-passthrough e2e. R0 2 rounds + whole-diff → 0C/0I.
+
+**Burndown 3:** the **bad-target backfill** (ReclassifyOutflow/ClassifyInbound/ManualFmv now validate at
+collection time against the effective payload → Hard `DecisionConflict` + exclusion; ManualFmv latest-wins
+preserved; zero fixtures relied on the old silence) — **the mutating-TUI safety prerequisite is DONE**;
+the §6017 $400 floor note (text-only, §1402(j)(2) carve-out, the $397.10 half-even tie); negative-W-2-flag
+binary tests; the hook mode-assertion KAT; TY2024 full-schedule equality locks (all 32 pairs). R0 2 rounds
++ whole-diff → 0C/0I/0M. Task-2 records: the CI report's clippy-baseline misstatement noted (record-only);
+the old gift-chunk3b review's synthetics converted to ·-notation (M-2, this commit).
+
+Deferred (OPEN): E10 scanner string-literal false-negative hardening (M-1); export.rs test-region
+everywhere-token exemption (M-2-export); a typed/sealed write-token (the ExportConfirmState FOLLOWUP);
+the nine stale-but-true STRICTLY-READ-ONLY lines in sibling tab modules; `do_export`'s se_result_for
+duplication; blocker detail/attribution test-pinning (N-1); E11 asserting AlreadyExists-kind (done in
+4f02b7a — CLOSED).
+
+**NEXT: the mutating-TUI program (THE KEY GOAL — user 2026-07-02)** — prerequisite (this backfill) +
+substrate (the export modal + write discipline) both in place. Separate `btctax-tui-edit` crate; 4-6
+chunks; recon → chunk-1 spec next. Then 5a FDF / 5b filled-PDF (Jan–Feb 2027) behind it.
+
+---
+
 ## ✅ CI infrastructure — SHIPPED (2026-07-02) — form program item 1
 
 GitHub Actions CI (`.github/workflows/ci.yml`): test / clippy `-D warnings` / fmt / **MSRV 1.88** /
