@@ -4,6 +4,27 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ NII interest slice — crypto-lending interest → §1411 NII — SHIPPED (2026-07-01)
+
+Queue item 1 (user-confirmed order). **RESOLVES the B-M1 "per-IncomeKind NII" deferral** — the known
+residual NIIT understatement. `IncomeKind::Interest` income now enters `nii_with` (WITH-scenario ONLY, per
+the crypto_ord attribution convention — a both-scenario insertion would cancel out of the `r.niit` delta);
+mining/staking/airdrops/rewards remain excluded (§1411(c)(6) SE / non-NII other income); MAGI unchanged
+(interest already in crypto_agi — no double-count); `nii_without`/the identity/SE untouched. Disclosure
+"cannot yet isolate" language replaced at all 3 sites; the pinned KAT re-pointed semantically. Goldens
+(TDD red→green): $570.00 headline (min-cap over-bound; absolute total $4,970.00 = ord_delta $4,400 + NIIT
+$570) + $380.00 mixed Mining+Interest boundary lock (wrong-inclusion → $1,520). The 5-golden B-M1
+regression net byte-identical. R0 GREEN round 1; whole-diff 0C/0I (both goldens + the bracket math
+independently re-derived). 647 tests.
+
+Deferred (OPEN, disclosed): the §1411(c)(2) active-trade-or-business lending exception (business-agnostic
+inclusion is conservative for the atypical active-lender case); Form 8960 generation. Nits (cosmetic, sweep
+opportunistically): the render footer names the excluded kinds twice; an optional §1411(c)(2) code comment.
+
+**Next (queue):** SE-tax completion → TY2024 tables.
+
+---
+
 ## ✅ Charitable/gift cluster — Chunk 1: §170(f)(11)(F) aggregation + Form 8283 FMV-method — SHIPPED (2026-07-01)
 
 First of three chunks in the user-directed charitable/gift completion cluster (deferred Phase-2/3). Form
