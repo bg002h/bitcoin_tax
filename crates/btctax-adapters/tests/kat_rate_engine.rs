@@ -33,6 +33,7 @@ fn single(ord: Usd, magi: Usd, qd: Usd) -> TaxProfile {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: Usd::ZERO,
     }
 }
 
@@ -47,6 +48,7 @@ fn mfj_profile(ord: Usd, magi: Usd) -> TaxProfile {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: Usd::ZERO,
     }
 }
 
@@ -61,6 +63,7 @@ fn mfs_profile(ord: Usd, magi: Usd) -> TaxProfile {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: Usd::ZERO,
     }
 }
 
@@ -75,6 +78,7 @@ fn hoh_profile(ord: Usd, magi: Usd) -> TaxProfile {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: Usd::ZERO,
     }
 }
 
@@ -89,6 +93,7 @@ fn qss_profile(ord: Usd, magi: Usd) -> TaxProfile {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: Usd::ZERO,
     }
 }
 

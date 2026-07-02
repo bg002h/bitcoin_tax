@@ -58,6 +58,13 @@ pub struct TaxProfile {
     /// (§1401(b)(2)(B)/Form 8959 Part II). Optional; defaults to $0. Must be ≥ 0.
     #[serde(default)]
     pub w2_medicare_wages: Usd,
+    /// Schedule C deductible business expenses for the year — reduces net SE earnings:
+    /// `net_se = max(0, gross_se − schedule_c_expenses)` (§1402(a)). Optional; defaults to $0
+    /// (no expenses supplied). Must be ≥ 0. Older stored profiles without this field deserialize
+    /// as $0. NOTE: the income-tax stack (engine B / `crypto_ord`) is NOT adjusted — the
+    /// ordinary-income overstatement is disclosed via the render advisory (ADVISORY-ONLY).
+    #[serde(default)]
+    pub schedule_c_expenses: Usd,
 }
 
 /// The marginal rates that apply to the user given their profile + the year's tax table. Reported
@@ -132,6 +139,7 @@ mod tests {
             },
             w2_ss_wages: dec!(0.00),
             w2_medicare_wages: dec!(0.00),
+            schedule_c_expenses: dec!(0.00),
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: TaxProfile = serde_json::from_str(&json).unwrap();
@@ -149,5 +157,7 @@ mod tests {
         // Chunk A — new W-2 fields also default to $0 from older/minimal stored profiles.
         assert_eq!(p.w2_ss_wages, Usd::ZERO);
         assert_eq!(p.w2_medicare_wages, Usd::ZERO);
+        // Chunk B — schedule_c_expenses also defaults to $0 from older/minimal stored profiles.
+        assert_eq!(p.schedule_c_expenses, Usd::ZERO);
     }
 }

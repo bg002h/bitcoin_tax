@@ -140,6 +140,7 @@ fn niit_profile() -> TaxProfile {
         },
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     }
 }
 
@@ -201,7 +202,16 @@ fn headline_flip_reward_to_mining_business_true() {
     );
     let tbl = synth_se(2025);
     assert!(
-        compute_se_tax(&before, 2025, FilingStatus::Single, &tbl, dec!(0), dec!(0)).is_none(),
+        compute_se_tax(
+            &before,
+            2025,
+            FilingStatus::Single,
+            &tbl,
+            dec!(0),
+            dec!(0),
+            dec!(0)
+        )
+        .is_none(),
         "before: compute_se_tax must be None (no SE income)"
     );
 
@@ -237,8 +247,16 @@ fn headline_flip_reward_to_mining_business_true() {
         dec!(10000),
         "after: se_net_income must be $10,000"
     );
-    let r = compute_se_tax(&after, 2025, FilingStatus::Single, &tbl, dec!(0), dec!(0))
-        .expect("compute_se_tax must be Some after flip");
+    let r = compute_se_tax(
+        &after,
+        2025,
+        FilingStatus::Single,
+        &tbl,
+        dec!(0),
+        dec!(0),
+        dec!(0),
+    )
+    .expect("compute_se_tax must be Some after flip");
     assert_eq!(r.net_se, dec!(10000.00));
     assert_eq!(r.base, dec!(9235.00));
     assert_eq!(r.ss, dec!(1145.14));

@@ -38,6 +38,7 @@ fn single_40k_profile() -> TaxProfile {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     }
 }
 
@@ -196,10 +197,14 @@ fn report_tax_year_renders_schedule_se_for_business_mining() {
     );
     // Standalone note.
     assert!(se.contains("SEPARATE federal liability"), "{se}");
-    // [Minor-2] expenses caveat — render must disclose that no Schedule C expenses are modeled.
+    // [Chunk B] $0-expenses note — old "not modeled" caveat replaced by Chunk B disclosure.
     assert!(
-        se.contains("Schedule C deductible business expenses are not modeled"),
-        "expenses caveat must appear in Schedule SE render: {se}"
+        se.contains("no Schedule C expenses supplied"),
+        "Chunk B $0-expenses note must appear in Schedule SE render: {se}"
+    );
+    assert!(
+        !se.contains("not modeled"),
+        "old 'not modeled' caveat must be absent (replaced by Chunk B): {se}"
     );
 
     // [D5] the income-tax report TOTAL is UNCHANGED by SE tax — the $14,129.55 SE figure is NOT
@@ -268,6 +273,7 @@ fn chunk_a_asymmetric_w2_transposition_guard_cli_path() {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(150000),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     };
     cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
 
@@ -341,6 +347,7 @@ fn chunk_a_export_parity_asymmetric_w2() {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(150000),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     };
     cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
 
@@ -594,6 +601,7 @@ st-sell,2025-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
             capital_loss_carryforward_in: Carryforward::default(),
             w2_ss_wages: dec!(0),
             w2_medicare_wages: dec!(0),
+            schedule_c_expenses: dec!(0),
         },
     )
     .unwrap();
@@ -612,6 +620,7 @@ st-sell,2025-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
             capital_loss_carryforward_in: Carryforward::default(), // wrong: {0, 0}
             w2_ss_wages: dec!(0),
             w2_medicare_wages: dec!(0),
+            schedule_c_expenses: dec!(0),
         },
     )
     .unwrap();

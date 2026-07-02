@@ -89,6 +89,7 @@ fn profile() -> TaxProfile {
         },
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     }
 }
 

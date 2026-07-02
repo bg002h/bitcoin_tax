@@ -142,6 +142,11 @@ enum Command {
         /// (§1401(b)(2)(B)/Form 8959 Part II). Optional; defaults to $0. Must not be negative.
         #[arg(long)]
         w2_medicare_wages: Option<String>,
+        /// Schedule C deductible business expenses for the year — reduces net SE earnings;
+        /// the income-tax stack above is NOT adjusted (see the advisory).
+        /// Optional; defaults to $0. Must not be negative.
+        #[arg(long)]
+        schedule_c_expenses: Option<String>,
         /// Show the stored profile for `--year` instead of setting it.
         #[arg(long, default_value_t = false)]
         show: bool,
@@ -649,6 +654,7 @@ fn run() -> Result<ExitCode, CliError> {
             carryforward_long,
             w2_ss_wages,
             w2_medicare_wages,
+            schedule_c_expenses,
             show,
         } => {
             let pp = passphrase(false)?;
@@ -664,7 +670,8 @@ fn run() -> Result<ExitCode, CliError> {
                          capital_loss_carryforward_in.short: {}\n\
                          capital_loss_carryforward_in.long: {}\n\
                          w2_ss_wages: {}\n\
-                         w2_medicare_wages: {}",
+                         w2_medicare_wages: {}\n\
+                         schedule_c_expenses: {}",
                         render::filing_status_tag(p.filing_status),
                         p.ordinary_taxable_income,
                         p.magi_excluding_crypto,
@@ -674,6 +681,7 @@ fn run() -> Result<ExitCode, CliError> {
                         p.capital_loss_carryforward_in.long,
                         p.w2_ss_wages,
                         p.w2_medicare_wages,
+                        p.schedule_c_expenses,
                     ),
                     None => println!("none"),
                 }
@@ -740,6 +748,16 @@ fn run() -> Result<ExitCode, CliError> {
                         "--w2-medicare-wages must not be negative".into(),
                     ));
                 }
+                let sce = schedule_c_expenses
+                    .as_deref()
+                    .map(eventref::parse_usd_arg)
+                    .transpose()?
+                    .unwrap_or_default();
+                if sce.is_sign_negative() {
+                    return Err(CliError::Usage(
+                        "--schedule-c-expenses must not be negative".into(),
+                    ));
+                }
 
                 let profile = TaxProfile {
                     filing_status: FilingStatus::from(fs),
@@ -753,6 +771,7 @@ fn run() -> Result<ExitCode, CliError> {
                     },
                     w2_ss_wages: w2_ss,
                     w2_medicare_wages: w2_medicare,
+                    schedule_c_expenses: sce,
                 };
                 cmd::tax::set_profile(vault, &pp, year, profile)?;
                 println!("Tax profile for {year} saved.");

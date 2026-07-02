@@ -82,6 +82,7 @@ fn profile(ord: Usd, magi: Usd, qd: Usd) -> TaxProfile {
         },
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     }
 }
 /// Single profile with a non-zero `other_net_capital_gain` (LT-character) — for the B-M1 loss-year KATs.
@@ -281,6 +282,7 @@ fn se_tax_is_standalone_not_in_total_federal_tax_attributable() {
         2025,
         FilingStatus::Single,
         &table.0,
+        btctax_core::conventions::Usd::ZERO,
         btctax_core::conventions::Usd::ZERO,
         btctax_core::conventions::Usd::ZERO,
     )
@@ -519,6 +521,7 @@ fn niit_loss_year_mfs_1500_limit() {
         },
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     };
     let out = compute_tax_year(&[], &st, 2025, Some(&p), &synth_mfs(2025));
     let TaxOutcome::Computed(r) = out else {
