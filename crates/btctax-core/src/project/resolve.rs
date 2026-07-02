@@ -547,6 +547,10 @@ pub fn resolve(
                     }
                     Some(EventPayload::TransferIn(_)) => {
                         // Valid TransferIn target. Duplicate → conflict; FIRST-WINS.
+                        // Deliberately NOT validated (D1 non-goal): a TransferIn consumed by a
+                        // TransferLink (`consumed_ins`) passes type-validation here — the link
+                        // consumes first in build_op. That is a *precedence* question, not a bad
+                        // target; unchanged.
                         if inbound_class.contains_key(target) {
                             blockers.push(Blocker {
                                 kind: BlockerKind::DecisionConflict,
@@ -595,6 +599,10 @@ pub fn resolve(
                     }
                     Some(EventPayload::TransferOut(_)) => {
                         // Valid TransferOut target. Duplicate → conflict; FIRST-WINS.
+                        // Deliberately NOT validated (D1 non-goal): a TransferOut that is ALSO
+                        // TransferLink'd passes type-validation but stays overridden by the link
+                        // (links win in build_op, before outflow_class). That is a *precedence*
+                        // question, not a bad target; unchanged.
                         if outflow_class.contains_key(target) {
                             blockers.push(Blocker {
                                 kind: BlockerKind::DecisionConflict,
