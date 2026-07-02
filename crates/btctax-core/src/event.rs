@@ -196,11 +196,12 @@ pub struct ClassifyRaw {
 /// on Income events.
 ///
 /// **Old-binary limitation:** this variant was added post-initial-release. A vault that CONTAINS a
-/// `ReclassifyIncome` event cannot be opened by a binary that predates Chunk C — the same accepted
-/// trade-off as every prior decision-type addition (each new variant is a forward-only change). Reading
-/// a vault WITHOUT this variant works fine with any binary (serde unknown-variant handling is silent-skip
-/// for future variants in old vaults — no data at all, nothing to skip). Voidable via the generic
-/// `VoidDecisionEvent`; a second non-voided decision for the same `income_event` → `DecisionConflict`.
+/// `ReclassifyIncome` event FAILS to load on a binary that predates Chunk C: serde's externally-tagged
+/// enum emits a LOUD unknown-variant error and the entire vault load fails. This is the accepted
+/// trade-off for every decision-type addition (each new variant is a forward-only change). A vault
+/// WITHOUT this variant loads correctly on any binary (there is no `ReclassifyIncome` event to fail on).
+/// Voidable via the generic `VoidDecisionEvent`; a second non-voided decision for the same
+/// `income_event` → `DecisionConflict`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReclassifyIncome {
     /// The target imported Income event whose `business` (and optionally `kind`) is being corrected.
@@ -269,9 +270,9 @@ pub enum EventPayload {
     MethodElection(MethodElection),
     LotSelection(LotSelection),
     /// SE-completion Chunk C: flip `business` (and optionally `kind`) on an already-imported Income event.
-    /// Old-binary limitation: a vault containing this variant cannot be opened by a pre-Chunk-C binary;
-    /// see `ReclassifyIncome` struct doc-comment for the full caveat. Reading a vault WITHOUT this variant
-    /// (i.e. any vault created before Chunk C) works with any binary — old or new.
+    /// Old-binary limitation: a vault containing this variant FAILS to load on a pre-Chunk-C binary
+    /// (serde's externally-tagged enum gives a loud unknown-variant error; see `ReclassifyIncome` struct
+    /// doc). A vault WITHOUT this variant (i.e. any vault created before Chunk C) loads on any binary.
     ReclassifyIncome(ReclassifyIncome),
 }
 

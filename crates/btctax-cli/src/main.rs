@@ -292,7 +292,8 @@ enum Reconcile {
         /// The Income event reference (from `report` or `income_recognized.csv` 'event' column).
         income_event: String,
         /// Whether this income is from a trade or business (true → SE-tax eligible).
-        #[arg(long)]
+        /// Must be supplied explicitly: `--business true` or `--business false`.
+        #[arg(long, required = true, action = clap::ArgAction::Set)]
         business: bool,
         /// Optional income kind correction: mining|staking|interest|airdrop|reward.
         /// Omit to keep the original kind (only flip `business`).
