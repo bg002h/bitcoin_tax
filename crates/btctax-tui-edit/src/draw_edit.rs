@@ -404,6 +404,51 @@ mod tests {
             rendered.contains("schedule_c_expenses"),
             "modal must show schedule_c_expenses"
         );
+
+        // ── Value assertions — spec requires "with the validated values" ─────────
+        // Fixture values are pairwise-distinct; three need contextual anchors
+        // because their digit sequences are substrings of other values:
+        //   "5000" ⊂ "85000", "500" ⊂ "85000", "3000" ⊂ "130000".
+        assert!(
+            rendered.contains("120000"),
+            "modal must show ordinary_taxable_income value 120000"
+        );
+        assert!(
+            rendered.contains("130000"),
+            "modal must show magi_excluding_crypto value 130000"
+        );
+        // "5000" is a substring of "85000"; anchor to the field name.
+        assert!(
+            rendered.contains("pref_income: 5000"),
+            "modal must show qualified_dividends value 5000 (anchored to avoid collision with 85000)"
+        );
+        assert!(
+            rendered.contains("1000"),
+            "modal must show other_net_capital_gain value 1000"
+        );
+        // "500" is a substring of "85000"; anchor to the field name.
+        assert!(
+            rendered.contains("short: 500"),
+            "modal must show carryforward short value 500 (anchored to avoid collision with 85000)"
+        );
+        assert!(
+            rendered.contains("250"),
+            "modal must show carryforward long value 250"
+        );
+        assert!(
+            rendered.contains("80000"),
+            "modal must show w2_ss_wages value 80000"
+        );
+        assert!(
+            rendered.contains("85000"),
+            "modal must show w2_medicare_wages value 85000"
+        );
+        // "3000" is a substring of "130000"; anchor to the colon-space prefix.
+        assert!(
+            rendered.contains(": 3000"),
+            "modal must show schedule_c_expenses value 3000 (anchored to avoid collision with 130000)"
+        );
+
         assert!(
             rendered.contains("WRITES THE VAULT"),
             "modal title must say WRITES THE VAULT"
