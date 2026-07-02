@@ -2502,11 +2502,18 @@ mod tests {
         {
             let mut session =
                 btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+            // wallet MUST be set: fold.rs Op::IncomeInbound and Op::GiftReceived fire
+            // FmvMissing and return early when wallet is None, so no lot or income record
+            // is ever created. This mirrors the requirement documented in seed_transfer_out_vault.
+            let wallet = Some(btctax_core::WalletId::Exchange {
+                provider: "River".to_string(),
+                account: "main".to_string(),
+            });
             let batch = vec![LedgerEvent {
                 id: ti_id.clone(),
                 utc_timestamp: OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(),
                 original_tz: UtcOffset::UTC,
-                wallet: None,
+                wallet,
                 payload: EventPayload::TransferIn(TransferIn {
                     sat: 500_000,
                     src_addr: None,
