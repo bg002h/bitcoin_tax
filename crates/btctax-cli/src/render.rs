@@ -193,7 +193,7 @@ fn disposal_year(d: &btctax_core::Disposal) -> i32 {
 /// FR4 render: holdings (always current) + realized disposals/removals/income (year-filtered).
 pub fn render_report(state: &LedgerState, year: Option<i32>) -> String {
     let mut out = String::new();
-    let yr = |y: i32| year.map_or(true, |f| f == y); // year filter; None => all (1.74-compatible; not is_none_or)
+    let yr = |y: i32| year.is_none_or(|f| f == y); // year filter; None => all (is_none_or stable since 1.82)
 
     let _ = writeln!(out, "Holdings (per wallet):");
     if state.holdings_by_wallet.is_empty() {
