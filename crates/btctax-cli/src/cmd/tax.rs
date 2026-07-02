@@ -78,8 +78,10 @@ pub fn report_tax_year(
     // "wage base unavailable" note (no silent drop); no business SE income → no Schedule SE section.
     let schedule_se = match profile.as_ref() {
         Some(p) => {
-            let business_income_present = !se_net_income(&state, year).is_zero();
-            let se_result = tables.table_for(year).and_then(|t| {
+            let gross_se = se_net_income(&state, year);
+            let table_opt = tables.table_for(year);
+            let table_present = table_opt.is_some();
+            let se_result = table_opt.and_then(|t| {
                 compute_se_tax(
                     &state,
                     year,
@@ -87,12 +89,15 @@ pub fn report_tax_year(
                     t,
                     p.w2_ss_wages,
                     p.w2_medicare_wages,
+                    p.schedule_c_expenses,
                 )
             });
             crate::render::render_schedule_se(
                 year,
                 se_result.as_ref(),
-                business_income_present,
+                gross_se,
+                table_present,
+                p.schedule_c_expenses,
                 p.w2_ss_wages,
                 p.w2_medicare_wages,
             )

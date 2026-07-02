@@ -769,6 +769,7 @@ fn make_tax_profile_single_50k() -> TaxProfile {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: Decimal::ZERO,
         w2_medicare_wages: Decimal::ZERO,
+        schedule_c_expenses: Decimal::ZERO,
     }
 }
 

@@ -67,6 +67,7 @@ pub fn export_snapshot(
                         t,
                         p.w2_ss_wages,
                         p.w2_medicare_wages,
+                        p.schedule_c_expenses,
                     )
                 })
             })

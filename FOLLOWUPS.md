@@ -4,6 +4,31 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ SE completion Chunk B — Schedule C expenses (advisory-only) — SHIPPED (2026-07-01) — SE CLUSTER COMPLETE
+
+Final SE chunk (queue item 2 done: A W-2 coordination + C ReclassifyIncome + B expenses).
+`TaxProfile.schedule_c_expenses` → `compute_se_tax(…, expenses)`: net_se = max(0, gross − expenses) before
+×0.9235 (§1402(a)); fully-expensed → None with a THREE-WAY render split (no false "wage base unavailable"
+note — liability status is "no tax owed"); composes with the W-2 caps (goldens $11,303.64 / None /
+$5,593.84); engine-B `crypto_ord` stays GROSS with a quantify-don't-prescribe advisory (the I3 mechanism —
+no OTI-edit prescription); all three surfaces (report/CSV/TUI) source the profile. R0 2 rounds → 0C/0I;
+whole-diff 0C/0I after a test-only fold (engine-B invariance KAT, report↔CSV parity, fully-expensed
+integration, real-binary negative-flag — the review caught them missing). 682 tests.
+
+Deferred (OPEN): engine-B gross-vs-net `crypto_ord` coordination (the real ordinary-income fix — high
+blast radius); §6017 $400 SE filing floor (not modeled; salient with expenses); the TUI condensed-block
+disclosure lines (Chunk-A N-1 family).
+
+**Next (queue + the architect-sequenced form program, user-approved 2026-07-01, no TY2025 extension):**
+TY2024 tables backfill → CI infrastructure (MSRV 1.74 gate + PII scan — BEFORE the new write surface/dep)
+→ small-FOLLOWUPS burndown → export-from-TUI (form CSVs only; never export_snapshot/the vault image;
+scoped export.rs + confirmation modal + extended bytes test) → 5a FDF/XFDF form-data output (zero deps, no
+template redistribution; builds the per-(form, revision-year) field-mapping architecture) → 5b filled-PDF
+(Jan–Feb 2027, when the IRS publishes the TY2026 revisions; lopdf MSRV-verify at pin time; Form 8949 may
+stay an attached statement per Exception 2). Mutating-TUI placement: architect consult in flight.
+
+---
+
 ## ✅ SE completion Chunk C — ReclassifyIncome decision (business flip) — SHIPPED (2026-07-01)
 
 Queue item 2, chunk 2 of 3. New event-sourced `ReclassifyIncome{income_event, business, kind:

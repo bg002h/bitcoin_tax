@@ -28,6 +28,7 @@ fn single_100k_profile() -> TaxProfile {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     }
 }
 

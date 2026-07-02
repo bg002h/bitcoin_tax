@@ -38,6 +38,7 @@ fn single_40k_profile() -> TaxProfile {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     }
 }
 
@@ -143,7 +144,7 @@ fn report_tax_year_renders_schedule_se_for_business_mining() {
     // Classify the unclassified Receive as $100,000 BUSINESS mining income (SE-eligible).
     let in_ref = {
         let s = Session::open(&vault, &pp()).unwrap();
-        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        let events = load_all(s.conn()).unwrap();
         events
             .iter()
             .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
@@ -196,10 +197,14 @@ fn report_tax_year_renders_schedule_se_for_business_mining() {
     );
     // Standalone note.
     assert!(se.contains("SEPARATE federal liability"), "{se}");
-    // [Minor-2] expenses caveat — render must disclose that no Schedule C expenses are modeled.
+    // [Chunk B] $0-expenses note — old "not modeled" caveat replaced by Chunk B disclosure.
     assert!(
-        se.contains("Schedule C deductible business expenses are not modeled"),
-        "expenses caveat must appear in Schedule SE render: {se}"
+        se.contains("no Schedule C expenses supplied"),
+        "Chunk B $0-expenses note must appear in Schedule SE render: {se}"
+    );
+    assert!(
+        !se.contains("not modeled"),
+        "old 'not modeled' caveat must be absent (replaced by Chunk B): {se}"
     );
 
     // [D5] the income-tax report TOTAL is UNCHANGED by SE tax — the $14,129.55 SE figure is NOT
@@ -237,7 +242,7 @@ fn chunk_a_asymmetric_w2_transposition_guard_cli_path() {
     // Classify the unclassified Receive as $100,000 BUSINESS mining income.
     let in_ref = {
         let s = Session::open(&vault, &pp()).unwrap();
-        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        let events = load_all(s.conn()).unwrap();
         events
             .iter()
             .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
@@ -268,6 +273,7 @@ fn chunk_a_asymmetric_w2_transposition_guard_cli_path() {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(150000),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     };
     cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
 
@@ -310,7 +316,7 @@ fn chunk_a_export_parity_asymmetric_w2() {
     // Classify the Receive as $100,000 BUSINESS mining income.
     let in_ref = {
         let s = Session::open(&vault, &pp()).unwrap();
-        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        let events = load_all(s.conn()).unwrap();
         events
             .iter()
             .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
@@ -341,6 +347,7 @@ fn chunk_a_export_parity_asymmetric_w2() {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(150000),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     };
     cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
 
@@ -594,6 +601,7 @@ st-sell,2025-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
             capital_loss_carryforward_in: Carryforward::default(),
             w2_ss_wages: dec!(0),
             w2_medicare_wages: dec!(0),
+            schedule_c_expenses: dec!(0),
         },
     )
     .unwrap();
@@ -612,6 +620,7 @@ st-sell,2025-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
             capital_loss_carryforward_in: Carryforward::default(), // wrong: {0, 0}
             w2_ss_wages: dec!(0),
             w2_medicare_wages: dec!(0),
+            schedule_c_expenses: dec!(0),
         },
     )
     .unwrap();
@@ -825,5 +834,240 @@ fn e2e_donation_details_seam_form_8283_carrier() {
         carrier.section,
         Some(Form8283Section::B),
         "LT donation with FMV=$10,000 > $5,000 threshold must be Section B"
+    );
+}
+
+/// [Chunk B / I2] Expensed-profile parity: profile with `schedule_c_expenses=$20,000` + business
+/// mining income $100,000 → `report_tax_year` surfaces the expensed SE figures (ss $9,161.12,
+/// total $11,303.64, gross/net breakout line) AND the `schedule_se.csv` export carries the SAME
+/// figures (parity between the report and the admin CSV path).
+///
+/// Golden values (Single, mining $100,000, expenses $20,000, no W-2, TY2025 bundled table):
+///   net_se = max(0, 100,000 − 20,000) = 80,000;
+///   base = round_cents(80,000 × 0.9235) = 73,880.00;
+///   ss = round_cents(12.4% × 73,880) = 9,161.12;
+///   medicare = round_cents(2.9% × 73,880) = 2,142.52;
+///   total = 9,161.12 + 2,142.52 = 11,303.64.
+///
+/// Parity contract: schedule_se.csv `ss_component` + `total_se_tax` must equal the report figures
+/// — locked against divergent call sites in cmd/tax.rs vs cmd/admin.rs.
+#[test]
+fn chunkb_expensed_profile_report_and_csv_parity() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_buy_receive(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // Classify the unclassified Receive as $100,000 BUSINESS mining income.
+    let in_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+    cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &in_ref,
+        InboundClass::Income {
+            kind: IncomeKind::Mining,
+            fmv: Some(dec!(100000.00)),
+            business: true,
+        },
+        datetime!(2025-01-01 00:00:00 UTC),
+    )
+    .unwrap();
+
+    // Profile: $20,000 Schedule C expenses.
+    let profile = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(40000),
+        magi_excluding_crypto: dec!(60000),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(20000),
+    };
+    cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
+
+    // ── Report path ────────────────────────────────────────────────────────────────────────────
+    let (_outcome, _advisory, _sched_d, _gift, se, _appraisal) =
+        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let se_text = se.expect("Schedule SE section expected with $20,000 expenses");
+
+    // Breakout line: gross − expenses = net SE.
+    assert!(
+        se_text.contains("gross business income"),
+        "breakout line must appear in report: {se_text}"
+    );
+    assert!(
+        se_text.contains("100000.00"),
+        "gross $100,000 must appear in breakout: {se_text}"
+    );
+    assert!(
+        se_text.contains("20000.00"),
+        "expenses $20,000 must appear in breakout: {se_text}"
+    );
+    assert!(
+        se_text.contains("80000.00"),
+        "net SE $80,000 must appear in breakout: {se_text}"
+    );
+    // Golden figures.
+    assert!(
+        se_text.contains("9161.12"),
+        "SS component $9,161.12 must appear in report: {se_text}"
+    );
+    assert!(
+        se_text.contains("11303.64"),
+        "total SE $11,303.64 must appear in report: {se_text}"
+    );
+
+    // ── CSV export path ────────────────────────────────────────────────────────────────────────
+    let export_dir = tempfile::tempdir().unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), export_dir.path(), Some(2025)).unwrap();
+    let csv_path = export_dir.path().join("schedule_se.csv");
+    assert!(
+        csv_path.exists(),
+        "schedule_se.csv must be written for expensed case"
+    );
+    let content = std::fs::read_to_string(&csv_path).unwrap();
+    // CSV parity: same figures as the report.
+    assert!(
+        content.contains("9161.12"),
+        "schedule_se.csv ss_component must match report ($9,161.12): {content}"
+    );
+    assert!(
+        content.contains("11303.64"),
+        "schedule_se.csv total_se_tax must match report ($11,303.64): {content}"
+    );
+}
+
+/// [Chunk B / I2 — fully-expensed] Expenses ≥ gross → `report_tax_year` renders the
+/// "fully expensed … no §1401 SE tax" line (not the wage-base-unavailable note) AND no
+/// `schedule_se.csv` is written by the export path (se_result=None → CSV omitted).
+///
+/// Fixture: business Mining income $10,000, Schedule C expenses $15,000 → net_se = max(0,
+/// 10,000 − 15,000) = 0 → `compute_se_tax` returns `None`. The render must show the
+/// "fully expensed" line, NOT the "SS wage base unavailable" note.
+#[test]
+fn chunkb_fully_expensed_integration_no_se_tax_no_csv() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_buy_receive(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // Classify the Receive as $10,000 BUSINESS mining income (small enough to be fully expensed).
+    let in_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+    cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &in_ref,
+        InboundClass::Income {
+            kind: IncomeKind::Mining,
+            fmv: Some(dec!(10000.00)),
+            business: true,
+        },
+        datetime!(2025-01-01 00:00:00 UTC),
+    )
+    .unwrap();
+
+    // Profile: expenses $15,000 ≥ gross $10,000 → fully expensed.
+    let profile = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(40000),
+        magi_excluding_crypto: dec!(60000),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(15000),
+    };
+    cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
+
+    // ── Report path: "fully expensed" line present; wage-base note absent ──────────────────────
+    let (_outcome, _advisory, _sched_d, _gift, se, _appraisal) =
+        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let se_text = se.expect("Schedule SE section expected (gross > 0) even when fully expensed");
+
+    assert!(
+        se_text.contains("fully expensed"),
+        "report must show fully-expensed line: {se_text}"
+    );
+    assert!(
+        se_text.contains("no \u{00a7}1401 SE tax"),
+        "report must state no SE tax owed: {se_text}"
+    );
+    assert!(
+        !se_text.contains("SS wage base unavailable"),
+        "wage-base-unavailable note must be ABSENT (not a table-missing case): {se_text}"
+    );
+
+    // ── Export path: no schedule_se.csv written (se_result=None) ──────────────────────────────
+    let export_dir = tempfile::tempdir().unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), export_dir.path(), Some(2025)).unwrap();
+    let csv_path = export_dir.path().join("schedule_se.csv");
+    assert!(
+        !csv_path.exists(),
+        "schedule_se.csv must NOT be written for fully-expensed case (no SE tax owed)"
+    );
+}
+
+/// [Chunk B / Minor] Negative `--schedule-c-expenses` rejected at the binary level.
+///
+/// Calls `btctax tax-profile --year 2025 ... --schedule-c-expenses=-5` with all mandatory profile
+/// fields supplied — ensuring the guard at the Schedule-C-expenses validation step (not a
+/// "required field" guard) is what produces the error. Binary must exit non-zero.
+///
+/// Pattern: `std::process::Command` over the compiled binary (same as `fr9_exit_code.rs`).
+/// `CARGO_BIN_EXE_btctax` is set by Cargo for integration-test binaries.
+#[test]
+fn tax_profile_negative_schedule_c_expenses_rejected() {
+    // Minimal vault: just init (validation fires before any vault write).
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let status = std::process::Command::new(bin)
+        .args([
+            "--vault",
+            vault.to_str().expect("vault path is valid UTF-8"),
+            "tax-profile",
+            "--year",
+            "2025",
+            "--filing-status",
+            "single",
+            "--ordinary-taxable-income",
+            "40000",
+            "--magi-excluding-crypto",
+            "60000",
+            "--qualified-dividends",
+            "0",
+            "--schedule-c-expenses=-5",
+        ])
+        .env("BTCTAX_PASSPHRASE", "pw")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("btctax binary must execute successfully");
+    assert_ne!(
+        status.code().unwrap_or(0),
+        0,
+        "btctax tax-profile --schedule-c-expenses=-5 must exit non-zero; \
+         if it exits 0 the negative-value guard has been removed"
     );
 }

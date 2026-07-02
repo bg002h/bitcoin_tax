@@ -717,8 +717,12 @@ pub fn write_csv_exports(
         write_form8949_csv(out_dir, state, year)?;
         write_schedule_d_csv(out_dir, state, year)?;
         write_form8283_csv(out_dir, state, year, donation_details)?;
-        // P2-D: standalone Schedule SE §1401 figure — written only when there IS SE tax (a computed
-        // SeTaxResult); omitted when the year has no business SE income (nothing to file).
+        // P2-D / Chunk B: standalone Schedule SE §1401 figure — written only when there IS SE tax
+        // (a computed SeTaxResult); omitted when there is no business SE income OR when the year
+        // is fully expensed (expenses ≥ gross → net_se == 0 → compute_se_tax returns None — [N4]).
+        // The "fully expensed" render advisory (render_schedule_se) surfaces the liability status
+        // ("no §1401 SE tax"); the CSV writer sees None in both the no-income and fully-expensed
+        // cases — same omission, different reason.
         if let Some(se) = se_result {
             write_schedule_se_csv(out_dir, se)?;
         }
@@ -1090,30 +1094,33 @@ pub fn render_schedule_d(
     s
 }
 
-/// P2-D Task 2 (D3 / Chunk A): render the standalone Schedule SE **§1401 self-employment tax**
-/// figure for `year`. Mirrors `render_schedule_d` / `render_gift_advisory` — a standalone
+/// P2-D Task 2 / Chunk B (Schedule SE): render the standalone §1401 SE-tax block for `year` as an
 /// informational block that does NOT feed engine B (`TaxResult::total_federal_tax_attributable` is
 /// UNCHANGED by SE tax).
 ///
-/// Three cases (no silent drop — mirrors P2-C's m6):
-/// - `result = Some(r)` → the full Schedule SE section: net SE income, the 92.35% base, the
-///   SS/Medicare/Additional-Medicare components, total §1401 SE tax, the §164(f) deductible half,
-///   the §164(f) advisory, the W-2 coordination disclosure, and the [D5] standalone note.
-/// - `result = None` AND `business_income_present` → a "SS wage base unavailable for {year}" note
-///   (business SE income exists but the year has no bundled table → the wage base is unknown; the
-///   §1401 tax is NOT computed rather than silently dropped).
-/// - `result = None` AND NOT `business_income_present` → `None` (no Schedule SE section at all).
+/// Three-way `None` split [R0-I1] (no silent drop — mirrors P2-C's m6):
+/// - `gross_se == 0` → `None` (no business SE income → no Schedule SE section at all).
+/// - `gross_se > 0 && !table_present` → a "SS wage base unavailable for {year}" note (business SE
+///   income exists but the year has no bundled table → the wage base is unknown; the §1401 tax is
+///   NOT computed rather than silently dropped).
+/// - `gross_se > 0 && table_present && result == None` → a "fully expensed" line (expenses ≥ gross
+///   → net_se == 0 → no §1401 SE tax owed; distinct from the "wage base unavailable" case).
+/// - `result = Some(r)` → the full Schedule SE section (breakout or $0 note, components, total,
+///   §164(f) advisory, W-2 coordination, the Chunk-B expense advisory, and the [D5] standalone note).
 ///
-/// `business_income_present` is `!se_net_income(state, year).is_zero()` (computed by the caller —
-/// the single §1402(a) SE-eligibility predicate lives in core).
-///
-/// `w2_ss_wages` / `w2_medicare_wages` are the values from `TaxProfile` (both ≥ 0). When either
-/// is > $0 the coordinated disclosure is rendered; when both are $0 the short $0-assumed note is
-/// shown.
+/// # Parameters
+/// - `gross_se`: `se_net_income(state, year)` — the GROSS SE income before expenses (caller computes).
+/// - `table_present`: `tables.table_for(year).is_some()` (caller has this from the `and_then` chain).
+/// - `schedule_c_expenses`: from `TaxProfile.schedule_c_expenses` (≥ 0). When > 0 triggers the
+///   breakout line and the Chunk-B ordinary-income advisory.
+/// - `w2_ss_wages` / `w2_medicare_wages`: from `TaxProfile` (both ≥ 0). When either is > $0 the
+///   W-2 coordinated disclosure is rendered; when both are $0 the short $0-assumed note is shown.
 pub fn render_schedule_se(
     year: i32,
     result: Option<&SeTaxResult>,
-    business_income_present: bool,
+    gross_se: Usd,
+    table_present: bool,
+    schedule_c_expenses: Usd,
     w2_ss_wages: Usd,
     w2_medicare_wages: Usd,
 ) -> Option<String> {
@@ -1124,18 +1131,43 @@ pub fn render_schedule_se(
                 s,
                 "Schedule SE (§1401 self-employment tax on business crypto income) — tax year {year}"
             );
+            // [Chunk B] Breakout line or $0 note depending on whether expenses were supplied.
+            if schedule_c_expenses > Usd::ZERO {
+                // The gross for display = net_se + expenses (since net_se = max(0, gross − expenses)
+                // and net_se > 0 here, gross = net_se + expenses exactly).
+                let gross_display = r.net_se + schedule_c_expenses;
+                let _ = writeln!(
+                    s,
+                    "  gross business income {} \u{2212} Schedule C expenses {} = net SE earnings {}",
+                    fmt_money(gross_display),
+                    fmt_money(schedule_c_expenses),
+                    fmt_money(r.net_se)
+                );
+                // [Chunk B / I3-mechanism] Ordinary-income advisory — correct mechanism; NO OTI-edit prescription.
+                let _ = writeln!(
+                    s,
+                    "  (Schedule C advisory) Schedule C expenses also reduce your ORDINARY taxable \
+                     income, but the income-tax total above uses GROSS crypto income \u{2014} to first \
+                     order it OVERSTATES your tax by your marginal ordinary rate applied to {}. The tax \
+                     profile cannot express this (an `ordinary_taxable_income` edit would shift both \
+                     legs of the crypto-attributable delta); the engine-side coordination is deferred \
+                     \u{2014} coordinate it on your actual return.",
+                    fmt_money(schedule_c_expenses)
+                );
+            } else {
+                let _ = writeln!(
+                    s,
+                    "  net self-employment income (business crypto, Interest excluded): {}",
+                    fmt_money(r.net_se)
+                );
+                let _ = writeln!(
+                    s,
+                    "  (Schedule C) no Schedule C expenses supplied (--schedule-c-expenses)"
+                );
+            }
             let _ = writeln!(
                 s,
-                "  net self-employment income (gross mining income \u{2014} no business expenses modeled; business crypto, Interest excluded): {}",
-                fmt_money(r.net_se)
-            );
-            let _ = writeln!(
-                s,
-                "  (caveat) Schedule C deductible business expenses are not modeled; if you have them, your actual SE tax is lower."
-            );
-            let _ = writeln!(
-                s,
-                "  × 92.35% net-earnings factor (§1402(a)) = net SE earnings: {}",
+                "  \u{00d7} 92.35% net-earnings factor (\u{00a7}1402(a)) = net SE earnings: {}",
                 fmt_money(r.base)
             );
             let _ = writeln!(
@@ -1205,7 +1237,9 @@ pub fn render_schedule_se(
             Some(s)
         }
         None => {
-            if business_income_present {
+            if gross_se.is_zero() {
+                None // no business SE income → no Schedule SE section
+            } else if !table_present {
                 // Business SE income present but no bundled table → wage base unknown; do NOT drop.
                 let mut s = String::new();
                 let _ = writeln!(
@@ -1220,7 +1254,21 @@ pub fn render_schedule_se(
                 );
                 Some(s)
             } else {
-                None // no business SE income → no Schedule SE section
+                // Business SE income present + table available + net_se == 0: fully expensed.
+                // [R0-I1] The liability status is "no tax owed", NOT "couldn't compute".
+                let mut s = String::new();
+                let _ = writeln!(
+                    s,
+                    "Schedule SE (§1401 self-employment tax on business crypto income) — tax year {year}"
+                );
+                let _ = writeln!(
+                    s,
+                    "  fully expensed: gross {} \u{2212} Schedule C expenses {} \u{2264} $0 \
+                     \u{2192} no \u{00a7}1401 SE tax for {year}.",
+                    fmt_money(gross_se),
+                    fmt_money(schedule_c_expenses)
+                );
+                Some(s)
             }
         }
     }
@@ -2345,12 +2393,13 @@ mod gift_advisory_tests {
 
 #[cfg(test)]
 mod schedule_se_tests {
-    //! P2-D Task 2 / Chunk A KATs — `render_schedule_se` + `schedule_se.csv`. The rendered figures
-    //! reuse the hand-verified Golden 1 `SeTaxResult` (Single $100,000 business mining). PRIVACY: synthetic.
+    //! P2-D Task 2 / Chunk A + Chunk B KATs — `render_schedule_se` + `schedule_se.csv`.
+    //! The rendered figures reuse hand-verified SeTaxResult fixtures (see btctax-core se.rs KATs).
+    //! PRIVACY: synthetic values only.
     use super::*;
     use rust_decimal_macros::dec;
 
-    /// Golden 1 SeTaxResult (Single, $100,000 business mining, no W-2) — see btctax-core se.rs KATs.
+    /// Golden 1 SeTaxResult (Single, $100,000 business mining, no W-2, no expenses).
     fn golden1() -> SeTaxResult {
         SeTaxResult {
             net_se: dec!(100000),
@@ -2389,14 +2438,59 @@ mod schedule_se_tests {
         }
     }
 
+    /// [Chunk B] Headline expenses SeTaxResult: Single, mining $100k, expenses $20k, no W-2.
+    /// net_se = 80,000; base = 80,000 × 0.9235 = 73,880.00; ss = 12.4% × 73,880 = 9,161.12;
+    /// medicare = 2.9% × 73,880 = 2,142.52; addl = 0; total = 11,303.64;
+    /// deductible_half = (9,161.12 + 2,142.52)/2 = 5,651.82.
+    fn expenses_headline() -> SeTaxResult {
+        SeTaxResult {
+            net_se: dec!(80000),
+            base: dec!(73880.00),
+            ss: dec!(9161.12),
+            medicare: dec!(2142.52),
+            addl: dec!(0.00),
+            total: dec!(11303.64),
+            deductible_half: dec!(5651.82),
+        }
+    }
+
+    /// [Chunk B] W-2 + expenses SeTaxResult: Single, mining $100k, expenses $20k, w2_ss $150k,
+    /// w2_medicare $150k.
+    /// net_se = 80,000; base = 73,880.00; ss_cap = max(0, 176,100 − 150,000) = 26,100 →
+    /// ss = 12.4% × min(73,880, 26,100) = 12.4% × 26,100 = 3,236.40;
+    /// medicare = 2.9% × 73,880 = 2,142.52;
+    /// addl_threshold = max(0, 200,000 − 150,000) = 50,000; over = 73,880 − 50,000 = 23,880 →
+    /// addl = 0.9% × 23,880 = 214.92;
+    /// total = 3,236.40 + 2,142.52 + 214.92 = 5,593.84;
+    /// deductible_half = (3,236.40 + 2,142.52)/2 = 2,689.46.
+    fn expenses_w2_combined() -> SeTaxResult {
+        SeTaxResult {
+            net_se: dec!(80000),
+            base: dec!(73880.00),
+            ss: dec!(3236.40),
+            medicare: dec!(2142.52),
+            addl: dec!(214.92),
+            total: dec!(5593.84),
+            deductible_half: dec!(2689.46),
+        }
+    }
+
     /// Business-mining year → full Schedule SE section: components + total + deductible half +
     /// [Chunk A] the $0-W-2 short note + the §164(f) advisory + the [D5] standalone note.
-    /// [R0-I2 regression] OVERSTATED/UNDERSTATED text is GONE; new $0 note is present.
+    /// [Chunk B] expenses $0 → "no Schedule C expenses supplied" note (old "not modeled" GONE).
     #[test]
     fn business_mining_year_renders_full_section() {
         let r = golden1();
-        let s = render_schedule_se(2025, Some(&r), true, Usd::ZERO, Usd::ZERO)
-            .expect("SE section expected");
+        let s = render_schedule_se(
+            2025,
+            Some(&r),
+            dec!(100000),
+            true,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+        )
+        .expect("SE section expected");
         // Components + total + §164(f) half.
         assert!(s.contains("92350.00"), "net SE earnings base: {s}");
         assert!(s.contains("11451.40"), "SS component: {s}");
@@ -2442,10 +2536,18 @@ mod schedule_se_tests {
             s.contains("not") && s.contains("§164(f)"),
             "notes §164(f) not auto-coordinated: {s}"
         );
-        // [Minor-2] expenses caveat.
+        // [Chunk B] $0-expenses note replaces the old "not modeled" caveat.
         assert!(
-            s.contains("Schedule C deductible business expenses are not modeled"),
-            "expenses caveat must appear in Schedule SE render: {s}"
+            s.contains("no Schedule C expenses supplied"),
+            "Chunk B $0-expenses note must appear: {s}"
+        );
+        assert!(
+            s.contains("--schedule-c-expenses"),
+            "$0 note must mention --schedule-c-expenses flag: {s}"
+        );
+        assert!(
+            !s.contains("not modeled"),
+            "old 'not modeled' caveat must be absent (replaced by Chunk B): {s}"
         );
     }
 
@@ -2453,8 +2555,16 @@ mod schedule_se_tests {
     #[test]
     fn w2_set_renders_coordinated_disclosure() {
         let r = w2_headline();
-        let s = render_schedule_se(2025, Some(&r), true, dec!(150000), dec!(150000))
-            .expect("SE section expected");
+        let s = render_schedule_se(
+            2025,
+            Some(&r),
+            dec!(100000),
+            true,
+            Usd::ZERO,
+            dec!(150000),
+            dec!(150000),
+        )
+        .expect("SE section expected");
         // [D3] Coordinated text present.
         assert!(
             s.contains("W-2 coordination applied"),
@@ -2470,7 +2580,7 @@ mod schedule_se_tests {
         );
         // The W-2 amounts appear in the disclosure text.
         assert!(s.contains("150000"), "w2_ss_wages amount must appear: {s}");
-        // Old OVERSTATED/UNDERSTATED text ABSENT even in W-2 mode.
+        // Old OVERSTATED/UNDERSTATED text ABSENT even in W-2 mode (expenses = 0).
         assert!(!s.contains("OVERSTATED"), "OVERSTATED must be absent: {s}");
         assert!(
             !s.contains("UNDERSTATED"),
@@ -2489,8 +2599,16 @@ mod schedule_se_tests {
     #[test]
     fn w2_asymmetric_render_transposition_guard() {
         let r = w2_asymmetric();
-        let s = render_schedule_se(2025, Some(&r), true, dec!(150000), Usd::ZERO)
-            .expect("SE section expected");
+        let s = render_schedule_se(
+            2025,
+            Some(&r),
+            dec!(100000),
+            true,
+            Usd::ZERO,
+            dec!(150000),
+            Usd::ZERO,
+        )
+        .expect("SE section expected");
         // W-2 coordination text must appear (w2_ss > 0).
         assert!(
             s.contains("W-2 coordination applied"),
@@ -2507,21 +2625,175 @@ mod schedule_se_tests {
         assert!(!s.contains("UNDERSTATED"), "{s}");
     }
 
-    /// No business SE income → no Schedule SE section (None).
+    /// No business SE income → no Schedule SE section (None). [gross_se == 0 path]
     #[test]
     fn no_business_income_no_section() {
-        assert!(render_schedule_se(2025, None, false, Usd::ZERO, Usd::ZERO).is_none());
+        assert!(
+            render_schedule_se(2025, None, Usd::ZERO, true, Usd::ZERO, Usd::ZERO, Usd::ZERO)
+                .is_none()
+        );
     }
 
     /// Business SE income present but no bundled table → the "SS wage base unavailable" note (no
-    /// silent drop).
+    /// silent drop). [gross_se > 0 && !table_present path]
     #[test]
     fn business_income_but_no_table_emits_note() {
-        let s = render_schedule_se(2099, None, true, Usd::ZERO, Usd::ZERO)
-            .expect("wage-base-unavailable note expected");
+        let s = render_schedule_se(
+            2099,
+            None,
+            dec!(100000),
+            false,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+        )
+        .expect("wage-base-unavailable note expected");
         assert!(s.contains("SS wage base unavailable"), "{s}");
         assert!(s.contains("2099"), "names the year: {s}");
         assert!(s.contains("no silent drop"), "{s}");
+    }
+
+    // ── Chunk B golden KATs ────────────────────────────────────────────────────────────────────
+
+    /// [Chunk B] Headline: expenses $20k, no W-2 → breakout line + Schedule C advisory.
+    /// Verifies: gross = net_se + expenses shown, advisory text present, NO old "not modeled" caveat.
+    #[test]
+    fn expenses_20k_no_w2_renders_breakout_and_advisory() {
+        let r = expenses_headline(); // net_se = 80,000; expenses = 20,000 → gross = 100,000
+        let s = render_schedule_se(
+            2025,
+            Some(&r),
+            dec!(100000), // gross_se
+            true,
+            dec!(20000), // schedule_c_expenses
+            Usd::ZERO,
+            Usd::ZERO,
+        )
+        .expect("SE section expected");
+        // Breakout line: gross − expenses = net SE
+        assert!(
+            s.contains("gross business income"),
+            "breakout line must appear: {s}"
+        );
+        assert!(
+            s.contains("100000.00"),
+            "gross ($100k) must appear in breakout: {s}"
+        );
+        assert!(
+            s.contains("20000.00"),
+            "expenses ($20k) must appear in breakout: {s}"
+        );
+        assert!(
+            s.contains("80000.00"),
+            "net_se ($80k) must appear in breakout: {s}"
+        );
+        // Schedule C advisory: OVERSTATES text present; NO OTI-edit prescription.
+        assert!(
+            s.contains("OVERSTATES"),
+            "Schedule C advisory OVERSTATES text: {s}"
+        );
+        assert!(
+            s.contains("ORDINARY taxable income"),
+            "advisory must mention ORDINARY taxable income: {s}"
+        );
+        assert!(
+            s.contains("engine-side coordination is deferred"),
+            "advisory must mention deferred coordination: {s}"
+        );
+        // NO OTI-edit prescription: must NOT say "reduce your ordinary_taxable_income" (spec D3).
+        assert!(
+            !s.contains("reduce your ordinary_taxable_income"),
+            "NO OTI-edit prescription allowed (spec D3): {s}"
+        );
+        assert!(
+            !s.contains("set --ordinary-taxable-income"),
+            "NO OTI-edit prescription allowed (spec D3): {s}"
+        );
+        // Golden figures: base, ss, medicare, total, deductible_half.
+        assert!(s.contains("73880.00"), "base $73,880: {s}");
+        assert!(s.contains("9161.12"), "ss $9,161.12: {s}");
+        assert!(s.contains("2142.52"), "medicare $2,142.52: {s}");
+        assert!(s.contains("11303.64"), "total $11,303.64: {s}");
+        assert!(s.contains("5651.82"), "deductible_half $5,651.82: {s}");
+        // Old "not modeled" caveat is ABSENT.
+        assert!(
+            !s.contains("not modeled"),
+            "old 'not modeled' caveat must be absent: {s}"
+        );
+    }
+
+    /// [Chunk B / R0-I1] Fully expensed (gross > 0, table present, net_se == 0) → the NEW
+    /// "fully expensed" line; the "SS wage base unavailable" note ABSENT.
+    #[test]
+    fn fully_expensed_shows_new_line_not_wage_base_note() {
+        // mining $10,000, expenses $15,000 → net_se = 0 → compute_se_tax returns None.
+        // Render with gross_se = 10,000 and table_present = true.
+        let s = render_schedule_se(
+            2025,
+            None,
+            dec!(10000), // gross_se
+            true,        // table_present = true
+            dec!(15000), // schedule_c_expenses
+            Usd::ZERO,
+            Usd::ZERO,
+        )
+        .expect("fully-expensed section expected (not None)");
+        // The new "fully expensed" line is present.
+        assert!(
+            s.contains("fully expensed"),
+            "fully-expensed line must appear: {s}"
+        );
+        assert!(
+            s.contains("10000.00"),
+            "gross $10k must appear in fully-expensed line: {s}"
+        );
+        assert!(
+            s.contains("15000.00"),
+            "expenses $15k must appear in fully-expensed line: {s}"
+        );
+        assert!(
+            s.contains("no §1401 SE tax"),
+            "must state no SE tax owed: {s}"
+        );
+        assert!(s.contains("2025"), "must name the year: {s}");
+        // The "SS wage base unavailable" note is ABSENT (negative assertion per [R0-I1]).
+        assert!(
+            !s.contains("SS wage base unavailable"),
+            "wage-base-unavailable note must be ABSENT for fully-expensed case: {s}"
+        );
+    }
+
+    /// [Chunk B] W-2 + expenses combined render: breakout and W-2 coordination both appear.
+    #[test]
+    fn expenses_w2_combined_renders_both() {
+        let r = expenses_w2_combined(); // net_se = 80,000; gross = 100,000; expenses = 20,000
+        let s = render_schedule_se(
+            2025,
+            Some(&r),
+            dec!(100000),
+            true,
+            dec!(20000),  // schedule_c_expenses
+            dec!(150000), // w2_ss_wages
+            dec!(150000), // w2_medicare_wages
+        )
+        .expect("SE section expected");
+        // Breakout line.
+        assert!(s.contains("gross business income"), "breakout line: {s}");
+        assert!(s.contains("80000.00"), "net_se in breakout: {s}");
+        // Schedule C advisory.
+        assert!(s.contains("OVERSTATES"), "Schedule C advisory: {s}");
+        // W-2 coordination also present.
+        assert!(
+            s.contains("W-2 coordination applied"),
+            "W-2 coordination: {s}"
+        );
+        // Figures correct.
+        assert!(s.contains("73880.00"), "base: {s}");
+        assert!(s.contains("3236.40"), "ss (reduced by W-2 cap): {s}");
+        assert!(s.contains("2142.52"), "medicare: {s}");
+        assert!(s.contains("214.92"), "addl: {s}");
+        assert!(s.contains("5593.84"), "total: {s}");
+        assert!(s.contains("2689.46"), "deductible_half: {s}");
     }
 
     /// `schedule_se.csv` columns + values (year-scoped; written when a SeTaxResult exists).
@@ -2563,7 +2835,7 @@ mod schedule_se_tests {
         assert_eq!(&rec[6], "7064.78"); // deductible_half
     }
 
-    /// No SeTaxResult → schedule_se.csv is NOT written (nothing to file).
+    /// No SeTaxResult → schedule_se.csv is NOT written (nothing to file; also covers fully-expensed).
     #[test]
     fn schedule_se_csv_omitted_when_no_se_tax() {
         let dir = tempfile::tempdir().unwrap();

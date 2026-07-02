@@ -22,6 +22,7 @@ fn prof_2025() -> TaxProfile {
         },
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     }
 }
 
@@ -72,6 +73,7 @@ fn set_overwrites_previous_profile() {
         },
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     };
     cmd::tax::set_profile(&vault, &pp(), 2025, updated.clone()).unwrap();
 
@@ -95,6 +97,7 @@ fn multiple_years_are_independent() {
         capital_loss_carryforward_in: Carryforward::default(),
         w2_ss_wages: dec!(0),
         w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
     };
     cmd::tax::set_profile(&vault, &pp(), 2024, p24.clone()).unwrap();
     cmd::tax::set_profile(&vault, &pp(), 2025, prof_2025()).unwrap();
