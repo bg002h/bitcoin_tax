@@ -866,11 +866,11 @@ mod tests {
         // [R0-N3] Qss is NOT a stored key in either map (it aliases MFJ via TaxTable::key) —
         // direct assertions on the pub fields, plus the alias check.
         assert!(
-            tt.ordinary.get(&FilingStatus::Qss).is_none(),
+            !tt.ordinary.contains_key(&FilingStatus::Qss),
             "Qss must not be a stored ordinary key (aliases Mfj at lookup)"
         );
         assert!(
-            tt.ltcg.get(&FilingStatus::Qss).is_none(),
+            !tt.ltcg.contains_key(&FilingStatus::Qss),
             "Qss must not be a stored ltcg key (aliases Mfj at lookup)"
         );
         assert_eq!(
