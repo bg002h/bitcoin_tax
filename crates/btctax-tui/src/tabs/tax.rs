@@ -15,16 +15,11 @@ use ratatui::{
 };
 use std::fmt::Write as _;
 
-/// Render the Tax tab into `area`.
-pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
-    let Some(snap) = app.snapshot.as_ref() else {
-        let p = Paragraph::new("no snapshot loaded")
-            .block(Block::default().title(" Tax ").borders(Borders::ALL));
-        frame.render_widget(p, area);
-        return;
-    };
-
-    let year = app.selected_year;
+/// App-free renderer for the Tax tab.
+///
+/// Extracted from `draw` so the editor crate can call this directly with its own
+/// `Snapshot` and `year`, without holding an `App`.
+pub fn render(frame: &mut Frame, area: Rect, snap: &Snapshot, year: i32) {
     let content = render_tax_content(snap, year);
 
     let p = Paragraph::new(content)
@@ -35,6 +30,22 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         )
         .wrap(Wrap { trim: false });
     frame.render_widget(p, area);
+}
+
+/// Render the Tax tab into `area`.
+///
+/// Thin `pub(crate)` wrapper over [`render`]: handles the `snapshot == None` placeholder
+/// exactly as before, then delegates to the App-free `render` fn.
+/// Call sites in `draw.rs` and `tabs/tests.rs` call this wrapper — unchanged.
+pub(crate) fn draw(frame: &mut Frame, area: Rect, app: &App) {
+    let Some(snap) = app.snapshot.as_ref() else {
+        let p = Paragraph::new("no snapshot loaded")
+            .block(Block::default().title(" Tax ").borders(Borders::ALL));
+        frame.render_widget(p, area);
+        return;
+    };
+
+    render(frame, area, snap, app.selected_year);
 }
 
 /// Build the full Tax tab text for `year` from `snap`.

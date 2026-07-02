@@ -327,6 +327,58 @@ pub fn load_all(conn: &Connection) -> Result<Vec<LedgerEvent>, CoreError> {
     Ok(out)
 }
 
+/// One raw `events` row with ALL persisted columns (including `ordinal` insertion order).
+///
+/// Amendment [N6]: includes `ordinal` to catch tail-delete + identical re-insert in
+/// the append-only prefix test (KAT-P1) at zero cost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawEventRow {
+    pub ordinal: i64,
+    pub event_id: String,
+    pub kind: String,
+    pub source: Option<String>,
+    pub source_ref: Option<String>,
+    pub decision_seq: Option<i64>,
+    pub utc_timestamp: String,
+    pub tz_offset_sec: i32,
+    pub wallet_json: Option<String>,
+    pub payload_json: String,
+    pub fingerprint: Option<String>,
+}
+
+/// The raw event log in INSERTION order — every persisted column of every row.
+///
+/// `SELECT ordinal, event_id, kind, ... FROM events ORDER BY ordinal`.
+/// Read-only; used for append-only prefix verification in tests (KAT-P1).
+/// This function is NOT a projection input.
+pub fn load_all_ordered(conn: &Connection) -> Result<Vec<RawEventRow>, CoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT ordinal, event_id, kind, source, source_ref, decision_seq, \
+         utc_timestamp, tz_offset_sec, wallet_json, payload_json, fingerprint \
+         FROM events ORDER BY ordinal",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(RawEventRow {
+            ordinal: r.get(0)?,
+            event_id: r.get(1)?,
+            kind: r.get(2)?,
+            source: r.get(3)?,
+            source_ref: r.get(4)?,
+            decision_seq: r.get(5)?,
+            utc_timestamp: r.get(6)?,
+            tz_offset_sec: r.get(7)?,
+            wallet_json: r.get(8)?,
+            payload_json: r.get(9)?,
+            fingerprint: r.get(10)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,5 +408,45 @@ mod tests {
                 variant
             );
         }
+    }
+
+    #[test]
+    fn load_all_ordered_empty_db_returns_empty_vec() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        let rows = load_all_ordered(&conn).unwrap();
+        assert!(rows.is_empty(), "empty events table must return empty vec");
+    }
+
+    #[test]
+    fn load_all_ordered_returns_rows_in_ordinal_order() {
+        use crate::event::{EventPayload, MethodElection};
+        use crate::project::LotMethod;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+
+        let now = OffsetDateTime::now_utc();
+        let tz = UtcOffset::UTC;
+        let p1 = EventPayload::MethodElection(MethodElection {
+            effective_from: date!(2024 - 01 - 01),
+            method: LotMethod::Fifo,
+        });
+        let p2 = EventPayload::MethodElection(MethodElection {
+            effective_from: date!(2025 - 01 - 01),
+            method: LotMethod::Hifo,
+        });
+        append_decision(&conn, p1, now, tz, None).unwrap();
+        append_decision(&conn, p2, now, tz, None).unwrap();
+
+        let rows = load_all_ordered(&conn).unwrap();
+        assert_eq!(rows.len(), 2, "must return 2 rows");
+        assert!(
+            rows[0].ordinal < rows[1].ordinal,
+            "rows must be in ordinal order"
+        );
+        assert_eq!(rows[0].decision_seq, Some(1));
+        assert_eq!(rows[1].decision_seq, Some(2));
     }
 }

@@ -2,15 +2,20 @@
 
 use crate::app::{App, Screen, Tab};
 use crate::tabs::{compliance, disposals, forms, holdings, income, tax};
+use crate::unlock::UnlockState;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Clear, Paragraph, Tabs, Wrap},
     Frame,
 };
+use std::path::Path;
 
 /// Top-level draw entry point.  Called once per iteration of the run loop.
-pub fn draw(frame: &mut Frame, app: &mut App) {
+///
+/// Kept `pub(crate)` because its signature takes `&mut App` (an internal type); the editor
+/// composes `tabs::*::render` directly rather than calling this.
+pub(crate) fn draw(frame: &mut Frame, app: &mut App) {
     match app.screen {
         Screen::Unlock => draw_unlock(frame, app),
         Screen::Locked => draw_locked(frame),
@@ -18,26 +23,38 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn draw_unlock(frame: &mut Frame, app: &App) {
+/// App-free unlock screen renderer.
+///
+/// Extracted so the editor crate can render its own unlock screen with EDITOR-branded
+/// strings while sharing the exact same layout and masked-input display.
+///
+/// Parameters:
+/// - `title` — the outer block title (e.g. `" btctax-tui — Unlock Vault "`).
+/// - `note_line` — the note/mode line shown below the passphrase field
+///   (e.g. `"offline · local · read-only · PGP-encrypted"`).
+pub fn draw_unlock_screen(
+    frame: &mut Frame,
+    vault_path: &Path,
+    unlock: &UnlockState,
+    title: &str,
+    note_line: &str,
+) {
     let area = frame.area();
 
     // Outer block provides the border and title
-    let block = Block::default()
-        .title(" btctax-tui — Unlock Vault ")
-        .borders(Borders::ALL);
+    let block = Block::default().title(title).borders(Borders::ALL);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     // Masked passphrase: one ● per character in the buffer (NEVER render actual chars)
-    let bullet_count = app.unlock.buffer.chars().count();
+    let bullet_count = unlock.buffer.chars().count();
     let masked = "●".repeat(bullet_count);
 
     // Vault path line (shows which vault is being opened)
-    let vault_line = format!("Vault: {}", app.vault_path.display());
+    let vault_line = format!("Vault: {}", vault_path.display());
 
     // Error line (empty string when no error, so layout stays stable)
-    let error_line = app
-        .unlock
+    let error_line = unlock
         .error
         .as_deref()
         .map(|e| format!("  ✗ {e}"))
@@ -49,7 +66,7 @@ fn draw_unlock(frame: &mut Frame, app: &App) {
          \n\
          Passphrase:  {masked}\n\
          \n\
-         offline · local · read-only · PGP-encrypted\n\
+         {note_line}\n\
          \n\
          {error_line}\n\
          \n\
@@ -58,6 +75,16 @@ fn draw_unlock(frame: &mut Frame, app: &App) {
 
     let msg = Paragraph::new(content).alignment(Alignment::Center);
     frame.render_widget(msg, inner);
+}
+
+fn draw_unlock(frame: &mut Frame, app: &App) {
+    draw_unlock_screen(
+        frame,
+        &app.vault_path,
+        &app.unlock,
+        " btctax-tui — Unlock Vault ",
+        "offline · local · read-only · PGP-encrypted",
+    );
 }
 
 fn draw_locked(frame: &mut Frame) {

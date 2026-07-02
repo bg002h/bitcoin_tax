@@ -3,7 +3,7 @@
 //! Whole-ledger (year-independent): `build_verify` is not year-scoped.
 //! STRICTLY READ-ONLY: no Session, no persistence, no mutations.
 
-use crate::app::App;
+use crate::app::{App, Snapshot};
 use btctax_cli::render::build_verify;
 use btctax_core::LotMethod;
 use ratatui::{
@@ -24,15 +24,14 @@ fn lot_method_tag(m: LotMethod) -> &'static str {
     }
 }
 
-/// Render the Compliance tab into `area`.
-pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
-    let Some(snap) = app.snapshot.as_ref() else {
-        let p = Paragraph::new("no snapshot loaded")
-            .block(Block::default().title(" Compliance ").borders(Borders::ALL));
-        frame.render_widget(p, area);
-        return;
-    };
-
+/// App-free renderer for the Compliance tab.
+///
+/// Extracted from `draw` so the editor crate can call this directly with its own
+/// `Snapshot`, without holding an `App`.
+///
+/// Note: `year` is accepted for API consistency with other tab renderers but is not
+/// used — the Compliance tab displays whole-ledger data (year-independent).
+pub fn render(frame: &mut Frame, area: Rect, snap: &Snapshot, _year: i32) {
     let content = render_compliance_content(snap);
     let p = Paragraph::new(content)
         .block(
@@ -44,10 +43,25 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(p, area);
 }
 
+/// Render the Compliance tab into `area`.
+///
+/// Thin `pub(crate)` wrapper over [`render`]: handles the `snapshot == None` placeholder
+/// exactly as before, then delegates to the App-free `render` fn.
+/// Call sites in `draw.rs` and `tabs/tests.rs` call this wrapper — unchanged.
+pub(crate) fn draw(frame: &mut Frame, area: Rect, app: &App) {
+    let Some(snap) = app.snapshot.as_ref() else {
+        let p = Paragraph::new("no snapshot loaded")
+            .block(Block::default().title(" Compliance ").borders(Borders::ALL));
+        frame.render_widget(p, area);
+        return;
+    };
+    render(frame, area, snap, app.selected_year);
+}
+
 /// Build the compliance report text from `snap`.
 ///
 /// Calls `build_verify` (pure read-only builder) and formats the `VerifyReport` fields.
-pub(crate) fn render_compliance_content(snap: &crate::app::Snapshot) -> String {
+pub(crate) fn render_compliance_content(snap: &Snapshot) -> String {
     let verify = build_verify(&snap.state, &snap.events, &snap.cli_config);
     let mut s = String::new();
 

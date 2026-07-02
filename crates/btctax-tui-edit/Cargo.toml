@@ -1,31 +1,26 @@
 [package]
-name = "btctax-tui"
+name = "btctax-tui-edit"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-[lib]
-name = "btctax_tui"
-path = "src/lib.rs"
-
 [[bin]]
-name = "btctax-tui"
+name = "btctax-tui-edit"
 path = "src/main.rs"
 
 [dependencies]
+btctax-tui      = { path = "../btctax-tui" }
 btctax-cli      = { path = "../btctax-cli" }
-btctax-store    = { path = "../btctax-store" }
 btctax-core     = { path = "../btctax-core" }
+btctax-store    = { path = "../btctax-store" }
 btctax-adapters = { path = "../btctax-adapters" }
 # [R0-M1] Explicit pinned versions — NO [workspace.dependencies] table exists.
-ratatui   = "0.29"
-crossterm = "0.28"
-# Match the workspace-shared versions used in btctax-core / btctax-cli.
-thiserror    = "1"
+ratatui      = "0.29"
+crossterm    = "0.28"
 rust_decimal = "1"
-# [R0-M1] Promoted from [dev-dependencies]: production use in ExportConfirmState + e keybinding.
-time = "0.3"
+time         = "0.3"
 
 [dev-dependencies]
-tempfile = "3"
+tempfile            = "3"
+rust_decimal_macros = "1"

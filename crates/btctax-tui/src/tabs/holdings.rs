@@ -2,12 +2,12 @@
 //!
 //! STRICTLY READ-ONLY: no Session, no persistence, no mutations.
 
-use crate::app::App;
+use crate::app::{App, Snapshot};
 use btctax_cli::render::wallet_label;
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
 };
 use rust_decimal::Decimal;
@@ -15,15 +15,20 @@ use rust_decimal::Decimal;
 use super::tags::basis_source_tag;
 use super::utils::sat_to_btc;
 
-/// Render the Holdings tab into `area`.
-pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
-    let Some(snap) = app.snapshot.as_ref() else {
-        let p = Paragraph::new("no snapshot loaded")
-            .block(Block::default().title(" Holdings ").borders(Borders::ALL));
-        frame.render_widget(p, area);
-        return;
-    };
-
+/// App-free renderer for the Holdings tab.
+///
+/// Extracted from `draw` so the editor crate can call this directly with its own
+/// `Snapshot` and `TableState`, without holding an `App`.
+///
+/// Note: `year` is accepted for API consistency with other stateful tab renderers
+/// but is not used — the Holdings tab shows all lots regardless of year.
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    snap: &Snapshot,
+    _year: i32,
+    table_state: &mut TableState,
+) {
     let lots = &snap.state.lots;
 
     if lots.is_empty() {
@@ -88,5 +93,26 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
         .block(Block::default().title(" Holdings ").borders(Borders::ALL))
         .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
-    frame.render_stateful_widget(table, area, &mut app.holdings_state);
+    frame.render_stateful_widget(table, area, table_state);
+}
+
+/// Render the Holdings tab into `area`.
+///
+/// Thin `pub(crate)` wrapper over [`render`]: handles the `snapshot == None` placeholder
+/// exactly as before, then delegates to the App-free `render` fn.
+/// Call sites in `draw.rs` and `tabs/tests.rs` call this wrapper — unchanged.
+pub(crate) fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
+    let Some(snap) = app.snapshot.as_ref() else {
+        let p = Paragraph::new("no snapshot loaded")
+            .block(Block::default().title(" Holdings ").borders(Borders::ALL));
+        frame.render_widget(p, area);
+        return;
+    };
+    render(
+        frame,
+        area,
+        snap,
+        app.selected_year,
+        &mut app.holdings_state,
+    );
 }

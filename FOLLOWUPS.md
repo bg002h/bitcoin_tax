@@ -4,6 +4,28 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ Mutating-TUI chunk 1 — btctax-tui-edit (tax-profile editing) — SHIPPED (2026-07-02) — THE KEY GOAL's first chunk
+
+The first vault-writing GUI binary, under the two-guarantee structure: the VIEWER went lib+bin (pure
+visibility — its write-free guarantee, E10 gate, and 76-test suite byte-untouched); the EDITOR
+(`btctax-tui-edit`) holds a live `mut Session` (VaultLock-exclusive, documented), writes ONLY via
+`edit/persist.rs` (its own mechanized gate incl. the four vault-CREATING constructor tokens — the R0-I1
+hole), every mutation behind a payload-showing confirmation modal (Enter → typed setter → `save()`'s
+atomic tmp/.bak/rename path → live re-projection; Esc → bytes-identical; failed-save semantics pinned +
+KAT-S1 chmod-forced, green un-ignored). Chunk-1 flow: `p` → the 10-field tax-profile form (pre-populated;
+CLI-parity validation incl. whitespace pin) → confirm → the Tax tab recomputes. Safety: the append-only
+prefix test (full-row+ordinal `load_all_ordered`, new in core), the cancel-bytes test, E2E CLI-readback.
+Spec R0 2 rounds → 0C/0I; whole-branch review 0C/0I (M1 modal-values asserts folded). **777 workspace
+tests.**
+
+Deferred (OPEN): a sealed write-token (type-level modal gating); per-mutation bundled-data reload;
+try_env_passphrase duplication; the t1-report surface-listing drift (record-only); tightening negative
+validation on BOTH surfaces (CLI+editor) together. **NEXT: chunk 2 — the reconcile-decision family**
+(classify-inbound, reclassify-outflow/income, set-fmv, void — the append_decision flows on the same
+skeleton; the prefix test's strict form activates).
+
+---
+
 ## ✅ Export-from-TUI + FOLLOWUPS burndown 3 — SHIPPED IN PARALLEL (2026-07-02)
 
 Two lanes, isolated (main tree + worktree), user-approved parallelization; landed export-first, burndown
