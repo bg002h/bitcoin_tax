@@ -2,7 +2,7 @@
 //! over engine data — the CLI displays; the engine computes (NFR4/NFR5).
 use crate::config::CliConfig;
 use btctax_adapters::FileReport;
-use btctax_core::conventions::{tax_date, TRANSITION_DATE};
+use btctax_core::conventions::{tax_date, Usd, TRANSITION_DATE};
 use btctax_core::persistence::ImportReport;
 use btctax_core::DonationDetails;
 use btctax_core::{
@@ -1090,14 +1090,15 @@ pub fn render_schedule_d(
     s
 }
 
-/// P2-D Task 2 (D3): render the standalone Schedule SE **§1401 self-employment tax** figure for
-/// `year`. Mirrors `render_schedule_d` / `render_gift_advisory` — a standalone informational block
-/// that does NOT feed engine B (`TaxResult::total_federal_tax_attributable` is UNCHANGED by SE tax).
+/// P2-D Task 2 (D3 / Chunk A): render the standalone Schedule SE **§1401 self-employment tax**
+/// figure for `year`. Mirrors `render_schedule_d` / `render_gift_advisory` — a standalone
+/// informational block that does NOT feed engine B (`TaxResult::total_federal_tax_attributable` is
+/// UNCHANGED by SE tax).
 ///
 /// Three cases (no silent drop — mirrors P2-C's m6):
 /// - `result = Some(r)` → the full Schedule SE section: net SE income, the 92.35% base, the
 ///   SS/Medicare/Additional-Medicare components, total §1401 SE tax, the §164(f) deductible half,
-///   the [D4/I2] dual-direction W-2 disclosure, and the [D5] standalone note.
+///   the §164(f) advisory, the W-2 coordination disclosure, and the [D5] standalone note.
 /// - `result = None` AND `business_income_present` → a "SS wage base unavailable for {year}" note
 ///   (business SE income exists but the year has no bundled table → the wage base is unknown; the
 ///   §1401 tax is NOT computed rather than silently dropped).
@@ -1105,10 +1106,16 @@ pub fn render_schedule_d(
 ///
 /// `business_income_present` is `!se_net_income(state, year).is_zero()` (computed by the caller —
 /// the single §1402(a) SE-eligibility predicate lives in core).
+///
+/// `w2_ss_wages` / `w2_medicare_wages` are the values from `TaxProfile` (both ≥ 0). When either
+/// is > $0 the coordinated disclosure is rendered; when both are $0 the short $0-assumed note is
+/// shown.
 pub fn render_schedule_se(
     year: i32,
     result: Option<&SeTaxResult>,
     business_income_present: bool,
+    w2_ss_wages: Usd,
+    w2_medicare_wages: Usd,
 ) -> Option<String> {
     match result {
         Some(r) => {
@@ -1157,17 +1164,37 @@ pub fn render_schedule_se(
                  §164(f)(1)): {}",
                 fmt_money(r.deductible_half)
             );
-            // [D4/I2] W-2 disclosure — the $0-W-2 assumption moves TWO components in OPPOSITE
-            // directions; state each with the correct direction.
+            // [Chunk A / R0-I3] §164(f) advisory — quantified first-order overstatement; NO prescription
+            // to edit ordinary_taxable_income (wrong mechanism — see spec D3/R0-I3 rationale).
             let _ = writeln!(
                 s,
-                "  (W-2 assumption) Assumes $0 W-2 wages. If you had a wage job: (1) the 12.4% Social \
-                 Security component may be OVERSTATED — its cap is the wage base LESS your W-2 \
-                 Social-Security wages (a lower cap → less SS); AND (2) the 0.9% Additional Medicare \
-                 component may be UNDERSTATED — the §1401(b)(2)(B)/Form 8959 threshold is REDUCED by \
-                 your W-2 Medicare wages (a lower threshold → MORE income taxed at 0.9%). Adjust each \
-                 accordingly."
+                "  (§164(f) advisory) The §164(f) deduction ({}) is NOT auto-coordinated into the \
+                 income-tax total above — to first order, that total overstates your combined tax by \
+                 your marginal ordinary rate applied to {}. The tax profile cannot express this deduction \
+                 directly (reducing `ordinary_taxable_income` would shift BOTH legs of the \
+                 crypto-attributable delta and only correct the bracket differential, not the level) — \
+                 coordinate it on your actual return.",
+                fmt_money(r.deductible_half),
+                fmt_money(r.deductible_half)
             );
+            // [Chunk A / D3] W-2 coordination disclosure — accurate when W-2 values are set;
+            // short $0-assumed note otherwise. REMOVES the old OVERSTATED/UNDERSTATED hedging.
+            if w2_ss_wages > Usd::ZERO || w2_medicare_wages > Usd::ZERO {
+                let _ = writeln!(
+                    s,
+                    "  (W-2 coordination applied) SS cap = max(0, wage base \u{2212} {}) (Box 3+7); \
+                     Additional-Medicare threshold reduced (not below 0) by {} (Box 5, \
+                     §1401(b)(2)(B)/Form 8959 Part II).",
+                    fmt_money(w2_ss_wages),
+                    fmt_money(w2_medicare_wages)
+                );
+            } else {
+                let _ = writeln!(
+                    s,
+                    "  (W-2) assumes $0 W-2 wages (set --w2-ss-wages/--w2-medicare-wages on the tax \
+                     profile if you had a wage job)."
+                );
+            }
             // [D5] standalone note — SE tax is a SEPARATE liability, not in the income-tax + NIIT total.
             let _ = writeln!(
                 s,
@@ -2318,12 +2345,12 @@ mod gift_advisory_tests {
 
 #[cfg(test)]
 mod schedule_se_tests {
-    //! P2-D Task 2 KATs — `render_schedule_se` + `schedule_se.csv`. The rendered figures reuse the
-    //! hand-verified Golden 1 `SeTaxResult` (Single $100,000 business mining). PRIVACY: synthetic.
+    //! P2-D Task 2 / Chunk A KATs — `render_schedule_se` + `schedule_se.csv`. The rendered figures
+    //! reuse the hand-verified Golden 1 `SeTaxResult` (Single $100,000 business mining). PRIVACY: synthetic.
     use super::*;
     use rust_decimal_macros::dec;
 
-    /// Golden 1 SeTaxResult (Single, $100,000 business mining) — see btctax-core se.rs KATs.
+    /// Golden 1 SeTaxResult (Single, $100,000 business mining, no W-2) — see btctax-core se.rs KATs.
     fn golden1() -> SeTaxResult {
         SeTaxResult {
             net_se: dec!(100000),
@@ -2336,12 +2363,40 @@ mod schedule_se_tests {
         }
     }
 
-    /// Business-mining year → full Schedule SE section: components + total + deductible half + the
-    /// [I2] dual-direction W-2 disclosure + the [D5] standalone note.
+    /// [Chunk A] W-2 SeTaxResult: Single, mining $100k, w2_ss $150k, w2_medicare $150k.
+    fn w2_headline() -> SeTaxResult {
+        SeTaxResult {
+            net_se: dec!(100000),
+            base: dec!(92350.00),
+            ss: dec!(3236.40),
+            medicare: dec!(2678.15),
+            addl: dec!(381.15),
+            total: dec!(6295.70),
+            deductible_half: dec!(2957.28),
+        }
+    }
+
+    /// [Chunk A] Asymmetric SeTaxResult: w2_ss $150k, w2_medicare $0.
+    fn w2_asymmetric() -> SeTaxResult {
+        SeTaxResult {
+            net_se: dec!(100000),
+            base: dec!(92350.00),
+            ss: dec!(3236.40),
+            medicare: dec!(2678.15),
+            addl: dec!(0.00),
+            total: dec!(5914.55),
+            deductible_half: dec!(2957.28),
+        }
+    }
+
+    /// Business-mining year → full Schedule SE section: components + total + deductible half +
+    /// [Chunk A] the $0-W-2 short note + the §164(f) advisory + the [D5] standalone note.
+    /// [R0-I2 regression] OVERSTATED/UNDERSTATED text is GONE; new $0 note is present.
     #[test]
     fn business_mining_year_renders_full_section() {
         let r = golden1();
-        let s = render_schedule_se(2025, Some(&r), true).expect("SE section expected");
+        let s = render_schedule_se(2025, Some(&r), true, Usd::ZERO, Usd::ZERO)
+            .expect("SE section expected");
         // Components + total + §164(f) half.
         assert!(s.contains("92350.00"), "net SE earnings base: {s}");
         assert!(s.contains("11451.40"), "SS component: {s}");
@@ -2352,18 +2407,31 @@ mod schedule_se_tests {
             s.contains("Additional Medicare"),
             "addl component labeled: {s}"
         );
-        // [I2] W-2 disclosure — CORRECT opposite directions.
+        // [Chunk A / R0-I2] NEW $0-W-2 short note present; old OVERSTATED/UNDERSTATED GONE.
         assert!(
-            s.contains("OVERSTATED"),
-            "SS component may be OVERSTATED: {s}"
+            s.contains("$0 W-2 wages"),
+            "short $0-W-2 note must appear (both W-2 = 0): {s}"
         );
         assert!(
-            s.contains("UNDERSTATED"),
-            "Additional-Medicare component may be UNDERSTATED: {s}"
+            s.contains("--w2-ss-wages"),
+            "$0 note must mention --w2-ss-wages flag: {s}"
         );
         assert!(
-            s.contains("§1401(b)(2)(B)"),
-            "cites the Form 8959 threshold: {s}"
+            !s.contains("OVERSTATED"),
+            "old OVERSTATED text must be absent (Chunk A regression): {s}"
+        );
+        assert!(
+            !s.contains("UNDERSTATED"),
+            "old UNDERSTATED text must be absent (Chunk A regression): {s}"
+        );
+        // [Chunk A / R0-I3] §164(f) advisory present.
+        assert!(
+            s.contains("NOT auto-coordinated"),
+            "§164(f) advisory must appear: {s}"
+        );
+        assert!(
+            s.contains("coordinate it on your actual return"),
+            "§164(f) advisory must include coordination instruction: {s}"
         );
         // [D5] standalone note.
         assert!(
@@ -2374,26 +2442,83 @@ mod schedule_se_tests {
             s.contains("not") && s.contains("§164(f)"),
             "notes §164(f) not auto-coordinated: {s}"
         );
-        // [Minor-2] expenses caveat: labels the net_se figure as gross mining income and discloses
-        // that no Schedule C business expenses are modeled (conservative: SE tax is overstated if
-        // the user has deductible expenses).
+        // [Minor-2] expenses caveat.
         assert!(
             s.contains("Schedule C deductible business expenses are not modeled"),
             "expenses caveat must appear in Schedule SE render: {s}"
         );
     }
 
+    /// [Chunk A / D3] When W-2 values are set, the coordinated disclosure appears with §1401(b)(2)(B).
+    #[test]
+    fn w2_set_renders_coordinated_disclosure() {
+        let r = w2_headline();
+        let s = render_schedule_se(2025, Some(&r), true, dec!(150000), dec!(150000))
+            .expect("SE section expected");
+        // [D3] Coordinated text present.
+        assert!(
+            s.contains("W-2 coordination applied"),
+            "coordinated disclosure must appear: {s}"
+        );
+        assert!(
+            s.contains("§1401(b)(2)(B)"),
+            "must cite §1401(b)(2)(B): {s}"
+        );
+        assert!(
+            s.contains("Form 8959 Part II"),
+            "must cite Form 8959 Part II: {s}"
+        );
+        // The W-2 amounts appear in the disclosure text.
+        assert!(s.contains("150000"), "w2_ss_wages amount must appear: {s}");
+        // Old OVERSTATED/UNDERSTATED text ABSENT even in W-2 mode.
+        assert!(!s.contains("OVERSTATED"), "OVERSTATED must be absent: {s}");
+        assert!(
+            !s.contains("UNDERSTATED"),
+            "UNDERSTATED must be absent: {s}"
+        );
+        // Figures correct.
+        assert!(s.contains("3236.40"), "reduced SS component: {s}");
+        assert!(s.contains("381.15"), "non-zero addl: {s}");
+        assert!(s.contains("6295.70"), "reduced total: {s}");
+        assert!(s.contains("2957.28"), "deductible_half: {s}");
+    }
+
+    /// [Chunk A / I4] Asymmetric-W-2 transposition guard (render level): w2_ss $150k, w2_medicare $0 →
+    /// ss == $3,236.40 AND addl == $0.00 in the rendered text.
+    /// A swapped (w2_medicare, w2_ss) argument order at the call site would flip both values.
+    #[test]
+    fn w2_asymmetric_render_transposition_guard() {
+        let r = w2_asymmetric();
+        let s = render_schedule_se(2025, Some(&r), true, dec!(150000), Usd::ZERO)
+            .expect("SE section expected");
+        // W-2 coordination text must appear (w2_ss > 0).
+        assert!(
+            s.contains("W-2 coordination applied"),
+            "coordinated disclosure must appear: {s}"
+        );
+        // ss is reduced, addl is 0 — not transposed values.
+        assert!(s.contains("3236.40"), "ss must be 3236.40 (reduced): {s}");
+        assert!(
+            s.contains("0.00"),
+            "addl must be 0.00 (threshold un-reduced): {s}"
+        );
+        // The old OVERSTATED/UNDERSTATED is absent.
+        assert!(!s.contains("OVERSTATED"), "{s}");
+        assert!(!s.contains("UNDERSTATED"), "{s}");
+    }
+
     /// No business SE income → no Schedule SE section (None).
     #[test]
     fn no_business_income_no_section() {
-        assert!(render_schedule_se(2025, None, false).is_none());
+        assert!(render_schedule_se(2025, None, false, Usd::ZERO, Usd::ZERO).is_none());
     }
 
     /// Business SE income present but no bundled table → the "SS wage base unavailable" note (no
     /// silent drop).
     #[test]
     fn business_income_but_no_table_emits_note() {
-        let s = render_schedule_se(2099, None, true).expect("wage-base-unavailable note expected");
+        let s = render_schedule_se(2099, None, true, Usd::ZERO, Usd::ZERO)
+            .expect("wage-base-unavailable note expected");
         assert!(s.contains("SS wage base unavailable"), "{s}");
         assert!(s.contains("2099"), "names the year: {s}");
         assert!(s.contains("no silent drop"), "{s}");

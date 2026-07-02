@@ -20,6 +20,8 @@ fn prof_2025() -> TaxProfile {
             short: dec!(0),
             long: dec!(0),
         },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     }
 }
 
@@ -68,6 +70,8 @@ fn set_overwrites_previous_profile() {
             short: dec!(200),
             long: dec!(300),
         },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     };
     cmd::tax::set_profile(&vault, &pp(), 2025, updated.clone()).unwrap();
 
@@ -89,6 +93,8 @@ fn multiple_years_are_independent() {
         qualified_dividends_and_other_pref_income: dec!(0),
         other_net_capital_gain: dec!(0),
         capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     };
     cmd::tax::set_profile(&vault, &pp(), 2024, p24.clone()).unwrap();
     cmd::tax::set_profile(&vault, &pp(), 2025, prof_2025()).unwrap();

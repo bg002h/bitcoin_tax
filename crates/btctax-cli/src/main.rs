@@ -132,6 +132,16 @@ enum Command {
         /// §1212(b) long-term capital loss carryforward into this year (optional; defaults to 0).
         #[arg(long)]
         carryforward_long: Option<String>,
+        /// Form W-2 Social Security wages (Box 3 + Box 7 tips; Schedule SE line 8a).
+        /// Reduces the §1401(a) SS cap: ss_cap = max(0, wage_base − w2_ss_wages). Optional;
+        /// defaults to $0. Must not be negative.
+        #[arg(long)]
+        w2_ss_wages: Option<String>,
+        /// Medicare wages (Box 5; Form 8959 line 1).
+        /// Reduces the Additional-Medicare threshold: addl_threshold = max(0, threshold − w2_medicare_wages)
+        /// (§1401(b)(2)(B)/Form 8959 Part II). Optional; defaults to $0. Must not be negative.
+        #[arg(long)]
+        w2_medicare_wages: Option<String>,
         /// Show the stored profile for `--year` instead of setting it.
         #[arg(long, default_value_t = false)]
         show: bool,
@@ -617,6 +627,8 @@ fn run() -> Result<ExitCode, CliError> {
             other_net_capital_gain,
             carryforward_short,
             carryforward_long,
+            w2_ss_wages,
+            w2_medicare_wages,
             show,
         } => {
             let pp = passphrase(false)?;
@@ -630,7 +642,9 @@ fn run() -> Result<ExitCode, CliError> {
                          qualified_dividends_and_other_pref_income: {}\n\
                          other_net_capital_gain: {}\n\
                          capital_loss_carryforward_in.short: {}\n\
-                         capital_loss_carryforward_in.long: {}",
+                         capital_loss_carryforward_in.long: {}\n\
+                         w2_ss_wages: {}\n\
+                         w2_medicare_wages: {}",
                         render::filing_status_tag(p.filing_status),
                         p.ordinary_taxable_income,
                         p.magi_excluding_crypto,
@@ -638,6 +652,8 @@ fn run() -> Result<ExitCode, CliError> {
                         p.other_net_capital_gain,
                         p.capital_loss_carryforward_in.short,
                         p.capital_loss_carryforward_in.long,
+                        p.w2_ss_wages,
+                        p.w2_medicare_wages,
                     ),
                     None => println!("none"),
                 }
@@ -686,6 +702,24 @@ fn run() -> Result<ExitCode, CliError> {
                     .map(eventref::parse_usd_arg)
                     .transpose()?
                     .unwrap_or_default();
+                let w2_ss = w2_ss_wages
+                    .as_deref()
+                    .map(eventref::parse_usd_arg)
+                    .transpose()?
+                    .unwrap_or_default();
+                if w2_ss.is_sign_negative() {
+                    return Err(CliError::Usage("--w2-ss-wages must not be negative".into()));
+                }
+                let w2_medicare = w2_medicare_wages
+                    .as_deref()
+                    .map(eventref::parse_usd_arg)
+                    .transpose()?
+                    .unwrap_or_default();
+                if w2_medicare.is_sign_negative() {
+                    return Err(CliError::Usage(
+                        "--w2-medicare-wages must not be negative".into(),
+                    ));
+                }
 
                 let profile = TaxProfile {
                     filing_status: FilingStatus::from(fs),
@@ -697,6 +731,8 @@ fn run() -> Result<ExitCode, CliError> {
                         short: cf_short,
                         long: cf_long,
                     },
+                    w2_ss_wages: w2_ss,
+                    w2_medicare_wages: w2_medicare,
                 };
                 cmd::tax::set_profile(vault, &pp, year, profile)?;
                 println!("Tax profile for {year} saved.");

@@ -38,6 +38,8 @@ fn single_100k_profile() -> TaxProfile {
         qualified_dividends_and_other_pref_income: dec!(0),
         other_net_capital_gain: dec!(0),
         capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     }
 }
 
@@ -699,6 +701,8 @@ fn void_clears_attestation_row_prevents_mislabel_as_attested_recording() {
         qualified_dividends_and_other_pref_income: dec!(0),
         other_net_capital_gain: dec!(0),
         capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     };
     cmd::tax::set_profile(&vault, &pp(), 2025, zero_income).unwrap();
 

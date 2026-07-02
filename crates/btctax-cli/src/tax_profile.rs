@@ -103,6 +103,8 @@ mod tests {
                 short: dec!(0),
                 long: dec!(0),
             },
+            w2_ss_wages: dec!(0),
+            w2_medicare_wages: dec!(0),
         }
     }
 

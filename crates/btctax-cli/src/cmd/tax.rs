@@ -79,10 +79,23 @@ pub fn report_tax_year(
     let schedule_se = match profile.as_ref() {
         Some(p) => {
             let business_income_present = !se_net_income(&state, year).is_zero();
-            let se_result = tables
-                .table_for(year)
-                .and_then(|t| compute_se_tax(&state, year, p.filing_status, t));
-            crate::render::render_schedule_se(year, se_result.as_ref(), business_income_present)
+            let se_result = tables.table_for(year).and_then(|t| {
+                compute_se_tax(
+                    &state,
+                    year,
+                    p.filing_status,
+                    t,
+                    p.w2_ss_wages,
+                    p.w2_medicare_wages,
+                )
+            });
+            crate::render::render_schedule_se(
+                year,
+                se_result.as_ref(),
+                business_income_present,
+                p.w2_ss_wages,
+                p.w2_medicare_wages,
+            )
         }
         None => None,
     };

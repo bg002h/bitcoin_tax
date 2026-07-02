@@ -31,6 +31,8 @@ fn single(ord: Usd, magi: Usd, qd: Usd) -> TaxProfile {
         qualified_dividends_and_other_pref_income: qd,
         other_net_capital_gain: dec!(0),
         capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     }
 }
 
@@ -43,6 +45,8 @@ fn mfj_profile(ord: Usd, magi: Usd) -> TaxProfile {
         qualified_dividends_and_other_pref_income: dec!(0),
         other_net_capital_gain: dec!(0),
         capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     }
 }
 
@@ -55,6 +59,8 @@ fn mfs_profile(ord: Usd, magi: Usd) -> TaxProfile {
         qualified_dividends_and_other_pref_income: dec!(0),
         other_net_capital_gain: dec!(0),
         capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     }
 }
 
@@ -67,6 +73,8 @@ fn hoh_profile(ord: Usd, magi: Usd) -> TaxProfile {
         qualified_dividends_and_other_pref_income: dec!(0),
         other_net_capital_gain: dec!(0),
         capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     }
 }
 
@@ -79,6 +87,8 @@ fn qss_profile(ord: Usd, magi: Usd) -> TaxProfile {
         qualified_dividends_and_other_pref_income: dec!(0),
         other_net_capital_gain: dec!(0),
         capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     }
 }
 

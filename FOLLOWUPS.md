@@ -4,6 +4,29 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ SE completion Chunk A — W-2 wage coordination — SHIPPED (2026-07-01)
+
+Queue item 2, chunk 1 of 3. `TaxProfile.w2_ss_wages`/`w2_medicare_wages` (`#[serde(default)]`; CLI flags,
+negative-rejected on the real path, `--show`) → `compute_se_tax(…, w2_ss, w2_medicare)`: SS cap =
+max(0, wage_base − w2_ss) (§1402(b)(1)/Sch SE 8a-9) + Additional-Medicare threshold = max(0, threshold −
+w2_medicare) (§1401(b)(2)(B)/Form 8959 Part II). ALL THREE surfaces (report/CSV/TUI) source the profile;
+asymmetric transposition + export-parity KATs. Goldens $6,295.70 (both directions) / ss-$0 above-base /
+addl-$831.15 threshold-zeroed (deductible $7,064.78 unchanged — addl still excluded). The dual-direction
+"$0 assumed" hedging REPLACED with accurate coordinated/unset text; the §164(f) advisory now QUANTIFIES the
+first-order overstatement (no OTI-edit prescription — wrong mechanism, R0-I3). P2-D figure-sets
+byte-identical. R0 2 rounds → 0C/0I (formulas verified against the actual Sch SE + Form 8959); whole-diff
+0C/0I. 655 tests.
+
+Deferred (OPEN): a binary-level test pinning the negative-flag Usage errors (M-1; the config_dispatch.rs
+harness makes it cheap — pair with the same gap on --prior-taxable-gifts); the TUI's condensed SE block
+omits the coordination disclosure text (N-1). **Cluster remaining: Chunk C** — ReclassifyIncome decision
+(River business:false flip; new EventPayload variant + resolve collection + build_op override + CLI;
+old-vaults-read-fine back-compat) → **Chunk B** — Schedule C expenses (ADVISORY-ONLY: reduces net_se,
+floored at 0; engine-B gross-vs-net coordination explicitly deferred — high blast radius). Full §164(f)
+auto-coordination remains deferred (circular + breaks the identity).
+
+---
+
 ## ✅ NII interest slice — crypto-lending interest → §1411 NII — SHIPPED (2026-07-01)
 
 Queue item 1 (user-confirmed order). **RESOLVES the B-M1 "per-IncomeKind NII" deferral** — the known
