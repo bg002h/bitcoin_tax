@@ -761,4 +761,122 @@ mod tests {
         assert_eq!(r.total_federal_tax_attributable, dec!(446.25));
         assert_eq!(r.niit, dec!(0));
     }
+
+    // ── KAT-A8 — TY2024 FULL-SCHEDULE equality lock (burndown-3 D5, closing TY2024 M1) ─────────────
+    //
+    // The exhaustive lock: every one of the 28 ordinary bracket edges (4 statuses × 7) and all 28
+    // rates asserted by DIRECT equality against arrays transcribed VERBATIM from
+    // design/SPEC_ty2024_tables.md §3.01 Tables 1–4 (triple-verified against Rev. Proc. 2023-34 /
+    // IRB 2023-48 — transcribed, never re-derived), plus the four §3.03 LTCG pairs (re-asserting
+    // KAT-A3 so this single test is the complete TY2024 schedule lock).
+    //
+    // Why it exists: A1/A2 pin only a handful of edges, and the A6a–A6d compute KATs assert
+    // marginal DELTAS, which a lower-edge transposition can cancel (the M1 delta-cancellation
+    // hole). Direct full-schedule equality closes it. A1–A7 remain as the readable spot-checks.
+
+    #[test]
+    fn ty2024_full_schedule_equality_all_28_edges_and_ltcg() {
+        let t = BundledTaxTables::load();
+        let tt = t.table_for(2024).unwrap();
+
+        // §3.01 Tables 1–4 — (lower, rate) pairs, verbatim from SPEC_ty2024_tables.md.
+        // Table 3 — §1(j)(2)(C): Unmarried Individuals (Single)
+        let single: [(Usd, Usd); 7] = [
+            (dec!(0), dec!(0.10)),
+            (dec!(11600), dec!(0.12)),
+            (dec!(47150), dec!(0.22)),
+            (dec!(100525), dec!(0.24)),
+            (dec!(191950), dec!(0.32)),
+            (dec!(243725), dec!(0.35)),
+            (dec!(609350), dec!(0.37)),
+        ];
+        // Table 1 — §1(j)(2)(A): Married Filing Jointly / Qualifying Surviving Spouse
+        let mfj: [(Usd, Usd); 7] = [
+            (dec!(0), dec!(0.10)),
+            (dec!(23200), dec!(0.12)),
+            (dec!(94300), dec!(0.22)),
+            (dec!(201050), dec!(0.24)),
+            (dec!(383900), dec!(0.32)),
+            (dec!(487450), dec!(0.35)),
+            (dec!(731200), dec!(0.37)),
+        ];
+        // Table 2 — §1(j)(2)(B): Head of Household (35% starts $243,700 — NOT Single/MFS $243,725)
+        let hoh: [(Usd, Usd); 7] = [
+            (dec!(0), dec!(0.10)),
+            (dec!(16550), dec!(0.12)),
+            (dec!(63100), dec!(0.22)),
+            (dec!(100500), dec!(0.24)),
+            (dec!(191950), dec!(0.32)),
+            (dec!(243700), dec!(0.35)),
+            (dec!(609350), dec!(0.37)),
+        ];
+        // Table 4 — §1(j)(2)(D): Married Filing Separately (37% starts $365,600)
+        let mfs: [(Usd, Usd); 7] = [
+            (dec!(0), dec!(0.10)),
+            (dec!(11600), dec!(0.12)),
+            (dec!(47150), dec!(0.22)),
+            (dec!(100525), dec!(0.24)),
+            (dec!(191950), dec!(0.32)),
+            (dec!(243725), dec!(0.35)),
+            (dec!(365600), dec!(0.37)),
+        ];
+
+        for (status, expected) in [
+            (FilingStatus::Single, &single),
+            (FilingStatus::Mfj, &mfj),
+            (FilingStatus::HoH, &hoh),
+            (FilingStatus::Mfs, &mfs),
+        ] {
+            let sched = tt.ordinary_for(status);
+            assert_eq!(
+                sched.brackets.len(),
+                7,
+                "{status:?}: TY2024 must have exactly 7 ordinary brackets"
+            );
+            for (i, (lower, rate)) in expected.iter().enumerate() {
+                assert_eq!(
+                    sched.brackets[i].lower, *lower,
+                    "{status:?} bracket[{i}] lower must match Rev. Proc. 2023-34 §3.01 verbatim"
+                );
+                assert_eq!(
+                    sched.brackets[i].rate, *rate,
+                    "{status:?} bracket[{i}] rate must match Rev. Proc. 2023-34 §3.01 verbatim"
+                );
+            }
+        }
+
+        // §3.03 LTCG pairs (re-asserting KAT-A3 for a single self-contained full-schedule lock).
+        for (status, max_zero, max_fifteen) in [
+            (FilingStatus::Single, dec!(47025), dec!(518900)),
+            (FilingStatus::Mfj, dec!(94050), dec!(583750)),
+            (FilingStatus::HoH, dec!(63000), dec!(551350)),
+            // MFS max_fifteen = $291,850 (NOT $291,875 = $583,750/2; independent rounding).
+            (FilingStatus::Mfs, dec!(47025), dec!(291850)),
+        ] {
+            assert_eq!(
+                *tt.ltcg_for(status),
+                LtcgBreakpoints {
+                    max_zero,
+                    max_fifteen
+                },
+                "{status:?} LTCG pair must match Rev. Proc. 2023-34 §3.03 verbatim"
+            );
+        }
+
+        // [R0-N3] Qss is NOT a stored key in either map (it aliases MFJ via TaxTable::key) —
+        // direct assertions on the pub fields, plus the alias check.
+        assert!(
+            !tt.ordinary.contains_key(&FilingStatus::Qss),
+            "Qss must not be a stored ordinary key (aliases Mfj at lookup)"
+        );
+        assert!(
+            !tt.ltcg.contains_key(&FilingStatus::Qss),
+            "Qss must not be a stored ltcg key (aliases Mfj at lookup)"
+        );
+        assert_eq!(
+            tt.ordinary_for(FilingStatus::Qss),
+            tt.ordinary_for(FilingStatus::Mfj),
+            "Qss ordinary lookup must alias the MFJ schedule"
+        );
+    }
 }

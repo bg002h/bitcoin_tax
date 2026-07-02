@@ -422,13 +422,54 @@ pub fn resolve(
 
     // ── 1d. ManualFmv ───────────────────────────────────────────────────────────────────────────
     // Collect event_id → usd_fmv; latest decision_seq wins (ascending iteration = last write wins).
+    // Validates the effective target payload at collection time (all four decision types in passes
+    // 1d/1e now share this invariant: target absent or wrong type → Hard DecisionConflict, EXCLUDED).
+    // Note: ManualFmv deliberately keeps latest-seq-wins with NO duplicate blocker — a valid
+    // re-pointing of an FMV is a correction flow, not a conflict.
     let mut manual_fmv: BTreeMap<EventId, Usd> = BTreeMap::new();
     for (_seq, d) in &decisions {
         if voided.contains(&d.id) {
             continue;
         }
         if let EventPayload::ManualFmv(m) = &d.payload {
-            manual_fmv.insert(m.event.clone(), m.usd_fmv);
+            let target = &m.event;
+            let effective_payload = by_id
+                .get(target)
+                .map(|raw| applied.get(target).unwrap_or(&raw.payload));
+            match effective_payload {
+                None => {
+                    // Target event does not exist in the ledger at all.
+                    blockers.push(Blocker {
+                        kind: BlockerKind::DecisionConflict,
+                        event: Some(d.id.clone()),
+                        detail: format!(
+                            "ManualFmv targets unknown event {} \
+                             — void the decision to clear this blocker",
+                            target.canonical()
+                        ),
+                    });
+                    // Decision EXCLUDED: not inserted into manual_fmv.
+                }
+                Some(EventPayload::Income(_)) => {
+                    // Valid Income target. Latest-seq-wins: ascending iteration = last write wins.
+                    // NO duplicate blocker (deliberate — re-pointing an FMV is a correction flow).
+                    manual_fmv.insert(target.clone(), m.usd_fmv);
+                }
+                Some(_) => {
+                    // Target exists but its effective payload is not Income. Hard blocker; EXCLUDED.
+                    blockers.push(Blocker {
+                        kind: BlockerKind::DecisionConflict,
+                        event: Some(d.id.clone()),
+                        detail: format!(
+                            "ManualFmv targets non-Income event {} \
+                             — for a TransferIn classified as income, set the FMV via \
+                             classify-inbound-income (its own `fmv` field); void this decision",
+                            target.canonical()
+                        ),
+                    });
+                    // Decision EXCLUDED: not inserted into manual_fmv.
+                }
+            }
         }
     }
 
@@ -486,41 +527,119 @@ pub fn resolve(
                 }
             }
             EventPayload::ClassifyInbound(ci) => {
-                if inbound_class.contains_key(&ci.transfer_in_event) {
-                    blockers.push(Blocker {
-                        kind: BlockerKind::DecisionConflict,
-                        event: Some(d.id.clone()),
-                        detail: "duplicate ClassifyInbound for the same TransferIn event".into(),
-                    });
-                } else {
-                    inbound_class.insert(ci.transfer_in_event.clone(), ci.as_.clone());
+                let target = &ci.transfer_in_event;
+                let effective_payload = by_id
+                    .get(target)
+                    .map(|raw| applied.get(target).unwrap_or(&raw.payload));
+                match effective_payload {
+                    None => {
+                        // Target event does not exist in the ledger at all.
+                        blockers.push(Blocker {
+                            kind: BlockerKind::DecisionConflict,
+                            event: Some(d.id.clone()),
+                            detail: format!(
+                                "ClassifyInbound targets unknown event {} \
+                                 — void the decision to clear this blocker",
+                                target.canonical()
+                            ),
+                        });
+                        // Decision EXCLUDED: not inserted into inbound_class.
+                    }
+                    Some(EventPayload::TransferIn(_)) => {
+                        // Valid TransferIn target. Duplicate → conflict; FIRST-WINS.
+                        // Deliberately NOT validated (D1 non-goal): a TransferIn consumed by a
+                        // TransferLink (`consumed_ins`) passes type-validation here — the link
+                        // consumes first in build_op. That is a *precedence* question, not a bad
+                        // target; unchanged.
+                        if inbound_class.contains_key(target) {
+                            blockers.push(Blocker {
+                                kind: BlockerKind::DecisionConflict,
+                                event: Some(d.id.clone()),
+                                detail: "duplicate ClassifyInbound for the same TransferIn event"
+                                    .into(),
+                            });
+                            // Second decision EXCLUDED; first-wins value stays in map.
+                        } else {
+                            inbound_class.insert(target.clone(), ci.as_.clone());
+                        }
+                    }
+                    Some(_) => {
+                        // Target exists but its effective payload is not TransferIn. Hard blocker; EXCLUDED.
+                        blockers.push(Blocker {
+                            kind: BlockerKind::DecisionConflict,
+                            event: Some(d.id.clone()),
+                            detail: format!(
+                                "ClassifyInbound targets non-TransferIn event {} \
+                                 — void the decision to clear this blocker",
+                                target.canonical()
+                            ),
+                        });
+                        // Decision EXCLUDED: not inserted into inbound_class.
+                    }
                 }
             }
             EventPayload::ReclassifyOutflow(ro) => {
-                if outflow_class.contains_key(&ro.transfer_out_event) {
-                    blockers.push(Blocker {
-                        kind: BlockerKind::DecisionConflict,
-                        event: Some(d.id.clone()),
-                        detail: "duplicate ReclassifyOutflow for the same TransferOut event".into(),
-                    });
-                } else {
-                    outflow_class.insert(ro.transfer_out_event.clone(), ro.clone());
+                let target = &ro.transfer_out_event;
+                let effective_payload = by_id
+                    .get(target)
+                    .map(|raw| applied.get(target).unwrap_or(&raw.payload));
+                match effective_payload {
+                    None => {
+                        // Target event does not exist in the ledger at all.
+                        blockers.push(Blocker {
+                            kind: BlockerKind::DecisionConflict,
+                            event: Some(d.id.clone()),
+                            detail: format!(
+                                "ReclassifyOutflow targets unknown event {} \
+                                 — void the decision to clear this blocker",
+                                target.canonical()
+                            ),
+                        });
+                        // Decision EXCLUDED: not inserted into outflow_class.
+                    }
+                    Some(EventPayload::TransferOut(_)) => {
+                        // Valid TransferOut target. Duplicate → conflict; FIRST-WINS.
+                        // Deliberately NOT validated (D1 non-goal): a TransferOut that is ALSO
+                        // TransferLink'd passes type-validation but stays overridden by the link
+                        // (links win in build_op, before outflow_class). That is a *precedence*
+                        // question, not a bad target; unchanged.
+                        if outflow_class.contains_key(target) {
+                            blockers.push(Blocker {
+                                kind: BlockerKind::DecisionConflict,
+                                event: Some(d.id.clone()),
+                                detail:
+                                    "duplicate ReclassifyOutflow for the same TransferOut event"
+                                        .into(),
+                            });
+                            // Second decision EXCLUDED; first-wins value stays in map.
+                        } else {
+                            outflow_class.insert(target.clone(), ro.clone());
+                        }
+                    }
+                    Some(_) => {
+                        // Target exists but its effective payload is not TransferOut. Hard blocker; EXCLUDED.
+                        blockers.push(Blocker {
+                            kind: BlockerKind::DecisionConflict,
+                            event: Some(d.id.clone()),
+                            detail: format!(
+                                "ReclassifyOutflow targets non-TransferOut event {} \
+                                 — for Income corrections use reclassify-income; \
+                                 void the decision to clear this blocker",
+                                target.canonical()
+                            ),
+                        });
+                        // Decision EXCLUDED: not inserted into outflow_class.
+                    }
                 }
             }
             EventPayload::ReclassifyIncome(ri) => {
-                // SE Chunk C (D2) — bad-target validation at collection time against the EFFECTIVE
-                // payload (`applied.get(&target).unwrap_or(raw)` — so a ClassifyRaw'd row that
+                // SE Chunk C (D2) / burndown-3 D1: bad-target validation at collection time against the
+                // EFFECTIVE payload (`applied.get(&target).unwrap_or(raw)` — so a ClassifyRaw'd row that
                 // became Income stays reclassifiable, and a by_id miss counts as bad).
-                //
-                // Deliberate divergence from ReclassifyOutflow: ReclassifyOutflow is silently inert
-                // when its target is missing/mismatched (blind insert, consulted only in the
-                // TransferOut branch). That is NOT acceptable for an SE-relevant correction whose
-                // projected-state consequence is material (SE tax inclusion vs. exclusion).
-                //
-                // Precedents for in-collection validation: TransferLink in-event check (~456-466),
-                // LotSelection target + principal conservation (~604-611).
-                //
-                // FOLLOWUP: backfill equivalent validation onto ReclassifyOutflow (out of scope here).
+                // All four decision types in passes 1d/1e now validate the effective target payload at
+                // collection time: ReclassifyOutflow→TransferOut, ClassifyInbound→TransferIn,
+                // ManualFmv→Income (pass 1d), and ReclassifyIncome→Income (here, pass 1e).
+                // Precedents: TransferLink in-event check (~456-466), LotSelection (~604-611).
                 let target = &ri.income_event;
                 let effective_payload = by_id
                     .get(target)
