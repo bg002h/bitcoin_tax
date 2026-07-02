@@ -4,6 +4,25 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ TY2024 tables backfill — SHIPPED (2026-07-01) — THE CONFIRMED QUEUE IS COMPLETE
+
+Queue item 3 (last). `ty2024()` in BundledTaxTables: all 28 ordinary bracket edges (Rev. Proc. 2023-34
+§3.01 — incl. HoH 35%@243,700, MFS 37%@365,600), the four LTCG pairs (§3.03 — MFS max_fifteen 291,850,
+NOT the naive half), gift $18,000 (§3.43), lifetime $13,610,000 (§3.41), SS wage base $168,600 (SSA/88 FR).
+Every digit verified by the author AND two independent reviewers against the primary sources (the
+whole-diff reviewer re-fetched IRB 2023-48 + FR 2023-23317). KATs A6a-d/A7 (the R0 caught the
+ST-gains-ARE-NII omission: MFS $396.00 incl. $38.00 NIIT) + structural + report-path + TY2025 byte-identical
+regression. `report --tax-year 2024` now computes. R0 2 rounds → 0C/0I; whole-diff 0C/0I. 692 tests.
+
+Deferred (OPEN): full-schedule equality KATs per status (M1 — the A6 delta KATs can cancel lower-edge
+errors; pin all 28 edges directly); TY2026/2027 tables stay BLOCKED on IRS/SSA publication (~Dec 2026).
+
+**Queue COMPLETE (NII slice → SE cluster → TY2024). Next: the user-approved form-program sequence** —
+CI infrastructure → small-FOLLOWUPS burndown → export-from-TUI → 5a FDF/XFDF → the mutating-TUI program
+(position 6, fall 2026) → 5b filled-PDF (Jan–Feb 2027).
+
+---
+
 ## ✅ SE completion Chunk B — Schedule C expenses (advisory-only) — SHIPPED (2026-07-01) — SE CLUSTER COMPLETE
 
 Final SE chunk (queue item 2 done: A W-2 coordination + C ReclassifyIncome + B expenses).
