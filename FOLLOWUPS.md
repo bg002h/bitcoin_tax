@@ -4,6 +4,35 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ Mutating-TUI chunk 2a — classify-inbound + reclassify-outflow — SHIPPED (2026-07-02)
+
+The first decision-APPENDING GUI flows: filterable target pick-lists from the projected state (the
+compound inbound pre-filter — UnknownBasisInbound + resolves-to-TransferIn + no non-voided classify —
+ADVERSARIALLY VERIFIED: no listable target can produce a DecisionConflict; outflows via
+pending_reconciliation, post-filtered by construction); per-variant forms (Income/GiftReceived;
+sell/spend/gift/donate — spend = GROSS proceeds) with CLI-parity validation; payload-showing modals
+(donee for gift AND donate; the both-donor-None warning); statuses derived from the RE-PROJECTED blockers
+(honest FmvMissing / gift-refire / price-gap / UncoveredDisposal surfacing; the only remedy ever named =
+void-then-re-classify — the double-prefixed remedy ref caught empirically and fixed red-then-green +
+mutation-tested); the STRICT append-only prefix tests; per-flow cancel-bytes + chmod save-failure KATs.
+Spec R0 2 rounds → 0C/0I (7 Importants incl. the FIRST-WINS retry story); whole-branch 2 rounds → 0C/0I.
+**810 workspace tests.** Process note: the Task-1 implementer's "all green" report was FALSE (5 E2E
+failures at its commit, fixture-side, fixed test-only) — caught by the next agent's honest report + a
+first-hand check; reviewer trust-notes now standard.
+
+**[WB-I4 records, spec-mandated]:** (a) the inbound pre-filter checks RAW payloads, not effective —
+UNDER-inclusion only (a ClassifyRaw'd-to-TransferIn row won't list; remedy = CLI; harden later);
+(b) donee trim/cap divergence: the TUI caps the buffer, the CLI accepts unbounded — unify later;
+(c) negative-sign parity: fmv/amount fields accept negatives on BOTH surfaces today (CLI parity
+preserved) — tighten both together later; (d) KAT-C2a q-swallow at text steps documented (q types);
+(e) the retry-duplicate escape hatch depends on CLI void until **chunk 2b** ships the void flow.
+
+**NEXT: chunk 2b** — reclassify-income + set-fmv + void (the correction family; 1-3 fields each; the
+void flow closes the in-editor remedy loop). Then chunk 3 (select-lots/donation-details/attest),
+chunk 4 (import), chunk 5 (optimize).
+
+---
+
 ## ✅ Mutating-TUI chunk 1 — btctax-tui-edit (tax-profile editing) — SHIPPED (2026-07-02) — THE KEY GOAL's first chunk
 
 The first vault-writing GUI binary, under the two-guarantee structure: the VIEWER went lib+bin (pure
