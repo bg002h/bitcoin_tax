@@ -6,7 +6,11 @@
 //!
 //! This module performs NO writes — it only holds form state and validates input.
 
-use btctax_core::{Carryforward, FilingStatus, TaxProfile, Usd};
+use btctax_core::{
+    Carryforward, DisposeKind, EventId, FilingStatus, InboundClass, IncomeKind, OutflowClass,
+    ReclassifyOutflow, Sat, TaxDate, TaxProfile, Usd, WalletId,
+};
+use ratatui::widgets::TableState;
 use std::str::FromStr;
 
 /// Maximum byte-length of a money field buffer (64 chars is ample for any Decimal).
@@ -191,6 +195,426 @@ fn parse_optional(buf: &FieldBuffer) -> Result<Usd, String> {
     }
     let trimmed = buf.buf.trim();
     Usd::from_str(trimmed).map_err(|_| format!("bad USD {trimmed}"))
+}
+
+// ── TargetList widget (shared by classify-inbound and reclassify-outflow) ─────
+
+/// Selectable list of actionable targets rendered as a `ratatui` Table.
+///
+/// Callers (flow-open code) guarantee `items` is non-empty — an empty filtered
+/// list never opens a flow [R0-M8]. The render's defensive "no items" placeholder
+/// and Enter-swallow are belt-and-suspenders; they are unreachable under the
+/// flow-open rule and carry no KAT.
+pub struct TargetList<T> {
+    pub items: Vec<T>,
+    pub table_state: TableState,
+}
+
+impl<T> TargetList<T> {
+    pub fn new(items: Vec<T>) -> Self {
+        let mut table_state = TableState::default();
+        if !items.is_empty() {
+            table_state.select(Some(0));
+        }
+        Self { items, table_state }
+    }
+
+    pub fn selected(&self) -> Option<&T> {
+        self.table_state.selected().and_then(|i| self.items.get(i))
+    }
+
+    pub fn scroll_up(&mut self) {
+        let next = match self.table_state.selected() {
+            Some(i) if i > 0 => Some(i - 1),
+            Some(_) => Some(0),
+            None => None,
+        };
+        self.table_state.select(next);
+    }
+
+    pub fn scroll_down(&mut self) {
+        let count = self.items.len();
+        if count == 0 {
+            return;
+        }
+        let next = match self.table_state.selected() {
+            Some(i) => Some((i + 1).min(count - 1)),
+            None => Some(0),
+        };
+        self.table_state.select(next);
+    }
+
+    pub fn go_top(&mut self) {
+        if !self.items.is_empty() {
+            self.table_state.select(Some(0));
+        }
+    }
+
+    pub fn go_bottom(&mut self) {
+        let count = self.items.len();
+        if count > 0 {
+            self.table_state.select(Some(count - 1));
+        }
+    }
+}
+
+// ── Display data types for list items ─────────────────────────────────────────
+
+/// Pre-computed display data for a classify-inbound list row.
+#[derive(Clone)]
+pub struct InboundListItem {
+    /// The TransferIn event targeted by the `UnknownBasisInbound` blocker.
+    pub blocker_event: EventId,
+    /// Calendar date (tax timezone) of the TransferIn event.
+    pub date: TaxDate,
+    /// Principal sat from the TransferIn payload.
+    pub sat: Sat,
+    /// Wallet of the TransferIn event (None → displayed as "(no wallet)").
+    pub wallet: Option<WalletId>,
+    /// Blocker detail string.
+    pub detail: String,
+}
+
+/// Pre-computed display data for a reclassify-outflow list row.
+/// Added here per the spec Task-1 file list; fully used in Task 2 [R0-N3].
+#[allow(dead_code)]
+#[derive(Clone)]
+pub struct OutflowListItem {
+    /// The `PendingTransfer.event` EventId.
+    pub transfer_out_event: EventId,
+    /// Calendar date (tax timezone) of the TransferOut event.
+    pub date: TaxDate,
+    /// Principal sat from `PendingTransfer.principal_sat`.
+    pub principal_sat: Sat,
+    /// Wallet of the TransferOut event.
+    pub wallet: Option<WalletId>,
+}
+
+// ── Classify-inbound flow types ───────────────────────────────────────────────
+
+/// Which variant the picker is showing for classify-inbound step 2.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum InboundVariant {
+    Income,
+    GiftReceived,
+}
+
+/// Step in the classify-inbound flow.
+pub enum ClassifyInboundStep {
+    List,
+    VariantPicker {
+        item: InboundListItem,
+        variant: InboundVariant,
+    },
+    IncomeForm {
+        item: InboundListItem,
+        /// Current IncomeKind selection; initial: Mining [R0-M3].
+        kind: IncomeKind,
+        fmv_buf: FieldBuffer,
+        /// Default: false (CLI parity).
+        business: bool,
+        /// 0 = kind (Tab-cycles), 1 = fmv (text), 2 = business (Space toggle).
+        focus: usize,
+        error: Option<String>,
+    },
+    GiftForm {
+        item: InboundListItem,
+        fmv_at_gift_buf: FieldBuffer,
+        donor_basis_buf: FieldBuffer,
+        donor_acquired_at_buf: FieldBuffer,
+        /// 0 = fmv_at_gift, 1 = donor_basis, 2 = donor_acquired_at.
+        focus: usize,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the classify-inbound flow.  Owns its target list.
+pub struct ClassifyInboundFlowState {
+    /// Owned list — no standalone list field on EditorApp [R0-I2].
+    pub list: TargetList<InboundListItem>,
+    pub step: ClassifyInboundStep,
+}
+
+/// Payload for the classify-inbound confirmation modal.
+pub struct ClassifyInboundModalState {
+    pub target_event: EventId,
+    pub target_date: TaxDate,
+    pub target_sat: Sat,
+    /// The VALIDATED classification — what will be persisted.
+    pub as_: InboundClass,
+}
+
+// ── Helper: IncomeKind cycling and display ────────────────────────────────────
+
+/// Cycle through the 5 `IncomeKind` variants in declaration order (event.rs:29–35).
+/// Mining → Staking → Interest → Airdrop → Reward → Mining.
+pub fn cycle_income_kind(kind: IncomeKind) -> IncomeKind {
+    match kind {
+        IncomeKind::Mining => IncomeKind::Staking,
+        IncomeKind::Staking => IncomeKind::Interest,
+        IncomeKind::Interest => IncomeKind::Airdrop,
+        IncomeKind::Airdrop => IncomeKind::Reward,
+        IncomeKind::Reward => IncomeKind::Mining,
+    }
+}
+
+/// Return the lowercase display tag for an `IncomeKind` (matches CLI render convention).
+pub fn income_kind_display(kind: IncomeKind) -> &'static str {
+    match kind {
+        IncomeKind::Mining => "mining",
+        IncomeKind::Staking => "staking",
+        IncomeKind::Interest => "interest",
+        IncomeKind::Airdrop => "airdrop",
+        IncomeKind::Reward => "reward",
+    }
+}
+
+// ── Classify-inbound validation ───────────────────────────────────────────────
+
+/// Validate the Income variant of the classify-inbound form.
+///
+/// `kind` is always structurally valid (picker).  `fmv_buf` is optional:
+/// empty (byte-len 0) → `None`; non-empty → `parse_usd_arg(trim)`.
+/// [R0-M4] whitespace-only is NOT empty.
+///
+/// Returns the validated `InboundClass::Income` or an error string.
+pub fn validate_classify_inbound_income(
+    kind: IncomeKind,
+    fmv_buf: &FieldBuffer,
+    business: bool,
+) -> Result<InboundClass, String> {
+    let fmv = if fmv_buf.is_empty() {
+        None
+    } else {
+        let trimmed = fmv_buf.buf.trim();
+        Some(Usd::from_str(trimmed).map_err(|_| format!("bad USD {trimmed:?}"))?)
+    };
+    Ok(InboundClass::Income {
+        kind,
+        fmv,
+        business,
+    })
+}
+
+/// Validate the GiftReceived variant of the classify-inbound form.
+///
+/// `fmv_at_gift_buf` is REQUIRED (empty → "fmv-at-gift is required").
+/// `donor_basis_buf` and `donor_acquired_at_buf` are optional.
+///
+/// Date format: YYYY-MM-DD (`parse_date_arg` semantics — `Date::parse(trim, "[year]-[month]-[day]")`).
+/// [R0-M4] whitespace-only is NOT empty.
+///
+/// Returns the validated `InboundClass::GiftReceived` or an error string.
+pub fn validate_classify_inbound_gift(
+    fmv_at_gift_buf: &FieldBuffer,
+    donor_basis_buf: &FieldBuffer,
+    donor_acquired_at_buf: &FieldBuffer,
+) -> Result<InboundClass, String> {
+    if fmv_at_gift_buf.is_empty() {
+        return Err("fmv-at-gift is required".to_string());
+    }
+    let trimmed = fmv_at_gift_buf.buf.trim();
+    let fmv_at_gift = Usd::from_str(trimmed).map_err(|_| format!("bad USD {trimmed:?}"))?;
+
+    let donor_basis = if donor_basis_buf.is_empty() {
+        None
+    } else {
+        let t = donor_basis_buf.buf.trim();
+        Some(Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?)
+    };
+
+    let donor_acquired_at = if donor_acquired_at_buf.is_empty() {
+        None
+    } else {
+        let t = donor_acquired_at_buf.buf.trim();
+        let fmt = time::macros::format_description!("[year]-[month]-[day]");
+        Some(time::Date::parse(t, fmt).map_err(|e| format!("bad date {t:?}: {e}"))?)
+    };
+
+    Ok(InboundClass::GiftReceived {
+        donor_basis,
+        donor_acquired_at,
+        fmv_at_gift,
+    })
+}
+
+// ── Reclassify-outflow flow types ────────────────────────────────────────────
+
+/// Which outflow kind is selected in the reclassify-outflow kind picker.
+///
+/// Tab cycles: Sell → Spend → Gift → Donate → Sell.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum OutflowKind {
+    Sell,
+    Spend,
+    Gift,
+    Donate,
+}
+
+/// Cycle through the 4 `OutflowKind` variants in picker order.
+/// Sell → Spend → Gift → Donate → Sell.
+pub fn cycle_outflow_kind(kind: OutflowKind) -> OutflowKind {
+    match kind {
+        OutflowKind::Sell => OutflowKind::Spend,
+        OutflowKind::Spend => OutflowKind::Gift,
+        OutflowKind::Gift => OutflowKind::Donate,
+        OutflowKind::Donate => OutflowKind::Sell,
+    }
+}
+
+/// Step in the reclassify-outflow flow.
+pub enum ReclassifyOutflowStep {
+    List,
+    KindPicker {
+        item: OutflowListItem,
+        /// Initial: Sell.
+        kind: OutflowKind,
+    },
+    FieldForm {
+        item: OutflowListItem,
+        kind: OutflowKind,
+        /// Gross proceeds (sell/spend) or FMV (gift/donate); REQUIRED.
+        amount_buf: FieldBuffer,
+        /// Network fee; optional.
+        fee_buf: FieldBuffer,
+        /// Appraisal required toggle; donate only (default false).
+        appraisal: bool,
+        /// Donee free-form label; optional; gift and donate only.
+        donee_buf: FieldBuffer,
+        /// Focus: 0=amount, 1=fee, 2=appraisal (donate only), 3=donee (gift/donate only).
+        /// Hidden rows are skipped in focus cycling.
+        focus: usize,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the reclassify-outflow flow. Owns its target list [R0-I2].
+pub struct ReclassifyOutflowFlowState {
+    /// Owned list — no standalone list field on EditorApp.
+    pub list: TargetList<OutflowListItem>,
+    pub step: ReclassifyOutflowStep,
+}
+
+/// Payload for the reclassify-outflow confirmation modal.
+pub struct ReclassifyOutflowModalState {
+    pub target_event: EventId,
+    pub target_date: TaxDate,
+    pub principal_sat: Sat,
+    /// The VALIDATED payload — what will be persisted.
+    pub payload: ReclassifyOutflow,
+}
+
+/// Return the label for the `amount` field based on the outflow kind.
+///
+/// [R0-I3]: gross proceeds for sell AND spend; FMV for gift/donate.
+pub fn amount_label(kind: OutflowKind) -> &'static str {
+    match kind {
+        OutflowKind::Sell | OutflowKind::Spend => "gross proceeds (USD)",
+        OutflowKind::Gift | OutflowKind::Donate => "FMV (USD)",
+    }
+}
+
+/// Compute the maximum focus index for the reclassify-outflow field form.
+///
+/// Focus order: 0=amount, 1=fee, 2=appraisal (donate only), 3=donee (gift/donate only).
+/// Hidden rows are skipped: for sell/spend max focus is 1; for gift max is 3 (skipping 2);
+/// for donate max is 3.
+pub fn max_focus_for_kind(kind: OutflowKind) -> usize {
+    match kind {
+        OutflowKind::Sell | OutflowKind::Spend => 1,
+        OutflowKind::Gift | OutflowKind::Donate => 3,
+    }
+}
+
+/// Step to the next visible focus row (skipping hidden rows).
+pub fn next_focus(focus: usize, kind: OutflowKind) -> usize {
+    let max = max_focus_for_kind(kind);
+    let next = (focus + 1).min(max);
+    // Row 2 (appraisal) is only shown for donate; skip for gift.
+    if next == 2 && kind == OutflowKind::Gift {
+        3.min(max)
+    } else {
+        next
+    }
+}
+
+/// Step to the previous visible focus row (skipping hidden rows).
+pub fn prev_focus(focus: usize, kind: OutflowKind) -> usize {
+    if focus == 0 {
+        return 0;
+    }
+    let prev = focus - 1;
+    // Row 2 (appraisal) is only shown for donate; skip for gift.
+    if prev == 2 && kind == OutflowKind::Gift {
+        1
+    } else {
+        prev
+    }
+}
+
+// ── Reclassify-outflow validation ────────────────────────────────────────────
+
+/// Validate the reclassify-outflow field form and build a `ReclassifyOutflow` payload.
+///
+/// `amount` is REQUIRED (empty byte-len-0 → "amount is required"; whitespace-only → parse error).
+/// `fee` is optional (empty → `None`). `appraisal` is a toggle bool (always valid).
+/// `donee` is optional free-form text; empty → `None`; non-empty → `Some(trim().to_owned())`.
+/// [R0-M4] whitespace-only is NOT empty.
+/// [R0-I3] `amount` is gross proceeds for sell/spend; FMV for gift/donate — same field, different label.
+///
+/// Returns the validated `ReclassifyOutflow` or an error string.
+pub fn validate_reclassify_outflow(
+    item: &OutflowListItem,
+    kind: OutflowKind,
+    amount_buf: &FieldBuffer,
+    fee_buf: &FieldBuffer,
+    appraisal: bool,
+    donee_buf: &FieldBuffer,
+) -> Result<ReclassifyOutflow, String> {
+    // amount: REQUIRED
+    if amount_buf.is_empty() {
+        return Err("amount is required".to_string());
+    }
+    let amount_trimmed = amount_buf.buf.trim();
+    let principal_proceeds_or_fmv =
+        Usd::from_str(amount_trimmed).map_err(|_| format!("bad USD {amount_trimmed:?}"))?;
+
+    // fee: optional
+    let fee_usd = if fee_buf.is_empty() {
+        None
+    } else {
+        let t = fee_buf.buf.trim();
+        Some(Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?)
+    };
+
+    // donee: optional free-form; trimmed + capped at FIELD_CAP
+    let donee = if donee_buf.is_empty() {
+        None
+    } else {
+        Some(donee_buf.buf.trim().to_owned())
+    };
+
+    // Build OutflowClass
+    let as_ = match kind {
+        OutflowKind::Sell => OutflowClass::Dispose {
+            kind: DisposeKind::Sell,
+        },
+        OutflowKind::Spend => OutflowClass::Dispose {
+            kind: DisposeKind::Spend,
+        },
+        OutflowKind::Gift => OutflowClass::GiftOut,
+        OutflowKind::Donate => OutflowClass::Donate {
+            appraisal_required: appraisal,
+        },
+    };
+
+    Ok(ReclassifyOutflow {
+        transfer_out_event: item.transfer_out_event.clone(),
+        as_,
+        principal_proceeds_or_fmv,
+        fee_usd,
+        donee,
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -381,6 +805,161 @@ mod tests {
         assert_eq!(p.other_net_capital_gain, Usd::ZERO);
     }
 
+    // ── KAT-V-CI-9: IncomeKind cycles in declaration order, initial = Mining ──
+
+    #[test]
+    fn kat_v_ci_9_income_kind_cycles_five_variants_wraps_to_mining() {
+        let mut kind = IncomeKind::Mining; // initial [R0-M3]
+        kind = cycle_income_kind(kind);
+        assert_eq!(kind, IncomeKind::Staking);
+        kind = cycle_income_kind(kind);
+        assert_eq!(kind, IncomeKind::Interest);
+        kind = cycle_income_kind(kind);
+        assert_eq!(kind, IncomeKind::Airdrop);
+        kind = cycle_income_kind(kind);
+        assert_eq!(kind, IncomeKind::Reward);
+        kind = cycle_income_kind(kind);
+        assert_eq!(kind, IncomeKind::Mining, "5 cycles must wrap to Mining");
+    }
+
+    // ── KAT-V-CI-1: Income fmv empty → None (valid, no error) ───────────────
+
+    #[test]
+    fn kat_v_ci_1_income_fmv_empty_gives_none() {
+        let result =
+            validate_classify_inbound_income(IncomeKind::Mining, &FieldBuffer::new(), false);
+        let cls = result.unwrap();
+        if let InboundClass::Income { fmv, .. } = cls {
+            assert!(fmv.is_none(), "empty fmv_buf must produce fmv=None");
+        } else {
+            panic!("expected Income variant");
+        }
+    }
+
+    // ── KAT-V-CI-2: Income fmv valid decimal → parses correctly ──────────────
+
+    #[test]
+    fn kat_v_ci_2_income_fmv_valid_decimal_parses() {
+        use rust_decimal_macros::dec;
+        let mut buf = FieldBuffer::new();
+        buf.set("45.50");
+        let result = validate_classify_inbound_income(IncomeKind::Staking, &buf, false);
+        let cls = result.unwrap();
+        if let InboundClass::Income {
+            fmv,
+            kind,
+            business,
+        } = cls
+        {
+            assert_eq!(fmv, Some(dec!(45.50)));
+            assert_eq!(kind, IncomeKind::Staking);
+            assert!(!business);
+        } else {
+            panic!("expected Income variant");
+        }
+    }
+
+    // ── KAT-V-CI-3: Income fmv non-numeric → parse error "bad USD…" ──────────
+
+    #[test]
+    fn kat_v_ci_3_income_fmv_nonnumeric_is_parse_error() {
+        let mut buf = FieldBuffer::new();
+        buf.set("abc");
+        let err = validate_classify_inbound_income(IncomeKind::Mining, &buf, false).unwrap_err();
+        assert!(
+            err.contains("bad USD"),
+            "non-numeric fmv must produce 'bad USD' error; got: {err}"
+        );
+    }
+
+    // ── KAT-V-CI-4: Income fmv whitespace-only → parse error (not None) ──────
+
+    #[test]
+    fn kat_v_ci_4_income_fmv_whitespace_only_is_parse_error_not_none() {
+        let mut buf = FieldBuffer::new();
+        buf.set("   "); // whitespace-only: is_empty()==false [R0-M4]
+        let err = validate_classify_inbound_income(IncomeKind::Mining, &buf, false).unwrap_err();
+        assert!(
+            err.contains("bad USD"),
+            "whitespace-only fmv must be a parse error, not None; got: {err}"
+        );
+    }
+
+    // ── KAT-V-CI-5: GiftReceived fmv_at_gift empty → "fmv-at-gift is required" ─
+
+    #[test]
+    fn kat_v_ci_5_gift_fmv_at_gift_empty_is_required_error() {
+        let err = validate_classify_inbound_gift(
+            &FieldBuffer::new(),
+            &FieldBuffer::new(),
+            &FieldBuffer::new(),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("fmv-at-gift") && err.contains("required"),
+            "empty fmv_at_gift must produce 'required' error; got: {err}"
+        );
+    }
+
+    // ── KAT-V-CI-6: GiftReceived fmv_at_gift valid → parses correctly ─────────
+
+    #[test]
+    fn kat_v_ci_6_gift_fmv_at_gift_valid_parses() {
+        use rust_decimal_macros::dec;
+        let mut buf = FieldBuffer::new();
+        buf.set("500.00");
+        let cls =
+            validate_classify_inbound_gift(&buf, &FieldBuffer::new(), &FieldBuffer::new()).unwrap();
+        if let InboundClass::GiftReceived {
+            fmv_at_gift,
+            donor_basis,
+            donor_acquired_at,
+        } = cls
+        {
+            assert_eq!(fmv_at_gift, dec!(500.00));
+            assert!(donor_basis.is_none());
+            assert!(donor_acquired_at.is_none());
+        } else {
+            panic!("expected GiftReceived variant");
+        }
+    }
+
+    // ── KAT-V-CI-7: GiftReceived donor_acquired_at valid YYYY-MM-DD → parses ──
+
+    #[test]
+    fn kat_v_ci_7_gift_donor_acquired_at_valid_parses() {
+        use time::macros::date;
+        let mut fmv_buf = FieldBuffer::new();
+        fmv_buf.set("500.00");
+        let mut date_buf = FieldBuffer::new();
+        date_buf.set("2022-04-01");
+        let cls = validate_classify_inbound_gift(&fmv_buf, &FieldBuffer::new(), &date_buf).unwrap();
+        if let InboundClass::GiftReceived {
+            donor_acquired_at, ..
+        } = cls
+        {
+            assert_eq!(donor_acquired_at, Some(date!(2022 - 04 - 01)));
+        } else {
+            panic!("expected GiftReceived variant");
+        }
+    }
+
+    // ── KAT-V-CI-8: GiftReceived donor_acquired_at bad format → "bad date…" ───
+
+    #[test]
+    fn kat_v_ci_8_gift_donor_acquired_at_bad_format_is_error() {
+        let mut fmv_buf = FieldBuffer::new();
+        fmv_buf.set("500.00");
+        let mut date_buf = FieldBuffer::new();
+        date_buf.set("not-a-date");
+        let err =
+            validate_classify_inbound_gift(&fmv_buf, &FieldBuffer::new(), &date_buf).unwrap_err();
+        assert!(
+            err.contains("bad date"),
+            "bad date format must produce 'bad date' error; got: {err}"
+        );
+    }
+
     // ── Parse failure: non-numeric ───────────────────────────────────────────
 
     #[test]
@@ -417,5 +996,260 @@ mod tests {
         assert_eq!(p.w2_ss_wages, dec!(80000));
         assert_eq!(p.w2_medicare_wages, dec!(85000));
         assert_eq!(p.schedule_c_expenses, dec!(3000));
+    }
+
+    // ── Helper: build a minimal OutflowListItem for validation tests ──────────
+
+    fn dummy_outflow_item() -> OutflowListItem {
+        use btctax_core::{
+            identity::{Source, SourceRef},
+            EventId,
+        };
+        use time::{OffsetDateTime, UtcOffset};
+        OutflowListItem {
+            transfer_out_event: EventId::import(Source::River, SourceRef::new("test-ro-1")),
+            date: btctax_core::conventions::tax_date(
+                OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(),
+                UtcOffset::UTC,
+            ),
+            principal_sat: 1_000_000,
+            wallet: None,
+        }
+    }
+
+    // ── KAT-V-RO-1: amount empty → "amount is required" ─────────────────────
+
+    #[test]
+    fn kat_v_ro_1_amount_empty_is_required_error() {
+        let item = dummy_outflow_item();
+        let err = validate_reclassify_outflow(
+            &item,
+            OutflowKind::Sell,
+            &FieldBuffer::new(),
+            &FieldBuffer::new(),
+            false,
+            &FieldBuffer::new(),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("amount") && err.contains("required"),
+            "empty amount must produce 'required' error; got: {err}"
+        );
+    }
+
+    // ── KAT-V-RO-2: amount valid decimal → parses correctly ──────────────────
+
+    #[test]
+    fn kat_v_ro_2_amount_valid_decimal_parses() {
+        let item = dummy_outflow_item();
+        let mut amount_buf = FieldBuffer::new();
+        amount_buf.set("640.00");
+        let ro = validate_reclassify_outflow(
+            &item,
+            OutflowKind::Sell,
+            &amount_buf,
+            &FieldBuffer::new(),
+            false,
+            &FieldBuffer::new(),
+        )
+        .unwrap();
+        assert_eq!(ro.principal_proceeds_or_fmv, dec!(640.00));
+        assert!(matches!(
+            ro.as_,
+            OutflowClass::Dispose {
+                kind: DisposeKind::Sell
+            }
+        ));
+        assert!(ro.fee_usd.is_none());
+        assert!(ro.donee.is_none());
+    }
+
+    // ── KAT-V-RO-3: amount whitespace-only → parse error (not "required") ────
+
+    #[test]
+    fn kat_v_ro_3_amount_whitespace_only_is_parse_error_not_required() {
+        let item = dummy_outflow_item();
+        let mut buf = FieldBuffer::new();
+        buf.set("   "); // whitespace-only: is_empty()==false [R0-M4]
+        let err = validate_reclassify_outflow(
+            &item,
+            OutflowKind::Sell,
+            &buf,
+            &FieldBuffer::new(),
+            false,
+            &FieldBuffer::new(),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("bad USD"),
+            "whitespace-only amount must be a parse error; got: {err}"
+        );
+        assert!(
+            !err.contains("required"),
+            "whitespace-only amount must NOT say 'required'; got: {err}"
+        );
+    }
+
+    // ── KAT-V-RO-4: fee empty → None (no error) ──────────────────────────────
+
+    #[test]
+    fn kat_v_ro_4_fee_empty_gives_none() {
+        let item = dummy_outflow_item();
+        let mut amount_buf = FieldBuffer::new();
+        amount_buf.set("640.00");
+        let ro = validate_reclassify_outflow(
+            &item,
+            OutflowKind::Sell,
+            &amount_buf,
+            &FieldBuffer::new(),
+            false,
+            &FieldBuffer::new(),
+        )
+        .unwrap();
+        assert!(ro.fee_usd.is_none(), "empty fee must produce None");
+    }
+
+    // ── KAT-V-RO-5: fee valid → parses correctly ─────────────────────────────
+
+    #[test]
+    fn kat_v_ro_5_fee_valid_parses() {
+        let item = dummy_outflow_item();
+        let mut amount_buf = FieldBuffer::new();
+        amount_buf.set("640.00");
+        let mut fee_buf = FieldBuffer::new();
+        fee_buf.set("2.50");
+        let ro = validate_reclassify_outflow(
+            &item,
+            OutflowKind::Sell,
+            &amount_buf,
+            &fee_buf,
+            false,
+            &FieldBuffer::new(),
+        )
+        .unwrap();
+        assert_eq!(ro.fee_usd, Some(dec!(2.50)));
+    }
+
+    // ── KAT-V-RO-6: appraisal toggle default false; Space toggles ────────────
+
+    #[test]
+    fn kat_v_ro_6_appraisal_toggle_default_false_then_true() {
+        let item = dummy_outflow_item();
+        let mut amount_buf = FieldBuffer::new();
+        amount_buf.set("640.00");
+
+        // Default: appraisal=false
+        let ro = validate_reclassify_outflow(
+            &item,
+            OutflowKind::Donate,
+            &amount_buf,
+            &FieldBuffer::new(),
+            false,
+            &FieldBuffer::new(),
+        )
+        .unwrap();
+        assert!(matches!(
+            ro.as_,
+            OutflowClass::Donate {
+                appraisal_required: false
+            }
+        ));
+
+        // Toggled: appraisal=true
+        let ro2 = validate_reclassify_outflow(
+            &item,
+            OutflowKind::Donate,
+            &amount_buf,
+            &FieldBuffer::new(),
+            true,
+            &FieldBuffer::new(),
+        )
+        .unwrap();
+        assert!(matches!(
+            ro2.as_,
+            OutflowClass::Donate {
+                appraisal_required: true
+            }
+        ));
+    }
+
+    // ── KAT-V-RO-7: donee empty → None; non-empty → Some(trimmed) ────────────
+
+    #[test]
+    fn kat_v_ro_7_donee_empty_is_none_nonempty_is_some_trimmed() {
+        let item = dummy_outflow_item();
+        let mut amount_buf = FieldBuffer::new();
+        amount_buf.set("640.00");
+
+        // Empty → None
+        let ro = validate_reclassify_outflow(
+            &item,
+            OutflowKind::Gift,
+            &amount_buf,
+            &FieldBuffer::new(),
+            false,
+            &FieldBuffer::new(),
+        )
+        .unwrap();
+        assert!(ro.donee.is_none(), "empty donee must produce None");
+
+        // Non-empty (with leading/trailing spaces) → Some(trimmed)
+        let mut donee_buf = FieldBuffer::new();
+        donee_buf.set("  Alice  ");
+        let ro2 = validate_reclassify_outflow(
+            &item,
+            OutflowKind::Gift,
+            &amount_buf,
+            &FieldBuffer::new(),
+            false,
+            &donee_buf,
+        )
+        .unwrap();
+        assert_eq!(
+            ro2.donee,
+            Some("Alice".to_string()),
+            "non-empty donee must be Some(trimmed)"
+        );
+    }
+
+    // ── KAT-V-RO-8: OutflowKind Tab cycles: sell → spend → gift → donate → sell ─
+
+    #[test]
+    fn kat_v_ro_8_outflow_kind_cycles_four_variants_wraps_to_sell() {
+        let mut kind = OutflowKind::Sell; // initial
+        kind = cycle_outflow_kind(kind);
+        assert_eq!(kind, OutflowKind::Spend);
+        kind = cycle_outflow_kind(kind);
+        assert_eq!(kind, OutflowKind::Gift);
+        kind = cycle_outflow_kind(kind);
+        assert_eq!(kind, OutflowKind::Donate);
+        kind = cycle_outflow_kind(kind);
+        assert_eq!(kind, OutflowKind::Sell, "4 cycles must wrap to Sell");
+    }
+
+    // ── KAT-V-RO-9: amount label is "gross proceeds" for sell/spend; "FMV" for gift/donate ─
+
+    #[test]
+    fn kat_v_ro_9_amount_label_per_kind() {
+        assert!(
+            amount_label(OutflowKind::Sell).contains("gross proceeds"),
+            "sell must have 'gross proceeds' label; got: {}",
+            amount_label(OutflowKind::Sell)
+        );
+        assert!(
+            amount_label(OutflowKind::Spend).contains("gross proceeds"),
+            "spend must have 'gross proceeds' label [R0-I3]; got: {}",
+            amount_label(OutflowKind::Spend)
+        );
+        assert!(
+            amount_label(OutflowKind::Gift).contains("FMV"),
+            "gift must have 'FMV' label; got: {}",
+            amount_label(OutflowKind::Gift)
+        );
+        assert!(
+            amount_label(OutflowKind::Donate).contains("FMV"),
+            "donate must have 'FMV' label; got: {}",
+            amount_label(OutflowKind::Donate)
+        );
     }
 }

@@ -13,7 +13,10 @@
 //! concurrent-writer case to reason about; this is the only safe lifecycle for a
 //! session-holding TUI editor.
 
-use crate::edit::form::{MutationModalState, ProfileFormState};
+use crate::edit::form::{
+    ClassifyInboundFlowState, ClassifyInboundModalState, MutationModalState, ProfileFormState,
+    ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
+};
 use btctax_cli::Session;
 use btctax_store::Passphrase;
 use btctax_tui::{
@@ -82,6 +85,23 @@ pub struct EditorApp {
     /// Modal dispatch precedes form and screen dispatch (the R0-M4 lesson —
     /// Esc must never fall through to a quit arm).
     pub mutation_modal: Option<MutationModalState>,
+    /// Full classify-inbound flow state.  `Some` while the flow is open.
+    ///
+    /// Dispatch order: modal → classify_inbound_modal → classify_inbound_flow
+    /// → profile form → screen.  Guarantees `q` / Esc never fall through to a
+    /// quit arm while the flow (or its modal) is blocking.
+    pub classify_inbound_flow: Option<ClassifyInboundFlowState>,
+    /// Classify-inbound confirmation modal.  `Some` while awaiting Enter/Esc.
+    /// Always set via the `IncomeForm` / `GiftForm` Enter path in the flow.
+    pub classify_inbound_modal: Option<ClassifyInboundModalState>,
+    /// Full reclassify-outflow flow state.  `Some` while the flow is open.
+    ///
+    /// Dispatch order: modal → reclassify_outflow_modal → reclassify_outflow_flow
+    /// → classify-inbound modal → classify-inbound flow → form → screen.
+    /// State invariant: at most one flow `Some` at any time; at most one modal `Some`.
+    pub reclassify_outflow_flow: Option<ReclassifyOutflowFlowState>,
+    /// Reclassify-outflow confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub reclassify_outflow_modal: Option<ReclassifyOutflowModalState>,
     /// One-line status (saved / error), shown in the footer.
     /// Cleared on the next non-modal key press (mirrors the viewer's `export_status`
     /// semantics, app.rs:140 [R0-N5]).
@@ -105,6 +125,10 @@ impl EditorApp {
             forms_state: TableState::default(),
             profile_form: None,
             mutation_modal: None,
+            classify_inbound_flow: None,
+            classify_inbound_modal: None,
+            reclassify_outflow_flow: None,
+            reclassify_outflow_modal: None,
             status: None,
         }
     }
