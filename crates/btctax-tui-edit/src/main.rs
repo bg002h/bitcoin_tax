@@ -1341,9 +1341,11 @@ fn derive_classify_inbound_status(
     // Decision-attributed DecisionConflict check (failed-save-retry duplicate [R0-I1]).
     for b in &snap.state.blockers {
         if b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(decision_id) {
+            // WB-I1 fix: canonical() already includes the "decision|" prefix, so format
+            // as "{}" (not "decision|{}") to avoid the double-prefix "decision|decision|N".
             return format!(
                 "Saved, but DecisionConflict fired on this decision — see Compliance; \
-                 clear with CLI: btctax reconcile void decision|{}",
+                 clear with CLI: btctax reconcile void {}",
                 decision_id.canonical()
             );
         }
@@ -1410,9 +1412,11 @@ fn derive_reclassify_outflow_status(
     // Decision-attributed DecisionConflict check (failed-save-retry duplicate [R0-I1]).
     for b in &snap.state.blockers {
         if b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(decision_id) {
+            // WB-I1 fix: canonical() already includes the "decision|" prefix, so format
+            // as "{}" (not "decision|{}") to avoid the double-prefix "decision|decision|N".
             return format!(
                 "Saved, but DecisionConflict fired on this decision — see Compliance; \
-                 clear with CLI: btctax reconcile void decision|{}",
+                 clear with CLI: btctax reconcile void {}",
                 decision_id.canonical()
             );
         }
@@ -2835,6 +2839,9 @@ mod tests {
             "S2: retry: flow must close after successful save"
         );
 
+        // WB-I2: capture status BEFORE drop(app) so we can assert after computing retry_id.
+        let status_after_retry = app.status.clone().unwrap_or_default();
+
         // Assert TRUE retry outcome: on-disk log == pre + 2 decision rows [R0-I1].
         let post_disk = {
             drop(app);
@@ -2883,6 +2890,21 @@ mod tests {
         assert!(
             has_conflict,
             "S2: re-projected state must contain DecisionConflict for retry decision {retry_id:?}"
+        );
+
+        // WB-I2: post-retry status must surface the conflict AND the correctly-formatted
+        // single-prefix void remedy (spec §D5 KAT-S2 step 3 final bullet).
+        // "void {canonical}" where canonical() = "decision|N" → must NOT produce "decision|decision|N".
+        let expected_void = format!("void {}", retry_id.canonical());
+        assert!(
+            status_after_retry.contains("DecisionConflict"),
+            "S2: post-retry status must contain 'DecisionConflict'; got: {:?}",
+            status_after_retry
+        );
+        assert!(
+            status_after_retry.contains(&expected_void),
+            "S2: post-retry status must contain the single-prefix remedy '{expected_void}'; \
+             got: {status_after_retry:?}"
         );
     }
 
@@ -3051,6 +3073,22 @@ mod tests {
             ),
             "E2E-CI: stored payload must be ClassifyInbound(Staking); got: {:?}",
             stored_payload
+        );
+
+        // Release the vault lock before the CLI read-back call.
+        drop(session2);
+
+        // Step 4 (spec KAT-E2E-CI): CLI read-back via cmd::inspect::verify.
+        // UnknownBasisInbound for the classified event must be absent from the hard-blocker list.
+        let vr = btctax_cli::cmd::inspect::verify(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let ubi_absent = !vr.hard.iter().any(|b| {
+            b.kind == BlockerKind::UnknownBasisInbound && b.event.as_ref() == Some(&ti_id)
+        });
+        assert!(
+            ubi_absent,
+            "E2E-CI step 4: cmd::inspect::verify must NOT list UnknownBasisInbound for the \
+             classified TransferIn; hard blockers: {:?}",
+            vr.hard
         );
     }
 
@@ -3719,6 +3757,7 @@ mod tests {
     #[test]
     fn kat_e2e_ro_reclassify_outflow_sell() {
         use btctax_core::persistence::load_all_ordered;
+        use btctax_core::Usd;
         use ratatui::{backend::TestBackend, Terminal};
         use rust_decimal_macros::dec;
 
@@ -3727,7 +3766,11 @@ mod tests {
         let key = dir.path().join("key.asc");
         let pp_str = "kat-e2e-ro-pass";
 
-        let to_id = seed_transfer_out_vault(&vault, &key, pp_str, 500_000);
+        // WB-I3 fix: use lot-seeded helper so the Dispose arm produces a covered Disposal
+        // (spec step 3 requires Disposal{kind=Sell, proceeds=640.00} in state.disposals).
+        // seed_transfer_out_vault_with_lots seeds an Acquire lot (500_000 sat, 1 day before
+        // TransferOut) so FIFO yields a fully covered single-leg Disposal.
+        let to_id = seed_transfer_out_vault_with_lots(&vault, &key, pp_str, 500_000);
 
         let mut app = open_app(&vault, pp_str);
 
@@ -3845,10 +3888,30 @@ mod tests {
             "E2E-RO: target must be gone from pending_reconciliation after reclassify"
         );
 
+        // WB-I3 step 3: Disposal with kind=Sell must appear in state.disposals.
+        // The lot-seeded vault provides 500_000 sat; the Acquire covers the full TransferOut,
+        // so the projection produces a single-leg Disposal with proceeds = entered 640.00.
         let disposal = snap.state.disposals.iter().find(|d| d.event == to_id);
-        // Note: disposal may be present as a Disposal (or UncoveredDisposal blocker
-        // if pool is short). The test vault has no lots, so UncoveredDisposal will fire.
-        // We verify the pending entry is gone and check the decision row.
+        assert!(
+            disposal.is_some(),
+            "E2E-RO: Disposal must appear in state.disposals after reclassify-sell \
+             (lot-seeded vault ensures full coverage)"
+        );
+        let d = disposal.unwrap();
+        assert_eq!(
+            d.kind,
+            DisposeKind::Sell,
+            "E2E-RO: Disposal.kind must be Sell"
+        );
+        // Single lot covers all 500_000 sat; no fee → net proceeds == gross proceeds == 640.00.
+        let total_proceeds: Usd = d.legs.iter().map(|l| l.proceeds).sum();
+        assert_eq!(
+            total_proceeds,
+            dec!(640.00),
+            "E2E-RO: Disposal total net proceeds must equal the entered 640.00; got: {total_proceeds}"
+        );
+
+        // Check the decision row on disk.
         let events = load_all_ordered(session2.conn()).unwrap();
         let decision_rows: Vec<_> = events.iter().filter(|r| r.kind == "decision").collect();
         assert_eq!(
@@ -3869,7 +3932,21 @@ mod tests {
             "E2E-RO: stored payload must be ReclassifyOutflow(Sell, 640.00); got: {:?}",
             stored_payload
         );
-        let _ = disposal; // present or not depends on lot coverage; not the critical assertion
+
+        // Release the vault lock before the CLI read-back call.
+        drop(session2);
+
+        // Step 4 (spec KAT-E2E-RO): CLI read-back via cmd::inspect::report.
+        // A fresh cmd::inspect::report projection must show the Sell Disposal.
+        let cli_state =
+            btctax_cli::cmd::inspect::report(&vault, &Passphrase::new(pp_str.into()), None)
+                .unwrap();
+        let cli_disposal = cli_state.disposals.iter().find(|d| d.event == to_id);
+        assert!(
+            cli_disposal.is_some() && cli_disposal.unwrap().kind == DisposeKind::Sell,
+            "E2E-RO step 4: cmd::inspect::report must project a Sell Disposal for the reclassified outflow; \
+             got: {:?}", cli_disposal
+        );
     }
 
     // ── KAT-E2E-UNCOVERED — reclassify-outflow with UncoveredDisposal ─────────
@@ -4266,6 +4343,9 @@ mod tests {
             "S2-RO: retry: flow must close after successful save"
         );
 
+        // WB-I2: capture status BEFORE drop(app) so we can assert after computing retry_id.
+        let status_after_retry = app.status.clone().unwrap_or_default();
+
         // Assert TRUE retry outcome: on-disk log == pre + 2 decision rows [R0-I1].
         let post_disk = {
             drop(app);
@@ -4315,6 +4395,21 @@ mod tests {
         assert!(
             has_conflict,
             "S2-RO: re-projected state must contain DecisionConflict for retry decision {retry_id:?}"
+        );
+
+        // WB-I2: post-retry status must surface the conflict AND the correctly-formatted
+        // single-prefix void remedy (spec §D5 KAT-S2-RO step 3 final bullet).
+        // "void {canonical}" where canonical() = "decision|N" → must NOT produce "decision|decision|N".
+        let expected_void = format!("void {}", retry_id.canonical());
+        assert!(
+            status_after_retry.contains("DecisionConflict"),
+            "S2-RO: post-retry status must contain 'DecisionConflict'; got: {:?}",
+            status_after_retry
+        );
+        assert!(
+            status_after_retry.contains(&expected_void),
+            "S2-RO: post-retry status must contain the single-prefix remedy '{expected_void}'; \
+             got: {status_after_retry:?}"
         );
     }
 }
