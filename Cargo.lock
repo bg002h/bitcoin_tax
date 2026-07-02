@@ -376,6 +376,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "btctax-tui-edit"
+version = "0.1.0"
+dependencies = [
+ "btctax-adapters",
+ "btctax-cli",
+ "btctax-core",
+ "btctax-store",
+ "btctax-tui",
+ "crossterm",
+ "ratatui",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "tempfile",
+ "time",
+]
+
+[[package]]
 name = "buffered-reader"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
