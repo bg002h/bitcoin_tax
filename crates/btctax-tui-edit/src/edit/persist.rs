@@ -21,7 +21,7 @@
 /// Mirrors `cmd::tax::set_profile` (cmd/tax.rs:14–23) minus the open/drop —
 /// the editor operates on its HELD session (the VaultLock must stay acquired).
 ///
-/// # Called only from the mutation-confirmation modal (Task 3)
+/// # Called only from the mutation-confirmation modal
 /// This is a `pub fn` freely callable; "the confirmation modal gates the ONLY
 /// call site" is a procedural guarantee (enforced by KAT-G1's confinement of
 /// the surface, the KATs, and whole-diff review), not a type-level proof.
@@ -33,8 +33,6 @@
 /// the pre-action state (the atomic path leaves the old image). This divergence
 /// is intentional and safe — do NOT roll back the side-table. The upsert is
 /// idempotent; a retry re-runs it on the next confirmed action.
-// Task 2 skeleton: function body complete; call site wired in Task 3.
-#[allow(dead_code)]
 pub fn persist_tax_profile(
     session: &mut btctax_cli::Session,
     year: i32,
@@ -49,6 +47,120 @@ pub fn persist_tax_profile(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    // ── KAT-P1 — append-only prefix test (side-table form) ───────────────────
+    //
+    // For chunk 1: a tax-profile set is a SIDE-TABLE upsert, NOT an event append.
+    // The degenerate strong form: event log UNCHANGED by a profile set.
+    // In-memory AND after drop+reopen, plus:
+    //   - mutation-actually-happened guard (profile round-trips)
+    //   - second differing upsert still leaves log == pre
+
+    fn fixture_profile() -> btctax_core::TaxProfile {
+        use btctax_core::{Carryforward, FilingStatus, TaxProfile};
+        use rust_decimal_macros::dec;
+        TaxProfile {
+            filing_status: FilingStatus::Mfj,
+            ordinary_taxable_income: dec!(120000),
+            magi_excluding_crypto: dec!(130000),
+            qualified_dividends_and_other_pref_income: dec!(5000),
+            other_net_capital_gain: dec!(0),
+            capital_loss_carryforward_in: Carryforward {
+                short: dec!(0),
+                long: dec!(0),
+            },
+            w2_ss_wages: dec!(80000),
+            w2_medicare_wages: dec!(85000),
+            schedule_c_expenses: dec!(3000),
+        }
+    }
+
+    #[test]
+    fn kat_p1_append_only_prefix_side_table_form() {
+        use btctax_core::event::{EventPayload, MethodElection};
+        use btctax_core::persistence::{append_decision, load_all_ordered};
+        use btctax_core::{LotMethod, TaxProfile};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p1-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        // Seed ≥ 2 decision events via append_decision (fixture setup — test-region exception)
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let now = OffsetDateTime::now_utc();
+            let tz = UtcOffset::UTC;
+            let p1 = EventPayload::MethodElection(MethodElection {
+                effective_from: date!(2024 - 01 - 01),
+                method: LotMethod::Fifo,
+            });
+            let p2 = EventPayload::MethodElection(MethodElection {
+                effective_from: date!(2025 - 01 - 01),
+                method: LotMethod::Hifo,
+            });
+            append_decision(session.conn(), p1, now, tz, None).unwrap();
+            append_decision(session.conn(), p2, now, tz, None).unwrap();
+            session.save().unwrap();
+        }
+
+        // Open the editor's session and capture the pre-state
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(pre.len(), 2, "should have seeded exactly 2 events");
+
+        let p = fixture_profile();
+        persist_tax_profile(&mut session, 2025, &p).unwrap();
+
+        // In-memory: log unchanged
+        let post_inmem = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post_inmem, pre,
+            "event log must be UNCHANGED in-memory after profile set (side-table upsert)"
+        );
+
+        // Drop + reopen: persisted image also unchanged
+        drop(session);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let post_disk = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(
+            post_disk, pre,
+            "event log must be UNCHANGED on disk after profile set"
+        );
+
+        // Mutation-actually-happened guard (test cannot vacuously pass on a no-op)
+        let stored = session2.tax_profile(2025).unwrap().unwrap();
+        assert_eq!(
+            stored, p,
+            "profile must be readable after persist_tax_profile"
+        );
+
+        // Second differing upsert: log still == pre
+        let p2 = TaxProfile {
+            ordinary_taxable_income: dec!(200000),
+            ..p.clone()
+        };
+        drop(session2);
+        let mut session3 =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        persist_tax_profile(&mut session3, 2025, &p2).unwrap();
+        let post3 = load_all_ordered(session3.conn()).unwrap();
+        assert_eq!(
+            post3, pre,
+            "log still unchanged after second (differing) upsert"
+        );
+        let stored2 = session3.tax_profile(2025).unwrap().unwrap();
+        assert_eq!(stored2, p2, "second upsert value is readable");
+    }
+
     // ── KAT-G1 — the editor's mechanized source gate ─────────────────────────
     //
     // Clones the E10 scanner structure (export.rs:690–919 in btctax-tui):

@@ -13,6 +13,7 @@
 //! concurrent-writer case to reason about; this is the only safe lifecycle for a
 //! session-holding TUI editor.
 
+use crate::edit::form::{MutationModalState, ProfileFormState};
 use btctax_cli::Session;
 use btctax_store::Passphrase;
 use btctax_tui::{
@@ -73,6 +74,14 @@ pub struct EditorApp {
     pub disposals_state: TableState,
     pub income_state: TableState,
     pub forms_state: TableState,
+    /// The tax-profile form. `Some` while the form is open.
+    /// Pre-populated from the selected year's existing profile when present.
+    pub profile_form: Option<ProfileFormState>,
+    /// The per-mutation confirmation modal. `Some` while awaiting Enter/Esc.
+    ///
+    /// Modal dispatch precedes form and screen dispatch (the R0-M4 lesson —
+    /// Esc must never fall through to a quit arm).
+    pub mutation_modal: Option<MutationModalState>,
     /// One-line status (saved / error), shown in the footer.
     /// Cleared on the next non-modal key press (mirrors the viewer's `export_status`
     /// semantics, app.rs:140 [R0-N5]).
@@ -94,6 +103,8 @@ impl EditorApp {
             disposals_state: TableState::default(),
             income_state: TableState::default(),
             forms_state: TableState::default(),
+            profile_form: None,
+            mutation_modal: None,
             status: None,
         }
     }

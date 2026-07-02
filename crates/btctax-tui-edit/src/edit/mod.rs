@@ -7,4 +7,5 @@
 //! `persist` is the ONLY module permitted to name the mutation surface
 //! (`conn()` / `save()` / `tax_profile::set` / `append_decision`).
 
+pub mod form;
 pub mod persist;
