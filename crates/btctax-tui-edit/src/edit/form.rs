@@ -7,8 +7,8 @@
 //! This module performs NO writes — it only holds form state and validates input.
 
 use btctax_core::{
-    Carryforward, DisposeKind, EventId, FilingStatus, InboundClass, IncomeKind, OutflowClass,
-    ReclassifyOutflow, Sat, TaxDate, TaxProfile, Usd, WalletId,
+    Carryforward, DisposeKind, EventId, FilingStatus, InboundClass, IncomeKind, ManualFmv,
+    OutflowClass, ReclassifyIncome, ReclassifyOutflow, Sat, TaxDate, TaxProfile, Usd, WalletId,
 };
 use ratatui::widgets::TableState;
 use std::str::FromStr;
@@ -615,6 +615,157 @@ pub fn validate_reclassify_outflow(
         fee_usd,
         donee,
     })
+}
+
+// ── Reclassify-income flow types ─────────────────────────────────────────────
+
+/// Pre-computed display data for a reclassify-income list row.
+#[derive(Clone)]
+pub struct IncomeListItem {
+    pub income_event: EventId,
+    pub date: TaxDate,
+    pub sat: Sat,
+    pub kind: IncomeKind,
+    pub business: bool,
+    /// FMV from income_recognized if present; None if FmvMissing.
+    pub fmv: Option<Usd>,
+    pub wallet: Option<WalletId>,
+}
+
+/// Pre-computed display data for a set-fmv list row.
+#[derive(Clone)]
+pub struct FmvListItem {
+    pub event: EventId,
+    pub date: TaxDate,
+    pub sat: Sat,
+    pub kind: IncomeKind,
+    pub wallet: Option<WalletId>,
+}
+
+/// Step in the reclassify-income flow.
+pub enum ReclassifyIncomeStep {
+    List,
+    FieldForm {
+        item: IncomeListItem,
+        /// 3-state: None = not chosen (REQUIRED-EXPLICIT).
+        business: Option<bool>,
+        /// None = keep original.
+        kind: Option<IncomeKind>,
+        /// 0 = business, 1 = kind.
+        focus: usize,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the reclassify-income flow.
+pub struct ReclassifyIncomeFlowState {
+    pub list: TargetList<IncomeListItem>,
+    pub step: ReclassifyIncomeStep,
+}
+
+/// Payload for the reclassify-income confirmation modal.
+pub struct ReclassifyIncomeModalState {
+    pub target_event: EventId,
+    pub target_date: TaxDate,
+    pub target_sat: Sat,
+    pub original_kind: IncomeKind,
+    pub original_business: bool,
+    pub new_business: bool,
+    pub new_kind: Option<IncomeKind>,
+}
+
+/// Step in the set-fmv flow.
+pub enum SetFmvStep {
+    List,
+    FieldForm {
+        item: FmvListItem,
+        usd_fmv_buf: FieldBuffer,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the set-fmv flow.
+pub struct SetFmvFlowState {
+    pub list: TargetList<FmvListItem>,
+    pub step: SetFmvStep,
+}
+
+/// Payload for the set-fmv confirmation modal.
+pub struct SetFmvModalState {
+    pub target_event: EventId,
+    pub target_date: TaxDate,
+    pub target_sat: Sat,
+    pub target_kind: IncomeKind,
+    pub usd_fmv: Usd,
+}
+
+// ── Reclassify-income validation ─────────────────────────────────────────────
+
+/// Validate the reclassify-income field form.
+///
+/// `business`: None → "business is required (press Tab to choose true or false)".
+/// `kind`: always valid (None = keep original).
+///
+/// Returns the validated `EventPayload::ReclassifyIncome(…)` or an error string.
+pub fn validate_reclassify_income(
+    item: &IncomeListItem,
+    business: Option<bool>,
+    kind: Option<IncomeKind>,
+) -> Result<btctax_core::EventPayload, String> {
+    let b = match business {
+        None => return Err("business is required (press Tab to choose true or false)".to_string()),
+        Some(b) => b,
+    };
+    Ok(btctax_core::EventPayload::ReclassifyIncome(
+        ReclassifyIncome {
+            income_event: item.income_event.clone(),
+            business: b,
+            kind,
+        },
+    ))
+}
+
+/// Validate the set-fmv field form.
+///
+/// `usd_fmv_buf`: empty (len==0) → "usd-fmv is required"; non-empty → parse.
+///
+/// Returns the validated `EventPayload::ManualFmv(…)` or an error string.
+pub fn validate_set_fmv(
+    item: &FmvListItem,
+    usd_fmv_buf: &FieldBuffer,
+) -> Result<btctax_core::EventPayload, String> {
+    if usd_fmv_buf.is_empty() {
+        return Err("usd-fmv is required".to_string());
+    }
+    let trimmed = usd_fmv_buf.buf.trim();
+    let usd_fmv = Usd::from_str(trimmed).map_err(|_| format!("bad USD {trimmed:?}"))?;
+    Ok(btctax_core::EventPayload::ManualFmv(ManualFmv {
+        event: item.event.clone(),
+        usd_fmv,
+    }))
+}
+
+/// Cycle through IncomeKind with an extra None state (None = keep original).
+///
+/// None → Mining → Staking → Interest → Airdrop → Reward → None.
+pub fn cycle_income_kind_optional(kind: Option<IncomeKind>) -> Option<IncomeKind> {
+    match kind {
+        None => Some(IncomeKind::Mining),
+        Some(IncomeKind::Mining) => Some(IncomeKind::Staking),
+        Some(IncomeKind::Staking) => Some(IncomeKind::Interest),
+        Some(IncomeKind::Interest) => Some(IncomeKind::Airdrop),
+        Some(IncomeKind::Airdrop) => Some(IncomeKind::Reward),
+        Some(IncomeKind::Reward) => None,
+    }
+}
+
+/// Cycle through the business 3-state (None → true → false → None).
+pub fn cycle_business_optional(b: Option<bool>) -> Option<bool> {
+    match b {
+        None => Some(true),
+        Some(true) => Some(false),
+        Some(false) => None,
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1225,6 +1376,221 @@ mod tests {
         assert_eq!(kind, OutflowKind::Donate);
         kind = cycle_outflow_kind(kind);
         assert_eq!(kind, OutflowKind::Sell, "4 cycles must wrap to Sell");
+    }
+
+    // ── Helper: build a minimal IncomeListItem for RI validation tests ────────
+
+    fn dummy_income_item() -> IncomeListItem {
+        use btctax_core::{
+            identity::{Source, SourceRef},
+            EventId,
+        };
+        use time::{OffsetDateTime, UtcOffset};
+        IncomeListItem {
+            income_event: EventId::import(Source::River, SourceRef::new("test-ri-1")),
+            date: btctax_core::conventions::tax_date(
+                OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(),
+                UtcOffset::UTC,
+            ),
+            sat: 100_000,
+            kind: IncomeKind::Reward,
+            business: false,
+            fmv: None,
+            wallet: None,
+        }
+    }
+
+    // ── Helper: build a minimal FmvListItem for FMV validation tests ──────────
+
+    fn dummy_fmv_item() -> FmvListItem {
+        use btctax_core::{
+            identity::{Source, SourceRef},
+            EventId,
+        };
+        use time::{OffsetDateTime, UtcOffset};
+        FmvListItem {
+            event: EventId::import(Source::River, SourceRef::new("test-fmv-1")),
+            date: btctax_core::conventions::tax_date(
+                OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(),
+                UtcOffset::UTC,
+            ),
+            sat: 100_000,
+            kind: IncomeKind::Staking,
+            wallet: None,
+        }
+    }
+
+    // ── KAT-RI-REQUIRED-BUSINESS: business=None → Err "business is required" ─
+
+    #[test]
+    fn kat_ri_required_business_none_is_error() {
+        let item = dummy_income_item();
+        let err = validate_reclassify_income(&item, None, None).unwrap_err();
+        assert!(
+            err.contains("business is required"),
+            "None business must produce 'business is required' error; got: {err}"
+        );
+    }
+
+    // ── KAT-V-RI-1: business=None → blocked ─────────────────────────────────
+
+    #[test]
+    fn kat_v_ri_1_business_none_is_blocked() {
+        let item = dummy_income_item();
+        let result = validate_reclassify_income(&item, None, None);
+        assert!(result.is_err(), "None business must be blocked");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("required"),
+            "error must say 'required'; got: {err}"
+        );
+    }
+
+    // ── KAT-V-RI-2: business=Some(true), kind=None → valid ──────────────────
+
+    #[test]
+    fn kat_v_ri_2_business_true_kind_none_is_valid() {
+        use btctax_core::EventPayload;
+        let item = dummy_income_item();
+        let result = validate_reclassify_income(&item, Some(true), None);
+        let payload = result.unwrap();
+        if let EventPayload::ReclassifyIncome(ri) = payload {
+            assert!(ri.business, "business must be true");
+            assert!(ri.kind.is_none(), "kind must be None (keep original)");
+        } else {
+            panic!("expected ReclassifyIncome");
+        }
+    }
+
+    // ── KAT-V-RI-3: business=Some(false), kind=Some(Mining) → valid ──────────
+
+    #[test]
+    fn kat_v_ri_3_business_false_kind_mining_is_valid() {
+        use btctax_core::EventPayload;
+        let item = dummy_income_item();
+        let result = validate_reclassify_income(&item, Some(false), Some(IncomeKind::Mining));
+        let payload = result.unwrap();
+        if let EventPayload::ReclassifyIncome(ri) = payload {
+            assert!(!ri.business, "business must be false");
+            assert_eq!(ri.kind, Some(IncomeKind::Mining));
+        } else {
+            panic!("expected ReclassifyIncome");
+        }
+    }
+
+    // ── KAT-V-RI-4: business=Some(true), kind=Some(Reward) → valid ──────────
+
+    #[test]
+    fn kat_v_ri_4_business_true_kind_reward_is_valid() {
+        use btctax_core::EventPayload;
+        let item = dummy_income_item();
+        let result = validate_reclassify_income(&item, Some(true), Some(IncomeKind::Reward));
+        let payload = result.unwrap();
+        if let EventPayload::ReclassifyIncome(ri) = payload {
+            assert!(ri.business);
+            assert_eq!(ri.kind, Some(IncomeKind::Reward));
+        } else {
+            panic!("expected ReclassifyIncome");
+        }
+    }
+
+    // ── KAT-V-FMV-1: empty buf → Err "usd-fmv is required" ──────────────────
+
+    #[test]
+    fn kat_v_fmv_1_empty_buf_is_required_error() {
+        let item = dummy_fmv_item();
+        let err = validate_set_fmv(&item, &FieldBuffer::new()).unwrap_err();
+        assert!(
+            err.contains("usd-fmv") && err.contains("required"),
+            "empty buf must produce 'usd-fmv is required' error; got: {err}"
+        );
+    }
+
+    // ── KAT-V-FMV-2: "45.00" → valid, usd_fmv=45.00 ─────────────────────────
+
+    #[test]
+    fn kat_v_fmv_2_valid_decimal_parses() {
+        use btctax_core::EventPayload;
+        use rust_decimal_macros::dec;
+        let item = dummy_fmv_item();
+        let mut buf = FieldBuffer::new();
+        buf.set("45.00");
+        let payload = validate_set_fmv(&item, &buf).unwrap();
+        if let EventPayload::ManualFmv(mf) = payload {
+            assert_eq!(mf.usd_fmv, dec!(45.00));
+        } else {
+            panic!("expected ManualFmv");
+        }
+    }
+
+    // ── KAT-V-FMV-3: whitespace-only → parse error, NOT "required" [R0-M4] ───
+
+    #[test]
+    fn kat_v_fmv_3_whitespace_only_is_parse_error_not_required() {
+        let item = dummy_fmv_item();
+        let mut buf = FieldBuffer::new();
+        buf.set("   "); // whitespace-only: is_empty()==false [R0-M4]
+        let err = validate_set_fmv(&item, &buf).unwrap_err();
+        assert!(
+            err.contains("bad USD"),
+            "whitespace-only usd-fmv must be a parse error; got: {err}"
+        );
+        assert!(
+            !err.contains("required"),
+            "whitespace-only usd-fmv must NOT say 'required'; got: {err}"
+        );
+    }
+
+    // ── Extra: non-numeric usd-fmv → parse error ─────────────────────────────
+
+    #[test]
+    fn set_fmv_non_numeric_is_parse_error() {
+        let item = dummy_fmv_item();
+        let mut buf = FieldBuffer::new();
+        buf.set("abc");
+        let err = validate_set_fmv(&item, &buf).unwrap_err();
+        assert!(
+            err.contains("bad USD"),
+            "non-numeric must produce 'bad USD' error; got: {err}"
+        );
+    }
+
+    // ── Cycle pins: business 3-state and optional-kind 6-state ───────────────
+    //
+    // KAT-RI-REQUIRED-BUSINESS cycle pins (spec D5): Tab cycles
+    // None → Some(true) → Some(false) → None.
+
+    #[test]
+    fn kat_ri_business_optional_cycles_three_states_and_wraps() {
+        let mut b: Option<bool> = None; // initial: not chosen (REQUIRED-EXPLICIT)
+        b = cycle_business_optional(b);
+        assert_eq!(b, Some(true));
+        b = cycle_business_optional(b);
+        assert_eq!(b, Some(false));
+        b = cycle_business_optional(b);
+        assert_eq!(b, None, "3 cycles must wrap back to None");
+        b = cycle_business_optional(b);
+        assert_eq!(b, Some(true), "4th cycle lands on Some(true) again");
+    }
+
+    // Optional-kind picker: None → Mining → Staking → Interest → Airdrop →
+    // Reward → None (spec D1: None = keep original).
+
+    #[test]
+    fn kat_ri_kind_optional_cycles_six_states_and_wraps() {
+        let mut k: Option<IncomeKind> = None; // initial: keep original
+        k = cycle_income_kind_optional(k);
+        assert_eq!(k, Some(IncomeKind::Mining));
+        k = cycle_income_kind_optional(k);
+        assert_eq!(k, Some(IncomeKind::Staking));
+        k = cycle_income_kind_optional(k);
+        assert_eq!(k, Some(IncomeKind::Interest));
+        k = cycle_income_kind_optional(k);
+        assert_eq!(k, Some(IncomeKind::Airdrop));
+        k = cycle_income_kind_optional(k);
+        assert_eq!(k, Some(IncomeKind::Reward));
+        k = cycle_income_kind_optional(k);
+        assert_eq!(k, None, "6 cycles must wrap back to None (keep original)");
     }
 
     // ── KAT-V-RO-9: amount label is "gross proceeds" for sell/spend; "FMV" for gift/donate ─

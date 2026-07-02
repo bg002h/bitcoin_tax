@@ -112,6 +112,60 @@ pub fn persist_reclassify_outflow(
     Ok(id)
 }
 
+/// Append a `ReclassifyIncome` decision event and atomically save the vault.
+///
+/// `payload` is the **fully-validated** `EventPayload::ReclassifyIncome(…)` built by
+/// the reclassify-income form.  `now` is the caller-supplied `OffsetDateTime`
+/// (injected at Enter-press for test determinism; never derived inside this fn).
+///
+/// # Strict-append semantics
+/// Calls `append_decision(conn, payload, now, UTC, None)` → the event is assigned
+/// `decision_seq = MAX(existing) + 1`.  After `session.save()` the vault image on
+/// disk contains the new event at the tail.  The KAT-P2c strict-prefix test
+/// verifies this invariant.
+pub fn persist_reclassify_income(
+    session: &mut btctax_cli::Session,
+    payload: btctax_core::event::EventPayload,
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, btctax_cli::CliError> {
+    let id = btctax_core::persistence::append_decision(
+        session.conn(),
+        payload,
+        now,
+        time::UtcOffset::UTC,
+        None,
+    )?;
+    session.save()?;
+    Ok(id)
+}
+
+/// Append a `ManualFmv` decision event and atomically save the vault.
+///
+/// `payload` is the **fully-validated** `EventPayload::ManualFmv(…)` built by
+/// the set-fmv form.  `now` is the caller-supplied `OffsetDateTime`
+/// (injected at Enter-press for test determinism; never derived inside this fn).
+///
+/// # Strict-append semantics
+/// Calls `append_decision(conn, payload, now, UTC, None)` → the event is assigned
+/// `decision_seq = MAX(existing) + 1`.  After `session.save()` the vault image on
+/// disk contains the new event at the tail.  The KAT-P2d strict-prefix test
+/// verifies this invariant.
+pub fn persist_set_fmv(
+    session: &mut btctax_cli::Session,
+    payload: btctax_core::event::EventPayload,
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, btctax_cli::CliError> {
+    let id = btctax_core::persistence::append_decision(
+        session.conn(),
+        payload,
+        now,
+        time::UtcOffset::UTC,
+        None,
+    )?;
+    session.save()?;
+    Ok(id)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -787,5 +841,196 @@ mod tests {
             "KAT-G1 source gate violations found:\n{}",
             violations.join("\n")
         );
+    }
+
+    // ── KAT-P2c — append-only strict prefix test (reclassify-income append form) ──
+    //
+    // Invariant: persist_reclassify_income appends EXACTLY one decision event
+    // to the tail of the event log.
+
+    #[test]
+    fn kat_p2c_append_only_strict_prefix_reclassify_income() {
+        use btctax_core::event::{
+            EventPayload, FmvStatus, Income, IncomeKind, LedgerEvent, MethodElection,
+            ReclassifyIncome,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, load_all_ordered};
+        use btctax_core::EventId;
+        use btctax_store::Passphrase;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p2c-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        let income_id: EventId = EventId::import(Source::River, SourceRef::new("ref-p2c"));
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let wallet = Some(btctax_core::WalletId::Exchange {
+                provider: "River".to_string(),
+                account: "main".to_string(),
+            });
+            let batch = vec![LedgerEvent {
+                id: income_id.clone(),
+                utc_timestamp: OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(),
+                original_tz: UtcOffset::UTC,
+                wallet,
+                payload: EventPayload::Income(Income {
+                    sat: 100_000,
+                    usd_fmv: Some(rust_decimal_macros::dec!(30000)),
+                    fmv_status: FmvStatus::PriceDataset,
+                    kind: IncomeKind::Staking,
+                    business: false,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            let now = OffsetDateTime::from_unix_timestamp(1_748_001_000).unwrap();
+            let p = EventPayload::MethodElection(MethodElection {
+                effective_from: date!(2024 - 01 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
+            session.save().unwrap();
+        }
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            pre.len(),
+            2,
+            "pre must have 2 events (1 import + 1 decision)"
+        );
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+        assert_eq!(pre_max_seq, 1);
+
+        let payload = EventPayload::ReclassifyIncome(ReclassifyIncome {
+            income_event: income_id.clone(),
+            business: true,
+            kind: None,
+        });
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+
+        let returned_id = persist_reclassify_income(&mut session, payload.clone(), now).unwrap();
+
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 1);
+        assert_eq!(&post[..pre.len()], pre.as_slice(), "strict prefix");
+
+        let tail = &post[pre.len()];
+        let tail_seq = tail.decision_seq.expect("tail must have decision_seq");
+        assert_eq!(tail_seq, (pre_max_seq + 1) as i64);
+
+        let tail_event_id = EventId::Decision {
+            seq: tail_seq as u64,
+        };
+        assert_eq!(returned_id, tail_event_id);
+
+        let stored_payload: EventPayload =
+            serde_json::from_str(&tail.payload_json).expect("must deserialise");
+        assert_eq!(stored_payload, payload);
+
+        drop(session);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let post_disk = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(post_disk, post, "on-disk must equal in-memory post");
+    }
+
+    // ── KAT-P2d — append-only strict prefix test (set-fmv / ManualFmv append form) ──
+    //
+    // Invariant: persist_set_fmv appends EXACTLY one decision event
+    // to the tail of the event log.
+
+    #[test]
+    fn kat_p2d_append_only_strict_prefix_set_fmv() {
+        use btctax_core::event::{
+            EventPayload, FmvStatus, Income, IncomeKind, LedgerEvent, ManualFmv, MethodElection,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, load_all_ordered};
+        use btctax_core::EventId;
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p2d-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        let income_id: EventId = EventId::import(Source::River, SourceRef::new("ref-p2d"));
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let wallet = Some(btctax_core::WalletId::Exchange {
+                provider: "River".to_string(),
+                account: "main".to_string(),
+            });
+            let batch = vec![LedgerEvent {
+                id: income_id.clone(),
+                utc_timestamp: OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(),
+                original_tz: UtcOffset::UTC,
+                wallet,
+                payload: EventPayload::Income(Income {
+                    sat: 100_000,
+                    usd_fmv: None,
+                    fmv_status: FmvStatus::Missing,
+                    kind: IncomeKind::Staking,
+                    business: false,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            let now = OffsetDateTime::from_unix_timestamp(1_748_001_000).unwrap();
+            let p = EventPayload::MethodElection(MethodElection {
+                effective_from: date!(2024 - 01 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
+            session.save().unwrap();
+        }
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(pre.len(), 2);
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+        assert_eq!(pre_max_seq, 1);
+
+        let payload = EventPayload::ManualFmv(ManualFmv {
+            event: income_id.clone(),
+            usd_fmv: dec!(45.00),
+        });
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+
+        let returned_id = persist_set_fmv(&mut session, payload.clone(), now).unwrap();
+
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 1);
+        assert_eq!(&post[..pre.len()], pre.as_slice(), "strict prefix");
+
+        let tail = &post[pre.len()];
+        let tail_seq = tail.decision_seq.expect("tail must have decision_seq");
+        assert_eq!(tail_seq, (pre_max_seq + 1) as i64);
+
+        let tail_event_id = EventId::Decision {
+            seq: tail_seq as u64,
+        };
+        assert_eq!(returned_id, tail_event_id);
+
+        let stored_payload: EventPayload =
+            serde_json::from_str(&tail.payload_json).expect("must deserialise");
+        assert_eq!(stored_payload, payload);
+
+        drop(session);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let post_disk = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(post_disk, post, "on-disk must equal in-memory post");
     }
 }

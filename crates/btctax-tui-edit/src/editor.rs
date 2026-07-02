@@ -15,7 +15,8 @@
 
 use crate::edit::form::{
     ClassifyInboundFlowState, ClassifyInboundModalState, MutationModalState, ProfileFormState,
-    ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
+    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyOutflowFlowState,
+    ReclassifyOutflowModalState, SetFmvFlowState, SetFmvModalState,
 };
 use btctax_cli::Session;
 use btctax_store::Passphrase;
@@ -102,6 +103,14 @@ pub struct EditorApp {
     pub reclassify_outflow_flow: Option<ReclassifyOutflowFlowState>,
     /// Reclassify-outflow confirmation modal.  `Some` while awaiting Enter/Esc.
     pub reclassify_outflow_modal: Option<ReclassifyOutflowModalState>,
+    /// Full reclassify-income flow state.  `Some` while the flow is open.
+    pub reclassify_income_flow: Option<ReclassifyIncomeFlowState>,
+    /// Reclassify-income confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub reclassify_income_modal: Option<ReclassifyIncomeModalState>,
+    /// Full set-fmv flow state.  `Some` while the flow is open.
+    pub set_fmv_flow: Option<SetFmvFlowState>,
+    /// Set-fmv confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub set_fmv_modal: Option<SetFmvModalState>,
     /// One-line status (saved / error), shown in the footer.
     /// Cleared on the next non-modal key press (mirrors the viewer's `export_status`
     /// semantics, app.rs:140 [R0-N5]).
@@ -129,6 +138,10 @@ impl EditorApp {
             classify_inbound_modal: None,
             reclassify_outflow_flow: None,
             reclassify_outflow_modal: None,
+            reclassify_income_flow: None,
+            reclassify_income_modal: None,
+            set_fmv_flow: None,
+            set_fmv_modal: None,
             status: None,
         }
     }

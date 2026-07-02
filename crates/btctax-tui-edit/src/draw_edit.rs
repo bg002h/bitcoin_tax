@@ -10,8 +10,9 @@
 
 use crate::edit::form::{
     amount_label, income_kind_display, ClassifyInboundModalState, ClassifyInboundStep,
-    InboundVariant, MutationModalState, OutflowKind, ProfileFormState, ReclassifyOutflowModalState,
-    ReclassifyOutflowStep, FIELD_LABELS,
+    InboundVariant, MutationModalState, OutflowKind, ProfileFormState, ReclassifyIncomeFlowState,
+    ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowModalState,
+    ReclassifyOutflowStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, FIELD_LABELS,
 };
 use crate::editor::{EditorApp, EditorScreen};
 use btctax_core::{DisposeKind, InboundClass, OutflowClass};
@@ -186,6 +187,40 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.reclassify_outflow_modal.as_ref() {
         draw_reclassify_outflow_modal(frame, area, modal);
+    }
+    // Reclassify-income flow overlay.
+    if app.reclassify_income_flow.is_some() {
+        let is_list = matches!(
+            app.reclassify_income_flow.as_ref().map(|f| &f.step),
+            Some(ReclassifyIncomeStep::List)
+        );
+        if is_list {
+            if let Some(flow) = app.reclassify_income_flow.as_mut() {
+                draw_reclassify_income_list(frame, area, flow);
+            }
+        } else if let Some(flow) = app.reclassify_income_flow.as_ref() {
+            draw_reclassify_income_form(frame, area, &flow.step);
+        }
+    }
+    if let Some(modal) = app.reclassify_income_modal.as_ref() {
+        draw_reclassify_income_modal(frame, area, modal);
+    }
+    // Set-FMV flow overlay.
+    if app.set_fmv_flow.is_some() {
+        let is_list = matches!(
+            app.set_fmv_flow.as_ref().map(|f| &f.step),
+            Some(SetFmvStep::List)
+        );
+        if is_list {
+            if let Some(flow) = app.set_fmv_flow.as_mut() {
+                draw_set_fmv_list(frame, area, flow);
+            }
+        } else if let Some(flow) = app.set_fmv_flow.as_ref() {
+            draw_set_fmv_form(frame, area, &flow.step);
+        }
+    }
+    if let Some(modal) = app.set_fmv_modal.as_ref() {
+        draw_set_fmv_modal(frame, area, modal);
     }
 }
 
@@ -913,6 +948,367 @@ fn draw_reclassify_outflow_modal(
 
     let block = Block::default()
         .title(" Confirm: reclassify-outflow — WRITES THE VAULT ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+// ── Reclassify-income flow draw functions ─────────────────────────────────────
+
+/// Render the reclassify-income target list overlay.
+fn draw_reclassify_income_list(
+    frame: &mut Frame,
+    area: Rect,
+    flow: &mut ReclassifyIncomeFlowState,
+) {
+    let modal_width: u16 = 100;
+    let modal_height: u16 = (flow.list.items.len() as u16 + 6).min(area.height.saturating_sub(2));
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Reclassify Income — select Income event target  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let header = Row::new(vec![
+        Cell::from("Date"),
+        Cell::from("Sat"),
+        Cell::from("Kind"),
+        Cell::from("Business"),
+        Cell::from("FMV"),
+        Cell::from("EventId"),
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
+
+    let rows: Vec<Row> = if flow.list.items.is_empty() {
+        vec![Row::new(vec![Cell::from(
+            "(no reclassifiable income events)",
+        )])]
+    } else {
+        flow.list
+            .items
+            .iter()
+            .map(|item| {
+                let fmv_str = item
+                    .fmv
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "(pending)".to_string());
+                Row::new(vec![
+                    Cell::from(item.date.to_string()),
+                    Cell::from(item.sat.to_string()),
+                    Cell::from(income_kind_display(item.kind)),
+                    Cell::from(item.business.to_string()),
+                    Cell::from(fmv_str),
+                    Cell::from(item.income_event.canonical()),
+                ])
+            })
+            .collect()
+    };
+
+    let widths = [
+        Constraint::Length(12),
+        Constraint::Length(12),
+        Constraint::Length(10),
+        Constraint::Length(10),
+        Constraint::Length(14),
+        Constraint::Min(30),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        )
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.list.table_state);
+
+    let footer_area = Rect {
+        x: modal_rect.x,
+        y: modal_rect.y + modal_rect.height.saturating_sub(1),
+        width: modal_rect.width,
+        height: 1,
+    };
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(footer, footer_area);
+}
+
+/// Render the reclassify-income field form overlay.
+fn draw_reclassify_income_form(frame: &mut Frame, area: Rect, step: &ReclassifyIncomeStep) {
+    let modal_width: u16 = 72;
+    let modal_height: u16 = 14;
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let ReclassifyIncomeStep::FieldForm {
+        item,
+        business,
+        kind,
+        focus,
+        error,
+    } = step
+    else {
+        return;
+    };
+
+    let biz_display = match business {
+        None => "---  [required]",
+        Some(true) => "true",
+        Some(false) => "false",
+    };
+    let kind_display = match kind {
+        None => "keep original",
+        Some(k) => income_kind_display(*k),
+    };
+
+    let biz_line = format!(
+        "  {} business: {}  (Tab: cycle true/false/---)",
+        if *focus == 0 { ">" } else { " " },
+        biz_display,
+    );
+    let kind_line = format!(
+        "  {} kind:     {}  (Tab: cycle None/Mining/Staking/Interest/Airdrop/Reward)",
+        if *focus == 1 { ">" } else { " " },
+        kind_display,
+    );
+    let err_line = error
+        .as_deref()
+        .map(|e| format!("\n  Error: {e}"))
+        .unwrap_or_default();
+
+    let content = format!(
+        "  target: {target}\n\
+         \n\
+         {biz_line}\n\
+         {kind_line}\
+         {err_line}\n\
+         \n\
+         \n  Enter: validate   Esc: back to list   ↑/↓: move focus   q: swallowed",
+        target = item.income_event.canonical(),
+    );
+
+    let block = Block::default()
+        .title(" Reclassify Income — field form  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+/// Render the reclassify-income confirmation modal.
+fn draw_reclassify_income_modal(frame: &mut Frame, area: Rect, modal: &ReclassifyIncomeModalState) {
+    // Spec D1: when kind is Some(k), show "{display} (was {original})";
+    // when None, show "keep original".
+    let new_kind_display = match modal.new_kind {
+        Some(k) => format!(
+            "{} (was {})",
+            income_kind_display(k),
+            income_kind_display(modal.original_kind)
+        ),
+        None => "keep original".to_string(),
+    };
+
+    let content = format!(
+        "  target:  {target}   (Income)\n\
+           date:    {date}\n\
+           sat:     {sat}\n\
+         \n\
+           original: kind={orig_kind}  business={orig_biz}\n\
+           override:\n\
+             business: {new_biz}    (was {orig_biz})\n\
+             kind:     {new_kind}\n\
+         \n\
+           Effects: income_recognized updates; SE/NIIT exposure\n\
+           may change depending on the flip direction.\n\
+         \n\
+           Appended as a decision event (append-only log).\n\
+           Saved immediately via the vault's atomic write path.\n\
+         \n\
+         [Enter] Confirm & save     [Esc] Cancel — writes nothing",
+        target = modal.target_event.canonical(),
+        date = modal.target_date,
+        sat = modal.target_sat,
+        orig_kind = income_kind_display(modal.original_kind),
+        orig_biz = modal.original_business,
+        new_biz = modal.new_business,
+        new_kind = new_kind_display,
+    );
+
+    let modal_width: u16 = 64;
+    let content_lines = content.lines().count() as u16 + 2;
+    let modal_height = content_lines.max(14);
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Confirm: reclassify-income — WRITES THE VAULT ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+// ── Set-FMV flow draw functions ───────────────────────────────────────────────
+
+/// Render the set-fmv target list overlay.
+fn draw_set_fmv_list(frame: &mut Frame, area: Rect, flow: &mut SetFmvFlowState) {
+    let modal_width: u16 = 90;
+    let modal_height: u16 = (flow.list.items.len() as u16 + 6).min(area.height.saturating_sub(2));
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Set FMV — select FmvMissing Income event  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let header = Row::new(vec![
+        Cell::from("Date"),
+        Cell::from("Sat"),
+        Cell::from("Kind"),
+        Cell::from("EventId"),
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
+
+    let rows: Vec<Row> = if flow.list.items.is_empty() {
+        vec![Row::new(vec![Cell::from("(no FMV-missing income events)")])]
+    } else {
+        flow.list
+            .items
+            .iter()
+            .map(|item| {
+                Row::new(vec![
+                    Cell::from(item.date.to_string()),
+                    Cell::from(item.sat.to_string()),
+                    Cell::from(income_kind_display(item.kind)),
+                    Cell::from(item.event.canonical()),
+                ])
+            })
+            .collect()
+    };
+
+    let widths = [
+        Constraint::Length(12),
+        Constraint::Length(12),
+        Constraint::Length(10),
+        Constraint::Min(30),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        )
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.list.table_state);
+
+    let footer_area = Rect {
+        x: modal_rect.x,
+        y: modal_rect.y + modal_rect.height.saturating_sub(1),
+        width: modal_rect.width,
+        height: 1,
+    };
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(footer, footer_area);
+}
+
+/// Render the set-fmv field form overlay.
+fn draw_set_fmv_form(frame: &mut Frame, area: Rect, step: &SetFmvStep) {
+    let modal_width: u16 = 70;
+    let modal_height: u16 = 12;
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let SetFmvStep::FieldForm {
+        item,
+        usd_fmv_buf,
+        error,
+    } = step
+    else {
+        return;
+    };
+
+    let fmv_line = format!("  > usd_fmv (USD) [REQUIRED]: {}", usd_fmv_buf.buf);
+    let err_line = error
+        .as_deref()
+        .map(|e| format!("\n  Error: {e}"))
+        .unwrap_or_default();
+
+    let content = format!(
+        "  target: {target}\n\
+         \n\
+         {fmv_line}\
+         {err_line}\n\
+         \n\
+         \n  Enter: validate   Esc: back to list   q: swallowed",
+        target = item.event.canonical(),
+    );
+
+    let block = Block::default()
+        .title(" Set FMV — field form  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+/// Render the set-fmv confirmation modal.
+fn draw_set_fmv_modal(frame: &mut Frame, area: Rect, modal: &SetFmvModalState) {
+    let content = format!(
+        "  target:  {target}   (Income)\n\
+           date:    {date}\n\
+           sat:     {sat}\n\
+           kind:    {kind}\n\
+         \n\
+           usd_fmv: {usd_fmv}   (REQUIRED — sets the income FMV)\n\
+         \n\
+           Effects: FmvMissing blocker will clear; income_recognized\n\
+           will gain an entry with this FMV.\n\
+         \n\
+           Appended as a decision event (append-only log).\n\
+           Saved immediately via the vault's atomic write path.\n\
+         \n\
+         [Enter] Confirm & save     [Esc] Cancel — writes nothing",
+        target = modal.target_event.canonical(),
+        date = modal.target_date,
+        sat = modal.target_sat,
+        kind = income_kind_display(modal.target_kind),
+        usd_fmv = modal.usd_fmv,
+    );
+
+    let modal_width: u16 = 64;
+    let content_lines = content.lines().count() as u16 + 2;
+    let modal_height = content_lines.max(14);
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Confirm: set-fmv — WRITES THE VAULT ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Red));
 

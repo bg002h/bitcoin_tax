@@ -18,12 +18,15 @@ use crossterm::{
     terminal::{enable_raw_mode, EnterAlternateScreen},
 };
 use edit::form::{
-    cycle_filing_status, cycle_income_kind, cycle_outflow_kind, income_kind_display, next_focus,
-    prev_focus, validate, validate_classify_inbound_gift, validate_classify_inbound_income,
-    validate_reclassify_outflow, ClassifyInboundFlowState, ClassifyInboundModalState,
-    ClassifyInboundStep, FieldBuffer, InboundListItem, InboundVariant, MutationModalState,
-    OutflowKind, OutflowListItem, ProfileFormState, ReclassifyOutflowFlowState,
-    ReclassifyOutflowModalState, ReclassifyOutflowStep, TargetList,
+    cycle_business_optional, cycle_filing_status, cycle_income_kind, cycle_income_kind_optional,
+    cycle_outflow_kind, income_kind_display, next_focus, prev_focus, validate,
+    validate_classify_inbound_gift, validate_classify_inbound_income, validate_reclassify_income,
+    validate_reclassify_outflow, validate_set_fmv, ClassifyInboundFlowState,
+    ClassifyInboundModalState, ClassifyInboundStep, FieldBuffer, FmvListItem, InboundListItem,
+    InboundVariant, IncomeListItem, MutationModalState, OutflowKind, OutflowListItem,
+    ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
+    ReclassifyOutflowFlowState, ReclassifyOutflowModalState, ReclassifyOutflowStep,
+    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList,
 };
 use editor::{EditorApp, EditorScreen};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -34,7 +37,7 @@ use std::time::Duration;
 
 use btctax_core::{
     BlockerKind, ClassifyInbound, DisposeKind, EventId, EventPayload, InboundClass, IncomeKind,
-    OutflowClass,
+    ManualFmv, OutflowClass, ReclassifyIncome,
 };
 use btctax_tui::app::Tab;
 use btctax_tui::{restore_terminal, setup_panic_hook, TerminalGuard};
@@ -70,13 +73,17 @@ fn parse_vault_path() -> PathBuf {
 /// Only KEY PRESS events are acted on (release/repeat ignored).
 ///
 /// **Dispatch order** (modal → flow → form → screen — the R0-M4 lesson: Esc must never
-/// fall through to a quit arm mid-flow or mid-modal):
+/// fall through to a quit arm mid-flow or mid-modal) [N4]:
 /// 1. Mutation-modal dispatch — BEFORE flow, form and screen dispatch.
 /// 2. Classify-inbound-modal dispatch — BEFORE flow, form and screen dispatch.
 /// 3. Reclassify-outflow-modal dispatch — BEFORE flow, form and screen dispatch.
-/// 4. Flow dispatch — ANY open flow claims ALL keys at every step [R0-I2].
-/// 5. Form dispatch — BEFORE screen dispatch.
-/// 6. Screen dispatch (Unlock / Locked / Browse).
+/// 4. Reclassify-income-modal dispatch — BEFORE flow, form and screen dispatch.
+/// 5. Set-fmv-modal dispatch — BEFORE flow, form and screen dispatch.
+/// 6. Flow dispatch — ANY open flow claims ALL keys at every step [R0-I2].
+/// 7. Form dispatch — BEFORE screen dispatch.
+/// 8. Screen dispatch (Unlock / Locked / Browse).
+///
+/// At most one flow `Some` and at most one modal `Some` at any time.
 ///
 /// # Screen dispatch
 /// - **Unlock**: `Esc` → quit; `Tab`/`BackTab` → ignored (no tab bar); `Enter` →
@@ -85,7 +92,8 @@ fn parse_vault_path() -> PathBuf {
 /// - **Browse**: `q`/`Esc` → quit; `Tab` → next tab; `BackTab` → prev tab;
 ///   `←/→` → year change + reset selections; `↑/↓ j/k` → scroll;
 ///   `PgUp/PgDn` → page; `g/G` → top/bottom; `p` → tax-profile form;
-///   `c` → classify-inbound flow; `o` → reclassify-outflow flow.
+///   `c` → classify-inbound flow; `o` → reclassify-outflow flow;
+///   `r` → reclassify-income flow; `f` → set-fmv flow.
 pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     if key.kind != KeyEventKind::Press {
         return;
@@ -109,7 +117,19 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
-    // ── 4. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
+    // ── 4. Reclassify-income-modal dispatch — BEFORE flow, form, screen ───────
+    if app.reclassify_income_modal.is_some() {
+        handle_reclassify_income_modal_key(app, key);
+        return;
+    }
+
+    // ── 5. Set-fmv-modal dispatch — BEFORE flow, form, screen ────────────────
+    if app.set_fmv_modal.is_some() {
+        handle_set_fmv_modal_key(app, key);
+        return;
+    }
+
+    // ── 6. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
     //    Every step of an open flow is claimed here; 'q' and Esc can never
     //    fall through to a Browse quit arm mid-flow.
     if app.classify_inbound_flow.is_some() {
@@ -120,14 +140,22 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         handle_reclassify_outflow_flow_key(app, key);
         return;
     }
+    if app.reclassify_income_flow.is_some() {
+        handle_reclassify_income_flow_key(app, key);
+        return;
+    }
+    if app.set_fmv_flow.is_some() {
+        handle_set_fmv_flow_key(app, key);
+        return;
+    }
 
-    // ── 5. Form dispatch — BEFORE screen dispatch ─────────────────────────────
+    // ── 7. Form dispatch — BEFORE screen dispatch ─────────────────────────────
     if app.profile_form.is_some() {
         handle_form_key(app, key);
         return;
     }
 
-    // ── 6. Screen dispatch ────────────────────────────────────────────────────
+    // ── 8. Screen dispatch ────────────────────────────────────────────────────
     match app.screen {
         EditorScreen::Unlock => match key.code {
             // Only Esc quits from Unlock — 'q' and all printable chars go to buffer.
@@ -175,6 +203,8 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('p') => open_profile_form(app),
                 KeyCode::Char('c') => open_classify_inbound_flow(app),
                 KeyCode::Char('o') => open_reclassify_outflow_flow(app),
+                KeyCode::Char('r') => open_reclassify_income_flow(app),
+                KeyCode::Char('f') => open_set_fmv_flow(app),
                 _ => {}
             }
         }
@@ -1166,6 +1196,409 @@ fn handle_ro_field_form_key(app: &mut EditorApp, key: KeyEvent) {
     }
 }
 
+// ── Reclassify-income modal handler ──────────────────────────────────────────
+
+fn handle_reclassify_income_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let modal_data = match app.reclassify_income_modal.as_ref() {
+                Some(m) => {
+                    let payload = EventPayload::ReclassifyIncome(ReclassifyIncome {
+                        income_event: m.target_event.clone(),
+                        business: m.new_business,
+                        kind: m.new_kind,
+                    });
+                    let target_event = m.target_event.clone();
+                    let new_business = m.new_business;
+                    let new_kind = m.new_kind;
+                    (payload, target_event, new_business, new_kind)
+                }
+                None => return,
+            };
+            let (payload, target_event, new_business, new_kind) = modal_data;
+
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.reclassify_income_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_reclassify_income(session, payload, now)
+            };
+
+            match save_result {
+                Ok(decision_id) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_reclassify_income_status(
+                                &snap,
+                                &target_event,
+                                &decision_id,
+                                new_business,
+                                new_kind,
+                            );
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.reclassify_income_modal = None;
+                    app.reclassify_income_flow = None;
+                }
+                Err(e) => {
+                    app.reclassify_income_modal = None;
+                    app.status = Some(format!("Save error: {e}"));
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.reclassify_income_modal = None;
+        }
+        _ => {}
+    }
+}
+
+// ── Set-fmv modal handler ─────────────────────────────────────────────────────
+
+fn handle_set_fmv_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let modal_data = match app.set_fmv_modal.as_ref() {
+                Some(m) => {
+                    let payload = EventPayload::ManualFmv(ManualFmv {
+                        event: m.target_event.clone(),
+                        usd_fmv: m.usd_fmv,
+                    });
+                    let target_event = m.target_event.clone();
+                    let usd_fmv = m.usd_fmv;
+                    (payload, target_event, usd_fmv)
+                }
+                None => return,
+            };
+            let (payload, target_event, usd_fmv) = modal_data;
+
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.set_fmv_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_set_fmv(session, payload, now)
+            };
+
+            match save_result {
+                Ok(decision_id) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status =
+                                derive_set_fmv_status(&snap, &target_event, &decision_id, usd_fmv);
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.set_fmv_modal = None;
+                    app.set_fmv_flow = None;
+                }
+                Err(e) => {
+                    app.set_fmv_modal = None;
+                    app.status = Some(format!("Save error: {e}"));
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.set_fmv_modal = None;
+        }
+        _ => {}
+    }
+}
+
+// ── Reclassify-income flow key dispatch ──────────────────────────────────────
+
+fn handle_reclassify_income_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step_kind: u8 = match app.reclassify_income_flow.as_ref().map(|f| &f.step) {
+        Some(ReclassifyIncomeStep::List) => 0,
+        Some(ReclassifyIncomeStep::FieldForm { .. }) => 1,
+        None => return,
+    };
+    match step_kind {
+        0 => handle_ri_list_key(app, key),
+        1 => handle_ri_field_form_key(app, key),
+        _ => {}
+    }
+}
+
+fn handle_ri_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.reclassify_income_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.reclassify_income_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.reclassify_income_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.reclassify_income_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            let selected = app
+                .reclassify_income_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+            if let Some(item) = selected {
+                if let Some(flow) = app.reclassify_income_flow.as_mut() {
+                    flow.step = ReclassifyIncomeStep::FieldForm {
+                        item,
+                        business: None,
+                        kind: None,
+                        focus: 0,
+                        error: None,
+                    };
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.reclassify_income_flow = None;
+        }
+        _ => {}
+    }
+}
+
+fn handle_ri_field_form_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let result = {
+                match app.reclassify_income_flow.as_ref() {
+                    Some(f) => match &f.step {
+                        ReclassifyIncomeStep::FieldForm {
+                            item,
+                            business,
+                            kind,
+                            ..
+                        } => validate_reclassify_income(item, *business, *kind)
+                            .map(|_| (item.clone(), *business, *kind)),
+                        _ => return,
+                    },
+                    None => return,
+                }
+            };
+            match result {
+                Ok((item, business, kind)) => {
+                    app.reclassify_income_modal = Some(ReclassifyIncomeModalState {
+                        target_event: item.income_event.clone(),
+                        target_date: item.date,
+                        target_sat: item.sat,
+                        original_kind: item.kind,
+                        original_business: item.business,
+                        new_business: business.unwrap_or(false),
+                        new_kind: kind,
+                    });
+                }
+                Err(msg) => {
+                    if let Some(flow) = app.reclassify_income_flow.as_mut() {
+                        if let ReclassifyIncomeStep::FieldForm { error, .. } = &mut flow.step {
+                            *error = Some(msg);
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            if let Some(flow) = app.reclassify_income_flow.as_mut() {
+                flow.step = ReclassifyIncomeStep::List;
+            }
+        }
+        KeyCode::Tab => {
+            if let Some(flow) = app.reclassify_income_flow.as_mut() {
+                if let ReclassifyIncomeStep::FieldForm {
+                    business,
+                    kind,
+                    focus,
+                    ..
+                } = &mut flow.step
+                {
+                    if *focus == 0 {
+                        *business = cycle_business_optional(*business);
+                    } else {
+                        *kind = cycle_income_kind_optional(*kind);
+                    }
+                }
+            }
+        }
+        KeyCode::Up => {
+            if let Some(flow) = app.reclassify_income_flow.as_mut() {
+                if let ReclassifyIncomeStep::FieldForm { focus, .. } = &mut flow.step {
+                    *focus = focus.saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Down => {
+            if let Some(flow) = app.reclassify_income_flow.as_mut() {
+                if let ReclassifyIncomeStep::FieldForm { focus, .. } = &mut flow.step {
+                    *focus = (*focus + 1).min(1);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+// ── Set-fmv flow key dispatch ─────────────────────────────────────────────────
+
+fn handle_set_fmv_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step_kind: u8 = match app.set_fmv_flow.as_ref().map(|f| &f.step) {
+        Some(SetFmvStep::List) => 0,
+        Some(SetFmvStep::FieldForm { .. }) => 1,
+        None => return,
+    };
+    match step_kind {
+        0 => handle_sfmv_list_key(app, key),
+        1 => handle_sfmv_field_form_key(app, key),
+        _ => {}
+    }
+}
+
+fn handle_sfmv_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.set_fmv_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.set_fmv_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.set_fmv_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.set_fmv_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            let selected = app
+                .set_fmv_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+            if let Some(item) = selected {
+                if let Some(flow) = app.set_fmv_flow.as_mut() {
+                    flow.step = SetFmvStep::FieldForm {
+                        item,
+                        usd_fmv_buf: FieldBuffer::new(),
+                        error: None,
+                    };
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.set_fmv_flow = None;
+        }
+        _ => {}
+    }
+}
+
+fn handle_sfmv_field_form_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let result = {
+                match app.set_fmv_flow.as_ref() {
+                    Some(f) => match &f.step {
+                        SetFmvStep::FieldForm {
+                            item, usd_fmv_buf, ..
+                        } => validate_set_fmv(item, usd_fmv_buf)
+                            .map(|payload| (item.clone(), payload)),
+                        _ => return,
+                    },
+                    None => return,
+                }
+            };
+            match result {
+                Ok((item, payload)) => {
+                    let usd_fmv = match &payload {
+                        EventPayload::ManualFmv(mf) => mf.usd_fmv,
+                        _ => unreachable!(),
+                    };
+                    app.set_fmv_modal = Some(SetFmvModalState {
+                        target_event: item.event.clone(),
+                        target_date: item.date,
+                        target_sat: item.sat,
+                        target_kind: item.kind,
+                        usd_fmv,
+                    });
+                }
+                Err(msg) => {
+                    if let Some(flow) = app.set_fmv_flow.as_mut() {
+                        if let SetFmvStep::FieldForm { error, .. } = &mut flow.step {
+                            *error = Some(msg);
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            if let Some(flow) = app.set_fmv_flow.as_mut() {
+                flow.step = SetFmvStep::List;
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.set_fmv_flow.as_mut() {
+                if let SetFmvStep::FieldForm { usd_fmv_buf, .. } = &mut flow.step {
+                    usd_fmv_buf.pop_char();
+                }
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(flow) = app.set_fmv_flow.as_mut() {
+                if let SetFmvStep::FieldForm { usd_fmv_buf, .. } = &mut flow.step {
+                    usd_fmv_buf.push_char(c);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 // ── Classify-inbound flow opener ──────────────────────────────────────────────
 
 /// Build an `events_by_id` lookup table from the snapshot's raw event list.
@@ -1437,6 +1870,228 @@ fn derive_reclassify_outflow_status(
 
     // No target-attributed blocker: clean success.
     format!("Reclassified outflow as {kind_str}")
+}
+
+// ── Reclassify-income flow opener ─────────────────────────────────────────────
+
+/// Open the reclassify-income flow from the Browse screen.
+///
+/// Applies the compound pre-filter (spec §Pre-filter verification, Claim C):
+/// 1. Raw `EventPayload::Income` events only [WB-I4(a): raw only — ClassifyRaw'd
+///    Unclassified events whose effective payload became Income are excluded;
+///    under-inclusion only (safe direction); recorded in FOLLOWUPS].
+/// 2. No non-voided `ReclassifyIncome` decision already targets it (a second
+///    would fire Hard `DecisionConflict`; FIRST-WINS, resolve.rs pass-1e).
+///
+/// Display data derives date/sat/kind/business from the Income payload directly
+/// (pre-override — the filter excludes already-reclassified events), enriched
+/// with the `income_recognized` entry for fmv when present. `FmvMissing` events
+/// (no income_recognized entry) render fmv as `"(pending)"`.
+///
+/// Empty filtered list → status "No reclassifiable income events"; flow NOT
+/// opened [R0-M8].
+fn open_reclassify_income_flow(app: &mut EditorApp) {
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+
+    // [N3] Both sets are HOISTED once before the per-event filter (the 2a
+    // precedent: `open_classify_inbound_flow`) — never rebuilt inside the closure.
+
+    // Voided-decision set (VoidDecisionEvent targets).
+    let voided: BTreeSet<&EventId> = snap
+        .events
+        .iter()
+        .filter_map(|ev| {
+            if let EventPayload::VoidDecisionEvent(v) = &ev.payload {
+                Some(&v.target_event_id)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Income EventIds already targeted by a non-voided ReclassifyIncome
+    // (a second would fire DecisionConflict; FIRST-WINS).
+    let already_reclassified: BTreeSet<&EventId> = snap
+        .events
+        .iter()
+        .filter(|ev| !voided.contains(&ev.id))
+        .filter_map(|ev| {
+            if let EventPayload::ReclassifyIncome(ri) = &ev.payload {
+                Some(&ri.income_event)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut items: Vec<IncomeListItem> = snap
+        .events
+        .iter()
+        .filter_map(|e| {
+            // Filter 1: raw Income payload only.
+            let inc = match &e.payload {
+                EventPayload::Income(inc) => inc,
+                _ => return None,
+            };
+            // Filter 2: exclude if a non-voided ReclassifyIncome already targets it.
+            if already_reclassified.contains(&e.id) {
+                return None;
+            }
+            // FMV from income_recognized if present (clean FMV); None → "(pending)".
+            let fmv = snap
+                .state
+                .income_recognized
+                .iter()
+                .find(|r| r.event == e.id)
+                .map(|r| r.usd_fmv);
+            let date = btctax_core::conventions::tax_date(e.utc_timestamp, e.original_tz);
+            Some(IncomeListItem {
+                income_event: e.id.clone(),
+                date,
+                sat: inc.sat,
+                kind: inc.kind,
+                business: inc.business,
+                fmv,
+                wallet: e.wallet.clone(),
+            })
+        })
+        .collect();
+
+    // Sort by date for deterministic display order.
+    items.sort_by_key(|i| i.date);
+
+    if items.is_empty() {
+        // R0-M8: empty filtered list never opens a flow.
+        app.status = Some("No reclassifiable income events".to_string());
+        return;
+    }
+
+    app.reclassify_income_flow = Some(ReclassifyIncomeFlowState {
+        list: TargetList::new(items),
+        step: ReclassifyIncomeStep::List,
+    });
+}
+
+// ── Set-FMV flow opener ───────────────────────────────────────────────────────
+
+/// Open the set-fmv flow from the Browse screen.
+///
+/// Applies the filter from spec Claim D:
+/// 1. `FmvMissing` blockers only.
+/// 2. Blocker.event resolves to a raw `EventPayload::Income` event in snap.events
+///    (ManualFmv pass-1d validates EFFECTIVE payload == Income; the raw filter
+///    approximates this — same WB-I4(a) limitation as 2a. A TransferIn classified
+///    as Income via ClassifyInbound is excluded — correct, because ManualFmv on a
+///    TransferIn fires DecisionConflict; the remedy is void + re-classify).
+///
+/// No pre-filter for already-set FMVs: the list naturally empties when the
+/// `FmvMissing` blocker clears after a successful persist + re-projection; a
+/// second `ManualFmv` is NOT a conflict (latest-wins, resolve.rs:453–456).
+///
+/// Empty filtered list → status "No FMV-missing income events"; flow NOT
+/// opened [R0-M8].
+fn open_set_fmv_flow(app: &mut EditorApp) {
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let ev_idx = events_by_id(snap);
+
+    let mut items: Vec<FmvListItem> = snap
+        .state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::FmvMissing)
+        .filter_map(|b| {
+            let id = b.event.as_ref()?;
+            // Raw Income payload check [WB-I4(a): raw only].
+            let ev = ev_idx.get(id)?;
+            let inc = match &ev.payload {
+                EventPayload::Income(inc) => inc,
+                _ => return None,
+            };
+            let date = btctax_core::conventions::tax_date(ev.utc_timestamp, ev.original_tz);
+            Some(FmvListItem {
+                event: id.clone(),
+                date,
+                sat: inc.sat,
+                kind: inc.kind,
+                wallet: ev.wallet.clone(),
+            })
+        })
+        .collect();
+
+    // Sort by date for deterministic display order.
+    items.sort_by_key(|i| i.date);
+
+    if items.is_empty() {
+        // R0-M8: empty filtered list never opens a flow.
+        app.status = Some("No FMV-missing income events".to_string());
+        return;
+    }
+
+    app.set_fmv_flow = Some(SetFmvFlowState {
+        list: TargetList::new(items),
+        step: SetFmvStep::List,
+    });
+}
+
+// ── Status derivers for reclassify-income and set-fmv ─────────────────────────
+
+fn derive_reclassify_income_status(
+    snap: &btctax_tui::app::Snapshot,
+    _target_event: &EventId,
+    decision_id: &EventId,
+    new_business: bool,
+    new_kind: Option<IncomeKind>,
+) -> String {
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(decision_id) {
+            return format!(
+                "Saved, but DecisionConflict fired on this decision — see Compliance; \
+                 clear with Void flow (press 'v') or CLI: btctax reconcile void {}",
+                decision_id.canonical()
+            );
+        }
+    }
+
+    let effective_kind = new_kind.map(income_kind_display).unwrap_or("original");
+    format!("Reclassified income: business={new_business}, kind={effective_kind}")
+}
+
+fn derive_set_fmv_status(
+    snap: &btctax_tui::app::Snapshot,
+    target_event: &EventId,
+    decision_id: &EventId,
+    usd_fmv: btctax_core::Usd,
+) -> String {
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::FmvMissing && b.event.as_ref() == Some(target_event) {
+            return format!(
+                "FMV set but FmvMissing re-fired for this event — see Compliance; \
+                 blocker detail: {}",
+                b.detail
+            );
+        }
+    }
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(decision_id) {
+            return format!(
+                "Saved, but DecisionConflict fired on this decision — see Compliance; \
+                 clear with Void flow (press 'v') or CLI: btctax reconcile void {}",
+                decision_id.canonical()
+            );
+        }
+    }
+
+    format!(
+        "FMV set: {usd_fmv} for {} — FmvMissing blocker cleared",
+        target_event.canonical()
+    )
 }
 
 // ── Scroll helpers ────────────────────────────────────────────────────────────
@@ -4410,6 +5065,1052 @@ mod tests {
             status_after_retry.contains(&expected_void),
             "S2-RO: post-retry status must contain the single-prefix remedy '{expected_void}'; \
              got: {status_after_retry:?}"
+        );
+    }
+
+    // ── Seed helpers for reclassify-income and set-fmv tests ─────────────────
+
+    /// Seed a vault with an Income event (FmvStatus::PriceDataset, Reward, 100_000 sat,
+    /// fmv=$30_000) plus a MethodElection, and return the income EventId.
+    fn seed_income_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> btctax_core::EventId {
+        use btctax_core::event::{EventPayload, FmvStatus, Income, IncomeKind, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let income_id = EventId::import(Source::River, SourceRef::new("e2e-income-1"));
+        {
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+            let wallet = Some(btctax_core::WalletId::Exchange {
+                provider: "River".to_string(),
+                account: "main".to_string(),
+            });
+            let batch = vec![LedgerEvent {
+                id: income_id.clone(),
+                utc_timestamp: OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(),
+                original_tz: UtcOffset::UTC,
+                wallet,
+                payload: EventPayload::Income(Income {
+                    sat: 100_000,
+                    usd_fmv: Some(dec!(30_000)),
+                    fmv_status: FmvStatus::PriceDataset,
+                    kind: IncomeKind::Reward,
+                    business: false,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            let now = OffsetDateTime::from_unix_timestamp(1_748_001_000).unwrap();
+            let p = EventPayload::MethodElection(btctax_core::event::MethodElection {
+                // Valid standing order: effective_from >= made-date (2025-05-23) and
+                // >= TRANSITION_DATE (2025-01-01) — a back-dated election fires the
+                // Hard MethodElectionBackdated blocker and would gate compute_tax_year.
+                effective_from: date!(2025 - 06 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            btctax_core::persistence::append_decision(session.conn(), p, now, UtcOffset::UTC, None)
+                .unwrap();
+            session.save().unwrap();
+        }
+        income_id
+    }
+
+    /// Seed a vault with an Income event (FmvStatus::Missing, Staking, 100_000 sat, no fmv)
+    /// plus a MethodElection, and return the income EventId.
+    fn seed_income_fmv_missing_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> btctax_core::EventId {
+        use btctax_core::event::{EventPayload, FmvStatus, Income, IncomeKind, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let income_id = EventId::import(Source::River, SourceRef::new("e2e-fmv-miss-1"));
+        {
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+            let wallet = Some(btctax_core::WalletId::Exchange {
+                provider: "River".to_string(),
+                account: "main".to_string(),
+            });
+            let batch = vec![LedgerEvent {
+                id: income_id.clone(),
+                utc_timestamp: OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(),
+                original_tz: UtcOffset::UTC,
+                wallet,
+                payload: EventPayload::Income(Income {
+                    sat: 100_000,
+                    usd_fmv: None,
+                    fmv_status: FmvStatus::Missing,
+                    kind: IncomeKind::Staking,
+                    business: false,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            let now = OffsetDateTime::from_unix_timestamp(1_748_001_000).unwrap();
+            let p = EventPayload::MethodElection(btctax_core::event::MethodElection {
+                // Valid standing order: effective_from >= made-date (2025-05-23) and
+                // >= TRANSITION_DATE (2025-01-01) — a back-dated election fires the
+                // Hard MethodElectionBackdated blocker and would gate compute_tax_year.
+                effective_from: date!(2025 - 06 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            btctax_core::persistence::append_decision(session.conn(), p, now, UtcOffset::UTC, None)
+                .unwrap();
+            session.save().unwrap();
+        }
+        income_id
+    }
+
+    // ── KAT-C2c — cancel path: reclassify-income bytes unchanged; q swallowed ──
+    //
+    // Spec sequence [I4 — one step back per Esc press]:
+    // r → List; Enter → FieldForm; Tab business→true; Enter → modal;
+    // Esc → modal closes (FieldForm still open); Esc → back to List;
+    // Esc → flow closes. 'q' swallowed at EVERY flow step + at the modal.
+
+    #[test]
+    fn kat_c2c_cancel_path_vault_bytes_unchanged_reclassify_income() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-c2c-ri-pass";
+
+        seed_income_vault(&vault, &key, pp_str);
+        let bytes_before = std::fs::read(&vault).unwrap();
+
+        {
+            let mut app = open_app(&vault, pp_str);
+
+            // 'r' → open RI flow at List
+            handle_key(&mut app, press(KeyCode::Char('r')));
+            assert!(app.reclassify_income_flow.is_some(), "C2c: flow must open");
+
+            // 'q' at List is swallowed [R0-I2]
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2c: 'q' at List must be swallowed");
+            assert!(
+                app.reclassify_income_flow.is_some(),
+                "C2c: flow must remain open after 'q' at List"
+            );
+
+            // Enter → select first item (move to FieldForm)
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                matches!(
+                    app.reclassify_income_flow.as_ref().map(|f| &f.step),
+                    Some(ReclassifyIncomeStep::FieldForm { .. })
+                ),
+                "C2c: must enter FieldForm after Enter on list"
+            );
+
+            // 'q' at FieldForm is swallowed (both rows are pickers — no text buffer)
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2c: 'q' at FieldForm must be swallowed");
+            assert!(app.reclassify_income_flow.is_some());
+
+            // Tab to set business=true (otherwise Enter would error)
+            handle_key(&mut app, press(KeyCode::Tab));
+
+            // Enter → validate → modal opens
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.reclassify_income_modal.is_some(),
+                "C2c: modal must open after valid Enter"
+            );
+
+            // 'q' while modal open is swallowed
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2c: 'q' at modal must be swallowed");
+            assert!(
+                app.reclassify_income_modal.is_some(),
+                "C2c: modal must stay open after 'q'"
+            );
+
+            // Esc → cancel modal (no write); FieldForm still open [I4]
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.reclassify_income_modal.is_none(),
+                "C2c: modal must close on Esc"
+            );
+            assert!(
+                matches!(
+                    app.reclassify_income_flow.as_ref().map(|f| &f.step),
+                    Some(ReclassifyIncomeStep::FieldForm { .. })
+                ),
+                "C2c: Esc on modal must keep FieldForm open"
+            );
+
+            // Esc → close FieldForm, back to List [I4 — one step back per press]
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                matches!(
+                    app.reclassify_income_flow.as_ref().map(|f| &f.step),
+                    Some(ReclassifyIncomeStep::List)
+                ),
+                "C2c: Esc on FieldForm must go back to List"
+            );
+
+            // 'q' at List (again) still swallowed
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(
+                !app.should_quit,
+                "C2c: 'q' at List (second time) must be swallowed"
+            );
+
+            // Esc → close flow
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(app.reclassify_income_flow.is_none(), "C2c: flow must close");
+            assert!(!app.should_quit, "C2c: Esc on List must NOT quit");
+        }
+
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "C2c: vault bytes must be unchanged after Esc cancel path"
+        );
+    }
+
+    // ── KAT-C2d — cancel path: set-fmv bytes unchanged; q swallowed ──────────
+    //
+    // Spec sequence [I4 — one step back per Esc press]:
+    // f → List; Enter → FieldForm; type FMV; Enter → modal;
+    // Esc → modal closes (FieldForm still open); Esc → back to List;
+    // Esc → flow closes. 'q' swallowed at each step ('q' at the text field
+    // inserts into the buffer per the 2a R2-N1 discipline — it never quits).
+
+    #[test]
+    fn kat_c2d_cancel_path_vault_bytes_unchanged_set_fmv() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-c2d-sfmv-pass";
+
+        seed_income_fmv_missing_vault(&vault, &key, pp_str);
+        let bytes_before = std::fs::read(&vault).unwrap();
+
+        {
+            let mut app = open_app(&vault, pp_str);
+
+            // 'f' → open Set-FMV flow at List
+            handle_key(&mut app, press(KeyCode::Char('f')));
+            assert!(app.set_fmv_flow.is_some(), "C2d: flow must open");
+
+            // 'q' at List is swallowed [R0-I2]
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2d: 'q' at List must be swallowed");
+            assert!(
+                app.set_fmv_flow.is_some(),
+                "C2d: flow must remain open after 'q' at List"
+            );
+
+            // Enter → select first item (move to FieldForm)
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                matches!(
+                    app.set_fmv_flow.as_ref().map(|f| &f.step),
+                    Some(SetFmvStep::FieldForm { .. })
+                ),
+                "C2d: must enter FieldForm after Enter on list"
+            );
+
+            // 'q' at FieldForm inserts into the text buffer (does NOT quit) [R2-N1]
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(
+                !app.should_quit,
+                "C2d: 'q' at FieldForm must be swallowed (not quit) [R2-N1]"
+            );
+            assert!(app.set_fmv_flow.is_some());
+            // Backspace out the 'q' before typing the FMV.
+            handle_key(&mut app, press(KeyCode::Backspace));
+
+            // Type a valid FMV
+            type_str(&mut app, "45.00");
+
+            // Enter → validate → modal opens
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.set_fmv_modal.is_some(),
+                "C2d: modal must open after valid Enter"
+            );
+
+            // 'q' while modal open is swallowed
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2d: 'q' at modal must be swallowed");
+            assert!(
+                app.set_fmv_modal.is_some(),
+                "C2d: modal must stay open after 'q'"
+            );
+
+            // Esc → cancel modal (no write); FieldForm still open [I4]
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(app.set_fmv_modal.is_none(), "C2d: modal must close on Esc");
+            assert!(
+                matches!(
+                    app.set_fmv_flow.as_ref().map(|f| &f.step),
+                    Some(SetFmvStep::FieldForm { .. })
+                ),
+                "C2d: Esc on modal must keep FieldForm open"
+            );
+
+            // Esc → close FieldForm, back to List [I4]
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                matches!(
+                    app.set_fmv_flow.as_ref().map(|f| &f.step),
+                    Some(SetFmvStep::List)
+                ),
+                "C2d: Esc on FieldForm must go back to List"
+            );
+
+            // Esc → close flow
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(app.set_fmv_flow.is_none(), "C2d: flow must close");
+            assert!(!app.should_quit, "C2d: Esc on List must NOT quit");
+        }
+
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "C2d: vault bytes must be unchanged after Esc cancel path"
+        );
+    }
+
+    // ── KAT-E2E-RI — end-to-end reclassify-income (business flip, kind kept) ──
+    //
+    // Spec steps: seed Income{Reward, business:false} → confirm IncomeRecord
+    // projects {Reward, false} → drive r → Tab business to true, leave kind None
+    // (keep original) → modal shows "business: true (was false)" + "keep original"
+    // → save → re-project: IncomeRecord{Reward, true}; the pre-filter now excludes
+    // the event from the r list (flow won't re-open; R0-M8 status).
+
+    #[test]
+    fn kat_e2e_ri_reclassify_income_happy_path() {
+        use btctax_core::persistence::load_all_ordered;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-ri-pass";
+
+        let income_id = seed_income_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        // 1. Verify seed: IncomeRecord{Reward, business:false} in initial snapshot.
+        let snap = app.snapshot.as_ref().unwrap();
+        let ir_before = snap
+            .state
+            .income_recognized
+            .iter()
+            .find(|r| r.event == income_id)
+            .expect("E2E-RI: income record must exist before");
+        assert!(!ir_before.business, "E2E-RI: seed has business=false");
+        assert_eq!(
+            ir_before.kind,
+            IncomeKind::Reward,
+            "E2E-RI: seed has kind=Reward"
+        );
+
+        // 2. 'r' → open RI flow; list shows the event.
+        handle_key(&mut app, press(KeyCode::Char('r')));
+        assert!(
+            app.reclassify_income_flow.is_some(),
+            "E2E-RI: flow must open"
+        );
+        {
+            let flow = app.reclassify_income_flow.as_ref().unwrap();
+            assert_eq!(flow.list.items.len(), 1, "E2E-RI: list must show 1 event");
+            assert_eq!(
+                flow.list.items[0].income_event, income_id,
+                "E2E-RI: list item must be the seeded Income event"
+            );
+        }
+
+        // Enter → select first item (FieldForm)
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.reclassify_income_flow.as_ref().map(|f| &f.step),
+                Some(ReclassifyIncomeStep::FieldForm { .. })
+            ),
+            "E2E-RI: must enter FieldForm"
+        );
+
+        // Tab on business (focus=0): None → true.  Leave kind as None (keep original).
+        handle_key(&mut app, press(KeyCode::Tab));
+
+        // Enter → validate → modal
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.reclassify_income_modal.is_some(),
+            "E2E-RI: modal must open"
+        );
+
+        // Modal render: shows "business: true    (was false)" and "kind: keep original".
+        let backend = ratatui::backend::TestBackend::new(100, 40);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let rendered = rendered_text(&terminal);
+        assert!(
+            rendered.contains("business: true"),
+            "E2E-RI: modal must show 'business: true'; rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("(was false)"),
+            "E2E-RI: modal must show '(was false)'; rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("keep original"),
+            "E2E-RI: modal must show 'keep original' for kind=None; rendered: {rendered}"
+        );
+
+        // Enter on modal → save + re-project
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.reclassify_income_modal.is_none(),
+            "E2E-RI: modal must close"
+        );
+        assert!(
+            app.reclassify_income_flow.is_none(),
+            "E2E-RI: flow must close"
+        );
+
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.starts_with("Reclassified income"),
+            "E2E-RI: status must start with 'Reclassified income'; got: {status}"
+        );
+        assert!(
+            status.contains("business=true"),
+            "E2E-RI: status must say business=true; got: {status}"
+        );
+        assert!(
+            status.contains("kind=original"),
+            "E2E-RI: status must say kind=original (kept); got: {status}"
+        );
+
+        // 3. Re-projected snapshot: IncomeRecord{Reward, business:true}; the
+        // original business:false record is GONE (override applies; single record).
+        {
+            let snap_after = app.snapshot.as_ref().unwrap();
+            let recs: Vec<_> = snap_after
+                .state
+                .income_recognized
+                .iter()
+                .filter(|r| r.event == income_id)
+                .collect();
+            assert_eq!(
+                recs.len(),
+                1,
+                "E2E-RI: exactly one income record for the target after reclassify"
+            );
+            assert!(recs[0].business, "E2E-RI: business must be true after");
+            assert_eq!(
+                recs[0].kind,
+                IncomeKind::Reward,
+                "E2E-RI: kind must stay Reward (kind=None keeps original)"
+            );
+        }
+
+        // 4. The event no longer appears in the 'r' list (non-voided
+        // ReclassifyIncome pre-filter excludes it) → flow won't open [R0-M8].
+        handle_key(&mut app, press(KeyCode::Char('r')));
+        assert!(
+            app.reclassify_income_flow.is_none(),
+            "E2E-RI: 'r' must NOT re-open the flow (event pre-filtered)"
+        );
+        assert_eq!(
+            app.status.as_deref(),
+            Some("No reclassifiable income events"),
+            "E2E-RI: status must be the R0-M8 empty-list message"
+        );
+
+        // 5. On-disk log: the ReclassifyIncome decision round-trips.
+        drop(app);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let (snap2, _) = btctax_tui::unlock::build_snapshot(&session2).unwrap();
+        let ir_after = snap2
+            .state
+            .income_recognized
+            .iter()
+            .find(|r| r.event == income_id)
+            .expect("E2E-RI: income record must exist after reopen");
+        assert!(ir_after.business, "E2E-RI: business=true persists on disk");
+        assert_eq!(
+            ir_after.kind,
+            IncomeKind::Reward,
+            "E2E-RI: kind=Reward persists on disk"
+        );
+
+        let events = load_all_ordered(session2.conn()).unwrap();
+        let dec_rows: Vec<_> = events.iter().filter(|r| r.kind == "decision").collect();
+        // 1 MethodElection + 1 ReclassifyIncome = 2 decisions
+        assert_eq!(dec_rows.len(), 2, "E2E-RI: must have 2 decision rows");
+        let stored: btctax_core::EventPayload =
+            serde_json::from_str(&dec_rows[1].payload_json).unwrap();
+        assert!(
+            matches!(
+                &stored,
+                btctax_core::EventPayload::ReclassifyIncome(ri)
+                    if ri.income_event == income_id
+                    && ri.business
+                    && ri.kind.is_none()
+            ),
+            "E2E-RI: stored payload must be ReclassifyIncome{{business:true, kind:None}}; got: {:?}",
+            stored
+        );
+    }
+
+    // ── KAT-E2E-RI-SE — Interest → Mining flip moves BOTH NIIT and SE [I3] ───
+    //
+    // Fixture (spec D5, figures transcribed from the core reclassify_income.rs
+    // KATs — niit_profile() + the ±$380 derivation + the P2-D SE math):
+    //   Income{kind: Interest, business: false, fmv: $10,000} @ 2025-03-01;
+    //   profile: Single, ordinary_taxable_income=$0, magi_excluding_crypto=$205,000
+    //   (above the Single $200,000 §1411 threshold — NIIT non-vacuous).
+    //
+    // Before:  interest_nii=$10,000 → niit = round_cents(3.8% × $10,000) = $380.00
+    //          (exact); se = None (Interest is SE-EXCLUDED per §1402(a)(2)).
+    // After (business=true, kind=Mining):
+    //          niit = $0 (Interest left NII; delta −$380.00 exact);
+    //          se = Some{base $9,235.00, ss $1,145.14, medicare $267.82,
+    //                    total $1,412.96, deductible_half $706.48}.
+    // The TUI status is the CLEAN success string — NO tax figure in the status
+    // (blocker-derived-status discipline; figures asserted on TaxResult only).
+
+    #[test]
+    fn kat_e2e_ri_se_reclassify_income_se_exposure_changes() {
+        use btctax_adapters::BundledTaxTables;
+        use btctax_core::event::{EventPayload, FmvStatus, Income, IncomeKind, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::tax::compute::compute_tax_year;
+        use btctax_core::tax::se::compute_se_tax;
+        use btctax_core::tax::types::{FilingStatus, TaxOutcome, TaxProfile};
+        use btctax_core::Carryforward;
+        use btctax_core::EventId;
+        use btctax_core::TaxTables;
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-ri-se-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+        let income_id = EventId::import(Source::River, SourceRef::new("e2e-se-1"));
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let wallet = Some(btctax_core::WalletId::Exchange {
+                provider: "River".to_string(),
+                account: "main".to_string(),
+            });
+            let batch = vec![LedgerEvent {
+                id: income_id.clone(),
+                // 2025-03-01 12:00:00 UTC — same calendar date as the core KAT fixture.
+                utc_timestamp: OffsetDateTime::from_unix_timestamp(1_740_830_400).unwrap(),
+                original_tz: UtcOffset::UTC,
+                wallet,
+                payload: EventPayload::Income(Income {
+                    sat: 100_000,
+                    usd_fmv: Some(dec!(10_000)),
+                    fmv_status: FmvStatus::PriceDataset,
+                    kind: IncomeKind::Interest,
+                    business: false,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            session.save().unwrap();
+        }
+
+        let tables = BundledTaxTables::load();
+        let year = 2025;
+        // niit_profile() from the core KAT fixture (reclassify_income.rs).
+        let profile = TaxProfile {
+            filing_status: FilingStatus::Single,
+            ordinary_taxable_income: dec!(0),
+            magi_excluding_crypto: dec!(205000),
+            qualified_dividends_and_other_pref_income: dec!(0),
+            other_net_capital_gain: dec!(0),
+            capital_loss_carryforward_in: Carryforward {
+                short: dec!(0),
+                long: dec!(0),
+            },
+            w2_ss_wages: dec!(0),
+            w2_medicare_wages: dec!(0),
+            schedule_c_expenses: dec!(0),
+        };
+
+        // ── 1. BEFORE reclassify: niit = $380.00 exact; SE = None ────────────
+        let session_before =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let (snap_before, _) = btctax_tui::unlock::build_snapshot(&session_before).unwrap();
+        let before_outcome =
+            compute_tax_year(&[], &snap_before.state, year, Some(&profile), &tables);
+        let TaxOutcome::Computed(before_r) = before_outcome else {
+            panic!("E2E-RI-SE: engine B must be computable BEFORE; got: {before_outcome:?}");
+        };
+        assert_eq!(
+            before_r.niit,
+            dec!(380.00),
+            "E2E-RI-SE: before — Interest NII $10,000 over the $200k threshold must \
+             yield niit exactly $380.00"
+        );
+        let se_before = compute_se_tax(
+            &snap_before.state,
+            year,
+            FilingStatus::Single,
+            tables.table_for(year).unwrap(),
+            dec!(0),
+            dec!(0),
+            dec!(0),
+        );
+        assert!(
+            se_before.is_none(),
+            "E2E-RI-SE: before — Interest is SE-excluded (§1402(a)(2)); got: {:?}",
+            se_before
+        );
+        drop(session_before);
+
+        // ── 2. Drive the TUI flow: business=true, kind=Mining ────────────────
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('r')));
+        handle_key(&mut app, press(KeyCode::Enter)); // list → FieldForm
+        handle_key(&mut app, press(KeyCode::Tab)); // business: None → true
+        handle_key(&mut app, press(KeyCode::Down)); // focus → kind
+        handle_key(&mut app, press(KeyCode::Tab)); // kind: None → Mining
+        handle_key(&mut app, press(KeyCode::Enter)); // validate → modal
+        assert!(app.reclassify_income_modal.is_some(), "SE: modal must open");
+
+        // Modal render: "business: true (was false)" and "kind: mining (was interest)".
+        let backend = ratatui::backend::TestBackend::new(100, 40);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let rendered = rendered_text(&terminal);
+        assert!(
+            rendered.contains("business: true"),
+            "E2E-RI-SE: modal must show 'business: true'; rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("(was false)"),
+            "E2E-RI-SE: modal must show '(was false)'; rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("mining (was interest)"),
+            "E2E-RI-SE: modal must show 'mining (was interest)'; rendered: {rendered}"
+        );
+
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → save + re-project
+        assert!(
+            app.reclassify_income_modal.is_none(),
+            "SE: modal must close after save"
+        );
+
+        // Status is the CLEAN success string — no tax figure appears in it.
+        assert_eq!(
+            app.status.as_deref(),
+            Some("Reclassified income: business=true, kind=mining"),
+            "E2E-RI-SE: status must be the clean blocker-derived string (no figures)"
+        );
+
+        // ── 3. AFTER reclassify (exact asserts) ──────────────────────────────
+        let snap_after = app.snapshot.as_ref().unwrap();
+        let TaxOutcome::Computed(after_r) =
+            compute_tax_year(&[], &snap_after.state, year, Some(&profile), &tables)
+        else {
+            panic!("E2E-RI-SE: engine B must be computable AFTER");
+        };
+        assert_eq!(
+            after_r.niit,
+            dec!(0),
+            "E2E-RI-SE: after — Mining is not NII; niit must be exactly $0"
+        );
+        assert_eq!(
+            before_r.niit - after_r.niit,
+            dec!(380.00),
+            "E2E-RI-SE: NIIT delta must be exactly −$380.00 (Interest left NII)"
+        );
+
+        let se = compute_se_tax(
+            &snap_after.state,
+            year,
+            FilingStatus::Single,
+            tables.table_for(year).unwrap(),
+            dec!(0),
+            dec!(0),
+            dec!(0),
+        )
+        .expect("E2E-RI-SE: Mining+business must produce SE tax after reclassify");
+        // Core-KAT hand-derived figures for fmv=$10,000, Single, no W-2:
+        assert_eq!(se.base, dec!(9235.00), "E2E-RI-SE: SE base $9,235.00");
+        assert_eq!(se.ss, dec!(1145.14), "E2E-RI-SE: SS $1,145.14");
+        assert_eq!(se.medicare, dec!(267.82), "E2E-RI-SE: Medicare $267.82");
+        assert_eq!(se.total, dec!(1412.96), "E2E-RI-SE: total $1,412.96");
+        assert_eq!(
+            se.deductible_half,
+            dec!(706.48),
+            "E2E-RI-SE: deductible_half $706.48"
+        );
+    }
+
+    // ── KAT-E2E-FMV — set-fmv happy path clears FmvMissing blocker ───────────
+
+    #[test]
+    fn kat_e2e_fmv_set_fmv_clears_blocker() {
+        use btctax_core::persistence::load_all_ordered;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-fmv-pass";
+
+        let income_id = seed_income_fmv_missing_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        // 1. Verify seed: FmvMissing blocker present; income_recognized has NO
+        // entry for the target (no FMV yet).
+        {
+            let snap = app.snapshot.as_ref().unwrap();
+            let has_missing =
+                snap.state.blockers.iter().any(|b| {
+                    b.kind == BlockerKind::FmvMissing && b.event.as_ref() == Some(&income_id)
+                });
+            assert!(
+                has_missing,
+                "E2E-FMV: FmvMissing blocker must be present before set-fmv"
+            );
+            assert!(
+                !snap
+                    .state
+                    .income_recognized
+                    .iter()
+                    .any(|r| r.event == income_id),
+                "E2E-FMV: income_recognized must NOT contain the target before set-fmv"
+            );
+        }
+
+        // 'f' → open flow; list shows the event.
+        handle_key(&mut app, press(KeyCode::Char('f')));
+        assert!(app.set_fmv_flow.is_some(), "E2E-FMV: flow must open");
+        {
+            let flow = app.set_fmv_flow.as_ref().unwrap();
+            assert_eq!(flow.list.items.len(), 1, "E2E-FMV: list must show 1 event");
+            assert_eq!(
+                flow.list.items[0].event, income_id,
+                "E2E-FMV: list item must be the FmvMissing Income event"
+            );
+        }
+
+        // Enter → select first item (FieldForm)
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.set_fmv_flow.as_ref().map(|f| &f.step),
+                Some(SetFmvStep::FieldForm { .. })
+            ),
+            "E2E-FMV: must enter FieldForm"
+        );
+
+        // Type FMV
+        type_str(&mut app, "45.00");
+
+        // Enter → modal
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(app.set_fmv_modal.is_some(), "E2E-FMV: modal must open");
+
+        // 2. Modal render: shows usd_fmv 45.00 and the target canonical id.
+        let backend = ratatui::backend::TestBackend::new(100, 40);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let rendered = rendered_text(&terminal);
+        assert!(
+            rendered.contains("45.00"),
+            "E2E-FMV: modal must show usd_fmv 45.00; rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains(&income_id.canonical()),
+            "E2E-FMV: modal must show the target canonical id; rendered: {rendered}"
+        );
+
+        // Enter → confirm
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(app.set_fmv_modal.is_none(), "E2E-FMV: modal must close");
+        assert!(app.set_fmv_flow.is_none(), "E2E-FMV: flow must close");
+
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.starts_with("FMV set"),
+            "E2E-FMV: status must start with 'FMV set'; got: {status}"
+        );
+        assert!(
+            status.contains("FmvMissing blocker cleared"),
+            "E2E-FMV: status must say the blocker cleared; got: {status}"
+        );
+
+        // 3. Re-projected state: FmvMissing GONE; income_recognized has the entry
+        // {usd_fmv: 45.00, kind: Staking, business: false}; the lot materializes
+        // at usd_basis 45.00 (NOT basis_pending).
+        {
+            use rust_decimal_macros::dec;
+            let snap_after = app.snapshot.as_ref().unwrap();
+            let still_missing =
+                snap_after.state.blockers.iter().any(|b| {
+                    b.kind == BlockerKind::FmvMissing && b.event.as_ref() == Some(&income_id)
+                });
+            assert!(
+                !still_missing,
+                "E2E-FMV: FmvMissing blocker must be cleared after set-fmv"
+            );
+
+            let ir = snap_after
+                .state
+                .income_recognized
+                .iter()
+                .find(|r| r.event == income_id)
+                .expect("E2E-FMV: income_recognized must contain the target after set-fmv");
+            assert_eq!(ir.usd_fmv, dec!(45.00), "E2E-FMV: usd_fmv must be 45.00");
+            assert_eq!(
+                ir.kind,
+                IncomeKind::Staking,
+                "E2E-FMV: kind must stay Staking"
+            );
+            assert!(!ir.business, "E2E-FMV: business must stay false");
+
+            // 4. The lot has usd_basis = 45.00 (not basis_pending).
+            let lot = snap_after
+                .state
+                .lots
+                .iter()
+                .find(|l| l.original_sat == 100_000)
+                .expect("E2E-FMV: the income lot must materialize after set-fmv");
+            assert_eq!(
+                lot.usd_basis,
+                dec!(45.00),
+                "E2E-FMV: lot.usd_basis must equal the supplied FMV"
+            );
+            assert!(
+                !lot.basis_pending,
+                "E2E-FMV: lot must NOT be basis_pending after set-fmv"
+            );
+        }
+
+        // The event is no longer in the 'f' list (FmvMissing cleared) → the flow
+        // won't re-open [R0-M8].
+        handle_key(&mut app, press(KeyCode::Char('f')));
+        assert!(
+            app.set_fmv_flow.is_none(),
+            "E2E-FMV: 'f' must NOT re-open the flow (blocker cleared)"
+        );
+        assert_eq!(
+            app.status.as_deref(),
+            Some("No FMV-missing income events"),
+            "E2E-FMV: status must be the R0-M8 empty-list message"
+        );
+
+        // Verify ManualFmv decision was appended.
+        drop(app);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let events = load_all_ordered(session2.conn()).unwrap();
+        let dec_rows: Vec<_> = events.iter().filter(|r| r.kind == "decision").collect();
+        // 1 MethodElection + 1 ManualFmv = 2 decisions
+        assert_eq!(
+            dec_rows.len(),
+            2,
+            "E2E-FMV: must have 2 decision rows; got: {}",
+            dec_rows.len()
+        );
+        let stored: btctax_core::EventPayload =
+            serde_json::from_str(&dec_rows[1].payload_json).unwrap();
+        assert!(
+            matches!(
+                &stored,
+                btctax_core::EventPayload::ManualFmv(mf)
+                    if mf.event == income_id
+                    && mf.usd_fmv == rust_decimal_macros::dec!(45.00)
+            ),
+            "E2E-FMV: stored payload must be ManualFmv; got: {:?}",
+            stored
+        );
+    }
+
+    // ── KAT-E2E-FMV-REPOINT — second set-fmv overrides; NO conflict ──────────
+    //
+    // Spec D5: after the FIRST set-fmv the FmvMissing blocker clears, so the
+    // event leaves the 'f' list (pinned in KAT-E2E-FMV). The re-point is
+    // therefore tested at the unit level: `persist_set_fmv` called twice on the
+    // same event. LATEST-WINS (resolve.rs:453–456): on-disk log grows by 2
+    // ManualFmv rows, NO DecisionConflict, income_recognized reflects the
+    // SECOND FMV. This proves the "no pre-filter for already-set FMVs" claim
+    // is safe.
+
+    #[test]
+    fn kat_e2e_fmv_repoint_second_set_fmv_no_conflict() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_core::ManualFmv;
+        use rust_decimal_macros::dec;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-fmv-repoint-pass";
+
+        let income_id = seed_income_fmv_missing_vault(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+
+        // First set-fmv: 45.00.
+        let now1 = time::OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+        let payload1 = EventPayload::ManualFmv(ManualFmv {
+            event: income_id.clone(),
+            usd_fmv: dec!(45.00),
+        });
+        crate::edit::persist::persist_set_fmv(&mut session, payload1, now1).unwrap();
+
+        // Second set-fmv (the re-point): 90.00 — LATEST-WINS, no conflict.
+        let now2 = time::OffsetDateTime::from_unix_timestamp(1_748_003_000).unwrap();
+        let payload2 = EventPayload::ManualFmv(ManualFmv {
+            event: income_id.clone(),
+            usd_fmv: dec!(90.00),
+        });
+        crate::edit::persist::persist_set_fmv(&mut session, payload2, now2).unwrap();
+
+        // On-disk log == pre + 2 ManualFmv rows.
+        drop(session);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let post = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(
+            post.len(),
+            pre.len() + 2,
+            "REPOINT: on-disk log must grow by exactly 2 rows"
+        );
+        let first: btctax_core::EventPayload =
+            serde_json::from_str(&post[pre.len()].payload_json).unwrap();
+        let second: btctax_core::EventPayload =
+            serde_json::from_str(&post[pre.len() + 1].payload_json).unwrap();
+        assert!(
+            matches!(
+                &first,
+                btctax_core::EventPayload::ManualFmv(mf)
+                    if mf.event == income_id && mf.usd_fmv == dec!(45.00)
+            ),
+            "REPOINT: first appended row must be ManualFmv(45.00); got: {first:?}"
+        );
+        assert!(
+            matches!(
+                &second,
+                btctax_core::EventPayload::ManualFmv(mf)
+                    if mf.event == income_id && mf.usd_fmv == dec!(90.00)
+            ),
+            "REPOINT: second appended row must be ManualFmv(90.00); got: {second:?}"
+        );
+
+        // Re-projected state: NO DecisionConflict anywhere (latest-wins is not a
+        // conflict); income_recognized reflects the SECOND FMV; FmvMissing gone.
+        let (snap, _) = btctax_tui::unlock::build_snapshot(&session2).unwrap();
+        assert!(
+            !snap
+                .state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::DecisionConflict),
+            "REPOINT: no DecisionConflict may fire on a ManualFmv re-point; blockers: {:?}",
+            snap.state.blockers
+        );
+        assert!(
+            !snap
+                .state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::FmvMissing && b.event.as_ref() == Some(&income_id)),
+            "REPOINT: FmvMissing must stay cleared after the re-point"
+        );
+        let ir = snap
+            .state
+            .income_recognized
+            .iter()
+            .find(|r| r.event == income_id)
+            .expect("REPOINT: income_recognized must contain the target");
+        assert_eq!(
+            ir.usd_fmv,
+            dec!(90.00),
+            "REPOINT: income_recognized must reflect the SECOND FMV (latest-wins)"
+        );
+    }
+
+    // ── KAT-RI-REQUIRED-BUSINESS — key-driven: submit blocked without a choice ─
+    //
+    // Spec D5: on the reclassify-income FieldForm the `business` field is
+    // REQUIRED-EXPLICIT — initial None renders "---" + "[required]"; Enter with
+    // None sets the error and does NOT open the modal; Tab chooses true; Enter
+    // then opens the modal.
+
+    #[test]
+    fn kat_ri_required_business_submit_blocked_without_choice() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-ri-req-biz-pass";
+
+        seed_income_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        handle_key(&mut app, press(KeyCode::Char('r')));
+        handle_key(&mut app, press(KeyCode::Enter)); // list → FieldForm (business=None)
+
+        // Initial render: "---" and "[required]" marker for the unset business row.
+        let backend = ratatui::backend::TestBackend::new(100, 40);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let rendered = rendered_text(&terminal);
+        assert!(
+            rendered.contains("---"),
+            "RI-REQ: form must render '---' for unset business; rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("[required]"),
+            "RI-REQ: form must render the '[required]' marker; rendered: {rendered}"
+        );
+
+        // Enter with business=None → error; modal must NOT open.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.reclassify_income_modal.is_none(),
+            "RI-REQ: modal must NOT open while business is unset"
+        );
+        {
+            let flow = app.reclassify_income_flow.as_ref().unwrap();
+            let ReclassifyIncomeStep::FieldForm {
+                error, business, ..
+            } = &flow.step
+            else {
+                panic!("RI-REQ: must still be at FieldForm");
+            };
+            assert!(business.is_none(), "RI-REQ: business must still be None");
+            let err = error.as_deref().unwrap_or("");
+            assert!(
+                err.contains("business is required"),
+                "RI-REQ: error must say 'business is required'; got: {err}"
+            );
+        }
+
+        // Tab → business = Some(true); Enter → modal opens (no error).
+        handle_key(&mut app, press(KeyCode::Tab));
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.reclassify_income_modal.is_some(),
+            "RI-REQ: modal must open once business is chosen"
         );
     }
 }
