@@ -37,6 +37,8 @@ fn single_100k_profile() -> TaxProfile {
         qualified_dividends_and_other_pref_income: dec!(0),
         other_net_capital_gain: dec!(0),
         capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     }
 }
 

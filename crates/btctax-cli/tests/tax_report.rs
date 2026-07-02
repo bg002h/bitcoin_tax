@@ -36,6 +36,8 @@ fn single_40k_profile() -> TaxProfile {
         qualified_dividends_and_other_pref_income: dec!(0),
         other_net_capital_gain: dec!(0),
         capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     }
 }
 
@@ -127,9 +129,11 @@ fn report_tax_year_renders_golden() {
     );
 }
 
-/// [P2-D Task 2 wiring] A business-mining year → `report_tax_year` surfaces the Schedule SE section
-/// (components + total + §164(f) half + the dual-direction W-2 disclosure + the standalone note),
-/// and the income-tax report's TOTAL is UNCHANGED by SE tax (D5 — SE is standalone).
+/// [P2-D Task 2 wiring / Chunk A] A business-mining year → `report_tax_year` surfaces the
+/// Schedule SE section (components + total + §164(f) half + [Chunk A] the $0-W-2 note + the
+/// §164(f) advisory + the standalone note), and the income-tax report's TOTAL is UNCHANGED by
+/// SE tax (D5 — SE is standalone).
+/// [R0-I2 regression] Old OVERSTATED/UNDERSTATED text ABSENT; new $0 note PRESENT.
 #[test]
 fn report_tax_year_renders_schedule_se_for_business_mining() {
     let csv_dir = tempfile::tempdir().unwrap();
@@ -167,16 +171,30 @@ fn report_tax_year_renders_schedule_se_for_business_mining() {
         cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let se = se.expect("Schedule SE section expected for a business-mining year");
 
-    // Golden 1 components (Single, $100,000 business mining).
+    // Golden 1 components (Single, $100,000 business mining, W-2 = $0).
     assert!(se.contains("11451.40"), "SS component: {se}");
     assert!(se.contains("2678.15"), "Medicare component: {se}");
     assert!(se.contains("14129.55"), "total SE tax: {se}");
     assert!(se.contains("7064.78"), "§164(f) deductible half: {se}");
-    // Dual-direction W-2 disclosure + standalone note.
+    // [Chunk A / R0-I2] New $0-W-2 short note present; old OVERSTATED/UNDERSTATED GONE.
     assert!(
-        se.contains("OVERSTATED") && se.contains("UNDERSTATED"),
-        "{se}"
+        se.contains("$0 W-2 wages"),
+        "new $0-W-2 note must be present (profile has no W-2): {se}"
     );
+    assert!(
+        !se.contains("OVERSTATED"),
+        "old OVERSTATED text must be absent (Chunk A regression): {se}"
+    );
+    assert!(
+        !se.contains("UNDERSTATED"),
+        "old UNDERSTATED text must be absent (Chunk A regression): {se}"
+    );
+    // [Chunk A / R0-I3] §164(f) advisory present.
+    assert!(
+        se.contains("NOT auto-coordinated"),
+        "§164(f) advisory must appear: {se}"
+    );
+    // Standalone note.
     assert!(se.contains("SEPARATE federal liability"), "{se}");
     // [Minor-2] expenses caveat — render must disclose that no Schedule C expenses are modeled.
     assert!(
@@ -202,6 +220,154 @@ fn report_tax_year_renders_schedule_se_for_business_mining() {
     assert!(
         !it.contains("14129.55"),
         "SE tax must NOT appear in the income-tax report total (standalone, D5):\n{it}"
+    );
+}
+
+/// [Chunk A / I4] Asymmetric-W-2 transposition guard (CLI path): profile w2_ss $150,000 /
+/// w2_medicare $0 → the rendered Schedule SE shows ss $3,236.40 AND addl $0.00.
+/// A swapped (w2_medicare, w2_ss) call order would flip both → ss $11,451.40 / addl $381.15.
+/// Exercises the REAL cmd/tax.rs call site, not just the render unit KAT.
+#[test]
+fn chunk_a_asymmetric_w2_transposition_guard_cli_path() {
+    use btctax_core::TaxProfile;
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_buy_receive(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // Classify the unclassified Receive as $100,000 BUSINESS mining income.
+    let in_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+    cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &in_ref,
+        InboundClass::Income {
+            kind: IncomeKind::Mining,
+            fmv: Some(dec!(100000.00)),
+            business: true,
+        },
+        datetime!(2025-06-01 00:00:00 UTC),
+    )
+    .unwrap();
+
+    // Asymmetric profile: w2_ss_wages $150k, w2_medicare_wages $0.
+    let profile = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(40000),
+        magi_excluding_crypto: dec!(60000),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(150000),
+        w2_medicare_wages: dec!(0),
+    };
+    cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
+
+    let (_outcome, _advisory, _sched_d, _gift, se, _appraisal) =
+        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let se = se.expect("Schedule SE section expected");
+
+    // ss must be $3,236.40 (reduced by w2_ss $150k) — NOT $11,451.40 (transposition).
+    assert!(
+        se.contains("3236.40"),
+        "ss must be 3236.40 (w2_ss reduced cap): {se}"
+    );
+    assert!(
+        !se.contains("11451.40"),
+        "ss must NOT be 11451.40 (transposition would give this): {se}"
+    );
+    // addl must be $0.00 (threshold un-reduced, base < $200k) — NOT $381.15 (transposition).
+    // Note: 0.00 appears in the Additional Medicare component line.
+    assert!(
+        se.contains("W-2 coordination applied"),
+        "coordinated disclosure must appear: {se}"
+    );
+    assert!(
+        !se.contains("381.15"),
+        "addl must NOT be 381.15 (transposition would give this): {se}"
+    );
+}
+
+/// [Chunk A / I1+M6] Export-path parity: the asymmetric profile (w2_ss $150k, w2_medicare $0)
+/// produces schedule_se.csv figures that EQUAL the report figures (cmd/admin.rs call site).
+/// If cmd/admin.rs defaulted W-2 to $0, the CSV would show $11,451.40 while the report shows
+/// $3,236.40 — this test catches that divergence.
+#[test]
+fn chunk_a_export_parity_asymmetric_w2() {
+    use btctax_core::TaxProfile;
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_buy_receive(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // Classify the Receive as $100,000 BUSINESS mining income.
+    let in_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+    cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &in_ref,
+        InboundClass::Income {
+            kind: IncomeKind::Mining,
+            fmv: Some(dec!(100000.00)),
+            business: true,
+        },
+        datetime!(2025-06-01 00:00:00 UTC),
+    )
+    .unwrap();
+
+    // Asymmetric profile: w2_ss $150k, w2_medicare $0.
+    let profile = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(40000),
+        magi_excluding_crypto: dec!(60000),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(150000),
+        w2_medicare_wages: dec!(0),
+    };
+    cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
+
+    // Get report figures (cmd/tax.rs call site).
+    let (_outcome, _advisory, _sched_d, _gift, se, _appraisal) =
+        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let se_text = se.expect("Schedule SE section expected");
+    // Report shows reduced SS.
+    assert!(
+        se_text.contains("3236.40"),
+        "report must show reduced ss $3,236.40: {se_text}"
+    );
+
+    // Get export figures (cmd/admin.rs call site) and compare with report.
+    let export_dir = tempfile::tempdir().unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), export_dir.path(), Some(2025)).unwrap();
+    let csv_path = export_dir.path().join("schedule_se.csv");
+    assert!(csv_path.exists(), "schedule_se.csv must be written");
+    let content = std::fs::read_to_string(&csv_path).unwrap();
+    // The CSV ss_component must match the report ($3,236.40, not $11,451.40).
+    assert!(
+        content.contains("3236.40"),
+        "schedule_se.csv ss_component must equal report figure $3,236.40 (not 11451.40): {content}"
+    );
+    assert!(
+        !content.contains("11451.40"),
+        "schedule_se.csv must NOT show the un-coordinated ss $11,451.40: {content}"
     );
 }
 
@@ -426,6 +592,8 @@ st-sell,2025-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
             qualified_dividends_and_other_pref_income: dec!(0),
             other_net_capital_gain: dec!(0),
             capital_loss_carryforward_in: Carryforward::default(),
+            w2_ss_wages: dec!(0),
+            w2_medicare_wages: dec!(0),
         },
     )
     .unwrap();
@@ -442,6 +610,8 @@ st-sell,2025-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
             qualified_dividends_and_other_pref_income: dec!(0),
             other_net_capital_gain: dec!(0),
             capital_loss_carryforward_in: Carryforward::default(), // wrong: {0, 0}
+            w2_ss_wages: dec!(0),
+            w2_medicare_wages: dec!(0),
         },
     )
     .unwrap();

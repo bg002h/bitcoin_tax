@@ -80,6 +80,8 @@ fn profile(ord: Usd, magi: Usd, qd: Usd) -> TaxProfile {
             short: dec!(0),
             long: dec!(0),
         },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     }
 }
 /// Single profile with a non-zero `other_net_capital_gain` (LT-character) — for the B-M1 loss-year KATs.
@@ -274,8 +276,15 @@ fn se_tax_is_standalone_not_in_total_federal_tax_attributable() {
     assert_eq!(r.ordinary_from_crypto, dec!(100000));
     assert_eq!(r.total_federal_tax_attributable, dec!(16000.00));
     // SE tax computed SEPARATELY (standalone) — NOT added to total_federal_tax_attributable (D5).
-    let se = btctax_core::compute_se_tax(&st, 2025, FilingStatus::Single, &table.0)
-        .expect("SE tax expected");
+    let se = btctax_core::compute_se_tax(
+        &st,
+        2025,
+        FilingStatus::Single,
+        &table.0,
+        btctax_core::conventions::Usd::ZERO,
+        btctax_core::conventions::Usd::ZERO,
+    )
+    .expect("SE tax expected");
     assert_eq!(se.total, dec!(14129.55));
     assert_ne!(
         r.total_federal_tax_attributable,
@@ -508,6 +517,8 @@ fn niit_loss_year_mfs_1500_limit() {
             short: dec!(0),
             long: dec!(0),
         },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     };
     let out = compute_tax_year(&[], &st, 2025, Some(&p), &synth_mfs(2025));
     let TaxOutcome::Computed(r) = out else {

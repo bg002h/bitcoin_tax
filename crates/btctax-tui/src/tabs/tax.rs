@@ -90,8 +90,12 @@ pub(crate) fn render_tax_content(snap: &Snapshot, year: i32) -> String {
             let filing_status = profile
                 .map(|p| p.filing_status)
                 .unwrap_or(FilingStatus::Single);
+            let w2_ss = profile.map(|p| p.w2_ss_wages).unwrap_or_default();
+            let w2_medicare = profile.map(|p| p.w2_medicare_wages).unwrap_or_default();
             if let Some(t) = snap.tables.table_for(year) {
-                if let Some(se) = compute_se_tax(&snap.state, year, filing_status, t) {
+                if let Some(se) =
+                    compute_se_tax(&snap.state, year, filing_status, t, w2_ss, w2_medicare)
+                {
                     let _ = writeln!(s);
                     let _ = writeln!(s, "  --- Schedule SE (§1401 self-employment tax) ---");
                     let _ = writeln!(s, "  Net SE income: {:.2}", se.net_se);

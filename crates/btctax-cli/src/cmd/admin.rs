@@ -58,10 +58,18 @@ pub fn export_snapshot(
     let se_result = match tax_year {
         Some(y) => {
             let tables = BundledTaxTables::load();
-            session
-                .tax_profile(y)?
-                .and_then(|p| tables.table_for(y).map(|t| (p.filing_status, t)))
-                .and_then(|(status, t)| compute_se_tax(&state, y, status, t))
+            session.tax_profile(y)?.and_then(|p| {
+                tables.table_for(y).and_then(|t| {
+                    compute_se_tax(
+                        &state,
+                        y,
+                        p.filing_status,
+                        t,
+                        p.w2_ss_wages,
+                        p.w2_medicare_wages,
+                    )
+                })
+            })
         }
         None => None,
     };

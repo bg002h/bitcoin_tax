@@ -482,6 +482,8 @@ fn pre2025_advisory_note_does_not_gate_compute_tax_year() {
             short: dec!(0),
             long: dec!(0),
         },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     };
     let evs = vec![
         buy(

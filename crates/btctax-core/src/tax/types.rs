@@ -47,6 +47,17 @@ pub struct TaxProfile {
     /// is surfaced in Task 10).
     #[serde(default)]
     pub capital_loss_carryforward_in: Carryforward,
+    /// Form W-2 Social Security wages (Box 3 + Box 7 tips; Schedule SE line 8a) — reduces the
+    /// §1401(a) SS cap: `ss_cap = max(0, ss_wage_base − w2_ss_wages)` (§1402(b)(1)). Optional;
+    /// defaults to $0 (no W-2 wage job). Must be ≥ 0. Older stored profiles without this field
+    /// deserialize as $0.
+    #[serde(default)]
+    pub w2_ss_wages: Usd,
+    /// Medicare wages (Box 5; Form 8959 line 1) — reduces the §1401(b)(2) Additional-Medicare
+    /// threshold: `addl_threshold = max(0, threshold(status) − w2_medicare_wages)`
+    /// (§1401(b)(2)(B)/Form 8959 Part II). Optional; defaults to $0. Must be ≥ 0.
+    #[serde(default)]
+    pub w2_medicare_wages: Usd,
 }
 
 /// The marginal rates that apply to the user given their profile + the year's tax table. Reported
@@ -119,6 +130,8 @@ mod tests {
                 short: dec!(0.00),
                 long: dec!(0.00),
             },
+            w2_ss_wages: dec!(0.00),
+            w2_medicare_wages: dec!(0.00),
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: TaxProfile = serde_json::from_str(&json).unwrap();
@@ -133,5 +146,8 @@ mod tests {
         let p: TaxProfile = serde_json::from_str(json).unwrap();
         assert_eq!(p.other_net_capital_gain, Usd::ZERO);
         assert_eq!(p.capital_loss_carryforward_in, Carryforward::default());
+        // Chunk A — new W-2 fields also default to $0 from older/minimal stored profiles.
+        assert_eq!(p.w2_ss_wages, Usd::ZERO);
+        assert_eq!(p.w2_medicare_wages, Usd::ZERO);
     }
 }

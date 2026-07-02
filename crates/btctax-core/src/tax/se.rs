@@ -29,8 +29,7 @@ pub struct SeTaxResult {
     pub net_se: Usd,
     /// §1402(a): net SE earnings = `round_cents(net_se × 92.35%)` — the base the SE-tax rates apply to.
     pub base: Usd,
-    /// §1401(a): Social Security portion = `12.4% × min(base, ss_wage_base − W-2 SS wages)`
-    /// (W-2 SS wages assumed $0 — D4).
+    /// §1401(a): Social Security portion = `12.4% × min(base, max(0, ss_wage_base − w2_ss_wages))`.
     pub ss: Usd,
     /// §1401(b)(1): Medicare portion = `2.9% × base` (uncapped).
     pub medicare: Usd,
@@ -65,13 +64,23 @@ pub fn se_net_income(state: &LedgerState, year: i32) -> Usd {
 /// (§230 SSA). The caller is responsible for the "business income present but no bundled table"
 /// case (it cannot construct a `table` there — see `render_schedule_se`, no silent drop).
 ///
+/// # Parameters
+/// - `w2_ss_wages`: Form W-2 Social Security wages (Box 3 + Box 7 tips; Schedule SE line 8a).
+///   **Must be ≥ 0** — the CLI validates; this function assumes the precondition holds.
+///   Reduces the §1401(a) SS cap: `ss_cap = max(0, ss_wage_base − w2_ss_wages)` (§1402(b)(1)).
+/// - `w2_medicare_wages`: Medicare wages (Box 5; Form 8959 line 1).
+///   **Must be ≥ 0** — the CLI validates; this function assumes the precondition holds.
+///   Reduces the Additional-Medicare threshold: `addl_threshold = max(0, threshold − w2_medicare_wages)`
+///   (§1401(b)(2)(B)/Form 8959 Part II).
+///
+/// # Computation
 /// - `net_se = Σ usd_fmv` over `income_recognized` where `business == true && kind != Interest &&
-///   recognized_at.year() == year`. **Interest is EXCLUDED** (§1402(a)(2) — investment income, not
-///   SE; consistent with B-M1 treating crypto-lending interest as NII). `net_se == 0` → `None`.
+///   recognized_at.year() == year`. **Interest is EXCLUDED** (§1402(a)(2)). `net_se == 0` → `None`.
 /// - `base = round_cents(net_se × 92.35%)` (§1402(a)).
-/// - `ss = round_cents(12.4% × min(base, ss_wage_base − W-2 SS wages))`, W-2 SS wages = $0 (D4).
-/// - `medicare = round_cents(2.9% × base)`.
-/// - `addl = round_cents(0.9% × max(0, base − threshold(status)))` (§1401(b)(2)).
+/// - `ss_cap = max(0, ss_wage_base − w2_ss_wages)`; `ss = round_cents(12.4% × min(base, ss_cap))`.
+/// - `medicare = round_cents(2.9% × base)` (uncapped).
+/// - `addl_threshold = max(0, threshold(status) − w2_medicare_wages)`;
+///   `addl = round_cents(0.9% × max(0, base − addl_threshold))` (§1401(b)(2)).
 /// - `total = ss + medicare + addl`.
 /// - `deductible_half = round_cents((ss + medicare) / 2)` — EXCLUDES `addl` (§164(f)(1)).
 ///
@@ -82,6 +91,8 @@ pub fn compute_se_tax(
     year: i32,
     status: FilingStatus,
     table: &TaxTable,
+    w2_ss_wages: Usd,
+    w2_medicare_wages: Usd,
 ) -> Option<SeTaxResult> {
     let net_se = se_net_income(state, year);
     if net_se.is_zero() {
@@ -91,8 +102,7 @@ pub fn compute_se_tax(
     // §1402(a): net SE earnings = net SE income × 92.35% (intermediate cent-round is the Schedule SE order).
     let base = round_cents(net_se * SE_NET_EARNINGS_FACTOR);
 
-    // §1401(a): Social Security portion, capped at the wage base LESS W-2 SS wages (D4: W-2 = $0).
-    let w2_ss_wages = Usd::ZERO;
+    // §1401(a): Social Security portion, capped at the wage base LESS W-2 SS wages (§1402(b)(1)).
     let ss_cap = {
         let c = table.ss_wage_base - w2_ss_wages;
         if c < Usd::ZERO {
@@ -107,9 +117,18 @@ pub fn compute_se_tax(
     // §1401(b)(1): Medicare portion (uncapped).
     let medicare = round_cents(SE_RATE_MEDICARE * base);
 
-    // §1401(b)(2): Additional Medicare portion on net SE earnings over the status threshold.
+    // §1401(b)(2): Additional Medicare portion. The threshold is reduced (not below zero) by W-2
+    // Medicare wages (§1401(b)(2)(B)/Form 8959 Part II coordination).
+    let addl_threshold = {
+        let t = se_addl_medicare_threshold(status) - w2_medicare_wages;
+        if t < Usd::ZERO {
+            Usd::ZERO
+        } else {
+            t
+        }
+    };
     let over = {
-        let o = base - se_addl_medicare_threshold(status);
+        let o = base - addl_threshold;
         if o < Usd::ZERO {
             Usd::ZERO
         } else {
@@ -175,7 +194,15 @@ mod tests {
             dec!(100000),
             date!(2025 - 03 - 01),
         )]);
-        let r = compute_se_tax(&st, 2025, FilingStatus::Single, &tbl()).expect("SE tax expected");
+        let r = compute_se_tax(
+            &st,
+            2025,
+            FilingStatus::Single,
+            &tbl(),
+            Usd::ZERO,
+            Usd::ZERO,
+        )
+        .expect("SE tax expected");
         assert_eq!(r.net_se, dec!(100000));
         assert_eq!(r.base, dec!(92350.00));
         assert_eq!(r.ss, dec!(11451.40));
@@ -196,7 +223,15 @@ mod tests {
             dec!(300000),
             date!(2025 - 06 - 15),
         )]);
-        let r = compute_se_tax(&st, 2025, FilingStatus::Single, &tbl()).expect("SE tax expected");
+        let r = compute_se_tax(
+            &st,
+            2025,
+            FilingStatus::Single,
+            &tbl(),
+            Usd::ZERO,
+            Usd::ZERO,
+        )
+        .expect("SE tax expected");
         assert_eq!(r.base, dec!(277050.00));
         assert_eq!(r.ss, dec!(21836.40)); // capped at 12.4% × 176,100
         assert_eq!(r.medicare, dec!(8034.45));
@@ -216,7 +251,15 @@ mod tests {
             dec!(250000),
             date!(2025 - 02 - 01),
         )]);
-        let r = compute_se_tax(&st, 2025, FilingStatus::Single, &tbl()).expect("SE tax expected");
+        let r = compute_se_tax(
+            &st,
+            2025,
+            FilingStatus::Single,
+            &tbl(),
+            Usd::ZERO,
+            Usd::ZERO,
+        )
+        .expect("SE tax expected");
         assert_eq!(r.base, dec!(230875.00));
         assert_eq!(r.ss, dec!(21836.40));
     }
@@ -231,7 +274,8 @@ mod tests {
             dec!(200000),
             date!(2025 - 04 - 01),
         )]);
-        let r = compute_se_tax(&st, 2025, FilingStatus::Mfs, &tbl()).expect("SE tax expected");
+        let r = compute_se_tax(&st, 2025, FilingStatus::Mfs, &tbl(), Usd::ZERO, Usd::ZERO)
+            .expect("SE tax expected");
         assert_eq!(r.base, dec!(184700.00));
         assert_eq!(r.ss, dec!(21836.40)); // capped
         assert_eq!(r.medicare, dec!(5356.30));
@@ -257,7 +301,15 @@ mod tests {
                 date!(2025 - 03 - 02),
             ),
         ]);
-        let r = compute_se_tax(&st, 2025, FilingStatus::Single, &tbl()).expect("SE tax expected");
+        let r = compute_se_tax(
+            &st,
+            2025,
+            FilingStatus::Single,
+            &tbl(),
+            Usd::ZERO,
+            Usd::ZERO,
+        )
+        .expect("SE tax expected");
         // Interest's $50,000 is NOT in net_se → identical to Golden 1.
         assert_eq!(r.net_se, dec!(100000));
         assert_eq!(r.base, dec!(92350.00));
@@ -273,7 +325,15 @@ mod tests {
             dec!(12345.67),
             date!(2025 - 05 - 05),
         )]);
-        let r = compute_se_tax(&st, 2025, FilingStatus::Single, &tbl()).expect("SE tax expected");
+        let r = compute_se_tax(
+            &st,
+            2025,
+            FilingStatus::Single,
+            &tbl(),
+            Usd::ZERO,
+            Usd::ZERO,
+        )
+        .expect("SE tax expected");
         assert_eq!(r.base, dec!(11401.23)); // round_cents(12,345.67 × 0.9235)
         assert_eq!(r.ss, dec!(1413.75)); // round_cents(0.124 × 11,401.23)
         assert_eq!(r.medicare, dec!(330.64)); // round_cents(0.029 × 11,401.23)
@@ -291,7 +351,15 @@ mod tests {
             dec!(100000),
             date!(2025 - 03 - 01),
         )]);
-        assert!(compute_se_tax(&st, 2025, FilingStatus::Single, &tbl()).is_none());
+        assert!(compute_se_tax(
+            &st,
+            2025,
+            FilingStatus::Single,
+            &tbl(),
+            Usd::ZERO,
+            Usd::ZERO
+        )
+        .is_none());
     }
 
     /// Hobby (business == false) mining is EXCLUDED (Notice 2014-21 A-9 — hobby ≠ SE).
@@ -312,7 +380,15 @@ mod tests {
                 date!(2025 - 03 - 02),
             ),
         ]);
-        assert!(compute_se_tax(&st, 2025, FilingStatus::Single, &tbl()).is_none());
+        assert!(compute_se_tax(
+            &st,
+            2025,
+            FilingStatus::Single,
+            &tbl(),
+            Usd::ZERO,
+            Usd::ZERO
+        )
+        .is_none());
     }
 
     /// Year filter: business mining in a DIFFERENT year is excluded from this year's net SE.
@@ -332,7 +408,146 @@ mod tests {
                 date!(2024 - 03 - 01),
             ),
         ]);
-        let r = compute_se_tax(&st, 2025, FilingStatus::Single, &tbl()).expect("SE tax expected");
+        let r = compute_se_tax(
+            &st,
+            2025,
+            FilingStatus::Single,
+            &tbl(),
+            Usd::ZERO,
+            Usd::ZERO,
+        )
+        .expect("SE tax expected");
         assert_eq!(r.net_se, dec!(100000)); // 2024's income not counted
+    }
+
+    // ── Chunk A — W-2 coordination goldens ────────────────────────────────────────────────────
+    // TY2025: wage base $176,100; Single addl threshold $200,000; mining $100,000 → base $92,350.
+    // All hand-verified against Schedule SE / Form 8959 Part II. Assert EXACT.
+
+    /// [Chunk A] Both-directions headline: w2_ss $150,000 + w2_medicare $150,000.
+    ///
+    /// ss_cap = max(0, 176,100 − 150,000) = 26,100 → ss = 12.4% × 26,100 = 3,236.40 (lower).
+    /// addl_threshold = max(0, 200,000 − 150,000) = 50,000 → over = 92,350 − 50,000 = 42,350
+    ///   → addl = 0.9% × 42,350 = 381.15 (higher — threshold is reduced, more income taxed at 0.9%).
+    /// deductible_half = (3,236.40 + 2,678.15) / 2 = 5,914.55 / 2 = 2,957.275 → HALF_EVEN 2,957.28
+    ///   (EXCLUDES addl 381.15).
+    #[test]
+    fn w2_both_directions_headline_150k_ss_150k_medicare() {
+        let st = state_with(vec![income(
+            IncomeKind::Mining,
+            true,
+            dec!(100000),
+            date!(2025 - 03 - 01),
+        )]);
+        let r = compute_se_tax(
+            &st,
+            2025,
+            FilingStatus::Single,
+            &tbl(),
+            dec!(150000),
+            dec!(150000),
+        )
+        .expect("SE tax expected");
+        assert_eq!(r.base, dec!(92350.00));
+        assert_eq!(r.ss, dec!(3236.40));
+        assert_eq!(r.medicare, dec!(2678.15));
+        assert_eq!(r.addl, dec!(381.15));
+        assert_eq!(r.total, dec!(6295.70));
+        assert_eq!(r.deductible_half, dec!(2957.28));
+    }
+
+    /// [Chunk A] W-2 SS above the wage base ($180,000 > $176,100): ss_cap = 0 → ss = $0.00.
+    ///
+    /// addl_threshold = 200,000 (w2_medicare = 0) → over = max(0, 92,350 − 200,000) = 0 → addl = 0.
+    /// total = medicare only = 2,678.15; deductible_half = 2,678.15/2 = 1,339.075 → HALF_EVEN 1,339.08.
+    #[test]
+    fn w2_ss_above_wage_base_180k() {
+        let st = state_with(vec![income(
+            IncomeKind::Mining,
+            true,
+            dec!(100000),
+            date!(2025 - 03 - 01),
+        )]);
+        let r = compute_se_tax(
+            &st,
+            2025,
+            FilingStatus::Single,
+            &tbl(),
+            dec!(180000),
+            Usd::ZERO,
+        )
+        .expect("SE tax expected");
+        assert_eq!(r.base, dec!(92350.00));
+        assert_eq!(r.ss, dec!(0.00));
+        assert_eq!(r.medicare, dec!(2678.15));
+        assert_eq!(r.addl, dec!(0.00));
+        assert_eq!(r.total, dec!(2678.15));
+        assert_eq!(r.deductible_half, dec!(1339.08));
+    }
+
+    /// [Chunk A] W-2 Medicare above the threshold (isolated): w2_ss = 0, w2_medicare = $250,000.
+    ///
+    /// addl_threshold = max(0, 200,000 − 250,000) = 0 → over = 92,350 → addl = 0.9% × 92,350 = 831.15.
+    /// ss and medicare are UNCHANGED from Golden 1 (w2_ss = 0). deductible_half = (ss+medicare)/2 =
+    /// (11,451.40+2,678.15)/2 = 7,064.775 → HALF_EVEN 7,064.78 — UNCHANGED from P2-D, pins that addl
+    /// STILL does not enter the deductible.
+    #[test]
+    fn w2_medicare_above_threshold_isolated_250k() {
+        let st = state_with(vec![income(
+            IncomeKind::Mining,
+            true,
+            dec!(100000),
+            date!(2025 - 03 - 01),
+        )]);
+        let r = compute_se_tax(
+            &st,
+            2025,
+            FilingStatus::Single,
+            &tbl(),
+            Usd::ZERO,
+            dec!(250000),
+        )
+        .expect("SE tax expected");
+        assert_eq!(r.base, dec!(92350.00));
+        assert_eq!(r.ss, dec!(11451.40));
+        assert_eq!(r.medicare, dec!(2678.15));
+        assert_eq!(r.addl, dec!(831.15));
+        assert_eq!(r.total, dec!(14960.70));
+        // Pins that addl STILL excluded from deductible_half (unchanged from P2-D Golden 1).
+        assert_eq!(r.deductible_half, dec!(7064.78));
+    }
+
+    /// [Chunk A / I4] Asymmetric transposition guard: w2_ss $150,000, w2_medicare $0.
+    ///
+    /// ss_cap = 26,100 → ss = 3,236.40 (reduced); addl_threshold = 200,000 → over = 0 → addl = 0.
+    /// A transposition of the two params (swap ss ↔ medicare) would give ss=11,451.40/addl=381.15 —
+    /// BOTH flip. This test catches any transposed call at the engine level.
+    #[test]
+    fn w2_asymmetric_transposition_guard_150k_ss_0_medicare() {
+        let st = state_with(vec![income(
+            IncomeKind::Mining,
+            true,
+            dec!(100000),
+            date!(2025 - 03 - 01),
+        )]);
+        let r = compute_se_tax(
+            &st,
+            2025,
+            FilingStatus::Single,
+            &tbl(),
+            dec!(150000),
+            Usd::ZERO,
+        )
+        .expect("SE tax expected");
+        assert_eq!(
+            r.ss,
+            dec!(3236.40),
+            "ss must be reduced (not 11451.40 — transposition check)"
+        );
+        assert_eq!(
+            r.addl,
+            dec!(0.00),
+            "addl must be 0 (not 381.15 — transposition check)"
+        );
     }
 }

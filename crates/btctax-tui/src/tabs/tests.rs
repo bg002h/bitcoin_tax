@@ -767,6 +767,8 @@ fn make_tax_profile_single_50k() -> TaxProfile {
         qualified_dividends_and_other_pref_income: Decimal::ZERO,
         other_net_capital_gain: Decimal::ZERO,
         capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: Decimal::ZERO,
+        w2_medicare_wages: Decimal::ZERO,
     }
 }
 

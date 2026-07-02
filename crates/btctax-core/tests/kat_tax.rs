@@ -1947,6 +1947,8 @@ fn qualified_appraisal_note_is_advisory_and_does_not_gate_compute() {
             short: dec!(0),
             long: dec!(0),
         },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
     };
     let outcome = compute_tax_year(&events, &st, 2026, Some(&profile), &tables);
     assert!(
