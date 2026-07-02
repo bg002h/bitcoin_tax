@@ -168,6 +168,16 @@ fn income_rec(d: time::Date, fmv: Usd) -> IncomeRecord {
         business: false,
     }
 }
+fn income_rec_interest(d: time::Date, fmv: Usd) -> IncomeRecord {
+    IncomeRecord {
+        event: EventId::decision(3),
+        recognized_at: d,
+        sat: 100_000,
+        usd_fmv: fmv,
+        kind: IncomeKind::Interest,
+        business: false,
+    }
+}
 fn state_with(disposals: Vec<Disposal>, income: Vec<IncomeRecord>) -> LedgerState {
     LedgerState {
         disposals,
@@ -727,4 +737,81 @@ fn determinism_same_inputs_same_outcome() {
     let a = compute_tax_year(&[], &st, 2025, Some(&p), &synth(2025));
     let b = compute_tax_year(&[], &st, 2025, Some(&p), &synth(2025));
     assert_eq!(a, b);
+}
+
+/// [Task 1 — NII interest slice HEADLINE] §1411(c)(1)(A)(i): crypto-lending interest IS NII.
+///
+/// Single, synth table (NIIT threshold $200k). OTI $150,000; MAGI(excl crypto) $195,000; QD $0;
+/// other_net_capital_gain $0; zero carryforward; NO disposals; one Interest income $20,000 in-year.
+///
+/// D1 implementation path:
+///   interest_nii = 20,000; nii_with = 0+0+0-0+20,000 = 20,000; nii_without = 0.
+///   crypto_ord = 20,000; crypto_agi = 0-0+20,000 = 20,000; magi_with = 215,000 → over 15,000.
+///   niit_with  = 3.8% × min(20,000, 15,000) = 3.8% × 15,000 = 570.00  (min-cap: nii > over).
+///   niit_without = 0 (magi_without 195,000 < 200,000 threshold). niit DELTA = 570.00.
+///
+/// ord_delta = tax(170,000) − tax(150,000) on synth (both in 22% band above 50k bracket):
+///   22% × (170,000−150,000) = 22% × 20,000 = 4,400.00.
+/// total = 4,400 + 0 (no LTCG) + 570 = 4,970.00  [R0-N2: pinned absolutely, not just identity].
+///
+/// Pre-fix (no D1): interest_nii == 0 → niit == 0.00. Golden MUST FAIL red before D1 lands.
+#[test]
+fn interest_nii_headline_interest_plus_min_cap() {
+    let st = state_with(
+        vec![],
+        vec![income_rec_interest(date!(2025 - 06 - 01), dec!(20000))],
+    );
+    let p = profile(dec!(150000), dec!(195000), dec!(0));
+    let out = compute_tax_year(&[], &st, 2025, Some(&p), &synth(2025));
+    let TaxOutcome::Computed(r) = out else {
+        panic!("computable")
+    };
+    // NIIT: 3.8% × min(NII 20,000, over 15,000) = 570.00 (min-cap exercised: nii > over).
+    assert_eq!(r.niit, dec!(570.00));
+    // [R0-N2] Absolute total: ord_delta 4,400 + ltcg 0 + niit 570 = 4,970.00.
+    assert_eq!(r.total_federal_tax_attributable, dec!(4970.00));
+    // Identity: total == ord_delta + ltcg_tax + niit.
+    assert_eq!(
+        r.total_federal_tax_attributable,
+        dec!(4400.00) + r.ltcg_tax + r.niit
+    );
+    assert!(r.marginal_rates.niit_applies);
+}
+
+/// [Task 1 — NII interest slice EXCLUSION-BOUNDARY LOCK] Mixed Mining+Interest: only Interest
+/// enters NII; Mining stays excluded (SE income per §1411(c)(6) or non-NII other income).
+///
+/// Single, synth table (NIIT threshold $200k). OTI any; MAGI(excl crypto) $200,000 (exactly at
+/// the threshold → magi_without NOT > threshold → niit_without == 0); NO disposals.
+/// Mining $30,000 + Interest $10,000 both in-year.
+///
+/// D1 implementation path:
+///   crypto_ord = 40,000; interest_nii = 10,000 (Interest ONLY); nii_with = 10,000.
+///   crypto_agi = 0-0+40,000 = 40,000; magi_with = 240,000 → over 40,000.
+///   niit_with  = 3.8% × min(10,000, 40,000) = 3.8% × 10,000 = 380.00 (NII is the cap).
+///   niit_without = 0 (magi_without = 200,000, NOT > 200,000 → over == 0). niit DELTA = 380.00.
+///
+/// Wrong-inclusion guard: if Mining wrongly entered NII → nii_with 40,000 → niit_with
+///   3.8% × min(40,000, 40,000) = 1,520.00 — the golden fails that wrong path.
+///
+/// Pre-fix (no D1): interest_nii == 0 → niit == 0.00. Golden MUST FAIL red before D1 lands.
+#[test]
+fn interest_nii_mixed_mining_plus_interest_exclusion_boundary() {
+    let st = state_with(
+        vec![],
+        vec![
+            income_rec(date!(2025 - 03 - 01), dec!(30000)), // Mining → NOT NII
+            income_rec_interest(date!(2025 - 07 - 01), dec!(10000)), // Interest → IS NII
+        ],
+    );
+    // magi_excluding_crypto == 200,000: magi_without NOT > threshold → niit_without == 0.
+    let p = profile(dec!(50000), dec!(200000), dec!(0));
+    let out = compute_tax_year(&[], &st, 2025, Some(&p), &synth(2025));
+    let TaxOutcome::Computed(r) = out else {
+        panic!("computable")
+    };
+    // Interest IS NII; Mining is NOT: 3.8% × min(10,000, 40,000) = 380.00.
+    // Wrong-inclusion of Mining would give 3.8% × min(40,000, 40,000) = 1,520.00.
+    assert_eq!(r.niit, dec!(380.00));
+    assert!(r.marginal_rates.niit_applies);
 }

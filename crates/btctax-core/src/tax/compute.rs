@@ -10,7 +10,7 @@
 //! precision** — NOT the IRS binned Tax Tables and NOT whole-dollar rounding — with `ROUND_HALF_EVEN`
 //! to cents applied at the END only (the project's canonical `round_cents`).
 use crate::conventions::{round_cents, Usd};
-use crate::event::LedgerEvent;
+use crate::event::{IncomeKind, LedgerEvent};
 use crate::state::{Blocker, BlockerKind, LedgerState, Severity, Term};
 use crate::tax::tables::{
     loss_limit, niit_threshold, LtcgBreakpoints, OrdinarySchedule, TaxTables, NIIT_RATE,
@@ -212,10 +212,9 @@ pub fn net_1222(
 /// scenario's `bottom`) and is reported back as `ordinary_from_crypto`.
 ///
 /// **§1411 (B-M1).** NII is `QD + surviving net capital gains (ST+LT) − the §1211(b)-allowed net capital
-/// loss` (≤ $3,000 / $1,500 MFS — matching Form 8960 line 5a / §1.1411-4(d)). Crypto **ordinary** income
-/// (mining/staking/airdrops/rewards) is in MAGI but correctly EXCLUDED from NII (SE income per §1411(c)(6),
-/// or non-NII "other income"); the ONLY residual understatement is crypto-lending **interest**
-/// (§1411(c)(1)(A)(i)), which the minimal model cannot yet isolate — a Phase-2 refinement. NIIT =
+/// loss` (≤ $3,000 / $1,500 MFS — matching Form 8960 line 5a / §1.1411-4(d)) **plus** crypto-lending
+/// **interest** income (§1411(c)(1)(A)(i), NII). Crypto **ordinary** income (mining/staking/airdrops/rewards)
+/// is in MAGI but correctly EXCLUDED from NII (SE income per §1411(c)(6), or non-NII "other income"). NIIT =
 /// 3.8% × max(0, min(NII, MAGI − threshold)) (floored at $0; never negative). MAGI gets only the crypto
 /// **delta** added (so the non-crypto QD/cap-gain already in `magi_excluding_crypto` is never double-counted).
 ///
@@ -300,6 +299,16 @@ pub fn compute_tax_year(
         .filter(|i| i.recognized_at.year() == year)
         .map(|i| i.usd_fmv)
         .sum();
+    // §1411(c)(1)(A)(i): crypto-lending interest IS NII. Isolated from the rest of crypto_ord
+    // (mining/staking/airdrops/rewards stay excluded — SE income per §1411(c)(6) or non-NII other income).
+    // WITH-scenario only, per the crypto_ord attribution convention (the WITHOUT scenario = no crypto):
+    // adding it to both scenarios would cancel out of the r.niit delta and hide the liability.
+    let interest_nii: Usd = state
+        .income_recognized
+        .iter()
+        .filter(|i| i.recognized_at.year() == year && i.kind == IncomeKind::Interest)
+        .map(|i| i.usd_fmv)
+        .sum();
 
     let cf = profile.capital_loss_carryforward_in;
     // ── two scenarios: §1222 netting WITH and WITHOUT crypto ───────────────────────────────────────
@@ -337,11 +346,11 @@ pub fn compute_tax_year(
     // (B-M1). Per Form 8960 line 5a / §1.1411-4(d) (Example 1), a net capital loss reduces NII by ONLY the
     // §1211-limited amount (≤ $3,000 / $1,500 MFS) — not by wiping out other-category gains. In a gain year
     // `loss_deduction == 0`, so this is a no-op; in a net-loss year the surviving gains are 0, so NII becomes
-    // `qd − loss_deduction`. Crypto ORDINARY income (mining/staking/airdrops/rewards) is correctly EXCLUDED
-    // from NII — SE income per §1411(c)(6), or non-NII "other income"; the ONLY residual understatement is
-    // crypto-lending INTEREST (NII under §1411(c)(1)(A)(i)), which the minimal model cannot yet isolate from
-    // other `crypto_ord` — a Phase-2 refinement. NIIT = 3.8% × max(0, min(NII, MAGI − threshold)).
-    let nii_with = qd + with.ordinary_gain + with.preferential_gain - with.loss_deduction;
+    // `qd − loss_deduction`. Crypto-lending INTEREST (§1411(c)(1)(A)(i)) is INCLUDED in NII (`interest_nii`,
+    // WITH-scenario only). Mining/staking/airdrops/rewards remain EXCLUDED from NII — SE income per
+    // §1411(c)(6), or non-NII "other income". NIIT = 3.8% × max(0, min(NII, MAGI − threshold)).
+    let nii_with =
+        qd + with.ordinary_gain + with.preferential_gain - with.loss_deduction + interest_nii;
     let nii_without =
         qd + without.ordinary_gain + without.preferential_gain - without.loss_deduction;
     // `magi_excluding_crypto` already includes QD + non-crypto cap gain; add ONLY the crypto AGI delta.
