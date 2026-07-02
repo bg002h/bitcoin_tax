@@ -159,9 +159,9 @@ pub fn accept(
 }
 
 /// Implementation seam for [`accept`] with injectable tax tables. The public `accept` uses the bundled
-/// tables (TY2025 only); tests inject a table for a later year to exercise the 2027+ broker refusal
-/// end-to-end (a 2027 disposal is otherwise `YearNotComputable` under the bundled-tables-only path).
-/// Not part of the stable surface.
+/// tables (TY2024 and TY2025); tests inject a table for a later year to exercise the 2027+ broker
+/// refusal end-to-end (a 2027 disposal is otherwise `YearNotComputable` under the bundled-tables-only
+/// path). Not part of the stable surface.
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
 pub fn accept_with_tables(

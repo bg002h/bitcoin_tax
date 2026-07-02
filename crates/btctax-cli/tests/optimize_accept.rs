@@ -80,9 +80,9 @@ fn attestation_of(vault: &Path, disposal: &EventId) -> Option<String> {
 }
 
 // ── Injectable synthetic tax tables (for the 2027-broker end-to-end refusal) ────────────────────────
-// The bundled tables cover TY2025 only, so a 2027 disposal is `YearNotComputable` under the public
-// `accept`. `accept_with_tables` lets the test inject a later year's table to drive the disposal to a
-// real `ForbiddenBroker2027` verdict and assert the categorical refusal end-to-end.
+// The bundled tables cover TY2024 and TY2025, so a 2027 disposal is `YearNotComputable` under the
+// public `accept`. `accept_with_tables` lets the test inject a later year's table to drive the
+// disposal to a real `ForbiddenBroker2027` verdict and assert the categorical refusal end-to-end.
 struct OneTable(TaxTable);
 impl TaxTables for OneTable {
     fn table_for(&self, year: i32) -> Option<&TaxTable> {
