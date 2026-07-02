@@ -11,10 +11,10 @@ use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::{
     project, AllocLot, AllocMethod, BlockerKind, ClassifyInbound, ClassifyRaw, DonationDetails,
-    EventId, EventPayload, InboundClass, LedgerEvent, LotId, LotMethod, LotPick, LotSelection,
-    ManualFmv, MethodElection, OutflowClass, ReclassifyOutflow, RejectImport, RemovalKind,
-    SafeHarborAllocation, SupersedeImport, TaxDate, TransferLink, TransferTarget, Usd,
-    VoidDecisionEvent,
+    EventId, EventPayload, InboundClass, IncomeKind, LedgerEvent, LotId, LotMethod, LotPick,
+    LotSelection, ManualFmv, MethodElection, OutflowClass, ReclassifyIncome, ReclassifyOutflow,
+    RejectImport, RemovalKind, SafeHarborAllocation, SupersedeImport, TaxDate, TransferLink,
+    TransferTarget, Usd, VoidDecisionEvent,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -561,6 +561,32 @@ pub fn safe_harbor_attest(
     )?;
     session.save()?;
     Ok(id)
+}
+
+/// SE-completion Chunk C (D3): flip `business` (and optionally `kind`) on an already-imported
+/// `Income` event. Enables SE-tax treatment for professional miners / stakers whose River (and
+/// other adapter) income arrives with `business: false` hard-coded at ingest time.
+///
+/// The engine validates the target at collection time: if the referenced event does not exist OR its
+/// effective payload is not `Income`, a Hard `DecisionConflict` blocker fires and the decision is
+/// excluded (not silently inert, not a panic). To correct a `TransferIn` row use `classify-inbound-income`
+/// instead. **DecisionConflict is Hard — to re-decide, `void` the prior decision then re-issue.**
+pub fn reclassify_income(
+    vault_path: &Path,
+    pp: &Passphrase,
+    income_ref: &str,
+    business: bool,
+    kind: Option<IncomeKind>,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let income_event = parse_event_id(income_ref)?;
+    let mut session = Session::open(vault_path, pp)?;
+    let payload = EventPayload::ReclassifyIncome(ReclassifyIncome {
+        income_event,
+        business,
+        kind,
+    });
+    append_and_save(&mut session, payload, now)
 }
 
 /// Chunk 3b D2: store Form 8283 Section-B donation + appraiser details in the

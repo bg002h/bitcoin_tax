@@ -157,6 +157,8 @@ enum Resolved {
 
 /// Map an effective imported payload → `Op`, applying any `ManualFmv` override and Task 8/9 classification maps.
 /// ManualFmv on an `Income` replaces the FMV and clears the would-be `fmv_missing` gate.
+/// `income_reclassify` (SE Chunk C): a `ReclassifyIncome` override flips `business` and optionally `kind`
+/// on an `Income` event — the only projected-state change in this pass (no fold change needed).
 #[allow(clippy::too_many_arguments)]
 fn build_op(
     id: &EventId,
@@ -166,6 +168,7 @@ fn build_op(
     consumed_ins: &BTreeSet<EventId>,
     inbound_class: &BTreeMap<EventId, InboundClass>,
     outflow_class: &BTreeMap<EventId, ReclassifyOutflow>,
+    income_reclassify: &BTreeMap<EventId, ReclassifyIncome>,
     by_id: &BTreeMap<EventId, &LedgerEvent>,
 ) -> Op {
     match payload {
@@ -182,11 +185,17 @@ fn build_op(
             // ManualFmv wins; otherwise use the event's own FMV (if not Missing).
             let fmv =
                 fmv_override.or_else(|| x.usd_fmv.filter(|_| x.fmv_status != FmvStatus::Missing));
+            // SE Chunk C: apply ReclassifyIncome override if present (validated at collection time).
+            let (business, kind) = if let Some(o) = income_reclassify.get(id) {
+                (o.business, o.kind.unwrap_or(x.kind))
+            } else {
+                (x.business, x.kind)
+            };
             Op::Income {
                 sat: x.sat,
                 fmv,
-                kind: x.kind,
-                business: x.business,
+                kind,
+                business,
             }
         }
         EventPayload::TransferOut(t) => {
@@ -290,7 +299,8 @@ pub fn resolve(
     let mut blockers: Vec<Blocker> = Vec::new();
 
     // ── 1a. Collect Voids; classify each target's revocability ──────────────────────────────────
-    //   Revocable targets: TransferLink, ReclassifyOutflow, ClassifyInbound, ManualFmv, ClassifyRaw.
+    //   Revocable targets: TransferLink, ReclassifyOutflow, ClassifyInbound, ManualFmv, ClassifyRaw,
+    //   MethodElection, LotSelection, ReclassifyIncome.
     //   NON-revocable targets: SupersedeImport, RejectImport, VoidDecisionEvent.
     //   Void of a non-revocable target → DecisionConflict (target stays in force; void is inert).
     //   Void of SafeHarborAllocation → collected in allocation_voids (deferred to Task 12).
@@ -423,12 +433,14 @@ pub fn resolve(
     }
 
     // ── 1e. Classification decisions ────────────────────────────────────────────────────────────
-    // TransferLink → links + consumed_ins; ClassifyInbound → inbound_class; ReclassifyOutflow → outflow_class.
-    // Contradiction detection (same-target multi-class) for all three.
+    // TransferLink → links + consumed_ins; ClassifyInbound → inbound_class; ReclassifyOutflow → outflow_class;
+    // ReclassifyIncome (SE Chunk C) → income_reclassify.
+    // Contradiction detection (same-target multi-class) for all four.
     let mut links: BTreeMap<EventId, TransferTarget> = BTreeMap::new();
     let mut consumed_ins: BTreeSet<EventId> = BTreeSet::new();
     let mut inbound_class: BTreeMap<EventId, InboundClass> = BTreeMap::new();
     let mut outflow_class: BTreeMap<EventId, ReclassifyOutflow> = BTreeMap::new();
+    let mut income_reclassify: BTreeMap<EventId, ReclassifyIncome> = BTreeMap::new();
 
     for (_seq, d) in &decisions {
         if voided.contains(&d.id) {
@@ -495,6 +507,72 @@ pub fn resolve(
                     outflow_class.insert(ro.transfer_out_event.clone(), ro.clone());
                 }
             }
+            EventPayload::ReclassifyIncome(ri) => {
+                // SE Chunk C (D2) — bad-target validation at collection time against the EFFECTIVE
+                // payload (`applied.get(&target).unwrap_or(raw)` — so a ClassifyRaw'd row that
+                // became Income stays reclassifiable, and a by_id miss counts as bad).
+                //
+                // Deliberate divergence from ReclassifyOutflow: ReclassifyOutflow is silently inert
+                // when its target is missing/mismatched (blind insert, consulted only in the
+                // TransferOut branch). That is NOT acceptable for an SE-relevant correction whose
+                // projected-state consequence is material (SE tax inclusion vs. exclusion).
+                //
+                // Precedents for in-collection validation: TransferLink in-event check (~456-466),
+                // LotSelection target + principal conservation (~604-611).
+                //
+                // FOLLOWUP: backfill equivalent validation onto ReclassifyOutflow (out of scope here).
+                let target = &ri.income_event;
+                let effective_payload = by_id
+                    .get(target)
+                    .map(|raw| applied.get(target).unwrap_or(&raw.payload));
+                match effective_payload {
+                    None => {
+                        // Target event does not exist in the ledger at all.
+                        blockers.push(Blocker {
+                            kind: BlockerKind::DecisionConflict,
+                            event: Some(d.id.clone()),
+                            detail: format!(
+                                "ReclassifyIncome targets unknown event {} \
+                                 — for TransferIn rows use classify-inbound-income; \
+                                 to re-decide, void the prior decision first",
+                                target.canonical()
+                            ),
+                        });
+                        // Decision EXCLUDED: not inserted into income_reclassify.
+                    }
+                    Some(EventPayload::Income(_)) => {
+                        // Valid Income target. Duplicate (second non-voided for same target) → conflict;
+                        // FIRST-WINS (ascending decision_seq iteration = first write wins).
+                        if income_reclassify.contains_key(target) {
+                            blockers.push(Blocker {
+                                kind: BlockerKind::DecisionConflict,
+                                event: Some(d.id.clone()),
+                                detail: "duplicate ReclassifyIncome for the same income event \
+                                         — to re-decide, void the prior decision first"
+                                    .into(),
+                            });
+                            // Second decision EXCLUDED; first-wins value stays in map.
+                        } else {
+                            income_reclassify.insert(target.clone(), ri.clone());
+                        }
+                    }
+                    Some(_) => {
+                        // Target exists but its effective payload is not Income (e.g. a TransferIn,
+                        // Acquire, or a reclassified TransferOut). Hard blocker; decision EXCLUDED.
+                        blockers.push(Blocker {
+                            kind: BlockerKind::DecisionConflict,
+                            event: Some(d.id.clone()),
+                            detail: format!(
+                                "ReclassifyIncome targets non-Income event {} \
+                                 — for TransferIn rows use classify-inbound-income; \
+                                 to re-decide, void the prior decision first",
+                                target.canonical()
+                            ),
+                        });
+                        // Decision EXCLUDED: not inserted into income_reclassify.
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -518,6 +596,7 @@ pub fn resolve(
             &consumed_ins,
             &inbound_class,
             &outflow_class,
+            &income_reclassify,
             &by_id,
         );
         timeline.push(Eff {
