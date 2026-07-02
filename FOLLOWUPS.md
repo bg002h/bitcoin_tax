@@ -4,6 +4,29 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ SE completion Chunk C — ReclassifyIncome decision (business flip) — SHIPPED (2026-07-01)
+
+Queue item 2, chunk 2 of 3. New event-sourced `ReclassifyIncome{income_event, business, kind:
+Option<IncomeKind>}` decision + `reconcile reclassify-income <ref> --business <true|false> [--kind …]`
+(explicit-value, required, binary-verified) — closes the River `business:false` immutability (river.rs
+comments updated). Collection-time bad-target validation against the EFFECTIVE payload → Hard
+`DecisionConflict` + exclusion (a DELIBERATE divergence from ReclassifyOutflow's silently-inert behavior);
+FIRST-WINS dedup; void via VoidDecisionEvent; build_op-only override (fold untouched). KATs: the headline
+flip enables compute_se_tax; engine-B invariance under business-only flips; NON-VACUOUS kind-flip NIIT
+deltas ±$380.00 (the reviewer corrected the implementer's ±$190 derivation — the code/KAT were right);
+back-compat (old vaults load; old binaries fail LOUD — documented). R0 2 rounds → 0C/0I; whole-diff
+0C/0I after folds (the --business SetTrue parse bug caught empirically against the binary). 670 tests.
+
+**Deferred (OPEN) — [I-2 backfill]: `ReclassifyOutflow` (and `ClassifyInbound`/`ManualFmv`) bad-target
+handling is SILENTLY INERT** (blind collection, consulted only in the matching build_op branch) — backfill
+the same collection-time effective-payload validation → Hard blocker that ReclassifyIncome now has.
+
+**Cluster remaining: Chunk B** — Schedule C expenses (ADVISORY-ONLY: `TaxProfile.schedule_c_expenses` →
+net_se = max(0, gross − expenses); engine-B gross-vs-net coordination explicitly deferred — high blast
+radius; precise advisory text per the recon).
+
+---
+
 ## ✅ SE completion Chunk A — W-2 wage coordination — SHIPPED (2026-07-01)
 
 Queue item 2, chunk 1 of 3. `TaxProfile.w2_ss_wages`/`w2_medicare_wages` (`#[serde(default)]`; CLI flags,
