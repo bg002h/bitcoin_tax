@@ -1,0 +1,3 @@
+# Local PII-patterns file — NEVER commit (contains owner-specific scan patterns)
+.pii-patterns
+.pii-patterns.bak

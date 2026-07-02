@@ -4,4 +4,4 @@ members = ["crates/btctax-store", "crates/btctax-core", "crates/btctax-adapters"
 [workspace.package]
 edition = "2021"
 license = "MIT OR Unlicense"
-rust-version = "1.74"
+rust-version = "1.88"
