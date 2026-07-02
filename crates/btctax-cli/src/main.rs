@@ -280,6 +280,26 @@ enum Reconcile {
     },
     /// §A.4 Batch import LotSelections from a CSV (disposal_ref,origin_event_id,split_sequence,sat).
     ImportSelections { csv: PathBuf },
+    /// SE-completion Chunk C: flip `business` (and optionally `kind`) on an already-imported Income event.
+    ///
+    /// Corrects the `business: false` hard-code that River (and other adapters) emit at ingest time,
+    /// enabling SE-tax treatment for professional miners / stakers. The engine validates that the target
+    /// event exists and is an Income event — a missing or non-Income target fires a Hard DecisionConflict
+    /// blocker (decision excluded). For TransferIn rows use `classify-inbound-income` instead.
+    ///
+    /// DecisionConflict is Hard — to re-decide, `void` the prior decision first, then re-issue.
+    ReclassifyIncome {
+        /// The Income event reference (from `report` or `income_recognized.csv` 'event' column).
+        income_event: String,
+        /// Whether this income is from a trade or business (true → SE-tax eligible).
+        /// Must be supplied explicitly: `--business true` or `--business false`.
+        #[arg(long, required = true, action = clap::ArgAction::Set)]
+        business: bool,
+        /// Optional income kind correction: mining|staking|interest|airdrop|reward.
+        /// Omit to keep the original kind (only flip `business`).
+        #[arg(long)]
+        kind: Option<String>,
+    },
     /// Store Form 8283 Section-B donation + appraiser details for a donation event.
     /// The event ref is the TransferOut EventId from the removals.csv 'event' column.
     SetDonationDetails {
@@ -857,6 +877,17 @@ fn dispatch_reconcile(
             // early (the trailing single-id println does not apply here).
             println!("Recorded {} LotSelection decision(s)", ids.len());
             return Ok(());
+        }
+        Reconcile::ReclassifyIncome {
+            income_event,
+            business,
+            kind,
+        } => {
+            let kind = kind
+                .as_deref()
+                .map(eventref::parse_income_kind)
+                .transpose()?;
+            cmd::reconcile::reclassify_income(vault, &pp, &income_event, business, kind, now)?
         }
         Reconcile::SetDonationDetails {
             out_event_ref,

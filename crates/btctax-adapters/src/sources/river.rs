@@ -146,12 +146,11 @@ impl Adapter for River {
                     let (fmv, status) = resolve_fmv(None, date, sat, prices); // no export USD → dataset
                     (
                         Direction::In,
-                        // `business: false` is hard-coded at the adapter layer and IMMUTABLE
-                        // post-ingest — `Income` is not `ClassifyRaw`-able, so there is no
-                        // reconciliation path to flip this flag after import. If the owner's River
-                        // income is business income (e.g. professional mining subject to SE-tax),
-                        // this mapping MUST be confirmed or changed here before relying on it for
-                        // SE-tax calculations.
+                        // `business: false` is hard-coded at the adapter layer. To flip this flag
+                        // (and optionally the kind) after import, use:
+                        //   `reconcile reclassify-income <event_ref> --business true [--kind mining|…]`
+                        // SE Chunk C ships this path; professional miners subject to SE-tax should
+                        // use it. Voidable and conflict-checked (Hard DecisionConflict on duplicate).
                         EventPayload::Income(Income {
                             sat,
                             usd_fmv: fmv,
@@ -165,11 +164,11 @@ impl Adapter for River {
                     let (fmv, status) = resolve_fmv(None, date, sat, prices);
                     (
                         Direction::In,
-                        // `business: false` is hard-coded at the adapter layer and IMMUTABLE
-                        // post-ingest — `Income` is not `ClassifyRaw`-able, so there is no
-                        // reconciliation path to flip this flag after import. If the owner's River
-                        // interest income is business income, this mapping MUST be confirmed or
-                        // changed here before relying on it for SE-tax calculations.
+                        // `business: false` is hard-coded at the adapter layer. To flip this flag
+                        // (and optionally the kind) after import, use:
+                        //   `reconcile reclassify-income <event_ref> --business true [--kind mining|…]`
+                        // SE Chunk C ships this path; professional miners/stakers subject to SE-tax
+                        // should use it. Voidable and conflict-checked (Hard DecisionConflict on duplicate).
                         EventPayload::Income(Income {
                             sat,
                             usd_fmv: fmv,

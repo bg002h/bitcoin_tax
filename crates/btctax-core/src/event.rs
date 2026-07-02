@@ -190,6 +190,29 @@ pub struct ClassifyRaw {
     pub as_: Box<EventPayload>, // the supplied imported payload
 }
 
+/// SE-completion Chunk C (D1): flip the `business` flag (and optionally `kind`) of an already-imported
+/// `Income` event. Corrects the `business: false` hard-code that River (and other adapters) emit at
+/// ingest time, enabling SE-tax treatment for professional miners / stakers who cannot use `ClassifyRaw`
+/// on Income events.
+///
+/// **Old-binary limitation:** this variant was added post-initial-release. A vault that CONTAINS a
+/// `ReclassifyIncome` event FAILS to load on a binary that predates Chunk C: serde's externally-tagged
+/// enum emits a LOUD unknown-variant error and the entire vault load fails. This is the accepted
+/// trade-off for every decision-type addition (each new variant is a forward-only change). A vault
+/// WITHOUT this variant loads correctly on any binary (there is no `ReclassifyIncome` event to fail on).
+/// Voidable via the generic `VoidDecisionEvent`; a second non-voided decision for the same
+/// `income_event` → `DecisionConflict`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReclassifyIncome {
+    /// The target imported Income event whose `business` (and optionally `kind`) is being corrected.
+    pub income_event: EventId,
+    /// The corrected `business` flag (true = trade-or-business income, subject to SE tax).
+    pub business: bool,
+    /// Optional kind correction. `None` = keep the original kind; `Some(k)` overrides to `k`.
+    #[serde(default)]
+    pub kind: Option<IncomeKind>,
+}
+
 /// A named-lot selection element (§A.4): consume exactly `sat` from lot `lot`.
 /// Used by `PoolSet::consume` (Task 2) and carried by the `LotSelection` decision payload (Task 4).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -246,6 +269,11 @@ pub enum EventPayload {
     ClassifyRaw(ClassifyRaw),
     MethodElection(MethodElection),
     LotSelection(LotSelection),
+    /// SE-completion Chunk C: flip `business` (and optionally `kind`) on an already-imported Income event.
+    /// Old-binary limitation: a vault containing this variant FAILS to load on a pre-Chunk-C binary
+    /// (serde's externally-tagged enum gives a loud unknown-variant error; see `ReclassifyIncome` struct
+    /// doc). A vault WITHOUT this variant (i.e. any vault created before Chunk C) loads on any binary.
+    ReclassifyIncome(ReclassifyIncome),
 }
 
 impl EventPayload {
@@ -446,6 +474,18 @@ mod tests {
                     },
                 ],
             }),
+            // SE Chunk C: ReclassifyIncome — with kind override (Some arm)
+            EventPayload::ReclassifyIncome(ReclassifyIncome {
+                income_event: EventId::import(Source::River, SourceRef::new("in|river-income-001")),
+                business: true,
+                kind: Some(IncomeKind::Mining),
+            }),
+            // SE Chunk C: ReclassifyIncome — kind: None (keep original)
+            EventPayload::ReclassifyIncome(ReclassifyIncome {
+                income_event: EventId::import(Source::River, SourceRef::new("in|river-income-002")),
+                business: true,
+                kind: None,
+            }),
         ];
         for p in payloads {
             let ev = sample(p);
@@ -463,6 +503,25 @@ mod tests {
             method: crate::LotMethod::Lifo,
         });
         assert!(crate::persistence::fingerprint(&me).is_none());
+    }
+
+    /// [R0-Minor] SE Chunk C KAT: `ReclassifyIncome.fingerprint() == None` (decision variant;
+    /// catch-all `_ => None` in `persistence::fingerprint` covers it).
+    #[test]
+    fn reclassify_income_decision_has_no_fingerprint() {
+        let ri = EventPayload::ReclassifyIncome(ReclassifyIncome {
+            income_event: EventId::import(Source::Coinbase, SourceRef::new("X")),
+            business: true,
+            kind: Some(IncomeKind::Mining),
+        });
+        assert!(crate::persistence::fingerprint(&ri).is_none());
+        // Confirm kind=None arm also has no fingerprint.
+        let ri_no_kind = EventPayload::ReclassifyIncome(ReclassifyIncome {
+            income_event: EventId::import(Source::Coinbase, SourceRef::new("Y")),
+            business: false,
+            kind: None,
+        });
+        assert!(crate::persistence::fingerprint(&ri_no_kind).is_none());
     }
 
     #[test]
