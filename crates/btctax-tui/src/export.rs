@@ -162,7 +162,8 @@ mod tests {
         event::IncomeKind,
         identity::{EventId, Source, SourceRef},
         state::{IncomeRecord, LedgerState},
-        Carryforward, FilingStatus, TaxProfile,
+        BasisSource, Carryforward, DonationDetails, FilingStatus, LotId, Removal, RemovalKind,
+        RemovalLeg, TaxProfile, Term,
     };
     use rust_decimal::Decimal;
     use std::collections::BTreeMap;
@@ -333,6 +334,113 @@ mod tests {
         assert_eq!(row[4], "62.46", "additional_medicare_component golden");
         assert_eq!(row[5], "4370.12", "total_se_tax golden");
         assert_eq!(row[6], "2153.83", "deductible_half golden");
+    }
+
+    // ── KAT-E4b — donation_details passthrough: donee name in exported form8283.csv ──────────
+
+    /// KAT-E4b: `donation_details` passthrough from Snapshot → `do_export` → `write_form_csvs`
+    /// → `write_form8283_csv`. Exercises the second assembly-sensitive artifact identified in R0-I3
+    /// (the SE CSV golden figures cover the first; this covers the second).
+    ///
+    /// Fixture: a single donation removal in TY2025 with a `DonationDetails` entry keyed by the
+    /// same `EventId` as the removal. Synthetic values: donee "Test Charity Seam", appraiser
+    /// "Test Appraiser Seam", EIN "99-1234567" (exclusion-listed synthetic — pii-scan-generic.sh).
+    ///
+    /// After `do_export`, the exported `form8283.csv` MUST contain both name strings — proving the
+    /// passthrough is wired end-to-end at the TUI export boundary, not just by inspection.
+    #[test]
+    fn e4b_donee_passthrough_appears_in_exported_form8283() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        btctax_cli::cmd::init::run(
+            &vault,
+            &btctax_store::Passphrase::new("e4b-pass".into()),
+            &key,
+        )
+        .unwrap();
+
+        let export_now = datetime!(2025-06-15 12:00:00 UTC);
+
+        // Donation event identity — the DonationDetails map key must match the removal's event.
+        let donation_event = make_event_id("e4b-donation");
+
+        // Single-leg LT donation: $3,000 claimed deduction → Section A (≤ $5,000 aggregate).
+        let leg = RemovalLeg {
+            lot_id: LotId {
+                origin_event_id: make_event_id("e4b-lot"),
+                split_sequence: 0,
+            },
+            sat: 10_000_000, // 0.1 BTC
+            basis: Decimal::from(1000i64),
+            fmv_at_transfer: Decimal::from(3000i64),
+            term: Term::LongTerm,
+            basis_source: BasisSource::ComputedFromCost,
+            acquired_at: make_date(2024, 1, 1),
+        };
+
+        let removal = Removal {
+            event: donation_event.clone(),
+            kind: RemovalKind::Donation,
+            removed_at: make_date(2025, 6, 1),
+            legs: vec![leg],
+            appraisal_required: false,
+            donor_acquired_at: None,
+            claimed_deduction: Some(Decimal::from(3000i64)),
+            donee: None,
+        };
+
+        let mut state = LedgerState::default();
+        state.removals.push(removal);
+
+        // Synthetic DonationDetails — "99-1234567" is in the pii-scan-generic.sh exclusion list.
+        let details = DonationDetails {
+            donee_name: "Test Charity Seam".into(),
+            donee_address: None,
+            donee_ein: Some("99-1234567".into()),
+            appraiser_name: "Test Appraiser Seam".into(),
+            appraiser_address: None,
+            appraiser_tin: None,
+            appraiser_ptin: None,
+            appraiser_qualifications: None,
+            appraisal_date: None,
+            fmv_method_override: None,
+        };
+
+        let mut donation_details = BTreeMap::new();
+        donation_details.insert(donation_event, details);
+
+        let snap = Snapshot {
+            events: vec![],
+            state,
+            cli_config: CliConfig::default(),
+            profiles: BTreeMap::new(),
+            tables: BundledTaxTables::load(),
+            donation_details,
+        };
+
+        let out_dir = export_dir_for(&vault, export_now);
+        let modal = ExportConfirmState {
+            year: 2025,
+            out_dir: out_dir.clone(),
+            files: compute_files(&snap, 2025),
+            export_now,
+        };
+
+        do_export(&snap, &modal).expect("export must succeed");
+
+        // The exported form8283.csv must contain both the donee and appraiser names —
+        // proving the Snapshot→do_export→write_form_csvs passthrough is wired end-to-end.
+        let csv_text =
+            std::fs::read_to_string(out_dir.join("form8283.csv")).expect("form8283.csv must exist");
+        assert!(
+            csv_text.contains("Test Charity Seam"),
+            "form8283.csv must contain donee name 'Test Charity Seam';\ncsv:\n{csv_text}"
+        );
+        assert!(
+            csv_text.contains("Test Appraiser Seam"),
+            "form8283.csv must contain appraiser name 'Test Appraiser Seam';\ncsv:\n{csv_text}"
+        );
     }
 
     // ── KAT-E5 — 0o600 file / 0o700 dir permissions (Unix only) ─────────────
@@ -527,10 +635,14 @@ mod tests {
         };
 
         // Export must fail — pre-existing dir triggers AlreadyExists.
-        let result = do_export(&snap, &modal);
+        // M-3: assert the specific AlreadyExists-kind, not just any error — catches a future
+        // refactor that fails for a different reason (e.g. a permission error masking a lost
+        // exclusivity guarantee).
+        let err = do_export(&snap, &modal)
+            .expect_err("do_export must return Err when the export dir pre-exists");
         assert!(
-            result.is_err(),
-            "do_export must return Err when the export dir pre-exists"
+            matches!(&err, btctax_cli::CliError::Store(btctax_store::StoreError::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists),
+            "do_export must return an AlreadyExists-kind error; got: {err}"
         );
 
         // The form CSVs must NOT have been written.
