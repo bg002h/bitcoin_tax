@@ -1,8 +1,9 @@
 //! Core application state: `Screen`, `Tab`, `Snapshot`, and `App`.
 //!
-//! STRICTLY READ-ONLY: this module MUST NOT call `Session::save()`, `persistence::append_*`,
-//! any `btctax_cli::cmd::*` mutating command, or `Session::conn()`.
+//! never writes the vault or any decrypted image of it; writes only the four form CSVs
+//! via `export.rs` on explicit user confirmation. This module performs no writes.
 
+use crate::export::ExportConfirmState;
 use crate::unlock;
 use crate::unlock::UnlockState;
 use btctax_adapters::BundledTaxTables;
@@ -112,7 +113,7 @@ pub struct Snapshot {
 /// Top-level application state.
 ///
 /// `handle_key` mutates ONLY UI navigation fields (`screen`, `tab`, `should_quit`,
-/// `selected_year`, `unlock`). It NEVER mutates ledger data.
+/// `selected_year`, `unlock`, `export_modal`, `export_status`). It NEVER mutates ledger data.
 pub struct App {
     /// Path to the encrypted vault file (from CLI arg or default).
     pub vault_path: PathBuf,
@@ -132,6 +133,12 @@ pub struct App {
     pub income_state: TableState,
     /// Scroll/selection state for the Form 8949 table in the Forms tab.
     pub forms_state: TableState,
+    /// Export confirmation modal state. `Some` while the modal is open; `None` otherwise.
+    /// Set by the `e` keybinding; cleared on Enter (execute) or Esc (cancel).
+    pub export_modal: Option<ExportConfirmState>,
+    /// One-line export status shown in the footer after a completed export or error.
+    /// Cleared on the next non-modal key press.
+    pub export_status: Option<String>,
 }
 
 impl App {
@@ -148,6 +155,8 @@ impl App {
             disposals_state: TableState::default(),
             income_state: TableState::default(),
             forms_state: TableState::default(),
+            export_modal: None,
+            export_status: None,
         }
     }
 

@@ -9,8 +9,8 @@
 //! - The raw chars are NEVER logged or rendered; only `●`×char_count is displayed.
 //!
 //! # Read-only contract
-//! STRICTLY READ-ONLY: does NOT call `Session::save()`, `persistence::append_*`,
-//! any `btctax_cli::cmd::*` mutating command, or `Session::conn()`.
+//! never writes the vault or any decrypted image of it; writes only the four form CSVs
+//! via `export.rs` on explicit user confirmation. This module performs no writes.
 
 use crate::app::Snapshot;
 use btctax_adapters::BundledTaxTables;
@@ -457,11 +457,15 @@ mod tests {
         let _ = &snap.tables;
     }
 
-    // ── Read-only behavioral test [R0-M6] ────────────────────────────────────
+    // ── Read-only behavioral test [R0-M6] + KAT-E3 ──────────────────────────
     //
     // The immutable Session binding is a compile-level guarantee that save() cannot be called.
     // This behavioral test adds a runtime confirmation: open→build-Snapshot→drop leaves
     // the vault file BYTE-IDENTICAL to what it was before.
+    //
+    // KAT-E3 extends it: do_export (writing the four form CSVs) must ALSO leave the vault
+    // byte-identical. The export writes ONLY to the timestamped export subdirectory; the
+    // vault file itself is never touched.
 
     #[test]
     fn vault_file_bytes_unchanged_after_open_build_snapshot_drop() {
@@ -484,11 +488,40 @@ mod tests {
             // snapshot and session both drop at end of this block
         }
 
-        let bytes_after = std::fs::read(&vault).expect("vault must be readable after");
-
+        let bytes_after_open_drop =
+            std::fs::read(&vault).expect("vault must be readable after open+drop");
         assert_eq!(
-            bytes_before, bytes_after,
-            "[R0-M6] vault file must be byte-identical after open→build-Snapshot→drop (nothing was written)"
+            bytes_before, bytes_after_open_drop,
+            "[R0-M6] vault file must be byte-identical after open→build-Snapshot→drop"
+        );
+
+        // ── KAT-E3: vault bytes unchanged after a FULL export cycle ──────────
+        // Open again, do_export (writes form CSVs to a fresh subdir), assert vault unchanged.
+        {
+            let outcome = attempt_open(&vault, Passphrase::new(pp_str.into()));
+            let (snapshot, year) = match outcome {
+                OpenOutcome::Success(snap, yr) => (snap, yr),
+                _ => panic!("[KAT-E3] second open must succeed"),
+            };
+
+            let export_now = time::macros::datetime!(2025-06-15 10:00:00 UTC);
+            let out_dir = crate::export::export_dir_for(&vault, export_now);
+            let modal = crate::export::ExportConfirmState {
+                year,
+                out_dir,
+                files: crate::export::compute_files(&snapshot, year),
+                export_now,
+            };
+            crate::export::do_export(&snapshot, &modal).expect("[KAT-E3] do_export must succeed");
+            // snapshot drops here
+        }
+
+        let bytes_after_export =
+            std::fs::read(&vault).expect("vault must be readable after export");
+        assert_eq!(
+            bytes_before, bytes_after_export,
+            "[KAT-E3] vault file must be byte-identical after a full export cycle \
+             (export writes only to the timestamped CSVs, never the vault)"
         );
     }
 }

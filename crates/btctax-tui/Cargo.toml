@@ -20,7 +20,8 @@ crossterm = "0.28"
 # Match the workspace-shared versions used in btctax-core / btctax-cli.
 thiserror    = "1"
 rust_decimal = "1"
+# [R0-M1] Promoted from [dev-dependencies]: production use in ExportConfirmState + e keybinding.
+time = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
-time = "0.3"

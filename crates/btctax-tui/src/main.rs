@@ -1,4 +1,4 @@
-//! `btctax-tui` — ratatui read-only vault viewer.
+//! `btctax-tui` — ratatui vault viewer with owner-only form-CSV export.
 //!
 //! Terminal lifecycle: enter raw mode + alternate screen on startup; ALWAYS restore on exit:
 //!   1. Setup `?` failure — `TerminalGuard` drop restores before propagating the `Err`.
@@ -7,11 +7,12 @@
 //!   4. Panic             — panic hook calls `restore_terminal()` before the default hook [R0-M4].
 //!      (`TerminalGuard` also runs during unwind; having both is belt-and-suspenders.)
 //!
-//! STRICTLY READ-ONLY: this binary MUST NOT call `Session::save()`, `persistence::append_*`,
-//! any `btctax_cli::cmd::*` mutating command, or `Session::conn()`.
+//! never writes the vault or any decrypted image of it; writes only the four form CSVs
+//! via `export.rs` on explicit user confirmation. This module performs no writes.
 
 mod app;
 mod draw;
+mod export;
 mod tabs;
 mod unlock;
 
@@ -25,6 +26,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
+use time::OffsetDateTime;
 
 // ── Terminal lifecycle ────────────────────────────────────────────────────────
 
@@ -98,20 +100,56 @@ fn parse_vault_path() -> PathBuf {
 /// Only KEY PRESS events are acted on; repeat/release are ignored (crossterm distinguishes them
 /// on supporting terminals; others always send `Press`).
 ///
-/// Dispatches on `app.screen` FIRST so that `Screen::Unlock` gets full text-input priority:
-/// `q` and other printable chars are appended to the passphrase buffer; only `Esc` quits.
-/// This means passphrases containing `q`, `t`, or any other letter/digit/symbol work correctly.
+/// **Modal priority [R0-M4]:** When `app.export_modal` is `Some`, the modal dispatch runs
+/// FIRST and consumes the key entirely (returning early). This prevents `Esc` from reaching
+/// the Viewer arm (which currently quits the app) while the modal is open.
+///
+/// Dispatches on `app.screen` FIRST (after modal) so that `Screen::Unlock` gets full
+/// text-input priority: `q` and other printable chars are appended to the passphrase buffer;
+/// only `Esc` quits. This means passphrases containing `q`, `t`, or any other
+/// letter/digit/symbol work correctly.
 ///
 /// # Screen dispatch
 /// - **Unlock**: `Esc` → quit; `Tab`/`BackTab` → ignored (no tab bar on this screen);
 ///   `Enter` → attempt open; `Backspace` → pop last char;
 ///   any `Char` (including `q`) → append to passphrase buffer.
 /// - **Locked**: `r` → retry (back to Unlock); `q`/`Esc` → quit.
-/// - **Viewer**: `q`/`Esc` → quit; `Tab` → next tab; `BackTab` → prev tab
-///   (full tab keybindings added in later tasks).
+/// - **Viewer**: `q`/`Esc` → quit; `Tab` → next tab; `BackTab` → prev tab;
+///   `e` → open export confirmation modal (no-op if no snapshot).
 pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
     if key.kind != KeyEventKind::Press {
         return;
+    }
+
+    // ── Modal dispatch — BEFORE screen dispatch [R0-M4] ──────────────────────
+    // When the export confirmation modal is open, ONLY Enter and Esc are acted on.
+    // ALL other keys (including 'q') are swallowed — the modal is blocking.
+    if app.export_modal.is_some() {
+        match key.code {
+            KeyCode::Enter => {
+                // Take the modal state (clearing app.export_modal = None).
+                let modal = app.export_modal.take().expect("checked is_some above");
+                if let Some(snap) = app.snapshot.as_ref() {
+                    match export::do_export(snap, &modal) {
+                        Ok(dir) => {
+                            app.export_status = Some(format!("Exported to {}", dir.display()));
+                        }
+                        Err(e) => {
+                            app.export_status = Some(format!("Export error: {e}"));
+                        }
+                    }
+                }
+                // export_modal is already None (taken above); drop modal.
+            }
+            KeyCode::Esc => {
+                // Cancel — writes nothing. Does NOT quit [R0-M4].
+                app.export_modal = None;
+            }
+            _ => {
+                // Swallowed. 'q' does NOT quit while the modal is open.
+            }
+        }
+        return; // Modal consumed the key — skip screen dispatch.
     }
 
     // Screen dispatch FIRST — so Unlock never accidentally fires global quit/tab keys.
@@ -142,26 +180,45 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
             }
             _ => {}
         },
-        Screen::Viewer => match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
-            KeyCode::Tab => app.tab = app.tab.next(),
-            KeyCode::BackTab => app.tab = app.tab.prev(),
-            KeyCode::Up | KeyCode::Char('k') => scroll_up(app),
-            KeyCode::Down | KeyCode::Char('j') => scroll_down(app),
-            KeyCode::PageUp => page_up(app),
-            KeyCode::PageDown => page_down(app),
-            KeyCode::Char('g') => go_top(app),
-            KeyCode::Char('G') => go_bottom(app),
-            KeyCode::Left => {
-                app.selected_year -= 1;
-                reset_selections(app);
+        Screen::Viewer => {
+            // Clear export status on any non-modal key press [D4 footer spec].
+            app.export_status = None;
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+                KeyCode::Tab => app.tab = app.tab.next(),
+                KeyCode::BackTab => app.tab = app.tab.prev(),
+                KeyCode::Up | KeyCode::Char('k') => scroll_up(app),
+                KeyCode::Down | KeyCode::Char('j') => scroll_down(app),
+                KeyCode::PageUp => page_up(app),
+                KeyCode::PageDown => page_down(app),
+                KeyCode::Char('g') => go_top(app),
+                KeyCode::Char('G') => go_bottom(app),
+                KeyCode::Left => {
+                    app.selected_year -= 1;
+                    reset_selections(app);
+                }
+                KeyCode::Right => {
+                    app.selected_year += 1;
+                    reset_selections(app);
+                }
+                // [D4] Export keybinding: open the confirmation modal.
+                // No-op when no snapshot is loaded [KAT-E8].
+                KeyCode::Char('e') => {
+                    if let Some(snap) = app.snapshot.as_ref() {
+                        let export_now = OffsetDateTime::now_utc();
+                        let out_dir = export::export_dir_for(&app.vault_path, export_now);
+                        let files = export::compute_files(snap, app.selected_year);
+                        app.export_modal = Some(export::ExportConfirmState {
+                            year: app.selected_year,
+                            out_dir,
+                            files,
+                            export_now,
+                        });
+                    }
+                }
+                _ => {}
             }
-            KeyCode::Right => {
-                app.selected_year += 1;
-                reset_selections(app);
-            }
-            _ => {}
-        },
+        }
     }
 }
 
@@ -684,6 +741,219 @@ mod tests {
             app.tab,
             Tab::Disposals,
             "Tab on Viewer must cycle to next tab"
+        );
+    }
+
+    // ── KAT-E8 — 'e' on Viewer with no snapshot is a no-op ──────────────────
+
+    /// KAT-E8: pressing `e` when `app.snapshot.is_none()` must NOT open the modal.
+    #[test]
+    fn e8_e_key_no_snapshot_is_noop() {
+        let mut app = new_app();
+        app.screen = Screen::Viewer;
+        // snapshot is None (never unlocked)
+        assert!(app.snapshot.is_none());
+
+        handle_key(&mut app, press(KeyCode::Char('e')));
+
+        assert!(
+            app.export_modal.is_none(),
+            "'e' with no snapshot must be a no-op — export_modal must stay None"
+        );
+    }
+
+    // ── KAT-E2 — Esc-cancel writes nothing + modal-priority asserts [R0-M4] ──
+
+    /// KAT-E2: Esc closes the modal without writing anything and without quitting.
+    /// Additionally verifies that `q` while the modal is open is swallowed.
+    #[test]
+    fn e2_esc_cancel_writes_nothing_and_q_is_swallowed() {
+        use btctax_adapters::BundledTaxTables;
+        use btctax_cli::CliConfig;
+        use btctax_core::state::LedgerState;
+        use std::collections::BTreeMap;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault_path = dir.path().join("vault.pgp");
+
+        // Build a minimal Snapshot (no income, no profiles — just enough to have a snapshot).
+        let snap = app::Snapshot {
+            events: vec![],
+            state: LedgerState::default(),
+            cli_config: CliConfig::default(),
+            profiles: BTreeMap::new(),
+            tables: BundledTaxTables::load(),
+            donation_details: BTreeMap::new(),
+        };
+
+        let mut test_app = App::new(vault_path);
+        test_app.screen = Screen::Viewer;
+        test_app.selected_year = 2025;
+        test_app.snapshot = Some(snap);
+
+        // Press 'e' → modal opens.
+        handle_key(&mut test_app, press(KeyCode::Char('e')));
+        assert!(
+            test_app.export_modal.is_some(),
+            "export_modal must be Some after 'e'"
+        );
+
+        // Snapshot the expected out_dir before we press any more keys.
+        let out_dir = test_app.export_modal.as_ref().unwrap().out_dir.clone();
+
+        // Additional case [R0-M4]: 'q' while modal open → swallowed (no quit, modal stays).
+        handle_key(&mut test_app, press(KeyCode::Char('q')));
+        assert!(
+            !test_app.should_quit,
+            "'q' while modal open must NOT quit the app"
+        );
+        assert!(
+            test_app.export_modal.is_some(),
+            "modal must still be open after 'q' (key is swallowed)"
+        );
+
+        // Press Esc → modal closes, nothing written, no quit.
+        handle_key(&mut test_app, press(KeyCode::Esc));
+        assert!(
+            test_app.export_modal.is_none(),
+            "export_modal must be None after Esc"
+        );
+        assert!(
+            !test_app.should_quit,
+            "Esc on modal must NOT quit the app [R0-M4]"
+        );
+        assert!(
+            test_app.export_status.is_none(),
+            "export_status must be None after cancel (no write occurred)"
+        );
+
+        // The output directory must NOT exist (no writes, not even the dir creation).
+        assert!(
+            !out_dir.exists(),
+            "export dir must NOT exist after Esc cancel — no writes occurred"
+        );
+    }
+
+    // ── KAT-E1 — Confirmation flow (unit, temp vault) ────────────────────────
+
+    /// KAT-E1: full confirm flow — `e` opens modal with correct files, Enter executes
+    /// the export, `export_status` contains "Exported to", output dir + CSVs exist.
+    #[test]
+    fn e1_confirmation_flow_with_se_income() {
+        use btctax_adapters::BundledTaxTables;
+        use btctax_cli::CliConfig;
+        use btctax_core::{
+            event::IncomeKind,
+            identity::{EventId, Source, SourceRef},
+            state::{IncomeRecord, LedgerState},
+            Carryforward, FilingStatus, TaxProfile,
+        };
+        use btctax_store::Passphrase;
+        use rust_decimal::Decimal;
+        use std::collections::BTreeMap;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        // Create a real vault so the vault_path's parent exists for the export dir.
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new("e1-pass".into()), &key).unwrap();
+
+        // Synthetic Snapshot with business mining income + TaxProfile for 2025.
+        let mut state = LedgerState::default();
+        state.income_recognized.push(IncomeRecord {
+            event: EventId::import(Source::Coinbase, SourceRef::new("e1-mining")),
+            recognized_at: time::Date::from_calendar_date(2025, time::Month::March, 1).unwrap(),
+            sat: 100_000_000,
+            usd_fmv: Decimal::from(50_000i64),
+            kind: IncomeKind::Mining,
+            business: true,
+        });
+        let mut profiles = BTreeMap::new();
+        profiles.insert(
+            2025,
+            TaxProfile {
+                filing_status: FilingStatus::Single,
+                ordinary_taxable_income: Decimal::from(50_000i64),
+                magi_excluding_crypto: Decimal::from(50_000i64),
+                qualified_dividends_and_other_pref_income: Decimal::ZERO,
+                other_net_capital_gain: Decimal::ZERO,
+                capital_loss_carryforward_in: Carryforward::default(),
+                w2_ss_wages: Decimal::ZERO,
+                w2_medicare_wages: Decimal::ZERO,
+                schedule_c_expenses: Decimal::ZERO,
+            },
+        );
+        let snap = app::Snapshot {
+            events: vec![],
+            state,
+            cli_config: CliConfig::default(),
+            profiles,
+            tables: BundledTaxTables::load(),
+            donation_details: BTreeMap::new(),
+        };
+
+        let mut test_app = App::new(vault);
+        test_app.screen = Screen::Viewer;
+        test_app.selected_year = 2025;
+        test_app.snapshot = Some(snap);
+
+        // Press 'e' → modal opens.
+        handle_key(&mut test_app, press(KeyCode::Char('e')));
+        assert!(
+            test_app.export_modal.is_some(),
+            "export_modal must be Some after 'e'"
+        );
+
+        {
+            let modal = test_app.export_modal.as_ref().unwrap();
+            assert!(
+                modal.files.contains(&"form8949.csv"),
+                "files must include form8949.csv"
+            );
+            assert!(
+                modal.files.contains(&"schedule_se.csv"),
+                "files must include schedule_se.csv (SE income + profile present)"
+            );
+            assert_eq!(modal.year, 2025, "modal year must be 2025");
+        }
+
+        let out_dir = test_app.export_modal.as_ref().unwrap().out_dir.clone();
+
+        // Press Enter → export executes.
+        handle_key(&mut test_app, press(KeyCode::Enter));
+        assert!(
+            test_app.export_modal.is_none(),
+            "export_modal must be None after Enter"
+        );
+        assert!(
+            test_app
+                .export_status
+                .as_deref()
+                .is_some_and(|s| s.contains("Exported to")),
+            "export_status must contain 'Exported to'; got: {:?}",
+            test_app.export_status
+        );
+
+        // Output dir and all expected CSVs must exist.
+        assert!(
+            out_dir.exists(),
+            "export dir must exist after successful export"
+        );
+        assert!(
+            out_dir.join("form8949.csv").exists(),
+            "form8949.csv must exist"
+        );
+        assert!(
+            out_dir.join("schedule_d.csv").exists(),
+            "schedule_d.csv must exist"
+        );
+        assert!(
+            out_dir.join("form8283.csv").exists(),
+            "form8283.csv must exist"
+        );
+        assert!(
+            out_dir.join("schedule_se.csv").exists(),
+            "schedule_se.csv must exist (SE income present + profile)"
         );
     }
 }

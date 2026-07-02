@@ -1169,3 +1169,242 @@ fn scroll_down_does_not_advance_past_last_data_row_to_total() {
         "scroll_down past last data row must stay at index 1 (TOTAL is not selectable)"
     );
 }
+
+// ── KAT-E7 — Disclosure-line KATs (Tax tab, render_tax_content) ──────────────
+
+/// Fixture builder: Snapshot with business mining income and a TaxProfile.
+fn make_se_snapshot(
+    fmv: i64,
+    schedule_c_expenses: i64,
+    w2_ss_wages: i64,
+    w2_medicare_wages: i64,
+) -> Snapshot {
+    let mut state = LedgerState::default();
+    state.income_recognized.push(IncomeRecord {
+        event: make_event_id(&format!("se-mining-{fmv}")),
+        recognized_at: make_date(2025, 3, 1),
+        sat: 100_000_000,
+        usd_fmv: Decimal::from(fmv),
+        kind: IncomeKind::Mining,
+        business: true,
+    });
+
+    let mut profiles = BTreeMap::new();
+    profiles.insert(
+        2025,
+        TaxProfile {
+            filing_status: FilingStatus::Single,
+            ordinary_taxable_income: Decimal::from(50_000i64),
+            magi_excluding_crypto: Decimal::from(50_000i64),
+            qualified_dividends_and_other_pref_income: Decimal::ZERO,
+            other_net_capital_gain: Decimal::ZERO,
+            capital_loss_carryforward_in: Carryforward::default(),
+            w2_ss_wages: Decimal::from(w2_ss_wages),
+            w2_medicare_wages: Decimal::from(w2_medicare_wages),
+            schedule_c_expenses: Decimal::from(schedule_c_expenses),
+        },
+    );
+
+    Snapshot {
+        events: vec![],
+        state,
+        cli_config: btctax_cli::CliConfig::default(),
+        profiles,
+        tables: BundledTaxTables::load(),
+        donation_details: BTreeMap::new(),
+    }
+}
+
+/// KAT-E7(a): disclosure lines present when schedule_c_expenses > 0 and w2_ss_wages > 0.
+///
+/// Fixture: TY2025, mining $50,000, profile with schedule_c_expenses=$5,000, w2_ss_wages=$30,000.
+/// Expected: gross breakout, I3-mechanism advisory, §164(f) advisory, W-2 coordination all present.
+#[test]
+fn e7a_disclosure_lines_with_expenses_and_w2() {
+    let snap = make_se_snapshot(50_000, 5_000, 30_000, 30_000);
+    let content = super::tax::render_tax_content(&snap, 2025);
+
+    // (a) Gross breakout line.
+    assert!(
+        content.contains("gross business income"),
+        "gross breakout must appear: 'gross business income' not found"
+    );
+    assert!(
+        content.contains("Schedule C expenses"),
+        "gross breakout must appear: 'Schedule C expenses' not found"
+    );
+    assert!(
+        content.contains("net SE earnings"),
+        "gross breakout must appear: 'net SE earnings' not found"
+    );
+
+    // (b) I3-mechanism advisory.
+    assert!(
+        content.contains("ORDINARY taxable income"),
+        "I3 advisory must appear: 'ORDINARY taxable income' not found"
+    );
+    assert!(
+        content.contains("OVERSTATES"),
+        "I3 advisory must appear: 'OVERSTATES' not found"
+    );
+    assert!(
+        content.contains("coordinate"),
+        "I3 advisory must appear: 'coordinate' not found"
+    );
+
+    // (c) §164(f) advisory.
+    assert!(
+        content.contains("§164(f)"),
+        "§164(f) advisory must appear: '§164(f)' not found"
+    );
+    assert!(
+        content.contains("NOT auto-coordinated"),
+        "§164(f) advisory must appear: 'NOT auto-coordinated' not found"
+    );
+
+    // (d) W-2 coordination disclosure.
+    assert!(
+        content.contains("W-2 coordination applied"),
+        "W-2 disclosure must appear: 'W-2 coordination applied' not found"
+    );
+    assert!(
+        content.contains("Box 3+7"),
+        "W-2 disclosure must appear: 'Box 3+7' not found"
+    );
+}
+
+/// KAT-E7(b): when schedule_c_expenses = 0, "no Schedule C expenses supplied" appears;
+/// the gross breakout and I3 advisory are absent.
+#[test]
+fn e7b_no_schedule_c_expenses_line_when_zero() {
+    let snap = make_se_snapshot(50_000, 0, 0, 0);
+    let content = super::tax::render_tax_content(&snap, 2025);
+
+    assert!(
+        content.contains("no Schedule C expenses supplied"),
+        "'no Schedule C expenses supplied' must appear when expenses=0; content:\n{content}"
+    );
+    // Gross breakout and I3 advisory must NOT appear (no expenses).
+    assert!(
+        !content.contains("gross business income"),
+        "gross breakout must NOT appear when expenses=0"
+    );
+    assert!(
+        !content.contains("OVERSTATES"),
+        "I3 advisory must NOT appear when expenses=0"
+    );
+}
+
+/// KAT-E7(c): fully-expensed case — gross $10,000, expenses $15,000, net ≤ $0.
+/// "fully expensed" and "no §1401 SE tax" appear; "SS wage base unavailable" does NOT.
+#[test]
+fn e7c_fully_expensed_shows_correct_message() {
+    let snap = make_se_snapshot(10_000, 15_000, 0, 0);
+    let content = super::tax::render_tax_content(&snap, 2025);
+
+    assert!(
+        content.contains("fully expensed"),
+        "'fully expensed' must appear when expenses >= gross; content:\n{content}"
+    );
+    assert!(
+        content.contains("no \u{00a7}1401 SE tax"),
+        "'no §1401 SE tax' must appear in fully-expensed case"
+    );
+    // "SS wage base unavailable" must NOT appear (table IS present for 2025).
+    assert!(
+        !content.contains("SS wage base unavailable"),
+        "'SS wage base unavailable' must NOT appear when table is present"
+    );
+}
+
+/// KAT-E7(d): [R0-I2] Profile gate — business income + table present + NO profile → no SE section.
+///
+/// This verifies the intentional behaviour change from the old hand-rolled SE block
+/// (which defaulted to Single/$0 wages when no profile).
+#[test]
+fn e7d_profile_gate_no_profile_means_no_se_section() {
+    // Snapshot with business income but NO profile for 2025.
+    let mut state = LedgerState::default();
+    state.income_recognized.push(IncomeRecord {
+        event: make_event_id("e7d-mining"),
+        recognized_at: make_date(2025, 3, 1),
+        sat: 100_000_000,
+        usd_fmv: Decimal::from(50_000i64),
+        kind: IncomeKind::Mining,
+        business: true,
+    });
+    let snap = make_snapshot(state); // empty profiles BTreeMap
+
+    let content = super::tax::render_tax_content(&snap, 2025);
+
+    // NO profile → NO SE section.
+    assert!(
+        !content.contains("Schedule SE"),
+        "NO SE section must appear when no profile (profile gate); content:\n{content}"
+    );
+    assert!(
+        !content.contains("§1401"),
+        "§1401 SE tax must NOT appear when no profile"
+    );
+}
+
+/// KAT-E7(e): [R0-I2] Outcome-independent placement — NotComputable year with
+/// profile + business income shows the SE section (matches CLI report behaviour).
+#[test]
+fn e7e_not_computable_year_with_profile_shows_se_section() {
+    // Add a hard blocker so compute_tax_year returns NotComputable.
+    let mut state = LedgerState::default();
+    state.blockers.push(btctax_core::Blocker {
+        kind: BlockerKind::Unclassified,
+        event: Some(make_event_id("e7e-blocker")),
+        detail: "test hard blocker for KAT-E7e".into(),
+    });
+    state.income_recognized.push(IncomeRecord {
+        event: make_event_id("e7e-mining"),
+        recognized_at: make_date(2025, 3, 1),
+        sat: 100_000_000,
+        usd_fmv: Decimal::from(50_000i64),
+        kind: IncomeKind::Mining,
+        business: true,
+    });
+
+    // Snapshot with a profile for 2025 (even though the year is NotComputable).
+    let mut profiles = BTreeMap::new();
+    profiles.insert(
+        2025,
+        TaxProfile {
+            filing_status: FilingStatus::Single,
+            ordinary_taxable_income: Decimal::from(50_000i64),
+            magi_excluding_crypto: Decimal::from(50_000i64),
+            qualified_dividends_and_other_pref_income: Decimal::ZERO,
+            other_net_capital_gain: Decimal::ZERO,
+            capital_loss_carryforward_in: Carryforward::default(),
+            w2_ss_wages: Decimal::ZERO,
+            w2_medicare_wages: Decimal::ZERO,
+            schedule_c_expenses: Decimal::ZERO,
+        },
+    );
+    let snap = Snapshot {
+        events: vec![],
+        state,
+        cli_config: btctax_cli::CliConfig::default(),
+        profiles,
+        tables: BundledTaxTables::load(),
+        donation_details: BTreeMap::new(),
+    };
+
+    let content = super::tax::render_tax_content(&snap, 2025);
+
+    // The year is NotComputable (hard blocker).
+    assert!(
+        content.contains("NOT COMPUTABLE"),
+        "NOT COMPUTABLE must appear (hard blocker present)"
+    );
+
+    // BUT the SE section must still be present (outcome-independent placement).
+    assert!(
+        content.contains("Schedule SE") || content.contains("§1401"),
+        "SE section must appear even for NotComputable year when profile + business income present; \
+         content:\n{content}"
+    );
+}
