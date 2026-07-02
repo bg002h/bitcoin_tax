@@ -3,7 +3,7 @@ name = "btctax-cli"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-rust-version.workspace = true   # M3: enforce the workspace MSRV (1.74) like the other 3 crates
+rust-version.workspace = true   # M3: enforce the workspace MSRV (1.88 — raised from 1.74, see FOLLOWUPS CI entry) like the other 3 crates
 
 [lib]
 name = "btctax_cli"

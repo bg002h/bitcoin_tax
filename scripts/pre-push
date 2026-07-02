@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# pre-push hook — PII gate (owner-specific + generic shape) over the PUSHED RANGE.
+# Install:  ln -s ../../scripts/pre-push .git/hooks/pre-push
+#       or: git config core.hooksPath scripts
+# Patterns: scripts/.pii-patterns (local, untracked, NEVER commit).
+# See scripts/README-pii-setup.md for format and setup instructions.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PATTERNS_FILE="$SCRIPT_DIR/.pii-patterns"
+ZERO=0000000000000000000000000000000000000000
+EXIT=0
+
+# ── Fail-closed patterns-file check [R0-I2 + R0-M9: empty == missing] ───────
+# A bare `touch scripts/.pii-patterns` half-setup must not silently degrade the
+# primary gate to generic-only; zero non-comment/non-blank lines == missing.
+COMBINED=""
+if [ -f "$PATTERNS_FILE" ]; then
+  mapfile -t PATTERNS < <(grep -vE '^\s*(#|$)' "$PATTERNS_FILE" || true)
+  [ ${#PATTERNS[@]} -gt 0 ] && COMBINED=$(IFS='|'; echo "${PATTERNS[*]}")
+fi
+if [ -z "$COMBINED" ]; then                                    # missing OR empty [R0-M9]
+  if [ "${BTCTAX_PII_BYPASS:-0}" = "1" ]; then
+    echo "pre-push WARNING: $PATTERNS_FILE missing/empty; owner-specific scan SKIPPED (bypass)." >&2
+  else
+    echo "pre-push: $PATTERNS_FILE missing or has no patterns — owner-specific PII scan cannot run." >&2
+    echo "See scripts/README-pii-setup.md.  Bypass once: BTCTAX_PII_BYPASS=1 git push" >&2
+    exit 1
+  fi
+fi
+
+# ── Pushed-range scan [R0-I3] ───────────────────────────────────────────────
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$ZERO" ] && continue                       # deletion — skip [KAT-H9]
+
+  if [ "$remote_sha" = "$ZERO" ]; then
+    # New ref [R0-I7]: NOT --not --all (excludes the pushed tip itself → empty set).
+    # --not --remotes = commits not reachable from any remote-tracking ref (not yet public).
+    # Non-matching glob excludes nothing → over-scans, fails safe.
+    revs=$(git rev-list "$local_sha" --not --remotes)
+  else
+    revs=$(git rev-list "$remote_sha..$local_sha")
+  fi
+
+  for rev in $revs; do
+    # ── Owner-specific scan (primary gate) [R0-I4 allowlist] ─────────────
+    if [ -n "$COMBINED" ]; then
+      set +e
+      git grep -InE "$COMBINED" "$rev" -- ':(exclude)LICENSE' >&2
+      gs=$?
+      set -e
+      if [ "$gs" -eq 0 ]; then
+        echo "pre-push: OWNER-SPECIFIC PII pattern in $rev (see above)." >&2
+        EXIT=1
+      elif [ "$gs" -gt 1 ]; then
+        echo "pre-push: git grep error (status $gs) in owner scan at $rev — aborting." >&2
+        exit "$gs"
+      fi
+      # gs=1 → no match → clean
+    fi
+
+    # ── Generic-shape scan [R0-M2: one list, no drift] ───────────────────
+    set +e
+    bash "$SCRIPT_DIR/pii-scan-generic.sh" "$rev"
+    gs=$?
+    set -e
+    if [ "$gs" -eq 1 ]; then
+      EXIT=1
+    elif [ "$gs" -gt 1 ]; then
+      echo "pre-push: generic scan error (status $gs) for $rev — aborting." >&2
+      exit "$gs"
+    fi
+  done
+done
+
+exit $EXIT

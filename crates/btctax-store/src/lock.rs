@@ -17,7 +17,7 @@ impl VaultLock {
         match f.try_lock_exclusive() {
             Ok(()) => Ok(VaultLock(f)),
             // On contention fs2 surfaces WouldBlock: Unix EWOULDBLOCK; Windows ERROR_LOCK_VIOLATION(33)
-            // mapped to WouldBlock by Rust >=1.64's decode_error_kind (PR #95306) — MSRV 1.74 satisfies this.
+            // mapped to WouldBlock by Rust >=1.64's decode_error_kind (PR #95306) — MSRV (1.88; ≥1.64 required) satisfies this.
             // If MSRV is ever lowered below 1.64, fall back to e.raw_os_error()==Some(33). (fs2 0.4 is dormant;
             // fd-lock is a maintained alternative that normalizes this mapping — see FOLLOWUPS.)
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Err(StoreError::Locked),

@@ -40,3 +40,7 @@ Cargo.lock.bak
 Thumbs.db
 *.swp
 *~
+
+# CI/scripts: local PII-patterns file (never commit)
+scripts/.pii-patterns
+scripts/.pii-patterns.bak

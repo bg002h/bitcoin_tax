@@ -4,6 +4,35 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ CI infrastructure — SHIPPED (2026-07-02) — form program item 1
+
+GitHub Actions CI (`.github/workflows/ci.yml`): test / clippy `-D warnings` / fmt / **MSRV 1.88** /
+generic-shape PII scan — all `--locked`, `permissions: contents: read`, the 3 actions SHA-pinned
+(independently re-resolved at review). Plus a **fail-closed range-scanning pre-push hook**
+(`scripts/pre-push`, 100755 — the review caught the mode-644 fail-open + the `--not --all` scan-nothing
+arm empirically): owner patterns from an untracked `scripts/.pii-patterns` (missing OR empty → exit 1;
+`BTCTAX_PII_BYPASS=1` scoped to that check only — the generic scan always runs); scans EVERY rev in
+`remote..local` (new refs via `--not --remotes`); `:(exclude)LICENSE` the sole allowlist entry. 18 hook
+KATs (temp-workspace copies). R0 3 rounds + whole-diff + confirmation → 0C/0I. 692 tests.
+
+**[M5 AMENDED — the user's own recorded decisions]:** the old "cargo +1.74 MSRV gate" item is superseded.
+(1) **MSRV → 1.88** (the empirical floor: lockfile v4 + the time/instability/darling families bind at
+1.88): the USER selected "Raise MSRV to the true floor" in the 2026-07-02 in-session structured question
+(vs downgrading deps). (2) **LICENSE carve-out** for the owner-name scan: per the USER's standing rule
+("…only LICENSE author name allowed"). Corollary ratified: `render.rs` `map_or(true,…)`→`is_none_or`
+(the lint is MSRV-gated; behavior-identical).
+
+**Operator setup (required for the hook to be active locally):** `git config core.hooksPath scripts` +
+create `scripts/.pii-patterns` (one regex per line; untracked) — see `scripts/README-pii-setup.md`.
+**Post-merge acceptance:** the first green CI run on GitHub (recorded at ship). **Branch-protection
+ruleset:** the documented `gh api` command is in the spec — pending the operator's go-ahead.
+
+Deferred (OPEN): a mode-assertion KAT (N-2); the report's clippy-baseline misstatement (M-1, record-only);
+pre-existing real-hyphen synthetics in an older review file vs the Notation rule (M-2); Windows/macOS
+runners; cargo-audit/deny.
+
+---
+
 ## ✅ TY2024 tables backfill — SHIPPED (2026-07-01) — THE CONFIRMED QUEUE IS COMPLETE
 
 Queue item 3 (last). `ty2024()` in BundledTaxTables: all 28 ordinary bracket edges (Rev. Proc. 2023-34
