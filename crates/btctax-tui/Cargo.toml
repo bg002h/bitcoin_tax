@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[lib]
+name = "btctax_tui"
+path = "src/lib.rs"
+
 [[bin]]
 name = "btctax-tui"
 path = "src/main.rs"

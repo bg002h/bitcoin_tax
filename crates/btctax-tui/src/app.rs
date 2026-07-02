@@ -114,7 +114,10 @@ pub struct Snapshot {
 ///
 /// `handle_key` mutates ONLY UI navigation fields (`screen`, `tab`, `should_quit`,
 /// `selected_year`, `unlock`, `export_modal`, `export_status`). It NEVER mutates ledger data.
-pub struct App {
+///
+/// Kept `pub(crate)` so the viewer's internal surface does not leak into the editor crate —
+/// the editor uses `btctax_tui::unlock::open_session` and `tabs::*::render` instead.
+pub(crate) struct App {
     /// Path to the encrypted vault file (from CLI arg or default).
     pub vault_path: PathBuf,
     /// Unlock screen state (passphrase buffer + error).
@@ -142,7 +145,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(vault_path: PathBuf) -> Self {
+    pub(crate) fn new(vault_path: PathBuf) -> Self {
         App {
             vault_path,
             unlock: UnlockState::new(),
@@ -165,7 +168,7 @@ impl App {
     /// Consume the passphrase buffer (via `mem::take` — never cloned [R0-I2]) and attempt
     /// to open the vault.  Updates `screen`/`snapshot`/`selected_year`/`unlock.error`
     /// according to the outcome.
-    pub fn do_unlock(&mut self) {
+    pub(crate) fn do_unlock(&mut self) {
         // Move passphrase out of buffer — NEVER clone [R0-I2/M7].
         // The taken `String` is moved into `Passphrase::new`; `self.unlock.buffer` is left empty.
         let pp = Passphrase::new(std::mem::take(&mut self.unlock.buffer));
@@ -174,7 +177,7 @@ impl App {
     }
 
     /// Apply an [`unlock::OpenOutcome`] to `App` state.
-    pub fn apply_open_outcome(&mut self, outcome: unlock::OpenOutcome) {
+    pub(crate) fn apply_open_outcome(&mut self, outcome: unlock::OpenOutcome) {
         match outcome {
             unlock::OpenOutcome::Success(snapshot, year) => {
                 self.snapshot = Some(*snapshot);
@@ -195,7 +198,7 @@ impl App {
     /// `BTCTAX_PASSPHRASE` fast-path: if the env var is set, open directly without a prompt.
     ///
     /// Mirrors the CLI's non-interactive behaviour.  Called once at startup before the event loop.
-    pub fn try_env_passphrase(&mut self) {
+    pub(crate) fn try_env_passphrase(&mut self) {
         if let Ok(pp_str) = std::env::var("BTCTAX_PASSPHRASE") {
             // pp_str is moved into Passphrase::new — never cloned, never logged [R0-I2].
             let pp = Passphrase::new(pp_str);

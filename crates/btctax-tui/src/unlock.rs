@@ -81,35 +81,93 @@ pub enum OpenOutcome {
     Error(String),
 }
 
+/// Outcome of [`open_session`] — like [`OpenOutcome`] but the `Session` is RETURNED instead
+/// of dropped so that the editor can hold it for the whole TUI session.
+pub enum SessionOpenOutcome {
+    /// Vault opened successfully; the live session, built snapshot, and year are returned.
+    ///
+    /// The session is returned (not dropped) so the editor can hold the `VaultLock` for the
+    /// full TUI session.  The viewer's `attempt_open` drops the session immediately via the
+    /// `drop(session)` call in its wrapper — preserving the viewer's structural read-only
+    /// property ("the viewer App never stores a Session").
+    ///
+    /// Both `session` and `snapshot` are boxed to keep all enum variants close in size
+    /// (mirrors `OpenOutcome::Success(Box<Snapshot>, i32)`).
+    Success {
+        /// The open, live session — caller must keep it alive for the TUI lifetime.
+        session: Box<Session>,
+        /// Read-only snapshot, boxed to keep variant sizes close.
+        snapshot: Box<Snapshot>,
+        /// Default display year (latest year with events, or 2025 for an empty ledger).
+        year: i32,
+    },
+    /// Another process holds the vault lock → show the `Screen::Locked` screen.
+    Locked,
+    /// Any other failure → show an error line on the `Screen::Unlock` screen.
+    Error(String),
+}
+
+/// Try to open `vault_path` with `pp`, build a read-only [`Snapshot`], and RETURN the session.
+///
+/// Unlike [`attempt_open`], the session is returned so the caller can hold the vault lock for
+/// the whole TUI session (the editor use-case).  Error strings are single-sourced via the
+/// private `map_open_error` helper — identical messages in both the viewer and the editor.
+///
+/// **[R0-M5] Passphrase-drop ordering PINNED:** `pp` is zeroized (`drop(pp)`) immediately after
+/// `Session::open` succeeds and BEFORE `build_snapshot` — exactly today's ordering.
+pub fn open_session(vault_path: &Path, pp: Passphrase) -> SessionOpenOutcome {
+    let session = match Session::open(vault_path, &pp) {
+        Ok(s) => s,
+        Err(CliError::Store(StoreError::Locked)) => return SessionOpenOutcome::Locked,
+        Err(e) => return SessionOpenOutcome::Error(map_open_error(&e, vault_path)),
+    };
+    // [R0-M5] Zeroize the passphrase immediately after Session::open succeeds,
+    // BEFORE build_snapshot — pinned ordering, verified by inspection at whole-diff.
+    drop(pp);
+
+    match build_snapshot(&session) {
+        Ok((snapshot, year)) => SessionOpenOutcome::Success {
+            session: Box::new(session),
+            snapshot: Box::new(snapshot),
+            year,
+        },
+        Err(e) => SessionOpenOutcome::Error(format!("failed to load vault data: {e}")),
+    }
+}
+
 /// Try to open `vault_path` with `pp` and build a read-only [`Snapshot`].
 ///
+/// Thin wrapper over [`open_session`]: on success, the session is DROPPED immediately
+/// (preserving the viewer's structural property — the viewer App never stores a Session).
+///
 /// # Read-only guarantees
-/// - **[R0-I1]** `session` is held in an **immutable** binding; `save()` takes `&mut self`,
-///   so calling it is a compile error.
+/// - **[R0-I1]** The session is dropped immediately on success; `save()` is never reachable.
 /// - **[R0-M2]** `CliConfig` is loaded via `session.config()`.
 /// - **[R0-M3]** `optimize_attested_set` is NOT called.
 /// - **[R0-I2]** `pp` arrives by MOVE (never cloned); `Passphrase::Drop` zeroizes it.
 ///   `Session::conn()` is NEVER called directly from `btctax-tui`.
 pub fn attempt_open(vault_path: &Path, pp: Passphrase) -> OpenOutcome {
-    // [R0-I1] IMMUTABLE binding — `let mut session` would make `save()` callable.
-    let session = match Session::open(vault_path, &pp) {
-        Ok(s) => s,
-        Err(CliError::Store(StoreError::Locked)) => return OpenOutcome::Locked,
-        Err(e) => return OpenOutcome::Error(map_open_error(&e, vault_path)),
-    };
-    // pp's job is done once Session::open succeeds; zeroize it now rather than at frame exit.
-    drop(pp);
-
-    match build_snapshot(&session) {
-        Ok((snapshot, year)) => OpenOutcome::Success(Box::new(snapshot), year),
-        Err(e) => OpenOutcome::Error(format!("failed to load vault data: {e}")),
+    match open_session(vault_path, pp) {
+        SessionOpenOutcome::Success {
+            session,
+            snapshot,
+            year,
+        } => {
+            // Drop the session — the viewer's structural read-only property:
+            // the viewer App never stores a Session (unlike the editor).
+            drop(session);
+            OpenOutcome::Success(snapshot, year)
+        }
+        SessionOpenOutcome::Locked => OpenOutcome::Locked,
+        SessionOpenOutcome::Error(msg) => OpenOutcome::Error(msg),
     }
 }
 
-/// Build a [`Snapshot`] from an open, immutable `Session`.
+/// Build a [`Snapshot`] from an open `Session`.
 ///
 /// Uses ONLY the typed read-only methods — never `session.conn()` directly [R0-I1].
-fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
+/// Exposed as `pub` so the editor can call it for re-projection after a confirmed mutation.
+pub fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
     // [R0-M2] CliConfig is loaded here (needed by build_verify in Compliance tab)
     // [R0-M3] optimize_attested_set is intentionally omitted
     let (events, state, _) = session.load_events_and_project()?;
@@ -522,6 +580,64 @@ mod tests {
             bytes_before, bytes_after_export,
             "[KAT-E3] vault file must be byte-identical after a full export cycle \
              (export writes only to the timestamped CSVs, never the vault)"
+        );
+    }
+
+    // ── Wrapper-consistency KAT: attempt_open and open_session agree ─────────
+    //
+    // `attempt_open` is a thin wrapper over `open_session`; their outcome variants must
+    // correspond one-to-one for every error class (Success/Locked/Error).
+
+    #[test]
+    fn attempt_open_is_wrapper_consistent_with_open_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key_backup = dir.path().join("key.asc");
+        let pp_str = "wrapper-consistency-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key_backup).unwrap();
+
+        // ── Correct passphrase: both return Success ───────────────────────────
+        // attempt_open drops the session immediately (viewer property).
+        let out1 = attempt_open(&vault, Passphrase::new(pp_str.into()));
+        assert!(
+            matches!(out1, OpenOutcome::Success(_, _)),
+            "attempt_open with correct passphrase must return Success"
+        );
+        // open_session returns the session; wrap in a block so it drops before the next check.
+        {
+            let out2 = open_session(&vault, Passphrase::new(pp_str.into()));
+            assert!(
+                matches!(out2, SessionOpenOutcome::Success { .. }),
+                "open_session with correct passphrase must return Success"
+            );
+            // out2 (and the held session) drop here — vault lock released.
+        }
+
+        // ── Wrong passphrase: both return Error ───────────────────────────────
+        // No session is held at this point, so the vault is accessible.
+        let out1 = attempt_open(&vault, Passphrase::new("wrong-pass".into()));
+        let out2 = open_session(&vault, Passphrase::new("wrong-pass".into()));
+        assert!(
+            matches!(out1, OpenOutcome::Error(_)),
+            "attempt_open with wrong passphrase must return Error"
+        );
+        assert!(
+            matches!(out2, SessionOpenOutcome::Error(_)),
+            "open_session with wrong passphrase must return Error"
+        );
+
+        // ── Locked vault: both return Locked ─────────────────────────────────
+        let _holder = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let out1 = attempt_open(&vault, Passphrase::new(pp_str.into()));
+        let out2 = open_session(&vault, Passphrase::new(pp_str.into()));
+        assert!(
+            matches!(out1, OpenOutcome::Locked),
+            "attempt_open on locked vault must return Locked"
+        );
+        assert!(
+            matches!(out2, SessionOpenOutcome::Locked),
+            "open_session on locked vault must return Locked"
         );
     }
 }

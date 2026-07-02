@@ -4,12 +4,12 @@
 //! STRICTLY READ-ONLY: no Session, no persistence, no mutations.
 //! No float (NFR5 / [R0-M5]): all amounts are exact `Decimal`.
 
-use crate::app::App;
+use crate::app::{App, Snapshot};
 use btctax_core::{form_8283, form_8949, schedule_d, Form8283Section, Form8949Box, Form8949Part};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
     Frame,
 };
 use std::fmt::Write as _;
@@ -40,20 +40,20 @@ fn form8283_section_tag(s: Form8283Section) -> &'static str {
     }
 }
 
-/// Render the Forms tab into `area`.
+/// App-free renderer for the Forms tab.
+///
+/// Extracted from `draw` so the editor crate can call this directly with its own
+/// `Snapshot`, `year`, and `TableState`, without holding an `App`.
 ///
 /// Layout: upper portion = Form 8949 scrollable table; lower portion = Schedule D totals +
 /// Form 8283 rows + standing footnotes.
-pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
-    let Some(snap) = app.snapshot.as_ref() else {
-        let p = Paragraph::new("no snapshot loaded")
-            .block(Block::default().title(" Forms ").borders(Borders::ALL));
-        frame.render_widget(p, area);
-        return;
-    };
-
-    let year = app.selected_year;
-
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    snap: &Snapshot,
+    year: i32,
+    table_state: &mut TableState,
+) {
     // Split: top = 8949 table, bottom = Schedule D + 8283 + footnotes.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -118,7 +118,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
             )
             .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
-        frame.render_stateful_widget(table, chunks[0], &mut app.forms_state);
+        frame.render_stateful_widget(table, chunks[0], table_state);
     }
 
     // ── Schedule D + Form 8283 + footnotes ────────────────────────────────────────────────────
@@ -173,4 +173,21 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
         )
         .wrap(Wrap { trim: false });
     frame.render_widget(p, chunks[1]);
+}
+
+/// Render the Forms tab into `area`.
+///
+/// Thin `pub(crate)` wrapper over [`render`]: handles the `snapshot == None` placeholder
+/// exactly as before, then delegates to the App-free `render` fn.
+/// Call sites in `draw.rs` and `tabs/tests.rs` call this wrapper — unchanged.
+pub(crate) fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
+    let Some(snap) = app.snapshot.as_ref() else {
+        let p = Paragraph::new("no snapshot loaded")
+            .block(Block::default().title(" Forms ").borders(Borders::ALL));
+        frame.render_widget(p, area);
+        return;
+    };
+
+    let year = app.selected_year;
+    render(frame, area, snap, year, &mut app.forms_state);
 }

@@ -2,29 +2,29 @@
 //!
 //! STRICTLY READ-ONLY: no Session, no persistence, no mutations.
 
-use crate::app::App;
+use crate::app::{App, Snapshot};
 use btctax_cli::render::wallet_label;
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
 };
 
 use super::tags::term_tag;
 use super::utils::sat_to_btc;
 
-/// Render the Disposals tab into `area`.
-pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
-    let Some(snap) = app.snapshot.as_ref() else {
-        let p = Paragraph::new("no snapshot loaded")
-            .block(Block::default().title(" Disposals ").borders(Borders::ALL));
-        frame.render_widget(p, area);
-        return;
-    };
-
-    let year = app.selected_year;
-
+/// App-free renderer for the Disposals tab.
+///
+/// Extracted from `draw` so the editor crate can call this directly with its own
+/// `Snapshot`, `year`, and `TableState`, without holding an `App`.
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    snap: &Snapshot,
+    year: i32,
+    table_state: &mut TableState,
+) {
     // Flatten disposals for the selected year into legs.
     let mut rows: Vec<Row> = Vec::new();
     let mut total_proceeds = rust_decimal::Decimal::ZERO;
@@ -105,5 +105,26 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
         )
         .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
-    frame.render_stateful_widget(table, area, &mut app.disposals_state);
+    frame.render_stateful_widget(table, area, table_state);
+}
+
+/// Render the Disposals tab into `area`.
+///
+/// Thin `pub(crate)` wrapper over [`render`]: handles the `snapshot == None` placeholder
+/// exactly as before, then delegates to the App-free `render` fn.
+/// Call sites in `draw.rs` and `tabs/tests.rs` call this wrapper — unchanged.
+pub(crate) fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
+    let Some(snap) = app.snapshot.as_ref() else {
+        let p = Paragraph::new("no snapshot loaded")
+            .block(Block::default().title(" Disposals ").borders(Borders::ALL));
+        frame.render_widget(p, area);
+        return;
+    };
+    render(
+        frame,
+        area,
+        snap,
+        app.selected_year,
+        &mut app.disposals_state,
+    );
 }
