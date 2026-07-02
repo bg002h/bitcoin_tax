@@ -1023,8 +1023,8 @@ pub fn render_tax_outcome(
                 excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the \
                 §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) \
                 and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly \
-                excluded from NII. The only residual understatement is crypto-lending interest (NII under \
-                §1411(c)(1)(A)(i)), which the minimal model cannot yet isolate — a Phase-2 refinement.)"
+                excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; \
+                mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)"
             );
         }
     }

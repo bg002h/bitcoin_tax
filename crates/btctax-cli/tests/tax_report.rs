@@ -205,11 +205,15 @@ fn report_tax_year_renders_schedule_se_for_business_mining() {
     );
 }
 
-/// [B-M1 Task 2] The Computed tax-report footer no longer carries the wrong-direction "understate"
-/// disclosure; it accurately states the §1211(b) loss is applied to NII and flags the residual
-/// crypto-lending-interest caveat.
+/// [B-M1 Task 2 / Task 1 NII-interest D2] The Computed tax-report footer carries accurate NII
+/// disclosures: §1211(b) loss applied; crypto-lending interest IS INCLUDED; mining/staking/etc.
+/// remain excluded. The old "cannot yet isolate" / residual-understatement language is GONE.
+///
+/// [R0-N1 — SEMANTIC] `contains("crypto-lending interest")` alone would pass on BOTH old and
+/// new text — must assert the NEW phrase ("is INCLUDED in NII") AND assert the old isolation
+/// disclaimer is absent.
 #[test]
-fn report_tax_year_footer_discloses_1211_loss_and_lending_interest_caveat() {
+fn report_tax_year_footer_discloses_1211_loss_and_interest_nii_included() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_lt_sell_2025(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
@@ -219,7 +223,7 @@ fn report_tax_year_footer_discloses_1211_loss_and_lending_interest_caveat() {
         cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
-    // Wrong-direction language removed:
+    // B-M1 negatives (wrong-direction language must be absent):
     assert!(
         !rendered.contains("can only ever understate"),
         "footer must not claim NIIT can only ever understate:\n{rendered}"
@@ -232,6 +236,11 @@ fn report_tax_year_footer_discloses_1211_loss_and_lending_interest_caveat() {
         !rendered.contains("does not reduce NII"),
         "footer must not claim NII is not reduced by the §1211 loss:\n{rendered}"
     );
+    // [R0-N1] The old isolation disclaimer must be GONE:
+    assert!(
+        !rendered.contains("cannot yet isolate"),
+        "footer must not say 'cannot yet isolate' — interest is now included:\n{rendered}"
+    );
     // Accurate position present:
     assert!(
         rendered.contains("reduces NII by the §1211(b)-allowed net capital loss"),
@@ -239,7 +248,12 @@ fn report_tax_year_footer_discloses_1211_loss_and_lending_interest_caveat() {
     );
     assert!(
         rendered.contains("crypto-lending interest"),
-        "footer must flag the residual crypto-lending-interest understatement:\n{rendered}"
+        "footer must reference crypto-lending interest:\n{rendered}"
+    );
+    // [R0-N1 SEMANTIC] The NEW phrase pins the correct state — passes ONLY on the new text:
+    assert!(
+        rendered.contains("is INCLUDED in NII"),
+        "footer must state crypto-lending interest is INCLUDED in NII:\n{rendered}"
     );
 }
 
