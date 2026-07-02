@@ -798,3 +798,90 @@ fn reclassify_income_fingerprint_is_none() {
     });
     assert!(btctax_core::persistence::fingerprint(&ri_no_kind).is_none());
 }
+
+/// [Chunk B / I1] Engine-B invariance: `schedule_c_expenses` $0 vs $20,000 does NOT change any
+/// `compute_tax_year` figures. Engine B always uses GROSS `crypto_ord` (Σ usd_fmv over all income,
+/// regardless of kind or business); `schedule_c_expenses` is advisory-only and only enters
+/// `compute_se_tax` (the standalone SE engine — D5: not folded into engine B).
+///
+/// Fixture: Single, business Mining $100,000 FMV, TY2025 synthetic table. Profile A:
+/// `schedule_c_expenses=$0`; Profile B: `schedule_c_expenses=$20,000`. All other profile fields
+/// identical (MAGI $205,000 for NIIT sensitivity — Mining is not NII, so NIIT is also unaffected).
+///
+/// Asserts `ordinary_from_crypto`, `niit`, `ltcg_tax`, and `total_federal_tax_attributable` are
+/// bit-identical across both profiles.
+///
+/// This is the spec's "engine B is agnostic to schedule_c_expenses" guarantee.
+#[test]
+fn engine_b_invariance_schedule_c_expenses_zero_vs_20k() {
+    let income = LedgerEvent {
+        id: income_id(),
+        utc_timestamp: ts_income(),
+        original_tz: offset!(+00:00),
+        wallet: Some(river_wallet()),
+        payload: EventPayload::Income(Income {
+            sat: 100_000_000,
+            usd_fmv: Some(dec!(100000)),
+            fmv_status: FmvStatus::PriceDataset,
+            kind: IncomeKind::Mining,
+            business: true,
+        }),
+    };
+    let state = project(
+        std::slice::from_ref(&income),
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    let tables = synth(2025);
+    let year = 2025;
+
+    // Profile A: no Schedule C expenses.
+    let profile_zero = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(0),
+        magi_excluding_crypto: dec!(205000),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward {
+            short: dec!(0),
+            long: dec!(0),
+        },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
+    };
+    // Profile B: $20,000 Schedule C expenses — only this field differs.
+    let profile_20k = TaxProfile {
+        schedule_c_expenses: dec!(20000),
+        ..profile_zero.clone()
+    };
+
+    let TaxOutcome::Computed(r_zero) =
+        compute_tax_year(&[], &state, year, Some(&profile_zero), &tables)
+    else {
+        panic!("engine B must be computable with schedule_c_expenses=$0");
+    };
+    let TaxOutcome::Computed(r_20k) =
+        compute_tax_year(&[], &state, year, Some(&profile_20k), &tables)
+    else {
+        panic!("engine B must be computable with schedule_c_expenses=$20,000");
+    };
+
+    // All engine-B output figures must be bit-identical (schedule_c_expenses does not enter engine B).
+    assert_eq!(
+        r_zero.ordinary_from_crypto, r_20k.ordinary_from_crypto,
+        "ordinary_from_crypto must be identical (engine B uses GROSS crypto_ord, not net)"
+    );
+    assert_eq!(
+        r_zero.niit, r_20k.niit,
+        "NIIT must be identical (schedule_c_expenses does not affect MAGI or NII)"
+    );
+    assert_eq!(
+        r_zero.ltcg_tax, r_20k.ltcg_tax,
+        "ltcg_tax must be identical (no disposals in fixture)"
+    );
+    assert_eq!(
+        r_zero.total_federal_tax_attributable, r_20k.total_federal_tax_attributable,
+        "total_federal_tax_attributable must be identical"
+    );
+}
