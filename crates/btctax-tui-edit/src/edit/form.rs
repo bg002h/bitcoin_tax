@@ -6,7 +6,11 @@
 //!
 //! This module performs NO writes — it only holds form state and validates input.
 
-use btctax_core::{Carryforward, FilingStatus, TaxProfile, Usd};
+use btctax_core::{
+    Carryforward, EventId, FilingStatus, InboundClass, IncomeKind, Sat, TaxDate, TaxProfile, Usd,
+    WalletId,
+};
+use ratatui::widgets::TableState;
 use std::str::FromStr;
 
 /// Maximum byte-length of a money field buffer (64 chars is ample for any Decimal).
@@ -191,6 +195,247 @@ fn parse_optional(buf: &FieldBuffer) -> Result<Usd, String> {
     }
     let trimmed = buf.buf.trim();
     Usd::from_str(trimmed).map_err(|_| format!("bad USD {trimmed}"))
+}
+
+// ── TargetList widget (shared by classify-inbound and reclassify-outflow) ─────
+
+/// Selectable list of actionable targets rendered as a `ratatui` Table.
+///
+/// Callers (flow-open code) guarantee `items` is non-empty — an empty filtered
+/// list never opens a flow [R0-M8]. The render's defensive "no items" placeholder
+/// and Enter-swallow are belt-and-suspenders; they are unreachable under the
+/// flow-open rule and carry no KAT.
+pub struct TargetList<T> {
+    pub items: Vec<T>,
+    pub table_state: TableState,
+}
+
+impl<T> TargetList<T> {
+    pub fn new(items: Vec<T>) -> Self {
+        let mut table_state = TableState::default();
+        if !items.is_empty() {
+            table_state.select(Some(0));
+        }
+        Self { items, table_state }
+    }
+
+    pub fn selected(&self) -> Option<&T> {
+        self.table_state.selected().and_then(|i| self.items.get(i))
+    }
+
+    pub fn scroll_up(&mut self) {
+        let next = match self.table_state.selected() {
+            Some(i) if i > 0 => Some(i - 1),
+            Some(_) => Some(0),
+            None => None,
+        };
+        self.table_state.select(next);
+    }
+
+    pub fn scroll_down(&mut self) {
+        let count = self.items.len();
+        if count == 0 {
+            return;
+        }
+        let next = match self.table_state.selected() {
+            Some(i) => Some((i + 1).min(count - 1)),
+            None => Some(0),
+        };
+        self.table_state.select(next);
+    }
+
+    pub fn go_top(&mut self) {
+        if !self.items.is_empty() {
+            self.table_state.select(Some(0));
+        }
+    }
+
+    pub fn go_bottom(&mut self) {
+        let count = self.items.len();
+        if count > 0 {
+            self.table_state.select(Some(count - 1));
+        }
+    }
+}
+
+// ── Display data types for list items ─────────────────────────────────────────
+
+/// Pre-computed display data for a classify-inbound list row.
+#[derive(Clone)]
+pub struct InboundListItem {
+    /// The TransferIn event targeted by the `UnknownBasisInbound` blocker.
+    pub blocker_event: EventId,
+    /// Calendar date (tax timezone) of the TransferIn event.
+    pub date: TaxDate,
+    /// Principal sat from the TransferIn payload.
+    pub sat: Sat,
+    /// Wallet of the TransferIn event (None → displayed as "(no wallet)").
+    pub wallet: Option<WalletId>,
+    /// Blocker detail string.
+    pub detail: String,
+}
+
+/// Pre-computed display data for a reclassify-outflow list row.
+/// Added here per the spec Task-1 file list; fully used in Task 2 [R0-N3].
+#[allow(dead_code)]
+#[derive(Clone)]
+pub struct OutflowListItem {
+    /// The `PendingTransfer.event` EventId.
+    pub transfer_out_event: EventId,
+    /// Calendar date (tax timezone) of the TransferOut event.
+    pub date: TaxDate,
+    /// Principal sat from `PendingTransfer.principal_sat`.
+    pub principal_sat: Sat,
+    /// Wallet of the TransferOut event.
+    pub wallet: Option<WalletId>,
+}
+
+// ── Classify-inbound flow types ───────────────────────────────────────────────
+
+/// Which variant the picker is showing for classify-inbound step 2.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum InboundVariant {
+    Income,
+    GiftReceived,
+}
+
+/// Step in the classify-inbound flow.
+pub enum ClassifyInboundStep {
+    List,
+    VariantPicker {
+        item: InboundListItem,
+        variant: InboundVariant,
+    },
+    IncomeForm {
+        item: InboundListItem,
+        /// Current IncomeKind selection; initial: Mining [R0-M3].
+        kind: IncomeKind,
+        fmv_buf: FieldBuffer,
+        /// Default: false (CLI parity).
+        business: bool,
+        /// 0 = kind (Tab-cycles), 1 = fmv (text), 2 = business (Space toggle).
+        focus: usize,
+        error: Option<String>,
+    },
+    GiftForm {
+        item: InboundListItem,
+        fmv_at_gift_buf: FieldBuffer,
+        donor_basis_buf: FieldBuffer,
+        donor_acquired_at_buf: FieldBuffer,
+        /// 0 = fmv_at_gift, 1 = donor_basis, 2 = donor_acquired_at.
+        focus: usize,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the classify-inbound flow.  Owns its target list.
+pub struct ClassifyInboundFlowState {
+    /// Owned list — no standalone list field on EditorApp [R0-I2].
+    pub list: TargetList<InboundListItem>,
+    pub step: ClassifyInboundStep,
+}
+
+/// Payload for the classify-inbound confirmation modal.
+pub struct ClassifyInboundModalState {
+    pub target_event: EventId,
+    pub target_date: TaxDate,
+    pub target_sat: Sat,
+    /// The VALIDATED classification — what will be persisted.
+    pub as_: InboundClass,
+}
+
+// ── Helper: IncomeKind cycling and display ────────────────────────────────────
+
+/// Cycle through the 5 `IncomeKind` variants in declaration order (event.rs:29–35).
+/// Mining → Staking → Interest → Airdrop → Reward → Mining.
+pub fn cycle_income_kind(kind: IncomeKind) -> IncomeKind {
+    match kind {
+        IncomeKind::Mining => IncomeKind::Staking,
+        IncomeKind::Staking => IncomeKind::Interest,
+        IncomeKind::Interest => IncomeKind::Airdrop,
+        IncomeKind::Airdrop => IncomeKind::Reward,
+        IncomeKind::Reward => IncomeKind::Mining,
+    }
+}
+
+/// Return the lowercase display tag for an `IncomeKind` (matches CLI render convention).
+pub fn income_kind_display(kind: IncomeKind) -> &'static str {
+    match kind {
+        IncomeKind::Mining => "mining",
+        IncomeKind::Staking => "staking",
+        IncomeKind::Interest => "interest",
+        IncomeKind::Airdrop => "airdrop",
+        IncomeKind::Reward => "reward",
+    }
+}
+
+// ── Classify-inbound validation ───────────────────────────────────────────────
+
+/// Validate the Income variant of the classify-inbound form.
+///
+/// `kind` is always structurally valid (picker).  `fmv_buf` is optional:
+/// empty (byte-len 0) → `None`; non-empty → `parse_usd_arg(trim)`.
+/// [R0-M4] whitespace-only is NOT empty.
+///
+/// Returns the validated `InboundClass::Income` or an error string.
+pub fn validate_classify_inbound_income(
+    kind: IncomeKind,
+    fmv_buf: &FieldBuffer,
+    business: bool,
+) -> Result<InboundClass, String> {
+    let fmv = if fmv_buf.is_empty() {
+        None
+    } else {
+        let trimmed = fmv_buf.buf.trim();
+        Some(Usd::from_str(trimmed).map_err(|_| format!("bad USD {trimmed:?}"))?)
+    };
+    Ok(InboundClass::Income {
+        kind,
+        fmv,
+        business,
+    })
+}
+
+/// Validate the GiftReceived variant of the classify-inbound form.
+///
+/// `fmv_at_gift_buf` is REQUIRED (empty → "fmv-at-gift is required").
+/// `donor_basis_buf` and `donor_acquired_at_buf` are optional.
+///
+/// Date format: YYYY-MM-DD (`parse_date_arg` semantics — `Date::parse(trim, "[year]-[month]-[day]")`).
+/// [R0-M4] whitespace-only is NOT empty.
+///
+/// Returns the validated `InboundClass::GiftReceived` or an error string.
+pub fn validate_classify_inbound_gift(
+    fmv_at_gift_buf: &FieldBuffer,
+    donor_basis_buf: &FieldBuffer,
+    donor_acquired_at_buf: &FieldBuffer,
+) -> Result<InboundClass, String> {
+    if fmv_at_gift_buf.is_empty() {
+        return Err("fmv-at-gift is required".to_string());
+    }
+    let trimmed = fmv_at_gift_buf.buf.trim();
+    let fmv_at_gift = Usd::from_str(trimmed).map_err(|_| format!("bad USD {trimmed:?}"))?;
+
+    let donor_basis = if donor_basis_buf.is_empty() {
+        None
+    } else {
+        let t = donor_basis_buf.buf.trim();
+        Some(Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?)
+    };
+
+    let donor_acquired_at = if donor_acquired_at_buf.is_empty() {
+        None
+    } else {
+        let t = donor_acquired_at_buf.buf.trim();
+        let fmt = time::macros::format_description!("[year]-[month]-[day]");
+        Some(time::Date::parse(t, fmt).map_err(|e| format!("bad date {t:?}: {e}"))?)
+    };
+
+    Ok(InboundClass::GiftReceived {
+        donor_basis,
+        donor_acquired_at,
+        fmv_at_gift,
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -379,6 +624,161 @@ mod tests {
         let f = make_valid_form(); // optional buffers are len-0
         let p = validate(&f).unwrap();
         assert_eq!(p.other_net_capital_gain, Usd::ZERO);
+    }
+
+    // ── KAT-V-CI-9: IncomeKind cycles in declaration order, initial = Mining ──
+
+    #[test]
+    fn kat_v_ci_9_income_kind_cycles_five_variants_wraps_to_mining() {
+        let mut kind = IncomeKind::Mining; // initial [R0-M3]
+        kind = cycle_income_kind(kind);
+        assert_eq!(kind, IncomeKind::Staking);
+        kind = cycle_income_kind(kind);
+        assert_eq!(kind, IncomeKind::Interest);
+        kind = cycle_income_kind(kind);
+        assert_eq!(kind, IncomeKind::Airdrop);
+        kind = cycle_income_kind(kind);
+        assert_eq!(kind, IncomeKind::Reward);
+        kind = cycle_income_kind(kind);
+        assert_eq!(kind, IncomeKind::Mining, "5 cycles must wrap to Mining");
+    }
+
+    // ── KAT-V-CI-1: Income fmv empty → None (valid, no error) ───────────────
+
+    #[test]
+    fn kat_v_ci_1_income_fmv_empty_gives_none() {
+        let result =
+            validate_classify_inbound_income(IncomeKind::Mining, &FieldBuffer::new(), false);
+        let cls = result.unwrap();
+        if let InboundClass::Income { fmv, .. } = cls {
+            assert!(fmv.is_none(), "empty fmv_buf must produce fmv=None");
+        } else {
+            panic!("expected Income variant");
+        }
+    }
+
+    // ── KAT-V-CI-2: Income fmv valid decimal → parses correctly ──────────────
+
+    #[test]
+    fn kat_v_ci_2_income_fmv_valid_decimal_parses() {
+        use rust_decimal_macros::dec;
+        let mut buf = FieldBuffer::new();
+        buf.set("45.50");
+        let result = validate_classify_inbound_income(IncomeKind::Staking, &buf, false);
+        let cls = result.unwrap();
+        if let InboundClass::Income {
+            fmv,
+            kind,
+            business,
+        } = cls
+        {
+            assert_eq!(fmv, Some(dec!(45.50)));
+            assert_eq!(kind, IncomeKind::Staking);
+            assert!(!business);
+        } else {
+            panic!("expected Income variant");
+        }
+    }
+
+    // ── KAT-V-CI-3: Income fmv non-numeric → parse error "bad USD…" ──────────
+
+    #[test]
+    fn kat_v_ci_3_income_fmv_nonnumeric_is_parse_error() {
+        let mut buf = FieldBuffer::new();
+        buf.set("abc");
+        let err = validate_classify_inbound_income(IncomeKind::Mining, &buf, false).unwrap_err();
+        assert!(
+            err.contains("bad USD"),
+            "non-numeric fmv must produce 'bad USD' error; got: {err}"
+        );
+    }
+
+    // ── KAT-V-CI-4: Income fmv whitespace-only → parse error (not None) ──────
+
+    #[test]
+    fn kat_v_ci_4_income_fmv_whitespace_only_is_parse_error_not_none() {
+        let mut buf = FieldBuffer::new();
+        buf.set("   "); // whitespace-only: is_empty()==false [R0-M4]
+        let err = validate_classify_inbound_income(IncomeKind::Mining, &buf, false).unwrap_err();
+        assert!(
+            err.contains("bad USD"),
+            "whitespace-only fmv must be a parse error, not None; got: {err}"
+        );
+    }
+
+    // ── KAT-V-CI-5: GiftReceived fmv_at_gift empty → "fmv-at-gift is required" ─
+
+    #[test]
+    fn kat_v_ci_5_gift_fmv_at_gift_empty_is_required_error() {
+        let err = validate_classify_inbound_gift(
+            &FieldBuffer::new(),
+            &FieldBuffer::new(),
+            &FieldBuffer::new(),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("fmv-at-gift") && err.contains("required"),
+            "empty fmv_at_gift must produce 'required' error; got: {err}"
+        );
+    }
+
+    // ── KAT-V-CI-6: GiftReceived fmv_at_gift valid → parses correctly ─────────
+
+    #[test]
+    fn kat_v_ci_6_gift_fmv_at_gift_valid_parses() {
+        use rust_decimal_macros::dec;
+        let mut buf = FieldBuffer::new();
+        buf.set("500.00");
+        let cls =
+            validate_classify_inbound_gift(&buf, &FieldBuffer::new(), &FieldBuffer::new()).unwrap();
+        if let InboundClass::GiftReceived {
+            fmv_at_gift,
+            donor_basis,
+            donor_acquired_at,
+        } = cls
+        {
+            assert_eq!(fmv_at_gift, dec!(500.00));
+            assert!(donor_basis.is_none());
+            assert!(donor_acquired_at.is_none());
+        } else {
+            panic!("expected GiftReceived variant");
+        }
+    }
+
+    // ── KAT-V-CI-7: GiftReceived donor_acquired_at valid YYYY-MM-DD → parses ──
+
+    #[test]
+    fn kat_v_ci_7_gift_donor_acquired_at_valid_parses() {
+        use time::macros::date;
+        let mut fmv_buf = FieldBuffer::new();
+        fmv_buf.set("500.00");
+        let mut date_buf = FieldBuffer::new();
+        date_buf.set("2022-04-01");
+        let cls = validate_classify_inbound_gift(&fmv_buf, &FieldBuffer::new(), &date_buf).unwrap();
+        if let InboundClass::GiftReceived {
+            donor_acquired_at, ..
+        } = cls
+        {
+            assert_eq!(donor_acquired_at, Some(date!(2022 - 04 - 01)));
+        } else {
+            panic!("expected GiftReceived variant");
+        }
+    }
+
+    // ── KAT-V-CI-8: GiftReceived donor_acquired_at bad format → "bad date…" ───
+
+    #[test]
+    fn kat_v_ci_8_gift_donor_acquired_at_bad_format_is_error() {
+        let mut fmv_buf = FieldBuffer::new();
+        fmv_buf.set("500.00");
+        let mut date_buf = FieldBuffer::new();
+        date_buf.set("not-a-date");
+        let err =
+            validate_classify_inbound_gift(&fmv_buf, &FieldBuffer::new(), &date_buf).unwrap_err();
+        assert!(
+            err.contains("bad date"),
+            "bad date format must produce 'bad date' error; got: {err}"
+        );
     }
 
     // ── Parse failure: non-numeric ───────────────────────────────────────────

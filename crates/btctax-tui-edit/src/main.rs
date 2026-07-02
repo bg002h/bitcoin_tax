@@ -17,13 +17,20 @@ use crossterm::{
     execute,
     terminal::{enable_raw_mode, EnterAlternateScreen},
 };
-use edit::form::{cycle_filing_status, validate, MutationModalState, ProfileFormState};
+use edit::form::{
+    cycle_filing_status, cycle_income_kind, income_kind_display, validate,
+    validate_classify_inbound_gift, validate_classify_inbound_income, ClassifyInboundFlowState,
+    ClassifyInboundModalState, ClassifyInboundStep, FieldBuffer, InboundListItem, InboundVariant,
+    MutationModalState, ProfileFormState, TargetList,
+};
 use editor::{EditorApp, EditorScreen};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
+use std::collections::BTreeSet;
 use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use btctax_core::{BlockerKind, ClassifyInbound, EventId, EventPayload, InboundClass, IncomeKind};
 use btctax_tui::app::Tab;
 use btctax_tui::{restore_terminal, setup_panic_hook, TerminalGuard};
 
@@ -57,11 +64,13 @@ fn parse_vault_path() -> PathBuf {
 ///
 /// Only KEY PRESS events are acted on (release/repeat ignored).
 ///
-/// **Dispatch order** (modal → form → screen — the R0-M4 lesson: Esc must never
-/// fall through a modal to a quit arm):
-/// 1. Mutation-modal dispatch — BEFORE form and screen dispatch.
-/// 2. Form dispatch — BEFORE screen dispatch.
-/// 3. Screen dispatch (Unlock / Locked / Browse).
+/// **Dispatch order** (modal → flow → form → screen — the R0-M4 lesson: Esc must never
+/// fall through to a quit arm mid-flow or mid-modal):
+/// 1. Mutation-modal dispatch — BEFORE flow, form and screen dispatch.
+/// 2. Classify-inbound-modal dispatch — BEFORE flow, form and screen dispatch.
+/// 3. Flow dispatch — ANY open flow claims ALL keys at every step [R0-I2].
+/// 4. Form dispatch — BEFORE screen dispatch.
+/// 5. Screen dispatch (Unlock / Locked / Browse).
 ///
 /// # Screen dispatch
 /// - **Unlock**: `Esc` → quit; `Tab`/`BackTab` → ignored (no tab bar); `Enter` →
@@ -69,25 +78,40 @@ fn parse_vault_path() -> PathBuf {
 /// - **Locked**: `r` → retry (back to Unlock); `q`/`Esc` → quit.
 /// - **Browse**: `q`/`Esc` → quit; `Tab` → next tab; `BackTab` → prev tab;
 ///   `←/→` → year change + reset selections; `↑/↓ j/k` → scroll;
-///   `PgUp/PgDn` → page; `g/G` → top/bottom; `p` → tax-profile form.
+///   `PgUp/PgDn` → page; `g/G` → top/bottom; `p` → tax-profile form;
+///   `c` → classify-inbound flow.
 pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     if key.kind != KeyEventKind::Press {
         return;
     }
 
-    // ── 1. Mutation-modal dispatch — BEFORE form and screen dispatch ───────────
+    // ── 1. Mutation-modal dispatch — BEFORE everything else ───────────────────
     if app.mutation_modal.is_some() {
         handle_modal_key(app, key);
         return;
     }
 
-    // ── 2. Form dispatch — BEFORE screen dispatch ─────────────────────────────
+    // ── 2. Classify-inbound-modal dispatch — BEFORE flow, form, screen ────────
+    if app.classify_inbound_modal.is_some() {
+        handle_classify_inbound_modal_key(app, key);
+        return;
+    }
+
+    // ── 3. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
+    //    Every step of an open flow is claimed here; 'q' and Esc can never
+    //    fall through to a Browse quit arm mid-flow.
+    if app.classify_inbound_flow.is_some() {
+        handle_classify_inbound_flow_key(app, key);
+        return;
+    }
+
+    // ── 4. Form dispatch — BEFORE screen dispatch ─────────────────────────────
     if app.profile_form.is_some() {
         handle_form_key(app, key);
         return;
     }
 
-    // ── 3. Screen dispatch ────────────────────────────────────────────────────
+    // ── 5. Screen dispatch ────────────────────────────────────────────────────
     match app.screen {
         EditorScreen::Unlock => match key.code {
             // Only Esc quits from Unlock — 'q' and all printable chars go to buffer.
@@ -133,6 +157,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                     reset_selections(app);
                 }
                 KeyCode::Char('p') => open_profile_form(app),
+                KeyCode::Char('c') => open_classify_inbound_flow(app),
                 _ => {}
             }
         }
@@ -313,6 +338,637 @@ fn open_profile_form(app: &mut EditorApp) {
     }
 
     app.profile_form = Some(form);
+}
+
+// ── Classify-inbound modal handler ────────────────────────────────────────────
+
+/// Handle a key press while the classify-inbound confirmation modal is open.
+///
+/// Same blocking pattern as `handle_modal_key`: all unmatched keys are swallowed;
+/// `q` does NOT quit; `Esc` closes modal only (back to field form).
+///
+/// Enter-arm semantics (identical to chunk-1 D4 / R0-M1 pattern):
+/// - `Ok(id)` → re-project, D4-step-2 blocker-derived status, close modal + flow.
+/// - `Err(e)` → close modal, keep form open (buffers intact), "Save error: {e}".
+fn handle_classify_inbound_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            // Extract the payload from the modal (before dropping the borrow).
+            let modal = match app.classify_inbound_modal.as_ref() {
+                Some(m) => {
+                    let payload = EventPayload::ClassifyInbound(ClassifyInbound {
+                        transfer_in_event: m.target_event.clone(),
+                        as_: m.as_.clone(),
+                    });
+                    (payload, m.target_event.clone(), m.as_.clone())
+                }
+                None => return,
+            };
+            let (payload, target_event, as_) = modal;
+
+            // Capture now at Enter-press (not inside persist fn) for determinism.
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.classify_inbound_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_classify_inbound(session, payload, now)
+            };
+
+            match save_result {
+                Ok(decision_id) => {
+                    // Re-project: borrows session immutably in its own block.
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            // D4 step-2: derive status from re-projected blockers [R0-I5].
+                            let status = derive_classify_inbound_status(
+                                &snap,
+                                &target_event,
+                                &decision_id,
+                                &as_,
+                            );
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.classify_inbound_modal = None;
+                    app.classify_inbound_flow = None;
+                }
+                Err(e) => {
+                    // Failed-save semantics [R0-M1]: close modal, keep form (buffers intact).
+                    app.classify_inbound_modal = None;
+                    app.status = Some(format!("Save error: {e}"));
+                }
+            }
+        }
+        KeyCode::Esc => {
+            // Cancel: close modal only → back to the field form.
+            app.classify_inbound_modal = None;
+        }
+        _ => {
+            // All other keys swallowed (blocking modal — 'q' must NOT quit here).
+        }
+    }
+}
+
+// ── Classify-inbound flow key dispatch ────────────────────────────────────────
+
+/// Dispatch the key to the appropriate step handler.
+///
+/// The FLOW OPTION (not the step) is the guard in `handle_key` [R0-I2]: when we
+/// reach this function the flow is always `Some`.  The step discriminant is
+/// read here to fan out to step-specific handlers.
+fn handle_classify_inbound_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    // Determine the step discriminant via a non-destructuring borrow.
+    let step_kind: u8 = match app.classify_inbound_flow.as_ref().map(|f| &f.step) {
+        Some(ClassifyInboundStep::List) => 0,
+        Some(ClassifyInboundStep::VariantPicker { .. }) => 1,
+        Some(ClassifyInboundStep::IncomeForm { .. }) => 2,
+        Some(ClassifyInboundStep::GiftForm { .. }) => 3,
+        None => return,
+    };
+    match step_kind {
+        0 => handle_ci_list_key(app, key),
+        1 => handle_ci_picker_key(app, key),
+        2 => handle_ci_income_form_key(app, key),
+        3 => handle_ci_gift_form_key(app, key),
+        _ => {}
+    }
+}
+
+/// List step: scroll and select.
+fn handle_ci_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            // Transition to variant picker with the selected item.
+            let selected = app
+                .classify_inbound_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+            if let Some(item) = selected {
+                if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                    flow.step = ClassifyInboundStep::VariantPicker {
+                        item,
+                        variant: InboundVariant::Income, // initial selection
+                    };
+                }
+            }
+            // If nothing selected (defensive; list is non-empty by contract), swallow.
+        }
+        KeyCode::Esc => {
+            // Close the flow — back to Browse; nothing written.
+            app.classify_inbound_flow = None;
+        }
+        _ => {
+            // All other keys (including 'q') swallowed while flow is open [R0-I2].
+        }
+    }
+}
+
+/// Variant-picker step: Income ↔ GiftReceived via Tab.
+fn handle_ci_picker_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Tab => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::VariantPicker { variant, .. } = &mut flow.step {
+                    *variant = match *variant {
+                        InboundVariant::Income => InboundVariant::GiftReceived,
+                        InboundVariant::GiftReceived => InboundVariant::Income,
+                    };
+                }
+            }
+        }
+        KeyCode::Enter => {
+            // Move to the per-variant field form.  Use mem::replace to take ownership.
+            let Some(flow) = app.classify_inbound_flow.as_mut() else {
+                return;
+            };
+            let old_step = std::mem::replace(&mut flow.step, ClassifyInboundStep::List);
+            if let ClassifyInboundStep::VariantPicker { item, variant } = old_step {
+                flow.step = match variant {
+                    InboundVariant::Income => ClassifyInboundStep::IncomeForm {
+                        item,
+                        kind: IncomeKind::Mining, // initial [R0-M3]
+                        fmv_buf: FieldBuffer::new(),
+                        business: false,
+                        focus: 0,
+                        error: None,
+                    },
+                    InboundVariant::GiftReceived => ClassifyInboundStep::GiftForm {
+                        item,
+                        fmv_at_gift_buf: FieldBuffer::new(),
+                        donor_basis_buf: FieldBuffer::new(),
+                        donor_acquired_at_buf: FieldBuffer::new(),
+                        focus: 0,
+                        error: None,
+                    },
+                };
+            }
+            // If step wasn't VariantPicker (shouldn't happen), step is now List (placeholder).
+        }
+        KeyCode::Esc => {
+            // Back to the list step.
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                flow.step = ClassifyInboundStep::List;
+            }
+        }
+        _ => {
+            // All other keys (including 'q') swallowed [R0-I2].
+        }
+    }
+}
+
+/// Income-form step: kind picker (Tab), fmv text, business toggle (Space), submit.
+fn handle_ci_income_form_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            // Validate → open modal on success; set error on failure.
+            let result = {
+                match app.classify_inbound_flow.as_ref() {
+                    Some(f) => match &f.step {
+                        ClassifyInboundStep::IncomeForm {
+                            item,
+                            kind,
+                            fmv_buf,
+                            business,
+                            ..
+                        } => validate_classify_inbound_income(*kind, fmv_buf, *business)
+                            .map(|cls| (item.clone(), cls)),
+                        _ => return,
+                    },
+                    None => return,
+                }
+            };
+            match result {
+                Ok((item, cls)) => {
+                    app.classify_inbound_modal = Some(ClassifyInboundModalState {
+                        target_event: item.blocker_event.clone(),
+                        target_date: item.date,
+                        target_sat: item.sat,
+                        as_: cls,
+                    });
+                }
+                Err(msg) => {
+                    if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                        if let ClassifyInboundStep::IncomeForm { error, .. } = &mut flow.step {
+                            *error = Some(msg);
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            // Back to variant picker (retaining the item).
+            let item = match app.classify_inbound_flow.as_ref() {
+                Some(f) => match &f.step {
+                    ClassifyInboundStep::IncomeForm { item, .. } => item.clone(),
+                    _ => return,
+                },
+                None => return,
+            };
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                flow.step = ClassifyInboundStep::VariantPicker {
+                    item,
+                    variant: InboundVariant::Income,
+                };
+            }
+        }
+        KeyCode::Tab => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::IncomeForm { kind, focus, .. } = &mut flow.step {
+                    if *focus == 0 {
+                        // Tab on kind row cycles the IncomeKind variant.
+                        *kind = cycle_income_kind(*kind);
+                    } else {
+                        // Tab on other rows moves focus down.
+                        *focus = (*focus + 1).min(2);
+                    }
+                }
+            }
+        }
+        KeyCode::BackTab => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::IncomeForm { focus, .. } = &mut flow.step {
+                    *focus = focus.saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Up => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::IncomeForm { focus, .. } = &mut flow.step {
+                    *focus = focus.saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Down => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::IncomeForm { focus, .. } = &mut flow.step {
+                    *focus = (*focus + 1).min(2);
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::IncomeForm { fmv_buf, focus, .. } = &mut flow.step {
+                    if *focus == 1 {
+                        fmv_buf.pop_char();
+                    }
+                }
+            }
+        }
+        KeyCode::Char(' ') => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::IncomeForm {
+                    business, focus, ..
+                } = &mut flow.step
+                {
+                    if *focus == 2 {
+                        *business = !*business;
+                    }
+                }
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::IncomeForm { fmv_buf, focus, .. } = &mut flow.step {
+                    if *focus == 1 {
+                        fmv_buf.push_char(c);
+                    }
+                    // focus==0 (kind): Tab cycles kind (handled above); 'q' inserts into
+                    // fmv_buf (text focus) or is swallowed here — does NOT quit [R2-N1].
+                    // focus==2 (business): Space toggles; other chars swallowed.
+                }
+            }
+        }
+        _ => {
+            // All unmatched keys (including 'q' at non-text focus) swallowed [R0-I2].
+        }
+    }
+}
+
+/// Gift-form step: three optional fields (fmv_at_gift required), submit.
+fn handle_ci_gift_form_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let result = {
+                match app.classify_inbound_flow.as_ref() {
+                    Some(f) => match &f.step {
+                        ClassifyInboundStep::GiftForm {
+                            item,
+                            fmv_at_gift_buf,
+                            donor_basis_buf,
+                            donor_acquired_at_buf,
+                            ..
+                        } => validate_classify_inbound_gift(
+                            fmv_at_gift_buf,
+                            donor_basis_buf,
+                            donor_acquired_at_buf,
+                        )
+                        .map(|cls| (item.clone(), cls)),
+                        _ => return,
+                    },
+                    None => return,
+                }
+            };
+            match result {
+                Ok((item, cls)) => {
+                    app.classify_inbound_modal = Some(ClassifyInboundModalState {
+                        target_event: item.blocker_event.clone(),
+                        target_date: item.date,
+                        target_sat: item.sat,
+                        as_: cls,
+                    });
+                }
+                Err(msg) => {
+                    if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                        if let ClassifyInboundStep::GiftForm { error, .. } = &mut flow.step {
+                            *error = Some(msg);
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            // Back to variant picker (retaining the item).
+            let item = match app.classify_inbound_flow.as_ref() {
+                Some(f) => match &f.step {
+                    ClassifyInboundStep::GiftForm { item, .. } => item.clone(),
+                    _ => return,
+                },
+                None => return,
+            };
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                flow.step = ClassifyInboundStep::VariantPicker {
+                    item,
+                    variant: InboundVariant::GiftReceived,
+                };
+            }
+        }
+        KeyCode::Tab | KeyCode::Down => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::GiftForm { focus, .. } = &mut flow.step {
+                    *focus = (*focus + 1).min(2);
+                }
+            }
+        }
+        KeyCode::BackTab | KeyCode::Up => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::GiftForm { focus, .. } = &mut flow.step {
+                    *focus = focus.saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::GiftForm {
+                    fmv_at_gift_buf,
+                    donor_basis_buf,
+                    donor_acquired_at_buf,
+                    focus,
+                    ..
+                } = &mut flow.step
+                {
+                    match *focus {
+                        0 => fmv_at_gift_buf.pop_char(),
+                        1 => donor_basis_buf.pop_char(),
+                        2 => donor_acquired_at_buf.pop_char(),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::GiftForm {
+                    fmv_at_gift_buf,
+                    donor_basis_buf,
+                    donor_acquired_at_buf,
+                    focus,
+                    ..
+                } = &mut flow.step
+                {
+                    match *focus {
+                        0 => fmv_at_gift_buf.push_char(c),
+                        1 => donor_basis_buf.push_char(c),
+                        2 => donor_acquired_at_buf.push_char(c),
+                        _ => {}
+                    }
+                    // 'q' at any text focus inserts into the buffer — does NOT quit [R2-N1].
+                }
+            }
+        }
+        _ => {
+            // All unmatched keys swallowed [R0-I2].
+        }
+    }
+}
+
+// ── Classify-inbound flow opener ──────────────────────────────────────────────
+
+/// Build an `events_by_id` lookup table from the snapshot's raw event list.
+fn events_by_id(
+    snap: &btctax_tui::app::Snapshot,
+) -> std::collections::BTreeMap<&EventId, &btctax_core::LedgerEvent> {
+    snap.events.iter().map(|e| (&e.id, e)).collect()
+}
+
+/// Open the classify-inbound flow from the Browse screen.
+///
+/// Applies the compound pre-filter (spec §Pre-filter verification, Claim A):
+/// 1. `UnknownBasisInbound` blockers only.
+/// 2. Blocker.event resolves to a raw `TransferIn` event in snap.events [R0-M2: raw only].
+/// 3. No non-voided `ClassifyInbound` decision in snap.events already targets it.
+///
+/// Empty filtered list → status "No unclassified inbound transfers"; flow NOT opened [R0-M8].
+fn open_classify_inbound_flow(app: &mut EditorApp) {
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let ev_idx = events_by_id(snap);
+
+    // Pre-compute the set of voided event ids (for filter 3's voided-ClassifyInbound check).
+    let voided: BTreeSet<EventId> = snap
+        .events
+        .iter()
+        .filter_map(|e| {
+            if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                Some(v.target_event_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Apply filter 3: build the set of TransferIn EventIds already targeted by a non-voided
+    // ClassifyInbound decision (adding a second would fire DecisionConflict; FIRST-WINS).
+    let already_classified: BTreeSet<EventId> = snap
+        .events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .filter_map(|e| {
+            if let EventPayload::ClassifyInbound(ci) = &e.payload {
+                Some(ci.transfer_in_event.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Apply filters 1 + 2 + 3 in one pass.
+    let mut items: Vec<InboundListItem> = snap
+        .state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+        .filter_map(|b| {
+            let ti_id = b.event.as_ref()?;
+            // Filter 2: raw TransferIn payload check [R0-M2: raw only, effective-payload
+            // limitation documented in spec + FOLLOWUPS].
+            let ev = ev_idx.get(ti_id)?;
+            if !matches!(ev.payload, EventPayload::TransferIn(_)) {
+                return None;
+            }
+            // Filter 3: no non-voided ClassifyInbound already targets this TransferIn.
+            if already_classified.contains(ti_id) {
+                return None;
+            }
+            // Build the display item.
+            let sat = match &ev.payload {
+                EventPayload::TransferIn(ti) => ti.sat,
+                _ => unreachable!(),
+            };
+            let date = btctax_core::conventions::tax_date(ev.utc_timestamp, ev.original_tz);
+            Some(InboundListItem {
+                blocker_event: ti_id.clone(),
+                date,
+                sat,
+                wallet: ev.wallet.clone(),
+                detail: b.detail.clone(),
+            })
+        })
+        .collect();
+
+    // Sort by date for deterministic display order.
+    items.sort_by_key(|i| i.date);
+
+    if items.is_empty() {
+        // R0-M8: empty filtered list never opens a flow.
+        app.status = Some("No unclassified inbound transfers".to_string());
+        return;
+    }
+
+    app.classify_inbound_flow = Some(ClassifyInboundFlowState {
+        list: TargetList::new(items),
+        step: ClassifyInboundStep::List,
+    });
+}
+
+// ── Post-persist status derivation ────────────────────────────────────────────
+
+/// Derive the status string from the RE-PROJECTED blockers after a classify-inbound save.
+///
+/// The status is NEVER keyed on the payload shape — it is derived from the new
+/// `snap.state.blockers` [R0-I5].  The `decision_id` is the returned `EventId` of the
+/// just-appended decision (used only for the `DecisionConflict` check; the TransferIn
+/// `target_event` is the event attributed to `FmvMissing` and `UnknownBasisInbound`).
+fn derive_classify_inbound_status(
+    snap: &btctax_tui::app::Snapshot,
+    target_event: &EventId,
+    decision_id: &EventId,
+    as_: &InboundClass,
+) -> String {
+    // Decision-attributed DecisionConflict check (failed-save-retry duplicate [R0-I1]).
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(decision_id) {
+            return format!(
+                "Saved, but DecisionConflict fired on this decision — see Compliance; \
+                 clear with CLI: btctax reconcile void decision|{}",
+                decision_id.canonical()
+            );
+        }
+    }
+
+    // FmvMissing attributed to the target TransferIn event.
+    // [R0-I4]: no set-fmv suggestion — void + re-classify is the only remedy.
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::FmvMissing && b.event.as_ref() == Some(target_event) {
+            // Find the decision seq from the decision_id for the void CLI command.
+            let seq = match decision_id {
+                EventId::Decision { seq } => *seq,
+                _ => 0,
+            };
+            return format!(
+                "Classified as Income({kind}) but FMV missing — FmvMissing blocker fired; \
+                 to supply the FMV, void this decision (CLI: btctax reconcile void \
+                 decision|{seq}) and re-classify with an FMV",
+                kind = match as_ {
+                    InboundClass::Income { kind, .. } => income_kind_display(*kind),
+                    _ => "?",
+                }
+            );
+        }
+    }
+
+    // UnknownBasisInbound re-fired for the target TransferIn (gift case 3 or 4) [R0-I5].
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::UnknownBasisInbound && b.event.as_ref() == Some(target_event) {
+            let seq = match decision_id {
+                EventId::Decision { seq } => *seq,
+                _ => 0,
+            };
+            return format!(
+                "Gift recorded but basis unknown — UnknownBasisInbound re-fired; \
+                 void this decision (CLI: btctax reconcile void decision|{seq}) \
+                 and re-classify with donor basis or a donor date covered by the price dataset"
+            );
+        }
+    }
+
+    // No target-attributed blocker: clean success.
+    let cls_desc = match as_ {
+        InboundClass::Income { kind, .. } => {
+            format!("Income({})", income_kind_display(*kind))
+        }
+        InboundClass::GiftReceived { .. } => "GiftReceived".to_string(),
+    };
+    format!("Classified inbound as {cls_desc}")
 }
 
 // ── Scroll helpers ────────────────────────────────────────────────────────────
@@ -1362,6 +2018,876 @@ mod tests {
         assert_eq!(
             cli_profile.qualified_dividends_and_other_pref_income,
             dec!(5000)
+        );
+    }
+
+    // ── Helper: seed a TransferIn vault and return the transfer's EventId ──────
+
+    fn seed_transfer_in_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> btctax_core::EventId {
+        use btctax_core::event::{EventPayload, LedgerEvent, TransferIn};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let ti_id = EventId::import(Source::River, SourceRef::new("test-ti-1"));
+        {
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+            let batch = vec![LedgerEvent {
+                id: ti_id.clone(),
+                utc_timestamp: OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(),
+                original_tz: UtcOffset::UTC,
+                wallet: None,
+                payload: EventPayload::TransferIn(TransferIn {
+                    sat: 500_000,
+                    src_addr: None,
+                    txid: None,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            session.save().unwrap();
+        }
+        ti_id
+    }
+
+    // Helper: unlock app from vault
+    fn open_app(vault: &std::path::Path, pp_str: &str) -> EditorApp {
+        let mut app = EditorApp::new(vault.to_path_buf());
+        for c in pp_str.chars() {
+            app.unlock.push_char(c);
+        }
+        app.do_unlock();
+        assert_eq!(app.screen, EditorScreen::Browse, "must open to Browse");
+        app
+    }
+
+    // Helper: collect a string from a TestBackend terminal buffer
+    fn rendered_text(terminal: &ratatui::Terminal<ratatui::backend::TestBackend>) -> String {
+        terminal
+            .backend()
+            .buffer()
+            .clone()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    // ── KAT-C2a — cancel-path vault bytes unchanged (classify-inbound) ────────
+
+    #[test]
+    fn kat_c2a_cancel_path_vault_bytes_unchanged_classify_inbound() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-c2a-pass";
+
+        seed_transfer_in_vault(&vault, &key, pp_str);
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+
+        {
+            let mut app = open_app(&vault, pp_str);
+
+            // ── c → flow opens at List step ──────────────────────────────────
+            handle_key(&mut app, press(KeyCode::Char('c')));
+            assert!(
+                app.classify_inbound_flow.is_some(),
+                "C2a: flow must open on 'c'"
+            );
+
+            // 'q' at List step is swallowed (R0-I2 / R2-N1)
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(
+                !app.should_quit,
+                "C2a: 'q' at List step must be swallowed, not quit"
+            );
+            assert!(
+                app.classify_inbound_flow.is_some(),
+                "C2a: flow must remain open after 'q' at List"
+            );
+
+            // Enter → variant picker
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                matches!(
+                    app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                    Some(ClassifyInboundStep::VariantPicker { .. })
+                ),
+                "C2a: Enter on List must transition to VariantPicker"
+            );
+
+            // 'q' at VariantPicker is swallowed
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(
+                !app.should_quit,
+                "C2a: 'q' at VariantPicker must be swallowed"
+            );
+            assert!(app.classify_inbound_flow.is_some());
+
+            // Tab → GiftReceived
+            handle_key(&mut app, press(KeyCode::Tab));
+            assert!(
+                matches!(
+                    app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                    Some(ClassifyInboundStep::VariantPicker {
+                        variant: InboundVariant::GiftReceived,
+                        ..
+                    })
+                ),
+                "C2a: Tab on VariantPicker must cycle to GiftReceived"
+            );
+
+            // Enter → GiftForm
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                matches!(
+                    app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                    Some(ClassifyInboundStep::GiftForm { .. })
+                ),
+                "C2a: Enter on VariantPicker(Gift) must open GiftForm"
+            );
+
+            // 'q' at GiftForm (text focus 0) inserts into fmv_at_gift_buf [R2-N1],
+            // but does NOT quit and does NOT close the flow.
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(
+                !app.should_quit,
+                "C2a: 'q' at GiftForm must be swallowed (not quit) [R2-N1]"
+            );
+            assert!(app.classify_inbound_flow.is_some());
+            // Backspace out the 'q' before the fmv_at_gift submit.
+            handle_key(&mut app, press(KeyCode::Backspace));
+
+            // Type a valid fmv_at_gift value.
+            type_str(&mut app, "500.00");
+
+            // Enter → modal opens
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.classify_inbound_modal.is_some(),
+                "C2a: Enter on valid GiftForm must open classify_inbound_modal"
+            );
+
+            // 'q' while modal open is swallowed
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(
+                !app.should_quit,
+                "C2a: 'q' while CI modal open must be swallowed"
+            );
+            assert!(app.classify_inbound_modal.is_some());
+
+            // Esc → modal closes (back to GiftForm)
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.classify_inbound_modal.is_none(),
+                "C2a: Esc on CI modal must close the modal"
+            );
+            assert!(
+                matches!(
+                    app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                    Some(ClassifyInboundStep::GiftForm { .. })
+                ),
+                "C2a: Esc on CI modal must keep GiftForm open"
+            );
+            assert!(!app.should_quit, "C2a: Esc on modal must NOT quit");
+
+            // Esc → GiftForm closes (back to VariantPicker)
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                matches!(
+                    app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                    Some(ClassifyInboundStep::VariantPicker { .. })
+                ),
+                "C2a: Esc on GiftForm must go back to VariantPicker"
+            );
+
+            // 'q' at VariantPicker still swallowed
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(
+                !app.should_quit,
+                "C2a: 'q' at VariantPicker (second time) must be swallowed"
+            );
+
+            // Esc → VariantPicker closes (back to List)
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                matches!(
+                    app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                    Some(ClassifyInboundStep::List)
+                ),
+                "C2a: Esc on VariantPicker must go back to List"
+            );
+
+            // 'q' at List is still swallowed
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(
+                !app.should_quit,
+                "C2a: 'q' at List (second time) must be swallowed"
+            );
+
+            // Esc → flow closes
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.classify_inbound_flow.is_none(),
+                "C2a: Esc on List must close the flow"
+            );
+            assert!(!app.should_quit, "C2a: Esc on List must NOT quit");
+
+            // 'q' in Browse (after flow closes) → quit
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(app.should_quit, "C2a: 'q' after flow closes must quit");
+        }
+
+        // Vault must be byte-identical (cancel path — nothing written).
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "KAT-C2a: vault must be byte-identical after full cancel path"
+        );
+    }
+
+    // ── KAT-S2 — save-error path for classify-inbound (chmod; unix) ──────────
+
+    #[cfg(unix)]
+    #[test]
+    fn kat_s2_save_error_path_classify_inbound_chmod() {
+        use btctax_core::event::{EventPayload, InboundClass, IncomeKind};
+        use btctax_core::persistence::load_all_ordered;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-s2-pass";
+
+        seed_transfer_in_vault(&vault, &key, pp_str);
+
+        // Root-skip guard (same pattern as KAT-S1).
+        {
+            let test_file = dir.path().join("probe.tmp");
+            let perms = std::fs::Permissions::from_mode(0o500);
+            std::fs::set_permissions(dir.path(), perms).unwrap();
+            let can_write = std::fs::write(&test_file, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("KAT-S2: skipping — chmod 0o500 did not deny writes (running as root?)");
+                return;
+            }
+        }
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Capture pre-state row count.
+        let pre_len = load_all_ordered(app.session.as_ref().unwrap().conn())
+            .unwrap()
+            .len();
+
+        // Navigate to the CI income modal: c → Enter (list) → Enter (picker=Income)
+        // → Tab (kind=Staking) → focus 1 → type FMV → Enter (opens modal).
+        handle_key(&mut app, press(KeyCode::Char('c')));
+        assert!(app.classify_inbound_flow.is_some(), "S2: flow must open");
+        handle_key(&mut app, press(KeyCode::Enter)); // list → picker
+        handle_key(&mut app, press(KeyCode::Enter)); // picker → IncomeForm (kind=Mining)
+                                                     // Move focus to fmv field (focus 1)
+        handle_key(&mut app, press(KeyCode::Down));
+        // Type FMV
+        type_str(&mut app, "30000.00");
+        // Enter → opens CI modal
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.classify_inbound_modal.is_some(),
+            "S2: CI modal must be open"
+        );
+
+        // Make vault's parent dir read-only (0o500) → save will fail.
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // Press Enter on modal → save fails.
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        // (1) modal must be closed.
+        assert!(
+            app.classify_inbound_modal.is_none(),
+            "S2: CI modal must close after save failure"
+        );
+        // (2) flow must still be open with the IncomeForm intact.
+        assert!(
+            matches!(
+                app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                Some(ClassifyInboundStep::IncomeForm { .. })
+            ),
+            "S2: IncomeForm must remain open after save failure (buffers intact)"
+        );
+        // (3) status must contain "Save error".
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("Save error"))
+                .unwrap_or(false),
+            "S2: status must contain 'Save error'; got: {:?}",
+            app.status
+        );
+        // (4) vault bytes unchanged.
+        let bytes_mid = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_mid,
+            "S2: vault must be byte-identical after save failure"
+        );
+
+        // Restore permissions.
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        // Retry: re-submit the form → modal → confirm → save succeeds.
+        handle_key(&mut app, press(KeyCode::Enter)); // re-open modal (IncomeForm still open)
+        assert!(
+            app.classify_inbound_modal.is_some(),
+            "S2: retry: CI modal must re-open on Enter"
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → N+2 appended
+
+        // Flow + modal closed on successful save.
+        assert!(
+            app.classify_inbound_modal.is_none(),
+            "S2: retry: modal must close after successful save"
+        );
+        assert!(
+            app.classify_inbound_flow.is_none(),
+            "S2: retry: flow must close after successful save"
+        );
+
+        // Assert TRUE retry outcome: on-disk log == pre + 2 decision rows [R0-I1].
+        let post_disk = {
+            drop(app);
+            let session2 =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            load_all_ordered(session2.conn()).unwrap()
+        };
+        let new_decisions: Vec<_> = post_disk
+            .iter()
+            .skip(pre_len)
+            .filter(|r| r.kind == "decision")
+            .collect();
+        assert_eq!(
+            new_decisions.len(),
+            2,
+            "S2: retry: on-disk log must have EXACTLY 2 new decision rows (N+1 from failed-save + N+2 from retry); got: {}",
+            new_decisions.len()
+        );
+
+        // Both rows' payloads round-trip to the identical ClassifyInbound payload.
+        let p0: EventPayload = serde_json::from_str(&new_decisions[0].payload_json).unwrap();
+        let p1: EventPayload = serde_json::from_str(&new_decisions[1].payload_json).unwrap();
+        assert_eq!(p0, p1, "S2: both retry rows must have identical payload");
+        assert!(
+            matches!(
+                &p0,
+                EventPayload::ClassifyInbound(ci)
+                    if matches!(&ci.as_, InboundClass::Income { kind: IncomeKind::Mining, .. })
+            ),
+            "S2: payload must be ClassifyInbound::Income(Mining); got: {:?}",
+            p0
+        );
+
+        // The re-projected state after the retry must contain a DecisionConflict
+        // attributed to the retry decision's EventId (FIRST-WINS).
+        let retry_seq = new_decisions[1]
+            .decision_seq
+            .expect("retry decision must have decision_seq") as u64;
+        let retry_id = btctax_core::EventId::Decision { seq: retry_seq };
+        let snap_session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let (snap, _) = btctax_tui::unlock::build_snapshot(&snap_session).unwrap();
+        let has_conflict = snap.state.blockers.iter().any(|b| {
+            b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(&retry_id)
+        });
+        assert!(
+            has_conflict,
+            "S2: re-projected state must contain DecisionConflict for retry decision {retry_id:?}"
+        );
+    }
+
+    // ── KAT-E2E-CI — end-to-end classify-inbound (Income with FMV) ───────────
+
+    #[test]
+    fn kat_e2e_ci_classify_inbound_income_with_fmv() {
+        use btctax_core::event::InboundClass;
+        use btctax_core::persistence::load_all_ordered;
+        use ratatui::{backend::TestBackend, Terminal};
+        use rust_decimal_macros::dec;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-ci-pass";
+
+        let ti_id = seed_transfer_in_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // 1. Confirm seed produces UnknownBasisInbound in the projected state.
+        let snap_before = app.snapshot.as_ref().unwrap();
+        let has_ubi = snap_before.state.blockers.iter().any(|b| {
+            b.kind == BlockerKind::UnknownBasisInbound && b.event.as_ref() == Some(&ti_id)
+        });
+        assert!(
+            has_ubi,
+            "E2E-CI: seed must produce UnknownBasisInbound blocker"
+        );
+
+        // 2. Key-drive the full flow.
+        handle_key(&mut app, press(KeyCode::Char('c'))); // open flow
+        assert!(
+            app.classify_inbound_flow.is_some(),
+            "E2E-CI: flow must open"
+        );
+
+        // List → Enter → VariantPicker (Income initial)
+        handle_key(&mut app, press(KeyCode::Enter));
+        // VariantPicker (Income) → Enter → IncomeForm (kind=Mining initial)
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        // Tab on kind row → Staking (exercises picker)
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert!(
+            matches!(
+                app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                Some(ClassifyInboundStep::IncomeForm {
+                    kind: IncomeKind::Staking,
+                    focus: 0,
+                    ..
+                })
+            ),
+            "E2E-CI: one Tab on kind must yield Staking"
+        );
+
+        // Move focus to fmv field, type FMV
+        handle_key(&mut app, press(KeyCode::Down)); // focus → 1
+        type_str(&mut app, "45.50");
+
+        // Enter → CI modal
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.classify_inbound_modal.is_some(),
+            "E2E-CI: Enter on valid IncomeForm must open CI modal"
+        );
+
+        // Check modal content via render.
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let rendered = rendered_text(&terminal);
+        let ti_canonical = ti_id.canonical();
+        assert!(
+            rendered.contains(&ti_canonical),
+            "E2E-CI: modal must show canonical EventId; rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("staking"),
+            "E2E-CI: modal must show kind 'staking'; rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("45.50"),
+            "E2E-CI: modal must show FMV 45.50; rendered: {rendered}"
+        );
+
+        // Enter on modal → save + re-project.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.classify_inbound_modal.is_none(),
+            "E2E-CI: modal must close after confirm"
+        );
+        assert!(
+            app.classify_inbound_flow.is_none(),
+            "E2E-CI: flow must close after confirm"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("Staking") || s.contains("staking"))
+                .unwrap_or(false),
+            "E2E-CI: status must contain kind; got: {:?}",
+            app.status
+        );
+
+        // 3. Reopen + project → UnknownBasisInbound gone; IncomeRecord + Lot present.
+        drop(app);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let (snap, _) = btctax_tui::unlock::build_snapshot(&session2).unwrap();
+
+        let ubi_gone = !snap.state.blockers.iter().any(|b| {
+            b.kind == BlockerKind::UnknownBasisInbound && b.event.as_ref() == Some(&ti_id)
+        });
+        assert!(
+            ubi_gone,
+            "E2E-CI: UnknownBasisInbound must be gone after classification"
+        );
+
+        let income_rec = snap
+            .state
+            .income_recognized
+            .iter()
+            .find(|r| r.event == ti_id);
+        assert!(
+            income_rec.is_some(),
+            "E2E-CI: IncomeRecord must be present for the classified TransferIn"
+        );
+        let ir = income_rec.unwrap();
+        assert_eq!(
+            ir.kind,
+            IncomeKind::Staking,
+            "E2E-CI: IncomeRecord.kind must be Staking"
+        );
+        assert_eq!(
+            ir.usd_fmv,
+            dec!(45.50),
+            "E2E-CI: IncomeRecord.usd_fmv must be 45.50"
+        );
+
+        let lot = snap.state.lots.iter().find(|l| {
+            // The lot's basis comes from the Income path; look for the sat count.
+            l.original_sat == 500_000
+        });
+        assert!(
+            lot.is_some(),
+            "E2E-CI: a Lot with 500_000 sat must be present after classification"
+        );
+
+        // 4. Check the event log has the new decision.
+        let events = load_all_ordered(session2.conn()).unwrap();
+        let decision_rows: Vec<_> = events.iter().filter(|r| r.kind == "decision").collect();
+        assert_eq!(
+            decision_rows.len(),
+            1,
+            "E2E-CI: exactly one decision row must be appended"
+        );
+        let stored_payload: btctax_core::EventPayload =
+            serde_json::from_str(&decision_rows[0].payload_json).unwrap();
+        assert!(
+            matches!(
+                &stored_payload,
+                btctax_core::EventPayload::ClassifyInbound(ci)
+                    if ci.transfer_in_event == ti_id
+                    && matches!(&ci.as_, InboundClass::Income { kind: IncomeKind::Staking, .. })
+            ),
+            "E2E-CI: stored payload must be ClassifyInbound(Staking); got: {:?}",
+            stored_payload
+        );
+    }
+
+    // ── KAT-E2E-FMV-MISSING — classify-inbound Income without FMV ────────────
+
+    #[test]
+    fn kat_e2e_fmv_missing_classify_inbound_income_no_fmv() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-fmv-miss-pass";
+
+        let ti_id = seed_transfer_in_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        // c → Enter → Enter (Income, no Tab) → Enter (fmv_buf empty) → modal → Enter
+        handle_key(&mut app, press(KeyCode::Char('c')));
+        handle_key(&mut app, press(KeyCode::Enter)); // list → picker
+        handle_key(&mut app, press(KeyCode::Enter)); // picker → IncomeForm (Mining)
+                                                     // Leave fmv_buf EMPTY (focus stays at 0, kind=Mining).
+        handle_key(&mut app, press(KeyCode::Enter)); // validates OK (fmv optional) → modal
+        assert!(
+            app.classify_inbound_modal.is_some(),
+            "FMV-MISSING: modal must open with empty fmv"
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → save + re-project
+
+        assert!(
+            app.classify_inbound_modal.is_none(),
+            "FMV-MISSING: modal must close after confirm"
+        );
+        assert!(
+            app.classify_inbound_flow.is_none(),
+            "FMV-MISSING: flow must close after confirm"
+        );
+
+        // Status must contain "FmvMissing" AND "void" (R0-I4 remedy).
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.contains("FmvMissing") || status.contains("FMV missing"),
+            "FMV-MISSING: status must mention FmvMissing; got: {status}"
+        );
+        assert!(
+            status.contains("void"),
+            "FMV-MISSING: status must mention 'void' (the CLI remedy); got: {status}"
+        );
+        // Must NOT suggest set-fmv (R0-I4).
+        assert!(
+            !status.contains("set-fmv"),
+            "FMV-MISSING: status must NOT suggest set-fmv (R0-I4); got: {status}"
+        );
+
+        // Re-project: FmvMissing blocker is present; lot with basis_pending.
+        let snap = app.snapshot.as_ref().unwrap();
+        let has_fmv_missing = snap
+            .state
+            .blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::FmvMissing && b.event.as_ref() == Some(&ti_id));
+        assert!(
+            has_fmv_missing,
+            "FMV-MISSING: re-projected state must have FmvMissing blocker"
+        );
+
+        let lot = snap.state.lots.iter().find(|l| l.original_sat == 500_000);
+        assert!(
+            lot.is_some(),
+            "FMV-MISSING: lot must be created even without FMV (basis_pending)"
+        );
+        assert!(
+            lot.unwrap().basis_pending,
+            "FMV-MISSING: lot must have basis_pending=true when FMV missing"
+        );
+    }
+
+    // ── KAT-E2E-GIFT-UNKNOWN — both donor fields empty ────────────────────────
+
+    #[test]
+    fn kat_e2e_gift_unknown_both_donor_fields_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-gift-unk-pass";
+
+        let _ti_id = seed_transfer_in_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        // c → Enter → Tab(Gift) → Enter → fmv_at_gift → Enter → modal → Enter
+        handle_key(&mut app, press(KeyCode::Char('c')));
+        handle_key(&mut app, press(KeyCode::Enter)); // list → picker (Income initial)
+        handle_key(&mut app, press(KeyCode::Tab)); // cycle to GiftReceived
+        handle_key(&mut app, press(KeyCode::Enter)); // picker → GiftForm
+        type_str(&mut app, "300.00"); // fmv_at_gift (required); donor fields empty
+        handle_key(&mut app, press(KeyCode::Enter)); // validates → modal
+        assert!(
+            app.classify_inbound_modal.is_some(),
+            "GIFT-UNK: modal must open"
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm
+
+        assert!(app.classify_inbound_modal.is_none());
+        assert!(app.classify_inbound_flow.is_none());
+
+        // Status must contain "UnknownBasisInbound" (or "basis unknown") AND "void".
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.contains("UnknownBasisInbound") || status.contains("basis unknown"),
+            "GIFT-UNK: status must mention UnknownBasisInbound; got: {status}"
+        );
+        assert!(
+            status.contains("void"),
+            "GIFT-UNK: status must mention 'void'; got: {status}"
+        );
+
+        // Re-projected: original UBI gone (classified); new UBI fires (gift case 4).
+        let snap = app.snapshot.as_ref().unwrap();
+        let new_ubi = snap
+            .state
+            .blockers
+            .iter()
+            .find(|b| b.kind == BlockerKind::UnknownBasisInbound);
+        assert!(
+            new_ubi.is_some(),
+            "GIFT-UNK: UnknownBasisInbound must re-fire after gift with no donor info"
+        );
+
+        // The classify-inbound list (c) must NOT show this TransferIn again
+        // (it has a ClassifyInbound decision → pre-filtered out).
+        // We verify by re-opening the flow and checking it either shows empty status
+        // or opens without this ti_id.
+        //
+        // Since we already saved the first CI decision, the flow's pre-filter's
+        // "already_classified" set will contain ti_id → it won't appear in items.
+        // The easiest check: close app, rebuild snapshot fresh, re-run filter logic.
+        //
+        // For KAT purposes: simply re-open the classify-inbound flow and assert
+        // "No unclassified inbound transfers" status (the only TransferIn is now classified).
+        drop(app);
+        let session3 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let mut app3 = EditorApp::new(vault.clone());
+        app3.session = Some(session3);
+        let (snap3, _) =
+            btctax_tui::unlock::build_snapshot(app3.session.as_ref().unwrap()).unwrap();
+        app3.snapshot = Some(snap3);
+        app3.screen = EditorScreen::Browse;
+
+        handle_key(&mut app3, press(KeyCode::Char('c')));
+        assert!(
+            app3.classify_inbound_flow.is_none(),
+            "GIFT-UNK: c must not open flow (TransferIn already classified)"
+        );
+        assert!(
+            app3.status
+                .as_deref()
+                .map(|s| s.contains("No unclassified") || s.contains("no unclassified"))
+                .unwrap_or(false),
+            "GIFT-UNK: c must set 'No unclassified inbound transfers' status; got: {:?}",
+            app3.status
+        );
+    }
+
+    // ── KAT-E2E-GIFT-PRICE-GAP — donor date outside bundled price dataset ─────
+
+    #[test]
+    fn kat_e2e_gift_price_gap_donor_date_outside_price_dataset() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-price-gap-pass";
+
+        let _ti_id = seed_transfer_in_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        // c → Enter → Tab(Gift) → Enter → GiftForm
+        handle_key(&mut app, press(KeyCode::Char('c')));
+        handle_key(&mut app, press(KeyCode::Enter)); // list → picker
+        handle_key(&mut app, press(KeyCode::Tab)); // cycle to GiftReceived
+        handle_key(&mut app, press(KeyCode::Enter)); // picker → GiftForm
+
+        // fmv_at_gift
+        type_str(&mut app, "500.00");
+        // Tab to donor_basis (leave empty)
+        handle_key(&mut app, press(KeyCode::Tab));
+        // Tab to donor_acquired_at
+        handle_key(&mut app, press(KeyCode::Tab));
+        // Type a date OUTSIDE the bundled price dataset (e.g. 1990-01-01).
+        type_str(&mut app, "1990-01-01");
+
+        handle_key(&mut app, press(KeyCode::Enter)); // validates → modal
+        assert!(
+            app.classify_inbound_modal.is_some(),
+            "PRICE-GAP: modal must open"
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm
+
+        assert!(app.classify_inbound_modal.is_none());
+        assert!(app.classify_inbound_flow.is_none());
+
+        // Status must come from RE-PROJECTED blockers, not payload shape [R0-I5].
+        // Since donor_acquired_at=1990-01-01 is outside the price dataset, the fold
+        // fires UnknownBasisInbound (gift case 3, fold.rs:913–927).
+        // Status must mention "UnknownBasisInbound" (or "basis unknown") AND "void".
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.contains("UnknownBasisInbound") || status.contains("basis unknown"),
+            "PRICE-GAP: status must come from re-projected UnknownBasisInbound [R0-I5]; got: {status}"
+        );
+        assert!(
+            status.contains("void"),
+            "PRICE-GAP: status must mention 'void'; got: {status}"
+        );
+
+        // Re-projected: UnknownBasisInbound re-fired (gift case 3).
+        let snap = app.snapshot.as_ref().unwrap();
+        let ubi_refired = snap
+            .state
+            .blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::UnknownBasisInbound);
+        assert!(
+            ubi_refired,
+            "PRICE-GAP: UnknownBasisInbound must re-fire for out-of-range donor date"
+        );
+    }
+
+    // ── KAT-E2E-GIFT-DUAL — gift happy path with dual basis ──────────────────
+
+    #[test]
+    fn kat_e2e_gift_dual_basis_fmv_less_than_donor_basis() {
+        use rust_decimal_macros::dec;
+        use time::macros::date;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-gift-dual-pass";
+
+        let ti_id = seed_transfer_in_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        // c → Enter → Tab(Gift) → Enter → GiftForm
+        handle_key(&mut app, press(KeyCode::Char('c')));
+        handle_key(&mut app, press(KeyCode::Enter)); // list → picker
+        handle_key(&mut app, press(KeyCode::Tab)); // cycle to GiftReceived
+        handle_key(&mut app, press(KeyCode::Enter)); // picker → GiftForm
+
+        // fmv_at_gift = 400 (LESS than donor_basis = 500 → dual basis case 2)
+        type_str(&mut app, "400.00");
+        // Tab to donor_basis
+        handle_key(&mut app, press(KeyCode::Tab));
+        type_str(&mut app, "500.00");
+        // Tab to donor_acquired_at
+        handle_key(&mut app, press(KeyCode::Tab));
+        // Date that IS in the bundled price dataset (2024-01-01 should be covered).
+        type_str(&mut app, "2024-01-01");
+
+        handle_key(&mut app, press(KeyCode::Enter)); // validate → modal
+        assert!(
+            app.classify_inbound_modal.is_some(),
+            "GIFT-DUAL: modal must open"
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → save
+
+        assert!(app.classify_inbound_modal.is_none());
+        assert!(app.classify_inbound_flow.is_none());
+
+        // Clean success status (no new blocker for this event).
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.contains("GiftReceived") || status.contains("gift"),
+            "GIFT-DUAL: status must mention GiftReceived; got: {status}"
+        );
+        // No UnknownBasisInbound or FmvMissing.
+        assert!(
+            !status.contains("UnknownBasisInbound") && !status.contains("FmvMissing"),
+            "GIFT-DUAL: status must be clean success; got: {status}"
+        );
+
+        // Re-project: no new UnknownBasisInbound for ti_id; dual-basis lot present.
+        let snap = app.snapshot.as_ref().unwrap();
+        let ubi_for_target = snap.state.blockers.iter().any(|b| {
+            b.kind == BlockerKind::UnknownBasisInbound && b.event.as_ref() == Some(&ti_id)
+        });
+        assert!(
+            !ubi_for_target,
+            "GIFT-DUAL: must have no UBI for the target after dual-basis gift"
+        );
+
+        // Check the gift lot's dual-basis fields.
+        // The lot is created in fold.rs gift case 2: fmv_at_gift(400) < donor_basis(500).
+        // usd_basis = donor_basis (500), dual_loss_basis = Some(fmv_at_gift = 400).
+        let gift_lot = snap.state.lots.iter().find(|l| l.original_sat == 500_000);
+        assert!(gift_lot.is_some(), "GIFT-DUAL: gift lot must be present");
+        let lot = gift_lot.unwrap();
+        assert_eq!(
+            lot.usd_basis,
+            dec!(500.00),
+            "GIFT-DUAL: lot.usd_basis must equal donor_basis (500.00)"
+        );
+        assert_eq!(
+            lot.dual_loss_basis,
+            Some(dec!(400.00)),
+            "GIFT-DUAL: lot.dual_loss_basis must equal fmv_at_gift (400.00)"
+        );
+        assert_eq!(
+            lot.donor_acquired_at,
+            Some(date!(2024 - 01 - 01)),
+            "GIFT-DUAL: lot.donor_acquired_at must be carried through"
         );
     }
 
