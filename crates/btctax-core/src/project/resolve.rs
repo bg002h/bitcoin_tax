@@ -741,8 +741,10 @@ pub fn resolve(
             AllocMethod::ActualPosition => min_opt(first_2025_disposition, Some(due)),
             AllocMethod::ProRata => max_opt(first_2025_disposition, Some(due)),
         };
-        let timebarred = (!a.timely_allocation_attested && bar.is_some_and(|b| made > b))
-            || (a.method == AllocMethod::ProRata && !a.timely_allocation_attested);
+        // Factored: (¬attested ∧ past-bar) ∨ (ProRata ∧ ¬attested) ≡ ¬attested ∧ (past-bar ∨ ProRata)
+        // (behavior-identical; stable clippy::nonminimal_bool — surfaced by the first CI run).
+        let timebarred = !a.timely_allocation_attested
+            && (bar.is_some_and(|b| made > b) || a.method == AllocMethod::ProRata);
 
         // (3) Conservation vs the pre-2025 Universal snapshot, computed under THIS allocation's RECORDED
         //     method (§A.7) — so a non-FIFO filer conserves against the residue it actually listed. HARD on
