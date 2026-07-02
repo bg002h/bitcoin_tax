@@ -768,6 +768,73 @@ pub fn cycle_business_optional(b: Option<bool>) -> Option<bool> {
     }
 }
 
+// ── Void flow types ───────────────────────────────────────────────────────────
+
+/// Pre-computed display data for a void-decision list row.
+#[derive(Clone)]
+pub struct VoidListItem {
+    /// The decision EventId being offered for void.
+    pub event_id: EventId,
+    /// Sequence number (for display in the Seq column).
+    pub seq: u64,
+    /// Static payload type tag ("TransferLink", "ClassifyInbound", etc.).
+    pub payload_tag: &'static str,
+    /// Human-readable target summary computed at list-open time.
+    pub target_summary: String,
+    /// The decision's OWN inner target event (used by `derive_void_status`'s
+    /// returned-blocker check). None for MethodElection and SafeHarborAllocation.
+    pub inner_target: Option<EventId>,
+}
+
+/// Step in the void flow. Only `List` — Enter goes DIRECTLY to `VoidModalState`.
+pub enum VoidStep {
+    List,
+}
+
+/// Full state for the void flow. Owns its target list [R0-I2 discipline].
+pub struct VoidFlowState {
+    /// Owned target list — no standalone list field on EditorApp.
+    pub list: TargetList<VoidListItem>,
+    pub step: VoidStep,
+}
+
+/// Payload for the void confirmation modal.
+pub struct VoidModalState {
+    /// The decision EventId being voided.
+    pub target_event_id: EventId,
+    pub seq: u64,
+    pub payload_tag: &'static str,
+    pub target_summary: String,
+    /// Carried from VoidListItem for derive_void_status [M5].
+    pub inner_target: Option<EventId>,
+    /// True when the target is SafeHarborAllocation — triggers the conditional warning.
+    pub is_safe_harbor: bool,
+}
+
+/// Return `true` when `payload` is a revocable decision type.
+///
+/// Revocable: TransferLink, ReclassifyOutflow, ClassifyInbound, ManualFmv, ClassifyRaw,
+/// MethodElection, LotSelection, ReclassifyIncome, SafeHarborAllocation.
+/// Non-revocable (excluded from void list): SupersedeImport, RejectImport, VoidDecisionEvent,
+/// and imported event payloads (Acquire, Income, Dispose, TransferOut, TransferIn, Unclassified,
+/// ImportConflict — these carry Import EventIds, not Decision EventIds, so they cannot appear in
+/// the void list; the check on Decision-id'd events guards the decision payload variants only).
+pub fn is_revocable_payload(payload: &btctax_core::EventPayload) -> bool {
+    use btctax_core::EventPayload;
+    matches!(
+        payload,
+        EventPayload::TransferLink(_)
+            | EventPayload::ReclassifyOutflow(_)
+            | EventPayload::ClassifyInbound(_)
+            | EventPayload::ManualFmv(_)
+            | EventPayload::ClassifyRaw(_)
+            | EventPayload::MethodElection(_)
+            | EventPayload::LotSelection(_)
+            | EventPayload::ReclassifyIncome(_)
+            | EventPayload::SafeHarborAllocation(_)
+    )
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

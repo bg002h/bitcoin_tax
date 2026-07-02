@@ -16,7 +16,7 @@
 use crate::edit::form::{
     ClassifyInboundFlowState, ClassifyInboundModalState, MutationModalState, ProfileFormState,
     ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyOutflowFlowState,
-    ReclassifyOutflowModalState, SetFmvFlowState, SetFmvModalState,
+    ReclassifyOutflowModalState, SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
 };
 use btctax_cli::Session;
 use btctax_store::Passphrase;
@@ -111,6 +111,12 @@ pub struct EditorApp {
     pub set_fmv_flow: Option<SetFmvFlowState>,
     /// Set-fmv confirmation modal.  `Some` while awaiting Enter/Esc.
     pub set_fmv_modal: Option<SetFmvModalState>,
+    /// Full void flow state.  `Some` while the flow is open.
+    ///
+    /// Dispatch order: void_modal (layer 6) → void_flow (flow layer) → ...
+    pub void_flow: Option<VoidFlowState>,
+    /// Void confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub void_modal: Option<VoidModalState>,
     /// One-line status (saved / error), shown in the footer.
     /// Cleared on the next non-modal key press (mirrors the viewer's `export_status`
     /// semantics, app.rs:140 [R0-N5]).
@@ -142,6 +148,8 @@ impl EditorApp {
             reclassify_income_modal: None,
             set_fmv_flow: None,
             set_fmv_modal: None,
+            void_flow: None,
+            void_modal: None,
             status: None,
         }
     }

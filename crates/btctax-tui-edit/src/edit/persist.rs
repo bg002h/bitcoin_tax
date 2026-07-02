@@ -166,6 +166,60 @@ pub fn persist_set_fmv(
     Ok(id)
 }
 
+/// Append a `VoidDecisionEvent` decision and atomically save the vault.
+///
+/// `target_event_id` is the EventId of the revocable decision to void.
+/// `now` is INJECTED at Enter-press for test determinism.
+///
+/// # LotSelection side-effect (reconcile.rs:117–147)
+/// If the target decision is a `LotSelection`, also calls
+/// `btctax_cli::optimize_attest::clear(session.conn(), &ls.disposal_event)` BEFORE save —
+/// same atomic batch as the CLI void command. Non-LotSelection targets are unaffected.
+///
+/// # Idempotent retry semantics [M1]
+/// A retry appends a second `VoidDecisionEvent` for the SAME original target (NOT a
+/// void-of-void — the target is the original decision, so resolve.rs:312–321 does not fire).
+/// The BTreeSet insert in resolve.rs:330 is idempotent — no conflict fires; the second row is
+/// inert. Status after retry: clean-success. On `Err(save)`: the void modal closes, the flow
+/// stays at List, status "Save error: {e}"; retry = re-select → modal → Enter. Pinned by
+/// KAT-VOID-RETRY.
+pub fn persist_void(
+    session: &mut btctax_cli::Session,
+    target_event_id: btctax_core::EventId,
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, btctax_cli::CliError> {
+    use btctax_core::{
+        event::VoidDecisionEvent,
+        persistence::{append_decision, load_all},
+        EventPayload,
+    };
+
+    // Detect LotSelection target for the optimize_attest side-effect.
+    let events = load_all(session.conn())?;
+    let disposal_to_clear: Option<btctax_core::EventId> = events
+        .iter()
+        .find(|e| e.id == target_event_id)
+        .and_then(|e| match &e.payload {
+            EventPayload::LotSelection(ls) => Some(ls.disposal_event.clone()),
+            _ => None,
+        });
+
+    let id = append_decision(
+        session.conn(),
+        EventPayload::VoidDecisionEvent(VoidDecisionEvent { target_event_id }),
+        now,
+        time::UtcOffset::UTC,
+        None,
+    )?;
+
+    if let Some(disposal) = disposal_to_clear {
+        btctax_cli::optimize_attest::clear(session.conn(), &disposal)?;
+    }
+
+    session.save()?;
+    Ok(id)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1028,6 +1082,88 @@ mod tests {
             serde_json::from_str(&tail.payload_json).expect("must deserialise");
         assert_eq!(stored_payload, payload);
 
+        drop(session);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let post_disk = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(post_disk, post, "on-disk must equal in-memory post");
+    }
+
+    // ── KAT-P2e — append-only strict prefix test (void / VoidDecisionEvent append) ─
+    //
+    // Invariant: persist_void appends EXACTLY one VoidDecisionEvent to the tail;
+    // the existing prefix is unchanged; the tail round-trips as VoidDecisionEvent
+    // targeting the seeded MethodElection decision.
+
+    #[test]
+    fn kat_p2e_append_only_strict_prefix_void() {
+        use btctax_core::event::{EventPayload, MethodElection};
+        use btctax_core::persistence::{append_decision, load_all_ordered};
+        use btctax_core::EventId;
+        use btctax_store::Passphrase;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p2e-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        // Seed a MethodElection decision (the target for the void).
+        let me_id: EventId;
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let now = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+            let p = EventPayload::MethodElection(MethodElection {
+                effective_from: date!(2024 - 01 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            let id = append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
+            me_id = id;
+            session.save().unwrap();
+        }
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(pre.len(), 1, "pre must have 1 event (the MethodElection)");
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+        assert_eq!(pre_max_seq, 1);
+
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+        let returned_id = persist_void(&mut session, me_id.clone(), now).unwrap();
+
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 1, "post must have pre + 1 rows");
+        assert_eq!(&post[..pre.len()], pre.as_slice(), "strict prefix");
+
+        let tail = &post[pre.len()];
+        let tail_seq = tail.decision_seq.expect("tail must have decision_seq");
+        assert_eq!(
+            tail_seq,
+            (pre_max_seq + 1) as i64,
+            "tail seq must be pre_max+1"
+        );
+
+        let tail_event_id = EventId::Decision {
+            seq: tail_seq as u64,
+        };
+        assert_eq!(returned_id, tail_event_id, "returned id must match tail");
+
+        let stored_payload: EventPayload =
+            serde_json::from_str(&tail.payload_json).expect("tail must deserialise");
+        match &stored_payload {
+            EventPayload::VoidDecisionEvent(v) => {
+                assert_eq!(
+                    v.target_event_id, me_id,
+                    "void must target the seeded MethodElection"
+                );
+            }
+            other => panic!("expected VoidDecisionEvent, got {other:?}"),
+        }
+
+        // Drop + reopen: same strict-prefix holds on disk.
         drop(session);
         let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
         let post_disk = load_all_ordered(session2.conn()).unwrap();
