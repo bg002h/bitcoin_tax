@@ -40,7 +40,12 @@ fn gem_wallet() -> WalletId {
 }
 
 /// Build an imported LedgerEvent (Source::Coinbase by default).
-fn ev(ref_str: &str, ts: time::OffsetDateTime, wallet: WalletId, payload: EventPayload) -> LedgerEvent {
+fn ev(
+    ref_str: &str,
+    ts: time::OffsetDateTime,
+    wallet: WalletId,
+    payload: EventPayload,
+) -> LedgerEvent {
     LedgerEvent {
         id: EventId::import(Source::Coinbase, SourceRef::new(ref_str)),
         utc_timestamp: ts,
@@ -141,7 +146,11 @@ fn reclassify_outflow_missing_target_yields_blocker() {
             donee: None,
         }),
     );
-    let st = project(&[buy, out, bad], &StaticPrices::default(), &ProjectionConfig::default());
+    let st = project(
+        &[buy, out, bad],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
 
     assert_eq!(
         count_decision_conflicts(&st),
@@ -184,7 +193,11 @@ fn reclassify_outflow_wrong_type_target_income_yields_blocker() {
             donee: None,
         }),
     );
-    let st = project(&[income, bad], &StaticPrices::default(), &ProjectionConfig::default());
+    let st = project(
+        &[income, bad],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
 
     assert_eq!(
         count_decision_conflicts(&st),
@@ -227,7 +240,11 @@ fn classify_inbound_missing_target_yields_blocker() {
             },
         }),
     );
-    let st = project(&[tin, bad], &StaticPrices::default(), &ProjectionConfig::default());
+    let st = project(
+        &[tin, bad],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
 
     // Filter specifically for DecisionConflict (UnknownBasisInbound is also expected for the TransferIn).
     assert_eq!(
@@ -237,7 +254,10 @@ fn classify_inbound_missing_target_yields_blocker() {
         st.blockers
     );
     // No lot created from the bad ClassifyInbound.
-    assert!(st.lots.is_empty(), "no lot expected from bad ClassifyInbound");
+    assert!(
+        st.lots.is_empty(),
+        "no lot expected from bad ClassifyInbound"
+    );
     assert!(st.income_recognized.is_empty(), "no income expected");
 }
 
@@ -284,7 +304,11 @@ fn classify_inbound_wrong_type_target_transferout_yields_blocker() {
             },
         }),
     );
-    let st = project(&[buy, out, bad], &StaticPrices::default(), &ProjectionConfig::default());
+    let st = project(
+        &[buy, out, bad],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
 
     assert_eq!(
         count_decision_conflicts(&st),
@@ -329,7 +353,11 @@ fn manual_fmv_missing_target_yields_blocker() {
             usd_fmv: dec!(99999.00),
         }),
     );
-    let st = project(&[income, bad], &StaticPrices::default(), &ProjectionConfig::default());
+    let st = project(
+        &[income, bad],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
 
     assert_eq!(
         count_decision_conflicts(&st),
@@ -372,7 +400,11 @@ fn manual_fmv_wrong_type_target_transferin_yields_blocker() {
             usd_fmv: dec!(99999.00),
         }),
     );
-    let st = project(&[tin, bad], &StaticPrices::default(), &ProjectionConfig::default());
+    let st = project(
+        &[tin, bad],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
 
     // Filter for DecisionConflict specifically (UnknownBasisInbound also present from the TransferIn).
     assert_eq!(
@@ -427,7 +459,11 @@ fn reclassify_outflow_valid_happy_path() {
             donee: None,
         }),
     );
-    let st = project(&[buy, out, recl], &StaticPrices::default(), &ProjectionConfig::default());
+    let st = project(
+        &[buy, out, recl],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
 
     assert_eq!(
         count_decision_conflicts(&st),
@@ -469,7 +505,11 @@ fn classify_inbound_valid_happy_path() {
             },
         }),
     );
-    let st = project(&[tin, cls], &StaticPrices::default(), &ProjectionConfig::default());
+    let st = project(
+        &[tin, cls],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
 
     assert_eq!(
         count_decision_conflicts(&st),
@@ -478,10 +518,7 @@ fn classify_inbound_valid_happy_path() {
         st.blockers
     );
     assert_eq!(st.lots.len(), 1, "gift lot must be created");
-    assert!(
-        st.income_recognized.is_empty(),
-        "gift is not income"
-    );
+    assert!(st.income_recognized.is_empty(), "gift is not income");
 }
 
 // ── Test 9: ManualFmv valid happy path (FmvMissing Income) ────────────────────────────────────
@@ -511,7 +548,11 @@ fn manual_fmv_valid_happy_path_fmv_missing() {
             usd_fmv: dec!(9999.00),
         }),
     );
-    let st = project(&[income, fmv_dec], &StaticPrices::default(), &ProjectionConfig::default());
+    let st = project(
+        &[income, fmv_dec],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
 
     assert_eq!(
         count_decision_conflicts(&st),
@@ -521,7 +562,9 @@ fn manual_fmv_valid_happy_path_fmv_missing() {
     );
     // ManualFmv override applied: FmvMissing blocker should not fire.
     assert!(
-        st.blockers.iter().all(|b| b.kind != BlockerKind::FmvMissing),
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::FmvMissing),
         "FmvMissing must not fire when ManualFmv override is applied: {:?}",
         st.blockers
     );

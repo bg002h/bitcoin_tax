@@ -551,7 +551,8 @@ pub fn resolve(
                             blockers.push(Blocker {
                                 kind: BlockerKind::DecisionConflict,
                                 event: Some(d.id.clone()),
-                                detail: "duplicate ClassifyInbound for the same TransferIn event".into(),
+                                detail: "duplicate ClassifyInbound for the same TransferIn event"
+                                    .into(),
                             });
                             // Second decision EXCLUDED; first-wins value stays in map.
                         } else {
@@ -598,7 +599,9 @@ pub fn resolve(
                             blockers.push(Blocker {
                                 kind: BlockerKind::DecisionConflict,
                                 event: Some(d.id.clone()),
-                                detail: "duplicate ReclassifyOutflow for the same TransferOut event".into(),
+                                detail:
+                                    "duplicate ReclassifyOutflow for the same TransferOut event"
+                                        .into(),
                             });
                             // Second decision EXCLUDED; first-wins value stays in map.
                         } else {
