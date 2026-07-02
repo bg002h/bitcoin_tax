@@ -14,7 +14,7 @@ use btctax_cli::{cmd, eventref, render, Session};
 use btctax_core::persistence::load_all;
 use btctax_core::{
     form_8283, Carryforward, DonationDetails, EventPayload, FilingStatus, Form8283Section,
-    InboundClass, IncomeKind, OutflowClass, TaxProfile,
+    InboundClass, IncomeKind, OutflowClass, SeTaxResult, TaxProfile,
 };
 use btctax_store::Passphrase;
 use rust_decimal_macros::dec;
@@ -1068,6 +1068,173 @@ fn tax_profile_negative_schedule_c_expenses_rejected() {
         status.code().unwrap_or(0),
         0,
         "btctax tax-profile --schedule-c-expenses=-5 must exit non-zero; \
+         if it exits 0 the negative-value guard has been removed"
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────────────
+// [burndown-3 D2] §6017 $400 filing-floor note KATs
+// ──────────────────────────────────────────────────────────────────────────────────────────────
+
+/// [burndown-3 D2] §6017 floor note appears when base < $400 — including the exact case where
+/// the PRE-factor profit exceeds $400: net_se $430 → base = round_cents(430 × 0.9235) = $397.10
+/// (the raw product $397.1050 is an exact tie; house ROUND_HALF_EVEN resolves to the even cent
+/// — $397.10, NOT $397.11). The §6017/§1402(b)(2) test is on the ×0.9235 base.
+#[test]
+fn schedule_se_6017_floor_note_present_below_400_base() {
+    // Pin the ROUND_HALF_EVEN tie-break directly (R0-M1 claim).
+    assert_eq!(
+        btctax_core::conventions::round_cents(dec!(430.00) * dec!(0.9235)),
+        dec!(397.10),
+        "ROUND_HALF_EVEN: the exact tie 397.1050 resolves to the even cent"
+    );
+
+    let r = SeTaxResult {
+        net_se: dec!(430.00),
+        base: dec!(397.10),
+        ss: dec!(49.24),
+        medicare: dec!(11.52),
+        addl: dec!(0),
+        total: dec!(60.76),
+        deductible_half: dec!(30.38),
+    };
+    let s = render::render_schedule_se(
+        2025,
+        Some(&r),
+        dec!(430.00),
+        true,
+        dec!(0),
+        dec!(0),
+        dec!(0),
+    )
+    .expect("Some(r) arm always renders");
+    assert!(
+        s.contains("(§6017 filing floor)"),
+        "§6017 note must be present when base < $400:\n{s}"
+    );
+    assert!(
+        s.contains("397.10"),
+        "the note must show the ×0.9235 base (397.10, ROUND_HALF_EVEN):\n{s}"
+    );
+    assert!(
+        s.contains("§1402(j)(2)"),
+        "the church-employee carve-out must be present:\n{s}"
+    );
+}
+
+/// [burndown-3 D2] §6017 floor note is ABSENT when base ≥ $400 (boundary: exactly $400 is
+/// "400 or more" — no note).
+#[test]
+fn schedule_se_6017_floor_note_absent_at_or_above_400_base() {
+    let r = SeTaxResult {
+        net_se: dec!(433.14),
+        base: dec!(400.00), // exactly at the floor → §6017 filing required → NO note
+        ss: dec!(49.60),
+        medicare: dec!(11.60),
+        addl: dec!(0),
+        total: dec!(61.20),
+        deductible_half: dec!(30.60),
+    };
+    let s = render::render_schedule_se(
+        2025,
+        Some(&r),
+        dec!(433.14),
+        true,
+        dec!(0),
+        dec!(0),
+        dec!(0),
+    )
+    .expect("Some(r) arm always renders");
+    assert!(
+        !s.contains("§6017"),
+        "no §6017 note at base == $400 (strict <):\n{s}"
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────────────
+// [burndown-3 D3] Negative-flag binary tests — W-2 wage guards
+// ──────────────────────────────────────────────────────────────────────────────────────────────
+
+/// [burndown-3 D3] Negative `--w2-ss-wages` rejected at the binary level.
+///
+/// Drives the REAL binary via `env!("CARGO_BIN_EXE_btctax")` and locks the
+/// `--w2-ss-wages must not be negative` guard (main.rs:738-740, Chunk-A M-1 discharge).
+#[test]
+fn tax_profile_negative_w2_ss_wages_rejected() {
+    // Minimal vault: just init (validation fires before any vault write).
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let status = std::process::Command::new(bin)
+        .args([
+            "--vault",
+            vault.to_str().expect("vault path is valid UTF-8"),
+            "tax-profile",
+            "--year",
+            "2025",
+            "--filing-status",
+            "single",
+            "--ordinary-taxable-income",
+            "40000",
+            "--magi-excluding-crypto",
+            "60000",
+            "--qualified-dividends",
+            "0",
+            "--w2-ss-wages=-5",
+        ])
+        .env("BTCTAX_PASSPHRASE", "pw")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("btctax binary must execute successfully");
+    assert_ne!(
+        status.code().unwrap_or(0),
+        0,
+        "btctax tax-profile --w2-ss-wages=-5 must exit non-zero; \
+         if it exits 0 the negative-value guard has been removed"
+    );
+}
+
+/// [burndown-3 D3] Negative `--w2-medicare-wages` rejected at the binary level.
+///
+/// Drives the REAL binary via `env!("CARGO_BIN_EXE_btctax")` and locks the
+/// `--w2-medicare-wages must not be negative` guard (main.rs:746-750, Chunk-A M-1 discharge).
+#[test]
+fn tax_profile_negative_w2_medicare_wages_rejected() {
+    // Minimal vault: just init (validation fires before any vault write).
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let status = std::process::Command::new(bin)
+        .args([
+            "--vault",
+            vault.to_str().expect("vault path is valid UTF-8"),
+            "tax-profile",
+            "--year",
+            "2025",
+            "--filing-status",
+            "single",
+            "--ordinary-taxable-income",
+            "40000",
+            "--magi-excluding-crypto",
+            "60000",
+            "--qualified-dividends",
+            "0",
+            "--w2-medicare-wages=-5",
+        ])
+        .env("BTCTAX_PASSPHRASE", "pw")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("btctax binary must execute successfully");
+    assert_ne!(
+        status.code().unwrap_or(0),
+        0,
+        "btctax tax-profile --w2-medicare-wages=-5 must exit non-zero; \
          if it exits 0 the negative-value guard has been removed"
     );
 }

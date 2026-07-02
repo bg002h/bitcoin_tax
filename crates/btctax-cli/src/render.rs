@@ -1258,6 +1258,21 @@ pub fn render_schedule_se(
                      profile if you had a wage job)."
                 );
             }
+            // [burndown-3 D2] §6017 $400 filing floor — the test is on the ×0.9235 base (§1402(a),
+            // which includes the §1402(a)(12) 7.65% reduction), NOT the pre-factor net_se.
+            if r.base < rust_decimal::Decimal::from(400) {
+                let _ = writeln!(
+                    s,
+                    "  (§6017 filing floor) Net earnings from self-employment ({base}) are below $400: \
+                     a Schedule SE filing is required on account of this income only when net earnings \
+                     from self-employment (the ×92.35% base, §1402(a)) are $400 or more (§6017), and \
+                     below that floor no §1401 SE tax is imposed (§1402(b)(2); church employee income \
+                     excepted — §1402(j)(2), not modeled) — the figures above are shown for \
+                     transparency (other self-employment activities, if any, combine on your actual \
+                     Schedule SE).",
+                    base = fmt_money(r.base)
+                );
+            }
             // [D5] standalone note — SE tax is a SEPARATE liability, not in the income-tax + NIIT total.
             let _ = writeln!(
                 s,
