@@ -328,6 +328,8 @@ pub struct OutflowListItem {
 pub enum InboundVariant {
     Income,
     GiftReceived,
+    /// Cycle A: "my own coins" — a non-taxable inbound self-transfer.
+    SelfTransferMine,
 }
 
 /// Step in the classify-inbound flow.
@@ -354,6 +356,16 @@ pub enum ClassifyInboundStep {
         donor_basis_buf: FieldBuffer,
         donor_acquired_at_buf: FieldBuffer,
         /// 0 = fmv_at_gift, 1 = donor_basis, 2 = donor_acquired_at.
+        focus: usize,
+        error: Option<String>,
+    },
+    /// Cycle A: inbound self-transfer ("my own coins"). Both fields optional — empty basis defaults to
+    /// $0 (conservative) and fires the honest advisory; empty acquired defaults to the receipt date.
+    SelfTransferForm {
+        item: InboundListItem,
+        basis_buf: FieldBuffer,
+        acquired_buf: FieldBuffer,
+        /// 0 = basis (USD, optional), 1 = acquired_at (YYYY-MM-DD, optional).
         focus: usize,
         error: Option<String>,
     },
@@ -467,6 +479,37 @@ pub fn validate_classify_inbound_gift(
         donor_acquired_at,
         fmv_at_gift,
     })
+}
+
+/// Validate the SelfTransferMine variant of the classify-inbound form (Cycle A).
+///
+/// Both fields are OPTIONAL:
+///   `basis_buf`    — empty → `None` ($0 default + honest advisory in the fold); else `parse_usd_arg(trim)`.
+///   `acquired_buf` — empty → `None` (receipt-date default); else `parse_date_arg(trim)` (YYYY-MM-DD).
+/// [R0-M4] whitespace-only is NOT empty (it parse-errors, never silently `None`). An explicit `0` basis
+/// parses to `Some(0)` — an attested zero cost, honored WITHOUT the advisory (the flag keys on `None`).
+///
+/// Returns the validated `InboundClass::SelfTransferMine` or an error string.
+pub fn validate_classify_inbound_self_transfer(
+    basis_buf: &FieldBuffer,
+    acquired_buf: &FieldBuffer,
+) -> Result<InboundClass, String> {
+    let basis = if basis_buf.is_empty() {
+        None
+    } else {
+        let t = basis_buf.buf.trim();
+        Some(Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?)
+    };
+
+    let acquired_at = if acquired_buf.is_empty() {
+        None
+    } else {
+        let t = acquired_buf.buf.trim();
+        let fmt = time::macros::format_description!("[year]-[month]-[day]");
+        Some(time::Date::parse(t, fmt).map_err(|e| format!("bad date {t:?}: {e}"))?)
+    };
+
+    Ok(InboundClass::SelfTransferMine { basis, acquired_at })
 }
 
 // ── Reclassify-outflow flow types ────────────────────────────────────────────
@@ -2106,6 +2149,75 @@ mod tests {
             err.contains("bad date"),
             "bad date format must produce 'bad date' error; got: {err}"
         );
+    }
+
+    // ── KAT-V-CI-ST: SelfTransferMine validator (Cycle A, Task 3) ────────────
+
+    /// Both fields empty → `SelfTransferMine { basis: None, acquired_at: None }` (the conservative
+    /// defaults path; the fold applies $0 + receipt-date and fires the honest advisory).
+    #[test]
+    fn kat_v_ci_st_1_both_empty_gives_none_none() {
+        let cls = validate_classify_inbound_self_transfer(&FieldBuffer::new(), &FieldBuffer::new())
+            .unwrap();
+        if let InboundClass::SelfTransferMine { basis, acquired_at } = cls {
+            assert!(basis.is_none(), "empty basis_buf → None");
+            assert!(acquired_at.is_none(), "empty acquired_buf → None");
+        } else {
+            panic!("expected SelfTransferMine variant");
+        }
+    }
+
+    /// Both fields supplied → parsed basis + acquisition date.
+    #[test]
+    fn kat_v_ci_st_2_supplied_fields_parse() {
+        use rust_decimal_macros::dec;
+        use time::macros::date;
+        let mut basis = FieldBuffer::new();
+        basis.set("1234.56");
+        let mut acq = FieldBuffer::new();
+        acq.set("2015-01-02");
+        let cls = validate_classify_inbound_self_transfer(&basis, &acq).unwrap();
+        if let InboundClass::SelfTransferMine { basis, acquired_at } = cls {
+            assert_eq!(basis, Some(dec!(1234.56)));
+            assert_eq!(acquired_at, Some(date!(2015 - 01 - 02)));
+        } else {
+            panic!("expected SelfTransferMine variant");
+        }
+    }
+
+    /// An explicit `0` basis → `Some(0)` (attested zero-cost — the fold honors it WITHOUT the advisory).
+    #[test]
+    fn kat_v_ci_st_3_explicit_zero_basis_is_some_zero() {
+        use rust_decimal_macros::dec;
+        let mut basis = FieldBuffer::new();
+        basis.set("0");
+        let cls = validate_classify_inbound_self_transfer(&basis, &FieldBuffer::new()).unwrap();
+        if let InboundClass::SelfTransferMine { basis, .. } = cls {
+            assert_eq!(basis, Some(dec!(0)), "explicit 0 → Some(0), NOT None");
+        } else {
+            panic!("expected SelfTransferMine variant");
+        }
+    }
+
+    /// [R0-M4] Whitespace-only basis is NOT empty → a parse error (not silently None).
+    #[test]
+    fn kat_v_ci_st_4_whitespace_only_basis_is_parse_error() {
+        let mut basis = FieldBuffer::new();
+        basis.set("   ");
+        let err = validate_classify_inbound_self_transfer(&basis, &FieldBuffer::new()).unwrap_err();
+        assert!(
+            err.contains("bad USD"),
+            "whitespace basis → parse error; got: {err}"
+        );
+    }
+
+    /// Bad date format → "bad date" error.
+    #[test]
+    fn kat_v_ci_st_5_bad_date_is_error() {
+        let mut acq = FieldBuffer::new();
+        acq.set("not-a-date");
+        let err = validate_classify_inbound_self_transfer(&FieldBuffer::new(), &acq).unwrap_err();
+        assert!(err.contains("bad date"), "bad date → error; got: {err}");
     }
 
     // ── Parse failure: non-numeric ───────────────────────────────────────────

@@ -602,8 +602,9 @@ fn draw_classify_inbound_form(frame: &mut Frame, area: Rect, step: &ClassifyInbo
     let (title, content) = match step {
         ClassifyInboundStep::VariantPicker { item, variant } => {
             let variant_str = match variant {
-                InboundVariant::Income => "> Income         GiftReceived",
-                InboundVariant::GiftReceived => "  Income       > GiftReceived",
+                InboundVariant::Income => "> Income    GiftReceived    SelfTransferMine",
+                InboundVariant::GiftReceived => "  Income  > GiftReceived    SelfTransferMine",
+                InboundVariant::SelfTransferMine => "  Income    GiftReceived  > SelfTransferMine",
             };
             let c = format!(
                 "  target: {target}\n\
@@ -703,6 +704,45 @@ fn draw_classify_inbound_form(frame: &mut Frame, area: Rect, step: &ClassifyInbo
                 target = item.blocker_event.canonical(),
             );
             (" Classify Inbound — GiftReceived  [EDITOR] ", c)
+        }
+        ClassifyInboundStep::SelfTransferForm {
+            item,
+            basis_buf,
+            acquired_buf,
+            focus,
+            error,
+        } => {
+            let basis_line = format!(
+                "  {} basis (USD, optional):  {}",
+                if *focus == 0 { ">" } else { " " },
+                basis_buf.buf,
+            );
+            let acquired_line = format!(
+                "  {} acquired_at (YYYY-MM-DD, optional): {}",
+                if *focus == 1 { ">" } else { " " },
+                acquired_buf.buf,
+            );
+            let zero_basis_note = if basis_buf.is_empty() {
+                "\n  NOTE: empty basis → $0 default (non-gating advisory); supply real cost if known."
+            } else {
+                ""
+            };
+            let err_line = error
+                .as_deref()
+                .map(|e| format!("\n  Error: {e}"))
+                .unwrap_or_default();
+            let c = format!(
+                "  target: {target}   (my own coins — non-taxable)\n\
+                 \n\
+                 {basis_line}\n\
+                 {acquired_line}\
+                 {zero_basis_note}\
+                 {err_line}\n\
+                 \n\
+                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move focus   q: swallowed",
+                target = item.blocker_event.canonical(),
+            );
+            (" Classify Inbound — SelfTransferMine  [EDITOR] ", c)
         }
         // List step is rendered by draw_classify_inbound_list.
         ClassifyInboundStep::List => ("", String::new()),
