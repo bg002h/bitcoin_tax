@@ -57,15 +57,25 @@ impl From<btctax_core::CoreError> for PersistError {
     }
 }
 
+/// Revert the in-memory DB to `pre` after a mutation-committing step failed, mapping the error:
+/// `RolledBack` if the revert succeeds, `ResidueLive` if the revert ALSO fails (residue is live).
+fn rollback(
+    session: &mut btctax_cli::Session,
+    pre: &[u8],
+    err: btctax_cli::CliError,
+) -> PersistError {
+    match session.restore(pre) {
+        Ok(()) => PersistError::RolledBack(err),
+        Err(_revert_err) => PersistError::ResidueLive(err),
+    }
+}
+
 /// `session.save()`; on failure revert the in-memory DB to `pre`. `Ok` on success; `RolledBack` on a
 /// save failure cleanly reverted; `ResidueLive` if the revert itself failed (residue live).
 fn save_or_rollback(session: &mut btctax_cli::Session, pre: Vec<u8>) -> Result<(), PersistError> {
     match session.save() {
         Ok(()) => Ok(()),
-        Err(save_err) => match session.restore(&pre) {
-            Ok(()) => Err(PersistError::RolledBack(save_err)),
-            Err(_revert_err) => Err(PersistError::ResidueLive(save_err)),
-        },
+        Err(save_err) => Err(rollback(session, &pre, save_err)),
     }
 }
 
@@ -266,8 +276,14 @@ pub fn persist_void(
         None,
     )?;
 
+    // A failure AFTER the committed append must roll back — else the void append becomes residue
+    // that could piggy-back a later save [WB-M1]. (`clear` is a pure in-memory DELETE; its failure
+    // is the same OOM/corruption class as a restore failure — nil reachability, but the invariant is
+    // now airtight and symmetric with `save_or_rollback`.)
     if let Some(disposal) = disposal_to_clear {
-        btctax_cli::optimize_attest::clear(session.conn(), &disposal)?;
+        if let Err(e) = btctax_cli::optimize_attest::clear(session.conn(), &disposal) {
+            return Err(rollback(session, &pre, e));
+        }
     }
 
     save_or_rollback(session, pre)?;
