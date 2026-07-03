@@ -4,6 +4,39 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ self-transfer completion, Cycle B — matched in/out pairs — SHIPPED (2026-07-03) — PROGRAM COMPLETE
+
+Identify + CONFIRM that an inbound leg + an outbound leg are two sides of one self-transfer. Two
+representations: **RELOCATE** (cross-wallet, dest tracked) reuses the existing `TransferLink` out→in (basis
+carries to the destination); **DROP** (passthrough — coins in+out of a tracked waypoint to external) = a
+NEW `EventPayload::SelfTransferPassthrough` decision mapping BOTH legs to `Op::Skip` (net zero, no lot, no
+tax). A read-only **matcher** (`Session::self_transfer_match_plan`) PROPOSES pairs (candidate ins =
+`UnknownBasisInbound`, outs = `pending_reconciliation`; amount-within-fee-tolerance + ±2-day directional
+window + one-in/one-out ambiguity + txid corroboration; DROP/RELOCATE suggested by wallet topology) — but
+NEVER auto: the user confirms every pair (CLI `reconcile match-self-transfers` two-phase / TUI
+proposal-list). **False-match safety is structural** (only unreconciled legs are candidates). The
+load-bearing **[I1] cross-type overlap guard** (a separate post-collection loop) raises a Hard
+`DecisionConflict` if a passthrough leg also carries a taxable classification → the taxable event ALWAYS
+wins (never silently skipped). Spec R0 GREEN (2 rounds; round 1 caught I1 + the void surface); whole-diff
+review 0C/0I/0M/2N (fault-injected I1 both directions + DROP; the CLI force-apply verified unable to hide a
+taxable event). **992 workspace tests.** Governed by [[self-transfer-completion-policy]]. Reviews:
+`reviews/R0-spec-self-transfer-passthrough-round-{1,2}.md`,
+`reviews/whole-branch-review-self-transfer-passthrough-round-1.md`.
+
+**The self-transfer completion program (Cycle A inbound + Cycle B matched pairs) is COMPLETE.**
+
+**NEXT (user-approved queue, 2026-07-03):** (1) **bulk-classify-inbound-self-transfer** — the inbound
+mirror of bulk-link (sweep leftover unmatched `UnknownInbound` deposits → self-transfer-in, $0 basis,
+filtered/per-row-excludable/confirmed/atomic; surface the total USD given $0 basis); then (2) **bulk
+reconcile for the OTHER decision types** (void, resolve-conflict, outflow→Sell/Spend/Gift/Donate,
+inbound→Income). Each its own [[standard-workflow]] cycle.
+
+**Nits (non-blocking):** [WD-N1] the CLI "writes-nothing" test asserts event-count not bytes (byte-exact
+coverage already exists via the TUI cancel KAT); [WD-N2] Phase-2 confirm of an ambiguous proposed pair
+doesn't re-echo the ambiguity flag (spec-compliant). — OPEN (nits).
+
+---
+
 ## ✅ self-transfer completion, Cycle A — inbound self-transfer-in — SHIPPED (2026-07-03)
 
 New `btctax-core` capability (the first core change in a long TUI-only series): classify a pending
