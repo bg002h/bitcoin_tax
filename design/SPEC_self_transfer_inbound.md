@@ -1,8 +1,9 @@
 # SPEC — self-transfer completion, Cycle A: inbound self-transfer-in
 
 **Source baseline:** `main` @ `a740b3d` (all anchors verified at write time).
-**Review status: R0 round 1 folded (0C / 0I / 3M / 3N — GATE PASSED; all folded); awaiting R0 round 2.
-Review: `reviews/R0-spec-self-transfer-inbound-round-1.md`.**
+**Review status: R0-GREEN (2 rounds; 0 Critical / 0 Important). Reviews:
+`reviews/R0-spec-self-transfer-inbound-round-{1,2}.md` (round 1: 0C/0I/3M/3N — all tax-correctness
+invariants verified; round 2: 0C/0I/0M/0N, no drift). Cleared to implement.**
 **Design lineage:** brainstorm with the user (2026-07-03) → architect design (grounded at `a740b3d`).
 First half of the "self-transfer completion" program. **Cycle B (matched in/out pairs — the
 `SelfTransferPassthrough` drop primitive + the confirmed matcher) is OUT OF SCOPE here** — its own cycle.
@@ -191,7 +192,10 @@ event is a raw `TransferIn` with no non-voided `ClassifyInbound`). Add:
 - **[R0-M3] Enumerate the exhaustive-match sites Task 3 must add an arm to** (all compile-forced, not
   silent): `draw_classify_inbound_modal` (`draw_edit.rs:728`, the modal RENDER fn — a new arm, distinct
   from the reused modal STATE), the `cls_desc` status match (`main.rs:2193`), the variant Tab-cycle
-  (`main.rs:769`), the variant→form transition (`main.rs:783`), and the step-index helper (`main.rs:698`).
+  (`main.rs:769`), the variant→form transition (`main.rs:783`), the step-index helper (`main.rs:698`),
+  and the VariantPicker/step draw arms (inside `draw_classify_inbound_form` `:591`). **[R0-r2]** ALSO wire
+  the `SelfTransferForm` KEY-HANDLER (the `handle_ci_*` branches are `if let`, NOT compile-forced — a
+  missed handler is a silent dead step, caught by the Task-3 E2E).
 
 ---
 
