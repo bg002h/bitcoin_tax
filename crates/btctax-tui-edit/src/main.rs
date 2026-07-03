@@ -4963,8 +4963,9 @@ fn derive_attest_status(snap: &btctax_tui::app::Snapshot, new_attest_id: &EventI
 // ── Safe-harbor-allocate flow (chunk 5, D1/D2/D4/D5/D6) ───────────────────────
 
 /// Open the safe-harbor-allocate flow (`A`) — the CREATION counterpart to attest (`a`). Six
-/// eligibility steps (spec D1), in order. The residue math is done ONLY through
-/// `Session::safe_harbor_residue` (KAT-G1-clean — no `conn(`/`load_all`/`project` inline here).
+/// eligibility steps (spec D1), in order. The residue math is delegated ENTIRELY to
+/// `Session::safe_harbor_residue` — no inline DB access (`conn(`/`load_all`/`project`) here. Of those,
+/// only `conn(` is a KAT-G1 persist-only token; reads (`load_all`/`project`) are not gated.
 fn open_safe_harbor_allocate_flow(app: &mut EditorApp) {
     // 1. Latch: refuse while a prior save left unrevertable residue.
     if let Some(s) = app.residue_latch_status() {
