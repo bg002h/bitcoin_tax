@@ -26,15 +26,16 @@ use edit::form::{
     validate_classify_raw_acquire, validate_classify_raw_income, validate_donation_details,
     validate_reclassify_income, validate_reclassify_outflow, validate_select_lots,
     validate_set_fmv, AllocLotRow, BulkLinkFlowState, BulkLinkModalState, BulkLinkRowItem,
-    BulkLinkStep, BulkStiFlowState, BulkStiModalState, BulkStiRowItem, BulkStiStep,
-    ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState,
-    ClassifyRawModalState, ClassifyRawStep, ClassifyRawVariant, ConflictItem, DisposalKind,
-    DisposalListItem, DonationListItem, FieldBuffer, FmvListItem, InEventItem, InboundListItem,
-    InboundVariant, IncomeListItem, LinkMode, LinkTransferFlowState, LinkTransferModalState,
-    LinkTransferStep, LotPickFormRow, MatchPairAction, MatchSelfTransferItem,
-    MatchSelfTransfersFlowState, MatchSelfTransfersModalState, MutationModalState,
-    OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep, OptimizeCandidateItem,
-    OutflowKind, OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
+    BulkLinkStep, BulkResolveFlowState, BulkResolveModalState, BulkResolveRowItem, BulkResolveStep,
+    BulkStiFlowState, BulkStiModalState, BulkStiRowItem, BulkStiStep, ClassifyInboundFlowState,
+    ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
+    ClassifyRawStep, ClassifyRawVariant, ConflictItem, DisposalKind, DisposalListItem,
+    DonationListItem, FieldBuffer, FmvListItem, InEventItem, InboundListItem, InboundVariant,
+    IncomeListItem, LinkMode, LinkTransferFlowState, LinkTransferModalState, LinkTransferStep,
+    LotPickFormRow, MatchPairAction, MatchSelfTransferItem, MatchSelfTransfersFlowState,
+    MatchSelfTransfersModalState, MutationModalState, OptimizeAcceptFlowState,
+    OptimizeAcceptModalState, OptimizeAcceptStep, OptimizeCandidateItem, OutflowKind,
+    OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
     ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
     ReclassifyOutflowModalState, ReclassifyOutflowStep, ResolveConflictFlowState,
     ResolveConflictModalState, ResolveConflictStep, ResolveKind, SafeHarborAllocateFlowState,
@@ -212,6 +213,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Bulk-resolve-conflict-modal dispatch — BEFORE flow, form, screen ─────
+    if app.bulk_resolve_modal.is_some() {
+        handle_bulk_resolve_modal_key(app, key);
+        return;
+    }
+
     // ── Match-self-transfers-modal dispatch — BEFORE flow, form, screen ──────
     if app.match_self_transfers_modal.is_some() {
         handle_match_self_transfers_modal_key(app, key);
@@ -267,6 +274,10 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.bulk_sti_flow.is_some() {
         handle_bulk_sti_flow_key(app, key);
+        return;
+    }
+    if app.bulk_resolve_flow.is_some() {
+        handle_bulk_resolve_flow_key(app, key);
         return;
     }
     if app.match_self_transfers_flow.is_some() {
@@ -351,6 +362,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('A') => open_safe_harbor_allocate_flow(app),
                 KeyCode::Char('b') => open_bulk_link_transfer_flow(app),
                 KeyCode::Char('B') => open_bulk_self_transfer_in_flow(app),
+                KeyCode::Char('C') => open_bulk_resolve_conflict_flow(app),
                 KeyCode::Char('m') => open_match_self_transfers_flow(app),
                 KeyCode::Char('i') => open_resolve_conflict_flow(app),
                 KeyCode::Char('z') => open_optimize_accept_flow(app),
@@ -584,6 +596,8 @@ impl EditorApp {
         self.bulk_link_modal = None;
         self.bulk_sti_flow = None;
         self.bulk_sti_modal = None;
+        self.bulk_resolve_flow = None;
+        self.bulk_resolve_modal = None;
         self.match_self_transfers_flow = None;
         self.match_self_transfers_modal = None;
     }
@@ -6267,6 +6281,261 @@ fn derive_bulk_sti_status(snap: &btctax_tui::app::Snapshot, n: usize) -> String 
         "Classified {n} inbound deposit(s) as self-transfer-in ($0 basis); \
          {remaining} unclassified inbound(s) remain."
     )
+}
+
+// ── Bulk resolve-conflict flow (bulk-resolve-conflict D3) ─────────────────────
+
+/// Browse-key `C`: open the bulk resolve-conflict flow. READ-ONLY at open (the
+/// `Session::bulk_resolve_conflict_plan` helper appends/persists nothing); an empty conflict set sets a
+/// status and never opens the flow. Residue-latch gated like every mutating opener. The plan's
+/// STRUCTURED rows are rendered here into `current`/`new` summaries via `import_payload_summary` (the
+/// front-end formatter; [R0-M1] the CLI renders its own).
+fn open_bulk_resolve_conflict_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let plan = match app.session.as_ref() {
+        Some(s) => s.bulk_resolve_conflict_plan(),
+        None => return,
+    };
+    let plan = match plan {
+        Ok(p) => p,
+        Err(e) => {
+            app.status = Some(format!("Plan error: {e}"));
+            return;
+        }
+    };
+    if plan.rows.is_empty() {
+        app.status = Some("No unresolved import conflicts to bulk-resolve".to_string());
+        return;
+    }
+    let items: Vec<BulkResolveRowItem> = plan
+        .rows
+        .iter()
+        .map(|r| BulkResolveRowItem {
+            conflict_event: r.conflict_event.clone(),
+            target: r.target.clone(),
+            date: r.date,
+            current_summary: import_payload_summary(&r.current_payload),
+            new_summary: import_payload_summary(&r.new_payload),
+            new_fingerprint: r.new_fingerprint.clone(),
+            checked: true,
+        })
+        .collect();
+    app.bulk_resolve_flow = Some(BulkResolveFlowState {
+        step: BulkResolveStep::Choose,
+        kind: ResolveKind::Accept, // default; toggled in step 1
+        preview: TargetList::new(items),
+        error: None,
+    });
+}
+
+/// Dispatch to the correct sub-handler depending on `BulkResolveStep`.
+fn handle_bulk_resolve_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.bulk_resolve_flow.as_ref() {
+        Some(f) => match f.step {
+            BulkResolveStep::Choose => 0u8,
+            BulkResolveStep::Preview => 1,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_bulk_resolve_choose_key(app, key),
+        _ => handle_bulk_resolve_preview_key(app, key),
+    }
+}
+
+/// Step 1 — batch-wide Accept/Reject toggle. `←/→` (or `h/l`) toggles the kind; Enter → Preview; Esc →
+/// close flow; `q` swallowed.
+fn handle_bulk_resolve_choose_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l') => {
+            if let Some(f) = app.bulk_resolve_flow.as_mut() {
+                f.kind = match f.kind {
+                    ResolveKind::Accept => ResolveKind::Reject,
+                    ResolveKind::Reject => ResolveKind::Accept,
+                };
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(f) = app.bulk_resolve_flow.as_mut() {
+                f.error = None;
+                f.step = BulkResolveStep::Preview;
+            }
+        }
+        KeyCode::Esc => {
+            app.bulk_resolve_flow = None;
+        }
+        KeyCode::Char('q') => {}
+        _ => {}
+    }
+}
+
+/// Step 2 — per-row exclude checklist. `k/j/g/G` scroll; `Space`/`x` toggles the row's exclusion;
+/// Enter → confirm modal over the CHECKED rows (refuse if none); Esc → back to Choose; `q` swallowed.
+fn handle_bulk_resolve_preview_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(f) = app.bulk_resolve_flow.as_mut() {
+                f.preview.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(f) = app.bulk_resolve_flow.as_mut() {
+                f.preview.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(f) = app.bulk_resolve_flow.as_mut() {
+                f.preview.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(f) = app.bulk_resolve_flow.as_mut() {
+                f.preview.go_bottom();
+            }
+        }
+        KeyCode::Char(' ') | KeyCode::Char('x') => {
+            if let Some(f) = app.bulk_resolve_flow.as_mut() {
+                if let Some(i) = f.preview.table_state.selected() {
+                    if let Some(item) = f.preview.items.get_mut(i) {
+                        item.checked = !item.checked;
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => open_bulk_resolve_modal(app),
+        KeyCode::Esc => {
+            if let Some(f) = app.bulk_resolve_flow.as_mut() {
+                f.error = None;
+                f.step = BulkResolveStep::Choose;
+            }
+        }
+        KeyCode::Char('q') => {}
+        _ => {}
+    }
+}
+
+/// Capture the CHECKED preview rows into the confirmation modal. Empty selection → refuse (stay on
+/// Preview with a "Nothing selected" error), never open the modal.
+fn open_bulk_resolve_modal(app: &mut EditorApp) {
+    let modal = {
+        let f = match app.bulk_resolve_flow.as_ref() {
+            Some(f) => f,
+            None => return,
+        };
+        let count = crate::edit::form::bulk_resolve_checked_count(&f.preview.items);
+        if count == 0 {
+            None
+        } else {
+            let conflict_events: Vec<EventId> = f
+                .preview
+                .items
+                .iter()
+                .filter(|i| i.checked)
+                .map(|i| i.conflict_event.clone())
+                .collect();
+            Some(BulkResolveModalState {
+                kind: f.kind,
+                conflict_events,
+                count,
+            })
+        }
+    };
+    match modal {
+        Some(m) => app.bulk_resolve_modal = Some(m),
+        None => {
+            if let Some(f) = app.bulk_resolve_flow.as_mut() {
+                f.error = Some("Nothing selected — check at least one row".to_string());
+            }
+        }
+    }
+}
+
+/// Handle a key press while the bulk resolve-conflict confirmation modal is open (Tier-B non-revocable;
+/// explicit confirm, NOT typed-word).
+///
+/// Enter → `persist_bulk_resolve_conflict` (batch append + single save, mid-batch rollback via the
+/// shared helper) → re-project + `derive_bulk_resolve_status` + close; `Err(e)` → close modal, route
+/// `on_persist_error`. Esc → close modal only (back to Preview; nothing written). All else swallowed.
+fn handle_bulk_resolve_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (conflict_events, kind) = match app.bulk_resolve_modal.as_ref() {
+                Some(m) => (m.conflict_events.clone(), m.kind),
+                None => return,
+            };
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.bulk_resolve_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_bulk_resolve_conflict(
+                    session,
+                    conflict_events,
+                    kind,
+                    now,
+                )
+            };
+
+            match save_result {
+                Ok(n) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_bulk_resolve_status(&snap, kind, n);
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.bulk_resolve_modal = None;
+                    app.bulk_resolve_flow = None;
+                }
+                Err(e) => {
+                    app.bulk_resolve_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.bulk_resolve_modal = None;
+        }
+        _ => {}
+    }
+}
+
+/// Derive the post-apply status from RE-PROJECTED state (bulk-resolve-conflict D3): the applied count +
+/// the number of `ImportConflict` blockers that REMAIN unresolved.
+fn derive_bulk_resolve_status(
+    snap: &btctax_tui::app::Snapshot,
+    kind: ResolveKind,
+    n: usize,
+) -> String {
+    let remaining = snap
+        .state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::ImportConflict)
+        .count();
+    let verb = match kind {
+        ResolveKind::Accept => "Accepted",
+        ResolveKind::Reject => "Rejected",
+    };
+    format!("{verb} {n} import conflict(s); {remaining} unresolved remain.")
 }
 
 // ── Match-self-transfers flow (self-transfer-passthrough C3) ──────────────────
@@ -18877,6 +19146,237 @@ mod tests {
         assert!(
             included.contains(&i1) && !included.contains(&i2),
             "voided i1 is a fresh candidate again; classified i2 is not"
+        );
+    }
+
+    // ── Bulk resolve-conflict flow KATs (bulk-resolve-conflict D3) ───────────
+
+    /// Seed a vault with TWO unresolved `ImportConflict`s on two Acquires with DISTINCT dates so the
+    /// plan's date-sort is deterministic (row 0 = t1, earlier; row 1 = t2, later). Each target is
+    /// re-imported with a changed `usd_cost`: t1 30_000 → 40_000, t2 20_000 → 25_000. Returns `[t1, t2]`.
+    fn seed_two_conflicts_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> [EventId; 2] {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::WalletId;
+        use rust_decimal_macros::dec;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let t1 = EventId::import(Source::River, SourceRef::new("rc-bulk-1"));
+        let t2 = EventId::import(Source::River, SourceRef::new("rc-bulk-2"));
+        let wallet = Some(WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        });
+        let mk = |id: &EventId, ts, usd: rust_decimal::Decimal| LedgerEvent {
+            id: id.clone(),
+            utc_timestamp: ts,
+            original_tz: UtcOffset::UTC,
+            wallet: wallet.clone(),
+            payload: EventPayload::Acquire(Acquire {
+                sat: 100_000,
+                usd_cost: usd,
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ExchangeProvided,
+            }),
+        };
+        let ts1 = datetime!(2024-03-01 12:00:00 UTC);
+        let ts2 = datetime!(2024-06-01 12:00:00 UTC);
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        // v1 imports.
+        btctax_core::persistence::append_import_batch(
+            session.conn(),
+            &[mk(&t1, ts1, dec!(30000)), mk(&t2, ts2, dec!(20000))],
+        )
+        .unwrap();
+        session.save().unwrap();
+        // v2 re-imports (changed cost) → two ImportConflicts.
+        btctax_core::persistence::append_import_batch(
+            session.conn(),
+            &[mk(&t1, ts1, dec!(40000)), mk(&t2, ts2, dec!(25000))],
+        )
+        .unwrap();
+        session.save().unwrap();
+        [t1, t2]
+    }
+
+    /// `C` with NO unresolved conflicts → flow never opens; status set.
+    #[test]
+    fn bulk_resolve_refuses_when_no_conflicts() {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use rust_decimal_macros::dec;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulkrc-nocand";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            // A single clean Acquire (imported once) → no ImportConflict.
+            let batch = vec![LedgerEvent {
+                id: EventId::import(Source::River, SourceRef::new("acq-only")),
+                utc_timestamp: datetime!(2024-12-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(btctax_core::WalletId::Exchange {
+                    provider: "River".into(),
+                    account: "main".into(),
+                }),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(3000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            session.save().unwrap();
+        }
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('C')));
+        assert!(
+            app.bulk_resolve_flow.is_none(),
+            "no conflicts → flow must NOT open"
+        );
+        assert_eq!(
+            app.status.as_deref(),
+            Some("No unresolved import conflicts to bulk-resolve")
+        );
+    }
+
+    /// `C` → Choose; `←/→` toggles the batch-wide Accept/Reject kind (Accept default).
+    #[test]
+    fn bulk_resolve_accept_reject_toggle() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulkrc-toggle";
+        seed_two_conflicts_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('C')));
+        {
+            let f = app.bulk_resolve_flow.as_ref().expect("C opens the flow");
+            assert!(matches!(f.step, BulkResolveStep::Choose));
+            assert!(matches!(f.kind, ResolveKind::Accept), "default is Accept");
+            assert_eq!(f.preview.items.len(), 2, "both conflicts listed");
+        }
+        handle_key(&mut app, press(KeyCode::Right));
+        assert!(matches!(
+            app.bulk_resolve_flow.as_ref().unwrap().kind,
+            ResolveKind::Reject
+        ));
+        handle_key(&mut app, press(KeyCode::Left));
+        assert!(matches!(
+            app.bulk_resolve_flow.as_ref().unwrap().kind,
+            ResolveKind::Accept
+        ));
+    }
+
+    /// Unchecking a preview row omits its conflict from the confirm modal's batch.
+    #[test]
+    fn bulk_resolve_per_row_exclude_drops_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulkrc-exclude";
+        let [t1, _t2] = seed_two_conflicts_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('C'))); // → Choose
+        handle_key(&mut app, press(KeyCode::Enter)); // → Preview
+        {
+            let f = app.bulk_resolve_flow.as_ref().unwrap();
+            assert!(matches!(f.step, BulkResolveStep::Preview));
+            assert_eq!(f.preview.items.len(), 2, "both conflicts, all checked");
+            assert!(f.preview.items.iter().all(|i| i.checked));
+            assert_eq!(
+                f.preview.items[0].target, t1,
+                "row 0 (sorted-by-date) targets the earlier conflict t1"
+            );
+        }
+        // Exclude row 0 (t1's conflict) → only t2's conflict remains checked.
+        handle_key(&mut app, press(KeyCode::Char(' ')));
+        assert!(!app.bulk_resolve_flow.as_ref().unwrap().preview.items[0].checked);
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal
+        let m = app
+            .bulk_resolve_modal
+            .as_ref()
+            .expect("confirm modal must open over checked rows");
+        assert_eq!(m.count, 1, "one row excluded → one remains");
+        let row1_conflict = app.bulk_resolve_flow.as_ref().unwrap().preview.items[1]
+            .conflict_event
+            .clone();
+        assert_eq!(
+            m.conflict_events,
+            vec![row1_conflict],
+            "excluded t1 is absent from the batch (only t2's conflict)"
+        );
+    }
+
+    /// E2E: `C` → (Accept default) → Preview → exclude row 0 → confirm → APPLY. The INCLUDED conflict
+    /// (t2) resolves — its blocker clears and the projection adopts its new payload; the EXCLUDED
+    /// conflict (t1) STAYS flagged and keeps its current payload.
+    #[test]
+    fn bulk_resolve_then_conflicts_cleared() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-bulkrc";
+        seed_two_conflicts_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        {
+            let n = app
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .state
+                .blockers
+                .iter()
+                .filter(|b| b.kind == BlockerKind::ImportConflict)
+                .count();
+            assert_eq!(n, 2, "two conflicts start flagged");
+        }
+
+        handle_key(&mut app, press(KeyCode::Char('C'))); // → Choose (Accept default)
+        handle_key(&mut app, press(KeyCode::Enter)); // → Preview
+        handle_key(&mut app, press(KeyCode::Char(' '))); // exclude row 0 (t1)
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal
+        assert!(app.bulk_resolve_modal.is_some());
+        handle_key(&mut app, press(KeyCode::Enter)); // APPLY (persist + re-project)
+
+        assert!(app.bulk_resolve_modal.is_none() && app.bulk_resolve_flow.is_none());
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.contains("Accepted 1 import conflict") && status.contains("1 unresolved remain"),
+            "E2E-bulk-RC: status reports 1 accepted + 1 remaining; got {status:?}"
+        );
+        let snap = app.snapshot.as_ref().unwrap();
+        let remaining = snap
+            .state
+            .blockers
+            .iter()
+            .filter(|b| b.kind == BlockerKind::ImportConflict)
+            .count();
+        assert_eq!(remaining, 1, "excluded conflict (t1) stays flagged");
+        // t2 accepted → adopts new (25_000); t1 unresolved → keeps current (30_000). Σ basis = 55_000.
+        let total_basis: btctax_core::Usd = snap.state.lots.iter().map(|l| l.usd_basis).sum();
+        assert_eq!(
+            total_basis,
+            rust_decimal_macros::dec!(55000),
+            "included t2 adopts new basis; excluded t1 keeps current"
         );
     }
 

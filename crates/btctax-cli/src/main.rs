@@ -407,6 +407,26 @@ enum Reconcile {
         #[arg(long)]
         yes: bool,
     },
+    /// Bulk-resolve import conflicts: ACCEPT (adopt each new payload) or REJECT (keep each current
+    /// payload) MANY flagged `ImportConflict`s in one confirmed batch. Shows a `current → new` preview,
+    /// then requires --yes (or interactive y/N). Exactly one of --accept / --reject is required. Each
+    /// resolution is NON-REVOCABLE (`SupersedeImport`/`RejectImport` cannot be voided); to resolve a
+    /// conflict differently, exclude it and use single-item `accept-conflict`/`reject-conflict`.
+    #[command(group(clap::ArgGroup::new("resolve_action").required(true).args(["accept", "reject"])))]
+    BulkResolveConflict {
+        /// Accept every listed conflict (adopt each new payload onto its target).
+        #[arg(long)]
+        accept: bool,
+        /// Reject every listed conflict (keep each target's current payload).
+        #[arg(long)]
+        reject: bool,
+        /// Print the preview and exit without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip the interactive confirmation (non-interactive apply).
+        #[arg(long)]
+        yes: bool,
+    },
     /// Match unreconciled inbound + outbound legs as self-transfers (self-transfer-passthrough C3).
     /// With no --in/--out: PREVIEW the proposed pairs (read-only). With --in and --out: confirm ONE
     /// pair (DROP for a same-wallet passthrough, RELOCATE for a cross-wallet transfer). NEVER automatic.
@@ -1212,6 +1232,51 @@ fn dispatch_reconcile(
             println!("classified {n} inbound deposits as self-transfer-in ($0 basis)");
             return Ok(());
         }
+        Reconcile::BulkResolveConflict {
+            accept,
+            reject: _, // clap's ArgGroup guarantees EXACTLY one of --accept/--reject; dispatch on `accept`.
+            dry_run,
+            yes,
+        } => {
+            // clap's ArgGroup guarantees EXACTLY one of --accept / --reject; the else is defensive.
+            let plan = cmd::reconcile::bulk_resolve_conflict_plan(vault, &pp)?;
+            render_bulk_resolve_preview(&plan, accept);
+
+            if plan.rows.is_empty() {
+                println!("no unresolved import conflicts");
+                return Ok(());
+            }
+            if dry_run {
+                return Ok(());
+            }
+            let action = if accept { "Accept" } else { "Reject" };
+            let confirmed = if yes {
+                true
+            } else {
+                print!("{action} {} import conflict(s)? [y/N] ", plan.rows.len());
+                use std::io::Write;
+                std::io::stdout().flush().ok();
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line)?;
+                matches!(line.trim(), "y" | "Y" | "yes" | "YES")
+            };
+            if !confirmed {
+                println!("aborted; nothing written");
+                return Ok(());
+            }
+            let conflict_events: Vec<_> =
+                plan.rows.iter().map(|r| r.conflict_event.clone()).collect();
+            if accept {
+                let n =
+                    cmd::reconcile::apply_bulk_accept_conflicts(vault, &pp, conflict_events, now)?;
+                println!("accepted {n} import conflicts");
+            } else {
+                let n =
+                    cmd::reconcile::apply_bulk_reject_conflicts(vault, &pp, conflict_events, now)?;
+                println!("rejected {n} import conflicts");
+            }
+            return Ok(());
+        }
         Reconcile::MatchSelfTransfers {
             in_ref,
             out_ref,
@@ -1418,4 +1483,91 @@ fn render_bulk_sti_preview(plan: &btctax_cli::BulkStiPlan) {
         plan.total_sat,
         total
     );
+}
+
+/// One-line human summary of an imported payload for the bulk resolve-conflict preview. The CLI
+/// front-end's own summary formatter [R0-M1] — `import_payload_summary` is a private tui-edit binary
+/// fn unreachable from btctax-cli, so the row carries the STRUCTURED `EventPayload` and each front-end
+/// renders it. Covers the common imported variants; anything else falls back to a compact debug form.
+fn bulk_resolve_payload_summary(p: &btctax_core::EventPayload) -> String {
+    use btctax_core::EventPayload;
+    match p {
+        EventPayload::Acquire(a) => format!("Acquire {} sat, cost {}", a.sat, a.usd_cost),
+        EventPayload::Income(i) => {
+            let fmv = i
+                .usd_fmv
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "(no fmv)".to_string());
+            format!("Income {} sat @ {}", i.sat, fmv)
+        }
+        EventPayload::Dispose(d) => format!("Dispose {} sat, proceeds {}", d.sat, d.usd_proceeds),
+        EventPayload::TransferIn(t) => format!("TransferIn {} sat", t.sat),
+        EventPayload::TransferOut(t) => format!("TransferOut {} sat", t.sat),
+        EventPayload::Unclassified(u) => {
+            format!(
+                "Unclassified: {}",
+                u.raw.chars().take(40).collect::<String>()
+            )
+        }
+        other => format!("{other:?}"),
+    }
+}
+
+/// Render the bulk resolve-conflict preview: a `current → new` table (bulk-resolve-conflict D2). `accept`
+/// selects the action shown in the banner (ACCEPT adopts new / REJECT keeps current). No $ number — a
+/// conflict resolution recognizes no gain.
+fn render_bulk_resolve_preview(plan: &btctax_cli::BulkResolvePlan, accept: bool) {
+    let action = if accept {
+        "ACCEPT (adopt new)"
+    } else {
+        "REJECT (keep current)"
+    };
+    println!("Bulk resolve-conflict preview — action: {action} (NON-REVOCABLE)");
+    println!(
+        "{:<12}  {:<26}  {:<10}  {:<34}  {:<34}",
+        "date", "target", "new-fp", "current", "→ new"
+    );
+    for r in &plan.rows {
+        println!(
+            "{:<12}  {:<26}  {:<10}  {:<34}  {:<34}",
+            r.date,
+            r.target.canonical(),
+            r.new_fingerprint,
+            bulk_resolve_payload_summary(&r.current_payload),
+            bulk_resolve_payload_summary(&r.new_payload),
+        );
+    }
+    println!("conflicts {}", plan.rows.len());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parse a `reconcile bulk-resolve-conflict …` invocation via the real clap derivation.
+    fn parse_brc(args: &[&str]) -> Result<Cli, clap::Error> {
+        let mut full = vec!["btctax", "reconcile", "bulk-resolve-conflict"];
+        full.extend_from_slice(args);
+        Cli::try_parse_from(full)
+    }
+
+    /// The clap ArgGroup makes `--accept | --reject` REQUIRED and MUTUALLY EXCLUSIVE [R0-r2]:
+    /// neither fails, both fail, exactly one parses. (No `ResolveKind` in the CLI — a batch-wide bool.)
+    #[test]
+    fn bulk_resolve_cli_requires_accept_xor_reject() {
+        assert!(
+            parse_brc(&[]).is_err(),
+            "neither --accept nor --reject must fail (group required)"
+        );
+        assert!(
+            parse_brc(&["--accept", "--reject"]).is_err(),
+            "both must fail (group mutually exclusive)"
+        );
+        assert!(parse_brc(&["--accept"]).is_ok(), "--accept alone parses");
+        assert!(parse_brc(&["--reject"]).is_ok(), "--reject alone parses");
+        assert!(
+            parse_brc(&["--reject", "--dry-run"]).is_ok(),
+            "--reject --dry-run parses"
+        );
+    }
 }

@@ -14,9 +14,9 @@
 //! session-holding TUI editor.
 
 use crate::edit::form::{
-    BulkLinkFlowState, BulkLinkModalState, BulkStiFlowState, BulkStiModalState,
-    ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyRawFlowState,
-    ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
+    BulkLinkFlowState, BulkLinkModalState, BulkResolveFlowState, BulkResolveModalState,
+    BulkStiFlowState, BulkStiModalState, ClassifyInboundFlowState, ClassifyInboundModalState,
+    ClassifyRawFlowState, ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
     MatchSelfTransfersFlowState, MatchSelfTransfersModalState, MutationModalState,
     OptimizeAcceptFlowState, OptimizeAcceptModalState, ProfileFormState, ReclassifyIncomeFlowState,
     ReclassifyIncomeModalState, ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
@@ -186,6 +186,14 @@ pub struct EditorApp {
     pub bulk_sti_flow: Option<BulkStiFlowState>,
     /// Bulk STI confirmation modal.  `Some` while awaiting Enter/Esc.
     pub bulk_sti_modal: Option<BulkStiModalState>,
+    /// Full bulk resolve-conflict flow state (bulk-resolve-conflict D3).  `Some` while open.
+    ///
+    /// Dispatch order: bulk_resolve_modal (modal layer) → bulk_resolve_flow (flow layer). Each
+    /// resolution is NON-REVOCABLE (`SupersedeImport`/`RejectImport` excluded from
+    /// `is_revocable_payload`), so the confirm is Tier-B (non-revocable warning) — NOT typed-word.
+    pub bulk_resolve_flow: Option<BulkResolveFlowState>,
+    /// Bulk resolve-conflict confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub bulk_resolve_modal: Option<BulkResolveModalState>,
     /// Full match-self-transfers flow state (self-transfer-passthrough C3).  `Some` while open.
     ///
     /// Dispatch order: match_self_transfers_modal (modal layer) → match_self_transfers_flow (flow
@@ -255,6 +263,8 @@ impl EditorApp {
             bulk_link_modal: None,
             bulk_sti_flow: None,
             bulk_sti_modal: None,
+            bulk_resolve_flow: None,
+            bulk_resolve_modal: None,
             match_self_transfers_flow: None,
             match_self_transfers_modal: None,
             attest_save_failed: false,

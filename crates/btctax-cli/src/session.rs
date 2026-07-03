@@ -113,6 +113,40 @@ pub struct BulkStiPlan {
     pub missing_price_count: usize,
 }
 
+// ── Bulk resolve-conflict plan (bulk-resolve-conflict D1) ────────────────────
+//
+// The shared, READ-ONLY plan both the CLI (`cmd::reconcile::bulk_resolve_conflict_plan`) and the TUI
+// `C` flow compute from the HELD session. Candidate set = live `ImportConflict` blockers only (engine
+// post-filtered — an accepted/rejected conflict is no longer flagged → structural idempotence). Each
+// row carries the STRUCTURED current/new payloads (NOT pre-rendered strings) so each front-end renders
+// its own summary (CLI table formatter; TUI reuses `import_payload_summary`). Appends/persists NOTHING.
+
+/// One flagged import conflict in a bulk resolve-conflict plan. STRUCTURED (front-ends render summaries).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkResolveRow {
+    /// The `ImportConflict` event id — the resolution target (`SupersedeImport`/`RejectImport` carry
+    /// this as `conflict_event`).
+    pub conflict_event: EventId,
+    /// Calendar date (tax tz) of the conflict event.
+    pub date: TaxDate,
+    /// The TARGET import event id whose payload the conflict proposes to supersede (≠ conflict_event).
+    pub target: EventId,
+    /// Payload currently at the target (front-end renders "current"; KEPT on reject).
+    pub current_payload: EventPayload,
+    /// `ImportConflict.new_payload` (front-end renders "→ new"; ADOPTED on accept).
+    pub new_payload: EventPayload,
+    /// The 8-char `new_fingerprint` disambiguator (front-end shows it).
+    pub new_fingerprint: String,
+}
+
+/// The read-only plan a bulk resolve-conflict would execute: the live `ImportConflict` rows (sorted by
+/// date). No $ number (a conflict resolution recognizes no gain); no time/wallet filter (per-row
+/// exclude is the precision tool at the front-end).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkResolvePlan {
+    pub rows: Vec<BulkResolveRow>,
+}
+
 // ── Self-transfer matcher (self-transfer-passthrough C2) ─────────────────────
 //
 // A READ-ONLY proposal helper (mirrors `bulk_link_transfer_plan`/`safe_harbor_residue`): it appends and
@@ -548,6 +582,50 @@ impl Session {
             total_usd_fmv_floor,
             missing_price_count,
         })
+    }
+
+    /// READ-ONLY: compute the bulk resolve-conflict plan (bulk-resolve-conflict D1). Candidate set =
+    /// live `ImportConflict` blockers only (engine post-filtered — an accepted/rejected conflict is no
+    /// longer flagged, so re-running never double-resolves; structural idempotence). Joins each blocker
+    /// (whose `.event` is the `ImportConflict` event id) to the event index to build a STRUCTURED row:
+    /// the conflict's `target` + `new_payload` + `new_fingerprint`, plus the `current_payload` read from
+    /// the TARGET event (a SEPARATE event — accept adopts `new_payload`, reject keeps `current_payload`).
+    /// Appends/persists NOTHING; mirrors `bulk_self_transfer_in_plan`.
+    pub fn bulk_resolve_conflict_plan(&self) -> Result<BulkResolvePlan, CliError> {
+        let (events, state, _cfg) = self.load_events_and_project()?;
+        let index: std::collections::HashMap<EventId, &LedgerEvent> =
+            events.iter().map(|e| (e.id.clone(), e)).collect();
+
+        let mut rows: Vec<BulkResolveRow> = Vec::new();
+        for b in &state.blockers {
+            if b.kind != BlockerKind::ImportConflict {
+                continue;
+            }
+            let Some(conflict_id) = &b.event else {
+                continue;
+            };
+            let Some(conflict_ev) = index.get(conflict_id) else {
+                continue;
+            };
+            let EventPayload::ImportConflict(c) = &conflict_ev.payload else {
+                continue;
+            };
+            // CURRENT payload lives at the TARGET id (a separate event, conflict_event != target).
+            let Some(target_ev) = index.get(&c.target) else {
+                continue;
+            };
+            let date = tax_date(conflict_ev.utc_timestamp, conflict_ev.original_tz);
+            rows.push(BulkResolveRow {
+                conflict_event: conflict_id.clone(),
+                date,
+                target: c.target.clone(),
+                current_payload: target_ev.payload.clone(),
+                new_payload: (*c.new_payload).clone(),
+                new_fingerprint: c.new_fingerprint.0.chars().take(8).collect::<String>(),
+            });
+        }
+        rows.sort_by_key(|r| r.date);
+        Ok(BulkResolvePlan { rows })
     }
 
     /// READ-ONLY: propose self-transfer matches (self-transfer-passthrough C2). Appends/persists NOTHING

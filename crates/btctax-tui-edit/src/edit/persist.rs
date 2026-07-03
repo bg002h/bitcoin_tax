@@ -474,6 +474,42 @@ pub fn persist_bulk_self_transfer_in(
     )
 }
 
+/// Append ONE `SupersedeImport` (accept) or `RejectImport` (reject) per `conflict_event`, then a SINGLE
+/// `save_or_rollback` (bulk-resolve-conflict D3). All-or-nothing; a thin wrapper that builds the
+/// per-row payload from the batch-wide `kind` and delegates to `persist_bulk_decisions` (Task 1) — the
+/// empty guard + mid-batch rollback + single save all live there.
+///
+/// # Non-revocable [G2]
+/// `SupersedeImport`/`RejectImport` are EXCLUDED from `is_revocable_payload`, so a wrong accept/reject
+/// CANNOT be voided in-editor (a later void fires `DecisionConflict`). The confirm modal carries the
+/// Tier-B non-revocable warning (NOT a typed-word gate, which is reserved for the §7.4 attest).
+pub fn persist_bulk_resolve_conflict(
+    session: &mut btctax_cli::Session,
+    conflict_events: Vec<btctax_core::EventId>,
+    kind: crate::edit::form::ResolveKind,
+    now: time::OffsetDateTime,
+) -> Result<usize, PersistError> {
+    use btctax_core::event::{RejectImport, SupersedeImport};
+    use btctax_core::EventPayload;
+    let payloads = conflict_events
+        .into_iter()
+        .map(|conflict_event| match kind {
+            crate::edit::form::ResolveKind::Accept => {
+                EventPayload::SupersedeImport(SupersedeImport { conflict_event })
+            }
+            crate::edit::form::ResolveKind::Reject => {
+                EventPayload::RejectImport(RejectImport { conflict_event })
+            }
+        })
+        .collect();
+    persist_bulk_decisions(
+        session,
+        payloads,
+        now,
+        "bulk resolve-conflict: nothing selected",
+    )
+}
+
 /// Append a `ClassifyRaw` decision event and atomically save the vault (chunk 4a, D2).
 ///
 /// `payload` is the VALIDATED `EventPayload::ClassifyRaw(…)` built by the classify-raw flow (its

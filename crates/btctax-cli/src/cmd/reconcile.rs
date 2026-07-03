@@ -6,7 +6,8 @@
 //! Also contains the `set-donation-details` / `show-donation-details` side-table commands (no decision
 //! append — these write to the `donation_details` side-table directly, like `tax-profile set`).
 use crate::{
-    BulkFilter, BulkLinkPlan, BulkStiFilter, BulkStiPlan, CliError, MatchProposal, Session,
+    BulkFilter, BulkLinkPlan, BulkResolvePlan, BulkStiFilter, BulkStiPlan, CliError, MatchProposal,
+    Session,
 };
 use btctax_core::conventions::TRANSITION_DATE;
 use btctax_core::persistence::{append_decision, load_all};
@@ -290,6 +291,64 @@ pub fn apply_bulk_self_transfer_in(
     }
     session.save()?;
     Ok(in_events.len())
+}
+
+/// bulk-resolve-conflict D2 — Phase 1 (read): open the session and compute the bulk resolve-conflict
+/// plan. Two-phase by design (mirrors `bulk_link_plan`): this read phase renders NOTHING to the vault,
+/// so the interactive `y/N` confirmation stays a thin, untested shell in the `main.rs` dispatch. The
+/// plan is the shared read helper `Session::bulk_resolve_conflict_plan` (D1). The session (and its
+/// VaultLock) is dropped on return, before the confirmation prompt runs.
+pub fn bulk_resolve_conflict_plan(
+    vault_path: &Path,
+    pp: &Passphrase,
+) -> Result<BulkResolvePlan, CliError> {
+    let session = Session::open(vault_path, pp)?;
+    session.bulk_resolve_conflict_plan()
+}
+
+/// bulk-resolve-conflict D2 — Phase 2 (write), ACCEPT: atomically append one `SupersedeImport` per
+/// conflict (adopt each `new_payload` onto its target id), then a SINGLE `save`. All-or-nothing: a
+/// mid-batch `append_decision` failure returns `Err` BEFORE the save, and the local `Session` is
+/// dropped with nothing written — the exact one-session / N-append / one-save atomicity of
+/// `apply_bulk_link_transfer`. Mirrors the shipped single-item split `accept_conflict`/`reject_conflict`
+/// [R0-I1 — NO `ResolveKind` in the CLI; it lives only in btctax-tui-edit]. Returns the number accepted.
+pub fn apply_bulk_accept_conflicts(
+    vault_path: &Path,
+    pp: &Passphrase,
+    conflict_events: Vec<EventId>,
+    now: OffsetDateTime,
+) -> Result<usize, CliError> {
+    let mut session = Session::open(vault_path, pp)?;
+    for conflict_event in &conflict_events {
+        let payload = EventPayload::SupersedeImport(SupersedeImport {
+            conflict_event: conflict_event.clone(),
+        });
+        // `?` on a mid-batch failure returns before `save` — the in-memory session is discarded, so
+        // nothing lands on disk (CLI atomicity; the TUI path instead ROLLS BACK via persist_bulk_decisions).
+        append_decision(session.conn(), payload, now, UtcOffset::UTC, None)?;
+    }
+    session.save()?;
+    Ok(conflict_events.len())
+}
+
+/// bulk-resolve-conflict D2 — Phase 2 (write), REJECT: atomically append one `RejectImport` per
+/// conflict (keep each target's current payload; clear the blocker), then a SINGLE `save`. Same
+/// all-or-nothing CLI atomicity as `apply_bulk_accept_conflicts`. Returns the number rejected.
+pub fn apply_bulk_reject_conflicts(
+    vault_path: &Path,
+    pp: &Passphrase,
+    conflict_events: Vec<EventId>,
+    now: OffsetDateTime,
+) -> Result<usize, CliError> {
+    let mut session = Session::open(vault_path, pp)?;
+    for conflict_event in &conflict_events {
+        let payload = EventPayload::RejectImport(RejectImport {
+            conflict_event: conflict_event.clone(),
+        });
+        append_decision(session.conn(), payload, now, UtcOffset::UTC, None)?;
+    }
+    session.save()?;
+    Ok(conflict_events.len())
 }
 
 /// FR6/TP7: confirm a self-transfer. `target` is a destination `TransferIn` event (`--to-event`) or a
