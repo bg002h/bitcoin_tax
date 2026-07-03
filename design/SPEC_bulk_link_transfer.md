@@ -1,8 +1,9 @@
 # SPEC — bulk self-transfer (`bulk-link-transfer`)
 
 **Source baseline:** `main` @ `a16ea00` (mutating-TUI feature-complete; all anchors verified at write time).
-**Review status: R0 round 1 folded (0C / 2I / 4M / 2N — all folded; Fork B EXPAND adopted); awaiting R0
-round 2. Review: `reviews/R0-spec-bulk-link-transfer-round-1.md`.**
+**Review status: R0-GREEN (2 rounds; 0 Critical / 0 Important). Reviews:
+`reviews/R0-spec-bulk-link-transfer-round-{1,2}.md` (round 1: 0C/2I/4M/2N — the mid-batch-rollback + the
+USD-floor catches; round 2: 0C/0I, one doc-nit folded). Cleared to implement.**
 **Design lineage:** brainstorm with the user (2026-07-03). Settled decisions:
 scope = **self-transfer first**; mechanic = **link all selected outflows to ONE destination wallet**
 (out→wallet, no fuzzy matching); home = **both** CLI + TUI over a shared `btctax-cli` core; **source-wallet
@@ -132,15 +133,17 @@ BulkLinkTransfer {
     #[arg(long)] yes: bool,
 }
 ```
-Frame: none of year/from/to → `All`; `year` → `Year`; `from`+`to` → `Range`. **Command
-`cmd::reconcile::bulk_link_transfer(vault, pp, filter, dest, confirmed: bool, now) -> Result<Outcome>`**
-[R0-M2: a pure helper taking a `confirmed` bool, so the interactive `y/N` stays a thin, untested shell in
-`main.rs` dispatch — the CLI has no existing stdin-confirm precedent; only `rpassword` for the passphrase].
-It: parses dest + optional from_wallet via `parse_wallet_id`; builds the plan via
-`session.bulk_link_transfer_plan(filter, dest)`; returns the plan for the caller to **render the preview
-table** (date · source wallet · BTC · USD-value + the totals footer: "**total USD reclassified
-non-taxable**" as exact `$X` or `≥ $X (N unavailable)` [R0-I2], and the skipped-same-wallet count). Flow
-in dispatch:
+Frame: none of year/from/to → `All`; `year` → `Year`; `from`+`to` → `Range`. **Two-phase command** [R0-M2
++ R0-r2-nit — split so the interactive `y/N` stays a thin, untested shell in `main.rs` dispatch; the CLI
+has no existing stdin-confirm precedent, only `rpassword` for the passphrase]:
+- **Phase 1 (read):** `cmd::reconcile::bulk_link_plan(vault, pp, filter, dest) -> Result<BulkLinkPlan>` —
+  opens the session, parses dest + from_wallet via `parse_wallet_id`, returns `session.bulk_link_transfer_plan
+  (filter, dest)`. Dispatch **renders the preview table** (date · source wallet · BTC · USD-value + the
+  totals footer: "**total USD reclassified non-taxable**" as exact `$X` or `≥ $X (N unavailable)` [R0-I2],
+  and the skipped-same-wallet count).
+- **Phase 2 (write, only when confirmed):** `cmd::reconcile::apply_bulk_link_transfer(vault, pp, out_events,
+  dest, now) -> Result<usize>` — atomic batch-append + one save (below).
+Flow in dispatch:
 - `included.is_empty()` → print "no pending outbound transfers match" and exit 0 (no write).
 - `--dry-run` → render the preview and stop (exit 0).
 - else render the preview, then confirm: `--yes` ⇒ `confirmed = true`; otherwise dispatch reads an
