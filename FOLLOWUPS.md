@@ -4,6 +4,25 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ fix: round sub-satoshi BTC amounts (Gemini import unblocked) — SHIPPED (2026-07-03)
+
+User-reported bug: `btctax import .../ReadOnly/*` → `gemini row 2: fractional satoshi in BTC amount
+"0.0010216163"`. Gemini exports 10-dp internal-ledger artifacts (fee splits / interest / averaged fills —
+8 of 825 BTC-Amount cells in the user's file are finer than a satoshi); `parse_btc_to_sat` REJECTED them
+(`AdapterError::FractionalSat`), aborting the whole multi-file import on the first data row. **Fix
+(user-approved): round BTC amounts to the NEAREST satoshi** (`Decimal::round()` = `MidpointNearestEven`,
+matching `round_cents`) — normalizing an un-representable BTC QUANTITY to the satoshi grid (< 1 sat ≈
+<$0.001 error). USD/tax VALUES are still parsed exactly (NFR5 intact); this is BTC quantity only. Removed
+the now-unused `FractionalSat`; corrected the `parse.rs`/`read.rs` docs (the xlsx `Data::Float →
+format!("{f}") → parse_btc_to_sat` read path is in scope; its ≤8-dp bound was wrong). `btctax-adapters`
+only. R0 GREEN (2 rounds; round 1 caught the xlsx numeric-cell read-path gap); whole-diff review 0C/0I
+(`.round()`→`.trunc()` fault-injection drove both the unit + the numeric-xlsx integration KATs RED).
+**1006 workspace tests.** Reviews: `reviews/R0-spec-gemini-subsatoshi-round-round-{1,2}.md`,
+`reviews/whole-branch-review-gemini-subsatoshi-round-round-1.md`. **The user's Gemini disposals (~42
+sells) now import.**
+
+---
+
 ## ✅ bulk-classify-inbound-self-transfer — SHIPPED (2026-07-03) — QUEUE ITEM 2 DONE
 
 The inbound mirror of `bulk-link-transfer` applied to Cycle A's `InboundClass::SelfTransferMine`: sweep

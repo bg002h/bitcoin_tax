@@ -56,12 +56,6 @@ pub enum AdapterError {
         value: String,
         reason: String,
     },
-    #[error("{adapter} row {line}: fractional satoshi in BTC amount {value:?}")]
-    FractionalSat {
-        adapter: &'static str,
-        line: usize,
-        value: String,
-    },
     #[error("unrecognized file (no adapter matched): {path}")]
     UnknownSource { path: String },
     /// A file was detected as Swan (matched at least one role signature) but its header did not
