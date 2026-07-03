@@ -18,9 +18,10 @@ use crate::edit::form::{
     ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState, MutationModalState,
     OptimizeAcceptFlowState, OptimizeAcceptModalState, ProfileFormState, ReclassifyIncomeFlowState,
     ReclassifyIncomeModalState, ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
-    ResolveConflictFlowState, ResolveConflictModalState, SafeHarborAttestFlowState,
-    SelectLotsFlowState, SelectLotsModalState, SetDonationDetailsFlowState,
-    SetDonationDetailsModalState, SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
+    ResolveConflictFlowState, ResolveConflictModalState, SafeHarborAllocateFlowState,
+    SafeHarborAllocateModalState, SafeHarborAttestFlowState, SelectLotsFlowState,
+    SelectLotsModalState, SetDonationDetailsFlowState, SetDonationDetailsModalState,
+    SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
 };
 use btctax_cli::Session;
 use btctax_store::Passphrase;
@@ -161,6 +162,13 @@ pub struct EditorApp {
     pub optimize_accept_flow: Option<OptimizeAcceptFlowState>,
     /// Optimize-accept confirmation modal.  `Some` while awaiting Enter/Esc.
     pub optimize_accept_modal: Option<OptimizeAcceptModalState>,
+    /// Full safe-harbor-allocate flow state (chunk 5, D2).  `Some` while the flow is open.
+    ///
+    /// Dispatch order: safe_harbor_allocate_modal (modal layer) → safe_harbor_allocate_flow (flow
+    /// layer). Creation is REVOCABLE, so the confirmation is a plain modal — NO typed-word gate.
+    pub safe_harbor_allocate_flow: Option<SafeHarborAllocateFlowState>,
+    /// Safe-harbor-allocate confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub safe_harbor_allocate_modal: Option<SafeHarborAllocateModalState>,
     /// Residue latch [R0-C1]: set to `true` when `persist_safe_harbor_attest` returns Err.
     ///
     /// While `true`, ALL mutating openers (p/c/o/r/f/v/s/d/a) refuse with the
@@ -217,6 +225,8 @@ impl EditorApp {
             resolve_conflict_modal: None,
             optimize_accept_flow: None,
             optimize_accept_modal: None,
+            safe_harbor_allocate_flow: None,
+            safe_harbor_allocate_modal: None,
             attest_save_failed: false,
             rollback_failed: false,
             status: None,

@@ -18,26 +18,28 @@ use crossterm::{
     terminal::{enable_raw_mode, EnterAlternateScreen},
 };
 use edit::form::{
-    cycle_basis_source, cycle_business_optional, cycle_classify_raw_variant, cycle_filing_status,
-    cycle_income_kind, cycle_income_kind_optional, cycle_outflow_kind, filter_optimize_candidates,
-    income_kind_display, is_revocable_payload, next_focus, optimize_basis_label, prev_focus,
-    validate, validate_classify_inbound_gift, validate_classify_inbound_income,
-    validate_classify_raw_acquire, validate_classify_raw_income, validate_donation_details,
-    validate_reclassify_income, validate_reclassify_outflow, validate_select_lots,
-    validate_set_fmv, ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyInboundStep,
-    ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep, ClassifyRawVariant, ConflictItem,
-    DisposalKind, DisposalListItem, DonationListItem, FieldBuffer, FmvListItem, InEventItem,
-    InboundListItem, InboundVariant, IncomeListItem, LinkMode, LinkTransferFlowState,
-    LinkTransferModalState, LinkTransferStep, LotPickFormRow, MutationModalState,
-    OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep, OptimizeCandidateItem,
-    OutflowKind, OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
-    ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
-    ReclassifyOutflowModalState, ReclassifyOutflowStep, ResolveConflictFlowState,
-    ResolveConflictModalState, ResolveConflictStep, ResolveKind, SafeHarborAttestFlowState,
-    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
-    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
-    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TransferOutItem, VoidFlowState,
-    VoidListItem, VoidModalState, VoidStep, WalletItem, FREETEXT_CAP,
+    cycle_alloc_method, cycle_basis_source, cycle_business_optional, cycle_classify_raw_variant,
+    cycle_filing_status, cycle_income_kind, cycle_income_kind_optional, cycle_outflow_kind,
+    filter_optimize_candidates, income_kind_display, is_revocable_payload, next_focus,
+    optimize_basis_label, prev_focus, validate, validate_classify_inbound_gift,
+    validate_classify_inbound_income, validate_classify_raw_acquire, validate_classify_raw_income,
+    validate_donation_details, validate_reclassify_income, validate_reclassify_outflow,
+    validate_select_lots, validate_set_fmv, AllocLotRow, ClassifyInboundFlowState,
+    ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
+    ClassifyRawStep, ClassifyRawVariant, ConflictItem, DisposalKind, DisposalListItem,
+    DonationListItem, FieldBuffer, FmvListItem, InEventItem, InboundListItem, InboundVariant,
+    IncomeListItem, LinkMode, LinkTransferFlowState, LinkTransferModalState, LinkTransferStep,
+    LotPickFormRow, MutationModalState, OptimizeAcceptFlowState, OptimizeAcceptModalState,
+    OptimizeAcceptStep, OptimizeCandidateItem, OutflowKind, OutflowListItem, ProfileFormState,
+    RawListItem, ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
+    ReclassifyOutflowFlowState, ReclassifyOutflowModalState, ReclassifyOutflowStep,
+    ResolveConflictFlowState, ResolveConflictModalState, ResolveConflictStep, ResolveKind,
+    SafeHarborAllocateFlowState, SafeHarborAllocateModalState, SafeHarborAllocateStep,
+    SafeHarborAttestFlowState, SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState,
+    SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
+    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList,
+    TransferOutItem, VoidFlowState, VoidListItem, VoidModalState, VoidStep, WalletItem,
+    FREETEXT_CAP,
 };
 use editor::{EditorApp, EditorScreen};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -189,6 +191,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Safe-harbor-allocate-modal dispatch — BEFORE flow, form, screen ──────
+    if app.safe_harbor_allocate_modal.is_some() {
+        handle_safe_harbor_allocate_modal_key(app, key);
+        return;
+    }
+
     // ── 9. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
     //    Every step of an open flow is claimed here; 'q' and Esc can never
     //    fall through to a Browse quit arm mid-flow.
@@ -226,6 +234,10 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.classify_raw_flow.is_some() {
         handle_classify_raw_flow_key(app, key);
+        return;
+    }
+    if app.safe_harbor_allocate_flow.is_some() {
+        handle_safe_harbor_allocate_flow_key(app, key);
         return;
     }
     if app.safe_harbor_attest_flow.is_some() {
@@ -303,6 +315,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('l') => open_link_transfer_flow(app),
                 KeyCode::Char('u') => open_classify_raw_flow(app),
                 KeyCode::Char('a') => open_safe_harbor_attest_flow(app),
+                KeyCode::Char('A') => open_safe_harbor_allocate_flow(app),
                 KeyCode::Char('i') => open_resolve_conflict_flow(app),
                 KeyCode::Char('z') => open_optimize_accept_flow(app),
                 _ => {}
@@ -529,6 +542,8 @@ impl EditorApp {
         self.resolve_conflict_modal = None;
         self.optimize_accept_flow = None;
         self.optimize_accept_modal = None;
+        self.safe_harbor_allocate_flow = None;
+        self.safe_harbor_allocate_modal = None;
     }
 }
 
@@ -4943,6 +4958,287 @@ fn derive_attest_status(snap: &btctax_tui::app::Snapshot, new_attest_id: &EventI
         "Allocation attested (IRREVOCABLE, §7.4) — {}; quit and run btctax verify to confirm effectiveness",
         new_attest_id.canonical()
     )
+}
+
+// ── Safe-harbor-allocate flow (chunk 5, D1/D2/D4/D5/D6) ───────────────────────
+
+/// Open the safe-harbor-allocate flow (`A`) — the CREATION counterpart to attest (`a`). Six
+/// eligibility steps (spec D1), in order. The residue math is done ONLY through
+/// `Session::safe_harbor_residue` (KAT-G1-clean — no `conn(`/`load_all`/`project` inline here).
+fn open_safe_harbor_allocate_flow(app: &mut EditorApp) {
+    // 1. Latch: refuse while a prior save left unrevertable residue.
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    // 2. Snapshot must be present (mirrors every other opener).
+    if app.snapshot.is_none() {
+        return;
+    }
+
+    // 3+4. Config gate (pre-2025 method declared+attested) and the pre-2025 residue — BOTH read the
+    // HELD session. The residue helper reads config ONCE and returns the method it was computed under
+    // [R0-M1/G5]; we thread that RETURNED method unchanged through flow→modal→persist.
+    let session = match app.session.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+    let cfg = match session.config() {
+        Ok(c) => c,
+        Err(e) => {
+            app.status = Some(format!("Pre-flight config error: {e}"));
+            return;
+        }
+    };
+    if !cfg.pre2025_method_attested {
+        app.status = Some(
+            "Declare your filed pre-2025 method first — quit the editor, then run: \
+             btctax config --set-pre2025-method <m> --attest-pre2025-method"
+                .to_string(),
+        );
+        return;
+    }
+    let (lots, pre2025_method) = match session.safe_harbor_residue() {
+        Ok(t) => t,
+        Err(e) => {
+            app.status = Some(format!("Pre-flight residue error: {e}"));
+            return;
+        }
+    };
+    if lots.is_empty() {
+        app.status = Some(
+            "No pre-2025 lots to allocate (Path A applies; safe harbor unnecessary)".to_string(),
+        );
+        return;
+    }
+
+    // 5. No existing LIVE allocation (TUI-added guard the CLI lacks — prevents the chunk-3 "Multiple
+    // live allocations present" tangle). Scan the cached snapshot's events for a non-voided
+    // SafeHarborAllocation.
+    let snap = app.snapshot.as_ref().unwrap();
+    let voided: std::collections::BTreeSet<&EventId> = snap
+        .events
+        .iter()
+        .filter_map(|e| {
+            if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                Some(&v.target_event_id)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let live_exists = snap
+        .events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .any(|e| matches!(e.payload, EventPayload::SafeHarborAllocation(_)));
+    if live_exists {
+        app.status = Some(
+            "An allocation already exists — attest it with 'a', or void it with 'v' \
+             before creating a new one"
+                .to_string(),
+        );
+        return;
+    }
+
+    // 6. Open the flow at Preview. Totals + display rows are computed ONCE from the residue (the
+    // `method` toggle is method-INDEPENDENT — G3 — so it never recomputes these).
+    let total_sat: btctax_core::Sat = lots.iter().map(|l| l.sat).sum();
+    let total_basis: btctax_core::Usd = lots.iter().map(|l| l.usd_basis).sum();
+    let rows: Vec<AllocLotRow> = lots
+        .iter()
+        .map(|l| AllocLotRow {
+            wallet: l.wallet.clone(),
+            sat: l.sat,
+            usd_basis: l.usd_basis,
+            acquired_at: l.acquired_at,
+            dual_loss_basis: l.dual_loss_basis,
+            donor_acquired_at: l.donor_acquired_at,
+        })
+        .collect();
+    app.safe_harbor_allocate_flow = Some(SafeHarborAllocateFlowState {
+        lots,
+        total_sat,
+        total_basis,
+        method: btctax_core::AllocMethod::ActualPosition,
+        pre2025_method,
+        list: TargetList::new(rows),
+        step: SafeHarborAllocateStep::Preview,
+    });
+}
+
+/// Capture the allocate Preview into the confirmation modal (revocable framing; NOT typed-word).
+fn open_safe_harbor_allocate_modal(app: &mut EditorApp) {
+    let modal = match app.safe_harbor_allocate_flow.as_ref() {
+        Some(f) => SafeHarborAllocateModalState {
+            lots: f.lots.clone(),
+            total_sat: f.total_sat,
+            total_basis: f.total_basis,
+            method: f.method,
+            pre2025_method: f.pre2025_method,
+            lot_count: f.lots.len(),
+        },
+        None => return,
+    };
+    app.safe_harbor_allocate_modal = Some(modal);
+}
+
+/// Handle a key press while the allocate Preview is open (the flow's only step; spec D2).
+///
+/// `Tab`/`←`/`→` → cycle `method` (the recorded tag ONLY — the residue is method-independent, G3);
+/// `↑`/`k`/`↓`/`j`/`g`/`G` scroll the lot list; `Enter` → open the confirm modal; `Esc` → close flow;
+/// all else (incl. `q`) swallowed.
+fn handle_safe_harbor_allocate_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Tab | KeyCode::Left | KeyCode::Right => {
+            if let Some(flow) = app.safe_harbor_allocate_flow.as_mut() {
+                flow.method = cycle_alloc_method(flow.method);
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.safe_harbor_allocate_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.safe_harbor_allocate_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.safe_harbor_allocate_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.safe_harbor_allocate_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => open_safe_harbor_allocate_modal(app),
+        KeyCode::Esc => {
+            app.safe_harbor_allocate_flow = None;
+        }
+        _ => {
+            // All other keys (including 'q') swallowed while the flow is open.
+        }
+    }
+}
+
+/// Handle a key press while the allocate confirmation modal is open (chunk 5, D4/D5).
+///
+/// On `Enter`: `persist_safe_harbor_allocate` (single append via `save_or_rollback`, no latch) →
+/// re-project + `derive_allocate_status` + close modal & flow; on `Err(e)` close the modal and route
+/// through `on_persist_error`. On `Esc`: close the modal only (back to Preview; nothing written). All
+/// other keys are swallowed (blocking modal).
+fn handle_safe_harbor_allocate_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (lots, method, pre2025_method) = match app.safe_harbor_allocate_modal.as_ref() {
+                Some(m) => (m.lots.clone(), m.method, m.pre2025_method),
+                None => return,
+            };
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.safe_harbor_allocate_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_safe_harbor_allocate(
+                    session,
+                    lots,
+                    method,
+                    pre2025_method,
+                    now,
+                )
+            };
+
+            match save_result {
+                Ok(new_id) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_allocate_status(&snap, &new_id);
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.safe_harbor_allocate_modal = None;
+                    app.safe_harbor_allocate_flow = None;
+                }
+                Err(e) => {
+                    app.safe_harbor_allocate_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.safe_harbor_allocate_modal = None;
+        }
+        _ => {
+            // All other keys swallowed (blocking modal).
+        }
+    }
+}
+
+/// Derive the status string for a completed safe-harbor-allocate (spec D6). Four arms in PRIORITY
+/// order, keyed to `new_id` [R0-M10 discipline], mirroring `derive_attest_status`.
+fn derive_allocate_status(snap: &btctax_tui::app::Snapshot, new_id: &EventId) -> String {
+    let has = |k: BlockerKind| {
+        snap.state
+            .blockers
+            .iter()
+            .any(|b| b.kind == k && b.event.as_ref() == Some(new_id))
+    };
+
+    // Arm 1: conservation failed on the new allocation (defensive — the residue conserves by
+    // construction, but fail closed).
+    if has(BlockerKind::SafeHarborUnconservable) {
+        return "Created, but SafeHarborUnconservable fired — see Compliance; void ('v') and re-run."
+            .to_string();
+    }
+
+    // Arm 2: DecisionConflict on the new id OR the `event: None` "multiple effective" conflict
+    // (resolve.rs) [R0-N2: the event:None read is a DELIBERATE exception to the new_id-only discipline
+    // — the multiple-effective conflict has no single owning id; defensive, normally unreachable given
+    // the step-5 guard].
+    let multiple_effective = snap
+        .state
+        .blockers
+        .iter()
+        .any(|b| b.kind == BlockerKind::DecisionConflict && b.event.is_none());
+    if has(BlockerKind::DecisionConflict) || multiple_effective {
+        return "Created, but conflicts with an existing effective allocation — void one ('v') \
+                (see Compliance)."
+            .to_string();
+    }
+
+    // Arm 3: SafeHarborTimebar on the new id — the EXPECTED arm (every fresh allocation at the current
+    // date is timebarred → inert → voidable; G2).
+    if has(BlockerKind::SafeHarborTimebar) {
+        return "Allocation created (REVOCABLE, timebarred) — attest with 'a' to make it effective, \
+                or void with 'v'."
+            .to_string();
+    }
+
+    // Arm 4: clean — no timebar (unreachable for a fresh allocation at the current date, G2; kept
+    // correct, NOT dead code). An immediately-effective allocation can no longer be voided (G1:
+    // voidability tracks effectiveness).
+    "Allocation created and EFFECTIVE (Path B) — it can no longer be voided; attest with 'a' to \
+     lock §7.4."
+        .to_string()
 }
 
 // ── Resolve-conflict flow (chunk 4b, D3) ─────────────────────────────────────
@@ -12884,6 +13180,247 @@ mod tests {
                 panic!("ATTEST-HAPPY: event at pre.len() must be VoidDecisionEvent; got {other:?}")
             }
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Chunk 5 — safe-harbor-ALLOCATE (`A`) flow: opener/eligibility + status + E2E
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// Seed a vault for the allocate opener. `with_pre2025_lot` adds a pre-2025 Acquire (River,
+    /// 2024-06-01, 0.20 BTC) so the residue is non-empty; `attest_method` declares+attests FIFO (the
+    /// config gate); `prior_alloc` pre-appends a live SafeHarborAllocation (step-5 guard fixture).
+    fn seed_allocate_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+        with_pre2025_lot: bool,
+        attest_method: bool,
+        prior_alloc: Option<btctax_core::event::SafeHarborAllocation>,
+    ) {
+        use btctax_core::event::{Acquire, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, append_import_batch};
+        use rust_decimal::Decimal;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        {
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+            if with_pre2025_lot {
+                let batch = vec![LedgerEvent {
+                    id: EventId::import(Source::River, SourceRef::new("alloc-pre-lot")),
+                    // 2024-06-01 (pre-2025 → PoolKey::Universal).
+                    utc_timestamp: OffsetDateTime::from_unix_timestamp(1_717_200_000).unwrap(),
+                    original_tz: UtcOffset::UTC,
+                    wallet: Some(river_wallet()),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 20_000_000,
+                        usd_cost: Decimal::from(8550),
+                        fee_usd: Decimal::ZERO,
+                        basis_source: BasisSource::ExchangeProvided,
+                    }),
+                }];
+                append_import_batch(session.conn(), &batch).unwrap();
+            }
+            if let Some(a) = prior_alloc {
+                append_decision(
+                    session.conn(),
+                    EventPayload::SafeHarborAllocation(a),
+                    OffsetDateTime::from_unix_timestamp(1_741_100_000).unwrap(),
+                    UtcOffset::UTC,
+                    None,
+                )
+                .unwrap();
+            }
+            session.save().unwrap();
+        }
+        if attest_method {
+            btctax_cli::cmd::admin::set_pre2025_method(
+                vault,
+                &Passphrase::new(pp_str.into()),
+                btctax_core::LotMethod::Fifo,
+                true,
+            )
+            .unwrap();
+        }
+    }
+
+    /// Count non-voided-independent SafeHarborAllocation events currently in the HELD session's log.
+    fn count_allocations(app: &EditorApp) -> usize {
+        use btctax_core::persistence::load_all;
+        let session = app.session.as_ref().unwrap();
+        load_all(session.conn())
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e.payload, EventPayload::SafeHarborAllocation(_)))
+            .count()
+    }
+
+    // ── KAT-ALLOCATE-REFUSE-UNATTESTED (D1 step 3) ───────────────────────────
+    #[test]
+    fn kat_allocate_refuses_when_pre2025_method_unattested() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-alloc-unattested";
+        // Pre-2025 lot present, but pre2025_method NOT attested.
+        seed_allocate_vault(&vault, &key, pp_str, true, false, None);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('A')));
+
+        assert!(
+            app.safe_harbor_allocate_flow.is_none(),
+            "UNATTESTED: flow must NOT open when pre2025_method is unattested"
+        );
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.contains("Declare your filed pre-2025 method first")
+                && status.contains("--attest-pre2025-method"),
+            "UNATTESTED: status must direct to the CLI attest remedy; got: {status:?}"
+        );
+        assert_eq!(
+            count_allocations(&app),
+            0,
+            "UNATTESTED: nothing may be appended"
+        );
+    }
+
+    // ── KAT-ALLOCATE-REFUSE-LIVE-EXISTS (D1 step 5) ──────────────────────────
+    #[test]
+    fn kat_allocate_refuses_when_live_allocation_exists() {
+        use btctax_core::event::{AllocMethod, SafeHarborAllocation};
+        use btctax_core::LotMethod;
+        use time::macros::date;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-alloc-live-exists";
+
+        // Attested method + a pre-2025 lot (residue non-empty) + a pre-existing live allocation.
+        let prior = SafeHarborAllocation {
+            lots: vec![],
+            as_of_date: date!(2025 - 01 - 01),
+            method: AllocMethod::ProRata,
+            timely_allocation_attested: false,
+            pre2025_method: LotMethod::Fifo,
+        };
+        seed_allocate_vault(&vault, &key, pp_str, true, true, Some(prior));
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('A')));
+
+        assert!(
+            app.safe_harbor_allocate_flow.is_none(),
+            "LIVE-EXISTS: flow must NOT open when a live allocation already exists"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or("")
+                .contains("An allocation already exists"),
+            "LIVE-EXISTS: status must direct to attest/void; got: {:?}",
+            app.status
+        );
+        assert_eq!(
+            count_allocations(&app),
+            1,
+            "LIVE-EXISTS: no SECOND allocation may be appended (step-5 refuses)"
+        );
+    }
+
+    // ── KAT-ALLOCATE-NOOP-EMPTY-RESIDUE (D1 step 4) ──────────────────────────
+    #[test]
+    fn kat_allocate_noop_when_residue_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-alloc-empty";
+        // Attested method but NO pre-2025 lot → the residue is empty.
+        seed_allocate_vault(&vault, &key, pp_str, false, true, None);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('A')));
+
+        assert!(
+            app.safe_harbor_allocate_flow.is_none(),
+            "EMPTY: flow must NOT open when there is no pre-2025 residue"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or("")
+                .contains("No pre-2025 lots to allocate"),
+            "EMPTY: status must be the Path-A-applies message; got: {:?}",
+            app.status
+        );
+        assert_eq!(count_allocations(&app), 0, "EMPTY: nothing appended");
+    }
+
+    // ── KAT-ALLOCATE-LATCH-REFUSES (D1 step 1) ───────────────────────────────
+    #[test]
+    fn kat_allocate_latch_refuses() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-alloc-latch";
+        seed_allocate_vault(&vault, &key, pp_str, true, true, None);
+
+        let mut app = open_app(&vault, pp_str);
+        app.rollback_failed = true; // arm the unrevertable-residue latch
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('A')));
+
+        assert!(
+            app.safe_harbor_allocate_flow.is_none(),
+            "LATCH: flow must NOT open while rollback_failed is set"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("could not be reverted"))
+                .unwrap_or(false),
+            "LATCH: status must be the CRITICAL residue latch; got: {:?}",
+            app.status
+        );
+        assert_eq!(count_allocations(&app), 0, "LATCH: nothing appended");
+    }
+
+    // ── KAT-ALLOCATE-STATUS-TIMEBARRED (D6 arm 3) ────────────────────────────
+    //
+    // derive_allocate_status keyed to a timebarred allocation id → arm 3. Uses the ProRata
+    // unattested seed (timebarred UNCONDITIONALLY, independent of the wall-clock date), so the arm
+    // is exercised deterministically.
+    #[test]
+    fn kat_allocate_status_timebarred() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-alloc-status-tb";
+        let alloc_id = seed_safe_harbor_vault(&vault, &key, pp_str);
+
+        let app = open_app(&vault, pp_str);
+        let snap = app.snapshot.as_ref().unwrap();
+
+        // Sanity: the seed allocation is timebarred (inert), not effective.
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::SafeHarborTimebar
+                    && b.event.as_ref() == Some(&alloc_id)),
+            "STATUS-TB: the seed allocation must fire SafeHarborTimebar on its id"
+        );
+
+        let status = derive_allocate_status(snap, &alloc_id);
+        assert_eq!(
+            status,
+            "Allocation created (REVOCABLE, timebarred) — attest with 'a' to make it effective, \
+             or void with 'v'.",
+            "STATUS-TB: a timebarred fresh allocation must yield the arm-3 status"
+        );
     }
 
     // ── KAT-E2E-ATTEST-WRONGWORD — wrong word: error shown, buf preserved ─────

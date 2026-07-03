@@ -7,10 +7,10 @@
 //! This module performs NO writes — it only holds form state and validates input.
 
 use btctax_core::{
-    BasisSource, Carryforward, DisposalProposal, DisposeKind, DonationDetails, EventId,
-    FilingStatus, FmvStatus, Form8283Section, InboundClass, IncomeKind, LotId, LotPick, ManualFmv,
-    OutflowClass, Persistability, ReclassifyIncome, ReclassifyOutflow, Sat, TaxDate, TaxProfile,
-    TransferTarget, Usd, WalletId,
+    AllocLot, AllocMethod, BasisSource, Carryforward, DisposalProposal, DisposeKind,
+    DonationDetails, EventId, FilingStatus, FmvStatus, Form8283Section, InboundClass, IncomeKind,
+    LotId, LotMethod, LotPick, ManualFmv, OutflowClass, Persistability, ReclassifyIncome,
+    ReclassifyOutflow, Sat, TaxDate, TaxProfile, TransferTarget, Usd, WalletId,
 };
 use ratatui::widgets::TableState;
 use std::str::FromStr;
@@ -148,6 +148,18 @@ pub fn cycle_filing_status(fs: FilingStatus) -> FilingStatus {
         FilingStatus::Mfs => FilingStatus::HoH,
         FilingStatus::HoH => FilingStatus::Qss,
         FilingStatus::Qss => FilingStatus::Single,
+    }
+}
+
+/// Cycle the safe-harbor allocation `AllocMethod` (mirrors `cycle_filing_status`). The toggle changes
+/// ONLY the recorded `method` tag — the displayed residue lots are method-INDEPENDENT (gotcha G3):
+/// both `ActualPosition` and `ProRata` seed from the SAME per-wallet actuals; the method affects only
+/// the engine's timebar/effectiveness rule, never the lot list. ProRata cross-wallet redistribution is
+/// NOT implemented (core O4) — the tag records the election; it does not redistribute basis.
+pub fn cycle_alloc_method(m: AllocMethod) -> AllocMethod {
+    match m {
+        AllocMethod::ActualPosition => AllocMethod::ProRata,
+        AllocMethod::ProRata => AllocMethod::ActualPosition,
     }
 }
 
@@ -1566,6 +1578,56 @@ pub struct OptimizeAcceptModalState {
     pub attestation: Option<String>,
     /// §A.5 basis label (`"Contemporaneous"` / `"AttestedRecording"`).
     pub basis_label: &'static str,
+}
+
+// ── Safe-harbor-allocate flow types (chunk 5, D2) ────────────────────────────
+
+/// Pre-computed display row for one pre-2025 residue `AllocLot` in the allocate Preview table.
+/// Carries the AllocLot's display-relevant fields; the residue is method-INDEPENDENT (G3), so these
+/// rows are computed ONCE at open and never recomputed when the `method` toggle changes.
+#[derive(Clone)]
+pub struct AllocLotRow {
+    pub wallet: WalletId,
+    pub sat: Sat,
+    pub usd_basis: Usd,
+    pub acquired_at: TaxDate,
+    /// §1015(a) LOSS basis (FMV-at-gift); `Some` only for a dual-basis gift lot.
+    pub dual_loss_basis: Option<Usd>,
+    /// §1223(2) donor acquisition date (tacking); `Some` only for a gift lot.
+    pub donor_acquired_at: Option<TaxDate>,
+}
+
+/// Step in the safe-harbor-allocate flow. There is exactly ONE step (the Preview); the confirmation
+/// is a SEPARATE modal (`SafeHarborAllocateModalState`) — creation is REVOCABLE, so NO typed-word gate
+/// (contrast the attest flow, whose TypedWord step IS the gate).
+pub enum SafeHarborAllocateStep {
+    Preview,
+}
+
+/// Full state for the safe-harbor-allocate flow (chunk 5, D2).
+///
+/// The ONLY user input is `method` (an `AllocMethod` toggle). `lots`/`total_sat`/`total_basis` are the
+/// residue computed ONCE at open via `Session::safe_harbor_residue`; the `method` toggle changes ONLY
+/// the recorded tag, never the displayed lots (G3). `pre2025_method` is the method the residue was
+/// computed under, threaded UNCHANGED through flow→modal→persist (G5 immutability).
+pub struct SafeHarborAllocateFlowState {
+    pub lots: Vec<AllocLot>,
+    pub total_sat: Sat,
+    pub total_basis: Usd,
+    pub method: AllocMethod,
+    pub pre2025_method: LotMethod,
+    pub list: TargetList<AllocLotRow>,
+    pub step: SafeHarborAllocateStep,
+}
+
+/// Payload for the safe-harbor-allocate confirmation modal (revocable framing; NOT typed-word).
+pub struct SafeHarborAllocateModalState {
+    pub lots: Vec<AllocLot>,
+    pub total_sat: Sat,
+    pub total_basis: Usd,
+    pub method: AllocMethod,
+    pub pre2025_method: LotMethod,
+    pub lot_count: usize,
 }
 
 /// The §A.5 basis label for a `Persistability`. `ForbiddenBroker2027` is never persisted (pre-filtered),
