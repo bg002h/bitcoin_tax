@@ -10,8 +10,10 @@
 
 use crate::edit::form::{
     amount_label, income_kind_display, ClassifyInboundModalState, ClassifyInboundStep,
-    InboundVariant, MutationModalState, OutflowKind, ProfileFormState, ReclassifyOutflowModalState,
-    ReclassifyOutflowStep, FIELD_LABELS,
+    InboundVariant, MutationModalState, OutflowKind, ProfileFormState, ReclassifyIncomeFlowState,
+    ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowModalState,
+    ReclassifyOutflowStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState,
+    VoidModalState, FIELD_LABELS,
 };
 use crate::editor::{EditorApp, EditorScreen};
 use btctax_core::{DisposeKind, InboundClass, OutflowClass};
@@ -186,6 +188,49 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.reclassify_outflow_modal.as_ref() {
         draw_reclassify_outflow_modal(frame, area, modal);
+    }
+    // Reclassify-income flow overlay.
+    if app.reclassify_income_flow.is_some() {
+        let is_list = matches!(
+            app.reclassify_income_flow.as_ref().map(|f| &f.step),
+            Some(ReclassifyIncomeStep::List)
+        );
+        if is_list {
+            if let Some(flow) = app.reclassify_income_flow.as_mut() {
+                draw_reclassify_income_list(frame, area, flow);
+            }
+        } else if let Some(flow) = app.reclassify_income_flow.as_ref() {
+            draw_reclassify_income_form(frame, area, &flow.step);
+        }
+    }
+    if let Some(modal) = app.reclassify_income_modal.as_ref() {
+        draw_reclassify_income_modal(frame, area, modal);
+    }
+    // Set-FMV flow overlay.
+    if app.set_fmv_flow.is_some() {
+        let is_list = matches!(
+            app.set_fmv_flow.as_ref().map(|f| &f.step),
+            Some(SetFmvStep::List)
+        );
+        if is_list {
+            if let Some(flow) = app.set_fmv_flow.as_mut() {
+                draw_set_fmv_list(frame, area, flow);
+            }
+        } else if let Some(flow) = app.set_fmv_flow.as_ref() {
+            draw_set_fmv_form(frame, area, &flow.step);
+        }
+    }
+    if let Some(modal) = app.set_fmv_modal.as_ref() {
+        draw_set_fmv_modal(frame, area, modal);
+    }
+    // Void-decision flow overlay.
+    if app.void_flow.is_some() {
+        if let Some(flow) = app.void_flow.as_mut() {
+            draw_void_list(frame, area, flow);
+        }
+    }
+    if let Some(modal) = app.void_modal.as_ref() {
+        draw_void_modal(frame, area, modal);
     }
 }
 
@@ -922,6 +967,496 @@ fn draw_reclassify_outflow_modal(
     frame.render_widget(paragraph, modal_rect);
 }
 
+// ── Reclassify-income flow draw functions ─────────────────────────────────────
+
+/// Render the reclassify-income target list overlay.
+fn draw_reclassify_income_list(
+    frame: &mut Frame,
+    area: Rect,
+    flow: &mut ReclassifyIncomeFlowState,
+) {
+    let modal_width: u16 = 100;
+    let modal_height: u16 = (flow.list.items.len() as u16 + 6).min(area.height.saturating_sub(2));
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Reclassify Income — select Income event target  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let header = Row::new(vec![
+        Cell::from("Date"),
+        Cell::from("Sat"),
+        Cell::from("Kind"),
+        Cell::from("Business"),
+        Cell::from("FMV"),
+        Cell::from("EventId"),
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
+
+    let rows: Vec<Row> = if flow.list.items.is_empty() {
+        vec![Row::new(vec![Cell::from(
+            "(no reclassifiable income events)",
+        )])]
+    } else {
+        flow.list
+            .items
+            .iter()
+            .map(|item| {
+                let fmv_str = item
+                    .fmv
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "(pending)".to_string());
+                Row::new(vec![
+                    Cell::from(item.date.to_string()),
+                    Cell::from(item.sat.to_string()),
+                    Cell::from(income_kind_display(item.kind)),
+                    Cell::from(item.business.to_string()),
+                    Cell::from(fmv_str),
+                    Cell::from(item.income_event.canonical()),
+                ])
+            })
+            .collect()
+    };
+
+    let widths = [
+        Constraint::Length(12),
+        Constraint::Length(12),
+        Constraint::Length(10),
+        Constraint::Length(10),
+        Constraint::Length(14),
+        Constraint::Min(30),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        )
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.list.table_state);
+
+    let footer_area = Rect {
+        x: modal_rect.x,
+        y: modal_rect.y + modal_rect.height.saturating_sub(1),
+        width: modal_rect.width,
+        height: 1,
+    };
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(footer, footer_area);
+}
+
+/// Render the reclassify-income field form overlay.
+fn draw_reclassify_income_form(frame: &mut Frame, area: Rect, step: &ReclassifyIncomeStep) {
+    let modal_width: u16 = 72;
+    let modal_height: u16 = 14;
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let ReclassifyIncomeStep::FieldForm {
+        item,
+        business,
+        kind,
+        focus,
+        error,
+    } = step
+    else {
+        return;
+    };
+
+    let biz_display = match business {
+        None => "---  [required]",
+        Some(true) => "true",
+        Some(false) => "false",
+    };
+    let kind_display = match kind {
+        None => "keep original",
+        Some(k) => income_kind_display(*k),
+    };
+
+    let biz_line = format!(
+        "  {} business: {}  (Tab: cycle true/false/---)",
+        if *focus == 0 { ">" } else { " " },
+        biz_display,
+    );
+    let kind_line = format!(
+        "  {} kind:     {}  (Tab: cycle None/Mining/Staking/Interest/Airdrop/Reward)",
+        if *focus == 1 { ">" } else { " " },
+        kind_display,
+    );
+    let err_line = error
+        .as_deref()
+        .map(|e| format!("\n  Error: {e}"))
+        .unwrap_or_default();
+
+    let content = format!(
+        "  target: {target}\n\
+         \n\
+         {biz_line}\n\
+         {kind_line}\
+         {err_line}\n\
+         \n\
+         \n  Enter: validate   Esc: back to list   ↑/↓: move focus   q: swallowed",
+        target = item.income_event.canonical(),
+    );
+
+    let block = Block::default()
+        .title(" Reclassify Income — field form  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+/// Render the reclassify-income confirmation modal.
+fn draw_reclassify_income_modal(frame: &mut Frame, area: Rect, modal: &ReclassifyIncomeModalState) {
+    // Spec D1: when kind is Some(k), show "{display} (was {original})";
+    // when None, show "keep original".
+    let new_kind_display = match modal.new_kind {
+        Some(k) => format!(
+            "{} (was {})",
+            income_kind_display(k),
+            income_kind_display(modal.original_kind)
+        ),
+        None => "keep original".to_string(),
+    };
+
+    let content = format!(
+        "  target:  {target}   (Income)\n\
+           date:    {date}\n\
+           sat:     {sat}\n\
+         \n\
+           original: kind={orig_kind}  business={orig_biz}\n\
+           override:\n\
+             business: {new_biz}    (was {orig_biz})\n\
+             kind:     {new_kind}\n\
+         \n\
+           Effects: income_recognized updates; SE/NIIT exposure\n\
+           may change depending on the flip direction.\n\
+         \n\
+           Appended as a decision event (append-only log).\n\
+           Saved immediately via the vault's atomic write path.\n\
+         \n\
+         [Enter] Confirm & save     [Esc] Cancel — writes nothing",
+        target = modal.target_event.canonical(),
+        date = modal.target_date,
+        sat = modal.target_sat,
+        orig_kind = income_kind_display(modal.original_kind),
+        orig_biz = modal.original_business,
+        new_biz = modal.new_business,
+        new_kind = new_kind_display,
+    );
+
+    let modal_width: u16 = 64;
+    let content_lines = content.lines().count() as u16 + 2;
+    let modal_height = content_lines.max(14);
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Confirm: reclassify-income — WRITES THE VAULT ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+// ── Set-FMV flow draw functions ───────────────────────────────────────────────
+
+/// Render the set-fmv target list overlay.
+fn draw_set_fmv_list(frame: &mut Frame, area: Rect, flow: &mut SetFmvFlowState) {
+    let modal_width: u16 = 90;
+    let modal_height: u16 = (flow.list.items.len() as u16 + 6).min(area.height.saturating_sub(2));
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Set FMV — select FmvMissing Income event  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let header = Row::new(vec![
+        Cell::from("Date"),
+        Cell::from("Sat"),
+        Cell::from("Kind"),
+        Cell::from("EventId"),
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
+
+    let rows: Vec<Row> = if flow.list.items.is_empty() {
+        vec![Row::new(vec![Cell::from("(no FMV-missing income events)")])]
+    } else {
+        flow.list
+            .items
+            .iter()
+            .map(|item| {
+                Row::new(vec![
+                    Cell::from(item.date.to_string()),
+                    Cell::from(item.sat.to_string()),
+                    Cell::from(income_kind_display(item.kind)),
+                    Cell::from(item.event.canonical()),
+                ])
+            })
+            .collect()
+    };
+
+    let widths = [
+        Constraint::Length(12),
+        Constraint::Length(12),
+        Constraint::Length(10),
+        Constraint::Min(30),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        )
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.list.table_state);
+
+    let footer_area = Rect {
+        x: modal_rect.x,
+        y: modal_rect.y + modal_rect.height.saturating_sub(1),
+        width: modal_rect.width,
+        height: 1,
+    };
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(footer, footer_area);
+}
+
+/// Render the set-fmv field form overlay.
+fn draw_set_fmv_form(frame: &mut Frame, area: Rect, step: &SetFmvStep) {
+    let modal_width: u16 = 70;
+    let modal_height: u16 = 12;
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let SetFmvStep::FieldForm {
+        item,
+        usd_fmv_buf,
+        error,
+    } = step
+    else {
+        return;
+    };
+
+    let fmv_line = format!("  > usd_fmv (USD) [REQUIRED]: {}", usd_fmv_buf.buf);
+    let err_line = error
+        .as_deref()
+        .map(|e| format!("\n  Error: {e}"))
+        .unwrap_or_default();
+
+    let content = format!(
+        "  target: {target}\n\
+         \n\
+         {fmv_line}\
+         {err_line}\n\
+         \n\
+         \n  Enter: validate   Esc: back to list   q: swallowed",
+        target = item.event.canonical(),
+    );
+
+    let block = Block::default()
+        .title(" Set FMV — field form  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+/// Render the set-fmv confirmation modal.
+fn draw_set_fmv_modal(frame: &mut Frame, area: Rect, modal: &SetFmvModalState) {
+    let content = format!(
+        "  target:  {target}   (Income)\n\
+           date:    {date}\n\
+           sat:     {sat}\n\
+           kind:    {kind}\n\
+         \n\
+           usd_fmv: {usd_fmv}   (REQUIRED — sets the income FMV)\n\
+         \n\
+           Effects: FmvMissing blocker will clear; income_recognized\n\
+           will gain an entry with this FMV.\n\
+         \n\
+           Appended as a decision event (append-only log).\n\
+           Saved immediately via the vault's atomic write path.\n\
+         \n\
+         [Enter] Confirm & save     [Esc] Cancel — writes nothing",
+        target = modal.target_event.canonical(),
+        date = modal.target_date,
+        sat = modal.target_sat,
+        kind = income_kind_display(modal.target_kind),
+        usd_fmv = modal.usd_fmv,
+    );
+
+    let modal_width: u16 = 64;
+    let content_lines = content.lines().count() as u16 + 2;
+    let modal_height = content_lines.max(14);
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Confirm: set-fmv — WRITES THE VAULT ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+// ── Void-decision flow draw functions ─────────────────────────────────────────
+
+/// Render the void-decision target list overlay.
+///
+/// Columns: Seq | Type | Target summary.
+/// The void flow has NO FieldForm step — Enter from the list goes DIRECTLY to the modal.
+fn draw_void_list(frame: &mut Frame, area: Rect, flow: &mut VoidFlowState) {
+    let modal_width: u16 = 100;
+    let modal_height: u16 = (flow.list.items.len() as u16 + 6).min(area.height.saturating_sub(2));
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Void Decision — select decision to void  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let header = Row::new(vec![
+        Cell::from("Seq"),
+        Cell::from("Type"),
+        Cell::from("Target summary"),
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
+
+    let rows: Vec<Row> = if flow.list.items.is_empty() {
+        vec![Row::new(vec![Cell::from("(no revocable decisions)")])]
+    } else {
+        flow.list
+            .items
+            .iter()
+            .map(|item| {
+                Row::new(vec![
+                    Cell::from(item.seq.to_string()),
+                    Cell::from(item.payload_tag),
+                    Cell::from(item.target_summary.clone()),
+                ])
+            })
+            .collect()
+    };
+
+    let widths = [
+        Constraint::Length(8),
+        Constraint::Length(24),
+        Constraint::Min(40),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        )
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.list.table_state);
+
+    let footer_area = Rect {
+        x: modal_rect.x,
+        y: modal_rect.y + modal_rect.height.saturating_sub(1),
+        width: modal_rect.width,
+        height: 1,
+    };
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select → modal   Esc: close   q: swallowed")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(footer, footer_area);
+}
+
+/// Render the void-decision confirmation modal.
+///
+/// Shows the decision being voided + the full cascade consequence note (D3.1).
+/// Appends the SafeHarbor conditional warning when `modal.is_safe_harbor` is true.
+fn draw_void_modal(frame: &mut Frame, area: Rect, modal: &VoidModalState) {
+    let consequence = "\
+  Consequence: this decision's effects un-project.\n\
+  Prior blockers may return (e.g. voiding a ClassifyInbound\n\
+  returns UnknownBasisInbound; the pending row re-lists).\n\
+  Decisions that DEPENDED on this one (e.g. a ManualFmv or\n\
+  ReclassifyIncome on a ClassifyRaw'd event, or a\n\
+  LotSelection picking its lots) may now fire\n\
+  DecisionConflict/LotSelectionInvalid — void those too.\n";
+
+    let sha_warning = if modal.is_safe_harbor {
+        "\n  WARNING: If this allocation is effective (Path B), voiding\n\
+  it fires DecisionConflict — irrevocable (§7.4). If inert,\n\
+  the void applies and the Path A default resumes.\n\
+  A rejected void permanently removes this allocation from\n\
+  this list (CLI void remains available).\n"
+    } else {
+        ""
+    };
+
+    let content = format!(
+        "  decision: decision|{seq}  ({tag})\n\
+           target:   {summary}\n\
+         \n\
+         {consequence}\
+         {sha_warning}\
+           Appended as a VoidDecisionEvent (append-only log).\n\
+           Saved immediately via the vault's atomic write path.\n\
+         \n\
+         [Enter] Confirm & save     [Esc] Cancel — writes nothing",
+        seq = modal.seq,
+        tag = modal.payload_tag,
+        summary = modal.target_summary,
+        consequence = consequence,
+        sha_warning = sha_warning,
+    );
+
+    let modal_width: u16 = 70;
+    let content_lines = content.lines().count() as u16 + 2;
+    let modal_height = content_lines.max(16);
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Confirm: void decision — WRITES THE VAULT ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
 /// Compute a centered `Rect` of the given dimensions within `area`.
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let x = area.x + area.width.saturating_sub(width) / 2;
@@ -1161,6 +1696,87 @@ mod tests {
         assert!(
             rendered.contains("EDITOR"),
             "Browse screen must contain [EDITOR] marker; rendered:\n{rendered}"
+        );
+    }
+
+    // ── KAT-VOID-SHA-WARNING — SafeHarbor void modal carries the mandatory warning ─
+    //
+    // Spec D3.1 [M3]: SafeHarborAllocation IS in the void list, but its modal MUST
+    // display the conditional-revocability warning (Path B conflict / Path A inert)
+    // INCLUDING the permanence line ("a rejected void permanently removes this
+    // allocation from this list"). Non-SafeHarbor modals must NOT show it.
+    // The cascade consequence note [I1] is ALWAYS present, both cases.
+
+    fn render_void_modal_to_string(modal: &VoidModalState) -> String {
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let area = terminal.get_frame().area();
+        terminal.draw(|f| draw_void_modal(f, area, modal)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .clone()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    #[test]
+    fn kat_void_sha_warning_present_for_safe_harbor_absent_otherwise() {
+        // SafeHarborAllocation modal: warning MUST be present.
+        let sha_modal = VoidModalState {
+            target_event_id: btctax_core::EventId::Decision { seq: 7 },
+            seq: 7,
+            payload_tag: "SafeHarborAllocation",
+            target_summary: "alloc 2 lots as_of 2025-01-01".to_string(),
+            inner_target: None,
+            is_safe_harbor: true,
+        };
+        let rendered = render_void_modal_to_string(&sha_modal);
+        assert!(
+            rendered.contains("WARNING: If this allocation is effective (Path B)"),
+            "SHA-WARN: SafeHarbor void modal must show the Path-B conditional warning; \
+             rendered:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("irrevocable"),
+            "SHA-WARN: warning must state irrevocability (§7.4); rendered:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("permanently removes this allocation"),
+            "SHA-WARN: warning must carry the [M3] permanence line; rendered:\n{rendered}"
+        );
+        // The cascade consequence note [I1] is always present.
+        assert!(
+            rendered.contains("void those too"),
+            "SHA-WARN: cascade consequence note must be present; rendered:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("Prior blockers may return"),
+            "SHA-WARN: returned-blocker consequence note must be present; rendered:\n{rendered}"
+        );
+
+        // Non-SafeHarbor modal (MethodElection): warning must be ABSENT.
+        let me_modal = VoidModalState {
+            target_event_id: btctax_core::EventId::Decision { seq: 3 },
+            seq: 3,
+            payload_tag: "MethodElection",
+            target_summary: "method=Fifo from 2024-01-01".to_string(),
+            inner_target: None,
+            is_safe_harbor: false,
+        };
+        let rendered_me = render_void_modal_to_string(&me_modal);
+        assert!(
+            !rendered_me.contains("WARNING: If this allocation is effective"),
+            "SHA-WARN: non-SafeHarbor void modal must NOT show the SafeHarbor warning; \
+             rendered:\n{rendered_me}"
+        );
+        // Cascade note still present for non-SafeHarbor.
+        assert!(
+            rendered_me.contains("void those too"),
+            "SHA-WARN: cascade note must be present for non-SafeHarbor too; \
+             rendered:\n{rendered_me}"
         );
     }
 }

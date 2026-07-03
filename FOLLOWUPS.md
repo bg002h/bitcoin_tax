@@ -4,6 +4,31 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ Mutating-TUI chunk 2b — reclassify-income + set-fmv + VOID — SHIPPED (2026-07-02) — THE RECONCILE FAMILY IS COMPLETE IN THE GUI
+
+The correction family: `r` reclassify-income (required-explicit business; kind-optional; the Interest→
+Mining E2E pins exact NIIT −$380.00 / SE $1,412.96 effects), `f` set-fmv (latest-wins re-point — no
+conflict), `v` VOID (the exact nine-variant revocable set; SafeHarborAllocation with the mandatory Path-B
++ permanence warning; the DEPENDENT-DECISION CASCADE stated in the modal + KAT'd end-to-end — orphans fire
+conflicts on their own ids, "void those too"; the honest void-REJECTED status; the void retry verified
+OPPOSITE to classify's — idempotent, +2 inert rows, no conflict; the LotSelection void clears
+optimize_attest, unit-locked). The four 2a remedy arms now name the in-editor Void flow first (all pins
+strengthened in place — a mechanized diff analysis found ZERO deleted asserts). Spec R0 2 rounds → 0C/0I;
+whole-branch 2 rounds → 0C/0I. **845 workspace tests.**
+
+**[I2 records]:** (a) WB-I4(a) raw-vs-effective under-inclusion now spans the 2b lists too (deferred,
+same remedy); (b) [M3] a REJECTED SafeHarbor void permanently hides the in-force allocation from the v
+list (documented in the modal; refine-later); (c) cascade conflicts are invisible to the immediate status
+when attributed to orphans (the Compliance tab carries them; a generic blockers-diff status is a deferred
+enhancement); (d) [R0-N3] hoisted-set staleness across re-projections (the 2a precedent, benign);
+(e) possible duplicate f-list rows under duplicate FmvMissing blockers (not observed; dedupe later).
+
+**NEXT: chunk 3** — select-lots, set-donation-details, safe-harbor attest (the remaining decision flows)
+→ chunk 4 import → chunk 5 optimize. The 2a/2b specs are the pattern; the chunk-2 recon lineage maps most
+of chunk 3's surface.
+
+---
+
 ## ✅ Mutating-TUI chunk 2a — classify-inbound + reclassify-outflow — SHIPPED (2026-07-02)
 
 The first decision-APPENDING GUI flows: filterable target pick-lists from the projected state (the
