@@ -2482,12 +2482,31 @@ fn open_void_flow(app: &mut EditorApp) {
         })
         .collect();
 
+    // #7: exclude EFFECTIVE SafeHarborAllocations (irrevocable, §7.4). A confirmed void of an
+    // effective allocation writes a permanent VoidDecisionEvent the engine rejects with
+    // DecisionConflict (a damaging no-op). "Effective" = a non-voided SafeHarborAllocation on
+    // whose id NEITHER SafeHarborTimebar NOR SafeHarborUnconservable fired (resolve.rs:865-921).
+    // Inert allocations (timebarred OR unconservable) STAY voidable — voiding them applies
+    // cleanly (transition.rs:403) — so they remain listed.
+    let effective_alloc = |e: &btctax_core::LedgerEvent| {
+        matches!(e.payload, EventPayload::SafeHarborAllocation(_)) && {
+            let has = |k| {
+                snap.state
+                    .blockers
+                    .iter()
+                    .any(|b| b.kind == k && b.event.as_ref() == Some(&e.id))
+            };
+            !has(BlockerKind::SafeHarborTimebar) && !has(BlockerKind::SafeHarborUnconservable)
+        }
+    };
+
     let mut items: Vec<VoidListItem> = snap
         .events
         .iter()
         .filter(|e| matches!(e.id, EventId::Decision { .. }))
         .filter(|e| !voided.contains(&e.id))
         .filter(|e| is_revocable_payload(&e.payload))
+        .filter(|e| !effective_alloc(e))
         .map(|e| {
             let seq = match &e.id {
                 EventId::Decision { seq } => *seq,
@@ -11123,10 +11142,19 @@ mod tests {
         );
     }
 
-    // ── KAT-E2E-ATTEST-VOID — voiding the newly attested alloc yields conflict status ──
+    // ── KAT-E2E-ATTEST-VOID — after attest the void list is EMPTY (#7 pre-filter) ──
+    //
+    // REWRITTEN for #7 (INTENTIONAL SUPERSESSION — flag for the whole-diff reviewer):
+    // the prior version pinned the §7.4 doomed-void TRAP (asserted the attested alloc IS
+    // listed, and that voiding it yields "remains in force"). After #7's effective-allocation
+    // pre-filter that path is TUI-UNREACHABLE: post-attest the newly-attested allocation is
+    // EFFECTIVE (excluded by the pre-filter) and the prior is already voided (excluded by the
+    // voided-set scan) → the void list is EMPTY. So the flow does NOT open and the status is
+    // the empty-list message. Engine coverage of the §7.4 irrevocability guard is NOT lost —
+    // it is still pinned by crates/btctax-core/tests/transition.rs:365.
 
     #[test]
-    fn kat_e2e_attest_void_new_alloc_yields_conflict_status() {
+    fn kat_e2e_attest_void_list_empty_after_attest() {
         use btctax_core::persistence::load_all_ordered;
 
         let dir = tempfile::tempdir().unwrap();
@@ -11134,7 +11162,8 @@ mod tests {
         let key = dir.path().join("key.asc");
         let pp_str = "kat-e2e-attest-void";
 
-        let prior_id = seed_safe_harbor_vault(&vault, &key, pp_str);
+        // The prior (unattested ProRata) allocation — voided by the attest below.
+        let _prior_id = seed_safe_harbor_vault(&vault, &key, pp_str);
 
         let mut app = open_app(&vault, pp_str);
 
@@ -11145,7 +11174,7 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Enter)); // save
         assert!(
             app.safe_harbor_attest_flow.is_none(),
-            "VOID-NEW: flow must be closed after attest"
+            "VOID-EMPTY: flow must be closed after attest"
         );
 
         // The NEW attested allocation's id = tail decision row.
@@ -11157,96 +11186,169 @@ mod tests {
             }
         };
 
-        // Now open void flow: 'v' → the new attested allocation IS listed;
-        // the voided PRIOR is NOT (raw voided-set scan excludes it).
-        app.status = None;
-        handle_key(&mut app, press(KeyCode::Char('v')));
-        assert!(
-            app.void_flow.is_some(),
-            "VOID-NEW: void flow must open; attest_save_failed={}, snapshot={:?}",
-            app.attest_save_failed,
-            app.snapshot.is_some()
-        );
-        {
-            let void_flow = app.void_flow.as_ref().unwrap();
-            assert!(
-                void_flow
-                    .list
-                    .items
-                    .iter()
-                    .any(|i| i.event_id == new_attest_id),
-                "VOID-NEW: the NEW attested allocation must be listed in the void flow"
-            );
-            assert!(
-                !void_flow.list.items.iter().any(|i| i.event_id == prior_id),
-                "VOID-NEW: the voided PRIOR must NOT appear in the void list"
-            );
-            // Select the new attested allocation's row.
-            let idx = void_flow
-                .list
-                .items
-                .iter()
-                .position(|i| i.event_id == new_attest_id)
-                .unwrap();
-            app.void_flow
-                .as_mut()
-                .unwrap()
-                .list
-                .table_state
-                .select(Some(idx));
-        }
-
-        handle_key(&mut app, press(KeyCode::Enter)); // List → VoidModal
-        assert!(
-            app.void_modal.is_some(),
-            "VOID-NEW: void modal must open after Enter on void list"
-        );
-        assert!(
-            app.void_modal.as_ref().unwrap().is_safe_harbor,
-            "VOID-NEW: modal must carry the SafeHarborAllocation warning flag"
-        );
-        handle_key(&mut app, press(KeyCode::Enter)); // confirm void
-
-        assert!(
-            app.void_modal.is_none(),
-            "VOID-NEW: void modal must be closed after confirm"
-        );
-        assert!(
-            app.void_flow.is_none(),
-            "VOID-NEW: void flow must be closed after confirm"
-        );
-
-        // §7.4: the void is REJECTED — derive_void_status arm-1 wording, quoted FULLY
-        // (round-2 N3, including " (see Compliance)"). NOT "Voided…".
-        assert_eq!(
-            app.status.as_deref(),
-            Some(
-                "Void saved, but DecisionConflict fired — the target decision \
-                 remains in force (see Compliance)"
-            ),
-            "VOID-NEW: status must be the arm-1 rejected-void wording"
-        );
-
-        // Re-projected state: the doomed void's DecisionConflict is present and the
-        // allocation is STILL effective (it keeps curing its own timebar: no
-        // SafeHarborTimebar on the attested id).
+        // Precondition sanity: post-attest the new allocation is EFFECTIVE (no timebar /
+        // unconservable on its id) and the prior is voided — so both are excluded from the
+        // void list (effective-alloc pre-filter + voided-set scan respectively).
         {
             let snap = app.snapshot.as_ref().unwrap();
-            assert!(
+            let on_new = |k: BlockerKind| {
                 snap.state
                     .blockers
                     .iter()
-                    .any(|b| b.kind == BlockerKind::DecisionConflict),
-                "VOID-NEW: DecisionConflict must be present after the doomed void"
-            );
+                    .any(|b| b.kind == k && b.event.as_ref() == Some(&new_attest_id))
+            };
             assert!(
-                !snap.state.blockers.iter().any(|b| {
-                    b.kind == BlockerKind::SafeHarborTimebar
-                        && b.event.as_ref() == Some(&new_attest_id)
-                }),
-                "VOID-NEW: the attested allocation must remain effective (no timebar on its id)"
+                !on_new(BlockerKind::SafeHarborTimebar)
+                    && !on_new(BlockerKind::SafeHarborUnconservable),
+                "VOID-EMPTY: the newly attested allocation must be effective"
             );
         }
+
+        // Now open void flow: 'v' → the list is EMPTY → flow does NOT open + empty-list status.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('v')));
+        assert!(
+            app.void_flow.is_none(),
+            "VOID-EMPTY: void flow must NOT open (effective alloc excluded, prior voided)"
+        );
+        assert_eq!(
+            app.status.as_deref(),
+            Some("No revocable decisions to void"),
+            "VOID-EMPTY: status must be the empty-list message"
+        );
+    }
+
+    // ── KAT-VOID-EFFECTIVE-PREFILTER-MIXED (#7) — effective alloc excluded, other listed ──
+    //
+    // Seed an EFFECTIVE SafeHarborAllocation (empty → conservable vs the empty pre-2025
+    // Universal snapshot; attested → not timebarred) PLUS one other revocable decision
+    // (a MethodElection) so the flow opens. Assert the other decision IS listed and the
+    // effective allocation is NOT.
+
+    #[test]
+    fn kat_void_effective_prefilter_mixed() {
+        use btctax_core::event::{AllocMethod, EventPayload, MethodElection, SafeHarborAllocation};
+        use btctax_core::persistence::append_decision;
+        use btctax_core::LotMethod;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-void-mixed-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        let (alloc_id, me_id) = {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            // Decision 1: an EFFECTIVE allocation.
+            let alloc_id = append_decision(
+                session.conn(),
+                EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+                    lots: vec![],
+                    as_of_date: date!(2025 - 01 - 01),
+                    method: AllocMethod::ActualPosition,
+                    timely_allocation_attested: true,
+                    pre2025_method: LotMethod::Fifo,
+                }),
+                OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(),
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            // Decision 2: another revocable decision so the flow opens.
+            let me_id = append_decision(
+                session.conn(),
+                EventPayload::MethodElection(MethodElection {
+                    effective_from: date!(2024 - 01 - 01),
+                    method: LotMethod::Fifo,
+                }),
+                OffsetDateTime::from_unix_timestamp(1_748_001_000).unwrap(),
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+            (alloc_id, me_id)
+        };
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Sanity: the allocation is effective (no timebar / unconservable on its id).
+        {
+            let snap = app.snapshot.as_ref().unwrap();
+            let on_alloc = |k: BlockerKind| {
+                snap.state
+                    .blockers
+                    .iter()
+                    .any(|b| b.kind == k && b.event.as_ref() == Some(&alloc_id))
+            };
+            assert!(
+                !on_alloc(BlockerKind::SafeHarborTimebar)
+                    && !on_alloc(BlockerKind::SafeHarborUnconservable),
+                "VOID-MIXED: the allocation must be effective (Path B)"
+            );
+        }
+
+        // v → flow opens (the MethodElection keeps the list non-empty).
+        handle_key(&mut app, press(KeyCode::Char('v')));
+        let void_flow = app
+            .void_flow
+            .as_ref()
+            .expect("VOID-MIXED: flow must open (other revocable decision present)");
+        assert!(
+            void_flow.list.items.iter().any(|i| i.event_id == me_id),
+            "VOID-MIXED: the MethodElection must be listed"
+        );
+        assert!(
+            !void_flow.list.items.iter().any(|i| i.event_id == alloc_id),
+            "VOID-MIXED: the effective allocation must NOT be listed"
+        );
+    }
+
+    // ── KAT-VOID-INERT-ALLOC-LISTED (#7) — a timebarred alloc REMAINS voidable ──
+    //
+    // An unattested past-bar ProRata allocation is timebarred (inert) → voiding it applies
+    // cleanly (transition.rs:403) → it must REMAIN in the void list (the pre-filter excludes
+    // ONLY effective allocations).
+
+    #[test]
+    fn kat_void_inert_alloc_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-void-inert-pass";
+
+        // Unattested ProRata empty allocation → timebarred (inert).
+        let alloc_id = seed_safe_harbor_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Sanity: the allocation IS timebarred (inert).
+        {
+            let snap = app.snapshot.as_ref().unwrap();
+            assert!(
+                snap.state.blockers.iter().any(|b| {
+                    b.kind == BlockerKind::SafeHarborTimebar && b.event.as_ref() == Some(&alloc_id)
+                }),
+                "VOID-INERT: the allocation must be timebarred (inert)"
+            );
+        }
+
+        handle_key(&mut app, press(KeyCode::Char('v')));
+        let void_flow = app
+            .void_flow
+            .as_ref()
+            .expect("VOID-INERT: flow must open (an inert allocation is voidable)");
+        assert!(
+            void_flow
+                .list
+                .items
+                .iter()
+                .any(|i| i.event_id == alloc_id && i.payload_tag == "SafeHarborAllocation"),
+            "VOID-INERT: the timebarred allocation must REMAIN in the void list"
+        );
     }
 
     // ── KAT-E2E-ATTEST-ERRLATCH — save error sets latch, blocks all openers ──
