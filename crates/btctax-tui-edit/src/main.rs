@@ -2540,26 +2540,17 @@ fn handle_select_lots_modal_key(app: &mut EditorApp, key: KeyEvent) {
     match key.code {
         KeyCode::Enter => {
             // Extract the validated payload from the modal before dropping the borrow.
-            let (
-                disposal_event,
-                disposal_date,
-                disposal_kind,
-                principal_sat,
-                picks,
-                pick_count,
-                total_sat,
-            ) = match app.select_lots_modal.as_ref() {
-                Some(m) => (
-                    m.disposal_event.clone(),
-                    m.disposal_date,
-                    m.disposal_kind,
-                    m.principal_sat,
-                    m.picks.clone(),
-                    m.pick_count,
-                    m.total_sat,
-                ),
-                None => return,
-            };
+            // (disposal_date/kind/principal are display-only modal fields — not needed here.)
+            let (disposal_event, picks, pick_count, total_sat) =
+                match app.select_lots_modal.as_ref() {
+                    Some(m) => (
+                        m.disposal_event.clone(),
+                        m.picks.clone(),
+                        m.pick_count,
+                        m.total_sat,
+                    ),
+                    None => return,
+                };
 
             let payload =
                 btctax_core::EventPayload::LotSelection(btctax_core::event::LotSelection {
@@ -2612,8 +2603,6 @@ fn handle_select_lots_modal_key(app: &mut EditorApp, key: KeyEvent) {
                     app.status = Some(format!("Save error: {e}"));
                 }
             }
-            // Suppress unused-variable warning for unused extraction fields.
-            let _ = (disposal_date, disposal_kind, principal_sat);
         }
         KeyCode::Esc => {
             // Cancel: close modal → back to LotsForm (nothing written).
@@ -2709,13 +2698,8 @@ fn handle_sl_list_key(app: &mut EditorApp, key: KeyEvent) {
                         Some(w) => format!("{w:?}"),
                         None => "(no wallet)".to_string(),
                     };
-                    // Set error on the list step (stay in List).
-                    if let Some(flow) = app.select_lots_flow.as_mut() {
-                        if let SelectLotsStep::List = &flow.step {
-                            // No per-step error on List; set global status.
-                        }
-                        let _ = flow.step; // silence unused lint
-                    }
+                    // No per-step error on the List step — surface via the global status
+                    // and stay on List (the flow's step is left unchanged).
                     app.status = Some(format!(
                         "No lots available for wallet {wallet_str}; check Holdings"
                     ));
@@ -10081,6 +10065,147 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Esc));
     }
 
+    // ── KAT-V-DD-4 — pre-population drives the PRODUCTION List→FieldForm mapping ─
+    //
+    // Round-1 whole-branch review [I1]: the prior form.rs `kat_v_dd_4_...` re-implemented
+    // the 10-field pre-population mapping IN the test body (coverage theatre — dropping a
+    // production optional-field pre-population passed uncaught, risking a last-write-wins
+    // upsert of `None` over a stored field). This real-path version stores a full 10-field
+    // DonationDetails, drives `d` → List → Enter → FieldForm (the production pre-population
+    // at the List→FieldForm transition, main.rs), asserts EACH of the 10 buffers equals the
+    // stored value, then Enter → modal to assert the validated `details` round-trip.
+
+    #[test]
+    fn kat_v_dd_4_pre_population_drives_real_path() {
+        use time::macros::date;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-v-dd-4-pass";
+
+        let (_, to_id) = seed_donate_vault(&vault, &key, pp_str, 500_000);
+
+        // Store a FULL 10-field DonationDetails via the production side-table writer,
+        // then drop the session (releasing the vault lock before open_app).
+        let details = DonationDetails {
+            donee_name: "Community Foundation".to_owned(),
+            donee_address: Some("123 Charity Lane".to_owned()),
+            donee_ein: Some("12-3456789".to_owned()),
+            appraiser_name: "Jane Appraiser".to_owned(),
+            appraiser_address: Some("456 Appraise Ave".to_owned()),
+            appraiser_tin: Some("987654321".to_owned()),
+            appraiser_ptin: Some("P01234567".to_owned()),
+            appraiser_qualifications: Some("certified bitcoin appraiser".to_owned()),
+            appraisal_date: Some(date!(2025 - 05 - 20)),
+            fmv_method_override: Some("qualified appraisal".to_owned()),
+        };
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            crate::edit::persist::persist_donation_details(&mut session, &to_id, &details).unwrap();
+        }
+
+        // Open the editor; snap.donation_details now carries the stored details.
+        let mut app = open_app(&vault, pp_str);
+
+        // d → List: the list item must carry existing_details from snap.donation_details.
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        {
+            let flow = app
+                .set_donation_details_flow
+                .as_ref()
+                .expect("KAT-V-DD-4: flow must open");
+            let item = flow
+                .list
+                .items
+                .iter()
+                .find(|i| i.event_id == to_id)
+                .expect("KAT-V-DD-4: donation must appear in list");
+            assert_eq!(
+                item.existing_details.as_ref(),
+                Some(&details),
+                "KAT-V-DD-4: list item must carry the stored details from snap.donation_details"
+            );
+        }
+
+        // Enter → FieldForm: runs the production pre-population mapping.
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        // Assert EACH of the 10 buffers equals the stored value — a dropped or swapped
+        // production pre-population line fails HERE (the [I1] regression guard).
+        {
+            let flow = app.set_donation_details_flow.as_ref().unwrap();
+            let SetDonationDetailsStep::FieldForm {
+                donee_name_buf,
+                donee_address_buf,
+                donee_ein_buf,
+                appraiser_name_buf,
+                appraiser_address_buf,
+                appraiser_tin_buf,
+                appraiser_ptin_buf,
+                appraiser_qualifications_buf,
+                appraisal_date_buf,
+                fmv_method_override_buf,
+                ..
+            } = &flow.step
+            else {
+                panic!("KAT-V-DD-4: Enter must open FieldForm");
+            };
+            assert_eq!(
+                donee_name_buf.buf.trim(),
+                "Community Foundation",
+                "donee_name"
+            );
+            assert_eq!(
+                donee_address_buf.buf.trim(),
+                "123 Charity Lane",
+                "donee_address"
+            );
+            assert_eq!(donee_ein_buf.buf.trim(), "12-3456789", "donee_ein");
+            assert_eq!(
+                appraiser_name_buf.buf.trim(),
+                "Jane Appraiser",
+                "appraiser_name"
+            );
+            assert_eq!(
+                appraiser_address_buf.buf.trim(),
+                "456 Appraise Ave",
+                "appraiser_address"
+            );
+            assert_eq!(appraiser_tin_buf.buf.trim(), "987654321", "appraiser_tin");
+            assert_eq!(appraiser_ptin_buf.buf.trim(), "P01234567", "appraiser_ptin");
+            assert_eq!(
+                appraiser_qualifications_buf.buf.trim(),
+                "certified bitcoin appraiser",
+                "appraiser_qualifications"
+            );
+            assert_eq!(
+                appraisal_date_buf.buf.trim(),
+                "2025-05-20",
+                "appraisal_date"
+            );
+            assert_eq!(
+                fmv_method_override_buf.buf.trim(),
+                "qualified appraisal",
+                "fmv_method_override"
+            );
+        }
+
+        // Enter → modal: the pre-populated buffers round-trip through the REAL validator
+        // back to the exact stored details (retains the prior round-trip assertion, now
+        // over production-populated buffers — strictly stronger).
+        handle_key(&mut app, press(KeyCode::Enter));
+        let modal = app
+            .set_donation_details_modal
+            .as_ref()
+            .expect("KAT-V-DD-4: Enter on a valid FieldForm must open the modal");
+        assert_eq!(
+            modal.details, details,
+            "KAT-V-DD-4: validated modal details must round-trip to the stored details"
+        );
+    }
+
     // ── Safe-harbor-attest flow KATs ─────────────────────────────────────────
 
     /// Seed a vault with one TIMEBARRED SafeHarborAllocation
@@ -10897,55 +11022,35 @@ mod tests {
             "ERRLATCH: vault bytes must be unchanged after failed save"
         );
 
-        // While latch is set: 'a' must refuse with latch status.
-        app.status = None;
-        handle_key(&mut app, press(KeyCode::Char('a')));
-        assert!(
-            app.safe_harbor_attest_flow.is_none(),
-            "ERRLATCH: 'a' must not open flow while latch is set"
-        );
-        assert!(
-            app.status
-                .as_deref()
-                .map(|s| s.contains("failed attest save"))
-                .unwrap_or(false),
-            "ERRLATCH: status must contain 'failed attest save'; got: {:?}",
-            app.status
-        );
-
-        // While latch is set: 'f' (an unrelated mutating opener) must also refuse —
-        // this is the piggy-back guard: with every mutating opener latched shut, no
-        // later session.save() can flush the in-memory Void+Attest residue.
-        app.status = None;
-        handle_key(&mut app, press(KeyCode::Char('f')));
-        assert!(
-            app.set_fmv_flow.is_none(),
-            "ERRLATCH: 'f' must not open the set-fmv flow while latch is set"
-        );
-        assert!(
-            app.status
-                .as_deref()
-                .map(|s| s.contains("failed attest save"))
-                .unwrap_or(false),
-            "ERRLATCH: 'f' must show latch status; got: {:?}",
-            app.status
-        );
-
-        // While latch is set: 'p' (profile form) must also refuse.
-        app.status = None;
-        handle_key(&mut app, press(KeyCode::Char('p')));
-        assert!(
-            app.profile_form.is_none(),
-            "ERRLATCH: 'p' must not open profile form while latch is set"
-        );
-        assert!(
-            app.status
-                .as_deref()
-                .map(|s| s.contains("failed attest save"))
-                .unwrap_or(false),
-            "ERRLATCH: 'p' must show latch status; got: {:?}",
-            app.status
-        );
+        // While the latch is set, EVERY mutating opener (p/c/o/r/f/v/s/d/a) must refuse
+        // with the latch status — this is the piggy-back guard: with every mutating opener
+        // latched shut, no later session.save() can flush the in-memory Void+Attest residue.
+        // [round-1 whole-branch review TF-M1: cover all 9 openers, not just a/f/p, so a
+        // future opener added without the guard is caught here.]
+        for k in ['p', 'c', 'o', 'r', 'f', 'v', 's', 'd', 'a'] {
+            app.status = None;
+            handle_key(&mut app, press(KeyCode::Char(k)));
+            assert!(
+                app.profile_form.is_none()
+                    && app.classify_inbound_flow.is_none()
+                    && app.reclassify_outflow_flow.is_none()
+                    && app.reclassify_income_flow.is_none()
+                    && app.set_fmv_flow.is_none()
+                    && app.void_flow.is_none()
+                    && app.select_lots_flow.is_none()
+                    && app.set_donation_details_flow.is_none()
+                    && app.safe_harbor_attest_flow.is_none(),
+                "ERRLATCH: opener '{k}' must open no mutating flow while the latch is set"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("failed attest save"))
+                    .unwrap_or(false),
+                "ERRLATCH: opener '{k}' must show the latch status; got: {:?}",
+                app.status
+            );
+        }
 
         // Verify vault disk bytes still equal bytes_before (session holds lock; read file directly).
         let bytes_after2 = std::fs::read(&vault).unwrap();

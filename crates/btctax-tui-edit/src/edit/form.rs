@@ -2135,77 +2135,11 @@ mod tests {
         );
     }
 
-    /// KAT-V-DD-4: pre-population round-trip — all 10 FieldBuffers pre-populated.
-    #[test]
-    fn kat_v_dd_4_pre_population_round_trip() {
-        use time::macros::date;
-
-        // Build a DonationDetails and pre-populate 10 buffers from it.
-        let details = DonationDetails {
-            donee_name: "Community Foundation".to_owned(),
-            donee_address: Some("123 Charity Lane".to_owned()),
-            donee_ein: Some("12-3456789".to_owned()),
-            appraiser_name: "Jane Appraiser".to_owned(),
-            appraiser_address: Some("456 Appraise Ave".to_owned()),
-            appraiser_tin: Some("987654321".to_owned()),
-            appraiser_ptin: Some("P01234567".to_owned()),
-            appraiser_qualifications: Some("certified bitcoin appraiser".to_owned()),
-            appraisal_date: Some(date!(2025 - 05 - 20)),
-            fmv_method_override: Some("qualified appraisal".to_owned()),
-        };
-
-        let mut bufs = empty_bufs();
-        bufs[0].set(&details.donee_name);
-        if let Some(v) = &details.donee_address {
-            bufs[1].set(v);
-        }
-        if let Some(v) = &details.donee_ein {
-            bufs[2].set(v);
-        }
-        bufs[3].set(&details.appraiser_name);
-        if let Some(v) = &details.appraiser_address {
-            bufs[4].set(v);
-        }
-        if let Some(v) = &details.appraiser_tin {
-            bufs[5].set(v);
-        }
-        if let Some(v) = &details.appraiser_ptin {
-            bufs[6].set(v);
-        }
-        if let Some(v) = &details.appraiser_qualifications {
-            bufs[7].set(v);
-        }
-        if let Some(v) = &details.appraisal_date {
-            bufs[8].set(&v.to_string());
-        }
-        if let Some(v) = &details.fmv_method_override {
-            bufs[9].set(v);
-        }
-
-        // All 10 buffers must be non-empty (pre-populated).
-        for (i, buf) in bufs.iter().enumerate() {
-            assert!(
-                !buf.is_empty(),
-                "KAT-V-DD-4: buffer[{i}] must be pre-populated; got empty"
-            );
-        }
-
-        // Round-trip: validate → should produce the same details.
-        let round_tripped = call_validate_dd(&bufs).unwrap();
-        assert_eq!(round_tripped.donee_name, details.donee_name);
-        assert_eq!(round_tripped.donee_address, details.donee_address);
-        assert_eq!(round_tripped.donee_ein, details.donee_ein);
-        assert_eq!(round_tripped.appraiser_name, details.appraiser_name);
-        assert_eq!(round_tripped.appraiser_tin, details.appraiser_tin);
-        assert_eq!(round_tripped.appraiser_ptin, details.appraiser_ptin);
-        assert_eq!(
-            round_tripped.appraiser_qualifications,
-            details.appraiser_qualifications
-        );
-        assert_eq!(round_tripped.appraisal_date, details.appraisal_date);
-        assert_eq!(
-            round_tripped.fmv_method_override,
-            details.fmv_method_override
-        );
-    }
+    // KAT-V-DD-4 (pre-population round-trip) is implemented in `main.rs` as
+    // `kat_v_dd_4_pre_population_drives_real_path`. The prior version here
+    // re-implemented the production List→FieldForm pre-population mapping IN the test
+    // body — round-1 whole-branch review [I1] found it to be coverage theatre (dropping
+    // a production optional-field pre-population passed uncaught). The real-path version
+    // drives `d` → List → Enter → FieldForm so a wiring regression in any of the 10
+    // fields fails, then Enter → modal to assert the validator round-trip.
 }
