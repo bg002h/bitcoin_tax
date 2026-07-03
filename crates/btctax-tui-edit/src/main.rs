@@ -31,7 +31,7 @@ use edit::form::{
     SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
     SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
     SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, VoidFlowState, VoidListItem,
-    VoidModalState, VoidStep,
+    VoidModalState, VoidStep, FREETEXT_CAP,
 };
 use editor::{EditorApp, EditorScreen};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -2058,7 +2058,7 @@ fn derive_classify_inbound_status(
             // as "{}" (not "decision|{}") to avoid the double-prefix "decision|decision|N".
             return format!(
                 "Saved, but DecisionConflict fired on this decision — see Compliance; \
-                 clear with Void flow (press 'v') or CLI: btctax reconcile void {}",
+                 clear with Void flow (press 'v'), or quit the editor and run: btctax reconcile void {}",
                 decision_id.canonical()
             );
         }
@@ -2075,8 +2075,8 @@ fn derive_classify_inbound_status(
             };
             return format!(
                 "Classified as Income({kind}) but FMV missing — FmvMissing blocker fired; \
-                 to supply the FMV, void this decision (Void flow: press 'v'; or CLI: \
-                 btctax reconcile void decision|{seq}) and re-classify with an FMV",
+                 to supply the FMV, void this decision (Void flow: press 'v'; or quit the \
+                 editor and run: btctax reconcile void decision|{seq}) and re-classify with an FMV",
                 kind = match as_ {
                     InboundClass::Income { kind, .. } => income_kind_display(*kind),
                     _ => "?",
@@ -2094,7 +2094,7 @@ fn derive_classify_inbound_status(
             };
             return format!(
                 "Gift recorded but basis unknown — UnknownBasisInbound re-fired; \
-                 void this decision (Void flow: press 'v'; or CLI: btctax reconcile void \
+                 void this decision (Void flow: press 'v'; or quit the editor and run: btctax reconcile void \
                  decision|{seq}) and re-classify with donor basis or a donor date covered \
                  by the price dataset"
             );
@@ -2130,7 +2130,7 @@ fn derive_reclassify_outflow_status(
             // as "{}" (not "decision|{}") to avoid the double-prefix "decision|decision|N".
             return format!(
                 "Saved, but DecisionConflict fired on this decision — see Compliance; \
-                 clear with Void flow (press 'v') or CLI: btctax reconcile void {}",
+                 clear with Void flow (press 'v'), or quit the editor and run: btctax reconcile void {}",
                 decision_id.canonical()
             );
         }
@@ -2342,7 +2342,7 @@ fn derive_reclassify_income_status(
         if b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(decision_id) {
             return format!(
                 "Saved, but DecisionConflict fired on this decision — see Compliance; \
-                 clear with Void flow (press 'v') or CLI: btctax reconcile void {}",
+                 clear with Void flow (press 'v'), or quit the editor and run: btctax reconcile void {}",
                 decision_id.canonical()
             );
         }
@@ -2371,7 +2371,7 @@ fn derive_set_fmv_status(
         if b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(decision_id) {
             return format!(
                 "Saved, but DecisionConflict fired on this decision — see Compliance; \
-                 clear with Void flow (press 'v') or CLI: btctax reconcile void {}",
+                 clear with Void flow (press 'v'), or quit the editor and run: btctax reconcile void {}",
                 decision_id.canonical()
             );
         }
@@ -2999,16 +2999,19 @@ fn handle_dd_list_key(app: &mut EditorApp, key: KeyEvent) {
 
             if let Some(item) = selected {
                 // Pre-populate buffers from existing_details if present.
-                let mut donee_name_buf = FieldBuffer::new();
-                let mut donee_address_buf = FieldBuffer::new();
+                // #6: the 6 FREE-TEXT fields accept CLI-parity length (FREETEXT_CAP = 512);
+                // the 4 STRUCTURED fields (ein/tin/ptin/date) keep FIELD_CAP = 64 (fixed-format;
+                // a 512-char EIN is nonsense + a render hazard). `.set(existing…)` respects the cap.
+                let mut donee_name_buf = FieldBuffer::with_cap(FREETEXT_CAP);
+                let mut donee_address_buf = FieldBuffer::with_cap(FREETEXT_CAP);
                 let mut donee_ein_buf = FieldBuffer::new();
-                let mut appraiser_name_buf = FieldBuffer::new();
-                let mut appraiser_address_buf = FieldBuffer::new();
+                let mut appraiser_name_buf = FieldBuffer::with_cap(FREETEXT_CAP);
+                let mut appraiser_address_buf = FieldBuffer::with_cap(FREETEXT_CAP);
                 let mut appraiser_tin_buf = FieldBuffer::new();
                 let mut appraiser_ptin_buf = FieldBuffer::new();
-                let mut appraiser_qualifications_buf = FieldBuffer::new();
+                let mut appraiser_qualifications_buf = FieldBuffer::with_cap(FREETEXT_CAP);
                 let mut appraisal_date_buf = FieldBuffer::new();
-                let mut fmv_method_override_buf = FieldBuffer::new();
+                let mut fmv_method_override_buf = FieldBuffer::with_cap(FREETEXT_CAP);
 
                 if let Some(existing) = &item.existing_details {
                     donee_name_buf.set(&existing.donee_name);
@@ -7876,6 +7879,10 @@ mod tests {
             status.contains("btctax reconcile void"),
             "RS-1: status must contain 'btctax reconcile void'; got: {status}"
         );
+        assert!(
+            status.contains("quit the editor"),
+            "RS-1: status must name 'quit the editor' first (VaultLock audit); got: {status}"
+        );
     }
 
     // KAT-RS-2: derive_classify_inbound_status — FmvMissing arm.
@@ -7899,6 +7906,10 @@ mod tests {
         assert!(
             status.contains("btctax reconcile void"),
             "RS-2: status must contain 'btctax reconcile void'; got: {status}"
+        );
+        assert!(
+            status.contains("quit the editor"),
+            "RS-2: status must name 'quit the editor' first (VaultLock audit); got: {status}"
         );
     }
 
@@ -7926,6 +7937,10 @@ mod tests {
             status.contains("btctax reconcile void"),
             "RS-3: status must contain 'btctax reconcile void'; got: {status}"
         );
+        assert!(
+            status.contains("quit the editor"),
+            "RS-3: status must name 'quit the editor' first (VaultLock audit); got: {status}"
+        );
     }
 
     // KAT-RS-4: derive_reclassify_outflow_status — DecisionConflict arm.
@@ -7943,6 +7958,61 @@ mod tests {
         assert!(
             status.contains("btctax reconcile void"),
             "RS-4: status must contain 'btctax reconcile void'; got: {status}"
+        );
+        assert!(
+            status.contains("quit the editor"),
+            "RS-4: status must name 'quit the editor' first (VaultLock audit); got: {status}"
+        );
+    }
+
+    // KAT-RS-5: derive_reclassify_income_status — DecisionConflict arm.
+    #[test]
+    fn kat_rs_5_reclassify_income_status_conflict_arm_names_void_flow() {
+        use btctax_core::EventId;
+        let decision_id = EventId::Decision { seq: 13 };
+        let target_event = EventId::Decision { seq: 2 };
+        let snap = make_synthetic_snapshot_with_conflict(decision_id.clone());
+        let status = derive_reclassify_income_status(
+            &snap,
+            &target_event,
+            &decision_id,
+            true,
+            Some(IncomeKind::Staking),
+        );
+        assert!(
+            status.contains("'v'"),
+            "RS-5: status must contain \"'v'\"; got: {status}"
+        );
+        assert!(
+            status.contains("btctax reconcile void"),
+            "RS-5: status must contain 'btctax reconcile void'; got: {status}"
+        );
+        assert!(
+            status.contains("quit the editor"),
+            "RS-5: status must name 'quit the editor' first (VaultLock audit); got: {status}"
+        );
+    }
+
+    // KAT-RS-6: derive_set_fmv_status — DecisionConflict arm.
+    #[test]
+    fn kat_rs_6_set_fmv_status_conflict_arm_names_void_flow() {
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        let decision_id = EventId::Decision { seq: 17 };
+        let target_event = EventId::Decision { seq: 6 };
+        let snap = make_synthetic_snapshot_with_conflict(decision_id.clone());
+        let status = derive_set_fmv_status(&snap, &target_event, &decision_id, dec!(1234));
+        assert!(
+            status.contains("'v'"),
+            "RS-6: status must contain \"'v'\"; got: {status}"
+        );
+        assert!(
+            status.contains("btctax reconcile void"),
+            "RS-6: status must contain 'btctax reconcile void'; got: {status}"
+        );
+        assert!(
+            status.contains("quit the editor"),
+            "RS-6: status must name 'quit the editor' first (VaultLock audit); got: {status}"
         );
     }
 
@@ -10164,6 +10234,140 @@ mod tests {
             );
         }
         handle_key(&mut app, press(KeyCode::Esc));
+    }
+
+    // ── KAT-FREETEXT-CAP (#6) — a >64-char free-text field round-trips ────────
+    //
+    // The donation FREE-TEXT buffers use `FieldBuffer::with_cap(FREETEXT_CAP=512)`, so a
+    // 200-char appraiser_qualifications is NOT truncated (the CLI is unbounded). Type it,
+    // save, reload → assert the full 200 chars round-trip.
+
+    #[test]
+    fn kat_freetext_cap_long_qualifications_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-freetext-cap-pass";
+
+        let (_, to_id) = seed_donate_vault(&vault, &key, pp_str, 500_000);
+        let long_qual = "A".repeat(200); // > FIELD_CAP (64), < FREETEXT_CAP (512)
+
+        let mut app = open_app(&vault, pp_str);
+
+        // d → List → Enter → FieldForm.
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        // donee_name (field 0, focused) — REQUIRED.
+        type_str(&mut app, "Community Foundation");
+        // appraiser_name (field 3) — REQUIRED.
+        for _ in 0..3 {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        type_str(&mut app, "Jane Appraiser");
+        // appraiser_qualifications (field 7) — free-text, 200 chars.
+        for _ in 0..4 {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        type_str(&mut app, &long_qual);
+
+        // The free-text buffer must hold ALL 200 chars (not truncated at 64).
+        {
+            let flow = app.set_donation_details_flow.as_ref().unwrap();
+            if let SetDonationDetailsStep::FieldForm {
+                appraiser_qualifications_buf,
+                ..
+            } = &flow.step
+            {
+                assert_eq!(
+                    appraiser_qualifications_buf.buf.len(),
+                    200,
+                    "FREETEXT-CAP: free-text buffer must hold all 200 chars pre-save"
+                );
+            } else {
+                panic!("FREETEXT-CAP: expected FieldForm step");
+            }
+        }
+
+        // Enter → modal → Enter → save.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.set_donation_details_modal.is_some(),
+            "FREETEXT-CAP: modal must open"
+        );
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.set_donation_details_flow.is_none(),
+            "FREETEXT-CAP: flow must close after save"
+        );
+
+        // Reload: d → List → Enter → FieldForm; qualifications must round-trip in FULL.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        {
+            let flow = app.set_donation_details_flow.as_ref().unwrap();
+            if let SetDonationDetailsStep::FieldForm {
+                appraiser_qualifications_buf,
+                ..
+            } = &flow.step
+            {
+                assert_eq!(
+                    appraiser_qualifications_buf.buf.trim(),
+                    long_qual,
+                    "FREETEXT-CAP: 200-char qualifications must round-trip fully after reload"
+                );
+            } else {
+                panic!("FREETEXT-CAP: expected FieldForm step on reload");
+            }
+        }
+        // Also confirm the persisted side-table value is the full 200 chars.
+        let snap = app.snapshot.as_ref().unwrap();
+        let details = snap.donation_details.get(&to_id).unwrap();
+        assert_eq!(
+            details.appraiser_qualifications.as_deref(),
+            Some(long_qual.as_str()),
+            "FREETEXT-CAP: persisted qualifications must be the full 200 chars"
+        );
+        handle_key(&mut app, press(KeyCode::Esc));
+    }
+
+    // ── KAT-STRUCTURED-CAP (#6) — a STRUCTURED field still caps at 64 ─────────
+    //
+    // donee_ein is a fixed-format field: it keeps `FieldBuffer::new()` (FIELD_CAP=64).
+    // Typing 100 chars must cap at 64 (a 512-char EIN is nonsense + a render hazard).
+
+    #[test]
+    fn kat_structured_cap_donee_ein_caps_at_64() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-structured-cap-pass";
+
+        seed_donate_vault(&vault, &key, pp_str, 500_000);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // d → List → Enter → FieldForm.
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        // Navigate to donee_ein (field 2) and type 100 chars.
+        for _ in 0..2 {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        type_str(&mut app, &"9".repeat(100));
+
+        let flow = app.set_donation_details_flow.as_ref().unwrap();
+        if let SetDonationDetailsStep::FieldForm { donee_ein_buf, .. } = &flow.step {
+            assert_eq!(
+                donee_ein_buf.buf.len(),
+                64,
+                "STRUCTURED-CAP: donee_ein must cap at FIELD_CAP (64), not FREETEXT_CAP"
+            );
+        } else {
+            panic!("STRUCTURED-CAP: expected FieldForm step");
+        }
     }
 
     // ── KAT-V-DD-4 — pre-population drives the PRODUCTION List→FieldForm mapping ─

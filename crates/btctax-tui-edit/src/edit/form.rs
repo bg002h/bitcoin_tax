@@ -17,26 +17,42 @@ use std::str::FromStr;
 /// Maximum byte-length of a money field buffer (64 chars is ample for any Decimal).
 pub const FIELD_CAP: usize = 64;
 
-/// A single money-field text input buffer.
+/// Byte-length cap for donation **free-text** fields (donee/appraiser name+address,
+/// appraiser qualifications, fmv-method override). [R0-N1] A generous BOUND for TUI
+/// rendering — the CLI (`Option<String>`) is unbounded; 512 covers realistic
+/// addresses / multi-clause qualifications while keeping the buffer render-safe.
+pub const FREETEXT_CAP: usize = 512;
+
+/// A single text input buffer.
 ///
 /// Follows the `UnlockState` push/pop discipline (unlock.rs:42–63 — the only
-/// text-input precedent): pre-allocated to `FIELD_CAP`, never reallocates.
+/// text-input precedent): pre-allocated to its `cap`, never reallocates.
 /// Rendered **plaintext** (not masked — these are not secrets).
+///
+/// `cap` is per-instance: money/structured fields keep `FIELD_CAP`; donation
+/// free-text fields use `FREETEXT_CAP` (see `with_cap`).
 #[derive(Debug)]
 pub struct FieldBuffer {
     pub buf: String,
+    cap: usize,
 }
 
 impl FieldBuffer {
     pub fn new() -> Self {
+        Self::with_cap(FIELD_CAP)
+    }
+
+    /// Construct a buffer with an explicit byte-length cap (pre-allocated, never reallocates).
+    pub fn with_cap(cap: usize) -> Self {
         Self {
-            buf: String::with_capacity(FIELD_CAP),
+            buf: String::with_capacity(cap),
+            cap,
         }
     }
 
-    /// Push one character, silently ignoring input past FIELD_CAP.
+    /// Push one character, silently ignoring input past this buffer's `cap`.
     pub fn push_char(&mut self, c: char) {
-        if self.buf.len() + c.len_utf8() <= FIELD_CAP {
+        if self.buf.len() + c.len_utf8() <= self.cap {
             self.buf.push(c);
         }
     }
@@ -46,7 +62,7 @@ impl FieldBuffer {
         self.buf.pop();
     }
 
-    /// Set the buffer content, respecting FIELD_CAP.
+    /// Set the buffer content, respecting this buffer's `cap`.
     pub fn set(&mut self, s: &str) {
         self.buf.clear();
         for c in s.chars() {
