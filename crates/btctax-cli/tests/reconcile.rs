@@ -1223,3 +1223,338 @@ fn attest_pre2025_method_requires_set_pre2025_method() {
         "no-op (show config only) must succeed"
     );
 }
+
+// ── bulk-link-transfer KATs (bulk-link-transfer Task 1) ──────────────────────
+
+/// Seed a vault with two source wallets and five pending outbound transfers spanning two years and
+/// a mix of priced / unpriced dates. Returns `(vault_path, [o1, o2, o3, o4, o5])` — the out EventIds:
+///   o1: wallet A, 2025-03-01 (priced), 100_000 sat
+///   o2: wallet A, 2025-06-15 (priced),  50_000 sat
+///   o3: wallet B, 2025-03-01 (priced),  30_000 sat
+///   o4: wallet A, 2024-02-01 (priced),  20_000 sat  (dropped by Frame::Year(2025))
+///   o5: wallet A, 2025-04-01 (UNPRICED),40_000 sat  (increments missing_price_count)
+/// PRIVACY: synthetic values only.
+fn bulk_fixture(dir: &std::path::Path) -> (std::path::PathBuf, [EventId; 5]) {
+    use btctax_core::event::{Acquire, BasisSource, TransferOut};
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::LedgerEvent;
+    use time::macros::datetime;
+    use time::UtcOffset;
+
+    let vault = dir.join("bulk.pgp");
+    let mut session = Session::create(&vault, &pp()).unwrap();
+
+    let wallet_a = WalletId::Exchange {
+        provider: "coinbase".into(),
+        account: "main".into(),
+    };
+    let wallet_b = WalletId::Exchange {
+        provider: "river".into(),
+        account: "main".into(),
+    };
+
+    let mkid = |r: &str| EventId::import(Source::Coinbase, SourceRef::new(r));
+    let out = |sat: i64| {
+        EventPayload::TransferOut(TransferOut {
+            sat,
+            fee_sat: None,
+            dest_addr: None,
+            txid: None,
+        })
+    };
+
+    let acq_a = mkid("acq-a");
+    let acq_b = mkid("acq-b");
+    let o1 = mkid("o1");
+    let o2 = mkid("o2");
+    let o3 = mkid("o3");
+    let o4 = mkid("o4");
+    let o5 = mkid("o5");
+
+    let batch = vec![
+        LedgerEvent {
+            id: acq_a.clone(),
+            utc_timestamp: datetime!(2024-01-15 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_a.clone()),
+            payload: EventPayload::Acquire(Acquire {
+                sat: 1_000_000,
+                usd_cost: rust_decimal_macros::dec!(30000),
+                fee_usd: rust_decimal_macros::dec!(0),
+                basis_source: BasisSource::ComputedFromCost,
+            }),
+        },
+        LedgerEvent {
+            id: acq_b.clone(),
+            utc_timestamp: datetime!(2024-01-15 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_b.clone()),
+            payload: EventPayload::Acquire(Acquire {
+                sat: 500_000,
+                usd_cost: rust_decimal_macros::dec!(20000),
+                fee_usd: rust_decimal_macros::dec!(0),
+                basis_source: BasisSource::ComputedFromCost,
+            }),
+        },
+        LedgerEvent {
+            id: o4.clone(),
+            utc_timestamp: datetime!(2024-02-01 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_a.clone()),
+            payload: out(20_000),
+        },
+        LedgerEvent {
+            id: o1.clone(),
+            utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_a.clone()),
+            payload: out(100_000),
+        },
+        LedgerEvent {
+            id: o3.clone(),
+            utc_timestamp: datetime!(2025-03-01 13:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_b.clone()),
+            payload: out(30_000),
+        },
+        LedgerEvent {
+            id: o5.clone(),
+            utc_timestamp: datetime!(2025-04-01 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_a.clone()),
+            payload: out(40_000),
+        },
+        LedgerEvent {
+            id: o2.clone(),
+            utc_timestamp: datetime!(2025-06-15 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_a.clone()),
+            payload: out(50_000),
+        },
+    ];
+    append_import_batch(session.conn(), &batch).unwrap();
+    session.save().unwrap();
+    (vault, [o1, o2, o3, o4, o5])
+}
+
+fn wallet_a() -> WalletId {
+    WalletId::Exchange {
+        provider: "coinbase".into(),
+        account: "main".into(),
+    }
+}
+fn wallet_b() -> WalletId {
+    WalletId::Exchange {
+        provider: "river".into(),
+        account: "main".into(),
+    }
+}
+fn cold() -> WalletId {
+    WalletId::SelfCustody {
+        label: "cold".into(),
+    }
+}
+
+/// The plan selects pending outs in-frame, applies the from_wallet filter, and routes same-wallet
+/// rows to `skipped_same_wallet` (never `included`).
+#[test]
+fn bulk_plan_selects_pending_in_frame() {
+    use btctax_cli::{BulkFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [o1, o2, o3, _o4, o5]) = bulk_fixture(dir.path());
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    // Frame::Year(2025), dest = B → o3 (source B) is same-wallet ⇒ skipped; o4 (2024) dropped.
+    let plan = s
+        .bulk_link_transfer_plan(
+            BulkFilter {
+                frame: Frame::Year(2025),
+                from_wallet: None,
+            },
+            wallet_b(),
+        )
+        .unwrap();
+    let included: Vec<_> = plan.included.iter().map(|r| r.out_event.clone()).collect();
+    assert_eq!(
+        included,
+        vec![o1.clone(), o5.clone(), o2.clone()],
+        "included sorted by date, same-wallet o3 skipped, 2024 o4 dropped"
+    );
+    let skipped: Vec<_> = plan
+        .skipped_same_wallet
+        .iter()
+        .map(|r| r.out_event.clone())
+        .collect();
+    assert_eq!(
+        skipped,
+        vec![o3.clone()],
+        "o3 (source == dest B) is skipped_same_wallet"
+    );
+    assert_eq!(plan.total_sat, 190_000, "Σ included principal_sat");
+
+    // from_wallet = Some(A), dest = cold (never a source) → only A's 2025 outs, none skipped.
+    let plan2 = s
+        .bulk_link_transfer_plan(
+            BulkFilter {
+                frame: Frame::Year(2025),
+                from_wallet: Some(wallet_a()),
+            },
+            cold(),
+        )
+        .unwrap();
+    let included2: Vec<_> = plan2.included.iter().map(|r| r.out_event.clone()).collect();
+    assert_eq!(
+        included2,
+        vec![o1, o5, o2],
+        "from_wallet filter keeps only wallet-A outs"
+    );
+    assert!(
+        plan2.skipped_same_wallet.is_empty(),
+        "cold is no source → nothing skipped"
+    );
+}
+
+/// A row with no price → `usd_value = None`, increments `missing_price_count`; the floor is the Σ of
+/// the PRICED rows only (never a false exact total).
+#[test]
+fn bulk_plan_usd_total_floor_when_price_missing() {
+    use btctax_cli::{BulkFilter, Frame};
+    use rust_decimal_macros::dec;
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _ids) = bulk_fixture(dir.path());
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    let plan = s
+        .bulk_link_transfer_plan(
+            BulkFilter {
+                frame: Frame::Year(2025),
+                from_wallet: Some(wallet_a()),
+            },
+            cold(),
+        )
+        .unwrap();
+    // Included: o1 (84.00), o5 (unpriced), o2 (33.75).
+    assert_eq!(plan.included.len(), 3);
+    assert_eq!(
+        plan.missing_price_count, 1,
+        "o5 (2025-04-01) has no bundled price"
+    );
+    assert_eq!(
+        plan.total_usd_value_floor,
+        dec!(84.00) + dec!(33.75),
+        "floor = Σ of priced rows only (o1 + o2)"
+    );
+    // The one None row is present in `included` (advisory, not dropped).
+    assert_eq!(
+        plan.included
+            .iter()
+            .filter(|r| r.usd_value.is_none())
+            .count(),
+        1
+    );
+}
+
+/// Phase 1 (`bulk_link_plan`) is READ-ONLY: computing the plan writes nothing to the vault.
+#[test]
+fn bulk_cli_dry_run_writes_nothing() {
+    use btctax_cli::{BulkFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _ids) = bulk_fixture(dir.path());
+
+    let before = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::load_all(s.conn()).unwrap().len()
+    };
+    let plan = cmd::reconcile::bulk_link_plan(
+        &vault,
+        &pp(),
+        BulkFilter {
+            frame: Frame::All,
+            from_wallet: None,
+        },
+        cold(),
+    )
+    .unwrap();
+    assert!(
+        !plan.included.is_empty(),
+        "plan must select rows (so the no-write is meaningful)"
+    );
+    let after = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::load_all(s.conn()).unwrap().len()
+    };
+    assert_eq!(
+        before, after,
+        "computing the plan must not append any event"
+    );
+}
+
+/// Phase 2 (`apply_bulk_link_transfer`) is atomic: N TransferLinks appended in ONE save; the linked
+/// outs leave `pending_reconciliation` (they project as `Op::SelfTransfer`).
+#[test]
+fn bulk_cli_apply_is_atomic_single_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [o1, o2, _o3, _o4, _o5]) = bulk_fixture(dir.path());
+
+    let pending_before = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        s.project().unwrap().0.pending_reconciliation.len()
+    };
+    assert_eq!(pending_before, 5, "all five outs start pending");
+
+    let n = cmd::reconcile::apply_bulk_link_transfer(
+        &vault,
+        &pp(),
+        vec![o1.clone(), o2.clone()],
+        cold(),
+        now(),
+    )
+    .unwrap();
+    assert_eq!(n, 2);
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    // o1 + o2 are no longer pending (self-transferred); o3/o4/o5 remain.
+    let still_pending: std::collections::BTreeSet<_> = state
+        .pending_reconciliation
+        .iter()
+        .map(|p| p.event.clone())
+        .collect();
+    assert_eq!(state.pending_reconciliation.len(), 3);
+    assert!(!still_pending.contains(&o1) && !still_pending.contains(&o2));
+
+    // Exactly two TransferLink decisions, both to Wallet(cold).
+    let links: Vec<_> = btctax_core::persistence::load_all(s.conn())
+        .unwrap()
+        .into_iter()
+        .filter_map(|e| match e.payload {
+            EventPayload::TransferLink(tl) => Some(tl),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(links.len(), 2, "exactly two TransferLinks appended");
+    assert!(links
+        .iter()
+        .all(|tl| tl.in_event_or_wallet == TransferTarget::Wallet(cold())));
+}
+
+/// A frame that matches nothing → empty plan (the dispatch prints "no match" and exits 0).
+#[test]
+fn bulk_cli_no_match_exits_clean() {
+    use btctax_cli::{BulkFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _ids) = bulk_fixture(dir.path());
+    let s = Session::open(&vault, &pp()).unwrap();
+    let plan = s
+        .bulk_link_transfer_plan(
+            BulkFilter {
+                frame: Frame::Year(2030),
+                from_wallet: None,
+            },
+            cold(),
+        )
+        .unwrap();
+    assert!(plan.included.is_empty(), "no pending outs in 2030");
+    assert!(plan.skipped_same_wallet.is_empty());
+    assert_eq!(plan.total_sat, 0);
+}

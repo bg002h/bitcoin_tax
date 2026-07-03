@@ -5,7 +5,7 @@
 //!
 //! Also contains the `set-donation-details` / `show-donation-details` side-table commands (no decision
 //! append — these write to the `donation_details` side-table directly, like `tax-profile set`).
-use crate::{CliError, Session};
+use crate::{BulkFilter, BulkLinkPlan, CliError, Session};
 use btctax_core::conventions::TRANSITION_DATE;
 use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::{
@@ -13,7 +13,7 @@ use btctax_core::{
     InboundClass, IncomeKind, LotId, LotMethod, LotPick, LotSelection, ManualFmv, MethodElection,
     OutflowClass, ReclassifyIncome, ReclassifyOutflow, RejectImport, RemovalKind,
     SafeHarborAllocation, SupersedeImport, TaxDate, TransferLink, TransferTarget, Usd,
-    VoidDecisionEvent,
+    VoidDecisionEvent, WalletId,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -203,6 +203,48 @@ pub fn reject_conflict(
         EventPayload::RejectImport(RejectImport { conflict_event }),
         now,
     )
+}
+
+/// bulk-link-transfer D2 — Phase 1 (read): open the session and compute the bulk link-transfer plan.
+///
+/// Two-phase by design [R0-M2]: this read phase opens/renders NOTHING to the vault, so the
+/// interactive `y/N` confirmation stays a thin, untested shell in the `main.rs` dispatch. The plan is
+/// the shared read helper `Session::bulk_link_transfer_plan` (D1). The session (and its VaultLock) is
+/// dropped on return, before the confirmation prompt runs.
+pub fn bulk_link_plan(
+    vault_path: &Path,
+    pp: &Passphrase,
+    filter: BulkFilter,
+    dest: WalletId,
+) -> Result<BulkLinkPlan, CliError> {
+    let session = Session::open(vault_path, pp)?;
+    session.bulk_link_transfer_plan(filter, dest)
+}
+
+/// bulk-link-transfer D2 — Phase 2 (write): atomically link every `out_event` to `dest` as a
+/// self-transfer. Appends one `TransferLink { out_event, Wallet(dest) }` per row, then a SINGLE
+/// `save`. All-or-nothing: a mid-batch `append_decision` failure returns `Err` BEFORE the save, and
+/// the local `Session` is dropped with nothing written — the exact one-session / N-append / one-save
+/// atomicity of `import_selections`. Returns the number of outflows linked.
+pub fn apply_bulk_link_transfer(
+    vault_path: &Path,
+    pp: &Passphrase,
+    out_events: Vec<EventId>,
+    dest: WalletId,
+    now: OffsetDateTime,
+) -> Result<usize, CliError> {
+    let mut session = Session::open(vault_path, pp)?;
+    for out_event in &out_events {
+        let payload = EventPayload::TransferLink(TransferLink {
+            out_event: out_event.clone(),
+            in_event_or_wallet: TransferTarget::Wallet(dest.clone()),
+        });
+        // `?` on a mid-batch failure returns before `save` — the in-memory session is discarded, so
+        // nothing lands on disk (CLI atomicity; the TUI path must instead ROLL BACK, see D3 [R0-I1]).
+        append_decision(session.conn(), payload, now, UtcOffset::UTC, None)?;
+    }
+    session.save()?;
+    Ok(out_events.len())
 }
 
 /// FR6/TP7: confirm a self-transfer. `target` is a destination `TransferIn` event (`--to-event`) or a
