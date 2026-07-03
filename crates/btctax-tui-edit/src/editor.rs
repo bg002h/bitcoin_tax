@@ -14,8 +14,9 @@
 //! session-holding TUI editor.
 
 use crate::edit::form::{
-    BulkLinkFlowState, BulkLinkModalState, ClassifyInboundFlowState, ClassifyInboundModalState,
-    ClassifyRawFlowState, ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
+    BulkLinkFlowState, BulkLinkModalState, BulkStiFlowState, BulkStiModalState,
+    ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyRawFlowState,
+    ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
     MatchSelfTransfersFlowState, MatchSelfTransfersModalState, MutationModalState,
     OptimizeAcceptFlowState, OptimizeAcceptModalState, ProfileFormState, ReclassifyIncomeFlowState,
     ReclassifyIncomeModalState, ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
@@ -177,6 +178,14 @@ pub struct EditorApp {
     pub bulk_link_flow: Option<BulkLinkFlowState>,
     /// Bulk-link-transfer confirmation modal.  `Some` while awaiting Enter/Esc.
     pub bulk_link_modal: Option<BulkLinkModalState>,
+    /// Full bulk classify-inbound-self-transfer flow state (bulk-classify-inbound-self-transfer D3).
+    ///
+    /// Dispatch order: bulk_sti_modal (modal layer) → bulk_sti_flow (flow layer). Creation is
+    /// REVOCABLE (each classification voidable via `v`), so the confirmation is a plain modal — NO
+    /// typed-word.
+    pub bulk_sti_flow: Option<BulkStiFlowState>,
+    /// Bulk STI confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub bulk_sti_modal: Option<BulkStiModalState>,
     /// Full match-self-transfers flow state (self-transfer-passthrough C3).  `Some` while open.
     ///
     /// Dispatch order: match_self_transfers_modal (modal layer) → match_self_transfers_flow (flow
@@ -244,6 +253,8 @@ impl EditorApp {
             safe_harbor_allocate_modal: None,
             bulk_link_flow: None,
             bulk_link_modal: None,
+            bulk_sti_flow: None,
+            bulk_sti_modal: None,
             match_self_transfers_flow: None,
             match_self_transfers_modal: None,
             attest_save_failed: false,

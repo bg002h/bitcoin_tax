@@ -423,6 +423,58 @@ pub fn persist_bulk_link_transfer(
     Ok(out_events.len())
 }
 
+/// Append ONE `ClassifyInbound { transfer_in_event, SelfTransferMine{None,None} }` per `in_event`,
+/// then a SINGLE `save_or_rollback` (bulk-classify-inbound-self-transfer D3). All-or-nothing; each
+/// inbound is given the $0 conservative basis / receipt-date HP (non-taxable "my own coins").
+///
+/// # Empty guard [R0-M1]
+/// An empty `in_events` (user unchecked everything) is REFUSED BEFORE any snapshot/append — a
+/// `NoChange(CliError::Usage(..))` (same shape as `persist_bulk_link_transfer`) so the caller never
+/// appends zero + saves. The UI gate also refuses earlier; this is the belt-and-suspenders guard the
+/// `persist_bulk_sti_refuses_empty` KAT locks.
+///
+/// # [bulk-I1] Mid-batch append rollback (the load-bearing distinction from the CLI path)
+/// `append_decision` commits per-call to the in-memory conn. If the append at row k>1 fails, appends
+/// 1..k-1 are ALREADY LIVE residue; a bare `?` would return `NoChange` (contract: "vault unchanged")
+/// while phantom decisions sit in the DB. So on ANY append error the WHOLE batch is reverted via
+/// `rollback(session, &pre, e.into())` (whole-DB restore to the pre-batch snapshot) — NOT `?`. A
+/// `save` failure likewise reverts the whole batch via `save_or_rollback`. Never a partial apply.
+pub fn persist_bulk_self_transfer_in(
+    session: &mut btctax_cli::Session,
+    in_events: Vec<btctax_core::EventId>,
+    now: time::OffsetDateTime,
+) -> Result<usize, PersistError> {
+    if in_events.is_empty() {
+        return Err(PersistError::NoChange(btctax_cli::CliError::Usage(
+            "bulk classify-inbound-self-transfer: nothing selected".into(),
+        )));
+    }
+    let pre = session.snapshot()?;
+    for in_event in &in_events {
+        let payload =
+            btctax_core::EventPayload::ClassifyInbound(btctax_core::event::ClassifyInbound {
+                transfer_in_event: in_event.clone(),
+                as_: btctax_core::InboundClass::SelfTransferMine {
+                    basis: None,
+                    acquired_at: None,
+                },
+            });
+        // [bulk-I1] Do NOT use `?` here: a mid-batch failure at row k>1 leaves appends 1..k-1 as live
+        // residue AND would leak a bare NoChange over phantom decisions. Revert the WHOLE batch.
+        if let Err(e) = btctax_core::persistence::append_decision(
+            session.conn(),
+            payload,
+            now,
+            time::UtcOffset::UTC,
+            None,
+        ) {
+            return Err(rollback(session, &pre, e.into()));
+        }
+    }
+    save_or_rollback(session, pre)?; // ONE save; on failure the whole batch reverts
+    Ok(in_events.len())
+}
+
 /// Append a `ClassifyRaw` decision event and atomically save the vault (chunk 4a, D2).
 ///
 /// `payload` is the VALIDATED `EventPayload::ClassifyRaw(…)` built by the classify-raw flow (its
@@ -3806,6 +3858,161 @@ mod tests {
             .unwrap();
         let n = persist_bulk_link_transfer(&mut session, outs, cold_dest(), now).unwrap();
         assert_eq!(n, 3, "retry links all three cleanly");
+        let post2 = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post2.len(), pre.len() + 3);
+    }
+
+    // ── KAT-BULK-STI — persist_bulk_self_transfer_in (bulk-classify-inbound-self-transfer D3) ─────
+
+    fn synth_ins(n: usize) -> Vec<btctax_core::EventId> {
+        use btctax_core::identity::{Source, SourceRef};
+        (0..n)
+            .map(|i| {
+                btctax_core::EventId::import(Source::River, SourceRef::new(format!("bulk-in{i}")))
+            })
+            .collect()
+    }
+
+    /// EXACTLY N `ClassifyInbound{SelfTransferMine{None,None}}` tail-appended over a strict prefix,
+    /// each threading its `transfer_in_event` in order; on-disk == in-memory.
+    #[test]
+    fn kat_persist_bulk_sti_strict_prefix() {
+        use btctax_core::event::EventPayload;
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_core::InboundClass;
+        use btctax_store::Passphrase;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulksti-sp-pass";
+        bulk_seed(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+        assert_eq!(pre_max_seq, 1, "pre max decision_seq must be 1");
+
+        let ins = synth_ins(3);
+        let now = OffsetDateTime::from_unix_timestamp(1_700_002_000).unwrap();
+        let n = persist_bulk_self_transfer_in(&mut session, ins.clone(), now).unwrap();
+        assert_eq!(n, 3, "three inbounds classified");
+
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 3, "exactly three appends");
+        assert_eq!(
+            &post[..pre.len()],
+            pre.as_slice(),
+            "first pre.len() rows unchanged (strict prefix)"
+        );
+        for (i, in_ev) in ins.iter().enumerate() {
+            let row = &post[pre.len() + i];
+            let seq = row.decision_seq.expect("tail decision_seq");
+            assert_eq!(seq, (pre_max_seq + 1 + i as i64), "monotonic seq");
+            let payload: EventPayload = serde_json::from_str(&row.payload_json).unwrap();
+            match payload {
+                EventPayload::ClassifyInbound(ci) => {
+                    assert_eq!(&ci.transfer_in_event, in_ev, "in_event threaded in order");
+                    assert!(
+                        matches!(
+                            ci.as_,
+                            InboundClass::SelfTransferMine {
+                                basis: None,
+                                acquired_at: None
+                            }
+                        ),
+                        "every classification is SelfTransferMine{{None,None}}"
+                    );
+                }
+                other => panic!("tail must be ClassifyInbound, got {other:?}"),
+            }
+        }
+        drop(session);
+        let s2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        assert_eq!(load_all_ordered(s2.conn()).unwrap(), post);
+    }
+
+    /// [R0-M1] Empty `in_events` → `NoChange`, log byte-unchanged (never append zero + save).
+    #[test]
+    fn kat_persist_bulk_sti_refuses_empty() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_store::Passphrase;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulksti-empty-pass";
+        bulk_seed(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let now = OffsetDateTime::from_unix_timestamp(1_700_002_000).unwrap();
+        let result = persist_bulk_self_transfer_in(&mut session, vec![], now);
+        assert!(
+            matches!(result, Err(PersistError::NoChange(_))),
+            "empty selection must refuse with NoChange; got {result:?}"
+        );
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post, pre, "refusal writes nothing");
+    }
+
+    /// [bulk-I1] A mid-batch APPEND failure at row k>1 reverts the WHOLE batch — event-log
+    /// byte-unchanged, NO phantom residue from the appends before k, retry clean. Injection: a
+    /// BEFORE-INSERT trigger that RAISE(ABORT)s when the SECOND bulk append's decision_seq lands, so
+    /// append #1 has ALREADY committed (per-call) when append #2 fails.
+    #[test]
+    fn kat_persist_bulk_sti_reverts_mid_batch_append_failure() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_store::Passphrase;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulksti-midbatch-pass";
+        bulk_seed(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+        assert_eq!(pre_max_seq, 1, "pre max decision_seq must be 1");
+
+        // Fail the SECOND bulk append: pre_max+1 (seq 2) commits, pre_max+2 (seq 3) aborts.
+        let target = pre_max_seq + 2;
+        session
+            .conn()
+            .execute_batch(&format!(
+                "CREATE TRIGGER inject_sti_midbatch_fail BEFORE INSERT ON events \
+                 WHEN NEW.decision_seq = {target} \
+                 BEGIN SELECT RAISE(ABORT, 'injected mid-batch append failure'); END;"
+            ))
+            .unwrap();
+
+        let ins = synth_ins(3);
+        let now = OffsetDateTime::from_unix_timestamp(1_700_002_000).unwrap();
+        let result = persist_bulk_self_transfer_in(&mut session, ins.clone(), now);
+        assert!(
+            matches!(result, Err(PersistError::RolledBack(_))),
+            "mid-batch append failure must revert the whole batch (RolledBack); got {result:?}"
+        );
+
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post, pre,
+            "whole batch reverted — no phantom decision from append #1 survives"
+        );
+
+        session
+            .conn()
+            .execute_batch("DROP TRIGGER inject_sti_midbatch_fail;")
+            .unwrap();
+        let n = persist_bulk_self_transfer_in(&mut session, ins, now).unwrap();
+        assert_eq!(n, 3, "retry classifies all three cleanly");
         let post2 = load_all_ordered(session.conn()).unwrap();
         assert_eq!(post2.len(), pre.len() + 3);
     }

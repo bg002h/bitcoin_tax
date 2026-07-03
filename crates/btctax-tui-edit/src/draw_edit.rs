@@ -9,11 +9,12 @@
 //! Unlock screen. This module performs no writes.
 
 use crate::edit::form::{
-    amount_label, basis_source_display, bulk_checked_totals, bulk_usd_floor_label,
-    income_kind_display, wallet_label, BulkLinkFlowState, BulkLinkModalState, BulkLinkStep,
-    ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
-    ClassifyRawStep, ClassifyRawVariant, DisposalKind, FieldBuffer, InboundVariant, LinkMode,
-    LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, MatchSelfTransfersFlowState,
+    amount_label, basis_source_display, bulk_checked_totals, bulk_sti_checked_totals,
+    bulk_usd_floor_label, income_kind_display, wallet_label, BulkLinkFlowState, BulkLinkModalState,
+    BulkLinkStep, BulkStiFlowState, BulkStiModalState, BulkStiStep, ClassifyInboundModalState,
+    ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep,
+    ClassifyRawVariant, DisposalKind, FieldBuffer, InboundVariant, LinkMode, LinkTransferFlowState,
+    LinkTransferModalState, LinkTransferStep, MatchSelfTransfersFlowState,
     MatchSelfTransfersModalState, MutationModalState, OptimizeAcceptFlowState,
     OptimizeAcceptModalState, OptimizeAcceptStep, OutflowKind, ProfileFormState,
     ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
@@ -356,6 +357,13 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.bulk_link_modal.as_ref() {
         draw_bulk_link_modal(frame, area, modal);
+    }
+    // Bulk classify-inbound-self-transfer flow overlay (bulk-classify-inbound-self-transfer D3).
+    if let Some(flow) = app.bulk_sti_flow.as_mut() {
+        draw_bulk_sti_flow(frame, area, flow);
+    }
+    if let Some(modal) = app.bulk_sti_modal.as_ref() {
+        draw_bulk_sti_modal(frame, area, modal);
     }
     // Match-self-transfers flow overlay (self-transfer-passthrough C3).
     if let Some(flow) = app.match_self_transfers_flow.as_mut() {
@@ -3538,6 +3546,212 @@ fn draw_bulk_link_modal(frame: &mut Frame, area: Rect, modal: &BulkLinkModalStat
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Red))
         .title(" Confirm: bulk self-transfer — WRITES THE VAULT ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+// ── Bulk classify-inbound-self-transfer overlays (bulk-classify-inbound-self-transfer D3) ─────
+
+/// Render the bulk STI flow overlay (two steps on one panel: Filter → Preview).
+fn draw_bulk_sti_flow(frame: &mut Frame, area: Rect, flow: &mut BulkStiFlowState) {
+    let modal_rect = centered_rect(96, 26, area);
+    frame.render_widget(Clear, modal_rect);
+    let outer = Block::default().borders(Borders::ALL).title(
+        " BULK CLASSIFY INBOUND SELF-TRANSFER — give many unknown-basis deposits $0 basis (non-taxable) ",
+    );
+    let inner = outer.inner(modal_rect);
+    frame.render_widget(outer, modal_rect);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(0),
+            Constraint::Length(5),
+        ])
+        .split(inner);
+
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let hl = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let focus = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+
+    // Banner.
+    frame.render_widget(
+        Paragraph::new(vec![Line::from(Span::styled(
+            "each selected deposit → SelfTransferMine ($0 conservative basis, receipt-date HP; voidable)",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))]),
+        chunks[0],
+    );
+
+    match flow.step {
+        BulkStiStep::Filter => {
+            let wallet_label_str = match flow.wallet_choices.get(flow.wallet_idx) {
+                Some(Some(w)) => wallet_label(w),
+                _ => "Any".to_string(),
+            };
+            let year_label = match flow.year_choices.get(flow.year_idx) {
+                Some(Some(y)) => y.to_string(),
+                _ => "All".to_string(),
+            };
+            let w_style = if flow.filter_focus == 0 {
+                focus
+            } else {
+                Style::default()
+            };
+            let yr_style = if flow.filter_focus == 1 {
+                focus
+            } else {
+                Style::default()
+            };
+            let lines = vec![
+                Line::from(Span::styled("Step 1/2 — filter", bold)),
+                Line::from(""),
+                Line::from(vec![
+                    Span::raw("  receiving wallet: "),
+                    Span::styled(format!("[{wallet_label_str}]"), w_style),
+                ]),
+                Line::from(vec![
+                    Span::raw("  time frame      : "),
+                    Span::styled(format!("[{year_label}]"), yr_style),
+                ]),
+            ];
+            frame.render_widget(Paragraph::new(lines), chunks[1]);
+        }
+        BulkStiStep::Preview => {
+            let selected = flow.preview.table_state.selected();
+            let rows: Vec<Row> = flow
+                .preview
+                .items
+                .iter()
+                .enumerate()
+                .map(|(i, it)| {
+                    let base = if selected == Some(i) {
+                        hl
+                    } else {
+                        Style::default()
+                    };
+                    let mark = if it.checked { "[x]" } else { "[ ]" };
+                    let usd = it
+                        .usd_fmv
+                        .map(|v| format!("${v}"))
+                        .unwrap_or_else(|| "—".to_string());
+                    let wl = it
+                        .wallet
+                        .as_ref()
+                        .map(wallet_label)
+                        .unwrap_or_else(|| "(no wallet)".to_string());
+                    Row::new(vec![
+                        Cell::from(mark).style(base),
+                        Cell::from(it.date.to_string()).style(base),
+                        Cell::from(wl).style(base),
+                        Cell::from(fmt_btc(it.sat)).style(base),
+                        Cell::from(usd).style(base),
+                    ])
+                })
+                .collect();
+            let header = Row::new(
+                ["", "date", "receiving wallet", "BTC", "USD FMV"]
+                    .iter()
+                    .map(|h| Cell::from(*h).style(bold)),
+            );
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Length(3),
+                    Constraint::Length(12),
+                    Constraint::Length(26),
+                    Constraint::Length(16),
+                    Constraint::Min(12),
+                ],
+            )
+            .header(header);
+            frame.render_stateful_widget(table, chunks[1], &mut flow.preview.table_state);
+        }
+    }
+
+    // Footer: live totals (Preview only) + step hint + transient error.
+    let mut footer: Vec<Line> = Vec::new();
+    if matches!(flow.step, BulkStiStep::Preview) {
+        let (count, sat, floor, missing) = bulk_sti_checked_totals(&flow.preview.items);
+        footer.push(Line::from(Span::styled(
+            format!(
+                "checked {count} · Σ {} BTC · total USD given $0 basis {}",
+                fmt_btc(sat),
+                bulk_usd_floor_label(floor, missing)
+            ),
+            bold,
+        )));
+    }
+    let hint = match flow.step {
+        BulkStiStep::Filter => "↑/↓: focus  ←/→: change  Enter: preview  Esc: cancel",
+        BulkStiStep::Preview => "↑/↓: scroll  Space/x: toggle  Enter: confirm  Esc: back",
+    };
+    footer.push(Line::from(Span::styled(
+        hint,
+        Style::default().fg(Color::Cyan),
+    )));
+    if let Some(err) = &flow.error {
+        footer.push(Line::from(Span::styled(
+            format!("⚠ {err}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+    frame.render_widget(Paragraph::new(footer), chunks[2]);
+}
+
+/// Render the bulk STI confirmation modal (explicit; NOT typed-word — each classification voidable).
+fn draw_bulk_sti_modal(frame: &mut Frame, area: Rect, modal: &BulkStiModalState) {
+    let lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Apply BULK classify-inbound-self-transfer?",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!("    deposits    : {}", modal.count)),
+        Line::from(format!("    Σ BTC       : {}", fmt_btc(modal.total_sat))),
+        Line::from(format!(
+            "    Σ USD → $0 basis : {}",
+            bulk_usd_floor_label(modal.total_usd_fmv_floor, modal.missing_price_count)
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Each is a voidable classify-inbound decision ('v'). For any deposit whose real cost",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "  you can substantiate, exclude it here and classify it single-item with a real basis",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "  (classify-inbound-self-transfer --basis).",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+        Line::from("  Appended as N decisions, saved via the vault's atomic write path."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  [Enter] Apply — writes the vault    [Esc] Cancel — writes nothing",
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from(""),
+    ];
+
+    let height = (lines.len() + 2) as u16;
+    let modal_rect = centered_rect(82, height, area);
+    frame.render_widget(Clear, modal_rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red))
+        .title(" Confirm: bulk classify-inbound-self-transfer — WRITES THE VAULT ");
     let inner = block.inner(modal_rect);
     frame.render_widget(block, modal_rect);
     frame.render_widget(Paragraph::new(lines), inner);

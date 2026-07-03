@@ -1836,6 +1836,76 @@ pub fn bulk_usd_floor_label(floor: Usd, missing: usize) -> String {
     }
 }
 
+// ── Bulk classify-inbound-self-transfer flow types (bulk-classify-inbound-self-transfer D3) ──
+
+/// One preview-checklist row: an enriched pending unknown-basis inbound + its `checked` (included)
+/// flag. Every row starts CHECKED; `Space`/`x` toggles `checked` (exclude). Mirrors `session::BulkStiRow`
+/// fields plus the UI flag.
+#[derive(Clone)]
+pub struct BulkStiRowItem {
+    pub in_event: EventId,
+    pub date: TaxDate,
+    pub wallet: Option<WalletId>,
+    pub sat: Sat,
+    /// The USD FMV being GIVEN $0 basis (`fmv_of`); `None` on missing price → footer floor + "(N unavailable)".
+    pub usd_fmv: Option<Usd>,
+    pub checked: bool,
+}
+
+/// Step in the bulk STI flow (two steps — NO destination pick; an inbound IS the receiving leg).
+pub enum BulkStiStep {
+    /// 1 — receiving-wallet (Any/each) + time-frame (All/each-year) toggles.
+    Filter,
+    /// 2 — per-row exclude checklist over the PRICED plan; `Space`/`x` toggles a row.
+    Preview,
+}
+
+/// Full state for the bulk STI flow. The filter choices are read from the snapshot at open
+/// (KAT-G1-clean, like `open_classify_inbound_flow`); only the PRICED preview (step 1→2) routes through
+/// the `Session::bulk_self_transfer_in_plan` helper.
+pub struct BulkStiFlowState {
+    pub step: BulkStiStep,
+    /// `[None = Any, Some(w), …]` — Any + each distinct receiving wallet of the candidates.
+    pub wallet_choices: Vec<Option<WalletId>>,
+    pub wallet_idx: usize,
+    /// `[None = All, Some(y), …]` — All + each distinct year present in the candidates.
+    pub year_choices: Vec<Option<i32>>,
+    pub year_idx: usize,
+    /// 0 = receiving-wallet row, 1 = time-frame row.
+    pub filter_focus: usize,
+    /// Preview checklist over the priced plan.
+    pub preview: TargetList<BulkStiRowItem>,
+    /// Cross-step transient error (empty plan / nothing selected).
+    pub error: Option<String>,
+}
+
+/// Payload for the bulk STI confirmation modal (explicit confirm; NOT typed-word — each classification
+/// is voidable per-`v`). Captures the CHECKED rows only.
+pub struct BulkStiModalState {
+    pub in_events: Vec<EventId>,
+    pub count: usize,
+    pub total_sat: Sat,
+    pub total_usd_fmv_floor: Usd,
+    pub missing_price_count: usize,
+}
+
+/// Live footer/modal totals over the CHECKED rows: `(count, Σ sat, Σ priced USD floor, missing count)`.
+pub fn bulk_sti_checked_totals(items: &[BulkStiRowItem]) -> (usize, Sat, Usd, usize) {
+    let mut count = 0usize;
+    let mut sat: Sat = 0;
+    let mut floor: Usd = Usd::ZERO;
+    let mut missing = 0usize;
+    for it in items.iter().filter(|i| i.checked) {
+        count += 1;
+        sat += it.sat;
+        match it.usd_fmv {
+            Some(v) => floor += v,
+            None => missing += 1,
+        }
+    }
+    (count, sat, floor, missing)
+}
+
 /// The §A.5 basis label for a `Persistability`. `ForbiddenBroker2027` is never persisted (pre-filtered),
 /// so it maps to a placeholder that is unreachable at the modal.
 pub fn optimize_basis_label(p: Persistability) -> &'static str {
