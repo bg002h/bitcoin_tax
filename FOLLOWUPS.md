@@ -4,8 +4,30 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
-## tui-edit chunk 5 (safe-harbor-allocate `A`) — FOLLOWUP
+## ✅ tui-edit chunk 5 (safe-harbor-allocate `A`) — SHIPPED (2026-07-03) — MUTATING-TUI PROGRAM FEATURE-COMPLETE
 
+Cycle D (chunk 5), the FINAL feature cycle. **safe-harbor-allocate (`A`)** — CREATES a
+`SafeHarborAllocation` (the §7.4 pre-2025 Universal-residue snapshot @ 2025-01-01). Recompute the residue
+via a new additive `Session::safe_harbor_residue` (returns lots + the `LotMethod` used; KAT-G1-clean; the
+CLI command refactored to share it, DRY); Preview (method toggle — residue is method-INDEPENDENT) →
+REVOCABLE modal (not typed-word; creation is voidable while inert) → single-append
+`persist_safe_harbor_allocate` (save_or_rollback, no side-table, no latch). Completes the
+create(`A`)→attest(`a`)→void(`v`) loop. Voidability tracks EFFECTIVENESS not attestation (#7 encodes it);
+at the current date every fresh allocation is timebarred/inert/voidable. `btctax-core` unchanged. Spec R0
+2 rounds → 0C/0I (verified the 3 residue gotchas: voidability / timebar-at-current-date / ProRata);
+whole-diff review → 0C/0I/1M/3N (3 fault-injection probes; the E2E date-dependence assessed
+monotonically-safe + production date-correct; btctax-core untouched). **931 workspace tests.** Reviews:
+`reviews/R0-spec-tui-edit-chunk5-round-{1,2}.md`, `reviews/whole-branch-review-tui-edit-chunk5-round-1.md`.
+
+**FOLLOWUPS recorded:**
+- **[C5-2 M-DATE] the two allocate E2E tests embed an implicit "today > 2026-04-15" assumption** (a fresh
+  allocation is timebarred only past `TY2025_RETURN_DUE`). Monotonically safe (passes now and forever
+  forward; production uses `now_utc()` and is date-correct at any date; date-independent arm-3 coverage
+  exists via a ProRata-unattested seed). Optional: add a `now < 2026-04-15` skip-guard for pre-deadline
+  determinism. — OPEN (non-blocking, test hygiene).
+- **[C5-3 nits] cosmetic:** the opener doc comment over-lists `load_all`/`project` as KAT-G1-gated (they
+  aren't; intent correct); `AllocLotRow` duplicates `AllocLot` (a `TargetList<AllocLot>` would suffice);
+  `draw_edit::fmt_btc` mildly duplicates `btctax-tui`'s `sat_to_btc`. All harmless. — OPEN (non-blocking).
 - **[C5-1] ProRata `AllocMethod` records the tag but does NOT redistribute basis cross-wallet (matches
   core open question O4).** Both `ActualPosition` and `ProRata` seed the safe-harbor allocation from the
   SAME per-wallet actuals (`crates/btctax-cli/src/cmd/reconcile.rs` I-1 note + O4; `Session::safe_harbor_residue`
