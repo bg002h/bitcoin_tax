@@ -149,6 +149,22 @@ impl Vault {
         let ct = crypto::encrypt_to(&self.cert, &blob::encode_blob(SCHEMA_VERSION, &image))?;
         atomic::atomic_write(&self.path, &ct)
     }
+
+    /// Serialize the current in-memory DB image (no disk I/O). A prior `snapshot()` result can be
+    /// fed to `restore()` to revert an attempted mutation whose `save()` failed. Reuses the exact
+    /// serialization the vault round-trips on every `open()`.
+    pub fn snapshot(&self) -> Result<Vec<u8>, StoreError> {
+        sqlite_io::db_to_bytes(&self.conn)
+    }
+
+    /// Replace the in-memory DB with `image` (a prior `snapshot()`). No disk I/O; the vault file,
+    /// `VaultLock`, `cert`, and `path` are untouched, so the exclusive lock is held across the swap.
+    /// On `Err` (only `db_from_bytes` OOM) the assignment never runs, so `self.conn` is UNCHANGED —
+    /// the caller MUST treat `Err` as "unsaved residue may still be live", never silently swallow it.
+    pub fn restore(&mut self, image: &[u8]) -> Result<(), StoreError> {
+        self.conn = sqlite_io::db_from_bytes(image)?;
+        Ok(())
+    }
     pub fn export_snapshot(&self, out_dir: &Path) -> Result<PathBuf, StoreError> {
         // [MEDIUM security] restricted directory + owner-only file (plaintext tax data)
         mkdir_owner_only(out_dir)?;
@@ -228,6 +244,59 @@ mod tests {
             .execute("CREATE TABLE IF NOT EXISTS t (x TEXT)", [])
             .unwrap();
         v.save().unwrap();
+    }
+
+    /// `snapshot()` then a further in-memory mutation then `restore()` reverts the in-memory DB
+    /// byte-for-byte to the snapshot (the core of the save-rollback mechanism).
+    #[test]
+    fn snapshot_restore_reverts_in_memory_mutation() {
+        let dir = tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let mut v = Vault::create(&vault, &pp()).unwrap();
+        v.conn().execute("CREATE TABLE t (x INTEGER)", []).unwrap();
+        v.conn().execute("INSERT INTO t VALUES (1)", []).unwrap();
+        v.save().unwrap();
+
+        let snap = v.snapshot().unwrap();
+        // Further mutation, not yet saved to disk.
+        v.conn().execute("INSERT INTO t VALUES (2)", []).unwrap();
+        let n: i64 = v
+            .conn()
+            .query_row("SELECT COUNT(*) FROM t", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 2, "pre-restore: snapshot row + the extra row");
+
+        v.restore(&snap).unwrap();
+        let n: i64 = v
+            .conn()
+            .query_row("SELECT COUNT(*) FROM t", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1, "restore must revert to the snapshot's single row");
+        let x: i64 = v
+            .conn()
+            .query_row("SELECT x FROM t", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            x, 1,
+            "the surviving row must be the snapshot's, not the reverted insert"
+        );
+    }
+
+    /// `restore()` performs NO disk I/O — the on-disk vault file bytes are unchanged.
+    #[test]
+    fn restore_does_not_touch_the_vault_file() {
+        let dir = tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let mut v = Vault::create(&vault, &pp()).unwrap();
+        v.conn().execute("CREATE TABLE t (x INTEGER)", []).unwrap();
+        v.save().unwrap();
+        let snap = v.snapshot().unwrap();
+        v.conn().execute("INSERT INTO t VALUES (9)", []).unwrap();
+
+        let before = std::fs::read(&vault).unwrap();
+        v.restore(&snap).unwrap();
+        let after = std::fs::read(&vault).unwrap();
+        assert_eq!(before, after, "restore must not write the vault file");
     }
 
     /// `repair` on a HEALTHY vault (pgp present) must refuse with `AlreadyExists`;
