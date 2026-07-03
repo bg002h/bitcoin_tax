@@ -1,7 +1,8 @@
 # SPEC — self-transfer completion, Cycle A: inbound self-transfer-in
 
 **Source baseline:** `main` @ `a740b3d` (all anchors verified at write time).
-**Review status: DRAFT — awaiting mandatory R0.**
+**Review status: R0 round 1 folded (0C / 0I / 3M / 3N — GATE PASSED; all folded); awaiting R0 round 2.
+Review: `reviews/R0-spec-self-transfer-inbound-round-1.md`.**
 **Design lineage:** brainstorm with the user (2026-07-03) → architect design (grounded at `a740b3d`).
 First half of the "self-transfer completion" program. **Cycle B (matched in/out pairs — the
 `SelfTransferPassthrough` drop primitive + the confirmed matcher) is OUT OF SCOPE here** — its own cycle.
@@ -117,14 +118,17 @@ New arm in `fold_event`, modeled on `Op::IncomeInbound` (`fold.rs:823`) but **no
 basis-pending**:
 ```rust
 Op::SelfTransferInbound { sat, basis, acquired_at } => {
-    let wallet = /* eff.wallet, else the IncomeInbound wallet-missing guard (fold.rs:830) → Hard
-                    UnknownBasisInbound + return; a wallet-less self-transfer-in has nowhere to land */;
+    let wallet = /* eff.wallet, else: nowhere to create the lot → emit Hard BlockerKind::UnknownBasisInbound
+                    with a self-transfer message + return. [R0-M2] Do NOT copy the IncomeInbound guard
+                    (fold.rs:830) verbatim — it emits FmvMissing "income inbound without wallet",
+                    semantically wrong for a non-income self-transfer. */;
     let usd_basis = basis.unwrap_or(Usd::ZERO);   // conservative $0 default
     let acq = acquired_at.unwrap_or(date);        // conservative receipt-date default (date = event date)
     if basis.is_none() {
         st.add_blocker(BlockerKind::SelfTransferInboundZeroBasis, Some(eff.id.clone()),
             "basis defaulted to $0 — likely overstates your eventual gain; supply real cost if you have \
-             it (classify-inbound-self-transfer --basis). Holding period also defaults to the receipt \
+             it (btctax reconcile classify-inbound-self-transfer --basis). [R0-N1] Holding period also \
+             defaults to the receipt \
              date (short-term) unless --acquired is supplied.");   // ADVISORY only; NEVER Hard
     }
     let lot = Lot {
@@ -181,9 +185,13 @@ event is a raw `TransferIn` with no non-voided `ClassifyInbound`). Add:
 - `validate_classify_inbound_self_transfer(basis_buf, acquired_buf) -> Result<InboundClass, String>`
   beside the income/gift validators (`form.rs:412-449`): both fields optional; empty → `None`;
   whitespace-only is NOT empty (the shipped [R0-M4] rule).
-- Draw arm in `draw_classify_inbound_form` (`draw_edit.rs:591`); confirm modal reuses
-  `ClassifyInboundModalState` (`as_: InboundClass` already covers it); persistence reuses
-  `persist_classify_inbound` (`persist.rs:122-137`) unchanged.
+- Draw arm in `draw_classify_inbound_form` (`draw_edit.rs:591`); persistence reuses
+  `persist_classify_inbound` (`persist.rs:122-137`) unchanged (the MODAL STATE `ClassifyInboundModalState`
+  is reused — `as_: InboundClass` covers the new variant).
+- **[R0-M3] Enumerate the exhaustive-match sites Task 3 must add an arm to** (all compile-forced, not
+  silent): `draw_classify_inbound_modal` (`draw_edit.rs:728`, the modal RENDER fn — a new arm, distinct
+  from the reused modal STATE), the `cls_desc` status match (`main.rs:2193`), the variant Tab-cycle
+  (`main.rs:769`), the variant→form transition (`main.rs:783`), and the step-index helper (`main.rs:698`).
 
 ---
 
@@ -208,7 +216,9 @@ event is a raw `TransferIn` with no non-voided `ClassifyInbound`). Add:
 - **btctax-core:** the 8 invariants above (basis/HP defaults + adjust; non-taxable; basis_pending-false +
   no-gate; advisory-not-hard + non-gating; outside-FIFO + sellable; conservation). Plus: serde
   round-trips the new variant; duplicate `ClassifyInbound` first-wins still holds; void re-exposes the
-  inbound as `UnknownInbound`.
+  inbound as `UnknownInbound`. **[R0-N2]** a PRE-2025 receipt self-transfer-in conserves + folds through
+  the Universal pool (`universal_snapshot`) correctly; the **wallet-missing corner** [R0-M2] emits Hard
+  `UnknownBasisInbound` (not `FmvMissing`) + creates no lot.
 - **btctax-cli:** `classify-inbound-self-transfer` appends `SelfTransferMine` (defaults None; with
   `--basis`/`--acquired`); wrong-target (non-TransferIn) errors via the existing bad-target path.
 - **btctax-tui-edit:** the flow lists the target, the validator (optional fields; whitespace≠empty), the
@@ -234,13 +244,20 @@ event is a raw `TransferIn` with no non-voided `ClassifyInbound`). Add:
   lot's own `acquired_at`.
 - **G4:** the Advisory blocker fires on `basis.is_none()`, NOT on `usd_basis == 0` (an attested
   `Some(0)` must be silent).
-- **G5:** wallet-missing corner — a wallet-less `TransferIn` self-transfer-in has nowhere to create the
-  lot; reuse the `IncomeInbound` wallet guard (Hard blocker + return), don't panic.
-- **G6 (compile — don't miss):** adding `Op::SelfTransferInbound` forces a NEW ARM in EVERY exhaustive
-  `Op` match, even where the behavior is a no-op — `is_disposition_op` → `false`, `honoring_principal` →
-  `None`, and any `render`/consult/optimize match over `Op`. No logic change; just the arm (grep every
-  `match … Op` / `Op::` site). This is the workspace-lockstep rebuild surface; a missed arm is a compile
-  error, not a silent bug — but enumerate them up front.
+- **G5 [R0-M2]:** wallet-missing corner — a wallet-less `TransferIn` self-transfer-in has nowhere to
+  create the lot → emit Hard `UnknownBasisInbound` with a self-transfer message + return (do NOT copy the
+  `IncomeInbound` guard verbatim — it emits `FmvMissing`, semantically wrong here). Add a KAT. Don't panic.
+- **G6 (two kinds of Op-match site — handle BOTH) [R0-M1]:**
+  (a) **Exhaustive** matches force a new arm (compile error if missed): `build_op`'s inbound-class match
+  (add the C3 arm, `resolve.rs:256-277`) + any exhaustive `Op` render/dispatch.
+  (b) **Catch-all** (`_ =>`) matches do NOT force an arm and already default CORRECTLY for a lot-CREATING
+  op — `is_disposition_op` (`resolve.rs:996`, `_ => false`), `honoring_principal` (`resolve.rs:1008`,
+  `_ => None`), and `evaluate.rs::honoring_sat` (`:76`, `_ => None`). LEAVE these on their defaults; a
+  WRONG explicit arm (e.g. `honoring_principal => Some(sat)`) would SILENTLY break invariant #7
+  (outside-FIFO). VERIFY all three read correctly for the new op — don't "helpfully" add an arm.
+- **G7 (nit) [R0-N3]:** the CLI `--acquired` / TUI validator MAY warn if `acquired_at > receipt date`
+  (a future typo). Not required for correctness — a future date only makes the lot short-term (the
+  conservative direction) — but it's cheap hygiene.
 
 ## Out of scope (later cycles)
 - **Cycle B:** matched in/out pairs — the `SelfTransferPassthrough` drop primitive (both legs → `Op::Skip`),
