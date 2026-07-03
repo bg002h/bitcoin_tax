@@ -377,6 +377,53 @@ pub fn persist_classify_raw(
     Ok(id)
 }
 
+/// Append a `SupersedeImport` (accept) or `RejectImport` (reject) decision resolving an
+/// `ImportConflict`, and atomically save the vault (chunk 4b, D3).
+///
+/// `conflict_event` is the `ImportConflict` event id (the blocker's `.event`); `kind` selects the
+/// appended variant. `now` is INJECTED at Enter-press for test determinism. Mirrors the two CLI
+/// verbs `reconcile accept-conflict` / `reject-conflict` (reconcile.rs:178/194), which differ only in
+/// the appended payload — hence one persist fn with a `kind` param.
+///
+/// # Single-append shape (NO bespoke latch)
+/// Identical `snapshot → append_decision → save_or_rollback` shape as `persist_select_lots`: exactly
+/// ONE fallible mutation after the snapshot, so a failed save reverts cleanly and a retry re-appends
+/// with the SAME `decision_seq` (no residue). On success the target's `ImportConflict` blocker clears
+/// (resolve.rs:386-401).
+///
+/// # Non-revocable [D3]
+/// `SupersedeImport`/`RejectImport` are EXCLUDED from `is_revocable_payload`, so the decision cannot
+/// be voided in-editor (a later void would fire `DecisionConflict`, resolve.rs:312-313). The modal
+/// carries the prominent NON-REVOCABLE warning; this is the correct ceremony (NOT a typed-word gate,
+/// which is reserved for the §7.4 unrecoverable-batch attest).
+pub fn persist_resolve_conflict(
+    session: &mut btctax_cli::Session,
+    conflict_event: btctax_core::EventId,
+    kind: crate::edit::form::ResolveKind,
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, PersistError> {
+    use btctax_core::event::{RejectImport, SupersedeImport};
+    use btctax_core::EventPayload;
+    let payload = match kind {
+        crate::edit::form::ResolveKind::Accept => {
+            EventPayload::SupersedeImport(SupersedeImport { conflict_event })
+        }
+        crate::edit::form::ResolveKind::Reject => {
+            EventPayload::RejectImport(RejectImport { conflict_event })
+        }
+    };
+    let pre = session.snapshot()?;
+    let id = btctax_core::persistence::append_decision(
+        session.conn(),
+        payload,
+        now,
+        time::UtcOffset::UTC,
+        None,
+    )?;
+    save_or_rollback(session, pre)?;
+    Ok(id)
+}
+
 /// Store `DonationDetails` for `event_id` in the `donation_details` side-table
 /// and atomically save the vault (last-write-wins upsert; NOT a decision event).
 ///
@@ -2466,6 +2513,319 @@ mod tests {
         assert_eq!(
             post_disk, post,
             "on-disk image must equal in-memory post after save"
+        );
+    }
+
+    // ── Resolve-conflict helper: seed an ImportConflict on an Acquire (chunk 4b, D3) ──
+    //
+    // Import Acquire{usd_cost:30000} at target X, then re-import Acquire{usd_cost:50000} at the SAME
+    // (source, source_ref) → append_import_batch emits ONE ImportConflict whose new_payload carries
+    // usd_cost:50000. Returns (target, conflict_event). The unresolved conflict fires an
+    // ImportConflict blocker; the baseline lot keeps usd_basis 30000 until the conflict is resolved.
+    #[cfg(test)]
+    fn seed_acquire_conflict(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> (btctax_core::EventId, btctax_core::EventId) {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_import_batch, load_all};
+        use btctax_core::{EventId, WalletId};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let target = EventId::import(Source::River, SourceRef::new("rc-acq"));
+        let wallet = Some(WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        });
+        let ts = OffsetDateTime::from_unix_timestamp(1_740_000_000).unwrap();
+
+        {
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+            let v1 = vec![LedgerEvent {
+                id: target.clone(),
+                utc_timestamp: ts,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(30000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            }];
+            append_import_batch(session.conn(), &v1).unwrap();
+            session.save().unwrap();
+
+            // Re-import the SAME (source, source_ref) with different content → ImportConflict.
+            let v2 = vec![LedgerEvent {
+                id: target.clone(),
+                utc_timestamp: ts,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(50000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            }];
+            append_import_batch(session.conn(), &v2).unwrap();
+            session.save().unwrap();
+
+            let events = load_all(session.conn()).unwrap();
+            let conflict_event = events
+                .iter()
+                .find(|e| matches!(e.payload, EventPayload::ImportConflict(_)))
+                .expect("ImportConflict must exist after re-import with changed content")
+                .id
+                .clone();
+            (target, conflict_event)
+        }
+    }
+
+    // ── KAT-P2-RC-A — resolve-conflict ACCEPT: strict prefix + target adopts new_payload ──
+    //
+    // persist_resolve_conflict(Accept) appends EXACTLY one SupersedeImport{conflict_event}; the
+    // ImportConflict blocker clears AND the target lot's basis becomes the NEW payload's 50000.
+    #[test]
+    fn kat_p2_rc_accept_supersede_adopts_new_payload() {
+        use crate::edit::form::ResolveKind;
+        use btctax_core::event::EventPayload;
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_core::{BlockerKind, EventId};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-rc-a-pass";
+        let (target, conflict_event) = seed_acquire_conflict(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+
+        // Baseline: unresolved conflict → blocker present; lot basis is the ORIGINAL 30000.
+        let (_e0, s0, _c0) = session.load_events_and_project().unwrap();
+        assert!(
+            s0.blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::ImportConflict),
+            "baseline must carry an ImportConflict blocker"
+        );
+        assert_eq!(
+            s0.lots
+                .iter()
+                .find(|l| l.original_sat == 100_000)
+                .unwrap()
+                .usd_basis,
+            dec!(30000),
+            "baseline lot basis must be the ORIGINAL 30000"
+        );
+
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+        let id = persist_resolve_conflict(
+            &mut session,
+            conflict_event.clone(),
+            ResolveKind::Accept,
+            now,
+        )
+        .unwrap();
+
+        // Strict prefix: exactly one decision appended at the tail.
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 1, "post must be pre.len()+1");
+        assert_eq!(&post[..pre.len()], pre.as_slice(), "strict prefix");
+        let tail = &post[pre.len()];
+        let tail_seq = tail.decision_seq.expect("tail must have decision_seq");
+        assert_eq!(tail_seq, (pre_max_seq + 1) as i64, "tail seq = pre_max+1");
+        assert_eq!(
+            id,
+            EventId::Decision {
+                seq: tail_seq as u64
+            }
+        );
+        let stored: EventPayload =
+            serde_json::from_str(&tail.payload_json).expect("tail must deserialise");
+        match &stored {
+            EventPayload::SupersedeImport(s) => {
+                assert_eq!(s.conflict_event, conflict_event, "targets the conflict")
+            }
+            other => panic!("expected SupersedeImport, got {other:?}"),
+        }
+
+        // Re-project: blocker cleared AND the lot adopts the NEW payload's 50000 basis.
+        let (_e1, s1, _c1) = session.load_events_and_project().unwrap();
+        assert!(
+            s1.blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::ImportConflict),
+            "ImportConflict blocker must clear after accept"
+        );
+        assert_eq!(
+            s1.lots
+                .iter()
+                .find(|l| l.original_sat == 100_000)
+                .unwrap()
+                .usd_basis,
+            dec!(50000),
+            "accept must adopt the NEW payload (basis 50000)"
+        );
+        let _ = target;
+    }
+
+    // ── KAT-P2-RC-R — resolve-conflict REJECT: original stands, blocker clears ──
+    #[test]
+    fn kat_p2_rc_reject_keeps_original() {
+        use crate::edit::form::ResolveKind;
+        use btctax_core::event::EventPayload;
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_core::BlockerKind;
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-rc-r-pass";
+        let (_target, conflict_event) = seed_acquire_conflict(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+        let id = persist_resolve_conflict(
+            &mut session,
+            conflict_event.clone(),
+            ResolveKind::Reject,
+            now,
+        )
+        .unwrap();
+
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 1);
+        assert_eq!(&post[..pre.len()], pre.as_slice(), "strict prefix");
+        let tail = &post[pre.len()];
+        let stored: EventPayload =
+            serde_json::from_str(&tail.payload_json).expect("tail must deserialise");
+        match &stored {
+            EventPayload::RejectImport(r) => assert_eq!(r.conflict_event, conflict_event),
+            other => panic!("expected RejectImport, got {other:?}"),
+        }
+        let _ = id;
+
+        // Re-project: blocker cleared AND the lot keeps the ORIGINAL 30000 basis.
+        let (_e1, s1, _c1) = session.load_events_and_project().unwrap();
+        assert!(
+            s1.blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::ImportConflict),
+            "ImportConflict blocker must clear after reject"
+        );
+        assert_eq!(
+            s1.lots
+                .iter()
+                .find(|l| l.original_sat == 100_000)
+                .unwrap()
+                .usd_basis,
+            dec!(30000),
+            "reject must keep the ORIGINAL payload (basis 30000)"
+        );
+    }
+
+    // ── KAT-RC-NONREVOCABLE — SupersedeImport/RejectImport are NOT revocable ──
+    //
+    // Pins that a resolve-conflict decision never appears in the void ('v') list: the void-list
+    // pre-filter offers only `is_revocable_payload` decisions, and these two are excluded (a later
+    // void fires DecisionConflict, resolve.rs:312-313). This is the persist-level anchor for the
+    // spec's non-revocability requirement.
+    #[test]
+    fn kat_rc_supersede_reject_are_non_revocable() {
+        use btctax_core::event::{RejectImport, SupersedeImport};
+        use btctax_core::{EventId, EventPayload};
+        let ce = EventId::decision(1);
+        assert!(
+            !crate::edit::form::is_revocable_payload(&EventPayload::SupersedeImport(
+                SupersedeImport {
+                    conflict_event: ce.clone()
+                }
+            )),
+            "SupersedeImport must NOT be revocable"
+        );
+        assert!(
+            !crate::edit::form::is_revocable_payload(&EventPayload::RejectImport(RejectImport {
+                conflict_event: ce
+            })),
+            "RejectImport must NOT be revocable"
+        );
+    }
+
+    // ── save-rollback: persist_resolve_conflict reverts on a failed save ──
+    #[cfg(unix)]
+    #[test]
+    fn kat_persist_resolve_conflict_rollback_on_failed_save() {
+        use crate::edit::form::ResolveKind;
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_core::BlockerKind;
+        use btctax_store::Passphrase;
+        use std::os::unix::fs::PermissionsExt;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-rc-rollback-pass";
+        let (_target, conflict_event) = seed_acquire_conflict(&vault, &key, pp_str);
+
+        // Root-skip guard (chmod is a no-op as root).
+        {
+            let probe = dir.path().join("probe.tmp");
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("rc-rollback KAT: skipping — chmod did not deny writes (root?)");
+                return;
+            }
+        }
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result =
+            persist_resolve_conflict(&mut session, conflict_event, ResolveKind::Accept, now);
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(
+            matches!(result, Err(PersistError::RolledBack(_))),
+            "failed save must return RolledBack; got: {result:?}"
+        );
+
+        // Rollback: NO decision appended, and the conflict stays unresolved.
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len(), "rollback must revert the append");
+        let (_e, s, _c) = session.load_events_and_project().unwrap();
+        assert!(
+            s.blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::ImportConflict),
+            "conflict must remain unresolved after a rolled-back save"
         );
     }
 }

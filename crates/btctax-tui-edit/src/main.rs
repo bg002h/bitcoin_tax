@@ -25,16 +25,18 @@ use edit::form::{
     validate_donation_details, validate_reclassify_income, validate_reclassify_outflow,
     validate_select_lots, validate_set_fmv, ClassifyInboundFlowState, ClassifyInboundModalState,
     ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep,
-    ClassifyRawVariant, DisposalKind, DisposalListItem, DonationListItem, FieldBuffer, FmvListItem,
-    InEventItem, InboundListItem, InboundVariant, IncomeListItem, LinkMode, LinkTransferFlowState,
-    LinkTransferModalState, LinkTransferStep, LotPickFormRow, MutationModalState, OutflowKind,
-    OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
-    ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
-    ReclassifyOutflowModalState, ReclassifyOutflowStep, SafeHarborAttestFlowState,
-    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
-    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
-    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TransferOutItem, VoidFlowState,
-    VoidListItem, VoidModalState, VoidStep, WalletItem, FREETEXT_CAP,
+    ClassifyRawVariant, ConflictItem, DisposalKind, DisposalListItem, DonationListItem,
+    FieldBuffer, FmvListItem, InEventItem, InboundListItem, InboundVariant, IncomeListItem,
+    LinkMode, LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, LotPickFormRow,
+    MutationModalState, OutflowKind, OutflowListItem, ProfileFormState, RawListItem,
+    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
+    ReclassifyOutflowFlowState, ReclassifyOutflowModalState, ReclassifyOutflowStep,
+    ResolveConflictFlowState, ResolveConflictModalState, ResolveConflictStep, ResolveKind,
+    SafeHarborAttestFlowState, SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState,
+    SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
+    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList,
+    TransferOutItem, VoidFlowState, VoidListItem, VoidModalState, VoidStep, WalletItem,
+    FREETEXT_CAP,
 };
 use editor::{EditorApp, EditorScreen};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -174,6 +176,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Resolve-conflict-modal dispatch — BEFORE flow, form, screen ──────────
+    if app.resolve_conflict_modal.is_some() {
+        handle_resolve_conflict_modal_key(app, key);
+        return;
+    }
+
     // ── 9. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
     //    Every step of an open flow is claimed here; 'q' and Esc can never
     //    fall through to a Browse quit arm mid-flow.
@@ -215,6 +223,10 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.safe_harbor_attest_flow.is_some() {
         handle_safe_harbor_attest_flow_key(app, key);
+        return;
+    }
+    if app.resolve_conflict_flow.is_some() {
+        handle_resolve_conflict_flow_key(app, key);
         return;
     }
 
@@ -280,6 +292,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('l') => open_link_transfer_flow(app),
                 KeyCode::Char('u') => open_classify_raw_flow(app),
                 KeyCode::Char('a') => open_safe_harbor_attest_flow(app),
+                KeyCode::Char('i') => open_resolve_conflict_flow(app),
                 _ => {}
             }
         }
@@ -500,6 +513,8 @@ impl EditorApp {
         self.classify_raw_flow = None;
         self.classify_raw_modal = None;
         self.safe_harbor_attest_flow = None;
+        self.resolve_conflict_flow = None;
+        self.resolve_conflict_modal = None;
     }
 }
 
@@ -4913,6 +4928,305 @@ fn derive_attest_status(snap: &btctax_tui::app::Snapshot, new_attest_id: &EventI
     format!(
         "Allocation attested (IRREVOCABLE, §7.4) — {}; quit and run btctax verify to confirm effectiveness",
         new_attest_id.canonical()
+    )
+}
+
+// ── Resolve-conflict flow (chunk 4b, D3) ─────────────────────────────────────
+
+/// One-line human summary of an imported payload (resolve-conflict list + modal). Covers the common
+/// imported variants; anything else falls back to a compact debug form.
+fn import_payload_summary(p: &EventPayload) -> String {
+    match p {
+        EventPayload::Acquire(a) => format!("Acquire {} sat, cost {}", a.sat, a.usd_cost),
+        EventPayload::Income(i) => {
+            let fmv = i
+                .usd_fmv
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "(no fmv)".to_string());
+            format!("Income {} sat @ {}", i.sat, fmv)
+        }
+        EventPayload::Dispose(d) => {
+            format!("Dispose {} sat, proceeds {}", d.sat, d.usd_proceeds)
+        }
+        EventPayload::TransferIn(t) => format!("TransferIn {} sat", t.sat),
+        EventPayload::TransferOut(t) => format!("TransferOut {} sat", t.sat),
+        EventPayload::Unclassified(u) => {
+            format!(
+                "Unclassified: {}",
+                u.raw.chars().take(40).collect::<String>()
+            )
+        }
+        other => format!("{other:?}"),
+    }
+}
+
+/// Open the resolve-conflict flow from the Browse screen (chunk 4b, D3).
+///
+/// Pre-filter: events carrying `BlockerKind::ImportConflict` (Hard; fires ONLY while UNRESOLVED —
+/// resolve.rs:386-401), so no extra exclusion is needed (inherently post-filtered). The blocker's
+/// `.event` is the `ImportConflict` EventId; its payload names the `target` import event and the
+/// `new_payload` proposed to supersede it. The two summaries are computed here (the CURRENT payload
+/// lives at the TARGET id, a SEPARATE event; the NEW payload rides the conflict).
+///
+/// Empty filtered list → status "No unresolved import conflicts"; flow NOT opened [R0-M8].
+fn open_resolve_conflict_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let ev_idx = events_by_id(snap);
+
+    let mut items: Vec<ConflictItem> = snap
+        .state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::ImportConflict)
+        .filter_map(|b| {
+            let conflict_id = b.event.as_ref()?;
+            let conflict_ev = ev_idx.get(conflict_id)?;
+            let conflict = match &conflict_ev.payload {
+                EventPayload::ImportConflict(c) => c,
+                _ => return None,
+            };
+            let date = btctax_core::conventions::tax_date(
+                conflict_ev.utc_timestamp,
+                conflict_ev.original_tz,
+            );
+            // CURRENT payload lives at the TARGET id (a separate event, conflict_event != target).
+            let current_summary = ev_idx
+                .get(&conflict.target)
+                .map(|e| import_payload_summary(&e.payload))
+                .unwrap_or_else(|| "(target not found)".to_string());
+            let new_summary = import_payload_summary(&conflict.new_payload);
+            let new_fingerprint = conflict
+                .new_fingerprint
+                .0
+                .chars()
+                .take(8)
+                .collect::<String>();
+            Some(ConflictItem {
+                conflict_event: conflict_id.clone(),
+                target: conflict.target.clone(),
+                date,
+                new_fingerprint,
+                current_summary,
+                new_summary,
+            })
+        })
+        .collect();
+    items.sort_by_key(|i| i.date);
+
+    if items.is_empty() {
+        // R0-M8: empty filtered list never opens a flow.
+        app.status = Some("No unresolved import conflicts".to_string());
+        return;
+    }
+
+    app.resolve_conflict_flow = Some(ResolveConflictFlowState {
+        list: TargetList::new(items),
+        step: ResolveConflictStep::List,
+    });
+}
+
+/// Dispatch to the correct sub-handler depending on `ResolveConflictStep`.
+fn handle_resolve_conflict_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.resolve_conflict_flow.as_ref() {
+        Some(f) => match &f.step {
+            ResolveConflictStep::List => 0u8,
+            ResolveConflictStep::Choose { .. } => 1u8,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_rc_list_key(app, key),
+        _ => handle_rc_choose_key(app, key),
+    }
+}
+
+/// List step: Enter → Choose (default Accept). Esc → close flow. q → swallowed.
+fn handle_rc_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            let selected = app
+                .resolve_conflict_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+            if let Some(item) = selected {
+                if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                    flow.step = ResolveConflictStep::Choose {
+                        conflict: item,
+                        kind: ResolveKind::Accept, // default
+                    };
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.resolve_conflict_flow = None;
+        }
+        _ => {
+            // All other keys (including 'q') swallowed while flow is open [R0-I2].
+        }
+    }
+}
+
+/// Choose step: ←/→ or h/l toggle Accept ⇄ Reject (in-flow — NOT Browse `a`); Enter → modal;
+/// Esc → back to List; q → swallowed.
+fn handle_rc_choose_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l') | KeyCode::Tab => {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                if let ResolveConflictStep::Choose { kind, .. } = &mut flow.step {
+                    *kind = match *kind {
+                        ResolveKind::Accept => ResolveKind::Reject,
+                        ResolveKind::Reject => ResolveKind::Accept,
+                    };
+                }
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(flow) = app.resolve_conflict_flow.as_ref() {
+                if let ResolveConflictStep::Choose { conflict, kind } = &flow.step {
+                    app.resolve_conflict_modal = Some(ResolveConflictModalState {
+                        conflict_event: conflict.conflict_event.clone(),
+                        target: conflict.target.clone(),
+                        kind: *kind,
+                        old_summary: conflict.current_summary.clone(),
+                        new_summary: conflict.new_summary.clone(),
+                    });
+                }
+            }
+        }
+        KeyCode::Esc => {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                flow.step = ResolveConflictStep::List;
+            }
+        }
+        _ => {
+            // All other keys (including 'q') swallowed [R0-I2].
+        }
+    }
+}
+
+/// Handle a key press while the resolve-conflict confirmation modal is open (chunk 4b, D3).
+///
+/// Enter → `persist_resolve_conflict(session, conflict_event, kind, now)` → re-project + status +
+///   close. `Err(e)` → close modal, route through `on_persist_error`.
+/// Esc → close modal only (back to the Choose step; nothing written).
+fn handle_resolve_conflict_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (conflict_event, kind) = match app.resolve_conflict_modal.as_ref() {
+                Some(m) => (m.conflict_event.clone(), m.kind),
+                None => return,
+            };
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.resolve_conflict_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_resolve_conflict(
+                    session,
+                    conflict_event.clone(),
+                    kind,
+                    now,
+                )
+            };
+
+            match save_result {
+                Ok(_decision_id) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status =
+                                derive_resolve_conflict_status(&snap, &conflict_event, kind);
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.resolve_conflict_modal = None;
+                    app.resolve_conflict_flow = None;
+                }
+                Err(e) => {
+                    app.resolve_conflict_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.resolve_conflict_modal = None;
+        }
+        _ => {
+            // All other keys swallowed (blocking modal).
+        }
+    }
+}
+
+/// Derive the status string from RE-PROJECTED state after a resolve-conflict save (chunk 4b, D3).
+///
+/// The pre-filter removes already-resolved conflicts and a failed save rolls back clean, so no
+/// `DecisionConflict` retry arm is reachable. On success the target's `ImportConflict` blocker
+/// clears; a defensive re-check reports the (unreachable) case where it somehow persists.
+fn derive_resolve_conflict_status(
+    snap: &btctax_tui::app::Snapshot,
+    conflict_event: &EventId,
+    kind: ResolveKind,
+) -> String {
+    let verb = match kind {
+        ResolveKind::Accept => "accepted",
+        ResolveKind::Reject => "rejected",
+    };
+    let still_unresolved =
+        snap.state.blockers.iter().any(|b| {
+            b.kind == BlockerKind::ImportConflict && b.event.as_ref() == Some(conflict_event)
+        });
+    if still_unresolved {
+        return format!(
+            "Resolution recorded for {} but the import-conflict blocker persists — see Compliance.",
+            conflict_event.canonical()
+        );
+    }
+    format!(
+        "Conflict {} {verb}; import-conflict resolved.",
+        conflict_event.canonical()
     )
 }
 
@@ -14709,6 +15023,195 @@ mod tests {
         assert!(
             rendered_text(&terminal).contains("link-transfer"),
             "LT-RENDER: confirm modal overlay"
+        );
+    }
+
+    // ── Resolve-conflict flow (chunk 4b, D3) ─────────────────────────────────
+
+    /// Seed a vault with ONE unresolved ImportConflict on an Acquire (usd_cost 30000 → 50000).
+    fn seed_conflict_vault(vault: &std::path::Path, key: &std::path::Path, pp_str: &str) {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::append_import_batch;
+        use btctax_core::{EventId, WalletId};
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let target = EventId::import(Source::River, SourceRef::new("rc-e2e"));
+        let wallet = Some(WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        });
+        let ts = OffsetDateTime::from_unix_timestamp(1_740_000_000).unwrap();
+        let acq = |usd: rust_decimal::Decimal| {
+            vec![LedgerEvent {
+                id: target.clone(),
+                utc_timestamp: ts,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: usd,
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            }]
+        };
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        append_import_batch(session.conn(), &acq(dec!(30000))).unwrap();
+        session.save().unwrap();
+        append_import_batch(session.conn(), &acq(dec!(50000))).unwrap();
+        session.save().unwrap();
+    }
+
+    // ── KAT-C2-RC — cancel-path bytes-unchanged (resolve-conflict) ───────────
+    #[test]
+    fn kat_c2_rc_cancel_path_vault_bytes_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-c2rc-pass";
+        seed_conflict_vault(&vault, &key, pp_str);
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+        {
+            let mut app = open_app(&vault, pp_str);
+
+            // i → flow opens at List.
+            handle_key(&mut app, press(KeyCode::Char('i')));
+            assert!(app.resolve_conflict_flow.is_some(), "C2-RC: 'i' opens flow");
+
+            // q swallowed (flow stays open, editor does not quit).
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2-RC: q must not quit mid-flow");
+            assert!(app.resolve_conflict_flow.is_some(), "C2-RC: q swallowed");
+
+            // Enter → Choose step.
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(matches!(
+                app.resolve_conflict_flow.as_ref().map(|f| &f.step),
+                Some(ResolveConflictStep::Choose { .. })
+            ));
+
+            // toggle Accept ⇄ Reject.
+            handle_key(&mut app, press(KeyCode::Right));
+            assert!(matches!(
+                app.resolve_conflict_flow.as_ref().map(|f| &f.step),
+                Some(ResolveConflictStep::Choose {
+                    kind: ResolveKind::Reject,
+                    ..
+                })
+            ));
+            handle_key(&mut app, press(KeyCode::Left));
+
+            // Enter → modal.
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(app.resolve_conflict_modal.is_some(), "C2-RC: modal opens");
+
+            // Esc → modal closed, back to Choose (flow open).
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(app.resolve_conflict_modal.is_none());
+            assert!(matches!(
+                app.resolve_conflict_flow.as_ref().map(|f| &f.step),
+                Some(ResolveConflictStep::Choose { .. })
+            ));
+
+            // Esc → List; Esc → close.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(matches!(
+                app.resolve_conflict_flow.as_ref().map(|f| &f.step),
+                Some(ResolveConflictStep::List)
+            ));
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(app.resolve_conflict_flow.is_none(), "C2-RC: flow closed");
+        }
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(bytes_before, bytes_after, "C2-RC: cancel writes nothing");
+    }
+
+    // ── KAT-E2E-RC-ACCEPT — full 'i' accept path adopts new payload, clears blocker ──
+    #[test]
+    fn kat_e2e_rc_accept() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-rc-a-pass";
+        seed_conflict_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('i'))); // List
+        handle_key(&mut app, press(KeyCode::Enter)); // Choose (default Accept)
+        handle_key(&mut app, press(KeyCode::Enter)); // modal
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm & save
+
+        assert!(app.resolve_conflict_modal.is_none() && app.resolve_conflict_flow.is_none());
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.contains("accepted") && status.contains("import-conflict resolved"),
+            "E2E-RC-ACCEPT: status must confirm resolution; got {status:?}"
+        );
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::ImportConflict),
+            "E2E-RC-ACCEPT: ImportConflict blocker must clear"
+        );
+        let lot = snap
+            .state
+            .lots
+            .iter()
+            .find(|l| l.original_sat == 100_000)
+            .unwrap();
+        assert_eq!(
+            lot.usd_basis,
+            rust_decimal_macros::dec!(50000),
+            "E2E-RC-ACCEPT: lot must adopt the NEW basis 50000"
+        );
+    }
+
+    // ── KAT-E2E-RC-REJECT — full 'i' reject path keeps original, clears blocker ──
+    #[test]
+    fn kat_e2e_rc_reject() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-rc-r-pass";
+        seed_conflict_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('i'))); // List
+        handle_key(&mut app, press(KeyCode::Enter)); // Choose (Accept)
+        handle_key(&mut app, press(KeyCode::Right)); // toggle → Reject
+        handle_key(&mut app, press(KeyCode::Enter)); // modal
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm & save
+
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.contains("rejected") && status.contains("import-conflict resolved"),
+            "E2E-RC-REJECT: status must confirm resolution; got {status:?}"
+        );
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::ImportConflict),
+            "E2E-RC-REJECT: ImportConflict blocker must clear"
+        );
+        let lot = snap
+            .state
+            .lots
+            .iter()
+            .find(|l| l.original_sat == 100_000)
+            .unwrap();
+        assert_eq!(
+            lot.usd_basis,
+            rust_decimal_macros::dec!(30000),
+            "E2E-RC-REJECT: lot must keep the ORIGINAL basis 30000"
         );
     }
 }

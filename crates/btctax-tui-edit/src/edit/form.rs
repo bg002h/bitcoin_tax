@@ -1443,6 +1443,71 @@ pub fn validate_classify_raw_income(
     ))
 }
 
+// ── Resolve-conflict flow types (chunk 4b, D3) ───────────────────────────────
+
+/// Pre-computed display data for a resolve-conflict list row.
+///
+/// Sourced from events carrying `BlockerKind::ImportConflict` — the blocker's `.event` is the
+/// `ImportConflict` event id (`conflict_event`), whose payload names the `target` import event and
+/// the `new_payload` proposed to supersede it. The two summaries are computed at open time (against
+/// the CURRENT `target` payload vs the conflict's `new_payload`), so the flow/modal render no live
+/// event lookups.
+#[derive(Clone)]
+pub struct ConflictItem {
+    /// The `ImportConflict` event id — the resolution target (`SupersedeImport`/`RejectImport`
+    /// carry this as `conflict_event`).
+    pub conflict_event: EventId,
+    /// The TARGET import event id whose payload the conflict proposes to supersede.
+    pub target: EventId,
+    /// Calendar date (tax tz) of the conflict event.
+    pub date: TaxDate,
+    /// Short `new_fingerprint` string (table column).
+    pub new_fingerprint: String,
+    /// One-line summary of the TARGET's CURRENT payload (kept on reject; replaced on accept).
+    pub current_summary: String,
+    /// One-line summary of the conflict's NEW payload (adopted on accept).
+    pub new_summary: String,
+}
+
+/// Accept vs Reject branch of the resolve-conflict flow (an in-flow toggle — NOT Browse `a`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveKind {
+    /// `SupersedeImport` — adopt `new_payload` onto the target id.
+    Accept,
+    /// `RejectImport` — keep the original; discard the new payload.
+    Reject,
+}
+
+/// Step in the resolve-conflict flow.
+pub enum ResolveConflictStep {
+    /// Step 1: pick a conflict.
+    List,
+    /// Step 2: accept/reject choice for the picked conflict (`←/→` or `h/l` toggles).
+    Choose {
+        conflict: ConflictItem,
+        kind: ResolveKind,
+    },
+}
+
+/// Full state for the resolve-conflict flow. Owns its list [R0-I2 discipline].
+pub struct ResolveConflictFlowState {
+    pub list: TargetList<ConflictItem>,
+    pub step: ResolveConflictStep,
+}
+
+/// Payload for the resolve-conflict confirmation modal.
+///
+/// Shows BOTH sides (the target's CURRENT payload vs the conflict's NEW payload) and the
+/// NON-REVOCABLE warning. `SupersedeImport`/`RejectImport` are excluded from `is_revocable_payload`;
+/// a later void fires `DecisionConflict`, so the decision cannot be undone in-editor.
+pub struct ResolveConflictModalState {
+    pub conflict_event: EventId,
+    pub target: EventId,
+    pub kind: ResolveKind,
+    pub old_summary: String,
+    pub new_summary: String,
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

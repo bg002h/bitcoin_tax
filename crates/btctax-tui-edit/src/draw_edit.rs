@@ -15,6 +15,7 @@ use crate::edit::form::{
     LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, MutationModalState,
     OutflowKind, ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState,
     ReclassifyIncomeStep, ReclassifyOutflowModalState, ReclassifyOutflowStep,
+    ResolveConflictFlowState, ResolveConflictModalState, ResolveConflictStep, ResolveKind,
     SafeHarborAttestFlowState, SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState,
     SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
     SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState,
@@ -304,6 +305,23 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
                 draw_attest_typed_word(frame, area, &flow.step)
             }
         }
+    }
+    // Resolve-conflict flow overlay.
+    if app.resolve_conflict_flow.is_some() {
+        let is_list = matches!(
+            app.resolve_conflict_flow.as_ref().map(|f| &f.step),
+            Some(ResolveConflictStep::List)
+        );
+        if is_list {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                draw_resolve_conflict_list(frame, area, flow);
+            }
+        } else if let Some(flow) = app.resolve_conflict_flow.as_ref() {
+            draw_resolve_conflict_choose(frame, area, &flow.step);
+        }
+    }
+    if let Some(modal) = app.resolve_conflict_modal.as_ref() {
+        draw_resolve_conflict_modal(frame, area, modal);
     }
 }
 
@@ -2602,6 +2620,173 @@ fn draw_attest_typed_word(frame: &mut Frame, area: Rect, step: &SafeHarborAttest
     let inner = block.inner(modal_rect);
     frame.render_widget(block, modal_rect);
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+// ── Resolve-conflict flow draw functions (chunk 4b, D3) ──────────────────────
+
+/// Render the resolve-conflict step-1 list overlay.
+///
+/// Title: `" Resolve Import Conflict — select a conflict "`.
+/// Columns: `Date | Target | New-fingerprint | conflict EventId`.
+fn draw_resolve_conflict_list(frame: &mut Frame, area: Rect, flow: &mut ResolveConflictFlowState) {
+    let modal_rect = centered_rect(96, 20, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let header_cells = ["Date", "Target", "New-fingerprint", "Conflict EventId"]
+        .iter()
+        .map(|h| Cell::from(*h).style(Style::default().add_modifier(Modifier::BOLD)));
+    let header = Row::new(header_cells).height(1);
+
+    let selected_idx = flow.list.table_state.selected();
+    let items: Vec<Row> = flow
+        .list
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let is_selected = selected_idx == Some(i);
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            Row::new(vec![
+                Cell::from(item.date.to_string()).style(style),
+                Cell::from(item.target.canonical()).style(style),
+                Cell::from(item.new_fingerprint.clone()).style(style),
+                Cell::from(item.conflict_event.canonical()).style(style),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        items,
+        [
+            Constraint::Length(12),
+            Constraint::Length(26),
+            Constraint::Length(12),
+            Constraint::Min(24),
+        ],
+    )
+    .header(header)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Resolve Import Conflict — select a conflict "),
+    );
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.list.table_state);
+}
+
+/// Render the resolve-conflict step-2 accept/reject choice overlay (an in-flow toggle).
+fn draw_resolve_conflict_choose(frame: &mut Frame, area: Rect, step: &ResolveConflictStep) {
+    let ResolveConflictStep::Choose { conflict, kind } = step else {
+        return;
+    };
+
+    let (accept_span, reject_span) = match kind {
+        ResolveKind::Accept => (
+            Span::styled(
+                " ACCEPT ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  reject  "),
+        ),
+        ResolveKind::Reject => (
+            Span::raw("  accept  "),
+            Span::styled(
+                " REJECT ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ),
+    };
+
+    let lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(format!(
+            "  conflict: {}",
+            conflict.conflict_event.canonical()
+        )),
+        Line::from(format!("  target:   {}", conflict.target.canonical())),
+        Line::from(""),
+        Line::from(format!("  current:  {}", conflict.current_summary)),
+        Line::from(format!("  →new:     {}", conflict.new_summary)),
+        Line::from(""),
+        Line::from(vec![Span::raw("  choose:  "), accept_span, reject_span]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  ←/→ (h/l): toggle   Enter: confirm → modal   Esc: back   q: swallowed",
+            Style::default().fg(Color::Cyan),
+        )),
+    ];
+
+    let modal_rect = centered_rect(80, (lines.len() + 2) as u16, area);
+    frame.render_widget(Clear, modal_rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Resolve Import Conflict — accept or reject ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Render the resolve-conflict confirmation modal — BOTH sides + the NON-REVOCABLE warning.
+fn draw_resolve_conflict_modal(frame: &mut Frame, area: Rect, modal: &ResolveConflictModalState) {
+    let (title, adopt_note) = match modal.kind {
+        ResolveKind::Accept => (
+            " Confirm: ACCEPT conflict — WRITES THE VAULT ",
+            "(ACCEPT adopts new)",
+        ),
+        ResolveKind::Reject => (
+            " Confirm: REJECT conflict — WRITES THE VAULT ",
+            "(REJECT keeps current, discards new)",
+        ),
+    };
+
+    let content = format!(
+        "  conflict: {conflict}\n\
+           target:   {target}\n\
+         \n\
+           current:  {current}\n\
+           →new:     {new}   {adopt_note}\n\
+         \n\
+           !! This decision CANNOT be voided (non-revocable).\n\
+           Appended as a decision event (append-only log).\n\
+           Saved immediately via the vault's atomic write path.\n\
+         \n\
+         [Enter] Confirm & save   [Esc] Cancel — writes nothing",
+        conflict = modal.conflict_event.canonical(),
+        target = modal.target.canonical(),
+        current = modal.old_summary,
+        new = modal.new_summary,
+    );
+
+    let modal_width: u16 = 74;
+    let content_lines = content.lines().count() as u16 + 2;
+    let modal_height = content_lines.max(13);
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
