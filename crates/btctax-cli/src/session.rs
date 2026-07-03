@@ -7,10 +7,10 @@ use crate::optimize_attest;
 use crate::tax_profile;
 use crate::CliError;
 use btctax_adapters::{BundledPrices, BundledTaxTables};
-use btctax_core::conventions::tax_date;
+use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{init_schema, load_all};
 use btctax_core::{project, LedgerEvent, LedgerState, ProjectionConfig};
-use btctax_core::{DonationDetails, EventId, TaxProfile};
+use btctax_core::{AllocLot, DonationDetails, EventId, EventPayload, LotMethod, TaxProfile};
 use btctax_store::{Passphrase, Vault};
 use rusqlite::Connection;
 use std::path::Path;
@@ -177,6 +177,47 @@ impl Session {
             proposal_made,
         )
         .map_err(crate::cmd::optimize::map_opt_err)
+    }
+
+    /// READ-ONLY: the 2025-01-01 pre-2025 Universal residue as `AllocLot`s, plus the `pre2025_method`
+    /// (`LotMethod`) it was computed under. Appends/persists NOTHING. The single source of the pre-2025
+    /// subset, shared by `cmd::reconcile::safe_harbor_allocate` and the TUI allocate opener.
+    ///
+    /// Reads the config ONCE: `cfg.pre2025_method` is the recorded method returned to the caller, and
+    /// `cfg.to_projection()` is the projection the residue is computed under — the two are STRUCTURALLY
+    /// the same config read, so the returned method can never diverge from the residue's [R0-M1]. The
+    /// pre-2025 subset keeps only imports whose tax-date `< 2025-01-01` plus ALL reconciliation decisions
+    /// (which shape the residue), and DROPs any prior `SafeHarborAllocation` so the residue stays
+    /// allocation-INDEPENDENT (matches `transition::universal_snapshot`).
+    pub fn safe_harbor_residue(&self) -> Result<(Vec<AllocLot>, LotMethod), CliError> {
+        let cfg = self.config()?;
+        let pre2025_method = cfg.pre2025_method; // recorded field == the one used below
+        let proj = cfg.to_projection();
+        let pre2025: Vec<LedgerEvent> = load_all(self.conn())?
+            .into_iter()
+            .filter(|e| match &e.id {
+                EventId::Import { .. } => {
+                    tax_date(e.utc_timestamp, e.original_tz) < TRANSITION_DATE
+                }
+                _ => !matches!(e.payload, EventPayload::SafeHarborAllocation(_)),
+            })
+            .collect();
+        let prices = BundledPrices::load()?;
+        let residue = project(&pre2025, &prices, &proj);
+        let lots = residue
+            .lots
+            .iter()
+            .filter(|l| l.remaining_sat > 0)
+            .map(|l| AllocLot {
+                wallet: l.wallet.clone(),
+                sat: l.remaining_sat,
+                usd_basis: l.usd_basis,
+                acquired_at: l.acquired_at,
+                dual_loss_basis: l.dual_loss_basis,
+                donor_acquired_at: l.donor_acquired_at,
+            })
+            .collect();
+        Ok((lots, pre2025_method))
     }
 }
 

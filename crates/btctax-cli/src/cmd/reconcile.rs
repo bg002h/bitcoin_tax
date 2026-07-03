@@ -6,15 +6,14 @@
 //! Also contains the `set-donation-details` / `show-donation-details` side-table commands (no decision
 //! append — these write to the `donation_details` side-table directly, like `tax-profile set`).
 use crate::{CliError, Session};
-use btctax_adapters::BundledPrices;
-use btctax_core::conventions::{tax_date, TRANSITION_DATE};
+use btctax_core::conventions::TRANSITION_DATE;
 use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::{
-    project, AllocLot, AllocMethod, BlockerKind, ClassifyInbound, ClassifyRaw, DonationDetails,
-    EventId, EventPayload, InboundClass, IncomeKind, LedgerEvent, LotId, LotMethod, LotPick,
-    LotSelection, ManualFmv, MethodElection, OutflowClass, ReclassifyIncome, ReclassifyOutflow,
-    RejectImport, RemovalKind, SafeHarborAllocation, SupersedeImport, TaxDate, TransferLink,
-    TransferTarget, Usd, VoidDecisionEvent,
+    AllocMethod, BlockerKind, ClassifyInbound, ClassifyRaw, DonationDetails, EventId, EventPayload,
+    InboundClass, IncomeKind, LotId, LotMethod, LotPick, LotSelection, ManualFmv, MethodElection,
+    OutflowClass, ReclassifyIncome, ReclassifyOutflow, RejectImport, RemovalKind,
+    SafeHarborAllocation, SupersedeImport, TaxDate, TransferLink, TransferTarget, Usd,
+    VoidDecisionEvent,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -278,31 +277,10 @@ pub fn safe_harbor_allocate(
         }
     }
 
-    // Pre-2025-only event subset (see the I-1 note above).
-    let pre2025: Vec<LedgerEvent> = load_all(session.conn())?
-        .into_iter()
-        .filter(|e| match &e.id {
-            EventId::Import { .. } => tax_date(e.utc_timestamp, e.original_tz) < TRANSITION_DATE,
-            _ => !matches!(e.payload, EventPayload::SafeHarborAllocation(_)),
-        })
-        .collect();
-    let cfg = session.config()?.to_projection();
-    let prices = BundledPrices::load()?;
-    let residue = project(&pre2025, &prices, &cfg); // == the 2025-01-01 Universal residue
-
-    let lots: Vec<AllocLot> = residue
-        .lots
-        .iter()
-        .filter(|l| l.remaining_sat > 0)
-        .map(|l| AllocLot {
-            wallet: l.wallet.clone(),
-            sat: l.remaining_sat,
-            usd_basis: l.usd_basis,
-            acquired_at: l.acquired_at,
-            dual_loss_basis: l.dual_loss_basis,
-            donor_acquired_at: l.donor_acquired_at,
-        })
-        .collect();
+    // Pre-2025 residue + the recorded `pre2025_method` come from the single shared read helper
+    // (`Session::safe_harbor_residue`, D3) — the same source the TUI allocate opener uses. It reads
+    // config ONCE, so the returned method is STRUCTURALLY the one the residue was projected under.
+    let (lots, pre2025_method) = session.safe_harbor_residue()?;
     if lots.is_empty() {
         return Err(CliError::Usage(
             "no pre-2025 lots to allocate (Path A applies; safe harbor unnecessary)".into(),
@@ -313,11 +291,11 @@ pub fn safe_harbor_allocate(
         as_of_date: TRANSITION_DATE,
         method,
         timely_allocation_attested: attested,
-        // §A.7: capture the live attested pre-2025 method at attestation time. The residue above was
-        // projected under this SAME `cfg.pre2025_method`, so the listed lots conserve against the engine's
-        // method-aware snapshot. Immutable thereafter; a later live-config change fires the hard
-        // `Pre2025MethodConflictsAllocation` rather than silently breaking conservation.
-        pre2025_method: cfg.pre2025_method,
+        // §A.7: the recorded pre-2025 method is the SAME config method the residue above was projected
+        // under (both from the one `safe_harbor_residue` config read), so the listed lots conserve
+        // against the engine's method-aware snapshot. Immutable thereafter; a later live-config change
+        // fires the hard `Pre2025MethodConflictsAllocation` rather than silently breaking conservation.
+        pre2025_method,
     });
     append_and_save(&mut session, payload, now)
 }
