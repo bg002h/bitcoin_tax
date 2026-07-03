@@ -4,7 +4,7 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
-## Mutating-TUI chunk 3 — select-lots + set-donation-details + safe-harbor-attest — WHOLE-BRANCH REVIEW GREEN AFTER FOLD (2026-07-02)
+## ✅ Mutating-TUI chunk 3 — select-lots + set-donation-details + safe-harbor-attest — SHIPPED (2026-07-02)
 
 The remaining decision flows: `s` select-lots (specific-ID lot assignment; disposals + BOTH gift/donation
 removals, fee-mini + already-selected pre-filtered; wallet from the raw `LedgerEvent`; Σpick == principal
@@ -15,7 +15,7 @@ pre-populated on re-edit from `snap.donation_details`), `a` safe-harbor-attest (
 mutating openers after a failed save so no unrelated save can piggy-back the in-memory batch; close-on-Err,
 no retry path). Spec R0 2 rounds → 0C/0I; whole-branch review (3 independent lenses — safety, engine-semantics,
 test-fidelity) round 1 → 0C/2I (both on the test/docs surface; no product-code defect), folded + re-reviewed
-→ GREEN. Review: `reviews/whole-branch-review-tui-edit-chunk3-round-1.md`.
+→ GREEN. **868 workspace tests.** Review: `reviews/whole-branch-review-tui-edit-chunk3-round-1.md`.
 
 **Whole-branch review folds (round 1):** [I1] KAT-V-DD-4 was coverage theatre (re-implemented the
 List→FieldForm pre-population mapping IN the test body — a dropped optional-field pre-population passed
