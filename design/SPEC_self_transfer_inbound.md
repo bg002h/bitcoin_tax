@@ -127,10 +127,11 @@ Op::SelfTransferInbound { sat, basis, acquired_at } => {
     let acq = acquired_at.unwrap_or(date);        // conservative receipt-date default (date = event date)
     if basis.is_none() {
         st.add_blocker(BlockerKind::SelfTransferInboundZeroBasis, Some(eff.id.clone()),
-            "basis defaulted to $0 — likely overstates your eventual gain; supply real cost if you have \
-             it (btctax reconcile classify-inbound-self-transfer --basis). [R0-N1] Holding period also \
-             defaults to the receipt \
-             date (short-term) unless --acquired is supplied.");   // ADVISORY only; NEVER Hard
+            "basis defaulted to $0 — likely overstates your eventual gain (holding period also defaults \
+             to the receipt date = short-term). To supply the real cost/date, VOID this classification \
+             (press 'v', or run: btctax reconcile void) and re-classify with --basis/--acquired — \
+             classify-inbound is first-wins, so re-running without voiding first would conflict, not \
+             update.");   // [WD-M1] void-then-reclassify (first-wins); ADVISORY only; NEVER Hard
     }
     let lot = Lot {
         lot_id: LotId { origin_event_id: eff.id.clone(), split_sequence: 0 },

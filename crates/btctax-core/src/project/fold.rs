@@ -984,9 +984,11 @@ pub(crate) fn fold_event(
                 st.add_blocker(
                     BlockerKind::SelfTransferInboundZeroBasis,
                     Some(eff.id.clone()),
-                    "basis defaulted to $0 — likely overstates your eventual gain; supply real cost if \
-                     you have it (btctax reconcile classify-inbound-self-transfer --basis). Holding \
-                     period also defaults to the receipt date (short-term) unless --acquired is supplied.",
+                    "basis defaulted to $0 — likely overstates your eventual gain (holding period also \
+                     defaults to the receipt date = short-term). To supply the real cost/date, VOID this \
+                     classification (press 'v', or run: btctax reconcile void) and re-classify with \
+                     --basis/--acquired — classify-inbound is first-wins, so re-running without voiding \
+                     first would conflict, not update.",
                 );
             }
             let lot = Lot {
