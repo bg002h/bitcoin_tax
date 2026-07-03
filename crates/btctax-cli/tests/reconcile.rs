@@ -1558,3 +1558,323 @@ fn bulk_cli_no_match_exits_clean() {
     assert!(plan.skipped_same_wallet.is_empty());
     assert_eq!(plan.total_sat, 0);
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// self-transfer-passthrough C2 — the matcher `Session::self_transfer_match_plan`. READ-ONLY: pairs
+// ONLY unreconciled legs (candidate ins = UnknownBasisInbound TransferIns; candidate outs = pending
+// outflows), proposes DROP (same wallet) vs RELOCATE (cross wallet), flags ambiguity, NEVER auto-applies.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+/// Build a vault of raw TransferIn/TransferOut legs (imported directly). `legs` = (ref, kind, sat, wallet,
+/// ts). kind: "in" → TransferIn, "out" → TransferOut. Returns the vault path.
+fn match_fixture(
+    dir: &std::path::Path,
+    legs: &[(&str, &str, i64, WalletId, time::OffsetDateTime)],
+) -> std::path::PathBuf {
+    use btctax_core::event::{TransferIn, TransferOut};
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::LedgerEvent;
+    use time::UtcOffset;
+
+    let vault = dir.join("match.pgp");
+    let mut session = Session::create(&vault, &pp()).unwrap();
+    let batch: Vec<LedgerEvent> = legs
+        .iter()
+        .map(|(r, kind, sat, wallet, ts)| {
+            let payload = match *kind {
+                "in" => EventPayload::TransferIn(TransferIn {
+                    sat: *sat,
+                    src_addr: None,
+                    txid: None,
+                }),
+                "out" => EventPayload::TransferOut(TransferOut {
+                    sat: *sat,
+                    fee_sat: None,
+                    dest_addr: None,
+                    txid: None,
+                }),
+                other => panic!("bad kind {other}"),
+            };
+            LedgerEvent {
+                id: EventId::import(Source::Coinbase, SourceRef::new(*r)),
+                utc_timestamp: *ts,
+                original_tz: UtcOffset::UTC,
+                wallet: Some(wallet.clone()),
+                payload,
+            }
+        })
+        .collect();
+    append_import_batch(session.conn(), &batch).unwrap();
+    session.save().unwrap();
+    vault
+}
+
+fn id_of(r: &str) -> EventId {
+    EventId::import(Source::Coinbase, SourceRef::new(r))
+}
+
+/// Proposes-right-pairs: a same-wallet passthrough (in before out) → DROP; a cross-wallet transfer (out
+/// before in) → RELOCATE. Both non-ambiguous. And running the matcher writes NOTHING (invariant 3).
+#[test]
+fn self_transfer_match_proposes_drop_and_relocate() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = match_fixture(
+        dir.path(),
+        &[
+            // DROP pair: same wallet A, in (03-01) BEFORE out (03-02).
+            (
+                "in-d",
+                "in",
+                100_000,
+                wallet_a(),
+                datetime!(2025-03-01 12:00:00 UTC),
+            ),
+            (
+                "out-d",
+                "out",
+                100_000,
+                wallet_a(),
+                datetime!(2025-03-02 12:00:00 UTC),
+            ),
+            // RELOCATE pair: out from A (04-01), in to B (04-02).
+            (
+                "out-r",
+                "out",
+                100_000,
+                wallet_a(),
+                datetime!(2025-04-01 12:00:00 UTC),
+            ),
+            (
+                "in-r",
+                "in",
+                100_000,
+                wallet_b(),
+                datetime!(2025-04-02 12:00:00 UTC),
+            ),
+        ],
+    );
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    let events_before = btctax_core::persistence::load_all(s.conn()).unwrap().len();
+    let plan = s.self_transfer_match_plan().unwrap();
+    let events_after = btctax_core::persistence::load_all(s.conn()).unwrap().len();
+    assert_eq!(
+        events_before, events_after,
+        "the matcher must persist NOTHING (confirmed-not-automatic)"
+    );
+
+    assert_eq!(plan.len(), 2, "exactly two pairs proposed");
+    let drop = plan
+        .iter()
+        .find(|p| p.action == btctax_cli::MatchAction::Drop)
+        .expect("a DROP proposal");
+    assert_eq!(drop.in_event, id_of("in-d"));
+    assert_eq!(drop.out_event, id_of("out-d"));
+    assert!(!drop.ambiguous);
+
+    let reloc = plan
+        .iter()
+        .find(|p| p.action == btctax_cli::MatchAction::Relocate)
+        .expect("a RELOCATE proposal");
+    assert_eq!(reloc.in_event, id_of("in-r"));
+    assert_eq!(reloc.out_event, id_of("out-r"));
+    assert!(!reloc.ambiguous);
+}
+
+/// False-match safety: an already-classified income-in + an already-reclassified dispose-out with a
+/// MATCHING amount are NOT candidates (the income-in is no longer UnknownBasisInbound; the dispose-out
+/// is no longer pending), so no coincidental pair is proposed.
+#[test]
+fn self_transfer_match_excludes_reconciled_legs() {
+    let dir = tempfile::tempdir().unwrap();
+    // Give wallet A an acquire so the out has coins to dispose (a real, recognized sale).
+    let vault = {
+        use btctax_core::event::{Acquire, BasisSource, TransferIn, TransferOut};
+        use btctax_core::persistence::append_import_batch;
+        use btctax_core::LedgerEvent;
+        use time::UtcOffset;
+        let vault = dir.path().join("fm.pgp");
+        let mut s = Session::create(&vault, &pp()).unwrap();
+        let batch = vec![
+            LedgerEvent {
+                id: id_of("acq"),
+                utc_timestamp: datetime!(2025-01-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(wallet_a()),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(50),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ComputedFromCost,
+                }),
+            },
+            LedgerEvent {
+                id: id_of("in-inc"),
+                utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(wallet_a()),
+                payload: EventPayload::TransferIn(TransferIn {
+                    sat: 100_000,
+                    src_addr: None,
+                    txid: None,
+                }),
+            },
+            LedgerEvent {
+                id: id_of("out-disp"),
+                utc_timestamp: datetime!(2025-03-02 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(wallet_a()),
+                payload: EventPayload::TransferOut(TransferOut {
+                    sat: 100_000,
+                    fee_sat: None,
+                    dest_addr: None,
+                    txid: None,
+                }),
+            },
+        ];
+        append_import_batch(s.conn(), &batch).unwrap();
+        s.save().unwrap();
+        vault
+    };
+    // Classify the in as Income and reclassify the out as a Dispose — both now reconciled.
+    cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &id_of("in-inc").canonical(),
+        InboundClass::Income {
+            kind: IncomeKind::Reward,
+            fmv: Some(dec!(4200)),
+            business: false,
+        },
+        now(),
+    )
+    .unwrap();
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &id_of("out-disp").canonical(),
+        OutflowClass::Dispose {
+            kind: DisposeKind::Sell,
+        },
+        dec!(5000),
+        None,
+        None,
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let plan = s.self_transfer_match_plan().unwrap();
+    assert!(
+        plan.is_empty(),
+        "reconciled legs are NOT candidates — no coincidental match proposed: {plan:?}"
+    );
+}
+
+/// Ambiguity: one in matches TWO outs (same amount + window) → BOTH pairs surfaced `ambiguous`, never
+/// silently picked.
+#[test]
+fn self_transfer_match_flags_ambiguity() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = match_fixture(
+        dir.path(),
+        &[
+            // One in (A, 03-03); two candidate outs (A) within the DROP window (in on/before out).
+            (
+                "in-x",
+                "in",
+                100_000,
+                wallet_a(),
+                datetime!(2025-03-03 12:00:00 UTC),
+            ),
+            (
+                "out-1",
+                "out",
+                100_000,
+                wallet_a(),
+                datetime!(2025-03-03 13:00:00 UTC),
+            ),
+            (
+                "out-2",
+                "out",
+                100_000,
+                wallet_a(),
+                datetime!(2025-03-04 12:00:00 UTC),
+            ),
+        ],
+    );
+    let s = Session::open(&vault, &pp()).unwrap();
+    let plan = s.self_transfer_match_plan().unwrap();
+    assert_eq!(
+        plan.len(),
+        2,
+        "the in matches both outs → two flagged pairs"
+    );
+    assert!(
+        plan.iter().all(|p| p.ambiguous),
+        "a 1-in/2-out collision must flag BOTH pairs ambiguous, never auto-pick: {plan:?}"
+    );
+}
+
+/// `apply_self_transfer_passthrough` appends exactly ONE `SelfTransferPassthrough` decision, and the
+/// resulting projection SKIPS both legs (the DROP is applied).
+#[test]
+fn apply_self_transfer_passthrough_drops_both_legs() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = match_fixture(
+        dir.path(),
+        &[
+            (
+                "in-d",
+                "in",
+                100_000,
+                wallet_a(),
+                datetime!(2025-03-01 12:00:00 UTC),
+            ),
+            (
+                "out-d",
+                "out",
+                100_000,
+                wallet_a(),
+                datetime!(2025-03-02 12:00:00 UTC),
+            ),
+        ],
+    );
+    let before = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::load_all(s.conn()).unwrap().len()
+    };
+    cmd::reconcile::apply_self_transfer_passthrough(
+        &vault,
+        &pp(),
+        &id_of("in-d").canonical(),
+        &id_of("out-d").canonical(),
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+    assert_eq!(events.len(), before + 1, "exactly one decision appended");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e.payload, EventPayload::SelfTransferPassthrough(_)))
+            .count(),
+        1
+    );
+    let (state, _) = s.project().unwrap();
+    assert!(state.lots.is_empty(), "in-leg skipped → no lot");
+    assert!(
+        state.pending_reconciliation.is_empty(),
+        "out-leg skipped → not pending"
+    );
+    assert!(
+        state
+            .blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::UnknownBasisInbound
+                && b.kind != BlockerKind::UnmatchedOutflows),
+        "both legs vanish cleanly"
+    );
+}

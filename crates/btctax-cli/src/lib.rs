@@ -12,7 +12,9 @@ pub mod session;
 pub mod tax_profile;
 
 pub use config::CliConfig;
-pub use session::{BulkFilter, BulkLinkPlan, BulkLinkRow, Frame, Session};
+pub use session::{
+    BulkFilter, BulkLinkPlan, BulkLinkRow, Frame, MatchAction, MatchProposal, Session,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
