@@ -21,12 +21,15 @@ use edit::form::{
     cycle_business_optional, cycle_filing_status, cycle_income_kind, cycle_income_kind_optional,
     cycle_outflow_kind, income_kind_display, is_revocable_payload, next_focus, prev_focus,
     validate, validate_classify_inbound_gift, validate_classify_inbound_income,
-    validate_reclassify_income, validate_reclassify_outflow, validate_set_fmv,
-    ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyInboundStep, FieldBuffer,
-    FmvListItem, InboundListItem, InboundVariant, IncomeListItem, MutationModalState, OutflowKind,
-    OutflowListItem, ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState,
-    ReclassifyIncomeStep, ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
-    ReclassifyOutflowStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList,
+    validate_donation_details, validate_reclassify_income, validate_reclassify_outflow,
+    validate_select_lots, validate_set_fmv, ClassifyInboundFlowState, ClassifyInboundModalState,
+    ClassifyInboundStep, DisposalKind, DisposalListItem, DonationListItem, FieldBuffer,
+    FmvListItem, InboundListItem, InboundVariant, IncomeListItem, LotPickFormRow,
+    MutationModalState, OutflowKind, OutflowListItem, ProfileFormState, ReclassifyIncomeFlowState,
+    ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
+    ReclassifyOutflowModalState, ReclassifyOutflowStep, SelectLotsFlowState, SelectLotsModalState,
+    SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
+    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList,
     VoidFlowState, VoidListItem, VoidModalState, VoidStep,
 };
 use editor::{EditorApp, EditorScreen};
@@ -37,8 +40,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use btctax_core::{
-    BlockerKind, ClassifyInbound, DisposeKind, EventId, EventPayload, InboundClass, IncomeKind,
-    ManualFmv, OutflowClass, ReclassifyIncome,
+    BlockerKind, ClassifyInbound, DisposeKind, DonationDetails, EventId, EventPayload,
+    Form8283Section, InboundClass, IncomeKind, ManualFmv, OutflowClass, ReclassifyIncome,
+    RemovalKind,
 };
 use btctax_tui::app::Tab;
 use btctax_tui::{restore_terminal, setup_panic_hook, TerminalGuard};
@@ -137,7 +141,19 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
-    // ── 7. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
+    // ── 7. Select-lots-modal dispatch — BEFORE flow, form, screen ────────────
+    if app.select_lots_modal.is_some() {
+        handle_select_lots_modal_key(app, key);
+        return;
+    }
+
+    // ── 8. Set-donation-details-modal dispatch — BEFORE flow, form, screen ───
+    if app.set_donation_details_modal.is_some() {
+        handle_set_donation_details_modal_key(app, key);
+        return;
+    }
+
+    // ── 9. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
     //    Every step of an open flow is claimed here; 'q' and Esc can never
     //    fall through to a Browse quit arm mid-flow.
     if app.classify_inbound_flow.is_some() {
@@ -158,6 +174,14 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.void_flow.is_some() {
         handle_void_flow_key(app, key);
+        return;
+    }
+    if app.select_lots_flow.is_some() {
+        handle_select_lots_flow_key(app, key);
+        return;
+    }
+    if app.set_donation_details_flow.is_some() {
+        handle_set_donation_details_flow_key(app, key);
         return;
     }
 
@@ -218,6 +242,8 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('r') => open_reclassify_income_flow(app),
                 KeyCode::Char('f') => open_set_fmv_flow(app),
                 KeyCode::Char('v') => open_void_flow(app),
+                KeyCode::Char('s') => open_select_lots_flow(app),
+                KeyCode::Char('d') => open_set_donation_details_flow(app),
                 _ => {}
             }
         }
@@ -2435,6 +2461,919 @@ fn derive_void_status(
         "Voided {payload_tag} decision|{seq} — effects un-projected; \
          check Compliance for any returned blockers"
     )
+}
+
+// ── Select-lots flow: modal handler ──────────────────────────────────────────
+
+/// Handle a key press while the select-lots confirmation modal is open.
+///
+/// Enter-arm (spec D1):
+///   `Ok(id)` → re-project + `derive_select_lots_status` + close modal + close flow.
+///   `Err(e)` → close modal, keep LotsForm open (buffers intact), status `"Save error: {e}"`.
+///
+/// Esc → close modal only (back to LotsForm; nothing written).
+fn handle_select_lots_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            // Extract the validated payload from the modal before dropping the borrow.
+            let (
+                disposal_event,
+                disposal_date,
+                disposal_kind,
+                principal_sat,
+                picks,
+                pick_count,
+                total_sat,
+            ) = match app.select_lots_modal.as_ref() {
+                Some(m) => (
+                    m.disposal_event.clone(),
+                    m.disposal_date,
+                    m.disposal_kind,
+                    m.principal_sat,
+                    m.picks.clone(),
+                    m.pick_count,
+                    m.total_sat,
+                ),
+                None => return,
+            };
+
+            let payload =
+                btctax_core::EventPayload::LotSelection(btctax_core::event::LotSelection {
+                    disposal_event: disposal_event.clone(),
+                    lots: picks,
+                });
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.select_lots_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_select_lots(session, payload, now)
+            };
+
+            match save_result {
+                Ok(decision_id) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_select_lots_status(
+                                &snap,
+                                &disposal_event,
+                                &decision_id,
+                                pick_count,
+                                total_sat,
+                            );
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.select_lots_modal = None;
+                    app.select_lots_flow = None;
+                }
+                Err(e) => {
+                    // [M1] On save error: close modal, keep LotsForm open (buffers intact).
+                    app.select_lots_modal = None;
+                    app.status = Some(format!("Save error: {e}"));
+                }
+            }
+            // Suppress unused-variable warning for unused extraction fields.
+            let _ = (disposal_date, disposal_kind, principal_sat);
+        }
+        KeyCode::Esc => {
+            // Cancel: close modal → back to LotsForm (nothing written).
+            app.select_lots_modal = None;
+        }
+        _ => {
+            // All other keys swallowed (blocking modal — 'q' must NOT quit here).
+        }
+    }
+}
+
+// ── Select-lots flow: flow key dispatcher ────────────────────────────────────
+
+/// Dispatch to the correct sub-handler depending on `SelectLotsStep`.
+fn handle_select_lots_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.select_lots_flow.as_ref() {
+        Some(f) => match &f.step {
+            SelectLotsStep::List => 0u8,
+            SelectLotsStep::LotsForm { .. } => 1u8,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_sl_list_key(app, key),
+        _ => handle_sl_lots_form_key(app, key),
+    }
+}
+
+/// Handle keys at the select-lots flow's List step.
+///
+/// Enter → transition to LotsForm (build lot rows from snap.state.lots).
+/// Esc → close flow (back to Browse).
+/// q → SWALLOWED (flow is blocking).
+fn handle_sl_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            // Transition to LotsForm: clone selected item, build lot rows.
+            let selected = app
+                .select_lots_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+            let snap = match app.snapshot.as_ref() {
+                Some(s) => s,
+                None => return,
+            };
+
+            if let Some(item) = selected {
+                // Build lot rows filtered to item.wallet and sorted by acquired_at ASC.
+                let wallet_ref = item.wallet.as_ref();
+                let rows: Vec<LotPickFormRow> = snap
+                    .state
+                    .lots
+                    .iter()
+                    .filter(|l| wallet_ref.is_some_and(|w| &l.wallet == w))
+                    .map(|l| LotPickFormRow {
+                        lot_id: l.lot_id.clone(),
+                        remaining_sat: l.remaining_sat,
+                        acquired_at: l.acquired_at,
+                        usd_basis: l.usd_basis,
+                        pick_sat_buf: FieldBuffer::new(),
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .collect();
+
+                // Sort by acquired_at ASC (oldest first — Specific-Id natural display order).
+                let mut sorted_rows = rows;
+                sorted_rows.sort_by_key(|r| r.acquired_at);
+
+                if sorted_rows.is_empty() {
+                    let wallet_str = match &item.wallet {
+                        Some(w) => format!("{w:?}"),
+                        None => "(no wallet)".to_string(),
+                    };
+                    // Set error on the list step (stay in List).
+                    if let Some(flow) = app.select_lots_flow.as_mut() {
+                        if let SelectLotsStep::List = &flow.step {
+                            // No per-step error on List; set global status.
+                        }
+                        let _ = flow.step; // silence unused lint
+                    }
+                    app.status = Some(format!(
+                        "No lots available for wallet {wallet_str}; check Holdings"
+                    ));
+                    return;
+                }
+
+                if let Some(flow) = app.select_lots_flow.as_mut() {
+                    flow.step = SelectLotsStep::LotsForm {
+                        item,
+                        rows: sorted_rows,
+                        cursor: 0,
+                        error: None,
+                    };
+                }
+            }
+        }
+        KeyCode::Esc => {
+            // Close flow; nothing written.
+            app.select_lots_flow = None;
+        }
+        KeyCode::Char('q') => {
+            // SWALLOWED: flow is blocking; 'q' must NOT quit while a flow is open.
+        }
+        _ => {}
+    }
+}
+
+/// Handle keys at the select-lots flow's LotsForm step.
+///
+/// 0..9 → push digit to focused row's pick_sat_buf.
+/// Backspace → pop from focused row's pick_sat_buf.
+/// Enter → validate → open select_lots_modal.
+/// Esc → back to List step (one step per press — [I4]).
+fn handle_sl_lots_form_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                if let SelectLotsStep::LotsForm { cursor, .. } = &mut flow.step {
+                    *cursor = cursor.saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                if let SelectLotsStep::LotsForm { rows, cursor, .. } = &mut flow.step {
+                    *cursor = (*cursor + 1).min(rows.len().saturating_sub(1));
+                }
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                if let SelectLotsStep::LotsForm { cursor, .. } = &mut flow.step {
+                    *cursor = 0;
+                }
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                if let SelectLotsStep::LotsForm { rows, cursor, .. } = &mut flow.step {
+                    *cursor = rows.len().saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Char(c) if c.is_ascii_digit() => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                if let SelectLotsStep::LotsForm { rows, cursor, .. } = &mut flow.step {
+                    if let Some(row) = rows.get_mut(*cursor) {
+                        row.pick_sat_buf.push_char(c);
+                    }
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                if let SelectLotsStep::LotsForm { rows, cursor, .. } = &mut flow.step {
+                    if let Some(row) = rows.get_mut(*cursor) {
+                        row.pick_sat_buf.pop_char();
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => {
+            // Validate → open modal on success.
+            let validation_result = app.select_lots_flow.as_ref().and_then(|flow| {
+                if let SelectLotsStep::LotsForm { item, rows, .. } = &flow.step {
+                    Some(validate_select_lots(item, rows).map(|payload| {
+                        // Build modal state from validated payload.
+                        let (disposal_event, picks) = match &payload {
+                            btctax_core::EventPayload::LotSelection(ls) => {
+                                (ls.disposal_event.clone(), ls.lots.clone())
+                            }
+                            _ => unreachable!("validate_select_lots always returns LotSelection"),
+                        };
+                        let pick_count = picks.len();
+                        let total_sat: btctax_core::Sat = picks.iter().map(|p| p.sat).sum();
+                        SelectLotsModalState {
+                            disposal_event,
+                            disposal_date: item.date,
+                            disposal_kind: item.kind,
+                            principal_sat: item.principal_sat,
+                            picks,
+                            pick_count,
+                            total_sat,
+                        }
+                    }))
+                } else {
+                    None
+                }
+            });
+
+            match validation_result {
+                Some(Ok(modal)) => {
+                    app.select_lots_modal = Some(modal);
+                }
+                Some(Err(msg)) => {
+                    if let Some(flow) = app.select_lots_flow.as_mut() {
+                        if let SelectLotsStep::LotsForm { error, .. } = &mut flow.step {
+                            *error = Some(msg);
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+        KeyCode::Esc => {
+            // Back to List step (one step per press — [I4]).
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                flow.step = SelectLotsStep::List;
+            }
+        }
+        KeyCode::Char('q') => {
+            // SWALLOWED: flow is blocking.
+        }
+        _ => {}
+    }
+}
+
+// ── Set-donation-details flow: modal handler ──────────────────────────────────
+
+/// Handle a key press while the set-donation-details confirmation modal is open.
+///
+/// Enter-arm (spec D2):
+///   `Ok(())` → re-project snapshot + derive status + close modal + close flow.
+///   `Err(e)` → close modal, keep FieldForm open (buffers intact), status `"Save error: {e}"`.
+///
+/// Esc → close modal only (back to FieldForm; nothing written).
+fn handle_set_donation_details_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (event_id, details) = match app.set_donation_details_modal.as_ref() {
+                Some(m) => (m.event_id.clone(), m.details.clone()),
+                None => return,
+            };
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.set_donation_details_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_donation_details(session, &event_id, &details)
+            };
+
+            match save_result {
+                Ok(()) => {
+                    // Re-project.
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_donation_details_status(&event_id, &details);
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.set_donation_details_modal = None;
+                    app.set_donation_details_flow = None;
+                }
+                Err(e) => {
+                    // [M1] On save error: close modal, keep FieldForm open.
+                    app.set_donation_details_modal = None;
+                    app.status = Some(format!("Save error: {e}"));
+                }
+            }
+        }
+        KeyCode::Esc => {
+            // Cancel: close modal → back to FieldForm (nothing written).
+            app.set_donation_details_modal = None;
+        }
+        _ => {
+            // All other keys swallowed.
+        }
+    }
+}
+
+// ── Set-donation-details flow: flow key dispatcher ───────────────────────────
+
+/// Dispatch to the correct sub-handler depending on `SetDonationDetailsStep`.
+fn handle_set_donation_details_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.set_donation_details_flow.as_ref() {
+        Some(f) => match &f.step {
+            SetDonationDetailsStep::List => 0u8,
+            SetDonationDetailsStep::FieldForm { .. } => 1u8,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_dd_list_key(app, key),
+        _ => handle_dd_field_form_key(app, key),
+    }
+}
+
+/// Handle keys at the donation-details flow's List step.
+///
+/// Enter → open FieldForm (pre-populated from item.existing_details if present).
+/// Esc → close flow (back to Browse).
+/// q → SWALLOWED (flow is blocking).
+fn handle_dd_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            let selected = app
+                .set_donation_details_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+
+            if let Some(item) = selected {
+                // Pre-populate buffers from existing_details if present.
+                let mut donee_name_buf = FieldBuffer::new();
+                let mut donee_address_buf = FieldBuffer::new();
+                let mut donee_ein_buf = FieldBuffer::new();
+                let mut appraiser_name_buf = FieldBuffer::new();
+                let mut appraiser_address_buf = FieldBuffer::new();
+                let mut appraiser_tin_buf = FieldBuffer::new();
+                let mut appraiser_ptin_buf = FieldBuffer::new();
+                let mut appraiser_qualifications_buf = FieldBuffer::new();
+                let mut appraisal_date_buf = FieldBuffer::new();
+                let mut fmv_method_override_buf = FieldBuffer::new();
+
+                if let Some(existing) = &item.existing_details {
+                    donee_name_buf.set(&existing.donee_name);
+                    if let Some(v) = &existing.donee_address {
+                        donee_address_buf.set(v);
+                    }
+                    if let Some(v) = &existing.donee_ein {
+                        donee_ein_buf.set(v);
+                    }
+                    appraiser_name_buf.set(&existing.appraiser_name);
+                    if let Some(v) = &existing.appraiser_address {
+                        appraiser_address_buf.set(v);
+                    }
+                    if let Some(v) = &existing.appraiser_tin {
+                        appraiser_tin_buf.set(v);
+                    }
+                    if let Some(v) = &existing.appraiser_ptin {
+                        appraiser_ptin_buf.set(v);
+                    }
+                    if let Some(v) = &existing.appraiser_qualifications {
+                        appraiser_qualifications_buf.set(v);
+                    }
+                    if let Some(v) = &existing.appraisal_date {
+                        appraisal_date_buf.set(&v.to_string());
+                    }
+                    if let Some(v) = &existing.fmv_method_override {
+                        fmv_method_override_buf.set(v);
+                    }
+                }
+
+                if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                    flow.step = SetDonationDetailsStep::FieldForm {
+                        item,
+                        donee_name_buf,
+                        donee_address_buf,
+                        donee_ein_buf,
+                        appraiser_name_buf,
+                        appraiser_address_buf,
+                        appraiser_tin_buf,
+                        appraiser_ptin_buf,
+                        appraiser_qualifications_buf,
+                        appraisal_date_buf,
+                        fmv_method_override_buf,
+                        focus: 0,
+                        error: None,
+                    };
+                }
+            }
+        }
+        KeyCode::Esc => {
+            // Close flow; nothing written.
+            app.set_donation_details_flow = None;
+        }
+        KeyCode::Char('q') => {
+            // SWALLOWED: flow is blocking.
+        }
+        _ => {}
+    }
+}
+
+/// Handle keys at the donation-details flow's FieldForm step.
+///
+/// ↑/↓ → move focus. Printable chars → push to focused buf. Backspace → pop.
+/// Enter → validate → open modal. Esc → back to List step [I4].
+#[allow(clippy::too_many_lines)]
+fn handle_dd_field_form_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                if let SetDonationDetailsStep::FieldForm { focus, .. } = &mut flow.step {
+                    *focus = focus.saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Down => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                if let SetDonationDetailsStep::FieldForm { focus, .. } = &mut flow.step {
+                    *focus = (*focus + 1).min(9);
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                if let SetDonationDetailsStep::FieldForm {
+                    focus,
+                    donee_name_buf,
+                    donee_address_buf,
+                    donee_ein_buf,
+                    appraiser_name_buf,
+                    appraiser_address_buf,
+                    appraiser_tin_buf,
+                    appraiser_ptin_buf,
+                    appraiser_qualifications_buf,
+                    appraisal_date_buf,
+                    fmv_method_override_buf,
+                    ..
+                } = &mut flow.step
+                {
+                    let bufs: [&mut FieldBuffer; 10] = [
+                        donee_name_buf,
+                        donee_address_buf,
+                        donee_ein_buf,
+                        appraiser_name_buf,
+                        appraiser_address_buf,
+                        appraiser_tin_buf,
+                        appraiser_ptin_buf,
+                        appraiser_qualifications_buf,
+                        appraisal_date_buf,
+                        fmv_method_override_buf,
+                    ];
+                    if let Some(b) = bufs.into_iter().nth(*focus) {
+                        b.pop_char();
+                    }
+                }
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                if let SetDonationDetailsStep::FieldForm {
+                    focus,
+                    donee_name_buf,
+                    donee_address_buf,
+                    donee_ein_buf,
+                    appraiser_name_buf,
+                    appraiser_address_buf,
+                    appraiser_tin_buf,
+                    appraiser_ptin_buf,
+                    appraiser_qualifications_buf,
+                    appraisal_date_buf,
+                    fmv_method_override_buf,
+                    ..
+                } = &mut flow.step
+                {
+                    let bufs: [&mut FieldBuffer; 10] = [
+                        donee_name_buf,
+                        donee_address_buf,
+                        donee_ein_buf,
+                        appraiser_name_buf,
+                        appraiser_address_buf,
+                        appraiser_tin_buf,
+                        appraiser_ptin_buf,
+                        appraiser_qualifications_buf,
+                        appraisal_date_buf,
+                        fmv_method_override_buf,
+                    ];
+                    if let Some(b) = bufs.into_iter().nth(*focus) {
+                        b.push_char(c);
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => {
+            // Validate → open modal on success.
+            let validation_result = app.set_donation_details_flow.as_ref().and_then(|flow| {
+                if let SetDonationDetailsStep::FieldForm {
+                    item,
+                    donee_name_buf,
+                    donee_address_buf,
+                    donee_ein_buf,
+                    appraiser_name_buf,
+                    appraiser_address_buf,
+                    appraiser_tin_buf,
+                    appraiser_ptin_buf,
+                    appraiser_qualifications_buf,
+                    appraisal_date_buf,
+                    fmv_method_override_buf,
+                    ..
+                } = &flow.step
+                {
+                    Some(
+                        validate_donation_details(
+                            donee_name_buf,
+                            donee_address_buf,
+                            donee_ein_buf,
+                            appraiser_name_buf,
+                            appraiser_address_buf,
+                            appraiser_tin_buf,
+                            appraiser_ptin_buf,
+                            appraiser_qualifications_buf,
+                            appraisal_date_buf,
+                            fmv_method_override_buf,
+                        )
+                        .map(|details| SetDonationDetailsModalState {
+                            event_id: item.event_id.clone(),
+                            event_date: item.date,
+                            total_sat: item.total_sat,
+                            details,
+                        }),
+                    )
+                } else {
+                    None
+                }
+            });
+
+            match validation_result {
+                Some(Ok(modal)) => {
+                    app.set_donation_details_modal = Some(modal);
+                }
+                Some(Err(msg)) => {
+                    if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                        if let SetDonationDetailsStep::FieldForm { error, .. } = &mut flow.step {
+                            *error = Some(msg);
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+        KeyCode::Esc => {
+            // Back to List step (one step per press — [I4]).
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                flow.step = SetDonationDetailsStep::List;
+            }
+        }
+        // Note: 'q' as a Char lands in the Char(c) arm above and is pushed to the focused
+        // buffer. The flow guard ensures 'q' never reaches a Browse quit arm [I4].
+        _ => {}
+    }
+}
+
+// ── Select-lots flow: opener ──────────────────────────────────────────────────
+
+/// Open the select-lots flow from the Browse screen.
+///
+/// Applies the compound pre-filter (spec §Claim F):
+/// 1. Voided-decision set: IDs targeted by VoidDecisionEvent.
+/// 2. Already-selected set: disposal_event IDs of non-voided LotSelection decisions.
+/// 3. Disposals (sell/spend) excluding fee_mini_disposition and already-selected.
+/// 4. Removals (gift/donation — BOTH kinds) excluding already-selected.
+///
+/// Per-item wallet sourced from `events_by_id(snap)[&event].wallet` [R0-I1]:
+/// NOT from DisposalLeg (would miss Gift/Donate rows where RemovalLeg has no wallet).
+///
+/// Empty filtered list → status "No method-honoring disposals available for lot
+/// selection (select-lots pre-filter)"; flow NOT opened [R0-M8].
+fn open_select_lots_flow(app: &mut EditorApp) {
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let ev_idx = events_by_id(snap);
+
+    // Build voided set (IDs targeted by any VoidDecisionEvent).
+    let voided: std::collections::BTreeSet<&EventId> = snap
+        .events
+        .iter()
+        .filter_map(|e| {
+            if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                Some(&v.target_event_id)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Build already-selected set: disposal_event IDs of non-voided LotSelection decisions.
+    let already_selected: std::collections::BTreeSet<&EventId> = snap
+        .events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .filter_map(|e| {
+            if let EventPayload::LotSelection(ls) = &e.payload {
+                Some(&ls.disposal_event)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Disposals (sell / spend).
+    let disposal_items: Vec<DisposalListItem> = snap
+        .state
+        .disposals
+        .iter()
+        .filter(|d| !d.fee_mini_disposition)
+        .filter(|d| !already_selected.contains(&d.event))
+        .map(|d| {
+            let principal_sat: btctax_core::Sat = d.legs.iter().map(|l| l.sat).sum();
+            // Wallet sourced from the raw LedgerEvent [R0-I1].
+            let wallet = ev_idx.get(&d.event).and_then(|e| e.wallet.clone());
+            // Disposal.kind is DisposeKind {Sell, Spend} (state.rs:38-40).
+            // Gift/Donate removals come from snap.state.removals, not snap.state.disposals.
+            let kind = match d.kind {
+                DisposeKind::Sell => DisposalKind::Sell,
+                DisposeKind::Spend => DisposalKind::Spend,
+            };
+            DisposalListItem {
+                disposal_event: d.event.clone(),
+                date: d.disposed_at,
+                kind,
+                principal_sat,
+                wallet,
+            }
+        })
+        .collect();
+
+    // Removals (gift / donation — BOTH kinds — [R0-Claim F]).
+    let removal_items: Vec<DisposalListItem> = snap
+        .state
+        .removals
+        .iter()
+        .filter(|r| !already_selected.contains(&r.event))
+        .map(|r| {
+            let principal_sat: btctax_core::Sat = r.legs.iter().map(|l| l.sat).sum();
+            // Wallet sourced from the raw LedgerEvent [R0-I1].
+            let wallet = ev_idx.get(&r.event).and_then(|e| e.wallet.clone());
+            let kind = match r.kind {
+                RemovalKind::Gift => DisposalKind::Gift,
+                RemovalKind::Donation => DisposalKind::Donate,
+            };
+            DisposalListItem {
+                disposal_event: r.event.clone(),
+                date: r.removed_at,
+                kind,
+                principal_sat,
+                wallet,
+            }
+        })
+        .collect();
+
+    // Merge and sort by date DESC (most recent first — matching the display tabs).
+    let mut items: Vec<DisposalListItem> = [disposal_items, removal_items].concat();
+    items.sort_by_key(|item| std::cmp::Reverse(item.date));
+
+    if items.is_empty() {
+        app.status = Some(
+            "No method-honoring disposals available for lot selection (select-lots pre-filter)"
+                .to_string(),
+        );
+        return;
+    }
+
+    app.select_lots_flow = Some(SelectLotsFlowState {
+        list: TargetList::new(items),
+        step: SelectLotsStep::List,
+    });
+}
+
+// ── Set-donation-details flow: opener ────────────────────────────────────────
+
+/// Open the set-donation-details flow from the Browse screen.
+///
+/// Applies the pre-filter from spec §Claim G:
+/// - Only `snap.state.removals` entries where `r.kind == RemovalKind::Donation`.
+/// - No "already-complete" exclusion: re-setting is always valid (last-write-wins).
+/// - `existing_details` sourced from `snap.donation_details` [R0-I3] (NEVER `conn(`).
+///
+/// Empty filtered list → status "No donation removals found (donate a TransferOut first
+/// via reclassify-outflow)"; flow NOT opened [R0-M8].
+fn open_set_donation_details_flow(app: &mut EditorApp) {
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let mut items: Vec<DonationListItem> = snap
+        .state
+        .removals
+        .iter()
+        .filter(|r| r.kind == RemovalKind::Donation)
+        .map(|r| {
+            let total_sat: btctax_core::Sat = r.legs.iter().map(|l| l.sat).sum();
+            // existing_details from snap.donation_details — NEVER conn( [R0-I3].
+            let existing_details = snap.donation_details.get(&r.event).cloned();
+            DonationListItem {
+                event_id: r.event.clone(),
+                date: r.removed_at,
+                total_sat,
+                donee: r.donee.clone(),
+                existing_details,
+            }
+        })
+        .collect();
+
+    // Sort by date DESC.
+    items.sort_by_key(|item| std::cmp::Reverse(item.date));
+
+    if items.is_empty() {
+        app.status = Some(
+            "No donation removals found (donate a TransferOut first via reclassify-outflow)"
+                .to_string(),
+        );
+        return;
+    }
+
+    app.set_donation_details_flow = Some(SetDonationDetailsFlowState {
+        list: TargetList::new(items),
+        step: SetDonationDetailsStep::List,
+    });
+}
+
+// ── Status derivers ───────────────────────────────────────────────────────────
+
+/// Derive the status string from RE-PROJECTED state after a select-lots save.
+///
+/// Three arms (spec D1):
+/// 1. `DecisionConflict` attributed to `decision_id` → NEITHER applies; method-order fallback.
+///    Status ends with `"(see Compliance)"` [R0-N3 nit sweep].
+/// 2. `LotSelectionInvalid` with `event == disposal_event` → engine rejected the selection.
+/// 3. Clean → success summary with pick_count and total_sat.
+fn derive_select_lots_status(
+    snap: &btctax_tui::app::Snapshot,
+    disposal_event: &EventId,
+    decision_id: &EventId,
+    pick_count: usize,
+    total_sat: btctax_core::Sat,
+) -> String {
+    // Arm 1: DecisionConflict attributed to the SECOND selection's decision_id.
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(decision_id) {
+            return format!(
+                "Saved, but DecisionConflict fired — neither selection applies (method order \
+                 governs); clear with Void flow (press 'v'), or quit the editor and run: \
+                 btctax reconcile void {} (see Compliance)",
+                decision_id.canonical()
+            );
+        }
+    }
+
+    // Arm 2: LotSelectionInvalid attributed to the disposal_event.
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::LotSelectionInvalid && b.event.as_ref() == Some(disposal_event) {
+            return "LotSelection saved but invalid — see Compliance for detail; the disposal \
+                    falls back to method order. Correct via Void flow (press 'v') then re-select."
+                .to_string();
+        }
+    }
+
+    // Arm 3: clean.
+    format!(
+        "Lot selection recorded for {} — {pick_count} lot(s), {total_sat} sat; \
+         check Compliance for §1.1012-1(j) contemporaneity.",
+        disposal_event.canonical()
+    )
+}
+
+/// Derive the status string from the IN-HAND validated details (spec D2).
+///
+/// Uses `details.is_review_complete(Form8283Section::B)` directly (last-write-wins
+/// guarantees the value just written IS the stored value — no side-table re-load,
+/// no `conn(` in main.rs [R0-I3(c)]).
+fn derive_donation_details_status(event_id: &EventId, details: &DonationDetails) -> String {
+    if details.is_review_complete(Form8283Section::B) {
+        format!(
+            "Details saved for {} — Section B complete (§6695A fields present)",
+            event_id.canonical()
+        )
+    } else {
+        format!(
+            "Details saved for {} — Section A complete on presence; add appraiser \
+             TIN/PTIN + appraisal date + qualifications + donee EIN for Section B completeness",
+            event_id.canonical()
+        )
+    }
 }
 
 // ── Scroll helpers ────────────────────────────────────────────────────────────
@@ -7664,5 +8603,1084 @@ mod tests {
             !tags.contains(&"ClassifyInbound"),
             "VOID-EXCL: already-voided ClassifyInbound must NOT be in void list"
         );
+    }
+
+    // ── Task 1 KAT helpers ────────────────────────────────────────────────────
+
+    /// Seed vault: Acquire + TransferOut + ReclassifyOutflow(Donate) → Donation removal.
+    /// Returns (acquire_id, transfer_out_id, wallet).
+    fn seed_donate_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+        principal_sat: btctax_core::Sat,
+    ) -> (btctax_core::EventId, btctax_core::EventId) {
+        use btctax_core::event::{
+            Acquire, BasisSource, EventPayload, LedgerEvent, OutflowClass, ReclassifyOutflow,
+            TransferOut,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+
+        let wallet = Some(btctax_core::WalletId::Exchange {
+            provider: "River".to_string(),
+            account: "main".to_string(),
+        });
+        let acq_id = EventId::import(Source::River, SourceRef::new("donate-acq-1"));
+        let to_id = EventId::import(Source::River, SourceRef::new("donate-to-1"));
+
+        {
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+            let t0 = OffsetDateTime::from_unix_timestamp(1_747_913_600).unwrap();
+            let t1 = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+            let batch = vec![
+                LedgerEvent {
+                    id: acq_id.clone(),
+                    utc_timestamp: t0,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::Acquire(Acquire {
+                        // Acquire 2× so FIFO leaves remaining_sat == principal_sat after donation.
+                        // This ensures snap.state.lots is non-empty when select-lots opens.
+                        sat: principal_sat * 2,
+                        usd_cost: dec!(50000),
+                        fee_usd: dec!(0),
+                        basis_source: BasisSource::ExchangeProvided,
+                    }),
+                },
+                LedgerEvent {
+                    id: to_id.clone(),
+                    utc_timestamp: t1,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::TransferOut(TransferOut {
+                        sat: principal_sat,
+                        fee_sat: None,
+                        dest_addr: None,
+                        txid: None,
+                    }),
+                },
+            ];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+
+            let t2 = OffsetDateTime::from_unix_timestamp(1_748_100_000).unwrap();
+            let ro = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                transfer_out_event: to_id.clone(),
+                as_: OutflowClass::Donate {
+                    appraisal_required: false,
+                },
+                principal_proceeds_or_fmv: dec!(20000),
+                fee_usd: None,
+                donee: None,
+            });
+            btctax_core::persistence::append_decision(session.conn(), ro, t2, UtcOffset::UTC, None)
+                .unwrap();
+            // MethodElection so fold has a method.
+            let me = EventPayload::MethodElection(btctax_core::event::MethodElection {
+                effective_from: time::macros::date!(2024 - 01 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            btctax_core::persistence::append_decision(session.conn(), me, t2, UtcOffset::UTC, None)
+                .unwrap();
+            session.save().unwrap();
+        }
+
+        (acq_id, to_id)
+    }
+
+    /// Seed vault: TWO Acquire lots + TransferOut + ReclassifyOutflow(Sell).
+    /// Returns (lot_a_id, lot_b_id, transfer_out_id).
+    fn seed_two_lot_sell_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> (
+        btctax_core::EventId,
+        btctax_core::EventId,
+        btctax_core::EventId,
+    ) {
+        use btctax_core::event::{
+            Acquire, BasisSource, DisposeKind, EventPayload, LedgerEvent, OutflowClass,
+            ReclassifyOutflow, TransferOut,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+
+        let wallet = Some(btctax_core::WalletId::Exchange {
+            provider: "River".to_string(),
+            account: "main".to_string(),
+        });
+        let lot_a_id = EventId::import(Source::River, SourceRef::new("lot-a-1"));
+        let lot_b_id = EventId::import(Source::River, SourceRef::new("lot-b-1"));
+        let to_id = EventId::import(Source::River, SourceRef::new("sell-to-1"));
+
+        {
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+            let ta = OffsetDateTime::from_unix_timestamp(1_740_000_000).unwrap(); // lot A — earlier
+            let tb = OffsetDateTime::from_unix_timestamp(1_741_000_000).unwrap(); // lot B — later
+            let tc = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(); // sell
+            let td = OffsetDateTime::from_unix_timestamp(1_748_100_000).unwrap(); // decisions
+            let batch = vec![
+                LedgerEvent {
+                    id: lot_a_id.clone(),
+                    utc_timestamp: ta,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 1_000_000,
+                        usd_cost: dec!(30000),
+                        fee_usd: dec!(0),
+                        basis_source: BasisSource::ExchangeProvided,
+                    }),
+                },
+                LedgerEvent {
+                    id: lot_b_id.clone(),
+                    utc_timestamp: tb,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 1_000_000,
+                        usd_cost: dec!(50000),
+                        fee_usd: dec!(0),
+                        basis_source: BasisSource::ExchangeProvided,
+                    }),
+                },
+                LedgerEvent {
+                    id: to_id.clone(),
+                    utc_timestamp: tc,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::TransferOut(TransferOut {
+                        sat: 500_000,
+                        fee_sat: None,
+                        dest_addr: None,
+                        txid: None,
+                    }),
+                },
+            ];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+
+            // ReclassifyOutflow → Sell.
+            let ro = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                transfer_out_event: to_id.clone(),
+                as_: OutflowClass::Dispose {
+                    kind: DisposeKind::Sell,
+                },
+                principal_proceeds_or_fmv: dec!(30000),
+                fee_usd: None,
+                donee: None,
+            });
+            btctax_core::persistence::append_decision(session.conn(), ro, td, UtcOffset::UTC, None)
+                .unwrap();
+            // MethodElection (FIFO — so lot A is consumed by default).
+            let me = EventPayload::MethodElection(btctax_core::event::MethodElection {
+                effective_from: time::macros::date!(2024 - 01 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            btctax_core::persistence::append_decision(session.conn(), me, td, UtcOffset::UTC, None)
+                .unwrap();
+            session.save().unwrap();
+        }
+
+        (lot_a_id, lot_b_id, to_id)
+    }
+
+    // ── KAT-C2f — cancel-path bytes-unchanged (select-lots) ──────────────────
+
+    #[test]
+    fn kat_c2f_cancel_path_vault_bytes_unchanged_select_lots() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-c2f-pass";
+
+        // Seed: 2 lots (1M sat each) + TransferOut 500K + ReclassifyOutflow(Sell) + MethodElection.
+        // FIFO consumes 500K from lot A → lot A remaining = 500K, lot B remaining = 1M.
+        // snap.state.lots is non-empty so LotsForm can open.
+        let (_lot_a, _lot_b, _to_id) = seed_two_lot_sell_vault(&vault, &key, pp_str);
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+
+        {
+            let mut app = open_app(&vault, pp_str);
+
+            // ── s → flow opens at List step ──────────────────────────────────
+            handle_key(&mut app, press(KeyCode::Char('s')));
+            assert!(
+                app.select_lots_flow.is_some(),
+                "C2f: select_lots_flow must open on 's'"
+            );
+
+            // 'q' at List step is SWALLOWED [I4].
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2f: 'q' at List must be swallowed");
+            assert!(
+                app.select_lots_flow.is_some(),
+                "C2f: flow must still be open after swallowed 'q'"
+            );
+
+            // Enter → LotsForm.
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                matches!(
+                    app.select_lots_flow.as_ref().map(|f| &f.step),
+                    Some(SelectLotsStep::LotsForm { .. })
+                ),
+                "C2f: Enter must transition to LotsForm"
+            );
+
+            // 'q' at LotsForm is SWALLOWED.
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2f: 'q' at LotsForm must be swallowed");
+
+            // Type "500000" → pick_sat_buf for lot A (cursor=0).
+            // Disposal principal is 500K sat; lot A remaining = 500K (FIFO consumed 500K of 1M).
+            for c in "500000".chars() {
+                handle_key(&mut app, press(KeyCode::Char(c)));
+            }
+
+            // Enter → modal opens (picks == principal).
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.select_lots_modal.is_some(),
+                "C2f: Enter on valid picks must open select_lots_modal"
+            );
+
+            // 'q' at modal is SWALLOWED.
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2f: 'q' at modal must be swallowed");
+
+            // Esc → modal closes; LotsForm stays open with buffer intact.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(app.select_lots_modal.is_none(), "C2f: Esc must close modal");
+            assert!(
+                matches!(
+                    app.select_lots_flow.as_ref().map(|f| &f.step),
+                    Some(SelectLotsStep::LotsForm { .. })
+                ),
+                "C2f: LotsForm must still be open after Esc-close-modal"
+            );
+            // Buffer intact.
+            {
+                let flow = app.select_lots_flow.as_ref().unwrap();
+                if let SelectLotsStep::LotsForm { rows, .. } = &flow.step {
+                    assert_eq!(
+                        rows[0].pick_sat_buf.buf, "500000",
+                        "C2f: buffer must be intact after modal Esc"
+                    );
+                }
+            }
+
+            // Esc from LotsForm → back to List.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                matches!(
+                    app.select_lots_flow.as_ref().map(|f| &f.step),
+                    Some(SelectLotsStep::List)
+                ),
+                "C2f: Esc from LotsForm must go back to List"
+            );
+
+            // Esc from List → flow closes.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.select_lots_flow.is_none(),
+                "C2f: Esc from List must close flow"
+            );
+        }
+
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "C2f: vault bytes must be UNCHANGED on full cancel path"
+        );
+    }
+
+    // ── KAT-C2g — cancel-path bytes-unchanged (set-donation-details) ─────────
+
+    #[test]
+    fn kat_c2g_cancel_path_vault_bytes_unchanged_set_donation_details() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-c2g-pass";
+
+        seed_donate_vault(&vault, &key, pp_str, 500_000);
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+
+        {
+            let mut app = open_app(&vault, pp_str);
+
+            // ── d → flow opens at List step ──────────────────────────────────
+            handle_key(&mut app, press(KeyCode::Char('d')));
+            assert!(
+                app.set_donation_details_flow.is_some(),
+                "C2g: set_donation_details_flow must open on 'd'"
+            );
+
+            // 'q' at List is SWALLOWED.
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2g: 'q' at List must be swallowed");
+
+            // Enter → FieldForm.
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                matches!(
+                    app.set_donation_details_flow.as_ref().map(|f| &f.step),
+                    Some(SetDonationDetailsStep::FieldForm { .. })
+                ),
+                "C2g: Enter must transition to FieldForm"
+            );
+
+            // 'q' at FieldForm is pushed to donee_name_buf (NOT swallowed as quit) [I4].
+            // We skip the 'q'-swallow check here since 'q' is a valid text char for the field.
+
+            // Type donee_name.
+            type_str(&mut app, "Test Charity");
+
+            // Move focus to appraiser_name (field 3, index 3).
+            for _ in 0..3 {
+                handle_key(&mut app, press(KeyCode::Down));
+            }
+            type_str(&mut app, "Jane Appraiser");
+
+            // Enter → modal opens.
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.set_donation_details_modal.is_some(),
+                "C2g: Enter on valid FieldForm must open set_donation_details_modal"
+            );
+
+            // Esc → modal closes; FieldForm stays open.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.set_donation_details_modal.is_none(),
+                "C2g: Esc must close modal"
+            );
+            assert!(
+                matches!(
+                    app.set_donation_details_flow.as_ref().map(|f| &f.step),
+                    Some(SetDonationDetailsStep::FieldForm { .. })
+                ),
+                "C2g: FieldForm must still be open after modal Esc"
+            );
+
+            // Esc from FieldForm → back to List.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                matches!(
+                    app.set_donation_details_flow.as_ref().map(|f| &f.step),
+                    Some(SetDonationDetailsStep::List)
+                ),
+                "C2g: Esc from FieldForm must go back to List"
+            );
+
+            // Esc from List → flow closes.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.set_donation_details_flow.is_none(),
+                "C2g: Esc from List must close flow"
+            );
+        }
+
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "C2g: vault bytes must be UNCHANGED on full cancel path"
+        );
+    }
+
+    // ── KAT-S3a — save-error path for select-lots (chmod) ────────────────────
+
+    #[test]
+    #[cfg(unix)]
+    fn kat_s3a_save_error_path_select_lots_chmod() {
+        use btctax_core::persistence::load_all_ordered;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-s3a-pass";
+
+        // Seed: 2 lots (1M sat each) + TransferOut 500K + ReclassifyOutflow(Sell) + MethodElection.
+        // FIFO takes 500K from lot A → remaining = 500K; snap.state.lots is non-empty.
+        let (_lot_a, _lot_b, _to_id) = seed_two_lot_sell_vault(&vault, &key, pp_str);
+
+        // Root-skip guard.
+        {
+            let probe = dir.path().join("probe.tmp");
+            let perms = std::fs::Permissions::from_mode(0o500);
+            std::fs::set_permissions(dir.path(), perms).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("KAT-S3a: skipping — chmod 0o500 did not deny writes (running as root?)");
+                return;
+            }
+        }
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+        let pre_event_count = {
+            let session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            load_all_ordered(session.conn()).unwrap().len()
+        };
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Drive s → LotsForm → pick 500000 → modal.
+        // Lot A (cursor=0) has 500K remaining; disposal principal is 500K. Pick exact.
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Enter)); // List → LotsForm
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(app.select_lots_modal.is_some(), "S3a: modal must open");
+
+        // Make vault's parent dir read-only.
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // Confirm → should fail.
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        // Restore before any assertions that might panic and leave dir locked.
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        // Assertions: modal closed, LotsForm still open, buffer intact, status "Save error".
+        assert!(
+            app.select_lots_modal.is_none(),
+            "S3a: modal must be closed after save failure"
+        );
+        assert!(
+            matches!(
+                app.select_lots_flow.as_ref().map(|f| &f.step),
+                Some(SelectLotsStep::LotsForm { .. })
+            ),
+            "S3a: LotsForm must still be open after save failure"
+        );
+        {
+            let flow = app.select_lots_flow.as_ref().unwrap();
+            if let SelectLotsStep::LotsForm { rows, .. } = &flow.step {
+                assert_eq!(
+                    rows[0].pick_sat_buf.buf, "500000",
+                    "S3a: buffer must be intact after save failure"
+                );
+            }
+        }
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("Save error"))
+                .unwrap_or(false),
+            "S3a: status must contain 'Save error'; got: {:?}",
+            app.status
+        );
+        let bytes_mid = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_mid,
+            "S3a: vault bytes must be unchanged after failed save"
+        );
+
+        // Retry → should succeed (second LotSelection → conflict).
+        handle_key(&mut app, press(KeyCode::Enter)); // validate again → modal
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → retry save
+        assert!(
+            app.select_lots_modal.is_none(),
+            "S3a: modal must be closed after retry save"
+        );
+        assert!(
+            app.select_lots_flow.is_none(),
+            "S3a: flow must be closed after retry"
+        );
+
+        // Assert: post.len() == pre.len() + 2 (first attempt + retry).
+        let status_after_retry = app.status.clone();
+        drop(app);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let post = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(
+            post.len(),
+            pre_event_count + 2,
+            "S3a: post must have pre.len()+2 events (both LotSelection attempts); pre={pre_event_count}"
+        );
+
+        // Both tails are LotSelection for the same disposal_event.
+        let tail1 = &post[pre_event_count];
+        let tail2 = &post[pre_event_count + 1];
+        let p1: btctax_core::EventPayload =
+            serde_json::from_str(&tail1.payload_json).expect("tail1 must deserialize");
+        let p2: btctax_core::EventPayload =
+            serde_json::from_str(&tail2.payload_json).expect("tail2 must deserialize");
+        assert!(
+            matches!(p1, btctax_core::EventPayload::LotSelection(_)),
+            "S3a: tail1 must be LotSelection"
+        );
+        assert!(
+            matches!(p2, btctax_core::EventPayload::LotSelection(_)),
+            "S3a: tail2 must be LotSelection"
+        );
+        if let (
+            btctax_core::EventPayload::LotSelection(ls1),
+            btctax_core::EventPayload::LotSelection(ls2),
+        ) = (p1, p2)
+        {
+            assert_eq!(
+                ls1.disposal_event, ls2.disposal_event,
+                "S3a: both LotSelections must target the same disposal"
+            );
+        }
+
+        // Re-project: DecisionConflict attributed to the SECOND (retry) decision.
+        let (snap, _) = btctax_tui::unlock::build_snapshot(&session2).unwrap();
+        let retry_decision_id = btctax_core::EventId::Decision {
+            seq: tail2.decision_seq.unwrap() as u64,
+        };
+        let has_conflict = snap.state.blockers.iter().any(|b| {
+            b.kind == btctax_core::BlockerKind::DecisionConflict
+                && b.event.as_ref() == Some(&retry_decision_id)
+        });
+        assert!(
+            has_conflict,
+            "S3a: retry must produce DecisionConflict on the SECOND decision's id"
+        );
+        // Status must surface the conflict.
+        assert!(
+            status_after_retry
+                .as_deref()
+                .map(|s| s.contains("DecisionConflict") || s.contains("conflict"))
+                .unwrap_or(false),
+            "S3a: status must surface DecisionConflict after retry; got: {:?}",
+            status_after_retry
+        );
+    }
+
+    // ── KAT-E2E-SL — end-to-end select-lots (discriminating seed) ─────────────
+
+    #[test]
+    fn kat_e2e_sl_select_lots_happy_path_discriminating_seed() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-sl-pass";
+
+        let (lot_a_id, lot_b_id, to_id) = seed_two_lot_sell_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // 1. Confirm disposal is in projected state.
+        let snap = app.snapshot.as_ref().unwrap();
+        let disposal_present = snap.state.disposals.iter().any(|d| d.event == to_id);
+        assert!(
+            disposal_present,
+            "E2E-SL: TransferOut/sell must appear in snap.state.disposals"
+        );
+
+        // Under FIFO, lot A (earlier) is consumed.
+        let uses_lot_a = snap.state.disposals.iter().any(|d| {
+            d.event == to_id && d.legs.iter().any(|l| l.lot_id.origin_event_id == lot_a_id)
+        });
+        assert!(
+            uses_lot_a,
+            "E2E-SL: FIFO must consume lot A before select-lots"
+        );
+
+        // 2. Drive s → list → Enter → LotsForm.
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.select_lots_flow.is_some(),
+            "E2E-SL: flow must open on 's'"
+        );
+
+        handle_key(&mut app, press(KeyCode::Enter)); // List → LotsForm
+        assert!(
+            matches!(
+                app.select_lots_flow.as_ref().map(|f| &f.step),
+                Some(SelectLotsStep::LotsForm { .. })
+            ),
+            "E2E-SL: Enter must transition to LotsForm"
+        );
+
+        // LotsForm shows BOTH lots (sorted by acquired_at ASC = A first, B second).
+        let rows_len = app.select_lots_flow.as_ref().and_then(|f| {
+            if let SelectLotsStep::LotsForm { rows, .. } = &f.step {
+                Some(rows.len())
+            } else {
+                None
+            }
+        });
+        assert_eq!(rows_len, Some(2), "E2E-SL: LotsForm must show 2 lots");
+
+        // Navigate to lot B (index 1) and type "500000".
+        handle_key(&mut app, press(KeyCode::Down)); // cursor → lot B (index 1)
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+
+        // Enter → modal.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.select_lots_modal.is_some(),
+            "E2E-SL: Enter must open modal"
+        );
+
+        // Render and check modal content.
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| crate::draw_edit::draw(f, &mut app))
+            .unwrap();
+        let rendered = rendered_text(&terminal);
+        assert!(
+            rendered.contains("sell") || rendered.contains("(sell)"),
+            "E2E-SL: modal must show disposal kind 'sell'; rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("500000"),
+            "E2E-SL: modal must show 500000 sat; rendered: {rendered}"
+        );
+
+        // Confirm → save + re-project.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.select_lots_modal.is_none(),
+            "E2E-SL: modal must close after confirm"
+        );
+        assert!(
+            app.select_lots_flow.is_none(),
+            "E2E-SL: flow must close after confirm"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("Lot selection"))
+                .unwrap_or(false),
+            "E2E-SL: status must contain 'Lot selection'; got: {:?}",
+            app.status
+        );
+
+        // 3. Re-project: no LotSelectionInvalid; disposal now consumes lot B.
+        let snap2 = app.snapshot.as_ref().unwrap();
+        let no_invalid = !snap2.state.blockers.iter().any(|b| {
+            b.kind == BlockerKind::LotSelectionInvalid && b.event.as_ref() == Some(&to_id)
+        });
+        assert!(
+            no_invalid,
+            "E2E-SL: no LotSelectionInvalid after valid selection"
+        );
+
+        let uses_lot_b = snap2.state.disposals.iter().any(|d| {
+            d.event == to_id && d.legs.iter().any(|l| l.lot_id.origin_event_id == lot_b_id)
+        });
+        assert!(
+            uses_lot_b,
+            "E2E-SL: re-projected disposal must consume lot B (non-FIFO specific-ID overrides FIFO)"
+        );
+
+        // 4. The disposal NO LONGER appears in the 's' list (already-selected pre-filter).
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.select_lots_flow.is_none(),
+            "E2E-SL: flow must NOT open — no eligible disposals after selection (pre-filter)"
+        );
+        assert!(
+            app.status.is_some(),
+            "E2E-SL: status must be set when no eligible disposals"
+        );
+    }
+
+    // ── KAT-E2E-SL-DONATE — select-lots through a Donate removal ─────────────
+
+    #[test]
+    fn kat_e2e_sl_donate_wallet_sourced_from_raw_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-sl-donate-pass";
+
+        // Seed: Acquire (wallet W) + TransferOut + ReclassifyOutflow(Donate).
+        let (_, to_id) = seed_donate_vault(&vault, &key, pp_str, 500_000);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // 1. The donation removal appears in projected state.
+        let snap = app.snapshot.as_ref().unwrap();
+        let removal_present = snap.state.removals.iter().any(|r| r.event == to_id);
+        assert!(
+            removal_present,
+            "E2E-SL-DONATE: Donation removal must appear in snap.state.removals"
+        );
+
+        // 2. Drive s → list shows the donate removal.
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.select_lots_flow.is_some(),
+            "E2E-SL-DONATE: flow must open"
+        );
+
+        // Verify the list contains the donate removal and its wallet comes from raw LedgerEvent.
+        let flow = app.select_lots_flow.as_ref().unwrap();
+        let donate_item = flow
+            .list
+            .items
+            .iter()
+            .find(|item| item.disposal_event == to_id);
+        assert!(
+            donate_item.is_some(),
+            "E2E-SL-DONATE: dispose list must contain the donate removal"
+        );
+        let donate_item = donate_item.unwrap();
+        assert_eq!(
+            donate_item.kind,
+            DisposalKind::Donate,
+            "E2E-SL-DONATE: kind must be Donate"
+        );
+        // Wallet comes from raw LedgerEvent (RemovalLeg has no wallet field [R0-I1]).
+        assert!(
+            donate_item.wallet.is_some(),
+            "E2E-SL-DONATE: wallet must be sourced from raw LedgerEvent (not None)"
+        );
+
+        // Enter → LotsForm with wallet-W lots.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.select_lots_flow.as_ref().map(|f| &f.step),
+                Some(SelectLotsStep::LotsForm { .. })
+            ),
+            "E2E-SL-DONATE: Enter must open LotsForm"
+        );
+
+        // Pick the full principal (500000 sat).
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(
+            app.select_lots_modal.is_some(),
+            "E2E-SL-DONATE: modal must open"
+        );
+
+        // Confirm → save.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.select_lots_modal.is_none(),
+            "E2E-SL-DONATE: modal must close"
+        );
+        assert!(
+            app.select_lots_flow.is_none(),
+            "E2E-SL-DONATE: flow must close"
+        );
+
+        // Re-project: no LotSelectionInvalid.
+        let snap2 = app.snapshot.as_ref().unwrap();
+        let no_invalid = !snap2.state.blockers.iter().any(|b| {
+            b.kind == BlockerKind::LotSelectionInvalid && b.event.as_ref() == Some(&to_id)
+        });
+        assert!(
+            no_invalid,
+            "E2E-SL-DONATE: no LotSelectionInvalid after valid donation selection"
+        );
+    }
+
+    // ── KAT-E2E-SL-VOID — select-lots + void round-trip ─────────────────────
+
+    #[test]
+    fn kat_e2e_sl_void_lot_selection_re_appears_in_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-sl-void-pass";
+
+        let (lot_a_id, _lot_b_id, to_id) = seed_two_lot_sell_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Step 1: select lots (lot B, non-FIFO).
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → LotsForm
+        handle_key(&mut app, press(KeyCode::Down)); // cursor to lot B
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → save
+
+        assert!(
+            app.select_lots_flow.is_none(),
+            "SL-VOID: flow must close after save"
+        );
+
+        // Get the LotSelection decision_id from the status (we need the id for void).
+        let snap_after_select = app.snapshot.as_ref().unwrap();
+        let selection_decision_id = snap_after_select
+            .events
+            .iter()
+            .rev()
+            .find(|e| matches!(&e.payload, btctax_core::EventPayload::LotSelection(_)))
+            .map(|e| e.id.clone())
+            .expect("SL-VOID: LotSelection decision must exist after save");
+
+        // Step 2: void the LotSelection.
+        handle_key(&mut app, press(KeyCode::Char('v'))); // open void flow
+        assert!(app.void_flow.is_some(), "SL-VOID: void flow must open");
+        // Find and select the LotSelection in the void list.
+        let lot_sel_idx = app
+            .void_flow
+            .as_ref()
+            .unwrap()
+            .list
+            .items
+            .iter()
+            .position(|item| item.event_id == selection_decision_id);
+        assert!(
+            lot_sel_idx.is_some(),
+            "SL-VOID: LotSelection must be in void list"
+        );
+        // Navigate to it.
+        let target_idx = lot_sel_idx.unwrap();
+        for _ in 0..target_idx {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → void modal
+        assert!(app.void_modal.is_some(), "SL-VOID: void modal must open");
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm void
+        assert!(
+            app.void_flow.is_none(),
+            "SL-VOID: void flow must close after confirm"
+        );
+
+        // Step 3: disposal re-appears in select-lots list.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.select_lots_flow.is_some(),
+            "SL-VOID: disposal must re-appear in select-lots list after void"
+        );
+
+        // Verify FIFO restored (lot A consumed again after voiding the specific-ID).
+        let snap_after_void = app.snapshot.as_ref().unwrap();
+        let uses_lot_a_again = snap_after_void.state.disposals.iter().any(|d| {
+            d.event == to_id && d.legs.iter().any(|l| l.lot_id.origin_event_id == lot_a_id)
+        });
+        assert!(
+            uses_lot_a_again,
+            "SL-VOID: after voiding LotSelection, disposal must revert to FIFO (lot A)"
+        );
+
+        // Close flow.
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(
+            app.select_lots_flow.is_none(),
+            "SL-VOID: Esc must close flow"
+        );
+
+        // Verify optimize_attestation was cleared (chunk-2b persist_void side-effect).
+        drop(app);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let attest = btctax_cli::optimize_attest::get(session2.conn(), &to_id).unwrap();
+        assert!(
+            attest.is_none(),
+            "SL-VOID: optimize_attestation must be None for the disposal (no attest was set)"
+        );
+    }
+
+    // ── KAT-E2E-DD — end-to-end set-donation-details (completeness progression)
+
+    #[test]
+    fn kat_e2e_dd_donation_details_completeness_progression() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-dd-pass";
+
+        let (_, to_id) = seed_donate_vault(&vault, &key, pp_str, 500_000);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Step 1: donation appears in list with "(none)" completeness.
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        assert!(
+            app.set_donation_details_flow.is_some(),
+            "E2E-DD: flow must open"
+        );
+        {
+            let flow = app.set_donation_details_flow.as_ref().unwrap();
+            let item = flow.list.items.iter().find(|i| i.event_id == to_id);
+            assert!(item.is_some(), "E2E-DD: donation must appear in list");
+            assert_eq!(
+                item.unwrap().completeness_str(),
+                "(none)",
+                "E2E-DD: initial completeness must be (none)"
+            );
+        }
+
+        // Step 2: Enter → FieldForm; fill only required fields.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.set_donation_details_flow.as_ref().map(|f| &f.step),
+                Some(SetDonationDetailsStep::FieldForm { .. })
+            ),
+            "E2E-DD: Enter must open FieldForm"
+        );
+
+        // Fill donee_name (field 0 — already focused).
+        type_str(&mut app, "Community Foundation");
+        // Move to appraiser_name (field 3).
+        for _ in 0..3 {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        type_str(&mut app, "Jane Appraiser");
+
+        // Enter → modal.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.set_donation_details_modal.is_some(),
+            "E2E-DD: modal must open"
+        );
+
+        // Confirm → save.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.set_donation_details_modal.is_none(),
+            "E2E-DD: modal must close"
+        );
+        assert!(
+            app.set_donation_details_flow.is_none(),
+            "E2E-DD: flow must close"
+        );
+
+        // Step 3: status = "Section A complete on presence".
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.contains("Section A complete on presence"),
+            "E2E-DD: status must say 'Section A complete on presence'; got: {status}"
+        );
+
+        // Step 4: re-open; list shows "present" completeness; FieldForm pre-populated.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        assert!(
+            app.set_donation_details_flow.is_some(),
+            "E2E-DD: flow must re-open"
+        );
+        {
+            let flow = app.set_donation_details_flow.as_ref().unwrap();
+            let item = flow.list.items.iter().find(|i| i.event_id == to_id);
+            assert!(
+                item.is_some(),
+                "E2E-DD: donation must appear in list on re-open"
+            );
+            assert_eq!(
+                item.unwrap().completeness_str(),
+                "present",
+                "E2E-DD: completeness must be 'present' after initial save"
+            );
+        }
+
+        handle_key(&mut app, press(KeyCode::Enter)); // → FieldForm
+                                                     // Verify pre-populated: donee_name should be "Community Foundation".
+        {
+            let flow = app.set_donation_details_flow.as_ref().unwrap();
+            if let SetDonationDetailsStep::FieldForm {
+                donee_name_buf,
+                appraiser_name_buf,
+                ..
+            } = &flow.step
+            {
+                assert_eq!(
+                    donee_name_buf.buf.trim(),
+                    "Community Foundation",
+                    "E2E-DD: donee_name_buf must be pre-populated"
+                );
+                assert_eq!(
+                    appraiser_name_buf.buf.trim(),
+                    "Jane Appraiser",
+                    "E2E-DD: appraiser_name_buf must be pre-populated"
+                );
+            }
+        }
+
+        // Add fields for Section B completeness: appraiser_tin (5), appraisal_date (8),
+        // appraiser_qualifications (7), donee_ein (2).
+        // Navigate to appraiser_tin (field 5).
+        for _ in 0..5 {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        type_str(&mut app, "987654321"); // appraiser_tin
+
+        // Navigate to appraiser_qualifications (field 7 = 2 more Down).
+        handle_key(&mut app, press(KeyCode::Down)); // → 6
+        handle_key(&mut app, press(KeyCode::Down)); // → 7
+        type_str(&mut app, "certified bitcoin appraiser");
+
+        // Navigate to appraisal_date (field 8).
+        handle_key(&mut app, press(KeyCode::Down));
+        type_str(&mut app, "2025-05-20");
+
+        // Navigate to donee_ein (field 2) — go back to top first.
+        handle_key(&mut app, press(KeyCode::Up)); // → 7
+        handle_key(&mut app, press(KeyCode::Up)); // → 6
+        handle_key(&mut app, press(KeyCode::Up)); // → 5
+        handle_key(&mut app, press(KeyCode::Up)); // → 4
+        handle_key(&mut app, press(KeyCode::Up)); // → 3
+        handle_key(&mut app, press(KeyCode::Up)); // → 2
+        type_str(&mut app, "12-3456789"); // donee_ein
+
+        // Enter → modal.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.set_donation_details_modal.is_some(),
+            "E2E-DD step4: modal must open"
+        );
+
+        // Confirm → save.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.set_donation_details_modal.is_none(),
+            "E2E-DD step4: modal must close"
+        );
+        assert!(
+            app.set_donation_details_flow.is_none(),
+            "E2E-DD step4: flow must close"
+        );
+
+        // Step 5: status = "Section B complete".
+        let status2 = app.status.as_deref().unwrap_or("");
+        assert!(
+            status2.contains("Section B complete"),
+            "E2E-DD step5: status must say 'Section B complete'; got: {status2}"
+        );
+
+        // List now shows "B-complete".
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        {
+            let flow = app.set_donation_details_flow.as_ref().unwrap();
+            let item = flow.list.items.iter().find(|i| i.event_id == to_id);
+            assert_eq!(
+                item.unwrap().completeness_str(),
+                "B-complete",
+                "E2E-DD: completeness must be 'B-complete' after Section B save"
+            );
+        }
+        handle_key(&mut app, press(KeyCode::Esc));
     }
 }

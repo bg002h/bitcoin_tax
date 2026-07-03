@@ -220,6 +220,51 @@ pub fn persist_void(
     Ok(id)
 }
 
+/// Append a `LotSelection` decision and atomically save the vault.
+///
+/// `payload` is the VALIDATED `EventPayload::LotSelection(…)`.
+/// `now` is INJECTED at Enter-press for test determinism.
+///
+/// # Duplicate ⇒ conflict, NEITHER applies (resolve.rs:787-800) [R0-I2]
+/// A retry appends a duplicate `LotSelection` for the same `disposal_event`. The dup
+/// fires a Hard `DecisionConflict` on ITS id and NEITHER selection applies (the disposal
+/// falls back to METHOD ORDER) until one of the two is voided — voiding the duplicate
+/// reinstates the first. Surfaced by the D1 status; cleared via the Void flow ('v') or,
+/// after quitting the editor, CLI: `btctax reconcile void decision|<seq>`.
+///
+/// Does NOT write to `optimize_attestation` (only `optimize accept --attest` does that).
+/// Clearing `optimize_attestation` on void is handled by `persist_void` (chunk 2b, D4).
+pub fn persist_select_lots(
+    session: &mut btctax_cli::Session,
+    payload: btctax_core::event::EventPayload, // must be EventPayload::LotSelection
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, btctax_cli::CliError> {
+    let id = btctax_core::persistence::append_decision(
+        session.conn(),
+        payload,
+        now,
+        time::UtcOffset::UTC,
+        None,
+    )?;
+    session.save()?;
+    Ok(id)
+}
+
+/// Store `DonationDetails` for `event_id` in the `donation_details` side-table
+/// and atomically save the vault (last-write-wins upsert; NOT a decision event).
+///
+/// Mirrors `tax_profile::set` discipline (chunk 1 D3). No `append_decision` call.
+/// `is_review_complete` is NOT checked here — it is checked post-save for the status string.
+pub fn persist_donation_details(
+    session: &mut btctax_cli::Session,
+    event_id: &btctax_core::EventId,
+    details: &btctax_core::DonationDetails,
+) -> Result<(), btctax_cli::CliError> {
+    btctax_cli::donation_details::set(session.conn(), event_id, details)?;
+    session.save()?;
+    Ok(())
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -682,7 +727,14 @@ mod tests {
         ];
 
         // Non-test write-mutation tokens — FORBIDDEN outside edit/persist.rs:
-        let persist_only_tokens: &[&str] = &["conn(", "save(", "tax_profile::set", "append_"];
+        // [R0-I4] "donation_details::set" added for the D2 side-table writer parity.
+        let persist_only_tokens: &[&str] = &[
+            "conn(",
+            "save(",
+            "tax_profile::set",
+            "append_",
+            "donation_details::set",
+        ];
 
         // Test-region forbidden everywhere (no viewer export surface in the editor):
         let test_region_tokens: &[&str] =
@@ -854,6 +906,8 @@ mod tests {
             let tok_conn = format!("{}(", "conn"); // "conn("
             let tok_tax_set = format!("{}::{}", "tax_profile", "set"); // "tax_profile::set"
             let tok_session_create = format!("{}::{}", "Session", "create"); // "Session::create" [R0-I1]
+                                                                             // [R0-I4]: donation_details::set added to persist_only_tokens.
+            let tok_dd_set = format!("{}::{}", "donation_details", "set"); // "donation_details::set"
 
             let content = format!(
                 "// planted self-check file\n\
@@ -862,6 +916,7 @@ mod tests {
                  \tlet _ = {tok_conn});\n\
                  \tlet _ = {tok_tax_set}(conn, 2025, &p);\n\
                  \tlet _ = {tok_session_create}(&path, &pp);\n\
+                 \tlet _ = {tok_dd_set}(conn, &id, &d);\n\
                  }}\n"
             );
             std::fs::write(&planted_path, &content).unwrap();
@@ -879,6 +934,10 @@ mod tests {
             assert!(
                 hits_persist.iter().any(|(t, _)| t == "tax_profile::set"),
                 "self-check FAILED: scanner did not detect planted write-mutation token — gate is broken"
+            );
+            assert!(
+                hits_persist.iter().any(|(t, _)| t == "donation_details::set"),
+                "self-check FAILED: scanner did not detect planted donation_details::set token [R0-I4] — gate is broken"
             );
 
             // Verify scanner catches the R0-I1 vault-creating constructor.
@@ -1341,5 +1400,339 @@ mod tests {
                 "MethodElection void must NOT touch the optimize_attest side-table"
             );
         }
+    }
+
+    // ── KAT-P2g — append-only strict prefix test (select-lots / LotSelection append) ──
+    //
+    // Seed: Acquire (wallet W) + TransferOut + ReclassifyOutflow(Donate) → a Donation
+    // removal in projected state. The `LotSelection` payload references the TransferOut
+    // EventId as `disposal_event` and the Acquire's lot as `LotPick`.
+    //
+    // Strict-prefix formula:
+    //   post.len() == pre.len() + 1
+    //   post[..pre.len()] == pre[..]
+    //   post[pre.len()].kind == "decision"
+    //   post[pre.len()].decision_seq == Some(pre_max + 1)
+    //   payload round-trips as LotSelection targeting the expected disposal
+
+    #[test]
+    fn kat_p2g_append_only_strict_prefix_select_lots() {
+        use btctax_core::event::{
+            Acquire, EventPayload, LedgerEvent, LotPick, LotSelection, MethodElection,
+            OutflowClass, ReclassifyOutflow, TransferOut,
+        };
+        use btctax_core::identity::{LotId, Source, SourceRef};
+        use btctax_core::persistence::{append_decision, append_import_batch, load_all_ordered};
+        use btctax_core::{EventId, WalletId};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p2g-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        let wallet = WalletId::Exchange {
+            provider: "River".to_string(),
+            account: "main".to_string(),
+        };
+
+        let acquire_id = EventId::import(Source::River, SourceRef::new("p2g-acquire"));
+        let out_id = EventId::import(Source::River, SourceRef::new("p2g-out"));
+        let lot_id = LotId {
+            origin_event_id: acquire_id.clone(),
+            split_sequence: 0,
+        };
+
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+
+            // Seed: Acquire + TransferOut.
+            let t0 = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+            let t1 = OffsetDateTime::from_unix_timestamp(1_700_086_400).unwrap();
+            let batch = vec![
+                LedgerEvent {
+                    id: acquire_id.clone(),
+                    utc_timestamp: t0,
+                    original_tz: UtcOffset::UTC,
+                    wallet: Some(wallet.clone()),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 500_000,
+                        usd_cost: dec!(15000),
+                        fee_usd: dec!(0),
+                        basis_source: btctax_core::event::BasisSource::ExchangeProvided,
+                    }),
+                },
+                LedgerEvent {
+                    id: out_id.clone(),
+                    utc_timestamp: t1,
+                    original_tz: UtcOffset::UTC,
+                    wallet: Some(wallet.clone()),
+                    payload: EventPayload::TransferOut(TransferOut {
+                        sat: 500_000,
+                        fee_sat: None,
+                        dest_addr: None,
+                        txid: None,
+                    }),
+                },
+            ];
+            append_import_batch(session.conn(), &batch).unwrap();
+
+            // Seed: ReclassifyOutflow(Donate) decision + MethodElection.
+            let t2 = OffsetDateTime::from_unix_timestamp(1_700_100_000).unwrap();
+            let ro_payload = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                transfer_out_event: out_id.clone(),
+                as_: OutflowClass::Donate {
+                    appraisal_required: false,
+                },
+                principal_proceeds_or_fmv: dec!(20000),
+                fee_usd: None,
+                donee: None,
+            });
+            append_decision(session.conn(), ro_payload, t2, UtcOffset::UTC, None).unwrap();
+            let me_payload = EventPayload::MethodElection(MethodElection {
+                effective_from: date!(2024 - 01 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            append_decision(session.conn(), me_payload, t2, UtcOffset::UTC, None).unwrap();
+            session.save().unwrap();
+        }
+
+        // Open editor session, capture pre-state.
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+
+        // Build LotSelection payload.
+        let payload = EventPayload::LotSelection(LotSelection {
+            disposal_event: out_id.clone(),
+            lots: vec![LotPick {
+                lot: lot_id.clone(),
+                sat: 500_000,
+            }],
+        });
+        let now = OffsetDateTime::from_unix_timestamp(1_700_200_000).unwrap();
+
+        let returned_id = persist_select_lots(&mut session, payload.clone(), now).unwrap();
+
+        // ── Strict-prefix assertion ───────────────────────────────────────────
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post.len(),
+            pre.len() + 1,
+            "KAT-P2g: post must be pre.len()+1"
+        );
+        assert_eq!(
+            &post[..pre.len()],
+            pre.as_slice(),
+            "KAT-P2g: first pre.len() rows must be unchanged (strict prefix)"
+        );
+
+        let tail = &post[pre.len()];
+        let tail_seq = tail.decision_seq.expect("tail must have decision_seq");
+        assert_eq!(
+            tail_seq,
+            (pre_max_seq + 1) as i64,
+            "KAT-P2g: tail seq must be pre_max+1"
+        );
+        assert_eq!(
+            returned_id,
+            EventId::Decision {
+                seq: tail_seq as u64
+            },
+            "KAT-P2g: returned id must match tail"
+        );
+
+        // Payload round-trips.
+        let stored: EventPayload =
+            serde_json::from_str(&tail.payload_json).expect("tail must deserialise");
+        match &stored {
+            EventPayload::LotSelection(ls) => {
+                assert_eq!(
+                    ls.disposal_event, out_id,
+                    "KAT-P2g: LotSelection must target out_id"
+                );
+                assert_eq!(ls.lots.len(), 1, "KAT-P2g: one lot pick");
+                assert_eq!(ls.lots[0].lot, lot_id, "KAT-P2g: lot id matches");
+                assert_eq!(ls.lots[0].sat, 500_000, "KAT-P2g: sat matches");
+            }
+            other => panic!("KAT-P2g: expected LotSelection, got {other:?}"),
+        }
+
+        // Drop + reopen.
+        drop(session);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let post_disk = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(
+            post_disk, post,
+            "KAT-P2g: on-disk must equal in-memory post"
+        );
+    }
+
+    // ── KAT-DD-PERSIST — side-table write test for persist_donation_details ───
+    //
+    // Not a strict-prefix test (no decision event). Pattern mirrors `persist_tax_profile`'s KAT:
+    // - Create temp vault; seed a Donation removal event.
+    // - Call persist_donation_details → assert side-table has the stored value.
+    // - Drop + reopen: same value on disk.
+    // - Call again with full_details (upsert): assert the value is replaced.
+    // - Assert event log has NO new decision rows (strict: post.len() == pre.len()).
+
+    #[test]
+    fn kat_dd_persist_side_table_write() {
+        use btctax_core::event::{
+            Acquire, EventPayload, LedgerEvent, OutflowClass, ReclassifyOutflow, TransferOut,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, append_import_batch, load_all_ordered};
+        use btctax_core::{DonationDetails, EventId, WalletId};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-dd-persist-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        let wallet = WalletId::Exchange {
+            provider: "River".to_string(),
+            account: "main".to_string(),
+        };
+        let acquire_id = EventId::import(Source::River, SourceRef::new("dd-acquire"));
+        let out_id = EventId::import(Source::River, SourceRef::new("dd-out"));
+
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let t0 = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+            let t1 = OffsetDateTime::from_unix_timestamp(1_700_086_400).unwrap();
+            let batch = vec![
+                LedgerEvent {
+                    id: acquire_id.clone(),
+                    utc_timestamp: t0,
+                    original_tz: UtcOffset::UTC,
+                    wallet: Some(wallet.clone()),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 500_000,
+                        usd_cost: dec!(15000),
+                        fee_usd: dec!(0),
+                        basis_source: btctax_core::event::BasisSource::ExchangeProvided,
+                    }),
+                },
+                LedgerEvent {
+                    id: out_id.clone(),
+                    utc_timestamp: t1,
+                    original_tz: UtcOffset::UTC,
+                    wallet: Some(wallet.clone()),
+                    payload: EventPayload::TransferOut(TransferOut {
+                        sat: 500_000,
+                        fee_sat: None,
+                        dest_addr: None,
+                        txid: None,
+                    }),
+                },
+            ];
+            append_import_batch(session.conn(), &batch).unwrap();
+            let t2 = OffsetDateTime::from_unix_timestamp(1_700_100_000).unwrap();
+            let ro_payload = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                transfer_out_event: out_id.clone(),
+                as_: OutflowClass::Donate {
+                    appraisal_required: false,
+                },
+                principal_proceeds_or_fmv: dec!(20000),
+                fee_usd: None,
+                donee: None,
+            });
+            append_decision(session.conn(), ro_payload, t2, UtcOffset::UTC, None).unwrap();
+            session.save().unwrap();
+        }
+
+        let minimal_details = DonationDetails {
+            donee_name: "Test Charity".to_owned(),
+            donee_address: None,
+            donee_ein: None,
+            appraiser_name: "Test Appraiser".to_owned(),
+            appraiser_address: None,
+            appraiser_tin: None,
+            appraiser_ptin: None,
+            appraiser_qualifications: None,
+            appraisal_date: None,
+            fmv_method_override: None,
+        };
+        let full_details = DonationDetails {
+            donee_name: "Test Charity Full".to_owned(),
+            donee_address: Some("123 Main St".to_owned()),
+            donee_ein: Some("12-3456789".to_owned()),
+            appraiser_name: "Jane Appraiser".to_owned(),
+            appraiser_address: Some("456 Appraise Ave".to_owned()),
+            appraiser_tin: Some("987654321".to_owned()),
+            appraiser_ptin: None,
+            appraiser_qualifications: Some("Certified BTC Appraiser".to_owned()),
+            appraisal_date: Some(time::macros::date!(2025 - 05 - 20)),
+            fmv_method_override: None,
+        };
+
+        // Open editor session, capture pre-state.
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+
+        // First persist (minimal_details).
+        persist_donation_details(&mut session, &out_id, &minimal_details).unwrap();
+
+        // In-memory: side-table has the stored value.
+        let stored = btctax_cli::donation_details::get(session.conn(), &out_id).unwrap();
+        assert_eq!(
+            stored,
+            Some(minimal_details.clone()),
+            "KAT-DD-PERSIST: minimal_details must be stored in-memory"
+        );
+
+        // Event log unchanged.
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post, pre,
+            "KAT-DD-PERSIST: event log must be UNCHANGED after donation_details set"
+        );
+
+        // Drop + reopen: same value on disk.
+        drop(session);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let stored_disk = btctax_cli::donation_details::get(session2.conn(), &out_id).unwrap();
+        assert_eq!(
+            stored_disk,
+            Some(minimal_details.clone()),
+            "KAT-DD-PERSIST: minimal_details must be on disk after drop+reopen"
+        );
+        let post_disk = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(
+            post_disk, pre,
+            "KAT-DD-PERSIST: event log unchanged on disk"
+        );
+        drop(session2);
+
+        // Upsert: second persist replaces prior value.
+        let mut session3 =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        persist_donation_details(&mut session3, &out_id, &full_details).unwrap();
+        let stored2 = btctax_cli::donation_details::get(session3.conn(), &out_id).unwrap();
+        assert_eq!(
+            stored2,
+            Some(full_details.clone()),
+            "KAT-DD-PERSIST: upsert must replace minimal_details with full_details"
+        );
+        let post2 = load_all_ordered(session3.conn()).unwrap();
+        assert_eq!(
+            post2, pre,
+            "KAT-DD-PERSIST: event log unchanged after upsert"
+        );
     }
 }

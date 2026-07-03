@@ -16,7 +16,9 @@
 use crate::edit::form::{
     ClassifyInboundFlowState, ClassifyInboundModalState, MutationModalState, ProfileFormState,
     ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyOutflowFlowState,
-    ReclassifyOutflowModalState, SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
+    ReclassifyOutflowModalState, SelectLotsFlowState, SelectLotsModalState,
+    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetFmvFlowState, SetFmvModalState,
+    VoidFlowState, VoidModalState,
 };
 use btctax_cli::Session;
 use btctax_store::Passphrase;
@@ -117,6 +119,18 @@ pub struct EditorApp {
     pub void_flow: Option<VoidFlowState>,
     /// Void confirmation modal.  `Some` while awaiting Enter/Esc.
     pub void_modal: Option<VoidModalState>,
+    /// Full select-lots flow state.  `Some` while the flow is open.
+    ///
+    /// Dispatch order: select_lots_modal (layer 7) → select_lots_flow (flow layer, layer 9) → ...
+    pub select_lots_flow: Option<SelectLotsFlowState>,
+    /// Select-lots confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub select_lots_modal: Option<SelectLotsModalState>,
+    /// Full set-donation-details flow state.  `Some` while the flow is open.
+    ///
+    /// Dispatch order: set_donation_details_modal (layer 8) → set_donation_details_flow (flow layer) → ...
+    pub set_donation_details_flow: Option<SetDonationDetailsFlowState>,
+    /// Set-donation-details confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub set_donation_details_modal: Option<SetDonationDetailsModalState>,
     /// One-line status (saved / error), shown in the footer.
     /// Cleared on the next non-modal key press (mirrors the viewer's `export_status`
     /// semantics, app.rs:140 [R0-N5]).
@@ -150,6 +164,10 @@ impl EditorApp {
             set_fmv_modal: None,
             void_flow: None,
             void_modal: None,
+            select_lots_flow: None,
+            select_lots_modal: None,
+            set_donation_details_flow: None,
+            set_donation_details_modal: None,
             status: None,
         }
     }
