@@ -4,6 +4,44 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ Terminal chunk-5 burndown — DISPOSITION (2026-07-03) — AUTONOMOUS RUN COMPLETE
+
+The post-chunk-3 autonomous run (mandate 2026-07-02: save-rollback + hardening → chunk 4 → chunk 5 →
+burndown; STOP after the chunk-5 burndown) is **COMPLETE**. Shipped to `main`: A `tui-edit-save-rollback`
+(`8c8b924`), B `tui-edit-hardening` 6 items (`755e47c`), C chunk 4 = 4a+4b (`f31c1d6`), D chunk 5
+(`396a728`). The mutating-TUI editor is **feature-complete** (chunks 1/2a/2b/3/4/5). **931 workspace tests.**
+
+**Terminal-burndown triage (architect-decided).** Every open chunk-4/chunk-5 review followup was triaged.
+The decisive finding: **not one item is simultaneously cheap AND worth a code change** — the valuable
+items are feature/engine-scoped; every cheap item is already-adequate, no-practical-impact, or
+never-triggering. So this burndown is a **documentation-only closing pass** (no code TDD cycle; §8
+scaled-down ceremony): one code-comment correction + this disposition record. Disposition:
+
+- **FIXED (comment):** **[C5-3a]** the `open_safe_harbor_allocate_flow` doc comment (`main.rs:4967`) mis-cited
+  `load_all`/`project` as KAT-G1-gated — only `conn(` is a persist-only token; reads aren't gated. Reworded.
+  (Zero runtime risk — the gate strips comments; no KAT needed.)
+- **CONSCIOUSLY DEFERRED — tracked-open (rationale per architect triage):**
+  - **[4a-1]** classify-raw 6-variant builder — a feature; CLI `classify-raw --payload-json` covers the rest.
+  - **[4a-2]** link-transfer to a never-seen wallet — needs a wallet registry (none exists); the pick-list is
+    sourced from `snap.events` by design (R0-I2); CLI `--to-wallet` is the escape.
+  - **[4a-3]** TargetPick empty-lists UX — already adequate (per-mode empty hints render at
+    `draw_edit.rs:2148/2170`); residual is cosmetic.
+  - **[4b-N1]** optimize-accept `made` open- vs enter-time — no practical impact (midnight boundary only,
+    R0-round-2-blessed); the "fix" adds churn to the rollback path for zero gain.
+  - **[C5-1]** ProRata cross-wallet redistribution — a `btctax-core` feature (open question O4); the TUI is
+    already faithful to core (G3).
+  - **[C5-2]** allocate-E2E date skip-guard — a `now < 2026-04-15` guard can never fire (window closed;
+    run terminating) → would add permanently-dead code. Left as-is (monotonically safe; production
+    date-correct; date-independent arm-3 coverage exists).
+  - **[C5-3b]** `AllocLotRow`→`TargetList<AllocLot>` — zero-value cosmetic refactor with nonzero risk.
+  - **[C5-3c]** `fmt_btc`/`sat_to_btc` — cross-crate, different return types + sign semantics; not a
+    mechanical dedup.
+
+  These remain OPEN in their chunk sections below as tracked backlog — the next work is USER-DIRECTED
+  (the autonomous mandate is discharged; do NOT auto-start).
+
+---
+
 ## ✅ tui-edit chunk 5 (safe-harbor-allocate `A`) — SHIPPED (2026-07-03) — MUTATING-TUI PROGRAM FEATURE-COMPLETE
 
 Cycle D (chunk 5), the FINAL feature cycle. **safe-harbor-allocate (`A`)** — CREATES a
