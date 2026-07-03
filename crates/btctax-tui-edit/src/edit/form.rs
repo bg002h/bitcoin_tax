@@ -888,7 +888,7 @@ pub struct VoidModalState {
 /// Return `true` when `payload` is a revocable decision type.
 ///
 /// Revocable: TransferLink, ReclassifyOutflow, ClassifyInbound, ManualFmv, ClassifyRaw,
-/// MethodElection, LotSelection, ReclassifyIncome, SafeHarborAllocation.
+/// MethodElection, LotSelection, ReclassifyIncome, SelfTransferPassthrough, SafeHarborAllocation.
 /// Non-revocable (excluded from void list): SupersedeImport, RejectImport, VoidDecisionEvent,
 /// and imported event payloads (Acquire, Income, Dispose, TransferOut, TransferIn, Unclassified,
 /// ImportConflict — these carry Import EventIds, not Decision EventIds, so they cannot appear in
@@ -905,6 +905,7 @@ pub fn is_revocable_payload(payload: &btctax_core::EventPayload) -> bool {
             | EventPayload::MethodElection(_)
             | EventPayload::LotSelection(_)
             | EventPayload::ReclassifyIncome(_)
+            | EventPayload::SelfTransferPassthrough(_)
             | EventPayload::SafeHarborAllocation(_)
     )
 }

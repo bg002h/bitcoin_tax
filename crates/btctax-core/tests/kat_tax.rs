@@ -3456,3 +3456,508 @@ fn self_transfer_in_without_wallet_emits_hard_unknown_basis_not_fmv_missing() {
         "must NOT copy the IncomeInbound FmvMissing guard (semantically wrong for a non-income receipt)"
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Cycle B — self-transfer PASSTHROUGH DROP (SPEC_self_transfer_passthrough). A TransferIn leg + a
+// TransferOut leg confirmed as the two sides of ONE self-transfer through a tracked waypoint whose
+// counterparties are BOTH external: both legs net to zero (no lot, no disposition, no tax) via a
+// `SelfTransferPassthrough` decision that maps BOTH legs to `Op::Skip`. Invariants 1/5/6/7/8 + the
+// load-bearing [R0-I1] cross-type overlap guard (BOTH directions) + void-re-exposes-both.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+/// A raw `TransferOut` (self-transfer withdrawing side).
+fn stx_out(
+    src_ref: &str,
+    ts: time::OffsetDateTime,
+    sat: i64,
+    fee_sat: Option<i64>,
+    wallet: Option<WalletId>,
+) -> LedgerEvent {
+    LedgerEvent {
+        id: EventId::import(Source::Coinbase, SourceRef::new(src_ref)),
+        utc_timestamp: ts,
+        original_tz: offset!(+00:00),
+        wallet,
+        payload: EventPayload::TransferOut(TransferOut {
+            sat,
+            fee_sat,
+            dest_addr: None,
+            txid: None,
+        }),
+    }
+}
+
+/// A `SelfTransferPassthrough` decision naming the raw `in_ref` TransferIn + `out_ref` TransferOut.
+fn passthrough(seq: u64, ts: time::OffsetDateTime, in_ref: &str, out_ref: &str) -> LedgerEvent {
+    dec_ev(
+        seq,
+        ts,
+        EventPayload::SelfTransferPassthrough(SelfTransferPassthrough {
+            in_event: EventId::import(Source::Coinbase, SourceRef::new(in_ref)),
+            out_event: EventId::import(Source::Coinbase, SourceRef::new(out_ref)),
+        }),
+    )
+}
+
+/// Invariant 1 — DROP correctness: a same-wallet passthrough → BOTH legs `Op::Skip`; NO lot anywhere;
+/// holdings unchanged; income/disposals/removals empty; conservation balanced; and NEITHER the in-leg's
+/// `UnknownBasisInbound` NOR the out-leg's `UnmatchedOutflows` blocker fires (both legs vanish cleanly).
+#[test]
+fn passthrough_drop_skips_both_legs_non_taxable() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let out_ev = stx_out(
+        "OUT",
+        datetime!(2025-04-02 00:00:00 UTC),
+        100_000,
+        None,
+        Some(wal()),
+    );
+    let pt = passthrough(1, datetime!(2026-01-01 00:00:00 UTC), "IN", "OUT");
+    let st = project(
+        &[in_ev, out_ev, pt],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(st.lots.is_empty(), "passthrough creates NO lot");
+    assert!(
+        st.holdings_by_wallet.is_empty(),
+        "holdings unchanged (net zero)"
+    );
+    assert!(st.income_recognized.is_empty());
+    assert!(st.disposals.is_empty());
+    assert!(st.removals.is_empty());
+    assert!(
+        st.pending_reconciliation.is_empty(),
+        "the out-leg is SKIPPED, never pending"
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::UnknownBasisInbound),
+        "the in-leg is skipped — no unknown-basis blocker"
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::UnmatchedOutflows),
+        "the out-leg is skipped — no unmatched-outflow blocker"
+    );
+    let r = conservation_report(&st);
+    assert!(r.balanced, "{r:?}");
+    assert_eq!(r.sigma_held, 0);
+}
+
+/// Invariant 5 — precedence (G-PRECEDENCE + G-BOTH-ATOMIC): the `passthrough_skip` check precedes
+/// `PendingOut` in `build_op`, so the skipped `TransferOut` never lands in `pending_reconciliation` —
+/// and, critically, it never MIS-CONSUMES an unrelated lot sitting in the same wallet pool. A BUY lot
+/// co-located in the waypoint survives untouched.
+#[test]
+fn passthrough_out_leg_never_pending_and_never_misconsumes() {
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let out_ev = stx_out(
+        "OUT",
+        datetime!(2025-05-01 00:00:00 UTC),
+        100_000,
+        None,
+        Some(wal()),
+    );
+    let pt = passthrough(1, datetime!(2026-01-01 00:00:00 UTC), "IN", "OUT");
+    let st = project(
+        &[buy, in_ev, out_ev, pt],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.pending_reconciliation.is_empty(),
+        "skipped out-leg must NOT enter pending_reconciliation"
+    );
+    assert_eq!(st.lots.len(), 1, "only the BUY lot survives");
+    assert_eq!(
+        *st.holdings_by_wallet.get(&wal()).unwrap(),
+        100_000,
+        "the BUY lot is NOT mis-consumed by an orphaned PendingOut"
+    );
+    assert!(st.disposals.is_empty());
+    let r = conservation_report(&st);
+    assert!(r.balanced, "{r:?}");
+}
+
+/// Invariant 8 [R0-I1] direction 1 — the load-bearing tax-safety guard: a `SelfTransferPassthrough{out:B}`
+/// followed by a real `ReclassifyOutflow{Dispose}` on B (no void) → Hard `DecisionConflict`, the
+/// passthrough is EXCLUDED, and B projects as the Dispose (the disposal is RECOGNIZED, not silently
+/// skipped). WITHOUT the guard the Skip would erase a taxable disposal.
+#[test]
+fn passthrough_then_dispose_on_out_leg_conflict_disposal_recognized() {
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let out_ev = stx_out(
+        "OUT",
+        datetime!(2025-05-01 00:00:00 UTC),
+        100_000,
+        None,
+        Some(wal()),
+    );
+    let pt = passthrough(1, datetime!(2026-01-01 00:00:00 UTC), "IN", "OUT");
+    let dispose = dec_ev(
+        2,
+        datetime!(2026-01-02 00:00:00 UTC),
+        EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::Dispose {
+                kind: DisposeKind::Sell,
+            },
+            principal_proceeds_or_fmv: dec!(200.00),
+            fee_usd: None,
+            donee: None,
+        }),
+    );
+    let st = project(
+        &[buy, in_ev, out_ev, pt, dispose],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::DecisionConflict
+                && b.event == Some(EventId::decision(1))),
+        "the passthrough must lose to a Hard DecisionConflict"
+    );
+    assert_eq!(
+        st.disposals.len(),
+        1,
+        "the taxable disposal on the out-leg MUST be recognized, not skipped"
+    );
+    assert_eq!(st.disposals[0].legs[0].gain, dec!(140.00)); // 200 proceeds − 60 basis
+}
+
+/// Invariant 8 [R0-I1] direction 2 — symmetric guard on the IN leg: a `SelfTransferPassthrough{in:A}`
+/// followed by a real `ClassifyInbound{Income}` on A → Hard `DecisionConflict`, passthrough EXCLUDED,
+/// and A projects as Income (the income is RECOGNIZED, not silently skipped).
+#[test]
+fn passthrough_then_income_on_in_leg_conflict_income_recognized() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let out_ev = stx_out(
+        "OUT",
+        datetime!(2025-05-01 00:00:00 UTC),
+        100_000,
+        None,
+        Some(wal()),
+    );
+    let pt = passthrough(1, datetime!(2026-01-01 00:00:00 UTC), "IN", "OUT");
+    let income = dec_ev(
+        2,
+        datetime!(2026-01-02 00:00:00 UTC),
+        EventPayload::ClassifyInbound(ClassifyInbound {
+            transfer_in_event: EventId::import(Source::Coinbase, SourceRef::new("IN")),
+            as_: InboundClass::Income {
+                kind: IncomeKind::Mining,
+                fmv: Some(dec!(500.00)),
+                business: false,
+            },
+        }),
+    );
+    let st = project(
+        &[in_ev, out_ev, pt, income],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::DecisionConflict
+                && b.event == Some(EventId::decision(1))),
+        "the passthrough must lose to a Hard DecisionConflict"
+    );
+    assert_eq!(
+        st.income_recognized.len(),
+        1,
+        "the income on the in-leg MUST be recognized, not skipped"
+    );
+    assert_eq!(st.income_recognized[0].usd_fmv, dec!(500.00));
+}
+
+/// Invariant 6a — decision hygiene, BAD TARGET (either leg wrong type) → Hard `DecisionConflict` and
+/// the WHOLE decision is excluded (neither leg enters `passthrough_skip`), so a valid sibling leg is
+/// NOT silently skipped. Tested BOTH ways: in-leg points at an Acquire; out-leg points at a TransferIn.
+#[test]
+fn passthrough_bad_target_excludes_whole_decision() {
+    // (a) in_event points at an Acquire (not a TransferIn) → whole decision excluded.
+    let buy = ev(
+        "BUY",
+        datetime!(2025-03-01 00:00:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: dec!(60.00),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let out_ev = stx_out(
+        "OUT",
+        datetime!(2025-05-01 00:00:00 UTC),
+        50_000,
+        None,
+        Some(wal()),
+    );
+    let pt = passthrough(1, datetime!(2026-01-01 00:00:00 UTC), "BUY", "OUT");
+    let st = project(
+        &[buy, out_ev, pt],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::DecisionConflict),
+        "bad in-target → Hard DecisionConflict"
+    );
+    assert_eq!(
+        st.pending_reconciliation.len(),
+        1,
+        "whole decision excluded — the valid out-leg is NOT skipped (falls through to PendingOut)"
+    );
+    assert_eq!(
+        st.lots.len(),
+        1,
+        "the BUY lot is untouched by the excluded decision"
+    );
+
+    // (b) out_event points at a TransferIn (not a TransferOut) → whole decision excluded.
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let in2 = stx_in(
+        "IN2",
+        datetime!(2025-04-02 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let pt2 = passthrough(1, datetime!(2026-01-01 00:00:00 UTC), "IN", "IN2");
+    let st2 = project(
+        &[in_ev, in2, pt2],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st2.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::DecisionConflict),
+        "bad out-target → Hard DecisionConflict"
+    );
+    assert_eq!(
+        st2.blockers
+            .iter()
+            .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+            .count(),
+        2,
+        "whole decision excluded — BOTH raw TransferIns re-expose as UnknownInbound (neither skipped)"
+    );
+}
+
+/// Invariant 6b — decision hygiene, DUPLICATE (either leg already claimed by a prior passthrough) →
+/// first-wins + one `DecisionConflict`. The winning pair skips; the loser's non-shared leg falls
+/// through (NOT skipped).
+#[test]
+fn passthrough_duplicate_leg_first_wins() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let out1 = stx_out(
+        "OUT1",
+        datetime!(2025-05-01 00:00:00 UTC),
+        100_000,
+        None,
+        Some(wal()),
+    );
+    let out2 = stx_out(
+        "OUT2",
+        datetime!(2025-05-02 00:00:00 UTC),
+        100_000,
+        None,
+        Some(wal()),
+    );
+    // Both passthroughs claim IN; the first (seq 1) wins.
+    let pt1 = passthrough(1, datetime!(2026-01-01 00:00:00 UTC), "IN", "OUT1");
+    let pt2 = passthrough(2, datetime!(2026-01-02 00:00:00 UTC), "IN", "OUT2");
+    let st = project(
+        &[in_ev, out1, out2, pt1, pt2],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(
+        st.blockers
+            .iter()
+            .filter(|b| b.kind == BlockerKind::DecisionConflict)
+            .count(),
+        1,
+        "exactly one DecisionConflict for the duplicate"
+    );
+    // OUT1 was skipped by the winning pt1; only OUT2 (loser's non-shared leg) is pending.
+    assert_eq!(
+        st.pending_reconciliation.len(),
+        1,
+        "only OUT2 falls through"
+    );
+    assert_eq!(
+        st.pending_reconciliation[0].event,
+        EventId::import(Source::Coinbase, SourceRef::new("OUT2")),
+        "the WINNING pair (IN+OUT1) is skipped; OUT2 is the loser's fall-through leg"
+    );
+}
+
+/// Invariant 6c — Void RE-EXPOSES both legs: a `VoidDecisionEvent` targeting the passthrough restores
+/// the in-leg to `UnknownInbound` (Hard `UnknownBasisInbound`, no lot) and the out-leg to `PendingOut`.
+#[test]
+fn void_passthrough_re_exposes_both_legs() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let out_ev = stx_out(
+        "OUT",
+        datetime!(2025-05-01 00:00:00 UTC),
+        100_000,
+        None,
+        Some(wal()),
+    );
+    let pt = passthrough(1, datetime!(2026-01-01 00:00:00 UTC), "IN", "OUT");
+    let void = dec_ev(
+        2,
+        datetime!(2026-02-01 00:00:00 UTC),
+        EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+            target_event_id: EventId::decision(1),
+        }),
+    );
+    let st = project(
+        &[in_ev, out_ev, pt, void],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(st.lots.is_empty(), "voided passthrough creates no lot");
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::UnknownBasisInbound),
+        "in-leg re-exposed as UnknownInbound"
+    );
+    assert_eq!(
+        st.pending_reconciliation.len(),
+        1,
+        "out-leg re-exposed as PendingOut"
+    );
+    assert_eq!(
+        st.pending_reconciliation[0].event,
+        EventId::import(Source::Coinbase, SourceRef::new("OUT"))
+    );
+}
+
+/// Invariant 7 — OUTSIDE FIFO: a `LotSelection` targeting a passthrough-skipped leg is rejected
+/// (`LotSelectionInvalid`) — a skipped leg is not method-honoring.
+#[test]
+fn passthrough_leg_is_not_lot_selectable() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let out_ev = stx_out(
+        "OUT",
+        datetime!(2025-05-01 00:00:00 UTC),
+        100_000,
+        None,
+        Some(wal()),
+    );
+    let pt = passthrough(1, datetime!(2026-01-01 00:00:00 UTC), "IN", "OUT");
+    let bad_sel = dec_ev(
+        2,
+        datetime!(2026-01-02 00:00:00 UTC),
+        EventPayload::LotSelection(LotSelection {
+            disposal_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            lots: vec![LotPick {
+                lot: LotId {
+                    origin_event_id: EventId::import(Source::Coinbase, SourceRef::new("BUY")),
+                    split_sequence: 0,
+                },
+                sat: 100_000,
+            }],
+        }),
+    );
+    let st = project(
+        &[in_ev, out_ev, pt, bad_sel],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::LotSelectionInvalid),
+        "a LotSelection cannot target a passthrough-skipped leg (Op::Skip is not honoring)"
+    );
+}
+
+/// serde: a `SelfTransferPassthrough` payload round-trips through the canonical vault encoding unchanged.
+#[test]
+fn passthrough_round_trips_serde() {
+    let payload = EventPayload::SelfTransferPassthrough(SelfTransferPassthrough {
+        in_event: EventId::import(Source::Coinbase, SourceRef::new("IN")),
+        out_event: EventId::import(Source::River, SourceRef::new("out|river-001")),
+    });
+    let json = serde_json::to_string(&payload).unwrap();
+    let back: EventPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(payload, back);
+    // Old-binary-fails-loud: the externally-tagged variant tag is present in the JSON, so a binary
+    // whose enum lacks the variant fails with serde's loud unknown-variant error (forward-only).
+    assert!(
+        json.contains("SelfTransferPassthrough"),
+        "the variant tag is serialized (pre-feature binaries reject it loudly)"
+    );
+}

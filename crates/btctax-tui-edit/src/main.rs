@@ -2647,6 +2647,16 @@ fn summarize_void_payload(payload: &EventPayload) -> (&'static str, String, Opti
             Some(ri.income_event.clone()),
             false,
         ),
+        EventPayload::SelfTransferPassthrough(stp) => (
+            "SelfTransferPassthrough",
+            format!(
+                "drop in {} + out {}",
+                stp.in_event.canonical(),
+                stp.out_event.canonical()
+            ),
+            Some(stp.out_event.clone()),
+            false,
+        ),
         EventPayload::SafeHarborAllocation(a) => (
             "SafeHarborAllocation",
             format!("alloc {} lots as_of {}", a.lots.len(), a.as_of_date),
