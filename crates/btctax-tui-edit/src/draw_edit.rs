@@ -13,15 +13,17 @@ use crate::edit::form::{
     ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
     ClassifyRawStep, ClassifyRawVariant, DisposalKind, FieldBuffer, InboundVariant, LinkMode,
     LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, MutationModalState,
-    OutflowKind, ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState,
-    ReclassifyIncomeStep, ReclassifyOutflowModalState, ReclassifyOutflowStep,
-    SafeHarborAttestFlowState, SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState,
-    SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
-    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState,
-    VoidModalState, DONATION_FIELD_LABELS, FIELD_LABELS,
+    OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep, OutflowKind,
+    ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
+    ReclassifyOutflowModalState, ReclassifyOutflowStep, ResolveConflictFlowState,
+    ResolveConflictModalState, ResolveConflictStep, ResolveKind, SafeHarborAttestFlowState,
+    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
+    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
+    SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState, VoidModalState,
+    DONATION_FIELD_LABELS, FIELD_LABELS,
 };
 use crate::editor::{EditorApp, EditorScreen};
-use btctax_core::{DisposeKind, InboundClass, OutflowClass};
+use btctax_core::{DisposeKind, InboundClass, OutflowClass, Persistability};
 use btctax_tui::app::Tab;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -304,6 +306,40 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
                 draw_attest_typed_word(frame, area, &flow.step)
             }
         }
+    }
+    // Resolve-conflict flow overlay.
+    if app.resolve_conflict_flow.is_some() {
+        let is_list = matches!(
+            app.resolve_conflict_flow.as_ref().map(|f| &f.step),
+            Some(ResolveConflictStep::List)
+        );
+        if is_list {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                draw_resolve_conflict_list(frame, area, flow);
+            }
+        } else if let Some(flow) = app.resolve_conflict_flow.as_ref() {
+            draw_resolve_conflict_choose(frame, area, &flow.step);
+        }
+    }
+    if let Some(modal) = app.resolve_conflict_modal.as_ref() {
+        draw_resolve_conflict_modal(frame, area, modal);
+    }
+    // Optimize-accept flow overlay.
+    if app.optimize_accept_flow.is_some() {
+        let is_list = matches!(
+            app.optimize_accept_flow.as_ref().map(|f| &f.step),
+            Some(OptimizeAcceptStep::List)
+        );
+        if is_list {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                draw_optimize_accept_list(frame, area, flow);
+            }
+        } else if let Some(flow) = app.optimize_accept_flow.as_ref() {
+            draw_optimize_accept_attest_text(frame, area, &flow.step);
+        }
+    }
+    if let Some(modal) = app.optimize_accept_modal.as_ref() {
+        draw_optimize_accept_modal(frame, area, modal);
     }
 }
 
@@ -2599,6 +2635,389 @@ fn draw_attest_typed_word(frame: &mut Frame, area: Rect, step: &SafeHarborAttest
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" IRREVOCABLE: type ATTEST to confirm — WRITES THE VAULT ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+// ── Resolve-conflict flow draw functions (chunk 4b, D3) ──────────────────────
+
+/// Render the resolve-conflict step-1 list overlay.
+///
+/// Title: `" Resolve Import Conflict — select a conflict "`.
+/// Columns: `Date | Target | New-fingerprint | conflict EventId`.
+fn draw_resolve_conflict_list(frame: &mut Frame, area: Rect, flow: &mut ResolveConflictFlowState) {
+    let modal_rect = centered_rect(96, 20, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let header_cells = ["Date", "Target", "New-fingerprint", "Conflict EventId"]
+        .iter()
+        .map(|h| Cell::from(*h).style(Style::default().add_modifier(Modifier::BOLD)));
+    let header = Row::new(header_cells).height(1);
+
+    let selected_idx = flow.list.table_state.selected();
+    let items: Vec<Row> = flow
+        .list
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let is_selected = selected_idx == Some(i);
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            Row::new(vec![
+                Cell::from(item.date.to_string()).style(style),
+                Cell::from(item.target.canonical()).style(style),
+                Cell::from(item.new_fingerprint.clone()).style(style),
+                Cell::from(item.conflict_event.canonical()).style(style),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        items,
+        [
+            Constraint::Length(12),
+            Constraint::Length(26),
+            Constraint::Length(12),
+            Constraint::Min(24),
+        ],
+    )
+    .header(header)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Resolve Import Conflict — select a conflict "),
+    );
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.list.table_state);
+}
+
+/// Render the resolve-conflict step-2 accept/reject choice overlay (an in-flow toggle).
+fn draw_resolve_conflict_choose(frame: &mut Frame, area: Rect, step: &ResolveConflictStep) {
+    let ResolveConflictStep::Choose { conflict, kind } = step else {
+        return;
+    };
+
+    let (accept_span, reject_span) = match kind {
+        ResolveKind::Accept => (
+            Span::styled(
+                " ACCEPT ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  reject  "),
+        ),
+        ResolveKind::Reject => (
+            Span::raw("  accept  "),
+            Span::styled(
+                " REJECT ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ),
+    };
+
+    let lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(format!(
+            "  conflict: {}",
+            conflict.conflict_event.canonical()
+        )),
+        Line::from(format!("  target:   {}", conflict.target.canonical())),
+        Line::from(""),
+        Line::from(format!("  current:  {}", conflict.current_summary)),
+        Line::from(format!("  →new:     {}", conflict.new_summary)),
+        Line::from(""),
+        Line::from(vec![Span::raw("  choose:  "), accept_span, reject_span]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  ←/→ (h/l): toggle   Enter: confirm → modal   Esc: back   q: swallowed",
+            Style::default().fg(Color::Cyan),
+        )),
+    ];
+
+    let modal_rect = centered_rect(80, (lines.len() + 2) as u16, area);
+    frame.render_widget(Clear, modal_rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Resolve Import Conflict — accept or reject ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Render the resolve-conflict confirmation modal — BOTH sides + the NON-REVOCABLE warning.
+fn draw_resolve_conflict_modal(frame: &mut Frame, area: Rect, modal: &ResolveConflictModalState) {
+    let (title, adopt_note) = match modal.kind {
+        ResolveKind::Accept => (
+            " Confirm: ACCEPT conflict — WRITES THE VAULT ",
+            "(ACCEPT adopts new)",
+        ),
+        ResolveKind::Reject => (
+            " Confirm: REJECT conflict — WRITES THE VAULT ",
+            "(REJECT keeps current, discards new)",
+        ),
+    };
+
+    let content = format!(
+        "  conflict: {conflict}\n\
+           target:   {target}\n\
+         \n\
+           current:  {current}\n\
+           →new:     {new}   {adopt_note}\n\
+         \n\
+           !! This decision CANNOT be voided (non-revocable).\n\
+           Appended as a decision event (append-only log).\n\
+           Saved immediately via the vault's atomic write path.\n\
+         \n\
+         [Enter] Confirm & save   [Esc] Cancel — writes nothing",
+        conflict = modal.conflict_event.canonical(),
+        target = modal.target.canonical(),
+        current = modal.old_summary,
+        new = modal.new_summary,
+    );
+
+    let modal_width: u16 = 74;
+    let content_lines = content.lines().count() as u16 + 2;
+    let modal_height = content_lines.max(13);
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+// ── Optimize-accept flow draw functions (chunk 4b, D4) ───────────────────────
+
+/// Short display label for a `Persistability` (list column).
+fn persistability_label(p: Persistability) -> &'static str {
+    match p {
+        Persistability::ContemporaneousNow => "contemporaneous",
+        Persistability::NeedsAttestation => "needs-attestation",
+        Persistability::ForbiddenBroker2027 => "forbidden",
+    }
+}
+
+/// Render the optimize-accept step-1 list overlay + the flow-level year-Δtax banner.
+///
+/// Banner: whole-year `delta` (≤ 0) + APPROXIMATE caveat. Table: Date | Wallet | Persistability |
+/// disposal EventId — NO per-disposal Δtax column [R0-I1].
+fn draw_optimize_accept_list(frame: &mut Frame, area: Rect, flow: &mut OptimizeAcceptFlowState) {
+    let modal_rect = centered_rect(96, 22, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title(" Optimize — accept a proposed lot selection ");
+    let inner = outer.inner(modal_rect);
+    frame.render_widget(outer, modal_rect);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(inner);
+
+    // ── Banner (year-level Δtax; approximate caveat) ─────────────────────────
+    let mut banner_lines = vec![Line::from(Span::styled(
+        format!(
+            "Expected year Δtax if the FULL proposal is accepted: {} (≤ 0)",
+            flow.delta
+        ),
+        Style::default().add_modifier(Modifier::BOLD),
+    ))];
+    if flow.approximate {
+        banner_lines.push(Line::from(Span::styled(
+            "APPROXIMATE — not a guaranteed global minimum",
+            Style::default().fg(Color::Yellow),
+        )));
+    }
+    banner_lines.push(Line::from(Span::styled(
+        "(per-row dollar figures are not shown — the delta is a whole-year figure)",
+        Style::default().fg(Color::DarkGray),
+    )));
+    frame.render_widget(Paragraph::new(banner_lines), chunks[0]);
+
+    // ── Table ─────────────────────────────────────────────────────────────────
+    let header_cells = ["Date", "Wallet", "Persistability", "Disposal EventId"]
+        .iter()
+        .map(|h| Cell::from(*h).style(Style::default().add_modifier(Modifier::BOLD)));
+    let header = Row::new(header_cells).height(1);
+
+    let selected_idx = flow.list.table_state.selected();
+    let items: Vec<Row> = flow
+        .list
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let is_selected = selected_idx == Some(i);
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            Row::new(vec![
+                Cell::from(item.date.to_string()).style(style),
+                Cell::from(wallet_label(&item.wallet)).style(style),
+                Cell::from(persistability_label(item.persistable)).style(style),
+                Cell::from(item.disposal.canonical()).style(style),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        items,
+        [
+            Constraint::Length(12),
+            Constraint::Length(22),
+            Constraint::Length(18),
+            Constraint::Min(20),
+        ],
+    )
+    .header(header);
+
+    frame.render_stateful_widget(table, chunks[1], &mut flow.list.table_state);
+}
+
+/// Render the optimize-accept attestation-text step (NeedsAttestation only).
+fn draw_optimize_accept_attest_text(frame: &mut Frame, area: Rect, step: &OptimizeAcceptStep) {
+    let OptimizeAcceptStep::AttestText { item, buf, error } = step else {
+        return;
+    };
+
+    let modal_rect = centered_rect(76, 16, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(format!("  disposal: {}", item.disposal.canonical())),
+        Line::from(format!(
+            "  picks:    {} lot(s) (already executed — attestation required)",
+            item.picks.len()
+        )),
+        Line::from(""),
+        Line::from("  Type your contemporaneous-ID statement (the --attest value):"),
+        Line::from(format!("  > {}_", buf.buf)),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  This narrow attestation records that the selection was identified",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "  contemporaneously; it is co-persisted with the LotSelection.",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+    ];
+    if let Some(err) = error {
+        lines.push(Line::from(Span::styled(
+            format!("  {err}"),
+            Style::default().fg(Color::Red),
+        )));
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(Span::styled(
+        "  [Enter] Continue (non-empty)   [Esc] Back",
+        Style::default().fg(Color::Cyan),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Optimize — attestation (contemporaneous ID) ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Render the optimize-accept confirmation modal — proposed picks (elide past 8) + basis label +
+/// (attested) the attestation text and the co-persist note. NO per-disposal Δtax [R0-I1].
+fn draw_optimize_accept_modal(frame: &mut Frame, area: Rect, modal: &OptimizeAcceptModalState) {
+    let mut lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(format!("  disposal: {}", modal.disposal.canonical())),
+        Line::from(format!(
+            "  Picks: {} lot(s), {} sat total",
+            modal.pick_count, modal.total_sat
+        )),
+        Line::from(format!("  basis: {}", modal.basis_label)),
+        Line::from(""),
+    ];
+
+    const MAX_PICKS_SHOWN: usize = 8;
+    let show_count = modal.picks.len().min(MAX_PICKS_SHOWN);
+    for pick in &modal.picks[..show_count] {
+        lines.push(Line::from(format!(
+            "    {}#{}   →  {} sat",
+            pick.lot.origin_event_id.canonical(),
+            pick.lot.split_sequence,
+            pick.sat
+        )));
+    }
+    if modal.picks.len() > MAX_PICKS_SHOWN {
+        let remainder_count = modal.picks.len() - MAX_PICKS_SHOWN;
+        let remainder_sat: btctax_core::Sat =
+            modal.picks[MAX_PICKS_SHOWN..].iter().map(|p| p.sat).sum();
+        lines.push(Line::from(format!(
+            "    … and {remainder_count} more picks ({remainder_sat} sat in the remainder)"
+        )));
+    }
+    lines.push(Line::from(""));
+
+    if let Some(att) = modal.attestation.as_deref() {
+        lines.push(Line::from(Span::styled(
+            format!("  attestation: {att}"),
+            Style::default().fg(Color::Yellow),
+        )));
+        lines.push(Line::from(
+            "  an attestation row is written alongside the LotSelection;",
+        ));
+        lines.push(Line::from("  voiding the LotSelection clears it."));
+        lines.push(Line::from(""));
+    }
+
+    lines.push(Line::from(
+        "  Appended as a revocable decision (void with 'v').",
+    ));
+    lines.push(Line::from(
+        "  Saved immediately via the vault's atomic write path.",
+    ));
+    lines.push(Line::from(""));
+    lines.push(Line::from(
+        "  [Enter] Confirm & save     [Esc] Cancel — writes nothing",
+    ));
+    lines.push(Line::from(""));
+
+    let height = (lines.len() + 2) as u16;
+    let modal_rect = centered_rect(74, height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red))
+        .title(" Confirm: optimize-accept — WRITES THE VAULT ");
     let inner = block.inner(modal_rect);
     frame.render_widget(block, modal_rect);
     frame.render_widget(Paragraph::new(lines), inner);

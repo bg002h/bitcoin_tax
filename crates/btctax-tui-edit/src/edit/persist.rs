@@ -377,6 +377,111 @@ pub fn persist_classify_raw(
     Ok(id)
 }
 
+/// Append a `SupersedeImport` (accept) or `RejectImport` (reject) decision resolving an
+/// `ImportConflict`, and atomically save the vault (chunk 4b, D3).
+///
+/// `conflict_event` is the `ImportConflict` event id (the blocker's `.event`); `kind` selects the
+/// appended variant. `now` is INJECTED at Enter-press for test determinism. Mirrors the two CLI
+/// verbs `reconcile accept-conflict` / `reject-conflict` (reconcile.rs:178/194), which differ only in
+/// the appended payload — hence one persist fn with a `kind` param.
+///
+/// # Single-append shape (NO bespoke latch)
+/// Identical `snapshot → append_decision → save_or_rollback` shape as `persist_select_lots`: exactly
+/// ONE fallible mutation after the snapshot, so a failed save reverts cleanly and a retry re-appends
+/// with the SAME `decision_seq` (no residue). On success the target's `ImportConflict` blocker clears
+/// (resolve.rs:386-401).
+///
+/// # Non-revocable [D3]
+/// `SupersedeImport`/`RejectImport` are EXCLUDED from `is_revocable_payload`, so the decision cannot
+/// be voided in-editor (a later void would fire `DecisionConflict`, resolve.rs:312-313). The modal
+/// carries the prominent NON-REVOCABLE warning; this is the correct ceremony (NOT a typed-word gate,
+/// which is reserved for the §7.4 unrecoverable-batch attest).
+pub fn persist_resolve_conflict(
+    session: &mut btctax_cli::Session,
+    conflict_event: btctax_core::EventId,
+    kind: crate::edit::form::ResolveKind,
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, PersistError> {
+    use btctax_core::event::{RejectImport, SupersedeImport};
+    use btctax_core::EventPayload;
+    let payload = match kind {
+        crate::edit::form::ResolveKind::Accept => {
+            EventPayload::SupersedeImport(SupersedeImport { conflict_event })
+        }
+        crate::edit::form::ResolveKind::Reject => {
+            EventPayload::RejectImport(RejectImport { conflict_event })
+        }
+    };
+    let pre = session.snapshot()?;
+    let id = btctax_core::persistence::append_decision(
+        session.conn(),
+        payload,
+        now,
+        time::UtcOffset::UTC,
+        None,
+    )?;
+    save_or_rollback(session, pre)?;
+    Ok(id)
+}
+
+/// Append the optimizer's proposed `LotSelection` and — for an already-executed disposal — ALSO
+/// upsert the `optimize_attestation` side-table row, then atomically save the vault (chunk 4b, D4).
+///
+/// `disposal` is the disposal EventId; `picks` is the proposed `LotSelection.lots`; `attestation`
+/// is `Some(text)` for the `NeedsAttestation`/`AttestedRecording` path (co-persisted) and `None` for
+/// the genuinely-contemporaneous path; `made` is the selection's made-date (attested_at string);
+/// `now` is INJECTED at Enter-press for the append timestamp. Mirrors `cmd::optimize::accept`'s
+/// per-disposal co-persist (cmd/optimize.rs:263-264) but on the HELD session.
+///
+/// # Dual-write shape — the INVERSE of `persist_void`
+/// Snapshots, appends the `LotSelection`, then (if attested) `optimize_attest::set`. A failure AFTER
+/// the committed append is routed through `rollback(session, &pre, e)` — symmetric with `persist_void`'s
+/// clear-then-rollback — so no residue can piggy-back a later save. The final `save_or_rollback` does a
+/// whole-DB restore on a failed save, reverting BOTH the append AND the side-table set. A retry after
+/// a failed save re-appends with the SAME `decision_seq` (no residue). Voiding the resulting
+/// `LotSelection` via `v` clears the attestation row (the shipped `persist_void` `optimize_attest::clear`
+/// — closes the loop with zero `persist_void` changes).
+///
+/// # Duplicate guard is upstream
+/// The MANDATORY duplicate-LotSelection guard (a disposal with a live `LotSelection` is never offered)
+/// lives in the opener's `filter_optimize_candidates` pre-filter; a genuine duplicate that slips
+/// through (a failed-save race) still fires `DecisionConflict` and NEITHER selection applies.
+pub fn persist_optimize_accept(
+    session: &mut btctax_cli::Session,
+    disposal: btctax_core::EventId,
+    picks: Vec<btctax_core::LotPick>,
+    attestation: Option<String>,
+    made: btctax_core::TaxDate,
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, PersistError> {
+    use btctax_core::event::LotSelection;
+    use btctax_core::EventPayload;
+
+    let pre = session.snapshot()?;
+    let payload = EventPayload::LotSelection(LotSelection {
+        disposal_event: disposal.clone(),
+        lots: picks,
+    });
+    let id = btctax_core::persistence::append_decision(
+        session.conn(),
+        payload,
+        now,
+        time::UtcOffset::UTC,
+        None,
+    )?;
+    if let Some(att) = attestation {
+        // A failure AFTER the committed append must roll back — symmetric with persist_void's
+        // clear-then-rollback (the INVERSE side-table op: set here, clear there).
+        if let Err(e) =
+            btctax_cli::optimize_attest::set(session.conn(), &disposal, &att, &made.to_string())
+        {
+            return Err(rollback(session, &pre, e));
+        }
+    }
+    save_or_rollback(session, pre)?; // whole-DB restore reverts BOTH the append AND the side-table set
+    Ok(id)
+}
+
 /// Store `DonationDetails` for `event_id` in the `donation_details` side-table
 /// and atomically save the vault (last-write-wins upsert; NOT a decision event).
 ///
@@ -1122,6 +1227,7 @@ mod tests {
             "tax_profile::set",
             "append_",
             "donation_details::set",
+            "optimize_attest::set",
             "restore(",
         ];
 
@@ -1298,6 +1404,8 @@ mod tests {
             let tok_session_create = format!("{}::{}", "Session", "create"); // "Session::create" [R0-I1]
                                                                              // [R0-I4]: donation_details::set added to persist_only_tokens.
             let tok_dd_set = format!("{}::{}", "donation_details", "set"); // "donation_details::set"
+                                                                           // chunk4b: optimize_attest::set added to persist_only_tokens.
+            let tok_oa_set = format!("{}::{}", "optimize_attest", "set"); // "optimize_attest::set"
 
             let content = format!(
                 "// planted self-check file\n\
@@ -1308,6 +1416,7 @@ mod tests {
                  \tlet _ = {tok_tax_set}(conn, 2025, &p);\n\
                  \tlet _ = {tok_session_create}(&path, &pp);\n\
                  \tlet _ = {tok_dd_set}(conn, &id, &d);\n\
+                 \tlet _ = {tok_oa_set}(conn, &id, &a, &at);\n\
                  }}\n"
             );
             std::fs::write(&planted_path, &content).unwrap();
@@ -1333,6 +1442,10 @@ mod tests {
             assert!(
                 hits_persist.iter().any(|(t, _)| t == "donation_details::set"),
                 "self-check FAILED: scanner did not detect planted donation_details::set token [R0-I4] — gate is broken"
+            );
+            assert!(
+                hits_persist.iter().any(|(t, _)| t == "optimize_attest::set"),
+                "self-check FAILED: scanner did not detect planted optimize_attest::set token [chunk4b] — gate is broken"
             );
 
             // Verify scanner catches the R0-I1 vault-creating constructor.
@@ -2467,5 +2580,523 @@ mod tests {
             post_disk, post,
             "on-disk image must equal in-memory post after save"
         );
+    }
+
+    // ── Resolve-conflict helper: seed an ImportConflict on an Acquire (chunk 4b, D3) ──
+    //
+    // Import Acquire{usd_cost:30000} at target X, then re-import Acquire{usd_cost:50000} at the SAME
+    // (source, source_ref) → append_import_batch emits ONE ImportConflict whose new_payload carries
+    // usd_cost:50000. Returns (target, conflict_event). The unresolved conflict fires an
+    // ImportConflict blocker; the baseline lot keeps usd_basis 30000 until the conflict is resolved.
+    #[cfg(test)]
+    fn seed_acquire_conflict(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> (btctax_core::EventId, btctax_core::EventId) {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_import_batch, load_all};
+        use btctax_core::{EventId, WalletId};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let target = EventId::import(Source::River, SourceRef::new("rc-acq"));
+        let wallet = Some(WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        });
+        let ts = OffsetDateTime::from_unix_timestamp(1_740_000_000).unwrap();
+
+        {
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+            let v1 = vec![LedgerEvent {
+                id: target.clone(),
+                utc_timestamp: ts,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(30000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            }];
+            append_import_batch(session.conn(), &v1).unwrap();
+            session.save().unwrap();
+
+            // Re-import the SAME (source, source_ref) with different content → ImportConflict.
+            let v2 = vec![LedgerEvent {
+                id: target.clone(),
+                utc_timestamp: ts,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(50000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            }];
+            append_import_batch(session.conn(), &v2).unwrap();
+            session.save().unwrap();
+
+            let events = load_all(session.conn()).unwrap();
+            let conflict_event = events
+                .iter()
+                .find(|e| matches!(e.payload, EventPayload::ImportConflict(_)))
+                .expect("ImportConflict must exist after re-import with changed content")
+                .id
+                .clone();
+            (target, conflict_event)
+        }
+    }
+
+    // ── KAT-P2-RC-A — resolve-conflict ACCEPT: strict prefix + target adopts new_payload ──
+    //
+    // persist_resolve_conflict(Accept) appends EXACTLY one SupersedeImport{conflict_event}; the
+    // ImportConflict blocker clears AND the target lot's basis becomes the NEW payload's 50000.
+    #[test]
+    fn kat_p2_rc_accept_supersede_adopts_new_payload() {
+        use crate::edit::form::ResolveKind;
+        use btctax_core::event::EventPayload;
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_core::{BlockerKind, EventId};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-rc-a-pass";
+        let (target, conflict_event) = seed_acquire_conflict(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+
+        // Baseline: unresolved conflict → blocker present; lot basis is the ORIGINAL 30000.
+        let (_e0, s0, _c0) = session.load_events_and_project().unwrap();
+        assert!(
+            s0.blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::ImportConflict),
+            "baseline must carry an ImportConflict blocker"
+        );
+        assert_eq!(
+            s0.lots
+                .iter()
+                .find(|l| l.original_sat == 100_000)
+                .unwrap()
+                .usd_basis,
+            dec!(30000),
+            "baseline lot basis must be the ORIGINAL 30000"
+        );
+
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+        let id = persist_resolve_conflict(
+            &mut session,
+            conflict_event.clone(),
+            ResolveKind::Accept,
+            now,
+        )
+        .unwrap();
+
+        // Strict prefix: exactly one decision appended at the tail.
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 1, "post must be pre.len()+1");
+        assert_eq!(&post[..pre.len()], pre.as_slice(), "strict prefix");
+        let tail = &post[pre.len()];
+        let tail_seq = tail.decision_seq.expect("tail must have decision_seq");
+        assert_eq!(tail_seq, (pre_max_seq + 1) as i64, "tail seq = pre_max+1");
+        assert_eq!(
+            id,
+            EventId::Decision {
+                seq: tail_seq as u64
+            }
+        );
+        let stored: EventPayload =
+            serde_json::from_str(&tail.payload_json).expect("tail must deserialise");
+        match &stored {
+            EventPayload::SupersedeImport(s) => {
+                assert_eq!(s.conflict_event, conflict_event, "targets the conflict")
+            }
+            other => panic!("expected SupersedeImport, got {other:?}"),
+        }
+
+        // Re-project: blocker cleared AND the lot adopts the NEW payload's 50000 basis.
+        let (_e1, s1, _c1) = session.load_events_and_project().unwrap();
+        assert!(
+            s1.blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::ImportConflict),
+            "ImportConflict blocker must clear after accept"
+        );
+        assert_eq!(
+            s1.lots
+                .iter()
+                .find(|l| l.original_sat == 100_000)
+                .unwrap()
+                .usd_basis,
+            dec!(50000),
+            "accept must adopt the NEW payload (basis 50000)"
+        );
+        let _ = target;
+    }
+
+    // ── KAT-P2-RC-R — resolve-conflict REJECT: original stands, blocker clears ──
+    #[test]
+    fn kat_p2_rc_reject_keeps_original() {
+        use crate::edit::form::ResolveKind;
+        use btctax_core::event::EventPayload;
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_core::BlockerKind;
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-rc-r-pass";
+        let (_target, conflict_event) = seed_acquire_conflict(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+        let id = persist_resolve_conflict(
+            &mut session,
+            conflict_event.clone(),
+            ResolveKind::Reject,
+            now,
+        )
+        .unwrap();
+
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 1);
+        assert_eq!(&post[..pre.len()], pre.as_slice(), "strict prefix");
+        let tail = &post[pre.len()];
+        let stored: EventPayload =
+            serde_json::from_str(&tail.payload_json).expect("tail must deserialise");
+        match &stored {
+            EventPayload::RejectImport(r) => assert_eq!(r.conflict_event, conflict_event),
+            other => panic!("expected RejectImport, got {other:?}"),
+        }
+        let _ = id;
+
+        // Re-project: blocker cleared AND the lot keeps the ORIGINAL 30000 basis.
+        let (_e1, s1, _c1) = session.load_events_and_project().unwrap();
+        assert!(
+            s1.blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::ImportConflict),
+            "ImportConflict blocker must clear after reject"
+        );
+        assert_eq!(
+            s1.lots
+                .iter()
+                .find(|l| l.original_sat == 100_000)
+                .unwrap()
+                .usd_basis,
+            dec!(30000),
+            "reject must keep the ORIGINAL payload (basis 30000)"
+        );
+    }
+
+    // ── KAT-RC-NONREVOCABLE — SupersedeImport/RejectImport are NOT revocable ──
+    //
+    // Pins that a resolve-conflict decision never appears in the void ('v') list: the void-list
+    // pre-filter offers only `is_revocable_payload` decisions, and these two are excluded (a later
+    // void fires DecisionConflict, resolve.rs:312-313). This is the persist-level anchor for the
+    // spec's non-revocability requirement.
+    #[test]
+    fn kat_rc_supersede_reject_are_non_revocable() {
+        use btctax_core::event::{RejectImport, SupersedeImport};
+        use btctax_core::{EventId, EventPayload};
+        let ce = EventId::decision(1);
+        assert!(
+            !crate::edit::form::is_revocable_payload(&EventPayload::SupersedeImport(
+                SupersedeImport {
+                    conflict_event: ce.clone()
+                }
+            )),
+            "SupersedeImport must NOT be revocable"
+        );
+        assert!(
+            !crate::edit::form::is_revocable_payload(&EventPayload::RejectImport(RejectImport {
+                conflict_event: ce
+            })),
+            "RejectImport must NOT be revocable"
+        );
+    }
+
+    // ── save-rollback: persist_resolve_conflict reverts on a failed save ──
+    #[cfg(unix)]
+    #[test]
+    fn kat_persist_resolve_conflict_rollback_on_failed_save() {
+        use crate::edit::form::ResolveKind;
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_core::BlockerKind;
+        use btctax_store::Passphrase;
+        use std::os::unix::fs::PermissionsExt;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-rc-rollback-pass";
+        let (_target, conflict_event) = seed_acquire_conflict(&vault, &key, pp_str);
+
+        // Root-skip guard (chmod is a no-op as root).
+        {
+            let probe = dir.path().join("probe.tmp");
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("rc-rollback KAT: skipping — chmod did not deny writes (root?)");
+                return;
+            }
+        }
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result =
+            persist_resolve_conflict(&mut session, conflict_event, ResolveKind::Accept, now);
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(
+            matches!(result, Err(PersistError::RolledBack(_))),
+            "failed save must return RolledBack; got: {result:?}"
+        );
+
+        // Rollback: NO decision appended, and the conflict stays unresolved.
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len(), "rollback must revert the append");
+        let (_e, s, _c) = session.load_events_and_project().unwrap();
+        assert!(
+            s.blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::ImportConflict),
+            "conflict must remain unresolved after a rolled-back save"
+        );
+    }
+
+    // ── Optimize-accept persist helpers ──────────────────────────────────────
+
+    /// Seed a vault with ONE MethodElection decision (so pre_max_seq == 1). Returns the disposal +
+    /// lot ids to synthesize a proposed LotSelection (the persist fn does not require the disposal to
+    /// exist as an imported ledger event — mirrors kat_p2f).
+    #[cfg(test)]
+    fn seed_optimize_accept_base(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> (btctax_core::EventId, btctax_core::LotPick) {
+        use btctax_core::event::{EventPayload, MethodElection};
+        use btctax_core::identity::{LotId, Source, SourceRef};
+        use btctax_core::persistence::append_decision;
+        use btctax_core::{EventId, LotPick};
+        use btctax_store::Passphrase;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let t0 = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+        append_decision(
+            session.conn(),
+            EventPayload::MethodElection(MethodElection {
+                effective_from: date!(2024 - 01 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            }),
+            t0,
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+        session.save().unwrap();
+
+        let disposal = EventId::import(Source::River, SourceRef::new("oa-disposal"));
+        let lot_origin = EventId::import(Source::River, SourceRef::new("oa-lot"));
+        let pick = LotPick {
+            lot: LotId {
+                origin_event_id: lot_origin,
+                split_sequence: 0,
+            },
+            sat: 100_000,
+        };
+        (disposal, pick)
+    }
+
+    // ── KAT-P2-OA-ATTEST — attested optimize-accept: LotSelection + attest row; void clears it ──
+    //
+    // E2E attested: post.len()+1 (LotSelection) AND optimize_attest::get == Some(text). Then the
+    // shipped persist_void round-trip → optimize_attest::get == None (INVERSE of the set here).
+    #[test]
+    fn kat_p2_oa_attested_appends_lotselection_and_attest_row_then_void_clears() {
+        use btctax_core::event::EventPayload;
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_core::EventId;
+        use btctax_store::Passphrase;
+        use time::{macros::date, OffsetDateTime};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-oa-attest-pass";
+        let (disposal, pick) = seed_optimize_accept_base(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+
+        let made = date!(2026 - 07 - 03);
+        let now = OffsetDateTime::from_unix_timestamp(1_752_000_000).unwrap();
+        let id = persist_optimize_accept(
+            &mut session,
+            disposal.clone(),
+            vec![pick.clone()],
+            Some("contemporaneous-id-statement".to_string()),
+            made,
+            now,
+        )
+        .unwrap();
+
+        // Strict prefix: exactly one LotSelection appended at the tail.
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 1, "post = pre.len()+1");
+        assert_eq!(&post[..pre.len()], pre.as_slice(), "strict prefix");
+        let tail = &post[pre.len()];
+        let tail_seq = tail.decision_seq.expect("tail must have decision_seq");
+        assert_eq!(tail_seq, (pre_max_seq + 1) as i64);
+        assert_eq!(
+            id,
+            EventId::Decision {
+                seq: tail_seq as u64
+            }
+        );
+        let stored: EventPayload =
+            serde_json::from_str(&tail.payload_json).expect("tail must deserialise");
+        match &stored {
+            EventPayload::LotSelection(ls) => {
+                assert_eq!(ls.disposal_event, disposal, "targets the disposal");
+                assert_eq!(ls.lots, vec![pick.clone()], "picks round-trip");
+            }
+            other => panic!("expected LotSelection, got {other:?}"),
+        }
+
+        // Attest row is present and equals the attested text.
+        let att = btctax_cli::optimize_attest::get(session.conn(), &disposal).unwrap();
+        assert_eq!(
+            att.as_deref(),
+            Some("contemporaneous-id-statement"),
+            "attest row must be co-persisted"
+        );
+
+        // Void round-trip: voiding the LotSelection clears the attest row (shipped persist_void).
+        let vnow = OffsetDateTime::from_unix_timestamp(1_752_001_000).unwrap();
+        persist_void(&mut session, id, vnow).unwrap();
+        let att_after = btctax_cli::optimize_attest::get(session.conn(), &disposal).unwrap();
+        assert_eq!(att_after, None, "void must clear the attest row");
+    }
+
+    // ── KAT-P2-OA-CONTEMP — contemporaneous optimize-accept: LotSelection, NO attest row ──
+    #[test]
+    fn kat_p2_oa_contemporaneous_appends_lotselection_no_attest_row() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_store::Passphrase;
+        use time::{macros::date, OffsetDateTime};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-oa-contemp-pass";
+        let (disposal, pick) = seed_optimize_accept_base(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+
+        let made = date!(2026 - 07 - 03);
+        let now = OffsetDateTime::from_unix_timestamp(1_752_000_000).unwrap();
+        persist_optimize_accept(&mut session, disposal.clone(), vec![pick], None, made, now)
+            .unwrap();
+
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 1, "one LotSelection appended");
+        // No attestation row for the contemporaneous path.
+        let att = btctax_cli::optimize_attest::get(session.conn(), &disposal).unwrap();
+        assert_eq!(att, None, "contemporaneous path writes NO attest row");
+    }
+
+    // ── save-rollback: persist_optimize_accept reverts BOTH the append AND the attest set ──
+    #[cfg(unix)]
+    #[test]
+    fn kat_persist_optimize_accept_rollback_on_failed_save() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_store::Passphrase;
+        use std::os::unix::fs::PermissionsExt;
+        use time::{macros::date, OffsetDateTime};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-oa-rollback-pass";
+        let (disposal, pick) = seed_optimize_accept_base(&vault, &key, pp_str);
+
+        // Root-skip guard.
+        {
+            let probe = dir.path().join("probe.tmp");
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("oa-rollback KAT: skipping — chmod did not deny writes (root?)");
+                return;
+            }
+        }
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let made = date!(2026 - 07 - 03);
+        let now = OffsetDateTime::from_unix_timestamp(1_752_000_000).unwrap();
+
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result = persist_optimize_accept(
+            &mut session,
+            disposal.clone(),
+            vec![pick],
+            Some("attest".to_string()),
+            made,
+            now,
+        );
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(
+            matches!(result, Err(PersistError::RolledBack(_))),
+            "failed save must return RolledBack; got: {result:?}"
+        );
+        // Rollback reverts BOTH the append AND the attest set (whole-DB restore).
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len(), "append reverted");
+        let att = btctax_cli::optimize_attest::get(session.conn(), &disposal).unwrap();
+        assert_eq!(att, None, "attest set reverted by the whole-DB restore");
     }
 }

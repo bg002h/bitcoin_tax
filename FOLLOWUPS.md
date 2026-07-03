@@ -4,6 +4,36 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ tui-edit chunk 4b (resolve-conflict + optimize-accept) — SHIPPED (2026-07-03) — CHUNK 4 COMPLETE
+
+Cycle C (chunk 4), second half. **resolve-conflict (`i`)** — accept/reject a flagged `ImportConflict`
+→ `SupersedeImport`/`RejectImport` (NON-revocable: prominent warning, both-sides modal, not typed-word).
+**optimize-accept (`z`)** — the heaviest flow: recompute the optimizer via a new additive
+`Session::optimize_proposal` (KAT-G1-clean — all optimizer plumbing stays in btctax-cli), pre-filter
+(changed & not `ForbiddenBroker2027` & no live LotSelection), pick → (NeedsAttestation: text step) →
+persist a `LotSelection` + the `optimize_attestation` side-table (the INVERSE of `persist_void`'s
+attest-clear; whole-DB rollback reverts both; KAT-G1 gains `optimize_attest::set`). No per-disposal Δtax
+(the R0 catch: the data model has only a whole-year `delta`, shown once as a flow banner). Positive
+closed-loop with `persist_void` (voiding an optimize-accepted LotSelection clears its attest row).
+`btctax-core` untouched. Spec R0 2 rounds → 0C/0I (round 1 caught the per-disposal-Δtax data-model gap +
+the `map_opt_err`/`tax_date` reachability); whole-diff review → 0C/0I/0M/1N (3 fault-injection probes;
+diff clean, 36 deletions a rehunk artifact). **921 workspace tests.** Reviews:
+`reviews/R0-spec-tui-edit-chunk4b-round-{1,2}.md`, `reviews/whole-branch-review-tui-edit-chunk4b-round-1.md`.
+
+**Chunk 4 (import-level decisions) is COMPLETE:** 4a (link-transfer, classify-raw) + 4b
+(resolve-conflict, optimize-accept). All 5 CLI reconcile/optimize verbs now have TUI decision flows.
+
+**FOLLOWUP recorded:**
+1. **[WB4b-N1 nit] optimize-accept `made` date** — the `Persistability` verdict is fixed at open-time
+   (`proposal_made`) while the attestation's `attested_at` is computed at Enter-time; they could differ
+   by one day at a midnight boundary (no practical impact; matches the CLI's single-`made` intent).
+   Optional tighten: thread the opener's `proposal_made` through to the persist call.
+
+**NEXT: chunk 5 — safe-harbor-allocate** (the CREATION side of SafeHarborAllocation; pre-2025 residue
+math; LARGE/COMPLEX) per the roadmap, then the terminal chunk-5 burndown.
+
+---
+
 ## ✅ tui-edit chunk 4a (link-transfer + classify-raw) — SHIPPED (2026-07-03)
 
 Cycle C (chunk 4) of the autonomous run, first half (architect split 4a/4b). Two new TUI decision

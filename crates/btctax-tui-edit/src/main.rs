@@ -19,18 +19,21 @@ use crossterm::{
 };
 use edit::form::{
     cycle_basis_source, cycle_business_optional, cycle_classify_raw_variant, cycle_filing_status,
-    cycle_income_kind, cycle_income_kind_optional, cycle_outflow_kind, income_kind_display,
-    is_revocable_payload, next_focus, prev_focus, validate, validate_classify_inbound_gift,
-    validate_classify_inbound_income, validate_classify_raw_acquire, validate_classify_raw_income,
-    validate_donation_details, validate_reclassify_income, validate_reclassify_outflow,
-    validate_select_lots, validate_set_fmv, ClassifyInboundFlowState, ClassifyInboundModalState,
-    ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep,
-    ClassifyRawVariant, DisposalKind, DisposalListItem, DonationListItem, FieldBuffer, FmvListItem,
-    InEventItem, InboundListItem, InboundVariant, IncomeListItem, LinkMode, LinkTransferFlowState,
-    LinkTransferModalState, LinkTransferStep, LotPickFormRow, MutationModalState, OutflowKind,
-    OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
+    cycle_income_kind, cycle_income_kind_optional, cycle_outflow_kind, filter_optimize_candidates,
+    income_kind_display, is_revocable_payload, next_focus, optimize_basis_label, prev_focus,
+    validate, validate_classify_inbound_gift, validate_classify_inbound_income,
+    validate_classify_raw_acquire, validate_classify_raw_income, validate_donation_details,
+    validate_reclassify_income, validate_reclassify_outflow, validate_select_lots,
+    validate_set_fmv, ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyInboundStep,
+    ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep, ClassifyRawVariant, ConflictItem,
+    DisposalKind, DisposalListItem, DonationListItem, FieldBuffer, FmvListItem, InEventItem,
+    InboundListItem, InboundVariant, IncomeListItem, LinkMode, LinkTransferFlowState,
+    LinkTransferModalState, LinkTransferStep, LotPickFormRow, MutationModalState,
+    OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep, OptimizeCandidateItem,
+    OutflowKind, OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
     ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
-    ReclassifyOutflowModalState, ReclassifyOutflowStep, SafeHarborAttestFlowState,
+    ReclassifyOutflowModalState, ReclassifyOutflowStep, ResolveConflictFlowState,
+    ResolveConflictModalState, ResolveConflictStep, ResolveKind, SafeHarborAttestFlowState,
     SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
     SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
     SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TransferOutItem, VoidFlowState,
@@ -46,8 +49,8 @@ use std::time::Duration;
 use btctax_core::conventions::TRANSITION_DATE;
 use btctax_core::{
     BasisSource, BlockerKind, ClassifyInbound, DisposeKind, DonationDetails, EventId, EventPayload,
-    Form8283Section, InboundClass, IncomeKind, ManualFmv, OutflowClass, ReclassifyIncome,
-    RemovalKind, TransferTarget,
+    Form8283Section, InboundClass, IncomeKind, ManualFmv, OutflowClass, Persistability,
+    ReclassifyIncome, RemovalKind, TransferTarget,
 };
 use btctax_tui::app::Tab;
 use btctax_tui::{restore_terminal, setup_panic_hook, TerminalGuard};
@@ -174,6 +177,18 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Resolve-conflict-modal dispatch — BEFORE flow, form, screen ──────────
+    if app.resolve_conflict_modal.is_some() {
+        handle_resolve_conflict_modal_key(app, key);
+        return;
+    }
+
+    // ── Optimize-accept-modal dispatch — BEFORE flow, form, screen ───────────
+    if app.optimize_accept_modal.is_some() {
+        handle_optimize_accept_modal_key(app, key);
+        return;
+    }
+
     // ── 9. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
     //    Every step of an open flow is claimed here; 'q' and Esc can never
     //    fall through to a Browse quit arm mid-flow.
@@ -215,6 +230,14 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.safe_harbor_attest_flow.is_some() {
         handle_safe_harbor_attest_flow_key(app, key);
+        return;
+    }
+    if app.resolve_conflict_flow.is_some() {
+        handle_resolve_conflict_flow_key(app, key);
+        return;
+    }
+    if app.optimize_accept_flow.is_some() {
+        handle_optimize_accept_flow_key(app, key);
         return;
     }
 
@@ -280,6 +303,8 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('l') => open_link_transfer_flow(app),
                 KeyCode::Char('u') => open_classify_raw_flow(app),
                 KeyCode::Char('a') => open_safe_harbor_attest_flow(app),
+                KeyCode::Char('i') => open_resolve_conflict_flow(app),
+                KeyCode::Char('z') => open_optimize_accept_flow(app),
                 _ => {}
             }
         }
@@ -500,6 +525,10 @@ impl EditorApp {
         self.classify_raw_flow = None;
         self.classify_raw_modal = None;
         self.safe_harbor_attest_flow = None;
+        self.resolve_conflict_flow = None;
+        self.resolve_conflict_modal = None;
+        self.optimize_accept_flow = None;
+        self.optimize_accept_modal = None;
     }
 }
 
@@ -4914,6 +4943,671 @@ fn derive_attest_status(snap: &btctax_tui::app::Snapshot, new_attest_id: &EventI
         "Allocation attested (IRREVOCABLE, §7.4) — {}; quit and run btctax verify to confirm effectiveness",
         new_attest_id.canonical()
     )
+}
+
+// ── Resolve-conflict flow (chunk 4b, D3) ─────────────────────────────────────
+
+/// One-line human summary of an imported payload (resolve-conflict list + modal). Covers the common
+/// imported variants; anything else falls back to a compact debug form.
+fn import_payload_summary(p: &EventPayload) -> String {
+    match p {
+        EventPayload::Acquire(a) => format!("Acquire {} sat, cost {}", a.sat, a.usd_cost),
+        EventPayload::Income(i) => {
+            let fmv = i
+                .usd_fmv
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "(no fmv)".to_string());
+            format!("Income {} sat @ {}", i.sat, fmv)
+        }
+        EventPayload::Dispose(d) => {
+            format!("Dispose {} sat, proceeds {}", d.sat, d.usd_proceeds)
+        }
+        EventPayload::TransferIn(t) => format!("TransferIn {} sat", t.sat),
+        EventPayload::TransferOut(t) => format!("TransferOut {} sat", t.sat),
+        EventPayload::Unclassified(u) => {
+            format!(
+                "Unclassified: {}",
+                u.raw.chars().take(40).collect::<String>()
+            )
+        }
+        other => format!("{other:?}"),
+    }
+}
+
+/// Open the resolve-conflict flow from the Browse screen (chunk 4b, D3).
+///
+/// Pre-filter: events carrying `BlockerKind::ImportConflict` (Hard; fires ONLY while UNRESOLVED —
+/// resolve.rs:386-401), so no extra exclusion is needed (inherently post-filtered). The blocker's
+/// `.event` is the `ImportConflict` EventId; its payload names the `target` import event and the
+/// `new_payload` proposed to supersede it. The two summaries are computed here (the CURRENT payload
+/// lives at the TARGET id, a SEPARATE event; the NEW payload rides the conflict).
+///
+/// Empty filtered list → status "No unresolved import conflicts"; flow NOT opened [R0-M8].
+fn open_resolve_conflict_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let ev_idx = events_by_id(snap);
+
+    let mut items: Vec<ConflictItem> = snap
+        .state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::ImportConflict)
+        .filter_map(|b| {
+            let conflict_id = b.event.as_ref()?;
+            let conflict_ev = ev_idx.get(conflict_id)?;
+            let conflict = match &conflict_ev.payload {
+                EventPayload::ImportConflict(c) => c,
+                _ => return None,
+            };
+            let date = btctax_core::conventions::tax_date(
+                conflict_ev.utc_timestamp,
+                conflict_ev.original_tz,
+            );
+            // CURRENT payload lives at the TARGET id (a separate event, conflict_event != target).
+            let current_summary = ev_idx
+                .get(&conflict.target)
+                .map(|e| import_payload_summary(&e.payload))
+                .unwrap_or_else(|| "(target not found)".to_string());
+            let new_summary = import_payload_summary(&conflict.new_payload);
+            let new_fingerprint = conflict
+                .new_fingerprint
+                .0
+                .chars()
+                .take(8)
+                .collect::<String>();
+            Some(ConflictItem {
+                conflict_event: conflict_id.clone(),
+                target: conflict.target.clone(),
+                date,
+                new_fingerprint,
+                current_summary,
+                new_summary,
+            })
+        })
+        .collect();
+    items.sort_by_key(|i| i.date);
+
+    if items.is_empty() {
+        // R0-M8: empty filtered list never opens a flow.
+        app.status = Some("No unresolved import conflicts".to_string());
+        return;
+    }
+
+    app.resolve_conflict_flow = Some(ResolveConflictFlowState {
+        list: TargetList::new(items),
+        step: ResolveConflictStep::List,
+    });
+}
+
+/// Dispatch to the correct sub-handler depending on `ResolveConflictStep`.
+fn handle_resolve_conflict_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.resolve_conflict_flow.as_ref() {
+        Some(f) => match &f.step {
+            ResolveConflictStep::List => 0u8,
+            ResolveConflictStep::Choose { .. } => 1u8,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_rc_list_key(app, key),
+        _ => handle_rc_choose_key(app, key),
+    }
+}
+
+/// List step: Enter → Choose (default Accept). Esc → close flow. q → swallowed.
+fn handle_rc_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            let selected = app
+                .resolve_conflict_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+            if let Some(item) = selected {
+                if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                    flow.step = ResolveConflictStep::Choose {
+                        conflict: item,
+                        kind: ResolveKind::Accept, // default
+                    };
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.resolve_conflict_flow = None;
+        }
+        _ => {
+            // All other keys (including 'q') swallowed while flow is open [R0-I2].
+        }
+    }
+}
+
+/// Choose step: ←/→ or h/l toggle Accept ⇄ Reject (in-flow — NOT Browse `a`); Enter → modal;
+/// Esc → back to List; q → swallowed.
+fn handle_rc_choose_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l') | KeyCode::Tab => {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                if let ResolveConflictStep::Choose { kind, .. } = &mut flow.step {
+                    *kind = match *kind {
+                        ResolveKind::Accept => ResolveKind::Reject,
+                        ResolveKind::Reject => ResolveKind::Accept,
+                    };
+                }
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(flow) = app.resolve_conflict_flow.as_ref() {
+                if let ResolveConflictStep::Choose { conflict, kind } = &flow.step {
+                    app.resolve_conflict_modal = Some(ResolveConflictModalState {
+                        conflict_event: conflict.conflict_event.clone(),
+                        target: conflict.target.clone(),
+                        kind: *kind,
+                        old_summary: conflict.current_summary.clone(),
+                        new_summary: conflict.new_summary.clone(),
+                    });
+                }
+            }
+        }
+        KeyCode::Esc => {
+            if let Some(flow) = app.resolve_conflict_flow.as_mut() {
+                flow.step = ResolveConflictStep::List;
+            }
+        }
+        _ => {
+            // All other keys (including 'q') swallowed [R0-I2].
+        }
+    }
+}
+
+/// Handle a key press while the resolve-conflict confirmation modal is open (chunk 4b, D3).
+///
+/// Enter → `persist_resolve_conflict(session, conflict_event, kind, now)` → re-project + status +
+///   close. `Err(e)` → close modal, route through `on_persist_error`.
+/// Esc → close modal only (back to the Choose step; nothing written).
+fn handle_resolve_conflict_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (conflict_event, kind) = match app.resolve_conflict_modal.as_ref() {
+                Some(m) => (m.conflict_event.clone(), m.kind),
+                None => return,
+            };
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.resolve_conflict_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_resolve_conflict(
+                    session,
+                    conflict_event.clone(),
+                    kind,
+                    now,
+                )
+            };
+
+            match save_result {
+                Ok(_decision_id) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status =
+                                derive_resolve_conflict_status(&snap, &conflict_event, kind);
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.resolve_conflict_modal = None;
+                    app.resolve_conflict_flow = None;
+                }
+                Err(e) => {
+                    app.resolve_conflict_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.resolve_conflict_modal = None;
+        }
+        _ => {
+            // All other keys swallowed (blocking modal).
+        }
+    }
+}
+
+/// Derive the status string from RE-PROJECTED state after a resolve-conflict save (chunk 4b, D3).
+///
+/// The pre-filter removes already-resolved conflicts and a failed save rolls back clean, so no
+/// `DecisionConflict` retry arm is reachable. On success the target's `ImportConflict` blocker
+/// clears; a defensive re-check reports the (unreachable) case where it somehow persists.
+fn derive_resolve_conflict_status(
+    snap: &btctax_tui::app::Snapshot,
+    conflict_event: &EventId,
+    kind: ResolveKind,
+) -> String {
+    let verb = match kind {
+        ResolveKind::Accept => "accepted",
+        ResolveKind::Reject => "rejected",
+    };
+    let still_unresolved =
+        snap.state.blockers.iter().any(|b| {
+            b.kind == BlockerKind::ImportConflict && b.event.as_ref() == Some(conflict_event)
+        });
+    if still_unresolved {
+        return format!(
+            "Resolution recorded for {} but the import-conflict blocker persists — see Compliance.",
+            conflict_event.canonical()
+        );
+    }
+    format!(
+        "Conflict {} {verb}; import-conflict resolved.",
+        conflict_event.canonical()
+    )
+}
+
+// ── Optimize-accept flow (chunk 4b, D4) ──────────────────────────────────────
+
+/// Open the optimize-accept flow from the Browse screen (chunk 4b, D4).
+///
+/// Opener = a READ-ONLY optimizer RECOMPUTE (KAT-G1-clean) via the additive
+/// `Session::optimize_proposal(year, now)` — never trusts a stale proposal (NFR4), never opens a
+/// second `Session` (a second open would deadlock on the held VaultLock; `cmd::optimize::accept` is
+/// forbidden). On `Err(e)` shows the consult remedy and no-opens.
+///
+/// Pre-filter (`filter_optimize_candidates`): keep rows where `proposed != current`,
+/// `persistable != ForbiddenBroker2027`, AND the disposal has NO live `LotSelection` (the MANDATORY
+/// duplicate guard). Empty filtered list → status + NO open [R0-M3].
+fn open_optimize_accept_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    if app.snapshot.is_none() {
+        return;
+    }
+    let year = app.selected_year;
+    let now = time::OffsetDateTime::now_utc();
+
+    // READ-ONLY recompute via the additive btctax-cli helper.
+    let proposal = {
+        let session = match app.session.as_ref() {
+            Some(s) => s,
+            None => return,
+        };
+        match session.optimize_proposal(year, now) {
+            Ok(p) => p,
+            Err(e) => {
+                app.status = Some(format!(
+                    "{e} — quit the editor and run: btctax optimize consult"
+                ));
+                return;
+            }
+        }
+    };
+
+    // Duplicate guard: disposal_events of non-voided LotSelection decisions (owned set for the helper).
+    let (items, delta, approximate) = {
+        let snap = app.snapshot.as_ref().unwrap();
+        let voided: std::collections::BTreeSet<&EventId> = snap
+            .events
+            .iter()
+            .filter_map(|e| {
+                if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                    Some(&v.target_event_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let already_selected: std::collections::BTreeSet<EventId> = snap
+            .events
+            .iter()
+            .filter(|e| !voided.contains(&e.id))
+            .filter_map(|e| {
+                if let EventPayload::LotSelection(ls) = &e.payload {
+                    Some(ls.disposal_event.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        (
+            filter_optimize_candidates(&proposal.per_disposal, &already_selected),
+            proposal.delta,
+            proposal.approximate,
+        )
+    };
+
+    if items.is_empty() {
+        // R0-M3: empty filtered list never opens a flow.
+        app.status = Some("No persistable optimizer improvements available".to_string());
+        return;
+    }
+
+    app.optimize_accept_flow = Some(OptimizeAcceptFlowState {
+        list: TargetList::new(items),
+        step: OptimizeAcceptStep::List,
+        delta,
+        approximate,
+    });
+}
+
+/// Build the optimize-accept confirmation modal from a chosen candidate.
+fn open_optimize_accept_modal(
+    app: &mut EditorApp,
+    item: OptimizeCandidateItem,
+    attestation: Option<String>,
+) {
+    let pick_count = item.picks.len();
+    let total_sat: btctax_core::Sat = item.picks.iter().map(|p| p.sat).sum();
+    let basis_label = optimize_basis_label(item.persistable);
+    app.optimize_accept_modal = Some(OptimizeAcceptModalState {
+        disposal: item.disposal,
+        picks: item.picks,
+        pick_count,
+        total_sat,
+        attestation,
+        basis_label,
+    });
+}
+
+/// Dispatch to the correct sub-handler depending on `OptimizeAcceptStep`.
+fn handle_optimize_accept_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.optimize_accept_flow.as_ref() {
+        Some(f) => match &f.step {
+            OptimizeAcceptStep::List => 0u8,
+            OptimizeAcceptStep::AttestText { .. } => 1u8,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_oa_list_key(app, key),
+        _ => handle_oa_attest_text_key(app, key),
+    }
+}
+
+/// List step: Enter → branch on persistability (`ContemporaneousNow` → modal; `NeedsAttestation` →
+/// attestation-text step). Esc → close flow. q → swallowed.
+fn handle_oa_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            let selected = app
+                .optimize_accept_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+            if let Some(item) = selected {
+                match item.persistable {
+                    Persistability::ContemporaneousNow => {
+                        open_optimize_accept_modal(app, item, None);
+                    }
+                    Persistability::NeedsAttestation => {
+                        if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                            flow.step = OptimizeAcceptStep::AttestText {
+                                item,
+                                buf: FieldBuffer::with_cap(FREETEXT_CAP),
+                                error: None,
+                            };
+                        }
+                    }
+                    Persistability::ForbiddenBroker2027 => {
+                        // Unreachable — pre-filtered out of the candidate list. Defensive no-op.
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.optimize_accept_flow = None;
+        }
+        _ => {
+            // All other keys (including 'q') swallowed while flow is open [R0-I2].
+        }
+    }
+}
+
+/// Attestation-text step (NeedsAttestation only): free-text entry of the contemporaneous-ID
+/// statement. Enter → non-empty required → modal. Esc → back to List. All printable chars (incl.
+/// 'q') are consumed by the buffer.
+fn handle_oa_attest_text_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                flow.step = OptimizeAcceptStep::List;
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                if let OptimizeAcceptStep::AttestText { buf, .. } = &mut flow.step {
+                    buf.pop_char();
+                }
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                if let OptimizeAcceptStep::AttestText { buf, error, .. } = &mut flow.step {
+                    buf.push_char(c);
+                    *error = None;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            // [R0-M4] "empty" = len==0 (checked before trimming). Store the text VERBATIM (CLI parity).
+            let (item, is_empty, text) = match app.optimize_accept_flow.as_ref() {
+                Some(f) => match &f.step {
+                    OptimizeAcceptStep::AttestText { item, buf, .. } => {
+                        (item.clone(), buf.is_empty(), buf.buf.clone())
+                    }
+                    _ => return,
+                },
+                None => return,
+            };
+            if is_empty {
+                if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                    if let OptimizeAcceptStep::AttestText { error, .. } = &mut flow.step {
+                        *error = Some(
+                            "attestation text is required (the contemporaneous-ID statement)"
+                                .to_string(),
+                        );
+                    }
+                }
+                return;
+            }
+            open_optimize_accept_modal(app, item, Some(text));
+        }
+        _ => {
+            // Non-text keys swallowed.
+        }
+    }
+}
+
+/// Handle a key press while the optimize-accept confirmation modal is open (chunk 4b, D4).
+///
+/// Enter → `persist_optimize_accept(session, disposal, picks, attestation, made, now)` (dual-write:
+///   LotSelection + optional attest row) → re-project + status + close. `Err(e)` → close modal,
+///   route through `on_persist_error`.
+/// Esc → close modal only (back to the prior step; nothing written).
+fn handle_optimize_accept_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (disposal, picks, attestation, basis_label) =
+                match app.optimize_accept_modal.as_ref() {
+                    Some(m) => (
+                        m.disposal.clone(),
+                        m.picks.clone(),
+                        m.attestation.clone(),
+                        m.basis_label,
+                    ),
+                    None => return,
+                };
+            let pick_count = picks.len();
+            let attested = attestation.is_some();
+            let now = time::OffsetDateTime::now_utc();
+            let made = btctax_core::conventions::tax_date(now, time::UtcOffset::UTC);
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.optimize_accept_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_optimize_accept(
+                    session,
+                    disposal.clone(),
+                    picks,
+                    attestation,
+                    made,
+                    now,
+                )
+            };
+
+            match save_result {
+                Ok(decision_id) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_optimize_accept_status(
+                                &snap,
+                                &disposal,
+                                &decision_id,
+                                pick_count,
+                                basis_label,
+                                attested,
+                            );
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.optimize_accept_modal = None;
+                    app.optimize_accept_flow = None;
+                }
+                Err(e) => {
+                    app.optimize_accept_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.optimize_accept_modal = None;
+        }
+        _ => {
+            // All other keys swallowed (blocking modal).
+        }
+    }
+}
+
+/// Derive the status string from RE-PROJECTED state after an optimize-accept save (chunk 4b, D4).
+///
+/// Three arms (spec D4): (1) `DecisionConflict` on `decision_id` (duplicate LotSelection — only via a
+/// failed-save race) → NEITHER-applies/method-order (reuses the select-lots arm-1 wording); (2)
+/// `LotSelectionInvalid` for the disposal → saved-but-invalid; (3) clean → recorded summary
+/// (+ "; attestation recorded" when attested).
+fn derive_optimize_accept_status(
+    snap: &btctax_tui::app::Snapshot,
+    disposal: &EventId,
+    decision_id: &EventId,
+    pick_count: usize,
+    basis_label: &str,
+    attested: bool,
+) -> String {
+    // Arm 1: DecisionConflict attributed to the decision_id.
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(decision_id) {
+            return format!(
+                "Saved, but DecisionConflict fired — neither selection applies (method order \
+                 governs); clear with Void flow (press 'v'), or quit the editor and run: \
+                 btctax reconcile void {} (see Compliance)",
+                decision_id.canonical()
+            );
+        }
+    }
+
+    // Arm 2: LotSelectionInvalid attributed to the disposal.
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::LotSelectionInvalid && b.event.as_ref() == Some(disposal) {
+            return "Optimizer selection saved but invalid — see Compliance; void ('v') and retry."
+                .to_string();
+        }
+    }
+
+    // Arm 3: clean.
+    let mut s = format!(
+        "Optimizer selection recorded for {} — {pick_count} lot(s); {basis_label}",
+        disposal.canonical()
+    );
+    if attested {
+        s.push_str("; attestation recorded");
+    }
+    s.push('.');
+    s
 }
 
 // ── Scroll helpers ────────────────────────────────────────────────────────────
@@ -14709,6 +15403,468 @@ mod tests {
         assert!(
             rendered_text(&terminal).contains("link-transfer"),
             "LT-RENDER: confirm modal overlay"
+        );
+    }
+
+    // ── Resolve-conflict flow (chunk 4b, D3) ─────────────────────────────────
+
+    /// Seed a vault with ONE unresolved ImportConflict on an Acquire (usd_cost 30000 → 50000).
+    fn seed_conflict_vault(vault: &std::path::Path, key: &std::path::Path, pp_str: &str) {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::append_import_batch;
+        use btctax_core::{EventId, WalletId};
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let target = EventId::import(Source::River, SourceRef::new("rc-e2e"));
+        let wallet = Some(WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        });
+        let ts = OffsetDateTime::from_unix_timestamp(1_740_000_000).unwrap();
+        let acq = |usd: rust_decimal::Decimal| {
+            vec![LedgerEvent {
+                id: target.clone(),
+                utc_timestamp: ts,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: usd,
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            }]
+        };
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        append_import_batch(session.conn(), &acq(dec!(30000))).unwrap();
+        session.save().unwrap();
+        append_import_batch(session.conn(), &acq(dec!(50000))).unwrap();
+        session.save().unwrap();
+    }
+
+    // ── KAT-C2-RC — cancel-path bytes-unchanged (resolve-conflict) ───────────
+    #[test]
+    fn kat_c2_rc_cancel_path_vault_bytes_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-c2rc-pass";
+        seed_conflict_vault(&vault, &key, pp_str);
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+        {
+            let mut app = open_app(&vault, pp_str);
+
+            // i → flow opens at List.
+            handle_key(&mut app, press(KeyCode::Char('i')));
+            assert!(app.resolve_conflict_flow.is_some(), "C2-RC: 'i' opens flow");
+
+            // q swallowed (flow stays open, editor does not quit).
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2-RC: q must not quit mid-flow");
+            assert!(app.resolve_conflict_flow.is_some(), "C2-RC: q swallowed");
+
+            // Enter → Choose step.
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(matches!(
+                app.resolve_conflict_flow.as_ref().map(|f| &f.step),
+                Some(ResolveConflictStep::Choose { .. })
+            ));
+
+            // toggle Accept ⇄ Reject.
+            handle_key(&mut app, press(KeyCode::Right));
+            assert!(matches!(
+                app.resolve_conflict_flow.as_ref().map(|f| &f.step),
+                Some(ResolveConflictStep::Choose {
+                    kind: ResolveKind::Reject,
+                    ..
+                })
+            ));
+            handle_key(&mut app, press(KeyCode::Left));
+
+            // Enter → modal.
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(app.resolve_conflict_modal.is_some(), "C2-RC: modal opens");
+
+            // Esc → modal closed, back to Choose (flow open).
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(app.resolve_conflict_modal.is_none());
+            assert!(matches!(
+                app.resolve_conflict_flow.as_ref().map(|f| &f.step),
+                Some(ResolveConflictStep::Choose { .. })
+            ));
+
+            // Esc → List; Esc → close.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(matches!(
+                app.resolve_conflict_flow.as_ref().map(|f| &f.step),
+                Some(ResolveConflictStep::List)
+            ));
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(app.resolve_conflict_flow.is_none(), "C2-RC: flow closed");
+        }
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(bytes_before, bytes_after, "C2-RC: cancel writes nothing");
+    }
+
+    // ── KAT-E2E-RC-ACCEPT — full 'i' accept path adopts new payload, clears blocker ──
+    #[test]
+    fn kat_e2e_rc_accept() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-rc-a-pass";
+        seed_conflict_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('i'))); // List
+        handle_key(&mut app, press(KeyCode::Enter)); // Choose (default Accept)
+        handle_key(&mut app, press(KeyCode::Enter)); // modal
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm & save
+
+        assert!(app.resolve_conflict_modal.is_none() && app.resolve_conflict_flow.is_none());
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.contains("accepted") && status.contains("import-conflict resolved"),
+            "E2E-RC-ACCEPT: status must confirm resolution; got {status:?}"
+        );
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::ImportConflict),
+            "E2E-RC-ACCEPT: ImportConflict blocker must clear"
+        );
+        let lot = snap
+            .state
+            .lots
+            .iter()
+            .find(|l| l.original_sat == 100_000)
+            .unwrap();
+        assert_eq!(
+            lot.usd_basis,
+            rust_decimal_macros::dec!(50000),
+            "E2E-RC-ACCEPT: lot must adopt the NEW basis 50000"
+        );
+    }
+
+    // ── KAT-E2E-RC-REJECT — full 'i' reject path keeps original, clears blocker ──
+    #[test]
+    fn kat_e2e_rc_reject() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-rc-r-pass";
+        seed_conflict_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('i'))); // List
+        handle_key(&mut app, press(KeyCode::Enter)); // Choose (Accept)
+        handle_key(&mut app, press(KeyCode::Right)); // toggle → Reject
+        handle_key(&mut app, press(KeyCode::Enter)); // modal
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm & save
+
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.contains("rejected") && status.contains("import-conflict resolved"),
+            "E2E-RC-REJECT: status must confirm resolution; got {status:?}"
+        );
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::ImportConflict),
+            "E2E-RC-REJECT: ImportConflict blocker must clear"
+        );
+        let lot = snap
+            .state
+            .lots
+            .iter()
+            .find(|l| l.original_sat == 100_000)
+            .unwrap();
+        assert_eq!(
+            lot.usd_basis,
+            rust_decimal_macros::dec!(30000),
+            "E2E-RC-REJECT: lot must keep the ORIGINAL basis 30000"
+        );
+    }
+
+    // ── Optimize-accept flow (chunk 4b, D4) ──────────────────────────────────
+
+    /// A single-lot candidate item for the flow-step tests.
+    fn oa_item(persistable: Persistability) -> OptimizeCandidateItem {
+        use btctax_core::identity::{LotId, Source, SourceRef};
+        OptimizeCandidateItem {
+            disposal: EventId::import(Source::River, SourceRef::new("oa-item-disp")),
+            wallet: btctax_core::WalletId::Exchange {
+                provider: "River".into(),
+                account: "main".into(),
+            },
+            date: time::macros::date!(2025 - 05 - 23),
+            persistable,
+            picks: vec![btctax_core::LotPick {
+                lot: LotId {
+                    origin_event_id: EventId::import(Source::River, SourceRef::new("oa-item-lot")),
+                    split_sequence: 0,
+                },
+                sat: 100_000,
+            }],
+        }
+    }
+
+    fn oa_flow_app(persistable: Persistability) -> EditorApp {
+        let mut app = EditorApp::new(PathBuf::new());
+        app.screen = EditorScreen::Browse;
+        app.optimize_accept_flow = Some(OptimizeAcceptFlowState {
+            list: TargetList::new(vec![oa_item(persistable)]),
+            step: OptimizeAcceptStep::List,
+            delta: rust_decimal_macros::dec!(-1234),
+            approximate: false,
+        });
+        app
+    }
+
+    // ── KAT-OA-CONTEMP-SKIP — ContemporaneousNow → modal directly (no text step) ──
+    #[test]
+    fn kat_oa_contemporaneous_skips_text_step() {
+        let mut app = oa_flow_app(Persistability::ContemporaneousNow);
+        handle_key(&mut app, press(KeyCode::Enter)); // pick
+        assert!(
+            app.optimize_accept_modal.is_some(),
+            "OA-CONTEMP: modal opens directly"
+        );
+        let m = app.optimize_accept_modal.as_ref().unwrap();
+        assert!(m.attestation.is_none(), "OA-CONTEMP: no attestation");
+        assert_eq!(m.basis_label, "Contemporaneous");
+        // Flow stayed at List (never entered AttestText).
+        assert!(matches!(
+            app.optimize_accept_flow.as_ref().map(|f| &f.step),
+            Some(OptimizeAcceptStep::List)
+        ));
+    }
+
+    // ── KAT-OA-NEEDS-ATTEST — NeedsAttestation → text step; empty rejected, text → modal ──
+    #[test]
+    fn kat_oa_needs_attestation_requires_nonempty_text() {
+        let mut app = oa_flow_app(Persistability::NeedsAttestation);
+        handle_key(&mut app, press(KeyCode::Enter)); // pick → AttestText
+        assert!(app.optimize_accept_modal.is_none(), "no modal yet");
+        assert!(matches!(
+            app.optimize_accept_flow.as_ref().map(|f| &f.step),
+            Some(OptimizeAcceptStep::AttestText { .. })
+        ));
+
+        // Empty text → Enter → error, still no modal.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.optimize_accept_modal.is_none(),
+            "OA-NEEDS: empty text must NOT open the modal"
+        );
+        let has_error = matches!(
+            app.optimize_accept_flow.as_ref().map(|f| &f.step),
+            Some(OptimizeAcceptStep::AttestText { error: Some(_), .. })
+        );
+        assert!(has_error, "OA-NEEDS: empty submit sets an error");
+
+        // Type text → Enter → modal opens, attested.
+        type_str(&mut app, "contemporaneous-id");
+        handle_key(&mut app, press(KeyCode::Enter));
+        let m = app
+            .optimize_accept_modal
+            .as_ref()
+            .expect("OA-NEEDS: non-empty text opens the modal");
+        assert_eq!(m.attestation.as_deref(), Some("contemporaneous-id"));
+        assert_eq!(m.basis_label, "AttestedRecording");
+    }
+
+    // ── KAT-E2E-OA-Z — full 'z' path via Session::optimize_proposal (attested) ──
+    fn oa_profile_2025() -> btctax_core::TaxProfile {
+        use rust_decimal_macros::dec;
+        btctax_core::TaxProfile {
+            filing_status: btctax_core::FilingStatus::Single,
+            ordinary_taxable_income: dec!(100000),
+            magi_excluding_crypto: dec!(100000),
+            qualified_dividends_and_other_pref_income: dec!(0),
+            other_net_capital_gain: dec!(0),
+            capital_loss_carryforward_in: btctax_core::Carryforward {
+                short: dec!(0),
+                long: dec!(0),
+            },
+            w2_ss_wages: dec!(0),
+            w2_medicare_wages: dec!(0),
+            schedule_c_expenses: dec!(0),
+        }
+    }
+
+    /// Seed a computable 2025 year: two same-wallet 2025 lots (A cheap $30k, B dearer $50k) + a 500k
+    /// sale (FIFO baseline consumes cheaper lot A → higher gain; the optimizer prefers dearer lot B →
+    /// a persistable proposed row). NO back-dated MethodElection (default FIFO config keeps 2025
+    /// computable — a MethodElection effective before its own made-date would fire
+    /// `MethodElectionBackdated`). Returns the sale's disposal EventId.
+    fn oa_seed_computable_sell(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> btctax_core::EventId {
+        use btctax_core::event::{
+            Acquire, BasisSource, DisposeKind, EventPayload, LedgerEvent, OutflowClass,
+            ReclassifyOutflow, TransferOut,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::{EventId, WalletId};
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let wallet = Some(WalletId::Exchange {
+            provider: "River".to_string(),
+            account: "main".to_string(),
+        });
+        let lot_a = EventId::import(Source::River, SourceRef::new("oa-lot-a"));
+        let lot_b = EventId::import(Source::River, SourceRef::new("oa-lot-b"));
+        let to_id = EventId::import(Source::River, SourceRef::new("oa-sell"));
+
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let ta = OffsetDateTime::from_unix_timestamp(1_739_000_000).unwrap(); // 2025-02 lot A
+        let tb = OffsetDateTime::from_unix_timestamp(1_741_000_000).unwrap(); // 2025-03 lot B
+        let tc = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(); // 2025-05 sell
+        let td = OffsetDateTime::from_unix_timestamp(1_748_100_000).unwrap(); // decisions
+        let batch = vec![
+            LedgerEvent {
+                id: lot_a.clone(),
+                utc_timestamp: ta,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 1_000_000,
+                    usd_cost: dec!(30000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            },
+            LedgerEvent {
+                id: lot_b.clone(),
+                utc_timestamp: tb,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 1_000_000,
+                    usd_cost: dec!(50000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            },
+            LedgerEvent {
+                id: to_id.clone(),
+                utc_timestamp: tc,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::TransferOut(TransferOut {
+                    sat: 500_000,
+                    fee_sat: None,
+                    dest_addr: None,
+                    txid: None,
+                }),
+            },
+        ];
+        btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+        let ro = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: to_id.clone(),
+            as_: OutflowClass::Dispose {
+                kind: DisposeKind::Sell,
+            },
+            principal_proceeds_or_fmv: dec!(30000),
+            fee_usd: None,
+            donee: None,
+        });
+        btctax_core::persistence::append_decision(session.conn(), ro, td, UtcOffset::UTC, None)
+            .unwrap();
+        session.save().unwrap();
+        to_id
+    }
+
+    #[test]
+    fn kat_e2e_oa_z_attested_persists_lotselection_and_attest_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-oa-pass";
+
+        let to_id = oa_seed_computable_sell(&vault, &key, pp_str);
+
+        // Set a 2025 profile so `optimize_year` computes (else YearNotComputable → no open).
+        {
+            let mut s = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            btctax_cli::tax_profile::set(s.conn(), 2025, &oa_profile_2025()).unwrap();
+            s.save().unwrap();
+        }
+
+        let mut app = open_app(&vault, pp_str);
+        app.selected_year = 2025;
+
+        // z → opener recomputes via Session::optimize_proposal; the optimizer prefers dearer lot B
+        // (lower gain) over FIFO's lot A → a persistable proposed row for the 2025 sale.
+        handle_key(&mut app, press(KeyCode::Char('z')));
+        let flow = app
+            .optimize_accept_flow
+            .as_ref()
+            .expect("OA-Z: flow must open with a persistable candidate");
+        assert!(
+            flow.list.items.iter().any(|c| c.disposal == to_id),
+            "OA-Z: the 2025 sale must be a candidate"
+        );
+        // Already-executed (made 2026 > sale 2025), own-books exchange → NeedsAttestation.
+        assert!(
+            matches!(
+                flow.list
+                    .items
+                    .iter()
+                    .find(|c| c.disposal == to_id)
+                    .unwrap()
+                    .persistable,
+                Persistability::NeedsAttestation
+            ),
+            "OA-Z: an already-executed own-books disposal needs attestation"
+        );
+
+        handle_key(&mut app, press(KeyCode::Enter)); // pick → AttestText
+        type_str(&mut app, "attest-2025");
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(app.optimize_accept_modal.is_some(), "OA-Z: modal opens");
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm & save
+
+        assert!(app.optimize_accept_modal.is_none() && app.optimize_accept_flow.is_none());
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.contains("Optimizer selection recorded")
+                && status.contains("attestation recorded"),
+            "OA-Z: status must confirm the attested recording; got {status:?}"
+        );
+
+        // The attestation row is co-persisted for the disposal.
+        let att =
+            btctax_cli::optimize_attest::get(app.session.as_ref().unwrap().conn(), &to_id).unwrap();
+        assert_eq!(
+            att.as_deref(),
+            Some("attest-2025"),
+            "OA-Z: attest row co-persisted with the LotSelection"
+        );
+
+        // The re-projected snapshot carries a LotSelection targeting the sale.
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            snap.events.iter().any(|e| matches!(
+                &e.payload,
+                btctax_core::EventPayload::LotSelection(ls) if ls.disposal_event == to_id
+            )),
+            "OA-Z: a LotSelection for the sale must be persisted"
         );
     }
 }

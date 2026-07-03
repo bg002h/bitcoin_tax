@@ -6,7 +6,8 @@ use crate::donation_details;
 use crate::optimize_attest;
 use crate::tax_profile;
 use crate::CliError;
-use btctax_adapters::BundledPrices;
+use btctax_adapters::{BundledPrices, BundledTaxTables};
+use btctax_core::conventions::tax_date;
 use btctax_core::persistence::{init_schema, load_all};
 use btctax_core::{project, LedgerEvent, LedgerState, ProjectionConfig};
 use btctax_core::{DonationDetails, EventId, TaxProfile};
@@ -142,6 +143,41 @@ impl Session {
         let state = project(&events, &prices, &cfg);
         Ok((events, state, cfg))
     }
+
+    /// Recompute the Mode-1 optimizer proposal for `year` on the HELD session. READ-ONLY: appends and
+    /// persists NOTHING (a clone-fold-discard recompute).
+    ///
+    /// The TUI editor's optimize-accept opener calls this to obtain a FRESH proposal (NFR4 — never
+    /// trusts a stale one) WITHOUT opening a second `Session` (a second open would deadlock on the
+    /// held VaultLock, and `cmd::optimize::accept` is forbidden to the editor for the same reason).
+    /// Assembles `optimize_year`'s inputs exactly as `cmd::optimize::run`/`accept` do — events + config
+    /// from this conn, bundled prices + tables, a FRESH `tax_profile(year)` read (not the cached snap),
+    /// the attested set, and `proposal_made = tax_date(now, UtcOffset::UTC)` — and maps `OptimizeError`
+    /// through the crate-internal `map_opt_err` (which is `pub(crate)` and not TUI-reachable). `now`
+    /// is injected by the caller for determinism.
+    pub fn optimize_proposal(
+        &self,
+        year: i32,
+        now: time::OffsetDateTime,
+    ) -> Result<btctax_core::OptimizeProposal, CliError> {
+        let (events, _state, cfg) = self.load_events_and_project()?;
+        let profile = self.tax_profile(year)?;
+        let prices = BundledPrices::load()?;
+        let tables = BundledTaxTables::load();
+        let attested = self.optimize_attested_set()?;
+        let proposal_made = tax_date(now, time::UtcOffset::UTC);
+        btctax_core::optimize_year(
+            &events,
+            &prices,
+            &cfg,
+            year,
+            profile.as_ref(),
+            &tables,
+            &attested,
+            proposal_made,
+        )
+        .map_err(crate::cmd::optimize::map_opt_err)
+    }
 }
 
 #[cfg(test)]
@@ -232,5 +268,117 @@ mod tests {
             "blocker count must match"
         );
         assert_eq!(cfg, cfg2, "ProjectionConfig must match");
+    }
+
+    /// `Session::optimize_proposal` recomputes the Mode-1 proposal on the HELD session (READ-ONLY,
+    /// no second open). For a 2025 year with two same-wallet lots and a 500k sale, the FIFO baseline
+    /// consumes the cheaper lot A (higher gain); the optimizer prefers the dearer lot B → a
+    /// per-disposal row whose proposed_selection differs from current_selection, with `delta ≤ 0`.
+    #[test]
+    fn optimize_proposal_recomputes_a_persistable_proposal_on_held_session() {
+        use btctax_core::event::{
+            Acquire, BasisSource, DisposeKind, EventPayload, LedgerEvent, OutflowClass,
+            ReclassifyOutflow, TransferOut,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, append_import_batch};
+        use btctax_core::{Carryforward, EventId, FilingStatus, TaxProfile, WalletId};
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        Session::create(&vault, &pp()).unwrap();
+        let mut s = Session::open(&vault, &pp()).unwrap();
+
+        let wallet = Some(WalletId::Exchange {
+            provider: "River".to_string(),
+            account: "main".to_string(),
+        });
+        let lot_a = EventId::import(Source::River, SourceRef::new("op-lot-a"));
+        let lot_b = EventId::import(Source::River, SourceRef::new("op-lot-b"));
+        let to_id = EventId::import(Source::River, SourceRef::new("op-sell"));
+        let ta = OffsetDateTime::from_unix_timestamp(1_739_000_000).unwrap();
+        let tb = OffsetDateTime::from_unix_timestamp(1_741_000_000).unwrap();
+        let tc = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+        let td = OffsetDateTime::from_unix_timestamp(1_748_100_000).unwrap();
+        let batch = vec![
+            LedgerEvent {
+                id: lot_a.clone(),
+                utc_timestamp: ta,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 1_000_000,
+                    usd_cost: dec!(30000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            },
+            LedgerEvent {
+                id: lot_b.clone(),
+                utc_timestamp: tb,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 1_000_000,
+                    usd_cost: dec!(50000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            },
+            LedgerEvent {
+                id: to_id.clone(),
+                utc_timestamp: tc,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::TransferOut(TransferOut {
+                    sat: 500_000,
+                    fee_sat: None,
+                    dest_addr: None,
+                    txid: None,
+                }),
+            },
+        ];
+        append_import_batch(s.conn(), &batch).unwrap();
+        let ro = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: to_id.clone(),
+            as_: OutflowClass::Dispose {
+                kind: DisposeKind::Sell,
+            },
+            principal_proceeds_or_fmv: dec!(30000),
+            fee_usd: None,
+            donee: None,
+        });
+        append_decision(s.conn(), ro, td, UtcOffset::UTC, None).unwrap();
+        let profile = TaxProfile {
+            filing_status: FilingStatus::Single,
+            ordinary_taxable_income: dec!(100000),
+            magi_excluding_crypto: dec!(100000),
+            qualified_dividends_and_other_pref_income: dec!(0),
+            other_net_capital_gain: dec!(0),
+            capital_loss_carryforward_in: Carryforward::default(),
+            w2_ss_wages: dec!(0),
+            w2_medicare_wages: dec!(0),
+            schedule_c_expenses: dec!(0),
+        };
+        crate::tax_profile::set(s.conn(), 2025, &profile).unwrap();
+        s.save().unwrap();
+
+        let now = OffsetDateTime::from_unix_timestamp(1_752_000_000).unwrap();
+        let proposal = s.optimize_proposal(2025, now).unwrap();
+        assert!(
+            proposal.delta <= dec!(0),
+            "delta must be ≤ 0 (baseline-seeded)"
+        );
+        let row = proposal
+            .per_disposal
+            .iter()
+            .find(|d| d.disposal == to_id)
+            .expect("the 2025 sale must be in the proposal");
+        assert_ne!(
+            row.proposed_selection, row.current_selection,
+            "the optimizer must propose the dearer lot (a change from FIFO)"
+        );
     }
 }
