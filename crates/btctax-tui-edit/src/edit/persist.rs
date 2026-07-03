@@ -482,6 +482,52 @@ pub fn persist_optimize_accept(
     Ok(id)
 }
 
+/// Append a `SafeHarborAllocation` decision event (chunk 5, D5) and atomically save the vault.
+///
+/// `lots`/`method`/`pre2025_method` come from the allocate flow (`lots` + `pre2025_method` computed
+/// ONCE at open via `Session::safe_harbor_residue`; `method` is the user's toggle). `timely_allocation_
+/// attested` is hard-coded `false` — creation yields a REVOCABLE allocation (voidable while inert). The
+/// `as_of_date` is the fixed `TRANSITION_DATE` (2025-01-01) universal snapshot. `now` is INJECTED at
+/// Enter-press for test determinism.
+///
+/// # Standard single-append template (NOT the attest special-case)
+/// A single `append_decision` rolls back CLEANLY on a failed save — no latch, no side-table. On
+/// `Err(save)`, `save_or_rollback` reverts the in-memory DB (retry re-appends with the SAME
+/// `decision_seq`); errors route through `EditorApp::on_persist_error`. Contrast
+/// `persist_safe_harbor_attest`, whose two-decision batch is unrecoverable and needs the
+/// `attest_save_failed` latch.
+///
+/// # Called only from the safe-harbor-allocate confirmation modal
+/// Same procedural guarantee as `persist_tax_profile` (see doc there).
+pub fn persist_safe_harbor_allocate(
+    session: &mut btctax_cli::Session,
+    lots: Vec<btctax_core::AllocLot>,
+    method: btctax_core::AllocMethod,
+    pre2025_method: btctax_core::LotMethod,
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, PersistError> {
+    use btctax_core::event::SafeHarborAllocation;
+    use btctax_core::EventPayload;
+
+    let pre = session.snapshot()?;
+    let payload = EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+        lots,
+        as_of_date: btctax_core::conventions::TRANSITION_DATE,
+        method,
+        timely_allocation_attested: false,
+        pre2025_method,
+    });
+    let id = btctax_core::persistence::append_decision(
+        session.conn(),
+        payload,
+        now,
+        time::UtcOffset::UTC,
+        None,
+    )?;
+    save_or_rollback(session, pre)?;
+    Ok(id)
+}
+
 /// Store `DonationDetails` for `event_id` in the `donation_details` side-table
 /// and atomically save the vault (last-write-wins upsert; NOT a decision event).
 ///
@@ -3098,5 +3144,215 @@ mod tests {
         assert_eq!(post.len(), pre.len(), "append reverted");
         let att = btctax_cli::optimize_attest::get(session.conn(), &disposal).unwrap();
         assert_eq!(att, None, "attest set reverted by the whole-DB restore");
+    }
+
+    // ── KAT-P-ALLOCATE-STRICT-PREFIX — chunk 5, D5 ───────────────────────────
+    //
+    // persist_safe_harbor_allocate appends EXACTLY one SafeHarborAllocation to the tail, with
+    // timely_allocation_attested == false, as_of_date == TRANSITION_DATE, and the supplied
+    // method/pre2025_method. Strict-prefix: post == pre ++ [new]; returned id == tail row; payload
+    // round-trips.
+    #[test]
+    fn kat_persist_allocate_single_append_strict_prefix() {
+        use btctax_core::event::{EventPayload, SafeHarborAllocation};
+        use btctax_core::persistence::{append_decision, load_all_ordered};
+        use btctax_core::{AllocLot, AllocMethod, EventId, LotMethod, WalletId};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p-alloc-sp-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        // Seed one decision so pre MAX(decision_seq) == 1 → tail must be seq 2.
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let p = EventPayload::MethodElection(btctax_core::event::MethodElection {
+                effective_from: date!(2024 - 01 - 01),
+                method: LotMethod::Fifo,
+            });
+            append_decision(
+                session.conn(),
+                p,
+                OffsetDateTime::from_unix_timestamp(1_700_001_000).unwrap(),
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+        }
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+        assert_eq!(pre_max_seq, 1, "pre max decision_seq must be 1");
+
+        let lots = vec![AllocLot {
+            wallet: WalletId::Exchange {
+                provider: "River".to_string(),
+                account: "main".to_string(),
+            },
+            sat: 20_000_000,
+            usd_basis: dec!(8550.00),
+            acquired_at: date!(2024 - 01 - 15),
+            dual_loss_basis: None,
+            donor_acquired_at: None,
+        }];
+        let now = OffsetDateTime::from_unix_timestamp(1_752_000_000).unwrap();
+        let returned_id = persist_safe_harbor_allocate(
+            &mut session,
+            lots.clone(),
+            AllocMethod::ProRata,
+            LotMethod::Hifo,
+            now,
+        )
+        .unwrap();
+
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 1, "exactly one append");
+        assert_eq!(
+            &post[..pre.len()],
+            pre.as_slice(),
+            "first pre.len() rows unchanged (strict prefix)"
+        );
+        let tail = &post[pre.len()];
+        let tail_seq = tail.decision_seq.expect("tail must have decision_seq");
+        assert_eq!(tail_seq, (pre_max_seq + 1) as i64, "tail seq == pre_max+1");
+        assert_eq!(
+            returned_id,
+            EventId::Decision {
+                seq: tail_seq as u64
+            },
+            "returned id must equal the tail Decision id"
+        );
+
+        // Exactly one SafeHarborAllocation in the whole log; it is the tail; attested == false.
+        let allocs: Vec<SafeHarborAllocation> = post
+            .iter()
+            .filter_map(
+                |r| match serde_json::from_str::<EventPayload>(&r.payload_json).unwrap() {
+                    EventPayload::SafeHarborAllocation(a) => Some(a),
+                    _ => None,
+                },
+            )
+            .collect();
+        assert_eq!(allocs.len(), 1, "exactly one SafeHarborAllocation appended");
+        let a = &allocs[0];
+        assert!(
+            !a.timely_allocation_attested,
+            "creation must be REVOCABLE (timely_allocation_attested == false)"
+        );
+        assert_eq!(a.as_of_date, btctax_core::conventions::TRANSITION_DATE);
+        assert_eq!(a.method, AllocMethod::ProRata, "method threaded verbatim");
+        assert_eq!(
+            a.pre2025_method,
+            LotMethod::Hifo,
+            "pre2025_method threaded verbatim (G5)"
+        );
+        assert_eq!(a.lots, lots, "lots threaded verbatim");
+    }
+
+    // ── KAT-P-ALLOCATE-ROLLBACK — chunk 5, D5 (single append rolls back cleanly) ──
+    #[cfg(unix)]
+    #[test]
+    fn kat_persist_allocate_rolls_back_on_failed_save() {
+        use btctax_core::event::EventPayload;
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_core::{AllocLot, AllocMethod, LotMethod, WalletId};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use std::os::unix::fs::PermissionsExt;
+        use time::{macros::date, OffsetDateTime};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p-alloc-rb-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        // Root-skip guard (chmod is a no-op as root).
+        {
+            let probe = dir.path().join("probe.tmp");
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("alloc-rollback KAT: skipping — chmod did not deny writes (root?)");
+                return;
+            }
+        }
+
+        let lots = vec![AllocLot {
+            wallet: WalletId::Exchange {
+                provider: "River".to_string(),
+                account: "main".to_string(),
+            },
+            sat: 20_000_000,
+            usd_basis: dec!(8550.00),
+            acquired_at: date!(2024 - 01 - 15),
+            dual_loss_basis: None,
+            donor_acquired_at: None,
+        }];
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let now = OffsetDateTime::from_unix_timestamp(1_752_000_000).unwrap();
+
+        // Make the vault's parent read-only → save() fails inside the persist fn.
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result = persist_safe_harbor_allocate(
+            &mut session,
+            lots.clone(),
+            AllocMethod::ActualPosition,
+            LotMethod::Fifo,
+            now,
+        );
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(
+            matches!(result, Err(PersistError::RolledBack(_))),
+            "failed save must return RolledBack (single append rolls back cleanly); got: {result:?}"
+        );
+
+        // In-memory log reverted: NO SafeHarborAllocation residue.
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post.len(),
+            pre.len(),
+            "rollback reverts the append (no residue)"
+        );
+        assert!(
+            post.iter().all(|r| !matches!(
+                serde_json::from_str::<EventPayload>(&r.payload_json).unwrap(),
+                EventPayload::SafeHarborAllocation(_)
+            )),
+            "no SafeHarborAllocation may survive the rollback"
+        );
+
+        // Retry after restoring perms is CLEAN (re-appends with the SAME decision_seq).
+        let retry = persist_safe_harbor_allocate(
+            &mut session,
+            lots,
+            AllocMethod::ActualPosition,
+            LotMethod::Fifo,
+            now,
+        )
+        .unwrap();
+        let post2 = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post2.len(), pre.len() + 1, "retry appends exactly one");
+        assert_eq!(
+            retry,
+            btctax_core::EventId::Decision {
+                seq: post2.last().unwrap().decision_seq.unwrap() as u64
+            },
+            "retry id matches the tail row"
+        );
     }
 }

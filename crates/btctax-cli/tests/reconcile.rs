@@ -916,6 +916,49 @@ cb-pre,2024-01-15 12:00:00 UTC,Buy,BTC,0.20000000,USD,42500.00,8500.00,8550.00,5
     );
 }
 
+/// Chunk-5 Task 1 KAT: `Session::safe_harbor_residue` returns EXACTLY the lots the CLI command
+/// appends, AND the returned `pre2025_method` equals the recorded `pre2025_method` on the appended
+/// allocation [R0-M1]. Guards the DRY refactor (the helper is the single source of the pre-2025
+/// subset, shared by `cmd::reconcile::safe_harbor_allocate` and the TUI allocate opener).
+#[test]
+fn safe_harbor_residue_matches_command_lots() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_timebarred(dir.path()); // pre-2025 0.20 BTC lot + a 2025 Sell
+    cmd::admin::set_pre2025_method(&vault, &pp(), LotMethod::Fifo, true).unwrap();
+
+    // Read the residue via the helper (READ-ONLY: appends/persists nothing).
+    let (helper_lots, helper_method) = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        s.safe_harbor_residue().unwrap()
+    };
+    assert!(
+        !helper_lots.is_empty(),
+        "pre-2025 residue must be non-empty"
+    );
+
+    // Append via the command, then load the persisted allocation.
+    cmd::reconcile::safe_harbor_allocate(&vault, &pp(), AllocMethod::ActualPosition, false, now())
+        .unwrap();
+    let s = Session::open(&vault, &pp()).unwrap();
+    let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+    let alloc = events
+        .iter()
+        .find_map(|e| match &e.payload {
+            EventPayload::SafeHarborAllocation(a) => Some(a.clone()),
+            _ => None,
+        })
+        .expect("SafeHarborAllocation persisted");
+
+    assert_eq!(
+        helper_lots, alloc.lots,
+        "helper lots must equal the command-appended lots"
+    );
+    assert_eq!(
+        helper_method, alloc.pre2025_method,
+        "helper method must equal the recorded pre2025_method [R0-M1]"
+    );
+}
+
 // ── Task 5: select-lots + import-selections + set_forward_method ────────────────────────────────
 
 /// Emits a `LotSelection` decision for a specific disposal. Uses a synthetic buy+sell fixture

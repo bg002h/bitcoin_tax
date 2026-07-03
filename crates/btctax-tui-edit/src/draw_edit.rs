@@ -16,11 +16,11 @@ use crate::edit::form::{
     OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep, OutflowKind,
     ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
     ReclassifyOutflowModalState, ReclassifyOutflowStep, ResolveConflictFlowState,
-    ResolveConflictModalState, ResolveConflictStep, ResolveKind, SafeHarborAttestFlowState,
-    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
-    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
-    SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState, VoidModalState,
-    DONATION_FIELD_LABELS, FIELD_LABELS,
+    ResolveConflictModalState, ResolveConflictStep, ResolveKind, SafeHarborAllocateFlowState,
+    SafeHarborAllocateModalState, SafeHarborAttestFlowState, SafeHarborAttestStep,
+    SelectLotsFlowState, SelectLotsModalState, SelectLotsStep, SetDonationDetailsFlowState,
+    SetDonationDetailsModalState, SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState,
+    SetFmvStep, VoidFlowState, VoidModalState, DONATION_FIELD_LABELS, FIELD_LABELS,
 };
 use crate::editor::{EditorApp, EditorScreen};
 use btctax_core::{DisposeKind, InboundClass, OutflowClass, Persistability};
@@ -340,6 +340,13 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.optimize_accept_modal.as_ref() {
         draw_optimize_accept_modal(frame, area, modal);
+    }
+    // Safe-harbor-allocate flow overlay (chunk 5, D2/D4).
+    if let Some(flow) = app.safe_harbor_allocate_flow.as_mut() {
+        draw_safe_harbor_allocate_preview(frame, area, flow);
+    }
+    if let Some(modal) = app.safe_harbor_allocate_modal.as_ref() {
+        draw_safe_harbor_allocate_modal(frame, area, modal);
     }
 }
 
@@ -3018,6 +3025,205 @@ fn draw_optimize_accept_modal(frame: &mut Frame, area: Rect, modal: &OptimizeAcc
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Red))
         .title(" Confirm: optimize-accept — WRITES THE VAULT ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Exact BTC string from a satoshi count (8 dp, no float). `100_000_000 sat = 1.00000000 BTC`.
+fn fmt_btc(sat: btctax_core::Sat) -> String {
+    format!("{}.{:08}", sat / 100_000_000, (sat % 100_000_000).abs())
+}
+
+/// Render the safe-harbor-allocate Preview (chunk 5, D2). Header + live method toggle + recorded
+/// pre-2025 method + scrollable residue-lot table + totals footer + revocable framing/hint.
+fn draw_safe_harbor_allocate_preview(
+    frame: &mut Frame,
+    area: Rect,
+    flow: &mut SafeHarborAllocateFlowState,
+) {
+    let modal_rect = centered_rect(96, 24, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title(" SAFE-HARBOR ALLOCATE — pre-2025 Universal residue snapshot @ 2025-01-01 ");
+    let inner = outer.inner(modal_rect);
+    frame.render_widget(outer, modal_rect);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(4),
+        ])
+        .split(inner);
+
+    // ── Banner: method (live toggle) + recorded pre-2025 method ───────────────
+    let banner_lines = vec![
+        Line::from(vec![
+            Span::raw("Method (Tab to change): "),
+            Span::styled(
+                format!("{:?}", flow.method),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(Span::styled(
+            format!("pre-2025 method (recorded): {:?}", flow.pre2025_method),
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "(both methods seed from the same per-wallet actuals; the tag sets only the \
+             timebar rule — the lots below are identical)",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    frame.render_widget(Paragraph::new(banner_lines), chunks[0]);
+
+    // ── Residue-lot table ─────────────────────────────────────────────────────
+    let header_cells = [
+        "Wallet",
+        "BTC",
+        "usd_basis",
+        "acquired_at",
+        "loss_basis",
+        "donor_date",
+    ]
+    .iter()
+    .map(|h| Cell::from(*h).style(Style::default().add_modifier(Modifier::BOLD)));
+    let header = Row::new(header_cells).height(1);
+
+    let selected_idx = flow.list.table_state.selected();
+    let rows: Vec<Row> = flow
+        .list
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let style = if selected_idx == Some(i) {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            let loss = r
+                .dual_loss_basis
+                .map(|v| format!("{v:.2}"))
+                .unwrap_or_else(|| "—".to_string());
+            let donor = r
+                .donor_acquired_at
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "—".to_string());
+            Row::new(vec![
+                Cell::from(wallet_label(&r.wallet)).style(style),
+                Cell::from(fmt_btc(r.sat)).style(style),
+                Cell::from(format!("{:.2}", r.usd_basis)).style(style),
+                Cell::from(r.acquired_at.to_string()).style(style),
+                Cell::from(loss).style(style),
+                Cell::from(donor).style(style),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(22),
+            Constraint::Length(14),
+            Constraint::Length(14),
+            Constraint::Length(12),
+            Constraint::Length(12),
+            Constraint::Min(10),
+        ],
+    )
+    .header(header);
+    frame.render_stateful_widget(table, chunks[1], &mut flow.list.table_state);
+
+    // ── Totals footer + framing + hint ────────────────────────────────────────
+    let footer_lines = vec![
+        Line::from(Span::styled(
+            format!(
+                "{} lot(s) · Σ {} BTC · Σ basis ${:.2}",
+                flow.lots.len(),
+                fmt_btc(flow.total_sat),
+                flow.total_basis
+            ),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Creates a REVOCABLE allocation (unattested). TIMEBARRED until you attest with 'a'. \
+             Void with 'v' while inert.",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "Tab: method  ↑/↓: scroll  Enter: confirm  Esc: cancel",
+            Style::default().fg(Color::Cyan),
+        )),
+    ];
+    frame.render_widget(Paragraph::new(footer_lines), chunks[2]);
+}
+
+/// Render the safe-harbor-allocate confirmation modal (chunk 5, D4). Revocable framing — NOT
+/// typed-word (creation is reversible; contrast attest's ATTEST gate).
+fn draw_safe_harbor_allocate_modal(
+    frame: &mut Frame,
+    area: Rect,
+    modal: &SafeHarborAllocateModalState,
+) {
+    let lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Create SAFE-HARBOR ALLOCATION?",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!("    method          : {:?}", modal.method)),
+        Line::from(format!(
+            "    pre-2025 method : {:?}   (recorded, immutable)",
+            modal.pre2025_method
+        )),
+        Line::from(format!(
+            "    as_of_date      : {}",
+            btctax_core::conventions::TRANSITION_DATE
+        )),
+        Line::from(format!(
+            "    lots            : {}  (Σ {} BTC, Σ basis ${:.2})",
+            modal.lot_count,
+            fmt_btc(modal.total_sat),
+            modal.total_basis
+        )),
+        Line::from("    timely_attested : false  → REVOCABLE"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  This is a REVOCABLE snapshot: voidable ('v') while inert, TIMEBARRED until",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "  you attest ('a', which makes it §7.4-IRREVOCABLE).",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+        Line::from("  Appended as ONE decision event, saved via the vault's atomic write path."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  [Enter] Create     [Esc] Cancel — writes nothing",
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from(""),
+    ];
+
+    let height = (lines.len() + 2) as u16;
+    let modal_rect = centered_rect(78, height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red))
+        .title(" Confirm: safe-harbor allocate — WRITES THE VAULT ");
     let inner = block.inner(modal_rect);
     frame.render_widget(block, modal_rect);
     frame.render_widget(Paragraph::new(lines), inner);
