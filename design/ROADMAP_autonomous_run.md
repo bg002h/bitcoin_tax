@@ -11,8 +11,8 @@ constraint (both edit the 9 opener heads); B-before-C/D is a safety + decay + te
 |---|---|---|---|
 | A | `tui-edit-save-rollback` (#9) | `Vault::snapshot`/`restore` + `save_or_rollback` over the 8 persist fns; `rollback_failed` latch. | ✅ **SHIPPED** (main `8c8b924`) |
 | B | `tui-edit-hardening` (6 items) | #1 SelfTransfer, #2 pre-2025 Universal gate, #3 UncoveredDisposal pre-filter, #6 FIELD_CAP, #7 void-list effective-alloc pre-filter, #8 quit-first. | ✅ **SHIPPED** (main `755e47c`) |
-| C | chunk 4 — import decisions | link-transfer, classify-raw, accept/reject-conflict, optimize-accept (mirror reconcile.rs `:151/:178/:194/:211` + cmd/optimize.rs). LARGE; split 4a/4b if it overruns. | **IN FLIGHT** — design |
-| D | chunk 5 — safe-harbor-allocate | CREATION side of SafeHarborAllocation (pre-2025 residue math). Completes create→attest→void loop. LARGE/COMPLEX. | pending C |
+| C | chunk 4 — import decisions | 4a link-transfer+classify-raw + 4b resolve-conflict+optimize-accept. | ✅ **SHIPPED** (main `f31c1d6`; 921 tests) |
+| D | chunk 5 — safe-harbor-allocate | CREATION side of SafeHarborAllocation (`reconcile.rs:250`; pre-2025 residue math via `transition.rs`). Completes create→attest→void loop. LARGE/COMPLEX. | **IN FLIGHT** — design |
 | E | chunk-5 burndown (TERMINAL) | Clear C+D whole-branch-review followups (E4+E5). **Run STOPS here.** | pending D |
 
 ## Carried hazards / watch-items (from the sequencing architect)
