@@ -1,8 +1,9 @@
 # SPEC — bulk-resolve-conflict (+ persist_bulk_decisions extraction)
 
 **Source baseline:** `main` @ `719e9fe` (all anchors verified at write time).
-**Review status: R0 round 1 folded (0C / 1I / 2M / 1N — GATE BLOCKED then folded); awaiting R0 round 2.
-Review: `reviews/R0-spec-bulk-resolve-conflict-round-1.md`.**
+**Review status: R0-GREEN (2 rounds; 0 Critical / 0 Important). Reviews:
+`reviews/R0-spec-bulk-resolve-conflict-round-{1,2}.md` (round 1: 0C/1I — the CLI `ResolveKind` cross-crate
+catch; round 2: 0C/0I, 2 cosmetic stale-name Nits swept). Cleared to implement.**
 **Design lineage:** architect program design for "bulk reconcile for the OTHER decision types" (queue item
 3), user-approved **safety-first** sequencing. This is **Cycle 2** (the extraction folded in as Task 1;
 Cycle 1 per the roadmap). Roadmap: memory `bulk-reconcile-other-types-roadmap`.
@@ -19,7 +20,7 @@ non-revocable-batch ceremony early.
 - **btctax-core:** UNCHANGED — reuses existing `SupersedeImport`/`RejectImport` (`event.rs:192/196`). No
   new decision variant → no forward-only serde break.
 - **btctax-cli:** MINOR/additive — `Session::bulk_resolve_conflict_plan` + `cmd::reconcile::
-  {bulk_resolve_conflict_plan, apply_bulk_resolve_conflict}` + a `Reconcile` clap variant.
+  {bulk_resolve_conflict_plan, apply_bulk_accept_conflicts, apply_bulk_reject_conflicts}` + a `Reconcile` clap variant.
 - **btctax-tui-edit:** internal refactor (Task 1, zero behavior) + MINOR/additive (Task 2 `C` flow +
   `persist_bulk_resolve_conflict` — a thin wrapper over `persist_bulk_decisions`).
 - **Lockstep: NONE** (no `docs/manual/`, no GUI crate).
@@ -110,7 +111,8 @@ the shipped single-item split `accept_conflict`/`reject_conflict`, `reconcile.rs
 ```
 reconcile bulk-resolve-conflict (--accept | --reject) [--dry-run] [--yes]
 ```
-`--accept`/`--reject` is REQUIRED (the batch-wide `ResolveKind`; mutually exclusive). Empty candidate set
+`--accept`/`--reject` is REQUIRED (a batch-wide accept/reject bool — NO `ResolveKind` in the CLI [R0-r2];
+mutually exclusive). Empty candidate set
 → "no unresolved import conflicts" + exit 0. `--dry-run` → preview + stop. `--yes`|interactive `y/N`.
 Print "accepted/rejected N import conflicts".
 
