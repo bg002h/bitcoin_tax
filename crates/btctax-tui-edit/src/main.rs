@@ -314,7 +314,7 @@ fn handle_modal_key(app: &mut EditorApp, key: KeyEvent) {
                     // [R0-M1] Failed-save semantics: close modal, keep form (buffers intact),
                     // set error status. Do NOT re-project (vault unchanged on disk).
                     app.mutation_modal = None;
-                    app.status = Some(format!("Save error: {e}"));
+                    app.on_persist_error(e);
                 }
             }
         }
@@ -401,6 +401,78 @@ fn handle_form_key(app: &mut EditorApp, key: KeyEvent) {
     }
 }
 
+impl EditorApp {
+    /// The residue-latch status, if any mutating opener must refuse. `attest_save_failed` keeps its
+    /// exact shipped wording (so `kat_e2e_attest_errlatch_chmod` stays green); `rollback_failed`
+    /// reports the unrevertable-residue remedy. `None` when neither latch is set. [save-rollback]
+    fn residue_latch_status(&self) -> Option<String> {
+        if self.attest_save_failed {
+            Some(
+                "A failed attest save left unsaved decisions in memory — quit the editor \
+                 (the unsaved attestation is discarded on quit), then retry via CLI: \
+                 btctax reconcile safe-harbor-attest"
+                    .to_string(),
+            )
+        } else if self.rollback_failed {
+            Some(
+                "CRITICAL: a save failed and could not be reverted — unsaved data is in memory. \
+                 Quit the editor NOW (the vault on disk is unchanged); no in-editor action will \
+                 save until you quit, then re-run the operation via the CLI."
+                    .to_string(),
+            )
+        } else {
+            None
+        }
+    }
+
+    /// The SINGLE site that maps a `PersistError` to its editor effect [R0-I1]. Every rollback-flow
+    /// Enter arm delegates here (after closing its own modal). `NoChange`/`RolledBack` → benign
+    /// keep-open status (nothing persisted; safe to retry). `ResidueLive` → arm the `rollback_failed`
+    /// latch, show the CRITICAL status, and close every mutation surface. `PersistError` has no
+    /// `Display`, so a lazy `{e}` cannot bypass the `ResidueLive` arm.
+    fn on_persist_error(&mut self, e: edit::persist::PersistError) {
+        use edit::persist::PersistError::{NoChange, ResidueLive, RolledBack};
+        match e {
+            NoChange(err) | RolledBack(err) => {
+                self.status = Some(format!(
+                    "Save error: {err} — no changes were recorded; safe to retry."
+                ));
+            }
+            ResidueLive(err) => {
+                self.rollback_failed = true;
+                self.status = Some(format!(
+                    "CRITICAL: a save failed and could not be reverted ({err}) — unsaved data is in \
+                     memory. Quit the editor NOW (the vault on disk is unchanged); no in-editor \
+                     action will save until you quit, then re-run the operation via the CLI."
+                ));
+                self.close_all_mutation_surfaces();
+            }
+        }
+    }
+
+    /// Close every mutating flow/modal (at most one of each is ever open). Used by the `ResidueLive`
+    /// arm so no open flow can trigger a further save while the residue latch is up.
+    fn close_all_mutation_surfaces(&mut self) {
+        self.profile_form = None;
+        self.mutation_modal = None;
+        self.classify_inbound_flow = None;
+        self.classify_inbound_modal = None;
+        self.reclassify_outflow_flow = None;
+        self.reclassify_outflow_modal = None;
+        self.reclassify_income_flow = None;
+        self.reclassify_income_modal = None;
+        self.set_fmv_flow = None;
+        self.set_fmv_modal = None;
+        self.void_flow = None;
+        self.void_modal = None;
+        self.select_lots_flow = None;
+        self.select_lots_modal = None;
+        self.set_donation_details_flow = None;
+        self.set_donation_details_modal = None;
+        self.safe_harbor_attest_flow = None;
+    }
+}
+
 /// Open the tax-profile form for `selected_year`, pre-populated from the snapshot.
 ///
 /// Pre-population (the `--show` equivalent): if `snapshot.profiles.get(&year)` is
@@ -408,13 +480,8 @@ fn handle_form_key(app: &mut EditorApp, key: KeyEvent) {
 /// `filing_status` is set from `p`.  Otherwise: `filing_status = Single`, all
 /// buffers empty (required fields must be typed; optional empties → $0 at validation).
 fn open_profile_form(app: &mut EditorApp) {
-    if app.attest_save_failed {
-        app.status = Some(
-            "A failed attest save left unsaved decisions in memory — quit the editor \
-             (the unsaved attestation is discarded on quit), then retry via CLI: \
-             btctax reconcile safe-harbor-attest"
-                .to_string(),
-        );
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
         return;
     }
     if app.snapshot.is_none() {
@@ -516,7 +583,7 @@ fn handle_classify_inbound_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Err(e) => {
                     // Failed-save semantics [R0-M1]: close modal, keep form (buffers intact).
                     app.classify_inbound_modal = None;
-                    app.status = Some(format!("Save error: {e}"));
+                    app.on_persist_error(e);
                 }
             }
         }
@@ -971,7 +1038,7 @@ fn handle_reclassify_outflow_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Err(e) => {
                     // Failed-save semantics [R0-M1]: close modal, keep form (buffers intact).
                     app.reclassify_outflow_modal = None;
-                    app.status = Some(format!("Save error: {e}"));
+                    app.on_persist_error(e);
                 }
             }
         }
@@ -1317,7 +1384,7 @@ fn handle_reclassify_income_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 }
                 Err(e) => {
                     app.reclassify_income_modal = None;
-                    app.status = Some(format!("Save error: {e}"));
+                    app.on_persist_error(e);
                 }
             }
         }
@@ -1384,7 +1451,7 @@ fn handle_set_fmv_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 }
                 Err(e) => {
                     app.set_fmv_modal = None;
-                    app.status = Some(format!("Save error: {e}"));
+                    app.on_persist_error(e);
                 }
             }
         }
@@ -1725,7 +1792,7 @@ fn handle_void_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Err(e) => {
                     // [M1] On save error: close modal, flow stays at List.
                     app.void_modal = None;
-                    app.status = Some(format!("Save error: {e}"));
+                    app.on_persist_error(e);
                 }
             }
         }
@@ -1822,13 +1889,8 @@ fn events_by_id(
 ///
 /// Empty filtered list → status "No unclassified inbound transfers"; flow NOT opened [R0-M8].
 fn open_classify_inbound_flow(app: &mut EditorApp) {
-    if app.attest_save_failed {
-        app.status = Some(
-            "A failed attest save left unsaved decisions in memory — quit the editor \
-             (the unsaved attestation is discarded on quit), then retry via CLI: \
-             btctax reconcile safe-harbor-attest"
-                .to_string(),
-        );
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
         return;
     }
     let snap = match app.snapshot.as_ref() {
@@ -1924,13 +1986,8 @@ fn open_classify_inbound_flow(app: &mut EditorApp) {
 ///
 /// Empty list → status "No pending outbound transfers"; flow NOT opened [R0-M8].
 fn open_reclassify_outflow_flow(app: &mut EditorApp) {
-    if app.attest_save_failed {
-        app.status = Some(
-            "A failed attest save left unsaved decisions in memory — quit the editor \
-             (the unsaved attestation is discarded on quit), then retry via CLI: \
-             btctax reconcile safe-harbor-attest"
-                .to_string(),
-        );
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
         return;
     }
     let snap = match app.snapshot.as_ref() {
@@ -2115,13 +2172,8 @@ fn derive_reclassify_outflow_status(
 /// Empty filtered list → status "No reclassifiable income events"; flow NOT
 /// opened [R0-M8].
 fn open_reclassify_income_flow(app: &mut EditorApp) {
-    if app.attest_save_failed {
-        app.status = Some(
-            "A failed attest save left unsaved decisions in memory — quit the editor \
-             (the unsaved attestation is discarded on quit), then retry via CLI: \
-             btctax reconcile safe-harbor-attest"
-                .to_string(),
-        );
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
         return;
     }
     let snap = match app.snapshot.as_ref() {
@@ -2227,13 +2279,8 @@ fn open_reclassify_income_flow(app: &mut EditorApp) {
 /// Empty filtered list → status "No FMV-missing income events"; flow NOT
 /// opened [R0-M8].
 fn open_set_fmv_flow(app: &mut EditorApp) {
-    if app.attest_save_failed {
-        app.status = Some(
-            "A failed attest save left unsaved decisions in memory — quit the editor \
-             (the unsaved attestation is discarded on quit), then retry via CLI: \
-             btctax reconcile safe-harbor-attest"
-                .to_string(),
-        );
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
         return;
     }
     let snap = match app.snapshot.as_ref() {
@@ -2413,13 +2460,8 @@ fn summarize_void_payload(payload: &EventPayload) -> (&'static str, String, Opti
 ///
 /// Empty filtered list → status "No revocable decisions to void"; flow NOT opened [R0-M8].
 fn open_void_flow(app: &mut EditorApp) {
-    if app.attest_save_failed {
-        app.status = Some(
-            "A failed attest save left unsaved decisions in memory — quit the editor \
-             (the unsaved attestation is discarded on quit), then retry via CLI: \
-             btctax reconcile safe-harbor-attest"
-                .to_string(),
-        );
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
         return;
     }
     let snap = match app.snapshot.as_ref() {
@@ -2600,7 +2642,7 @@ fn handle_select_lots_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Err(e) => {
                     // [M1] On save error: close modal, keep LotsForm open (buffers intact).
                     app.select_lots_modal = None;
-                    app.status = Some(format!("Save error: {e}"));
+                    app.on_persist_error(e);
                 }
             }
         }
@@ -2890,7 +2932,7 @@ fn handle_set_donation_details_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Err(e) => {
                     // [M1] On save error: close modal, keep FieldForm open.
                     app.set_donation_details_modal = None;
-                    app.status = Some(format!("Save error: {e}"));
+                    app.on_persist_error(e);
                 }
             }
         }
@@ -3203,13 +3245,8 @@ fn handle_dd_field_form_key(app: &mut EditorApp, key: KeyEvent) {
 /// Empty filtered list → status "No method-honoring disposals available for lot
 /// selection (select-lots pre-filter)"; flow NOT opened [R0-M8].
 fn open_select_lots_flow(app: &mut EditorApp) {
-    if app.attest_save_failed {
-        app.status = Some(
-            "A failed attest save left unsaved decisions in memory — quit the editor \
-             (the unsaved attestation is discarded on quit), then retry via CLI: \
-             btctax reconcile safe-harbor-attest"
-                .to_string(),
-        );
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
         return;
     }
     let snap = match app.snapshot.as_ref() {
@@ -3327,13 +3364,8 @@ fn open_select_lots_flow(app: &mut EditorApp) {
 /// Empty filtered list → status "No donation removals found (donate a TransferOut first
 /// via reclassify-outflow)"; flow NOT opened [R0-M8].
 fn open_set_donation_details_flow(app: &mut EditorApp) {
-    if app.attest_save_failed {
-        app.status = Some(
-            "A failed attest save left unsaved decisions in memory — quit the editor \
-             (the unsaved attestation is discarded on quit), then retry via CLI: \
-             btctax reconcile safe-harbor-attest"
-                .to_string(),
-        );
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
         return;
     }
     let snap = match app.snapshot.as_ref() {
@@ -3462,13 +3494,8 @@ fn derive_donation_details_status(event_id: &EventId, details: &DonationDetails)
 ///    effective …", return.
 /// 6. `SafeHarborTimebar` present → open the flow at the Info step.
 fn open_safe_harbor_attest_flow(app: &mut EditorApp) {
-    if app.attest_save_failed {
-        app.status = Some(
-            "A failed attest save left unsaved decisions in memory — quit the editor \
-             (the unsaved attestation is discarded on quit), then retry via CLI: \
-             btctax reconcile safe-harbor-attest"
-                .to_string(),
-        );
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
         return;
     }
     // No-op when the snapshot is missing (mirrors every other opener).
@@ -5135,6 +5162,14 @@ mod tests {
             bytes_before, bytes_mid,
             "S2: vault must be byte-identical after save failure"
         );
+        // (5) [save-rollback] the failed save left NO residue: the in-memory log is reverted to pre.
+        let mid_len = load_all_ordered(app.session.as_ref().unwrap().conn())
+            .unwrap()
+            .len();
+        assert_eq!(
+            mid_len, pre_len,
+            "S2: rollback must revert the in-memory append (no residue after a failed save)"
+        );
 
         // Restore permissions.
         std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -5157,10 +5192,12 @@ mod tests {
             "S2: retry: flow must close after successful save"
         );
 
-        // WB-I2: capture status BEFORE drop(app) so we can assert after computing retry_id.
+        // [save-rollback] capture status before drop(app).
         let status_after_retry = app.status.clone().unwrap_or_default();
 
-        // Assert TRUE retry outcome: on-disk log == pre + 2 decision rows [R0-I1].
+        // Retry outcome: the failed save left NO residue, so the retry appends EXACTLY ONE decision
+        // (not two) and fires NO DecisionConflict — this SUPERSEDES the old R0-I1 residue+conflict
+        // behavior (an intentional supersession, not a regression).
         let post_disk = {
             drop(app);
             let session2 =
@@ -5174,15 +5211,13 @@ mod tests {
             .collect();
         assert_eq!(
             new_decisions.len(),
-            2,
-            "S2: retry: on-disk log must have EXACTLY 2 new decision rows (N+1 from failed-save + N+2 from retry); got: {}",
+            1,
+            "S2: retry after a rolled-back save must append EXACTLY ONE decision (no residue); got: {}",
             new_decisions.len()
         );
 
-        // Both rows' payloads round-trip to the identical ClassifyInbound payload.
+        // The single row round-trips to the ClassifyInbound::Income(Mining) payload.
         let p0: EventPayload = serde_json::from_str(&new_decisions[0].payload_json).unwrap();
-        let p1: EventPayload = serde_json::from_str(&new_decisions[1].payload_json).unwrap();
-        assert_eq!(p0, p1, "S2: both retry rows must have identical payload");
         assert!(
             matches!(
                 &p0,
@@ -5193,40 +5228,22 @@ mod tests {
             p0
         );
 
-        // The re-projected state after the retry must contain a DecisionConflict
-        // attributed to the retry decision's EventId (FIRST-WINS).
-        let retry_seq = new_decisions[1]
-            .decision_seq
-            .expect("retry decision must have decision_seq") as u64;
-        let retry_id = btctax_core::EventId::Decision { seq: retry_seq };
+        // Clean retry: NO DecisionConflict anywhere, and the success status does not mention one.
         let snap_session =
             btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
         let (snap, _) = btctax_tui::unlock::build_snapshot(&snap_session).unwrap();
-        let has_conflict = snap.state.blockers.iter().any(|b| {
-            b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(&retry_id)
-        });
         assert!(
-            has_conflict,
-            "S2: re-projected state must contain DecisionConflict for retry decision {retry_id:?}"
-        );
-
-        // WB-I2: post-retry status must surface the conflict AND the correctly-formatted
-        // single-prefix void remedy (spec §D5 KAT-S2 step 3 final bullet).
-        // "void {canonical}" where canonical() = "decision|N" → must NOT produce "decision|decision|N".
-        let expected_void = format!("void {}", retry_id.canonical());
-        assert!(
-            status_after_retry.contains("DecisionConflict"),
-            "S2: post-retry status must contain 'DecisionConflict'; got: {:?}",
-            status_after_retry
+            !snap
+                .state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::DecisionConflict),
+            "S2: a clean retry must fire NO DecisionConflict; blockers: {:?}",
+            snap.state.blockers
         );
         assert!(
-            status_after_retry.contains(&expected_void),
-            "S2: post-retry status must contain the single-prefix remedy '{expected_void}'; \
-             got: {status_after_retry:?}"
-        );
-        assert!(
-            status_after_retry.contains("'v'"),
-            "S2: post-retry status must contain \"'v'\" (TUI void flow hint); got: {status_after_retry:?}"
+            !status_after_retry.contains("DecisionConflict"),
+            "S2: clean-retry status must not mention DecisionConflict; got: {status_after_retry:?}"
         );
     }
 
@@ -6655,6 +6672,14 @@ mod tests {
             bytes_before, bytes_mid,
             "S2-RO: vault must be byte-identical after save failure"
         );
+        // (5) [save-rollback] no residue: the in-memory log is reverted to pre after the failed save.
+        let mid_len = load_all_ordered(app.session.as_ref().unwrap().conn())
+            .unwrap()
+            .len();
+        assert_eq!(
+            mid_len, pre_len,
+            "S2-RO: rollback must revert the in-memory append (no residue after a failed save)"
+        );
 
         // Restore permissions.
         std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -6677,10 +6702,11 @@ mod tests {
             "S2-RO: retry: flow must close after successful save"
         );
 
-        // WB-I2: capture status BEFORE drop(app) so we can assert after computing retry_id.
+        // [save-rollback] capture status before drop(app).
         let status_after_retry = app.status.clone().unwrap_or_default();
 
-        // Assert TRUE retry outcome: on-disk log == pre + 2 decision rows [R0-I1].
+        // Retry outcome: the failed save left NO residue, so the retry appends EXACTLY ONE decision
+        // (not two) and fires NO DecisionConflict — SUPERSEDES the old R0-I1 residue+conflict behavior.
         let post_disk = {
             drop(app);
             let session2 =
@@ -6694,16 +6720,13 @@ mod tests {
             .collect();
         assert_eq!(
             new_decisions.len(),
-            2,
-            "S2-RO: retry: on-disk log must have EXACTLY 2 new decision rows \
-             (N+1 from failed-save + N+2 from retry); got: {}",
+            1,
+            "S2-RO: retry after a rolled-back save must append EXACTLY ONE decision (no residue); got: {}",
             new_decisions.len()
         );
 
-        // Both rows' payloads round-trip to the identical ReclassifyOutflow payload.
+        // The single row round-trips to the ReclassifyOutflow(Sell) payload.
         let p0: EventPayload = serde_json::from_str(&new_decisions[0].payload_json).unwrap();
-        let p1: EventPayload = serde_json::from_str(&new_decisions[1].payload_json).unwrap();
-        assert_eq!(p0, p1, "S2-RO: both retry rows must have identical payload");
         assert!(
             matches!(
                 &p0,
@@ -6714,40 +6737,22 @@ mod tests {
             p0
         );
 
-        // The re-projected state must contain a DecisionConflict
-        // attributed to the retry decision's EventId (FIRST-WINS).
-        let retry_seq = new_decisions[1]
-            .decision_seq
-            .expect("retry decision must have decision_seq") as u64;
-        let retry_id = btctax_core::EventId::Decision { seq: retry_seq };
+        // Clean retry: NO DecisionConflict anywhere, and the success status does not mention one.
         let snap_session =
             btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
         let (snap, _) = btctax_tui::unlock::build_snapshot(&snap_session).unwrap();
-        let has_conflict = snap.state.blockers.iter().any(|b| {
-            b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(&retry_id)
-        });
         assert!(
-            has_conflict,
-            "S2-RO: re-projected state must contain DecisionConflict for retry decision {retry_id:?}"
-        );
-
-        // WB-I2: post-retry status must surface the conflict AND the correctly-formatted
-        // single-prefix void remedy (spec §D5 KAT-S2-RO step 3 final bullet).
-        // "void {canonical}" where canonical() = "decision|N" → must NOT produce "decision|decision|N".
-        let expected_void = format!("void {}", retry_id.canonical());
-        assert!(
-            status_after_retry.contains("DecisionConflict"),
-            "S2-RO: post-retry status must contain 'DecisionConflict'; got: {:?}",
-            status_after_retry
+            !snap
+                .state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::DecisionConflict),
+            "S2-RO: a clean retry must fire NO DecisionConflict; blockers: {:?}",
+            snap.state.blockers
         );
         assert!(
-            status_after_retry.contains(&expected_void),
-            "S2-RO: post-retry status must contain the single-prefix remedy '{expected_void}'; \
-             got: {status_after_retry:?}"
-        );
-        assert!(
-            status_after_retry.contains("'v'"),
-            "S2-RO: post-retry status must contain \"'v'\" (TUI void flow hint); got: {status_after_retry:?}"
+            !status_after_retry.contains("DecisionConflict"),
+            "S2-RO: clean-retry status must not mention DecisionConflict; got: {status_after_retry:?}"
         );
     }
 
@@ -8138,8 +8143,15 @@ mod tests {
             bytes_before, bytes_after_fail,
             "S2b: vault bytes must be unchanged after failed save"
         );
+        // [save-rollback] no residue: the in-memory log is reverted to pre after the failed save.
+        let mid = load_all_ordered(app.session.as_ref().unwrap().conn()).unwrap();
+        assert_eq!(
+            mid.len(),
+            pre_count,
+            "S2b: rollback must revert the in-memory append (no residue after a failed save)"
+        );
 
-        // Re-submit (retry): in-memory carries ManualFmv seq N+1; retry appends seq N+2.
+        // Re-submit (retry): the rolled-back save left nothing; the retry appends ONE ManualFmv row.
         handle_key(&mut app, press(KeyCode::Enter)); // FieldForm → modal (re-open)
         assert!(
             app.set_fmv_modal.is_some(),
@@ -8147,25 +8159,23 @@ mod tests {
         );
         handle_key(&mut app, press(KeyCode::Enter)); // confirm retry
 
-        // Assert: 2 ManualFmv rows appended total; no FmvMissing; no DecisionConflict.
+        // Assert: exactly ONE ManualFmv row appended (rollback → no residue); no FmvMissing; no conflict.
         let session = app.session.as_ref().unwrap();
         let post = load_all_ordered(session.conn()).unwrap();
         assert_eq!(
             post.len(),
-            pre_count + 2,
-            "S2b: on-disk must have pre + 2 ManualFmv rows (both retry rows)"
+            pre_count + 1,
+            "S2b: retry after a rolled-back save must append EXACTLY ONE ManualFmv row (no residue)"
         );
 
         use btctax_core::EventPayload;
         let new_decisions: Vec<_> = post[pre_count..].iter().collect();
-        assert_eq!(new_decisions.len(), 2, "S2b: exactly 2 new rows");
-        for row in &new_decisions {
-            let p: EventPayload = serde_json::from_str(&row.payload_json).unwrap();
-            assert!(
-                matches!(p, EventPayload::ManualFmv(_)),
-                "S2b: both new rows must be ManualFmv"
-            );
-        }
+        assert_eq!(new_decisions.len(), 1, "S2b: exactly 1 new row");
+        let p: EventPayload = serde_json::from_str(&new_decisions[0].payload_json).unwrap();
+        assert!(
+            matches!(p, EventPayload::ManualFmv(_)),
+            "S2b: the new row must be ManualFmv"
+        );
 
         // Re-project and check.
         let snap = app.snapshot.as_ref().unwrap();
@@ -9475,8 +9485,16 @@ mod tests {
             bytes_before, bytes_mid,
             "S3a: vault bytes must be unchanged after failed save"
         );
+        // [save-rollback] no residue: the in-memory log is reverted to pre after the failed save.
+        let mid_len = load_all_ordered(app.session.as_ref().unwrap().conn())
+            .unwrap()
+            .len();
+        assert_eq!(
+            mid_len, pre_event_count,
+            "S3a: rollback must revert the in-memory append (no residue after a failed save)"
+        );
 
-        // Retry → should succeed (second LotSelection → conflict).
+        // Retry → clean single LotSelection (the rolled-back first attempt left no residue).
         handle_key(&mut app, press(KeyCode::Enter)); // validate again → modal
         handle_key(&mut app, press(KeyCode::Enter)); // confirm → retry save
         assert!(
@@ -9488,65 +9506,148 @@ mod tests {
             "S3a: flow must be closed after retry"
         );
 
-        // Assert: post.len() == pre.len() + 2 (first attempt + retry).
+        // Assert: exactly ONE LotSelection appended (rollback → no residue), NO DecisionConflict.
         let status_after_retry = app.status.clone();
         drop(app);
         let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
         let post = load_all_ordered(session2.conn()).unwrap();
         assert_eq!(
             post.len(),
-            pre_event_count + 2,
-            "S3a: post must have pre.len()+2 events (both LotSelection attempts); pre={pre_event_count}"
+            pre_event_count + 1,
+            "S3a: retry after a rolled-back save must append EXACTLY ONE LotSelection (no residue); pre={pre_event_count}"
         );
 
-        // Both tails are LotSelection for the same disposal_event.
-        let tail1 = &post[pre_event_count];
-        let tail2 = &post[pre_event_count + 1];
-        let p1: btctax_core::EventPayload =
-            serde_json::from_str(&tail1.payload_json).expect("tail1 must deserialize");
-        let p2: btctax_core::EventPayload =
-            serde_json::from_str(&tail2.payload_json).expect("tail2 must deserialize");
+        // The single tail is a LotSelection.
+        let tail = &post[pre_event_count];
+        let p: btctax_core::EventPayload =
+            serde_json::from_str(&tail.payload_json).expect("tail must deserialize");
         assert!(
-            matches!(p1, btctax_core::EventPayload::LotSelection(_)),
-            "S3a: tail1 must be LotSelection"
+            matches!(p, btctax_core::EventPayload::LotSelection(_)),
+            "S3a: the new tail must be LotSelection"
+        );
+
+        // Re-project: NO DecisionConflict (the failed-save residue that would have conflicted was
+        // reverted; a lone valid selection applies cleanly).
+        let (snap, _) = btctax_tui::unlock::build_snapshot(&session2).unwrap();
+        assert!(
+            !snap
+                .state
+                .blockers
+                .iter()
+                .any(|b| b.kind == btctax_core::BlockerKind::DecisionConflict),
+            "S3a: a clean retry must fire NO DecisionConflict; blockers: {:?}",
+            snap.state.blockers
         );
         assert!(
-            matches!(p2, btctax_core::EventPayload::LotSelection(_)),
-            "S3a: tail2 must be LotSelection"
+            !status_after_retry
+                .as_deref()
+                .unwrap_or("")
+                .contains("DecisionConflict"),
+            "S3a: clean-retry status must not mention DecisionConflict; got: {status_after_retry:?}"
         );
-        if let (
-            btctax_core::EventPayload::LotSelection(ls1),
-            btctax_core::EventPayload::LotSelection(ls2),
-        ) = (p1, p2)
-        {
-            assert_eq!(
-                ls1.disposal_event, ls2.disposal_event,
-                "S3a: both LotSelections must target the same disposal"
+    }
+
+    // ── save-rollback: residue-latch producer + consumer ─────────────────────
+
+    /// [R0-I1] PRODUCER test: `on_persist_error` is the SINGLE site that arms `rollback_failed`.
+    /// The runtime trigger (a restore OOM) is not inducible, so hand-build each `PersistError`
+    /// variant and assert the effect directly.
+    #[test]
+    fn kat_on_persist_error_residue_live_arms_latch() {
+        use edit::persist::PersistError;
+
+        // ResidueLive → arm the latch + CRITICAL status.
+        let mut app = EditorApp::new(std::path::PathBuf::from("/nonexistent"));
+        app.on_persist_error(PersistError::ResidueLive(btctax_cli::CliError::Usage(
+            "induced".to_string(),
+        )));
+        assert!(
+            app.rollback_failed,
+            "ResidueLive must arm the rollback_failed latch"
+        );
+        let s = app.status.as_deref().unwrap_or("");
+        assert!(
+            s.contains("could not be reverted") && s.contains("Quit the editor NOW"),
+            "ResidueLive status must be the CRITICAL residue message; got: {s:?}"
+        );
+
+        // NoChange / RolledBack → benign, no latch, "safe to retry".
+        for benign in [
+            PersistError::NoChange(btctax_cli::CliError::Usage("x".into())),
+            PersistError::RolledBack(btctax_cli::CliError::Usage("y".into())),
+        ] {
+            let mut a = EditorApp::new(std::path::PathBuf::from("/nonexistent"));
+            a.on_persist_error(benign);
+            assert!(!a.rollback_failed, "benign arms must NOT arm the latch");
+            assert!(
+                a.status
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("no changes were recorded; safe to retry"),
+                "benign status must be the safe-to-retry message; got: {:?}",
+                a.status
             );
         }
+    }
 
-        // Re-project: DecisionConflict attributed to the SECOND (retry) decision.
-        let (snap, _) = btctax_tui::unlock::build_snapshot(&session2).unwrap();
-        let retry_decision_id = btctax_core::EventId::Decision {
-            seq: tail2.decision_seq.unwrap() as u64,
-        };
-        let has_conflict = snap.state.blockers.iter().any(|b| {
-            b.kind == btctax_core::BlockerKind::DecisionConflict
-                && b.event.as_ref() == Some(&retry_decision_id)
-        });
+    /// `residue_latch_status` precedence: attest wording (verbatim — ERRLATCH regression guard) wins
+    /// over rollback wording; `None` when neither latch is set.
+    #[test]
+    fn kat_residue_latch_status_precedence() {
+        let mut a = EditorApp::new(std::path::PathBuf::from("/x"));
+        assert!(a.residue_latch_status().is_none(), "no latch → None");
+        a.rollback_failed = true;
         assert!(
-            has_conflict,
-            "S3a: retry must produce DecisionConflict on the SECOND decision's id"
+            a.residue_latch_status()
+                .unwrap()
+                .contains("could not be reverted"),
+            "rollback_failed → CRITICAL residue wording"
         );
-        // Status must surface the conflict.
+        a.attest_save_failed = true; // attest takes precedence
         assert!(
-            status_after_retry
-                .as_deref()
-                .map(|s| s.contains("DecisionConflict") || s.contains("conflict"))
-                .unwrap_or(false),
-            "S3a: status must surface DecisionConflict after retry; got: {:?}",
-            status_after_retry
+            a.residue_latch_status()
+                .unwrap()
+                .contains("failed attest save"),
+            "attest_save_failed must keep its verbatim wording (ERRLATCH regression guard)"
         );
+    }
+
+    /// CONSUMER test: while `rollback_failed` is set, EVERY mutating opener (p/c/o/r/f/v/s/d/a)
+    /// refuses with the CRITICAL residue status and opens no flow. Mirrors the attest ERRLATCH loop.
+    #[test]
+    fn kat_rollback_failed_latch_refuses_all_openers() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-rollback-latch-pass";
+        seed_transfer_in_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+        app.rollback_failed = true;
+
+        for k in ['p', 'c', 'o', 'r', 'f', 'v', 's', 'd', 'a'] {
+            app.status = None;
+            handle_key(&mut app, press(KeyCode::Char(k)));
+            assert!(
+                app.profile_form.is_none()
+                    && app.classify_inbound_flow.is_none()
+                    && app.reclassify_outflow_flow.is_none()
+                    && app.reclassify_income_flow.is_none()
+                    && app.set_fmv_flow.is_none()
+                    && app.void_flow.is_none()
+                    && app.select_lots_flow.is_none()
+                    && app.set_donation_details_flow.is_none()
+                    && app.safe_harbor_attest_flow.is_none(),
+                "rollback latch: opener '{k}' must open no mutating flow"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("could not be reverted"))
+                    .unwrap_or(false),
+                "rollback latch: opener '{k}' must show the CRITICAL residue status; got: {:?}",
+                app.status
+            );
+        }
     }
 
     // ── KAT-E2E-SL — end-to-end select-lots (discriminating seed) ─────────────

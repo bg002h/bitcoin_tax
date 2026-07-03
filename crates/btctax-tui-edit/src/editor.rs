@@ -140,6 +140,11 @@ pub struct EditorApp {
     /// While `true`, ALL mutating openers (p/c/o/r/f/v/s/d/a) refuse with the
     /// quit-first latch status. Cleared only by quitting (discards in-memory residue).
     pub attest_save_failed: bool,
+    /// Sibling residue latch [save-rollback]: set ONLY by `on_persist_error`'s `ResidueLive` arm,
+    /// i.e. when one of the 8 rollback persist fns failed to save AND the in-memory rollback ALSO
+    /// failed, so unsaved residue is live. Like `attest_save_failed`, while `true` every mutating
+    /// opener refuses (via `residue_latch_status`) until quit (which discards the residue).
+    pub rollback_failed: bool,
     /// One-line status (saved / error), shown in the footer.
     /// Cleared on the next non-modal key press (mirrors the viewer's `export_status`
     /// semantics, app.rs:140 [R0-N5]).
@@ -179,6 +184,7 @@ impl EditorApp {
             set_donation_details_modal: None,
             safe_harbor_attest_flow: None,
             attest_save_failed: false,
+            rollback_failed: false,
             status: None,
         }
     }
