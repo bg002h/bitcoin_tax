@@ -26,23 +26,23 @@ use edit::form::{
     validate_classify_raw_acquire, validate_classify_raw_income, validate_donation_details,
     validate_reclassify_income, validate_reclassify_outflow, validate_select_lots,
     validate_set_fmv, AllocLotRow, BulkLinkFlowState, BulkLinkModalState, BulkLinkRowItem,
-    BulkLinkStep, ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyInboundStep,
-    ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep, ClassifyRawVariant, ConflictItem,
-    DisposalKind, DisposalListItem, DonationListItem, FieldBuffer, FmvListItem, InEventItem,
-    InboundListItem, InboundVariant, IncomeListItem, LinkMode, LinkTransferFlowState,
-    LinkTransferModalState, LinkTransferStep, LotPickFormRow, MatchPairAction,
-    MatchSelfTransferItem, MatchSelfTransfersFlowState, MatchSelfTransfersModalState,
-    MutationModalState, OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep,
-    OptimizeCandidateItem, OutflowKind, OutflowListItem, ProfileFormState, RawListItem,
-    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
-    ReclassifyOutflowFlowState, ReclassifyOutflowModalState, ReclassifyOutflowStep,
-    ResolveConflictFlowState, ResolveConflictModalState, ResolveConflictStep, ResolveKind,
-    SafeHarborAllocateFlowState, SafeHarborAllocateModalState, SafeHarborAllocateStep,
-    SafeHarborAttestFlowState, SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState,
-    SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
-    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList,
-    TransferOutItem, VoidFlowState, VoidListItem, VoidModalState, VoidStep, WalletItem,
-    FREETEXT_CAP,
+    BulkLinkStep, BulkStiFlowState, BulkStiModalState, BulkStiRowItem, BulkStiStep,
+    ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState,
+    ClassifyRawModalState, ClassifyRawStep, ClassifyRawVariant, ConflictItem, DisposalKind,
+    DisposalListItem, DonationListItem, FieldBuffer, FmvListItem, InEventItem, InboundListItem,
+    InboundVariant, IncomeListItem, LinkMode, LinkTransferFlowState, LinkTransferModalState,
+    LinkTransferStep, LotPickFormRow, MatchPairAction, MatchSelfTransferItem,
+    MatchSelfTransfersFlowState, MatchSelfTransfersModalState, MutationModalState,
+    OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep, OptimizeCandidateItem,
+    OutflowKind, OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
+    ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
+    ReclassifyOutflowModalState, ReclassifyOutflowStep, ResolveConflictFlowState,
+    ResolveConflictModalState, ResolveConflictStep, ResolveKind, SafeHarborAllocateFlowState,
+    SafeHarborAllocateModalState, SafeHarborAllocateStep, SafeHarborAttestFlowState,
+    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
+    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
+    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TransferOutItem, VoidFlowState,
+    VoidListItem, VoidModalState, VoidStep, WalletItem, FREETEXT_CAP,
 };
 use editor::{EditorApp, EditorScreen};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -206,6 +206,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Bulk-STI-modal dispatch — BEFORE flow, form, screen ──────────────────
+    if app.bulk_sti_modal.is_some() {
+        handle_bulk_sti_modal_key(app, key);
+        return;
+    }
+
     // ── Match-self-transfers-modal dispatch — BEFORE flow, form, screen ──────
     if app.match_self_transfers_modal.is_some() {
         handle_match_self_transfers_modal_key(app, key);
@@ -257,6 +263,10 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.bulk_link_flow.is_some() {
         handle_bulk_link_flow_key(app, key);
+        return;
+    }
+    if app.bulk_sti_flow.is_some() {
+        handle_bulk_sti_flow_key(app, key);
         return;
     }
     if app.match_self_transfers_flow.is_some() {
@@ -340,6 +350,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('a') => open_safe_harbor_attest_flow(app),
                 KeyCode::Char('A') => open_safe_harbor_allocate_flow(app),
                 KeyCode::Char('b') => open_bulk_link_transfer_flow(app),
+                KeyCode::Char('B') => open_bulk_self_transfer_in_flow(app),
                 KeyCode::Char('m') => open_match_self_transfers_flow(app),
                 KeyCode::Char('i') => open_resolve_conflict_flow(app),
                 KeyCode::Char('z') => open_optimize_accept_flow(app),
@@ -571,6 +582,8 @@ impl EditorApp {
         self.safe_harbor_allocate_modal = None;
         self.bulk_link_flow = None;
         self.bulk_link_modal = None;
+        self.bulk_sti_flow = None;
+        self.bulk_sti_modal = None;
         self.match_self_transfers_flow = None;
         self.match_self_transfers_modal = None;
     }
@@ -5848,6 +5861,411 @@ fn derive_bulk_link_status(
     format!(
         "Linked {n} outflow(s) to {} as self-transfers ({remaining} pending outbound remain).",
         crate::edit::form::wallet_label(dest)
+    )
+}
+
+// ── Bulk classify-inbound-self-transfer flow (bulk-classify-inbound-self-transfer D3) ─────────
+
+/// Open the bulk classify-inbound-self-transfer flow from Browse (`B`).
+///
+/// Latch → snapshot → candidate set non-empty (else status). The candidate enumeration + filter
+/// choices (distinct receiving wallets + years) are read from `snap` DIRECTLY — KAT-G1-clean, like
+/// `open_classify_inbound_flow`. Only the PRICED preview (step 1→2) routes through
+/// `Session::bulk_self_transfer_in_plan`. Candidates mirror the CLI plan's selection: `TransferIn`s
+/// flagged `UnknownBasisInbound`, MINUS [I1] any already targeted by a non-voided `ClassifyInbound`
+/// (filter 3), MINUS [M2] wallet-less ones.
+fn open_bulk_self_transfer_in_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+    let ev_idx = events_by_id(snap);
+
+    // [I1] filter-3 sets, mirroring open_classify_inbound_flow: voided decision ids, then the set of
+    // TransferIn ids already targeted by a NON-VOIDED ClassifyInbound.
+    let voided: BTreeSet<EventId> = snap
+        .events
+        .iter()
+        .filter_map(|e| {
+            if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                Some(v.target_event_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    let already_classified: BTreeSet<EventId> = snap
+        .events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .filter_map(|e| {
+            if let EventPayload::ClassifyInbound(ci) = &e.payload {
+                Some(ci.transfer_in_event.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Enumerate candidates (in_event, date, wallet) from snap directly.
+    let mut wallet_set: BTreeSet<btctax_core::WalletId> = BTreeSet::new();
+    let mut year_set: BTreeSet<i32> = BTreeSet::new();
+    let mut any = false;
+    for b in &snap.state.blockers {
+        if b.kind != BlockerKind::UnknownBasisInbound {
+            continue;
+        }
+        let Some(id) = b.event.as_ref() else { continue };
+        // [I1] filter 3.
+        if already_classified.contains(id) {
+            continue;
+        }
+        let Some(ev) = ev_idx.get(id) else { continue };
+        if !matches!(ev.payload, EventPayload::TransferIn(_)) {
+            continue;
+        }
+        // [M2] wallet-less inbounds create no lot — excluded.
+        let Some(w) = ev.wallet.as_ref() else {
+            continue;
+        };
+        let date = btctax_core::conventions::tax_date(ev.utc_timestamp, ev.original_tz);
+        wallet_set.insert(w.clone());
+        year_set.insert(date.year());
+        any = true;
+    }
+
+    if !any {
+        app.status = Some("No unclassified inbound deposits to bulk-classify".to_string());
+        return;
+    }
+
+    let mut wallet_choices: Vec<Option<btctax_core::WalletId>> = vec![None]; // Any
+    wallet_choices.extend(wallet_set.into_iter().map(Some));
+    let mut year_choices: Vec<Option<i32>> = vec![None]; // All
+    year_choices.extend(year_set.into_iter().map(Some));
+
+    app.bulk_sti_flow = Some(BulkStiFlowState {
+        step: BulkStiStep::Filter,
+        wallet_choices,
+        wallet_idx: 0,
+        year_choices,
+        year_idx: 0,
+        filter_focus: 0,
+        preview: TargetList::new(Vec::new()),
+        error: None,
+    });
+}
+
+/// Dispatch to the correct sub-handler depending on `BulkStiStep`.
+fn handle_bulk_sti_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.bulk_sti_flow.as_ref() {
+        Some(f) => match f.step {
+            BulkStiStep::Filter => 0u8,
+            BulkStiStep::Preview => 1,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_bulk_sti_filter_key(app, key),
+        _ => handle_bulk_sti_preview_key(app, key),
+    }
+}
+
+/// Step 1 — filter. `k/j`/`↑/↓` move focus (receiving-wallet ⇄ time-frame); `←/→` cycle the focused
+/// choice; Enter → recompute the PRICED plan → Preview; Esc → close flow; `q` swallowed.
+fn handle_bulk_sti_filter_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                f.filter_focus = f.filter_focus.saturating_sub(1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                f.filter_focus = (f.filter_focus + 1).min(1);
+            }
+        }
+        KeyCode::Left => {
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                if f.filter_focus == 0 {
+                    let n = f.wallet_choices.len();
+                    f.wallet_idx = (f.wallet_idx + n - 1) % n;
+                } else {
+                    let n = f.year_choices.len();
+                    f.year_idx = (f.year_idx + n - 1) % n;
+                }
+            }
+        }
+        KeyCode::Right => {
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                if f.filter_focus == 0 {
+                    let n = f.wallet_choices.len();
+                    f.wallet_idx = (f.wallet_idx + 1) % n;
+                } else {
+                    let n = f.year_choices.len();
+                    f.year_idx = (f.year_idx + 1) % n;
+                }
+            }
+        }
+        KeyCode::Enter => bulk_sti_recompute_preview(app),
+        KeyCode::Esc => {
+            app.bulk_sti_flow = None;
+        }
+        KeyCode::Char('q') => {}
+        _ => {}
+    }
+}
+
+/// Recompute the priced plan from the current filter selections and transition to Preview (all rows
+/// checked). Empty plan → stay on Filter with an explanatory error. This is the ONLY Session-helper
+/// call in the flow (KAT-G1: the opener reads `snap` directly).
+fn bulk_sti_recompute_preview(app: &mut EditorApp) {
+    let filter = match app.bulk_sti_flow.as_ref() {
+        Some(f) => {
+            let wallet = f.wallet_choices.get(f.wallet_idx).cloned().flatten();
+            let frame = match f.year_choices.get(f.year_idx).copied().flatten() {
+                Some(y) => btctax_cli::Frame::Year(y),
+                None => btctax_cli::Frame::All,
+            };
+            btctax_cli::BulkStiFilter { frame, wallet }
+        }
+        None => return,
+    };
+    let plan = match app.session.as_ref() {
+        Some(s) => s.bulk_self_transfer_in_plan(filter),
+        None => return,
+    };
+    match plan {
+        Ok(plan) => {
+            let items: Vec<BulkStiRowItem> = plan
+                .included
+                .iter()
+                .map(|r| BulkStiRowItem {
+                    in_event: r.in_event.clone(),
+                    date: r.date,
+                    wallet: r.wallet.clone(),
+                    sat: r.sat,
+                    usd_fmv: r.usd_fmv,
+                    checked: true,
+                })
+                .collect();
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                if items.is_empty() {
+                    f.error =
+                        Some("No unclassified inbound deposits match this filter".to_string());
+                } else {
+                    f.error = None;
+                    f.preview = TargetList::new(items);
+                    f.step = BulkStiStep::Preview;
+                }
+            }
+        }
+        Err(e) => {
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                f.error = Some(format!("Plan error: {e}"));
+            }
+        }
+    }
+}
+
+/// Step 2 — per-row exclude checklist. `k/j/g/G` scroll; `Space`/`x` toggles the row's exclusion;
+/// Enter → confirm modal over the CHECKED rows (refuse if none); Esc → back to Filter; `q` swallowed.
+fn handle_bulk_sti_preview_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                f.preview.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                f.preview.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                f.preview.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                f.preview.go_bottom();
+            }
+        }
+        KeyCode::Char(' ') | KeyCode::Char('x') => {
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                if let Some(i) = f.preview.table_state.selected() {
+                    if let Some(item) = f.preview.items.get_mut(i) {
+                        item.checked = !item.checked;
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => open_bulk_sti_modal(app),
+        KeyCode::Esc => {
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                f.error = None;
+                f.step = BulkStiStep::Filter;
+            }
+        }
+        KeyCode::Char('q') => {}
+        _ => {}
+    }
+}
+
+/// Capture the CHECKED preview rows into the confirmation modal. Empty selection → refuse (stay on
+/// Preview with a "Nothing selected" error), never open the modal.
+fn open_bulk_sti_modal(app: &mut EditorApp) {
+    let modal = {
+        let f = match app.bulk_sti_flow.as_ref() {
+            Some(f) => f,
+            None => return,
+        };
+        let (count, total_sat, floor, missing) =
+            crate::edit::form::bulk_sti_checked_totals(&f.preview.items);
+        if count == 0 {
+            None
+        } else {
+            let in_events: Vec<EventId> = f
+                .preview
+                .items
+                .iter()
+                .filter(|i| i.checked)
+                .map(|i| i.in_event.clone())
+                .collect();
+            Some(BulkStiModalState {
+                in_events,
+                count,
+                total_sat,
+                total_usd_fmv_floor: floor,
+                missing_price_count: missing,
+            })
+        }
+    };
+    match modal {
+        Some(m) => app.bulk_sti_modal = Some(m),
+        None => {
+            if let Some(f) = app.bulk_sti_flow.as_mut() {
+                f.error = Some("Nothing selected — check at least one row".to_string());
+            }
+        }
+    }
+}
+
+/// Handle a key press while the bulk-STI confirmation modal is open (explicit confirm; NOT typed).
+///
+/// Enter → `persist_bulk_self_transfer_in` (batch append + single save, mid-batch rollback [bulk-I1]) →
+/// re-project + `derive_bulk_sti_status` + close; `Err(e)` → close modal, route `on_persist_error`.
+/// Esc → close modal only (back to Preview; nothing written). All else swallowed (blocking modal).
+fn handle_bulk_sti_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let in_events = match app.bulk_sti_modal.as_ref() {
+                Some(m) => m.in_events.clone(),
+                None => return,
+            };
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.bulk_sti_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_bulk_self_transfer_in(session, in_events, now)
+            };
+
+            match save_result {
+                Ok(n) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_bulk_sti_status(&snap, n);
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.bulk_sti_modal = None;
+                    app.bulk_sti_flow = None;
+                }
+                Err(e) => {
+                    app.bulk_sti_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.bulk_sti_modal = None;
+        }
+        _ => {}
+    }
+}
+
+/// Derive the post-apply status from RE-PROJECTED state (bulk-classify-inbound-self-transfer D3): the
+/// applied count + the number of unclassified inbound deposits that REMAIN (still flagged
+/// `UnknownBasisInbound` on a raw `TransferIn`, minus wallet-less — the same candidate predicate).
+fn derive_bulk_sti_status(snap: &btctax_tui::app::Snapshot, n: usize) -> String {
+    let ev_idx = events_by_id(snap);
+    let voided: BTreeSet<EventId> = snap
+        .events
+        .iter()
+        .filter_map(|e| {
+            if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                Some(v.target_event_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    let already_classified: BTreeSet<EventId> = snap
+        .events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .filter_map(|e| {
+            if let EventPayload::ClassifyInbound(ci) = &e.payload {
+                Some(ci.transfer_in_event.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    let remaining = snap
+        .state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+        .filter(|b| {
+            let Some(id) = b.event.as_ref() else {
+                return false;
+            };
+            if already_classified.contains(id) {
+                return false;
+            }
+            match ev_idx.get(id) {
+                Some(ev) => {
+                    matches!(ev.payload, EventPayload::TransferIn(_)) && ev.wallet.is_some()
+                }
+                None => false,
+            }
+        })
+        .count();
+    format!(
+        "Classified {n} inbound deposit(s) as self-transfer-in ($0 basis); \
+         {remaining} unclassified inbound(s) remain."
     )
 }
 
@@ -18123,6 +18541,342 @@ mod tests {
                 .iter()
                 .all(|b| b.kind != BlockerKind::DecisionConflict),
             "voiding a bulk link is clean (no DecisionConflict)"
+        );
+    }
+
+    // ── Bulk classify-inbound-self-transfer flow (bulk-classify-inbound-self-transfer D3) ─────
+
+    /// Seed a vault with two raw (unclassified) `TransferIn` deposits into wallet A, each firing
+    /// `UnknownBasisInbound`. Returns `(i1, i2)` (i1 earlier date → preview row 0 after sort).
+    fn seed_sti_inbounds(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> (btctax_core::EventId, btctax_core::EventId) {
+        use btctax_core::event::{EventPayload, LedgerEvent, TransferIn};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let wallet = Some(btctax_core::WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        });
+        let i1 = EventId::import(Source::River, SourceRef::new("sti-i1"));
+        let i2 = EventId::import(Source::River, SourceRef::new("sti-i2"));
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let tin = |sat: i64| {
+            EventPayload::TransferIn(TransferIn {
+                sat,
+                src_addr: None,
+                txid: None,
+            })
+        };
+        let batch = vec![
+            LedgerEvent {
+                id: i1.clone(),
+                utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: tin(100_000),
+            },
+            LedgerEvent {
+                id: i2.clone(),
+                utc_timestamp: datetime!(2025-06-15 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet,
+                payload: tin(50_000),
+            },
+        ];
+        btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+        session.save().unwrap();
+        (i1, i2)
+    }
+
+    /// `B` on a vault with NO unknown-basis inbound deposits refuses (no flow opened, status set).
+    #[test]
+    fn bulk_sti_refuses_when_no_candidates() {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulksti-nocand";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let batch = vec![LedgerEvent {
+                id: EventId::import(Source::River, SourceRef::new("acq-only")),
+                utc_timestamp: datetime!(2024-12-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(btctax_core::WalletId::Exchange {
+                    provider: "River".into(),
+                    account: "main".into(),
+                }),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(3000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            session.save().unwrap();
+        }
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('B')));
+        assert!(
+            app.bulk_sti_flow.is_none(),
+            "no candidates → flow must NOT open"
+        );
+        assert_eq!(
+            app.status.as_deref(),
+            Some("No unclassified inbound deposits to bulk-classify")
+        );
+    }
+
+    /// Unchecking a preview row omits it from the confirm modal's appended batch.
+    #[test]
+    fn bulk_sti_per_row_exclude_drops_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulksti-exclude";
+        let (i1, i2) = seed_sti_inbounds(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('B'))); // → Filter
+        assert!(matches!(
+            app.bulk_sti_flow.as_ref().map(|f| &f.step),
+            Some(BulkStiStep::Filter)
+        ));
+        handle_key(&mut app, press(KeyCode::Enter)); // Filter (All/Any) → Preview
+        {
+            let f = app.bulk_sti_flow.as_ref().unwrap();
+            assert!(matches!(f.step, BulkStiStep::Preview));
+            assert_eq!(
+                f.preview.items.len(),
+                2,
+                "both inbounds included, all checked"
+            );
+            assert!(f.preview.items.iter().all(|i| i.checked));
+            assert_eq!(
+                f.preview.items[0].in_event, i1,
+                "row 0 sorted-by-date is i1"
+            );
+        }
+        // Exclude row 0 (i1) → only i2 remains checked.
+        handle_key(&mut app, press(KeyCode::Char(' ')));
+        assert!(!app.bulk_sti_flow.as_ref().unwrap().preview.items[0].checked);
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal
+        let m = app
+            .bulk_sti_modal
+            .as_ref()
+            .expect("confirm modal must open over checked rows");
+        assert_eq!(m.count, 1, "one row excluded → one remains");
+        assert_eq!(
+            m.in_events,
+            vec![i2],
+            "excluded i1 is absent from the batch"
+        );
+    }
+
+    /// E2E: `B` → filter → exclude one → confirm → APPLY. The included inbound projects as a
+    /// non-taxable $0-basis lot and its `UnknownBasisInbound` clears; the excluded one stays flagged.
+    #[test]
+    fn bulk_sti_then_lots_created() {
+        use std::collections::BTreeSet;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-bulksti-lots";
+        let (i1, i2) = seed_sti_inbounds(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        {
+            let flagged: BTreeSet<_> = app
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .state
+                .blockers
+                .iter()
+                .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+                .filter_map(|b| b.event.clone())
+                .collect();
+            assert!(
+                flagged.contains(&i1) && flagged.contains(&i2),
+                "both inbounds start flagged UnknownBasisInbound"
+            );
+        }
+
+        handle_key(&mut app, press(KeyCode::Char('B'))); // → Filter
+        handle_key(&mut app, press(KeyCode::Enter)); // → Preview
+        handle_key(&mut app, press(KeyCode::Char(' '))); // exclude i1 (row 0)
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal
+        assert!(app.bulk_sti_modal.is_some());
+        handle_key(&mut app, press(KeyCode::Enter)); // APPLY (persist + re-project)
+
+        assert!(app.bulk_sti_flow.is_none() && app.bulk_sti_modal.is_none());
+        let snap = app.snapshot.as_ref().unwrap();
+
+        // i2 (included) no longer flagged; i1 (excluded) stays flagged.
+        let flagged: BTreeSet<_> = snap
+            .state
+            .blockers
+            .iter()
+            .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+            .filter_map(|b| b.event.clone())
+            .collect();
+        assert!(
+            flagged.contains(&i1) && !flagged.contains(&i2),
+            "excluded i1 stays unclassified; included i2's UnknownBasisInbound cleared"
+        );
+
+        // Exactly one ClassifyInbound appended; i2 created a $0-basis lot.
+        let classified: Vec<_> = snap
+            .events
+            .iter()
+            .filter_map(|e| match &e.payload {
+                EventPayload::ClassifyInbound(ci) => Some(ci.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(classified.len(), 1, "exactly one ClassifyInbound appended");
+        assert_eq!(classified[0].transfer_in_event, i2);
+        let lot = snap
+            .state
+            .lots
+            .iter()
+            .find(|l| l.lot_id.origin_event_id == i2)
+            .expect("the included inbound created a lot");
+        assert_eq!(
+            lot.usd_basis,
+            rust_decimal_macros::dec!(0),
+            "self-transfer-in defaults to $0 basis"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Classified 1 inbound"),
+            "status reports the applied count; got {:?}",
+            app.status
+        );
+    }
+
+    /// E2E: bulk-classify BOTH inbounds, then void ONE bulk-created classification via the `v` flow —
+    /// it voids cleanly, re-exposing `UnknownBasisInbound`, AND the voided inbound reappears in a FRESH
+    /// `plan.included` [R0-M-r2-1].
+    #[test]
+    fn bulk_sti_then_void() {
+        use std::collections::BTreeSet;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-bulksti-void";
+        let (i1, i2) = seed_sti_inbounds(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        // Bulk-classify BOTH (no exclude).
+        handle_key(&mut app, press(KeyCode::Char('B'))); // → Filter
+        handle_key(&mut app, press(KeyCode::Enter)); // → Preview
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        handle_key(&mut app, press(KeyCode::Enter)); // APPLY
+        {
+            let flagged = app
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .state
+                .blockers
+                .iter()
+                .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+                .count();
+            assert_eq!(flagged, 0, "both inbounds classified → none flagged");
+        }
+
+        // Find the ClassifyInbound decision id for i1.
+        let ci_id = {
+            let snap = app.snapshot.as_ref().unwrap();
+            snap.events
+                .iter()
+                .find(|e| {
+                    matches!(&e.payload, EventPayload::ClassifyInbound(ci) if ci.transfer_in_event == i1)
+                })
+                .map(|e| e.id.clone())
+                .expect("a ClassifyInbound for i1 must exist")
+        };
+
+        // Void it via the `v` flow.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('v')));
+        assert!(app.void_flow.is_some(), "void flow must open");
+        let idx = app
+            .void_flow
+            .as_ref()
+            .unwrap()
+            .list
+            .items
+            .iter()
+            .position(|it| it.event_id == ci_id)
+            .expect("the bulk classification must be listed as a revocable decision");
+        for _ in 0..idx {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → void modal
+        assert!(app.void_modal.is_some(), "void modal must open");
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm void
+        assert!(app.void_flow.is_none(), "void flow closes after confirm");
+
+        // After void: i1 re-exposed as UnknownBasisInbound; i2 stays classified; clean (no conflict).
+        let snap = app.snapshot.as_ref().unwrap();
+        let flagged: BTreeSet<_> = snap
+            .state
+            .blockers
+            .iter()
+            .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+            .filter_map(|b| b.event.clone())
+            .collect();
+        assert!(
+            flagged.contains(&i1),
+            "voided classification → i1 re-exposed"
+        );
+        assert!(!flagged.contains(&i2), "i2 remains classified");
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::DecisionConflict),
+            "voiding a bulk classification is clean (no DecisionConflict)"
+        );
+
+        // [R0-M-r2-1] i1 reappears in a FRESH plan.included (void → re-candidate).
+        let plan = app
+            .session
+            .as_ref()
+            .unwrap()
+            .bulk_self_transfer_in_plan(btctax_cli::BulkStiFilter {
+                frame: btctax_cli::Frame::All,
+                wallet: None,
+            })
+            .unwrap();
+        let included: BTreeSet<_> = plan.included.iter().map(|r| r.in_event.clone()).collect();
+        assert!(
+            included.contains(&i1) && !included.contains(&i2),
+            "voided i1 is a fresh candidate again; classified i2 is not"
         );
     }
 

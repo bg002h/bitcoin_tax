@@ -4,6 +4,32 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ bulk-classify-inbound-self-transfer — SHIPPED (2026-07-03) — QUEUE ITEM 2 DONE
+
+The inbound mirror of `bulk-link-transfer` applied to Cycle A's `InboundClass::SelfTransferMine`: sweep
+many pending unknown-basis inbound deposits → self-transfer-in ($0 conservative basis, non-taxable) in one
+filtered, per-row-excludable, confirmed, atomic batch. Preview surfaces the **total USD being given $0
+basis** (over-tax exposure, honest floor). CLI `reconcile bulk-classify-inbound-self-transfer` (two-phase,
+`--dry-run`/`--yes`) + TUI `B` flow. **Core-read-only** (reuses `ClassifyInbound`; `btctax-core` untouched).
+The R0 catch (I1): the candidate set must exclude inbounds already targeted by a non-voided `ClassifyInbound`
+(mirror `open_classify_inbound_flow` filter-3, NOT the matcher) + wallet-less ones — because
+`UnknownBasisInbound` is re-emitted for gift-basis-unknown / wallet-less states; sweeping one would append a
+duplicate → return-blocking Hard `DecisionConflict` (first-wins keeps the tax number). Income stays safe
+(fires `FmvMissing`, never `UnknownBasisInbound`). Spec R0 GREEN (2 rounds); whole-diff review 0C/0I/0M/1N
+(3 fault-injection probes RED-then-restored; additive-only, 0 tests removed). **1005 workspace tests.**
+Governed by [[self-transfer-completion-policy]]. Reviews:
+`reviews/R0-spec-bulk-classify-inbound-self-transfer-round-{1,2}.md`,
+`reviews/whole-branch-review-bulk-classify-inbound-self-transfer-round-1.md`.
+
+**Nit (non-blocking):** [WD-N1] `draw_bulk_sti_modal` — the "Σ USD → $0 basis :" label colon doesn't
+column-align with the two lines above. Cosmetic. — OPEN (nit).
+
+**NEXT (the LAST approved queue item): bulk reconcile for the OTHER decision types** — void ·
+resolve-conflict · outflow→Sell/Spend/Gift/Donate (FMV auto as estimated proceeds for Sell) ·
+inbound→Income. Its own [[standard-workflow]] cycle(s); likely split across a couple of cycles.
+
+---
+
 ## ✅ self-transfer completion, Cycle B — matched in/out pairs — SHIPPED (2026-07-03) — PROGRAM COMPLETE
 
 Identify + CONFIRM that an inbound leg + an outbound leg are two sides of one self-transfer. Two
