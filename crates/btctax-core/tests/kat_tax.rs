@@ -2833,3 +2833,626 @@ fn task1_removalleg_kat_b_gift_received_then_donated_acquired_at_equals_donor_da
         "acquired_at (tacked donor date) must be consistent with term"
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Cycle A — inbound self-transfer-in (SPEC_self_transfer_inbound). A TransferIn that is the
+// receiving side of an unmatched self-transfer, classified as "my own coins": a NON-taxable
+// receipt that CREATES a fresh origin lot (basis default $0 conservative, acquired_at default =
+// receipt date). Invariants 1–8 + serde/duplicate/void/pre-2025/wallet-missing corners.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+/// A raw `TransferIn` (self-transfer receiving side) — `wallet` overridable for the missing-wallet corner.
+fn stx_in(
+    src_ref: &str,
+    ts: time::OffsetDateTime,
+    sat: i64,
+    wallet: Option<WalletId>,
+) -> LedgerEvent {
+    LedgerEvent {
+        id: EventId::import(Source::Coinbase, SourceRef::new(src_ref)),
+        utc_timestamp: ts,
+        original_tz: offset!(+00:00),
+        wallet,
+        payload: EventPayload::TransferIn(TransferIn {
+            sat,
+            src_addr: None,
+            txid: None,
+        }),
+    }
+}
+
+/// A `ClassifyInbound::SelfTransferMine` decision targeting the raw `TransferIn` named `src_ref`.
+fn classify_self(
+    seq: u64,
+    ts: time::OffsetDateTime,
+    src_ref: &str,
+    basis: Option<Usd>,
+    acquired_at: Option<time::Date>,
+) -> LedgerEvent {
+    dec_ev(
+        seq,
+        ts,
+        EventPayload::ClassifyInbound(ClassifyInbound {
+            transfer_in_event: EventId::import(Source::Coinbase, SourceRef::new(src_ref)),
+            as_: InboundClass::SelfTransferMine { basis, acquired_at },
+        }),
+    )
+}
+
+/// Invariant 1 — conservative basis: `{basis:None}` → lot `usd_basis == 0`, `basis_source ==
+/// SelfTransferInbound`; a later Sell at proceeds P → gain == P (MAX gain, never under-reports).
+#[test]
+fn self_transfer_in_default_basis_is_zero_and_max_gain() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(1, datetime!(2026-01-01 00:00:00 UTC), "IN", None, None);
+    let sale = sell(datetime!(2025-06-01 00:00:00 UTC), dec!(100.00));
+    let st = project(
+        &[in_ev, cls, sale],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    // The created lot (post-sale it is fully consumed, so inspect the disposal leg for basis/gain).
+    assert_eq!(st.disposals.len(), 1);
+    let leg = &st.disposals[0].legs[0];
+    assert_eq!(leg.basis, dec!(0.00)); // conservative $0
+    assert_eq!(leg.gain, dec!(100.00)); // max gain: proceeds − 0
+    assert_eq!(leg.basis_source, BasisSource::SelfTransferInbound);
+}
+
+/// Invariant 2 — adjustable + advisory keys on `None`, not the numeric value:
+///   `{basis:Some(v)}`   → basis v, NO advisory.
+///   `{basis:Some(0)}`   → basis 0, NO advisory (attested zero-cost is silent).
+#[test]
+fn self_transfer_in_supplied_basis_has_no_advisory() {
+    // Some(50): real cost, no advisory.
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        "IN",
+        Some(dec!(50.00)),
+        None,
+    );
+    let st = project(
+        &[in_ev, cls],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st.lots.len(), 1);
+    assert_eq!(st.lots[0].usd_basis, dec!(50.00));
+    assert_eq!(st.lots[0].basis_source, BasisSource::SelfTransferInbound);
+    assert!(
+        !st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SelfTransferInboundZeroBasis),
+        "supplied basis must NOT fire the zero-basis advisory"
+    );
+
+    // Some(0): attested zero cost — basis 0 but STILL no advisory (flag keys on None).
+    let in0 = stx_in(
+        "IN0",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls0 = classify_self(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        "IN0",
+        Some(dec!(0)),
+        None,
+    );
+    let st0 = project(
+        &[in0, cls0],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st0.lots[0].usd_basis, dec!(0.00));
+    assert!(
+        !st0.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SelfTransferInboundZeroBasis),
+        "attested Some(0) must be silent — advisory keys on None, not usd_basis == 0"
+    );
+}
+
+/// Invariant 3a — conservative holding period: `{acquired_at:None}` on receipt date D → lot
+/// `acquired_at == D`; a <1yr-later disposal is Short-Term (conservative until proven long).
+#[test]
+fn self_transfer_in_hp_defaults_to_receipt_date_short_term() {
+    let d = time::macros::date!(2025 - 04 - 01);
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(1, datetime!(2026-01-01 00:00:00 UTC), "IN", None, None);
+    let sale = sell(datetime!(2025-06-01 00:00:00 UTC), dec!(100.00)); // ~2 months later
+    let st = project(
+        &[in_ev, cls, sale],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    let leg = &st.disposals[0].legs[0];
+    assert_eq!(leg.acquired_at, d); // gain_hp_start == lot's own acquired_at (no tacking)
+    assert_eq!(leg.term, Term::ShortTerm);
+}
+
+/// Invariant 3b — pool/HP ORTHOGONALITY: a 2026 receipt with a real 2013 `acquired_at` lands in the
+/// 2026 **Wallet** pool (keyed on the RECEIPT date) yet is Long-Term (HP from 2013). Proven jointly:
+/// the 2026-dated sale (Wallet pool) FINDS the lot (would be an uncovered disposal if it were mis-keyed
+/// into Universal) AND the disposal is Long-Term.
+#[test]
+fn self_transfer_in_supplied_old_date_is_long_term_in_wallet_pool() {
+    let old = time::macros::date!(2013 - 05 - 01);
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2026-01-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(
+        1,
+        datetime!(2026-01-02 00:00:00 UTC),
+        "IN",
+        Some(dec!(10.00)),
+        Some(old),
+    );
+    let sale = sell(datetime!(2026-03-01 00:00:00 UTC), dec!(100.00));
+    let st = project(
+        &[in_ev, cls, sale],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(
+        st.disposals.len(),
+        1,
+        "the 2026 Wallet-pool sale must find the lot"
+    );
+    let leg = &st.disposals[0].legs[0];
+    assert_eq!(leg.acquired_at, old);
+    assert_eq!(leg.term, Term::LongTerm);
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::UncoveredDisposal),
+        "lot must be in the 2026 Wallet pool (receipt date), not Universal (acquired_at)"
+    );
+}
+
+/// Invariant 4 — NON-taxable: no `IncomeRecord`, no Disposal/Removal for the receipt itself,
+/// nothing on any form. (Only the created lot; no recognition event.)
+#[test]
+fn self_transfer_in_is_non_taxable() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(1, datetime!(2026-01-01 00:00:00 UTC), "IN", None, None);
+    let st = project(
+        &[in_ev, cls],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st.lots.len(), 1, "one non-taxable origin lot created");
+    assert!(
+        st.income_recognized.is_empty(),
+        "self-transfer-in recognizes NO income"
+    );
+    assert!(st.disposals.is_empty());
+    assert!(st.removals.is_empty());
+}
+
+/// Invariant 5 — NEVER basis_pending / NEVER gated: `{basis:None}` → lot `basis_pending == false`;
+/// a later disposal computes a real gain with NO `FmvMissing` gate. (Gotcha G1.)
+#[test]
+fn self_transfer_in_is_never_basis_pending_or_gated() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(1, datetime!(2026-01-01 00:00:00 UTC), "IN", None, None);
+    // Lot-only projection: basis_pending must be false even for the defaulted $0 basis.
+    let st_lot = project(
+        &[in_ev.clone(), cls.clone()],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        !st_lot.lots[0].basis_pending,
+        "$0 basis is computable — NEVER pending (G1)"
+    );
+
+    // Disposal must NOT be gated by FmvMissing.
+    let sale = sell(datetime!(2025-07-01 00:00:00 UTC), dec!(80.00));
+    let st = project(
+        &[in_ev, cls, sale],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st.disposals.len(), 1);
+    assert_eq!(st.disposals[0].legs[0].gain, dec!(80.00));
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::FmvMissing),
+        "a self-transfer-in disposal must NEVER raise FmvMissing"
+    );
+}
+
+/// Invariant 6 — the honest flag is ADVISORY and NON-gating: `SelfTransferInboundZeroBasis.severity()
+/// == Advisory`; a projection whose ONLY blocker is this one carries NO Hard blocker, so
+/// `compute_tax_year` returns `Computed` (its sole blocker gate is `first_hard_blocker`, severity==Hard).
+#[test]
+fn self_transfer_in_zero_basis_blocker_is_advisory_and_non_gating() {
+    use btctax_core::tax::compute::compute_tax_year;
+    use btctax_core::tax::tables::{LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable};
+    use btctax_core::tax::types::{Carryforward, FilingStatus, TaxOutcome, TaxProfile};
+    use std::collections::BTreeMap;
+
+    assert_eq!(
+        BlockerKind::SelfTransferInboundZeroBasis.severity(),
+        Severity::Advisory,
+        "the zero-basis honesty flag must be Advisory, never Hard"
+    );
+
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(1, datetime!(2026-01-01 00:00:00 UTC), "IN", None, None);
+    let st = project(
+        &[in_ev, cls],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    // The advisory fires...
+    assert!(st
+        .blockers
+        .iter()
+        .any(|b| b.kind == BlockerKind::SelfTransferInboundZeroBasis));
+    // ...and it is the ONLY blocker, and it is NOT Hard.
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind.severity() != Severity::Hard),
+        "no Hard blocker may arise from a self-transfer-in — compute must not be gated"
+    );
+
+    // And compute_tax_year actually returns Computed (not NotComputable) for the receipt year.
+    let mut ordinary = BTreeMap::new();
+    ordinary.insert(
+        FilingStatus::Single,
+        OrdinarySchedule {
+            brackets: vec![OrdinaryBracket {
+                lower: dec!(0),
+                rate: dec!(0.10),
+            }],
+        },
+    );
+    let mut ltcg = BTreeMap::new();
+    ltcg.insert(
+        FilingStatus::Single,
+        LtcgBreakpoints {
+            max_zero: dec!(40000),
+            max_fifteen: dec!(400000),
+        },
+    );
+    let mut tables: BTreeMap<i32, TaxTable> = BTreeMap::new();
+    tables.insert(
+        2025,
+        TaxTable {
+            year: 2025,
+            source: "SYNTHETIC",
+            ordinary,
+            ltcg,
+            gift_annual_exclusion: dec!(19000),
+            ss_wage_base: dec!(176100),
+            gift_lifetime_exclusion: dec!(13_990_000),
+        },
+    );
+    let profile = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(0),
+        magi_excluding_crypto: dec!(0),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward {
+            short: dec!(0),
+            long: dec!(0),
+        },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
+    };
+    assert!(
+        matches!(
+            compute_tax_year(&[], &st, 2025, Some(&profile), &tables),
+            TaxOutcome::Computed(_)
+        ),
+        "a vault whose only blocker is the zero-basis advisory must still compute the year"
+    );
+}
+
+/// Invariant 7 — OUTSIDE FIFO but sellable: a `LotSelection` targeting the self-transfer-in event is
+/// rejected (`LotSelectionInvalid`) — a lot-CREATING op is not method-honoring — yet the created lot
+/// participates normally in FIFO when later SOLD.
+#[test]
+fn self_transfer_in_is_outside_fifo_but_sellable() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        "IN",
+        Some(dec!(20.00)),
+        None,
+    );
+    // A LotSelection naming the self-transfer-in TransferIn as its "disposal" — non-honoring.
+    let bad_sel = dec_ev(
+        2,
+        datetime!(2026-01-02 00:00:00 UTC),
+        EventPayload::LotSelection(LotSelection {
+            disposal_event: EventId::import(Source::Coinbase, SourceRef::new("IN")),
+            lots: vec![LotPick {
+                lot: LotId {
+                    origin_event_id: EventId::import(Source::Coinbase, SourceRef::new("IN")),
+                    split_sequence: 0,
+                },
+                sat: 100_000,
+            }],
+        }),
+    );
+    let sale = sell(datetime!(2026-06-01 00:00:00 UTC), dec!(100.00));
+    let st = project(
+        &[in_ev, cls, bad_sel, sale],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::LotSelectionInvalid),
+        "a LotSelection cannot target a lot-creating self-transfer-in"
+    );
+    // The lot still sells normally under FIFO fallback (basis 20 → gain 80).
+    assert_eq!(st.disposals.len(), 1);
+    assert_eq!(st.disposals[0].legs[0].basis, dec!(20.00));
+    assert_eq!(st.disposals[0].legs[0].gain, dec!(80.00));
+}
+
+/// Invariant 8 — FR9 conservation: `sigma_in` increments by the received sats and the report balances.
+#[test]
+fn self_transfer_in_conserves_sigma_in() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(1, datetime!(2026-01-01 00:00:00 UTC), "IN", None, None);
+    let st = project(
+        &[in_ev, cls],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st.stats.sigma_in, 100_000);
+    let r = conservation_report(&st);
+    assert!(r.balanced, "{r:?}");
+    assert_eq!(r.sigma_held, 100_000);
+}
+
+/// serde: a `ClassifyInbound::SelfTransferMine` (with basis + acquired_at) round-trips through the
+/// canonical vault encoding unchanged.
+#[test]
+fn self_transfer_in_classify_round_trips_serde() {
+    let ci = ClassifyInbound {
+        transfer_in_event: EventId::import(Source::Coinbase, SourceRef::new("IN")),
+        as_: InboundClass::SelfTransferMine {
+            basis: Some(dec!(12.34)),
+            acquired_at: Some(time::macros::date!(2019 - 08 - 07)),
+        },
+    };
+    let payload = EventPayload::ClassifyInbound(ci);
+    let json = serde_json::to_string(&payload).unwrap();
+    let back: EventPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(payload, back);
+
+    // Also the defaults form (both None).
+    let ci2 = ClassifyInbound {
+        transfer_in_event: EventId::import(Source::Coinbase, SourceRef::new("IN2")),
+        as_: InboundClass::SelfTransferMine {
+            basis: None,
+            acquired_at: None,
+        },
+    };
+    let p2 = EventPayload::ClassifyInbound(ci2);
+    let back2: EventPayload = serde_json::from_str(&serde_json::to_string(&p2).unwrap()).unwrap();
+    assert_eq!(p2, back2);
+}
+
+/// Duplicate `ClassifyInbound` first-wins still holds for the new variant: the second decision is a
+/// `DecisionConflict` and the FIRST classification governs.
+#[test]
+fn duplicate_classify_inbound_self_transfer_first_wins() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    // First: basis $10 (wins). Second: basis $99 (excluded → DecisionConflict).
+    let first = classify_self(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        "IN",
+        Some(dec!(10.00)),
+        None,
+    );
+    let second = classify_self(
+        2,
+        datetime!(2026-01-02 00:00:00 UTC),
+        "IN",
+        Some(dec!(99.00)),
+        None,
+    );
+    let st = project(
+        &[in_ev, first, second],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st.lots.len(), 1);
+    assert_eq!(
+        st.lots[0].usd_basis,
+        dec!(10.00),
+        "first classification wins"
+    );
+    assert_eq!(
+        st.blockers
+            .iter()
+            .filter(|b| b.kind == BlockerKind::DecisionConflict)
+            .count(),
+        1,
+        "exactly one DecisionConflict for the duplicate"
+    );
+}
+
+/// Voiding the self-transfer classification RE-EXPOSES the raw `TransferIn` as `UnknownInbound`
+/// (Hard `UnknownBasisInbound`, no lot) — the decision is fully reversible.
+#[test]
+fn void_classify_inbound_self_transfer_re_exposes_unknown_inbound() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(1, datetime!(2026-01-01 00:00:00 UTC), "IN", None, None);
+    let void = dec_ev(
+        2,
+        datetime!(2026-02-01 00:00:00 UTC),
+        EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+            target_event_id: EventId::decision(1),
+        }),
+    );
+    let st = project(
+        &[in_ev, cls, void],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(st.lots.is_empty(), "voided classification creates no lot");
+    assert!(st
+        .blockers
+        .iter()
+        .any(|b| b.kind == BlockerKind::UnknownBasisInbound));
+    assert!(
+        st.blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::SelfTransferInboundZeroBasis),
+        "voided classification fires no self-transfer advisory"
+    );
+}
+
+/// [R0-N2] A PRE-2025 receipt self-transfer-in folds through the **Universal** pool (pool keyed on the
+/// pre-transition receipt date) and conserves; a post-2025 sale (reconstructed per-wallet) consumes it.
+#[test]
+fn pre_2025_self_transfer_in_conserves_through_universal_pool() {
+    // Receipt on 2024-06-01 (pre-TRANSITION_DATE 2025-01-01) → Universal pool.
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2024-06-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        "IN",
+        Some(dec!(15.00)),
+        None,
+    );
+    // Lot-only: conserves; lot present with acquired_at == receipt (2024-06-01).
+    let st_lot = project(
+        &[in_ev.clone(), cls.clone()],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st_lot.lots.len(), 1);
+    assert_eq!(
+        st_lot.lots[0].acquired_at,
+        time::macros::date!(2024 - 06 - 01)
+    );
+    let r0 = conservation_report(&st_lot);
+    assert!(
+        r0.balanced,
+        "pre-2025 self-transfer-in must conserve: {r0:?}"
+    );
+
+    // With a 2026 sale: the Universal lot reconstructs into the per-wallet pool and is consumed LT.
+    let sale = sell(datetime!(2026-03-01 00:00:00 UTC), dec!(100.00));
+    let st = project(
+        &[in_ev, cls, sale],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(
+        st.disposals.len(),
+        1,
+        "the pre-2025 lot must be sellable post-transition"
+    );
+    assert_eq!(st.disposals[0].legs[0].term, Term::LongTerm);
+    let r = conservation_report(&st);
+    assert!(r.balanced, "{r:?}");
+}
+
+/// [R0-M2 / G5] The wallet-MISSING corner: a self-transfer-in `TransferIn` with `wallet: None` has
+/// nowhere to create the lot → emit a Hard `UnknownBasisInbound` (a self-transfer message), NOT the
+/// income-path `FmvMissing`, and create NO lot. Must not panic.
+#[test]
+fn self_transfer_in_without_wallet_emits_hard_unknown_basis_not_fmv_missing() {
+    let in_ev = stx_in("IN", datetime!(2025-04-01 00:00:00 UTC), 100_000, None);
+    let cls = classify_self(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        "IN",
+        Some(dec!(10.00)),
+        None,
+    );
+    let st = project(
+        &[in_ev, cls],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert!(st.lots.is_empty(), "no wallet → no lot");
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::UnknownBasisInbound),
+        "wallet-missing self-transfer-in must raise Hard UnknownBasisInbound"
+    );
+    assert!(
+        st.blockers.iter().all(|b| b.kind != BlockerKind::FmvMissing),
+        "must NOT copy the IncomeInbound FmvMissing guard (semantically wrong for a non-income receipt)"
+    );
+}

@@ -49,6 +49,7 @@ fn basis_source_tag(bs: BasisSource) -> &'static str {
         BasisSource::GiftFmvFallback => "gift_fmv_fallback",
         BasisSource::SafeHarborAllocated => "safe_harbor",
         BasisSource::ReconstructedPerWallet => "reconstructed",
+        BasisSource::SelfTransferInbound => "self_transfer_in",
     }
 }
 

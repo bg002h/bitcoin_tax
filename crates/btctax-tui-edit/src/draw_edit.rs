@@ -760,6 +760,22 @@ fn draw_classify_inbound_modal(frame: &mut Frame, area: Rect, modal: &ClassifyIn
                 "  as: GiftReceived\n\n    fmv_at_gift:       {fmv_at_gift}   (REQUIRED)\n    donor_basis:       {basis_str}\n    donor_acquired_at: {date_str}{both_none_warn}",
             )
         }
+        InboundClass::SelfTransferMine { basis, acquired_at } => {
+            let basis_str = basis
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "(empty = default $0, conservative)".to_string());
+            let date_str = acquired_at
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "(empty = default = receipt date, short-term)".to_string());
+            let zero_basis_note = if basis.is_none() {
+                "\n\n  NOTE: basis defaults to $0 (non-gating advisory) — supply real cost if you have it."
+            } else {
+                ""
+            };
+            format!(
+                "  as: SelfTransferMine (my own coins — non-taxable)\n\n    basis:       {basis_str}\n    acquired_at: {date_str}{zero_basis_note}",
+            )
+        }
     };
 
     let content = format!(

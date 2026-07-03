@@ -1306,7 +1306,10 @@ pub fn cycle_classify_raw_variant(v: ClassifyRawVariant) -> ClassifyRawVariant {
     }
 }
 
-/// Cycle through the 8 `BasisSource` variants in declaration order (event.rs:16-26).
+/// Cycle through the 8 user-selectable `BasisSource` variants in declaration order (event.rs:16-26).
+/// `SelfTransferInbound` is a system-assigned source (the inbound self-transfer fold), NOT a manual
+/// classify-raw choice, so it is deliberately OUTSIDE the ring: it never appears as a cycle output, and
+/// if an edited lot somehow carries it, one Tab exits to `ExchangeProvided`.
 pub fn cycle_basis_source(bs: BasisSource) -> BasisSource {
     match bs {
         BasisSource::ExchangeProvided => BasisSource::ComputedFromCost,
@@ -1317,6 +1320,7 @@ pub fn cycle_basis_source(bs: BasisSource) -> BasisSource {
         BasisSource::GiftFmvFallback => BasisSource::SafeHarborAllocated,
         BasisSource::SafeHarborAllocated => BasisSource::ReconstructedPerWallet,
         BasisSource::ReconstructedPerWallet => BasisSource::ExchangeProvided,
+        BasisSource::SelfTransferInbound => BasisSource::ExchangeProvided, // off-ring defensive exit
     }
 }
 
@@ -1331,6 +1335,7 @@ pub fn basis_source_display(bs: BasisSource) -> &'static str {
         BasisSource::GiftFmvFallback => "gift-fmv-fallback",
         BasisSource::SafeHarborAllocated => "safe-harbor-allocated",
         BasisSource::ReconstructedPerWallet => "reconstructed-per-wallet",
+        BasisSource::SelfTransferInbound => "self-transfer-inbound",
     }
 }
 

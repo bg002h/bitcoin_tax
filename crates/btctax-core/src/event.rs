@@ -23,6 +23,10 @@ pub enum BasisSource {
     GiftFmvFallback,
     SafeHarborAllocated,
     ReconstructedPerWallet,
+    /// Cycle A: the created lot of an inbound self-transfer (`InboundClass::SelfTransferMine`) —
+    /// "my own coins" returning. Used whether the basis was user-supplied or defaulted to $0; the
+    /// defaulted-vs-supplied signal rides the `SelfTransferInboundZeroBasis` advisory, not this source.
+    SelfTransferInbound,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,6 +134,18 @@ pub enum InboundClass {
         donor_basis: Option<Usd>,
         donor_acquired_at: Option<TaxDate>,
         fmv_at_gift: Usd,
+    },
+    /// Cycle A: the receiving side of a self-transfer whose matching withdrawal was never imported —
+    /// classified as "my own coins". NON-taxable; CREATES a fresh origin lot (no source lot exists).
+    SelfTransferMine {
+        /// Basis of the returning coins. `None` ⇒ default $0 (conservative) AND the zero-basis advisory
+        /// fires. `Some(v)` ⇒ user-supplied real cost, NO advisory. `Some(0)` (attested zero-cost) is
+        /// honored WITHOUT the advisory — the flag keys on `None`, not the numeric value.
+        #[serde(default)]
+        basis: Option<Usd>,
+        /// Original acquisition date. `None` ⇒ default = receipt date (short-term). `Some(d)` ⇒ real date.
+        #[serde(default)]
+        acquired_at: Option<TaxDate>,
     },
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

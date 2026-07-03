@@ -2195,6 +2195,7 @@ fn derive_classify_inbound_status(
             format!("Income({})", income_kind_display(*kind))
         }
         InboundClass::GiftReceived { .. } => "GiftReceived".to_string(),
+        InboundClass::SelfTransferMine { .. } => "SelfTransferMine".to_string(),
     };
     format!("Classified inbound as {cls_desc}")
 }
