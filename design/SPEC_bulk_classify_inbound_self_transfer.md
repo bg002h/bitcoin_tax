@@ -1,8 +1,10 @@
 # SPEC — bulk classify-inbound-self-transfer
 
 **Source baseline:** `main` @ `569a5ee` (post self-transfer-completion A+B; all anchors verified at write time).
-**Review status: R0 round 1 folded (0C / 1I / 3M / 1N — GATE BLOCKED then folded); awaiting R0 round 2.
-Review: `reviews/R0-spec-bulk-classify-inbound-self-transfer-round-1.md`.**
+**Review status: R0-GREEN (2 rounds; 0 Critical / 0 Important). Reviews:
+`reviews/R0-spec-bulk-classify-inbound-self-transfer-round-{1,2}.md` (round 1: 0C/1I — the candidate-set
+false-classify catch; round 2: 0C/0I — I1 verified structurally complete; the 2 Minor + 1 Nit round-2
+prose/cosmetic residuals folded). Cleared to implement.**
 **Design lineage:** user-approved (2026-07-03) as queue item 2 after the self-transfer completion program;
 a close MIRROR of the shipped `bulk-link-transfer` (the outbound bulk) applied to Cycle A's
 `InboundClass::SelfTransferMine`. Governed by memory `self-transfer-completion-policy`.
@@ -86,8 +88,11 @@ pub fn bulk_self_transfer_in_plan(&self, filter: BulkStiFilter) -> Result<BulkSt
 ```
 **Selection:** enumerate `UnknownBasisInbound`-flagged `TransferIn` events (blocker set joined to the raw
 event, as `self_transfer_match_plan` does), then **EXCLUDE [R0-I1]** any `in_event` already targeted by a
-non-voided `ClassifyInbound` (build the `already_classified` set from `ClassifyInbound` targets minus
-`VoidDecisionEvent` targets — mirror `open_classify_inbound_flow`'s filter 3, `main.rs:2139-2171`) **and
+non-voided `ClassifyInbound` (build `already_classified` = the `transfer_in_event` of each
+`ClassifyInbound` decision whose OWN decision id is NOT in the `VoidDecisionEvent` target set —
+`classifyinbounds.filter(|c| !voided.contains(&c.id)).map(|c| c.transfer_in_event)` [R0-M-r2-1: don't
+subtract TransferIn ids from decision ids — they're disjoint id-spaces]; mirror
+`open_classify_inbound_flow`'s filter 3, `main.rs:2139-2171`) **and
 [R0-M2]** any `wallet.is_none()` `TransferIn` (creates no lot). For each survivor: `date = tax_date(...)`,
 `wallet = ev.wallet` (now always `Some`), `sat`, `usd_fmv = fmv_of(&prices, date, sat)`; **frame filter**
 (`All` / `Year(y)` / `Range{from,to}` — reuse `crate::Frame` [R0-M3], the exact bulk-link type); **wallet
@@ -129,7 +134,8 @@ new state. Empty selection (all unchecked) → refuse before persist.
 ```rust
 pub fn persist_bulk_self_transfer_in(session: &mut Session, in_events: Vec<EventId>,
     now: OffsetDateTime) -> Result<usize, PersistError> {
-    if in_events.is_empty() { return Err(PersistError::NoChange); }  // [R0-M1] refuse BEFORE snapshot (mirror)
+    if in_events.is_empty() { return Err(rollback_empty()); }  // [R0-M1] refuse BEFORE snapshot — same
+                                                               // NoChange(CliError::Usage(..)) shape as persist_bulk_link_transfer [R0-N-r2-1]
     let pre = session.snapshot()?;
     for in_event in &in_events {
         let payload = EventPayload::ClassifyInbound(ClassifyInbound {
@@ -153,8 +159,9 @@ self-transfer-in ($0 basis); {remaining} unclassified inbound(s) remain."`
 ## Atomicity & correctness (both surfaces)
 - **One save per bulk op**; a mid-batch append failure reverts the WHOLE batch (TUI via `rollback`, CLI
   discards the unwritten Session). Never partial.
-- **Idempotence / structural safety:** candidates are only `UnknownBasisInbound` inbounds (already drops
-  classified/matched ones), so re-running never double-classifies; an excluded row is simply not appended.
+- **Idempotence / structural safety [R0-M-r2-2]:** the filter-3 `already_classified` exclusion drops any
+  inbound that already carries a live `ClassifyInbound` (so re-running never double-classifies / never
+  fires a duplicate `DecisionConflict`); an excluded row is simply not appended.
 - **Reversible:** each is a voidable `ClassifyInbound` decision (`v`), re-exposing the inbound as
   `UnknownInbound`.
 
@@ -200,7 +207,8 @@ self-transfer-in ($0 basis); {remaining} unclassified inbound(s) remain."`
 - **main.rs:** `bulk_sti_refuses_when_no_candidates`; `bulk_sti_per_row_exclude_drops_row`; E2E
   `bulk_sti_then_lots_created` (`B` → filter → exclude one → confirm → included inbounds create non-taxable
   $0-basis lots + clear `UnknownBasisInbound`, the excluded one stays unclassified) + `bulk_sti_then_void`
-  (one bulk classification voids cleanly, re-exposing `UnknownInbound`). **KAT-G1** stays green.
+  (one bulk classification voids cleanly, re-exposing `UnknownInbound` — AND the voided inbound reappears
+  in a FRESH `plan.included` [R0-M-r2-1], pinning the void→re-candidate accounting). **KAT-G1** stays green.
 
 ## Plan (TDD, phased — each: KATs red → implement green → review to 0C/0I)
 - **Task 1 — core plan + CLI** (`Session::bulk_self_transfer_in_plan`; the two-phase CLI +
