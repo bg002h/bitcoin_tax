@@ -282,3 +282,132 @@ the pair as written is unimplementable.
 
 **BLOCKED (1C / 7I).** All findings are spec-text fixes plus KAT roster additions; nothing
 requires a design restart. Re-review required after fold (§2 loop).
+
+---
+
+# Round 2 — re-review
+
+**Artifact:** `design/SPEC_tui_edit_chunk3.md` (FOLDED @ `1226240`, branch `feat/tui-edit-chunk3`).
+**Reviewer:** R0 (independent; architect). Every load-bearing citation re-checked file-by-file
+against the working tree at `1226240`. Round-1-verified-sound items (attest two-decision
+atomicity; select-lots needs no `optimize_attest` write; `s`/`d`/`a` free) NOT re-litigated —
+spot-confirmed intact.
+**Verdict: 0 Critical / 0 Important / 0 new Minor / 1 Nit — R0 GREEN, ready to implement.**
+
+## Airtightness ruling — the `attest_save_failed` latch (C1)
+
+**AIRTIGHT.** The residue latch closes the piggy-back hole with no remaining bypass. The proof
+rests on a chain of source-verified facts:
+
+1. **Every production `session.save()` lives in `edit/persist.rs`.** KAT-G1 (persist.rs:614-895)
+   scans non-test regions of all editor-crate files and forbids `save(` (in `persist_only_tokens`,
+   persist.rs:685) everywhere except `edit/persist.rs`. The 10 `session.save()` hits in `main.rs`
+   are all past the `#[cfg(test)]` split at main.rs:2615 — test seeds, not a production save path.
+   KAT-G1 is green at HEAD ⇒ mechanically, no other production save exists.
+2. **Every persist fn is reachable only through an opener key.** The nine persist fns map 1:1 to
+   openers `p/c/o/r/f/v/s/d/a`; each save fires only from a modal/flow `Enter` handler, and a
+   flow/modal becomes `Some` only via its opener. The latch refuses **all nine** openers — total
+   coverage, no persist fn left reachable.
+3. **No concurrent second flow can hold an in-flight save when the Err fires.** The dispatch
+   invariant (≤1 flow, ≤1 modal; an open flow claims all keys) means while the attest flow is
+   open nothing else is open; on `Err` the attest flow closes entirely and the latch is set in the
+   same arm (D3 Enter-arm; the ONLY setter). `Vault::save` is atomic (NFR2/NFR3) ⇒ the residue is
+   purely in-memory.
+4. **Quit is save-free and lock-releasing.** No `impl Drop` for `Vault`/`Session` saves — the only
+   relevant `Drop` is `VaultLock` (lock.rs:29), which *releases* the lock. `should_quit` runs no
+   save. So quitting drops the in-memory Connection (residue evaporates; on-disk vault stays
+   pre-action) and frees the lock so the CLI attest can then run cleanly — the remedy is physically
+   reachable exactly as the quit-first status strings now say (editor.rs:8-14; session.rs:53-58).
+5. **The export flow is not a save path.** The editor has no export surface at all —
+   `export_snapshot`/`write_csv_exports`/`write_form_csvs` are KAT-G1 test-region-forbidden even in
+   the editor (persist.rs:688-689). Verified: no save.
+6. **Attest-retry is double-guarded.** `a` is in the latched set (primary). Defense-in-depth: the
+   pre-flight runs off `session.load_events_and_project()` which reads `self.conn()` — the *in-memory*
+   Connection (session.rs:124-132), NOT disk. After a failed save the residue is visible: the prior
+   is now voided (excluded), the new `attested:true` allocation is the sole live one ⇒ count==1 ⇒
+   the `timely_allocation_attested` arm fires "already attested", appending NOTHING (reconcile.rs
+   mirror 495-510). Both guards hold independently.
+
+The only residual dependency is procedural — the implementer must place the latch check in all
+nine openers (spec mandates it in Hard Constraints + Task 3; KAT-E2E-ATTEST-ERRLATCH pins two
+representative classes: `a` = the attest opener itself, `f` = an unrelated mutating opener). That
+is adequate sampling for a uniform guard clause; not a finding.
+
+## C1 CLOSED
+
+Both defects fixed and pinned. (a) The remedy strings now say **quit the editor first** at every
+CLI-pointing status (D3 Enter-arm line 830-831; pre-flight arms; the D1 conflict status;
+Hard-Constraints audit line 118-120) — the `VaultLock` (editor.rs:8-14) makes an in-editor "retry
+via CLI" impossible, and quit is what makes the CLI remedy *safe*. (b) The `attest_save_failed`
+latch (set ONLY in the Err arm; refuses all nine openers) closes the piggy-back hole; the truthful
+Err string discloses discard-on-quit; the session-sourced already-attested arm is the reopen guard;
+KAT-E2E-ATTEST-ERRLATCH pins the latch + the refusal (`a` and `f`) + bytes-unchanged + the
+defense-in-depth pre-flight refusal. The unrecoverable double-batch consequence is documented
+accurately (two effective ⇒ Hard `DecisionConflict` "multiple effective SafeHarborAllocations" +
+Path A, resolve.rs:958-967; both §7.4-unvoidable). Airtight per the ruling above.
+
+## I1–I7 CLOSED (each verified against source at `1226240`)
+
+- **I1 — wallet sourcing.** D1 now sources `wallet` for ALL list items from the raw event via
+  `events_by_id(snap)[&item.disposal_event].wallet.clone()` (LedgerEvent.wallet:Option<WalletId>,
+  event.rs:302; helper at main.rs:1765). Confirmed `RemovalLeg` has NO wallet field (state.rs:148-163)
+  — the raw-event source is load-bearing for Gift/Donate. `None` → the existing "no lots" error.
+  KAT-E2E-SL-DONATE drives `s` → a Donate removal → wallet=W from the raw event → persist. CLOSED.
+- **I2 — duplicate-LotSelection semantics.** All four sites now read "dup ⇒ conflict on the SECOND
+  id, NEITHER applies (method-order fallback), voiding the duplicate reinstates the FIRST; voiding
+  the first keeps re-edited picks." Verified exact against resolve.rs:787-800 (`blockers.push` on
+  `d.id`, then `for id in &dup { selections.remove(id) }` at 798-799 = "NEITHER"). No "first governs"
+  text survives anywhere in the spec. CLOSED.
+- **I3 — donation-details reads.** D2 list + pre-population now read `snap.donation_details`
+  (app.rs:110, populated unlock.rs:177/185); "main.rs makes NO `donation_details::get` calls"; the
+  `Ok` arm rebuilds the snapshot (uniform with set-fmv, main.rs:1318-1339) so KAT-E2E-DD step 4
+  passes; status derives from the in-hand `details` (no `conn(`). No `conn(` outside `edit/persist.rs`
+  non-test code. CLOSED.
+- **I4 — KAT-G1 writer guard.** D4 now instructs ADD `"donation_details::set"` to
+  `persist_only_tokens`; confirmed the token is NOT yet present (persist.rs:685 = `["conn(","save(",
+  "tax_profile::set","append_"]`) and `tax_profile::set` is the parity precedent. Task 4's claim is
+  now mechanized. CLOSED.
+- **I5 — single-source pre-flight.** D3 runs the whole pre-flight off ONE
+  `session.load_events_and_project()` (reconcile.rs:474 mirror), no cached-`snap` mixing; the method
+  name carries no forbidden token (KAT-G1-legal in main.rs); this is the guard behind the C1
+  defense-in-depth. KAT added to ERRLATCH step 5. CLOSED.
+- **I6 — post-attest void REJECTED.** KAT-E2E-ATTEST-VOID added: the attested allocation IS listed
+  by the 2b void flow (`is_revocable_payload` includes `SafeHarborAllocation`, form.rs:822-836; list
+  filter main.rs:2353-2374; SHA warning draw_edit.rs:1415-1420); confirm → arm-1 status "Void saved,
+  but DecisionConflict fired — the target decision remains in force" (main.rs:2410-2417); allocation
+  stays effective; doomed void permanent (resolve.rs:924-934; void-of-void non-revocable 312-321).
+  Info warning strengthened to "PERMANENT Hard DecisionConflict that gates tax computation (§7.4)".
+  CLOSED.
+- **I7 — buffer semantics reconciled.** D3 key table pins ONE semantics: wrong word → error,
+  **buffer PRESERVED**. KAT-E2E-ATTEST ("ATTES"→err→"T"→submit) and KAT-E2E-ATTEST-WRONGWORD
+  ("attest"→err→Backspace×6→"ATTEST"→submit) are now mutually consistent under PRESERVED, and
+  match the substrate (`FieldBuffer` has no auto-clear; `set` exists, `push_str` does not,
+  form.rs). CLOSED.
+
+## Minors / Nits — folded
+
+M1(a) `resolve.rs:924-933` ✓, M1(b) `persist.rs:685` ✓, M1(c) `main.rs:323-324` ✓, M1(d)
+allocation-void → `allocation_voids` Vec (resolve.rs:322-328), never line 330 ✓; M2 double-batch =
+`effective.len()==2` + Path A (958-967) ✓; M3 KAT-P2f collision confirmed at persist.rs:1186 →
+re-lettered P2g/P2h ✓; M4 11-layer count consistent across all three sites ✓; M5 seed=100000 sat ✓;
+M6 two-lot discriminating seed ✓; M7 `!fee_mini_disposition` flag (honoring_principal(SelfTransfer)
+=Some, resolve.rs:1008-1016) ✓; M8 overflow rule (first 8 + "… and K more") ✓; M9 FIELD_CAP=64
+FOLLOWUP ✓; M10 stale-Advisory note keyed to new id, "don't widen to no-timebar-anywhere"
+(resolve.rs:846-847 vs 322-328) ✓; N1 `FieldBuffer::set` (form.rs) ✓; N2 state.rs:133-179 ✓.
+No stale `reconcile.rs:926` / `persist.rs:577` / `main.rs:326` / `push_str` / `12-layer` /
+"first governs" text survives (grep-clean).
+
+## Round-2 Nit (non-blocking; does NOT gate GREEN)
+
+- **N3 (Nit) — KAT-E2E-ATTEST-VOID quotes a truncated arm-1 status.** The spec's step-2 string
+  omits the trailing `" (see Compliance)"` present in `derive_void_status` arm 1
+  (main.rs:2411-2413: `"… remains in force (see Compliance)"`). The KAT's exact-string assertion
+  should use the full arm-1 string. Cosmetic KAT-authoring detail; the discriminating assertion
+  (arm-1 wording, NOT "Voided…") is correct.
+
+## Gate decision — Round 2
+
+**GREEN (0 Critical / 0 Important).** All 1C/7I/10M/2N round-1 findings folded and re-verified
+against source at `1226240`; no new Critical/Important/Minor introduced by the folds; internal
+consistency holds; the latch is airtight. One cosmetic Nit (N3) may be swept during implementation.
+**Ready to implement** (TDD, phased, per §2 review-to-green on the resulting diff).
