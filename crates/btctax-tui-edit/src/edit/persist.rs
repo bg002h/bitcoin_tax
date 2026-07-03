@@ -320,6 +320,35 @@ pub fn persist_select_lots(
     Ok(id)
 }
 
+/// Append a `TransferLink` decision event and atomically save the vault (chunk 4a, D1).
+///
+/// `payload` is the VALIDATED `EventPayload::TransferLink(…)` built by the link-transfer flow.
+/// `now` is INJECTED at Enter-press for test determinism.
+///
+/// # Single-append shape (NO bespoke latch)
+/// Identical `snapshot → append_decision → save_or_rollback` shape as `persist_select_lots`:
+/// exactly ONE fallible mutation after the snapshot, so a failed save reverts cleanly and a retry
+/// re-appends with the SAME `decision_seq` (no residue, no duplicate). The linked pair projects the
+/// TransferOut to `Op::SelfTransfer` (a non-taxable relocation); a genuine DUPLICATE link — two
+/// SUCCESSFUL links for one out_event — still fires `DecisionConflict` in resolve.rs and NEITHER
+/// applies, but the failed-save path no longer creates one.
+pub fn persist_link_transfer(
+    session: &mut btctax_cli::Session,
+    payload: btctax_core::event::EventPayload, // must be EventPayload::TransferLink
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, PersistError> {
+    let pre = session.snapshot()?;
+    let id = btctax_core::persistence::append_decision(
+        session.conn(),
+        payload,
+        now,
+        time::UtcOffset::UTC,
+        None,
+    )?;
+    save_or_rollback(session, pre)?;
+    Ok(id)
+}
+
 /// Store `DonationDetails` for `event_id` in the `donation_details` side-table
 /// and atomically save the vault (last-write-wins upsert; NOT a decision event).
 ///
@@ -783,6 +812,106 @@ mod tests {
             post_disk, post,
             "on-disk image must equal in-memory post after save"
         );
+    }
+
+    // ── KAT-P2-LT — append-only strict prefix test (link-transfer append form) ──
+    //
+    // Invariant: persist_link_transfer appends EXACTLY one decision event to the tail.
+    // Strict-prefix formula: post == pre ++ [new_event]; tail.decision_seq == pre_max+1.
+
+    #[test]
+    fn kat_p2_lt_append_only_strict_prefix_link_transfer() {
+        use btctax_core::event::{EventPayload, TransferLink};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, load_all_ordered};
+        use btctax_core::{EventId, TransferTarget, WalletId};
+        use btctax_store::Passphrase;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p2lt-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        // Seed 1 import TransferOut event + 1 decision event → non-trivial pre-state.
+        let import_event_id: EventId = EventId::import(Source::River, SourceRef::new("ref-p2lt"));
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let batch = vec![btctax_core::event::LedgerEvent {
+                id: import_event_id.clone(),
+                utc_timestamp: OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(WalletId::Exchange {
+                    provider: "River".into(),
+                    account: "main".into(),
+                }),
+                payload: EventPayload::TransferOut(btctax_core::event::TransferOut {
+                    sat: 100_000,
+                    fee_sat: None,
+                    dest_addr: None,
+                    txid: None,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            let now = OffsetDateTime::from_unix_timestamp(1_700_001_000).unwrap();
+            let p = EventPayload::MethodElection(btctax_core::event::MethodElection {
+                effective_from: date!(2024 - 01 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
+            session.save().unwrap();
+        };
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(pre.len(), 2, "pre must have exactly 2 events");
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+        assert_eq!(pre_max_seq, 1, "pre max decision_seq must be 1");
+
+        let payload = EventPayload::TransferLink(TransferLink {
+            out_event: import_event_id.clone(),
+            in_event_or_wallet: TransferTarget::Wallet(WalletId::Exchange {
+                provider: "Kraken".into(),
+                account: "cold".into(),
+            }),
+        });
+        let now = OffsetDateTime::from_unix_timestamp(1_700_002_000).unwrap();
+
+        let returned_id = persist_link_transfer(&mut session, payload.clone(), now).unwrap();
+
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 1, "post must be pre.len()+1");
+        assert_eq!(
+            &post[..pre.len()],
+            pre.as_slice(),
+            "first pre.len() rows must be unchanged (strict prefix)"
+        );
+        let tail = &post[pre.len()];
+        let tail_seq = tail.decision_seq.expect("tail row must have decision_seq");
+        assert_eq!(
+            tail_seq,
+            (pre_max_seq + 1) as i64,
+            "tail seq must be pre_max+1"
+        );
+        assert_eq!(
+            returned_id,
+            EventId::Decision {
+                seq: tail_seq as u64
+            },
+            "returned EventId must equal Decision {{ seq }}"
+        );
+        let stored_payload: EventPayload =
+            serde_json::from_str(&tail.payload_json).expect("tail payload_json must deserialise");
+        assert_eq!(stored_payload, payload, "stored payload must round-trip");
+
+        drop(session);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let post_disk = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(post_disk, post, "on-disk image must equal in-memory post");
     }
 
     // ── KAT-G1 — the editor's mechanized source gate ─────────────────────────

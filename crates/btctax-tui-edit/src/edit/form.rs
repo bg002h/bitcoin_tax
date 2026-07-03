@@ -9,7 +9,7 @@
 use btctax_core::{
     Carryforward, DisposeKind, DonationDetails, EventId, FilingStatus, Form8283Section,
     InboundClass, IncomeKind, LotId, ManualFmv, OutflowClass, ReclassifyIncome, ReclassifyOutflow,
-    Sat, TaxDate, TaxProfile, Usd, WalletId,
+    Sat, TaxDate, TaxProfile, TransferTarget, Usd, WalletId,
 };
 use ratatui::widgets::TableState;
 use std::str::FromStr;
@@ -1165,6 +1165,96 @@ pub struct SafeHarborAttestFlowState {
     /// The allocation payload (cloned from the pre-flight load — for display and re-append).
     pub prior_alloc: btctax_core::event::SafeHarborAllocation,
     pub step: SafeHarborAttestStep,
+}
+
+// ── Link-transfer flow types (chunk 4a, D1) ──────────────────────────────────
+
+/// Human-readable one-line label for a `WalletId` (used in the modal target line
+/// and the wallet pick-list). Mirrors the `provider/account` render convention.
+pub fn wallet_label(w: &WalletId) -> String {
+    match w {
+        WalletId::Exchange { provider, account } => format!("{provider}/{account}"),
+        WalletId::SelfCustody { label } => format!("self:{label}"),
+    }
+}
+
+/// Pre-computed display data for a link-transfer step-1 (out-list) row.
+///
+/// Sourced from `snap.state.pending_reconciliation` (the same inherently-post-filtered
+/// source reclassify-outflow uses): exactly the unlinked, unreconciled TransferOuts.
+#[derive(Clone)]
+pub struct TransferOutItem {
+    /// The `PendingTransfer.event` EventId (the raw TransferOut).
+    pub transfer_out_event: EventId,
+    /// Calendar date (tax timezone) of the TransferOut event.
+    pub date: TaxDate,
+    /// Principal sat from `PendingTransfer.principal_sat`.
+    pub principal_sat: Sat,
+    /// Wallet of the TransferOut event (SOURCE wallet).
+    pub wallet: Option<WalletId>,
+}
+
+/// Pre-computed display data for a link-transfer step-2 in-event (InEvent mode) row.
+///
+/// Only `TransferIn` events whose raw `LedgerEvent.wallet.is_some()` (the engine requires a
+/// resolvable destination wallet) AND not already targeted by a non-voided `TransferLink::InEvent`.
+#[derive(Clone)]
+pub struct InEventItem {
+    /// The TransferIn event id.
+    pub in_event: EventId,
+    /// Calendar date (tax timezone) of the TransferIn event.
+    pub date: TaxDate,
+    /// Principal sat from the TransferIn payload.
+    pub sat: Sat,
+    /// Destination wallet (guaranteed `Some` by the pre-filter).
+    pub wallet: WalletId,
+}
+
+/// Pre-computed display data for a link-transfer step-2 wallet (Wallet mode) row.
+///
+/// ALL distinct `snap.events[].wallet` Some-values [R0-I2] — NOT just `holdings_by_wallet`
+/// keys (which would hide a zero-balance destination wallet, the primary Wallet-target use case).
+#[derive(Clone)]
+pub struct WalletItem {
+    pub wallet: WalletId,
+}
+
+/// Which target mode the step-2 picker is showing (Tab cycles InEvent ⇄ Wallet).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LinkMode {
+    InEvent,
+    Wallet,
+}
+
+/// Step in the link-transfer flow.
+pub enum LinkTransferStep {
+    OutList,
+    TargetPick {
+        out: TransferOutItem,
+        mode: LinkMode,
+    },
+}
+
+/// Full state for the link-transfer flow. Owns all three target lists [R0-I2 discipline].
+pub struct LinkTransferFlowState {
+    /// Step-1 list: pending TransferOuts.
+    pub out_list: TargetList<TransferOutItem>,
+    pub step: LinkTransferStep,
+    /// Step-2 InEvent-mode list (built once at open).
+    pub in_list: TargetList<InEventItem>,
+    /// Step-2 Wallet-mode list (built once at open).
+    pub wallet_list: TargetList<WalletItem>,
+}
+
+/// Payload for the link-transfer confirmation modal.
+pub struct LinkTransferModalState {
+    pub out_event: EventId,
+    pub out_date: TaxDate,
+    pub out_sat: Sat,
+    /// The VALIDATED target — what will be persisted (InEvent(id) or Wallet(w)).
+    pub target: TransferTarget,
+    /// Human-readable target label (shown in the modal).
+    pub target_label: String,
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

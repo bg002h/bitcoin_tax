@@ -9,14 +9,15 @@
 //! Unlock screen. This module performs no writes.
 
 use crate::edit::form::{
-    amount_label, income_kind_display, ClassifyInboundModalState, ClassifyInboundStep,
-    DisposalKind, FieldBuffer, InboundVariant, MutationModalState, OutflowKind, ProfileFormState,
-    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
-    ReclassifyOutflowModalState, ReclassifyOutflowStep, SafeHarborAttestFlowState,
-    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
-    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
-    SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState, VoidModalState,
-    DONATION_FIELD_LABELS, FIELD_LABELS,
+    amount_label, income_kind_display, wallet_label, ClassifyInboundModalState,
+    ClassifyInboundStep, DisposalKind, FieldBuffer, InboundVariant, LinkMode,
+    LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, MutationModalState,
+    OutflowKind, ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState,
+    ReclassifyIncomeStep, ReclassifyOutflowModalState, ReclassifyOutflowStep,
+    SafeHarborAttestFlowState, SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState,
+    SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
+    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState,
+    VoidModalState, DONATION_FIELD_LABELS, FIELD_LABELS,
 };
 use crate::editor::{EditorApp, EditorScreen};
 use btctax_core::{DisposeKind, InboundClass, OutflowClass};
@@ -260,6 +261,23 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.set_donation_details_modal.as_ref() {
         draw_donation_details_modal(frame, area, modal);
+    }
+    // Link-transfer flow overlay.
+    if app.link_transfer_flow.is_some() {
+        let is_out_list = matches!(
+            app.link_transfer_flow.as_ref().map(|f| &f.step),
+            Some(LinkTransferStep::OutList)
+        );
+        if is_out_list {
+            if let Some(flow) = app.link_transfer_flow.as_mut() {
+                draw_link_transfer_out_list(frame, area, flow);
+            }
+        } else if let Some(flow) = app.link_transfer_flow.as_mut() {
+            draw_link_transfer_target_pick(frame, area, flow);
+        }
+    }
+    if let Some(modal) = app.link_transfer_modal.as_ref() {
+        draw_link_transfer_modal(frame, area, modal);
     }
     if let Some(flow) = app.safe_harbor_attest_flow.as_ref() {
         match &flow.step {
@@ -1960,6 +1978,225 @@ fn draw_donation_details_modal(
     let inner = block.inner(modal_rect);
     frame.render_widget(block, modal_rect);
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+// ── Link-transfer draw functions (chunk 4a, D1) ──────────────────────────────
+
+/// Render the link-transfer step-1 (out-list) overlay.
+///
+/// Title: `" Link Transfer — select the outgoing transfer "`.
+/// Columns: `Date | Principal Sat | Wallet | EventId`.
+fn draw_link_transfer_out_list(frame: &mut Frame, area: Rect, flow: &mut LinkTransferFlowState) {
+    let modal_width: u16 = 90;
+    let modal_height: u16 =
+        (flow.out_list.items.len() as u16 + 6).min(area.height.saturating_sub(2));
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Link Transfer — select the outgoing transfer  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let header = Row::new(vec![
+        Cell::from("Date"),
+        Cell::from("Principal Sat"),
+        Cell::from("Wallet"),
+        Cell::from("EventId"),
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
+
+    let rows: Vec<Row> = flow
+        .out_list
+        .items
+        .iter()
+        .map(|item| {
+            let wallet_str = match &item.wallet {
+                Some(w) => wallet_label(w),
+                None => "(no wallet)".to_string(),
+            };
+            Row::new(vec![
+                Cell::from(item.date.to_string()),
+                Cell::from(item.principal_sat.to_string()),
+                Cell::from(wallet_str),
+                Cell::from(item.transfer_out_event.canonical()),
+            ])
+        })
+        .collect();
+
+    let widths = [
+        Constraint::Length(12),
+        Constraint::Length(14),
+        Constraint::Length(18),
+        Constraint::Min(28),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        )
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.out_list.table_state);
+
+    let footer_area = Rect {
+        x: modal_rect.x,
+        y: modal_rect.y + modal_rect.height.saturating_sub(1),
+        width: modal_rect.width,
+        height: 1,
+    };
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(footer, footer_area);
+}
+
+/// Render the link-transfer step-2 (target pick) overlay: a mode toggle (Tab cycles
+/// InEvent ⇄ Wallet) over either the in-event list or the wallet list.
+fn draw_link_transfer_target_pick(frame: &mut Frame, area: Rect, flow: &mut LinkTransferFlowState) {
+    let mode = match &flow.step {
+        LinkTransferStep::TargetPick { mode, .. } => *mode,
+        _ => return,
+    };
+    let out_canonical = match &flow.step {
+        LinkTransferStep::TargetPick { out, .. } => out.transfer_out_event.canonical(),
+        _ => String::new(),
+    };
+
+    let modal_width: u16 = 92;
+    let modal_height: u16 = 22.min(area.height.saturating_sub(2));
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let (mode_tag, header, rows): (&str, Row, Vec<Row>) = match mode {
+        LinkMode::InEvent => (
+            "InEvent (link to a TransferIn)",
+            Row::new(vec![
+                Cell::from("Date"),
+                Cell::from("Sat"),
+                Cell::from("Wallet"),
+                Cell::from("EventId"),
+            ])
+            .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)),
+            if flow.in_list.items.is_empty() {
+                vec![Row::new(vec![Cell::from(
+                    "(no linkable TransferIn events — Tab to Wallet mode)",
+                )])]
+            } else {
+                flow.in_list
+                    .items
+                    .iter()
+                    .map(|item| {
+                        Row::new(vec![
+                            Cell::from(item.date.to_string()),
+                            Cell::from(item.sat.to_string()),
+                            Cell::from(wallet_label(&item.wallet)),
+                            Cell::from(item.in_event.canonical()),
+                        ])
+                    })
+                    .collect()
+            },
+        ),
+        LinkMode::Wallet => (
+            "Wallet (link to a known wallet)",
+            Row::new(vec![Cell::from("Wallet")])
+                .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)),
+            if flow.wallet_list.items.is_empty() {
+                vec![Row::new(vec![Cell::from("(no known wallets)")])]
+            } else {
+                flow.wallet_list
+                    .items
+                    .iter()
+                    .map(|item| Row::new(vec![Cell::from(wallet_label(&item.wallet))]))
+                    .collect()
+            },
+        ),
+    };
+
+    let title = format!(" Link Transfer — {out_canonical} → pick a target  [EDITOR] ");
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let widths = match mode {
+        LinkMode::InEvent => vec![
+            Constraint::Length(12),
+            Constraint::Length(12),
+            Constraint::Length(20),
+            Constraint::Min(24),
+        ],
+        LinkMode::Wallet => vec![Constraint::Min(40)],
+    };
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        )
+        .highlight_symbol("> ");
+
+    let table_state = match mode {
+        LinkMode::InEvent => &mut flow.in_list.table_state,
+        LinkMode::Wallet => &mut flow.wallet_list.table_state,
+    };
+    frame.render_stateful_widget(table, modal_rect, table_state);
+
+    let footer_area = Rect {
+        x: modal_rect.x,
+        y: modal_rect.y + modal_rect.height.saturating_sub(1),
+        width: modal_rect.width,
+        height: 1,
+    };
+    let footer = Paragraph::new(format!(
+        "mode: {mode_tag}   Tab: switch mode   ↑/↓: scroll   Enter: confirm   Esc: back   q: swallowed"
+    ))
+    .alignment(Alignment::Center)
+    .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(footer, footer_area);
+}
+
+/// Render the link-transfer confirmation modal (non-taxable relocation framing, TP8-c).
+fn draw_link_transfer_modal(frame: &mut Frame, area: Rect, modal: &LinkTransferModalState) {
+    let content = format!(
+        "  out:    {out}  ({sat} sat, {date})\n\
+         \n\
+           →link:  {target}\n\
+         \n\
+           Records a NON-TAXABLE self-transfer (relocation).\n\
+           Basis carries; any fee is non-taxable (TP8-c).\n\
+           Appended as a revocable decision (void with 'v').\n\
+         \n\
+         [Enter] Confirm & save   [Esc] Cancel — writes nothing",
+        out = modal.out_event.canonical(),
+        sat = modal.out_sat,
+        date = modal.out_date,
+        target = modal.target_label,
+    );
+
+    let modal_width: u16 = 74;
+    let content_lines = content.lines().count() as u16 + 2;
+    let modal_height = content_lines.max(12);
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Confirm: link-transfer — WRITES THE VAULT ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
 }
 
 // ── Safe-harbor-attest flow draw functions ─────────────────────────────────────
