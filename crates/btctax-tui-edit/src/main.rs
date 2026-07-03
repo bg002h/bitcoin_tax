@@ -19,24 +19,25 @@ use crossterm::{
 };
 use edit::form::{
     cycle_basis_source, cycle_business_optional, cycle_classify_raw_variant, cycle_filing_status,
-    cycle_income_kind, cycle_income_kind_optional, cycle_outflow_kind, income_kind_display,
-    is_revocable_payload, next_focus, prev_focus, validate, validate_classify_inbound_gift,
-    validate_classify_inbound_income, validate_classify_raw_acquire, validate_classify_raw_income,
-    validate_donation_details, validate_reclassify_income, validate_reclassify_outflow,
-    validate_select_lots, validate_set_fmv, ClassifyInboundFlowState, ClassifyInboundModalState,
-    ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep,
-    ClassifyRawVariant, ConflictItem, DisposalKind, DisposalListItem, DonationListItem,
-    FieldBuffer, FmvListItem, InEventItem, InboundListItem, InboundVariant, IncomeListItem,
-    LinkMode, LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, LotPickFormRow,
-    MutationModalState, OutflowKind, OutflowListItem, ProfileFormState, RawListItem,
-    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
-    ReclassifyOutflowFlowState, ReclassifyOutflowModalState, ReclassifyOutflowStep,
-    ResolveConflictFlowState, ResolveConflictModalState, ResolveConflictStep, ResolveKind,
-    SafeHarborAttestFlowState, SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState,
-    SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
-    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList,
-    TransferOutItem, VoidFlowState, VoidListItem, VoidModalState, VoidStep, WalletItem,
-    FREETEXT_CAP,
+    cycle_income_kind, cycle_income_kind_optional, cycle_outflow_kind, filter_optimize_candidates,
+    income_kind_display, is_revocable_payload, next_focus, optimize_basis_label, prev_focus,
+    validate, validate_classify_inbound_gift, validate_classify_inbound_income,
+    validate_classify_raw_acquire, validate_classify_raw_income, validate_donation_details,
+    validate_reclassify_income, validate_reclassify_outflow, validate_select_lots,
+    validate_set_fmv, ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyInboundStep,
+    ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep, ClassifyRawVariant, ConflictItem,
+    DisposalKind, DisposalListItem, DonationListItem, FieldBuffer, FmvListItem, InEventItem,
+    InboundListItem, InboundVariant, IncomeListItem, LinkMode, LinkTransferFlowState,
+    LinkTransferModalState, LinkTransferStep, LotPickFormRow, MutationModalState,
+    OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep, OptimizeCandidateItem,
+    OutflowKind, OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
+    ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
+    ReclassifyOutflowModalState, ReclassifyOutflowStep, ResolveConflictFlowState,
+    ResolveConflictModalState, ResolveConflictStep, ResolveKind, SafeHarborAttestFlowState,
+    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
+    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
+    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TransferOutItem, VoidFlowState,
+    VoidListItem, VoidModalState, VoidStep, WalletItem, FREETEXT_CAP,
 };
 use editor::{EditorApp, EditorScreen};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -48,8 +49,8 @@ use std::time::Duration;
 use btctax_core::conventions::TRANSITION_DATE;
 use btctax_core::{
     BasisSource, BlockerKind, ClassifyInbound, DisposeKind, DonationDetails, EventId, EventPayload,
-    Form8283Section, InboundClass, IncomeKind, ManualFmv, OutflowClass, ReclassifyIncome,
-    RemovalKind, TransferTarget,
+    Form8283Section, InboundClass, IncomeKind, ManualFmv, OutflowClass, Persistability,
+    ReclassifyIncome, RemovalKind, TransferTarget,
 };
 use btctax_tui::app::Tab;
 use btctax_tui::{restore_terminal, setup_panic_hook, TerminalGuard};
@@ -182,6 +183,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Optimize-accept-modal dispatch — BEFORE flow, form, screen ───────────
+    if app.optimize_accept_modal.is_some() {
+        handle_optimize_accept_modal_key(app, key);
+        return;
+    }
+
     // ── 9. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
     //    Every step of an open flow is claimed here; 'q' and Esc can never
     //    fall through to a Browse quit arm mid-flow.
@@ -227,6 +234,10 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.resolve_conflict_flow.is_some() {
         handle_resolve_conflict_flow_key(app, key);
+        return;
+    }
+    if app.optimize_accept_flow.is_some() {
+        handle_optimize_accept_flow_key(app, key);
         return;
     }
 
@@ -293,6 +304,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('u') => open_classify_raw_flow(app),
                 KeyCode::Char('a') => open_safe_harbor_attest_flow(app),
                 KeyCode::Char('i') => open_resolve_conflict_flow(app),
+                KeyCode::Char('z') => open_optimize_accept_flow(app),
                 _ => {}
             }
         }
@@ -515,6 +527,8 @@ impl EditorApp {
         self.safe_harbor_attest_flow = None;
         self.resolve_conflict_flow = None;
         self.resolve_conflict_modal = None;
+        self.optimize_accept_flow = None;
+        self.optimize_accept_modal = None;
     }
 }
 
@@ -5228,6 +5242,372 @@ fn derive_resolve_conflict_status(
         "Conflict {} {verb}; import-conflict resolved.",
         conflict_event.canonical()
     )
+}
+
+// ── Optimize-accept flow (chunk 4b, D4) ──────────────────────────────────────
+
+/// Open the optimize-accept flow from the Browse screen (chunk 4b, D4).
+///
+/// Opener = a READ-ONLY optimizer RECOMPUTE (KAT-G1-clean) via the additive
+/// `Session::optimize_proposal(year, now)` — never trusts a stale proposal (NFR4), never opens a
+/// second `Session` (a second open would deadlock on the held VaultLock; `cmd::optimize::accept` is
+/// forbidden). On `Err(e)` shows the consult remedy and no-opens.
+///
+/// Pre-filter (`filter_optimize_candidates`): keep rows where `proposed != current`,
+/// `persistable != ForbiddenBroker2027`, AND the disposal has NO live `LotSelection` (the MANDATORY
+/// duplicate guard). Empty filtered list → status + NO open [R0-M3].
+fn open_optimize_accept_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    if app.snapshot.is_none() {
+        return;
+    }
+    let year = app.selected_year;
+    let now = time::OffsetDateTime::now_utc();
+
+    // READ-ONLY recompute via the additive btctax-cli helper.
+    let proposal = {
+        let session = match app.session.as_ref() {
+            Some(s) => s,
+            None => return,
+        };
+        match session.optimize_proposal(year, now) {
+            Ok(p) => p,
+            Err(e) => {
+                app.status = Some(format!(
+                    "{e} — quit the editor and run: btctax optimize consult"
+                ));
+                return;
+            }
+        }
+    };
+
+    // Duplicate guard: disposal_events of non-voided LotSelection decisions (owned set for the helper).
+    let (items, delta, approximate) = {
+        let snap = app.snapshot.as_ref().unwrap();
+        let voided: std::collections::BTreeSet<&EventId> = snap
+            .events
+            .iter()
+            .filter_map(|e| {
+                if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                    Some(&v.target_event_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let already_selected: std::collections::BTreeSet<EventId> = snap
+            .events
+            .iter()
+            .filter(|e| !voided.contains(&e.id))
+            .filter_map(|e| {
+                if let EventPayload::LotSelection(ls) = &e.payload {
+                    Some(ls.disposal_event.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        (
+            filter_optimize_candidates(&proposal.per_disposal, &already_selected),
+            proposal.delta,
+            proposal.approximate,
+        )
+    };
+
+    if items.is_empty() {
+        // R0-M3: empty filtered list never opens a flow.
+        app.status = Some("No persistable optimizer improvements available".to_string());
+        return;
+    }
+
+    app.optimize_accept_flow = Some(OptimizeAcceptFlowState {
+        list: TargetList::new(items),
+        step: OptimizeAcceptStep::List,
+        delta,
+        approximate,
+    });
+}
+
+/// Build the optimize-accept confirmation modal from a chosen candidate.
+fn open_optimize_accept_modal(
+    app: &mut EditorApp,
+    item: OptimizeCandidateItem,
+    attestation: Option<String>,
+) {
+    let pick_count = item.picks.len();
+    let total_sat: btctax_core::Sat = item.picks.iter().map(|p| p.sat).sum();
+    let basis_label = optimize_basis_label(item.persistable);
+    app.optimize_accept_modal = Some(OptimizeAcceptModalState {
+        disposal: item.disposal,
+        picks: item.picks,
+        pick_count,
+        total_sat,
+        attestation,
+        basis_label,
+    });
+}
+
+/// Dispatch to the correct sub-handler depending on `OptimizeAcceptStep`.
+fn handle_optimize_accept_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.optimize_accept_flow.as_ref() {
+        Some(f) => match &f.step {
+            OptimizeAcceptStep::List => 0u8,
+            OptimizeAcceptStep::AttestText { .. } => 1u8,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_oa_list_key(app, key),
+        _ => handle_oa_attest_text_key(app, key),
+    }
+}
+
+/// List step: Enter → branch on persistability (`ContemporaneousNow` → modal; `NeedsAttestation` →
+/// attestation-text step). Esc → close flow. q → swallowed.
+fn handle_oa_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            let selected = app
+                .optimize_accept_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+            if let Some(item) = selected {
+                match item.persistable {
+                    Persistability::ContemporaneousNow => {
+                        open_optimize_accept_modal(app, item, None);
+                    }
+                    Persistability::NeedsAttestation => {
+                        if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                            flow.step = OptimizeAcceptStep::AttestText {
+                                item,
+                                buf: FieldBuffer::with_cap(FREETEXT_CAP),
+                                error: None,
+                            };
+                        }
+                    }
+                    Persistability::ForbiddenBroker2027 => {
+                        // Unreachable — pre-filtered out of the candidate list. Defensive no-op.
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.optimize_accept_flow = None;
+        }
+        _ => {
+            // All other keys (including 'q') swallowed while flow is open [R0-I2].
+        }
+    }
+}
+
+/// Attestation-text step (NeedsAttestation only): free-text entry of the contemporaneous-ID
+/// statement. Enter → non-empty required → modal. Esc → back to List. All printable chars (incl.
+/// 'q') are consumed by the buffer.
+fn handle_oa_attest_text_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                flow.step = OptimizeAcceptStep::List;
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                if let OptimizeAcceptStep::AttestText { buf, .. } = &mut flow.step {
+                    buf.pop_char();
+                }
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                if let OptimizeAcceptStep::AttestText { buf, error, .. } = &mut flow.step {
+                    buf.push_char(c);
+                    *error = None;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            // [R0-M4] "empty" = len==0 (checked before trimming). Store the text VERBATIM (CLI parity).
+            let (item, is_empty, text) = match app.optimize_accept_flow.as_ref() {
+                Some(f) => match &f.step {
+                    OptimizeAcceptStep::AttestText { item, buf, .. } => {
+                        (item.clone(), buf.is_empty(), buf.buf.clone())
+                    }
+                    _ => return,
+                },
+                None => return,
+            };
+            if is_empty {
+                if let Some(flow) = app.optimize_accept_flow.as_mut() {
+                    if let OptimizeAcceptStep::AttestText { error, .. } = &mut flow.step {
+                        *error = Some(
+                            "attestation text is required (the contemporaneous-ID statement)"
+                                .to_string(),
+                        );
+                    }
+                }
+                return;
+            }
+            open_optimize_accept_modal(app, item, Some(text));
+        }
+        _ => {
+            // Non-text keys swallowed.
+        }
+    }
+}
+
+/// Handle a key press while the optimize-accept confirmation modal is open (chunk 4b, D4).
+///
+/// Enter → `persist_optimize_accept(session, disposal, picks, attestation, made, now)` (dual-write:
+///   LotSelection + optional attest row) → re-project + status + close. `Err(e)` → close modal,
+///   route through `on_persist_error`.
+/// Esc → close modal only (back to the prior step; nothing written).
+fn handle_optimize_accept_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (disposal, picks, attestation, basis_label) =
+                match app.optimize_accept_modal.as_ref() {
+                    Some(m) => (
+                        m.disposal.clone(),
+                        m.picks.clone(),
+                        m.attestation.clone(),
+                        m.basis_label,
+                    ),
+                    None => return,
+                };
+            let pick_count = picks.len();
+            let attested = attestation.is_some();
+            let now = time::OffsetDateTime::now_utc();
+            let made = btctax_core::conventions::tax_date(now, time::UtcOffset::UTC);
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.optimize_accept_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_optimize_accept(
+                    session,
+                    disposal.clone(),
+                    picks,
+                    attestation,
+                    made,
+                    now,
+                )
+            };
+
+            match save_result {
+                Ok(decision_id) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_optimize_accept_status(
+                                &snap,
+                                &disposal,
+                                &decision_id,
+                                pick_count,
+                                basis_label,
+                                attested,
+                            );
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.optimize_accept_modal = None;
+                    app.optimize_accept_flow = None;
+                }
+                Err(e) => {
+                    app.optimize_accept_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.optimize_accept_modal = None;
+        }
+        _ => {
+            // All other keys swallowed (blocking modal).
+        }
+    }
+}
+
+/// Derive the status string from RE-PROJECTED state after an optimize-accept save (chunk 4b, D4).
+///
+/// Three arms (spec D4): (1) `DecisionConflict` on `decision_id` (duplicate LotSelection — only via a
+/// failed-save race) → NEITHER-applies/method-order (reuses the select-lots arm-1 wording); (2)
+/// `LotSelectionInvalid` for the disposal → saved-but-invalid; (3) clean → recorded summary
+/// (+ "; attestation recorded" when attested).
+fn derive_optimize_accept_status(
+    snap: &btctax_tui::app::Snapshot,
+    disposal: &EventId,
+    decision_id: &EventId,
+    pick_count: usize,
+    basis_label: &str,
+    attested: bool,
+) -> String {
+    // Arm 1: DecisionConflict attributed to the decision_id.
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(decision_id) {
+            return format!(
+                "Saved, but DecisionConflict fired — neither selection applies (method order \
+                 governs); clear with Void flow (press 'v'), or quit the editor and run: \
+                 btctax reconcile void {} (see Compliance)",
+                decision_id.canonical()
+            );
+        }
+    }
+
+    // Arm 2: LotSelectionInvalid attributed to the disposal.
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::LotSelectionInvalid && b.event.as_ref() == Some(disposal) {
+            return "Optimizer selection saved but invalid — see Compliance; void ('v') and retry."
+                .to_string();
+        }
+    }
+
+    // Arm 3: clean.
+    let mut s = format!(
+        "Optimizer selection recorded for {} — {pick_count} lot(s); {basis_label}",
+        disposal.canonical()
+    );
+    if attested {
+        s.push_str("; attestation recorded");
+    }
+    s.push('.');
+    s
 }
 
 // ── Scroll helpers ────────────────────────────────────────────────────────────
@@ -15212,6 +15592,279 @@ mod tests {
             lot.usd_basis,
             rust_decimal_macros::dec!(30000),
             "E2E-RC-REJECT: lot must keep the ORIGINAL basis 30000"
+        );
+    }
+
+    // ── Optimize-accept flow (chunk 4b, D4) ──────────────────────────────────
+
+    /// A single-lot candidate item for the flow-step tests.
+    fn oa_item(persistable: Persistability) -> OptimizeCandidateItem {
+        use btctax_core::identity::{LotId, Source, SourceRef};
+        OptimizeCandidateItem {
+            disposal: EventId::import(Source::River, SourceRef::new("oa-item-disp")),
+            wallet: btctax_core::WalletId::Exchange {
+                provider: "River".into(),
+                account: "main".into(),
+            },
+            date: time::macros::date!(2025 - 05 - 23),
+            persistable,
+            picks: vec![btctax_core::LotPick {
+                lot: LotId {
+                    origin_event_id: EventId::import(Source::River, SourceRef::new("oa-item-lot")),
+                    split_sequence: 0,
+                },
+                sat: 100_000,
+            }],
+        }
+    }
+
+    fn oa_flow_app(persistable: Persistability) -> EditorApp {
+        let mut app = EditorApp::new(PathBuf::new());
+        app.screen = EditorScreen::Browse;
+        app.optimize_accept_flow = Some(OptimizeAcceptFlowState {
+            list: TargetList::new(vec![oa_item(persistable)]),
+            step: OptimizeAcceptStep::List,
+            delta: rust_decimal_macros::dec!(-1234),
+            approximate: false,
+        });
+        app
+    }
+
+    // ── KAT-OA-CONTEMP-SKIP — ContemporaneousNow → modal directly (no text step) ──
+    #[test]
+    fn kat_oa_contemporaneous_skips_text_step() {
+        let mut app = oa_flow_app(Persistability::ContemporaneousNow);
+        handle_key(&mut app, press(KeyCode::Enter)); // pick
+        assert!(
+            app.optimize_accept_modal.is_some(),
+            "OA-CONTEMP: modal opens directly"
+        );
+        let m = app.optimize_accept_modal.as_ref().unwrap();
+        assert!(m.attestation.is_none(), "OA-CONTEMP: no attestation");
+        assert_eq!(m.basis_label, "Contemporaneous");
+        // Flow stayed at List (never entered AttestText).
+        assert!(matches!(
+            app.optimize_accept_flow.as_ref().map(|f| &f.step),
+            Some(OptimizeAcceptStep::List)
+        ));
+    }
+
+    // ── KAT-OA-NEEDS-ATTEST — NeedsAttestation → text step; empty rejected, text → modal ──
+    #[test]
+    fn kat_oa_needs_attestation_requires_nonempty_text() {
+        let mut app = oa_flow_app(Persistability::NeedsAttestation);
+        handle_key(&mut app, press(KeyCode::Enter)); // pick → AttestText
+        assert!(app.optimize_accept_modal.is_none(), "no modal yet");
+        assert!(matches!(
+            app.optimize_accept_flow.as_ref().map(|f| &f.step),
+            Some(OptimizeAcceptStep::AttestText { .. })
+        ));
+
+        // Empty text → Enter → error, still no modal.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.optimize_accept_modal.is_none(),
+            "OA-NEEDS: empty text must NOT open the modal"
+        );
+        let has_error = matches!(
+            app.optimize_accept_flow.as_ref().map(|f| &f.step),
+            Some(OptimizeAcceptStep::AttestText { error: Some(_), .. })
+        );
+        assert!(has_error, "OA-NEEDS: empty submit sets an error");
+
+        // Type text → Enter → modal opens, attested.
+        type_str(&mut app, "contemporaneous-id");
+        handle_key(&mut app, press(KeyCode::Enter));
+        let m = app
+            .optimize_accept_modal
+            .as_ref()
+            .expect("OA-NEEDS: non-empty text opens the modal");
+        assert_eq!(m.attestation.as_deref(), Some("contemporaneous-id"));
+        assert_eq!(m.basis_label, "AttestedRecording");
+    }
+
+    // ── KAT-E2E-OA-Z — full 'z' path via Session::optimize_proposal (attested) ──
+    fn oa_profile_2025() -> btctax_core::TaxProfile {
+        use rust_decimal_macros::dec;
+        btctax_core::TaxProfile {
+            filing_status: btctax_core::FilingStatus::Single,
+            ordinary_taxable_income: dec!(100000),
+            magi_excluding_crypto: dec!(100000),
+            qualified_dividends_and_other_pref_income: dec!(0),
+            other_net_capital_gain: dec!(0),
+            capital_loss_carryforward_in: btctax_core::Carryforward {
+                short: dec!(0),
+                long: dec!(0),
+            },
+            w2_ss_wages: dec!(0),
+            w2_medicare_wages: dec!(0),
+            schedule_c_expenses: dec!(0),
+        }
+    }
+
+    /// Seed a computable 2025 year: two same-wallet 2025 lots (A cheap $30k, B dearer $50k) + a 500k
+    /// sale (FIFO baseline consumes cheaper lot A → higher gain; the optimizer prefers dearer lot B →
+    /// a persistable proposed row). NO back-dated MethodElection (default FIFO config keeps 2025
+    /// computable — a MethodElection effective before its own made-date would fire
+    /// `MethodElectionBackdated`). Returns the sale's disposal EventId.
+    fn oa_seed_computable_sell(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> btctax_core::EventId {
+        use btctax_core::event::{
+            Acquire, BasisSource, DisposeKind, EventPayload, LedgerEvent, OutflowClass,
+            ReclassifyOutflow, TransferOut,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::{EventId, WalletId};
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let wallet = Some(WalletId::Exchange {
+            provider: "River".to_string(),
+            account: "main".to_string(),
+        });
+        let lot_a = EventId::import(Source::River, SourceRef::new("oa-lot-a"));
+        let lot_b = EventId::import(Source::River, SourceRef::new("oa-lot-b"));
+        let to_id = EventId::import(Source::River, SourceRef::new("oa-sell"));
+
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let ta = OffsetDateTime::from_unix_timestamp(1_739_000_000).unwrap(); // 2025-02 lot A
+        let tb = OffsetDateTime::from_unix_timestamp(1_741_000_000).unwrap(); // 2025-03 lot B
+        let tc = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(); // 2025-05 sell
+        let td = OffsetDateTime::from_unix_timestamp(1_748_100_000).unwrap(); // decisions
+        let batch = vec![
+            LedgerEvent {
+                id: lot_a.clone(),
+                utc_timestamp: ta,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 1_000_000,
+                    usd_cost: dec!(30000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            },
+            LedgerEvent {
+                id: lot_b.clone(),
+                utc_timestamp: tb,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 1_000_000,
+                    usd_cost: dec!(50000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            },
+            LedgerEvent {
+                id: to_id.clone(),
+                utc_timestamp: tc,
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::TransferOut(TransferOut {
+                    sat: 500_000,
+                    fee_sat: None,
+                    dest_addr: None,
+                    txid: None,
+                }),
+            },
+        ];
+        btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+        let ro = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: to_id.clone(),
+            as_: OutflowClass::Dispose {
+                kind: DisposeKind::Sell,
+            },
+            principal_proceeds_or_fmv: dec!(30000),
+            fee_usd: None,
+            donee: None,
+        });
+        btctax_core::persistence::append_decision(session.conn(), ro, td, UtcOffset::UTC, None)
+            .unwrap();
+        session.save().unwrap();
+        to_id
+    }
+
+    #[test]
+    fn kat_e2e_oa_z_attested_persists_lotselection_and_attest_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-oa-pass";
+
+        let to_id = oa_seed_computable_sell(&vault, &key, pp_str);
+
+        // Set a 2025 profile so `optimize_year` computes (else YearNotComputable → no open).
+        {
+            let mut s = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            btctax_cli::tax_profile::set(s.conn(), 2025, &oa_profile_2025()).unwrap();
+            s.save().unwrap();
+        }
+
+        let mut app = open_app(&vault, pp_str);
+        app.selected_year = 2025;
+
+        // z → opener recomputes via Session::optimize_proposal; the optimizer prefers dearer lot B
+        // (lower gain) over FIFO's lot A → a persistable proposed row for the 2025 sale.
+        handle_key(&mut app, press(KeyCode::Char('z')));
+        let flow = app
+            .optimize_accept_flow
+            .as_ref()
+            .expect("OA-Z: flow must open with a persistable candidate");
+        assert!(
+            flow.list.items.iter().any(|c| c.disposal == to_id),
+            "OA-Z: the 2025 sale must be a candidate"
+        );
+        // Already-executed (made 2026 > sale 2025), own-books exchange → NeedsAttestation.
+        assert!(
+            matches!(
+                flow.list
+                    .items
+                    .iter()
+                    .find(|c| c.disposal == to_id)
+                    .unwrap()
+                    .persistable,
+                Persistability::NeedsAttestation
+            ),
+            "OA-Z: an already-executed own-books disposal needs attestation"
+        );
+
+        handle_key(&mut app, press(KeyCode::Enter)); // pick → AttestText
+        type_str(&mut app, "attest-2025");
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(app.optimize_accept_modal.is_some(), "OA-Z: modal opens");
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm & save
+
+        assert!(app.optimize_accept_modal.is_none() && app.optimize_accept_flow.is_none());
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.contains("Optimizer selection recorded")
+                && status.contains("attestation recorded"),
+            "OA-Z: status must confirm the attested recording; got {status:?}"
+        );
+
+        // The attestation row is co-persisted for the disposal.
+        let att =
+            btctax_cli::optimize_attest::get(app.session.as_ref().unwrap().conn(), &to_id).unwrap();
+        assert_eq!(
+            att.as_deref(),
+            Some("attest-2025"),
+            "OA-Z: attest row co-persisted with the LotSelection"
+        );
+
+        // The re-projected snapshot carries a LotSelection targeting the sale.
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            snap.events.iter().any(|e| matches!(
+                &e.payload,
+                btctax_core::EventPayload::LotSelection(ls) if ls.disposal_event == to_id
+            )),
+            "OA-Z: a LotSelection for the sale must be persisted"
         );
     }
 }

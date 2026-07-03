@@ -16,11 +16,11 @@
 use crate::edit::form::{
     ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyRawFlowState,
     ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState, MutationModalState,
-    ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState,
-    ReclassifyOutflowFlowState, ReclassifyOutflowModalState, ResolveConflictFlowState,
-    ResolveConflictModalState, SafeHarborAttestFlowState, SelectLotsFlowState,
-    SelectLotsModalState, SetDonationDetailsFlowState, SetDonationDetailsModalState,
-    SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
+    OptimizeAcceptFlowState, OptimizeAcceptModalState, ProfileFormState, ReclassifyIncomeFlowState,
+    ReclassifyIncomeModalState, ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
+    ResolveConflictFlowState, ResolveConflictModalState, SafeHarborAttestFlowState,
+    SelectLotsFlowState, SelectLotsModalState, SetDonationDetailsFlowState,
+    SetDonationDetailsModalState, SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
 };
 use btctax_cli::Session;
 use btctax_store::Passphrase;
@@ -155,6 +155,12 @@ pub struct EditorApp {
     pub resolve_conflict_flow: Option<ResolveConflictFlowState>,
     /// Resolve-conflict confirmation modal.  `Some` while awaiting Enter/Esc.
     pub resolve_conflict_modal: Option<ResolveConflictModalState>,
+    /// Full optimize-accept flow state (chunk 4b, D4).  `Some` while the flow is open.
+    ///
+    /// Dispatch order: optimize_accept_modal (modal layer) → optimize_accept_flow (flow layer) → ...
+    pub optimize_accept_flow: Option<OptimizeAcceptFlowState>,
+    /// Optimize-accept confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub optimize_accept_modal: Option<OptimizeAcceptModalState>,
     /// Residue latch [R0-C1]: set to `true` when `persist_safe_harbor_attest` returns Err.
     ///
     /// While `true`, ALL mutating openers (p/c/o/r/f/v/s/d/a) refuse with the
@@ -209,6 +215,8 @@ impl EditorApp {
             safe_harbor_attest_flow: None,
             resolve_conflict_flow: None,
             resolve_conflict_modal: None,
+            optimize_accept_flow: None,
+            optimize_accept_modal: None,
             attest_save_failed: false,
             rollback_failed: false,
             status: None,

@@ -7,9 +7,10 @@
 //! This module performs NO writes — it only holds form state and validates input.
 
 use btctax_core::{
-    BasisSource, Carryforward, DisposeKind, DonationDetails, EventId, FilingStatus, FmvStatus,
-    Form8283Section, InboundClass, IncomeKind, LotId, ManualFmv, OutflowClass, ReclassifyIncome,
-    ReclassifyOutflow, Sat, TaxDate, TaxProfile, TransferTarget, Usd, WalletId,
+    BasisSource, Carryforward, DisposalProposal, DisposeKind, DonationDetails, EventId,
+    FilingStatus, FmvStatus, Form8283Section, InboundClass, IncomeKind, LotId, LotPick, ManualFmv,
+    OutflowClass, Persistability, ReclassifyIncome, ReclassifyOutflow, Sat, TaxDate, TaxProfile,
+    TransferTarget, Usd, WalletId,
 };
 use ratatui::widgets::TableState;
 use std::str::FromStr;
@@ -1508,6 +1509,101 @@ pub struct ResolveConflictModalState {
     pub new_summary: String,
 }
 
+// ── Optimize-accept flow types (chunk 4b, D4) ────────────────────────────────
+
+/// Pre-computed display data for one optimize-accept candidate disposal (a per-disposal proposal row
+/// that survived the pre-filter). NO per-disposal Δtax [R0-I1]: `DisposalProposal` carries no
+/// per-disposal delta, and the year-level `OptimizeProposal.delta` is shown at the flow level only.
+#[derive(Clone)]
+pub struct OptimizeCandidateItem {
+    /// The disposal EventId the proposed selection targets.
+    pub disposal: EventId,
+    /// Wallet of the disposal (table column).
+    pub wallet: WalletId,
+    /// Calendar date (tax tz) of the disposal.
+    pub date: TaxDate,
+    /// §C.2 gate verdict — drives the step-2 branch (`ContemporaneousNow` → modal;
+    /// `NeedsAttestation` → attestation-text step). `ForbiddenBroker2027` is pre-filtered out.
+    pub persistable: Persistability,
+    /// The optimizer's tax-minimizing pick (the `LotSelection.lots` to persist).
+    pub picks: Vec<LotPick>,
+}
+
+/// Step in the optimize-accept flow.
+// AttestText carries a FieldBuffer + a cloned item; boxing is not worth it (TUI-only).
+#[allow(clippy::large_enum_variant)]
+pub enum OptimizeAcceptStep {
+    /// Step 1: pick a proposed disposal.
+    List,
+    /// Step 2 (NeedsAttestation only): type the contemporaneous-ID attestation (non-empty required).
+    AttestText {
+        item: OptimizeCandidateItem,
+        buf: FieldBuffer,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the optimize-accept flow. Owns its candidate list [R0-I2 discipline].
+pub struct OptimizeAcceptFlowState {
+    pub list: TargetList<OptimizeCandidateItem>,
+    pub step: OptimizeAcceptStep,
+    /// Whole-year `optimized − baseline` figure (≤ 0) — the flow-level banner [R0-I1].
+    pub delta: Usd,
+    /// `true` ⇔ the proposal is only APPROXIMATE (banner caveat).
+    pub approximate: bool,
+}
+
+/// Payload for the optimize-accept confirmation modal.
+pub struct OptimizeAcceptModalState {
+    pub disposal: EventId,
+    /// The proposed `LotSelection.lots`.
+    pub picks: Vec<LotPick>,
+    pub pick_count: usize,
+    /// Σ picks.sat.
+    pub total_sat: Sat,
+    /// `None` → `Contemporaneous` (basis label; no attest row); `Some(text)` → `AttestedRecording`
+    /// (the attestation text co-persisted alongside the LotSelection).
+    pub attestation: Option<String>,
+    /// §A.5 basis label (`"Contemporaneous"` / `"AttestedRecording"`).
+    pub basis_label: &'static str,
+}
+
+/// The §A.5 basis label for a `Persistability`. `ForbiddenBroker2027` is never persisted (pre-filtered),
+/// so it maps to a placeholder that is unreachable at the modal.
+pub fn optimize_basis_label(p: Persistability) -> &'static str {
+    match p {
+        Persistability::ContemporaneousNow => "Contemporaneous",
+        Persistability::NeedsAttestation => "AttestedRecording",
+        Persistability::ForbiddenBroker2027 => "Forbidden",
+    }
+}
+
+/// Pre-filter the optimizer proposal's per-disposal rows into persistable candidates (chunk 4b, D4).
+///
+/// Keeps a row iff ALL hold:
+/// - `proposed_selection != current_selection` (a no-change row is the CLI "already optimal" skip);
+/// - `persistable != ForbiddenBroker2027` (2027+ broker lots NEVER persist — no attestation cures);
+/// - the disposal has NO live (non-voided) `LotSelection` (`already_selected`) — else the append is a
+///   DUPLICATE ⇒ `DecisionConflict` NEITHER-applies (the MANDATORY duplicate guard).
+pub fn filter_optimize_candidates(
+    per_disposal: &[DisposalProposal],
+    already_selected: &std::collections::BTreeSet<EventId>,
+) -> Vec<OptimizeCandidateItem> {
+    per_disposal
+        .iter()
+        .filter(|d| d.proposed_selection != d.current_selection)
+        .filter(|d| d.persistable != Persistability::ForbiddenBroker2027)
+        .filter(|d| !already_selected.contains(&d.disposal))
+        .map(|d| OptimizeCandidateItem {
+            disposal: d.disposal.clone(),
+            wallet: d.wallet.clone(),
+            date: d.date,
+            persistable: d.persistable,
+            picks: d.proposed_selection.clone(),
+        })
+        .collect()
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2503,4 +2599,106 @@ mod tests {
     // a production optional-field pre-population passed uncaught). The real-path version
     // drives `d` → List → Enter → FieldForm so a wiring regression in any of the 10
     // fields fails, then Enter → modal to assert the validator round-trip.
+
+    // ── KAT-OA-FILTER — optimize-accept pre-filter (chunk 4b, D4) ────────────
+    //
+    // filter_optimize_candidates keeps ONLY rows where proposed != current AND persistable !=
+    // ForbiddenBroker2027 AND the disposal has NO live LotSelection. Constructs `DisposalProposal`s
+    // by hand (all pub) to pin ForbiddenBroker2027-excluded + live-LotSelection-excluded + no-change
+    // excluded, mirroring the spec's optimize-accept KAT bullets.
+    #[test]
+    fn kat_oa_filter_excludes_nochange_forbidden_and_already_selected() {
+        use btctax_core::identity::{LotId, Source, SourceRef};
+        use btctax_core::project::ComplianceStatus;
+        use btctax_core::{DisposalProposal, EventId, LotPick, Persistability, WalletId};
+        use time::macros::date;
+
+        let wallet = WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        };
+        let d = |tag: &str| EventId::import(Source::River, SourceRef::new(tag));
+        let pick = |tag: &str, sat: i64| LotPick {
+            lot: LotId {
+                origin_event_id: d(tag),
+                split_sequence: 0,
+            },
+            sat,
+        };
+        let row = |disp: EventId, cur: Vec<LotPick>, prop: Vec<LotPick>, p: Persistability| {
+            DisposalProposal {
+                disposal: disp,
+                wallet: wallet.clone(),
+                date: date!(2025 - 05 - 23),
+                current_selection: cur,
+                proposed_selection: prop,
+                status: ComplianceStatus::NonCompliant,
+                persistable: p,
+            }
+        };
+
+        let a = d("oa-A"); // ContemporaneousNow, changed → KEPT
+        let b = d("oa-B"); // no-change → EXCLUDED
+        let c = d("oa-C"); // ForbiddenBroker2027, changed → EXCLUDED
+        let sel = d("oa-D"); // NeedsAttestation, changed, already-selected → EXCLUDED
+        let e = d("oa-E"); // NeedsAttestation, changed → KEPT
+
+        let per_disposal = vec![
+            row(
+                a.clone(),
+                vec![pick("lotA1", 100)],
+                vec![pick("lotA2", 100)],
+                Persistability::ContemporaneousNow,
+            ),
+            row(
+                b.clone(),
+                vec![pick("lotB", 100)],
+                vec![pick("lotB", 100)],
+                Persistability::ContemporaneousNow,
+            ),
+            row(
+                c.clone(),
+                vec![pick("lotC1", 100)],
+                vec![pick("lotC2", 100)],
+                Persistability::ForbiddenBroker2027,
+            ),
+            row(
+                sel.clone(),
+                vec![pick("lotD1", 100)],
+                vec![pick("lotD2", 100)],
+                Persistability::NeedsAttestation,
+            ),
+            row(
+                e.clone(),
+                vec![pick("lotE1", 100)],
+                vec![pick("lotE2", 100)],
+                Persistability::NeedsAttestation,
+            ),
+        ];
+
+        let already_selected: std::collections::BTreeSet<EventId> = [sel.clone()].into();
+        let kept = filter_optimize_candidates(&per_disposal, &already_selected);
+        let kept_ids: Vec<EventId> = kept.iter().map(|k| k.disposal.clone()).collect();
+
+        assert!(kept_ids.contains(&a), "ContemporaneousNow changed row kept");
+        assert!(kept_ids.contains(&e), "NeedsAttestation changed row kept");
+        assert!(!kept_ids.contains(&b), "no-change row excluded");
+        assert!(!kept_ids.contains(&c), "ForbiddenBroker2027 excluded");
+        assert!(
+            !kept_ids.contains(&sel),
+            "already-selected (live LotSelection) excluded"
+        );
+        assert_eq!(kept.len(), 2, "exactly A and E survive");
+
+        // The kept ContemporaneousNow row carries its proposed picks + verdict.
+        let a_item = kept.iter().find(|k| k.disposal == a).unwrap();
+        assert_eq!(a_item.persistable, Persistability::ContemporaneousNow);
+        assert_eq!(a_item.picks, vec![pick("lotA2", 100)]);
+        assert_eq!(optimize_basis_label(a_item.persistable), "Contemporaneous");
+        let e_item = kept.iter().find(|k| k.disposal == e).unwrap();
+        assert_eq!(
+            optimize_basis_label(e_item.persistable),
+            "AttestedRecording"
+        );
+    }
 }
