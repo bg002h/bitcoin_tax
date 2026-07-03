@@ -4,6 +4,36 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ tui-edit-save-rollback (mutating-TUI hardening #9) — SHIPPED (2026-07-03)
+
+Cycle A of the autonomous post-chunk-3 run (roadmap: `design/ROADMAP_autonomous_run.md`, order
+A→B→C→D→E). A failed `session.save()` in any of the 8 editor persist fns now reverts the in-memory
+DB byte-identically (`Vault::snapshot`/`restore` over `sqlite_io`, `Session` wrappers,
+`save_or_rollback`) — so a confirmed-but-unsaved decision can NEVER piggy-back a later save. Replaces
+the old "failed save → residue → retry = N+2 rows + DecisionConflict" with "failed save → clean no-op;
+retry is clean (same `decision_seq`)". `PersistError{NoChange,RolledBack,ResidueLive}` (no `Display`);
+`on_persist_error` is the sole site arming the new `rollback_failed` latch on `ResidueLive`; the 9
+opener guards folded into `residue_latch_status` (attest wording verbatim). Whole-DB restore reverts
+`persist_void`'s `optimize_attest` side-table clear for free (incl. a post-append `clear`-failure —
+WB-M1 fold). `persist_tax_profile` INCLUDED for a uniform invariant. **Attest left latched** (its
+double-batch is unrecoverable; unification filed below). Spec R0 2 rounds → 0C/0I; whole-branch review
++ M1 fold → GREEN. **876 workspace tests.** Reviews: `reviews/spec-review-tui-edit-save-rollback-r0-round-{1,2}.md`,
+`reviews/whole-branch-review-tui-edit-save-rollback-round-1.md`.
+
+**FOLLOWUP recorded:**
+1. **Attest adopts snapshot/restore → retire `attest_save_failed`** — once the rollback mechanism has
+   soaked, `persist_safe_harbor_attest` can use `save_or_rollback` too (a clean rollback of its
+   two-decision batch makes the unrecoverable double-batch impossible and even permits safe in-editor
+   retry), retiring the separate C1 latch and folding `residue_latch_status` down to one branch.
+   Deliberately deferred this cycle (do not wire a brand-new mechanism into the catastrophic path
+   until it soaks). [N1 nit: the 3 remaining "silent" persist headers could gain the one-line
+   "reverted on failed save" note — the module header already documents the invariant; no action.]
+
+**NEXT: cycle B — `tui-edit-hardening`** (the 6 items: #1/2/3 select-lots + #7/8/6 safety/UX), per the
+roadmap. Re-recon B against post-A HEAD first (A churned the opener heads + persist layer).
+
+---
+
 ## ✅ Mutating-TUI chunk 3 — select-lots + set-donation-details + safe-harbor-attest — SHIPPED (2026-07-02)
 
 The remaining decision flows: `s` select-lots (specific-ID lot assignment; disposals + BOTH gift/donation

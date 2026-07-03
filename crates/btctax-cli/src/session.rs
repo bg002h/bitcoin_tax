@@ -68,6 +68,18 @@ impl Session {
         Ok(())
     }
 
+    /// Snapshot the in-memory DB image (no disk I/O) for a possible `restore()` after a failed save.
+    pub fn snapshot(&self) -> Result<Vec<u8>, CliError> {
+        Ok(self.vault.snapshot()?)
+    }
+
+    /// Restore the in-memory DB from a prior `snapshot()` (no disk I/O). On `Err`, the in-memory DB
+    /// is UNCHANGED and unsaved residue may still be live — the caller MUST latch, never swallow.
+    pub fn restore(&mut self, image: &[u8]) -> Result<(), CliError> {
+        self.vault.restore(image)?;
+        Ok(())
+    }
+
     /// Borrow the vault for store-level operations (`export_snapshot` / `backup_key`).
     pub fn vault(&self) -> &Vault {
         &self.vault
@@ -153,6 +165,36 @@ mod tests {
         let (state, _cfg) = s.project().unwrap();
         assert!(state.lots.is_empty());
         assert!(state.blockers.is_empty());
+    }
+
+    /// `Session::snapshot`/`restore` delegate to the vault and revert an in-memory mutation
+    /// without touching disk (the wrapper the persist layer uses for save-rollback).
+    #[test]
+    fn session_snapshot_restore_reverts_in_memory_mutation() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let mut s = Session::create(&vault, &pp()).unwrap();
+        s.conn().execute("CREATE TABLE t (x INTEGER)", []).unwrap();
+        s.save().unwrap();
+
+        let snap = s.snapshot().unwrap();
+        s.conn().execute("INSERT INTO t VALUES (7)", []).unwrap();
+        let n: i64 = s
+            .conn()
+            .query_row("SELECT COUNT(*) FROM t", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1, "pre-restore: the inserted row is present in memory");
+
+        let before = std::fs::read(&vault).unwrap();
+        s.restore(&snap).unwrap();
+        let after = std::fs::read(&vault).unwrap();
+        assert_eq!(before, after, "restore must not write the vault file");
+
+        let n: i64 = s
+            .conn()
+            .query_row("SELECT COUNT(*) FROM t", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "restore must revert the in-memory insert");
     }
 
     #[test]

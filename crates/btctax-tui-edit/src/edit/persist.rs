@@ -15,6 +15,69 @@
 //! are FORBIDDEN in non-test code of this crate (R0-I1). They create/overwrite a
 //! vault file outside `Vault::save`'s atomic path, which violates the guarantee.
 //! The mechanized gate (KAT-G1) enforces this crate-wide.
+//!
+//! # Failed-save rollback (save-rollback cycle)
+//! Every persist fn below (except `persist_safe_harbor_attest`) snapshots the in-memory DB before
+//! mutating and, if `session.save()` fails, reverts it via `save_or_rollback` — so a failed save
+//! leaves NO residue and a retry is clean (same `decision_seq`). `persist_safe_harbor_attest` keeps
+//! its own `attest_save_failed` latch (its double-batch is unrecoverable; see that fn + editor.rs).
+
+/// Outcome of an editor persist fn's save-with-rollback. `NoChange` and `RolledBack` are both
+/// "nothing persisted, safe to retry"; `ResidueLive` is the (astronomically rare) unrecoverable case.
+///
+/// # No `Display` [R0-I1]
+/// This enum deliberately does NOT implement `Display`, so a lazy `format!("{e}")` is a compile
+/// error — every consumer routes through `EditorApp::on_persist_error`, the single site that arms
+/// the `rollback_failed` latch on `ResidueLive`.
+#[derive(Debug)]
+pub enum PersistError {
+    /// Failed at `snapshot()` or the append/upsert — NOTHING was written and there is no residue
+    /// (snapshot failure = fail-closed refusal; append/upsert failure = no row added).
+    NoChange(btctax_cli::CliError),
+    /// `save()` failed; the in-memory DB was cleanly reverted to its pre-mutation image. No residue;
+    /// a retry re-appends with the SAME `decision_seq`.
+    RolledBack(btctax_cli::CliError),
+    /// `save()` failed AND the revert ALSO failed — the unsaved mutation is LIVE in the in-memory DB.
+    /// The caller MUST latch every mutating opener and prompt an immediate quit (the on-disk vault is
+    /// pre-action; quitting discards the residue).
+    ResidueLive(btctax_cli::CliError),
+}
+
+// Both `From` impls are required: `session.snapshot()?` yields `CliError`, but `append_decision(...)?`
+// / `load_all(...)?` yield `btctax_core::CoreError`, and Rust does not chain
+// `CoreError → CliError → PersistError`. Neither impl targets `ResidueLive`.
+impl From<btctax_cli::CliError> for PersistError {
+    fn from(e: btctax_cli::CliError) -> Self {
+        PersistError::NoChange(e)
+    }
+}
+impl From<btctax_core::CoreError> for PersistError {
+    fn from(e: btctax_core::CoreError) -> Self {
+        PersistError::NoChange(e.into()) // CoreError → CliError
+    }
+}
+
+/// Revert the in-memory DB to `pre` after a mutation-committing step failed, mapping the error:
+/// `RolledBack` if the revert succeeds, `ResidueLive` if the revert ALSO fails (residue is live).
+fn rollback(
+    session: &mut btctax_cli::Session,
+    pre: &[u8],
+    err: btctax_cli::CliError,
+) -> PersistError {
+    match session.restore(pre) {
+        Ok(()) => PersistError::RolledBack(err),
+        Err(_revert_err) => PersistError::ResidueLive(err),
+    }
+}
+
+/// `session.save()`; on failure revert the in-memory DB to `pre`. `Ok` on success; `RolledBack` on a
+/// save failure cleanly reverted; `ResidueLive` if the revert itself failed (residue live).
+fn save_or_rollback(session: &mut btctax_cli::Session, pre: Vec<u8>) -> Result<(), PersistError> {
+    match session.save() {
+        Ok(()) => Ok(()),
+        Err(save_err) => Err(rollback(session, &pre, save_err)),
+    }
+}
 
 /// Upsert the tax profile for `year` and atomically save the vault.
 ///
@@ -27,19 +90,18 @@
 /// the surface, the KATs, and whole-diff review), not a type-level proof.
 /// A sealed confirmation-token type is a FOLLOWUP if the editor grows more flows.
 ///
-/// # Failed-save semantics (R0-M1)
-/// When `tax_profile::set` succeeds but `save` fails, the in-memory session
-/// already carries the confirmed upsert while the on-disk vault remains
-/// the pre-action state (the atomic path leaves the old image). This divergence
-/// is intentional and safe — do NOT roll back the side-table. The upsert is
-/// idempotent; a retry re-runs it on the next confirmed action.
+/// # Failed-save rollback [R0-I2]
+/// Snapshots before the upsert; if `save` fails, `save_or_rollback` reverts the in-memory side-table
+/// to its pre-upsert image so memory == disk and a retry re-runs cleanly. Included in the rollback
+/// set for a uniform invariant (reverting an idempotent upsert is unnecessary but harmless).
 pub fn persist_tax_profile(
     session: &mut btctax_cli::Session,
     year: i32,
     p: &btctax_core::TaxProfile,
-) -> Result<(), btctax_cli::CliError> {
+) -> Result<(), PersistError> {
+    let pre = session.snapshot()?;
     btctax_cli::tax_profile::set(session.conn(), year, p)?; // typed side-table upsert
-    session.save()?; // encrypt + atomic_write
+    save_or_rollback(session, pre)?; // encrypt + atomic_write; revert on failure
     Ok(())
 }
 
@@ -61,7 +123,8 @@ pub fn persist_classify_inbound(
     session: &mut btctax_cli::Session,
     payload: btctax_core::event::EventPayload,
     now: time::OffsetDateTime,
-) -> Result<btctax_core::EventId, btctax_cli::CliError> {
+) -> Result<btctax_core::EventId, PersistError> {
+    let pre = session.snapshot()?;
     let id = btctax_core::persistence::append_decision(
         session.conn(),
         payload,
@@ -69,7 +132,7 @@ pub fn persist_classify_inbound(
         time::UtcOffset::UTC,
         None,
     )?;
-    session.save()?;
+    save_or_rollback(session, pre)?;
     Ok(id)
 }
 
@@ -88,19 +151,16 @@ pub fn persist_classify_inbound(
 /// # Called only from the reclassify-outflow confirmation modal
 /// Same procedural guarantee as `persist_tax_profile` (see doc there).
 ///
-/// # Failed-save + retry semantics [R0-I1]
-/// If `append_decision` succeeds but `save` fails, the in-memory session carries the
-/// committed decision while the on-disk vault remains pre-action. No rollback. A retry
-/// appends an identical-payload DUPLICATE with a new `decision_seq`; resolve is
-/// FIRST-WINS (resolve.rs:600–617) — the FIRST (failed-save) decision stays in force,
-/// and the duplicate fires a Hard `DecisionConflict` on ITS id (resolve.rs:606–614).
-/// The post-persist status surfaces the conflict (D4 step 2); the user clears it via
-/// the CLI (`btctax reconcile void decision|<seq>`) until chunk 2b's void flow.
+/// # Failed-save rollback [R0-I1]
+/// Snapshots before the append; if `save` fails, `save_or_rollback` reverts the in-memory DB so no
+/// residue remains. A retry after a failed save is CLEAN — it re-appends with the SAME `decision_seq`
+/// (recomputed `MAX+1` over the reverted table), producing no duplicate and no `DecisionConflict`.
 pub fn persist_reclassify_outflow(
     session: &mut btctax_cli::Session,
     payload: btctax_core::event::EventPayload,
     now: time::OffsetDateTime,
-) -> Result<btctax_core::EventId, btctax_cli::CliError> {
+) -> Result<btctax_core::EventId, PersistError> {
+    let pre = session.snapshot()?;
     let id = btctax_core::persistence::append_decision(
         session.conn(),
         payload,
@@ -108,7 +168,7 @@ pub fn persist_reclassify_outflow(
         time::UtcOffset::UTC,
         None,
     )?;
-    session.save()?;
+    save_or_rollback(session, pre)?;
     Ok(id)
 }
 
@@ -127,7 +187,8 @@ pub fn persist_reclassify_income(
     session: &mut btctax_cli::Session,
     payload: btctax_core::event::EventPayload,
     now: time::OffsetDateTime,
-) -> Result<btctax_core::EventId, btctax_cli::CliError> {
+) -> Result<btctax_core::EventId, PersistError> {
+    let pre = session.snapshot()?;
     let id = btctax_core::persistence::append_decision(
         session.conn(),
         payload,
@@ -135,7 +196,7 @@ pub fn persist_reclassify_income(
         time::UtcOffset::UTC,
         None,
     )?;
-    session.save()?;
+    save_or_rollback(session, pre)?;
     Ok(id)
 }
 
@@ -154,7 +215,8 @@ pub fn persist_set_fmv(
     session: &mut btctax_cli::Session,
     payload: btctax_core::event::EventPayload,
     now: time::OffsetDateTime,
-) -> Result<btctax_core::EventId, btctax_cli::CliError> {
+) -> Result<btctax_core::EventId, PersistError> {
+    let pre = session.snapshot()?;
     let id = btctax_core::persistence::append_decision(
         session.conn(),
         payload,
@@ -162,7 +224,7 @@ pub fn persist_set_fmv(
         time::UtcOffset::UTC,
         None,
     )?;
-    session.save()?;
+    save_or_rollback(session, pre)?;
     Ok(id)
 }
 
@@ -176,23 +238,25 @@ pub fn persist_set_fmv(
 /// `btctax_cli::optimize_attest::clear(session.conn(), &ls.disposal_event)` BEFORE save —
 /// same atomic batch as the CLI void command. Non-LotSelection targets are unaffected.
 ///
-/// # Idempotent retry semantics [M1]
-/// A retry appends a second `VoidDecisionEvent` for the SAME original target (NOT a
-/// void-of-void — the target is the original decision, so resolve.rs:312–321 does not fire).
-/// The BTreeSet insert in resolve.rs:330 is idempotent — no conflict fires; the second row is
-/// inert. Status after retry: clean-success. On `Err(save)`: the void modal closes, the flow
-/// stays at List, status "Save error: {e}"; retry = re-select → modal → Enter. Pinned by
-/// KAT-VOID-RETRY.
+/// # Failed-save rollback [M1]
+/// Snapshots before the append + the `optimize_attest::clear` side-effect; if `save` fails,
+/// `save_or_rollback` reverts BOTH the void row AND the side-table clear (the whole-DB restore
+/// covers the side-table for free — the load-bearing reason A′ uses whole-DB restore, not a row
+/// DELETE). A retry after a failed save is clean — same `decision_seq`, no residue. A retry after a
+/// SUCCESSFUL void appends a separate second void row for the same target (idempotent — the
+/// resolve.rs BTreeSet insert is inert, no conflict; pinned by KAT-VOID-RETRY).
 pub fn persist_void(
     session: &mut btctax_cli::Session,
     target_event_id: btctax_core::EventId,
     now: time::OffsetDateTime,
-) -> Result<btctax_core::EventId, btctax_cli::CliError> {
+) -> Result<btctax_core::EventId, PersistError> {
     use btctax_core::{
         event::VoidDecisionEvent,
         persistence::{append_decision, load_all},
         EventPayload,
     };
+
+    let pre = session.snapshot()?;
 
     // Detect LotSelection target for the optimize_attest side-effect.
     let events = load_all(session.conn())?;
@@ -212,11 +276,17 @@ pub fn persist_void(
         None,
     )?;
 
+    // A failure AFTER the committed append must roll back — else the void append becomes residue
+    // that could piggy-back a later save [WB-M1]. (`clear` is a pure in-memory DELETE; its failure
+    // is the same OOM/corruption class as a restore failure — nil reachability, but the invariant is
+    // now airtight and symmetric with `save_or_rollback`.)
     if let Some(disposal) = disposal_to_clear {
-        btctax_cli::optimize_attest::clear(session.conn(), &disposal)?;
+        if let Err(e) = btctax_cli::optimize_attest::clear(session.conn(), &disposal) {
+            return Err(rollback(session, &pre, e));
+        }
     }
 
-    session.save()?;
+    save_or_rollback(session, pre)?;
     Ok(id)
 }
 
@@ -225,12 +295,11 @@ pub fn persist_void(
 /// `payload` is the VALIDATED `EventPayload::LotSelection(…)`.
 /// `now` is INJECTED at Enter-press for test determinism.
 ///
-/// # Duplicate ⇒ conflict, NEITHER applies (resolve.rs:787-800) [R0-I2]
-/// A retry appends a duplicate `LotSelection` for the same `disposal_event`. The dup
-/// fires a Hard `DecisionConflict` on ITS id and NEITHER selection applies (the disposal
-/// falls back to METHOD ORDER) until one of the two is voided — voiding the duplicate
-/// reinstates the first. Surfaced by the D1 status; cleared via the Void flow ('v') or,
-/// after quitting the editor, CLI: `btctax reconcile void decision|<seq>`.
+/// # Failed-save rollback [R0-I2]
+/// Snapshots before the append; if `save` fails, `save_or_rollback` reverts the in-memory DB. A retry
+/// after a failed save is CLEAN — same `decision_seq`, no duplicate, no `DecisionConflict`. (A genuine
+/// DUPLICATE — two SUCCESSFUL selections for one disposal — still conflicts per resolve.rs:787-800 and
+/// NEITHER applies; the failed-save path simply no longer creates one.)
 ///
 /// Does NOT write to `optimize_attestation` (only `optimize accept --attest` does that).
 /// Clearing `optimize_attestation` on void is handled by `persist_void` (chunk 2b, D4).
@@ -238,7 +307,8 @@ pub fn persist_select_lots(
     session: &mut btctax_cli::Session,
     payload: btctax_core::event::EventPayload, // must be EventPayload::LotSelection
     now: time::OffsetDateTime,
-) -> Result<btctax_core::EventId, btctax_cli::CliError> {
+) -> Result<btctax_core::EventId, PersistError> {
+    let pre = session.snapshot()?;
     let id = btctax_core::persistence::append_decision(
         session.conn(),
         payload,
@@ -246,7 +316,7 @@ pub fn persist_select_lots(
         time::UtcOffset::UTC,
         None,
     )?;
-    session.save()?;
+    save_or_rollback(session, pre)?;
     Ok(id)
 }
 
@@ -255,13 +325,15 @@ pub fn persist_select_lots(
 ///
 /// Mirrors `tax_profile::set` discipline (chunk 1 D3). No `append_decision` call.
 /// `is_review_complete` is NOT checked here — it is checked post-save for the status string.
+/// Reverted on a failed save via `save_or_rollback` (retry is clean).
 pub fn persist_donation_details(
     session: &mut btctax_cli::Session,
     event_id: &btctax_core::EventId,
     details: &btctax_core::DonationDetails,
-) -> Result<(), btctax_cli::CliError> {
+) -> Result<(), PersistError> {
+    let pre = session.snapshot()?;
     btctax_cli::donation_details::set(session.conn(), event_id, details)?;
-    session.save()?;
+    save_or_rollback(session, pre)?;
     Ok(())
 }
 
@@ -785,12 +857,17 @@ mod tests {
 
         // Non-test write-mutation tokens — FORBIDDEN outside edit/persist.rs:
         // [R0-I4] "donation_details::set" added for the D2 side-table writer parity.
+        // [R0-M2] "restore(" added: Session::restore reverts the in-memory DB, so it is a
+        // mutation-surface token confinable to edit/persist.rs. Note: this is NOT a false positive
+        // for ratatui teardown (that is `restore_terminal` = `restore_`, not `restore(`), and
+        // `snapshot(` is deliberately NOT gated (a pure read, and `build_snapshot(` contains it).
         let persist_only_tokens: &[&str] = &[
             "conn(",
             "save(",
             "tax_profile::set",
             "append_",
             "donation_details::set",
+            "restore(",
         ];
 
         // Test-region forbidden everywhere (no viewer export surface in the editor):
@@ -961,6 +1038,7 @@ mod tests {
             // Construct forbidden tokens at runtime — never appear literally in source.
             let tok_save = format!("{}(", "save"); // "save("
             let tok_conn = format!("{}(", "conn"); // "conn("
+            let tok_restore = format!("{}(", "restore"); // "restore(" [R0-M2]
             let tok_tax_set = format!("{}::{}", "tax_profile", "set"); // "tax_profile::set"
             let tok_session_create = format!("{}::{}", "Session", "create"); // "Session::create" [R0-I1]
                                                                              // [R0-I4]: donation_details::set added to persist_only_tokens.
@@ -971,6 +1049,7 @@ mod tests {
                  pub fn bad() {{\n\
                  \tlet _ = {tok_save});\n\
                  \tlet _ = {tok_conn});\n\
+                 \tlet _ = {tok_restore});\n\
                  \tlet _ = {tok_tax_set}(conn, 2025, &p);\n\
                  \tlet _ = {tok_session_create}(&path, &pp);\n\
                  \tlet _ = {tok_dd_set}(conn, &id, &d);\n\
@@ -987,6 +1066,10 @@ mod tests {
             assert!(
                 hits_persist.iter().any(|(t, _)| t == "conn("),
                 "self-check FAILED: scanner did not detect planted write-mutation token — gate is broken"
+            );
+            assert!(
+                hits_persist.iter().any(|(t, _)| t == "restore("),
+                "self-check FAILED: scanner did not detect planted restore( token [R0-M2] — gate is broken"
             );
             assert!(
                 hits_persist.iter().any(|(t, _)| t == "tax_profile::set"),
@@ -1457,6 +1540,174 @@ mod tests {
                 "MethodElection void must NOT touch the optimize_attest side-table"
             );
         }
+    }
+
+    // ── save-rollback: persist_void rolls back the side-table clear on a failed save ──
+    //
+    // persist_void clears optimize_attest BEFORE save; if the save fails, the whole-DB rollback
+    // must revert BOTH the void append AND the side-table clear. (A per-row DELETE would miss the
+    // side-table — the load-bearing reason A′ uses whole-DB restore.)
+    #[cfg(unix)]
+    #[test]
+    fn kat_persist_void_rollback_preserves_optimize_attest_on_failed_save() {
+        use btctax_core::event::{EventPayload, LotPick, LotSelection};
+        use btctax_core::identity::{LotId, Source, SourceRef};
+        use btctax_core::persistence::{append_decision, load_all_ordered};
+        use btctax_core::EventId;
+        use btctax_store::Passphrase;
+        use std::os::unix::fs::PermissionsExt;
+        use time::{OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-void-rollback-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        let disposal_id = EventId::import(Source::River, SourceRef::new("vr-disposal"));
+        let lot_origin = EventId::import(Source::River, SourceRef::new("vr-lot"));
+
+        let ls_id: EventId;
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let t0 = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+            let ls_payload = EventPayload::LotSelection(LotSelection {
+                disposal_event: disposal_id.clone(),
+                lots: vec![LotPick {
+                    lot: LotId {
+                        origin_event_id: lot_origin,
+                        split_sequence: 0,
+                    },
+                    sat: 100_000,
+                }],
+            });
+            ls_id = append_decision(session.conn(), ls_payload, t0, UtcOffset::UTC, None).unwrap();
+            btctax_cli::optimize_attest::set(
+                session.conn(),
+                &disposal_id,
+                "attestation",
+                "2025-06-01",
+            )
+            .unwrap();
+            session.save().unwrap();
+        }
+
+        // Root-skip guard (chmod is a no-op as root).
+        {
+            let probe = dir.path().join("probe.tmp");
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("void-rollback KAT: skipping — chmod did not deny writes (root?)");
+                return;
+            }
+        }
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+
+        // Make the vault's parent read-only → save() fails inside persist_void.
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result = persist_void(&mut session, ls_id.clone(), now);
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(
+            matches!(result, Err(PersistError::RolledBack(_))),
+            "failed save must return RolledBack; got: {result:?}"
+        );
+
+        // The in-memory log is reverted: NO void row appended.
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post.len(),
+            pre.len(),
+            "rollback must revert the void append (no residue)"
+        );
+
+        // The side-table clear was reverted too: the optimize_attest row SURVIVES.
+        let attest = btctax_cli::optimize_attest::get(session.conn(), &disposal_id).unwrap();
+        assert_eq!(
+            attest.as_deref(),
+            Some("attestation"),
+            "rollback must restore the optimize_attest row cleared before the failed save"
+        );
+    }
+
+    // ── save-rollback: persist_donation_details reverts the side-table upsert on a failed save ──
+    #[cfg(unix)]
+    #[test]
+    fn kat_persist_donation_details_rollback_on_failed_save() {
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::{DonationDetails, EventId};
+        use btctax_store::Passphrase;
+        use std::os::unix::fs::PermissionsExt;
+
+        fn details(donee: &str, appraiser: &str) -> DonationDetails {
+            DonationDetails {
+                donee_name: donee.to_owned(),
+                donee_address: None,
+                donee_ein: None,
+                appraiser_name: appraiser.to_owned(),
+                appraiser_address: None,
+                appraiser_tin: None,
+                appraiser_ptin: None,
+                appraiser_qualifications: None,
+                appraisal_date: None,
+                fmv_method_override: None,
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-dd-rollback-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        let event_id = EventId::import(Source::River, SourceRef::new("dd-donation"));
+        let original = details("Original Donee", "Original Appraiser");
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            persist_donation_details(&mut session, &event_id, &original).unwrap();
+        }
+
+        // Root-skip guard.
+        {
+            let probe = dir.path().join("probe.tmp");
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("dd-rollback KAT: skipping — chmod did not deny writes (root?)");
+                return;
+            }
+        }
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let updated = details("UPDATED Donee", "UPDATED Appraiser");
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result = persist_donation_details(&mut session, &event_id, &updated);
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(
+            matches!(result, Err(PersistError::RolledBack(_))),
+            "failed save must return RolledBack; got: {result:?}"
+        );
+
+        // The in-memory side-table reverts to the ORIGINAL value (the failed upsert did not land).
+        let got = btctax_cli::donation_details::get(session.conn(), &event_id).unwrap();
+        assert_eq!(
+            got.as_ref(),
+            Some(&original),
+            "rollback must revert the donation_details upsert to its prior value"
+        );
     }
 
     // ── KAT-P2g — append-only strict prefix test (select-lots / LotSelection append) ──
