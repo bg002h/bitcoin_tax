@@ -4,6 +4,77 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ Mutating-TUI chunk 3 — select-lots + set-donation-details + safe-harbor-attest — SHIPPED (2026-07-02)
+
+The remaining decision flows: `s` select-lots (specific-ID lot assignment; disposals + BOTH gift/donation
+removals, fee-mini + already-selected pre-filtered; wallet from the raw `LedgerEvent`; Σpick == principal
+conserved in-TUI; duplicate ⇒ `DecisionConflict` on the 2nd id, NEITHER applies, method-order fallback until
+one is voided), `d` set-donation-details (Form 8283 §B appraiser/donee side-table upsert, last-write-wins,
+pre-populated on re-edit from `snap.donation_details`), `a` safe-harbor-attest (IRREVOCABLE §7.4; typed-word
+`ATTEST`; two-decision atomic Void+re-attest batch; the C1 residue latch — `attest_save_failed` blocks all 9
+mutating openers after a failed save so no unrelated save can piggy-back the in-memory batch; close-on-Err,
+no retry path). Spec R0 2 rounds → 0C/0I; whole-branch review (3 independent lenses — safety, engine-semantics,
+test-fidelity) round 1 → 0C/2I (both on the test/docs surface; no product-code defect), folded + re-reviewed
+→ GREEN. **868 workspace tests.** Review: `reviews/whole-branch-review-tui-edit-chunk3-round-1.md`.
+
+**Whole-branch review folds (round 1):** [I1] KAT-V-DD-4 was coverage theatre (re-implemented the
+List→FieldForm pre-population mapping IN the test body — a dropped optional-field pre-population passed
+uncaught, risking a last-write-wins upsert of `None` over a stored field) → rewritten to drive the real
+`d`→List→Enter→FieldForm path, assert all 10 buffers, then Enter→modal for the validator round-trip
+(fault-injection-verified: dropping a production pre-population line now fails the test). [TF-M1]
+KAT-E2E-ATTEST-ERRLATCH now loops the latch refusal over ALL 9 openers, not just a/f/p. [SAFE-M1] dead code
+in the select-lots "no lots"/modal-Enter arms removed. [SAFE-N1 nit] declined — reusing `parse_date_arg`
+would leak `CliError`'s "usage:" prefix into a TUI field error; the inline parse is format-identical and
+KAT-V-DD-3-pinned.
+
+**FOLLOWUPS recorded for chunk 3:**
+
+1. **SelfTransfer select-lots under-inclusion** — linked TransferOut events that project to `Op::SelfTransfer`
+   are method-honoring (`honoring_principal` → `Some`) but are absent from the TUI select-lots list (not in
+   `state.disposals`/`state.removals`). Under-inclusion only (safe direction; the CLI `select-lots` remains
+   available). Fix = scan `snap.events` for a TransferOut with a non-voided TransferLink (the SelfTransfer
+   case) and include it in the disposal list.
+2. **Lot-display at disposal date** — the TUI shows currently-projected lots, not the pool available AT the
+   disposal date; the engine validates accurately (fires `LotSelectionInvalid` on re-projection), so the
+   display is a best-effort guide. **[ENG-m1] narrows this:** for a disposal DATED before `TRANSITION_DATE`
+   the engine consumes from `PoolKey::Universal` (un-partitioned by wallet), but the TUI candidate-lot filter
+   (`l.wallet == item.wallet`, main.rs) offers only the disposal-wallet's lots — so a valid cross-wallet
+   pre-2025 selection can be un-presentable. Under-inclusion only. Fix = drop the wallet filter when
+   `item.date < TRANSITION_DATE`.
+3. **[ENG-m2] Shortfall-disposal principal target** — for an under-covered disposal (`UncoveredDisposal`),
+   `Σ legs.sat < op.sat`, so `validate_select_lots` conserves against a smaller number than the engine's
+   `honoring_principal`; a TUI-passing selection is then engine-rejected as `LotSelectionInvalid`. Degenerate
+   (the disposal already carries a Hard `UncoveredDisposal`) and surfaced by `derive_select_lots_status`
+   Arm 2 — no silent loss. One-line guard candidate.
+4. **Safe-harbor-allocate TUI flow** — `reconcile safe-harbor-allocate` (the CREATION side of the allocation)
+   is out of scope for chunk 3 (attest-only cure path). The user creates the allocation via CLI, then attests
+   via the TUI. Deferred to chunk 5.
+5. **WB-I4(a) carryforward** — the raw-vs-effective under-inclusion (2b FOLLOWUP) does NOT affect chunk 3
+   (select-lots uses already-projected disposals/removals; donation-details targets removals by `RemovalKind`;
+   attest targets `SafeHarborAllocation` by voided-set scan).
+6. **FIELD_CAP=64 CLI-parity limit** — the free-text donation fields (addresses, `appraiser_qualifications`)
+   truncate at 64 chars in the TUI (form.rs); the CLI accepts arbitrary length. Candidate fix = a larger cap
+   for designated free-text fields.
+7. **Void-list pre-filter for effective allocations [R0-I6]** — the 2b void flow still LISTS an effective
+   (attested) allocation, and a confirmed void is a permanently-damaging no-op (§7.4 doomed-void Hard
+   `DecisionConflict`; KAT-E2E-ATTEST-VOID pins today's behavior). Effectiveness is derivable from blockers —
+   pre-filter effective allocations out of the void list in a later chunk so the trap is unreachable.
+8. **[SAFE-M2] Pre-existing 2a/2b void-remedy statuses omit "quit the editor first"** —
+   `derive_classify_inbound_status` / `derive_reclassify_income_status` / `derive_set_fmv_status` name
+   `"CLI: btctax reconcile void {}"` without the quit-first clause the R0-C1 lock audit mandates (the editor
+   holds the exclusive VaultLock for its lifetime). Present verbatim at `main` (NOT a chunk-3 regression) and
+   each names the in-editor `press 'v'` remedy first, so not a safety hole. Apply the quit-first fold to these
+   strings in a follow-up.
+9. **In-memory residue after failed saves (2a/2b flows)** — the C1 piggy-back mechanics exist for the benign
+   single appends of the shipped flows too (keep-form-open retry). Benign there (re-confirm is the intended
+   remedy; the payloads are revocable), but consider generalizing the `attest_save_failed` latch into a
+   session-dirty latch for all failed saves.
+
+**NEXT: chunk 4** — import-level decisions (link-transfer, classify-raw, accept/reject-conflict,
+optimize-accept). Chunk 5 = safe-harbor-allocate (the creation side). The chunk-3 spec/pattern carries over.
+
+---
+
 ## ✅ Mutating-TUI chunk 2b — reclassify-income + set-fmv + VOID — SHIPPED (2026-07-02) — THE RECONCILE FAMILY IS COMPLETE IN THE GUI
 
 The correction family: `r` reclassify-income (required-explicit business; kind-optional; the Interest→

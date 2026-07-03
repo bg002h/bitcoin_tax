@@ -16,7 +16,9 @@
 use crate::edit::form::{
     ClassifyInboundFlowState, ClassifyInboundModalState, MutationModalState, ProfileFormState,
     ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyOutflowFlowState,
-    ReclassifyOutflowModalState, SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
+    ReclassifyOutflowModalState, SafeHarborAttestFlowState, SelectLotsFlowState,
+    SelectLotsModalState, SetDonationDetailsFlowState, SetDonationDetailsModalState,
+    SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
 };
 use btctax_cli::Session;
 use btctax_store::Passphrase;
@@ -117,6 +119,27 @@ pub struct EditorApp {
     pub void_flow: Option<VoidFlowState>,
     /// Void confirmation modal.  `Some` while awaiting Enter/Esc.
     pub void_modal: Option<VoidModalState>,
+    /// Full select-lots flow state.  `Some` while the flow is open.
+    ///
+    /// Dispatch order: select_lots_modal (layer 7) → select_lots_flow (flow layer, layer 9) → ...
+    pub select_lots_flow: Option<SelectLotsFlowState>,
+    /// Select-lots confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub select_lots_modal: Option<SelectLotsModalState>,
+    /// Full set-donation-details flow state.  `Some` while the flow is open.
+    ///
+    /// Dispatch order: set_donation_details_modal (layer 8) → set_donation_details_flow (flow layer) → ...
+    pub set_donation_details_flow: Option<SetDonationDetailsFlowState>,
+    /// Set-donation-details confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub set_donation_details_modal: Option<SetDonationDetailsModalState>,
+    /// Full safe-harbor-attest flow state.  `Some` while the flow is open.
+    ///
+    /// No separate modal — TypedWord step is the gate (layer 9 only) [R0-M4].
+    pub safe_harbor_attest_flow: Option<SafeHarborAttestFlowState>,
+    /// Residue latch [R0-C1]: set to `true` when `persist_safe_harbor_attest` returns Err.
+    ///
+    /// While `true`, ALL mutating openers (p/c/o/r/f/v/s/d/a) refuse with the
+    /// quit-first latch status. Cleared only by quitting (discards in-memory residue).
+    pub attest_save_failed: bool,
     /// One-line status (saved / error), shown in the footer.
     /// Cleared on the next non-modal key press (mirrors the viewer's `export_status`
     /// semantics, app.rs:140 [R0-N5]).
@@ -150,6 +173,12 @@ impl EditorApp {
             set_fmv_modal: None,
             void_flow: None,
             void_modal: None,
+            select_lots_flow: None,
+            select_lots_modal: None,
+            set_donation_details_flow: None,
+            set_donation_details_modal: None,
+            safe_harbor_attest_flow: None,
+            attest_save_failed: false,
             status: None,
         }
     }

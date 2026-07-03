@@ -7,8 +7,9 @@
 //! This module performs NO writes — it only holds form state and validates input.
 
 use btctax_core::{
-    Carryforward, DisposeKind, EventId, FilingStatus, InboundClass, IncomeKind, ManualFmv,
-    OutflowClass, ReclassifyIncome, ReclassifyOutflow, Sat, TaxDate, TaxProfile, Usd, WalletId,
+    Carryforward, DisposeKind, DonationDetails, EventId, FilingStatus, Form8283Section,
+    InboundClass, IncomeKind, LotId, ManualFmv, OutflowClass, ReclassifyIncome, ReclassifyOutflow,
+    Sat, TaxDate, TaxProfile, Usd, WalletId,
 };
 use ratatui::widgets::TableState;
 use std::str::FromStr;
@@ -21,6 +22,7 @@ pub const FIELD_CAP: usize = 64;
 /// Follows the `UnlockState` push/pop discipline (unlock.rs:42–63 — the only
 /// text-input precedent): pre-allocated to `FIELD_CAP`, never reallocates.
 /// Rendered **plaintext** (not masked — these are not secrets).
+#[derive(Debug)]
 pub struct FieldBuffer {
     pub buf: String,
 }
@@ -833,6 +835,316 @@ pub fn is_revocable_payload(payload: &btctax_core::EventPayload) -> bool {
             | EventPayload::ReclassifyIncome(_)
             | EventPayload::SafeHarborAllocation(_)
     )
+}
+
+// ── Select-lots flow types ────────────────────────────────────────────────────
+
+/// Display kind for a disposal-list row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisposalKind {
+    Sell,
+    Spend,
+    Gift,
+    Donate,
+}
+
+/// Pre-computed display data for a select-lots disposal list row.
+///
+/// `wallet` is ALWAYS sourced from the raw `LedgerEvent.wallet` via `events_by_id` [R0-I1].
+/// `RemovalLeg` has no wallet field — Gift/Donate rows would have no wallet source otherwise.
+#[derive(Clone)]
+pub struct DisposalListItem {
+    pub disposal_event: EventId,
+    pub date: TaxDate,
+    pub kind: DisposalKind,
+    /// Principal sat = Σ legs.sat (from Disposal or Removal).
+    pub principal_sat: Sat,
+    /// From the raw `LedgerEvent.wallet` via `events_by_id`.
+    pub wallet: Option<WalletId>,
+}
+
+/// A single lot-pick row in the LotsForm.
+pub struct LotPickFormRow {
+    pub lot_id: LotId,
+    pub remaining_sat: Sat,
+    pub acquired_at: TaxDate,
+    pub usd_basis: Usd,
+    /// Editable sat amount (digits only; initially empty = 0).
+    pub pick_sat_buf: FieldBuffer,
+}
+
+impl LotPickFormRow {
+    /// Parse pick_sat_buf as i64; returns 0 when buffer is empty.
+    pub fn pick_sat(&self) -> Result<Sat, String> {
+        if self.pick_sat_buf.is_empty() {
+            return Ok(0);
+        }
+        self.pick_sat_buf.buf.trim().parse::<i64>().map_err(|e| {
+            format!(
+                "bad sat in row {}: {e}",
+                self.lot_id.origin_event_id.canonical()
+            )
+        })
+    }
+}
+
+/// Step in the select-lots flow.
+pub enum SelectLotsStep {
+    List,
+    LotsForm {
+        item: DisposalListItem,
+        rows: Vec<LotPickFormRow>,
+        /// Focused row index.
+        cursor: usize,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the select-lots flow.
+pub struct SelectLotsFlowState {
+    /// Owned by the flow [R0-I2 discipline].
+    pub list: TargetList<DisposalListItem>,
+    pub step: SelectLotsStep,
+}
+
+/// Payload for the select-lots confirmation modal.
+pub struct SelectLotsModalState {
+    pub disposal_event: EventId,
+    pub disposal_date: TaxDate,
+    pub disposal_kind: DisposalKind,
+    pub principal_sat: Sat,
+    /// Validated picks (non-zero only).
+    pub picks: Vec<btctax_core::LotPick>,
+    pub pick_count: usize,
+    /// Σ picks.sat (== principal_sat by construction).
+    pub total_sat: Sat,
+}
+
+/// Validate the LotsForm at Enter-press.
+///
+/// Returns `EventPayload::LotSelection(…)` or an error string.
+///
+/// Validation rules (spec D1):
+/// 1. Parse every `pick_sat_buf` → error on any non-integer.
+/// 2. Collect rows with `pick_sat > 0` → `Vec<LotPick>`.
+/// 3. If no picks (all zero) → `"pick at least one lot"`.
+/// 4. `Σ picked_sat` must equal `item.principal_sat`.
+pub fn validate_select_lots(
+    item: &DisposalListItem,
+    rows: &[LotPickFormRow],
+) -> Result<btctax_core::EventPayload, String> {
+    // Step 1: parse every buffer.
+    let mut total: Sat = 0;
+    let mut picks: Vec<btctax_core::LotPick> = Vec::new();
+    for row in rows {
+        let sat = row.pick_sat()?;
+        if sat > 0 {
+            total += sat;
+            picks.push(btctax_core::LotPick {
+                lot: row.lot_id.clone(),
+                sat,
+            });
+        }
+    }
+
+    // Step 3: at least one pick required.
+    if picks.is_empty() {
+        return Err("pick at least one lot".to_string());
+    }
+
+    // Step 4: principal conservation.
+    if total != item.principal_sat {
+        return Err(format!(
+            "picked {total} sat != disposal principal {} sat; adjust to match exactly",
+            item.principal_sat
+        ));
+    }
+
+    Ok(btctax_core::EventPayload::LotSelection(
+        btctax_core::event::LotSelection {
+            disposal_event: item.disposal_event.clone(),
+            lots: picks,
+        },
+    ))
+}
+
+// ── Set-donation-details flow types ──────────────────────────────────────────
+
+/// Pre-computed display data for a set-donation-details list row.
+#[derive(Clone)]
+pub struct DonationListItem {
+    pub event_id: EventId,
+    pub date: TaxDate,
+    /// Σ removal.legs.iter().map(|l| l.sat).sum().
+    pub total_sat: Sat,
+    /// From `Removal.donee` (free-form label, if any).
+    pub donee: Option<String>,
+    /// From `snap.donation_details.get(&event_id).cloned()` [R0-I3].
+    pub existing_details: Option<DonationDetails>,
+}
+
+impl DonationListItem {
+    /// Return the completeness string for the Completeness column.
+    pub fn completeness_str(&self) -> &'static str {
+        match &self.existing_details {
+            None => "(none)",
+            Some(d) if d.is_review_complete(Form8283Section::B) => "B-complete",
+            Some(_) => "present",
+        }
+    }
+}
+
+/// Step in the set-donation-details flow.
+// FieldForm has 10 FieldBuffer fields by design; boxing the variant is not worth the
+// refactor cost given TUI-only usage (stack frames are short-lived).
+#[allow(clippy::large_enum_variant)]
+pub enum SetDonationDetailsStep {
+    List,
+    FieldForm {
+        item: DonationListItem,
+        donee_name_buf: FieldBuffer,
+        donee_address_buf: FieldBuffer,
+        donee_ein_buf: FieldBuffer,
+        appraiser_name_buf: FieldBuffer,
+        appraiser_address_buf: FieldBuffer,
+        appraiser_tin_buf: FieldBuffer,
+        appraiser_ptin_buf: FieldBuffer,
+        appraiser_qualifications_buf: FieldBuffer,
+        appraisal_date_buf: FieldBuffer,
+        fmv_method_override_buf: FieldBuffer,
+        /// 0..=9 focus index.
+        focus: usize,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the set-donation-details flow.
+pub struct SetDonationDetailsFlowState {
+    pub list: TargetList<DonationListItem>,
+    pub step: SetDonationDetailsStep,
+}
+
+/// Payload for the set-donation-details confirmation modal.
+pub struct SetDonationDetailsModalState {
+    pub event_id: EventId,
+    pub event_date: TaxDate,
+    pub total_sat: Sat,
+    /// The VALIDATED details payload.
+    pub details: DonationDetails,
+}
+
+/// Labels for the 10 donation-details fields (focus index 0..=9).
+pub const DONATION_FIELD_LABELS: [&str; 10] = [
+    "donee_name (REQUIRED)",
+    "donee_address",
+    "donee_ein",
+    "appraiser_name (REQUIRED)",
+    "appraiser_address",
+    "appraiser_tin",
+    "appraiser_ptin",
+    "appraiser_qualifications",
+    "appraisal_date (YYYY-MM-DD)",
+    "fmv_method_override",
+];
+
+/// Validate the donation-details FieldForm at Enter-press.
+///
+/// Returns `DonationDetails` or an error string.
+///
+/// Validation rules (spec D2):
+/// 1. `donee_name`: REQUIRED (empty → error).
+/// 2. `appraiser_name`: REQUIRED (empty → error).
+/// 3. `appraisal_date`: if non-empty → `parse_date_arg(trim)` (YYYY-MM-DD → error on bad format).
+/// 4. All other optionals: empty → `None`.
+#[allow(clippy::too_many_arguments)]
+pub fn validate_donation_details(
+    donee_name_buf: &FieldBuffer,
+    donee_address_buf: &FieldBuffer,
+    donee_ein_buf: &FieldBuffer,
+    appraiser_name_buf: &FieldBuffer,
+    appraiser_address_buf: &FieldBuffer,
+    appraiser_tin_buf: &FieldBuffer,
+    appraiser_ptin_buf: &FieldBuffer,
+    appraiser_qualifications_buf: &FieldBuffer,
+    appraisal_date_buf: &FieldBuffer,
+    fmv_method_override_buf: &FieldBuffer,
+) -> Result<DonationDetails, String> {
+    // donee_name: REQUIRED
+    if donee_name_buf.is_empty() {
+        return Err("donee-name is required".to_string());
+    }
+    let donee_name = donee_name_buf.buf.trim().to_owned();
+
+    // appraiser_name: REQUIRED
+    if appraiser_name_buf.is_empty() {
+        return Err("appraiser-name is required".to_string());
+    }
+    let appraiser_name = appraiser_name_buf.buf.trim().to_owned();
+
+    // Optional string fields.
+    let opt_str = |buf: &FieldBuffer| -> Option<String> {
+        if buf.is_empty() {
+            None
+        } else {
+            let t = buf.buf.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_owned())
+            }
+        }
+    };
+
+    // appraisal_date: optional; if non-empty must parse as YYYY-MM-DD.
+    let appraisal_date = if appraisal_date_buf.is_empty() {
+        None
+    } else {
+        let t = appraisal_date_buf.buf.trim();
+        let fmt = time::macros::format_description!("[year]-[month]-[day]");
+        Some(time::Date::parse(t, fmt).map_err(|e| format!("bad date {t:?}: {e}"))?)
+    };
+
+    Ok(DonationDetails {
+        donee_name,
+        donee_address: opt_str(donee_address_buf),
+        donee_ein: opt_str(donee_ein_buf),
+        appraiser_name,
+        appraiser_address: opt_str(appraiser_address_buf),
+        appraiser_tin: opt_str(appraiser_tin_buf),
+        appraiser_ptin: opt_str(appraiser_ptin_buf),
+        appraiser_qualifications: opt_str(appraiser_qualifications_buf),
+        appraisal_date,
+        fmv_method_override: opt_str(fmv_method_override_buf),
+    })
+}
+
+// ── Safe-harbor-attest flow types ─────────────────────────────────────────────
+
+/// Step in the safe-harbor-attest flow.
+///
+/// TypedWord is the FINAL gate — no separate modal exists for this flow [R0-M4].
+// TypedWord carries FieldBuffer which is not large; no boxing needed.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum SafeHarborAttestStep {
+    /// Step 1: displays allocation details + IRREVOCABLE warnings.
+    Info,
+    /// Step 2: user must type "ATTEST" (all-caps) to confirm.
+    TypedWord {
+        buf: FieldBuffer,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the safe-harbor-attest flow.
+///
+/// No separate modal field on EditorApp — TypedWord is the gate [R0-M4].
+pub struct SafeHarborAttestFlowState {
+    /// EventId of the live (non-voided, timebarred) SafeHarborAllocation being re-attested.
+    pub prior_id: btctax_core::EventId,
+    /// The allocation payload (cloned from the pre-flight load — for display and re-append).
+    pub prior_alloc: btctax_core::event::SafeHarborAllocation,
+    pub step: SafeHarborAttestStep,
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1685,4 +1997,149 @@ mod tests {
             amount_label(OutflowKind::Donate)
         );
     }
+
+    // ── KAT-V-SL-1..3 — select-lots validation ───────────────────────────────
+
+    fn dummy_disposal_item(principal_sat: Sat) -> DisposalListItem {
+        DisposalListItem {
+            disposal_event: btctax_core::EventId::Decision { seq: 1 },
+            date: time::macros::date!(2025 - 09 - 15),
+            kind: DisposalKind::Sell,
+            principal_sat,
+            wallet: None,
+        }
+    }
+
+    fn dummy_lot_row(lot_sat: Sat, pick: &str) -> LotPickFormRow {
+        let mut buf = FieldBuffer::new();
+        buf.set(pick);
+        LotPickFormRow {
+            lot_id: btctax_core::LotId {
+                origin_event_id: btctax_core::EventId::Decision { seq: 99 },
+                split_sequence: 0,
+            },
+            remaining_sat: lot_sat,
+            acquired_at: time::macros::date!(2024 - 01 - 01),
+            usd_basis: rust_decimal_macros::dec!(30000),
+            pick_sat_buf: buf,
+        }
+    }
+
+    /// KAT-V-SL-1: all picks zero → "pick at least one lot".
+    #[test]
+    fn kat_v_sl_1_all_picks_zero_is_required_error() {
+        let item = dummy_disposal_item(100_000);
+        let rows = vec![
+            dummy_lot_row(60_000, ""),  // empty = 0
+            dummy_lot_row(40_000, "0"), // explicit zero
+        ];
+        let err = validate_select_lots(&item, &rows).unwrap_err();
+        assert!(
+            err.contains("pick at least one lot"),
+            "all-zero picks must produce 'pick at least one lot'; got: {err}"
+        );
+    }
+
+    /// KAT-V-SL-2: Σ picked_sat < principal_sat → error.
+    #[test]
+    fn kat_v_sl_2_underpick_is_principal_mismatch_error() {
+        let item = dummy_disposal_item(100_000);
+        let rows = vec![dummy_lot_row(100_000, "50000")]; // 50k < 100k
+        let err = validate_select_lots(&item, &rows).unwrap_err();
+        assert!(
+            err.contains("50000 sat") && err.contains("100000 sat"),
+            "underpick must mention totals; got: {err}"
+        );
+        assert!(
+            !err.contains("pick at least"),
+            "error must NOT say 'pick at least one lot' for underpick; got: {err}"
+        );
+    }
+
+    /// KAT-V-SL-3: Σ picked_sat == principal_sat → valid; builds correct LotPick list.
+    #[test]
+    fn kat_v_sl_3_exact_pick_is_valid_builds_lot_pick_list() {
+        let item = dummy_disposal_item(100_000);
+        let lot_id = btctax_core::LotId {
+            origin_event_id: btctax_core::EventId::Decision { seq: 42 },
+            split_sequence: 1,
+        };
+        let mut buf = FieldBuffer::new();
+        buf.set("100000");
+        let rows = vec![LotPickFormRow {
+            lot_id: lot_id.clone(),
+            remaining_sat: 100_000,
+            acquired_at: time::macros::date!(2024 - 06 - 01),
+            usd_basis: rust_decimal_macros::dec!(50000),
+            pick_sat_buf: buf,
+        }];
+        let payload = validate_select_lots(&item, &rows).unwrap();
+        match payload {
+            btctax_core::EventPayload::LotSelection(ls) => {
+                assert_eq!(ls.disposal_event, item.disposal_event);
+                assert_eq!(ls.lots.len(), 1);
+                assert_eq!(ls.lots[0].lot, lot_id);
+                assert_eq!(ls.lots[0].sat, 100_000);
+            }
+            other => panic!("expected LotSelection, got {other:?}"),
+        }
+    }
+
+    // ── KAT-V-DD-1..3 — set-donation-details validation ──────────────────────
+
+    fn empty_bufs() -> [FieldBuffer; 10] {
+        std::array::from_fn(|_| FieldBuffer::new())
+    }
+
+    fn call_validate_dd(bufs: &[FieldBuffer; 10]) -> Result<DonationDetails, String> {
+        validate_donation_details(
+            &bufs[0], &bufs[1], &bufs[2], &bufs[3], &bufs[4], &bufs[5], &bufs[6], &bufs[7],
+            &bufs[8], &bufs[9],
+        )
+    }
+
+    /// KAT-V-DD-1: donee_name empty → "donee-name is required".
+    #[test]
+    fn kat_v_dd_1_donee_name_empty_is_required_error() {
+        let bufs = empty_bufs();
+        let err = call_validate_dd(&bufs).unwrap_err();
+        assert!(
+            err.contains("donee-name") && err.contains("required"),
+            "empty donee_name must say 'donee-name is required'; got: {err}"
+        );
+    }
+
+    /// KAT-V-DD-2: appraiser_name empty → "appraiser-name is required".
+    #[test]
+    fn kat_v_dd_2_appraiser_name_empty_is_required_error() {
+        let mut bufs = empty_bufs();
+        bufs[0].set("Community Foundation"); // fill donee_name
+        let err = call_validate_dd(&bufs).unwrap_err();
+        assert!(
+            err.contains("appraiser-name") && err.contains("required"),
+            "empty appraiser_name must say 'appraiser-name is required'; got: {err}"
+        );
+    }
+
+    /// KAT-V-DD-3: appraisal_date non-empty with bad format → parse error.
+    #[test]
+    fn kat_v_dd_3_bad_appraisal_date_format_is_error() {
+        let mut bufs = empty_bufs();
+        bufs[0].set("Community Foundation");
+        bufs[3].set("Jane Appraiser");
+        bufs[8].set("not-a-date"); // appraisal_date = bad format
+        let err = call_validate_dd(&bufs).unwrap_err();
+        assert!(
+            err.contains("bad date"),
+            "bad appraisal_date must produce 'bad date' error; got: {err}"
+        );
+    }
+
+    // KAT-V-DD-4 (pre-population round-trip) is implemented in `main.rs` as
+    // `kat_v_dd_4_pre_population_drives_real_path`. The prior version here
+    // re-implemented the production List→FieldForm pre-population mapping IN the test
+    // body — round-1 whole-branch review [I1] found it to be coverage theatre (dropping
+    // a production optional-field pre-population passed uncaught). The real-path version
+    // drives `d` → List → Enter → FieldForm so a wiring regression in any of the 10
+    // fields fails, then Enter → modal to assert the validator round-trip.
 }

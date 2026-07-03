@@ -10,10 +10,13 @@
 
 use crate::edit::form::{
     amount_label, income_kind_display, ClassifyInboundModalState, ClassifyInboundStep,
-    InboundVariant, MutationModalState, OutflowKind, ProfileFormState, ReclassifyIncomeFlowState,
-    ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowModalState,
-    ReclassifyOutflowStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState,
-    VoidModalState, FIELD_LABELS,
+    DisposalKind, FieldBuffer, InboundVariant, MutationModalState, OutflowKind, ProfileFormState,
+    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
+    ReclassifyOutflowModalState, ReclassifyOutflowStep, SafeHarborAttestFlowState,
+    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
+    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
+    SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState, VoidModalState,
+    DONATION_FIELD_LABELS, FIELD_LABELS,
 };
 use crate::editor::{EditorApp, EditorScreen};
 use btctax_core::{DisposeKind, InboundClass, OutflowClass};
@@ -231,6 +234,40 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.void_modal.as_ref() {
         draw_void_modal(frame, area, modal);
+    }
+    // Select-lots flow overlay.
+    if app.select_lots_flow.is_some() {
+        if let Some(flow) = app.select_lots_flow.as_mut() {
+            match &mut flow.step {
+                SelectLotsStep::List => draw_select_lots_list(frame, area, flow),
+                SelectLotsStep::LotsForm { .. } => draw_lots_form(frame, area, &mut flow.step),
+            }
+        }
+    }
+    if let Some(modal) = app.select_lots_modal.as_ref() {
+        draw_select_lots_modal(frame, area, modal);
+    }
+    // Set-donation-details flow overlay.
+    if app.set_donation_details_flow.is_some() {
+        if let Some(flow) = app.set_donation_details_flow.as_mut() {
+            match &mut flow.step {
+                SetDonationDetailsStep::List => draw_donation_details_list(frame, area, flow),
+                SetDonationDetailsStep::FieldForm { .. } => {
+                    draw_donation_details_form(frame, area, &mut flow.step)
+                }
+            }
+        }
+    }
+    if let Some(modal) = app.set_donation_details_modal.as_ref() {
+        draw_donation_details_modal(frame, area, modal);
+    }
+    if let Some(flow) = app.safe_harbor_attest_flow.as_ref() {
+        match &flow.step {
+            SafeHarborAttestStep::Info => draw_attest_info(frame, area, flow),
+            SafeHarborAttestStep::TypedWord { .. } => {
+                draw_attest_typed_word(frame, area, &flow.step)
+            }
+        }
     }
 }
 
@@ -1467,6 +1504,590 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
         width: width.min(area.width),
         height: height.min(area.height),
     }
+}
+
+// ── Select-lots draw functions ────────────────────────────────────────────────
+
+/// Render the select-lots disposal list overlay.
+///
+/// Title: `" Select Lots — select disposal event "`.
+/// Columns: `Date | Kind | Principal Sat | Wallet | EventId`.
+fn draw_select_lots_list(frame: &mut Frame, area: Rect, flow: &mut SelectLotsFlowState) {
+    let modal_rect = centered_rect(90, 22, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let header_cells = ["Date", "Kind", "Principal Sat", "Wallet", "EventId"]
+        .iter()
+        .map(|h| Cell::from(*h).style(Style::default().add_modifier(Modifier::BOLD)));
+    let header = Row::new(header_cells).height(1);
+
+    let kind_str = |k: DisposalKind| match k {
+        DisposalKind::Sell => "sell",
+        DisposalKind::Spend => "spend",
+        DisposalKind::Gift => "gift",
+        DisposalKind::Donate => "donate",
+    };
+
+    let selected_idx = flow.list.table_state.selected();
+    let items: Vec<Row> = flow
+        .list
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let is_selected = selected_idx == Some(i);
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            let wallet_str = match &item.wallet {
+                Some(w) => format!("{w:?}"),
+                None => "(no wallet)".to_string(),
+            };
+            Row::new(vec![
+                Cell::from(item.date.to_string()).style(style),
+                Cell::from(kind_str(item.kind)).style(style),
+                Cell::from(item.principal_sat.to_string()).style(style),
+                Cell::from(wallet_str).style(style),
+                Cell::from(item.disposal_event.canonical()).style(style),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        items,
+        [
+            Constraint::Length(12),
+            Constraint::Length(8),
+            Constraint::Length(14),
+            Constraint::Length(20),
+            Constraint::Min(20),
+        ],
+    )
+    .header(header)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Select Lots — select disposal event "),
+    );
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.list.table_state);
+}
+
+/// Render the select-lots LotsForm overlay.
+///
+/// Scrollable multi-row form with editable `pick_sat` fields.
+/// Running-total footer: `"Picked: {Σ_pick_sat} / {principal_sat} sat"`.
+fn draw_lots_form(frame: &mut Frame, area: Rect, step: &mut SelectLotsStep) {
+    let SelectLotsStep::LotsForm {
+        item,
+        rows,
+        cursor,
+        error,
+    } = step
+    else {
+        return;
+    };
+
+    let modal_rect = centered_rect(90, 24, area);
+    frame.render_widget(Clear, modal_rect);
+
+    // Header and rows.
+    let principal_sat = item.principal_sat;
+    let picked_sat: btctax_core::Sat = rows.iter().map(|r| r.pick_sat().unwrap_or(0)).sum();
+
+    let inner = Block::default().borders(Borders::ALL).title(format!(
+        " Select Lots — {event}  [Enter=submit  Esc=back] ",
+        event = item.disposal_event.canonical()
+    ));
+    let inner_area = inner.inner(modal_rect);
+    frame.render_widget(inner, modal_rect);
+
+    // Calculate content layout.
+    let available_height = inner_area.height as usize;
+    let footer_lines = 2usize; // 1 for totals, 1 for error/blank
+    let visible_rows = available_height.saturating_sub(footer_lines + 1 /*header*/);
+
+    // Scroll window.
+    let start = (*cursor).saturating_sub(visible_rows.saturating_sub(1));
+    let end = (start + visible_rows).min(rows.len());
+    let scroll_rows = &rows[start..end];
+
+    let header = Line::from(vec![Span::styled(
+        format!(
+            "{:<14} {:<32} {:>12} {:>12}  Pick Sat",
+            "Acquired", "LotId", "Remaining", "Basis/Sat"
+        ),
+        Style::default().add_modifier(Modifier::BOLD),
+    )]);
+
+    let row_lines: Vec<Line> = scroll_rows
+        .iter()
+        .enumerate()
+        .map(|(idx, row)| {
+            let abs_idx = start + idx;
+            let is_cursor = abs_idx == *cursor;
+            let pick_str = if row.pick_sat_buf.is_empty() {
+                "0".to_string()
+            } else {
+                row.pick_sat_buf.buf.clone()
+            };
+            let lot_str = format!(
+                "{}#{}",
+                row.lot_id.origin_event_id.canonical(),
+                row.lot_id.split_sequence
+            );
+            let line = format!(
+                "{:<14} {:<32} {:>12} {:>12}  {}",
+                row.acquired_at.to_string(),
+                &lot_str[..lot_str.len().min(32)],
+                row.remaining_sat,
+                row.usd_basis,
+                pick_str
+            );
+            if is_cursor {
+                Line::from(Span::styled(
+                    line,
+                    Style::default().fg(Color::Black).bg(Color::Cyan),
+                ))
+            } else {
+                Line::from(line)
+            }
+        })
+        .collect();
+
+    let mut all_lines = vec![header];
+    all_lines.extend(row_lines);
+
+    // Footer: running total and error.
+    let total_line = Line::from(format!("Picked: {picked_sat} / {principal_sat} sat"));
+    all_lines.push(total_line);
+
+    if let Some(err) = error {
+        all_lines.push(Line::from(Span::styled(
+            err.as_str(),
+            Style::default().fg(Color::Red),
+        )));
+    }
+
+    let para = Paragraph::new(all_lines);
+    frame.render_widget(para, inner_area);
+}
+
+/// Render the select-lots confirmation modal.
+///
+/// Shows disposal info + picks (up to 8; overflow line for the rest).
+fn draw_select_lots_modal(frame: &mut Frame, area: Rect, modal: &SelectLotsModalState) {
+    let kind_str = match modal.disposal_kind {
+        DisposalKind::Sell => "sell",
+        DisposalKind::Spend => "spend",
+        DisposalKind::Gift => "gift",
+        DisposalKind::Donate => "donate",
+    };
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(format!(
+            "  disposal: {}  ({})",
+            modal.disposal_event.canonical(),
+            kind_str
+        )),
+        Line::from(format!("  date:     {}", modal.disposal_date)),
+        Line::from(format!("  principal: {} sat", modal.principal_sat)),
+        Line::from(""),
+        Line::from(format!(
+            "  Picks: {} lot(s), {} sat total",
+            modal.pick_count, modal.total_sat
+        )),
+    ];
+
+    const MAX_PICKS_SHOWN: usize = 8;
+    let show_count = modal.picks.len().min(MAX_PICKS_SHOWN);
+    for pick in &modal.picks[..show_count] {
+        lines.push(Line::from(format!(
+            "    {}#{}   →  {} sat",
+            pick.lot.origin_event_id.canonical(),
+            pick.lot.split_sequence,
+            pick.sat
+        )));
+    }
+    if modal.picks.len() > MAX_PICKS_SHOWN {
+        let remainder_count = modal.picks.len() - MAX_PICKS_SHOWN;
+        let remainder_sat: btctax_core::Sat =
+            modal.picks[MAX_PICKS_SHOWN..].iter().map(|p| p.sat).sum();
+        lines.push(Line::from(format!(
+            "    … and {remainder_count} more picks ({remainder_sat} sat in the remainder)"
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(
+        "  Appended as a decision event (append-only log).",
+    ));
+    lines.push(Line::from(
+        "  Saved immediately via the vault's atomic write path.",
+    ));
+    lines.push(Line::from(""));
+    lines.push(Line::from(
+        "  [Enter] Confirm & save     [Esc] Cancel — writes nothing",
+    ));
+    lines.push(Line::from(""));
+
+    let height = (lines.len() + 2) as u16;
+    let modal_rect = centered_rect(70, height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Confirm: select-lots — WRITES THE VAULT ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+// ── Set-donation-details draw functions ──────────────────────────────────────
+
+/// Render the set-donation-details list overlay.
+///
+/// Title: `" Set Donation Details — select Donation event "`.
+/// Columns: `Date | Sat | Donee | Completeness | EventId`.
+fn draw_donation_details_list(
+    frame: &mut Frame,
+    area: Rect,
+    flow: &mut SetDonationDetailsFlowState,
+) {
+    let modal_rect = centered_rect(90, 20, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let header_cells = ["Date", "Sat", "Donee", "Completeness", "EventId"]
+        .iter()
+        .map(|h| Cell::from(*h).style(Style::default().add_modifier(Modifier::BOLD)));
+    let header = Row::new(header_cells).height(1);
+
+    let selected_idx = flow.list.table_state.selected();
+    let items: Vec<Row> = flow
+        .list
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let is_selected = selected_idx == Some(i);
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            Row::new(vec![
+                Cell::from(item.date.to_string()).style(style),
+                Cell::from(item.total_sat.to_string()).style(style),
+                Cell::from(item.donee.as_deref().unwrap_or("")).style(style),
+                Cell::from(item.completeness_str()).style(style),
+                Cell::from(item.event_id.canonical()).style(style),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        items,
+        [
+            Constraint::Length(12),
+            Constraint::Length(12),
+            Constraint::Length(20),
+            Constraint::Length(14),
+            Constraint::Min(20),
+        ],
+    )
+    .header(header)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Set Donation Details — select Donation event "),
+    );
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.list.table_state);
+}
+
+/// Render the donation-details field form overlay.
+///
+/// 10-field form; focused field is highlighted.
+fn draw_donation_details_form(frame: &mut Frame, area: Rect, step: &mut SetDonationDetailsStep) {
+    let SetDonationDetailsStep::FieldForm {
+        item,
+        donee_name_buf,
+        donee_address_buf,
+        donee_ein_buf,
+        appraiser_name_buf,
+        appraiser_address_buf,
+        appraiser_tin_buf,
+        appraiser_ptin_buf,
+        appraiser_qualifications_buf,
+        appraisal_date_buf,
+        fmv_method_override_buf,
+        focus,
+        error,
+    } = step
+    else {
+        return;
+    };
+
+    let modal_rect = centered_rect(80, 20, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let labels = DONATION_FIELD_LABELS;
+    let bufs: [&FieldBuffer; 10] = [
+        donee_name_buf,
+        donee_address_buf,
+        donee_ein_buf,
+        appraiser_name_buf,
+        appraiser_address_buf,
+        appraiser_tin_buf,
+        appraiser_ptin_buf,
+        appraiser_qualifications_buf,
+        appraisal_date_buf,
+        fmv_method_override_buf,
+    ];
+
+    let mut lines: Vec<Line> = vec![Line::from(format!(
+        "  event: {}  (Donation)",
+        item.event_id.canonical()
+    ))];
+
+    for (i, (label, buf)) in labels.iter().zip(bufs.iter()).enumerate() {
+        let val = if buf.is_empty() { "" } else { buf.buf.as_str() };
+        let line_text = format!("  {:30} {}", label, val);
+        if i == *focus {
+            lines.push(Line::from(Span::styled(
+                line_text,
+                Style::default().fg(Color::Black).bg(Color::Cyan),
+            )));
+        } else {
+            lines.push(Line::from(line_text));
+        }
+    }
+
+    if let Some(err) = error {
+        lines.push(Line::from(Span::styled(
+            format!("  Error: {err}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+    lines.push(Line::from(
+        "  [Enter] Confirm → modal   [Esc] Back   [↑/↓] Move focus",
+    ));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Set Donation Details — field form ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Render the donation-details confirmation modal.
+///
+/// Shows only non-None fields + "last-write-wins; not a decision event" note.
+fn draw_donation_details_modal(
+    frame: &mut Frame,
+    area: Rect,
+    modal: &SetDonationDetailsModalState,
+) {
+    let d = &modal.details;
+    let mut lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(format!(
+            "  event:  {}  (Donation)",
+            modal.event_id.canonical()
+        )),
+        Line::from(format!("  date:   {}", modal.event_date)),
+        Line::from(format!("  sat:    {}", modal.total_sat)),
+        Line::from(""),
+        Line::from(format!("  donee_name:           {}", d.donee_name)),
+    ];
+    if let Some(v) = &d.donee_address {
+        lines.push(Line::from(format!("  donee_address:        {v}")));
+    }
+    if let Some(v) = &d.donee_ein {
+        lines.push(Line::from(format!("  donee_ein:            {v}")));
+    }
+    lines.push(Line::from(format!(
+        "  appraiser_name:       {}",
+        d.appraiser_name
+    )));
+    if let Some(v) = &d.appraiser_address {
+        lines.push(Line::from(format!("  appraiser_address:    {v}")));
+    }
+    if let Some(v) = &d.appraiser_tin {
+        lines.push(Line::from(format!("  appraiser_tin:        {v}")));
+    }
+    if let Some(v) = &d.appraiser_ptin {
+        lines.push(Line::from(format!("  appraiser_ptin:       {v}")));
+    }
+    if let Some(v) = &d.appraiser_qualifications {
+        lines.push(Line::from(format!("  appraiser_qualifications: {v}")));
+    }
+    if let Some(v) = &d.appraisal_date {
+        lines.push(Line::from(format!("  appraisal_date:       {v}")));
+    }
+    if let Some(v) = &d.fmv_method_override {
+        lines.push(Line::from(format!("  fmv_method_override:  {v}")));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(
+        "  Stored in side-table (last-write-wins; not a decision event).",
+    ));
+    lines.push(Line::from("  Saved via vault's atomic write path."));
+    lines.push(Line::from(""));
+    lines.push(Line::from(
+        "  [Enter] Confirm & save     [Esc] Cancel — writes nothing",
+    ));
+    lines.push(Line::from(""));
+
+    let height = (lines.len() + 2) as u16;
+    let modal_rect = centered_rect(70, height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Confirm: set-donation-details — WRITES THE VAULT ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+// ── Safe-harbor-attest flow draw functions ─────────────────────────────────────
+
+/// Render the attest-flow Info step (spec D3 mockup): allocation details, the
+/// §5.02(4) time-bar STATUS, the §7.4 IRREVOCABLE warning, and the post-attest
+/// void-is-permanent warning (the doomed void is itself append-only).
+///
+/// `[Enter]` → advance to TypedWord step.  `[Esc]` → cancel (closes flow).
+fn draw_attest_info(frame: &mut Frame, area: Rect, flow: &SafeHarborAttestFlowState) {
+    let modal_width: u16 = 72;
+    let modal_height: u16 = 24;
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let alloc = &flow.prior_alloc;
+    let lots_count = alloc.lots.len();
+    let total_sat: btctax_core::Sat = alloc.lots.iter().map(|l| l.sat).sum();
+    let method = format!("{:?}", alloc.method);
+    let pre2025 = format!("{:?}", alloc.pre2025_method);
+    let prior_id_str = flow.prior_id.canonical();
+
+    let warn = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
+
+    let lines: Vec<Line> = vec![
+        Line::from(format!("  Allocation: {prior_id_str}")),
+        Line::from(format!(
+            "  As-of date: {}  (§5.02(4) universal snapshot)",
+            alloc.as_of_date
+        )),
+        Line::from(format!("  Method:     {method}")),
+        Line::from(format!("  Pre-2025 method: {pre2025}")),
+        Line::from(format!("  Lots:       {lots_count}  ({total_sat} sat)")),
+        Line::from("  Attested:   false  ←  time-bar active (§5.02(4))"),
+        Line::from(""),
+        Line::from("  STATUS: this allocation is inert due to the §5.02(4)"),
+        Line::from("  time-bar. Attestation CURES the time-bar and makes the"),
+        Line::from("  allocation EFFECTIVE and IRREVOCABLE (§7.4)."),
+        Line::from(""),
+        Line::from(Span::styled("  !! IRREVOCABLE WARNING:", warn)),
+        Line::from(Span::styled(
+            "  Once attested, this allocation CANNOT be voided — any",
+            warn,
+        )),
+        Line::from(Span::styled(
+            "  void attempt fires a PERMANENT Hard DecisionConflict",
+            warn,
+        )),
+        Line::from(Span::styled(
+            "  that gates tax computation (§7.4): the doomed void is",
+            warn,
+        )),
+        Line::from(Span::styled(
+            "  itself append-only and cannot be undone. Do NOT attest",
+            warn,
+        )),
+        Line::from(Span::styled(
+            "  unless the lot list and method match your filed return.",
+            warn,
+        )),
+        Line::from(""),
+        Line::from("  The operation voids the current allocation and re-"),
+        Line::from("  appends it as attested (TWO decision events written)."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  [Enter] Proceed to confirmation   [Esc] Cancel",
+            Style::default().fg(Color::Cyan),
+        )),
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Safe-Harbor Attestation — IRREVOCABLE ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Render the attest-flow TypedWord step: user must type "ATTEST" to confirm.
+///
+/// Buffer is preserved on wrong word (error is shown) [R0-I7].
+/// `[Esc]` → back to the Info step (one step per press [I4]).
+fn draw_attest_typed_word(frame: &mut Frame, area: Rect, step: &SafeHarborAttestStep) {
+    let (buf_str, error) = match step {
+        SafeHarborAttestStep::TypedWord { buf, error } => (buf.buf.as_str(), error.as_deref()),
+        _ => return,
+    };
+
+    let modal_width: u16 = 64;
+    let modal_height: u16 = 13;
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from("  Type exactly:  ATTEST"),
+        Line::from(format!("  Your input:    {buf_str}_")),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  This attestation is permanent. The allocation becomes",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "  immediately irrevocable upon save.",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+    ];
+
+    if let Some(err) = error {
+        lines.push(Line::from(Span::styled(
+            format!("  {err}"),
+            Style::default().fg(Color::Red),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    lines.push(Line::from(Span::styled(
+        "  [Enter] Submit (if \"ATTEST\" typed)  [Esc] Cancel",
+        Style::default().fg(Color::Cyan),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" IRREVOCABLE: type ATTEST to confirm — WRITES THE VAULT ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

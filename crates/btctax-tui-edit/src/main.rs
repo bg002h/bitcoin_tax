@@ -21,13 +21,17 @@ use edit::form::{
     cycle_business_optional, cycle_filing_status, cycle_income_kind, cycle_income_kind_optional,
     cycle_outflow_kind, income_kind_display, is_revocable_payload, next_focus, prev_focus,
     validate, validate_classify_inbound_gift, validate_classify_inbound_income,
-    validate_reclassify_income, validate_reclassify_outflow, validate_set_fmv,
-    ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyInboundStep, FieldBuffer,
-    FmvListItem, InboundListItem, InboundVariant, IncomeListItem, MutationModalState, OutflowKind,
-    OutflowListItem, ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState,
-    ReclassifyIncomeStep, ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
-    ReclassifyOutflowStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList,
-    VoidFlowState, VoidListItem, VoidModalState, VoidStep,
+    validate_donation_details, validate_reclassify_income, validate_reclassify_outflow,
+    validate_select_lots, validate_set_fmv, ClassifyInboundFlowState, ClassifyInboundModalState,
+    ClassifyInboundStep, DisposalKind, DisposalListItem, DonationListItem, FieldBuffer,
+    FmvListItem, InboundListItem, InboundVariant, IncomeListItem, LotPickFormRow,
+    MutationModalState, OutflowKind, OutflowListItem, ProfileFormState, ReclassifyIncomeFlowState,
+    ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
+    ReclassifyOutflowModalState, ReclassifyOutflowStep, SafeHarborAttestFlowState,
+    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
+    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
+    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, VoidFlowState, VoidListItem,
+    VoidModalState, VoidStep,
 };
 use editor::{EditorApp, EditorScreen};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -37,8 +41,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use btctax_core::{
-    BlockerKind, ClassifyInbound, DisposeKind, EventId, EventPayload, InboundClass, IncomeKind,
-    ManualFmv, OutflowClass, ReclassifyIncome,
+    BlockerKind, ClassifyInbound, DisposeKind, DonationDetails, EventId, EventPayload,
+    Form8283Section, InboundClass, IncomeKind, ManualFmv, OutflowClass, ReclassifyIncome,
+    RemovalKind,
 };
 use btctax_tui::app::Tab;
 use btctax_tui::{restore_terminal, setup_panic_hook, TerminalGuard};
@@ -81,9 +86,13 @@ fn parse_vault_path() -> PathBuf {
 /// 4. Reclassify-income-modal dispatch — BEFORE flow, form and screen dispatch.
 /// 5. Set-fmv-modal dispatch — BEFORE flow, form and screen dispatch.
 /// 6. Void-modal dispatch — BEFORE flow, form and screen dispatch.
-/// 7. Flow dispatch — ANY open flow claims ALL keys at every step [R0-I2].
-/// 8. Form dispatch — BEFORE screen dispatch.
-/// 9. Screen dispatch (Unlock / Locked / Browse).
+/// 7. Select-lots-modal dispatch — BEFORE flow, form and screen dispatch.
+/// 8. Set-donation-details-modal dispatch — BEFORE flow, form and screen dispatch.
+/// 9. Flow dispatch — ANY open flow claims ALL keys at every step [R0-I2].
+///    The attest flow (incl. its TypedWord step — no separate attest modal) is
+///    handled entirely here [R0-M4].
+/// 10. Form dispatch — BEFORE screen dispatch.
+/// 11. Screen dispatch (Unlock / Locked / Browse).
 ///
 /// At most one flow `Some` and at most one modal `Some` at any time.
 ///
@@ -137,7 +146,19 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
-    // ── 7. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
+    // ── 7. Select-lots-modal dispatch — BEFORE flow, form, screen ────────────
+    if app.select_lots_modal.is_some() {
+        handle_select_lots_modal_key(app, key);
+        return;
+    }
+
+    // ── 8. Set-donation-details-modal dispatch — BEFORE flow, form, screen ───
+    if app.set_donation_details_modal.is_some() {
+        handle_set_donation_details_modal_key(app, key);
+        return;
+    }
+
+    // ── 9. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
     //    Every step of an open flow is claimed here; 'q' and Esc can never
     //    fall through to a Browse quit arm mid-flow.
     if app.classify_inbound_flow.is_some() {
@@ -160,8 +181,20 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         handle_void_flow_key(app, key);
         return;
     }
+    if app.select_lots_flow.is_some() {
+        handle_select_lots_flow_key(app, key);
+        return;
+    }
+    if app.set_donation_details_flow.is_some() {
+        handle_set_donation_details_flow_key(app, key);
+        return;
+    }
+    if app.safe_harbor_attest_flow.is_some() {
+        handle_safe_harbor_attest_flow_key(app, key);
+        return;
+    }
 
-    // ── 8. Form dispatch — BEFORE screen dispatch ─────────────────────────────
+    // ── 10. Form dispatch — BEFORE screen dispatch ────────────────────────────
     if app.profile_form.is_some() {
         handle_form_key(app, key);
         return;
@@ -218,6 +251,9 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('r') => open_reclassify_income_flow(app),
                 KeyCode::Char('f') => open_set_fmv_flow(app),
                 KeyCode::Char('v') => open_void_flow(app),
+                KeyCode::Char('s') => open_select_lots_flow(app),
+                KeyCode::Char('d') => open_set_donation_details_flow(app),
+                KeyCode::Char('a') => open_safe_harbor_attest_flow(app),
                 _ => {}
             }
         }
@@ -372,6 +408,15 @@ fn handle_form_key(app: &mut EditorApp, key: KeyEvent) {
 /// `filing_status` is set from `p`.  Otherwise: `filing_status = Single`, all
 /// buffers empty (required fields must be typed; optional empties → $0 at validation).
 fn open_profile_form(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     if app.snapshot.is_none() {
         return;
     }
@@ -1777,6 +1822,15 @@ fn events_by_id(
 ///
 /// Empty filtered list → status "No unclassified inbound transfers"; flow NOT opened [R0-M8].
 fn open_classify_inbound_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     let snap = match app.snapshot.as_ref() {
         Some(s) => s,
         None => return,
@@ -1870,6 +1924,15 @@ fn open_classify_inbound_flow(app: &mut EditorApp) {
 ///
 /// Empty list → status "No pending outbound transfers"; flow NOT opened [R0-M8].
 fn open_reclassify_outflow_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     let snap = match app.snapshot.as_ref() {
         Some(s) => s,
         None => return,
@@ -2052,6 +2115,15 @@ fn derive_reclassify_outflow_status(
 /// Empty filtered list → status "No reclassifiable income events"; flow NOT
 /// opened [R0-M8].
 fn open_reclassify_income_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     let snap = match app.snapshot.as_ref() {
         Some(s) => s,
         None => return,
@@ -2155,6 +2227,15 @@ fn open_reclassify_income_flow(app: &mut EditorApp) {
 /// Empty filtered list → status "No FMV-missing income events"; flow NOT
 /// opened [R0-M8].
 fn open_set_fmv_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     let snap = match app.snapshot.as_ref() {
         Some(s) => s,
         None => return,
@@ -2332,6 +2413,15 @@ fn summarize_void_payload(payload: &EventPayload) -> (&'static str, String, Opti
 ///
 /// Empty filtered list → status "No revocable decisions to void"; flow NOT opened [R0-M8].
 fn open_void_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     let snap = match app.snapshot.as_ref() {
         Some(s) => s,
         None => return,
@@ -2434,6 +2524,1236 @@ fn derive_void_status(
     format!(
         "Voided {payload_tag} decision|{seq} — effects un-projected; \
          check Compliance for any returned blockers"
+    )
+}
+
+// ── Select-lots flow: modal handler ──────────────────────────────────────────
+
+/// Handle a key press while the select-lots confirmation modal is open.
+///
+/// Enter-arm (spec D1):
+///   `Ok(id)` → re-project + `derive_select_lots_status` + close modal + close flow.
+///   `Err(e)` → close modal, keep LotsForm open (buffers intact), status `"Save error: {e}"`.
+///
+/// Esc → close modal only (back to LotsForm; nothing written).
+fn handle_select_lots_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            // Extract the validated payload from the modal before dropping the borrow.
+            // (disposal_date/kind/principal are display-only modal fields — not needed here.)
+            let (disposal_event, picks, pick_count, total_sat) =
+                match app.select_lots_modal.as_ref() {
+                    Some(m) => (
+                        m.disposal_event.clone(),
+                        m.picks.clone(),
+                        m.pick_count,
+                        m.total_sat,
+                    ),
+                    None => return,
+                };
+
+            let payload =
+                btctax_core::EventPayload::LotSelection(btctax_core::event::LotSelection {
+                    disposal_event: disposal_event.clone(),
+                    lots: picks,
+                });
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.select_lots_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_select_lots(session, payload, now)
+            };
+
+            match save_result {
+                Ok(decision_id) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_select_lots_status(
+                                &snap,
+                                &disposal_event,
+                                &decision_id,
+                                pick_count,
+                                total_sat,
+                            );
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.select_lots_modal = None;
+                    app.select_lots_flow = None;
+                }
+                Err(e) => {
+                    // [M1] On save error: close modal, keep LotsForm open (buffers intact).
+                    app.select_lots_modal = None;
+                    app.status = Some(format!("Save error: {e}"));
+                }
+            }
+        }
+        KeyCode::Esc => {
+            // Cancel: close modal → back to LotsForm (nothing written).
+            app.select_lots_modal = None;
+        }
+        _ => {
+            // All other keys swallowed (blocking modal — 'q' must NOT quit here).
+        }
+    }
+}
+
+// ── Select-lots flow: flow key dispatcher ────────────────────────────────────
+
+/// Dispatch to the correct sub-handler depending on `SelectLotsStep`.
+fn handle_select_lots_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.select_lots_flow.as_ref() {
+        Some(f) => match &f.step {
+            SelectLotsStep::List => 0u8,
+            SelectLotsStep::LotsForm { .. } => 1u8,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_sl_list_key(app, key),
+        _ => handle_sl_lots_form_key(app, key),
+    }
+}
+
+/// Handle keys at the select-lots flow's List step.
+///
+/// Enter → transition to LotsForm (build lot rows from snap.state.lots).
+/// Esc → close flow (back to Browse).
+/// q → SWALLOWED (flow is blocking).
+fn handle_sl_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            // Transition to LotsForm: clone selected item, build lot rows.
+            let selected = app
+                .select_lots_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+            let snap = match app.snapshot.as_ref() {
+                Some(s) => s,
+                None => return,
+            };
+
+            if let Some(item) = selected {
+                // Build lot rows filtered to item.wallet and sorted by acquired_at ASC.
+                let wallet_ref = item.wallet.as_ref();
+                let rows: Vec<LotPickFormRow> = snap
+                    .state
+                    .lots
+                    .iter()
+                    .filter(|l| wallet_ref.is_some_and(|w| &l.wallet == w))
+                    .map(|l| LotPickFormRow {
+                        lot_id: l.lot_id.clone(),
+                        remaining_sat: l.remaining_sat,
+                        acquired_at: l.acquired_at,
+                        usd_basis: l.usd_basis,
+                        pick_sat_buf: FieldBuffer::new(),
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .collect();
+
+                // Sort by acquired_at ASC (oldest first — Specific-Id natural display order).
+                let mut sorted_rows = rows;
+                sorted_rows.sort_by_key(|r| r.acquired_at);
+
+                if sorted_rows.is_empty() {
+                    let wallet_str = match &item.wallet {
+                        Some(w) => format!("{w:?}"),
+                        None => "(no wallet)".to_string(),
+                    };
+                    // No per-step error on the List step — surface via the global status
+                    // and stay on List (the flow's step is left unchanged).
+                    app.status = Some(format!(
+                        "No lots available for wallet {wallet_str}; check Holdings"
+                    ));
+                    return;
+                }
+
+                if let Some(flow) = app.select_lots_flow.as_mut() {
+                    flow.step = SelectLotsStep::LotsForm {
+                        item,
+                        rows: sorted_rows,
+                        cursor: 0,
+                        error: None,
+                    };
+                }
+            }
+        }
+        KeyCode::Esc => {
+            // Close flow; nothing written.
+            app.select_lots_flow = None;
+        }
+        KeyCode::Char('q') => {
+            // SWALLOWED: flow is blocking; 'q' must NOT quit while a flow is open.
+        }
+        _ => {}
+    }
+}
+
+/// Handle keys at the select-lots flow's LotsForm step.
+///
+/// 0..9 → push digit to focused row's pick_sat_buf.
+/// Backspace → pop from focused row's pick_sat_buf.
+/// Enter → validate → open select_lots_modal.
+/// Esc → back to List step (one step per press — [I4]).
+fn handle_sl_lots_form_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                if let SelectLotsStep::LotsForm { cursor, .. } = &mut flow.step {
+                    *cursor = cursor.saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                if let SelectLotsStep::LotsForm { rows, cursor, .. } = &mut flow.step {
+                    *cursor = (*cursor + 1).min(rows.len().saturating_sub(1));
+                }
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                if let SelectLotsStep::LotsForm { cursor, .. } = &mut flow.step {
+                    *cursor = 0;
+                }
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                if let SelectLotsStep::LotsForm { rows, cursor, .. } = &mut flow.step {
+                    *cursor = rows.len().saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Char(c) if c.is_ascii_digit() => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                if let SelectLotsStep::LotsForm { rows, cursor, .. } = &mut flow.step {
+                    if let Some(row) = rows.get_mut(*cursor) {
+                        row.pick_sat_buf.push_char(c);
+                    }
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                if let SelectLotsStep::LotsForm { rows, cursor, .. } = &mut flow.step {
+                    if let Some(row) = rows.get_mut(*cursor) {
+                        row.pick_sat_buf.pop_char();
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => {
+            // Validate → open modal on success.
+            let validation_result = app.select_lots_flow.as_ref().and_then(|flow| {
+                if let SelectLotsStep::LotsForm { item, rows, .. } = &flow.step {
+                    Some(validate_select_lots(item, rows).map(|payload| {
+                        // Build modal state from validated payload.
+                        let (disposal_event, picks) = match &payload {
+                            btctax_core::EventPayload::LotSelection(ls) => {
+                                (ls.disposal_event.clone(), ls.lots.clone())
+                            }
+                            _ => unreachable!("validate_select_lots always returns LotSelection"),
+                        };
+                        let pick_count = picks.len();
+                        let total_sat: btctax_core::Sat = picks.iter().map(|p| p.sat).sum();
+                        SelectLotsModalState {
+                            disposal_event,
+                            disposal_date: item.date,
+                            disposal_kind: item.kind,
+                            principal_sat: item.principal_sat,
+                            picks,
+                            pick_count,
+                            total_sat,
+                        }
+                    }))
+                } else {
+                    None
+                }
+            });
+
+            match validation_result {
+                Some(Ok(modal)) => {
+                    app.select_lots_modal = Some(modal);
+                }
+                Some(Err(msg)) => {
+                    if let Some(flow) = app.select_lots_flow.as_mut() {
+                        if let SelectLotsStep::LotsForm { error, .. } = &mut flow.step {
+                            *error = Some(msg);
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+        KeyCode::Esc => {
+            // Back to List step (one step per press — [I4]).
+            if let Some(flow) = app.select_lots_flow.as_mut() {
+                flow.step = SelectLotsStep::List;
+            }
+        }
+        KeyCode::Char('q') => {
+            // SWALLOWED: flow is blocking.
+        }
+        _ => {}
+    }
+}
+
+// ── Set-donation-details flow: modal handler ──────────────────────────────────
+
+/// Handle a key press while the set-donation-details confirmation modal is open.
+///
+/// Enter-arm (spec D2):
+///   `Ok(())` → re-project snapshot + derive status + close modal + close flow.
+///   `Err(e)` → close modal, keep FieldForm open (buffers intact), status `"Save error: {e}"`.
+///
+/// Esc → close modal only (back to FieldForm; nothing written).
+fn handle_set_donation_details_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (event_id, details) = match app.set_donation_details_modal.as_ref() {
+                Some(m) => (m.event_id.clone(), m.details.clone()),
+                None => return,
+            };
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.set_donation_details_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_donation_details(session, &event_id, &details)
+            };
+
+            match save_result {
+                Ok(()) => {
+                    // Re-project.
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_donation_details_status(&event_id, &details);
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.set_donation_details_modal = None;
+                    app.set_donation_details_flow = None;
+                }
+                Err(e) => {
+                    // [M1] On save error: close modal, keep FieldForm open.
+                    app.set_donation_details_modal = None;
+                    app.status = Some(format!("Save error: {e}"));
+                }
+            }
+        }
+        KeyCode::Esc => {
+            // Cancel: close modal → back to FieldForm (nothing written).
+            app.set_donation_details_modal = None;
+        }
+        _ => {
+            // All other keys swallowed.
+        }
+    }
+}
+
+// ── Set-donation-details flow: flow key dispatcher ───────────────────────────
+
+/// Dispatch to the correct sub-handler depending on `SetDonationDetailsStep`.
+fn handle_set_donation_details_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.set_donation_details_flow.as_ref() {
+        Some(f) => match &f.step {
+            SetDonationDetailsStep::List => 0u8,
+            SetDonationDetailsStep::FieldForm { .. } => 1u8,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_dd_list_key(app, key),
+        _ => handle_dd_field_form_key(app, key),
+    }
+}
+
+/// Handle keys at the donation-details flow's List step.
+///
+/// Enter → open FieldForm (pre-populated from item.existing_details if present).
+/// Esc → close flow (back to Browse).
+/// q → SWALLOWED (flow is blocking).
+fn handle_dd_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            let selected = app
+                .set_donation_details_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+
+            if let Some(item) = selected {
+                // Pre-populate buffers from existing_details if present.
+                let mut donee_name_buf = FieldBuffer::new();
+                let mut donee_address_buf = FieldBuffer::new();
+                let mut donee_ein_buf = FieldBuffer::new();
+                let mut appraiser_name_buf = FieldBuffer::new();
+                let mut appraiser_address_buf = FieldBuffer::new();
+                let mut appraiser_tin_buf = FieldBuffer::new();
+                let mut appraiser_ptin_buf = FieldBuffer::new();
+                let mut appraiser_qualifications_buf = FieldBuffer::new();
+                let mut appraisal_date_buf = FieldBuffer::new();
+                let mut fmv_method_override_buf = FieldBuffer::new();
+
+                if let Some(existing) = &item.existing_details {
+                    donee_name_buf.set(&existing.donee_name);
+                    if let Some(v) = &existing.donee_address {
+                        donee_address_buf.set(v);
+                    }
+                    if let Some(v) = &existing.donee_ein {
+                        donee_ein_buf.set(v);
+                    }
+                    appraiser_name_buf.set(&existing.appraiser_name);
+                    if let Some(v) = &existing.appraiser_address {
+                        appraiser_address_buf.set(v);
+                    }
+                    if let Some(v) = &existing.appraiser_tin {
+                        appraiser_tin_buf.set(v);
+                    }
+                    if let Some(v) = &existing.appraiser_ptin {
+                        appraiser_ptin_buf.set(v);
+                    }
+                    if let Some(v) = &existing.appraiser_qualifications {
+                        appraiser_qualifications_buf.set(v);
+                    }
+                    if let Some(v) = &existing.appraisal_date {
+                        appraisal_date_buf.set(&v.to_string());
+                    }
+                    if let Some(v) = &existing.fmv_method_override {
+                        fmv_method_override_buf.set(v);
+                    }
+                }
+
+                if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                    flow.step = SetDonationDetailsStep::FieldForm {
+                        item,
+                        donee_name_buf,
+                        donee_address_buf,
+                        donee_ein_buf,
+                        appraiser_name_buf,
+                        appraiser_address_buf,
+                        appraiser_tin_buf,
+                        appraiser_ptin_buf,
+                        appraiser_qualifications_buf,
+                        appraisal_date_buf,
+                        fmv_method_override_buf,
+                        focus: 0,
+                        error: None,
+                    };
+                }
+            }
+        }
+        KeyCode::Esc => {
+            // Close flow; nothing written.
+            app.set_donation_details_flow = None;
+        }
+        KeyCode::Char('q') => {
+            // SWALLOWED: flow is blocking.
+        }
+        _ => {}
+    }
+}
+
+/// Handle keys at the donation-details flow's FieldForm step.
+///
+/// ↑/↓ → move focus. Printable chars → push to focused buf. Backspace → pop.
+/// Enter → validate → open modal. Esc → back to List step [I4].
+#[allow(clippy::too_many_lines)]
+fn handle_dd_field_form_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                if let SetDonationDetailsStep::FieldForm { focus, .. } = &mut flow.step {
+                    *focus = focus.saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Down => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                if let SetDonationDetailsStep::FieldForm { focus, .. } = &mut flow.step {
+                    *focus = (*focus + 1).min(9);
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                if let SetDonationDetailsStep::FieldForm {
+                    focus,
+                    donee_name_buf,
+                    donee_address_buf,
+                    donee_ein_buf,
+                    appraiser_name_buf,
+                    appraiser_address_buf,
+                    appraiser_tin_buf,
+                    appraiser_ptin_buf,
+                    appraiser_qualifications_buf,
+                    appraisal_date_buf,
+                    fmv_method_override_buf,
+                    ..
+                } = &mut flow.step
+                {
+                    let bufs: [&mut FieldBuffer; 10] = [
+                        donee_name_buf,
+                        donee_address_buf,
+                        donee_ein_buf,
+                        appraiser_name_buf,
+                        appraiser_address_buf,
+                        appraiser_tin_buf,
+                        appraiser_ptin_buf,
+                        appraiser_qualifications_buf,
+                        appraisal_date_buf,
+                        fmv_method_override_buf,
+                    ];
+                    if let Some(b) = bufs.into_iter().nth(*focus) {
+                        b.pop_char();
+                    }
+                }
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                if let SetDonationDetailsStep::FieldForm {
+                    focus,
+                    donee_name_buf,
+                    donee_address_buf,
+                    donee_ein_buf,
+                    appraiser_name_buf,
+                    appraiser_address_buf,
+                    appraiser_tin_buf,
+                    appraiser_ptin_buf,
+                    appraiser_qualifications_buf,
+                    appraisal_date_buf,
+                    fmv_method_override_buf,
+                    ..
+                } = &mut flow.step
+                {
+                    let bufs: [&mut FieldBuffer; 10] = [
+                        donee_name_buf,
+                        donee_address_buf,
+                        donee_ein_buf,
+                        appraiser_name_buf,
+                        appraiser_address_buf,
+                        appraiser_tin_buf,
+                        appraiser_ptin_buf,
+                        appraiser_qualifications_buf,
+                        appraisal_date_buf,
+                        fmv_method_override_buf,
+                    ];
+                    if let Some(b) = bufs.into_iter().nth(*focus) {
+                        b.push_char(c);
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => {
+            // Validate → open modal on success.
+            let validation_result = app.set_donation_details_flow.as_ref().and_then(|flow| {
+                if let SetDonationDetailsStep::FieldForm {
+                    item,
+                    donee_name_buf,
+                    donee_address_buf,
+                    donee_ein_buf,
+                    appraiser_name_buf,
+                    appraiser_address_buf,
+                    appraiser_tin_buf,
+                    appraiser_ptin_buf,
+                    appraiser_qualifications_buf,
+                    appraisal_date_buf,
+                    fmv_method_override_buf,
+                    ..
+                } = &flow.step
+                {
+                    Some(
+                        validate_donation_details(
+                            donee_name_buf,
+                            donee_address_buf,
+                            donee_ein_buf,
+                            appraiser_name_buf,
+                            appraiser_address_buf,
+                            appraiser_tin_buf,
+                            appraiser_ptin_buf,
+                            appraiser_qualifications_buf,
+                            appraisal_date_buf,
+                            fmv_method_override_buf,
+                        )
+                        .map(|details| SetDonationDetailsModalState {
+                            event_id: item.event_id.clone(),
+                            event_date: item.date,
+                            total_sat: item.total_sat,
+                            details,
+                        }),
+                    )
+                } else {
+                    None
+                }
+            });
+
+            match validation_result {
+                Some(Ok(modal)) => {
+                    app.set_donation_details_modal = Some(modal);
+                }
+                Some(Err(msg)) => {
+                    if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                        if let SetDonationDetailsStep::FieldForm { error, .. } = &mut flow.step {
+                            *error = Some(msg);
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+        KeyCode::Esc => {
+            // Back to List step (one step per press — [I4]).
+            if let Some(flow) = app.set_donation_details_flow.as_mut() {
+                flow.step = SetDonationDetailsStep::List;
+            }
+        }
+        // Note: 'q' as a Char lands in the Char(c) arm above and is pushed to the focused
+        // buffer. The flow guard ensures 'q' never reaches a Browse quit arm [I4].
+        _ => {}
+    }
+}
+
+// ── Select-lots flow: opener ──────────────────────────────────────────────────
+
+/// Open the select-lots flow from the Browse screen.
+///
+/// Applies the compound pre-filter (spec §Claim F):
+/// 1. Voided-decision set: IDs targeted by VoidDecisionEvent.
+/// 2. Already-selected set: disposal_event IDs of non-voided LotSelection decisions.
+/// 3. Disposals (sell/spend) excluding fee_mini_disposition and already-selected.
+/// 4. Removals (gift/donation — BOTH kinds) excluding already-selected.
+///
+/// Per-item wallet sourced from `events_by_id(snap)[&event].wallet` [R0-I1]:
+/// NOT from DisposalLeg (would miss Gift/Donate rows where RemovalLeg has no wallet).
+///
+/// Empty filtered list → status "No method-honoring disposals available for lot
+/// selection (select-lots pre-filter)"; flow NOT opened [R0-M8].
+fn open_select_lots_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let ev_idx = events_by_id(snap);
+
+    // Build voided set (IDs targeted by any VoidDecisionEvent).
+    let voided: std::collections::BTreeSet<&EventId> = snap
+        .events
+        .iter()
+        .filter_map(|e| {
+            if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                Some(&v.target_event_id)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Build already-selected set: disposal_event IDs of non-voided LotSelection decisions.
+    let already_selected: std::collections::BTreeSet<&EventId> = snap
+        .events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .filter_map(|e| {
+            if let EventPayload::LotSelection(ls) = &e.payload {
+                Some(&ls.disposal_event)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Disposals (sell / spend).
+    let disposal_items: Vec<DisposalListItem> = snap
+        .state
+        .disposals
+        .iter()
+        .filter(|d| !d.fee_mini_disposition)
+        .filter(|d| !already_selected.contains(&d.event))
+        .map(|d| {
+            let principal_sat: btctax_core::Sat = d.legs.iter().map(|l| l.sat).sum();
+            // Wallet sourced from the raw LedgerEvent [R0-I1].
+            let wallet = ev_idx.get(&d.event).and_then(|e| e.wallet.clone());
+            // Disposal.kind is DisposeKind {Sell, Spend} (state.rs:38-40).
+            // Gift/Donate removals come from snap.state.removals, not snap.state.disposals.
+            let kind = match d.kind {
+                DisposeKind::Sell => DisposalKind::Sell,
+                DisposeKind::Spend => DisposalKind::Spend,
+            };
+            DisposalListItem {
+                disposal_event: d.event.clone(),
+                date: d.disposed_at,
+                kind,
+                principal_sat,
+                wallet,
+            }
+        })
+        .collect();
+
+    // Removals (gift / donation — BOTH kinds — [R0-Claim F]).
+    let removal_items: Vec<DisposalListItem> = snap
+        .state
+        .removals
+        .iter()
+        .filter(|r| !already_selected.contains(&r.event))
+        .map(|r| {
+            let principal_sat: btctax_core::Sat = r.legs.iter().map(|l| l.sat).sum();
+            // Wallet sourced from the raw LedgerEvent [R0-I1].
+            let wallet = ev_idx.get(&r.event).and_then(|e| e.wallet.clone());
+            let kind = match r.kind {
+                RemovalKind::Gift => DisposalKind::Gift,
+                RemovalKind::Donation => DisposalKind::Donate,
+            };
+            DisposalListItem {
+                disposal_event: r.event.clone(),
+                date: r.removed_at,
+                kind,
+                principal_sat,
+                wallet,
+            }
+        })
+        .collect();
+
+    // Merge and sort by date DESC (most recent first — matching the display tabs).
+    let mut items: Vec<DisposalListItem> = [disposal_items, removal_items].concat();
+    items.sort_by_key(|item| std::cmp::Reverse(item.date));
+
+    if items.is_empty() {
+        app.status = Some(
+            "No method-honoring disposals available for lot selection (select-lots pre-filter)"
+                .to_string(),
+        );
+        return;
+    }
+
+    app.select_lots_flow = Some(SelectLotsFlowState {
+        list: TargetList::new(items),
+        step: SelectLotsStep::List,
+    });
+}
+
+// ── Set-donation-details flow: opener ────────────────────────────────────────
+
+/// Open the set-donation-details flow from the Browse screen.
+///
+/// Applies the pre-filter from spec §Claim G:
+/// - Only `snap.state.removals` entries where `r.kind == RemovalKind::Donation`.
+/// - No "already-complete" exclusion: re-setting is always valid (last-write-wins).
+/// - `existing_details` sourced from `snap.donation_details` [R0-I3] (NEVER `conn(`).
+///
+/// Empty filtered list → status "No donation removals found (donate a TransferOut first
+/// via reclassify-outflow)"; flow NOT opened [R0-M8].
+fn open_set_donation_details_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let mut items: Vec<DonationListItem> = snap
+        .state
+        .removals
+        .iter()
+        .filter(|r| r.kind == RemovalKind::Donation)
+        .map(|r| {
+            let total_sat: btctax_core::Sat = r.legs.iter().map(|l| l.sat).sum();
+            // existing_details from snap.donation_details — NEVER conn( [R0-I3].
+            let existing_details = snap.donation_details.get(&r.event).cloned();
+            DonationListItem {
+                event_id: r.event.clone(),
+                date: r.removed_at,
+                total_sat,
+                donee: r.donee.clone(),
+                existing_details,
+            }
+        })
+        .collect();
+
+    // Sort by date DESC.
+    items.sort_by_key(|item| std::cmp::Reverse(item.date));
+
+    if items.is_empty() {
+        app.status = Some(
+            "No donation removals found (donate a TransferOut first via reclassify-outflow)"
+                .to_string(),
+        );
+        return;
+    }
+
+    app.set_donation_details_flow = Some(SetDonationDetailsFlowState {
+        list: TargetList::new(items),
+        step: SetDonationDetailsStep::List,
+    });
+}
+
+// ── Status derivers ───────────────────────────────────────────────────────────
+
+/// Derive the status string from RE-PROJECTED state after a select-lots save.
+///
+/// Three arms (spec D1):
+/// 1. `DecisionConflict` attributed to `decision_id` → NEITHER applies; method-order fallback.
+///    Status ends with `"(see Compliance)"` [R0-N3 nit sweep].
+/// 2. `LotSelectionInvalid` with `event == disposal_event` → engine rejected the selection.
+/// 3. Clean → success summary with pick_count and total_sat.
+fn derive_select_lots_status(
+    snap: &btctax_tui::app::Snapshot,
+    disposal_event: &EventId,
+    decision_id: &EventId,
+    pick_count: usize,
+    total_sat: btctax_core::Sat,
+) -> String {
+    // Arm 1: DecisionConflict attributed to the SECOND selection's decision_id.
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(decision_id) {
+            return format!(
+                "Saved, but DecisionConflict fired — neither selection applies (method order \
+                 governs); clear with Void flow (press 'v'), or quit the editor and run: \
+                 btctax reconcile void {} (see Compliance)",
+                decision_id.canonical()
+            );
+        }
+    }
+
+    // Arm 2: LotSelectionInvalid attributed to the disposal_event.
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::LotSelectionInvalid && b.event.as_ref() == Some(disposal_event) {
+            return "LotSelection saved but invalid — see Compliance for detail; the disposal \
+                    falls back to method order. Correct via Void flow (press 'v') then re-select."
+                .to_string();
+        }
+    }
+
+    // Arm 3: clean.
+    format!(
+        "Lot selection recorded for {} — {pick_count} lot(s), {total_sat} sat; \
+         check Compliance for §1.1012-1(j) contemporaneity.",
+        disposal_event.canonical()
+    )
+}
+
+/// Derive the status string from the IN-HAND validated details (spec D2).
+///
+/// Uses `details.is_review_complete(Form8283Section::B)` directly (last-write-wins
+/// guarantees the value just written IS the stored value — no side-table re-load,
+/// no `conn(` in main.rs [R0-I3(c)]).
+fn derive_donation_details_status(event_id: &EventId, details: &DonationDetails) -> String {
+    if details.is_review_complete(Form8283Section::B) {
+        format!(
+            "Details saved for {} — Section B complete (§6695A fields present)",
+            event_id.canonical()
+        )
+    } else {
+        format!(
+            "Details saved for {} — Section A complete on presence; add appraiser \
+             TIN/PTIN + appraisal date + qualifications + donee EIN for Section B completeness",
+            event_id.canonical()
+        )
+    }
+}
+
+// ── Safe-harbor-attest flow ───────────────────────────────────────────────────
+
+/// Open the safe-harbor-attest flow from the Browse screen.
+///
+/// # Step 0 — latch check [R0-C1]
+/// If `attest_save_failed` → the latch status; return. (Every mutating opener carries
+/// the same guard; here it also protects the direct-call path.)
+///
+/// # Step 1 — pre-flight (spec Claim H, [R0-I5])
+/// ONE `session.load_events_and_project()` call — NEVER the cached snap. The session
+/// sees any unsaved in-memory residue, so the already-attested arm is the
+/// defense-in-depth guard against the [R0-C1] double-batch. Arms, in order:
+/// 1. zero live allocations → "No allocation to attest …", return.
+/// 2. 2+ live allocations → "Multiple live allocations present …", return.
+/// 3. `prior.timely_allocation_attested` → "Allocation already attested …", return.
+/// 4. `SafeHarborUnconservable` on `prior_id` → "Allocation fails conservation …", return.
+/// 5. NO `SafeHarborTimebar` on `prior_id` (already-effective) → "Allocation already
+///    effective …", return.
+/// 6. `SafeHarborTimebar` present → open the flow at the Info step.
+fn open_safe_harbor_attest_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
+    // No-op when the snapshot is missing (mirrors every other opener).
+    if app.snapshot.is_none() {
+        return;
+    }
+    let session = match app.session.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+    let (events, state, _cfg) = match session.load_events_and_project() {
+        Ok(t) => t,
+        Err(e) => {
+            app.status = Some(format!("Pre-flight load error: {e}"));
+            return;
+        }
+    };
+
+    // Build voided set; collect live (non-voided) SafeHarborAllocation events.
+    let voided: std::collections::BTreeSet<EventId> = events
+        .iter()
+        .filter_map(|e| {
+            if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                Some(v.target_event_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    let live: Vec<(EventId, btctax_core::event::SafeHarborAllocation)> = events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .filter_map(|e| {
+            if let EventPayload::SafeHarborAllocation(a) = &e.payload {
+                Some((e.id.clone(), a.clone()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Arms 1–2: live-allocation count.
+    let (prior_id, prior_alloc) = match live.len() {
+        0 => {
+            app.status = Some(
+                "No allocation to attest — quit the editor, then run: \
+                 btctax reconcile safe-harbor-allocate"
+                    .to_string(),
+            );
+            return;
+        }
+        1 => live.into_iter().next().expect("len == 1"),
+        _ => {
+            app.status = Some(
+                "Multiple live allocations present — void the stale one (press 'v') \
+                 before attesting"
+                    .to_string(),
+            );
+            return;
+        }
+    };
+
+    // Arm 3: already attested (defense-in-depth against the C1 double-batch:
+    // the session-sourced load sees in-memory residue).
+    if prior_alloc.timely_allocation_attested {
+        app.status = Some("Allocation already attested — nothing to attest".to_string());
+        return;
+    }
+
+    // Arms 4–5: blocker checks from the freshly-projected state.
+    let blocked_with = |k: BlockerKind| {
+        state
+            .blockers
+            .iter()
+            .any(|b| b.event.as_ref() == Some(&prior_id) && b.kind == k)
+    };
+    if blocked_with(BlockerKind::SafeHarborUnconservable) {
+        app.status = Some(
+            "Allocation fails conservation — attestation cannot cure it; quit the \
+             editor, then re-run: btctax reconcile safe-harbor-allocate"
+                .to_string(),
+        );
+        return;
+    }
+    if !blocked_with(BlockerKind::SafeHarborTimebar) {
+        app.status = Some("Allocation already effective — no attestation needed".to_string());
+        return;
+    }
+
+    // Arm 6: SafeHarborTimebar present → open the flow at the Info step.
+    app.safe_harbor_attest_flow = Some(SafeHarborAttestFlowState {
+        prior_id,
+        prior_alloc,
+        step: SafeHarborAttestStep::Info,
+    });
+}
+
+/// Dispatch a key press to the correct step handler while the attest flow is open.
+///
+/// Attest flow has only two steps: Info and TypedWord.
+/// No separate modal — TypedWord IS the gate [R0-M4].
+fn handle_safe_harbor_attest_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.safe_harbor_attest_flow.as_ref() {
+        Some(f) => match &f.step {
+            SafeHarborAttestStep::Info => 0u8,
+            SafeHarborAttestStep::TypedWord { .. } => 1u8,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_attest_info_key(app, key),
+        _ => handle_attest_typed_word_key(app, key),
+    }
+}
+
+/// Handle a key press while the attest-flow Info step is active.
+///
+/// Enter → advance to TypedWord step.
+/// Esc → close flow entirely.
+/// All other keys (incl. `q`) → swallowed (never fall through to Browse quit).
+fn handle_attest_info_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.safe_harbor_attest_flow = None;
+        }
+        KeyCode::Enter => {
+            if let Some(flow) = app.safe_harbor_attest_flow.as_mut() {
+                flow.step = SafeHarborAttestStep::TypedWord {
+                    buf: FieldBuffer::new(),
+                    error: None,
+                };
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Handle a key press while the attest-flow TypedWord step is active.
+///
+/// All printable chars (incl. `q`) are consumed by the buffer — never fall through.
+/// Backspace removes last char from buf.
+/// Enter → validate "ATTEST"; on match calls `persist_safe_harbor_attest`:
+///   `Ok((void_id, attest_id))` → re-project + derive_attest_status + close flow.
+///   `Err(e)` → set `app.attest_save_failed = true` [R0-C1] + Err status + close flow.
+/// On wrong typed word → set error on step but PRESERVE buf (do NOT clear) [R0-I7].
+/// Esc → back to the Info step (one step per press — [I4]: TypedWord → Info → close).
+fn handle_attest_typed_word_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            if let Some(flow) = app.safe_harbor_attest_flow.as_mut() {
+                flow.step = SafeHarborAttestStep::Info;
+            }
+            return;
+        }
+        KeyCode::Backspace => {
+            if let Some(SafeHarborAttestFlowState {
+                step: SafeHarborAttestStep::TypedWord { buf, .. },
+                ..
+            }) = app.safe_harbor_attest_flow.as_mut()
+            {
+                buf.pop_char();
+            }
+            return;
+        }
+        KeyCode::Char(c) => {
+            if let Some(SafeHarborAttestFlowState {
+                step: SafeHarborAttestStep::TypedWord { buf, error },
+                ..
+            }) = app.safe_harbor_attest_flow.as_mut()
+            {
+                buf.push_char(c);
+                *error = None;
+            }
+            return;
+        }
+        KeyCode::Enter => {}
+        _ => return,
+    }
+
+    // Enter: validate typed word.
+    let (typed, prior_id, prior_alloc) = match app.safe_harbor_attest_flow.as_ref() {
+        Some(SafeHarborAttestFlowState {
+            step: SafeHarborAttestStep::TypedWord { buf, .. },
+            prior_id,
+            prior_alloc,
+        }) => (
+            buf.buf.as_str().trim().to_string(),
+            prior_id.clone(),
+            prior_alloc.clone(),
+        ),
+        _ => return,
+    };
+
+    if typed != "ATTEST" {
+        // Wrong word: set the spec error, buffer PRESERVED (the user corrects with
+        // Backspace) [R0-I7].
+        if let Some(SafeHarborAttestFlowState {
+            step: SafeHarborAttestStep::TypedWord { error, .. },
+            ..
+        }) = app.safe_harbor_attest_flow.as_mut()
+        {
+            *error = Some("type ATTEST (all caps) to confirm".to_string());
+        }
+        return;
+    }
+
+    // Correct word — call persist.
+    let now = time::OffsetDateTime::now_utc();
+    let save_result = match app.session.as_mut() {
+        Some(s) => edit::persist::persist_safe_harbor_attest(s, prior_id, prior_alloc, now),
+        None => return,
+    };
+
+    app.safe_harbor_attest_flow = None;
+
+    match save_result {
+        Ok((_void_id, attest_id)) => {
+            let new_snap = {
+                let session = app.session.as_ref().unwrap();
+                btctax_tui::unlock::build_snapshot(session)
+            };
+            match new_snap {
+                Ok((snap, _)) => {
+                    let status = derive_attest_status(&snap, &attest_id);
+                    app.snapshot = Some(snap);
+                    app.status = Some(status);
+                }
+                Err(e) => {
+                    app.status = Some(format!(
+                        "Attested but re-projection failed ({e}) — restart to refresh"
+                    ));
+                }
+            }
+        }
+        Err(e) => {
+            app.attest_save_failed = true;
+            app.status = Some(format!(
+                "Save error: {e} — quit the editor now (the unsaved attestation is \
+                 discarded on quit), then run: btctax reconcile safe-harbor-attest"
+            ));
+        }
+    }
+}
+
+/// Derive the status string for a completed safe-harbor attest (spec D3 derive_attest_status).
+///
+/// Four arms in PRIORITY order, keyed ONLY to `new_attest_id` [R0-M10]: the voided
+/// prior allocation keeps firing SafeHarborTimebar on ITS id every projection (stale
+/// Advisory, harmless — allocation-targeted voids never enter the engine's `voided`
+/// set). Never widen an arm to "no timebar anywhere". Blocker kinds outside the three
+/// arms fall through to the clean arm (spec: "no timebar, no unconservable, no
+/// conflict on new_attest_id").
+fn derive_attest_status(snap: &btctax_tui::app::Snapshot, new_attest_id: &EventId) -> String {
+    let has = |k: BlockerKind| {
+        snap.state
+            .blockers
+            .iter()
+            .any(|b| b.kind == k && b.event.as_ref() == Some(new_attest_id))
+    };
+
+    // Arm 1: conservation failed on the re-attested allocation (defensive).
+    if has(BlockerKind::SafeHarborUnconservable) {
+        return "ATTEST FAILED: allocation fires SafeHarborUnconservable — see Compliance; \
+                the prior void and re-append both landed; quit the editor, then repair via CLI"
+            .to_string();
+    }
+
+    // Arm 2: re-attested allocation still time-barred (unexpected).
+    if has(BlockerKind::SafeHarborTimebar) {
+        return "ATTEST SAVED but SafeHarborTimebar re-fired — check Compliance; \
+                the allocation may not have cured the time-bar"
+            .to_string();
+    }
+
+    // Arm 3: conflict on the new allocation (edge case).
+    if has(BlockerKind::DecisionConflict) {
+        return "ATTEST SAVED but DecisionConflict fired — check Compliance; vault \
+                integrity may be affected; quit and run: btctax verify"
+            .to_string();
+    }
+
+    // Arm 4: clean.
+    format!(
+        "Allocation attested (IRREVOCABLE, §7.4) — {}; quit and run btctax verify to confirm effectiveness",
+        new_attest_id.canonical()
     )
 }
 
@@ -7664,5 +8984,2114 @@ mod tests {
             !tags.contains(&"ClassifyInbound"),
             "VOID-EXCL: already-voided ClassifyInbound must NOT be in void list"
         );
+    }
+
+    // ── Task 1 KAT helpers ────────────────────────────────────────────────────
+
+    /// Seed vault: Acquire + TransferOut + ReclassifyOutflow(Donate) → Donation removal.
+    /// Returns (acquire_id, transfer_out_id, wallet).
+    fn seed_donate_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+        principal_sat: btctax_core::Sat,
+    ) -> (btctax_core::EventId, btctax_core::EventId) {
+        use btctax_core::event::{
+            Acquire, BasisSource, EventPayload, LedgerEvent, OutflowClass, ReclassifyOutflow,
+            TransferOut,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+
+        let wallet = Some(btctax_core::WalletId::Exchange {
+            provider: "River".to_string(),
+            account: "main".to_string(),
+        });
+        let acq_id = EventId::import(Source::River, SourceRef::new("donate-acq-1"));
+        let to_id = EventId::import(Source::River, SourceRef::new("donate-to-1"));
+
+        {
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+            let t0 = OffsetDateTime::from_unix_timestamp(1_747_913_600).unwrap();
+            let t1 = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+            let batch = vec![
+                LedgerEvent {
+                    id: acq_id.clone(),
+                    utc_timestamp: t0,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::Acquire(Acquire {
+                        // Acquire 2× so FIFO leaves remaining_sat == principal_sat after donation.
+                        // This ensures snap.state.lots is non-empty when select-lots opens.
+                        sat: principal_sat * 2,
+                        usd_cost: dec!(50000),
+                        fee_usd: dec!(0),
+                        basis_source: BasisSource::ExchangeProvided,
+                    }),
+                },
+                LedgerEvent {
+                    id: to_id.clone(),
+                    utc_timestamp: t1,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::TransferOut(TransferOut {
+                        sat: principal_sat,
+                        fee_sat: None,
+                        dest_addr: None,
+                        txid: None,
+                    }),
+                },
+            ];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+
+            let t2 = OffsetDateTime::from_unix_timestamp(1_748_100_000).unwrap();
+            let ro = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                transfer_out_event: to_id.clone(),
+                as_: OutflowClass::Donate {
+                    appraisal_required: false,
+                },
+                principal_proceeds_or_fmv: dec!(20000),
+                fee_usd: None,
+                donee: None,
+            });
+            btctax_core::persistence::append_decision(session.conn(), ro, t2, UtcOffset::UTC, None)
+                .unwrap();
+            // MethodElection so fold has a method.
+            let me = EventPayload::MethodElection(btctax_core::event::MethodElection {
+                effective_from: time::macros::date!(2024 - 01 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            btctax_core::persistence::append_decision(session.conn(), me, t2, UtcOffset::UTC, None)
+                .unwrap();
+            session.save().unwrap();
+        }
+
+        (acq_id, to_id)
+    }
+
+    /// Seed vault: TWO Acquire lots + TransferOut + ReclassifyOutflow(Sell).
+    /// Returns (lot_a_id, lot_b_id, transfer_out_id).
+    fn seed_two_lot_sell_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> (
+        btctax_core::EventId,
+        btctax_core::EventId,
+        btctax_core::EventId,
+    ) {
+        use btctax_core::event::{
+            Acquire, BasisSource, DisposeKind, EventPayload, LedgerEvent, OutflowClass,
+            ReclassifyOutflow, TransferOut,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+
+        let wallet = Some(btctax_core::WalletId::Exchange {
+            provider: "River".to_string(),
+            account: "main".to_string(),
+        });
+        let lot_a_id = EventId::import(Source::River, SourceRef::new("lot-a-1"));
+        let lot_b_id = EventId::import(Source::River, SourceRef::new("lot-b-1"));
+        let to_id = EventId::import(Source::River, SourceRef::new("sell-to-1"));
+
+        {
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+            let ta = OffsetDateTime::from_unix_timestamp(1_740_000_000).unwrap(); // lot A — earlier
+            let tb = OffsetDateTime::from_unix_timestamp(1_741_000_000).unwrap(); // lot B — later
+            let tc = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap(); // sell
+            let td = OffsetDateTime::from_unix_timestamp(1_748_100_000).unwrap(); // decisions
+            let batch = vec![
+                LedgerEvent {
+                    id: lot_a_id.clone(),
+                    utc_timestamp: ta,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 1_000_000,
+                        usd_cost: dec!(30000),
+                        fee_usd: dec!(0),
+                        basis_source: BasisSource::ExchangeProvided,
+                    }),
+                },
+                LedgerEvent {
+                    id: lot_b_id.clone(),
+                    utc_timestamp: tb,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 1_000_000,
+                        usd_cost: dec!(50000),
+                        fee_usd: dec!(0),
+                        basis_source: BasisSource::ExchangeProvided,
+                    }),
+                },
+                LedgerEvent {
+                    id: to_id.clone(),
+                    utc_timestamp: tc,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::TransferOut(TransferOut {
+                        sat: 500_000,
+                        fee_sat: None,
+                        dest_addr: None,
+                        txid: None,
+                    }),
+                },
+            ];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+
+            // ReclassifyOutflow → Sell.
+            let ro = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                transfer_out_event: to_id.clone(),
+                as_: OutflowClass::Dispose {
+                    kind: DisposeKind::Sell,
+                },
+                principal_proceeds_or_fmv: dec!(30000),
+                fee_usd: None,
+                donee: None,
+            });
+            btctax_core::persistence::append_decision(session.conn(), ro, td, UtcOffset::UTC, None)
+                .unwrap();
+            // MethodElection (FIFO — so lot A is consumed by default).
+            let me = EventPayload::MethodElection(btctax_core::event::MethodElection {
+                effective_from: time::macros::date!(2024 - 01 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            btctax_core::persistence::append_decision(session.conn(), me, td, UtcOffset::UTC, None)
+                .unwrap();
+            session.save().unwrap();
+        }
+
+        (lot_a_id, lot_b_id, to_id)
+    }
+
+    // ── KAT-C2f — cancel-path bytes-unchanged (select-lots) ──────────────────
+
+    #[test]
+    fn kat_c2f_cancel_path_vault_bytes_unchanged_select_lots() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-c2f-pass";
+
+        // Seed: 2 lots (1M sat each) + TransferOut 500K + ReclassifyOutflow(Sell) + MethodElection.
+        // FIFO consumes 500K from lot A → lot A remaining = 500K, lot B remaining = 1M.
+        // snap.state.lots is non-empty so LotsForm can open.
+        let (_lot_a, _lot_b, _to_id) = seed_two_lot_sell_vault(&vault, &key, pp_str);
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+
+        {
+            let mut app = open_app(&vault, pp_str);
+
+            // ── s → flow opens at List step ──────────────────────────────────
+            handle_key(&mut app, press(KeyCode::Char('s')));
+            assert!(
+                app.select_lots_flow.is_some(),
+                "C2f: select_lots_flow must open on 's'"
+            );
+
+            // 'q' at List step is SWALLOWED [I4].
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2f: 'q' at List must be swallowed");
+            assert!(
+                app.select_lots_flow.is_some(),
+                "C2f: flow must still be open after swallowed 'q'"
+            );
+
+            // Enter → LotsForm.
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                matches!(
+                    app.select_lots_flow.as_ref().map(|f| &f.step),
+                    Some(SelectLotsStep::LotsForm { .. })
+                ),
+                "C2f: Enter must transition to LotsForm"
+            );
+
+            // 'q' at LotsForm is SWALLOWED.
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2f: 'q' at LotsForm must be swallowed");
+
+            // Type "500000" → pick_sat_buf for lot A (cursor=0).
+            // Disposal principal is 500K sat; lot A remaining = 500K (FIFO consumed 500K of 1M).
+            for c in "500000".chars() {
+                handle_key(&mut app, press(KeyCode::Char(c)));
+            }
+
+            // Enter → modal opens (picks == principal).
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.select_lots_modal.is_some(),
+                "C2f: Enter on valid picks must open select_lots_modal"
+            );
+
+            // 'q' at modal is SWALLOWED.
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2f: 'q' at modal must be swallowed");
+
+            // Esc → modal closes; LotsForm stays open with buffer intact.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(app.select_lots_modal.is_none(), "C2f: Esc must close modal");
+            assert!(
+                matches!(
+                    app.select_lots_flow.as_ref().map(|f| &f.step),
+                    Some(SelectLotsStep::LotsForm { .. })
+                ),
+                "C2f: LotsForm must still be open after Esc-close-modal"
+            );
+            // Buffer intact.
+            {
+                let flow = app.select_lots_flow.as_ref().unwrap();
+                if let SelectLotsStep::LotsForm { rows, .. } = &flow.step {
+                    assert_eq!(
+                        rows[0].pick_sat_buf.buf, "500000",
+                        "C2f: buffer must be intact after modal Esc"
+                    );
+                }
+            }
+
+            // Esc from LotsForm → back to List.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                matches!(
+                    app.select_lots_flow.as_ref().map(|f| &f.step),
+                    Some(SelectLotsStep::List)
+                ),
+                "C2f: Esc from LotsForm must go back to List"
+            );
+
+            // Esc from List → flow closes.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.select_lots_flow.is_none(),
+                "C2f: Esc from List must close flow"
+            );
+        }
+
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "C2f: vault bytes must be UNCHANGED on full cancel path"
+        );
+    }
+
+    // ── KAT-C2g — cancel-path bytes-unchanged (set-donation-details) ─────────
+
+    #[test]
+    fn kat_c2g_cancel_path_vault_bytes_unchanged_set_donation_details() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-c2g-pass";
+
+        seed_donate_vault(&vault, &key, pp_str, 500_000);
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+
+        {
+            let mut app = open_app(&vault, pp_str);
+
+            // ── d → flow opens at List step ──────────────────────────────────
+            handle_key(&mut app, press(KeyCode::Char('d')));
+            assert!(
+                app.set_donation_details_flow.is_some(),
+                "C2g: set_donation_details_flow must open on 'd'"
+            );
+
+            // 'q' at List is SWALLOWED.
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(!app.should_quit, "C2g: 'q' at List must be swallowed");
+
+            // Enter → FieldForm.
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                matches!(
+                    app.set_donation_details_flow.as_ref().map(|f| &f.step),
+                    Some(SetDonationDetailsStep::FieldForm { .. })
+                ),
+                "C2g: Enter must transition to FieldForm"
+            );
+
+            // 'q' at FieldForm is pushed to donee_name_buf (NOT swallowed as quit) [I4].
+            // We skip the 'q'-swallow check here since 'q' is a valid text char for the field.
+
+            // Type donee_name.
+            type_str(&mut app, "Test Charity");
+
+            // Move focus to appraiser_name (field 3, index 3).
+            for _ in 0..3 {
+                handle_key(&mut app, press(KeyCode::Down));
+            }
+            type_str(&mut app, "Jane Appraiser");
+
+            // Enter → modal opens.
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.set_donation_details_modal.is_some(),
+                "C2g: Enter on valid FieldForm must open set_donation_details_modal"
+            );
+
+            // Esc → modal closes; FieldForm stays open.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.set_donation_details_modal.is_none(),
+                "C2g: Esc must close modal"
+            );
+            assert!(
+                matches!(
+                    app.set_donation_details_flow.as_ref().map(|f| &f.step),
+                    Some(SetDonationDetailsStep::FieldForm { .. })
+                ),
+                "C2g: FieldForm must still be open after modal Esc"
+            );
+
+            // Esc from FieldForm → back to List.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                matches!(
+                    app.set_donation_details_flow.as_ref().map(|f| &f.step),
+                    Some(SetDonationDetailsStep::List)
+                ),
+                "C2g: Esc from FieldForm must go back to List"
+            );
+
+            // Esc from List → flow closes.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.set_donation_details_flow.is_none(),
+                "C2g: Esc from List must close flow"
+            );
+        }
+
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "C2g: vault bytes must be UNCHANGED on full cancel path"
+        );
+    }
+
+    // ── KAT-S3a — save-error path for select-lots (chmod) ────────────────────
+
+    #[test]
+    #[cfg(unix)]
+    fn kat_s3a_save_error_path_select_lots_chmod() {
+        use btctax_core::persistence::load_all_ordered;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-s3a-pass";
+
+        // Seed: 2 lots (1M sat each) + TransferOut 500K + ReclassifyOutflow(Sell) + MethodElection.
+        // FIFO takes 500K from lot A → remaining = 500K; snap.state.lots is non-empty.
+        let (_lot_a, _lot_b, _to_id) = seed_two_lot_sell_vault(&vault, &key, pp_str);
+
+        // Root-skip guard.
+        {
+            let probe = dir.path().join("probe.tmp");
+            let perms = std::fs::Permissions::from_mode(0o500);
+            std::fs::set_permissions(dir.path(), perms).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("KAT-S3a: skipping — chmod 0o500 did not deny writes (running as root?)");
+                return;
+            }
+        }
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+        let pre_event_count = {
+            let session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            load_all_ordered(session.conn()).unwrap().len()
+        };
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Drive s → LotsForm → pick 500000 → modal.
+        // Lot A (cursor=0) has 500K remaining; disposal principal is 500K. Pick exact.
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Enter)); // List → LotsForm
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(app.select_lots_modal.is_some(), "S3a: modal must open");
+
+        // Make vault's parent dir read-only.
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // Confirm → should fail.
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        // Restore before any assertions that might panic and leave dir locked.
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        // Assertions: modal closed, LotsForm still open, buffer intact, status "Save error".
+        assert!(
+            app.select_lots_modal.is_none(),
+            "S3a: modal must be closed after save failure"
+        );
+        assert!(
+            matches!(
+                app.select_lots_flow.as_ref().map(|f| &f.step),
+                Some(SelectLotsStep::LotsForm { .. })
+            ),
+            "S3a: LotsForm must still be open after save failure"
+        );
+        {
+            let flow = app.select_lots_flow.as_ref().unwrap();
+            if let SelectLotsStep::LotsForm { rows, .. } = &flow.step {
+                assert_eq!(
+                    rows[0].pick_sat_buf.buf, "500000",
+                    "S3a: buffer must be intact after save failure"
+                );
+            }
+        }
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("Save error"))
+                .unwrap_or(false),
+            "S3a: status must contain 'Save error'; got: {:?}",
+            app.status
+        );
+        let bytes_mid = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_mid,
+            "S3a: vault bytes must be unchanged after failed save"
+        );
+
+        // Retry → should succeed (second LotSelection → conflict).
+        handle_key(&mut app, press(KeyCode::Enter)); // validate again → modal
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → retry save
+        assert!(
+            app.select_lots_modal.is_none(),
+            "S3a: modal must be closed after retry save"
+        );
+        assert!(
+            app.select_lots_flow.is_none(),
+            "S3a: flow must be closed after retry"
+        );
+
+        // Assert: post.len() == pre.len() + 2 (first attempt + retry).
+        let status_after_retry = app.status.clone();
+        drop(app);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let post = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(
+            post.len(),
+            pre_event_count + 2,
+            "S3a: post must have pre.len()+2 events (both LotSelection attempts); pre={pre_event_count}"
+        );
+
+        // Both tails are LotSelection for the same disposal_event.
+        let tail1 = &post[pre_event_count];
+        let tail2 = &post[pre_event_count + 1];
+        let p1: btctax_core::EventPayload =
+            serde_json::from_str(&tail1.payload_json).expect("tail1 must deserialize");
+        let p2: btctax_core::EventPayload =
+            serde_json::from_str(&tail2.payload_json).expect("tail2 must deserialize");
+        assert!(
+            matches!(p1, btctax_core::EventPayload::LotSelection(_)),
+            "S3a: tail1 must be LotSelection"
+        );
+        assert!(
+            matches!(p2, btctax_core::EventPayload::LotSelection(_)),
+            "S3a: tail2 must be LotSelection"
+        );
+        if let (
+            btctax_core::EventPayload::LotSelection(ls1),
+            btctax_core::EventPayload::LotSelection(ls2),
+        ) = (p1, p2)
+        {
+            assert_eq!(
+                ls1.disposal_event, ls2.disposal_event,
+                "S3a: both LotSelections must target the same disposal"
+            );
+        }
+
+        // Re-project: DecisionConflict attributed to the SECOND (retry) decision.
+        let (snap, _) = btctax_tui::unlock::build_snapshot(&session2).unwrap();
+        let retry_decision_id = btctax_core::EventId::Decision {
+            seq: tail2.decision_seq.unwrap() as u64,
+        };
+        let has_conflict = snap.state.blockers.iter().any(|b| {
+            b.kind == btctax_core::BlockerKind::DecisionConflict
+                && b.event.as_ref() == Some(&retry_decision_id)
+        });
+        assert!(
+            has_conflict,
+            "S3a: retry must produce DecisionConflict on the SECOND decision's id"
+        );
+        // Status must surface the conflict.
+        assert!(
+            status_after_retry
+                .as_deref()
+                .map(|s| s.contains("DecisionConflict") || s.contains("conflict"))
+                .unwrap_or(false),
+            "S3a: status must surface DecisionConflict after retry; got: {:?}",
+            status_after_retry
+        );
+    }
+
+    // ── KAT-E2E-SL — end-to-end select-lots (discriminating seed) ─────────────
+
+    #[test]
+    fn kat_e2e_sl_select_lots_happy_path_discriminating_seed() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-sl-pass";
+
+        let (lot_a_id, lot_b_id, to_id) = seed_two_lot_sell_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // 1. Confirm disposal is in projected state.
+        let snap = app.snapshot.as_ref().unwrap();
+        let disposal_present = snap.state.disposals.iter().any(|d| d.event == to_id);
+        assert!(
+            disposal_present,
+            "E2E-SL: TransferOut/sell must appear in snap.state.disposals"
+        );
+
+        // Under FIFO, lot A (earlier) is consumed.
+        let uses_lot_a = snap.state.disposals.iter().any(|d| {
+            d.event == to_id && d.legs.iter().any(|l| l.lot_id.origin_event_id == lot_a_id)
+        });
+        assert!(
+            uses_lot_a,
+            "E2E-SL: FIFO must consume lot A before select-lots"
+        );
+
+        // 2. Drive s → list → Enter → LotsForm.
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.select_lots_flow.is_some(),
+            "E2E-SL: flow must open on 's'"
+        );
+
+        handle_key(&mut app, press(KeyCode::Enter)); // List → LotsForm
+        assert!(
+            matches!(
+                app.select_lots_flow.as_ref().map(|f| &f.step),
+                Some(SelectLotsStep::LotsForm { .. })
+            ),
+            "E2E-SL: Enter must transition to LotsForm"
+        );
+
+        // LotsForm shows BOTH lots (sorted by acquired_at ASC = A first, B second).
+        let rows_len = app.select_lots_flow.as_ref().and_then(|f| {
+            if let SelectLotsStep::LotsForm { rows, .. } = &f.step {
+                Some(rows.len())
+            } else {
+                None
+            }
+        });
+        assert_eq!(rows_len, Some(2), "E2E-SL: LotsForm must show 2 lots");
+
+        // Navigate to lot B (index 1) and type "500000".
+        handle_key(&mut app, press(KeyCode::Down)); // cursor → lot B (index 1)
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+
+        // Enter → modal.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.select_lots_modal.is_some(),
+            "E2E-SL: Enter must open modal"
+        );
+
+        // Render and check modal content.
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| crate::draw_edit::draw(f, &mut app))
+            .unwrap();
+        let rendered = rendered_text(&terminal);
+        assert!(
+            rendered.contains("sell") || rendered.contains("(sell)"),
+            "E2E-SL: modal must show disposal kind 'sell'; rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("500000"),
+            "E2E-SL: modal must show 500000 sat; rendered: {rendered}"
+        );
+
+        // Confirm → save + re-project.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.select_lots_modal.is_none(),
+            "E2E-SL: modal must close after confirm"
+        );
+        assert!(
+            app.select_lots_flow.is_none(),
+            "E2E-SL: flow must close after confirm"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("Lot selection"))
+                .unwrap_or(false),
+            "E2E-SL: status must contain 'Lot selection'; got: {:?}",
+            app.status
+        );
+
+        // 3. Re-project: no LotSelectionInvalid; disposal now consumes lot B.
+        let snap2 = app.snapshot.as_ref().unwrap();
+        let no_invalid = !snap2.state.blockers.iter().any(|b| {
+            b.kind == BlockerKind::LotSelectionInvalid && b.event.as_ref() == Some(&to_id)
+        });
+        assert!(
+            no_invalid,
+            "E2E-SL: no LotSelectionInvalid after valid selection"
+        );
+
+        let uses_lot_b = snap2.state.disposals.iter().any(|d| {
+            d.event == to_id && d.legs.iter().any(|l| l.lot_id.origin_event_id == lot_b_id)
+        });
+        assert!(
+            uses_lot_b,
+            "E2E-SL: re-projected disposal must consume lot B (non-FIFO specific-ID overrides FIFO)"
+        );
+
+        // 4. The disposal NO LONGER appears in the 's' list (already-selected pre-filter).
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.select_lots_flow.is_none(),
+            "E2E-SL: flow must NOT open — no eligible disposals after selection (pre-filter)"
+        );
+        assert!(
+            app.status.is_some(),
+            "E2E-SL: status must be set when no eligible disposals"
+        );
+    }
+
+    // ── KAT-E2E-SL-DONATE — select-lots through a Donate removal ─────────────
+
+    #[test]
+    fn kat_e2e_sl_donate_wallet_sourced_from_raw_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-sl-donate-pass";
+
+        // Seed: Acquire (wallet W) + TransferOut + ReclassifyOutflow(Donate).
+        let (_, to_id) = seed_donate_vault(&vault, &key, pp_str, 500_000);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // 1. The donation removal appears in projected state.
+        let snap = app.snapshot.as_ref().unwrap();
+        let removal_present = snap.state.removals.iter().any(|r| r.event == to_id);
+        assert!(
+            removal_present,
+            "E2E-SL-DONATE: Donation removal must appear in snap.state.removals"
+        );
+
+        // 2. Drive s → list shows the donate removal.
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.select_lots_flow.is_some(),
+            "E2E-SL-DONATE: flow must open"
+        );
+
+        // Verify the list contains the donate removal and its wallet comes from raw LedgerEvent.
+        let flow = app.select_lots_flow.as_ref().unwrap();
+        let donate_item = flow
+            .list
+            .items
+            .iter()
+            .find(|item| item.disposal_event == to_id);
+        assert!(
+            donate_item.is_some(),
+            "E2E-SL-DONATE: dispose list must contain the donate removal"
+        );
+        let donate_item = donate_item.unwrap();
+        assert_eq!(
+            donate_item.kind,
+            DisposalKind::Donate,
+            "E2E-SL-DONATE: kind must be Donate"
+        );
+        // Wallet comes from raw LedgerEvent (RemovalLeg has no wallet field [R0-I1]).
+        assert!(
+            donate_item.wallet.is_some(),
+            "E2E-SL-DONATE: wallet must be sourced from raw LedgerEvent (not None)"
+        );
+
+        // Enter → LotsForm with wallet-W lots.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.select_lots_flow.as_ref().map(|f| &f.step),
+                Some(SelectLotsStep::LotsForm { .. })
+            ),
+            "E2E-SL-DONATE: Enter must open LotsForm"
+        );
+
+        // Pick the full principal (500000 sat).
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(
+            app.select_lots_modal.is_some(),
+            "E2E-SL-DONATE: modal must open"
+        );
+
+        // Confirm → save.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.select_lots_modal.is_none(),
+            "E2E-SL-DONATE: modal must close"
+        );
+        assert!(
+            app.select_lots_flow.is_none(),
+            "E2E-SL-DONATE: flow must close"
+        );
+
+        // Re-project: no LotSelectionInvalid.
+        let snap2 = app.snapshot.as_ref().unwrap();
+        let no_invalid = !snap2.state.blockers.iter().any(|b| {
+            b.kind == BlockerKind::LotSelectionInvalid && b.event.as_ref() == Some(&to_id)
+        });
+        assert!(
+            no_invalid,
+            "E2E-SL-DONATE: no LotSelectionInvalid after valid donation selection"
+        );
+    }
+
+    // ── KAT-E2E-SL-VOID — select-lots + void round-trip ─────────────────────
+
+    #[test]
+    fn kat_e2e_sl_void_lot_selection_re_appears_in_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-sl-void-pass";
+
+        let (lot_a_id, _lot_b_id, to_id) = seed_two_lot_sell_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Step 1: select lots (lot B, non-FIFO).
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → LotsForm
+        handle_key(&mut app, press(KeyCode::Down)); // cursor to lot B
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → save
+
+        assert!(
+            app.select_lots_flow.is_none(),
+            "SL-VOID: flow must close after save"
+        );
+
+        // Get the LotSelection decision_id from the status (we need the id for void).
+        let snap_after_select = app.snapshot.as_ref().unwrap();
+        let selection_decision_id = snap_after_select
+            .events
+            .iter()
+            .rev()
+            .find(|e| matches!(&e.payload, btctax_core::EventPayload::LotSelection(_)))
+            .map(|e| e.id.clone())
+            .expect("SL-VOID: LotSelection decision must exist after save");
+
+        // Step 2: void the LotSelection.
+        handle_key(&mut app, press(KeyCode::Char('v'))); // open void flow
+        assert!(app.void_flow.is_some(), "SL-VOID: void flow must open");
+        // Find and select the LotSelection in the void list.
+        let lot_sel_idx = app
+            .void_flow
+            .as_ref()
+            .unwrap()
+            .list
+            .items
+            .iter()
+            .position(|item| item.event_id == selection_decision_id);
+        assert!(
+            lot_sel_idx.is_some(),
+            "SL-VOID: LotSelection must be in void list"
+        );
+        // Navigate to it.
+        let target_idx = lot_sel_idx.unwrap();
+        for _ in 0..target_idx {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → void modal
+        assert!(app.void_modal.is_some(), "SL-VOID: void modal must open");
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm void
+        assert!(
+            app.void_flow.is_none(),
+            "SL-VOID: void flow must close after confirm"
+        );
+
+        // Step 3: disposal re-appears in select-lots list.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.select_lots_flow.is_some(),
+            "SL-VOID: disposal must re-appear in select-lots list after void"
+        );
+
+        // Verify FIFO restored (lot A consumed again after voiding the specific-ID).
+        let snap_after_void = app.snapshot.as_ref().unwrap();
+        let uses_lot_a_again = snap_after_void.state.disposals.iter().any(|d| {
+            d.event == to_id && d.legs.iter().any(|l| l.lot_id.origin_event_id == lot_a_id)
+        });
+        assert!(
+            uses_lot_a_again,
+            "SL-VOID: after voiding LotSelection, disposal must revert to FIFO (lot A)"
+        );
+
+        // Close flow.
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(
+            app.select_lots_flow.is_none(),
+            "SL-VOID: Esc must close flow"
+        );
+
+        // Verify optimize_attestation was cleared (chunk-2b persist_void side-effect).
+        drop(app);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let attest = btctax_cli::optimize_attest::get(session2.conn(), &to_id).unwrap();
+        assert!(
+            attest.is_none(),
+            "SL-VOID: optimize_attestation must be None for the disposal (no attest was set)"
+        );
+    }
+
+    // ── KAT-E2E-DD — end-to-end set-donation-details (completeness progression)
+
+    #[test]
+    fn kat_e2e_dd_donation_details_completeness_progression() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-dd-pass";
+
+        let (_, to_id) = seed_donate_vault(&vault, &key, pp_str, 500_000);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Step 1: donation appears in list with "(none)" completeness.
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        assert!(
+            app.set_donation_details_flow.is_some(),
+            "E2E-DD: flow must open"
+        );
+        {
+            let flow = app.set_donation_details_flow.as_ref().unwrap();
+            let item = flow.list.items.iter().find(|i| i.event_id == to_id);
+            assert!(item.is_some(), "E2E-DD: donation must appear in list");
+            assert_eq!(
+                item.unwrap().completeness_str(),
+                "(none)",
+                "E2E-DD: initial completeness must be (none)"
+            );
+        }
+
+        // Step 2: Enter → FieldForm; fill only required fields.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.set_donation_details_flow.as_ref().map(|f| &f.step),
+                Some(SetDonationDetailsStep::FieldForm { .. })
+            ),
+            "E2E-DD: Enter must open FieldForm"
+        );
+
+        // Fill donee_name (field 0 — already focused).
+        type_str(&mut app, "Community Foundation");
+        // Move to appraiser_name (field 3).
+        for _ in 0..3 {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        type_str(&mut app, "Jane Appraiser");
+
+        // Enter → modal.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.set_donation_details_modal.is_some(),
+            "E2E-DD: modal must open"
+        );
+
+        // Confirm → save.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.set_donation_details_modal.is_none(),
+            "E2E-DD: modal must close"
+        );
+        assert!(
+            app.set_donation_details_flow.is_none(),
+            "E2E-DD: flow must close"
+        );
+
+        // Step 3: status = "Section A complete on presence".
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.contains("Section A complete on presence"),
+            "E2E-DD: status must say 'Section A complete on presence'; got: {status}"
+        );
+
+        // Step 4: re-open; list shows "present" completeness; FieldForm pre-populated.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        assert!(
+            app.set_donation_details_flow.is_some(),
+            "E2E-DD: flow must re-open"
+        );
+        {
+            let flow = app.set_donation_details_flow.as_ref().unwrap();
+            let item = flow.list.items.iter().find(|i| i.event_id == to_id);
+            assert!(
+                item.is_some(),
+                "E2E-DD: donation must appear in list on re-open"
+            );
+            assert_eq!(
+                item.unwrap().completeness_str(),
+                "present",
+                "E2E-DD: completeness must be 'present' after initial save"
+            );
+        }
+
+        handle_key(&mut app, press(KeyCode::Enter)); // → FieldForm
+                                                     // Verify pre-populated: donee_name should be "Community Foundation".
+        {
+            let flow = app.set_donation_details_flow.as_ref().unwrap();
+            if let SetDonationDetailsStep::FieldForm {
+                donee_name_buf,
+                appraiser_name_buf,
+                ..
+            } = &flow.step
+            {
+                assert_eq!(
+                    donee_name_buf.buf.trim(),
+                    "Community Foundation",
+                    "E2E-DD: donee_name_buf must be pre-populated"
+                );
+                assert_eq!(
+                    appraiser_name_buf.buf.trim(),
+                    "Jane Appraiser",
+                    "E2E-DD: appraiser_name_buf must be pre-populated"
+                );
+            }
+        }
+
+        // Add fields for Section B completeness: appraiser_tin (5), appraisal_date (8),
+        // appraiser_qualifications (7), donee_ein (2).
+        // Navigate to appraiser_tin (field 5).
+        for _ in 0..5 {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        type_str(&mut app, "987654321"); // appraiser_tin
+
+        // Navigate to appraiser_qualifications (field 7 = 2 more Down).
+        handle_key(&mut app, press(KeyCode::Down)); // → 6
+        handle_key(&mut app, press(KeyCode::Down)); // → 7
+        type_str(&mut app, "certified bitcoin appraiser");
+
+        // Navigate to appraisal_date (field 8).
+        handle_key(&mut app, press(KeyCode::Down));
+        type_str(&mut app, "2025-05-20");
+
+        // Navigate to donee_ein (field 2) — go back to top first.
+        handle_key(&mut app, press(KeyCode::Up)); // → 7
+        handle_key(&mut app, press(KeyCode::Up)); // → 6
+        handle_key(&mut app, press(KeyCode::Up)); // → 5
+        handle_key(&mut app, press(KeyCode::Up)); // → 4
+        handle_key(&mut app, press(KeyCode::Up)); // → 3
+        handle_key(&mut app, press(KeyCode::Up)); // → 2
+        type_str(&mut app, "12-3456789"); // donee_ein
+
+        // Enter → modal.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.set_donation_details_modal.is_some(),
+            "E2E-DD step4: modal must open"
+        );
+
+        // Confirm → save.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.set_donation_details_modal.is_none(),
+            "E2E-DD step4: modal must close"
+        );
+        assert!(
+            app.set_donation_details_flow.is_none(),
+            "E2E-DD step4: flow must close"
+        );
+
+        // Step 5: status = "Section B complete".
+        let status2 = app.status.as_deref().unwrap_or("");
+        assert!(
+            status2.contains("Section B complete"),
+            "E2E-DD step5: status must say 'Section B complete'; got: {status2}"
+        );
+
+        // List now shows "B-complete".
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        {
+            let flow = app.set_donation_details_flow.as_ref().unwrap();
+            let item = flow.list.items.iter().find(|i| i.event_id == to_id);
+            assert_eq!(
+                item.unwrap().completeness_str(),
+                "B-complete",
+                "E2E-DD: completeness must be 'B-complete' after Section B save"
+            );
+        }
+        handle_key(&mut app, press(KeyCode::Esc));
+    }
+
+    // ── KAT-V-DD-4 — pre-population drives the PRODUCTION List→FieldForm mapping ─
+    //
+    // Round-1 whole-branch review [I1]: the prior form.rs `kat_v_dd_4_...` re-implemented
+    // the 10-field pre-population mapping IN the test body (coverage theatre — dropping a
+    // production optional-field pre-population passed uncaught, risking a last-write-wins
+    // upsert of `None` over a stored field). This real-path version stores a full 10-field
+    // DonationDetails, drives `d` → List → Enter → FieldForm (the production pre-population
+    // at the List→FieldForm transition, main.rs), asserts EACH of the 10 buffers equals the
+    // stored value, then Enter → modal to assert the validated `details` round-trip.
+
+    #[test]
+    fn kat_v_dd_4_pre_population_drives_real_path() {
+        use time::macros::date;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-v-dd-4-pass";
+
+        let (_, to_id) = seed_donate_vault(&vault, &key, pp_str, 500_000);
+
+        // Store a FULL 10-field DonationDetails via the production side-table writer,
+        // then drop the session (releasing the vault lock before open_app).
+        let details = DonationDetails {
+            donee_name: "Community Foundation".to_owned(),
+            donee_address: Some("123 Charity Lane".to_owned()),
+            donee_ein: Some("12-3456789".to_owned()),
+            appraiser_name: "Jane Appraiser".to_owned(),
+            appraiser_address: Some("456 Appraise Ave".to_owned()),
+            appraiser_tin: Some("987654321".to_owned()),
+            appraiser_ptin: Some("P01234567".to_owned()),
+            appraiser_qualifications: Some("certified bitcoin appraiser".to_owned()),
+            appraisal_date: Some(date!(2025 - 05 - 20)),
+            fmv_method_override: Some("qualified appraisal".to_owned()),
+        };
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            crate::edit::persist::persist_donation_details(&mut session, &to_id, &details).unwrap();
+        }
+
+        // Open the editor; snap.donation_details now carries the stored details.
+        let mut app = open_app(&vault, pp_str);
+
+        // d → List: the list item must carry existing_details from snap.donation_details.
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        {
+            let flow = app
+                .set_donation_details_flow
+                .as_ref()
+                .expect("KAT-V-DD-4: flow must open");
+            let item = flow
+                .list
+                .items
+                .iter()
+                .find(|i| i.event_id == to_id)
+                .expect("KAT-V-DD-4: donation must appear in list");
+            assert_eq!(
+                item.existing_details.as_ref(),
+                Some(&details),
+                "KAT-V-DD-4: list item must carry the stored details from snap.donation_details"
+            );
+        }
+
+        // Enter → FieldForm: runs the production pre-population mapping.
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        // Assert EACH of the 10 buffers equals the stored value — a dropped or swapped
+        // production pre-population line fails HERE (the [I1] regression guard).
+        {
+            let flow = app.set_donation_details_flow.as_ref().unwrap();
+            let SetDonationDetailsStep::FieldForm {
+                donee_name_buf,
+                donee_address_buf,
+                donee_ein_buf,
+                appraiser_name_buf,
+                appraiser_address_buf,
+                appraiser_tin_buf,
+                appraiser_ptin_buf,
+                appraiser_qualifications_buf,
+                appraisal_date_buf,
+                fmv_method_override_buf,
+                ..
+            } = &flow.step
+            else {
+                panic!("KAT-V-DD-4: Enter must open FieldForm");
+            };
+            assert_eq!(
+                donee_name_buf.buf.trim(),
+                "Community Foundation",
+                "donee_name"
+            );
+            assert_eq!(
+                donee_address_buf.buf.trim(),
+                "123 Charity Lane",
+                "donee_address"
+            );
+            assert_eq!(donee_ein_buf.buf.trim(), "12-3456789", "donee_ein");
+            assert_eq!(
+                appraiser_name_buf.buf.trim(),
+                "Jane Appraiser",
+                "appraiser_name"
+            );
+            assert_eq!(
+                appraiser_address_buf.buf.trim(),
+                "456 Appraise Ave",
+                "appraiser_address"
+            );
+            assert_eq!(appraiser_tin_buf.buf.trim(), "987654321", "appraiser_tin");
+            assert_eq!(appraiser_ptin_buf.buf.trim(), "P01234567", "appraiser_ptin");
+            assert_eq!(
+                appraiser_qualifications_buf.buf.trim(),
+                "certified bitcoin appraiser",
+                "appraiser_qualifications"
+            );
+            assert_eq!(
+                appraisal_date_buf.buf.trim(),
+                "2025-05-20",
+                "appraisal_date"
+            );
+            assert_eq!(
+                fmv_method_override_buf.buf.trim(),
+                "qualified appraisal",
+                "fmv_method_override"
+            );
+        }
+
+        // Enter → modal: the pre-populated buffers round-trip through the REAL validator
+        // back to the exact stored details (retains the prior round-trip assertion, now
+        // over production-populated buffers — strictly stronger).
+        handle_key(&mut app, press(KeyCode::Enter));
+        let modal = app
+            .set_donation_details_modal
+            .as_ref()
+            .expect("KAT-V-DD-4: Enter on a valid FieldForm must open the modal");
+        assert_eq!(
+            modal.details, details,
+            "KAT-V-DD-4: validated modal details must round-trip to the stored details"
+        );
+    }
+
+    // ── Safe-harbor-attest flow KATs ─────────────────────────────────────────
+
+    /// Seed a vault with one TIMEBARRED SafeHarborAllocation
+    /// (`timely_allocation_attested: false`). Returns the allocation's EventId.
+    ///
+    /// Method = ProRata: an unattested ProRata allocation is timebarred
+    /// UNCONDITIONALLY (resolve.rs pass-3 factored bar: `¬attested ∧ (past-bar ∨
+    /// ProRata)`), independent of the made-date. An unattested ActualPosition
+    /// allocation made before 2026-04-15 with no 2025 dispositions would instead be
+    /// ALREADY EFFECTIVE — the pre-flight would refuse it (arm 5) and the flow would
+    /// never open.
+    fn seed_safe_harbor_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> btctax_core::EventId {
+        use btctax_core::event::{AllocMethod, EventPayload, SafeHarborAllocation};
+        use btctax_core::persistence::append_decision;
+        use btctax_core::LotMethod;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let t0 = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+        let prior_id = append_decision(
+            session.conn(),
+            EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+                lots: vec![],
+                as_of_date: date!(2025 - 01 - 01),
+                method: AllocMethod::ProRata,
+                timely_allocation_attested: false,
+                pre2025_method: LotMethod::Fifo,
+            }),
+            t0,
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+        session.save().unwrap();
+        prior_id
+    }
+
+    // ── KAT-C2h — cancel-path bytes-unchanged (safe-harbor-attest) ────────────
+    //
+    // Spec D5: seed a valid timebarred allocation. `a` → Info; `Enter` → TypedWord;
+    // type partial word "ATT"; `Enter` → error shown, TypedWord stays open; `Esc` →
+    // back to Info [I4]; `Esc` → flow closes. `q` swallowed at each step.
+    // bytes_after == bytes_before. (Complement: KAT-E2E-ATTEST writes.)
+
+    #[test]
+    fn kat_c2h_cancel_path_vault_bytes_unchanged_attest() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-c2h-pass";
+
+        seed_safe_harbor_vault(&vault, &key, pp_str);
+        let bytes_before = std::fs::read(&vault).unwrap();
+
+        let mut app = open_app(&vault, pp_str);
+
+        // 'a' → flow opens at Info step.
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert!(
+            matches!(
+                app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                Some(SafeHarborAttestStep::Info)
+            ),
+            "C2h: flow must open at Info step"
+        );
+
+        // 'q' swallowed at Info step (flow is blocking).
+        handle_key(&mut app, press(KeyCode::Char('q')));
+        assert!(!app.should_quit, "C2h: 'q' at Info must NOT quit");
+        assert!(
+            app.safe_harbor_attest_flow.is_some(),
+            "C2h: 'q' at Info must NOT close the flow"
+        );
+
+        // Enter → TypedWord step.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                Some(SafeHarborAttestStep::TypedWord { .. })
+            ),
+            "C2h: Enter at Info must advance to TypedWord"
+        );
+
+        // Type partial word "ATT"; Enter → error shown, TypedWord stays open.
+        type_str(&mut app, "ATT");
+        handle_key(&mut app, press(KeyCode::Enter));
+        match app.safe_harbor_attest_flow.as_ref().map(|f| &f.step) {
+            Some(SafeHarborAttestStep::TypedWord { buf, error }) => {
+                assert_eq!(buf.buf.as_str(), "ATT", "C2h: buffer must be preserved");
+                assert_eq!(
+                    error.as_deref(),
+                    Some("type ATTEST (all caps) to confirm"),
+                    "C2h: wrong-word error must match spec text"
+                );
+            }
+            other => panic!("C2h: expected TypedWord after partial-word Enter; got {other:?}"),
+        }
+
+        // 'q' swallowed at TypedWord step (goes to the buffer, never quits).
+        handle_key(&mut app, press(KeyCode::Char('q')));
+        assert!(!app.should_quit, "C2h: 'q' at TypedWord must NOT quit");
+        assert!(
+            app.safe_harbor_attest_flow.is_some(),
+            "C2h: 'q' at TypedWord must NOT close the flow"
+        );
+
+        // Esc → back to Info step (one step per press — [I4]).
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(
+            matches!(
+                app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                Some(SafeHarborAttestStep::Info)
+            ),
+            "C2h: Esc at TypedWord must step back to Info (not close the flow)"
+        );
+
+        // Esc → flow closes.
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "C2h: Esc at Info must close the flow"
+        );
+        assert!(!app.should_quit, "C2h: cancel path must never quit the app");
+
+        // Vault bytes unchanged — nothing was written.
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "C2h: cancel path must leave vault bytes unchanged"
+        );
+        assert!(
+            !app.attest_save_failed,
+            "C2h: cancel path must never set the latch"
+        );
+    }
+
+    // ── KAT-E2E-ATTEST-PREFLIGHT — all 4 failure arms + positive control ──────
+    //
+    // Spec D5: drive `a` with vaults covering each pre-flight failure arm:
+    // 1. no allocation, 2. already-attested, 3. unconservable, 4. already-effective.
+    // 5. positive control: timebarred allocation → flow opens at Info step.
+
+    #[test]
+    fn kat_e2e_attest_preflight_failure_arms_and_positive_control() {
+        use btctax_core::event::{AllocMethod, EventPayload, SafeHarborAllocation};
+        use btctax_core::persistence::append_decision;
+        use btctax_core::LotMethod;
+        use rust_decimal_macros::dec;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        // Helper: init a vault and append one SafeHarborAllocation.
+        let seed_with = |vault: &std::path::Path,
+                         key: &std::path::Path,
+                         pp: &str,
+                         alloc: SafeHarborAllocation| {
+            btctax_cli::cmd::init::run(vault, &Passphrase::new(pp.into()), key).unwrap();
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp.into())).unwrap();
+            let t0 = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+            append_decision(
+                session.conn(),
+                EventPayload::SafeHarborAllocation(alloc),
+                t0,
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+        };
+
+        // ── Arm 1: no allocation ─────────────────────────────────────────────
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let vault = dir.path().join("vault.pgp");
+            let key = dir.path().join("key.asc");
+            let pp = "preflight-arm1";
+            btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp.into()), &key).unwrap();
+
+            let mut app = open_app(&vault, pp);
+            handle_key(&mut app, press(KeyCode::Char('a')));
+            assert!(
+                app.safe_harbor_attest_flow.is_none(),
+                "PREFLIGHT arm 1: flow must NOT open"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("No allocation to attest"))
+                    .unwrap_or(false),
+                "PREFLIGHT arm 1: status must say 'No allocation to attest'; got: {:?}",
+                app.status
+            );
+        }
+
+        // ── Arm 2: already attested (seed attested=true directly) ────────────
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let vault = dir.path().join("vault.pgp");
+            let key = dir.path().join("key.asc");
+            let pp = "preflight-arm2";
+            seed_with(
+                &vault,
+                &key,
+                pp,
+                SafeHarborAllocation {
+                    lots: vec![],
+                    as_of_date: date!(2025 - 01 - 01),
+                    method: AllocMethod::ActualPosition,
+                    timely_allocation_attested: true,
+                    pre2025_method: LotMethod::Fifo,
+                },
+            );
+
+            let mut app = open_app(&vault, pp);
+            handle_key(&mut app, press(KeyCode::Char('a')));
+            assert!(
+                app.safe_harbor_attest_flow.is_none(),
+                "PREFLIGHT arm 2: flow must NOT open"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("Allocation already attested"))
+                    .unwrap_or(false),
+                "PREFLIGHT arm 2: status must say 'Allocation already attested'; got: {:?}",
+                app.status
+            );
+        }
+
+        // ── Arm 3: unconservable (allocation lists sat the vault does not hold) ──
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let vault = dir.path().join("vault.pgp");
+            let key = dir.path().join("key.asc");
+            let pp = "preflight-arm3";
+            seed_with(
+                &vault,
+                &key,
+                pp,
+                SafeHarborAllocation {
+                    lots: vec![btctax_core::event::AllocLot {
+                        wallet: btctax_core::WalletId::Exchange {
+                            provider: "River".to_string(),
+                            account: "main".to_string(),
+                        },
+                        sat: 100_000,
+                        usd_basis: dec!(1000),
+                        acquired_at: date!(2024 - 06 - 01),
+                        dual_loss_basis: None,
+                        donor_acquired_at: None,
+                    }],
+                    as_of_date: date!(2025 - 01 - 01),
+                    method: AllocMethod::ProRata,
+                    timely_allocation_attested: false,
+                    pre2025_method: LotMethod::Fifo,
+                },
+            );
+
+            let mut app = open_app(&vault, pp);
+            handle_key(&mut app, press(KeyCode::Char('a')));
+            assert!(
+                app.safe_harbor_attest_flow.is_none(),
+                "PREFLIGHT arm 3: flow must NOT open"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("Allocation fails conservation"))
+                    .unwrap_or(false),
+                "PREFLIGHT arm 3: status must say 'Allocation fails conservation'; got: {:?}",
+                app.status
+            );
+        }
+
+        // ── Arm 4: already effective (unattested ActualPosition, made before the
+        //    2026-04-15 due date, no 2025 dispositions → NOT timebarred; empty lots
+        //    on an empty vault conserve → EFFECTIVE) ────────────────────────────
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let vault = dir.path().join("vault.pgp");
+            let key = dir.path().join("key.asc");
+            let pp = "preflight-arm4";
+            seed_with(
+                &vault,
+                &key,
+                pp,
+                SafeHarborAllocation {
+                    lots: vec![],
+                    as_of_date: date!(2025 - 01 - 01),
+                    method: AllocMethod::ActualPosition,
+                    timely_allocation_attested: false,
+                    pre2025_method: LotMethod::Fifo,
+                },
+            );
+
+            let mut app = open_app(&vault, pp);
+            handle_key(&mut app, press(KeyCode::Char('a')));
+            assert!(
+                app.safe_harbor_attest_flow.is_none(),
+                "PREFLIGHT arm 4: flow must NOT open"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("Allocation already effective"))
+                    .unwrap_or(false),
+                "PREFLIGHT arm 4: status must say 'Allocation already effective'; got: {:?}",
+                app.status
+            );
+        }
+
+        // ── Positive control: timebarred allocation → flow opens at Info step ──
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let vault = dir.path().join("vault.pgp");
+            let key = dir.path().join("key.asc");
+            let pp = "preflight-pos";
+            let prior_id = seed_safe_harbor_vault(&vault, &key, pp);
+
+            let mut app = open_app(&vault, pp);
+            handle_key(&mut app, press(KeyCode::Char('a')));
+            assert!(
+                matches!(
+                    app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                    Some(SafeHarborAttestStep::Info)
+                ),
+                "PREFLIGHT positive control: flow must open at Info step"
+            );
+            let flow = app.safe_harbor_attest_flow.as_ref().unwrap();
+            assert_eq!(
+                flow.prior_id, prior_id,
+                "PREFLIGHT positive control: flow.prior_id must match seeded allocation"
+            );
+
+            // Esc at Info closes the flow.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.safe_harbor_attest_flow.is_none(),
+                "PREFLIGHT positive control: Esc at Info must close flow"
+            );
+        }
+    }
+
+    // ── KAT-E2E-ATTEST — happy path: type ATTEST, vault updated ──────────────
+
+    #[test]
+    fn kat_e2e_attest_happy_path() {
+        use btctax_core::event::{EventPayload, SafeHarborAllocation};
+        use btctax_core::persistence::load_all_ordered;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-attest-happy";
+
+        let prior_id = seed_safe_harbor_vault(&vault, &key, pp_str);
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+        let pre_count = {
+            let s = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            load_all_ordered(s.conn()).unwrap().len()
+        };
+        assert_eq!(pre_count, 1, "ATTEST-HAPPY: pre must have 1 event");
+
+        let mut app = open_app(&vault, pp_str);
+
+        // 'a' → Info step.
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert!(
+            matches!(
+                app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                Some(SafeHarborAttestStep::Info)
+            ),
+            "ATTEST-HAPPY: must open at Info step"
+        );
+
+        // Spec step 2: the Info display mentions "IRREVOCABLE" and the prior
+        // allocation's canonical id.
+        {
+            use ratatui::{backend::TestBackend, Terminal};
+            let backend = TestBackend::new(100, 30);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+            let rendered: String = terminal
+                .backend()
+                .buffer()
+                .clone()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+                .collect();
+            assert!(
+                rendered.contains("IRREVOCABLE"),
+                "ATTEST-HAPPY: Info step must render 'IRREVOCABLE'"
+            );
+            assert!(
+                rendered.contains(&prior_id.canonical()),
+                "ATTEST-HAPPY: Info step must render the prior allocation's canonical id"
+            );
+        }
+
+        // Enter → TypedWord step.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                Some(SafeHarborAttestStep::TypedWord { .. })
+            ),
+            "ATTEST-HAPPY: Enter at Info must advance to TypedWord"
+        );
+
+        // Spec step 3: type "ATTES" (incomplete) → Enter → error shown, TypedWord
+        // still open, buffer PRESERVED [R0-I7].
+        type_str(&mut app, "ATTES");
+        handle_key(&mut app, press(KeyCode::Enter));
+        match app.safe_harbor_attest_flow.as_ref().map(|f| &f.step) {
+            Some(SafeHarborAttestStep::TypedWord { buf, error }) => {
+                assert_eq!(
+                    buf.buf.as_str(),
+                    "ATTES",
+                    "ATTEST-HAPPY: buffer must be preserved after incomplete word"
+                );
+                assert_eq!(
+                    error.as_deref(),
+                    Some("type ATTEST (all caps) to confirm"),
+                    "ATTEST-HAPPY: incomplete word must show the spec error"
+                );
+            }
+            other => panic!("ATTEST-HAPPY: expected TypedWord after 'ATTES'+Enter; got {other:?}"),
+        }
+
+        // Spec step 4: type "T" (completing "ATTEST" in the preserved buffer) → Enter → save.
+        type_str(&mut app, "T");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        // Flow must be closed.
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "ATTEST-HAPPY: flow must be closed after successful attest"
+        );
+
+        // Latch must NOT be set.
+        assert!(
+            !app.attest_save_failed,
+            "ATTEST-HAPPY: attest_save_failed must be false on success"
+        );
+
+        // Status is the clean arm: "Allocation attested (IRREVOCABLE, §7.4) — {id}; …".
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("Allocation attested (IRREVOCABLE, §7.4)"))
+                .unwrap_or(false),
+            "ATTEST-HAPPY: status must be the clean attest arm; got: {:?}",
+            app.status
+        );
+
+        // Vault must have changed (save happened).
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_ne!(
+            bytes_before, bytes_after,
+            "ATTEST-HAPPY: vault bytes must change after successful attest"
+        );
+
+        // Verify in-memory (app still holds the session — can't open a second session).
+        let post_events = {
+            let session = app.session.as_ref().unwrap();
+            load_all_ordered(session.conn()).unwrap()
+        };
+        assert_eq!(
+            post_events.len(),
+            pre_count + 2,
+            "ATTEST-HAPPY: post must have pre+2 events (void + re-attest)"
+        );
+
+        // The last event must be SafeHarborAllocation with timely_allocation_attested=true.
+        let last: btctax_core::event::EventPayload =
+            serde_json::from_str(&post_events.last().unwrap().payload_json).unwrap();
+        match &last {
+            EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+                timely_allocation_attested,
+                ..
+            }) => {
+                assert!(
+                    timely_allocation_attested,
+                    "ATTEST-HAPPY: last event must have timely_allocation_attested=true"
+                );
+            }
+            other => panic!("ATTEST-HAPPY: last event must be SafeHarborAllocation; got {other:?}"),
+        }
+
+        // Snapshot is rebuilt; NO SafeHarborTimebar attributed to the NEW allocation id.
+        // Do NOT assert "no timebar anywhere" [R0-M10]: the voided PRIOR keeps firing a
+        // stale Advisory SafeHarborTimebar on ITS id every projection.
+        assert!(
+            app.snapshot.is_some(),
+            "ATTEST-HAPPY: snapshot must be rebuilt after attest"
+        );
+        {
+            let new_attest_id = EventId::Decision {
+                seq: post_events.last().unwrap().decision_seq.unwrap() as u64,
+            };
+            let snap = app.snapshot.as_ref().unwrap();
+            assert!(
+                !snap.state.blockers.iter().any(|b| {
+                    b.kind == BlockerKind::SafeHarborTimebar
+                        && b.event.as_ref() == Some(&new_attest_id)
+                }),
+                "ATTEST-HAPPY: NO SafeHarborTimebar may be attributed to the NEW allocation id"
+            );
+        }
+
+        // Already-attested guard: pressing 'a' again must yield "Already attested" status.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "ATTEST-HAPPY: flow must NOT open when already attested"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("already attested"))
+                .unwrap_or(false),
+            "ATTEST-HAPPY: 'a' after attest must yield 'already attested' status; got: {:?}",
+            app.status
+        );
+
+        // prior_id must be in voided set.
+        let void_event = &post_events[pre_count];
+        let void_payload: EventPayload = serde_json::from_str(&void_event.payload_json).unwrap();
+        match &void_payload {
+            EventPayload::VoidDecisionEvent(v) => {
+                assert_eq!(
+                    v.target_event_id, prior_id,
+                    "ATTEST-HAPPY: void must target prior_id"
+                );
+            }
+            other => {
+                panic!("ATTEST-HAPPY: event at pre.len() must be VoidDecisionEvent; got {other:?}")
+            }
+        }
+    }
+
+    // ── KAT-E2E-ATTEST-WRONGWORD — wrong word: error shown, buf preserved ─────
+
+    #[test]
+    fn kat_e2e_attest_wrong_word_preserves_buf() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-wrongword";
+
+        seed_safe_harbor_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → TypedWord
+
+        // Type wrong word.
+        type_str(&mut app, "attest");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        // Flow must still be open, error must be set, buf must be preserved.
+        assert!(
+            app.safe_harbor_attest_flow.is_some(),
+            "WRONGWORD: flow must stay open on wrong word"
+        );
+        match app.safe_harbor_attest_flow.as_ref().map(|f| &f.step) {
+            Some(SafeHarborAttestStep::TypedWord { buf, error }) => {
+                assert_eq!(
+                    buf.buf.as_str(),
+                    "attest",
+                    "WRONGWORD: buf must be preserved; got: {:?}",
+                    buf.buf
+                );
+                assert_eq!(
+                    error.as_deref(),
+                    Some("type ATTEST (all caps) to confirm"),
+                    "WRONGWORD: case-sensitivity error must match spec text exactly"
+                );
+            }
+            other => panic!("WRONGWORD: expected TypedWord step; got {other:?}"),
+        }
+
+        // Correct word clears error and saves.
+        // Need to clear buf first (backspace x6).
+        for _ in 0..6 {
+            handle_key(&mut app, press(KeyCode::Backspace));
+        }
+        type_str(&mut app, "ATTEST");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "WRONGWORD: flow must close after correct word"
+        );
+        assert!(
+            !app.attest_save_failed,
+            "WRONGWORD: latch must not be set after correct attest"
+        );
+    }
+
+    // ── KAT-E2E-ATTEST-VOID — voiding the newly attested alloc yields conflict status ──
+
+    #[test]
+    fn kat_e2e_attest_void_new_alloc_yields_conflict_status() {
+        use btctax_core::persistence::load_all_ordered;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-attest-void";
+
+        let prior_id = seed_safe_harbor_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Attest first.
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Enter)); // Info → TypedWord
+        type_str(&mut app, "ATTEST");
+        handle_key(&mut app, press(KeyCode::Enter)); // save
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "VOID-NEW: flow must be closed after attest"
+        );
+
+        // The NEW attested allocation's id = tail decision row.
+        let new_attest_id = {
+            let session = app.session.as_ref().unwrap();
+            let rows = load_all_ordered(session.conn()).unwrap();
+            EventId::Decision {
+                seq: rows.last().unwrap().decision_seq.unwrap() as u64,
+            }
+        };
+
+        // Now open void flow: 'v' → the new attested allocation IS listed;
+        // the voided PRIOR is NOT (raw voided-set scan excludes it).
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('v')));
+        assert!(
+            app.void_flow.is_some(),
+            "VOID-NEW: void flow must open; attest_save_failed={}, snapshot={:?}",
+            app.attest_save_failed,
+            app.snapshot.is_some()
+        );
+        {
+            let void_flow = app.void_flow.as_ref().unwrap();
+            assert!(
+                void_flow
+                    .list
+                    .items
+                    .iter()
+                    .any(|i| i.event_id == new_attest_id),
+                "VOID-NEW: the NEW attested allocation must be listed in the void flow"
+            );
+            assert!(
+                !void_flow.list.items.iter().any(|i| i.event_id == prior_id),
+                "VOID-NEW: the voided PRIOR must NOT appear in the void list"
+            );
+            // Select the new attested allocation's row.
+            let idx = void_flow
+                .list
+                .items
+                .iter()
+                .position(|i| i.event_id == new_attest_id)
+                .unwrap();
+            app.void_flow
+                .as_mut()
+                .unwrap()
+                .list
+                .table_state
+                .select(Some(idx));
+        }
+
+        handle_key(&mut app, press(KeyCode::Enter)); // List → VoidModal
+        assert!(
+            app.void_modal.is_some(),
+            "VOID-NEW: void modal must open after Enter on void list"
+        );
+        assert!(
+            app.void_modal.as_ref().unwrap().is_safe_harbor,
+            "VOID-NEW: modal must carry the SafeHarborAllocation warning flag"
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm void
+
+        assert!(
+            app.void_modal.is_none(),
+            "VOID-NEW: void modal must be closed after confirm"
+        );
+        assert!(
+            app.void_flow.is_none(),
+            "VOID-NEW: void flow must be closed after confirm"
+        );
+
+        // §7.4: the void is REJECTED — derive_void_status arm-1 wording, quoted FULLY
+        // (round-2 N3, including " (see Compliance)"). NOT "Voided…".
+        assert_eq!(
+            app.status.as_deref(),
+            Some(
+                "Void saved, but DecisionConflict fired — the target decision \
+                 remains in force (see Compliance)"
+            ),
+            "VOID-NEW: status must be the arm-1 rejected-void wording"
+        );
+
+        // Re-projected state: the doomed void's DecisionConflict is present and the
+        // allocation is STILL effective (it keeps curing its own timebar: no
+        // SafeHarborTimebar on the attested id).
+        {
+            let snap = app.snapshot.as_ref().unwrap();
+            assert!(
+                snap.state
+                    .blockers
+                    .iter()
+                    .any(|b| b.kind == BlockerKind::DecisionConflict),
+                "VOID-NEW: DecisionConflict must be present after the doomed void"
+            );
+            assert!(
+                !snap.state.blockers.iter().any(|b| {
+                    b.kind == BlockerKind::SafeHarborTimebar
+                        && b.event.as_ref() == Some(&new_attest_id)
+                }),
+                "VOID-NEW: the attested allocation must remain effective (no timebar on its id)"
+            );
+        }
+    }
+
+    // ── KAT-E2E-ATTEST-ERRLATCH — save error sets latch, blocks all openers ──
+
+    #[cfg(unix)]
+    #[test]
+    fn kat_e2e_attest_errlatch_chmod() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-errlatch";
+
+        seed_safe_harbor_vault(&vault, &key, pp_str);
+
+        // Root-skip guard.
+        {
+            let probe = dir.path().join("probe.tmp");
+            let perms = std::fs::Permissions::from_mode(0o500);
+            std::fs::set_permissions(dir.path(), perms).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("KAT-E2E-ERRLATCH: skipping — chmod 0o500 did not deny writes (root?)");
+                return;
+            }
+        }
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+
+        let mut app = open_app(&vault, pp_str);
+
+        // 'a' → Info → TypedWord → "ATTEST".
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Enter)); // Info → TypedWord
+        type_str(&mut app, "ATTEST");
+
+        // Make vault's parent dir read-only before confirming.
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → save fails
+
+        // Restore BEFORE any assertions that might panic.
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        // [R0-C1] Latch must be set.
+        assert!(
+            app.attest_save_failed,
+            "ERRLATCH: attest_save_failed must be true after save error"
+        );
+
+        // Flow must be closed.
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "ERRLATCH: flow must be closed after save error"
+        );
+
+        // Status is the quit-first remedy (spec D3 Err arm).
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("Save error")
+                    && s.contains(
+                        "quit the editor now (the unsaved attestation is discarded on quit)"
+                    )
+                    && s.contains("btctax reconcile safe-harbor-attest"))
+                .unwrap_or(false),
+            "ERRLATCH: status must be the quit-first Err remedy; got: {:?}",
+            app.status
+        );
+
+        // Vault bytes must be unchanged.
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "ERRLATCH: vault bytes must be unchanged after failed save"
+        );
+
+        // While the latch is set, EVERY mutating opener (p/c/o/r/f/v/s/d/a) must refuse
+        // with the latch status — this is the piggy-back guard: with every mutating opener
+        // latched shut, no later session.save() can flush the in-memory Void+Attest residue.
+        // [round-1 whole-branch review TF-M1: cover all 9 openers, not just a/f/p, so a
+        // future opener added without the guard is caught here.]
+        for k in ['p', 'c', 'o', 'r', 'f', 'v', 's', 'd', 'a'] {
+            app.status = None;
+            handle_key(&mut app, press(KeyCode::Char(k)));
+            assert!(
+                app.profile_form.is_none()
+                    && app.classify_inbound_flow.is_none()
+                    && app.reclassify_outflow_flow.is_none()
+                    && app.reclassify_income_flow.is_none()
+                    && app.set_fmv_flow.is_none()
+                    && app.void_flow.is_none()
+                    && app.select_lots_flow.is_none()
+                    && app.set_donation_details_flow.is_none()
+                    && app.safe_harbor_attest_flow.is_none(),
+                "ERRLATCH: opener '{k}' must open no mutating flow while the latch is set"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("failed attest save"))
+                    .unwrap_or(false),
+                "ERRLATCH: opener '{k}' must show the latch status; got: {:?}",
+                app.status
+            );
+        }
+
+        // Verify vault disk bytes still equal bytes_before (session holds lock; read file directly).
+        let bytes_after2 = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after2,
+            "ERRLATCH: vault bytes must remain unchanged after failed save"
+        );
+
+        // Defense-in-depth [R0-I5]: even BYPASSING the latch, the session-sourced
+        // pre-flight sees the in-memory already-attested residue and refuses via the
+        // "already attested" arm, appending NOTHING.
+        {
+            use btctax_core::persistence::load_all_ordered;
+            let len_before = {
+                let session = app.session.as_ref().unwrap();
+                load_all_ordered(session.conn()).unwrap().len()
+            };
+            app.attest_save_failed = false; // bypass the latch deliberately
+            app.status = None;
+            open_safe_harbor_attest_flow(&mut app);
+            assert!(
+                app.safe_harbor_attest_flow.is_none(),
+                "ERRLATCH defense-in-depth: flow must NOT open on in-memory residue"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("Allocation already attested"))
+                    .unwrap_or(false),
+                "ERRLATCH defense-in-depth: pre-flight must refuse via the \
+                 'already attested' arm; got: {:?}",
+                app.status
+            );
+            let len_after = {
+                let session = app.session.as_ref().unwrap();
+                load_all_ordered(session.conn()).unwrap().len()
+            };
+            assert_eq!(
+                len_before, len_after,
+                "ERRLATCH defense-in-depth: the refused pre-flight must append NOTHING"
+            );
+        }
     }
 }
