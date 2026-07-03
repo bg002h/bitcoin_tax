@@ -7,9 +7,9 @@
 //! This module performs NO writes — it only holds form state and validates input.
 
 use btctax_core::{
-    Carryforward, DisposeKind, DonationDetails, EventId, FilingStatus, Form8283Section,
-    InboundClass, IncomeKind, LotId, ManualFmv, OutflowClass, ReclassifyIncome, ReclassifyOutflow,
-    Sat, TaxDate, TaxProfile, Usd, WalletId,
+    BasisSource, Carryforward, DisposeKind, DonationDetails, EventId, FilingStatus, FmvStatus,
+    Form8283Section, InboundClass, IncomeKind, LotId, ManualFmv, OutflowClass, ReclassifyIncome,
+    ReclassifyOutflow, Sat, TaxDate, TaxProfile, TransferTarget, Usd, WalletId,
 };
 use ratatui::widgets::TableState;
 use std::str::FromStr;
@@ -1165,6 +1165,282 @@ pub struct SafeHarborAttestFlowState {
     /// The allocation payload (cloned from the pre-flight load — for display and re-append).
     pub prior_alloc: btctax_core::event::SafeHarborAllocation,
     pub step: SafeHarborAttestStep,
+}
+
+// ── Link-transfer flow types (chunk 4a, D1) ──────────────────────────────────
+
+/// Human-readable one-line label for a `WalletId` (used in the modal target line
+/// and the wallet pick-list). Mirrors the `provider/account` render convention.
+pub fn wallet_label(w: &WalletId) -> String {
+    match w {
+        WalletId::Exchange { provider, account } => format!("{provider}/{account}"),
+        WalletId::SelfCustody { label } => format!("self:{label}"),
+    }
+}
+
+/// Pre-computed display data for a link-transfer step-1 (out-list) row.
+///
+/// Sourced from `snap.state.pending_reconciliation` (the same inherently-post-filtered
+/// source reclassify-outflow uses): exactly the unlinked, unreconciled TransferOuts.
+#[derive(Clone)]
+pub struct TransferOutItem {
+    /// The `PendingTransfer.event` EventId (the raw TransferOut).
+    pub transfer_out_event: EventId,
+    /// Calendar date (tax timezone) of the TransferOut event.
+    pub date: TaxDate,
+    /// Principal sat from `PendingTransfer.principal_sat`.
+    pub principal_sat: Sat,
+    /// Wallet of the TransferOut event (SOURCE wallet).
+    pub wallet: Option<WalletId>,
+}
+
+/// Pre-computed display data for a link-transfer step-2 in-event (InEvent mode) row.
+///
+/// Only `TransferIn` events whose raw `LedgerEvent.wallet.is_some()` (the engine requires a
+/// resolvable destination wallet) AND not already targeted by a non-voided `TransferLink::InEvent`.
+#[derive(Clone)]
+pub struct InEventItem {
+    /// The TransferIn event id.
+    pub in_event: EventId,
+    /// Calendar date (tax timezone) of the TransferIn event.
+    pub date: TaxDate,
+    /// Principal sat from the TransferIn payload.
+    pub sat: Sat,
+    /// Destination wallet (guaranteed `Some` by the pre-filter).
+    pub wallet: WalletId,
+}
+
+/// Pre-computed display data for a link-transfer step-2 wallet (Wallet mode) row.
+///
+/// ALL distinct `snap.events[].wallet` Some-values [R0-I2] — NOT just `holdings_by_wallet`
+/// keys (which would hide a zero-balance destination wallet, the primary Wallet-target use case).
+#[derive(Clone)]
+pub struct WalletItem {
+    pub wallet: WalletId,
+}
+
+/// Which target mode the step-2 picker is showing (Tab cycles InEvent ⇄ Wallet).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LinkMode {
+    InEvent,
+    Wallet,
+}
+
+/// Step in the link-transfer flow.
+pub enum LinkTransferStep {
+    OutList,
+    TargetPick {
+        out: TransferOutItem,
+        mode: LinkMode,
+    },
+}
+
+/// Full state for the link-transfer flow. Owns all three target lists [R0-I2 discipline].
+pub struct LinkTransferFlowState {
+    /// Step-1 list: pending TransferOuts.
+    pub out_list: TargetList<TransferOutItem>,
+    pub step: LinkTransferStep,
+    /// Step-2 InEvent-mode list (built once at open).
+    pub in_list: TargetList<InEventItem>,
+    /// Step-2 Wallet-mode list (built once at open).
+    pub wallet_list: TargetList<WalletItem>,
+}
+
+/// Payload for the link-transfer confirmation modal.
+pub struct LinkTransferModalState {
+    pub out_event: EventId,
+    pub out_date: TaxDate,
+    pub out_sat: Sat,
+    /// The VALIDATED target — what will be persisted (InEvent(id) or Wallet(w)).
+    pub target: TransferTarget,
+    /// Human-readable target label (shown in the modal).
+    pub target_label: String,
+}
+
+// ── Classify-raw flow types (chunk 4a, D2) ───────────────────────────────────
+
+/// Pre-computed display data for a classify-raw list row.
+///
+/// Events carrying `BlockerKind::Unclassified` whose payload is `EventPayload::Unclassified`,
+/// minus those already targeted by a non-voided `ClassifyRaw`.
+#[derive(Clone)]
+pub struct RawListItem {
+    /// The Unclassified event id (the ClassifyRaw target — its EventId is preserved).
+    pub target: EventId,
+    /// Calendar date (tax timezone) of the raw event.
+    pub date: TaxDate,
+    /// The raw import text (`Unclassified.raw`).
+    pub raw: String,
+    /// Wallet of the raw event (kept by the classified effective payload).
+    pub wallet: Option<WalletId>,
+}
+
+/// Which imported variant the classify-raw picker is building (Tab cycles).
+///
+/// **Scoped to Acquire + Income this cycle** — the two that dominate raw-row classification.
+/// Dispose/TransferOut/TransferIn/Unclassified are a CLI-only parity FOLLOWUP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassifyRawVariant {
+    Acquire,
+    Income,
+}
+
+/// Cycle the classify-raw variant (Acquire ⇄ Income).
+pub fn cycle_classify_raw_variant(v: ClassifyRawVariant) -> ClassifyRawVariant {
+    match v {
+        ClassifyRawVariant::Acquire => ClassifyRawVariant::Income,
+        ClassifyRawVariant::Income => ClassifyRawVariant::Acquire,
+    }
+}
+
+/// Cycle through the 8 `BasisSource` variants in declaration order (event.rs:16-26).
+pub fn cycle_basis_source(bs: BasisSource) -> BasisSource {
+    match bs {
+        BasisSource::ExchangeProvided => BasisSource::ComputedFromCost,
+        BasisSource::ComputedFromCost => BasisSource::FmvAtIncome,
+        BasisSource::FmvAtIncome => BasisSource::CarriedFromTransfer,
+        BasisSource::CarriedFromTransfer => BasisSource::GiftCarryover,
+        BasisSource::GiftCarryover => BasisSource::GiftFmvFallback,
+        BasisSource::GiftFmvFallback => BasisSource::SafeHarborAllocated,
+        BasisSource::SafeHarborAllocated => BasisSource::ReconstructedPerWallet,
+        BasisSource::ReconstructedPerWallet => BasisSource::ExchangeProvided,
+    }
+}
+
+/// Lowercase display tag for a `BasisSource`.
+pub fn basis_source_display(bs: BasisSource) -> &'static str {
+    match bs {
+        BasisSource::ExchangeProvided => "exchange-provided",
+        BasisSource::ComputedFromCost => "computed-from-cost",
+        BasisSource::FmvAtIncome => "fmv-at-income",
+        BasisSource::CarriedFromTransfer => "carried-from-transfer",
+        BasisSource::GiftCarryover => "gift-carryover",
+        BasisSource::GiftFmvFallback => "gift-fmv-fallback",
+        BasisSource::SafeHarborAllocated => "safe-harbor-allocated",
+        BasisSource::ReconstructedPerWallet => "reconstructed-per-wallet",
+    }
+}
+
+/// Step in the classify-raw flow.
+// AcquireForm / IncomeForm carry several FieldBuffers; boxing is not worth it (TUI-only).
+#[allow(clippy::large_enum_variant)]
+pub enum ClassifyRawStep {
+    List,
+    VariantPicker {
+        item: RawListItem,
+        variant: ClassifyRawVariant,
+    },
+    AcquireForm {
+        item: RawListItem,
+        sat_buf: FieldBuffer,
+        usd_cost_buf: FieldBuffer,
+        fee_buf: FieldBuffer,
+        /// A required BasisSource PICK (default ExchangeProvided); Tab cycles on the picker row.
+        basis_source: BasisSource,
+        /// 0=sat, 1=usd_cost, 2=fee, 3=basis_source.
+        focus: usize,
+        error: Option<String>,
+    },
+    IncomeForm {
+        item: RawListItem,
+        sat_buf: FieldBuffer,
+        /// Optional; typed → fmv_status=ManualEntry, empty → None + Missing.
+        fmv_buf: FieldBuffer,
+        kind: IncomeKind,
+        business: bool,
+        /// 0=sat, 1=usd_fmv, 2=kind, 3=business.
+        focus: usize,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the classify-raw flow. Owns its target list.
+pub struct ClassifyRawFlowState {
+    pub list: TargetList<RawListItem>,
+    pub step: ClassifyRawStep,
+}
+
+/// Payload for the classify-raw confirmation modal.
+pub struct ClassifyRawModalState {
+    /// The Unclassified target event id.
+    pub target: EventId,
+    /// The raw import text (shown in the modal).
+    pub raw: String,
+    /// The BUILT imported payload (Acquire/Income) — boxed into `ClassifyRaw.as_` at persist.
+    pub built: btctax_core::EventPayload,
+}
+
+/// Parse a REQUIRED sat field: empty (len==0) → "name is required"; else parse i64.
+fn parse_required_sat(buf: &FieldBuffer, name: &str) -> Result<Sat, String> {
+    if buf.is_empty() {
+        return Err(format!("{name} is required"));
+    }
+    let t = buf.buf.trim();
+    t.parse::<i64>().map_err(|_| format!("bad sat {t:?}"))
+}
+
+/// Validate the classify-raw Acquire form → `EventPayload::Acquire(…)` built DIRECTLY (NOT via
+/// `InboundClass` [R0-I1]).
+///
+/// `sat`/`usd_cost` REQUIRED; `fee_usd` optional → $0; `basis_source` is the required PICK.
+/// NO acquired-at field — the effective event keeps the TARGET's timestamp (resolve.rs) [R0-I1].
+pub fn validate_classify_raw_acquire(
+    sat_buf: &FieldBuffer,
+    usd_cost_buf: &FieldBuffer,
+    fee_buf: &FieldBuffer,
+    basis_source: BasisSource,
+) -> Result<btctax_core::EventPayload, String> {
+    let sat = parse_required_sat(sat_buf, "sat")?;
+    if usd_cost_buf.is_empty() {
+        return Err("usd-cost is required".to_string());
+    }
+    let uc = usd_cost_buf.buf.trim();
+    let usd_cost = Usd::from_str(uc).map_err(|_| format!("bad USD {uc:?}"))?;
+    let fee_usd = if fee_buf.is_empty() {
+        Usd::ZERO
+    } else {
+        let t = fee_buf.buf.trim();
+        Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?
+    };
+    Ok(btctax_core::EventPayload::Acquire(
+        btctax_core::event::Acquire {
+            sat,
+            usd_cost,
+            fee_usd,
+            basis_source,
+        },
+    ))
+}
+
+/// Validate the classify-raw Income form → `EventPayload::Income(…)` built DIRECTLY (NOT via
+/// `InboundClass` [R0-I1]).
+///
+/// `sat` REQUIRED; `usd_fmv` optional: typed → `Some` + `fmv_status=ManualEntry`, empty → `None` +
+/// `fmv_status=Missing` (resolve.rs discards `usd_fmv` when `Missing`; the empty case fires a
+/// `FmvMissing` blocker surfaced by status arm 3). `kind` PICK; `business` toggle.
+pub fn validate_classify_raw_income(
+    sat_buf: &FieldBuffer,
+    fmv_buf: &FieldBuffer,
+    kind: IncomeKind,
+    business: bool,
+) -> Result<btctax_core::EventPayload, String> {
+    let sat = parse_required_sat(sat_buf, "sat")?;
+    let (usd_fmv, fmv_status) = if fmv_buf.is_empty() {
+        (None, FmvStatus::Missing)
+    } else {
+        let t = fmv_buf.buf.trim();
+        let v = Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?;
+        (Some(v), FmvStatus::ManualEntry)
+    };
+    Ok(btctax_core::EventPayload::Income(
+        btctax_core::event::Income {
+            sat,
+            usd_fmv,
+            fmv_status,
+            kind,
+            business,
+        },
+    ))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

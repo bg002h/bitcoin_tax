@@ -14,11 +14,12 @@
 //! session-holding TUI editor.
 
 use crate::edit::form::{
-    ClassifyInboundFlowState, ClassifyInboundModalState, MutationModalState, ProfileFormState,
-    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyOutflowFlowState,
-    ReclassifyOutflowModalState, SafeHarborAttestFlowState, SelectLotsFlowState,
-    SelectLotsModalState, SetDonationDetailsFlowState, SetDonationDetailsModalState,
-    SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
+    ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyRawFlowState,
+    ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState, MutationModalState,
+    ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState,
+    ReclassifyOutflowFlowState, ReclassifyOutflowModalState, SafeHarborAttestFlowState,
+    SelectLotsFlowState, SelectLotsModalState, SetDonationDetailsFlowState,
+    SetDonationDetailsModalState, SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
 };
 use btctax_cli::Session;
 use btctax_store::Passphrase;
@@ -131,6 +132,18 @@ pub struct EditorApp {
     pub set_donation_details_flow: Option<SetDonationDetailsFlowState>,
     /// Set-donation-details confirmation modal.  `Some` while awaiting Enter/Esc.
     pub set_donation_details_modal: Option<SetDonationDetailsModalState>,
+    /// Full link-transfer flow state.  `Some` while the flow is open.
+    ///
+    /// Dispatch order: link_transfer_modal (modal layer) → link_transfer_flow (flow layer) → ...
+    pub link_transfer_flow: Option<LinkTransferFlowState>,
+    /// Link-transfer confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub link_transfer_modal: Option<LinkTransferModalState>,
+    /// Full classify-raw flow state.  `Some` while the flow is open.
+    ///
+    /// Dispatch order: classify_raw_modal (modal layer) → classify_raw_flow (flow layer) → ...
+    pub classify_raw_flow: Option<ClassifyRawFlowState>,
+    /// Classify-raw confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub classify_raw_modal: Option<ClassifyRawModalState>,
     /// Full safe-harbor-attest flow state.  `Some` while the flow is open.
     ///
     /// No separate modal — TypedWord step is the gate (layer 9 only) [R0-M4].
@@ -182,6 +195,10 @@ impl EditorApp {
             select_lots_modal: None,
             set_donation_details_flow: None,
             set_donation_details_modal: None,
+            link_transfer_flow: None,
+            link_transfer_modal: None,
+            classify_raw_flow: None,
+            classify_raw_modal: None,
             safe_harbor_attest_flow: None,
             attest_save_failed: false,
             rollback_failed: false,

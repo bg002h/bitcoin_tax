@@ -9,9 +9,9 @@ constraint (both edit the 9 opener heads); B-before-C/D is a safety + decay + te
 
 | # | Cycle | Scope | Status |
 |---|---|---|---|
-| A | `tui-edit-save-rollback` (#9) | `Vault::snapshot`/`restore` + `save_or_rollback` over the 8 persist fns; `rollback_failed` latch. New persist baseline; churns the 9 opener heads. | **IN FLIGHT** — spec written, awaiting R0 |
-| B | `tui-edit-hardening` (6 items) | Group A select-lots (#1 SelfTransfer incl, #2 pre-2025 Universal wallet filter, #3 shortfall guard) + Group B safety/UX (#7 void-list effective-alloc pre-filter, #8 quit-first status fold, #6 FIELD_CAP). ONE cycle, **before chunk 4**. | pending A |
-| C | chunk 4 — import decisions | link-transfer, classify-raw, accept/reject-conflict, optimize-accept (mirror reconcile.rs). LARGE; split 4a/4b if it overruns. | pending B |
+| A | `tui-edit-save-rollback` (#9) | `Vault::snapshot`/`restore` + `save_or_rollback` over the 8 persist fns; `rollback_failed` latch. | ✅ **SHIPPED** (main `8c8b924`) |
+| B | `tui-edit-hardening` (6 items) | #1 SelfTransfer, #2 pre-2025 Universal gate, #3 UncoveredDisposal pre-filter, #6 FIELD_CAP, #7 void-list effective-alloc pre-filter, #8 quit-first. | ✅ **SHIPPED** (main `755e47c`) |
+| C | chunk 4 — import decisions | link-transfer, classify-raw, accept/reject-conflict, optimize-accept (mirror reconcile.rs `:151/:178/:194/:211` + cmd/optimize.rs). LARGE; split 4a/4b if it overruns. | **IN FLIGHT** — design |
 | D | chunk 5 — safe-harbor-allocate | CREATION side of SafeHarborAllocation (pre-2025 residue math). Completes create→attest→void loop. LARGE/COMPLEX. | pending C |
 | E | chunk-5 burndown (TERMINAL) | Clear C+D whole-branch-review followups (E4+E5). **Run STOPS here.** | pending D |
 
