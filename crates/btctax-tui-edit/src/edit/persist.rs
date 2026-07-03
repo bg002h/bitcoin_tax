@@ -349,6 +349,53 @@ pub fn persist_link_transfer(
     Ok(id)
 }
 
+/// Append ONE `TransferLink { out_event, Wallet(dest) }` per `out_event`, then a SINGLE
+/// `save_or_rollback` (bulk-link-transfer D3). All-or-nothing.
+///
+/// # Empty guard
+/// An empty `out_events` (user unchecked everything) is REFUSED before any snapshot/append — a
+/// `NoChange` so the caller never appends zero + saves. The UI gate also refuses earlier; this is the
+/// belt-and-suspenders guard the `kat_persist_bulk_link_refuses_empty` KAT locks.
+///
+/// # [R0-I1] Mid-batch append rollback (the load-bearing distinction from the CLI path)
+/// `append_decision` commits per-call to the in-memory conn. If the append at row k>1 fails, appends
+/// 1..k-1 are ALREADY LIVE residue; a bare `?` would return `NoChange` (contract: "vault unchanged")
+/// while phantom decisions sit in the DB. So on ANY append error the WHOLE batch is reverted via
+/// `rollback(session, &pre, e.into())` (whole-DB restore to the pre-batch snapshot) — NOT `?`. A
+/// `save` failure likewise reverts the whole batch via `save_or_rollback`. Never a partial apply.
+pub fn persist_bulk_link_transfer(
+    session: &mut btctax_cli::Session,
+    out_events: Vec<btctax_core::EventId>,
+    dest: btctax_core::WalletId,
+    now: time::OffsetDateTime,
+) -> Result<usize, PersistError> {
+    if out_events.is_empty() {
+        return Err(PersistError::NoChange(btctax_cli::CliError::Usage(
+            "bulk link: nothing selected".into(),
+        )));
+    }
+    let pre = session.snapshot()?;
+    for out_event in &out_events {
+        let payload = btctax_core::EventPayload::TransferLink(btctax_core::event::TransferLink {
+            out_event: out_event.clone(),
+            in_event_or_wallet: btctax_core::TransferTarget::Wallet(dest.clone()),
+        });
+        // [R0-I1] Do NOT use `?` here: a mid-batch failure at row k>1 leaves appends 1..k-1 as live
+        // residue AND would leak a bare NoChange over phantom decisions. Revert the WHOLE batch.
+        if let Err(e) = btctax_core::persistence::append_decision(
+            session.conn(),
+            payload,
+            now,
+            time::UtcOffset::UTC,
+            None,
+        ) {
+            return Err(rollback(session, &pre, e.into()));
+        }
+    }
+    save_or_rollback(session, pre)?; // ONE save; on failure the whole batch reverts
+    Ok(out_events.len())
+}
+
 /// Append a `ClassifyRaw` decision event and atomically save the vault (chunk 4a, D2).
 ///
 /// `payload` is the VALIDATED `EventPayload::ClassifyRaw(…)` built by the classify-raw flow (its
@@ -3354,5 +3401,272 @@ mod tests {
             },
             "retry id matches the tail row"
         );
+    }
+
+    // ── KAT-BULK — persist_bulk_link_transfer (bulk-link-transfer D3) ─────────────
+
+    /// Seed a vault with `pre` = 1 import TransferOut + 1 MethodElection decision (pre max
+    /// decision_seq == 1). Returns the opened session (mut) via the passphrase string.
+    fn bulk_seed(vault: &std::path::Path, key: &std::path::Path, pp_str: &str) {
+        use btctax_core::event::{EventPayload, LedgerEvent, MethodElection, TransferOut};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, append_import_batch};
+        use btctax_core::{EventId, WalletId};
+        use btctax_store::Passphrase;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let batch = vec![LedgerEvent {
+            id: EventId::import(Source::River, SourceRef::new("bulk-out")),
+            utc_timestamp: OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(WalletId::Exchange {
+                provider: "River".into(),
+                account: "main".into(),
+            }),
+            payload: EventPayload::TransferOut(TransferOut {
+                sat: 100_000,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        }];
+        append_import_batch(session.conn(), &batch).unwrap();
+        let p = EventPayload::MethodElection(MethodElection {
+            effective_from: date!(2024 - 01 - 01),
+            method: btctax_core::LotMethod::Fifo,
+        });
+        append_decision(
+            session.conn(),
+            p,
+            OffsetDateTime::from_unix_timestamp(1_700_001_000).unwrap(),
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+        session.save().unwrap();
+    }
+
+    fn cold_dest() -> btctax_core::WalletId {
+        btctax_core::WalletId::SelfCustody {
+            label: "cold".into(),
+        }
+    }
+
+    fn synth_outs(n: usize) -> Vec<btctax_core::EventId> {
+        use btctax_core::identity::{Source, SourceRef};
+        (0..n)
+            .map(|i| {
+                btctax_core::EventId::import(Source::River, SourceRef::new(format!("bulk-o{i}")))
+            })
+            .collect()
+    }
+
+    /// EXACTLY N TransferLinks are tail-appended, all `Wallet(dest)`, over a strict prefix.
+    #[test]
+    fn kat_persist_bulk_link_strict_prefix() {
+        use btctax_core::event::EventPayload;
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_core::TransferTarget;
+        use btctax_store::Passphrase;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulk-sp-pass";
+        bulk_seed(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+        assert_eq!(pre_max_seq, 1, "pre max decision_seq must be 1");
+
+        let outs = synth_outs(3);
+        let now = OffsetDateTime::from_unix_timestamp(1_700_002_000).unwrap();
+        let n = persist_bulk_link_transfer(&mut session, outs.clone(), cold_dest(), now).unwrap();
+        assert_eq!(n, 3, "three outs linked");
+
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post.len(), pre.len() + 3, "exactly three appends");
+        assert_eq!(
+            &post[..pre.len()],
+            pre.as_slice(),
+            "first pre.len() rows unchanged (strict prefix)"
+        );
+        // The three tail rows are TransferLinks, in order, all Wallet(cold), seq pre_max+1..+3.
+        for (i, out) in outs.iter().enumerate() {
+            let row = &post[pre.len() + i];
+            let seq = row.decision_seq.expect("tail decision_seq");
+            assert_eq!(seq, (pre_max_seq + 1 + i as i64), "monotonic seq");
+            let payload: EventPayload = serde_json::from_str(&row.payload_json).unwrap();
+            match payload {
+                EventPayload::TransferLink(tl) => {
+                    assert_eq!(&tl.out_event, out, "out_event threaded in order");
+                    assert_eq!(
+                        tl.in_event_or_wallet,
+                        TransferTarget::Wallet(cold_dest()),
+                        "every link targets Wallet(dest)"
+                    );
+                }
+                other => panic!("tail must be TransferLink, got {other:?}"),
+            }
+        }
+        // On-disk == in-memory.
+        drop(session);
+        let s2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        assert_eq!(load_all_ordered(s2.conn()).unwrap(), post);
+    }
+
+    /// Empty `out_events` → `NoChange`, log byte-unchanged (never append zero + save).
+    #[test]
+    fn kat_persist_bulk_link_refuses_empty() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_store::Passphrase;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulk-empty-pass";
+        bulk_seed(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let now = OffsetDateTime::from_unix_timestamp(1_700_002_000).unwrap();
+        let result = persist_bulk_link_transfer(&mut session, vec![], cold_dest(), now);
+        assert!(
+            matches!(result, Err(PersistError::NoChange(_))),
+            "empty selection must refuse with NoChange; got {result:?}"
+        );
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post, pre, "refusal writes nothing");
+    }
+
+    /// chmod → failed save → whole batch reverts (`RolledBack`); log unchanged; retry clean.
+    #[cfg(unix)]
+    #[test]
+    fn kat_persist_bulk_link_rolls_back_on_failed_save() {
+        use btctax_core::event::EventPayload;
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_store::Passphrase;
+        use std::os::unix::fs::PermissionsExt;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulk-rb-pass";
+        bulk_seed(&vault, &key, pp_str);
+
+        // Root-skip guard (chmod is a no-op as root).
+        {
+            let probe = dir.path().join("probe.tmp");
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("bulk-rollback KAT: skipping — chmod did not deny writes (root?)");
+                return;
+            }
+        }
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let outs = synth_outs(3);
+        let now = OffsetDateTime::from_unix_timestamp(1_700_002_000).unwrap();
+
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result = persist_bulk_link_transfer(&mut session, outs.clone(), cold_dest(), now);
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(
+            matches!(result, Err(PersistError::RolledBack(_))),
+            "failed save must return RolledBack; got {result:?}"
+        );
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post.len(),
+            pre.len(),
+            "rollback reverts ALL appends (no residue)"
+        );
+        assert!(
+            post.iter().all(|r| !matches!(
+                serde_json::from_str::<EventPayload>(&r.payload_json).unwrap(),
+                EventPayload::TransferLink(_)
+            )),
+            "no TransferLink may survive the rollback"
+        );
+
+        // Retry after restoring perms re-appends all three cleanly.
+        let n = persist_bulk_link_transfer(&mut session, outs, cold_dest(), now).unwrap();
+        assert_eq!(n, 3);
+        let post2 = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post2.len(), pre.len() + 3, "retry appends exactly three");
+    }
+
+    /// [R0-I1] A mid-batch APPEND failure at row k>1 reverts the WHOLE batch — event-log
+    /// byte-unchanged, NO phantom residue from the appends before k, retry clean. Injection: a
+    /// BEFORE-INSERT trigger that RAISE(ABORT)s when the SECOND bulk append's decision_seq lands, so
+    /// append #1 has ALREADY committed (per-call) when append #2 fails.
+    #[test]
+    fn kat_persist_bulk_link_reverts_mid_batch_append_failure() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_store::Passphrase;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulk-midbatch-pass";
+        bulk_seed(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+        assert_eq!(pre_max_seq, 1, "pre max decision_seq must be 1");
+
+        // Fail the SECOND bulk append: pre_max+1 (seq 2) commits, pre_max+2 (seq 3) aborts.
+        let target = pre_max_seq + 2;
+        session
+            .conn()
+            .execute_batch(&format!(
+                "CREATE TRIGGER inject_midbatch_fail BEFORE INSERT ON events \
+                 WHEN NEW.decision_seq = {target} \
+                 BEGIN SELECT RAISE(ABORT, 'injected mid-batch append failure'); END;"
+            ))
+            .unwrap();
+
+        let outs = synth_outs(3);
+        let now = OffsetDateTime::from_unix_timestamp(1_700_002_000).unwrap();
+        let result = persist_bulk_link_transfer(&mut session, outs.clone(), cold_dest(), now);
+        assert!(
+            matches!(result, Err(PersistError::RolledBack(_))),
+            "mid-batch append failure must revert the whole batch (RolledBack); got {result:?}"
+        );
+
+        // Event-log byte-unchanged: the seq-2 phantom append is reverted too.
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post, pre,
+            "whole batch reverted — no phantom decision from append #1 survives"
+        );
+
+        // Retry after removing the injection is clean (all three appended).
+        session
+            .conn()
+            .execute_batch("DROP TRIGGER inject_midbatch_fail;")
+            .unwrap();
+        let n = persist_bulk_link_transfer(&mut session, outs, cold_dest(), now).unwrap();
+        assert_eq!(n, 3, "retry links all three cleanly");
+        let post2 = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post2.len(), pre.len() + 3);
     }
 }

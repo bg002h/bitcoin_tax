@@ -14,14 +14,14 @@
 //! session-holding TUI editor.
 
 use crate::edit::form::{
-    ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyRawFlowState,
-    ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState, MutationModalState,
-    OptimizeAcceptFlowState, OptimizeAcceptModalState, ProfileFormState, ReclassifyIncomeFlowState,
-    ReclassifyIncomeModalState, ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
-    ResolveConflictFlowState, ResolveConflictModalState, SafeHarborAllocateFlowState,
-    SafeHarborAllocateModalState, SafeHarborAttestFlowState, SelectLotsFlowState,
-    SelectLotsModalState, SetDonationDetailsFlowState, SetDonationDetailsModalState,
-    SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
+    BulkLinkFlowState, BulkLinkModalState, ClassifyInboundFlowState, ClassifyInboundModalState,
+    ClassifyRawFlowState, ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
+    MutationModalState, OptimizeAcceptFlowState, OptimizeAcceptModalState, ProfileFormState,
+    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyOutflowFlowState,
+    ReclassifyOutflowModalState, ResolveConflictFlowState, ResolveConflictModalState,
+    SafeHarborAllocateFlowState, SafeHarborAllocateModalState, SafeHarborAttestFlowState,
+    SelectLotsFlowState, SelectLotsModalState, SetDonationDetailsFlowState,
+    SetDonationDetailsModalState, SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
 };
 use btctax_cli::Session;
 use btctax_store::Passphrase;
@@ -169,6 +169,13 @@ pub struct EditorApp {
     pub safe_harbor_allocate_flow: Option<SafeHarborAllocateFlowState>,
     /// Safe-harbor-allocate confirmation modal.  `Some` while awaiting Enter/Esc.
     pub safe_harbor_allocate_modal: Option<SafeHarborAllocateModalState>,
+    /// Full bulk-link-transfer flow state (bulk-link-transfer D3).  `Some` while the flow is open.
+    ///
+    /// Dispatch order: bulk_link_modal (modal layer) → bulk_link_flow (flow layer). Creation is
+    /// REVOCABLE (each link voidable via `v`), so the confirmation is a plain modal — NO typed-word.
+    pub bulk_link_flow: Option<BulkLinkFlowState>,
+    /// Bulk-link-transfer confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub bulk_link_modal: Option<BulkLinkModalState>,
     /// Residue latch [R0-C1]: set to `true` when `persist_safe_harbor_attest` returns Err.
     ///
     /// While `true`, ALL mutating openers (p/c/o/r/f/v/s/d/a) refuse with the
@@ -227,6 +234,8 @@ impl EditorApp {
             optimize_accept_modal: None,
             safe_harbor_allocate_flow: None,
             safe_harbor_allocate_modal: None,
+            bulk_link_flow: None,
+            bulk_link_modal: None,
             attest_save_failed: false,
             rollback_failed: false,
             status: None,

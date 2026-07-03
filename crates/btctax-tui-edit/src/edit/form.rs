@@ -1630,6 +1630,100 @@ pub struct SafeHarborAllocateModalState {
     pub lot_count: usize,
 }
 
+// ── Bulk link-transfer flow types (bulk-link-transfer D3) ────────────────────
+
+/// One preview-checklist row: an enriched pending out + its `checked` (included) flag. Every row
+/// starts CHECKED; `Space`/`x` toggles `checked` (exclude). Mirrors `session::BulkLinkRow` fields plus
+/// the UI flag.
+#[derive(Clone)]
+pub struct BulkLinkRowItem {
+    pub out_event: EventId,
+    pub date: TaxDate,
+    pub source_wallet: Option<WalletId>,
+    pub principal_sat: Sat,
+    /// Advisory FMV (`fmv_of`); `None` on missing price → footer floor + "(N unavailable)".
+    pub usd_value: Option<Usd>,
+    pub basis_usd: Usd,
+    pub checked: bool,
+}
+
+/// Step in the bulk link-transfer flow (four steps on the `TargetList` substrate).
+pub enum BulkLinkStep {
+    /// 1 — pick the destination from the event-wallet union (or press `n` to type one).
+    DestPick,
+    /// 1b — free-text destination entry [Fork B]: `parse_wallet_id` reaches a never-seen cold wallet.
+    DestType,
+    /// 2 — source-wallet (Any/each) + time-frame (All/each-year) toggles.
+    Filter,
+    /// 3 — per-row exclude checklist over the PRICED plan; `Space`/`x` toggles a row.
+    Preview,
+}
+
+/// Full state for the bulk link-transfer flow. The dest pick-list + filter choices are read from the
+/// snapshot at open (KAT-G1-clean, like `open_link_transfer_flow`); only the PRICED preview (step 2→3)
+/// routes through the `Session::bulk_link_transfer_plan` helper [R0-M4].
+pub struct BulkLinkFlowState {
+    pub step: BulkLinkStep,
+    // Step 1 — destination.
+    /// The DISTINCT wallets across ALL `snap.events` (a dest may only ever appear inbound).
+    pub wallet_list: TargetList<WalletId>,
+    /// Typed-destination entry buffer [Fork B].
+    pub dest_buf: FieldBuffer,
+    /// The chosen destination, set on leaving step 1.
+    pub dest: Option<WalletId>,
+    // Step 2 — filter choices (derived from the pending outs at open).
+    /// `[None = Any, Some(w), …]` — Any + each distinct pending-out source wallet.
+    pub source_choices: Vec<Option<WalletId>>,
+    pub source_idx: usize,
+    /// `[None = All, Some(y), …]` — All + each distinct year present in the pending outs.
+    pub year_choices: Vec<Option<i32>>,
+    pub year_idx: usize,
+    /// 0 = source-wallet row, 1 = time-frame row.
+    pub filter_focus: usize,
+    // Step 3 — preview checklist over the priced plan.
+    pub preview: TargetList<BulkLinkRowItem>,
+    /// Cross-step transient error (bad typed dest / empty plan / nothing selected).
+    pub error: Option<String>,
+}
+
+/// Payload for the bulk link-transfer confirmation modal (explicit confirm; NOT typed-word — the op
+/// is reversible per-`v`). Captures the CHECKED rows only.
+pub struct BulkLinkModalState {
+    pub dest: WalletId,
+    pub out_events: Vec<EventId>,
+    pub count: usize,
+    pub total_sat: Sat,
+    pub total_usd_value_floor: Usd,
+    pub missing_price_count: usize,
+}
+
+/// Live footer/modal totals over the CHECKED rows: `(count, Σ sat, Σ priced USD floor, missing count)`.
+pub fn bulk_checked_totals(items: &[BulkLinkRowItem]) -> (usize, Sat, Usd, usize) {
+    let mut count = 0usize;
+    let mut sat: Sat = 0;
+    let mut floor: Usd = Usd::ZERO;
+    let mut missing = 0usize;
+    for it in items.iter().filter(|i| i.checked) {
+        count += 1;
+        sat += it.principal_sat;
+        match it.usd_value {
+            Some(v) => floor += v,
+            None => missing += 1,
+        }
+    }
+    (count, sat, floor, missing)
+}
+
+/// Render the USD floor for the bulk preview/modal: exact `$X` when nothing is unpriced, else
+/// `≥ $X (N unavailable)` [R0-I2].
+pub fn bulk_usd_floor_label(floor: Usd, missing: usize) -> String {
+    if missing == 0 {
+        format!("${floor}")
+    } else {
+        format!("\u{2265} ${floor} ({missing} unavailable)")
+    }
+}
+
 /// The §A.5 basis label for a `Persistability`. `ForbiddenBroker2027` is never persisted (pre-filtered),
 /// so it maps to a placeholder that is unreachable at the modal.
 pub fn optimize_basis_label(p: Persistability) -> &'static str {

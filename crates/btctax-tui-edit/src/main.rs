@@ -18,20 +18,21 @@ use crossterm::{
     terminal::{enable_raw_mode, EnterAlternateScreen},
 };
 use edit::form::{
-    cycle_alloc_method, cycle_basis_source, cycle_business_optional, cycle_classify_raw_variant,
-    cycle_filing_status, cycle_income_kind, cycle_income_kind_optional, cycle_outflow_kind,
-    filter_optimize_candidates, income_kind_display, is_revocable_payload, next_focus,
-    optimize_basis_label, prev_focus, validate, validate_classify_inbound_gift,
+    bulk_checked_totals, cycle_alloc_method, cycle_basis_source, cycle_business_optional,
+    cycle_classify_raw_variant, cycle_filing_status, cycle_income_kind, cycle_income_kind_optional,
+    cycle_outflow_kind, filter_optimize_candidates, income_kind_display, is_revocable_payload,
+    next_focus, optimize_basis_label, prev_focus, validate, validate_classify_inbound_gift,
     validate_classify_inbound_income, validate_classify_raw_acquire, validate_classify_raw_income,
     validate_donation_details, validate_reclassify_income, validate_reclassify_outflow,
-    validate_select_lots, validate_set_fmv, AllocLotRow, ClassifyInboundFlowState,
-    ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
-    ClassifyRawStep, ClassifyRawVariant, ConflictItem, DisposalKind, DisposalListItem,
-    DonationListItem, FieldBuffer, FmvListItem, InEventItem, InboundListItem, InboundVariant,
-    IncomeListItem, LinkMode, LinkTransferFlowState, LinkTransferModalState, LinkTransferStep,
-    LotPickFormRow, MutationModalState, OptimizeAcceptFlowState, OptimizeAcceptModalState,
-    OptimizeAcceptStep, OptimizeCandidateItem, OutflowKind, OutflowListItem, ProfileFormState,
-    RawListItem, ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
+    validate_select_lots, validate_set_fmv, AllocLotRow, BulkLinkFlowState, BulkLinkModalState,
+    BulkLinkRowItem, BulkLinkStep, ClassifyInboundFlowState, ClassifyInboundModalState,
+    ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep,
+    ClassifyRawVariant, ConflictItem, DisposalKind, DisposalListItem, DonationListItem,
+    FieldBuffer, FmvListItem, InEventItem, InboundListItem, InboundVariant, IncomeListItem,
+    LinkMode, LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, LotPickFormRow,
+    MutationModalState, OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep,
+    OptimizeCandidateItem, OutflowKind, OutflowListItem, ProfileFormState, RawListItem,
+    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
     ReclassifyOutflowFlowState, ReclassifyOutflowModalState, ReclassifyOutflowStep,
     ResolveConflictFlowState, ResolveConflictModalState, ResolveConflictStep, ResolveKind,
     SafeHarborAllocateFlowState, SafeHarborAllocateModalState, SafeHarborAllocateStep,
@@ -197,6 +198,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Bulk-link-transfer-modal dispatch — BEFORE flow, form, screen ────────
+    if app.bulk_link_modal.is_some() {
+        handle_bulk_link_modal_key(app, key);
+        return;
+    }
+
     // ── 9. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
     //    Every step of an open flow is claimed here; 'q' and Esc can never
     //    fall through to a Browse quit arm mid-flow.
@@ -238,6 +245,10 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.safe_harbor_allocate_flow.is_some() {
         handle_safe_harbor_allocate_flow_key(app, key);
+        return;
+    }
+    if app.bulk_link_flow.is_some() {
+        handle_bulk_link_flow_key(app, key);
         return;
     }
     if app.safe_harbor_attest_flow.is_some() {
@@ -316,6 +327,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('u') => open_classify_raw_flow(app),
                 KeyCode::Char('a') => open_safe_harbor_attest_flow(app),
                 KeyCode::Char('A') => open_safe_harbor_allocate_flow(app),
+                KeyCode::Char('b') => open_bulk_link_transfer_flow(app),
                 KeyCode::Char('i') => open_resolve_conflict_flow(app),
                 KeyCode::Char('z') => open_optimize_accept_flow(app),
                 _ => {}
@@ -544,6 +556,8 @@ impl EditorApp {
         self.optimize_accept_modal = None;
         self.safe_harbor_allocate_flow = None;
         self.safe_harbor_allocate_modal = None;
+        self.bulk_link_flow = None;
+        self.bulk_link_modal = None;
     }
 }
 
@@ -5240,6 +5254,455 @@ fn derive_allocate_status(snap: &btctax_tui::app::Snapshot, new_id: &EventId) ->
     "Allocation created and EFFECTIVE (Path B) — it can no longer be voided; attest with 'a' to \
      lock §7.4."
         .to_string()
+}
+
+// ── Bulk link-transfer flow (bulk-link-transfer D3) ──────────────────────────
+
+/// Open the bulk link-transfer flow from Browse (bulk-link-transfer D3).
+///
+/// Latch → snapshot → `pending_reconciliation` non-empty (else status). The dest pick-list (the full
+/// `snap.events` wallet union) and the filter choices (distinct source wallets + years among the
+/// pending outs) are read from `snap` DIRECTLY — KAT-G1-clean, like `open_link_transfer_flow`. Only
+/// the PRICED preview (step 2→3) routes through `Session::bulk_link_transfer_plan` [R0-M4].
+fn open_bulk_link_transfer_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+    if snap.state.pending_reconciliation.is_empty() {
+        app.status = Some("No pending outbound transfers to bulk-link".to_string());
+        return;
+    }
+    let ev_idx = events_by_id(snap);
+
+    // Dest pick-list: ALL distinct snap.events wallets (a dest may only ever appear inbound — so the
+    // full event-wallet union, NOT just pending-out source wallets). BTreeSet dedups + sorts.
+    let wallet_set: BTreeSet<btctax_core::WalletId> = snap
+        .events
+        .iter()
+        .filter_map(|e| e.wallet.clone())
+        .collect();
+    let wallet_items: Vec<btctax_core::WalletId> = wallet_set.into_iter().collect();
+
+    // Filter choices, from the enriched (date, source_wallet) of each pending out.
+    let mut source_set: BTreeSet<btctax_core::WalletId> = BTreeSet::new();
+    let mut year_set: BTreeSet<i32> = BTreeSet::new();
+    for pt in &snap.state.pending_reconciliation {
+        if let Some(ev) = ev_idx.get(&pt.event) {
+            if let Some(w) = &ev.wallet {
+                source_set.insert(w.clone());
+            }
+            let d = btctax_core::conventions::tax_date(ev.utc_timestamp, ev.original_tz);
+            year_set.insert(d.year());
+        }
+    }
+    let mut source_choices: Vec<Option<btctax_core::WalletId>> = vec![None]; // Any
+    source_choices.extend(source_set.into_iter().map(Some));
+    let mut year_choices: Vec<Option<i32>> = vec![None]; // All
+    year_choices.extend(year_set.into_iter().map(Some));
+
+    app.bulk_link_flow = Some(BulkLinkFlowState {
+        step: BulkLinkStep::DestPick,
+        wallet_list: TargetList::new(wallet_items),
+        dest_buf: FieldBuffer::new(),
+        dest: None,
+        source_choices,
+        source_idx: 0,
+        year_choices,
+        year_idx: 0,
+        filter_focus: 0,
+        preview: TargetList::new(Vec::new()),
+        error: None,
+    });
+}
+
+/// Dispatch to the correct sub-handler depending on `BulkLinkStep`.
+fn handle_bulk_link_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.bulk_link_flow.as_ref() {
+        Some(f) => match f.step {
+            BulkLinkStep::DestPick => 0u8,
+            BulkLinkStep::DestType => 1,
+            BulkLinkStep::Filter => 2,
+            BulkLinkStep::Preview => 3,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_bulk_dest_pick_key(app, key),
+        1 => handle_bulk_dest_type_key(app, key),
+        2 => handle_bulk_filter_key(app, key),
+        _ => handle_bulk_preview_key(app, key),
+    }
+}
+
+/// Step 1 — destination pick-list. `k/j/g/G` scroll; `n` → typed-destination entry [Fork B]; Enter →
+/// pick the highlighted wallet → Filter; Esc → close flow; `q` swallowed.
+fn handle_bulk_dest_pick_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.wallet_list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.wallet_list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.wallet_list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.wallet_list.go_bottom();
+            }
+        }
+        KeyCode::Char('n') => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.dest_buf.set("");
+                f.error = None;
+                f.step = BulkLinkStep::DestType;
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                if let Some(w) = f.wallet_list.selected().cloned() {
+                    f.dest = Some(w);
+                    f.error = None;
+                    f.step = BulkLinkStep::Filter;
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.bulk_link_flow = None;
+        }
+        KeyCode::Char('q') => {}
+        _ => {}
+    }
+}
+
+/// Step 1b — typed destination [Fork B]. Free text parsed by `eventref::parse_wallet_id` (the same
+/// call `--to-wallet` uses), so a never-seen cold wallet (`self:cold-wallet`) is reachable. Enter →
+/// parse: Ok → Filter; Err → error + stay. Esc → back to the pick-list. All chars (incl. `q`) type.
+fn handle_bulk_dest_type_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let parsed = app
+                .bulk_link_flow
+                .as_ref()
+                .map(|f| btctax_cli::eventref::parse_wallet_id(f.dest_buf.buf.trim()));
+            if let Some(res) = parsed {
+                match res {
+                    Ok(w) => {
+                        if let Some(f) = app.bulk_link_flow.as_mut() {
+                            f.dest = Some(w);
+                            f.error = None;
+                            f.step = BulkLinkStep::Filter;
+                        }
+                    }
+                    Err(e) => {
+                        if let Some(f) = app.bulk_link_flow.as_mut() {
+                            f.error = Some(format!("{e}"));
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.error = None;
+                f.step = BulkLinkStep::DestPick;
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.dest_buf.pop_char();
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.dest_buf.push_char(c);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Step 2 — filter. `k/j`/`↑/↓` move focus (source-wallet ⇄ time-frame); `←/→` cycle the focused
+/// choice; Enter → recompute the PRICED plan → Preview; Esc → back to dest pick; `q` swallowed.
+fn handle_bulk_filter_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.filter_focus = f.filter_focus.saturating_sub(1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.filter_focus = (f.filter_focus + 1).min(1);
+            }
+        }
+        KeyCode::Left => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                if f.filter_focus == 0 {
+                    let n = f.source_choices.len();
+                    f.source_idx = (f.source_idx + n - 1) % n;
+                } else {
+                    let n = f.year_choices.len();
+                    f.year_idx = (f.year_idx + n - 1) % n;
+                }
+            }
+        }
+        KeyCode::Right => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                if f.filter_focus == 0 {
+                    let n = f.source_choices.len();
+                    f.source_idx = (f.source_idx + 1) % n;
+                } else {
+                    let n = f.year_choices.len();
+                    f.year_idx = (f.year_idx + 1) % n;
+                }
+            }
+        }
+        KeyCode::Enter => bulk_recompute_preview(app),
+        KeyCode::Esc => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.error = None;
+                f.step = BulkLinkStep::DestPick;
+            }
+        }
+        KeyCode::Char('q') => {}
+        _ => {}
+    }
+}
+
+/// Recompute the priced plan from the current dest + filter selections and transition to Preview
+/// (all rows checked). Empty plan → stay on Filter with an explanatory error. This is the ONLY
+/// Session-helper call in the flow (KAT-G1: the opener reads `snap` directly).
+fn bulk_recompute_preview(app: &mut EditorApp) {
+    let (dest, filter) = match app.bulk_link_flow.as_ref() {
+        Some(f) => {
+            let dest = match f.dest.clone() {
+                Some(d) => d,
+                None => return,
+            };
+            let from_wallet = f.source_choices.get(f.source_idx).cloned().flatten();
+            let frame = match f.year_choices.get(f.year_idx).copied().flatten() {
+                Some(y) => btctax_cli::Frame::Year(y),
+                None => btctax_cli::Frame::All,
+            };
+            (dest, btctax_cli::BulkFilter { frame, from_wallet })
+        }
+        None => return,
+    };
+    let plan = match app.session.as_ref() {
+        Some(s) => s.bulk_link_transfer_plan(filter, dest),
+        None => return,
+    };
+    match plan {
+        Ok(plan) => {
+            let items: Vec<BulkLinkRowItem> = plan
+                .included
+                .iter()
+                .map(|r| BulkLinkRowItem {
+                    out_event: r.out_event.clone(),
+                    date: r.date,
+                    source_wallet: r.source_wallet.clone(),
+                    principal_sat: r.principal_sat,
+                    usd_value: r.usd_value,
+                    basis_usd: r.basis_usd,
+                    checked: true,
+                })
+                .collect();
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                if items.is_empty() {
+                    f.error = Some("No pending outbound transfers match this filter".to_string());
+                } else {
+                    f.error = None;
+                    f.preview = TargetList::new(items);
+                    f.step = BulkLinkStep::Preview;
+                }
+            }
+        }
+        Err(e) => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.error = Some(format!("Plan error: {e}"));
+            }
+        }
+    }
+}
+
+/// Step 3 — per-row exclude checklist. `k/j/g/G` scroll; `Space`/`x` toggles the row's exclusion;
+/// Enter → confirm modal over the CHECKED rows (refuse if none); Esc → back to Filter; `q` swallowed.
+fn handle_bulk_preview_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.preview.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.preview.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.preview.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.preview.go_bottom();
+            }
+        }
+        KeyCode::Char(' ') | KeyCode::Char('x') => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                if let Some(i) = f.preview.table_state.selected() {
+                    if let Some(item) = f.preview.items.get_mut(i) {
+                        item.checked = !item.checked;
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => open_bulk_link_modal(app),
+        KeyCode::Esc => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.error = None;
+                f.step = BulkLinkStep::Filter;
+            }
+        }
+        KeyCode::Char('q') => {}
+        _ => {}
+    }
+}
+
+/// Capture the CHECKED preview rows into the confirmation modal. Empty selection → refuse (stay on
+/// Preview with a "Nothing selected" error), never open the modal.
+fn open_bulk_link_modal(app: &mut EditorApp) {
+    let modal = {
+        let f = match app.bulk_link_flow.as_ref() {
+            Some(f) => f,
+            None => return,
+        };
+        let dest = match f.dest.clone() {
+            Some(d) => d,
+            None => return,
+        };
+        let (count, total_sat, floor, missing) = bulk_checked_totals(&f.preview.items);
+        if count == 0 {
+            None
+        } else {
+            let out_events: Vec<EventId> = f
+                .preview
+                .items
+                .iter()
+                .filter(|i| i.checked)
+                .map(|i| i.out_event.clone())
+                .collect();
+            Some(BulkLinkModalState {
+                dest,
+                out_events,
+                count,
+                total_sat,
+                total_usd_value_floor: floor,
+                missing_price_count: missing,
+            })
+        }
+    };
+    match modal {
+        Some(m) => app.bulk_link_modal = Some(m),
+        None => {
+            if let Some(f) = app.bulk_link_flow.as_mut() {
+                f.error = Some("Nothing selected — check at least one row".to_string());
+            }
+        }
+    }
+}
+
+/// Handle a key press while the bulk-link confirmation modal is open (explicit confirm; NOT typed).
+///
+/// Enter → `persist_bulk_link_transfer` (batch append + single save, mid-batch rollback [R0-I1]) →
+/// re-project + `derive_bulk_link_status` + close; `Err(e)` → close modal, route `on_persist_error`.
+/// Esc → close modal only (back to Preview; nothing written). All else swallowed (blocking modal).
+fn handle_bulk_link_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (out_events, dest) = match app.bulk_link_modal.as_ref() {
+                Some(m) => (m.out_events.clone(), m.dest.clone()),
+                None => return,
+            };
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.bulk_link_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_bulk_link_transfer(
+                    session,
+                    out_events,
+                    dest.clone(),
+                    now,
+                )
+            };
+
+            match save_result {
+                Ok(n) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_bulk_link_status(&snap, n, &dest);
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.bulk_link_modal = None;
+                    app.bulk_link_flow = None;
+                }
+                Err(e) => {
+                    app.bulk_link_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.bulk_link_modal = None;
+        }
+        _ => {}
+    }
+}
+
+/// Derive the post-apply status from RE-PROJECTED state (bulk-link-transfer D3). No blocker arm is
+/// normally reachable (each append is the shape the single flow uses; a failed save rolls back clean
+/// via `on_persist_error`).
+fn derive_bulk_link_status(
+    snap: &btctax_tui::app::Snapshot,
+    n: usize,
+    dest: &btctax_core::WalletId,
+) -> String {
+    let remaining = snap.state.pending_reconciliation.len();
+    format!(
+        "Linked {n} outflow(s) to {} as self-transfers ({remaining} pending outbound remain).",
+        crate::edit::form::wallet_label(dest)
+    )
 }
 
 // ── Resolve-conflict flow (chunk 4b, D3) ─────────────────────────────────────
@@ -16627,5 +17090,312 @@ mod tests {
             )),
             "OA-Z: a LotSelection for the sale must be persisted"
         );
+    }
+
+    // ── Bulk link-transfer TUI KATs (bulk-link-transfer D3) ──────────────────
+
+    /// Seed a vault with an Acquire lot + TWO pending TransferOuts from the SAME wallet
+    /// (River/main), on distinct 2025 dates. Returns `(o1 @ 2025-03-01, o2 @ 2025-06-15)`.
+    fn seed_bulk_one_wallet(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> (btctax_core::EventId, btctax_core::EventId) {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent, TransferOut};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let wallet = Some(btctax_core::WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        });
+        let acq = EventId::import(Source::River, SourceRef::new("bulk-acq"));
+        let o1 = EventId::import(Source::River, SourceRef::new("bulk-o1"));
+        let o2 = EventId::import(Source::River, SourceRef::new("bulk-o2"));
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let out = |sat: i64| {
+            EventPayload::TransferOut(TransferOut {
+                sat,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            })
+        };
+        let batch = vec![
+            LedgerEvent {
+                id: acq,
+                utc_timestamp: datetime!(2024-12-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 1_000_000,
+                    usd_cost: dec!(30000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            },
+            LedgerEvent {
+                id: o1.clone(),
+                utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: out(100_000),
+            },
+            LedgerEvent {
+                id: o2.clone(),
+                utc_timestamp: datetime!(2025-06-15 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet,
+                payload: out(50_000),
+            },
+        ];
+        btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+        session.save().unwrap();
+        (o1, o2)
+    }
+
+    /// Seed a vault with pending outs from TWO wallets. Returns `(river_out, coinbase_out)`.
+    fn seed_bulk_two_wallets(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> (btctax_core::EventId, btctax_core::EventId) {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent, TransferOut};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let river = Some(btctax_core::WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        });
+        let coinbase = Some(btctax_core::WalletId::Exchange {
+            provider: "Coinbase".into(),
+            account: "main".into(),
+        });
+        let acq_r = EventId::import(Source::River, SourceRef::new("bulk-acq-r"));
+        let acq_c = EventId::import(Source::Coinbase, SourceRef::new("bulk-acq-c"));
+        let river_out = EventId::import(Source::River, SourceRef::new("bulk-out-r"));
+        let coinbase_out = EventId::import(Source::Coinbase, SourceRef::new("bulk-out-c"));
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let out = |sat: i64| {
+            EventPayload::TransferOut(TransferOut {
+                sat,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            })
+        };
+        let acq = |sat: i64| {
+            EventPayload::Acquire(Acquire {
+                sat,
+                usd_cost: dec!(20000),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ExchangeProvided,
+            })
+        };
+        let batch = vec![
+            LedgerEvent {
+                id: acq_r,
+                utc_timestamp: datetime!(2024-12-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: river.clone(),
+                payload: acq(500_000),
+            },
+            LedgerEvent {
+                id: acq_c,
+                utc_timestamp: datetime!(2024-12-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: coinbase.clone(),
+                payload: acq(500_000),
+            },
+            LedgerEvent {
+                id: river_out.clone(),
+                utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: river,
+                payload: out(100_000),
+            },
+            LedgerEvent {
+                id: coinbase_out.clone(),
+                utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: coinbase,
+                payload: out(80_000),
+            },
+        ];
+        btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+        session.save().unwrap();
+        (river_out, coinbase_out)
+    }
+
+    /// `b` on a vault with NO pending outbound transfers refuses (no flow opened, status set).
+    #[test]
+    fn kat_bulk_refuses_when_no_pending() {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulk-nopending";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let batch = vec![LedgerEvent {
+                id: EventId::import(Source::River, SourceRef::new("acq-only")),
+                utc_timestamp: datetime!(2024-12-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(btctax_core::WalletId::Exchange {
+                    provider: "River".into(),
+                    account: "main".into(),
+                }),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(3000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            session.save().unwrap();
+        }
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('b')));
+        assert!(
+            app.bulk_link_flow.is_none(),
+            "no pending outs → flow must NOT open"
+        );
+        assert_eq!(
+            app.status.as_deref(),
+            Some("No pending outbound transfers to bulk-link")
+        );
+    }
+
+    /// Unchecking a preview row omits it from the confirm modal's appended batch.
+    #[test]
+    fn kat_bulk_per_row_exclude_drops_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulk-exclude";
+        let (o1, o2) = seed_bulk_one_wallet(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('b'))); // DestPick
+        handle_key(&mut app, press(KeyCode::Char('n'))); // typed dest
+        type_str(&mut app, "self:cold");
+        handle_key(&mut app, press(KeyCode::Enter)); // → Filter
+        assert!(matches!(
+            app.bulk_link_flow.as_ref().map(|f| &f.step),
+            Some(BulkLinkStep::Filter)
+        ));
+        handle_key(&mut app, press(KeyCode::Enter)); // Filter (All/Any) → Preview
+        {
+            let f = app.bulk_link_flow.as_ref().unwrap();
+            assert!(matches!(f.step, BulkLinkStep::Preview));
+            assert_eq!(f.preview.items.len(), 2, "both outs included, all checked");
+            assert!(f.preview.items.iter().all(|i| i.checked));
+            assert_eq!(
+                f.preview.items[0].out_event, o1,
+                "row 0 sorted-by-date is o1"
+            );
+        }
+        // Exclude row 0 (o1) → only o2 remains checked.
+        handle_key(&mut app, press(KeyCode::Char(' ')));
+        assert!(!app.bulk_link_flow.as_ref().unwrap().preview.items[0].checked);
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal
+        let m = app
+            .bulk_link_modal
+            .as_ref()
+            .expect("confirm modal must open over checked rows");
+        assert_eq!(m.count, 1, "one row excluded → one remains");
+        assert_eq!(
+            m.out_events,
+            vec![o2],
+            "excluded o1 is absent from the batch"
+        );
+    }
+
+    /// A same-wallet row (source == dest) is skipped — absent from the preview/batch.
+    #[test]
+    fn kat_bulk_same_wallet_row_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulk-samewallet";
+        let (river_out, coinbase_out) = seed_bulk_two_wallets(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('b'))); // DestPick
+                                                         // Wallet union sorted: [Coinbase/main, River/main]. Pick River/main (idx 1) as dest.
+        handle_key(&mut app, press(KeyCode::Down));
+        handle_key(&mut app, press(KeyCode::Enter)); // → Filter (dest = River/main)
+        handle_key(&mut app, press(KeyCode::Enter)); // Filter (All/Any) → Preview
+        let f = app.bulk_link_flow.as_ref().unwrap();
+        assert!(matches!(f.step, BulkLinkStep::Preview));
+        assert_eq!(
+            f.preview.items.len(),
+            1,
+            "the River/main out (source == dest) is skipped; only the Coinbase out remains"
+        );
+        assert_eq!(f.preview.items[0].out_event, coinbase_out);
+        assert!(
+            f.preview.items.iter().all(|i| i.out_event != river_out),
+            "the same-wallet row must be ABSENT from the preview"
+        );
+    }
+
+    /// [Fork B] Typing a never-seen cold wallet (`self:cold-wallet`) yields a `SelfCustody`
+    /// destination the batch links to.
+    #[test]
+    fn kat_bulk_typed_dest_cold_wallet() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulk-typeddest";
+        let (o1, o2) = seed_bulk_one_wallet(&vault, &key, pp_str);
+        let cold = btctax_core::WalletId::SelfCustody {
+            label: "cold-wallet".into(),
+        };
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('b'))); // DestPick
+        handle_key(&mut app, press(KeyCode::Char('n'))); // typed dest
+        type_str(&mut app, "self:cold-wallet");
+        handle_key(&mut app, press(KeyCode::Enter)); // parse → Filter
+        assert_eq!(
+            app.bulk_link_flow.as_ref().and_then(|f| f.dest.clone()),
+            Some(cold.clone()),
+            "typed cold wallet parses to a SelfCustody destination"
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // Filter → Preview
+        assert_eq!(
+            app.bulk_link_flow.as_ref().unwrap().preview.items.len(),
+            2,
+            "cold-wallet is no source → nothing skipped"
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal
+        let m = app.bulk_link_modal.as_ref().expect("modal opens");
+        assert_eq!(
+            m.dest, cold,
+            "the batch links to the never-seen cold wallet"
+        );
+        assert_eq!(m.out_events, vec![o1, o2]);
     }
 }
