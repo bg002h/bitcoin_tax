@@ -1,7 +1,8 @@
 # SPEC — bulk classify-inbound-self-transfer
 
 **Source baseline:** `main` @ `569a5ee` (post self-transfer-completion A+B; all anchors verified at write time).
-**Review status: DRAFT — awaiting mandatory R0.**
+**Review status: R0 round 1 folded (0C / 1I / 3M / 1N — GATE BLOCKED then folded); awaiting R0 round 2.
+Review: `reviews/R0-spec-bulk-classify-inbound-self-transfer-round-1.md`.**
 **Design lineage:** user-approved (2026-07-03) as queue item 2 after the self-transfer completion program;
 a close MIRROR of the shipped `bulk-link-transfer` (the outbound bulk) applied to Cycle A's
 `InboundClass::SelfTransferMine`. Governed by memory `self-transfer-completion-policy`.
@@ -43,12 +44,21 @@ doing it single-item (`classify-inbound-self-transfer --basis`). Per-row exclude
   the emitter `cmd::reconcile::classify_inbound` (`reconcile.rs:38`); `persist_classify_inbound`
   (`edit/persist.rs:122`). Bulk appends `ClassifyInbound { transfer_in_event, as_: SelfTransferMine{None,
   None} }` per selected inbound.
-- **Candidate source (structural false-classify safety):** the pending unknown-basis inbounds =
-  `TransferIn` events still flagged `BlockerKind::UnknownBasisInbound`, enumerated from the blocker set
-  joined to the raw `TransferIn` via the event index — the EXACT pattern `Session::self_transfer_match_plan`
-  uses (`session.rs:421-438`). An already-classified inbound (Income/Gift/self-transfer-in) or a matched
-  leg is no longer `UnknownBasisInbound`, so it can NEVER be swept (mirrors bulk-link's
-  `pending_reconciliation` boundary).
+- **Candidate source (structural false-classify safety) [R0-I1 — corrected]:** the candidates are
+  `TransferIn` events flagged `BlockerKind::UnknownBasisInbound` (blocker set joined to the raw
+  `TransferIn` via the event index, as `self_transfer_match_plan` does, `session.rs:437-453`) **AND NOT
+  already targeted by a non-voided `ClassifyInbound` decision** — because a bulk flow that APPENDS a
+  `ClassifyInbound` must mirror the SINGLE-ITEM opener `open_classify_inbound_flow`'s **filter 3**
+  (`main.rs:2139-2171`: "adding a second would fire DecisionConflict; FIRST-WINS"), NOT the *matcher*
+  (which never appends). This matters because `UnknownBasisInbound` is RE-EMITTED for THREE
+  ALREADY-classified states — Gift case-4 `GiftReceived{donor_basis:None,donor_acquired_at:None}`
+  (`fold.rs:931`), Gift case-3 price-missing (`fold.rs:920`), and a wallet-less `SelfTransferMine`
+  (`fold.rs:966`) — so "flagged `UnknownBasisInbound`" ≠ "unclassified". Sweeping one would append a
+  DUPLICATE `ClassifyInbound` → first-wins keeps the tax number BUT fires a Hard `DecisionConflict` that
+  blocks `compute_tax_year`. **Also exclude wallet-less `TransferIn`s** (`wallet.is_none()`) — as the
+  matcher does (`session.rs:493`) — since a wallet-less self-transfer-in creates NO lot and re-fires
+  `UnknownBasisInbound` [R0-M2]. **The income headline is safe regardless:** a classified Income deposit
+  fires `FmvMissing`, never `UnknownBasisInbound` (`fold.rs:854`), so it can never be a candidate.
 - **USD-at-receipt** (preview safety number) = `btctax_core::price::fmv_of(&prices, receipt_date,
   in.sat) -> Option<Usd>` (the vetted helper; missing price → `None`). This is the market value being
   given $0 basis.
@@ -61,7 +71,7 @@ doing it single-item (`classify-inbound-self-transfer --basis`). Per-row exclude
 Mirror `bulk_link_transfer_plan` exactly (a `&self` read helper; appends nothing; KAT-G1-clean at the TUI
 call site). Signature:
 ```rust
-pub struct BulkStiFilter { pub frame: Frame, pub wallet: Option<WalletId> }   // Frame reused from bulk-link
+pub struct BulkStiFilter { pub frame: crate::Frame, pub wallet: Option<WalletId> }  // [R0-M3] the exact bulk-link Frame
 pub struct BulkStiRow {
     pub in_event: EventId, pub date: TaxDate, pub wallet: Option<WalletId>,
     pub sat: Sat, pub usd_fmv: Option<Usd>,   // fmv_of(&prices, date, sat); the USD being given $0 basis
@@ -74,11 +84,15 @@ pub struct BulkStiPlan {
 }
 pub fn bulk_self_transfer_in_plan(&self, filter: BulkStiFilter) -> Result<BulkStiPlan, CliError>;
 ```
-**Selection:** enumerate `UnknownBasisInbound`-flagged `TransferIn` events (as
-`self_transfer_match_plan` does); enrich each with `date = tax_date(...)`, `wallet = ev.wallet`, `sat`,
-`usd_fmv = fmv_of(&prices, date, sat)`; **frame filter** (`All` / `Year(y)` / `Range{from,to}` — reuse
-`Frame`); **wallet filter** (if `Some(w)`, keep `wallet == Some(w)`); sort by `date`. Honest floor: a row
-with no price → `usd_fmv = None` + `missing_price_count += 1`; the total renders exact `$X` (0 missing) or
+**Selection:** enumerate `UnknownBasisInbound`-flagged `TransferIn` events (blocker set joined to the raw
+event, as `self_transfer_match_plan` does), then **EXCLUDE [R0-I1]** any `in_event` already targeted by a
+non-voided `ClassifyInbound` (build the `already_classified` set from `ClassifyInbound` targets minus
+`VoidDecisionEvent` targets — mirror `open_classify_inbound_flow`'s filter 3, `main.rs:2139-2171`) **and
+[R0-M2]** any `wallet.is_none()` `TransferIn` (creates no lot). For each survivor: `date = tax_date(...)`,
+`wallet = ev.wallet` (now always `Some`), `sat`, `usd_fmv = fmv_of(&prices, date, sat)`; **frame filter**
+(`All` / `Year(y)` / `Range{from,to}` — reuse `crate::Frame` [R0-M3], the exact bulk-link type); **wallet
+filter** (if `Some(w)`, keep `wallet == Some(w)`); sort by `date`. Honest floor: a row with no price →
+`usd_fmv = None` + `missing_price_count += 1`; the total renders exact `$X` (0 missing) or
 `≥ $X (N unavailable)`. **No same-wallet guard needed** (an inbound has no "destination"; it's the
 receiving leg). Empty `included` → the caller no-opens / exits.
 
@@ -115,6 +129,7 @@ new state. Empty selection (all unchecked) → refuse before persist.
 ```rust
 pub fn persist_bulk_self_transfer_in(session: &mut Session, in_events: Vec<EventId>,
     now: OffsetDateTime) -> Result<usize, PersistError> {
+    if in_events.is_empty() { return Err(PersistError::NoChange); }  // [R0-M1] refuse BEFORE snapshot (mirror)
     let pre = session.snapshot()?;
     for in_event in &in_events {
         let payload = EventPayload::ClassifyInbound(ClassifyInbound {
@@ -153,8 +168,13 @@ self-transfer-in ($0 basis); {remaining} unclassified inbound(s) remain."`
 - **Void (`v`):** bulk-created classifications are ordinary revocable decisions.
 
 ## Gotchas (for the reviewer)
-- **G1:** selection MUST be the `UnknownBasisInbound` set (not "all TransferIn") — that set already
-  excludes reconciled/matched inbounds → bulk can't sweep an income deposit or a matched self-transfer.
+- **G1 [R0-I1]:** selection = `UnknownBasisInbound`-flagged `TransferIn`s **MINUS** those already targeted
+  by a non-voided `ClassifyInbound` (filter 3, mirror `open_classify_inbound_flow`) **MINUS** wallet-less
+  ones. `UnknownBasisInbound` is RE-EMITTED for gift-basis-unknown + wallet-less-self-transfer states
+  (`fold.rs:920/931/966`), so "flagged" ≠ "unclassified" — appending a duplicate `ClassifyInbound` on one
+  fires a return-blocking Hard `DecisionConflict` (first-wins keeps the tax number, but the return stops
+  computing). A classified INCOME deposit fires `FmvMissing` not `UnknownBasisInbound`, so it is never a
+  candidate — the "can't zero-basis an income deposit" spine holds regardless.
 - **G2 (honesty):** the preview MUST surface the total USD FMV being given $0 basis (the over-tax the user
   is accepting) as a floor (`≥ $X` when a price is missing) — never blank, never a false exact.
 - **G3 [bulk-I1]:** the persist fn reverts a mid-batch append failure via `rollback(session,&pre,e)` — do
@@ -167,7 +187,11 @@ self-transfer-in ($0 basis); {remaining} unclassified inbound(s) remain."`
 
 ## KATs
 - **btctax-cli:** `bulk_sti_plan_selects_unknown_inbounds_in_frame` (frame + wallet filters; classified/
-  matched inbounds NOT selected — the structural safety); `bulk_sti_plan_fmv_floor_when_price_missing`;
+  matched inbounds NOT selected — the structural safety); **`bulk_sti_plan_excludes_already_classified_and_
+  walletless` [R0-I1]** — the fixture MUST include a **gift-case-4** inbound (`GiftReceived{donor_basis:
+  None, donor_acquired_at:None}`, which re-fires `UnknownBasisInbound`) AND a **wallet-less** `TransferIn`,
+  asserting NEITHER is in `included` (an Income-only fixture would miss this — Income fires `FmvMissing`,
+  not `UnknownBasisInbound`); `bulk_sti_plan_fmv_floor_when_price_missing`;
   `bulk_sti_cli_dry_run_writes_nothing`; `bulk_sti_cli_apply_is_atomic_single_save` (N ClassifyInbound
   appended, one save, all project as non-taxable $0-basis lots); `bulk_sti_cli_no_match_exits_clean`.
 - **edit/persist.rs:** `persist_bulk_sti_strict_prefix` (exactly N ClassifyInbound{SelfTransferMine}
