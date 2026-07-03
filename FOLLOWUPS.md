@@ -4,6 +4,31 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## bulk-link-transfer (`b` / `reconcile bulk-link-transfer`) — DEFERRALS (2026-07-03) — branch `feat/bulk-link-transfer`
+
+Bulk self-transfer shipped on `feat/bulk-link-transfer` (Task 1 core plan + two-phase CLI; Task 2 TUI
+`b` flow + `persist_bulk_link_transfer` with mid-batch rollback; Task 3 E2E). Scope was
+**self-transfer-only, out→wallet, one destination per batch** (SPEC_bulk_link_transfer.md). The
+following were CONSCIOUSLY DEFERRED (spec §Non-goals / Out-of-scope + R0 forks) — tracked-open backlog,
+USER-DIRECTED (do not auto-start):
+
+- **out→in auto-matching.** v1 links each selected outflow to ONE chosen *wallet* (`TransferTarget::Wallet`);
+  it does NOT fuzzy-match outs to specific inbound TransferIn events. A future pass could pair outs with
+  candidate `TransferIn`s by amount/date proximity. — OPEN (feature).
+- **other reconcile decision types.** Bulk applies ONLY `TransferLink` (self-transfer). Bulk
+  reclassify-outflow (Sell/Spend/Gift/Donate), bulk classify-inbound, etc. are not in scope — each needs
+  per-decision required inputs (proceeds/FMV/donee) that resist a single-confirm batch. — OPEN (feature).
+- **TUI free-text `--from/--to` date RANGE.** The TUI filter offers All + each distinct year (a picker,
+  no free-text date entry); an arbitrary date range is CLI-only (`--from`/`--to`, `Frame::Range`). The
+  year picker + per-row exclude covers the TUI case (R0 Fork-A: KEEP CLI-only). — OPEN (feature).
+- **backport the typed destination [Fork B] to the single `l` link-transfer flow.** The bulk `b` flow
+  accepts a TYPED destination (`parse_wallet_id` → a never-seen `self:cold-wallet` is reachable). The
+  single `l` flow is still pick-list-only (its R0-I2 limitation: destinations sourced from `snap.events`).
+  The typed-dest affordance built here should be backported to `l`. — OPEN (small; `open_link_transfer_flow`
+  `main.rs`, `handle_lt_target_pick_key`).
+
+---
+
 ## ✅ Terminal chunk-5 burndown — DISPOSITION (2026-07-03) — AUTONOMOUS RUN COMPLETE
 
 The post-chunk-3 autonomous run (mandate 2026-07-02: save-rollback + hardening → chunk 4 → chunk 5 →

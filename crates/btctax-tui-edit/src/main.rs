@@ -17398,4 +17398,179 @@ mod tests {
         );
         assert_eq!(m.out_events, vec![o1, o2]);
     }
+
+    // ── Bulk link-transfer E2E round-trips (bulk-link-transfer Task 3) ────────
+
+    /// E2E: `b` → typed dest → filter → exclude one → confirm → APPLY. The included out projects
+    /// as `Op::SelfTransfer` (relocated to the dest wallet, absent from pending); the excluded out
+    /// stays pending.
+    #[test]
+    fn kat_e2e_bulk_link_then_selftransfer() {
+        use btctax_core::{EventPayload, TransferTarget};
+        use std::collections::BTreeSet;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-bulk-st";
+        let (o1, o2) = seed_bulk_one_wallet(&vault, &key, pp_str);
+        let cold = btctax_core::WalletId::SelfCustody {
+            label: "cold".into(),
+        };
+
+        let mut app = open_app(&vault, pp_str);
+        {
+            let snap = app.snapshot.as_ref().unwrap();
+            let pend: BTreeSet<_> = snap
+                .state
+                .pending_reconciliation
+                .iter()
+                .map(|p| p.event.clone())
+                .collect();
+            assert!(
+                pend.contains(&o1) && pend.contains(&o2),
+                "both outs start pending"
+            );
+        }
+
+        // b → n → self:cold → Filter → Preview.
+        handle_key(&mut app, press(KeyCode::Char('b')));
+        handle_key(&mut app, press(KeyCode::Char('n')));
+        type_str(&mut app, "self:cold");
+        handle_key(&mut app, press(KeyCode::Enter)); // → Filter
+        handle_key(&mut app, press(KeyCode::Enter)); // → Preview
+                                                     // Exclude o1 (row 0, sorted by date), keep o2.
+        handle_key(&mut app, press(KeyCode::Char(' ')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal
+        assert!(app.bulk_link_modal.is_some());
+        handle_key(&mut app, press(KeyCode::Enter)); // APPLY (persist + re-project)
+
+        assert!(app.bulk_link_flow.is_none() && app.bulk_link_modal.is_none());
+        let snap = app.snapshot.as_ref().unwrap();
+        let pend: BTreeSet<_> = snap
+            .state
+            .pending_reconciliation
+            .iter()
+            .map(|p| p.event.clone())
+            .collect();
+        assert_eq!(
+            pend.len(),
+            1,
+            "one out linked, one excluded remains pending"
+        );
+        assert!(
+            pend.contains(&o1) && !pend.contains(&o2),
+            "excluded o1 stays pending; included o2 left pending (self-transferred)"
+        );
+        let links: Vec<_> = snap
+            .events
+            .iter()
+            .filter_map(|e| match &e.payload {
+                EventPayload::TransferLink(tl) => Some(tl.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(links.len(), 1, "exactly one TransferLink appended");
+        assert_eq!(links[0].out_event, o2);
+        assert_eq!(
+            links[0].in_event_or_wallet,
+            TransferTarget::Wallet(cold.clone())
+        );
+        assert!(
+            snap.state.holdings_by_wallet.contains_key(&cold),
+            "the self-transfer relocated o2's lot to the dest wallet (Op::SelfTransfer)"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Linked 1 outflow"),
+            "status reports the applied count; got {:?}",
+            app.status
+        );
+    }
+
+    /// E2E: bulk-link BOTH outs, then void ONE bulk-created link via the `v` flow — it voids
+    /// cleanly (the out returns to pending; no DecisionConflict).
+    #[test]
+    fn kat_e2e_bulk_link_then_void() {
+        use btctax_core::EventPayload;
+        use std::collections::BTreeSet;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-bulk-void";
+        let (o1, o2) = seed_bulk_one_wallet(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        // Bulk-link BOTH (no exclude).
+        handle_key(&mut app, press(KeyCode::Char('b')));
+        handle_key(&mut app, press(KeyCode::Char('n')));
+        type_str(&mut app, "self:cold");
+        handle_key(&mut app, press(KeyCode::Enter)); // → Filter
+        handle_key(&mut app, press(KeyCode::Enter)); // → Preview
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        handle_key(&mut app, press(KeyCode::Enter)); // APPLY
+        assert!(
+            app.snapshot
+                .as_ref()
+                .unwrap()
+                .state
+                .pending_reconciliation
+                .is_empty(),
+            "both outs linked → nothing pending"
+        );
+
+        // Find the TransferLink decision id for o1.
+        let link_id = {
+            let snap = app.snapshot.as_ref().unwrap();
+            snap.events
+                .iter()
+                .find(
+                    |e| matches!(&e.payload, EventPayload::TransferLink(tl) if tl.out_event == o1),
+                )
+                .map(|e| e.id.clone())
+                .expect("a TransferLink for o1 must exist")
+        };
+
+        // Void it via the `v` flow.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('v')));
+        assert!(app.void_flow.is_some(), "void flow must open");
+        let idx = app
+            .void_flow
+            .as_ref()
+            .unwrap()
+            .list
+            .items
+            .iter()
+            .position(|it| it.event_id == link_id)
+            .expect("the bulk link must be listed as a revocable decision");
+        for _ in 0..idx {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → void modal
+        assert!(app.void_modal.is_some(), "void modal must open");
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm void
+        assert!(app.void_flow.is_none(), "void flow closes after confirm");
+
+        // After void: o1 returns to pending; o2 stays self-transferred; the void is clean.
+        let snap = app.snapshot.as_ref().unwrap();
+        let pend: BTreeSet<_> = snap
+            .state
+            .pending_reconciliation
+            .iter()
+            .map(|p| p.event.clone())
+            .collect();
+        assert!(pend.contains(&o1), "voided link → o1 returns to pending");
+        assert!(!pend.contains(&o2), "o2 remains self-transferred");
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::DecisionConflict),
+            "voiding a bulk link is clean (no DecisionConflict)"
+        );
+    }
 }
