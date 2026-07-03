@@ -57,6 +57,12 @@ pub enum BlockerKind {
     /// exchange-price/readily-valued exception does NOT apply to crypto).
     /// **Advisory** — never gates `compute_tax_year`; emitted per qualifying Donate event.
     QualifiedAppraisalNote,
+    /// Cycle A: an inbound self-transfer (`InboundClass::SelfTransferMine`) whose basis was DEFAULTED
+    /// to $0 (`basis == None`). $0 is a *computable*, conservative value (never gates a later disposal —
+    /// contrast the Hard `UnknownBasisInbound`, which creates NO lot); this is a pure honesty prompt to
+    /// supply the real cost. Fires on `None` only, never on an attested `Some(0)`.
+    /// **Advisory** — never gates `compute_tax_year`.
+    SelfTransferInboundZeroBasis,
 }
 impl BlockerKind {
     pub fn severity(self) -> Severity {
@@ -75,9 +81,11 @@ impl BlockerKind {
             | TaxYearNotComputable
             | TaxProfileMissing
             | TaxTableMissing => Severity::Hard,
-            SafeHarborTimebar | UnmatchedOutflows | Pre2025MethodNote | QualifiedAppraisalNote => {
-                Severity::Advisory
-            }
+            SafeHarborTimebar
+            | UnmatchedOutflows
+            | Pre2025MethodNote
+            | QualifiedAppraisalNote
+            | SelfTransferInboundZeroBasis => Severity::Advisory,
         }
     }
 }

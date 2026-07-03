@@ -22,25 +22,25 @@ use edit::form::{
     cycle_classify_raw_variant, cycle_filing_status, cycle_income_kind, cycle_income_kind_optional,
     cycle_outflow_kind, filter_optimize_candidates, income_kind_display, is_revocable_payload,
     next_focus, optimize_basis_label, prev_focus, validate, validate_classify_inbound_gift,
-    validate_classify_inbound_income, validate_classify_raw_acquire, validate_classify_raw_income,
-    validate_donation_details, validate_reclassify_income, validate_reclassify_outflow,
-    validate_select_lots, validate_set_fmv, AllocLotRow, BulkLinkFlowState, BulkLinkModalState,
-    BulkLinkRowItem, BulkLinkStep, ClassifyInboundFlowState, ClassifyInboundModalState,
-    ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep,
-    ClassifyRawVariant, ConflictItem, DisposalKind, DisposalListItem, DonationListItem,
-    FieldBuffer, FmvListItem, InEventItem, InboundListItem, InboundVariant, IncomeListItem,
-    LinkMode, LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, LotPickFormRow,
-    MutationModalState, OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep,
-    OptimizeCandidateItem, OutflowKind, OutflowListItem, ProfileFormState, RawListItem,
-    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
-    ReclassifyOutflowFlowState, ReclassifyOutflowModalState, ReclassifyOutflowStep,
-    ResolveConflictFlowState, ResolveConflictModalState, ResolveConflictStep, ResolveKind,
-    SafeHarborAllocateFlowState, SafeHarborAllocateModalState, SafeHarborAllocateStep,
-    SafeHarborAttestFlowState, SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState,
-    SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
-    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList,
-    TransferOutItem, VoidFlowState, VoidListItem, VoidModalState, VoidStep, WalletItem,
-    FREETEXT_CAP,
+    validate_classify_inbound_income, validate_classify_inbound_self_transfer,
+    validate_classify_raw_acquire, validate_classify_raw_income, validate_donation_details,
+    validate_reclassify_income, validate_reclassify_outflow, validate_select_lots,
+    validate_set_fmv, AllocLotRow, BulkLinkFlowState, BulkLinkModalState, BulkLinkRowItem,
+    BulkLinkStep, ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyInboundStep,
+    ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep, ClassifyRawVariant, ConflictItem,
+    DisposalKind, DisposalListItem, DonationListItem, FieldBuffer, FmvListItem, InEventItem,
+    InboundListItem, InboundVariant, IncomeListItem, LinkMode, LinkTransferFlowState,
+    LinkTransferModalState, LinkTransferStep, LotPickFormRow, MutationModalState,
+    OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep, OptimizeCandidateItem,
+    OutflowKind, OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
+    ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
+    ReclassifyOutflowModalState, ReclassifyOutflowStep, ResolveConflictFlowState,
+    ResolveConflictModalState, ResolveConflictStep, ResolveKind, SafeHarborAllocateFlowState,
+    SafeHarborAllocateModalState, SafeHarborAllocateStep, SafeHarborAttestFlowState,
+    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
+    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
+    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TransferOutItem, VoidFlowState,
+    VoidListItem, VoidModalState, VoidStep, WalletItem, FREETEXT_CAP,
 };
 use editor::{EditorApp, EditorScreen};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -699,6 +699,7 @@ fn handle_classify_inbound_flow_key(app: &mut EditorApp, key: KeyEvent) {
         Some(ClassifyInboundStep::VariantPicker { .. }) => 1,
         Some(ClassifyInboundStep::IncomeForm { .. }) => 2,
         Some(ClassifyInboundStep::GiftForm { .. }) => 3,
+        Some(ClassifyInboundStep::SelfTransferForm { .. }) => 4,
         None => return,
     };
     match step_kind {
@@ -706,6 +707,7 @@ fn handle_classify_inbound_flow_key(app: &mut EditorApp, key: KeyEvent) {
         1 => handle_ci_picker_key(app, key),
         2 => handle_ci_income_form_key(app, key),
         3 => handle_ci_gift_form_key(app, key),
+        4 => handle_ci_self_transfer_form_key(app, key),
         _ => {}
     }
 }
@@ -768,7 +770,8 @@ fn handle_ci_picker_key(app: &mut EditorApp, key: KeyEvent) {
                 if let ClassifyInboundStep::VariantPicker { variant, .. } = &mut flow.step {
                     *variant = match *variant {
                         InboundVariant::Income => InboundVariant::GiftReceived,
-                        InboundVariant::GiftReceived => InboundVariant::Income,
+                        InboundVariant::GiftReceived => InboundVariant::SelfTransferMine,
+                        InboundVariant::SelfTransferMine => InboundVariant::Income,
                     };
                 }
             }
@@ -794,6 +797,13 @@ fn handle_ci_picker_key(app: &mut EditorApp, key: KeyEvent) {
                         fmv_at_gift_buf: FieldBuffer::new(),
                         donor_basis_buf: FieldBuffer::new(),
                         donor_acquired_at_buf: FieldBuffer::new(),
+                        focus: 0,
+                        error: None,
+                    },
+                    InboundVariant::SelfTransferMine => ClassifyInboundStep::SelfTransferForm {
+                        item,
+                        basis_buf: FieldBuffer::new(),
+                        acquired_buf: FieldBuffer::new(),
                         focus: 0,
                         error: None,
                     },
@@ -1046,6 +1056,116 @@ fn handle_ci_gift_form_key(app: &mut EditorApp, key: KeyEvent) {
                         0 => fmv_at_gift_buf.push_char(c),
                         1 => donor_basis_buf.push_char(c),
                         2 => donor_acquired_at_buf.push_char(c),
+                        _ => {}
+                    }
+                    // 'q' at any text focus inserts into the buffer — does NOT quit [R2-N1].
+                }
+            }
+        }
+        _ => {
+            // All unmatched keys swallowed [R0-I2].
+        }
+    }
+}
+
+/// SelfTransferForm step (Cycle A): two OPTIONAL text fields — basis (focus 0), acquired_at (focus 1).
+/// Mirrors the gift-form handler; Enter validates → opens the (reused) confirmation modal; Esc → picker.
+fn handle_ci_self_transfer_form_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let result = {
+                match app.classify_inbound_flow.as_ref() {
+                    Some(f) => match &f.step {
+                        ClassifyInboundStep::SelfTransferForm {
+                            item,
+                            basis_buf,
+                            acquired_buf,
+                            ..
+                        } => validate_classify_inbound_self_transfer(basis_buf, acquired_buf)
+                            .map(|cls| (item.clone(), cls)),
+                        _ => return,
+                    },
+                    None => return,
+                }
+            };
+            match result {
+                Ok((item, cls)) => {
+                    app.classify_inbound_modal = Some(ClassifyInboundModalState {
+                        target_event: item.blocker_event.clone(),
+                        target_date: item.date,
+                        target_sat: item.sat,
+                        as_: cls,
+                    });
+                }
+                Err(msg) => {
+                    if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                        if let ClassifyInboundStep::SelfTransferForm { error, .. } = &mut flow.step
+                        {
+                            *error = Some(msg);
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            // Back to variant picker (retaining the item).
+            let item = match app.classify_inbound_flow.as_ref() {
+                Some(f) => match &f.step {
+                    ClassifyInboundStep::SelfTransferForm { item, .. } => item.clone(),
+                    _ => return,
+                },
+                None => return,
+            };
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                flow.step = ClassifyInboundStep::VariantPicker {
+                    item,
+                    variant: InboundVariant::SelfTransferMine,
+                };
+            }
+        }
+        KeyCode::Tab | KeyCode::Down => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::SelfTransferForm { focus, .. } = &mut flow.step {
+                    *focus = (*focus + 1).min(1);
+                }
+            }
+        }
+        KeyCode::BackTab | KeyCode::Up => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::SelfTransferForm { focus, .. } = &mut flow.step {
+                    *focus = focus.saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::SelfTransferForm {
+                    basis_buf,
+                    acquired_buf,
+                    focus,
+                    ..
+                } = &mut flow.step
+                {
+                    match *focus {
+                        0 => basis_buf.pop_char(),
+                        1 => acquired_buf.pop_char(),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(flow) = app.classify_inbound_flow.as_mut() {
+                if let ClassifyInboundStep::SelfTransferForm {
+                    basis_buf,
+                    acquired_buf,
+                    focus,
+                    ..
+                } = &mut flow.step
+                {
+                    match *focus {
+                        0 => basis_buf.push_char(c),
+                        1 => acquired_buf.push_char(c),
                         _ => {}
                     }
                     // 'q' at any text focus inserts into the buffer — does NOT quit [R2-N1].
@@ -2195,6 +2315,7 @@ fn derive_classify_inbound_status(
             format!("Income({})", income_kind_display(*kind))
         }
         InboundClass::GiftReceived { .. } => "GiftReceived".to_string(),
+        InboundClass::SelfTransferMine { .. } => "SelfTransferMine".to_string(),
     };
     format!("Classified inbound as {cls_desc}")
 }
@@ -8014,6 +8135,200 @@ mod tests {
             "E2E-CI step 4: cmd::inspect::verify must NOT list UnknownBasisInbound for the \
              classified TransferIn; hard blockers: {:?}",
             vr.hard
+        );
+    }
+
+    // ── KAT-CI-ST — self-transfer-in variant Tab-cycle + form transition ─────
+
+    /// Cycle A (Task 3): the picker Tab-cycles Income → GiftReceived → SelfTransferMine → Income,
+    /// and Enter on the SelfTransferMine picker opens the SelfTransferForm step.
+    #[test]
+    fn kat_ci_st_picker_cycles_and_opens_self_transfer_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-ci-st-cycle";
+
+        seed_transfer_in_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        handle_key(&mut app, press(KeyCode::Char('c'))); // open flow (List)
+        handle_key(&mut app, press(KeyCode::Enter)); // List → VariantPicker (Income)
+                                                     // Tab twice: Income → GiftReceived → SelfTransferMine.
+        handle_key(&mut app, press(KeyCode::Tab));
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert!(
+            matches!(
+                app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                Some(ClassifyInboundStep::VariantPicker {
+                    variant: InboundVariant::SelfTransferMine,
+                    ..
+                })
+            ),
+            "two Tabs must reach SelfTransferMine"
+        );
+        // Third Tab wraps back to Income.
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert!(
+            matches!(
+                app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                Some(ClassifyInboundStep::VariantPicker {
+                    variant: InboundVariant::Income,
+                    ..
+                })
+            ),
+            "third Tab must wrap to Income"
+        );
+        // Back to SelfTransferMine, then Enter → SelfTransferForm.
+        handle_key(&mut app, press(KeyCode::Tab));
+        handle_key(&mut app, press(KeyCode::Tab));
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                Some(ClassifyInboundStep::SelfTransferForm { .. })
+            ),
+            "Enter on SelfTransferMine picker must open SelfTransferForm"
+        );
+        // Esc → back to VariantPicker (SelfTransferMine retained).
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(
+            matches!(
+                app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                Some(ClassifyInboundStep::VariantPicker {
+                    variant: InboundVariant::SelfTransferMine,
+                    ..
+                })
+            ),
+            "Esc on SelfTransferForm returns to the picker on SelfTransferMine"
+        );
+    }
+
+    /// KAT-E2E-ST — full self-transfer-in flow with DEFAULT basis: creates a non-taxable lot, clears
+    /// `UnknownBasisInbound`, and fires the `SelfTransferInboundZeroBasis` advisory. Also asserts the
+    /// modal renders the self-transfer copy, and 'q' in the (empty) basis field is swallowed.
+    #[test]
+    fn kat_e2e_ci_classify_inbound_self_transfer_default_basis() {
+        use btctax_core::persistence::load_all_ordered;
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-st-pass";
+
+        let ti_id = seed_transfer_in_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        // Seed produces UnknownBasisInbound.
+        assert!(
+            app.snapshot
+                .as_ref()
+                .unwrap()
+                .state
+                .blockers
+                .iter()
+                .any(|b| {
+                    b.kind == BlockerKind::UnknownBasisInbound && b.event.as_ref() == Some(&ti_id)
+                }),
+            "E2E-ST: seed must produce UnknownBasisInbound"
+        );
+        let pre_len = load_all_ordered(app.session.as_ref().unwrap().conn())
+            .unwrap()
+            .len();
+
+        // c → Enter (List→Picker) → Tab,Tab (→ SelfTransferMine) → Enter (→ SelfTransferForm)
+        handle_key(&mut app, press(KeyCode::Char('c')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        handle_key(&mut app, press(KeyCode::Tab));
+        handle_key(&mut app, press(KeyCode::Tab));
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.classify_inbound_flow.as_ref().map(|f| &f.step),
+                Some(ClassifyInboundStep::SelfTransferForm { .. })
+            ),
+            "E2E-ST: must be on SelfTransferForm"
+        );
+
+        // 'q' at the (text) basis field is swallowed (inserted, not quit) [R2-N1]; backspace it out.
+        handle_key(&mut app, press(KeyCode::Char('q')));
+        assert!(!app.should_quit, "E2E-ST: 'q' in basis field must not quit");
+        assert!(app.classify_inbound_flow.is_some());
+        handle_key(&mut app, press(KeyCode::Backspace));
+
+        // Leave BOTH fields empty (defaults). Enter → modal.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.classify_inbound_modal.is_some(),
+            "E2E-ST: Enter on empty SelfTransferForm must open the modal (fields optional)"
+        );
+
+        // Modal renders the self-transfer copy + the canonical target id.
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let rendered = rendered_text(&terminal);
+        assert!(
+            rendered.contains(&ti_id.canonical()),
+            "E2E-ST: modal must show the canonical EventId; rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("SelfTransferMine") || rendered.contains("my own coins"),
+            "E2E-ST: modal must identify the self-transfer classification; rendered: {rendered}"
+        );
+
+        // Confirm → save + re-project.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.classify_inbound_modal.is_none(),
+            "E2E-ST: modal closes after confirm"
+        );
+        assert!(
+            app.classify_inbound_flow.is_none(),
+            "E2E-ST: flow closes after confirm"
+        );
+
+        // Exactly one decision row appended.
+        let post_len = load_all_ordered(app.session.as_ref().unwrap().conn())
+            .unwrap()
+            .len();
+        assert_eq!(
+            post_len,
+            pre_len + 1,
+            "E2E-ST: exactly one decision appended"
+        );
+
+        // Reopen + project → UnknownBasisInbound gone; a non-taxable lot exists; advisory present.
+        drop(app);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let (snap, _) = btctax_tui::unlock::build_snapshot(&session2).unwrap();
+        assert!(
+            !snap.state.blockers.iter().any(|b| {
+                b.kind == BlockerKind::UnknownBasisInbound && b.event.as_ref() == Some(&ti_id)
+            }),
+            "E2E-ST: UnknownBasisInbound must be cleared"
+        );
+        assert_eq!(snap.state.lots.len(), 1, "E2E-ST: a lot is created");
+        assert_eq!(
+            snap.state.lots[0].usd_basis,
+            rust_decimal_macros::dec!(0),
+            "E2E-ST: default basis is $0"
+        );
+        assert!(
+            !snap.state.lots[0].basis_pending,
+            "E2E-ST: $0 basis never gates"
+        );
+        assert!(
+            snap.state.income_recognized.is_empty(),
+            "E2E-ST: non-taxable"
+        );
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::SelfTransferInboundZeroBasis),
+            "E2E-ST: the zero-basis advisory must fire for the default-basis path"
         );
     }
 

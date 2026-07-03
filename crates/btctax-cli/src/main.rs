@@ -234,6 +234,16 @@ enum Reconcile {
         #[arg(long)]
         donor_acquired: Option<String>,
     },
+    /// Classify an inbound TransferIn as an inbound self-transfer ("my own coins" returning) —
+    /// non-taxable, creates a fresh lot. `--basis` defaults to $0 (conservative; fires the honest
+    /// zero-basis advisory when omitted); `--acquired` defaults to the receipt date (short-term).
+    ClassifyInboundSelfTransfer {
+        in_ref: String,
+        #[arg(long)]
+        basis: Option<String>,
+        #[arg(long)]
+        acquired: Option<String>,
+    },
     /// Reclassify a pending TransferOut.
     ReclassifyOutflow {
         out: String,
@@ -859,6 +869,20 @@ fn dispatch_reconcile(
                     .map(eventref::parse_date_arg)
                     .transpose()?,
                 fmv_at_gift: eventref::parse_usd_arg(&fmv_at_gift)?,
+            };
+            cmd::reconcile::classify_inbound(vault, &pp, &in_ref, class, now)?
+        }
+        Reconcile::ClassifyInboundSelfTransfer {
+            in_ref,
+            basis,
+            acquired,
+        } => {
+            let class = InboundClass::SelfTransferMine {
+                basis: basis.as_deref().map(eventref::parse_usd_arg).transpose()?,
+                acquired_at: acquired
+                    .as_deref()
+                    .map(eventref::parse_date_arg)
+                    .transpose()?,
             };
             cmd::reconcile::classify_inbound(vault, &pp, &in_ref, class, now)?
         }

@@ -955,6 +955,62 @@ pub(crate) fn fold_event(
             pools.new_origin_lot(pool_key(date, &wallet), lot);
             stats.sigma_in += *sat; // classified GiftReceived is externally-sourced (FR9)
         }
+        Op::SelfTransferInbound {
+            sat,
+            basis,
+            acquired_at,
+        } => {
+            // Cycle A: "my own coins" returning — a NON-taxable receipt that CREATES a fresh origin lot.
+            // Modeled on Op::IncomeInbound (fold.rs), but (G1) NEVER basis_pending, (G2) pushes NO
+            // IncomeRecord, and (G3) donor_acquired_at: None (not a gift — no tacking).
+            let wallet = match &eff.wallet {
+                Some(w) => w.clone(),
+                None => {
+                    // [R0-M2 / G5] No wallet → nowhere to create the lot. Emit a Hard UnknownBasisInbound
+                    // with a self-transfer message (NOT the IncomeInbound FmvMissing guard, which is
+                    // semantically wrong for a non-income receipt) and return without creating a lot.
+                    st.add_blocker(
+                        BlockerKind::UnknownBasisInbound,
+                        Some(eff.id.clone()),
+                        "self-transfer inbound without wallet — nowhere to create the lot",
+                    );
+                    return;
+                }
+            };
+            let usd_basis = basis.unwrap_or(Usd::ZERO); // conservative $0 default (max eventual gain)
+            let acq = acquired_at.unwrap_or(date); // conservative receipt-date default (date = event date)
+            if basis.is_none() {
+                // (G4) ADVISORY only — fires on None, NOT on usd_basis == 0 (an attested Some(0) is silent).
+                st.add_blocker(
+                    BlockerKind::SelfTransferInboundZeroBasis,
+                    Some(eff.id.clone()),
+                    "basis defaulted to $0 — likely overstates your eventual gain (holding period also \
+                     defaults to the receipt date = short-term). To supply the real cost/date, VOID this \
+                     classification (press 'v', or run: btctax reconcile void) and re-classify with \
+                     --basis/--acquired — classify-inbound is first-wins, so re-running without voiding \
+                     first would conflict, not update.",
+                );
+            }
+            let lot = Lot {
+                lot_id: LotId {
+                    origin_event_id: eff.id.clone(),
+                    split_sequence: 0,
+                },
+                wallet: wallet.clone(),
+                acquired_at: acq, // HP start; gain_hp_start() == acq (donor_acquired_at is None → no tacking)
+                original_sat: *sat,
+                remaining_sat: *sat,
+                usd_basis,
+                basis_source: BasisSource::SelfTransferInbound,
+                dual_loss_basis: None,
+                donor_acquired_at: None, // NOT a gift — it's your own coin
+                basis_pending: false, // (G1) $0 is computable → NEVER gated (contrast Income-FMV-missing)
+            };
+            // pool_key uses the RECEIPT date (`date`), while acquired_at carries the supplied-or-receipt
+            // date — orthogonal (mirrors the gift path): a real old date lands in the receipt-year pool.
+            pools.new_origin_lot(pool_key(date, &wallet), lot);
+            stats.sigma_in += *sat; // FR9 Σin: coins enter the ledger (externally-sourced)
+        }
         Op::GiftOut {
             sat,
             fmv,

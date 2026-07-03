@@ -602,8 +602,9 @@ fn draw_classify_inbound_form(frame: &mut Frame, area: Rect, step: &ClassifyInbo
     let (title, content) = match step {
         ClassifyInboundStep::VariantPicker { item, variant } => {
             let variant_str = match variant {
-                InboundVariant::Income => "> Income         GiftReceived",
-                InboundVariant::GiftReceived => "  Income       > GiftReceived",
+                InboundVariant::Income => "> Income    GiftReceived    SelfTransferMine",
+                InboundVariant::GiftReceived => "  Income  > GiftReceived    SelfTransferMine",
+                InboundVariant::SelfTransferMine => "  Income    GiftReceived  > SelfTransferMine",
             };
             let c = format!(
                 "  target: {target}\n\
@@ -704,6 +705,45 @@ fn draw_classify_inbound_form(frame: &mut Frame, area: Rect, step: &ClassifyInbo
             );
             (" Classify Inbound — GiftReceived  [EDITOR] ", c)
         }
+        ClassifyInboundStep::SelfTransferForm {
+            item,
+            basis_buf,
+            acquired_buf,
+            focus,
+            error,
+        } => {
+            let basis_line = format!(
+                "  {} basis (USD, optional):  {}",
+                if *focus == 0 { ">" } else { " " },
+                basis_buf.buf,
+            );
+            let acquired_line = format!(
+                "  {} acquired_at (YYYY-MM-DD, optional): {}",
+                if *focus == 1 { ">" } else { " " },
+                acquired_buf.buf,
+            );
+            let zero_basis_note = if basis_buf.is_empty() {
+                "\n  NOTE: empty basis → $0 default (non-gating advisory); supply real cost if known."
+            } else {
+                ""
+            };
+            let err_line = error
+                .as_deref()
+                .map(|e| format!("\n  Error: {e}"))
+                .unwrap_or_default();
+            let c = format!(
+                "  target: {target}   (my own coins — non-taxable)\n\
+                 \n\
+                 {basis_line}\n\
+                 {acquired_line}\
+                 {zero_basis_note}\
+                 {err_line}\n\
+                 \n\
+                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move focus   q: swallowed",
+                target = item.blocker_event.canonical(),
+            );
+            (" Classify Inbound — SelfTransferMine  [EDITOR] ", c)
+        }
         // List step is rendered by draw_classify_inbound_list.
         ClassifyInboundStep::List => ("", String::new()),
     };
@@ -758,6 +798,22 @@ fn draw_classify_inbound_modal(frame: &mut Frame, area: Rect, modal: &ClassifyIn
             };
             format!(
                 "  as: GiftReceived\n\n    fmv_at_gift:       {fmv_at_gift}   (REQUIRED)\n    donor_basis:       {basis_str}\n    donor_acquired_at: {date_str}{both_none_warn}",
+            )
+        }
+        InboundClass::SelfTransferMine { basis, acquired_at } => {
+            let basis_str = basis
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "(empty = default $0, conservative)".to_string());
+            let date_str = acquired_at
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "(empty = default = receipt date, short-term)".to_string());
+            let zero_basis_note = if basis.is_none() {
+                "\n\n  NOTE: basis defaults to $0 (non-gating advisory) — supply real cost if you have it."
+            } else {
+                ""
+            };
+            format!(
+                "  as: SelfTransferMine (my own coins — non-taxable)\n\n    basis:       {basis_str}\n    acquired_at: {date_str}{zero_basis_note}",
             )
         }
     };

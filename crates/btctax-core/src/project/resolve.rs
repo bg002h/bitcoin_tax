@@ -68,6 +68,14 @@ pub enum Op {
         donor_acquired_at: Option<TaxDate>,
         fmv_at_gift: Usd,
     },
+    /// Cycle A: ClassifyInbound::SelfTransferMine on a TransferIn — CREATES a new NON-taxable origin lot
+    /// (basis default $0, acquired_at default = receipt date). NOT a relocation (no source lot exists),
+    /// so — unlike `SelfTransfer` — it is neither a disposition nor method-honoring (outside FIFO).
+    SelfTransferInbound {
+        sat: Sat,
+        basis: Option<Usd>,
+        acquired_at: Option<TaxDate>,
+    },
     // Task 9: gift/donation outbound (TP10) and reclassified disposal.
     /// ReclassifyOutflow{GiftOut}: Removal with zero recognized gain; per-lot basis + FMV + ST/LT.
     GiftOut {
@@ -274,6 +282,13 @@ fn build_op(
                         donor_acquired_at: *donor_acquired_at,
                         fmv_at_gift: *fmv_at_gift,
                     },
+                    InboundClass::SelfTransferMine { basis, acquired_at } => {
+                        Op::SelfTransferInbound {
+                            sat: t.sat,
+                            basis: *basis,
+                            acquired_at: *acquired_at,
+                        }
+                    }
                 }
             } else {
                 Op::UnknownInbound { sat: t.sat }

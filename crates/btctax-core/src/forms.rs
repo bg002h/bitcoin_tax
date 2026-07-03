@@ -218,8 +218,9 @@ pub enum Form8283Section {
 /// - `ExchangeProvided` / `ComputedFromCost` → **Purchased**
 /// - `GiftCarryover` / `GiftFmvFallback` → **Gift**
 /// - `FmvAtIncome` → **Other** ("income" is NOT a literal Form 8283 how-acquired category)
-/// - `CarriedFromTransfer` / `SafeHarborAllocated` / `ReconstructedPerWallet` → **Review** (origin
-///   lost — the acquisition provenance cannot be soundly asserted).
+/// - `CarriedFromTransfer` / `SafeHarborAllocated` / `ReconstructedPerWallet` /
+///   `SelfTransferInbound` → **Review** (origin lost — the acquisition provenance cannot be soundly
+///   asserted; a self-transfer-in's coins came from an un-imported wallet with attested/defaulted basis).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Form8283HowAcquired {
     /// Purchased (basis from an exchange record or a computed cost).
@@ -241,7 +242,8 @@ fn how_acquired_from(bs: BasisSource) -> Form8283HowAcquired {
         BasisSource::FmvAtIncome => H::Other,
         BasisSource::CarriedFromTransfer
         | BasisSource::SafeHarborAllocated
-        | BasisSource::ReconstructedPerWallet => H::Review,
+        | BasisSource::ReconstructedPerWallet
+        | BasisSource::SelfTransferInbound => H::Review,
     }
 }
 

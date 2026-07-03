@@ -4,6 +4,40 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ self-transfer completion, Cycle A — inbound self-transfer-in — SHIPPED (2026-07-03)
+
+New `btctax-core` capability (the first core change in a long TUI-only series): classify a pending
+inbound `TransferIn` as **"my own coins" (`InboundClass::SelfTransferMine`)** — the missing 4th path (an
+unmatched inbound was `Op::UnknownInbound`, hard-gated, no lot). Creates a **non-taxable** origin lot:
+basis defaults to **$0** (conservative; optionally `--basis`), acquired_at defaults to the **receipt
+date** (short-term; optionally `--acquired`), `basis_pending: false` (a $0 basis is computable → NEVER
+gates the return), `BasisSource::SelfTransferInbound`, `sigma_in += sat` (FR9), and an **Advisory**
+`SelfTransferInboundZeroBasis` flag only when basis was defaulted. Outside FIFO/HIFO/LIFO by construction.
+`forms.rs how_acquired_from → Review` (provenance lost — honest). CLI `reconcile
+classify-inbound-self-transfer` + TUI classify-inbound extension. Rides the EXISTING `ClassifyInbound`
+decision (reuses collection/first-wins/persist). Brainstorm→architect design→spec R0 GREEN (2 rounds) →
+whole-diff review 0C/0I/1M/1N (4 fault-injection probes: G1 never-gates, G2 non-taxable, G6 outside-FIFO,
+G4 attested-zero-silent — all RED-then-restored). **970 workspace tests.** Governed by
+[[self-transfer-completion-policy]]. Reviews: `reviews/R0-spec-self-transfer-inbound-round-{1,2}.md`,
+`reviews/whole-branch-review-self-transfer-inbound-round-1.md`.
+
+**Folded [WD-M1]:** the zero-basis advisory message now says to VOID-then-reclassify (classify-inbound is
+first-wins, so re-running `--basis` would conflict, not update) — matching the Income path.
+
+**NEXT — Cycle B (matched in/out pairs):**
+- **`SelfTransferPassthrough` drop primitive** — a new `EventPayload` decision mapping BOTH legs of a
+  passthrough (coins in + out of a tracked waypoint, leaving to external) to `Op::Skip` (net zero, no
+  tax, no lot). The RELOCATE half (cross-wallet, destination tracked) already exists as `TransferLink`
+  out→in. — OPEN (feature; the next cycle).
+- **the confirmed matcher** — a read-only proposal pairing UNRECONCILED legs (amount within a fee
+  tolerance, time window, txid corroboration), user-confirmed per pair, NEVER automatic (a coincidental
+  income-in + sale-out must not be auto-collapsed). — OPEN.
+- **bulk-classify-inbound-self-transfer** — a bulk version of Cycle A (after single-item ships). — OPEN.
+- **[WD-N1 nit]** the optional `--acquired > receipt date` future-typo warning (spec G7) — not
+  implemented (a future date only makes the lot short-term = conservative). — OPEN (nit).
+
+---
+
 ## ✅ bulk-link-transfer (`b` / `reconcile bulk-link-transfer`) — SHIPPED (2026-07-03)
 
 Bulk self-transfer: apply `TransferLink`→`Op::SelfTransfer` to many pending outbound transfers at once,
