@@ -4,13 +4,22 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
-## bulk-link-transfer (`b` / `reconcile bulk-link-transfer`) — DEFERRALS (2026-07-03) — branch `feat/bulk-link-transfer`
+## ✅ bulk-link-transfer (`b` / `reconcile bulk-link-transfer`) — SHIPPED (2026-07-03)
 
-Bulk self-transfer shipped on `feat/bulk-link-transfer` (Task 1 core plan + two-phase CLI; Task 2 TUI
-`b` flow + `persist_bulk_link_transfer` with mid-batch rollback; Task 3 E2E). Scope was
-**self-transfer-only, out→wallet, one destination per batch** (SPEC_bulk_link_transfer.md). The
-following were CONSCIOUSLY DEFERRED (spec §Non-goals / Out-of-scope + R0 forks) — tracked-open backlog,
-USER-DIRECTED (do not auto-start):
+Bulk self-transfer: apply `TransferLink`→`Op::SelfTransfer` to many pending outbound transfers at once,
+filtered by time frame + optional source wallet, each linked to ONE destination wallet, atomically +
+reversibly, behind a USD-value preview. Both surfaces — CLI `bulk-link-transfer` (two-phase:
+`bulk_link_plan` read + `apply_bulk_link_transfer` write; `--dry-run`/`--yes`) + TUI `b` flow (dest
+pick-or-**type** → filter → per-row-exclude checklist → confirm → atomic apply). Selection =
+`pending_reconciliation` (already excludes decided/linked outs); a mid-batch append failure reverts the
+WHOLE batch [I1]; honest USD floor `≥ $X (N unavailable)` [I2]; typed cold-wallet destination [Fork B].
+`btctax-core` untouched. First feature born from the full brainstorm→spec pipeline: R0 GREEN (2 rounds;
+caught the mid-batch-rollback + USD-floor) → whole-diff review GREEN (0C/0I/2M/3N; 3 fault-injection
+probes RED-then-restored). **946 workspace tests.** Reviews:
+`reviews/R0-spec-bulk-link-transfer-round-{1,2}.md`, `reviews/whole-branch-review-bulk-link-transfer-round-1.md`.
+
+Scope was **self-transfer-only, out→wallet, one destination per batch**. CONSCIOUSLY DEFERRED
+(tracked-open backlog, USER-DIRECTED — do not auto-start):
 
 - **out→in auto-matching.** v1 links each selected outflow to ONE chosen *wallet* (`TransferTarget::Wallet`);
   it does NOT fuzzy-match outs to specific inbound TransferIn events. A future pass could pair outs with
@@ -26,6 +35,9 @@ USER-DIRECTED (do not auto-start):
   single `l` flow is still pick-list-only (its R0-I2 limitation: destinations sourced from `snap.events`).
   The typed-dest affordance built here should be backported to `l`. — OPEN (small; `open_link_transfer_flow`
   `main.rs`, `handle_lt_target_pick_key`).
+- **[M1 whole-diff] CLI empty-plan cosmetic.** On an empty plan the CLI renders a header-only preview
+  table before the "no pending outbound transfers match" line (harmless redundancy; output still correct).
+  Move the empty check above `render_bulk_link_preview`. — OPEN (nit).
 
 ---
 
