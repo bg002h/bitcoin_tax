@@ -4,6 +4,21 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## tui-edit chunk 5 (safe-harbor-allocate `A`) — FOLLOWUP
+
+- **[C5-1] ProRata `AllocMethod` records the tag but does NOT redistribute basis cross-wallet (matches
+  core open question O4).** Both `ActualPosition` and `ProRata` seed the safe-harbor allocation from the
+  SAME per-wallet actuals (`crates/btctax-cli/src/cmd/reconcile.rs` I-1 note + O4; `Session::safe_harbor_residue`
+  in `crates/btctax-cli/src/session.rs`); the recorded `method` changes ONLY the engine's
+  timebar/effectiveness rule (`ProRata ⇒ always-timebarred-unless-attested`), never the displayed lots. The
+  chunk-5 TUI allocate flow (`A`) records the elected method tag and shows the actuals; its Preview/modal are
+  worded so ProRata does NOT imply cross-wallet redistribution (G3). A true cross-wallet pro-rata
+  redistribution is unimplemented in the engine (core O4) — out of scope here; the TUI is faithful to core.
+  *Recommend* implementing ProRata redistribution in `btctax-core` transition seeding, then surfacing it in
+  both the CLI command and the TUI preview. — OPEN (non-blocking; tracks the core O4 gap).
+
+---
+
 ## ✅ tui-edit chunk 4b (resolve-conflict + optimize-accept) — SHIPPED (2026-07-03) — CHUNK 4 COMPLETE
 
 Cycle C (chunk 4), second half. **resolve-conflict (`i`)** — accept/reject a flagged `ImportConflict`

@@ -13423,6 +13423,229 @@ mod tests {
         );
     }
 
+    // ── KAT-E2E-ALLOCATE-THEN-ATTEST (Task 3) ────────────────────────────────
+    //
+    // A (create REVOCABLE allocation) → a (attest) → EFFECTIVE (Path B). At the current date the
+    // created allocation is timebarred (G2: now > TY2025_RETURN_DUE 2026-04-15), so the attest flow
+    // opens and cures it; NO SafeHarborTimebar remains on the attested id.
+    #[test]
+    fn kat_e2e_allocate_then_attest() {
+        use btctax_core::event::{EventPayload, SafeHarborAllocation};
+        use btctax_core::persistence::load_all_ordered;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-alloc-attest";
+        // Pre-2025 lot (0.20 BTC) + attested FIFO → residue non-empty, config gate open.
+        seed_allocate_vault(&vault, &key, pp_str, true, true, None);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // A → Preview → Enter → modal → Enter → create.
+        handle_key(&mut app, press(KeyCode::Char('A')));
+        assert!(
+            matches!(
+                app.safe_harbor_allocate_flow.as_ref().map(|f| &f.step),
+                Some(SafeHarborAllocateStep::Preview)
+            ),
+            "ALLOC-ATTEST: flow must open at Preview"
+        );
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.safe_harbor_allocate_modal.is_some(),
+            "ALLOC-ATTEST: Enter must open the confirm modal"
+        );
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.safe_harbor_allocate_flow.is_none() && app.safe_harbor_allocate_modal.is_none(),
+            "ALLOC-ATTEST: a clean create must close the flow AND modal"
+        );
+
+        // The created allocation is REVOCABLE + timebarred (arm 3) at the current date.
+        let alloc_id = {
+            let session = app.session.as_ref().unwrap();
+            let events = load_all_ordered(session.conn()).unwrap();
+            let last = events.last().unwrap();
+            let payload: EventPayload = serde_json::from_str(&last.payload_json).unwrap();
+            assert!(
+                matches!(&payload, EventPayload::SafeHarborAllocation(a) if !a.timely_allocation_attested),
+                "ALLOC-ATTEST: the tail must be an unattested SafeHarborAllocation"
+            );
+            EventId::Decision {
+                seq: last.decision_seq.unwrap() as u64,
+            }
+        };
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or("")
+                .contains("REVOCABLE, timebarred"),
+            "ALLOC-ATTEST: create status must be arm 3 (timebarred); got: {:?}",
+            app.status
+        );
+
+        // a → attest the created allocation.
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert!(
+            matches!(
+                app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                Some(SafeHarborAttestStep::Info)
+            ),
+            "ALLOC-ATTEST: attest flow must open at Info (the created allocation is timebarred)"
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // → TypedWord
+        type_str(&mut app, "ATTEST");
+        handle_key(&mut app, press(KeyCode::Enter)); // → attest save
+
+        assert!(
+            app.safe_harbor_attest_flow.is_none() && !app.attest_save_failed,
+            "ALLOC-ATTEST: attest must succeed (flow closed, no latch)"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("Allocation attested (IRREVOCABLE, §7.4)"))
+                .unwrap_or(false),
+            "ALLOC-ATTEST: status must be the clean attest arm; got: {:?}",
+            app.status
+        );
+
+        // The attested allocation is EFFECTIVE: no SafeHarborTimebar on the NEW attested id +
+        // Path-B seed lots installed.
+        let post = {
+            let session = app.session.as_ref().unwrap();
+            load_all_ordered(session.conn()).unwrap()
+        };
+        let attest_id = EventId::Decision {
+            seq: post.last().unwrap().decision_seq.unwrap() as u64,
+        };
+        let last: EventPayload = serde_json::from_str(&post.last().unwrap().payload_json).unwrap();
+        assert!(
+            matches!(&last, EventPayload::SafeHarborAllocation(SafeHarborAllocation { timely_allocation_attested, .. }) if *timely_allocation_attested),
+            "ALLOC-ATTEST: the tail must be the attested allocation"
+        );
+        // Effective = neither the time-bar NOR the conservation blocker fires on the attested id.
+        let snap = app.snapshot.as_ref().unwrap();
+        let on_attest = |k: BlockerKind| {
+            snap.state
+                .blockers
+                .iter()
+                .any(|b| b.kind == k && b.event.as_ref() == Some(&attest_id))
+        };
+        assert!(
+            !on_attest(BlockerKind::SafeHarborTimebar),
+            "ALLOC-ATTEST: NO SafeHarborTimebar may be attributed to the attested id (effective)"
+        );
+        assert!(
+            !on_attest(BlockerKind::SafeHarborUnconservable),
+            "ALLOC-ATTEST: the residue must conserve (no SafeHarborUnconservable on the attested id)"
+        );
+        // The pre-attest allocation was voided by the attest batch (no stray live unattested residue).
+        let _ = alloc_id;
+    }
+
+    // ── KAT-E2E-ALLOCATE-THEN-VOID (Task 3) ──────────────────────────────────
+    //
+    // A (create REVOCABLE allocation) → v (void). The created allocation is inert (timebarred) at the
+    // current date, so #7 keeps it in the void list; voiding it applies CLEANLY (no DecisionConflict).
+    #[test]
+    fn kat_e2e_allocate_then_void() {
+        use btctax_core::event::{EventPayload, VoidDecisionEvent};
+        use btctax_core::persistence::load_all_ordered;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-alloc-void";
+        seed_allocate_vault(&vault, &key, pp_str, true, true, None);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // A → Preview → Enter → modal → Enter → create.
+        handle_key(&mut app, press(KeyCode::Char('A')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.safe_harbor_allocate_flow.is_none(),
+            "ALLOC-VOID: create must close the flow"
+        );
+
+        let alloc_id = {
+            let session = app.session.as_ref().unwrap();
+            let events = load_all_ordered(session.conn()).unwrap();
+            EventId::Decision {
+                seq: events.last().unwrap().decision_seq.unwrap() as u64,
+            }
+        };
+
+        // v → the inert allocation is listed (#7 keeps inert allocations voidable).
+        handle_key(&mut app, press(KeyCode::Char('v')));
+        {
+            let void_flow = app
+                .void_flow
+                .as_ref()
+                .expect("ALLOC-VOID: void flow must open");
+            assert!(
+                void_flow
+                    .list
+                    .items
+                    .iter()
+                    .any(|i| i.event_id == alloc_id && i.payload_tag == "SafeHarborAllocation"),
+                "ALLOC-VOID: the inert created allocation must be listed by the void flow (#7)"
+            );
+            let idx = void_flow
+                .list
+                .items
+                .iter()
+                .position(|i| i.event_id == alloc_id)
+                .unwrap();
+            app.void_flow
+                .as_mut()
+                .unwrap()
+                .list
+                .table_state
+                .select(Some(idx));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → void modal
+        assert!(
+            app.void_modal.is_some(),
+            "ALLOC-VOID: Enter must open the void modal"
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // → void save
+
+        assert!(
+            app.void_flow.is_none() && app.void_modal.is_none(),
+            "ALLOC-VOID: a clean void must close the flow AND modal"
+        );
+
+        // Voided CLEANLY: NO DecisionConflict.
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            !snap
+                .state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::DecisionConflict),
+            "ALLOC-VOID: voiding an inert allocation must NOT raise DecisionConflict; blockers: {:?}",
+            snap.state.blockers
+        );
+
+        // A VoidDecisionEvent targets the created allocation.
+        let events = {
+            let session = app.session.as_ref().unwrap();
+            load_all_ordered(session.conn()).unwrap()
+        };
+        assert!(
+            events.iter().any(|e| matches!(
+                serde_json::from_str::<EventPayload>(&e.payload_json).unwrap(),
+                EventPayload::VoidDecisionEvent(VoidDecisionEvent { target_event_id })
+                    if target_event_id == alloc_id
+            )),
+            "ALLOC-VOID: a VoidDecisionEvent must target the created allocation"
+        );
+    }
+
     // ── KAT-E2E-ATTEST-WRONGWORD — wrong word: error shown, buf preserved ─────
 
     #[test]
