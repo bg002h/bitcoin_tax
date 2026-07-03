@@ -1,8 +1,10 @@
 # SPEC — self-transfer completion, Cycle B: matched in/out pairs
 
 **Source baseline:** `main` @ `1dcacad` (post Cycle A; all anchors verified at write time).
-**Review status: R0 round 1 folded (0C / 2I / 2M / 2N — GATE BLOCKED then folded); awaiting R0 round 2.
-Review: `reviews/R0-spec-self-transfer-passthrough-round-1.md`.**
+**Review status: R0-GREEN (2 rounds; 0 Critical / 0 Important). Reviews:
+`reviews/R0-spec-self-transfer-passthrough-round-{1,2}.md` (round 1: 0C/2I — the cross-type-overlap
+tax-safety guard + the void surface; round 2: 0C/0I, guard verified correct+complete). Cleared to
+implement.**
 **Design lineage:** brainstorm with the user (2026-07-03) → architect design Part B (grounded, re-verified
 at `1dcacad`). Second half of the "self-transfer completion" program (Cycle A = inbound self-transfer-in,
 SHIPPED). Governed by the user-mandated policy in memory `self-transfer-completion-policy`.
@@ -56,7 +58,7 @@ confirm choice IS the determination (the matcher pre-selects from wallet topolog
 ## Grounding (verified at `1dcacad`)
 - Decision variants: `EventPayload::{SafeHarborAllocation, RejectImport, ReclassifyIncome, …}`
   (`event.rs:281-292`); the `ReclassifyIncome` old-binary-fails-loud doc (`event.rs:215-218`) is the
-  template. `persistence::fingerprint` catch-all `_ => None` (`persistence.rs:127`).
+  template. `persistence::fingerprint` catch-all `_ => return None` (`persistence.rs:96` [R0-M1]).
 - `build_op` returns `Op::Skip` for `consumed_ins` (`resolve.rs:260-262`) and the `_ => Op::Skip` fallback
   (`:298`). The pass-1e decision collection: `TransferLink` (`resolve.rs:506`), `ClassifyInbound` (`:544`),
   `ReclassifyIncome` (`:650`) — the new decision mirrors these (validate targets, first-wins, build a set).
@@ -94,7 +96,9 @@ pub struct SelfTransferPassthrough {
 **Collection (pass-1e, mirror `ClassifyInbound` `resolve.rs:544-579`):** validate `in_event` resolves to
 a `TransferIn` and `out_event` to a `TransferOut` — **BOTH targets valid or the WHOLE decision is
 excluded** [R0-N2] (bad target → Hard `DecisionConflict`; neither leg enters `passthrough_skip`);
-duplicate/first-wins; add **BOTH** ids to a `passthrough_skip: BTreeSet<EventId>`.
+duplicate/first-wins — where **duplicate = EITHER leg already claimed** by a prior passthrough [R0-N3]
+(a passthrough carries two target ids; mirror `TransferLink`'s dual check, `resolve.rs:507/516`; over-
+conflict is safe); add **BOTH** ids to a `passthrough_skip: BTreeSet<EventId>`.
 
 **[R0-I1 — MANDATORY cross-type overlap guard] a passthrough leg must be UNRECONCILED on both legs.**
 After ALL pass-1e maps are built (a passthrough may be appended BEFORE the conflicting classification, so
