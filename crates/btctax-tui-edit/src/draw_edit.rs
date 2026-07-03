@@ -1526,6 +1526,7 @@ fn draw_select_lots_list(frame: &mut Frame, area: Rect, flow: &mut SelectLotsFlo
         DisposalKind::Spend => "spend",
         DisposalKind::Gift => "gift",
         DisposalKind::Donate => "donate",
+        DisposalKind::SelfTransfer => "self-transfer",
     };
 
     let selected_idx = flow.list.table_state.selected();
@@ -1687,6 +1688,7 @@ fn draw_select_lots_modal(frame: &mut Frame, area: Rect, modal: &SelectLotsModal
         DisposalKind::Spend => "spend",
         DisposalKind::Gift => "gift",
         DisposalKind::Donate => "donate",
+        DisposalKind::SelfTransfer => "self-transfer",
     };
 
     let mut lines: Vec<Line> = vec![

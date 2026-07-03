@@ -4,6 +4,45 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ tui-edit-hardening (chunk-3 follow-ups #1/2/3/6/7/8) — SHIPPED (2026-07-03)
+
+Cycle B of the autonomous run (roadmap `design/ROADMAP_autonomous_run.md`). The six select-lots +
+safety/UX hardening fixes: **#1** SelfTransfer disposals are now selectable in select-lots (in-TUI
+reconstruction from non-voided `TransferLink`s, engine-faithful — sorted by `decision_seq`, FIRST-WINS,
+`consumed_ins` dedup); **#2** pre-2025 disposals offer Universal-pool cross-wallet candidate lots via a
+feasibility-honest gate (`l.acquired_at < TRANSITION_DATE && basis_source != SafeHarborAllocated` — the
+R0 review caught that the naive gate would offer §7.4 Path-B seed lots that fail `selection_feasible`);
+**#3** under-covered (`UncoveredDisposal`) disposals are pre-filtered out of select-lots (no doomed
+selection); **#6** free-text donation fields accept 512 chars (per-instance `FieldBuffer` cap; money/ID
+fields keep 64); **#7** the void list pre-filters EFFECTIVE `SafeHarborAllocation`s (neither timebar nor
+unconservable) — closing the permanent §7.4 doomed-void trap that KAT-E2E-ATTEST-VOID used to pin (that
+KAT rewritten to assert the empty list; the §7.4 engine guard stays pinned by
+`crates/btctax-core/tests/transition.rs:365`); **#8** the CLI-void remedy in 6 status arms names "quit
+the editor first" (VaultLock audit). `btctax-core` untouched. Spec R0 2 rounds → 0C/0I; whole-branch
+review + M1 fold (the reachable inert-alloc `is_safe_harbor` E2E assertion) → GREEN, 3 fault-injection
+probes verified the KATs load-bearing. **workspace tests green.** Reviews:
+`reviews/R0-spec-tui-edit-hardening-round-{1,2}.md`, `reviews/whole-branch-review-tui-edit-hardening-round-1.md`.
+
+**Chunk-3 follow-up status:** #1/2/3/6/7/8 RESOLVED (this cycle) + #9 RESOLVED (save-rollback cycle). Of
+the original chunk-3 followups, only **#4 (safe-harbor-allocate) = chunk 5** and **#5 (WB-I4a) =
+informational** remain — both accounted for in the roadmap.
+
+**FOLLOWUPS recorded (new, small):**
+1. **select-lots final-state vs fold-time lot residual** — the TUI offers CURRENTLY-projected lots, not
+   the pool AT the disposal's fold position; a lot created by a LATER split (`bump_split`, e.g. a
+   pre-2025 self-transfer fragment) can be offered for an EARLIER pre-2025 disposal where it was
+   infeasible at fold time. Fails SAFE — the engine raises `LotSelectionInvalid`, which GATES
+   `compute_tax_year` (never a silent wrong number), and `derive_select_lots_status` arm 2 surfaces it.
+   The irreducible "final-state ≠ fold-time" gap; the CLI (re-projects at fold position) is exact.
+2. **#1 SelfTransfer in-TUI reconstruction drift** — the TUI re-derives the SelfTransfer set from
+   `snap.events` rather than a core API; if the engine's link logic evolves, the TUI copy could drift
+   (backstopped by `LotSelectionInvalid`). A `pub fn` in `resolve.rs` exposing the honoring set would be
+   zero-drift (additive-MINOR to core) — deferred.
+
+**NEXT: cycle C — chunk 4 (import-level decisions)** per the roadmap.
+
+---
+
 ## ✅ tui-edit-save-rollback (mutating-TUI hardening #9) — SHIPPED (2026-07-03)
 
 Cycle A of the autonomous post-chunk-3 run (roadmap: `design/ROADMAP_autonomous_run.md`, order
