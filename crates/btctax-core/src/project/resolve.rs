@@ -177,8 +177,16 @@ fn build_op(
     inbound_class: &BTreeMap<EventId, InboundClass>,
     outflow_class: &BTreeMap<EventId, ReclassifyOutflow>,
     income_reclassify: &BTreeMap<EventId, ReclassifyIncome>,
+    passthrough_skip: &BTreeSet<EventId>,
     by_id: &BTreeMap<EventId, &LedgerEvent>,
 ) -> Op {
+    // Cycle B (G-PRECEDENCE): a confirmed-passthrough leg is skipped BEFORE any TransferLink /
+    // ReclassifyOutflow / ClassifyInbound / PendingOut branch below — so a skipped TransferOut never
+    // ALSO lands in `pending_reconciliation`. Safe because the [R0-I1] guard guarantees a leg in
+    // `passthrough_skip` carries no competing (taxable) classification.
+    if passthrough_skip.contains(id) {
+        return Op::Skip;
+    }
     match payload {
         EventPayload::Acquire(a) => Op::Acquire(a.clone()),
         EventPayload::Dispose(d) => Op::Dispose {
@@ -497,6 +505,11 @@ pub fn resolve(
     let mut inbound_class: BTreeMap<EventId, InboundClass> = BTreeMap::new();
     let mut outflow_class: BTreeMap<EventId, ReclassifyOutflow> = BTreeMap::new();
     let mut income_reclassify: BTreeMap<EventId, ReclassifyIncome> = BTreeMap::new();
+    // Cycle B: both legs of a confirmed passthrough self-transfer → `Op::Skip`. `passthroughs` keeps the
+    // accepted (decision id, in_event, out_event) triples so the [R0-I1] cross-type overlap guard can run
+    // AFTER every pass-1e map is built (below the loop).
+    let mut passthrough_skip: BTreeSet<EventId> = BTreeSet::new();
+    let mut passthroughs: Vec<(EventId, EventId, EventId)> = Vec::new();
 
     for (_seq, d) in &decisions {
         if voided.contains(&d.id) {
@@ -707,7 +720,84 @@ pub fn resolve(
                     }
                 }
             }
+            EventPayload::SelfTransferPassthrough(stp) => {
+                // Cycle B (C1): the DROP primitive — validate BOTH targets against their EFFECTIVE
+                // payloads (mirror ClassifyInbound/ReclassifyOutflow): in_event must be a TransferIn AND
+                // out_event a TransferOut, or the WHOLE decision is excluded [R0-N2] (bad target → Hard
+                // DecisionConflict; NEITHER leg enters passthrough_skip). Duplicate = EITHER leg already
+                // claimed by a prior passthrough [R0-N3] → conflict + first-wins (mirror TransferLink's
+                // dual check, :507/516). The [R0-I1] cross-type overlap guard runs BELOW, after all maps.
+                let in_target = &stp.in_event;
+                let out_target = &stp.out_event;
+                let in_payload = by_id
+                    .get(in_target)
+                    .map(|raw| applied.get(in_target).unwrap_or(&raw.payload));
+                let out_payload = by_id
+                    .get(out_target)
+                    .map(|raw| applied.get(out_target).unwrap_or(&raw.payload));
+                let in_ok = matches!(in_payload, Some(EventPayload::TransferIn(_)));
+                let out_ok = matches!(out_payload, Some(EventPayload::TransferOut(_)));
+                if !in_ok || !out_ok {
+                    blockers.push(Blocker {
+                        kind: BlockerKind::DecisionConflict,
+                        event: Some(d.id.clone()),
+                        detail: format!(
+                            "SelfTransferPassthrough requires in_event {} to be a TransferIn and \
+                             out_event {} to be a TransferOut — void the decision to clear this blocker",
+                            in_target.canonical(),
+                            out_target.canonical()
+                        ),
+                    });
+                    // WHOLE decision EXCLUDED: neither leg enters passthrough_skip (G-BOTH-ATOMIC).
+                } else if passthrough_skip.contains(in_target)
+                    || passthrough_skip.contains(out_target)
+                {
+                    // Duplicate: EITHER leg is already claimed by an earlier passthrough. First-wins;
+                    // this (later-seq) decision is a conflict and is EXCLUDED.
+                    blockers.push(Blocker {
+                        kind: BlockerKind::DecisionConflict,
+                        event: Some(d.id.clone()),
+                        detail:
+                            "duplicate SelfTransferPassthrough claims a leg already in another passthrough \
+                             — to re-decide, void the prior decision first"
+                                .into(),
+                    });
+                } else {
+                    passthrough_skip.insert(in_target.clone());
+                    passthrough_skip.insert(out_target.clone());
+                    passthroughs.push((d.id.clone(), in_target.clone(), out_target.clone()));
+                }
+            }
             _ => {}
+        }
+    }
+
+    // ── 1e-I1. [R0-I1] cross-type overlap guard (MANDATORY, load-bearing tax-safety) ─────────────
+    // A passthrough leg must be UNRECONCILED on BOTH legs. This runs AFTER every pass-1e map is built
+    // (a passthrough may be appended BEFORE the conflicting classification, so the check cannot live in
+    // the collector arm). EXCLUDE any passthrough whose out_event ALSO carries a ReclassifyOutflow/
+    // TransferLink OR whose in_event ALSO carries a ClassifyInbound / is consumed by a TransferLink —
+    // raise a Hard DecisionConflict and remove BOTH ids from passthrough_skip. The passthrough LOSES so
+    // the taxable classification WINS: otherwise a passthrough would `Op::Skip` a leg that has a real
+    // Dispose/Income and SILENTLY ERASE a taxable event (the exact failure the governing policy forbids).
+    for (dec_id, in_ev, out_ev) in &passthroughs {
+        let out_overlaps = outflow_class.contains_key(out_ev) || links.contains_key(out_ev);
+        let in_overlaps = inbound_class.contains_key(in_ev) || consumed_ins.contains(in_ev);
+        if out_overlaps || in_overlaps {
+            blockers.push(Blocker {
+                kind: BlockerKind::DecisionConflict,
+                event: Some(dec_id.clone()),
+                detail:
+                    "SelfTransferPassthrough leg also carries a taxable classification \
+                     (ReclassifyOutflow/TransferLink on the out-leg, or ClassifyInbound/TransferLink on \
+                     the in-leg) — the passthrough is EXCLUDED so the taxable event is recognized; \
+                     void the conflicting decision if the passthrough is correct"
+                        .into(),
+            });
+            // Remove BOTH ids (G-BOTH-ATOMIC): each leg belongs to at most one accepted passthrough
+            // (duplicate detection above), so this never disturbs another passthrough's membership.
+            passthrough_skip.remove(in_ev);
+            passthrough_skip.remove(out_ev);
         }
     }
 
@@ -731,6 +821,7 @@ pub fn resolve(
             &inbound_class,
             &outflow_class,
             &income_reclassify,
+            &passthrough_skip,
             &by_id,
         );
         timeline.push(Eff {

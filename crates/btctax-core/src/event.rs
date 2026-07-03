@@ -247,6 +247,28 @@ pub struct MethodElection {
     pub method: LotMethod,
 }
 
+/// Self-transfer completion Cycle B (C1): the DROP primitive. Confirms that an inbound leg (`in_event`,
+/// a `TransferIn`) and an outbound leg (`out_event`, a `TransferOut`) are the two sides of ONE
+/// self-transfer through a tracked waypoint whose counterparties are BOTH external (e.g. the user's
+/// coins in and out of Coinbase). Both legs net to zero: no lot, no disposition, no tax. It maps BOTH
+/// legs to `Op::Skip` (never only one — G-BOTH-ATOMIC). The cross-wallet case (destination tracked) is
+/// the EXISTING `TransferLink` RELOCATE, NOT this. Non-taxable, outside FIFO; a full audit record of WHY
+/// two imported movements were dropped. Voidable via the generic `VoidDecisionEvent` (re-exposes both
+/// legs: in → `UnknownInbound`, out → `PendingOut`).
+///
+/// **Old-binary limitation:** this variant was added post-initial-release. A vault that CONTAINS a
+/// `SelfTransferPassthrough` event FAILS to load on a binary that predates Cycle B: serde's
+/// externally-tagged enum emits a LOUD unknown-variant error and the entire vault load fails. This is
+/// the accepted trade-off for every decision-type addition (each new variant is a forward-only change;
+/// see the identical `ReclassifyIncome` struct doc). A vault WITHOUT this variant loads on any binary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelfTransferPassthrough {
+    /// The `TransferIn` leg (coins arriving at the tracked waypoint).
+    pub in_event: EventId,
+    /// The `TransferOut` leg (coins leaving the tracked waypoint).
+    pub out_event: EventId,
+}
+
 /// §A.4: a per-disposal specific-identification decision. `disposal_event` names the method-honoring
 /// disposition (Dispose/GiftOut/Donate/SelfTransfer) whose principal is satisfied by EXACTLY these
 /// `lots`. Σ `LotPick.sat` MUST equal the disposal's principal sat — the on-chain `fee_sat` is excluded
@@ -290,6 +312,11 @@ pub enum EventPayload {
     /// (serde's externally-tagged enum gives a loud unknown-variant error; see `ReclassifyIncome` struct
     /// doc). A vault WITHOUT this variant (i.e. any vault created before Chunk C) loads on any binary.
     ReclassifyIncome(ReclassifyIncome),
+    /// Self-transfer completion Cycle B: the DROP primitive — maps BOTH legs of a passthrough
+    /// self-transfer to `Op::Skip` (non-taxable, no lot). Old-binary limitation: a vault containing this
+    /// variant FAILS to load on a pre-Cycle-B binary (serde unknown-variant; see `SelfTransferPassthrough`
+    /// struct doc). A vault WITHOUT this variant loads on any binary.
+    SelfTransferPassthrough(SelfTransferPassthrough),
 }
 
 impl EventPayload {
@@ -502,6 +529,11 @@ mod tests {
                 business: true,
                 kind: None,
             }),
+            // Cycle B: SelfTransferPassthrough (the DROP primitive).
+            EventPayload::SelfTransferPassthrough(SelfTransferPassthrough {
+                in_event: EventId::import(Source::Coinbase, SourceRef::new("in|cb-in-001")),
+                out_event: EventId::import(Source::River, SourceRef::new("out|river-out-001")),
+            }),
         ];
         for p in payloads {
             let ev = sample(p);
@@ -538,6 +570,17 @@ mod tests {
             kind: None,
         });
         assert!(crate::persistence::fingerprint(&ri_no_kind).is_none());
+    }
+
+    /// Cycle B KAT: `SelfTransferPassthrough.fingerprint() == None` (decision variant;
+    /// catch-all `_ => None` in `persistence::fingerprint` covers it).
+    #[test]
+    fn self_transfer_passthrough_decision_has_no_fingerprint() {
+        let stp = EventPayload::SelfTransferPassthrough(SelfTransferPassthrough {
+            in_event: EventId::import(Source::Coinbase, SourceRef::new("IN")),
+            out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+        });
+        assert!(crate::persistence::fingerprint(&stp).is_none());
     }
 
     #[test]

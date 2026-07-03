@@ -888,7 +888,7 @@ pub struct VoidModalState {
 /// Return `true` when `payload` is a revocable decision type.
 ///
 /// Revocable: TransferLink, ReclassifyOutflow, ClassifyInbound, ManualFmv, ClassifyRaw,
-/// MethodElection, LotSelection, ReclassifyIncome, SafeHarborAllocation.
+/// MethodElection, LotSelection, ReclassifyIncome, SelfTransferPassthrough, SafeHarborAllocation.
 /// Non-revocable (excluded from void list): SupersedeImport, RejectImport, VoidDecisionEvent,
 /// and imported event payloads (Acquire, Income, Dispose, TransferOut, TransferIn, Unclassified,
 /// ImportConflict — these carry Import EventIds, not Decision EventIds, so they cannot appear in
@@ -905,6 +905,7 @@ pub fn is_revocable_payload(payload: &btctax_core::EventPayload) -> bool {
             | EventPayload::MethodElection(_)
             | EventPayload::LotSelection(_)
             | EventPayload::ReclassifyIncome(_)
+            | EventPayload::SelfTransferPassthrough(_)
             | EventPayload::SafeHarborAllocation(_)
     )
 }
@@ -1311,6 +1312,69 @@ pub struct LinkTransferModalState {
     pub target: TransferTarget,
     /// Human-readable target label (shown in the modal).
     pub target_label: String,
+}
+
+// ── Match-self-transfers flow types (self-transfer-passthrough C3) ────────────
+
+/// The confirm action for a matched self-transfer pair. Mirrors `btctax_cli::MatchAction`; kept as a
+/// local btctax_core-only enum so `form.rs` stays free of the CLI dependency. The user's choice IS the
+/// determination (DROP = same-wallet passthrough → `SelfTransferPassthrough`; RELOCATE = cross-wallet →
+/// `TransferLink`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MatchPairAction {
+    Drop,
+    Relocate,
+}
+impl MatchPairAction {
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Drop => Self::Relocate,
+            Self::Relocate => Self::Drop,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Drop => "DROP (passthrough — both legs dropped, non-taxable)",
+            Self::Relocate => "RELOCATE (link — coins move to the destination wallet)",
+        }
+    }
+}
+
+/// One proposed self-transfer match row (mirrors `btctax_cli::MatchProposal` + the suggested action as
+/// a local enum). Built at open from `Session::self_transfer_match_plan`.
+#[derive(Clone)]
+pub struct MatchSelfTransferItem {
+    pub in_event: EventId,
+    pub out_event: EventId,
+    pub in_date: TaxDate,
+    pub out_date: TaxDate,
+    pub in_wallet: Option<WalletId>,
+    pub out_wallet: Option<WalletId>,
+    pub in_sat: Sat,
+    pub out_principal_sat: Sat,
+    pub usd_value: Option<Usd>,
+    /// The topology-derived suggestion (same-wallet ⇒ Drop, cross-wallet ⇒ Relocate).
+    pub suggested: MatchPairAction,
+    pub ambiguous: bool,
+    pub txid_match: bool,
+}
+
+/// Full state for the match-self-transfers flow: a single-step list of proposed pairs.
+pub struct MatchSelfTransfersFlowState {
+    pub list: TargetList<MatchSelfTransferItem>,
+}
+
+/// Payload for the match-self-transfers confirmation modal. `action` starts at the suggested action and
+/// is toggled DROP↔RELOCATE by the user (the choice is the determination). NEVER auto-applied.
+pub struct MatchSelfTransfersModalState {
+    pub in_event: EventId,
+    pub out_event: EventId,
+    pub in_sat: Sat,
+    pub out_principal_sat: Sat,
+    pub in_wallet: Option<WalletId>,
+    pub out_wallet: Option<WalletId>,
+    pub action: MatchPairAction,
+    pub ambiguous: bool,
 }
 
 // ── Classify-raw flow types (chunk 4a, D2) ───────────────────────────────────

@@ -30,17 +30,19 @@ use edit::form::{
     ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep, ClassifyRawVariant, ConflictItem,
     DisposalKind, DisposalListItem, DonationListItem, FieldBuffer, FmvListItem, InEventItem,
     InboundListItem, InboundVariant, IncomeListItem, LinkMode, LinkTransferFlowState,
-    LinkTransferModalState, LinkTransferStep, LotPickFormRow, MutationModalState,
-    OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep, OptimizeCandidateItem,
-    OutflowKind, OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
-    ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
-    ReclassifyOutflowModalState, ReclassifyOutflowStep, ResolveConflictFlowState,
-    ResolveConflictModalState, ResolveConflictStep, ResolveKind, SafeHarborAllocateFlowState,
-    SafeHarborAllocateModalState, SafeHarborAllocateStep, SafeHarborAttestFlowState,
-    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
-    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
-    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TransferOutItem, VoidFlowState,
-    VoidListItem, VoidModalState, VoidStep, WalletItem, FREETEXT_CAP,
+    LinkTransferModalState, LinkTransferStep, LotPickFormRow, MatchPairAction,
+    MatchSelfTransferItem, MatchSelfTransfersFlowState, MatchSelfTransfersModalState,
+    MutationModalState, OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep,
+    OptimizeCandidateItem, OutflowKind, OutflowListItem, ProfileFormState, RawListItem,
+    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
+    ReclassifyOutflowFlowState, ReclassifyOutflowModalState, ReclassifyOutflowStep,
+    ResolveConflictFlowState, ResolveConflictModalState, ResolveConflictStep, ResolveKind,
+    SafeHarborAllocateFlowState, SafeHarborAllocateModalState, SafeHarborAllocateStep,
+    SafeHarborAttestFlowState, SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState,
+    SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
+    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList,
+    TransferOutItem, VoidFlowState, VoidListItem, VoidModalState, VoidStep, WalletItem,
+    FREETEXT_CAP,
 };
 use editor::{EditorApp, EditorScreen};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -204,6 +206,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Match-self-transfers-modal dispatch — BEFORE flow, form, screen ──────
+    if app.match_self_transfers_modal.is_some() {
+        handle_match_self_transfers_modal_key(app, key);
+        return;
+    }
+
     // ── 9. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
     //    Every step of an open flow is claimed here; 'q' and Esc can never
     //    fall through to a Browse quit arm mid-flow.
@@ -249,6 +257,10 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.bulk_link_flow.is_some() {
         handle_bulk_link_flow_key(app, key);
+        return;
+    }
+    if app.match_self_transfers_flow.is_some() {
+        handle_match_self_transfers_flow_key(app, key);
         return;
     }
     if app.safe_harbor_attest_flow.is_some() {
@@ -328,6 +340,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('a') => open_safe_harbor_attest_flow(app),
                 KeyCode::Char('A') => open_safe_harbor_allocate_flow(app),
                 KeyCode::Char('b') => open_bulk_link_transfer_flow(app),
+                KeyCode::Char('m') => open_match_self_transfers_flow(app),
                 KeyCode::Char('i') => open_resolve_conflict_flow(app),
                 KeyCode::Char('z') => open_optimize_accept_flow(app),
                 _ => {}
@@ -558,6 +571,8 @@ impl EditorApp {
         self.safe_harbor_allocate_modal = None;
         self.bulk_link_flow = None;
         self.bulk_link_modal = None;
+        self.match_self_transfers_flow = None;
+        self.match_self_transfers_modal = None;
     }
 }
 
@@ -2645,6 +2660,16 @@ fn summarize_void_payload(payload: &EventPayload) -> (&'static str, String, Opti
             "ReclassifyIncome",
             format!("income {} biz={}", ri.income_event.canonical(), ri.business),
             Some(ri.income_event.clone()),
+            false,
+        ),
+        EventPayload::SelfTransferPassthrough(stp) => (
+            "SelfTransferPassthrough",
+            format!(
+                "drop in {} + out {}",
+                stp.in_event.canonical(),
+                stp.out_event.canonical()
+            ),
+            Some(stp.out_event.clone()),
             false,
         ),
         EventPayload::SafeHarborAllocation(a) => (
@@ -5824,6 +5849,218 @@ fn derive_bulk_link_status(
         "Linked {n} outflow(s) to {} as self-transfers ({remaining} pending outbound remain).",
         crate::edit::form::wallet_label(dest)
     )
+}
+
+// ── Match-self-transfers flow (self-transfer-passthrough C3) ──────────────────
+
+/// Browse-key `m`: open the match-self-transfers proposal-list flow. READ-ONLY at open (the
+/// `Session::self_transfer_match_plan` helper appends/persists nothing); empty proposals set a status
+/// and never open the flow. Residue-latch gated like every mutating opener.
+fn open_match_self_transfers_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let proposals = match app.session.as_ref() {
+        Some(s) => s.self_transfer_match_plan(),
+        None => return,
+    };
+    let proposals = match proposals {
+        Ok(p) => p,
+        Err(e) => {
+            app.status = Some(format!("Match error: {e}"));
+            return;
+        }
+    };
+    if proposals.is_empty() {
+        app.status = Some("No self-transfer matches proposed".to_string());
+        return;
+    }
+    let items: Vec<MatchSelfTransferItem> = proposals
+        .iter()
+        .map(|p| MatchSelfTransferItem {
+            in_event: p.in_event.clone(),
+            out_event: p.out_event.clone(),
+            in_date: p.in_date,
+            out_date: p.out_date,
+            in_wallet: p.in_wallet.clone(),
+            out_wallet: p.out_wallet.clone(),
+            in_sat: p.in_sat,
+            out_principal_sat: p.out_principal_sat,
+            usd_value: p.usd_value,
+            suggested: match p.action {
+                btctax_cli::MatchAction::Drop => MatchPairAction::Drop,
+                btctax_cli::MatchAction::Relocate => MatchPairAction::Relocate,
+            },
+            ambiguous: p.ambiguous,
+            txid_match: p.txid_match,
+        })
+        .collect();
+    app.match_self_transfers_flow = Some(MatchSelfTransfersFlowState {
+        list: TargetList::new(items),
+    });
+}
+
+/// List navigation: `k/j/g/G` scroll; Enter → open the DROP/RELOCATE confirm modal over the selected
+/// pair; Esc → close the flow (nothing written); `q` swallowed (the flow Option is the dispatch guard).
+fn handle_match_self_transfers_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(f) = app.match_self_transfers_flow.as_mut() {
+                f.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(f) = app.match_self_transfers_flow.as_mut() {
+                f.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(f) = app.match_self_transfers_flow.as_mut() {
+                f.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(f) = app.match_self_transfers_flow.as_mut() {
+                f.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => open_match_self_transfers_modal(app),
+        KeyCode::Esc => {
+            app.match_self_transfers_flow = None;
+        }
+        _ => {}
+    }
+}
+
+/// Build the confirm modal from the selected pair; the modal's `action` starts at the topology-derived
+/// suggestion (the user may toggle it before confirming).
+fn open_match_self_transfers_modal(app: &mut EditorApp) {
+    let modal = match app.match_self_transfers_flow.as_ref() {
+        Some(f) => f.list.selected().map(|it| MatchSelfTransfersModalState {
+            in_event: it.in_event.clone(),
+            out_event: it.out_event.clone(),
+            in_sat: it.in_sat,
+            out_principal_sat: it.out_principal_sat,
+            in_wallet: it.in_wallet.clone(),
+            out_wallet: it.out_wallet.clone(),
+            action: it.suggested,
+            ambiguous: it.ambiguous,
+        }),
+        None => None,
+    };
+    if let Some(m) = modal {
+        app.match_self_transfers_modal = Some(m);
+    }
+}
+
+/// Handle a key while the match-self-transfers confirmation modal is open (explicit confirm; NOT typed).
+///
+/// Left/Right/Tab (or `d`/`r`) toggle DROP↔RELOCATE (the choice IS the determination). Enter → capture
+/// `now`, then DROP → `persist_self_transfer_passthrough` (both legs `Op::Skip`) or RELOCATE →
+/// `persist_link_transfer` (`TransferLink` out→in) → re-project + status + close; `Err(e)` → close modal,
+/// route `on_persist_error`. Esc → close modal only (back to the list; nothing written).
+fn handle_match_self_transfers_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::Char('d') | KeyCode::Char('r') => {
+            if let Some(m) = app.match_self_transfers_modal.as_mut() {
+                m.action = match key.code {
+                    KeyCode::Char('d') => MatchPairAction::Drop,
+                    KeyCode::Char('r') => MatchPairAction::Relocate,
+                    _ => m.action.toggle(),
+                };
+            }
+        }
+        KeyCode::Enter => {
+            let (in_event, out_event, action) = match app.match_self_transfers_modal.as_ref() {
+                Some(m) => (m.in_event.clone(), m.out_event.clone(), m.action),
+                None => return,
+            };
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.match_self_transfers_modal = None;
+                        return;
+                    }
+                };
+                match action {
+                    MatchPairAction::Drop => {
+                        // DROP → both legs Op::Skip (non-taxable passthrough).
+                        let payload = EventPayload::SelfTransferPassthrough(
+                            btctax_core::event::SelfTransferPassthrough {
+                                in_event: in_event.clone(),
+                                out_event: out_event.clone(),
+                            },
+                        );
+                        crate::edit::persist::persist_self_transfer_passthrough(
+                            session, payload, now,
+                        )
+                    }
+                    MatchPairAction::Relocate => {
+                        // RELOCATE routes to the EXISTING link_transfer out→in (G-RELOCATE-REUSE).
+                        let payload =
+                            EventPayload::TransferLink(btctax_core::event::TransferLink {
+                                out_event: out_event.clone(),
+                                in_event_or_wallet: TransferTarget::InEvent(in_event.clone()),
+                            });
+                        crate::edit::persist::persist_link_transfer(session, payload, now)
+                    }
+                }
+            };
+
+            match save_result {
+                Ok(_) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_match_self_transfers_status(&snap, action);
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.match_self_transfers_modal = None;
+                    app.match_self_transfers_flow = None;
+                }
+                Err(e) => {
+                    app.match_self_transfers_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.match_self_transfers_modal = None;
+        }
+        _ => {}
+    }
+}
+
+/// Post-apply status from RE-PROJECTED state (self-transfer-passthrough C3).
+fn derive_match_self_transfers_status(
+    snap: &btctax_tui::app::Snapshot,
+    action: MatchPairAction,
+) -> String {
+    let remaining = snap.state.pending_reconciliation.len();
+    match action {
+        MatchPairAction::Drop => format!(
+            "Dropped self-transfer passthrough (both legs skipped, non-taxable); \
+             {remaining} pending outbound remain."
+        ),
+        MatchPairAction::Relocate => format!(
+            "Relocated self-transfer (coins moved to the destination wallet, basis carried); \
+             {remaining} pending outbound remain."
+        ),
+    }
 }
 
 // ── Resolve-conflict flow (chunk 4b, D3) ─────────────────────────────────────
@@ -17886,6 +18123,384 @@ mod tests {
                 .iter()
                 .all(|b| b.kind != BlockerKind::DecisionConflict),
             "voiding a bulk link is clean (no DecisionConflict)"
+        );
+    }
+
+    // ── Match-self-transfers flow E2E (self-transfer-passthrough C3) ──────────
+
+    fn st_wallet_a() -> btctax_core::WalletId {
+        btctax_core::WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        }
+    }
+    fn st_wallet_b() -> btctax_core::WalletId {
+        btctax_core::WalletId::Exchange {
+            provider: "Coinbase".into(),
+            account: "main".into(),
+        }
+    }
+
+    /// Seed a vault with BOTH a same-wallet DROP pair (in-d/out-d in A, in before out) and a
+    /// cross-wallet RELOCATE pair (out-r in A / in-r in B, out before in), plus an Acquire in A that
+    /// covers both pending outs. Returns `(in_d, out_d, in_r, out_r)`.
+    fn seed_st_match_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> (
+        btctax_core::EventId,
+        btctax_core::EventId,
+        btctax_core::EventId,
+        btctax_core::EventId,
+    ) {
+        use btctax_core::event::{
+            Acquire, BasisSource, EventPayload, LedgerEvent, TransferIn, TransferOut,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let mkid = |r: &str| EventId::import(Source::River, SourceRef::new(r));
+        let in_d = mkid("st-in-d");
+        let out_d = mkid("st-out-d");
+        let out_r = mkid("st-out-r");
+        let in_r = mkid("st-in-r");
+        let ti = |sat| {
+            EventPayload::TransferIn(TransferIn {
+                sat,
+                src_addr: None,
+                txid: None,
+            })
+        };
+        let to = |sat| {
+            EventPayload::TransferOut(TransferOut {
+                sat,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            })
+        };
+        let ev = |id: EventId, ts, wallet: btctax_core::WalletId, payload| LedgerEvent {
+            id,
+            utc_timestamp: ts,
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet),
+            payload,
+        };
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let batch = vec![
+            ev(
+                mkid("st-acq"),
+                datetime!(2025-02-01 12:00:00 UTC),
+                st_wallet_a(),
+                EventPayload::Acquire(Acquire {
+                    sat: 200_000,
+                    usd_cost: dec!(100),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            ),
+            ev(
+                in_d.clone(),
+                datetime!(2025-03-01 12:00:00 UTC),
+                st_wallet_a(),
+                ti(100_000),
+            ),
+            ev(
+                out_d.clone(),
+                datetime!(2025-03-02 12:00:00 UTC),
+                st_wallet_a(),
+                to(100_000),
+            ),
+            ev(
+                out_r.clone(),
+                datetime!(2025-04-01 12:00:00 UTC),
+                st_wallet_a(),
+                to(100_000),
+            ),
+            ev(
+                in_r.clone(),
+                datetime!(2025-04-02 12:00:00 UTC),
+                st_wallet_b(),
+                ti(100_000),
+            ),
+        ];
+        btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+        session.save().unwrap();
+        (in_d, out_d, in_r, out_r)
+    }
+
+    /// E2E DROP: `m` → the list proposes the DROP pair at row 0 → Enter opens the modal (suggested
+    /// action DROP) → Enter APPLIES → a `SelfTransferPassthrough` is appended and BOTH legs Skip
+    /// (out-d leaves pending; in-d's UnknownBasisInbound clears). Never automatic.
+    #[test]
+    fn kat_e2e_match_self_transfers_drop_skips_both_legs() {
+        use btctax_core::EventPayload;
+        use std::collections::BTreeSet;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-st-drop";
+        let (in_d, out_d, _in_r, _out_r) = seed_st_match_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('m')));
+        assert!(app.match_self_transfers_flow.is_some(), "flow opens");
+        assert_eq!(
+            app.match_self_transfers_flow
+                .as_ref()
+                .unwrap()
+                .list
+                .items
+                .len(),
+            2,
+            "two proposals (DROP + RELOCATE)"
+        );
+        // Row 0 (sorted by out_date) is the DROP pair.
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        let m = app
+            .match_self_transfers_modal
+            .as_ref()
+            .expect("modal opens");
+        assert!(
+            matches!(m.action, MatchPairAction::Drop),
+            "same-wallet pair suggests DROP"
+        );
+        assert_eq!(m.in_event, in_d);
+        assert_eq!(m.out_event, out_d);
+        handle_key(&mut app, press(KeyCode::Enter)); // APPLY
+
+        assert!(
+            app.match_self_transfers_flow.is_none() && app.match_self_transfers_modal.is_none(),
+            "flow + modal close after apply"
+        );
+        let snap = app.snapshot.as_ref().unwrap();
+        assert_eq!(
+            snap.events
+                .iter()
+                .filter(|e| matches!(e.payload, EventPayload::SelfTransferPassthrough(_)))
+                .count(),
+            1,
+            "exactly one SelfTransferPassthrough appended"
+        );
+        let pend: BTreeSet<_> = snap
+            .state
+            .pending_reconciliation
+            .iter()
+            .map(|p| p.event.clone())
+            .collect();
+        assert!(!pend.contains(&out_d), "out-d is skipped, not pending");
+        assert!(
+            !snap
+                .state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::UnknownBasisInbound
+                    && b.event.as_ref() == Some(&in_d)),
+            "in-d's UnknownBasisInbound clears (leg skipped)"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Dropped"),
+            "status reports the DROP; got {:?}",
+            app.status
+        );
+    }
+
+    /// E2E RELOCATE: `m` → navigate to the cross-wallet pair (row 1) → Enter opens the modal (suggested
+    /// action RELOCATE) → Enter APPLIES → routes to `link_transfer` (a `TransferLink` is appended) and
+    /// the destination wallet B holds the relocated coins (non-taxable, basis carried).
+    #[test]
+    fn kat_e2e_match_self_transfers_relocate_lands_coins_in_dest() {
+        use btctax_core::EventPayload;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-st-reloc";
+        let (_in_d, _out_d, in_r, out_r) = seed_st_match_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('m')));
+        handle_key(&mut app, press(KeyCode::Down)); // → row 1 (RELOCATE pair)
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        let m = app
+            .match_self_transfers_modal
+            .as_ref()
+            .expect("modal opens");
+        assert!(
+            matches!(m.action, MatchPairAction::Relocate),
+            "cross-wallet pair suggests RELOCATE"
+        );
+        assert_eq!(m.in_event, in_r);
+        assert_eq!(m.out_event, out_r);
+        handle_key(&mut app, press(KeyCode::Enter)); // APPLY
+
+        assert!(
+            app.match_self_transfers_flow.is_none() && app.match_self_transfers_modal.is_none()
+        );
+        let snap = app.snapshot.as_ref().unwrap();
+        let links: Vec<_> = snap
+            .events
+            .iter()
+            .filter_map(|e| match &e.payload {
+                EventPayload::TransferLink(tl) => Some(tl.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            links.len(),
+            1,
+            "RELOCATE routes to link_transfer → one TransferLink"
+        );
+        assert_eq!(links[0].out_event, out_r);
+        assert_eq!(
+            links[0].in_event_or_wallet,
+            TransferTarget::InEvent(in_r.clone()),
+            "the link targets the in-event (out→in relocation)"
+        );
+        assert_eq!(
+            snap.state.holdings_by_wallet.get(&st_wallet_b()).copied(),
+            Some(100_000),
+            "the destination wallet B holds the relocated coins"
+        );
+        assert!(
+            snap.state.disposals.is_empty(),
+            "a self-transfer relocation recognizes no disposal"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Relocated"),
+            "status reports the RELOCATE; got {:?}",
+            app.status
+        );
+    }
+
+    /// Invariant 9 [R0-I2] void surface: a persisted DROP appears in the TUI void list
+    /// (`is_revocable_payload` + `summarize_void_payload` arms) and voids to RE-EXPOSE both legs
+    /// (in → UnknownBasisInbound, out → pending).
+    #[test]
+    fn kat_e2e_match_self_transfers_drop_then_void_re_exposes_both() {
+        use btctax_core::EventPayload;
+        use std::collections::BTreeSet;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-st-void";
+        let (in_d, out_d, _in_r, _out_r) = seed_st_match_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        // Apply the DROP (row 0).
+        handle_key(&mut app, press(KeyCode::Char('m')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        handle_key(&mut app, press(KeyCode::Enter)); // APPLY
+
+        let pt_id = {
+            let snap = app.snapshot.as_ref().unwrap();
+            snap.events
+                .iter()
+                .find(|e| matches!(e.payload, EventPayload::SelfTransferPassthrough(_)))
+                .map(|e| e.id.clone())
+                .expect("a SelfTransferPassthrough decision must exist")
+        };
+
+        // Open the void flow — the passthrough MUST be listed (is_revocable_payload includes it,
+        // summarize_void_payload renders it, not "?").
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('v')));
+        assert!(app.void_flow.is_some(), "void flow opens");
+        let (idx, tag) = {
+            let list = &app.void_flow.as_ref().unwrap().list;
+            let idx = list
+                .items
+                .iter()
+                .position(|it| it.event_id == pt_id)
+                .expect("the passthrough must appear in the void list");
+            (idx, list.items[idx].payload_tag)
+        };
+        assert_eq!(
+            tag, "SelfTransferPassthrough",
+            "summarize_void_payload renders a real tag, not \"?\""
+        );
+        for _ in 0..idx {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → void modal
+        assert!(app.void_modal.is_some());
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm void
+
+        let snap = app.snapshot.as_ref().unwrap();
+        let pend: BTreeSet<_> = snap
+            .state
+            .pending_reconciliation
+            .iter()
+            .map(|p| p.event.clone())
+            .collect();
+        assert!(
+            pend.contains(&out_d),
+            "voided DROP → out-d returns to pending"
+        );
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::UnknownBasisInbound
+                    && b.event.as_ref() == Some(&in_d)),
+            "voided DROP → in-d re-exposed as UnknownBasisInbound"
+        );
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::DecisionConflict),
+            "voiding a passthrough is clean (no DecisionConflict)"
+        );
+    }
+
+    /// Cancel path: opening the modal then pressing Esc closes ONLY the modal (flow stays open); a
+    /// second Esc closes the flow. Nothing is written on either cancel (the vault event log is
+    /// unchanged).
+    #[test]
+    fn kat_match_self_transfers_cancel_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-st-cancel";
+        seed_st_match_vault(&vault, &key, pp_str);
+
+        // On-disk bytes before any editor action (reading the file needs no vault lock).
+        let before = std::fs::read(&vault).unwrap();
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('m')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(app.match_self_transfers_modal.is_some());
+        handle_key(&mut app, press(KeyCode::Esc)); // close modal only
+        assert!(
+            app.match_self_transfers_modal.is_none() && app.match_self_transfers_flow.is_some(),
+            "Esc closes the modal but keeps the flow open"
+        );
+        handle_key(&mut app, press(KeyCode::Esc)); // close flow
+        assert!(
+            app.match_self_transfers_flow.is_none(),
+            "second Esc closes the flow"
+        );
+
+        let after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            before, after,
+            "cancel writes nothing (vault bytes unchanged)"
         );
     }
 }

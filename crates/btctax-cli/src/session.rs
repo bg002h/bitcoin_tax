@@ -11,8 +11,8 @@ use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{init_schema, load_all};
 use btctax_core::{project, LedgerEvent, LedgerState, ProjectionConfig};
 use btctax_core::{
-    AllocLot, DonationDetails, EventId, EventPayload, LotMethod, PendingTransfer, Sat, TaxDate,
-    TaxProfile, Usd, WalletId,
+    AllocLot, BlockerKind, DonationDetails, EventId, EventPayload, LotMethod, PendingTransfer, Sat,
+    TaxDate, TaxProfile, Usd, WalletId,
 };
 use btctax_store::{Passphrase, Vault};
 use rusqlite::Connection;
@@ -70,6 +70,48 @@ pub struct BulkLinkPlan {
     pub missing_price_count: usize,
     /// Σ `basis_usd` over `included`.
     pub total_basis_usd: Usd,
+}
+
+// ── Self-transfer matcher (self-transfer-passthrough C2) ─────────────────────
+//
+// A READ-ONLY proposal helper (mirrors `bulk_link_transfer_plan`/`safe_harbor_residue`): it appends and
+// persists NOTHING. It pairs ONLY UNRECONCILED legs — candidate ins are `TransferIn`s still flagged
+// `UnknownBasisInbound` (an already-classified income / self-transfer-in is no longer flagged, so it is
+// structurally excluded), candidate outs are `pending_reconciliation` entries (an already-reclassified
+// sale is no longer pending). The user CONFIRMS every match; nothing is written by this helper.
+
+/// The confirm action a matched self-transfer pair resolves to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchAction {
+    /// Same tracked wallet on both legs (both counterparties external): DROP → `SelfTransferPassthrough`.
+    Drop,
+    /// Different tracked wallets (out from X, in to Y, X≠Y): RELOCATE → the EXISTING `TransferLink` out→in.
+    Relocate,
+}
+
+/// One proposed self-transfer match (C2). A PROPOSAL — never applied until the user confirms it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchProposal {
+    pub in_event: EventId,
+    pub out_event: EventId,
+    pub in_date: TaxDate,
+    pub out_date: TaxDate,
+    /// The in-leg's wallet (the RELOCATE destination). `None` legs are never proposed (can't relocate /
+    /// can't be same-wallet), so this is always `Some` for a real proposal; `Option` kept defensively.
+    pub in_wallet: Option<WalletId>,
+    /// The out-leg's (source) wallet. Always `Some` for a pending out; `Option` kept defensively.
+    pub out_wallet: Option<WalletId>,
+    pub in_sat: Sat,
+    pub out_principal_sat: Sat,
+    /// `fmv_of(prices, out_date, out_principal_sat)` — advisory, `None` on missing price / overflow.
+    pub usd_value: Option<Usd>,
+    /// Suggested action from wallet topology (same-wallet ⇒ Drop, cross-tracked-wallet ⇒ Relocate).
+    pub action: MatchAction,
+    /// True when this in OR this out matches >1 counterpart — surfaced FLAGGED, NEVER auto-picked (G-FALSE-MATCH).
+    pub ambiguous: bool,
+    /// True when `in.txid == out.txid` (both `Some`) — decisive cross-wallet corroboration (relaxes the
+    /// amount check, but NOT the ambiguity guard).
+    pub txid_match: bool,
 }
 
 pub struct Session {
@@ -364,6 +406,174 @@ impl Session {
             missing_price_count,
             total_basis_usd,
         })
+    }
+
+    /// READ-ONLY: propose self-transfer matches (self-transfer-passthrough C2). Appends/persists NOTHING
+    /// (a clone-fold-discard recompute, like `bulk_link_transfer_plan`). Pairs ONLY unreconciled legs —
+    /// candidate ins are `TransferIn`s flagged `UnknownBasisInbound` [R0-M2] (enumerated from the blocker
+    /// set + joined to the raw event via the event index), candidate outs are `pending_reconciliation`.
+    ///
+    /// A pair is proposed iff ALL criteria pass: amount within `tol = max(out.fee_sat, ceil(0.005 ×
+    /// out.principal))` (a `txid` EXACT match relaxes the amount check), a ±2-day window consistent with
+    /// the direction (passthrough: in on/before out; relocate: in on/after out), and BOTH wallets present.
+    /// The suggested `action` is wallet topology (same-wallet ⇒ Drop, cross-tracked-wallet ⇒ Relocate).
+    /// A leg matching >1 counterpart is flagged `ambiguous` (surfaced, NEVER auto-picked — G-FALSE-MATCH).
+    pub fn self_transfer_match_plan(&self) -> Result<Vec<MatchProposal>, CliError> {
+        let (events, state, _cfg) = self.load_events_and_project()?;
+        let prices = BundledPrices::load()?;
+        let index: std::collections::HashMap<EventId, &LedgerEvent> =
+            events.iter().map(|e| (e.id.clone(), e)).collect();
+
+        // Candidate ins: TransferIn events still flagged UnknownBasisInbound (unreconciled), joined to the
+        // raw event via the index (the exact pattern `bulk_link_transfer_plan` uses for pending outs).
+        struct CandIn {
+            id: EventId,
+            sat: Sat,
+            txid: Option<String>,
+            date: TaxDate,
+            wallet: Option<WalletId>,
+        }
+        let mut ins: Vec<CandIn> = Vec::new();
+        for b in &state.blockers {
+            if b.kind != BlockerKind::UnknownBasisInbound {
+                continue;
+            }
+            let Some(id) = &b.event else { continue };
+            let Some(ev) = index.get(id) else { continue };
+            let EventPayload::TransferIn(ti) = &ev.payload else {
+                continue;
+            };
+            ins.push(CandIn {
+                id: id.clone(),
+                sat: ti.sat,
+                txid: ti.txid.clone(),
+                date: tax_date(ev.utc_timestamp, ev.original_tz),
+                wallet: ev.wallet.clone(),
+            });
+        }
+
+        // Candidate outs: pending_reconciliation entries (already Op::PendingOut — unreconciled).
+        struct CandOut {
+            id: EventId,
+            principal: Sat,
+            fee: Option<Sat>,
+            txid: Option<String>,
+            date: TaxDate,
+            wallet: Option<WalletId>,
+        }
+        let mut outs: Vec<CandOut> = Vec::new();
+        for pt in &state.pending_reconciliation {
+            let ev = index.get(&pt.event).copied();
+            let date = ev
+                .map(|e| tax_date(e.utc_timestamp, e.original_tz))
+                .unwrap_or_else(|| {
+                    tax_date(
+                        time::OffsetDateTime::from_unix_timestamp(0).unwrap(),
+                        time::UtcOffset::UTC,
+                    )
+                });
+            let txid = ev.and_then(|e| match &e.payload {
+                EventPayload::TransferOut(t) => t.txid.clone(),
+                _ => None,
+            });
+            outs.push(CandOut {
+                id: pt.event.clone(),
+                principal: pt.principal_sat,
+                fee: pt.fee_sat,
+                txid,
+                date,
+                wallet: ev.and_then(|e| e.wallet.clone()),
+            });
+        }
+
+        // Passing (in_idx, out_idx, action, txid_match) tuples.
+        let mut passing: Vec<(usize, usize, MatchAction, bool)> = Vec::new();
+        for (i, ci) in ins.iter().enumerate() {
+            // A wallet-less in can be neither a same-wallet DROP nor a RELOCATE destination.
+            let Some(in_wallet) = ci.wallet.as_ref() else {
+                continue;
+            };
+            for (j, co) in outs.iter().enumerate() {
+                let Some(out_wallet) = co.wallet.as_ref() else {
+                    continue;
+                };
+                let action = if in_wallet == out_wallet {
+                    MatchAction::Drop
+                } else {
+                    MatchAction::Relocate
+                };
+                // Amount: tol = max(fee, ceil(0.005 × principal)). ceil(p/200) = (p + 199) / 200 (p ≥ 0).
+                let slack = if co.principal > 0 {
+                    (co.principal + 199) / 200
+                } else {
+                    0
+                };
+                let tol = co.fee.unwrap_or(0).max(slack);
+                let txid_match = ci.txid.is_some() && ci.txid == co.txid;
+                let amount_ok = txid_match || (ci.sat - co.principal).abs() <= tol;
+                if !amount_ok {
+                    continue;
+                }
+                // ±2-day window, direction keyed to the topology (exchange timestamp drift tolerated).
+                let window_ok = match action {
+                    // Passthrough: the deposit precedes the withdrawal (in on/before out).
+                    MatchAction::Drop => {
+                        let d = (co.date - ci.date).whole_days();
+                        (0..=2).contains(&d)
+                    }
+                    // Relocate: the withdrawal precedes the arrival (in on/after out).
+                    MatchAction::Relocate => {
+                        let d = (ci.date - co.date).whole_days();
+                        (0..=2).contains(&d)
+                    }
+                };
+                if !window_ok {
+                    continue;
+                }
+                passing.push((i, j, action, txid_match));
+            }
+        }
+
+        // Ambiguity: a leg (in OR out) appearing in >1 passing pair is flagged, never silently picked.
+        let mut in_count: std::collections::HashMap<usize, usize> =
+            std::collections::HashMap::new();
+        let mut out_count: std::collections::HashMap<usize, usize> =
+            std::collections::HashMap::new();
+        for (i, j, _, _) in &passing {
+            *in_count.entry(*i).or_insert(0) += 1;
+            *out_count.entry(*j).or_insert(0) += 1;
+        }
+
+        let mut proposals: Vec<MatchProposal> = passing
+            .iter()
+            .map(|(i, j, action, txid_match)| {
+                let ci = &ins[*i];
+                let co = &outs[*j];
+                let ambiguous = in_count[i] > 1 || out_count[j] > 1;
+                MatchProposal {
+                    in_event: ci.id.clone(),
+                    out_event: co.id.clone(),
+                    in_date: ci.date,
+                    out_date: co.date,
+                    in_wallet: ci.wallet.clone(),
+                    out_wallet: co.wallet.clone(),
+                    in_sat: ci.sat,
+                    out_principal_sat: co.principal,
+                    usd_value: btctax_core::price::fmv_of(&prices, co.date, co.principal),
+                    action: *action,
+                    ambiguous,
+                    txid_match: *txid_match,
+                }
+            })
+            .collect();
+        // Deterministic order (NFR4): by out date, then the two ids.
+        proposals.sort_by(|a, b| {
+            a.out_date
+                .cmp(&b.out_date)
+                .then(a.out_event.cmp(&b.out_event))
+                .then(a.in_event.cmp(&b.in_event))
+        });
+        Ok(proposals)
     }
 }
 

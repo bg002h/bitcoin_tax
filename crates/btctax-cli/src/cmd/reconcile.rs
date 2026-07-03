@@ -5,15 +5,15 @@
 //!
 //! Also contains the `set-donation-details` / `show-donation-details` side-table commands (no decision
 //! append — these write to the `donation_details` side-table directly, like `tax-profile set`).
-use crate::{BulkFilter, BulkLinkPlan, CliError, Session};
+use crate::{BulkFilter, BulkLinkPlan, CliError, MatchProposal, Session};
 use btctax_core::conventions::TRANSITION_DATE;
 use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::{
     AllocMethod, BlockerKind, ClassifyInbound, ClassifyRaw, DonationDetails, EventId, EventPayload,
     InboundClass, IncomeKind, LotId, LotMethod, LotPick, LotSelection, ManualFmv, MethodElection,
     OutflowClass, ReclassifyIncome, ReclassifyOutflow, RejectImport, RemovalKind,
-    SafeHarborAllocation, SupersedeImport, TaxDate, TransferLink, TransferTarget, Usd,
-    VoidDecisionEvent, WalletId,
+    SafeHarborAllocation, SelfTransferPassthrough, SupersedeImport, TaxDate, TransferLink,
+    TransferTarget, Usd, VoidDecisionEvent, WalletId,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -261,6 +261,37 @@ pub fn link_transfer(
     let payload = EventPayload::TransferLink(TransferLink {
         out_event,
         in_event_or_wallet: target,
+    });
+    append_and_save(&mut session, payload, now)
+}
+
+/// self-transfer-passthrough C3 — Phase 1 (read): compute the self-transfer match proposals on the HELD
+/// session (READ-ONLY; appends/persists NOTHING). Mirrors `bulk_link_plan`: the shared read helper is
+/// `Session::self_transfer_match_plan`; the session (and its VaultLock) is dropped on return.
+pub fn self_transfer_match_plan(
+    vault_path: &Path,
+    pp: &Passphrase,
+) -> Result<Vec<MatchProposal>, CliError> {
+    let session = Session::open(vault_path, pp)?;
+    session.self_transfer_match_plan()
+}
+
+/// self-transfer-passthrough C3 — Phase 2 (write), DROP: append one `SelfTransferPassthrough` decision
+/// mapping BOTH legs to `Op::Skip` (non-taxable passthrough). Mirrors `link_transfer` (one append + save).
+/// The RELOCATE case is NOT here — it routes to the EXISTING `link_transfer(out, InEvent(in))` (G-RELOCATE-REUSE).
+pub fn apply_self_transfer_passthrough(
+    vault_path: &Path,
+    pp: &Passphrase,
+    in_ref: &str,
+    out_ref: &str,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let in_event = parse_event_id(in_ref)?;
+    let out_event = parse_event_id(out_ref)?;
+    let mut session = Session::open(vault_path, pp)?;
+    let payload = EventPayload::SelfTransferPassthrough(SelfTransferPassthrough {
+        in_event,
+        out_event,
     });
     append_and_save(&mut session, payload, now)
 }

@@ -13,9 +13,10 @@ use crate::edit::form::{
     income_kind_display, wallet_label, BulkLinkFlowState, BulkLinkModalState, BulkLinkStep,
     ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
     ClassifyRawStep, ClassifyRawVariant, DisposalKind, FieldBuffer, InboundVariant, LinkMode,
-    LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, MutationModalState,
-    OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep, OutflowKind,
-    ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
+    LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, MatchSelfTransfersFlowState,
+    MatchSelfTransfersModalState, MutationModalState, OptimizeAcceptFlowState,
+    OptimizeAcceptModalState, OptimizeAcceptStep, OutflowKind, ProfileFormState,
+    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
     ReclassifyOutflowModalState, ReclassifyOutflowStep, ResolveConflictFlowState,
     ResolveConflictModalState, ResolveConflictStep, ResolveKind, SafeHarborAllocateFlowState,
     SafeHarborAllocateModalState, SafeHarborAttestFlowState, SafeHarborAttestStep,
@@ -355,6 +356,13 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.bulk_link_modal.as_ref() {
         draw_bulk_link_modal(frame, area, modal);
+    }
+    // Match-self-transfers flow overlay (self-transfer-passthrough C3).
+    if let Some(flow) = app.match_self_transfers_flow.as_mut() {
+        draw_match_self_transfers_flow(frame, area, flow);
+    }
+    if let Some(modal) = app.match_self_transfers_modal.as_ref() {
+        draw_match_self_transfers_modal(frame, area, modal);
     }
 }
 
@@ -3530,6 +3538,175 @@ fn draw_bulk_link_modal(frame: &mut Frame, area: Rect, modal: &BulkLinkModalStat
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Red))
         .title(" Confirm: bulk self-transfer — WRITES THE VAULT ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Render the match-self-transfers proposal list (self-transfer-passthrough C3). One row per proposed
+/// pair: suggested action, both legs' date/wallet/sat, USD value, and the AMBIGUOUS / txid flags.
+fn draw_match_self_transfers_flow(
+    frame: &mut Frame,
+    area: Rect,
+    flow: &mut MatchSelfTransfersFlowState,
+) {
+    let modal_rect = centered_rect(98, 24, area);
+    frame.render_widget(Clear, modal_rect);
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title(" MATCH SELF-TRANSFERS — confirm a matched in/out pair (Enter); never automatic ");
+    let inner = outer.inner(modal_rect);
+    frame.render_widget(outer, modal_rect);
+
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let hl = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let warn = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(2)])
+        .split(inner);
+
+    let selected = flow.list.table_state.selected();
+    let rows: Vec<Row> = flow
+        .list
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, it)| {
+            let action = match it.suggested {
+                crate::edit::form::MatchPairAction::Drop => "DROP",
+                crate::edit::form::MatchPairAction::Relocate => "RELOCATE",
+            };
+            let in_w = it
+                .in_wallet
+                .as_ref()
+                .map(wallet_label)
+                .unwrap_or_else(|| "(no wallet)".to_string());
+            let out_w = it
+                .out_wallet
+                .as_ref()
+                .map(wallet_label)
+                .unwrap_or_else(|| "(no wallet)".to_string());
+            let usd = match it.usd_value {
+                Some(v) => format!("${v}"),
+                None => "\u{2014}".to_string(),
+            };
+            let mut flags = String::new();
+            if it.ambiguous {
+                flags.push_str(" [AMBIGUOUS]");
+            }
+            if it.txid_match {
+                flags.push_str(" [txid]");
+            }
+            let text = format!(
+                "{action:<8} in {} {} {} sat  →  out {} {} {} sat  {usd}{flags}",
+                it.in_date, in_w, it.in_sat, it.out_date, out_w, it.out_principal_sat,
+            );
+            let style = if selected == Some(i) {
+                hl
+            } else if it.ambiguous {
+                warn
+            } else {
+                Style::default()
+            };
+            Row::new(vec![Cell::from(text).style(style)])
+        })
+        .collect();
+    let header = Row::new(vec![Cell::from(
+        "proposed pairs — k/j move, Enter confirm (choose DROP/RELOCATE), Esc cancel",
+    )
+    .style(bold)]);
+    let table = Table::new(rows, [Constraint::Min(10)]).header(header);
+    frame.render_stateful_widget(table, chunks[0], &mut flow.list.table_state);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "  A coincidental amount match of a real income + a real sale must NOT be dropped — \
+             confirm only true self-transfers.",
+            warn,
+        ))),
+        chunks[1],
+    );
+}
+
+/// Render the match-self-transfers confirm modal (DROP vs RELOCATE choice; explicit confirm).
+fn draw_match_self_transfers_modal(
+    frame: &mut Frame,
+    area: Rect,
+    modal: &MatchSelfTransfersModalState,
+) {
+    let in_w = modal
+        .in_wallet
+        .as_ref()
+        .map(wallet_label)
+        .unwrap_or_else(|| "(no wallet)".to_string());
+    let out_w = modal
+        .out_wallet
+        .as_ref()
+        .map(wallet_label)
+        .unwrap_or_else(|| "(no wallet)".to_string());
+    let mut lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Confirm this self-transfer match?",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!(
+            "    in  : {} — {} sat @ {}",
+            modal.in_event.canonical(),
+            modal.in_sat,
+            in_w
+        )),
+        Line::from(format!(
+            "    out : {} — {} sat @ {}",
+            modal.out_event.canonical(),
+            modal.out_principal_sat,
+            out_w
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("    action : "),
+            Span::styled(
+                format!("[{}]", modal.action.label()),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(Span::styled(
+            "    (←/→ or Tab, or 'd'/'r', to switch DROP↔RELOCATE)",
+            Style::default().fg(Color::Yellow),
+        )),
+    ];
+    if modal.ambiguous {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  AMBIGUOUS: this leg matched more than one counterpart — be sure this is the right pair.",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  [Enter] Apply — writes the vault    [Esc] Cancel — writes nothing",
+        Style::default().fg(Color::Cyan),
+    )));
+    lines.push(Line::from(""));
+
+    let height = (lines.len() + 2) as u16;
+    let modal_rect = centered_rect(84, height, area);
+    frame.render_widget(Clear, modal_rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red))
+        .title(" Confirm: self-transfer match — WRITES THE VAULT ");
     let inner = block.inner(modal_rect);
     frame.render_widget(block, modal_rect);
     frame.render_widget(Paragraph::new(lines), inner);

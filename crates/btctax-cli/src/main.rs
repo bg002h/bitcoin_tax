@@ -382,6 +382,31 @@ enum Reconcile {
         #[arg(long)]
         yes: bool,
     },
+    /// Match unreconciled inbound + outbound legs as self-transfers (self-transfer-passthrough C3).
+    /// With no --in/--out: PREVIEW the proposed pairs (read-only). With --in and --out: confirm ONE
+    /// pair (DROP for a same-wallet passthrough, RELOCATE for a cross-wallet transfer). NEVER automatic.
+    MatchSelfTransfers {
+        /// Confirm this in-leg (TransferIn eventref); requires --out.
+        #[arg(long = "in", requires = "out_ref")]
+        in_ref: Option<String>,
+        /// Confirm this out-leg (TransferOut eventref); requires --in.
+        #[arg(long = "out", requires = "in_ref")]
+        out_ref: Option<String>,
+        /// Override the suggested action (else the proposal's topology-derived action is used).
+        #[arg(long, value_enum)]
+        action: Option<SelfTransferActionArg>,
+        /// Print the preview and exit without writing (conflicts with --in/--out).
+        #[arg(long, conflicts_with_all = ["in_ref", "out_ref"])]
+        dry_run: bool,
+    },
+}
+
+#[derive(Copy, Clone, ValueEnum)]
+enum SelfTransferActionArg {
+    /// Same-wallet passthrough → SelfTransferPassthrough (both legs skipped, non-taxable).
+    Drop,
+    /// Cross-wallet transfer → TransferLink (relocate the lots to the destination wallet).
+    Relocate,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -1101,9 +1126,130 @@ fn dispatch_reconcile(
             );
             return Ok(());
         }
+        Reconcile::MatchSelfTransfers {
+            in_ref,
+            out_ref,
+            action,
+            dry_run,
+        } => {
+            let proposals = cmd::reconcile::self_transfer_match_plan(vault, &pp)?;
+            render_self_transfer_matches(&proposals);
+
+            // Phase 1 only: preview (no refs) or explicit --dry-run.
+            let (Some(in_ref), Some(out_ref)) = (in_ref, out_ref) else {
+                if proposals.is_empty() {
+                    println!("no self-transfer matches proposed");
+                }
+                return Ok(());
+            };
+            if dry_run {
+                return Ok(());
+            }
+            // Phase 2: confirm ONE pair. The action is the explicit override, else the proposal's
+            // topology-derived suggestion; an unproposed pair requires an explicit --action.
+            let in_id = eventref::parse_event_id(&in_ref)?;
+            let out_id = eventref::parse_event_id(&out_ref)?;
+            let suggested = proposals
+                .iter()
+                .find(|p| p.in_event == in_id && p.out_event == out_id)
+                .map(|p| p.action);
+            let resolved =
+                match (action, suggested) {
+                    (Some(SelfTransferActionArg::Drop), _) => btctax_cli::MatchAction::Drop,
+                    (Some(SelfTransferActionArg::Relocate), _) => btctax_cli::MatchAction::Relocate,
+                    (None, Some(a)) => a,
+                    (None, None) => return Err(CliError::Usage(
+                        "that in/out pair is not a proposed match; pass --action drop|relocate \
+                         to confirm it explicitly"
+                            .into(),
+                    )),
+                };
+            match resolved {
+                btctax_cli::MatchAction::Drop => {
+                    // DROP: append one SelfTransferPassthrough (both legs → Op::Skip).
+                    let id = cmd::reconcile::apply_self_transfer_passthrough(
+                        vault, &pp, &in_ref, &out_ref, now,
+                    )?;
+                    println!(
+                        "dropped self-transfer passthrough (in {} + out {}); decision {}",
+                        in_id.canonical(),
+                        out_id.canonical(),
+                        id.canonical()
+                    );
+                }
+                btctax_cli::MatchAction::Relocate => {
+                    // RELOCATE routes to the EXISTING link_transfer out→in (G-RELOCATE-REUSE).
+                    let id = cmd::reconcile::link_transfer(
+                        vault,
+                        &pp,
+                        &out_ref,
+                        TransferTarget::InEvent(in_id.clone()),
+                        now,
+                    )?;
+                    println!(
+                        "relocated self-transfer (out {} → in {}); decision {}",
+                        out_id.canonical(),
+                        in_id.canonical(),
+                        id.canonical()
+                    );
+                }
+            }
+            return Ok(());
+        }
     };
     println!("Recorded decision {}", id.canonical());
     Ok(())
+}
+
+/// Render the self-transfer match proposals (self-transfer-passthrough C3, Phase 1). Read-only preview:
+/// each pair's two `EventId`s, the two dates + wallets + sats, the advisory USD value, the suggested
+/// action (DROP vs RELOCATE), and the `ambiguous` flag (surfaced, NEVER auto-picked).
+fn render_self_transfer_matches(proposals: &[btctax_cli::MatchProposal]) {
+    if proposals.is_empty() {
+        return;
+    }
+    println!("Self-transfer match proposals (confirm one with --in <in> --out <out>):");
+    for p in proposals {
+        let in_w = p
+            .in_wallet
+            .as_ref()
+            .map(render::wallet_label)
+            .unwrap_or_else(|| "(no wallet)".to_string());
+        let out_w = p
+            .out_wallet
+            .as_ref()
+            .map(render::wallet_label)
+            .unwrap_or_else(|| "(no wallet)".to_string());
+        let usd = match p.usd_value {
+            Some(v) => format!("${v}"),
+            None => "\u{2014}".to_string(),
+        };
+        let action = match p.action {
+            btctax_cli::MatchAction::Drop => "DROP",
+            btctax_cli::MatchAction::Relocate => "RELOCATE",
+        };
+        let flags = {
+            let mut s = String::new();
+            if p.ambiguous {
+                s.push_str(" [AMBIGUOUS]");
+            }
+            if p.txid_match {
+                s.push_str(" [txid-match]");
+            }
+            s
+        };
+        println!(
+            "  {action}{flags}  in {} ({}, {}, {} sat)  out {} ({}, {}, {} sat)  {usd}",
+            p.in_event.canonical(),
+            p.in_date,
+            in_w,
+            p.in_sat,
+            p.out_event.canonical(),
+            p.out_date,
+            out_w,
+            p.out_principal_sat,
+        );
+    }
 }
 
 /// Render the bulk link-transfer preview table + totals footer (bulk-link-transfer D2). The USD
