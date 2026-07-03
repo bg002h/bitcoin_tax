@@ -862,6 +862,10 @@ pub enum DisposalKind {
     Spend,
     Gift,
     Donate,
+    /// #1: a TransferOut projected to `Op::SelfTransfer` by a non-voided TransferLink.
+    /// Reconstructed in-TUI (not in `snap.state.disposals`/`removals`); `principal_sat` =
+    /// `TransferOut.sat` (fee excluded — matches `honoring_principal`, resolve.rs:211-214).
+    SelfTransfer,
 }
 
 /// Pre-computed display data for a select-lots disposal list row.

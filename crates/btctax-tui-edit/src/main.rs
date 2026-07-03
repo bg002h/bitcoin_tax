@@ -40,10 +40,11 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use btctax_core::conventions::TRANSITION_DATE;
 use btctax_core::{
-    BlockerKind, ClassifyInbound, DisposeKind, DonationDetails, EventId, EventPayload,
+    BasisSource, BlockerKind, ClassifyInbound, DisposeKind, DonationDetails, EventId, EventPayload,
     Form8283Section, InboundClass, IncomeKind, ManualFmv, OutflowClass, ReclassifyIncome,
-    RemovalKind,
+    RemovalKind, TransferTarget,
 };
 use btctax_tui::app::Tab;
 use btctax_tui::{restore_terminal, setup_panic_hook, TerminalGuard};
@@ -2732,13 +2733,27 @@ fn handle_sl_list_key(app: &mut EditorApp, key: KeyEvent) {
             };
 
             if let Some(item) = selected {
-                // Build lot rows filtered to item.wallet and sorted by acquired_at ASC.
+                // Build lot rows and sort by acquired_at ASC.
+                //
+                // #2: feasibility-honest candidate-lot gate [R0-I1]. A PRE-2025 disposal consumes
+                // from the (pre-boundary) Universal residue, so offer pre-2025 lots ACROSS wallets,
+                // but EXCLUDE Path-B `SafeHarborAllocated` seed lots — their lot_ids never existed
+                // in Universal, so the engine raises a hard LotSelectionInvalid (no method-order
+                // fallback). Path-A `ReconstructedPerWallet` lots preserve their Universal lot_ids
+                // and are feasible. Post-2025 disposals stay per-wallet (unchanged).
                 let wallet_ref = item.wallet.as_ref();
                 let rows: Vec<LotPickFormRow> = snap
                     .state
                     .lots
                     .iter()
-                    .filter(|l| wallet_ref.is_some_and(|w| &l.wallet == w))
+                    .filter(|l| {
+                        if item.date < TRANSITION_DATE {
+                            l.acquired_at < TRANSITION_DATE
+                                && l.basis_source != BasisSource::SafeHarborAllocated
+                        } else {
+                            wallet_ref.is_some_and(|w| &l.wallet == w)
+                        }
+                    })
                     .map(|l| LotPickFormRow {
                         lot_id: l.lot_id.clone(),
                         remaining_sat: l.remaining_sat,
@@ -3305,6 +3320,57 @@ fn open_select_lots_flow(app: &mut EditorApp) {
         })
         .collect();
 
+    // #3: pre-filter events carrying an UncoveredDisposal blocker out of the MERGED list
+    // (disposals + removals + self-transfers). Selecting lots can NEVER cure under-coverage
+    // (the pool is short); the disposal stays actionable in Compliance, whose UncoveredDisposal
+    // blocker names the real remedy (add the missing acquisition).
+    let uncovered: std::collections::BTreeSet<&EventId> = snap
+        .state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::UncoveredDisposal)
+        .filter_map(|b| b.event.as_ref())
+        .collect();
+
+    // #1: reconstruct SelfTransfers — a TransferOut projects to Op::SelfTransfer iff a non-voided
+    // TransferLink names it with a resolvable destination wallet (resolve.rs:201-216). Mirror the
+    // engine's pass-1 link build (resolve.rs:486-527): iterate non-voided TransferLinks by
+    // decision_seq ASC [R0-M2] and FIRST-WINS on a duplicate out_event; dedup in-events; skip an
+    // in-event that is missing or has no wallet (use `ev_idx.get`, never index [R0-M2]).
+    let mut transfer_links: Vec<(u64, &btctax_core::event::TransferLink)> = snap
+        .events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .filter_map(|e| match (&e.id, &e.payload) {
+            (EventId::Decision { seq }, EventPayload::TransferLink(tl)) => Some((*seq, tl)),
+            _ => None,
+        })
+        .collect();
+    transfer_links.sort_by_key(|(seq, _)| *seq);
+
+    let mut linked_outs: std::collections::BTreeSet<EventId> = std::collections::BTreeSet::new();
+    let mut consumed_ins: std::collections::BTreeSet<EventId> = std::collections::BTreeSet::new();
+    for (_seq, tl) in &transfer_links {
+        if linked_outs.contains(&tl.out_event) {
+            continue; // duplicate out_event → first (lowest-seq) wins
+        }
+        match &tl.in_event_or_wallet {
+            TransferTarget::Wallet(_) => {
+                linked_outs.insert(tl.out_event.clone());
+            }
+            TransferTarget::InEvent(in_id) => {
+                if consumed_ins.contains(in_id) {
+                    continue; // in-event already consumed by an earlier link
+                }
+                if ev_idx.get(in_id).and_then(|e| e.wallet.as_ref()).is_none() {
+                    continue; // in-event missing or has no resolvable destination wallet
+                }
+                consumed_ins.insert(in_id.clone());
+                linked_outs.insert(tl.out_event.clone());
+            }
+        }
+    }
+
     // Disposals (sell / spend).
     let disposal_items: Vec<DisposalListItem> = snap
         .state
@@ -3312,6 +3378,7 @@ fn open_select_lots_flow(app: &mut EditorApp) {
         .iter()
         .filter(|d| !d.fee_mini_disposition)
         .filter(|d| !already_selected.contains(&d.event))
+        .filter(|d| !uncovered.contains(&d.event))
         .map(|d| {
             let principal_sat: btctax_core::Sat = d.legs.iter().map(|l| l.sat).sum();
             // Wallet sourced from the raw LedgerEvent [R0-I1].
@@ -3338,6 +3405,7 @@ fn open_select_lots_flow(app: &mut EditorApp) {
         .removals
         .iter()
         .filter(|r| !already_selected.contains(&r.event))
+        .filter(|r| !uncovered.contains(&r.event))
         .map(|r| {
             let principal_sat: btctax_core::Sat = r.legs.iter().map(|l| l.sat).sum();
             // Wallet sourced from the raw LedgerEvent [R0-I1].
@@ -3356,8 +3424,34 @@ fn open_select_lots_flow(app: &mut EditorApp) {
         })
         .collect();
 
+    // #1: self-transfer rows from the raw TransferOut events whose id ∈ linked_outs.
+    let self_transfer_items: Vec<DisposalListItem> = linked_outs
+        .iter()
+        .filter(|out_id| !already_selected.contains(*out_id))
+        .filter(|out_id| !uncovered.contains(*out_id))
+        .filter_map(|out_id| {
+            let e = ev_idx.get(out_id)?;
+            let transfer_out = match &e.payload {
+                EventPayload::TransferOut(t) => t,
+                _ => return None,
+            };
+            // `date` sourced as at main.rs (tax_date of the raw event).
+            let date = btctax_core::conventions::tax_date(e.utc_timestamp, e.original_tz);
+            Some(DisposalListItem {
+                disposal_event: e.id.clone(),
+                date,
+                kind: DisposalKind::SelfTransfer,
+                // principal_sat = TransferOut.sat (NOT minus fee — matches honoring_principal).
+                principal_sat: transfer_out.sat,
+                // SOURCE wallet — correct for the candidate-lot filter.
+                wallet: e.wallet.clone(),
+            })
+        })
+        .collect();
+
     // Merge and sort by date DESC (most recent first — matching the display tabs).
-    let mut items: Vec<DisposalListItem> = [disposal_items, removal_items].concat();
+    let mut items: Vec<DisposalListItem> =
+        [disposal_items, removal_items, self_transfer_items].concat();
     items.sort_by_key(|item| std::cmp::Reverse(item.date));
 
     if items.is_empty() {
@@ -11500,5 +11594,817 @@ mod tests {
                 "ERRLATCH defense-in-depth: the refused pre-flight must append NOTHING"
             );
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Task 3 (select-lots cluster: #1 SelfTransfer, #2 pre-2025 gate, #3 uncovered)
+    // ══════════════════════════════════════════════════════════════════════════
+    //
+    // Epoch anchors (UTC): 2024-06-01 = 1_717_200_000, 2024-07-01 = 1_719_792_000,
+    // 2024-08-01 = 1_722_470_400 (all pre-2025 → PoolKey::Universal); 2025-02-01 =
+    // 1_738_368_000, 2025-03-01 = 1_740_787_200 (post-2025 → PoolKey::Wallet). The
+    // 2025-01-01 boundary is TRANSITION_DATE (= 1_735_689_600).
+
+    fn river_wallet() -> btctax_core::WalletId {
+        btctax_core::WalletId::Exchange {
+            provider: "River".to_string(),
+            account: "main".to_string(),
+        }
+    }
+    fn kraken_wallet() -> btctax_core::WalletId {
+        btctax_core::WalletId::Exchange {
+            provider: "Kraken".to_string(),
+            account: "main".to_string(),
+        }
+    }
+
+    /// #1: Acquire 1M (River, 2025-02) + TransferOut 500K (River, 2025-03) + a non-voided
+    /// TransferLink(out=to, dest=Wallet(Kraken)) → a covered SelfTransfer of 500K.
+    /// Returns (to_id, transfer_link_decision_id).
+    fn seed_self_transfer_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> (btctax_core::EventId, btctax_core::EventId) {
+        use btctax_core::event::{Acquire, EventPayload, LedgerEvent, TransferLink, TransferOut};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, append_import_batch};
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let acq_id = EventId::import(Source::River, SourceRef::new("st-acq-1"));
+        let to_id = EventId::import(Source::River, SourceRef::new("st-to-1"));
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let batch = vec![
+            LedgerEvent {
+                id: acq_id,
+                utc_timestamp: OffsetDateTime::from_unix_timestamp(1_738_368_000).unwrap(),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(river_wallet()),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 1_000_000,
+                    usd_cost: dec!(50000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            },
+            LedgerEvent {
+                id: to_id.clone(),
+                utc_timestamp: OffsetDateTime::from_unix_timestamp(1_740_787_200).unwrap(),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(river_wallet()),
+                payload: EventPayload::TransferOut(TransferOut {
+                    sat: 500_000,
+                    fee_sat: None,
+                    dest_addr: None,
+                    txid: None,
+                }),
+            },
+        ];
+        append_import_batch(session.conn(), &batch).unwrap();
+        let tl_id = append_decision(
+            session.conn(),
+            EventPayload::TransferLink(TransferLink {
+                out_event: to_id.clone(),
+                in_event_or_wallet: TransferTarget::Wallet(kraken_wallet()),
+            }),
+            OffsetDateTime::from_unix_timestamp(1_740_800_000).unwrap(),
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+        session.save().unwrap();
+        (to_id, tl_id)
+    }
+
+    // ── KAT-SELFTRANSFER-SELECTABLE (#1) ─────────────────────────────────────
+    #[test]
+    fn kat_selftransfer_selectable() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-st-sel-pass";
+
+        let (to_id, _tl_id) = seed_self_transfer_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // s → the SelfTransfer row is listed with principal = TransferOut.sat + source wallet.
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        {
+            let flow = app
+                .select_lots_flow
+                .as_ref()
+                .expect("ST-SEL: select-lots flow must open");
+            let item = flow
+                .list
+                .items
+                .iter()
+                .find(|i| i.disposal_event == to_id)
+                .expect("ST-SEL: the self-transfer must be listed");
+            assert_eq!(
+                item.kind,
+                DisposalKind::SelfTransfer,
+                "ST-SEL: kind must be SelfTransfer"
+            );
+            assert_eq!(
+                item.principal_sat, 500_000,
+                "ST-SEL: principal_sat must equal TransferOut.sat (fee excluded)"
+            );
+            assert_eq!(
+                item.wallet.as_ref(),
+                Some(&river_wallet()),
+                "ST-SEL: wallet must be the SOURCE wallet"
+            );
+        }
+
+        // Enter → LotsForm (post-2025 date → per-wallet; source wallet has the 500K remainder).
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.select_lots_flow.as_ref().map(|f| &f.step),
+                Some(SelectLotsStep::LotsForm { .. })
+            ),
+            "ST-SEL: LotsForm must open (source wallet has a lot)"
+        );
+
+        // Pick the whole 500K remainder → conserves principal → clean save (arm 3).
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(app.select_lots_modal.is_some(), "ST-SEL: modal must open");
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → save
+        assert!(
+            app.select_lots_flow.is_none(),
+            "ST-SEL: a clean save must close the flow"
+        );
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.contains("Lot selection recorded"),
+            "ST-SEL: clean save must yield the arm-3 status; got: {status}"
+        );
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            !snap.state.blockers.iter().any(|b| matches!(
+                b.kind,
+                BlockerKind::DecisionConflict | BlockerKind::LotSelectionInvalid
+            )),
+            "ST-SEL: the selection must apply cleanly; blockers: {:?}",
+            snap.state.blockers
+        );
+    }
+
+    // ── KAT-SELFTRANSFER-VOIDED-LINK-ABSENT (#1) ─────────────────────────────
+    #[test]
+    fn kat_selftransfer_voided_link_absent() {
+        use btctax_core::event::{EventPayload, VoidDecisionEvent};
+        use btctax_core::persistence::append_decision;
+        use time::{OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-st-void-pass";
+
+        let (_to_id, tl_id) = seed_self_transfer_vault(&vault, &key, pp_str);
+
+        // Void the TransferLink → the TransferOut is no longer a self-transfer.
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            append_decision(
+                session.conn(),
+                EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+                    target_event_id: tl_id,
+                }),
+                OffsetDateTime::from_unix_timestamp(1_741_000_000).unwrap(),
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+        }
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.select_lots_flow.is_none(),
+            "ST-VOID: a voided TransferLink → no self-transfer → empty list → flow must NOT open"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or("")
+                .contains("No method-honoring disposals available"),
+            "ST-VOID: status must be the empty-list message; got: {:?}",
+            app.status
+        );
+    }
+
+    /// #2/#3 pre-2025 seed builder. Adds Acquire lots (each `(wallet, ts, sat, usd_cost)`), a
+    /// pre-2025 TransferOut(500K, River, 2024-08) reclassified to Sell, and — when `trigger_2025`
+    /// — a post-2025 Acquire (River, 2025-02, `trigger_2025` sat, $trigger/20) to fire the §7.4
+    /// boundary seed. Optionally appends an effective SafeHarborAllocation (`alloc`). Returns
+    /// (to_id, Option<alloc_id>).
+    #[allow(clippy::type_complexity)]
+    fn seed_pre2025_disposal_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+        acquires: &[(btctax_core::WalletId, i64, i64, i64)],
+        trigger_2025: Option<(i64, i64)>,
+        alloc: Option<btctax_core::event::SafeHarborAllocation>,
+    ) -> (btctax_core::EventId, Option<btctax_core::EventId>) {
+        use btctax_core::event::{
+            Acquire, DisposeKind, EventPayload, LedgerEvent, OutflowClass, ReclassifyOutflow,
+            TransferOut,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, append_import_batch};
+        use rust_decimal::Decimal;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let to_id = EventId::import(Source::River, SourceRef::new("p25-to-1"));
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+
+        let mut batch: Vec<LedgerEvent> = Vec::new();
+        for (i, (wallet, ts, sat, usd_cost)) in acquires.iter().enumerate() {
+            batch.push(LedgerEvent {
+                id: EventId::import(Source::River, SourceRef::new(format!("p25-acq-{i}"))),
+                utc_timestamp: OffsetDateTime::from_unix_timestamp(*ts).unwrap(),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(wallet.clone()),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: *sat,
+                    usd_cost: Decimal::from(*usd_cost),
+                    fee_usd: Decimal::ZERO,
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            });
+        }
+        // Pre-2025 TransferOut (2024-08) in River.
+        batch.push(LedgerEvent {
+            id: to_id.clone(),
+            utc_timestamp: OffsetDateTime::from_unix_timestamp(1_722_470_400).unwrap(),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(river_wallet()),
+            payload: EventPayload::TransferOut(TransferOut {
+                sat: 500_000,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        });
+        if let Some((sat, usd_cost)) = trigger_2025 {
+            batch.push(LedgerEvent {
+                id: EventId::import(Source::River, SourceRef::new("p25-acq-2025")),
+                utc_timestamp: OffsetDateTime::from_unix_timestamp(1_738_368_000).unwrap(),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(river_wallet()),
+                payload: EventPayload::Acquire(Acquire {
+                    sat,
+                    usd_cost: Decimal::from(usd_cost),
+                    fee_usd: Decimal::ZERO,
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            });
+        }
+        append_import_batch(session.conn(), &batch).unwrap();
+
+        // Reclassify the TransferOut → Sell (a Dispose).
+        append_decision(
+            session.conn(),
+            EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                transfer_out_event: to_id.clone(),
+                as_: OutflowClass::Dispose {
+                    kind: DisposeKind::Sell,
+                },
+                principal_proceeds_or_fmv: Decimal::from(20000),
+                fee_usd: None,
+                donee: None,
+            }),
+            OffsetDateTime::from_unix_timestamp(1_741_000_000).unwrap(),
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+
+        let alloc_id = alloc.map(|a| {
+            append_decision(
+                session.conn(),
+                EventPayload::SafeHarborAllocation(a),
+                OffsetDateTime::from_unix_timestamp(1_741_100_000).unwrap(),
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap()
+        });
+        session.save().unwrap();
+        (to_id, alloc_id)
+    }
+
+    // ── KAT-PRE2025-CROSSWALLET-LOTS (#2) ────────────────────────────────────
+    #[test]
+    fn kat_pre2025_crosswallet_lots() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p25-xw-pass";
+
+        // Pre-2025 lots in River (2024-06) and Kraken (2024-07); pre-2025 disposal in River;
+        // a post-2025 Acquire triggers the Path-A boundary seed (lots → ReconstructedPerWallet).
+        let acq_river = EventId::import(
+            btctax_core::identity::Source::River,
+            btctax_core::identity::SourceRef::new("p25-acq-0"),
+        );
+        let acq_kraken = EventId::import(
+            btctax_core::identity::Source::River,
+            btctax_core::identity::SourceRef::new("p25-acq-1"),
+        );
+        let acq_2025 = EventId::import(
+            btctax_core::identity::Source::River,
+            btctax_core::identity::SourceRef::new("p25-acq-2025"),
+        );
+        let (to_id, _) = seed_pre2025_disposal_vault(
+            &vault,
+            &key,
+            pp_str,
+            &[
+                (river_wallet(), 1_717_200_000, 1_000_000, 30000),
+                (kraken_wallet(), 1_719_792_000, 1_000_000, 40000),
+            ],
+            Some((200_000, 10000)),
+            None,
+        );
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        {
+            let flow = app
+                .select_lots_flow
+                .as_ref()
+                .expect("XW: select-lots flow must open");
+            let idx = flow
+                .list
+                .items
+                .iter()
+                .position(|i| i.disposal_event == to_id)
+                .expect("XW: the pre-2025 disposal must be listed");
+            app.select_lots_flow
+                .as_mut()
+                .unwrap()
+                .list
+                .table_state
+                .select(Some(idx));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → LotsForm
+        {
+            let flow = app.select_lots_flow.as_ref().unwrap();
+            let origins: Vec<btctax_core::EventId> = match &flow.step {
+                SelectLotsStep::LotsForm { rows, .. } => rows
+                    .iter()
+                    .map(|r| r.lot_id.origin_event_id.clone())
+                    .collect(),
+                _ => panic!("XW: LotsForm must open"),
+            };
+            assert!(
+                origins.contains(&acq_river),
+                "XW: the River pre-2025 lot must be offered"
+            );
+            assert!(
+                origins.contains(&acq_kraken),
+                "XW: the Kraken pre-2025 lot must be offered CROSS-WALLET (pre-2025 Universal)"
+            );
+            assert!(
+                !origins.contains(&acq_2025),
+                "XW: the post-2025 lot must NOT be offered for a pre-2025 disposal"
+            );
+        }
+
+        // Pick the Kraken lot (rows sorted acquired_at ASC → River=0, Kraken=1) for 500K → clean.
+        handle_key(&mut app, press(KeyCode::Down)); // cursor → 1 (Kraken)
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(app.select_lots_modal.is_some(), "XW: modal must open");
+        handle_key(&mut app, press(KeyCode::Enter)); // save
+        assert!(
+            app.select_lots_flow.is_none(),
+            "XW: a clean cross-wallet selection must close the flow"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or("")
+                .contains("Lot selection recorded"),
+            "XW: clean arm-3 status expected; got: {:?}",
+            app.status
+        );
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            !snap.state.blockers.iter().any(|b| matches!(
+                b.kind,
+                BlockerKind::DecisionConflict | BlockerKind::LotSelectionInvalid
+            )),
+            "XW: the engine must accept the cross-wallet pre-2025 pick; blockers: {:?}",
+            snap.state.blockers
+        );
+    }
+
+    // ── KAT-PRE2025-PATHB-SEEDLOTS-EXCLUDED (#2) ─────────────────────────────
+    #[test]
+    fn kat_pre2025_pathb_seedlots_excluded() {
+        use btctax_core::event::{AllocLot, AllocMethod, SafeHarborAllocation};
+        use btctax_core::LotMethod;
+        use rust_decimal::Decimal;
+        use time::macros::date;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p25-pathb-pass";
+
+        // Pre-2025 residue after the 500K disposal = 500K sat / $15000 basis (from 1M / $30000).
+        // The attested allocation LISTS exactly that residue → effective → Path B installs
+        // SafeHarborAllocated seed lots (acquired 2024-06, < TRANSITION_DATE).
+        let alloc = SafeHarborAllocation {
+            lots: vec![AllocLot {
+                wallet: river_wallet(),
+                sat: 500_000,
+                usd_basis: Decimal::from(15000),
+                acquired_at: date!(2024 - 06 - 01),
+                dual_loss_basis: None,
+                donor_acquired_at: None,
+            }],
+            as_of_date: date!(2025 - 01 - 01),
+            method: AllocMethod::ActualPosition,
+            timely_allocation_attested: true,
+            pre2025_method: LotMethod::Fifo,
+        };
+        let (to_id, alloc_id) = seed_pre2025_disposal_vault(
+            &vault,
+            &key,
+            pp_str,
+            &[(river_wallet(), 1_717_200_000, 1_000_000, 30000)],
+            Some((100_000, 5000)),
+            Some(alloc),
+        );
+        let alloc_id = alloc_id.unwrap();
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Sanity: the allocation is EFFECTIVE (Path B) and the pool carries SafeHarborAllocated seeds.
+        {
+            let snap = app.snapshot.as_ref().unwrap();
+            let on_alloc = |k: BlockerKind| {
+                snap.state
+                    .blockers
+                    .iter()
+                    .any(|b| b.kind == k && b.event.as_ref() == Some(&alloc_id))
+            };
+            assert!(
+                !on_alloc(BlockerKind::SafeHarborTimebar)
+                    && !on_alloc(BlockerKind::SafeHarborUnconservable),
+                "PATHB: the allocation must be effective; blockers: {:?}",
+                snap.state.blockers
+            );
+            assert!(
+                snap.state
+                    .lots
+                    .iter()
+                    .any(|l| l.basis_source == BasisSource::SafeHarborAllocated),
+                "PATHB: Path-B seed lots must be present"
+            );
+        }
+
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        {
+            let flow = app
+                .select_lots_flow
+                .as_ref()
+                .expect("PATHB: flow must open (the disposal is a candidate)");
+            let idx = flow
+                .list
+                .items
+                .iter()
+                .position(|i| i.disposal_event == to_id)
+                .expect("PATHB: the pre-2025 disposal must be listed");
+            app.select_lots_flow
+                .as_mut()
+                .unwrap()
+                .list
+                .table_state
+                .select(Some(idx));
+        }
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Enter)); // → "No lots available" (all lots excluded)
+        assert!(
+            matches!(
+                app.select_lots_flow.as_ref().map(|f| &f.step),
+                Some(SelectLotsStep::List)
+            ),
+            "PATHB: the flow must stay on List (no feasible lot to offer)"
+        );
+        assert!(
+            app.select_lots_modal.is_none(),
+            "PATHB: no LotsForm/modal must open"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or("")
+                .contains("No lots available"),
+            "PATHB: Path-B seed lots are excluded → 'No lots available'; got: {:?}",
+            app.status
+        );
+    }
+
+    // ── KAT-POST2025-WALLET-SCOPED (#2 regression) ───────────────────────────
+    #[test]
+    fn kat_post2025_wallet_scoped() {
+        use btctax_core::event::{Acquire, EventPayload, LedgerEvent, TransferOut};
+        use btctax_core::event::{DisposeKind, OutflowClass, ReclassifyOutflow};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, append_import_batch};
+        use rust_decimal::Decimal;
+        use time::{OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-post25-ws-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+        let acq_river = EventId::import(Source::River, SourceRef::new("post-acq-river"));
+        let acq_kraken = EventId::import(Source::River, SourceRef::new("post-acq-kraken"));
+        let to_id = EventId::import(Source::River, SourceRef::new("post-to"));
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let batch = vec![
+                LedgerEvent {
+                    id: acq_river.clone(),
+                    utc_timestamp: OffsetDateTime::from_unix_timestamp(1_738_368_000).unwrap(),
+                    original_tz: UtcOffset::UTC,
+                    wallet: Some(river_wallet()),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 1_000_000,
+                        usd_cost: Decimal::from(50000),
+                        fee_usd: Decimal::ZERO,
+                        basis_source: BasisSource::ExchangeProvided,
+                    }),
+                },
+                LedgerEvent {
+                    id: acq_kraken.clone(),
+                    utc_timestamp: OffsetDateTime::from_unix_timestamp(1_738_454_400).unwrap(),
+                    original_tz: UtcOffset::UTC,
+                    wallet: Some(kraken_wallet()),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 1_000_000,
+                        usd_cost: Decimal::from(60000),
+                        fee_usd: Decimal::ZERO,
+                        basis_source: BasisSource::ExchangeProvided,
+                    }),
+                },
+                LedgerEvent {
+                    id: to_id.clone(),
+                    utc_timestamp: OffsetDateTime::from_unix_timestamp(1_740_787_200).unwrap(),
+                    original_tz: UtcOffset::UTC,
+                    wallet: Some(river_wallet()),
+                    payload: EventPayload::TransferOut(TransferOut {
+                        sat: 500_000,
+                        fee_sat: None,
+                        dest_addr: None,
+                        txid: None,
+                    }),
+                },
+            ];
+            append_import_batch(session.conn(), &batch).unwrap();
+            append_decision(
+                session.conn(),
+                EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                    transfer_out_event: to_id.clone(),
+                    as_: OutflowClass::Dispose {
+                        kind: DisposeKind::Sell,
+                    },
+                    principal_proceeds_or_fmv: Decimal::from(30000),
+                    fee_usd: None,
+                    donee: None,
+                }),
+                OffsetDateTime::from_unix_timestamp(1_741_000_000).unwrap(),
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+        }
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        {
+            let flow = app.select_lots_flow.as_ref().expect("WS: flow must open");
+            let idx = flow
+                .list
+                .items
+                .iter()
+                .position(|i| i.disposal_event == to_id)
+                .expect("WS: the post-2025 disposal must be listed");
+            app.select_lots_flow
+                .as_mut()
+                .unwrap()
+                .list
+                .table_state
+                .select(Some(idx));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → LotsForm
+        {
+            let flow = app.select_lots_flow.as_ref().unwrap();
+            let origins: Vec<btctax_core::EventId> = match &flow.step {
+                SelectLotsStep::LotsForm { rows, .. } => rows
+                    .iter()
+                    .map(|r| r.lot_id.origin_event_id.clone())
+                    .collect(),
+                _ => panic!("WS: LotsForm must open"),
+            };
+            assert!(
+                origins.contains(&acq_river),
+                "WS: the disposal's own-wallet (River) lot must be offered"
+            );
+            assert!(
+                !origins.contains(&acq_kraken),
+                "WS: a post-2025 disposal must NOT offer another wallet's (Kraken) lot"
+            );
+        }
+    }
+
+    // ── KAT-PRE2025-EXCLUDES-POST2025-LOT (#2) ───────────────────────────────
+    #[test]
+    fn kat_pre2025_excludes_post2025_lot() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p25-excl-pass";
+
+        let acq_river = EventId::import(
+            btctax_core::identity::Source::River,
+            btctax_core::identity::SourceRef::new("p25-acq-0"),
+        );
+        let acq_2025 = EventId::import(
+            btctax_core::identity::Source::River,
+            btctax_core::identity::SourceRef::new("p25-acq-2025"),
+        );
+        // Pre-2025 lot (River, 2024-06) + pre-2025 disposal; a post-2025 Acquire is BOTH the
+        // Path-A boundary trigger AND the 2025-acquired lot that must be excluded.
+        let (to_id, _) = seed_pre2025_disposal_vault(
+            &vault,
+            &key,
+            pp_str,
+            &[(river_wallet(), 1_717_200_000, 1_000_000, 30000)],
+            Some((500_000, 20000)),
+            None,
+        );
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        {
+            let flow = app.select_lots_flow.as_ref().expect("EXCL: flow must open");
+            let idx = flow
+                .list
+                .items
+                .iter()
+                .position(|i| i.disposal_event == to_id)
+                .expect("EXCL: the pre-2025 disposal must be listed");
+            app.select_lots_flow
+                .as_mut()
+                .unwrap()
+                .list
+                .table_state
+                .select(Some(idx));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → LotsForm
+        let flow = app.select_lots_flow.as_ref().unwrap();
+        let origins: Vec<btctax_core::EventId> = match &flow.step {
+            SelectLotsStep::LotsForm { rows, .. } => rows
+                .iter()
+                .map(|r| r.lot_id.origin_event_id.clone())
+                .collect(),
+            _ => panic!("EXCL: LotsForm must open (the pre-2025 lot is offered)"),
+        };
+        assert!(
+            origins.contains(&acq_river),
+            "EXCL: the pre-2025 lot must be offered"
+        );
+        assert!(
+            !origins.contains(&acq_2025),
+            "EXCL: the 2025-acquired lot must NOT be offered for a pre-2025 disposal"
+        );
+    }
+
+    // ── KAT-UNCOVERED-EXCLUDED (#3) ──────────────────────────────────────────
+    #[test]
+    fn kat_uncovered_excluded() {
+        use btctax_core::event::{Acquire, EventPayload, LedgerEvent, TransferOut};
+        use btctax_core::event::{DisposeKind, OutflowClass, ReclassifyOutflow};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, append_import_batch};
+        use rust_decimal::Decimal;
+        use time::{OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-uncov-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+        let acq_id = EventId::import(Source::River, SourceRef::new("uncov-acq"));
+        let to_id = EventId::import(Source::River, SourceRef::new("uncov-to"));
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            // Acquire only 300K but dispose 500K → PARTIAL coverage: the Disposal IS recorded
+            // (consumed non-empty) AND an UncoveredDisposal blocker fires on the disposal event.
+            let batch = vec![
+                LedgerEvent {
+                    id: acq_id,
+                    utc_timestamp: OffsetDateTime::from_unix_timestamp(1_738_368_000).unwrap(),
+                    original_tz: UtcOffset::UTC,
+                    wallet: Some(river_wallet()),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 300_000,
+                        usd_cost: Decimal::from(10000),
+                        fee_usd: Decimal::ZERO,
+                        basis_source: BasisSource::ExchangeProvided,
+                    }),
+                },
+                LedgerEvent {
+                    id: to_id.clone(),
+                    utc_timestamp: OffsetDateTime::from_unix_timestamp(1_740_787_200).unwrap(),
+                    original_tz: UtcOffset::UTC,
+                    wallet: Some(river_wallet()),
+                    payload: EventPayload::TransferOut(TransferOut {
+                        sat: 500_000,
+                        fee_sat: None,
+                        dest_addr: None,
+                        txid: None,
+                    }),
+                },
+            ];
+            append_import_batch(session.conn(), &batch).unwrap();
+            append_decision(
+                session.conn(),
+                EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                    transfer_out_event: to_id.clone(),
+                    as_: OutflowClass::Dispose {
+                        kind: DisposeKind::Sell,
+                    },
+                    principal_proceeds_or_fmv: Decimal::from(20000),
+                    fee_usd: None,
+                    donee: None,
+                }),
+                OffsetDateTime::from_unix_timestamp(1_741_000_000).unwrap(),
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+        }
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Sanity: the disposal IS recorded (partial coverage) but carries an UncoveredDisposal.
+        {
+            let snap = app.snapshot.as_ref().unwrap();
+            assert!(
+                snap.state.disposals.iter().any(|d| d.event == to_id),
+                "UNCOV: the partially-covered disposal must be recorded in state.disposals"
+            );
+            assert!(
+                snap.state.blockers.iter().any(|b| {
+                    b.kind == BlockerKind::UncoveredDisposal && b.event.as_ref() == Some(&to_id)
+                }),
+                "UNCOV: an UncoveredDisposal blocker must fire on the disposal event"
+            );
+        }
+
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.select_lots_flow.is_none(),
+            "UNCOV: the under-covered disposal is the only candidate and is pre-filtered → \
+             the flow must NOT open"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or("")
+                .contains("No method-honoring disposals available"),
+            "UNCOV: status must be the empty-list message; got: {:?}",
+            app.status
+        );
     }
 }
