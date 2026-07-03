@@ -167,8 +167,10 @@ pub fn peek_text(path: &Path, max_bytes: usize) -> Result<String, AdapterError> 
 }
 
 /// XLSX numeric cells are IEEE-754 doubles in the file format. Rust's shortest-round-trip `{}` for f64
-/// reproduces the intended ≤8-dp exchange decimal exactly (e.g. 0.12345678 → "0.12345678"); that string
-/// is then parsed by the exact decimal parser (NFR5 — documented bound, FOLLOWUPS).
+/// reproduces the source decimal exactly within f64's ~15-significant-digit clean range — including
+/// Gemini's >8-dp (sub-satoshi) internal-ledger amounts (e.g. 0.0010216163 → "0.0010216163"). That
+/// string is then parsed by `parse_btc_to_sat`, which ROUNDS any sub-satoshi BTC QUANTITY to the nearest
+/// satoshi (see parse.rs). USD/tax values are still parsed exactly (never rounded here).
 fn cell_to_string(d: &Data) -> String {
     match d {
         Data::Empty => String::new(),

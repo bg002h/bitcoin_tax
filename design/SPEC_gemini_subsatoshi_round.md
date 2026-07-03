@@ -2,8 +2,9 @@
 
 **Source baseline:** `main` @ `719e9fe` (branch `fix/gemini-subsatoshi-round` OFF MAIN — isolated from the
 in-flight Cycle-2 bulk-resolve-conflict work, which lives on its own branch and touches different crates).
-**Review status: R0 round 1 folded (0C / 1I / 2M / 2N — GATE BLOCKED then folded); awaiting R0 round 2.
-Review: `reviews/R0-spec-gemini-subsatoshi-round-round-1.md`.**
+**Review status: R0-GREEN (2 rounds; 0 Critical / 0 Important). Reviews:
+`reviews/R0-spec-gemini-subsatoshi-round-round-{1,2}.md` (round 1: 0C/1I — the xlsx numeric-cell read
+path; round 2: 0C/0I, 3 cosmetic nits). Cleared to implement.**
 **Lineage:** user-reported bug (2026-07-03): `btctax import ~/…/ReadOnly/*` →
 `error: gemini row 2: fractional satoshi in BTC amount "0.0010216163"`. User-approved fix: **round to the
 nearest satoshi.**

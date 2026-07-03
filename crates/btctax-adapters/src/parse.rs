@@ -51,9 +51,12 @@ pub fn parse_usd(
     Ok(d)
 }
 
-/// Parse a BTC amount string → integer satoshis EXACTLY (NFR5). Keeps sign (callers `.abs()` for the
-/// payload `sat`; the sign is available to disambiguate a signed/directional amount if a source needs
-/// it). A value with finer-than-satoshi precision is a `FractionalSat` error, never a silent round.
+/// Parse a BTC amount string → integer satoshis (NFR5). Keeps sign (callers `.abs()` for the payload
+/// `sat`; the sign is available to disambiguate a signed/directional amount if a source needs it). A
+/// value with finer-than-satoshi precision (e.g. Gemini's 10-dp internal-ledger artifacts) is ROUNDED to
+/// the nearest satoshi (`MidpointNearestEven`, matching `round_cents`) — normalizing an un-representable
+/// BTC QUANTITY to the satoshi grid (< 1 sat error). USD/tax VALUES are still never silently rounded;
+/// this is BTC quantity only.
 pub fn parse_btc_to_sat(
     source: &'static str,
     line: usize,
@@ -80,15 +83,12 @@ pub fn parse_btc_to_sat(
         value: raw.to_string(),
         reason: e.to_string(),
     })?;
-    let sats = btc * Decimal::from(SATS_PER_BTC);
-    if !sats.fract().is_zero() {
-        return Err(AdapterError::FractionalSat {
-            adapter: source,
-            line,
-            value: raw.to_string(),
-        });
-    }
-    sats.trunc().to_i64().ok_or_else(|| AdapterError::Parse {
+    // Round to the nearest satoshi (MidpointNearestEven, matching round_cents). Sub-satoshi BTC is
+    // un-representable (1 sat is the minimum unit); Gemini exports 10-dp internal-ledger artifacts
+    // (fee splits, interest accruals, averaged fills). This normalizes a QUANTITY to the sat grid
+    // (< 1 sat ≈ <$0.001 error) — it does NOT round any USD/tax value.
+    let sats = (btc * Decimal::from(SATS_PER_BTC)).round();
+    sats.to_i64().ok_or_else(|| AdapterError::Parse {
         adapter: source,
         line,
         field,
@@ -224,9 +224,36 @@ mod tests {
     }
 
     #[test]
-    fn fractional_satoshi_is_an_error_never_a_silent_round() {
-        let e = parse_btc_to_sat("river", 7, "amount", "0.000000001").unwrap_err();
-        assert!(matches!(e, AdapterError::FractionalSat { line: 7, .. })); // adapter + value are wildcards
+    fn subsatoshi_btc_rounds_to_nearest_satoshi() {
+        // Gemini's real 10-dp internal-ledger amounts round to the nearest sat (MidpointNearestEven).
+        assert_eq!(
+            parse_btc_to_sat("gemini", 1, "f", "0.0010216163").unwrap(),
+            102_162
+        ); // .63 → up
+        assert_eq!(
+            parse_btc_to_sat("gemini", 1, "f", "0.0997506234").unwrap(),
+            9_975_062
+        ); // .34 → down
+        assert_eq!(
+            parse_btc_to_sat("gemini", 1, "f", "0.7674706206").unwrap(),
+            76_747_062
+        ); // .06 → down
+        assert_eq!(
+            parse_btc_to_sat("gemini", 1, "f", "-0.1156442018").unwrap(),
+            -11_564_420
+        ); // .18 → toward 0
+        assert_eq!(
+            parse_btc_to_sat("gemini", 1, "f", "0.00076035204").unwrap(),
+            76_035
+        ); // .204 → down
+           // sub-half-satoshi → 0 (dust); this was the old FractionalSat error case.
+        assert_eq!(
+            parse_btc_to_sat("river", 7, "amount", "0.000000001").unwrap(),
+            0
+        ); // 0.1 sat → 0
+           // half-even ties (prove MidpointNearestEven, NOT half-up which would give 1 / 3):
+        assert_eq!(parse_btc_to_sat("t", 1, "f", "0.000000005").unwrap(), 0); // 0.5 sat → 0 (even)
+        assert_eq!(parse_btc_to_sat("t", 1, "f", "0.000000025").unwrap(), 2); // 2.5 sat → 2 (even)
     }
 
     #[test]

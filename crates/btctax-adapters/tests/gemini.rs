@@ -506,3 +506,82 @@ fn gemini_eth_only_row_dropped_by_fr2() {
     assert_eq!(out.unclassified, 0);
     assert_eq!(out.events.len(), 0);
 }
+
+// ── Sub-satoshi KAT [SPEC gemini-subsatoshi-round]: Gemini exports 10-dp internal-ledger amounts finer
+// than a satoshi. The BTC Amount cell reaches parse_btc_to_sat via the xlsx READ path
+// (Data::Float → format!("{f}")), which now ROUNDS to the nearest satoshi instead of aborting the import
+// with FractionalSat. This is the exact bug the user hit ("gemini row 2: fractional satoshi …"). Covers
+// BOTH a NUMERIC (Data::Float, the real Gemini shape) and a STRING cell — both must round to 102162.
+fn write_subsatoshi_fixture(path: &std::path::Path) {
+    let mut wb = Workbook::new();
+    let ws = wb.add_worksheet();
+    let header = [
+        "Date",
+        "Time (UTC)",
+        "Type",
+        "Symbol",
+        "BTC Amount BTC",
+        "USD Amount USD",
+        "Fee (USD) USD",
+        "BTC Balance BTC",
+        "Trade ID",
+        "Order ID",
+        "Tx Hash",
+        "Deposit Destination",
+        "Withdrawal Destination",
+    ];
+    for (c, h) in header.iter().enumerate() {
+        ws.write_string(0, c as u16, *h).unwrap();
+    }
+    // Row 1: BTCUSD Buy, BTC Amount 0.0010216163 (= 102161.63 sat) as a NUMERIC cell → Data::Float path.
+    ws.write_string(1, 0, "2025-07-01 09:00:00").unwrap();
+    ws.write_string(1, 1, "2025-07-01 09:00:00").unwrap();
+    ws.write_string(1, 2, "Buy").unwrap();
+    ws.write_string(1, 3, "BTCUSD").unwrap();
+    ws.write_number(1, 4, 0.0010216163f64).unwrap(); // NUMERIC sub-sat → Data::Float → format!("{f}")
+    ws.write_string(1, 5, "70.00").unwrap();
+    ws.write_string(1, 6, "0.50").unwrap();
+    ws.write_string(1, 7, "0.0010216163").unwrap();
+    ws.write_string(1, 8, "T-SS1").unwrap();
+    ws.write_string(1, 9, "O-SS1").unwrap();
+    // Row 2: identical Buy but BTC Amount as a STRING cell → Data::String path; must also round to 102162.
+    ws.write_string(2, 0, "2025-07-02 09:00:00").unwrap();
+    ws.write_string(2, 1, "2025-07-02 09:00:00").unwrap();
+    ws.write_string(2, 2, "Buy").unwrap();
+    ws.write_string(2, 3, "BTCUSD").unwrap();
+    ws.write_string(2, 4, "0.0010216163").unwrap(); // STRING sub-sat
+    ws.write_string(2, 5, "70.00").unwrap();
+    ws.write_string(2, 6, "0.50").unwrap();
+    ws.write_string(2, 7, "0.0010216163").unwrap();
+    ws.write_string(2, 8, "T-SS2").unwrap();
+    ws.write_string(2, 9, "O-SS2").unwrap();
+    wb.save(path).unwrap();
+}
+
+#[test]
+fn gemini_subsatoshi_btc_amount_rounds_and_imports() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("subsat.xlsx");
+    write_subsatoshi_fixture(&path);
+    let prices = BundledPrices::load().unwrap();
+    let gm = Gemini;
+    let g = FileGroup {
+        source: Source::Gemini,
+        label: "gemini_subsat".into(),
+        files: vec![SourceFile::new(path)],
+    };
+    // MUST NOT error on the sub-satoshi amounts (the bug previously aborted the whole import here).
+    let rows = gm.parse(&g).unwrap();
+    let out = gm.normalize(&g, rows, &prices).unwrap();
+    // Both Buy rows (numeric cell + string cell) → Acquire with sat rounded 102161.63 → 102162.
+    assert_eq!(out.events.len(), 2);
+    for e in &out.events {
+        match &e.payload {
+            EventPayload::Acquire(a) => assert_eq!(
+                a.sat, 102_162,
+                "0.0010216163 BTC (102161.63 sat) must round to nearest satoshi 102162"
+            ),
+            other => panic!("unexpected payload: {other:?}"),
+        }
+    }
+}
