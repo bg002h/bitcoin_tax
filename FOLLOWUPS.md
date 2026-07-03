@@ -4,6 +4,36 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ tui-edit chunk 4a (link-transfer + classify-raw) — SHIPPED (2026-07-03)
+
+Cycle C (chunk 4) of the autonomous run, first half (architect split 4a/4b). Two new TUI decision
+flows on the shipped substrate: **link-transfer (`l`)** — link a pending TransferOut to a TransferIn
+or a wallet → `TransferLink` → non-taxable self-transfer (wallet-list unions ALL distinct event
+wallets, not just `holdings_by_wallet` — an R0 catch); **classify-raw (`u`)** — classify an
+`Unclassified` raw import → `ClassifyRaw` with a struct-accurate Acquire/Income builder (the two
+dominant variants). Both single-append via `save_or_rollback`; both revocable. Spec R0 2 rounds →
+0C/0I (round 1 caught wrong builder struct-fields + the wallet-source narrowing); whole-diff review →
+0C/0I/1M/2N (3 fault-injection probes verified the KATs load-bearing; numstat churn verified a benign
+diff-artifact — only 8 import lines removed). `btctax-core`/`btctax-cli` untouched. **906 workspace
+tests.** Reviews: `reviews/R0-spec-tui-edit-chunk4a-round-{1,2}.md`,
+`reviews/whole-branch-review-tui-edit-chunk4a-round-1.md`.
+
+**FOLLOWUPS recorded:**
+1. **classify-raw remaining-variant parity** — the TUI builder covers Income + Acquire; the CLI
+   `classify-raw --payload-json` also accepts Dispose/TransferOut/TransferIn/Unclassified. Deferred
+   (a full 6-variant structured builder + the FIELD_CAP=64 free-text limit); CLI remains for the rest.
+2. **link-transfer to a never-seen wallet** — the Wallet-target pick-list offers only wallets that
+   appear in `snap.events` (no wallet registry exists); a brand-new destination wallet isn't offerable
+   → the CLI `reconcile link-transfer --to-wallet <id>` remains. [R0-I2]
+3. **[WB4a-3 nit] link-transfer TargetPick empty-lists UX** — if a pending TransferOut has no wallet
+   and no other event carries one, both target lists are empty at TargetPick (Enter is a graceful
+   no-op, Esc exits) with no status hint. Minor polish: show "no link targets available".
+
+**NEXT: chunk 4b** — resolve-conflict (accept/reject) + optimize-accept (re-derive its design against
+post-4a HEAD).
+
+---
+
 ## ✅ tui-edit-hardening (chunk-3 follow-ups #1/2/3/6/7/8) — SHIPPED (2026-07-03)
 
 Cycle B of the autonomous run (roadmap `design/ROADMAP_autonomous_run.md`). The six select-lots +
