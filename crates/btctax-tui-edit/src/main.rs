@@ -7085,6 +7085,28 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Enter)); // modal
         handle_key(&mut app, press(KeyCode::Enter)); // confirm
 
+        // 3b. IncomeRecord-restoration: post-void snapshot reverts to original values.
+        // The reclassify set business=true; after void the record must restore to the
+        // seeded business=false, kind=Reward (IncomeKind unchanged by kind=None reclassify).
+        {
+            let snap = app.snapshot.as_ref().unwrap();
+            let ir = snap
+                .state
+                .income_recognized
+                .iter()
+                .find(|r| r.event == income_id)
+                .expect("VOID-RI: income record must exist in post-void snapshot");
+            assert!(
+                !ir.business,
+                "VOID-RI: business must revert to original false after void"
+            );
+            assert_eq!(
+                ir.kind,
+                IncomeKind::Reward,
+                "VOID-RI: kind must remain original Reward after void"
+            );
+        }
+
         // 4. Re-project: income event back in r list.
         handle_key(&mut app, press(KeyCode::Char('r')));
         let back_in_list = app

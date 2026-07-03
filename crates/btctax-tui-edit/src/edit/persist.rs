@@ -1169,4 +1169,177 @@ mod tests {
         let post_disk = load_all_ordered(session2.conn()).unwrap();
         assert_eq!(post_disk, post, "on-disk must equal in-memory post");
     }
+
+    // ── KAT-P2f — persist_void clears optimize_attest on LotSelection; MethodElection untouched ──
+    //
+    // Pins the LotSelection arm of persist_void (reconcile.rs:117–147 / persist.rs:197–217):
+    //   1. LotSelection arm: void appends VoidDecisionEvent AND clears the optimize_attest
+    //      side-table row for the disposal atomically in the same session.save().
+    //   2. MethodElection arm (branch-not-taken): void appends VoidDecisionEvent but does NOT
+    //      touch the optimize_attest table — a row planted for an unrelated disposal survives
+    //      intact.
+    //
+    // Mirror of the CLI twin at btctax-cli/tests/optimize_accept.rs:649
+    // (`void_clears_attestation_row_prevents_mislabel_as_attested_recording`).
+
+    #[test]
+    fn kat_p2f_void_lot_selection_clears_optimize_attest_method_election_does_not() {
+        use btctax_core::event::{EventPayload, LotPick, LotSelection, MethodElection};
+        use btctax_core::identity::{LotId, Source, SourceRef};
+        use btctax_core::persistence::{append_decision, load_all_ordered};
+        use btctax_core::EventId;
+        use btctax_store::Passphrase;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p2f-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        // Synthetic disposal EventId. persist_void reads the LotSelection payload for its
+        // disposal_event field; the disposal need not exist as an imported ledger event.
+        let disposal_id = EventId::import(Source::River, SourceRef::new("p2f-disposal"));
+        let lot_origin = EventId::import(Source::River, SourceRef::new("p2f-lot"));
+
+        // ── Seed: LotSelection decision + MethodElection decision + optimize_attest row ──
+        let ls_id: EventId;
+        let me_id: EventId;
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let t0 = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+            let t1 = OffsetDateTime::from_unix_timestamp(1_748_001_000).unwrap();
+
+            let ls_payload = EventPayload::LotSelection(LotSelection {
+                disposal_event: disposal_id.clone(),
+                lots: vec![LotPick {
+                    lot: LotId {
+                        origin_event_id: lot_origin,
+                        split_sequence: 0,
+                    },
+                    sat: 100_000,
+                }],
+            });
+            ls_id = append_decision(session.conn(), ls_payload, t0, UtcOffset::UTC, None).unwrap();
+
+            let me_payload = EventPayload::MethodElection(MethodElection {
+                effective_from: date!(2024 - 01 - 01),
+                method: btctax_core::LotMethod::Fifo,
+            });
+            me_id = append_decision(session.conn(), me_payload, t1, UtcOffset::UTC, None).unwrap();
+
+            // Seed the optimize_attest side-table entry for the disposal.
+            btctax_cli::optimize_attest::set(
+                session.conn(),
+                &disposal_id,
+                "p2f-attestation-text",
+                "2025-06-01",
+            )
+            .unwrap();
+
+            session.save().unwrap();
+        }
+
+        // ── LotSelection arm: void appends event AND clears optimize_attest ────
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let pre = load_all_ordered(session.conn()).unwrap();
+            assert_eq!(pre.len(), 2, "pre must have 2 decision events");
+            let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+
+            // Confirm optimize_attest row is present before void.
+            let pre_attest =
+                btctax_cli::optimize_attest::get(session.conn(), &disposal_id).unwrap();
+            assert_eq!(
+                pre_attest.as_deref(),
+                Some("p2f-attestation-text"),
+                "pre-void: optimize_attest row must be present"
+            );
+
+            let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+            let returned_id = persist_void(&mut session, ls_id.clone(), now).unwrap();
+
+            // Strict-prefix: void is the only new event.
+            let post = load_all_ordered(session.conn()).unwrap();
+            assert_eq!(
+                post.len(),
+                pre.len() + 1,
+                "void must append exactly one event"
+            );
+            assert_eq!(
+                &post[..pre.len()],
+                pre.as_slice(),
+                "strict prefix preserved"
+            );
+
+            // Tail is a VoidDecisionEvent targeting the LotSelection.
+            let tail = &post[pre.len()];
+            let tail_seq = tail.decision_seq.expect("tail must have decision_seq");
+            assert_eq!(
+                tail_seq,
+                (pre_max_seq + 1) as i64,
+                "tail seq must be pre_max+1"
+            );
+            assert_eq!(
+                returned_id,
+                EventId::Decision {
+                    seq: tail_seq as u64
+                },
+                "returned id must match tail"
+            );
+            let stored: EventPayload =
+                serde_json::from_str(&tail.payload_json).expect("tail must deserialise");
+            match &stored {
+                EventPayload::VoidDecisionEvent(v) => {
+                    assert_eq!(
+                        v.target_event_id, ls_id,
+                        "void must target the seeded LotSelection"
+                    );
+                }
+                other => panic!("expected VoidDecisionEvent, got {other:?}"),
+            }
+
+            // PRIMARY assertion: optimize_attest row must be cleared atomically.
+            let post_attest =
+                btctax_cli::optimize_attest::get(session.conn(), &disposal_id).unwrap();
+            assert_eq!(
+                post_attest, None,
+                "void of a LotSelection must clear the optimize_attest row atomically"
+            );
+        }
+
+        // ── MethodElection arm (branch-not-taken): optimize_attest untouched ──
+        //
+        // Re-open, plant a fresh attest row for a different disposal, then void the
+        // MethodElection. The row must survive — MethodElection void does NOT call
+        // optimize_attest::clear.
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+
+            let other_disposal = EventId::import(Source::River, SourceRef::new("p2f-other"));
+            btctax_cli::optimize_attest::set(
+                session.conn(),
+                &other_disposal,
+                "p2f-other-attestation",
+                "2025-07-01",
+            )
+            .unwrap();
+
+            let now = OffsetDateTime::from_unix_timestamp(1_748_003_000).unwrap();
+            persist_void(&mut session, me_id.clone(), now).unwrap();
+
+            // Attest row for other_disposal must be UNTOUCHED.
+            let attest_after =
+                btctax_cli::optimize_attest::get(session.conn(), &other_disposal).unwrap();
+            assert_eq!(
+                attest_after.as_deref(),
+                Some("p2f-other-attestation"),
+                "MethodElection void must NOT touch the optimize_attest side-table"
+            );
+        }
+    }
 }
