@@ -347,6 +347,31 @@ enum Reconcile {
         /// TransferOut event reference for the donation (from removals.csv 'event' column).
         out_event_ref: String,
     },
+    /// Bulk-confirm self-transfers: link every PENDING outbound transfer in a time frame to one
+    /// destination wallet (non-taxable). Shows a preview + requires --yes (or interactive y/N).
+    BulkLinkTransfer {
+        /// Destination wallet every selected outflow links to.
+        #[arg(long)]
+        to_wallet: String,
+        /// Restrict to a single tax year (mutually exclusive with --from/--to).
+        #[arg(long, conflicts_with_all = ["from", "to"])]
+        year: Option<i32>,
+        /// Range start (YYYY-MM-DD; requires --to).
+        #[arg(long, requires = "to")]
+        from: Option<String>,
+        /// Range end (YYYY-MM-DD, inclusive; requires --from).
+        #[arg(long, requires = "from")]
+        to: Option<String>,
+        /// Only outflows FROM this source wallet.
+        #[arg(long)]
+        from_wallet: Option<String>,
+        /// Print the preview and exit without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip the interactive confirmation (non-interactive apply).
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -979,7 +1004,124 @@ fn dispatch_reconcile(
             }
             return Ok(());
         }
+        Reconcile::BulkLinkTransfer {
+            to_wallet,
+            year,
+            from,
+            to,
+            from_wallet,
+            dry_run,
+            yes,
+        } => {
+            let dest = eventref::parse_wallet_id(&to_wallet)?;
+            let from_wallet = from_wallet
+                .as_deref()
+                .map(eventref::parse_wallet_id)
+                .transpose()?;
+            // clap enforces: none / --year alone / --from + --to. The catch-all is defensive.
+            let frame = match (year, from, to) {
+                (Some(y), None, None) => btctax_cli::Frame::Year(y),
+                (None, Some(f), Some(t)) => btctax_cli::Frame::Range {
+                    from: eventref::parse_date_arg(&f)?,
+                    to: eventref::parse_date_arg(&t)?,
+                },
+                (None, None, None) => btctax_cli::Frame::All,
+                _ => {
+                    return Err(CliError::Usage(
+                        "bulk-link-transfer: use --year, or --from with --to, or neither".into(),
+                    ))
+                }
+            };
+            let filter = btctax_cli::BulkFilter { frame, from_wallet };
+            let plan = cmd::reconcile::bulk_link_plan(vault, &pp, filter, dest.clone())?;
+
+            render_bulk_link_preview(&plan);
+
+            if plan.included.is_empty() {
+                println!("no pending outbound transfers match");
+                return Ok(());
+            }
+            if dry_run {
+                return Ok(());
+            }
+            let confirmed = if yes {
+                true
+            } else {
+                print!(
+                    "Link {} outflow(s) to {} as self-transfers? [y/N] ",
+                    plan.included.len(),
+                    render::wallet_label(&dest)
+                );
+                use std::io::Write;
+                std::io::stdout().flush().ok();
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line)?;
+                matches!(line.trim(), "y" | "Y" | "yes" | "YES")
+            };
+            if !confirmed {
+                println!("aborted; nothing written");
+                return Ok(());
+            }
+            let out_events: Vec<_> = plan.included.iter().map(|r| r.out_event.clone()).collect();
+            let n = cmd::reconcile::apply_bulk_link_transfer(
+                vault,
+                &pp,
+                out_events,
+                dest.clone(),
+                now,
+            )?;
+            println!(
+                "linked {n} outflows to {}; {} skipped (same wallet)",
+                render::wallet_label(&dest),
+                plan.skipped_same_wallet.len()
+            );
+            return Ok(());
+        }
     };
     println!("Recorded decision {}", id.canonical());
     Ok(())
+}
+
+/// Render the bulk link-transfer preview table + totals footer (bulk-link-transfer D2). The USD
+/// total is the HONEST FLOOR [R0-I2]: exact `$X` when every included row has a price, else
+/// `≥ $X (N unavailable)`.
+fn render_bulk_link_preview(plan: &btctax_cli::BulkLinkPlan) {
+    println!(
+        "Bulk self-transfer preview → {}",
+        render::wallet_label(&plan.dest)
+    );
+    println!(
+        "{:<12}  {:<28}  {:>14}  {:>16}",
+        "date", "source wallet", "sat", "USD value"
+    );
+    for r in &plan.included {
+        let wallet = r
+            .source_wallet
+            .as_ref()
+            .map(render::wallet_label)
+            .unwrap_or_else(|| "(no wallet)".to_string());
+        let usd = match r.usd_value {
+            Some(v) => format!("${v}"),
+            None => "—".to_string(),
+        };
+        println!(
+            "{:<12}  {:<28}  {:>14}  {:>16}",
+            r.date, wallet, r.principal_sat, usd
+        );
+    }
+    let total = if plan.missing_price_count == 0 {
+        format!("${}", plan.total_usd_value_floor)
+    } else {
+        format!(
+            "\u{2265} ${} ({} unavailable)",
+            plan.total_usd_value_floor, plan.missing_price_count
+        )
+    };
+    println!(
+        "included {} | {} sat | total USD reclassified non-taxable {} | skipped (same wallet) {}",
+        plan.included.len(),
+        plan.total_sat,
+        total,
+        plan.skipped_same_wallet.len()
+    );
 }

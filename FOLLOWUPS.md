@@ -4,6 +4,43 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ bulk-link-transfer (`b` / `reconcile bulk-link-transfer`) — SHIPPED (2026-07-03)
+
+Bulk self-transfer: apply `TransferLink`→`Op::SelfTransfer` to many pending outbound transfers at once,
+filtered by time frame + optional source wallet, each linked to ONE destination wallet, atomically +
+reversibly, behind a USD-value preview. Both surfaces — CLI `bulk-link-transfer` (two-phase:
+`bulk_link_plan` read + `apply_bulk_link_transfer` write; `--dry-run`/`--yes`) + TUI `b` flow (dest
+pick-or-**type** → filter → per-row-exclude checklist → confirm → atomic apply). Selection =
+`pending_reconciliation` (already excludes decided/linked outs); a mid-batch append failure reverts the
+WHOLE batch [I1]; honest USD floor `≥ $X (N unavailable)` [I2]; typed cold-wallet destination [Fork B].
+`btctax-core` untouched. First feature born from the full brainstorm→spec pipeline: R0 GREEN (2 rounds;
+caught the mid-batch-rollback + USD-floor) → whole-diff review GREEN (0C/0I/2M/3N; 3 fault-injection
+probes RED-then-restored). **946 workspace tests.** Reviews:
+`reviews/R0-spec-bulk-link-transfer-round-{1,2}.md`, `reviews/whole-branch-review-bulk-link-transfer-round-1.md`.
+
+Scope was **self-transfer-only, out→wallet, one destination per batch**. CONSCIOUSLY DEFERRED
+(tracked-open backlog, USER-DIRECTED — do not auto-start):
+
+- **out→in auto-matching.** v1 links each selected outflow to ONE chosen *wallet* (`TransferTarget::Wallet`);
+  it does NOT fuzzy-match outs to specific inbound TransferIn events. A future pass could pair outs with
+  candidate `TransferIn`s by amount/date proximity. — OPEN (feature).
+- **other reconcile decision types.** Bulk applies ONLY `TransferLink` (self-transfer). Bulk
+  reclassify-outflow (Sell/Spend/Gift/Donate), bulk classify-inbound, etc. are not in scope — each needs
+  per-decision required inputs (proceeds/FMV/donee) that resist a single-confirm batch. — OPEN (feature).
+- **TUI free-text `--from/--to` date RANGE.** The TUI filter offers All + each distinct year (a picker,
+  no free-text date entry); an arbitrary date range is CLI-only (`--from`/`--to`, `Frame::Range`). The
+  year picker + per-row exclude covers the TUI case (R0 Fork-A: KEEP CLI-only). — OPEN (feature).
+- **backport the typed destination [Fork B] to the single `l` link-transfer flow.** The bulk `b` flow
+  accepts a TYPED destination (`parse_wallet_id` → a never-seen `self:cold-wallet` is reachable). The
+  single `l` flow is still pick-list-only (its R0-I2 limitation: destinations sourced from `snap.events`).
+  The typed-dest affordance built here should be backported to `l`. — OPEN (small; `open_link_transfer_flow`
+  `main.rs`, `handle_lt_target_pick_key`).
+- **[M1 whole-diff] CLI empty-plan cosmetic.** On an empty plan the CLI renders a header-only preview
+  table before the "no pending outbound transfers match" line (harmless redundancy; output still correct).
+  Move the empty check above `render_bulk_link_preview`. — OPEN (nit).
+
+---
+
 ## ✅ Terminal chunk-5 burndown — DISPOSITION (2026-07-03) — AUTONOMOUS RUN COMPLETE
 
 The post-chunk-3 autonomous run (mandate 2026-07-02: save-rollback + hardening → chunk 4 → chunk 5 →

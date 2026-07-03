@@ -9,7 +9,8 @@
 //! Unlock screen. This module performs no writes.
 
 use crate::edit::form::{
-    amount_label, basis_source_display, income_kind_display, wallet_label,
+    amount_label, basis_source_display, bulk_checked_totals, bulk_usd_floor_label,
+    income_kind_display, wallet_label, BulkLinkFlowState, BulkLinkModalState, BulkLinkStep,
     ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
     ClassifyRawStep, ClassifyRawVariant, DisposalKind, FieldBuffer, InboundVariant, LinkMode,
     LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, MutationModalState,
@@ -347,6 +348,13 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.safe_harbor_allocate_modal.as_ref() {
         draw_safe_harbor_allocate_modal(frame, area, modal);
+    }
+    // Bulk-link-transfer flow overlay (bulk-link-transfer D3).
+    if let Some(flow) = app.bulk_link_flow.as_mut() {
+        draw_bulk_link_flow(frame, area, flow);
+    }
+    if let Some(modal) = app.bulk_link_modal.as_ref() {
+        draw_bulk_link_modal(frame, area, modal);
     }
 }
 
@@ -3224,6 +3232,248 @@ fn draw_safe_harbor_allocate_modal(
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Red))
         .title(" Confirm: safe-harbor allocate — WRITES THE VAULT ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+// ── Bulk link-transfer overlays (bulk-link-transfer D3) ──────────────────────
+
+/// Render the bulk link-transfer flow overlay (four steps on one panel).
+fn draw_bulk_link_flow(frame: &mut Frame, area: Rect, flow: &mut BulkLinkFlowState) {
+    let modal_rect = centered_rect(96, 26, area);
+    frame.render_widget(Clear, modal_rect);
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title(" BULK SELF-TRANSFER — link many pending outflows to ONE wallet (non-taxable) ");
+    let inner = outer.inner(modal_rect);
+    frame.render_widget(outer, modal_rect);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(0),
+            Constraint::Length(4),
+        ])
+        .split(inner);
+
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let hl = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let focus = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+
+    // Banner: chosen destination.
+    let dest_line = match &flow.dest {
+        Some(w) => format!("destination: {}", wallet_label(w)),
+        None => "destination: (not chosen)".to_string(),
+    };
+    frame.render_widget(
+        Paragraph::new(vec![Line::from(Span::styled(
+            dest_line,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))]),
+        chunks[0],
+    );
+
+    match flow.step {
+        BulkLinkStep::DestPick => {
+            let selected = flow.wallet_list.table_state.selected();
+            let rows: Vec<Row> = flow
+                .wallet_list
+                .items
+                .iter()
+                .enumerate()
+                .map(|(i, w)| {
+                    let style = if selected == Some(i) {
+                        hl
+                    } else {
+                        Style::default()
+                    };
+                    Row::new(vec![Cell::from(wallet_label(w)).style(style)])
+                })
+                .collect();
+            let header = Row::new(vec![Cell::from(
+                "Step 1/4 — destination wallet (pick one, or press 'n' to type a new one)",
+            )
+            .style(bold)]);
+            let table = Table::new(rows, [Constraint::Min(10)]).header(header);
+            frame.render_stateful_widget(table, chunks[1], &mut flow.wallet_list.table_state);
+        }
+        BulkLinkStep::DestType => {
+            let lines = vec![
+                Line::from(Span::styled("Step 1/4 — type a destination wallet", bold)),
+                Line::from(""),
+                Line::from("  self:LABEL   or   exchange:PROVIDER:ACCOUNT"),
+                Line::from("  (a never-seen cold wallet like self:cold-wallet is reachable here)"),
+                Line::from(""),
+                Line::from(Span::styled(
+                    format!("  > {}", flow.dest_buf.buf),
+                    Style::default().fg(Color::Yellow),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(lines), chunks[1]);
+        }
+        BulkLinkStep::Filter => {
+            let src_label = match flow.source_choices.get(flow.source_idx) {
+                Some(Some(w)) => wallet_label(w),
+                _ => "Any".to_string(),
+            };
+            let year_label = match flow.year_choices.get(flow.year_idx) {
+                Some(Some(y)) => y.to_string(),
+                _ => "All".to_string(),
+            };
+            let src_style = if flow.filter_focus == 0 {
+                focus
+            } else {
+                Style::default()
+            };
+            let yr_style = if flow.filter_focus == 1 {
+                focus
+            } else {
+                Style::default()
+            };
+            let lines = vec![
+                Line::from(Span::styled("Step 2/4 — filter", bold)),
+                Line::from(""),
+                Line::from(vec![
+                    Span::raw("  source wallet: "),
+                    Span::styled(format!("[{src_label}]"), src_style),
+                ]),
+                Line::from(vec![
+                    Span::raw("  time frame   : "),
+                    Span::styled(format!("[{year_label}]"), yr_style),
+                ]),
+            ];
+            frame.render_widget(Paragraph::new(lines), chunks[1]);
+        }
+        BulkLinkStep::Preview => {
+            let selected = flow.preview.table_state.selected();
+            let rows: Vec<Row> = flow
+                .preview
+                .items
+                .iter()
+                .enumerate()
+                .map(|(i, it)| {
+                    let base = if selected == Some(i) {
+                        hl
+                    } else {
+                        Style::default()
+                    };
+                    let mark = if it.checked { "[x]" } else { "[ ]" };
+                    let usd = it
+                        .usd_value
+                        .map(|v| format!("${v}"))
+                        .unwrap_or_else(|| "—".to_string());
+                    let wl = it
+                        .source_wallet
+                        .as_ref()
+                        .map(wallet_label)
+                        .unwrap_or_else(|| "(no wallet)".to_string());
+                    Row::new(vec![
+                        Cell::from(mark).style(base),
+                        Cell::from(it.date.to_string()).style(base),
+                        Cell::from(wl).style(base),
+                        Cell::from(fmt_btc(it.principal_sat)).style(base),
+                        Cell::from(usd).style(base),
+                    ])
+                })
+                .collect();
+            let header = Row::new(
+                ["", "date", "source wallet", "BTC", "USD value"]
+                    .iter()
+                    .map(|h| Cell::from(*h).style(bold)),
+            );
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Length(3),
+                    Constraint::Length(12),
+                    Constraint::Length(26),
+                    Constraint::Length(16),
+                    Constraint::Min(12),
+                ],
+            )
+            .header(header);
+            frame.render_stateful_widget(table, chunks[1], &mut flow.preview.table_state);
+        }
+    }
+
+    // Footer: live totals (Preview only) + step hint + transient error.
+    let mut footer: Vec<Line> = Vec::new();
+    if matches!(flow.step, BulkLinkStep::Preview) {
+        let (count, sat, floor, missing) = bulk_checked_totals(&flow.preview.items);
+        footer.push(Line::from(Span::styled(
+            format!(
+                "checked {count} · Σ {} BTC · total USD reclassified non-taxable {}",
+                fmt_btc(sat),
+                bulk_usd_floor_label(floor, missing)
+            ),
+            bold,
+        )));
+    }
+    let hint = match flow.step {
+        BulkLinkStep::DestPick => "↑/↓: scroll  n: type a wallet  Enter: choose  Esc: cancel",
+        BulkLinkStep::DestType => "Enter: parse  Esc: back",
+        BulkLinkStep::Filter => "↑/↓: focus  ←/→: change  Enter: preview  Esc: back",
+        BulkLinkStep::Preview => "↑/↓: scroll  Space/x: toggle  Enter: confirm  Esc: back",
+    };
+    footer.push(Line::from(Span::styled(
+        hint,
+        Style::default().fg(Color::Cyan),
+    )));
+    if let Some(err) = &flow.error {
+        footer.push(Line::from(Span::styled(
+            format!("⚠ {err}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+    frame.render_widget(Paragraph::new(footer), chunks[2]);
+}
+
+/// Render the bulk link-transfer confirmation modal (explicit; NOT typed-word — each link voidable).
+fn draw_bulk_link_modal(frame: &mut Frame, area: Rect, modal: &BulkLinkModalState) {
+    let lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Apply BULK self-transfer?",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!("    destination : {}", wallet_label(&modal.dest))),
+        Line::from(format!("    outflows    : {}", modal.count)),
+        Line::from(format!("    Σ BTC       : {}", fmt_btc(modal.total_sat))),
+        Line::from(format!(
+            "    Σ USD made non-taxable : {}",
+            bulk_usd_floor_label(modal.total_usd_value_floor, modal.missing_price_count)
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Each link is individually voidable ('v').",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+        Line::from("  Appended as N decisions, saved via the vault's atomic write path."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  [Enter] Apply — writes the vault    [Esc] Cancel — writes nothing",
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from(""),
+    ];
+
+    let height = (lines.len() + 2) as u16;
+    let modal_rect = centered_rect(78, height, area);
+    frame.render_widget(Clear, modal_rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red))
+        .title(" Confirm: bulk self-transfer — WRITES THE VAULT ");
     let inner = block.inner(modal_rect);
     frame.render_widget(block, modal_rect);
     frame.render_widget(Paragraph::new(lines), inner);

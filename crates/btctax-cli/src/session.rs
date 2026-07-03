@@ -10,10 +10,67 @@ use btctax_adapters::{BundledPrices, BundledTaxTables};
 use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{init_schema, load_all};
 use btctax_core::{project, LedgerEvent, LedgerState, ProjectionConfig};
-use btctax_core::{AllocLot, DonationDetails, EventId, EventPayload, LotMethod, TaxProfile};
+use btctax_core::{
+    AllocLot, DonationDetails, EventId, EventPayload, LotMethod, PendingTransfer, Sat, TaxDate,
+    TaxProfile, Usd, WalletId,
+};
 use btctax_store::{Passphrase, Vault};
 use rusqlite::Connection;
 use std::path::Path;
+
+// ── Bulk link-transfer plan (bulk-link-transfer D1) ──────────────────────────
+//
+// The shared, READ-ONLY plan both the CLI (`cmd::reconcile::bulk_link_plan`) and the TUI priced
+// preview compute from the HELD session. Modeled on `optimize_proposal`/`safe_harbor_residue`: a
+// `&self` read helper that appends and persists NOTHING.
+
+/// Time-frame selector for a bulk link-transfer plan. `Range` bounds are INCLUSIVE.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Frame {
+    All,
+    Year(i32),
+    Range { from: TaxDate, to: TaxDate },
+}
+
+/// Filter narrowing which pending outbound transfers a bulk plan selects.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkFilter {
+    pub frame: Frame,
+    pub from_wallet: Option<WalletId>,
+}
+
+/// One enriched pending outbound transfer in a bulk link-transfer plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkLinkRow {
+    pub out_event: EventId,
+    pub date: TaxDate,
+    /// [R0-N2] ALWAYS `Some` for a pending out (a wallet-less TransferOut never reaches
+    /// `pending_reconciliation`); `Option` kept defensively.
+    pub source_wallet: Option<WalletId>,
+    pub principal_sat: Sat,
+    /// `fmv_of(&prices, date, principal_sat)` [R0-M1]; advisory, `None` on missing price / overflow.
+    pub usd_value: Option<Usd>,
+    /// Σ leg `usd_basis` carried (over the principal+fee sats the legs cover); non-taxable → carries.
+    pub basis_usd: Usd,
+}
+
+/// The read-only plan a bulk link-transfer would execute: the eligible/in-frame `included` rows, the
+/// `skipped_same_wallet` rows (source == dest — a meaningless self-link), and the preview totals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkLinkPlan {
+    pub dest: WalletId,
+    /// Eligible + in-frame + passes `from_wallet` + source != dest. Sorted by `date`.
+    pub included: Vec<BulkLinkRow>,
+    /// Source wallet == dest → cannot self-link to itself.
+    pub skipped_same_wallet: Vec<BulkLinkRow>,
+    pub total_sat: Sat,
+    /// [R0-I2] Σ of the priced `usd_value`s — a FLOOR, always a real number.
+    pub total_usd_value_floor: Usd,
+    /// [R0-I2] rows priced `None` → render "≥ $X (N unavailable)" vs exact "$X".
+    pub missing_price_count: usize,
+    /// Σ `basis_usd` over `included`.
+    pub total_basis_usd: Usd,
+}
 
 pub struct Session {
     vault: Vault,
@@ -218,6 +275,95 @@ impl Session {
             })
             .collect();
         Ok((lots, pre2025_method))
+    }
+
+    /// READ-ONLY: compute the bulk link-transfer plan (bulk-link-transfer D1). Selects over the
+    /// PROJECTED `pending_reconciliation` (which already excludes already-decided / already-linked
+    /// outs), enriches each with date / source wallet / principal / advisory USD value / carried
+    /// basis, applies the frame + `from_wallet` filters, and routes `source == dest` rows to
+    /// `skipped_same_wallet`. Appends and persists NOTHING; mirrors `safe_harbor_residue`.
+    ///
+    /// The USD value is `btctax_core::price::fmv_of(&prices, date, principal_sat)` [R0-M1] — the
+    /// vetted checked helper (round_cents + overflow→`None`), NOT a hand-rolled `principal × price`.
+    /// The total is the HONEST FLOOR [R0-I2]: `total_usd_value_floor` is Σ of the PRICED rows only,
+    /// and `missing_price_count` records how many rows lacked a price, so the caller renders exact
+    /// `$X` (when 0) or `≥ $X (N unavailable)`.
+    pub fn bulk_link_transfer_plan(
+        &self,
+        filter: BulkFilter,
+        dest: WalletId,
+    ) -> Result<BulkLinkPlan, CliError> {
+        let (events, state, _cfg) = self.load_events_and_project()?;
+        let prices = BundledPrices::load()?;
+        let index: std::collections::HashMap<EventId, &LedgerEvent> =
+            events.iter().map(|e| (e.id.clone(), e)).collect();
+
+        let enrich = |pt: &PendingTransfer| -> BulkLinkRow {
+            let ev = index.get(&pt.event).copied();
+            let date = ev
+                .map(|e| tax_date(e.utc_timestamp, e.original_tz))
+                .unwrap_or_else(|| {
+                    // Defensive: a pending out always has an indexed source event; fall back to the
+                    // epoch date rather than panic (mirrors the single link-transfer opener).
+                    tax_date(
+                        time::OffsetDateTime::from_unix_timestamp(0).unwrap(),
+                        time::UtcOffset::UTC,
+                    )
+                });
+            let source_wallet = ev.and_then(|e| e.wallet.clone());
+            let usd_value = btctax_core::price::fmv_of(&prices, date, pt.principal_sat);
+            let basis_usd: Usd = pt.legs.iter().map(|l| l.usd_basis).sum();
+            BulkLinkRow {
+                out_event: pt.event.clone(),
+                date,
+                source_wallet,
+                principal_sat: pt.principal_sat,
+                usd_value,
+                basis_usd,
+            }
+        };
+
+        let in_frame = |date: TaxDate| match &filter.frame {
+            Frame::All => true,
+            Frame::Year(y) => date.year() == *y,
+            Frame::Range { from, to } => *from <= date && date <= *to,
+        };
+
+        let mut included: Vec<BulkLinkRow> = Vec::new();
+        let mut skipped_same_wallet: Vec<BulkLinkRow> = Vec::new();
+        for pt in &state.pending_reconciliation {
+            let row = enrich(pt);
+            if !in_frame(row.date) {
+                continue;
+            }
+            if let Some(w) = &filter.from_wallet {
+                if row.source_wallet.as_ref() != Some(w) {
+                    continue;
+                }
+            }
+            // Same-wallet guard: a self-link to the SAME wallet is meaningless — report, never link.
+            if row.source_wallet.as_ref() == Some(&dest) {
+                skipped_same_wallet.push(row);
+            } else {
+                included.push(row);
+            }
+        }
+        included.sort_by_key(|r| r.date);
+
+        let total_sat: Sat = included.iter().map(|r| r.principal_sat).sum();
+        let total_usd_value_floor: Usd = included.iter().filter_map(|r| r.usd_value).sum();
+        let missing_price_count = included.iter().filter(|r| r.usd_value.is_none()).count();
+        let total_basis_usd: Usd = included.iter().map(|r| r.basis_usd).sum();
+
+        Ok(BulkLinkPlan {
+            dest,
+            included,
+            skipped_same_wallet,
+            total_sat,
+            total_usd_value_floor,
+            missing_price_count,
+            total_basis_usd,
+        })
     }
 }
 
