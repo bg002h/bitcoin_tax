@@ -16,12 +16,13 @@
 use crate::edit::form::{
     BulkLinkFlowState, BulkLinkModalState, ClassifyInboundFlowState, ClassifyInboundModalState,
     ClassifyRawFlowState, ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
-    MutationModalState, OptimizeAcceptFlowState, OptimizeAcceptModalState, ProfileFormState,
-    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyOutflowFlowState,
-    ReclassifyOutflowModalState, ResolveConflictFlowState, ResolveConflictModalState,
-    SafeHarborAllocateFlowState, SafeHarborAllocateModalState, SafeHarborAttestFlowState,
-    SelectLotsFlowState, SelectLotsModalState, SetDonationDetailsFlowState,
-    SetDonationDetailsModalState, SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
+    MatchSelfTransfersFlowState, MatchSelfTransfersModalState, MutationModalState,
+    OptimizeAcceptFlowState, OptimizeAcceptModalState, ProfileFormState, ReclassifyIncomeFlowState,
+    ReclassifyIncomeModalState, ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
+    ResolveConflictFlowState, ResolveConflictModalState, SafeHarborAllocateFlowState,
+    SafeHarborAllocateModalState, SafeHarborAttestFlowState, SelectLotsFlowState,
+    SelectLotsModalState, SetDonationDetailsFlowState, SetDonationDetailsModalState,
+    SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
 };
 use btctax_cli::Session;
 use btctax_store::Passphrase;
@@ -176,6 +177,13 @@ pub struct EditorApp {
     pub bulk_link_flow: Option<BulkLinkFlowState>,
     /// Bulk-link-transfer confirmation modal.  `Some` while awaiting Enter/Esc.
     pub bulk_link_modal: Option<BulkLinkModalState>,
+    /// Full match-self-transfers flow state (self-transfer-passthrough C3).  `Some` while open.
+    ///
+    /// Dispatch order: match_self_transfers_modal (modal layer) → match_self_transfers_flow (flow
+    /// layer). The DROP is REVOCABLE (voidable via `v`); the modal is a plain confirm — NO typed-word.
+    pub match_self_transfers_flow: Option<MatchSelfTransfersFlowState>,
+    /// Match-self-transfers confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub match_self_transfers_modal: Option<MatchSelfTransfersModalState>,
     /// Residue latch [R0-C1]: set to `true` when `persist_safe_harbor_attest` returns Err.
     ///
     /// While `true`, ALL mutating openers (p/c/o/r/f/v/s/d/a) refuse with the
@@ -236,6 +244,8 @@ impl EditorApp {
             safe_harbor_allocate_modal: None,
             bulk_link_flow: None,
             bulk_link_modal: None,
+            match_self_transfers_flow: None,
+            match_self_transfers_modal: None,
             attest_save_failed: false,
             rollback_failed: false,
             status: None,
