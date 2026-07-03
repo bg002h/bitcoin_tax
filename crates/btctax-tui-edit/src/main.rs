@@ -11443,6 +11443,19 @@ mod tests {
                 .any(|i| i.event_id == alloc_id && i.payload_tag == "SafeHarborAllocation"),
             "VOID-INERT: the timebarred allocation must REMAIN in the void list"
         );
+
+        // [WB-M1] The inert-allocation void path is now the ONLY reachable place to E2E-assert the
+        // void modal's is_safe_harbor flag (the ATTEST-VOID rewrite removed the effective-alloc path).
+        // Open the modal on the (sole, cursor-0) allocation and assert the Path-B warning flag is set.
+        handle_key(&mut app, press(KeyCode::Enter));
+        let modal = app
+            .void_modal
+            .as_ref()
+            .expect("VOID-INERT: Enter must open the void modal for the inert allocation");
+        assert!(
+            modal.is_safe_harbor,
+            "VOID-INERT: a SafeHarborAllocation void modal must set is_safe_harbor (Path-B warning)"
+        );
     }
 
     // ── KAT-E2E-ATTEST-ERRLATCH — save error sets latch, blocks all openers ──
