@@ -12,10 +12,11 @@ use crate::edit::form::{
     amount_label, income_kind_display, ClassifyInboundModalState, ClassifyInboundStep,
     DisposalKind, FieldBuffer, InboundVariant, MutationModalState, OutflowKind, ProfileFormState,
     ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
-    ReclassifyOutflowModalState, ReclassifyOutflowStep, SelectLotsFlowState, SelectLotsModalState,
-    SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
-    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState,
-    VoidModalState, DONATION_FIELD_LABELS, FIELD_LABELS,
+    ReclassifyOutflowModalState, ReclassifyOutflowStep, SafeHarborAttestFlowState,
+    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
+    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
+    SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState, VoidModalState,
+    DONATION_FIELD_LABELS, FIELD_LABELS,
 };
 use crate::editor::{EditorApp, EditorScreen};
 use btctax_core::{DisposeKind, InboundClass, OutflowClass};
@@ -259,6 +260,14 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.set_donation_details_modal.as_ref() {
         draw_donation_details_modal(frame, area, modal);
+    }
+    if let Some(flow) = app.safe_harbor_attest_flow.as_ref() {
+        match &flow.step {
+            SafeHarborAttestStep::Info => draw_attest_info(frame, area, flow),
+            SafeHarborAttestStep::TypedWord { .. } => {
+                draw_attest_typed_word(frame, area, &flow.step)
+            }
+        }
     }
 }
 
@@ -1946,6 +1955,136 @@ fn draw_donation_details_modal(
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Confirm: set-donation-details — WRITES THE VAULT ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+// ── Safe-harbor-attest flow draw functions ─────────────────────────────────────
+
+/// Render the attest-flow Info step (spec D3 mockup): allocation details, the
+/// §5.02(4) time-bar STATUS, the §7.4 IRREVOCABLE warning, and the post-attest
+/// void-is-permanent warning (the doomed void is itself append-only).
+///
+/// `[Enter]` → advance to TypedWord step.  `[Esc]` → cancel (closes flow).
+fn draw_attest_info(frame: &mut Frame, area: Rect, flow: &SafeHarborAttestFlowState) {
+    let modal_width: u16 = 72;
+    let modal_height: u16 = 24;
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let alloc = &flow.prior_alloc;
+    let lots_count = alloc.lots.len();
+    let total_sat: btctax_core::Sat = alloc.lots.iter().map(|l| l.sat).sum();
+    let method = format!("{:?}", alloc.method);
+    let pre2025 = format!("{:?}", alloc.pre2025_method);
+    let prior_id_str = flow.prior_id.canonical();
+
+    let warn = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
+
+    let lines: Vec<Line> = vec![
+        Line::from(format!("  Allocation: {prior_id_str}")),
+        Line::from(format!(
+            "  As-of date: {}  (§5.02(4) universal snapshot)",
+            alloc.as_of_date
+        )),
+        Line::from(format!("  Method:     {method}")),
+        Line::from(format!("  Pre-2025 method: {pre2025}")),
+        Line::from(format!("  Lots:       {lots_count}  ({total_sat} sat)")),
+        Line::from("  Attested:   false  ←  time-bar active (§5.02(4))"),
+        Line::from(""),
+        Line::from("  STATUS: this allocation is inert due to the §5.02(4)"),
+        Line::from("  time-bar. Attestation CURES the time-bar and makes the"),
+        Line::from("  allocation EFFECTIVE and IRREVOCABLE (§7.4)."),
+        Line::from(""),
+        Line::from(Span::styled("  !! IRREVOCABLE WARNING:", warn)),
+        Line::from(Span::styled(
+            "  Once attested, this allocation CANNOT be voided — any",
+            warn,
+        )),
+        Line::from(Span::styled(
+            "  void attempt fires a PERMANENT Hard DecisionConflict",
+            warn,
+        )),
+        Line::from(Span::styled(
+            "  that gates tax computation (§7.4): the doomed void is",
+            warn,
+        )),
+        Line::from(Span::styled(
+            "  itself append-only and cannot be undone. Do NOT attest",
+            warn,
+        )),
+        Line::from(Span::styled(
+            "  unless the lot list and method match your filed return.",
+            warn,
+        )),
+        Line::from(""),
+        Line::from("  The operation voids the current allocation and re-"),
+        Line::from("  appends it as attested (TWO decision events written)."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  [Enter] Proceed to confirmation   [Esc] Cancel",
+            Style::default().fg(Color::Cyan),
+        )),
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Safe-Harbor Attestation — IRREVOCABLE ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Render the attest-flow TypedWord step: user must type "ATTEST" to confirm.
+///
+/// Buffer is preserved on wrong word (error is shown) [R0-I7].
+/// `[Esc]` → back to the Info step (one step per press [I4]).
+fn draw_attest_typed_word(frame: &mut Frame, area: Rect, step: &SafeHarborAttestStep) {
+    let (buf_str, error) = match step {
+        SafeHarborAttestStep::TypedWord { buf, error } => (buf.buf.as_str(), error.as_deref()),
+        _ => return,
+    };
+
+    let modal_width: u16 = 64;
+    let modal_height: u16 = 13;
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from("  Type exactly:  ATTEST"),
+        Line::from(format!("  Your input:    {buf_str}_")),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  This attestation is permanent. The allocation becomes",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "  immediately irrevocable upon save.",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+    ];
+
+    if let Some(err) = error {
+        lines.push(Line::from(Span::styled(
+            format!("  {err}"),
+            Style::default().fg(Color::Red),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    lines.push(Line::from(Span::styled(
+        "  [Enter] Submit (if \"ATTEST\" typed)  [Esc] Cancel",
+        Style::default().fg(Color::Cyan),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" IRREVOCABLE: type ATTEST to confirm — WRITES THE VAULT ");
     let inner = block.inner(modal_rect);
     frame.render_widget(block, modal_rect);
     frame.render_widget(Paragraph::new(lines), inner);

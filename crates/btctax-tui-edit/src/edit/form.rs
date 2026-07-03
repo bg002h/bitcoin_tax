@@ -22,6 +22,7 @@ pub const FIELD_CAP: usize = 64;
 /// Follows the `UnlockState` push/pop discipline (unlock.rs:42–63 — the only
 /// text-input precedent): pre-allocated to `FIELD_CAP`, never reallocates.
 /// Rendered **plaintext** (not masked — these are not secrets).
+#[derive(Debug)]
 pub struct FieldBuffer {
     pub buf: String,
 }
@@ -1115,6 +1116,35 @@ pub fn validate_donation_details(
         appraisal_date,
         fmv_method_override: opt_str(fmv_method_override_buf),
     })
+}
+
+// ── Safe-harbor-attest flow types ─────────────────────────────────────────────
+
+/// Step in the safe-harbor-attest flow.
+///
+/// TypedWord is the FINAL gate — no separate modal exists for this flow [R0-M4].
+// TypedWord carries FieldBuffer which is not large; no boxing needed.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum SafeHarborAttestStep {
+    /// Step 1: displays allocation details + IRREVOCABLE warnings.
+    Info,
+    /// Step 2: user must type "ATTEST" (all-caps) to confirm.
+    TypedWord {
+        buf: FieldBuffer,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the safe-harbor-attest flow.
+///
+/// No separate modal field on EditorApp — TypedWord is the gate [R0-M4].
+pub struct SafeHarborAttestFlowState {
+    /// EventId of the live (non-voided, timebarred) SafeHarborAllocation being re-attested.
+    pub prior_id: btctax_core::EventId,
+    /// The allocation payload (cloned from the pre-flight load — for display and re-append).
+    pub prior_alloc: btctax_core::event::SafeHarborAllocation,
+    pub step: SafeHarborAttestStep,
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

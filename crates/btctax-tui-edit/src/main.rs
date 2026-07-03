@@ -27,10 +27,11 @@ use edit::form::{
     FmvListItem, InboundListItem, InboundVariant, IncomeListItem, LotPickFormRow,
     MutationModalState, OutflowKind, OutflowListItem, ProfileFormState, ReclassifyIncomeFlowState,
     ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
-    ReclassifyOutflowModalState, ReclassifyOutflowStep, SelectLotsFlowState, SelectLotsModalState,
-    SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
-    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList,
-    VoidFlowState, VoidListItem, VoidModalState, VoidStep,
+    ReclassifyOutflowModalState, ReclassifyOutflowStep, SafeHarborAttestFlowState,
+    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
+    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
+    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, VoidFlowState, VoidListItem,
+    VoidModalState, VoidStep,
 };
 use editor::{EditorApp, EditorScreen};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -85,9 +86,13 @@ fn parse_vault_path() -> PathBuf {
 /// 4. Reclassify-income-modal dispatch — BEFORE flow, form and screen dispatch.
 /// 5. Set-fmv-modal dispatch — BEFORE flow, form and screen dispatch.
 /// 6. Void-modal dispatch — BEFORE flow, form and screen dispatch.
-/// 7. Flow dispatch — ANY open flow claims ALL keys at every step [R0-I2].
-/// 8. Form dispatch — BEFORE screen dispatch.
-/// 9. Screen dispatch (Unlock / Locked / Browse).
+/// 7. Select-lots-modal dispatch — BEFORE flow, form and screen dispatch.
+/// 8. Set-donation-details-modal dispatch — BEFORE flow, form and screen dispatch.
+/// 9. Flow dispatch — ANY open flow claims ALL keys at every step [R0-I2].
+///    The attest flow (incl. its TypedWord step — no separate attest modal) is
+///    handled entirely here [R0-M4].
+/// 10. Form dispatch — BEFORE screen dispatch.
+/// 11. Screen dispatch (Unlock / Locked / Browse).
 ///
 /// At most one flow `Some` and at most one modal `Some` at any time.
 ///
@@ -184,8 +189,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         handle_set_donation_details_flow_key(app, key);
         return;
     }
+    if app.safe_harbor_attest_flow.is_some() {
+        handle_safe_harbor_attest_flow_key(app, key);
+        return;
+    }
 
-    // ── 8. Form dispatch — BEFORE screen dispatch ─────────────────────────────
+    // ── 10. Form dispatch — BEFORE screen dispatch ────────────────────────────
     if app.profile_form.is_some() {
         handle_form_key(app, key);
         return;
@@ -244,6 +253,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('v') => open_void_flow(app),
                 KeyCode::Char('s') => open_select_lots_flow(app),
                 KeyCode::Char('d') => open_set_donation_details_flow(app),
+                KeyCode::Char('a') => open_safe_harbor_attest_flow(app),
                 _ => {}
             }
         }
@@ -398,6 +408,15 @@ fn handle_form_key(app: &mut EditorApp, key: KeyEvent) {
 /// `filing_status` is set from `p`.  Otherwise: `filing_status = Single`, all
 /// buffers empty (required fields must be typed; optional empties → $0 at validation).
 fn open_profile_form(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     if app.snapshot.is_none() {
         return;
     }
@@ -1803,6 +1822,15 @@ fn events_by_id(
 ///
 /// Empty filtered list → status "No unclassified inbound transfers"; flow NOT opened [R0-M8].
 fn open_classify_inbound_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     let snap = match app.snapshot.as_ref() {
         Some(s) => s,
         None => return,
@@ -1896,6 +1924,15 @@ fn open_classify_inbound_flow(app: &mut EditorApp) {
 ///
 /// Empty list → status "No pending outbound transfers"; flow NOT opened [R0-M8].
 fn open_reclassify_outflow_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     let snap = match app.snapshot.as_ref() {
         Some(s) => s,
         None => return,
@@ -2078,6 +2115,15 @@ fn derive_reclassify_outflow_status(
 /// Empty filtered list → status "No reclassifiable income events"; flow NOT
 /// opened [R0-M8].
 fn open_reclassify_income_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     let snap = match app.snapshot.as_ref() {
         Some(s) => s,
         None => return,
@@ -2181,6 +2227,15 @@ fn open_reclassify_income_flow(app: &mut EditorApp) {
 /// Empty filtered list → status "No FMV-missing income events"; flow NOT
 /// opened [R0-M8].
 fn open_set_fmv_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     let snap = match app.snapshot.as_ref() {
         Some(s) => s,
         None => return,
@@ -2358,6 +2413,15 @@ fn summarize_void_payload(payload: &EventPayload) -> (&'static str, String, Opti
 ///
 /// Empty filtered list → status "No revocable decisions to void"; flow NOT opened [R0-M8].
 fn open_void_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     let snap = match app.snapshot.as_ref() {
         Some(s) => s,
         None => return,
@@ -3155,6 +3219,15 @@ fn handle_dd_field_form_key(app: &mut EditorApp, key: KeyEvent) {
 /// Empty filtered list → status "No method-honoring disposals available for lot
 /// selection (select-lots pre-filter)"; flow NOT opened [R0-M8].
 fn open_select_lots_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     let snap = match app.snapshot.as_ref() {
         Some(s) => s,
         None => return,
@@ -3270,6 +3343,15 @@ fn open_select_lots_flow(app: &mut EditorApp) {
 /// Empty filtered list → status "No donation removals found (donate a TransferOut first
 /// via reclassify-outflow)"; flow NOT opened [R0-M8].
 fn open_set_donation_details_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
     let snap = match app.snapshot.as_ref() {
         Some(s) => s,
         None => return,
@@ -3374,6 +3456,321 @@ fn derive_donation_details_status(event_id: &EventId, details: &DonationDetails)
             event_id.canonical()
         )
     }
+}
+
+// ── Safe-harbor-attest flow ───────────────────────────────────────────────────
+
+/// Open the safe-harbor-attest flow from the Browse screen.
+///
+/// # Step 0 — latch check [R0-C1]
+/// If `attest_save_failed` → the latch status; return. (Every mutating opener carries
+/// the same guard; here it also protects the direct-call path.)
+///
+/// # Step 1 — pre-flight (spec Claim H, [R0-I5])
+/// ONE `session.load_events_and_project()` call — NEVER the cached snap. The session
+/// sees any unsaved in-memory residue, so the already-attested arm is the
+/// defense-in-depth guard against the [R0-C1] double-batch. Arms, in order:
+/// 1. zero live allocations → "No allocation to attest …", return.
+/// 2. 2+ live allocations → "Multiple live allocations present …", return.
+/// 3. `prior.timely_allocation_attested` → "Allocation already attested …", return.
+/// 4. `SafeHarborUnconservable` on `prior_id` → "Allocation fails conservation …", return.
+/// 5. NO `SafeHarborTimebar` on `prior_id` (already-effective) → "Allocation already
+///    effective …", return.
+/// 6. `SafeHarborTimebar` present → open the flow at the Info step.
+fn open_safe_harbor_attest_flow(app: &mut EditorApp) {
+    if app.attest_save_failed {
+        app.status = Some(
+            "A failed attest save left unsaved decisions in memory — quit the editor \
+             (the unsaved attestation is discarded on quit), then retry via CLI: \
+             btctax reconcile safe-harbor-attest"
+                .to_string(),
+        );
+        return;
+    }
+    // No-op when the snapshot is missing (mirrors every other opener).
+    if app.snapshot.is_none() {
+        return;
+    }
+    let session = match app.session.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+    let (events, state, _cfg) = match session.load_events_and_project() {
+        Ok(t) => t,
+        Err(e) => {
+            app.status = Some(format!("Pre-flight load error: {e}"));
+            return;
+        }
+    };
+
+    // Build voided set; collect live (non-voided) SafeHarborAllocation events.
+    let voided: std::collections::BTreeSet<EventId> = events
+        .iter()
+        .filter_map(|e| {
+            if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                Some(v.target_event_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    let live: Vec<(EventId, btctax_core::event::SafeHarborAllocation)> = events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .filter_map(|e| {
+            if let EventPayload::SafeHarborAllocation(a) = &e.payload {
+                Some((e.id.clone(), a.clone()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Arms 1–2: live-allocation count.
+    let (prior_id, prior_alloc) = match live.len() {
+        0 => {
+            app.status = Some(
+                "No allocation to attest — quit the editor, then run: \
+                 btctax reconcile safe-harbor-allocate"
+                    .to_string(),
+            );
+            return;
+        }
+        1 => live.into_iter().next().expect("len == 1"),
+        _ => {
+            app.status = Some(
+                "Multiple live allocations present — void the stale one (press 'v') \
+                 before attesting"
+                    .to_string(),
+            );
+            return;
+        }
+    };
+
+    // Arm 3: already attested (defense-in-depth against the C1 double-batch:
+    // the session-sourced load sees in-memory residue).
+    if prior_alloc.timely_allocation_attested {
+        app.status = Some("Allocation already attested — nothing to attest".to_string());
+        return;
+    }
+
+    // Arms 4–5: blocker checks from the freshly-projected state.
+    let blocked_with = |k: BlockerKind| {
+        state
+            .blockers
+            .iter()
+            .any(|b| b.event.as_ref() == Some(&prior_id) && b.kind == k)
+    };
+    if blocked_with(BlockerKind::SafeHarborUnconservable) {
+        app.status = Some(
+            "Allocation fails conservation — attestation cannot cure it; quit the \
+             editor, then re-run: btctax reconcile safe-harbor-allocate"
+                .to_string(),
+        );
+        return;
+    }
+    if !blocked_with(BlockerKind::SafeHarborTimebar) {
+        app.status = Some("Allocation already effective — no attestation needed".to_string());
+        return;
+    }
+
+    // Arm 6: SafeHarborTimebar present → open the flow at the Info step.
+    app.safe_harbor_attest_flow = Some(SafeHarborAttestFlowState {
+        prior_id,
+        prior_alloc,
+        step: SafeHarborAttestStep::Info,
+    });
+}
+
+/// Dispatch a key press to the correct step handler while the attest flow is open.
+///
+/// Attest flow has only two steps: Info and TypedWord.
+/// No separate modal — TypedWord IS the gate [R0-M4].
+fn handle_safe_harbor_attest_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.safe_harbor_attest_flow.as_ref() {
+        Some(f) => match &f.step {
+            SafeHarborAttestStep::Info => 0u8,
+            SafeHarborAttestStep::TypedWord { .. } => 1u8,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_attest_info_key(app, key),
+        _ => handle_attest_typed_word_key(app, key),
+    }
+}
+
+/// Handle a key press while the attest-flow Info step is active.
+///
+/// Enter → advance to TypedWord step.
+/// Esc → close flow entirely.
+/// All other keys (incl. `q`) → swallowed (never fall through to Browse quit).
+fn handle_attest_info_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.safe_harbor_attest_flow = None;
+        }
+        KeyCode::Enter => {
+            if let Some(flow) = app.safe_harbor_attest_flow.as_mut() {
+                flow.step = SafeHarborAttestStep::TypedWord {
+                    buf: FieldBuffer::new(),
+                    error: None,
+                };
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Handle a key press while the attest-flow TypedWord step is active.
+///
+/// All printable chars (incl. `q`) are consumed by the buffer — never fall through.
+/// Backspace removes last char from buf.
+/// Enter → validate "ATTEST"; on match calls `persist_safe_harbor_attest`:
+///   `Ok((void_id, attest_id))` → re-project + derive_attest_status + close flow.
+///   `Err(e)` → set `app.attest_save_failed = true` [R0-C1] + Err status + close flow.
+/// On wrong typed word → set error on step but PRESERVE buf (do NOT clear) [R0-I7].
+/// Esc → back to the Info step (one step per press — [I4]: TypedWord → Info → close).
+fn handle_attest_typed_word_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            if let Some(flow) = app.safe_harbor_attest_flow.as_mut() {
+                flow.step = SafeHarborAttestStep::Info;
+            }
+            return;
+        }
+        KeyCode::Backspace => {
+            if let Some(SafeHarborAttestFlowState {
+                step: SafeHarborAttestStep::TypedWord { buf, .. },
+                ..
+            }) = app.safe_harbor_attest_flow.as_mut()
+            {
+                buf.pop_char();
+            }
+            return;
+        }
+        KeyCode::Char(c) => {
+            if let Some(SafeHarborAttestFlowState {
+                step: SafeHarborAttestStep::TypedWord { buf, error },
+                ..
+            }) = app.safe_harbor_attest_flow.as_mut()
+            {
+                buf.push_char(c);
+                *error = None;
+            }
+            return;
+        }
+        KeyCode::Enter => {}
+        _ => return,
+    }
+
+    // Enter: validate typed word.
+    let (typed, prior_id, prior_alloc) = match app.safe_harbor_attest_flow.as_ref() {
+        Some(SafeHarborAttestFlowState {
+            step: SafeHarborAttestStep::TypedWord { buf, .. },
+            prior_id,
+            prior_alloc,
+        }) => (
+            buf.buf.as_str().trim().to_string(),
+            prior_id.clone(),
+            prior_alloc.clone(),
+        ),
+        _ => return,
+    };
+
+    if typed != "ATTEST" {
+        // Wrong word: set the spec error, buffer PRESERVED (the user corrects with
+        // Backspace) [R0-I7].
+        if let Some(SafeHarborAttestFlowState {
+            step: SafeHarborAttestStep::TypedWord { error, .. },
+            ..
+        }) = app.safe_harbor_attest_flow.as_mut()
+        {
+            *error = Some("type ATTEST (all caps) to confirm".to_string());
+        }
+        return;
+    }
+
+    // Correct word — call persist.
+    let now = time::OffsetDateTime::now_utc();
+    let save_result = match app.session.as_mut() {
+        Some(s) => edit::persist::persist_safe_harbor_attest(s, prior_id, prior_alloc, now),
+        None => return,
+    };
+
+    app.safe_harbor_attest_flow = None;
+
+    match save_result {
+        Ok((_void_id, attest_id)) => {
+            let new_snap = {
+                let session = app.session.as_ref().unwrap();
+                btctax_tui::unlock::build_snapshot(session)
+            };
+            match new_snap {
+                Ok((snap, _)) => {
+                    let status = derive_attest_status(&snap, &attest_id);
+                    app.snapshot = Some(snap);
+                    app.status = Some(status);
+                }
+                Err(e) => {
+                    app.status = Some(format!(
+                        "Attested but re-projection failed ({e}) — restart to refresh"
+                    ));
+                }
+            }
+        }
+        Err(e) => {
+            app.attest_save_failed = true;
+            app.status = Some(format!(
+                "Save error: {e} — quit the editor now (the unsaved attestation is \
+                 discarded on quit), then run: btctax reconcile safe-harbor-attest"
+            ));
+        }
+    }
+}
+
+/// Derive the status string for a completed safe-harbor attest (spec D3 derive_attest_status).
+///
+/// Four arms in PRIORITY order, keyed ONLY to `new_attest_id` [R0-M10]: the voided
+/// prior allocation keeps firing SafeHarborTimebar on ITS id every projection (stale
+/// Advisory, harmless — allocation-targeted voids never enter the engine's `voided`
+/// set). Never widen an arm to "no timebar anywhere". Blocker kinds outside the three
+/// arms fall through to the clean arm (spec: "no timebar, no unconservable, no
+/// conflict on new_attest_id").
+fn derive_attest_status(snap: &btctax_tui::app::Snapshot, new_attest_id: &EventId) -> String {
+    let has = |k: BlockerKind| {
+        snap.state
+            .blockers
+            .iter()
+            .any(|b| b.kind == k && b.event.as_ref() == Some(new_attest_id))
+    };
+
+    // Arm 1: conservation failed on the re-attested allocation (defensive).
+    if has(BlockerKind::SafeHarborUnconservable) {
+        return "ATTEST FAILED: allocation fires SafeHarborUnconservable — see Compliance; \
+                the prior void and re-append both landed; quit the editor, then repair via CLI"
+            .to_string();
+    }
+
+    // Arm 2: re-attested allocation still time-barred (unexpected).
+    if has(BlockerKind::SafeHarborTimebar) {
+        return "ATTEST SAVED but SafeHarborTimebar re-fired — check Compliance; \
+                the allocation may not have cured the time-bar"
+            .to_string();
+    }
+
+    // Arm 3: conflict on the new allocation (edge case).
+    if has(BlockerKind::DecisionConflict) {
+        return "ATTEST SAVED but DecisionConflict fired — check Compliance; vault \
+                integrity may be affected; quit and run: btctax verify"
+            .to_string();
+    }
+
+    // Arm 4: clean.
+    format!(
+        "Allocation attested (IRREVOCABLE, §7.4) — {}; quit and run btctax verify to confirm effectiveness",
+        new_attest_id.canonical()
+    )
 }
 
 // ── Scroll helpers ────────────────────────────────────────────────────────────
@@ -9682,5 +10079,914 @@ mod tests {
             );
         }
         handle_key(&mut app, press(KeyCode::Esc));
+    }
+
+    // ── Safe-harbor-attest flow KATs ─────────────────────────────────────────
+
+    /// Seed a vault with one TIMEBARRED SafeHarborAllocation
+    /// (`timely_allocation_attested: false`). Returns the allocation's EventId.
+    ///
+    /// Method = ProRata: an unattested ProRata allocation is timebarred
+    /// UNCONDITIONALLY (resolve.rs pass-3 factored bar: `¬attested ∧ (past-bar ∨
+    /// ProRata)`), independent of the made-date. An unattested ActualPosition
+    /// allocation made before 2026-04-15 with no 2025 dispositions would instead be
+    /// ALREADY EFFECTIVE — the pre-flight would refuse it (arm 5) and the flow would
+    /// never open.
+    fn seed_safe_harbor_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> btctax_core::EventId {
+        use btctax_core::event::{AllocMethod, EventPayload, SafeHarborAllocation};
+        use btctax_core::persistence::append_decision;
+        use btctax_core::LotMethod;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let t0 = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+        let prior_id = append_decision(
+            session.conn(),
+            EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+                lots: vec![],
+                as_of_date: date!(2025 - 01 - 01),
+                method: AllocMethod::ProRata,
+                timely_allocation_attested: false,
+                pre2025_method: LotMethod::Fifo,
+            }),
+            t0,
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+        session.save().unwrap();
+        prior_id
+    }
+
+    // ── KAT-C2h — cancel-path bytes-unchanged (safe-harbor-attest) ────────────
+    //
+    // Spec D5: seed a valid timebarred allocation. `a` → Info; `Enter` → TypedWord;
+    // type partial word "ATT"; `Enter` → error shown, TypedWord stays open; `Esc` →
+    // back to Info [I4]; `Esc` → flow closes. `q` swallowed at each step.
+    // bytes_after == bytes_before. (Complement: KAT-E2E-ATTEST writes.)
+
+    #[test]
+    fn kat_c2h_cancel_path_vault_bytes_unchanged_attest() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-c2h-pass";
+
+        seed_safe_harbor_vault(&vault, &key, pp_str);
+        let bytes_before = std::fs::read(&vault).unwrap();
+
+        let mut app = open_app(&vault, pp_str);
+
+        // 'a' → flow opens at Info step.
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert!(
+            matches!(
+                app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                Some(SafeHarborAttestStep::Info)
+            ),
+            "C2h: flow must open at Info step"
+        );
+
+        // 'q' swallowed at Info step (flow is blocking).
+        handle_key(&mut app, press(KeyCode::Char('q')));
+        assert!(!app.should_quit, "C2h: 'q' at Info must NOT quit");
+        assert!(
+            app.safe_harbor_attest_flow.is_some(),
+            "C2h: 'q' at Info must NOT close the flow"
+        );
+
+        // Enter → TypedWord step.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                Some(SafeHarborAttestStep::TypedWord { .. })
+            ),
+            "C2h: Enter at Info must advance to TypedWord"
+        );
+
+        // Type partial word "ATT"; Enter → error shown, TypedWord stays open.
+        type_str(&mut app, "ATT");
+        handle_key(&mut app, press(KeyCode::Enter));
+        match app.safe_harbor_attest_flow.as_ref().map(|f| &f.step) {
+            Some(SafeHarborAttestStep::TypedWord { buf, error }) => {
+                assert_eq!(buf.buf.as_str(), "ATT", "C2h: buffer must be preserved");
+                assert_eq!(
+                    error.as_deref(),
+                    Some("type ATTEST (all caps) to confirm"),
+                    "C2h: wrong-word error must match spec text"
+                );
+            }
+            other => panic!("C2h: expected TypedWord after partial-word Enter; got {other:?}"),
+        }
+
+        // 'q' swallowed at TypedWord step (goes to the buffer, never quits).
+        handle_key(&mut app, press(KeyCode::Char('q')));
+        assert!(!app.should_quit, "C2h: 'q' at TypedWord must NOT quit");
+        assert!(
+            app.safe_harbor_attest_flow.is_some(),
+            "C2h: 'q' at TypedWord must NOT close the flow"
+        );
+
+        // Esc → back to Info step (one step per press — [I4]).
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(
+            matches!(
+                app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                Some(SafeHarborAttestStep::Info)
+            ),
+            "C2h: Esc at TypedWord must step back to Info (not close the flow)"
+        );
+
+        // Esc → flow closes.
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "C2h: Esc at Info must close the flow"
+        );
+        assert!(!app.should_quit, "C2h: cancel path must never quit the app");
+
+        // Vault bytes unchanged — nothing was written.
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "C2h: cancel path must leave vault bytes unchanged"
+        );
+        assert!(
+            !app.attest_save_failed,
+            "C2h: cancel path must never set the latch"
+        );
+    }
+
+    // ── KAT-E2E-ATTEST-PREFLIGHT — all 4 failure arms + positive control ──────
+    //
+    // Spec D5: drive `a` with vaults covering each pre-flight failure arm:
+    // 1. no allocation, 2. already-attested, 3. unconservable, 4. already-effective.
+    // 5. positive control: timebarred allocation → flow opens at Info step.
+
+    #[test]
+    fn kat_e2e_attest_preflight_failure_arms_and_positive_control() {
+        use btctax_core::event::{AllocMethod, EventPayload, SafeHarborAllocation};
+        use btctax_core::persistence::append_decision;
+        use btctax_core::LotMethod;
+        use rust_decimal_macros::dec;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        // Helper: init a vault and append one SafeHarborAllocation.
+        let seed_with = |vault: &std::path::Path,
+                         key: &std::path::Path,
+                         pp: &str,
+                         alloc: SafeHarborAllocation| {
+            btctax_cli::cmd::init::run(vault, &Passphrase::new(pp.into()), key).unwrap();
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp.into())).unwrap();
+            let t0 = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+            append_decision(
+                session.conn(),
+                EventPayload::SafeHarborAllocation(alloc),
+                t0,
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+        };
+
+        // ── Arm 1: no allocation ─────────────────────────────────────────────
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let vault = dir.path().join("vault.pgp");
+            let key = dir.path().join("key.asc");
+            let pp = "preflight-arm1";
+            btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp.into()), &key).unwrap();
+
+            let mut app = open_app(&vault, pp);
+            handle_key(&mut app, press(KeyCode::Char('a')));
+            assert!(
+                app.safe_harbor_attest_flow.is_none(),
+                "PREFLIGHT arm 1: flow must NOT open"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("No allocation to attest"))
+                    .unwrap_or(false),
+                "PREFLIGHT arm 1: status must say 'No allocation to attest'; got: {:?}",
+                app.status
+            );
+        }
+
+        // ── Arm 2: already attested (seed attested=true directly) ────────────
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let vault = dir.path().join("vault.pgp");
+            let key = dir.path().join("key.asc");
+            let pp = "preflight-arm2";
+            seed_with(
+                &vault,
+                &key,
+                pp,
+                SafeHarborAllocation {
+                    lots: vec![],
+                    as_of_date: date!(2025 - 01 - 01),
+                    method: AllocMethod::ActualPosition,
+                    timely_allocation_attested: true,
+                    pre2025_method: LotMethod::Fifo,
+                },
+            );
+
+            let mut app = open_app(&vault, pp);
+            handle_key(&mut app, press(KeyCode::Char('a')));
+            assert!(
+                app.safe_harbor_attest_flow.is_none(),
+                "PREFLIGHT arm 2: flow must NOT open"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("Allocation already attested"))
+                    .unwrap_or(false),
+                "PREFLIGHT arm 2: status must say 'Allocation already attested'; got: {:?}",
+                app.status
+            );
+        }
+
+        // ── Arm 3: unconservable (allocation lists sat the vault does not hold) ──
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let vault = dir.path().join("vault.pgp");
+            let key = dir.path().join("key.asc");
+            let pp = "preflight-arm3";
+            seed_with(
+                &vault,
+                &key,
+                pp,
+                SafeHarborAllocation {
+                    lots: vec![btctax_core::event::AllocLot {
+                        wallet: btctax_core::WalletId::Exchange {
+                            provider: "River".to_string(),
+                            account: "main".to_string(),
+                        },
+                        sat: 100_000,
+                        usd_basis: dec!(1000),
+                        acquired_at: date!(2024 - 06 - 01),
+                        dual_loss_basis: None,
+                        donor_acquired_at: None,
+                    }],
+                    as_of_date: date!(2025 - 01 - 01),
+                    method: AllocMethod::ProRata,
+                    timely_allocation_attested: false,
+                    pre2025_method: LotMethod::Fifo,
+                },
+            );
+
+            let mut app = open_app(&vault, pp);
+            handle_key(&mut app, press(KeyCode::Char('a')));
+            assert!(
+                app.safe_harbor_attest_flow.is_none(),
+                "PREFLIGHT arm 3: flow must NOT open"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("Allocation fails conservation"))
+                    .unwrap_or(false),
+                "PREFLIGHT arm 3: status must say 'Allocation fails conservation'; got: {:?}",
+                app.status
+            );
+        }
+
+        // ── Arm 4: already effective (unattested ActualPosition, made before the
+        //    2026-04-15 due date, no 2025 dispositions → NOT timebarred; empty lots
+        //    on an empty vault conserve → EFFECTIVE) ────────────────────────────
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let vault = dir.path().join("vault.pgp");
+            let key = dir.path().join("key.asc");
+            let pp = "preflight-arm4";
+            seed_with(
+                &vault,
+                &key,
+                pp,
+                SafeHarborAllocation {
+                    lots: vec![],
+                    as_of_date: date!(2025 - 01 - 01),
+                    method: AllocMethod::ActualPosition,
+                    timely_allocation_attested: false,
+                    pre2025_method: LotMethod::Fifo,
+                },
+            );
+
+            let mut app = open_app(&vault, pp);
+            handle_key(&mut app, press(KeyCode::Char('a')));
+            assert!(
+                app.safe_harbor_attest_flow.is_none(),
+                "PREFLIGHT arm 4: flow must NOT open"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("Allocation already effective"))
+                    .unwrap_or(false),
+                "PREFLIGHT arm 4: status must say 'Allocation already effective'; got: {:?}",
+                app.status
+            );
+        }
+
+        // ── Positive control: timebarred allocation → flow opens at Info step ──
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let vault = dir.path().join("vault.pgp");
+            let key = dir.path().join("key.asc");
+            let pp = "preflight-pos";
+            let prior_id = seed_safe_harbor_vault(&vault, &key, pp);
+
+            let mut app = open_app(&vault, pp);
+            handle_key(&mut app, press(KeyCode::Char('a')));
+            assert!(
+                matches!(
+                    app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                    Some(SafeHarborAttestStep::Info)
+                ),
+                "PREFLIGHT positive control: flow must open at Info step"
+            );
+            let flow = app.safe_harbor_attest_flow.as_ref().unwrap();
+            assert_eq!(
+                flow.prior_id, prior_id,
+                "PREFLIGHT positive control: flow.prior_id must match seeded allocation"
+            );
+
+            // Esc at Info closes the flow.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.safe_harbor_attest_flow.is_none(),
+                "PREFLIGHT positive control: Esc at Info must close flow"
+            );
+        }
+    }
+
+    // ── KAT-E2E-ATTEST — happy path: type ATTEST, vault updated ──────────────
+
+    #[test]
+    fn kat_e2e_attest_happy_path() {
+        use btctax_core::event::{EventPayload, SafeHarborAllocation};
+        use btctax_core::persistence::load_all_ordered;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-attest-happy";
+
+        let prior_id = seed_safe_harbor_vault(&vault, &key, pp_str);
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+        let pre_count = {
+            let s = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            load_all_ordered(s.conn()).unwrap().len()
+        };
+        assert_eq!(pre_count, 1, "ATTEST-HAPPY: pre must have 1 event");
+
+        let mut app = open_app(&vault, pp_str);
+
+        // 'a' → Info step.
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert!(
+            matches!(
+                app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                Some(SafeHarborAttestStep::Info)
+            ),
+            "ATTEST-HAPPY: must open at Info step"
+        );
+
+        // Spec step 2: the Info display mentions "IRREVOCABLE" and the prior
+        // allocation's canonical id.
+        {
+            use ratatui::{backend::TestBackend, Terminal};
+            let backend = TestBackend::new(100, 30);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+            let rendered: String = terminal
+                .backend()
+                .buffer()
+                .clone()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+                .collect();
+            assert!(
+                rendered.contains("IRREVOCABLE"),
+                "ATTEST-HAPPY: Info step must render 'IRREVOCABLE'"
+            );
+            assert!(
+                rendered.contains(&prior_id.canonical()),
+                "ATTEST-HAPPY: Info step must render the prior allocation's canonical id"
+            );
+        }
+
+        // Enter → TypedWord step.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.safe_harbor_attest_flow.as_ref().map(|f| &f.step),
+                Some(SafeHarborAttestStep::TypedWord { .. })
+            ),
+            "ATTEST-HAPPY: Enter at Info must advance to TypedWord"
+        );
+
+        // Spec step 3: type "ATTES" (incomplete) → Enter → error shown, TypedWord
+        // still open, buffer PRESERVED [R0-I7].
+        type_str(&mut app, "ATTES");
+        handle_key(&mut app, press(KeyCode::Enter));
+        match app.safe_harbor_attest_flow.as_ref().map(|f| &f.step) {
+            Some(SafeHarborAttestStep::TypedWord { buf, error }) => {
+                assert_eq!(
+                    buf.buf.as_str(),
+                    "ATTES",
+                    "ATTEST-HAPPY: buffer must be preserved after incomplete word"
+                );
+                assert_eq!(
+                    error.as_deref(),
+                    Some("type ATTEST (all caps) to confirm"),
+                    "ATTEST-HAPPY: incomplete word must show the spec error"
+                );
+            }
+            other => panic!("ATTEST-HAPPY: expected TypedWord after 'ATTES'+Enter; got {other:?}"),
+        }
+
+        // Spec step 4: type "T" (completing "ATTEST" in the preserved buffer) → Enter → save.
+        type_str(&mut app, "T");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        // Flow must be closed.
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "ATTEST-HAPPY: flow must be closed after successful attest"
+        );
+
+        // Latch must NOT be set.
+        assert!(
+            !app.attest_save_failed,
+            "ATTEST-HAPPY: attest_save_failed must be false on success"
+        );
+
+        // Status is the clean arm: "Allocation attested (IRREVOCABLE, §7.4) — {id}; …".
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("Allocation attested (IRREVOCABLE, §7.4)"))
+                .unwrap_or(false),
+            "ATTEST-HAPPY: status must be the clean attest arm; got: {:?}",
+            app.status
+        );
+
+        // Vault must have changed (save happened).
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_ne!(
+            bytes_before, bytes_after,
+            "ATTEST-HAPPY: vault bytes must change after successful attest"
+        );
+
+        // Verify in-memory (app still holds the session — can't open a second session).
+        let post_events = {
+            let session = app.session.as_ref().unwrap();
+            load_all_ordered(session.conn()).unwrap()
+        };
+        assert_eq!(
+            post_events.len(),
+            pre_count + 2,
+            "ATTEST-HAPPY: post must have pre+2 events (void + re-attest)"
+        );
+
+        // The last event must be SafeHarborAllocation with timely_allocation_attested=true.
+        let last: btctax_core::event::EventPayload =
+            serde_json::from_str(&post_events.last().unwrap().payload_json).unwrap();
+        match &last {
+            EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+                timely_allocation_attested,
+                ..
+            }) => {
+                assert!(
+                    timely_allocation_attested,
+                    "ATTEST-HAPPY: last event must have timely_allocation_attested=true"
+                );
+            }
+            other => panic!("ATTEST-HAPPY: last event must be SafeHarborAllocation; got {other:?}"),
+        }
+
+        // Snapshot is rebuilt; NO SafeHarborTimebar attributed to the NEW allocation id.
+        // Do NOT assert "no timebar anywhere" [R0-M10]: the voided PRIOR keeps firing a
+        // stale Advisory SafeHarborTimebar on ITS id every projection.
+        assert!(
+            app.snapshot.is_some(),
+            "ATTEST-HAPPY: snapshot must be rebuilt after attest"
+        );
+        {
+            let new_attest_id = EventId::Decision {
+                seq: post_events.last().unwrap().decision_seq.unwrap() as u64,
+            };
+            let snap = app.snapshot.as_ref().unwrap();
+            assert!(
+                !snap.state.blockers.iter().any(|b| {
+                    b.kind == BlockerKind::SafeHarborTimebar
+                        && b.event.as_ref() == Some(&new_attest_id)
+                }),
+                "ATTEST-HAPPY: NO SafeHarborTimebar may be attributed to the NEW allocation id"
+            );
+        }
+
+        // Already-attested guard: pressing 'a' again must yield "Already attested" status.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "ATTEST-HAPPY: flow must NOT open when already attested"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("already attested"))
+                .unwrap_or(false),
+            "ATTEST-HAPPY: 'a' after attest must yield 'already attested' status; got: {:?}",
+            app.status
+        );
+
+        // prior_id must be in voided set.
+        let void_event = &post_events[pre_count];
+        let void_payload: EventPayload = serde_json::from_str(&void_event.payload_json).unwrap();
+        match &void_payload {
+            EventPayload::VoidDecisionEvent(v) => {
+                assert_eq!(
+                    v.target_event_id, prior_id,
+                    "ATTEST-HAPPY: void must target prior_id"
+                );
+            }
+            other => {
+                panic!("ATTEST-HAPPY: event at pre.len() must be VoidDecisionEvent; got {other:?}")
+            }
+        }
+    }
+
+    // ── KAT-E2E-ATTEST-WRONGWORD — wrong word: error shown, buf preserved ─────
+
+    #[test]
+    fn kat_e2e_attest_wrong_word_preserves_buf() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-wrongword";
+
+        seed_safe_harbor_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → TypedWord
+
+        // Type wrong word.
+        type_str(&mut app, "attest");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        // Flow must still be open, error must be set, buf must be preserved.
+        assert!(
+            app.safe_harbor_attest_flow.is_some(),
+            "WRONGWORD: flow must stay open on wrong word"
+        );
+        match app.safe_harbor_attest_flow.as_ref().map(|f| &f.step) {
+            Some(SafeHarborAttestStep::TypedWord { buf, error }) => {
+                assert_eq!(
+                    buf.buf.as_str(),
+                    "attest",
+                    "WRONGWORD: buf must be preserved; got: {:?}",
+                    buf.buf
+                );
+                assert_eq!(
+                    error.as_deref(),
+                    Some("type ATTEST (all caps) to confirm"),
+                    "WRONGWORD: case-sensitivity error must match spec text exactly"
+                );
+            }
+            other => panic!("WRONGWORD: expected TypedWord step; got {other:?}"),
+        }
+
+        // Correct word clears error and saves.
+        // Need to clear buf first (backspace x6).
+        for _ in 0..6 {
+            handle_key(&mut app, press(KeyCode::Backspace));
+        }
+        type_str(&mut app, "ATTEST");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "WRONGWORD: flow must close after correct word"
+        );
+        assert!(
+            !app.attest_save_failed,
+            "WRONGWORD: latch must not be set after correct attest"
+        );
+    }
+
+    // ── KAT-E2E-ATTEST-VOID — voiding the newly attested alloc yields conflict status ──
+
+    #[test]
+    fn kat_e2e_attest_void_new_alloc_yields_conflict_status() {
+        use btctax_core::persistence::load_all_ordered;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-attest-void";
+
+        let prior_id = seed_safe_harbor_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Attest first.
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Enter)); // Info → TypedWord
+        type_str(&mut app, "ATTEST");
+        handle_key(&mut app, press(KeyCode::Enter)); // save
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "VOID-NEW: flow must be closed after attest"
+        );
+
+        // The NEW attested allocation's id = tail decision row.
+        let new_attest_id = {
+            let session = app.session.as_ref().unwrap();
+            let rows = load_all_ordered(session.conn()).unwrap();
+            EventId::Decision {
+                seq: rows.last().unwrap().decision_seq.unwrap() as u64,
+            }
+        };
+
+        // Now open void flow: 'v' → the new attested allocation IS listed;
+        // the voided PRIOR is NOT (raw voided-set scan excludes it).
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('v')));
+        assert!(
+            app.void_flow.is_some(),
+            "VOID-NEW: void flow must open; attest_save_failed={}, snapshot={:?}",
+            app.attest_save_failed,
+            app.snapshot.is_some()
+        );
+        {
+            let void_flow = app.void_flow.as_ref().unwrap();
+            assert!(
+                void_flow
+                    .list
+                    .items
+                    .iter()
+                    .any(|i| i.event_id == new_attest_id),
+                "VOID-NEW: the NEW attested allocation must be listed in the void flow"
+            );
+            assert!(
+                !void_flow.list.items.iter().any(|i| i.event_id == prior_id),
+                "VOID-NEW: the voided PRIOR must NOT appear in the void list"
+            );
+            // Select the new attested allocation's row.
+            let idx = void_flow
+                .list
+                .items
+                .iter()
+                .position(|i| i.event_id == new_attest_id)
+                .unwrap();
+            app.void_flow
+                .as_mut()
+                .unwrap()
+                .list
+                .table_state
+                .select(Some(idx));
+        }
+
+        handle_key(&mut app, press(KeyCode::Enter)); // List → VoidModal
+        assert!(
+            app.void_modal.is_some(),
+            "VOID-NEW: void modal must open after Enter on void list"
+        );
+        assert!(
+            app.void_modal.as_ref().unwrap().is_safe_harbor,
+            "VOID-NEW: modal must carry the SafeHarborAllocation warning flag"
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm void
+
+        assert!(
+            app.void_modal.is_none(),
+            "VOID-NEW: void modal must be closed after confirm"
+        );
+        assert!(
+            app.void_flow.is_none(),
+            "VOID-NEW: void flow must be closed after confirm"
+        );
+
+        // §7.4: the void is REJECTED — derive_void_status arm-1 wording, quoted FULLY
+        // (round-2 N3, including " (see Compliance)"). NOT "Voided…".
+        assert_eq!(
+            app.status.as_deref(),
+            Some(
+                "Void saved, but DecisionConflict fired — the target decision \
+                 remains in force (see Compliance)"
+            ),
+            "VOID-NEW: status must be the arm-1 rejected-void wording"
+        );
+
+        // Re-projected state: the doomed void's DecisionConflict is present and the
+        // allocation is STILL effective (it keeps curing its own timebar: no
+        // SafeHarborTimebar on the attested id).
+        {
+            let snap = app.snapshot.as_ref().unwrap();
+            assert!(
+                snap.state
+                    .blockers
+                    .iter()
+                    .any(|b| b.kind == BlockerKind::DecisionConflict),
+                "VOID-NEW: DecisionConflict must be present after the doomed void"
+            );
+            assert!(
+                !snap.state.blockers.iter().any(|b| {
+                    b.kind == BlockerKind::SafeHarborTimebar
+                        && b.event.as_ref() == Some(&new_attest_id)
+                }),
+                "VOID-NEW: the attested allocation must remain effective (no timebar on its id)"
+            );
+        }
+    }
+
+    // ── KAT-E2E-ATTEST-ERRLATCH — save error sets latch, blocks all openers ──
+
+    #[cfg(unix)]
+    #[test]
+    fn kat_e2e_attest_errlatch_chmod() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-errlatch";
+
+        seed_safe_harbor_vault(&vault, &key, pp_str);
+
+        // Root-skip guard.
+        {
+            let probe = dir.path().join("probe.tmp");
+            let perms = std::fs::Permissions::from_mode(0o500);
+            std::fs::set_permissions(dir.path(), perms).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("KAT-E2E-ERRLATCH: skipping — chmod 0o500 did not deny writes (root?)");
+                return;
+            }
+        }
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+
+        let mut app = open_app(&vault, pp_str);
+
+        // 'a' → Info → TypedWord → "ATTEST".
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Enter)); // Info → TypedWord
+        type_str(&mut app, "ATTEST");
+
+        // Make vault's parent dir read-only before confirming.
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → save fails
+
+        // Restore BEFORE any assertions that might panic.
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        // [R0-C1] Latch must be set.
+        assert!(
+            app.attest_save_failed,
+            "ERRLATCH: attest_save_failed must be true after save error"
+        );
+
+        // Flow must be closed.
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "ERRLATCH: flow must be closed after save error"
+        );
+
+        // Status is the quit-first remedy (spec D3 Err arm).
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("Save error")
+                    && s.contains(
+                        "quit the editor now (the unsaved attestation is discarded on quit)"
+                    )
+                    && s.contains("btctax reconcile safe-harbor-attest"))
+                .unwrap_or(false),
+            "ERRLATCH: status must be the quit-first Err remedy; got: {:?}",
+            app.status
+        );
+
+        // Vault bytes must be unchanged.
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "ERRLATCH: vault bytes must be unchanged after failed save"
+        );
+
+        // While latch is set: 'a' must refuse with latch status.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert!(
+            app.safe_harbor_attest_flow.is_none(),
+            "ERRLATCH: 'a' must not open flow while latch is set"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("failed attest save"))
+                .unwrap_or(false),
+            "ERRLATCH: status must contain 'failed attest save'; got: {:?}",
+            app.status
+        );
+
+        // While latch is set: 'f' (an unrelated mutating opener) must also refuse —
+        // this is the piggy-back guard: with every mutating opener latched shut, no
+        // later session.save() can flush the in-memory Void+Attest residue.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('f')));
+        assert!(
+            app.set_fmv_flow.is_none(),
+            "ERRLATCH: 'f' must not open the set-fmv flow while latch is set"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("failed attest save"))
+                .unwrap_or(false),
+            "ERRLATCH: 'f' must show latch status; got: {:?}",
+            app.status
+        );
+
+        // While latch is set: 'p' (profile form) must also refuse.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('p')));
+        assert!(
+            app.profile_form.is_none(),
+            "ERRLATCH: 'p' must not open profile form while latch is set"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("failed attest save"))
+                .unwrap_or(false),
+            "ERRLATCH: 'p' must show latch status; got: {:?}",
+            app.status
+        );
+
+        // Verify vault disk bytes still equal bytes_before (session holds lock; read file directly).
+        let bytes_after2 = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after2,
+            "ERRLATCH: vault bytes must remain unchanged after failed save"
+        );
+
+        // Defense-in-depth [R0-I5]: even BYPASSING the latch, the session-sourced
+        // pre-flight sees the in-memory already-attested residue and refuses via the
+        // "already attested" arm, appending NOTHING.
+        {
+            use btctax_core::persistence::load_all_ordered;
+            let len_before = {
+                let session = app.session.as_ref().unwrap();
+                load_all_ordered(session.conn()).unwrap().len()
+            };
+            app.attest_save_failed = false; // bypass the latch deliberately
+            app.status = None;
+            open_safe_harbor_attest_flow(&mut app);
+            assert!(
+                app.safe_harbor_attest_flow.is_none(),
+                "ERRLATCH defense-in-depth: flow must NOT open on in-memory residue"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("Allocation already attested"))
+                    .unwrap_or(false),
+                "ERRLATCH defense-in-depth: pre-flight must refuse via the \
+                 'already attested' arm; got: {:?}",
+                app.status
+            );
+            let len_after = {
+                let session = app.session.as_ref().unwrap();
+                load_all_ordered(session.conn()).unwrap().len()
+            };
+            assert_eq!(
+                len_before, len_after,
+                "ERRLATCH defense-in-depth: the refused pre-flight must append NOTHING"
+            );
+        }
     }
 }

@@ -265,6 +265,63 @@ pub fn persist_donation_details(
     Ok(())
 }
 
+/// Void the existing live SafeHarborAllocation and re-append it as attested.
+///
+/// `prior_id` is the EventId of the live (non-voided, timebarred) allocation.
+/// `prior_alloc` is the allocation payload (cloned from the pre-flight load).
+/// `now` is INJECTED at Enter-press for test determinism.
+///
+/// # Two-decision atomic batch (reconcile.rs:541-563)
+/// 1. Appends `VoidDecisionEvent{target_event_id: prior_id}` (inlines the void).
+/// 2. Appends `SafeHarborAllocation{..prior_alloc, timely_allocation_attested: true}`.
+///
+/// Both land in the same in-memory Connection; the single `session.save()` flushes both.
+///
+/// # Failed-save + retry (NO retry path — Hard Constraints [R0-C1])
+/// On `Err(save)`: the vault is pre-action on-disk, but BOTH appends remain in the
+/// in-memory Connection — any later `session.save()` would flush them as a side effect
+/// (the piggy-back hazard). The caller MUST set `app.attest_save_failed = true` (the
+/// residue latch: all mutating openers refuse until the editor quits). A retry would
+/// duplicate the batch → two effective allocations → Hard DecisionConflict + Path A
+/// (resolve.rs:958-967), both copies §7.4-unvoidable — unrecoverable [R0-M2]. The flow
+/// closes on Err; the safe remediation is QUIT (discards the residue), then the CLI.
+pub fn persist_safe_harbor_attest(
+    session: &mut btctax_cli::Session,
+    prior_id: btctax_core::EventId,
+    prior_alloc: btctax_core::event::SafeHarborAllocation,
+    now: time::OffsetDateTime,
+) -> Result<(btctax_core::EventId, btctax_core::EventId), btctax_cli::CliError> {
+    use btctax_core::{
+        event::{SafeHarborAllocation, VoidDecisionEvent},
+        persistence::append_decision,
+        EventPayload,
+    };
+    use time::UtcOffset;
+
+    let void_id = append_decision(
+        session.conn(),
+        EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+            target_event_id: prior_id,
+        }),
+        now,
+        UtcOffset::UTC,
+        None,
+    )?;
+    let attested = SafeHarborAllocation {
+        timely_allocation_attested: true,
+        ..prior_alloc
+    };
+    let attest_id = append_decision(
+        session.conn(),
+        EventPayload::SafeHarborAllocation(attested),
+        now,
+        UtcOffset::UTC,
+        None,
+    )?;
+    session.save()?;
+    Ok((void_id, attest_id))
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1733,6 +1790,176 @@ mod tests {
         assert_eq!(
             post2, pre,
             "KAT-DD-PERSIST: event log unchanged after upsert"
+        );
+    }
+
+    // ── KAT-P2h — two-decision strict-prefix test for persist_safe_harbor_attest ──
+    //
+    // Invariant: persist_safe_harbor_attest appends EXACTLY TWO decision events:
+    //   post[pre.len()]   = VoidDecisionEvent targeting prior_id
+    //   post[pre.len()+1] = SafeHarborAllocation with timely_allocation_attested=true
+    //
+    // Strict-prefix formula (spec D5 KAT-P2h):
+    //   post.len() == pre.len() + 2
+    //   post[..pre.len()] == pre[..]
+    //   post[pre.len()].kind == "decision"
+    //   post[pre.len()].decision_seq == pre_max_seq + 1
+    //   post[pre.len()+1].kind == "decision"
+    //   post[pre.len()+1].decision_seq == pre_max_seq + 2
+    //   payload round-trips: VoidDecisionEvent{ target_event_id: prior_id }
+    //   payload round-trips: SafeHarborAllocation { ..prior_alloc, timely_allocation_attested: true }
+
+    #[test]
+    fn kat_p2h_persist_safe_harbor_attest_two_decision_strict_prefix() {
+        use btctax_core::event::{
+            AllocMethod, EventPayload, SafeHarborAllocation, VoidDecisionEvent,
+        };
+        use btctax_core::persistence::{append_decision, load_all_ordered};
+        use btctax_core::{EventId, LotMethod};
+        use btctax_store::Passphrase;
+        use time::{macros::date, OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p2h-pass";
+
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        // Seed: a SafeHarborAllocation with timely_allocation_attested: false + one extra decision.
+        let prior_alloc = SafeHarborAllocation {
+            lots: vec![],
+            as_of_date: date!(2025 - 01 - 01),
+            method: AllocMethod::ActualPosition,
+            timely_allocation_attested: false,
+            pre2025_method: LotMethod::Fifo,
+        };
+        let prior_id: EventId;
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let t0 = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+            let t1 = OffsetDateTime::from_unix_timestamp(1_748_001_000).unwrap();
+            // Seed an extra decision first so pre_max_seq > 1.
+            append_decision(
+                session.conn(),
+                EventPayload::MethodElection(btctax_core::event::MethodElection {
+                    effective_from: date!(2024 - 01 - 01),
+                    method: LotMethod::Fifo,
+                }),
+                t0,
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            prior_id = append_decision(
+                session.conn(),
+                EventPayload::SafeHarborAllocation(prior_alloc.clone()),
+                t1,
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+        }
+
+        // Open editor session, capture pre-state.
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(pre.len(), 2, "pre must have 2 events");
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+        assert_eq!(pre_max_seq, 2, "pre max decision_seq must be 2");
+
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+        let (void_id, attest_id) =
+            persist_safe_harbor_attest(&mut session, prior_id.clone(), prior_alloc.clone(), now)
+                .unwrap();
+
+        // ── Strict-prefix assertion ───────────────────────────────────────────
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post.len(),
+            pre.len() + 2,
+            "post must be pre.len()+2 (two decisions appended)"
+        );
+
+        // Pre-prefix is byte-for-byte identical.
+        assert_eq!(
+            &post[..pre.len()],
+            pre.as_slice(),
+            "first pre.len() rows must be unchanged (strict prefix)"
+        );
+
+        // First new row: VoidDecisionEvent.
+        let void_row = &post[pre.len()];
+        let void_seq = void_row
+            .decision_seq
+            .expect("void row must have decision_seq");
+        assert_eq!(
+            void_seq,
+            (pre_max_seq + 1) as i64,
+            "void seq must be pre_max+1"
+        );
+        let expected_void_id = EventId::Decision {
+            seq: void_seq as u64,
+        };
+        assert_eq!(void_id, expected_void_id, "returned void_id must match row");
+        let void_payload: EventPayload =
+            serde_json::from_str(&void_row.payload_json).expect("void row must deserialise");
+        match &void_payload {
+            EventPayload::VoidDecisionEvent(VoidDecisionEvent { target_event_id }) => {
+                assert_eq!(
+                    *target_event_id, prior_id,
+                    "VoidDecisionEvent must target prior_id"
+                );
+            }
+            other => panic!("expected VoidDecisionEvent, got {other:?}"),
+        }
+
+        // Second new row: SafeHarborAllocation with timely_allocation_attested=true.
+        let attest_row = &post[pre.len() + 1];
+        let attest_seq = attest_row
+            .decision_seq
+            .expect("attest row must have decision_seq");
+        assert_eq!(
+            attest_seq,
+            void_seq + 1,
+            "attest seq must follow void seq immediately"
+        );
+        let expected_attest_id = EventId::Decision {
+            seq: attest_seq as u64,
+        };
+        assert_eq!(
+            attest_id, expected_attest_id,
+            "returned attest_id must match row"
+        );
+        let attest_payload: EventPayload =
+            serde_json::from_str(&attest_row.payload_json).expect("attest row must deserialise");
+        match &attest_payload {
+            EventPayload::SafeHarborAllocation(a) => {
+                assert!(
+                    a.timely_allocation_attested,
+                    "re-appended allocation must have timely_allocation_attested=true"
+                );
+                assert_eq!(
+                    a.as_of_date, prior_alloc.as_of_date,
+                    "all other fields must match prior_alloc"
+                );
+                assert_eq!(a.method, prior_alloc.method);
+                assert_eq!(a.pre2025_method, prior_alloc.pre2025_method);
+                assert_eq!(a.lots, prior_alloc.lots);
+            }
+            other => panic!("expected SafeHarborAllocation, got {other:?}"),
+        }
+
+        // Drop + reopen: same strict-prefix holds on disk.
+        drop(session);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let post_disk = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(
+            post_disk, post,
+            "on-disk image must equal in-memory post after save"
         );
     }
 }
