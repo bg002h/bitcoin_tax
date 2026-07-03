@@ -1,7 +1,8 @@
 # SPEC — bulk-resolve-conflict (+ persist_bulk_decisions extraction)
 
 **Source baseline:** `main` @ `719e9fe` (all anchors verified at write time).
-**Review status: DRAFT — awaiting mandatory R0.**
+**Review status: R0 round 1 folded (0C / 1I / 2M / 1N — GATE BLOCKED then folded); awaiting R0 round 2.
+Review: `reviews/R0-spec-bulk-resolve-conflict-round-1.md`.**
 **Design lineage:** architect program design for "bulk reconcile for the OTHER decision types" (queue item
 3), user-approved **safety-first** sequencing. This is **Cycle 2** (the extraction folded in as Task 1;
 Cycle 1 per the roadmap). Roadmap: memory `bulk-reconcile-other-types-roadmap`.
@@ -47,9 +48,12 @@ non-revocable-batch ceremony early.
 /// The shared bulk-persist loop: refuse empty, snapshot, append EACH payload, and on ANY append error
 /// revert the WHOLE batch (append_decision commits per-call), then ONE save. The mid-batch rollback is
 /// the safety-critical invariant that distinguishes the TUI atomic path from the CLI's drop-the-session.
-pub fn persist_bulk_decisions(session: &mut Session, payloads: Vec<EventPayload>, now: OffsetDateTime)
-    -> Result<usize, PersistError> {
-    if payloads.is_empty() { return Err(/* same NoChange(CliError::Usage(..)) shape as the shipped fns */); }
+pub fn persist_bulk_decisions(session: &mut Session, payloads: Vec<EventPayload>, now: OffsetDateTime,
+    empty_label: &str) -> Result<usize, PersistError> {
+    // [R0-M2] caller-supplied label preserves each shipped fn's EXACT "nothing selected" string → the
+    // re-point is TRULY zero-behavior (bulk-link passes "bulk link: nothing selected", bulk-sti passes
+    // "bulk classify-inbound-self-transfer: nothing selected"; bulk-resolve passes its own).
+    if payloads.is_empty() { return Err(PersistError::NoChange(CliError::Usage(empty_label.into()))); }
     let n = payloads.len();
     let pre = session.snapshot()?;
     for payload in payloads {
@@ -62,7 +66,8 @@ pub fn persist_bulk_decisions(session: &mut Session, payloads: Vec<EventPayload>
 }
 ```
 **Re-point** `persist_bulk_link_transfer` + `persist_bulk_self_transfer_in` to build their `Vec<EventPayload>`
-then delegate to `persist_bulk_decisions`. **Invariant: ZERO behavior change** — the shipped bulk-link +
+then delegate to `persist_bulk_decisions`, **each passing its existing empty-label string** [R0-M2] (so the
+re-point is truly byte-for-byte). **Invariant: ZERO behavior change** — the shipped bulk-link +
 bulk-sti KATs (strict-prefix, mid-batch-rollback, empty-refuse) MUST stay green unchanged (they are the
 pins). No new KAT needed for Task 1 beyond keeping the existing ones green; optionally a direct
 `persist_bulk_decisions` unit KAT. (Cycle 3/void will add a side-effect-hook variant for
@@ -77,21 +82,31 @@ Mirror the shipped `*_plan` helpers. **Candidate set** = `snap.state.blockers` w
 BlockerKind::ImportConflict` (engine-post-filtered — fires only while UNRESOLVED, so no client-side
 exclusion; an accepted/rejected conflict is no longer flagged → structural idempotence). Each blocker
 carries the conflict event id; join to the event index to build, per row: `conflict_event`, `date`,
-`target` (the `ImportConflict.target`), `current_summary` (the payload currently at the target) and
-`new_summary` (`ImportConflict.new_payload`) + `new_fingerprint` — exactly as `open_resolve_conflict_flow`
-does. **No $ number** (a conflict resolution recognizes no gain). **No time/wallet filter** (the conflict
-set is small; per-row exclude is the precision tool) — optional frame filter is out of scope.
+`target`, and the **STRUCTURED** current/new payloads + fingerprint — NOT pre-rendered summary strings
+[R0-M1: `import_payload_summary` is a private TUI-binary fn unreachable from `btctax-cli`, and the sibling
+`BulkStiRow`/`BulkLinkRow` carry structured data; each FRONT-END renders its own summary (CLI table
+formatter; TUI reuses `import_payload_summary`)]. **No $ number** (a conflict resolution recognizes no
+gain). **No time/wallet filter** (the conflict set is small; per-row exclude is the precision tool) —
+optional frame filter is out of scope.
 ```rust
-pub struct BulkResolveRow { pub conflict_event: EventId, pub date: TaxDate, pub target: EventId,
-    pub current_summary: String, pub new_summary: String }
+pub struct BulkResolveRow {
+    pub conflict_event: EventId, pub date: TaxDate, pub target: EventId,
+    pub current_payload: EventPayload,  // payload currently at the target (front-end renders "current")
+    pub new_payload: EventPayload,      // ImportConflict.new_payload (front-end renders "→ new")
+    pub new_fingerprint: String,        // [R0-N1] the 8-char disambiguator (front-end shows it)
+}
 pub struct BulkResolvePlan { pub rows: Vec<BulkResolveRow> }
 pub fn bulk_resolve_conflict_plan(&self) -> Result<BulkResolvePlan, CliError>;
 ```
 
 ### D2 — CLI `bulk-resolve-conflict`
 Two-phase (mirror bulk-link): `bulk_resolve_conflict_plan` (read/render the `current → new` table) +
-`apply_bulk_resolve_conflict(vault, pp, conflict_events, kind: ResolveKind, now)` (append one
-`SupersedeImport`/`RejectImport` per event via the shared loop, one save). Clap:
+**TWO apply fns** `apply_bulk_accept_conflicts(vault, pp, conflict_events, now)` /
+`apply_bulk_reject_conflicts(...)` [R0-I1 — do NOT reference `ResolveKind`; it lives ONLY in
+`btctax-tui-edit` and is unreachable from `btctax-cli` (dependency direction is tui-edit→cli). This mirrors
+the shipped single-item split `accept_conflict`/`reject_conflict`, `reconcile.rs:179/195`]. Each appends one
+`SupersedeImport`/`RejectImport` per event (one save). Dispatch selects the fn from the clap
+`--accept`/`--reject` bool. Clap:
 ```
 reconcile bulk-resolve-conflict (--accept | --reject) [--dry-run] [--yes]
 ```
@@ -125,7 +140,7 @@ pub fn persist_bulk_resolve_conflict(session: &mut Session, conflict_events: Vec
         ResolveKind::Accept => EventPayload::SupersedeImport(SupersedeImport { conflict_event }),
         ResolveKind::Reject => EventPayload::RejectImport(RejectImport { conflict_event }),
     }).collect();
-    persist_bulk_decisions(session, payloads, now)
+    persist_bulk_decisions(session, payloads, now, "bulk resolve-conflict: nothing selected")
 }
 ```
 Empty selection (all unchecked) → refuse (the shared helper's empty guard). Post-apply status
