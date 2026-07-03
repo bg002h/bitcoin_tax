@@ -72,6 +72,47 @@ pub struct BulkLinkPlan {
     pub total_basis_usd: Usd,
 }
 
+// ── Bulk classify-inbound-self-transfer plan (bulk-classify-inbound-self-transfer D1) ─
+//
+// The shared, READ-ONLY plan both the CLI (`cmd::reconcile::bulk_self_transfer_in_plan`) and the TUI
+// priced preview compute from the HELD session. A close MIRROR of `bulk_link_transfer_plan` applied to
+// Cycle A's `InboundClass::SelfTransferMine` ($0 conservative basis, non-taxable). Appends and
+// persists NOTHING.
+
+/// Filter narrowing which pending unknown-basis inbound deposits a bulk STI plan selects. `wallet`
+/// filters the RECEIVING wallet (the inbound has no "destination" — it IS the receiving leg).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkStiFilter {
+    pub frame: Frame,
+    pub wallet: Option<WalletId>,
+}
+
+/// One enriched pending unknown-basis inbound deposit in a bulk STI plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkStiRow {
+    pub in_event: EventId,
+    pub date: TaxDate,
+    /// [R0-M2] ALWAYS `Some` (wallet-less inbounds are excluded — they create no lot); `Option` kept
+    /// defensively / for display symmetry with `BulkLinkRow`.
+    pub wallet: Option<WalletId>,
+    pub sat: Sat,
+    /// `fmv_of(&prices, date, sat)` — the market value being given $0 basis; `None` on missing price.
+    pub usd_fmv: Option<Usd>,
+}
+
+/// The read-only plan a bulk STI would execute: the eligible/in-frame `included` rows + preview totals.
+/// No `skipped_*` bucket (an inbound has no self-destination to skip).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkStiPlan {
+    /// Eligible + in-frame + passes `wallet` filter. Sorted by `date`.
+    pub included: Vec<BulkStiRow>,
+    pub total_sat: Sat,
+    /// Σ of the priced `usd_fmv`s — the HONEST FLOOR (the over-tax exposure), always a real number.
+    pub total_usd_fmv_floor: Usd,
+    /// Rows priced `None` → render "≥ $X (N unavailable)" vs exact "$X".
+    pub missing_price_count: usize,
+}
+
 // ── Self-transfer matcher (self-transfer-passthrough C2) ─────────────────────
 //
 // A READ-ONLY proposal helper (mirrors `bulk_link_transfer_plan`/`safe_harbor_residue`): it appends and
@@ -405,6 +446,107 @@ impl Session {
             total_usd_value_floor,
             missing_price_count,
             total_basis_usd,
+        })
+    }
+
+    /// READ-ONLY: compute the bulk classify-inbound-self-transfer plan
+    /// (bulk-classify-inbound-self-transfer D1). A close MIRROR of `bulk_link_transfer_plan` applied to
+    /// Cycle A's inbound `SelfTransferMine` ($0 conservative basis, non-taxable). Appends/persists
+    /// NOTHING (clone-fold-discard recompute); KAT-G1-clean at the TUI call site.
+    ///
+    /// **Selection (structural false-classify safety) [R0-I1]:** candidates are `TransferIn` events
+    /// still flagged `UnknownBasisInbound` (blocker set joined to the raw event via the index, as
+    /// `self_transfer_match_plan` does) **MINUS** any already targeted by a NON-VOIDED `ClassifyInbound`
+    /// (mirror `open_classify_inbound_flow`'s filter 3 — appending a second fires a return-blocking Hard
+    /// `DecisionConflict`; `UnknownBasisInbound` is RE-EMITTED for gift-basis-unknown states, so
+    /// "flagged" ≠ "unclassified") **MINUS** wallet-less inbounds [R0-M2] (create no lot). The USD is
+    /// `fmv_of` [G4]; the total is the HONEST FLOOR (`total_usd_fmv_floor` + `missing_price_count`).
+    pub fn bulk_self_transfer_in_plan(
+        &self,
+        filter: BulkStiFilter,
+    ) -> Result<BulkStiPlan, CliError> {
+        let (events, state, _cfg) = self.load_events_and_project()?;
+        let prices = BundledPrices::load()?;
+        let index: std::collections::HashMap<EventId, &LedgerEvent> =
+            events.iter().map(|e| (e.id.clone(), e)).collect();
+
+        // [R0-I1] filter-3, mirroring `open_classify_inbound_flow`: the set of TransferIn event ids
+        // already targeted by a NON-VOIDED `ClassifyInbound`. Build the voided-decision-id set first,
+        // then keep only ClassifyInbounds whose OWN id is not voided [R0-M-r2-1: decision-id space and
+        // TransferIn-id space are disjoint; we intersect a decision's own id against `voided`, and map
+        // the survivor to its `transfer_in_event`].
+        let voided: std::collections::BTreeSet<EventId> = events
+            .iter()
+            .filter_map(|e| match &e.payload {
+                EventPayload::VoidDecisionEvent(v) => Some(v.target_event_id.clone()),
+                _ => None,
+            })
+            .collect();
+        let already_classified: std::collections::BTreeSet<EventId> = events
+            .iter()
+            .filter(|e| !voided.contains(&e.id))
+            .filter_map(|e| match &e.payload {
+                EventPayload::ClassifyInbound(ci) => Some(ci.transfer_in_event.clone()),
+                _ => None,
+            })
+            .collect();
+
+        let in_frame = |date: TaxDate| match &filter.frame {
+            Frame::All => true,
+            Frame::Year(y) => date.year() == *y,
+            Frame::Range { from, to } => *from <= date && date <= *to,
+        };
+
+        let mut included: Vec<BulkStiRow> = Vec::new();
+        for b in &state.blockers {
+            if b.kind != BlockerKind::UnknownBasisInbound {
+                continue;
+            }
+            let Some(id) = &b.event else { continue };
+            // [R0-I1] EXCLUDE any inbound that already carries a live ClassifyInbound (else the bulk
+            // append duplicates it → Hard DecisionConflict blocks compute_tax_year).
+            if already_classified.contains(id) {
+                continue;
+            }
+            let Some(ev) = index.get(id) else { continue };
+            let EventPayload::TransferIn(ti) = &ev.payload else {
+                continue;
+            };
+            // [R0-M2] EXCLUDE wallet-less inbounds — a self-transfer-in creates no lot and re-fires
+            // the blocker (matcher skips them too).
+            let Some(wallet) = ev.wallet.clone() else {
+                continue;
+            };
+            let date = tax_date(ev.utc_timestamp, ev.original_tz);
+            if !in_frame(date) {
+                continue;
+            }
+            if let Some(w) = &filter.wallet {
+                if &wallet != w {
+                    continue;
+                }
+            }
+            let sat = ti.sat;
+            let usd_fmv = btctax_core::price::fmv_of(&prices, date, sat);
+            included.push(BulkStiRow {
+                in_event: id.clone(),
+                date,
+                wallet: Some(wallet),
+                sat,
+                usd_fmv,
+            });
+        }
+        included.sort_by_key(|r| r.date);
+
+        let total_sat: Sat = included.iter().map(|r| r.sat).sum();
+        let total_usd_fmv_floor: Usd = included.iter().filter_map(|r| r.usd_fmv).sum();
+        let missing_price_count = included.iter().filter(|r| r.usd_fmv.is_none()).count();
+
+        Ok(BulkStiPlan {
+            included,
+            total_sat,
+            total_usd_fmv_floor,
+            missing_price_count,
         })
     }
 

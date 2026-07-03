@@ -382,6 +382,31 @@ enum Reconcile {
         #[arg(long)]
         yes: bool,
     },
+    /// Bulk-classify unknown-basis inbound deposits as self-transfer-ins ("my own coins"): apply
+    /// Cycle A's `SelfTransferMine` ($0 conservative basis, non-taxable) to MANY pending inbounds in a
+    /// time frame at once. Shows a preview surfacing the total USD given $0 basis (the over-tax
+    /// exposure) + requires --yes (or interactive y/N). Each is a voidable decision; for a deposit
+    /// whose real cost you can substantiate, classify it single-item with `classify-inbound-self-transfer --basis`.
+    BulkClassifyInboundSelfTransfer {
+        /// Restrict to a single tax year (mutually exclusive with --from/--to).
+        #[arg(long, conflicts_with_all = ["from", "to"])]
+        year: Option<i32>,
+        /// Range start (YYYY-MM-DD; requires --to).
+        #[arg(long, requires = "to")]
+        from: Option<String>,
+        /// Range end (YYYY-MM-DD, inclusive; requires --from).
+        #[arg(long, requires = "from")]
+        to: Option<String>,
+        /// Only inbounds received INTO this wallet.
+        #[arg(long)]
+        wallet: Option<String>,
+        /// Print the preview and exit without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip the interactive confirmation (non-interactive apply).
+        #[arg(long)]
+        yes: bool,
+    },
     /// Match unreconciled inbound + outbound legs as self-transfers (self-transfer-passthrough C3).
     /// With no --in/--out: PREVIEW the proposed pairs (read-only). With --in and --out: confirm ONE
     /// pair (DROP for a same-wallet passthrough, RELOCATE for a cross-wallet transfer). NEVER automatic.
@@ -1126,6 +1151,67 @@ fn dispatch_reconcile(
             );
             return Ok(());
         }
+        Reconcile::BulkClassifyInboundSelfTransfer {
+            year,
+            from,
+            to,
+            wallet,
+            dry_run,
+            yes,
+        } => {
+            let wallet = wallet
+                .as_deref()
+                .map(eventref::parse_wallet_id)
+                .transpose()?;
+            // clap enforces: none / --year alone / --from + --to. The catch-all is defensive.
+            let frame = match (year, from, to) {
+                (Some(y), None, None) => btctax_cli::Frame::Year(y),
+                (None, Some(f), Some(t)) => btctax_cli::Frame::Range {
+                    from: eventref::parse_date_arg(&f)?,
+                    to: eventref::parse_date_arg(&t)?,
+                },
+                (None, None, None) => btctax_cli::Frame::All,
+                _ => {
+                    return Err(CliError::Usage(
+                        "bulk-classify-inbound-self-transfer: use --year, or --from with --to, or neither"
+                            .into(),
+                    ))
+                }
+            };
+            let filter = btctax_cli::BulkStiFilter { frame, wallet };
+            let plan = cmd::reconcile::bulk_self_transfer_in_plan(vault, &pp, filter)?;
+
+            render_bulk_sti_preview(&plan);
+
+            if plan.included.is_empty() {
+                println!("no unclassified inbound deposits match");
+                return Ok(());
+            }
+            if dry_run {
+                return Ok(());
+            }
+            let confirmed = if yes {
+                true
+            } else {
+                print!(
+                    "Classify {} inbound deposit(s) as self-transfer-in ($0 basis)? [y/N] ",
+                    plan.included.len()
+                );
+                use std::io::Write;
+                std::io::stdout().flush().ok();
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line)?;
+                matches!(line.trim(), "y" | "Y" | "yes" | "YES")
+            };
+            if !confirmed {
+                println!("aborted; nothing written");
+                return Ok(());
+            }
+            let in_events: Vec<_> = plan.included.iter().map(|r| r.in_event.clone()).collect();
+            let n = cmd::reconcile::apply_bulk_self_transfer_in(vault, &pp, in_events, now)?;
+            println!("classified {n} inbound deposits as self-transfer-in ($0 basis)");
+            return Ok(());
+        }
         Reconcile::MatchSelfTransfers {
             in_ref,
             out_ref,
@@ -1293,5 +1379,43 @@ fn render_bulk_link_preview(plan: &btctax_cli::BulkLinkPlan) {
         plan.total_sat,
         total,
         plan.skipped_same_wallet.len()
+    );
+}
+
+/// Render the bulk classify-inbound-self-transfer preview table + totals footer
+/// (bulk-classify-inbound-self-transfer D2). The USD total is the HONEST FLOOR: exact `$X` when every
+/// included row has a price, else `≥ $X (N unavailable)` — the market value being GIVEN $0 basis (the
+/// deliberate over-tax exposure the user is accepting).
+fn render_bulk_sti_preview(plan: &btctax_cli::BulkStiPlan) {
+    println!("Bulk classify-inbound-self-transfer preview ($0 conservative basis, non-taxable)");
+    println!(
+        "{:<12}  {:<28}  {:>14}  {:>16}",
+        "date", "receiving wallet", "sat", "USD FMV"
+    );
+    for r in &plan.included {
+        let wallet = r
+            .wallet
+            .as_ref()
+            .map(render::wallet_label)
+            .unwrap_or_else(|| "(no wallet)".to_string());
+        let usd = match r.usd_fmv {
+            Some(v) => format!("${v}"),
+            None => "—".to_string(),
+        };
+        println!("{:<12}  {:<28}  {:>14}  {:>16}", r.date, wallet, r.sat, usd);
+    }
+    let total = if plan.missing_price_count == 0 {
+        format!("${}", plan.total_usd_fmv_floor)
+    } else {
+        format!(
+            "\u{2265} ${} ({} unavailable)",
+            plan.total_usd_fmv_floor, plan.missing_price_count
+        )
+    };
+    println!(
+        "included {} | {} sat | total USD reclassified to $0 basis (you'll be conservatively over-taxed on this later) {}",
+        plan.included.len(),
+        plan.total_sat,
+        total
     );
 }

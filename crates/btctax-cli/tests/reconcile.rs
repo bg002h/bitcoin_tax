@@ -1560,6 +1560,372 @@ fn bulk_cli_no_match_exits_clean() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
+// bulk-classify-inbound-self-transfer D1/D2 — `Session::bulk_self_transfer_in_plan` +
+// `cmd::reconcile::{bulk_self_transfer_in_plan, apply_bulk_self_transfer_in}`. READ-ONLY plan:
+// selects UnknownBasisInbound TransferIns MINUS already-classified (filter-3 [I1]) MINUS wallet-less
+// [M2]; honest USD floor; atomic N-append/one-save apply as SelfTransferMine{None,None} ($0 basis).
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+/// Seed a vault of raw (unclassified) `TransferIn` deposits, each firing `UnknownBasisInbound`.
+/// Returns `(vault, [i1, i2, i3, i4])`:
+///   i1 = wallet A, 2025-03-01, 100_000 sat (PRICED → $84.00)
+///   i2 = wallet A, 2025-04-01,  50_000 sat (UNPRICED — no bundled price)
+///   i3 = wallet B, 2025-06-15,  40_000 sat (PRICED)
+///   i4 = wallet A, 2024-02-01,  20_000 sat (OUT of the 2025 frame)
+fn sti_fixture(dir: &std::path::Path) -> (std::path::PathBuf, [EventId; 4]) {
+    use btctax_core::event::TransferIn;
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::LedgerEvent;
+    use time::UtcOffset;
+
+    let vault = dir.join("sti.pgp");
+    let mut session = Session::create(&vault, &pp()).unwrap();
+
+    let mkid = |r: &str| EventId::import(Source::Coinbase, SourceRef::new(r));
+    let tin = |sat: i64| {
+        EventPayload::TransferIn(TransferIn {
+            sat,
+            src_addr: None,
+            txid: None,
+        })
+    };
+    let ev = |id: EventId, ts, wallet: WalletId, sat: i64| LedgerEvent {
+        id,
+        utc_timestamp: ts,
+        original_tz: UtcOffset::UTC,
+        wallet: Some(wallet),
+        payload: tin(sat),
+    };
+
+    let i1 = mkid("sti-i1");
+    let i2 = mkid("sti-i2");
+    let i3 = mkid("sti-i3");
+    let i4 = mkid("sti-i4");
+    let batch = vec![
+        ev(
+            i1.clone(),
+            datetime!(2025-03-01 12:00:00 UTC),
+            wallet_a(),
+            100_000,
+        ),
+        ev(
+            i2.clone(),
+            datetime!(2025-04-01 12:00:00 UTC),
+            wallet_a(),
+            50_000,
+        ),
+        ev(
+            i3.clone(),
+            datetime!(2025-06-15 12:00:00 UTC),
+            wallet_b(),
+            40_000,
+        ),
+        ev(
+            i4.clone(),
+            datetime!(2024-02-01 12:00:00 UTC),
+            wallet_a(),
+            20_000,
+        ),
+    ];
+    append_import_batch(session.conn(), &batch).unwrap();
+    session.save().unwrap();
+    (vault, [i1, i2, i3, i4])
+}
+
+/// The plan selects UnknownBasisInbound TransferIns in-frame, applies the wallet filter, sorts by date.
+#[test]
+fn bulk_sti_plan_selects_unknown_inbounds_in_frame() {
+    use btctax_cli::{BulkStiFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [i1, i2, i3, _i4]) = sti_fixture(dir.path());
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    // Year(2025), wallet None → i1,i2,i3 (sorted by date); 2024 i4 dropped.
+    let plan = s
+        .bulk_self_transfer_in_plan(BulkStiFilter {
+            frame: Frame::Year(2025),
+            wallet: None,
+        })
+        .unwrap();
+    let included: Vec<_> = plan.included.iter().map(|r| r.in_event.clone()).collect();
+    assert_eq!(
+        included,
+        vec![i1.clone(), i2.clone(), i3.clone()],
+        "included sorted by date; the 2024 inbound is out of frame"
+    );
+    assert_eq!(plan.total_sat, 190_000, "Σ included sat");
+
+    // wallet = Some(A) → only A's 2025 inbounds (i1, i2); i3 (wallet B) filtered out.
+    let plan2 = s
+        .bulk_self_transfer_in_plan(BulkStiFilter {
+            frame: Frame::Year(2025),
+            wallet: Some(wallet_a()),
+        })
+        .unwrap();
+    let included2: Vec<_> = plan2.included.iter().map(|r| r.in_event.clone()).collect();
+    assert_eq!(
+        included2,
+        vec![i1, i2],
+        "wallet filter keeps only wallet-A inbounds"
+    );
+}
+
+/// [R0-I1 + R0-M2] The candidate set EXCLUDES (a) any inbound already targeted by a non-voided
+/// `ClassifyInbound` — here a gift-case-4 `GiftReceived{donor_basis:None,donor_acquired_at:None}` which
+/// RE-FIRES `UnknownBasisInbound` — and (b) any wallet-less `TransferIn` (creates no lot). Only the
+/// plain unclassified wallet-bearing inbound is selected.
+#[test]
+fn bulk_sti_plan_excludes_already_classified_and_walletless() {
+    use btctax_cli::{BulkStiFilter, Frame};
+    use btctax_core::event::TransferIn;
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::LedgerEvent;
+    use time::UtcOffset;
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("sti-excl.pgp");
+    let mut session = Session::create(&vault, &pp()).unwrap();
+
+    let mkid = |r: &str| EventId::import(Source::Coinbase, SourceRef::new(r));
+    let tin = |sat: i64| {
+        EventPayload::TransferIn(TransferIn {
+            sat,
+            src_addr: None,
+            txid: None,
+        })
+    };
+    let normal = mkid("sti-normal");
+    let gift4 = mkid("sti-gift4");
+    let walletless = mkid("sti-walletless");
+    let batch = vec![
+        // (a) plain unclassified, wallet A → the ONLY expected candidate.
+        LedgerEvent {
+            id: normal.clone(),
+            utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_a()),
+            payload: tin(100_000),
+        },
+        // (b) will be classified gift-case-4 → re-fires UnknownBasisInbound but is already-classified.
+        LedgerEvent {
+            id: gift4.clone(),
+            utc_timestamp: datetime!(2025-03-05 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_a()),
+            payload: tin(70_000),
+        },
+        // (c) wallet-less unclassified → fires UnknownBasisInbound with wallet None (M2 excludes it).
+        LedgerEvent {
+            id: walletless.clone(),
+            utc_timestamp: datetime!(2025-03-10 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: None,
+            payload: tin(60_000),
+        },
+    ];
+    append_import_batch(session.conn(), &batch).unwrap();
+    session.save().unwrap();
+    drop(session); // release the VaultLock before classify_inbound re-opens the vault
+
+    // Classify gift4 as gift-case-4 (donor basis + acquisition BOTH unknown → UnknownBasisInbound re-fires).
+    cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &gift4.canonical(),
+        InboundClass::GiftReceived {
+            donor_basis: None,
+            donor_acquired_at: None,
+            fmv_at_gift: dec!(1000),
+        },
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    // Sanity: all three still carry UnknownBasisInbound (so the exclusions are MEANINGFUL, not vacuous).
+    let (state, _) = s.project().unwrap();
+    let flagged: std::collections::BTreeSet<_> = state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+        .filter_map(|b| b.event.clone())
+        .collect();
+    assert!(
+        flagged.contains(&normal) && flagged.contains(&gift4) && flagged.contains(&walletless),
+        "all three inbounds re-fire UnknownBasisInbound: {flagged:?}"
+    );
+
+    let plan = s
+        .bulk_self_transfer_in_plan(BulkStiFilter {
+            frame: Frame::All,
+            wallet: None,
+        })
+        .unwrap();
+    let included: Vec<_> = plan.included.iter().map(|r| r.in_event.clone()).collect();
+    assert_eq!(
+        included,
+        vec![normal],
+        "only the plain unclassified wallet-bearing inbound is a candidate; \
+         gift-case-4 (already-classified, filter-3) and wallet-less (M2) are excluded"
+    );
+}
+
+/// A row with no price → `usd_fmv = None`, increments `missing_price_count`; the floor is the Σ of the
+/// PRICED rows only (never a false exact total).
+#[test]
+fn bulk_sti_plan_fmv_floor_when_price_missing() {
+    use btctax_cli::{BulkStiFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _ids) = sti_fixture(dir.path());
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    // wallet A / Year 2025 → i1 (2025-03-01, priced $84.00) + i2 (2025-04-01, unpriced).
+    let plan = s
+        .bulk_self_transfer_in_plan(BulkStiFilter {
+            frame: Frame::Year(2025),
+            wallet: Some(wallet_a()),
+        })
+        .unwrap();
+    assert_eq!(plan.included.len(), 2);
+    assert_eq!(
+        plan.missing_price_count, 1,
+        "i2 (2025-04-01) has no bundled price"
+    );
+    assert_eq!(
+        plan.total_usd_fmv_floor,
+        dec!(84.00),
+        "floor = Σ of priced rows only (i1)"
+    );
+    assert_eq!(
+        plan.included.iter().filter(|r| r.usd_fmv.is_none()).count(),
+        1
+    );
+}
+
+/// Phase 1 (`bulk_self_transfer_in_plan`) is READ-ONLY: computing the plan writes nothing to the vault.
+#[test]
+fn bulk_sti_cli_dry_run_writes_nothing() {
+    use btctax_cli::{BulkStiFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _ids) = sti_fixture(dir.path());
+
+    let before = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::load_all(s.conn()).unwrap().len()
+    };
+    let plan = cmd::reconcile::bulk_self_transfer_in_plan(
+        &vault,
+        &pp(),
+        BulkStiFilter {
+            frame: Frame::All,
+            wallet: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        !plan.included.is_empty(),
+        "plan must select rows (so the no-write is meaningful)"
+    );
+    let after = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::load_all(s.conn()).unwrap().len()
+    };
+    assert_eq!(
+        before, after,
+        "computing the plan must not append any event"
+    );
+}
+
+/// Phase 2 (`apply_bulk_self_transfer_in`) is atomic: N `ClassifyInbound{SelfTransferMine{None,None}}`
+/// appended in ONE save; each classified inbound projects as a non-taxable $0-basis lot and its
+/// `UnknownBasisInbound` blocker clears.
+#[test]
+fn bulk_sti_cli_apply_is_atomic_single_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [i1, i2, i3, _i4]) = sti_fixture(dir.path());
+
+    let n = cmd::reconcile::apply_bulk_self_transfer_in(
+        &vault,
+        &pp(),
+        vec![i1.clone(), i3.clone()],
+        now(),
+    )
+    .unwrap();
+    assert_eq!(n, 2);
+
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    // Exactly two ClassifyInbound{SelfTransferMine{None,None}} decisions appended.
+    let classified: Vec<_> = btctax_core::persistence::load_all(s.conn())
+        .unwrap()
+        .into_iter()
+        .filter_map(|e| match e.payload {
+            EventPayload::ClassifyInbound(ci) => Some(ci),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(classified.len(), 2, "exactly two ClassifyInbound appended");
+    assert!(
+        classified.iter().all(|ci| matches!(
+            ci.as_,
+            InboundClass::SelfTransferMine {
+                basis: None,
+                acquired_at: None
+            }
+        )),
+        "every appended classification is SelfTransferMine{{None,None}}"
+    );
+
+    let (state, _) = s.project().unwrap();
+    // i1 + i3 no longer flagged UnknownBasisInbound (i2 untouched stays flagged).
+    let flagged: std::collections::BTreeSet<_> = state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+        .filter_map(|b| b.event.clone())
+        .collect();
+    assert!(
+        !flagged.contains(&i1) && !flagged.contains(&i3),
+        "classified inbounds' UnknownBasisInbound blockers cleared"
+    );
+    assert!(flagged.contains(&i2), "the untouched i2 stays flagged");
+
+    // Each classified inbound created a $0-basis lot.
+    for id in [&i1, &i3] {
+        let lot = state
+            .lots
+            .iter()
+            .find(|l| &l.lot_id.origin_event_id == id)
+            .expect("a lot was created for the classified inbound");
+        assert_eq!(
+            lot.usd_basis,
+            dec!(0),
+            "self-transfer-in defaults to $0 basis"
+        );
+    }
+}
+
+/// A frame that matches nothing → empty plan (the dispatch prints "no match" and exits 0).
+#[test]
+fn bulk_sti_cli_no_match_exits_clean() {
+    use btctax_cli::{BulkStiFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _ids) = sti_fixture(dir.path());
+    let s = Session::open(&vault, &pp()).unwrap();
+    let plan = s
+        .bulk_self_transfer_in_plan(BulkStiFilter {
+            frame: Frame::Year(2030),
+            wallet: None,
+        })
+        .unwrap();
+    assert!(plan.included.is_empty(), "no inbounds in 2030");
+    assert_eq!(plan.total_sat, 0);
+    assert_eq!(plan.total_usd_fmv_floor, dec!(0));
+    assert_eq!(plan.missing_price_count, 0);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 // self-transfer-passthrough C2 — the matcher `Session::self_transfer_match_plan`. READ-ONLY: pairs
 // ONLY unreconciled legs (candidate ins = UnknownBasisInbound TransferIns; candidate outs = pending
 // outflows), proposes DROP (same wallet) vs RELOCATE (cross wallet), flags ambiguity, NEVER auto-applies.

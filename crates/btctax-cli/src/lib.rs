@@ -13,7 +13,8 @@ pub mod tax_profile;
 
 pub use config::CliConfig;
 pub use session::{
-    BulkFilter, BulkLinkPlan, BulkLinkRow, Frame, MatchAction, MatchProposal, Session,
+    BulkFilter, BulkLinkPlan, BulkLinkRow, BulkStiFilter, BulkStiPlan, BulkStiRow, Frame,
+    MatchAction, MatchProposal, Session,
 };
 
 #[derive(Debug, thiserror::Error)]
