@@ -18,15 +18,17 @@ use crossterm::{
     terminal::{enable_raw_mode, EnterAlternateScreen},
 };
 use edit::form::{
-    cycle_business_optional, cycle_filing_status, cycle_income_kind, cycle_income_kind_optional,
-    cycle_outflow_kind, income_kind_display, is_revocable_payload, next_focus, prev_focus,
-    validate, validate_classify_inbound_gift, validate_classify_inbound_income,
+    cycle_basis_source, cycle_business_optional, cycle_classify_raw_variant, cycle_filing_status,
+    cycle_income_kind, cycle_income_kind_optional, cycle_outflow_kind, income_kind_display,
+    is_revocable_payload, next_focus, prev_focus, validate, validate_classify_inbound_gift,
+    validate_classify_inbound_income, validate_classify_raw_acquire, validate_classify_raw_income,
     validate_donation_details, validate_reclassify_income, validate_reclassify_outflow,
     validate_select_lots, validate_set_fmv, ClassifyInboundFlowState, ClassifyInboundModalState,
-    ClassifyInboundStep, DisposalKind, DisposalListItem, DonationListItem, FieldBuffer,
-    FmvListItem, InEventItem, InboundListItem, InboundVariant, IncomeListItem, LinkMode,
-    LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, LotPickFormRow,
-    MutationModalState, OutflowKind, OutflowListItem, ProfileFormState, ReclassifyIncomeFlowState,
+    ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep,
+    ClassifyRawVariant, DisposalKind, DisposalListItem, DonationListItem, FieldBuffer, FmvListItem,
+    InEventItem, InboundListItem, InboundVariant, IncomeListItem, LinkMode, LinkTransferFlowState,
+    LinkTransferModalState, LinkTransferStep, LotPickFormRow, MutationModalState, OutflowKind,
+    OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
     ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
     ReclassifyOutflowModalState, ReclassifyOutflowStep, SafeHarborAttestFlowState,
     SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
@@ -166,6 +168,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Classify-raw-modal dispatch — BEFORE flow, form, screen ──────────────
+    if app.classify_raw_modal.is_some() {
+        handle_classify_raw_modal_key(app, key);
+        return;
+    }
+
     // ── 9. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
     //    Every step of an open flow is claimed here; 'q' and Esc can never
     //    fall through to a Browse quit arm mid-flow.
@@ -199,6 +207,10 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.link_transfer_flow.is_some() {
         handle_link_transfer_flow_key(app, key);
+        return;
+    }
+    if app.classify_raw_flow.is_some() {
+        handle_classify_raw_flow_key(app, key);
         return;
     }
     if app.safe_harbor_attest_flow.is_some() {
@@ -266,6 +278,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('s') => open_select_lots_flow(app),
                 KeyCode::Char('d') => open_set_donation_details_flow(app),
                 KeyCode::Char('l') => open_link_transfer_flow(app),
+                KeyCode::Char('u') => open_classify_raw_flow(app),
                 KeyCode::Char('a') => open_safe_harbor_attest_flow(app),
                 _ => {}
             }
@@ -484,6 +497,8 @@ impl EditorApp {
         self.set_donation_details_modal = None;
         self.link_transfer_flow = None;
         self.link_transfer_modal = None;
+        self.classify_raw_flow = None;
+        self.classify_raw_modal = None;
         self.safe_harbor_attest_flow = None;
     }
 }
@@ -4010,6 +4025,584 @@ fn derive_link_transfer_status(
         "Self-transfer link recorded for {} → {target_label}; the TransferOut is now a \
          non-taxable relocation.",
         out_event.canonical()
+    )
+}
+
+// ── Classify-raw flow (chunk 4a, D2) ─────────────────────────────────────────
+
+/// Open the classify-raw flow from the Browse screen (chunk 4a, D2).
+///
+/// Pre-filter: events carrying `BlockerKind::Unclassified` whose payload is
+/// `EventPayload::Unclassified`, minus those already targeted by a non-voided `ClassifyRaw`
+/// (a second classification of one target → `DecisionConflict`; FIRST-WINS). Same shape as
+/// `open_classify_inbound_flow`'s filter keyed on `Unclassified`.
+///
+/// Empty filtered list → status "No unclassified raw imports"; flow NOT opened [R0-M8].
+fn open_classify_raw_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let ev_idx = events_by_id(snap);
+
+    let voided: BTreeSet<EventId> = snap
+        .events
+        .iter()
+        .filter_map(|e| {
+            if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                Some(v.target_event_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Targets already classified by a non-voided ClassifyRaw (a second → DecisionConflict).
+    let already_classified: BTreeSet<EventId> = snap
+        .events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .filter_map(|e| {
+            if let EventPayload::ClassifyRaw(cr) = &e.payload {
+                Some(cr.target.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut items: Vec<RawListItem> = snap
+        .state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::Unclassified)
+        .filter_map(|b| {
+            let target = b.event.as_ref()?;
+            let ev = ev_idx.get(target)?;
+            // Raw-only: the target's RAW payload must be Unclassified.
+            let raw = match &ev.payload {
+                EventPayload::Unclassified(u) => u.raw.clone(),
+                _ => return None,
+            };
+            if already_classified.contains(target) {
+                return None;
+            }
+            let date = btctax_core::conventions::tax_date(ev.utc_timestamp, ev.original_tz);
+            Some(RawListItem {
+                target: target.clone(),
+                date,
+                raw,
+                wallet: ev.wallet.clone(),
+            })
+        })
+        .collect();
+    items.sort_by_key(|i| i.date);
+
+    if items.is_empty() {
+        // R0-M8: empty filtered list never opens a flow.
+        app.status = Some("No unclassified raw imports".to_string());
+        return;
+    }
+
+    app.classify_raw_flow = Some(ClassifyRawFlowState {
+        list: TargetList::new(items),
+        step: ClassifyRawStep::List,
+    });
+}
+
+/// Dispatch to the correct sub-handler depending on `ClassifyRawStep`.
+fn handle_classify_raw_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.classify_raw_flow.as_ref() {
+        Some(f) => match &f.step {
+            ClassifyRawStep::List => 0u8,
+            ClassifyRawStep::VariantPicker { .. } => 1u8,
+            ClassifyRawStep::AcquireForm { .. } => 2u8,
+            ClassifyRawStep::IncomeForm { .. } => 3u8,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_cr_list_key(app, key),
+        1 => handle_cr_picker_key(app, key),
+        2 => handle_cr_acquire_form_key(app, key),
+        _ => handle_cr_income_form_key(app, key),
+    }
+}
+
+/// List step: Enter → variant picker (initial Acquire). Esc → close flow. q → swallowed.
+fn handle_cr_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            let selected = app
+                .classify_raw_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+            if let Some(item) = selected {
+                if let Some(flow) = app.classify_raw_flow.as_mut() {
+                    flow.step = ClassifyRawStep::VariantPicker {
+                        item,
+                        variant: ClassifyRawVariant::Acquire, // initial
+                    };
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.classify_raw_flow = None;
+        }
+        _ => {
+            // All other keys (including 'q') swallowed while flow is open [R0-I2].
+        }
+    }
+}
+
+/// Variant-picker step: Acquire ↔ Income via Tab; Enter → the per-variant sub-form.
+fn handle_cr_picker_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Tab => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                if let ClassifyRawStep::VariantPicker { variant, .. } = &mut flow.step {
+                    *variant = cycle_classify_raw_variant(*variant);
+                }
+            }
+        }
+        KeyCode::Enter => {
+            let Some(flow) = app.classify_raw_flow.as_mut() else {
+                return;
+            };
+            let old_step = std::mem::replace(&mut flow.step, ClassifyRawStep::List);
+            if let ClassifyRawStep::VariantPicker { item, variant } = old_step {
+                flow.step = match variant {
+                    ClassifyRawVariant::Acquire => ClassifyRawStep::AcquireForm {
+                        item,
+                        sat_buf: FieldBuffer::new(),
+                        usd_cost_buf: FieldBuffer::new(),
+                        fee_buf: FieldBuffer::new(),
+                        basis_source: BasisSource::ExchangeProvided, // default PICK
+                        focus: 0,
+                        error: None,
+                    },
+                    ClassifyRawVariant::Income => ClassifyRawStep::IncomeForm {
+                        item,
+                        sat_buf: FieldBuffer::new(),
+                        fmv_buf: FieldBuffer::new(),
+                        kind: IncomeKind::Mining, // initial
+                        business: false,
+                        focus: 0,
+                        error: None,
+                    },
+                };
+            }
+        }
+        KeyCode::Esc => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                flow.step = ClassifyRawStep::List;
+            }
+        }
+        _ => {
+            // All other keys (including 'q') swallowed [R0-I2].
+        }
+    }
+}
+
+/// Acquire-form step: sat/usd_cost/fee text, basis_source picker (Tab on row 3), submit.
+fn handle_cr_acquire_form_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let result = match app.classify_raw_flow.as_ref() {
+                Some(f) => match &f.step {
+                    ClassifyRawStep::AcquireForm {
+                        item,
+                        sat_buf,
+                        usd_cost_buf,
+                        fee_buf,
+                        basis_source,
+                        ..
+                    } => {
+                        validate_classify_raw_acquire(sat_buf, usd_cost_buf, fee_buf, *basis_source)
+                            .map(|built| (item.clone(), built))
+                    }
+                    _ => return,
+                },
+                None => return,
+            };
+            match result {
+                Ok((item, built)) => {
+                    app.classify_raw_modal = Some(ClassifyRawModalState {
+                        target: item.target.clone(),
+                        raw: item.raw.clone(),
+                        built,
+                    });
+                }
+                Err(msg) => {
+                    if let Some(flow) = app.classify_raw_flow.as_mut() {
+                        if let ClassifyRawStep::AcquireForm { error, .. } = &mut flow.step {
+                            *error = Some(msg);
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            let item = match app.classify_raw_flow.as_ref() {
+                Some(f) => match &f.step {
+                    ClassifyRawStep::AcquireForm { item, .. } => item.clone(),
+                    _ => return,
+                },
+                None => return,
+            };
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                flow.step = ClassifyRawStep::VariantPicker {
+                    item,
+                    variant: ClassifyRawVariant::Acquire,
+                };
+            }
+        }
+        KeyCode::Tab => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                if let ClassifyRawStep::AcquireForm {
+                    basis_source,
+                    focus,
+                    ..
+                } = &mut flow.step
+                {
+                    if *focus == 3 {
+                        *basis_source = cycle_basis_source(*basis_source);
+                    } else {
+                        *focus = (*focus + 1).min(3);
+                    }
+                }
+            }
+        }
+        KeyCode::BackTab | KeyCode::Up => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                if let ClassifyRawStep::AcquireForm { focus, .. } = &mut flow.step {
+                    *focus = focus.saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Down => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                if let ClassifyRawStep::AcquireForm { focus, .. } = &mut flow.step {
+                    *focus = (*focus + 1).min(3);
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                if let ClassifyRawStep::AcquireForm {
+                    sat_buf,
+                    usd_cost_buf,
+                    fee_buf,
+                    focus,
+                    ..
+                } = &mut flow.step
+                {
+                    match *focus {
+                        0 => sat_buf.pop_char(),
+                        1 => usd_cost_buf.pop_char(),
+                        2 => fee_buf.pop_char(),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                if let ClassifyRawStep::AcquireForm {
+                    sat_buf,
+                    usd_cost_buf,
+                    fee_buf,
+                    focus,
+                    ..
+                } = &mut flow.step
+                {
+                    match *focus {
+                        0 => sat_buf.push_char(c),
+                        1 => usd_cost_buf.push_char(c),
+                        2 => fee_buf.push_char(c),
+                        // focus==3 (basis_source): Tab cycles (handled above); other chars swallowed.
+                        _ => {}
+                    }
+                }
+            }
+        }
+        _ => {
+            // All unmatched keys (including 'q' at a picker row) swallowed [R0-I2].
+        }
+    }
+}
+
+/// Income-form step: sat/usd_fmv text, kind picker (Tab on row 2), business toggle (Space), submit.
+fn handle_cr_income_form_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let result = match app.classify_raw_flow.as_ref() {
+                Some(f) => match &f.step {
+                    ClassifyRawStep::IncomeForm {
+                        item,
+                        sat_buf,
+                        fmv_buf,
+                        kind,
+                        business,
+                        ..
+                    } => validate_classify_raw_income(sat_buf, fmv_buf, *kind, *business)
+                        .map(|built| (item.clone(), built)),
+                    _ => return,
+                },
+                None => return,
+            };
+            match result {
+                Ok((item, built)) => {
+                    app.classify_raw_modal = Some(ClassifyRawModalState {
+                        target: item.target.clone(),
+                        raw: item.raw.clone(),
+                        built,
+                    });
+                }
+                Err(msg) => {
+                    if let Some(flow) = app.classify_raw_flow.as_mut() {
+                        if let ClassifyRawStep::IncomeForm { error, .. } = &mut flow.step {
+                            *error = Some(msg);
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            let item = match app.classify_raw_flow.as_ref() {
+                Some(f) => match &f.step {
+                    ClassifyRawStep::IncomeForm { item, .. } => item.clone(),
+                    _ => return,
+                },
+                None => return,
+            };
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                flow.step = ClassifyRawStep::VariantPicker {
+                    item,
+                    variant: ClassifyRawVariant::Income,
+                };
+            }
+        }
+        KeyCode::Tab => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                if let ClassifyRawStep::IncomeForm { kind, focus, .. } = &mut flow.step {
+                    if *focus == 2 {
+                        *kind = cycle_income_kind(*kind);
+                    } else {
+                        *focus = (*focus + 1).min(3);
+                    }
+                }
+            }
+        }
+        KeyCode::BackTab | KeyCode::Up => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                if let ClassifyRawStep::IncomeForm { focus, .. } = &mut flow.step {
+                    *focus = focus.saturating_sub(1);
+                }
+            }
+        }
+        KeyCode::Down => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                if let ClassifyRawStep::IncomeForm { focus, .. } = &mut flow.step {
+                    *focus = (*focus + 1).min(3);
+                }
+            }
+        }
+        KeyCode::Char(' ') => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                if let ClassifyRawStep::IncomeForm {
+                    business, focus, ..
+                } = &mut flow.step
+                {
+                    if *focus == 3 {
+                        *business = !*business;
+                    }
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                if let ClassifyRawStep::IncomeForm {
+                    sat_buf,
+                    fmv_buf,
+                    focus,
+                    ..
+                } = &mut flow.step
+                {
+                    match *focus {
+                        0 => sat_buf.pop_char(),
+                        1 => fmv_buf.pop_char(),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                if let ClassifyRawStep::IncomeForm {
+                    sat_buf,
+                    fmv_buf,
+                    focus,
+                    ..
+                } = &mut flow.step
+                {
+                    match *focus {
+                        0 => sat_buf.push_char(c),
+                        1 => fmv_buf.push_char(c),
+                        // focus==2 (kind): Tab cycles; focus==3 (business): Space toggles.
+                        _ => {}
+                    }
+                }
+            }
+        }
+        _ => {
+            // All unmatched keys (including 'q' at a picker/toggle row) swallowed [R0-I2].
+        }
+    }
+}
+
+/// Static "Acquire"/"Income" tag for a built classify-raw payload (modal + status).
+fn classify_raw_variant_label(built: &EventPayload) -> &'static str {
+    match built {
+        EventPayload::Acquire(_) => "Acquire",
+        EventPayload::Income(_) => "Income",
+        _ => "imported",
+    }
+}
+
+/// Handle a key press while the classify-raw confirmation modal is open (chunk 4a, D2).
+///
+/// Enter → build `ClassifyRaw{target, as_: Box::new(built)}` → persist_classify_raw → re-project +
+///   status + close. `Err(e)` → close modal, route through `on_persist_error`.
+/// Esc → close modal only (back to the sub-form; nothing written).
+fn handle_classify_raw_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (target, built) = match app.classify_raw_modal.as_ref() {
+                Some(m) => (m.target.clone(), m.built.clone()),
+                None => return,
+            };
+            let variant_label = classify_raw_variant_label(&built);
+
+            let payload = btctax_core::EventPayload::ClassifyRaw(btctax_core::event::ClassifyRaw {
+                target: target.clone(),
+                as_: Box::new(built),
+            });
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.classify_raw_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_classify_raw(session, payload, now)
+            };
+
+            match save_result {
+                Ok(decision_id) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_classify_raw_status(
+                                &snap,
+                                &target,
+                                &decision_id,
+                                variant_label,
+                            );
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.classify_raw_modal = None;
+                    app.classify_raw_flow = None;
+                }
+                Err(e) => {
+                    app.classify_raw_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.classify_raw_modal = None;
+        }
+        _ => {
+            // All other keys swallowed (blocking modal).
+        }
+    }
+}
+
+/// Derive the status string from RE-PROJECTED state after a classify-raw save (chunk 4a, D2).
+///
+/// Three arms (spec D2):
+/// 1. `DecisionConflict` attributed to `decision_id` (duplicate classify) → clear-with-void.
+/// 2. Clean and the target's `Unclassified` blocker is gone → success.
+/// 3. Clean but a NEW blocker attributes to the target — for the scoped Income/Acquire variants
+///    this is `FmvMissing` (Income with an empty `usd_fmv` → `Missing`) [R0-M2].
+fn derive_classify_raw_status(
+    snap: &btctax_tui::app::Snapshot,
+    target: &EventId,
+    decision_id: &EventId,
+    variant_label: &str,
+) -> String {
+    // Arm 1: DecisionConflict attributed to the decision_id.
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::DecisionConflict && b.event.as_ref() == Some(decision_id) {
+            return format!(
+                "Saved, but DecisionConflict fired — the classification was not applied; clear with \
+                 Void flow (press 'v'), or quit the editor and run: btctax reconcile void {}",
+                decision_id.canonical()
+            );
+        }
+    }
+
+    // Arm 3: a NEW blocker attributes to the target (FmvMissing for the scoped variants).
+    for b in &snap.state.blockers {
+        if b.kind == BlockerKind::FmvMissing && b.event.as_ref() == Some(target) {
+            return format!("Classified, but {:?} now applies — see Compliance.", b.kind);
+        }
+    }
+
+    // Arm 2: clean — the Unclassified blocker is cleared.
+    format!(
+        "Classified {} as {variant_label}; the Unclassified blocker is cleared.",
+        target.canonical()
     )
 }
 
@@ -13502,6 +14095,620 @@ mod tests {
                 .any(|w| w.wallet == kraken_wallet()),
             "LT-UNION: a zero-balance destination wallet MUST be offerable (union of events, \
              NOT holdings_by_wallet) [R0-I2]"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // chunk 4a — Task 2: classify-raw (`u`) KATs
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// Seed a vault with a single Unclassified import event (with a wallet) → the projection
+    /// carries a `BlockerKind::Unclassified` blocker on it. Returns the target EventId.
+    fn seed_unclassified_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> btctax_core::EventId {
+        use btctax_core::event::{EventPayload, LedgerEvent, Unclassified};
+        use btctax_core::identity::{Source, SourceRef};
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let raw_id = EventId::import(Source::River, SourceRef::new("cr-raw-1"));
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let batch = vec![LedgerEvent {
+            id: raw_id.clone(),
+            utc_timestamp: OffsetDateTime::from_unix_timestamp(1_740_787_200).unwrap(),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(river_wallet()),
+            payload: EventPayload::Unclassified(Unclassified {
+                raw: "river csv row: 0.005 BTC in, memo=?".into(),
+            }),
+        }];
+        btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+        session.save().unwrap();
+        raw_id
+    }
+
+    fn unclassified_blocker_present(snap: &btctax_tui::app::Snapshot, target: &EventId) -> bool {
+        snap.state
+            .blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::Unclassified && b.event.as_ref() == Some(target))
+    }
+
+    // ── KAT-E2E-CR-ACQUIRE — classify a raw row as Acquire → blocker cleared ──
+    #[test]
+    fn kat_e2e_cr_acquire() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-cr-acq-pass";
+
+        let target = seed_unclassified_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+        assert!(
+            unclassified_blocker_present(app.snapshot.as_ref().unwrap(), &target),
+            "CR-ACQ: the seed must carry an Unclassified blocker"
+        );
+
+        // u → List → Enter → VariantPicker(Acquire) → Enter → AcquireForm.
+        handle_key(&mut app, press(KeyCode::Char('u')));
+        assert!(app.classify_raw_flow.is_some(), "CR-ACQ: flow opens on 'u'");
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.classify_raw_flow.as_ref().map(|f| &f.step),
+                Some(ClassifyRawStep::VariantPicker {
+                    variant: ClassifyRawVariant::Acquire,
+                    ..
+                })
+            ),
+            "CR-ACQ: Enter opens VariantPicker(Acquire)"
+        );
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.classify_raw_flow.as_ref().map(|f| &f.step),
+                Some(ClassifyRawStep::AcquireForm { .. })
+            ),
+            "CR-ACQ: Enter opens AcquireForm"
+        );
+
+        // sat (focus 0) → Down → usd_cost (focus 1). Leave fee empty; basis_source default.
+        type_str(&mut app, "500000");
+        handle_key(&mut app, press(KeyCode::Down));
+        type_str(&mut app, "300.00");
+        // Enter → modal → confirm.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(app.classify_raw_modal.is_some(), "CR-ACQ: modal opens");
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.classify_raw_flow.is_none() && app.classify_raw_modal.is_none(),
+            "CR-ACQ: confirm closes modal + flow"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or("")
+                .contains("Unclassified blocker is cleared"),
+            "CR-ACQ: clean-arm status; got: {:?}",
+            app.status
+        );
+
+        // Re-projection: the Unclassified blocker is gone; the ClassifyRaw round-trips as Acquire.
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            !unclassified_blocker_present(snap, &target),
+            "CR-ACQ: the Unclassified blocker must be cleared after classify"
+        );
+        let cr = snap
+            .events
+            .iter()
+            .find_map(|e| match &e.payload {
+                EventPayload::ClassifyRaw(cr) if cr.target == target => Some(cr),
+                _ => None,
+            })
+            .expect("CR-ACQ: a ClassifyRaw decision must exist");
+        match &*cr.as_ {
+            EventPayload::Acquire(a) => {
+                assert_eq!(a.sat, 500_000, "CR-ACQ: sat");
+                assert_eq!(
+                    a.usd_cost,
+                    rust_decimal_macros::dec!(300.00),
+                    "CR-ACQ: usd_cost"
+                );
+                assert_eq!(a.fee_usd, rust_decimal::Decimal::ZERO, "CR-ACQ: fee → $0");
+                assert_eq!(
+                    a.basis_source,
+                    BasisSource::ExchangeProvided,
+                    "CR-ACQ: default basis_source"
+                );
+            }
+            other => panic!("CR-ACQ: expected Acquire, got {other:?}"),
+        }
+    }
+
+    // ── KAT-E2E-CR-INCOME — classify a raw row as Income (typed FMV) ──────────
+    #[test]
+    fn kat_e2e_cr_income() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-cr-inc-pass";
+
+        let target = seed_unclassified_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        // u → List → Enter → VariantPicker → Tab → Income → Enter → IncomeForm.
+        handle_key(&mut app, press(KeyCode::Char('u')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        handle_key(&mut app, press(KeyCode::Tab)); // Acquire → Income
+        assert!(
+            matches!(
+                app.classify_raw_flow.as_ref().map(|f| &f.step),
+                Some(ClassifyRawStep::VariantPicker {
+                    variant: ClassifyRawVariant::Income,
+                    ..
+                })
+            ),
+            "CR-INC: Tab cycles to Income"
+        );
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.classify_raw_flow.as_ref().map(|f| &f.step),
+                Some(ClassifyRawStep::IncomeForm { .. })
+            ),
+            "CR-INC: Enter opens IncomeForm"
+        );
+
+        // sat (focus 0) → Down → usd_fmv (focus 1) typed → fmv_status=ManualEntry.
+        type_str(&mut app, "250000");
+        handle_key(&mut app, press(KeyCode::Down));
+        type_str(&mut app, "180.00");
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(app.classify_raw_modal.is_some(), "CR-INC: modal opens");
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or("")
+                .contains("Unclassified blocker is cleared"),
+            "CR-INC: clean-arm status (typed FMV → no FmvMissing); got: {:?}",
+            app.status
+        );
+
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            !unclassified_blocker_present(snap, &target),
+            "CR-INC: Unclassified blocker cleared"
+        );
+        let cr = snap
+            .events
+            .iter()
+            .find_map(|e| match &e.payload {
+                EventPayload::ClassifyRaw(cr) if cr.target == target => Some(cr),
+                _ => None,
+            })
+            .expect("CR-INC: a ClassifyRaw decision must exist");
+        match &*cr.as_ {
+            EventPayload::Income(i) => {
+                assert_eq!(i.sat, 250_000, "CR-INC: sat");
+                assert_eq!(
+                    i.usd_fmv,
+                    Some(rust_decimal_macros::dec!(180.00)),
+                    "CR-INC: usd_fmv"
+                );
+                assert_eq!(
+                    i.fmv_status,
+                    btctax_core::FmvStatus::ManualEntry,
+                    "CR-INC: typed FMV → ManualEntry"
+                );
+                assert_eq!(i.kind, IncomeKind::Mining, "CR-INC: default kind");
+                assert!(!i.business, "CR-INC: default business=false");
+            }
+            other => panic!("CR-INC: expected Income, got {other:?}"),
+        }
+    }
+
+    // ── KAT-CR-FMV-MISSING — Income with an EMPTY usd_fmv → FmvMissing arm ─────
+    #[test]
+    fn kat_cr_income_empty_fmv_missing_arm() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-cr-fmv-pass";
+
+        let target = seed_unclassified_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        handle_key(&mut app, press(KeyCode::Char('u')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        handle_key(&mut app, press(KeyCode::Tab)); // → Income
+        handle_key(&mut app, press(KeyCode::Enter)); // → IncomeForm
+                                                     // sat only; LEAVE usd_fmv empty → fmv_status = Missing → FmvMissing blocker.
+        type_str(&mut app, "250000");
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm
+
+        // Round-trip: fmv_status = Missing, usd_fmv = None.
+        let snap = app.snapshot.as_ref().unwrap();
+        let cr = snap
+            .events
+            .iter()
+            .find_map(|e| match &e.payload {
+                EventPayload::ClassifyRaw(cr) if cr.target == target => Some(cr),
+                _ => None,
+            })
+            .expect("CR-FMV: a ClassifyRaw decision must exist");
+        match &*cr.as_ {
+            EventPayload::Income(i) => {
+                assert_eq!(i.usd_fmv, None, "CR-FMV: empty → None");
+                assert_eq!(
+                    i.fmv_status,
+                    btctax_core::FmvStatus::Missing,
+                    "CR-FMV: empty → Missing"
+                );
+            }
+            other => panic!("CR-FMV: expected Income, got {other:?}"),
+        }
+        // The Unclassified blocker cleared, but a FmvMissing blocker now attributes to the target.
+        assert!(
+            !unclassified_blocker_present(snap, &target),
+            "CR-FMV: the Unclassified blocker must be cleared"
+        );
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::FmvMissing && b.event.as_ref() == Some(&target)),
+            "CR-FMV: an empty-FMV Income must fire FmvMissing on the target"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or("")
+                .contains("FmvMissing now applies"),
+            "CR-FMV: status arm 3 must name FmvMissing; got: {:?}",
+            app.status
+        );
+    }
+
+    // ── KAT-CR-VARIANTS — only Acquire + Income are offered ───────────────────
+    #[test]
+    fn kat_cr_only_acquire_income_offered() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-cr-variants-pass";
+
+        let _target = seed_unclassified_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        handle_key(&mut app, press(KeyCode::Char('u')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → VariantPicker(Acquire)
+                                                     // Tab cycles through EXACTLY two variants (Acquire → Income → Acquire).
+        let variant = |app: &EditorApp| match app.classify_raw_flow.as_ref().map(|f| &f.step) {
+            Some(ClassifyRawStep::VariantPicker { variant, .. }) => Some(*variant),
+            _ => None,
+        };
+        assert_eq!(variant(&app), Some(ClassifyRawVariant::Acquire));
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert_eq!(variant(&app), Some(ClassifyRawVariant::Income));
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert_eq!(
+            variant(&app),
+            Some(ClassifyRawVariant::Acquire),
+            "CR-VAR: only Acquire + Income are offered (unsupported variants absent)"
+        );
+    }
+
+    // ── KAT-C2-CR — cancel path: q swallowed each step, Esc steps back, bytes unchanged ──
+    #[test]
+    fn kat_c2_cr_cancel_path_bytes_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-cr-cancel-pass";
+
+        let _target = seed_unclassified_vault(&vault, &key, pp_str);
+        let bytes_before = std::fs::read(&vault).unwrap();
+        {
+            let mut app = open_app(&vault, pp_str);
+
+            handle_key(&mut app, press(KeyCode::Char('u')));
+            assert!(app.classify_raw_flow.is_some(), "C2-CR: flow opens");
+            // 'q' swallowed at List.
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(
+                !app.should_quit && app.classify_raw_flow.is_some(),
+                "C2-CR: 'q' swallowed at List"
+            );
+
+            handle_key(&mut app, press(KeyCode::Enter)); // → VariantPicker
+                                                         // 'q' swallowed at VariantPicker.
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(
+                !app.should_quit && app.classify_raw_flow.is_some(),
+                "C2-CR: 'q' swallowed at VariantPicker"
+            );
+
+            handle_key(&mut app, press(KeyCode::Enter)); // → AcquireForm
+            assert!(
+                matches!(
+                    app.classify_raw_flow.as_ref().map(|f| &f.step),
+                    Some(ClassifyRawStep::AcquireForm { .. })
+                ),
+                "C2-CR: Enter opens AcquireForm"
+            );
+            // Fill valid fields and open the modal.
+            type_str(&mut app, "500000");
+            handle_key(&mut app, press(KeyCode::Down));
+            type_str(&mut app, "300.00");
+            handle_key(&mut app, press(KeyCode::Enter)); // → modal
+            assert!(app.classify_raw_modal.is_some(), "C2-CR: modal opens");
+            // 'q' swallowed at modal.
+            handle_key(&mut app, press(KeyCode::Char('q')));
+            assert!(
+                !app.should_quit && app.classify_raw_modal.is_some(),
+                "C2-CR: 'q' swallowed at modal"
+            );
+            // Esc closes modal → back to AcquireForm.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.classify_raw_modal.is_none()
+                    && matches!(
+                        app.classify_raw_flow.as_ref().map(|f| &f.step),
+                        Some(ClassifyRawStep::AcquireForm { .. })
+                    ),
+                "C2-CR: Esc closes modal → AcquireForm"
+            );
+            // Esc → back to VariantPicker.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                matches!(
+                    app.classify_raw_flow.as_ref().map(|f| &f.step),
+                    Some(ClassifyRawStep::VariantPicker { .. })
+                ),
+                "C2-CR: Esc steps back to VariantPicker"
+            );
+            // Esc → back to List.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                matches!(
+                    app.classify_raw_flow.as_ref().map(|f| &f.step),
+                    Some(ClassifyRawStep::List)
+                ),
+                "C2-CR: Esc steps back to List"
+            );
+            // Esc → close flow.
+            handle_key(&mut app, press(KeyCode::Esc));
+            assert!(
+                app.classify_raw_flow.is_none(),
+                "C2-CR: Esc closes the flow"
+            );
+        }
+        let bytes_after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_after,
+            "C2-CR: the cancel path writes NOTHING"
+        );
+    }
+
+    // ── KAT-S3-CR — save-error path (chmod) → rollback, retry clean, no residue ──
+    #[test]
+    #[cfg(unix)]
+    fn kat_s3_cr_save_error_chmod() {
+        use btctax_core::persistence::load_all_ordered;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-cr-s3-pass";
+
+        let _target = seed_unclassified_vault(&vault, &key, pp_str);
+
+        // Root-skip guard.
+        {
+            let probe = dir.path().join("probe.tmp");
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("KAT-S3-CR: skipping — chmod did not deny writes (root?)");
+                return;
+            }
+        }
+
+        let bytes_before = std::fs::read(&vault).unwrap();
+        let pre_event_count = {
+            let session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            load_all_ordered(session.conn()).unwrap().len()
+        };
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('u')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → VariantPicker(Acquire)
+        handle_key(&mut app, press(KeyCode::Enter)); // → AcquireForm
+        type_str(&mut app, "500000");
+        handle_key(&mut app, press(KeyCode::Down));
+        type_str(&mut app, "300.00");
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(app.classify_raw_modal.is_some(), "S3-CR: modal must open");
+
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → save fails
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(
+            app.classify_raw_modal.is_none(),
+            "S3-CR: modal closes on save failure"
+        );
+        assert!(
+            matches!(
+                app.classify_raw_flow.as_ref().map(|f| &f.step),
+                Some(ClassifyRawStep::AcquireForm { .. })
+            ),
+            "S3-CR: AcquireForm stays open after a save failure"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .map(|s| s.contains("Save error"))
+                .unwrap_or(false),
+            "S3-CR: status must contain 'Save error'; got: {:?}",
+            app.status
+        );
+        let bytes_mid = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            bytes_before, bytes_mid,
+            "S3-CR: vault bytes unchanged after failed save"
+        );
+        let mid_len = load_all_ordered(app.session.as_ref().unwrap().conn())
+            .unwrap()
+            .len();
+        assert_eq!(mid_len, pre_event_count, "S3-CR: rollback → no residue");
+
+        // Retry → clean single append.
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm → retry save
+        assert!(
+            app.classify_raw_flow.is_none(),
+            "S3-CR: flow closes after clean retry"
+        );
+        drop(app);
+        let session2 = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let post = load_all_ordered(session2.conn()).unwrap();
+        assert_eq!(
+            post.len(),
+            pre_event_count + 1,
+            "S3-CR: retry appends EXACTLY one ClassifyRaw (no residue)"
+        );
+    }
+
+    // ── KAT-RENDER-CR — the classify-raw overlays render at every step (no panic) ──
+    #[test]
+    fn kat_render_classify_raw_smoke() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-render-cr-pass";
+
+        let _target = seed_unclassified_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        handle_key(&mut app, press(KeyCode::Char('u')));
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        assert!(
+            rendered_text(&terminal).contains("Classify Raw"),
+            "CR-RENDER: list overlay"
+        );
+
+        handle_key(&mut app, press(KeyCode::Enter)); // VariantPicker(Acquire)
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        assert!(
+            rendered_text(&terminal).contains("variant picker"),
+            "CR-RENDER: variant picker overlay"
+        );
+
+        handle_key(&mut app, press(KeyCode::Enter)); // AcquireForm
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        assert!(
+            rendered_text(&terminal).contains("basis_source"),
+            "CR-RENDER: Acquire form overlay"
+        );
+
+        // Fill and open the modal.
+        type_str(&mut app, "500000");
+        handle_key(&mut app, press(KeyCode::Down));
+        type_str(&mut app, "300.00");
+        handle_key(&mut app, press(KeyCode::Enter)); // modal
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        assert!(
+            rendered_text(&terminal).contains("classify-raw"),
+            "CR-RENDER: confirm modal overlay"
+        );
+
+        // Income form path renders too.
+        handle_key(&mut app, press(KeyCode::Esc)); // close modal → AcquireForm
+        handle_key(&mut app, press(KeyCode::Esc)); // → VariantPicker
+        handle_key(&mut app, press(KeyCode::Tab)); // → Income
+        handle_key(&mut app, press(KeyCode::Enter)); // IncomeForm
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        assert!(
+            rendered_text(&terminal).contains("business"),
+            "CR-RENDER: Income form overlay"
+        );
+    }
+
+    // ── KAT-RENDER-LT — the link-transfer overlays render at every step (no panic) ──
+    // (Back-fills render coverage for the Task-1 flow; the Task-1 E2E asserts behaviour
+    // via handle_key + re-projection, not the draw path.)
+    #[test]
+    fn kat_render_link_transfer_smoke() {
+        use btctax_core::event::{EventPayload, LedgerEvent, TransferIn};
+        use btctax_core::identity::{Source, SourceRef};
+        use ratatui::{backend::TestBackend, Terminal};
+        use time::{OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-render-lt-pass";
+
+        let ti = LedgerEvent {
+            id: EventId::import(Source::River, SourceRef::new("lt-render-ti")),
+            utc_timestamp: OffsetDateTime::from_unix_timestamp(1_740_800_000).unwrap(),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(kraken_wallet()),
+            payload: EventPayload::TransferIn(TransferIn {
+                sat: 500_000,
+                src_addr: None,
+                txid: None,
+            }),
+        };
+        let _to_id = seed_link_out_vault(&vault, &key, pp_str, &[ti]);
+        let mut app = open_app(&vault, pp_str);
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        handle_key(&mut app, press(KeyCode::Char('l')));
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        assert!(
+            rendered_text(&terminal).contains("Link Transfer"),
+            "LT-RENDER: out-list overlay"
+        );
+
+        handle_key(&mut app, press(KeyCode::Enter)); // TargetPick(InEvent)
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        assert!(
+            rendered_text(&terminal).contains("InEvent"),
+            "LT-RENDER: target-pick InEvent overlay"
+        );
+
+        handle_key(&mut app, press(KeyCode::Tab)); // Wallet mode
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        assert!(
+            rendered_text(&terminal).contains("Wallet"),
+            "LT-RENDER: target-pick Wallet overlay"
+        );
+
+        handle_key(&mut app, press(KeyCode::Enter)); // modal
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        assert!(
+            rendered_text(&terminal).contains("link-transfer"),
+            "LT-RENDER: confirm modal overlay"
         );
     }
 }

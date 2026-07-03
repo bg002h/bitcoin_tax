@@ -7,9 +7,9 @@
 //! This module performs NO writes — it only holds form state and validates input.
 
 use btctax_core::{
-    Carryforward, DisposeKind, DonationDetails, EventId, FilingStatus, Form8283Section,
-    InboundClass, IncomeKind, LotId, ManualFmv, OutflowClass, ReclassifyIncome, ReclassifyOutflow,
-    Sat, TaxDate, TaxProfile, TransferTarget, Usd, WalletId,
+    BasisSource, Carryforward, DisposeKind, DonationDetails, EventId, FilingStatus, FmvStatus,
+    Form8283Section, InboundClass, IncomeKind, LotId, ManualFmv, OutflowClass, ReclassifyIncome,
+    ReclassifyOutflow, Sat, TaxDate, TaxProfile, TransferTarget, Usd, WalletId,
 };
 use ratatui::widgets::TableState;
 use std::str::FromStr;
@@ -1255,6 +1255,192 @@ pub struct LinkTransferModalState {
     pub target: TransferTarget,
     /// Human-readable target label (shown in the modal).
     pub target_label: String,
+}
+
+// ── Classify-raw flow types (chunk 4a, D2) ───────────────────────────────────
+
+/// Pre-computed display data for a classify-raw list row.
+///
+/// Events carrying `BlockerKind::Unclassified` whose payload is `EventPayload::Unclassified`,
+/// minus those already targeted by a non-voided `ClassifyRaw`.
+#[derive(Clone)]
+pub struct RawListItem {
+    /// The Unclassified event id (the ClassifyRaw target — its EventId is preserved).
+    pub target: EventId,
+    /// Calendar date (tax timezone) of the raw event.
+    pub date: TaxDate,
+    /// The raw import text (`Unclassified.raw`).
+    pub raw: String,
+    /// Wallet of the raw event (kept by the classified effective payload).
+    pub wallet: Option<WalletId>,
+}
+
+/// Which imported variant the classify-raw picker is building (Tab cycles).
+///
+/// **Scoped to Acquire + Income this cycle** — the two that dominate raw-row classification.
+/// Dispose/TransferOut/TransferIn/Unclassified are a CLI-only parity FOLLOWUP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassifyRawVariant {
+    Acquire,
+    Income,
+}
+
+/// Cycle the classify-raw variant (Acquire ⇄ Income).
+pub fn cycle_classify_raw_variant(v: ClassifyRawVariant) -> ClassifyRawVariant {
+    match v {
+        ClassifyRawVariant::Acquire => ClassifyRawVariant::Income,
+        ClassifyRawVariant::Income => ClassifyRawVariant::Acquire,
+    }
+}
+
+/// Cycle through the 8 `BasisSource` variants in declaration order (event.rs:16-26).
+pub fn cycle_basis_source(bs: BasisSource) -> BasisSource {
+    match bs {
+        BasisSource::ExchangeProvided => BasisSource::ComputedFromCost,
+        BasisSource::ComputedFromCost => BasisSource::FmvAtIncome,
+        BasisSource::FmvAtIncome => BasisSource::CarriedFromTransfer,
+        BasisSource::CarriedFromTransfer => BasisSource::GiftCarryover,
+        BasisSource::GiftCarryover => BasisSource::GiftFmvFallback,
+        BasisSource::GiftFmvFallback => BasisSource::SafeHarborAllocated,
+        BasisSource::SafeHarborAllocated => BasisSource::ReconstructedPerWallet,
+        BasisSource::ReconstructedPerWallet => BasisSource::ExchangeProvided,
+    }
+}
+
+/// Lowercase display tag for a `BasisSource`.
+pub fn basis_source_display(bs: BasisSource) -> &'static str {
+    match bs {
+        BasisSource::ExchangeProvided => "exchange-provided",
+        BasisSource::ComputedFromCost => "computed-from-cost",
+        BasisSource::FmvAtIncome => "fmv-at-income",
+        BasisSource::CarriedFromTransfer => "carried-from-transfer",
+        BasisSource::GiftCarryover => "gift-carryover",
+        BasisSource::GiftFmvFallback => "gift-fmv-fallback",
+        BasisSource::SafeHarborAllocated => "safe-harbor-allocated",
+        BasisSource::ReconstructedPerWallet => "reconstructed-per-wallet",
+    }
+}
+
+/// Step in the classify-raw flow.
+// AcquireForm / IncomeForm carry several FieldBuffers; boxing is not worth it (TUI-only).
+#[allow(clippy::large_enum_variant)]
+pub enum ClassifyRawStep {
+    List,
+    VariantPicker {
+        item: RawListItem,
+        variant: ClassifyRawVariant,
+    },
+    AcquireForm {
+        item: RawListItem,
+        sat_buf: FieldBuffer,
+        usd_cost_buf: FieldBuffer,
+        fee_buf: FieldBuffer,
+        /// A required BasisSource PICK (default ExchangeProvided); Tab cycles on the picker row.
+        basis_source: BasisSource,
+        /// 0=sat, 1=usd_cost, 2=fee, 3=basis_source.
+        focus: usize,
+        error: Option<String>,
+    },
+    IncomeForm {
+        item: RawListItem,
+        sat_buf: FieldBuffer,
+        /// Optional; typed → fmv_status=ManualEntry, empty → None + Missing.
+        fmv_buf: FieldBuffer,
+        kind: IncomeKind,
+        business: bool,
+        /// 0=sat, 1=usd_fmv, 2=kind, 3=business.
+        focus: usize,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the classify-raw flow. Owns its target list.
+pub struct ClassifyRawFlowState {
+    pub list: TargetList<RawListItem>,
+    pub step: ClassifyRawStep,
+}
+
+/// Payload for the classify-raw confirmation modal.
+pub struct ClassifyRawModalState {
+    /// The Unclassified target event id.
+    pub target: EventId,
+    /// The raw import text (shown in the modal).
+    pub raw: String,
+    /// The BUILT imported payload (Acquire/Income) — boxed into `ClassifyRaw.as_` at persist.
+    pub built: btctax_core::EventPayload,
+}
+
+/// Parse a REQUIRED sat field: empty (len==0) → "name is required"; else parse i64.
+fn parse_required_sat(buf: &FieldBuffer, name: &str) -> Result<Sat, String> {
+    if buf.is_empty() {
+        return Err(format!("{name} is required"));
+    }
+    let t = buf.buf.trim();
+    t.parse::<i64>().map_err(|_| format!("bad sat {t:?}"))
+}
+
+/// Validate the classify-raw Acquire form → `EventPayload::Acquire(…)` built DIRECTLY (NOT via
+/// `InboundClass` [R0-I1]).
+///
+/// `sat`/`usd_cost` REQUIRED; `fee_usd` optional → $0; `basis_source` is the required PICK.
+/// NO acquired-at field — the effective event keeps the TARGET's timestamp (resolve.rs) [R0-I1].
+pub fn validate_classify_raw_acquire(
+    sat_buf: &FieldBuffer,
+    usd_cost_buf: &FieldBuffer,
+    fee_buf: &FieldBuffer,
+    basis_source: BasisSource,
+) -> Result<btctax_core::EventPayload, String> {
+    let sat = parse_required_sat(sat_buf, "sat")?;
+    if usd_cost_buf.is_empty() {
+        return Err("usd-cost is required".to_string());
+    }
+    let uc = usd_cost_buf.buf.trim();
+    let usd_cost = Usd::from_str(uc).map_err(|_| format!("bad USD {uc:?}"))?;
+    let fee_usd = if fee_buf.is_empty() {
+        Usd::ZERO
+    } else {
+        let t = fee_buf.buf.trim();
+        Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?
+    };
+    Ok(btctax_core::EventPayload::Acquire(
+        btctax_core::event::Acquire {
+            sat,
+            usd_cost,
+            fee_usd,
+            basis_source,
+        },
+    ))
+}
+
+/// Validate the classify-raw Income form → `EventPayload::Income(…)` built DIRECTLY (NOT via
+/// `InboundClass` [R0-I1]).
+///
+/// `sat` REQUIRED; `usd_fmv` optional: typed → `Some` + `fmv_status=ManualEntry`, empty → `None` +
+/// `fmv_status=Missing` (resolve.rs discards `usd_fmv` when `Missing`; the empty case fires a
+/// `FmvMissing` blocker surfaced by status arm 3). `kind` PICK; `business` toggle.
+pub fn validate_classify_raw_income(
+    sat_buf: &FieldBuffer,
+    fmv_buf: &FieldBuffer,
+    kind: IncomeKind,
+    business: bool,
+) -> Result<btctax_core::EventPayload, String> {
+    let sat = parse_required_sat(sat_buf, "sat")?;
+    let (usd_fmv, fmv_status) = if fmv_buf.is_empty() {
+        (None, FmvStatus::Missing)
+    } else {
+        let t = fmv_buf.buf.trim();
+        let v = Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?;
+        (Some(v), FmvStatus::ManualEntry)
+    };
+    Ok(btctax_core::EventPayload::Income(
+        btctax_core::event::Income {
+            sat,
+            usd_fmv,
+            fmv_status,
+            kind,
+            business,
+        },
+    ))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

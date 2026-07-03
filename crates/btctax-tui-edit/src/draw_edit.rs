@@ -9,8 +9,9 @@
 //! Unlock screen. This module performs no writes.
 
 use crate::edit::form::{
-    amount_label, income_kind_display, wallet_label, ClassifyInboundModalState,
-    ClassifyInboundStep, DisposalKind, FieldBuffer, InboundVariant, LinkMode,
+    amount_label, basis_source_display, income_kind_display, wallet_label,
+    ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
+    ClassifyRawStep, ClassifyRawVariant, DisposalKind, FieldBuffer, InboundVariant, LinkMode,
     LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, MutationModalState,
     OutflowKind, ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState,
     ReclassifyIncomeStep, ReclassifyOutflowModalState, ReclassifyOutflowStep,
@@ -278,6 +279,23 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.link_transfer_modal.as_ref() {
         draw_link_transfer_modal(frame, area, modal);
+    }
+    // Classify-raw flow overlay.
+    if app.classify_raw_flow.is_some() {
+        let is_list = matches!(
+            app.classify_raw_flow.as_ref().map(|f| &f.step),
+            Some(ClassifyRawStep::List)
+        );
+        if is_list {
+            if let Some(flow) = app.classify_raw_flow.as_mut() {
+                draw_classify_raw_list(frame, area, flow);
+            }
+        } else if let Some(flow) = app.classify_raw_flow.as_ref() {
+            draw_classify_raw_form(frame, area, &flow.step);
+        }
+    }
+    if let Some(modal) = app.classify_raw_modal.as_ref() {
+        draw_classify_raw_modal(frame, area, modal);
     }
     if let Some(flow) = app.safe_harbor_attest_flow.as_ref() {
         match &flow.step {
@@ -2190,6 +2208,263 @@ fn draw_link_transfer_modal(frame: &mut Frame, area: Rect, modal: &LinkTransferM
 
     let block = Block::default()
         .title(" Confirm: link-transfer — WRITES THE VAULT ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+// ── Classify-raw draw functions (chunk 4a, D2) ───────────────────────────────
+
+/// Render the classify-raw list overlay.
+///
+/// Title: `" Classify Raw — select an unclassified import "`.
+/// Columns: `Date | Raw-text (elided) | Wallet | EventId`.
+fn draw_classify_raw_list(frame: &mut Frame, area: Rect, flow: &mut ClassifyRawFlowState) {
+    let modal_width: u16 = 96;
+    let modal_height: u16 = (flow.list.items.len() as u16 + 6).min(area.height.saturating_sub(2));
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Classify Raw — select an unclassified import  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let header = Row::new(vec![
+        Cell::from("Date"),
+        Cell::from("Raw"),
+        Cell::from("Wallet"),
+        Cell::from("EventId"),
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
+
+    let rows: Vec<Row> = flow
+        .list
+        .items
+        .iter()
+        .map(|item| {
+            let raw_elided: String = item.raw.chars().take(40).collect();
+            let wallet_str = match &item.wallet {
+                Some(w) => wallet_label(w),
+                None => "(no wallet)".to_string(),
+            };
+            Row::new(vec![
+                Cell::from(item.date.to_string()),
+                Cell::from(raw_elided),
+                Cell::from(wallet_str),
+                Cell::from(item.target.canonical()),
+            ])
+        })
+        .collect();
+
+    let widths = [
+        Constraint::Length(12),
+        Constraint::Length(40),
+        Constraint::Length(16),
+        Constraint::Min(20),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        )
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.list.table_state);
+
+    let footer_area = Rect {
+        x: modal_rect.x,
+        y: modal_rect.y + modal_rect.height.saturating_sub(1),
+        width: modal_rect.width,
+        height: 1,
+    };
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(footer, footer_area);
+}
+
+/// Render the classify-raw variant picker or per-variant sub-form overlay.
+fn draw_classify_raw_form(frame: &mut Frame, area: Rect, step: &ClassifyRawStep) {
+    let modal_width: u16 = 76;
+    let modal_height: u16 = 18;
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let (title, content) = match step {
+        ClassifyRawStep::VariantPicker { item, variant } => {
+            let row = |tag: &str, v: ClassifyRawVariant| {
+                if *variant == v {
+                    format!("> {tag}")
+                } else {
+                    format!("  {tag}")
+                }
+            };
+            let c = format!(
+                "  target: {target}\n  raw:    {raw}\n\
+                 \n\
+                   Select variant (Tab to cycle, Enter to confirm):\n\
+                 \n\
+                 {acq}   {inc}\n\
+                 \n\
+                 \n  Esc: back to list   q: swallowed",
+                target = item.target.canonical(),
+                raw = item.raw.chars().take(48).collect::<String>(),
+                acq = row("Acquire", ClassifyRawVariant::Acquire),
+                inc = row("Income", ClassifyRawVariant::Income),
+            );
+            (" Classify Raw — variant picker  [EDITOR] ", c)
+        }
+        ClassifyRawStep::AcquireForm {
+            item,
+            sat_buf,
+            usd_cost_buf,
+            fee_buf,
+            basis_source,
+            focus,
+            error,
+        } => {
+            let cur = |f: usize| if *focus == f { ">" } else { " " };
+            let err_line = error
+                .as_deref()
+                .map(|e| format!("\n  Error: {e}"))
+                .unwrap_or_default();
+            let c = format!(
+                "  target: {target}\n\
+                 \n\
+                 \n  {c0} sat: {sat}\
+                 \n  {c1} usd_cost (USD): {uc}\
+                 \n  {c2} fee_usd (USD, optional): {fee}\
+                 \n  {c3} basis_source: [{bs}]  (Tab: cycle)\
+                 {err}\n\
+                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move   q: swallowed",
+                target = item.target.canonical(),
+                c0 = cur(0),
+                sat = sat_buf.buf,
+                c1 = cur(1),
+                uc = usd_cost_buf.buf,
+                c2 = cur(2),
+                fee = fee_buf.buf,
+                c3 = cur(3),
+                bs = basis_source_display(*basis_source),
+                err = err_line,
+            );
+            (" Classify Raw — Acquire  [EDITOR] ", c)
+        }
+        ClassifyRawStep::IncomeForm {
+            item,
+            sat_buf,
+            fmv_buf,
+            kind,
+            business,
+            focus,
+            error,
+        } => {
+            let cur = |f: usize| if *focus == f { ">" } else { " " };
+            let err_line = error
+                .as_deref()
+                .map(|e| format!("\n  Error: {e}"))
+                .unwrap_or_default();
+            let c = format!(
+                "  target: {target}\n\
+                 \n\
+                 \n  {c0} sat: {sat}\
+                 \n  {c1} usd_fmv (USD, optional → Missing): {fmv}\
+                 \n  {c2} kind: [{kind}]  (Tab: cycle)\
+                 \n  {c3} business: {business}  (Space: toggle)\
+                 {err}\n\
+                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move   q: swallowed",
+                target = item.target.canonical(),
+                c0 = cur(0),
+                sat = sat_buf.buf,
+                c1 = cur(1),
+                fmv = fmv_buf.buf,
+                c2 = cur(2),
+                kind = income_kind_display(*kind),
+                c3 = cur(3),
+                business = business,
+                err = err_line,
+            );
+            (" Classify Raw — Income  [EDITOR] ", c)
+        }
+        ClassifyRawStep::List => ("", String::new()),
+    };
+
+    if title.is_empty() {
+        return; // defensive — List is rendered by draw_classify_raw_list.
+    }
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+/// Render the classify-raw confirmation modal (target + raw + the built imported payload).
+fn draw_classify_raw_modal(frame: &mut Frame, area: Rect, modal: &ClassifyRawModalState) {
+    let built_section = match &modal.built {
+        btctax_core::EventPayload::Acquire(a) => format!(
+            "  as: Acquire\n    sat:          {sat}\n    usd_cost:     {usd}\n    \
+             fee_usd:      {fee}\n    basis_source: {bs}",
+            sat = a.sat,
+            usd = a.usd_cost,
+            fee = a.fee_usd,
+            bs = basis_source_display(a.basis_source),
+        ),
+        btctax_core::EventPayload::Income(i) => {
+            let fmv_str = i
+                .usd_fmv
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "(none → Missing)".to_string());
+            format!(
+                "  as: Income\n    sat:        {sat}\n    usd_fmv:    {fmv}\n    \
+                 fmv_status: {status:?}\n    kind:       {kind}\n    business:   {business}",
+                sat = i.sat,
+                fmv = fmv_str,
+                status = i.fmv_status,
+                kind = income_kind_display(i.kind),
+                business = i.business,
+            )
+        }
+        _ => "  as: (unsupported)".to_string(),
+    };
+
+    let raw_elided: String = modal.raw.chars().take(52).collect();
+    let content = format!(
+        "  target: {target}  (Unclassified)\n\
+           raw:    {raw}\n\
+         \n\
+         {built_section}\n\
+         \n\
+           Appended as a revocable decision (void with 'v').\n\
+           Saved immediately via the vault's atomic write path.\n\
+         \n\
+         [Enter] Confirm & save     [Esc] Cancel — writes nothing",
+        target = modal.target.canonical(),
+        raw = raw_elided,
+    );
+
+    let modal_width: u16 = 72;
+    let content_lines = content.lines().count() as u16 + 2;
+    let modal_height = content_lines.max(12);
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Confirm: classify-raw — WRITES THE VAULT ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Red));
 
