@@ -150,6 +150,49 @@ pub struct ElectionRec {
     pub wallet: Option<WalletId>,
 }
 
+/// The SHARED wallet-aware election resolver (§A.5(a)) — the SOLE method-resolution path, used by BOTH
+/// `fold::applicable_method` (the fold) AND `disposal_compliance` (compliance). Returns the winning
+/// `ElectionRec` (or `None` ⇒ FIFO in the fold / no `StandingOrder` in compliance) for a disposal on
+/// `wallet` at `date`, via **TWO INDEPENDENT TIERS** [R0-M2]:
+///
+///   tier 1 — the latest election SCOPED to `wallet` (`wallet == Some(w)`) with `effective_from ≤ date`,
+///            ordered by `(effective_from, decision_seq)`;
+///   tier 2 — ONLY if tier 1 is empty: the latest GLOBAL election (`wallet == None`) with
+///            `effective_from ≤ date`, same order;
+///   else   — `None`.
+///
+/// The tiers are resolved INDEPENDENTLY: a later-dated GLOBAL election NEVER overrides an in-force
+/// SCOPED one for its wallet (tier 1 is decided purely among `wallet == Some(w)` records). Tier 1
+/// respects `effective_from ≤ date` [R0-r2-M1]: a not-yet-effective scoped election does NOT suppress an
+/// in-force global one — it simply fails the tier-1 filter, so tier 2 (global) is consulted, NOT FIFO.
+/// This is deliberately NOT a single `max_by` over all elections merged — that would let a fresh global
+/// election silently flip a wallet the user scoped (fault-injected by `later_global_does_not_override_*`).
+pub(crate) fn resolve_election<'a>(
+    date: TaxDate,
+    wallet: &WalletId,
+    elections: &'a [ElectionRec],
+) -> Option<&'a ElectionRec> {
+    let latest = |scoped: bool| -> Option<&'a ElectionRec> {
+        elections
+            .iter()
+            .filter(|e| e.effective_from <= date)
+            .filter(|e| {
+                if scoped {
+                    e.wallet.as_ref() == Some(wallet)
+                } else {
+                    e.wallet.is_none()
+                }
+            })
+            .max_by(|a, b| {
+                a.effective_from
+                    .cmp(&b.effective_from)
+                    .then(a.decision_seq.cmp(&b.decision_seq))
+            })
+    };
+    // tier 1 (scoped) is resolved FIRST and INDEPENDENTLY; only an EMPTY tier 1 falls to tier 2 (global).
+    latest(true).or_else(|| latest(false))
+}
+
 pub struct Resolution {
     pub timeline: Vec<Eff>,
     pub transition: TransitionMode,
