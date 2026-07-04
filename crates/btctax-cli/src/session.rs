@@ -1,13 +1,14 @@
 //! `Session` wraps one open `btctax_store::Vault` and is the single seam every command opens. The
 //! passphrase is ALWAYS a parameter — production resolves it in `main` (prompt/env); tests inject a
 //! constructed `Passphrase`. `project()` runs the pure core projection over the bundled price dataset.
+use crate::bulk_estimated;
 use crate::config::{self, CliConfig};
 use crate::donation_details;
 use crate::optimize_attest;
 use crate::tax_profile;
 use crate::CliError;
 use btctax_adapters::{BundledPrices, BundledTaxTables};
-use btctax_core::conventions::{tax_date, TRANSITION_DATE};
+use btctax_core::conventions::{round_cents, tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{init_schema, load_all};
 use btctax_core::{project, LedgerEvent, LedgerState, ProjectionConfig};
 use btctax_core::{
@@ -157,6 +158,64 @@ pub struct BulkIncomePlan {
     pub total_income_usd: Usd,
 }
 
+// ── Bulk reclassify-outflow plan (bulk-reclassify-outflow, Cycle 5 — the LAST) ─
+//
+// The shared, READ-ONLY plan both the CLI (`cmd::reconcile::bulk_reclassify_outflow_plan`) and the TUI
+// `O` flow compute from the HELD session. The bulk analog of the single `o` reclassify-outflow: it
+// sweeps MANY `pending_reconciliation` outflows to a `Dispose{Sell|Spend}` with the auto-FMV as
+// ESTIMATED proceeds. Enriches over `pending_reconciliation` exactly as `bulk_link_transfer_plan`
+// (session.rs) does. Appends/persists NOTHING.
+//
+// Load-bearing tax-safety [#a]: a candidate whose `fmv_of(date, principal_sat)` is `None` is EXCLUDED
+// (counted in `excluded_missing_price`), NOT included — `ReclassifyOutflow.principal_proceeds_or_fmv`
+// is `Usd` (NOT Option), so a missing-price row cannot be constructed WITHOUT fabricating a number, and
+// (unlike bulk-income's LOUD `FmvMissing`) a fabricated/`0` proceeds would be SILENT (gates nothing,
+// misreports gain/loss). So `included` carries a RESOLVED `fmv: Usd` (non-Option) — the load-bearing
+// structural defense, mirroring `BulkIncomeRow.fmv: Usd`.
+//
+// Estimated gain [Q3]: `basis_usd = Σ pt.legs.usd_basis` (already computed by the fold's SINGLE
+// chronological pass with all N candidate PendingOuts pending, so `Σ` over multiple rows' legs is NEVER
+// double-counted — an earlier-dated PendingOut has already drawn the pool down before a later one
+// folds). `estimated_gain = round_cents(fmv − basis_usd)` per row. Precedent: `bulk_link_transfer_plan`
+// already sums `pt.legs.usd_basis`.
+
+/// One enriched pending outbound transfer in a bulk reclassify-outflow plan, carrying a RESOLVED FMV.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkReclassifyOutflowRow {
+    pub out_event: EventId,
+    pub date: TaxDate,
+    /// [R0-N1] ALWAYS `Some` for a pending out (a wallet-less TransferOut never reaches
+    /// `pending_reconciliation`); `Option` kept defensively (mirror `BulkLinkRow.source_wallet`).
+    pub wallet: Option<WalletId>,
+    pub principal_sat: Sat,
+    /// [#a] The RESOLVED auto-FMV `fmv_of(&prices, date, principal_sat)` — ALWAYS a real number (the
+    /// `None` rows are EXCLUDED upstream). This is the ESTIMATED proceeds a `Dispose` recognizes.
+    pub fmv: Usd,
+    /// Σ leg `usd_basis` carried by the fold's PendingOut consumption (the disposal's basis).
+    pub basis_usd: Usd,
+    /// `round_cents(fmv − basis_usd)` — the per-row ESTIMATED gain (never double-counted; see above).
+    pub estimated_gain: Usd,
+}
+
+/// The read-only plan a bulk reclassify-outflow would execute: the eligible/in-frame `included` rows
+/// (each with a resolved `fmv`), the count of candidates dropped for a MISSING price, and preview
+/// totals. Mirrors `BulkIncomePlan`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkReclassifyOutflowPlan {
+    /// Eligible + in-frame + passes `from_wallet` filter + HAS a price. Sorted by `date`.
+    pub included: Vec<BulkReclassifyOutflowRow>,
+    /// [#a] Candidates dropped because `fmv_of == None` (surfaced, NOT silently dropped — a Sell with
+    /// fabricated proceeds would be a SILENT misreport; they stay pending).
+    pub excluded_missing_price: usize,
+    pub total_sat: Sat,
+    /// Σ `fmv` over `included` — the total ESTIMATED proceeds (always a real number).
+    pub total_proceeds_usd: Usd,
+    /// Σ `basis_usd` over `included`.
+    pub total_basis_usd: Usd,
+    /// Σ `estimated_gain` over `included` — the total ESTIMATED gain shown in the preview.
+    pub total_estimated_gain: Usd,
+}
+
 // ── Bulk resolve-conflict plan (bulk-resolve-conflict D1) ────────────────────
 //
 // The shared, READ-ONLY plan both the CLI (`cmd::reconcile::bulk_resolve_conflict_plan`) and the TUI
@@ -299,6 +358,7 @@ impl Session {
         tax_profile::init_table(vault.conn())?;
         optimize_attest::init_table(vault.conn())?;
         donation_details::init_table(vault.conn())?;
+        bulk_estimated::init_table(vault.conn())?;
         vault.save()?;
         Ok(Session { vault })
     }
@@ -370,6 +430,15 @@ impl Session {
         &self,
     ) -> Result<std::collections::BTreeMap<EventId, DonationDetails>, CliError> {
         donation_details::all(self.conn())
+    }
+
+    /// All disposals flagged as estimated-FMV proceeds by the bulk-reclassify-outflow path, keyed by
+    /// the `transfer_out_event` (== `Disposal.event`); value = the `date_marked` provenance stamp
+    /// (NFR4-stable `BTreeMap`). Robust to older vaults (defensive `init_table` guard inside
+    /// `bulk_estimated::all`). `build_snapshot` loads the `[est]` marker set via THIS accessor,
+    /// NEVER `conn()` directly [R0-M1].
+    pub fn bulk_estimated(&self) -> Result<std::collections::BTreeMap<EventId, String>, CliError> {
+        bulk_estimated::all(self.conn())
     }
 
     /// Load all events and run the pure deterministic projection (NFR4) over the bundled daily-close
@@ -760,6 +829,100 @@ impl Session {
             excluded_missing_price,
             total_sat,
             total_income_usd,
+        })
+    }
+
+    /// READ-ONLY: compute the bulk reclassify-outflow plan (bulk-reclassify-outflow, Cycle 5). Selects
+    /// over the PROJECTED `pending_reconciliation` (which already excludes already-reclassified / linked
+    /// outs, and never contains wallet-less outflows), enriches each with date / source wallet /
+    /// principal / RESOLVED auto-FMV / carried basis / estimated gain, and applies the frame +
+    /// `from_wallet` filters. Appends/persists NOTHING (clone-fold-discard recompute); mirrors
+    /// `bulk_link_transfer_plan` + the `bulk_classify_income_plan` `#a` missing-price exclusion.
+    ///
+    /// **[#a tax-safety — the whole cycle]** a candidate with no price is EXCLUDED (counted in
+    /// `excluded_missing_price`), NEVER reclassified: `ReclassifyOutflow.principal_proceeds_or_fmv` is
+    /// `Usd` (NOT Option), so the row could only be built by FABRICATING a `0`/bogus proceeds — a SILENT
+    /// misreport (unlike bulk-income's LOUD `FmvMissing`). `included` therefore carries a RESOLVED
+    /// `fmv: Usd` (non-Option), making a fabricated-proceeds Sell structurally unrepresentable here.
+    ///
+    /// **Estimated gain [Q3]:** `basis_usd = Σ pt.legs.usd_basis` — computed by the fold's SINGLE
+    /// chronological pass with ALL candidate PendingOuts pending, so `Σ` over multiple rows is NEVER
+    /// double-counted (an earlier-dated out drew the pool down before a later one folded). `estimated_gain
+    /// = round_cents(fmv − basis_usd)` per row. The persisted Form-8949 numbers always run the ordinary
+    /// fold (exact); only this preview carries the FIFO-vs-method / fee-treatment residual (label it).
+    pub fn bulk_reclassify_outflow_plan(
+        &self,
+        filter: BulkFilter,
+    ) -> Result<BulkReclassifyOutflowPlan, CliError> {
+        let (events, state, _cfg) = self.load_events_and_project()?;
+        let prices = BundledPrices::load()?;
+        let index: std::collections::HashMap<EventId, &LedgerEvent> =
+            events.iter().map(|e| (e.id.clone(), e)).collect();
+
+        let in_frame = |date: TaxDate| match &filter.frame {
+            Frame::All => true,
+            Frame::Year(y) => date.year() == *y,
+            Frame::Range { from, to } => *from <= date && date <= *to,
+        };
+
+        let mut included: Vec<BulkReclassifyOutflowRow> = Vec::new();
+        let mut excluded_missing_price = 0usize;
+        for pt in &state.pending_reconciliation {
+            let ev = index.get(&pt.event).copied();
+            let date = ev
+                .map(|e| tax_date(e.utc_timestamp, e.original_tz))
+                .unwrap_or_else(|| {
+                    // Defensive: a pending out always has an indexed source event; fall back to the
+                    // epoch date rather than panic (mirrors `bulk_link_transfer_plan`).
+                    tax_date(
+                        time::OffsetDateTime::from_unix_timestamp(0).unwrap(),
+                        time::UtcOffset::UTC,
+                    )
+                });
+            if !in_frame(date) {
+                continue;
+            }
+            let wallet = ev.and_then(|e| e.wallet.clone());
+            if let Some(w) = &filter.from_wallet {
+                if wallet.as_ref() != Some(w) {
+                    continue;
+                }
+            }
+            // [#a] EXCLUDE (count) a missing-price row — a Sell with fabricated proceeds is a SILENT
+            // misreport. `included` carries the resolved non-Option fmv.
+            let fmv = match btctax_core::price::fmv_of(&prices, date, pt.principal_sat) {
+                Some(v) => v,
+                None => {
+                    excluded_missing_price += 1;
+                    continue;
+                }
+            };
+            let basis_usd: Usd = pt.legs.iter().map(|l| l.usd_basis).sum();
+            let estimated_gain = round_cents(fmv - basis_usd);
+            included.push(BulkReclassifyOutflowRow {
+                out_event: pt.event.clone(),
+                date,
+                wallet,
+                principal_sat: pt.principal_sat,
+                fmv,
+                basis_usd,
+                estimated_gain,
+            });
+        }
+        included.sort_by_key(|r| r.date);
+
+        let total_sat: Sat = included.iter().map(|r| r.principal_sat).sum();
+        let total_proceeds_usd: Usd = included.iter().map(|r| r.fmv).sum();
+        let total_basis_usd: Usd = included.iter().map(|r| r.basis_usd).sum();
+        let total_estimated_gain: Usd = included.iter().map(|r| r.estimated_gain).sum();
+
+        Ok(BulkReclassifyOutflowPlan {
+            included,
+            excluded_missing_price,
+            total_sat,
+            total_proceeds_usd,
+            total_basis_usd,
+            total_estimated_gain,
         })
     }
 

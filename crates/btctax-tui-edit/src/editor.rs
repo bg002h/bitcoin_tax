@@ -15,9 +15,10 @@
 
 use crate::edit::form::{
     BulkIncomeFlowState, BulkIncomeModalState, BulkLinkFlowState, BulkLinkModalState,
-    BulkResolveFlowState, BulkResolveModalState, BulkStiFlowState, BulkStiModalState,
-    BulkVoidFlowState, BulkVoidModalState, ClassifyInboundFlowState, ClassifyInboundModalState,
-    ClassifyRawFlowState, ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
+    BulkReclassifyOutflowFlowState, BulkReclassifyOutflowModalState, BulkResolveFlowState,
+    BulkResolveModalState, BulkStiFlowState, BulkStiModalState, BulkVoidFlowState,
+    BulkVoidModalState, ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyRawFlowState,
+    ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
     MatchSelfTransfersFlowState, MatchSelfTransfersModalState, MutationModalState,
     OptimizeAcceptFlowState, OptimizeAcceptModalState, ProfileFormState, ReclassifyIncomeFlowState,
     ReclassifyIncomeModalState, ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
@@ -211,6 +212,14 @@ pub struct EditorApp {
     pub bulk_void_flow: Option<BulkVoidFlowState>,
     /// Bulk-void confirmation modal.  `Some` while awaiting Enter/Esc.
     pub bulk_void_modal: Option<BulkVoidModalState>,
+    /// Full bulk reclassify-outflow flow state (bulk-reclassify-outflow, Cycle 5).  `Some` while open.
+    ///
+    /// Dispatch order: bulk_reclassify_outflow_modal (modal layer) → bulk_reclassify_outflow_flow
+    /// (flow layer). Creation is REVOCABLE (each `ReclassifyOutflow` voidable via `v`), so the confirm
+    /// is a plain modal + a prominent ESTIMATED-proceeds warning — NO typed-word.
+    pub bulk_reclassify_outflow_flow: Option<BulkReclassifyOutflowFlowState>,
+    /// Bulk reclassify-outflow confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub bulk_reclassify_outflow_modal: Option<BulkReclassifyOutflowModalState>,
     /// Full match-self-transfers flow state (self-transfer-passthrough C3).  `Some` while open.
     ///
     /// Dispatch order: match_self_transfers_modal (modal layer) → match_self_transfers_flow (flow
@@ -286,6 +295,8 @@ impl EditorApp {
             bulk_resolve_modal: None,
             bulk_void_flow: None,
             bulk_void_modal: None,
+            bulk_reclassify_outflow_flow: None,
+            bulk_reclassify_outflow_modal: None,
             match_self_transfers_flow: None,
             match_self_transfers_modal: None,
             attest_save_failed: false,

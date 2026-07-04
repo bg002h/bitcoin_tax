@@ -439,6 +439,36 @@ enum Reconcile {
         #[arg(long)]
         yes: bool,
     },
+    /// Bulk-reclassify unknown pending OUTFLOWS as dispositions (Sell|Spend): reclassify MANY pending
+    /// `TransferOut`s as a `Dispose` in one confirmed batch, with the daily-close market value at the
+    /// outflow date as the ESTIMATED proceeds. Shows a preview surfacing the total ESTIMATED proceeds
+    /// AND the total ESTIMATED gain (Σ fmv − Σ basis) + the count of outflows EXCLUDED because no price
+    /// was available for their date (those stay pending — a Sell with fabricated proceeds would be a
+    /// SILENT misreport). `--kind` is UNIFORM and accepts ONLY sell|spend (gift/donate are out of
+    /// scope). Each is a voidable decision; for a single outflow use `reclassify-outflow`.
+    BulkReclassifyOutflow {
+        /// Disposition kind for the whole batch: sell|spend (gift/donate rejected — out of scope).
+        #[arg(long)]
+        kind: String,
+        /// Restrict to a single tax year (mutually exclusive with --from/--to).
+        #[arg(long, conflicts_with_all = ["from", "to"])]
+        year: Option<i32>,
+        /// Range start (YYYY-MM-DD; requires --to).
+        #[arg(long, requires = "to")]
+        from: Option<String>,
+        /// Range end (YYYY-MM-DD, inclusive; requires --from).
+        #[arg(long, requires = "from")]
+        to: Option<String>,
+        /// Only outflows from this SOURCE wallet.
+        #[arg(long)]
+        wallet: Option<String>,
+        /// Print the preview and exit without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip the interactive confirmation (non-interactive apply).
+        #[arg(long)]
+        yes: bool,
+    },
     /// Bulk-resolve import conflicts: ACCEPT (adopt each new payload) or REJECT (keep each current
     /// payload) MANY flagged `ImportConflict`s in one confirmed batch. Shows a `current → new` preview,
     /// then requires --yes (or interactive y/N). Exactly one of --accept / --reject is required. Each
@@ -1349,6 +1379,86 @@ fn dispatch_reconcile(
             );
             return Ok(());
         }
+        Reconcile::BulkReclassifyOutflow {
+            kind,
+            year,
+            from,
+            to,
+            wallet,
+            dry_run,
+            yes,
+        } => {
+            // Scope-lock: sell|spend only; gift/donate rejected structurally [Q2].
+            let kind = eventref::parse_dispose_kind(&kind)?;
+            let wallet = wallet
+                .as_deref()
+                .map(eventref::parse_wallet_id)
+                .transpose()?;
+            // clap enforces: none / --year alone / --from + --to. The catch-all is defensive.
+            let frame = match (year, from, to) {
+                (Some(y), None, None) => btctax_cli::Frame::Year(y),
+                (None, Some(f), Some(t)) => btctax_cli::Frame::Range {
+                    from: eventref::parse_date_arg(&f)?,
+                    to: eventref::parse_date_arg(&t)?,
+                },
+                (None, None, None) => btctax_cli::Frame::All,
+                _ => {
+                    return Err(CliError::Usage(
+                        "bulk-reclassify-outflow: use --year, or --from with --to, or neither"
+                            .into(),
+                    ))
+                }
+            };
+            let filter = btctax_cli::BulkFilter {
+                frame,
+                from_wallet: wallet,
+            };
+            let plan = cmd::reconcile::bulk_reclassify_outflow_plan(vault, &pp, filter)?;
+
+            render_bulk_reclassify_outflow_preview(&plan, kind);
+
+            if plan.included.is_empty() {
+                println!("no pending outflows match");
+                return Ok(());
+            }
+            if dry_run {
+                return Ok(());
+            }
+            let confirmed = if yes {
+                true
+            } else {
+                print!(
+                    "Reclassify {} pending outflow(s) as {} with ESTIMATED proceeds ${} \
+                     (ESTIMATED gain ${})? [y/N] ",
+                    plan.included.len(),
+                    dispose_kind_label(kind),
+                    plan.total_proceeds_usd,
+                    plan.total_estimated_gain
+                );
+                use std::io::Write;
+                std::io::stdout().flush().ok();
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line)?;
+                matches!(line.trim(), "y" | "Y" | "yes" | "YES")
+            };
+            if !confirmed {
+                println!("aborted; nothing written");
+                return Ok(());
+            }
+            // Dispatch derives out_events from `plan.included` (never raw --ref) — the #a exclusion + the
+            // estimate must not be bypassable.
+            let out_events: Vec<_> = plan.included.iter().map(|r| r.out_event.clone()).collect();
+            let n =
+                cmd::reconcile::apply_bulk_reclassify_outflow(vault, &pp, out_events, kind, now)?;
+            println!(
+                "reclassified {n} pending outflow(s) as {} with ESTIMATED proceeds ${} \
+                 (ESTIMATED gain ${})",
+                dispose_kind_label(kind),
+                plan.total_proceeds_usd,
+                plan.total_estimated_gain
+            );
+            return Ok(());
+        }
         Reconcile::BulkResolveConflict {
             accept,
             reject: _, // clap's ArgGroup guarantees EXACTLY one of --accept/--reject; dispatch on `accept`.
@@ -1649,6 +1759,57 @@ fn kind_label(kind: IncomeKind) -> &'static str {
         IncomeKind::Interest => "interest",
         IncomeKind::Airdrop => "airdrop",
         IncomeKind::Reward => "reward",
+    }
+}
+
+fn dispose_kind_label(kind: DisposeKind) -> &'static str {
+    match kind {
+        DisposeKind::Sell => "sell",
+        DisposeKind::Spend => "spend",
+    }
+}
+
+/// Preview for `bulk-reclassify-outflow`: the included rows (each auto-valued at its outflow-date FMV =
+/// the ESTIMATED proceeds), the total ESTIMATED proceeds AND the total ESTIMATED gain (Σ fmv − Σ basis),
+/// and the count of outflows EXCLUDED because their date has no bundled price (those stay pending — a
+/// Sell with fabricated proceeds would SILENTLY misreport gain/loss). The word "ESTIMATED" is printed
+/// adjacent to BOTH the proceeds and the gain totals.
+fn render_bulk_reclassify_outflow_preview(
+    plan: &btctax_cli::BulkReclassifyOutflowPlan,
+    kind: DisposeKind,
+) {
+    println!(
+        "Bulk reclassify-outflow preview ({}, auto-FMV at outflow date = ESTIMATED proceeds)",
+        dispose_kind_label(kind)
+    );
+    println!(
+        "{:<12}  {:>14}  {:>18}  {:>16}  {:>16}",
+        "date", "sat", "est. proceeds USD", "basis USD", "est. gain USD"
+    );
+    for r in &plan.included {
+        println!(
+            "{:<12}  {:>14}  {:>18}  {:>16}  {:>16}",
+            r.date,
+            r.principal_sat,
+            format!("${}", r.fmv),
+            format!("${}", r.basis_usd),
+            format!("${}", r.estimated_gain),
+        );
+    }
+    println!(
+        "included {} | {} sat | total ESTIMATED proceeds ${} | total basis ${} | total ESTIMATED gain ${}",
+        plan.included.len(),
+        plan.total_sat,
+        plan.total_proceeds_usd,
+        plan.total_basis_usd,
+        plan.total_estimated_gain,
+    );
+    if plan.excluded_missing_price > 0 {
+        println!(
+            "excluded {} outflow(s) with no available price (still pending — a disposition with no \
+             FMV cannot be auto-valued; set it single-item with `reclassify-outflow` instead)",
+            plan.excluded_missing_price
+        );
     }
 }
 

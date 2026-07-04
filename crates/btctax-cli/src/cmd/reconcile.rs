@@ -6,15 +6,15 @@
 //! Also contains the `set-donation-details` / `show-donation-details` side-table commands (no decision
 //! append — these write to the `donation_details` side-table directly, like `tax-profile set`).
 use crate::{
-    BulkFilter, BulkLinkPlan, BulkResolvePlan, BulkStiFilter, BulkStiPlan, BulkVoidPlan, CliError,
-    MatchProposal, Session,
+    BulkFilter, BulkLinkPlan, BulkReclassifyOutflowPlan, BulkResolvePlan, BulkStiFilter,
+    BulkStiPlan, BulkVoidPlan, CliError, MatchProposal, Session,
 };
-use btctax_core::conventions::TRANSITION_DATE;
+use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::{
-    AllocMethod, BlockerKind, ClassifyInbound, ClassifyRaw, DonationDetails, EventId, EventPayload,
-    InboundClass, IncomeKind, LotId, LotMethod, LotPick, LotSelection, ManualFmv, MethodElection,
-    OutflowClass, ReclassifyIncome, ReclassifyOutflow, RejectImport, RemovalKind,
+    AllocMethod, BlockerKind, ClassifyInbound, ClassifyRaw, DisposeKind, DonationDetails, EventId,
+    EventPayload, InboundClass, IncomeKind, LotId, LotMethod, LotPick, LotSelection, ManualFmv,
+    MethodElection, OutflowClass, ReclassifyIncome, ReclassifyOutflow, RejectImport, RemovalKind,
     SafeHarborAllocation, SelfTransferPassthrough, SupersedeImport, TaxDate, TransferLink,
     TransferTarget, Usd, VoidDecisionEvent, WalletId,
 };
@@ -126,6 +126,16 @@ pub fn void(
             EventPayload::LotSelection(ls) => Some(ls.disposal_event.clone()),
             _ => None,
         });
+    // Symmetric side-effect [WB]: voiding a ReclassifyOutflow must clear its `bulk_estimated` `[est]`
+    // flag (keyed by transfer_out_event == Disposal.event) — else a stale marker survives a
+    // void→re-reclassify (the R0-I1 gap, closed on the CLI path too, mirroring optimize_attest above).
+    let reclass_out_to_clear: Option<EventId> = events
+        .iter()
+        .find(|e| e.id == target_event_id)
+        .and_then(|e| match &e.payload {
+            EventPayload::ReclassifyOutflow(ro) => Some(ro.transfer_out_event.clone()),
+            _ => None,
+        });
 
     // Append the VoidDecisionEvent (no save yet — we batch with the attestation clear below).
     let id = append_decision(
@@ -142,6 +152,9 @@ pub fn void(
     // co-persist). Idempotent: clearing an absent row is Ok (no error).
     if let Some(disposal) = disposal_to_clear {
         crate::optimize_attest::clear(session.conn(), &disposal)?;
+    }
+    if let Some(out_event) = reclass_out_to_clear {
+        crate::bulk_estimated::clear(session.conn(), &out_event)?;
     }
 
     session.save()?;
@@ -366,6 +379,80 @@ pub fn apply_bulk_classify_inbound_income(
     Ok(n)
 }
 
+/// bulk-reclassify-outflow (Cycle 5) — Phase 1 (read): open the session and compute the bulk
+/// reclassify-outflow plan. Two-phase by design (mirrors `bulk_classify_income_plan`): this read phase
+/// renders NOTHING to the vault. The plan is the shared read helper `Session::bulk_reclassify_outflow_plan`
+/// — it excludes missing-price rows [#a tax-safety] and reports them as `excluded_missing_price`.
+pub fn bulk_reclassify_outflow_plan(
+    vault_path: &Path,
+    pp: &Passphrase,
+    filter: BulkFilter,
+) -> Result<BulkReclassifyOutflowPlan, CliError> {
+    let session = Session::open(vault_path, pp)?;
+    session.bulk_reclassify_outflow_plan(filter)
+}
+
+/// bulk-reclassify-outflow (Cycle 5) — Phase 2 (write): atomically reclassify every `out_event` as a
+/// `Dispose{kind}` with a PER-ROW auto-FMV as ESTIMATED proceeds, AND mark each in the `bulk_estimated`
+/// side-table, then a SINGLE `save`. Its OWN append-loop (mirrors `apply_bulk_classify_inbound_income`;
+/// the CLI CANNOT reach the tui-edit `persist_bulk_decisions` — dependency cycle, R0-I1 of Cycle 4).
+///
+/// **[#a defense-in-depth]** the fmv is RE-DERIVED per-row via `fmv_of(date, sat)`, never trusting a
+/// threaded number: `let Some(fmv) = … else { continue };`. The dispatch derives `out_events` from
+/// `plan.included` (the fmv-`Some` rows only), so every id resolves — and a missing-price row can NEVER
+/// be emitted as a Sell with fabricated `0`/bogus proceeds (a SILENT misreport), even if a future caller
+/// passed a non-plan id. `fee_usd: None` always (the on-chain `fee_sat` still flows via resolve.rs
+/// regardless — a uniform USD disposition-fee across heterogeneous txns is meaningless); `donee: None`
+/// (Dispose has none). `kind` is UNIFORM across the batch. Bare `?`-before-`save`: a mid-batch failure
+/// returns before `save` → the in-memory session is discarded, so NEITHER the appends NOR the side-table
+/// marks land [R0-M2]. Returns the number reclassified.
+pub fn apply_bulk_reclassify_outflow(
+    vault_path: &Path,
+    pp: &Passphrase,
+    out_events: Vec<EventId>,
+    kind: DisposeKind,
+    now: OffsetDateTime,
+) -> Result<usize, CliError> {
+    let mut session = Session::open(vault_path, pp)?;
+    let prices = btctax_adapters::BundledPrices::load()?;
+    let events = load_all(session.conn())?;
+    let index: std::collections::HashMap<&EventId, &btctax_core::LedgerEvent> =
+        events.iter().map(|e| (&e.id, e)).collect();
+    // Provenance stamp (the batch made-date) recorded on each side-table row.
+    let marked_at = tax_date(now, UtcOffset::UTC).to_string();
+    let mut n = 0usize;
+    for out_event in &out_events {
+        let Some(ev) = index.get(out_event) else {
+            continue;
+        };
+        let EventPayload::TransferOut(t) = &ev.payload else {
+            continue;
+        };
+        let date = tax_date(ev.utc_timestamp, ev.original_tz);
+        // #a defense-in-depth: re-derive the fmv; a missing-price row is skipped, NEVER emitted as a
+        // Dispose with fabricated proceeds. Makes a fabricated-proceeds Sell structurally unreachable.
+        let Some(fmv) = btctax_core::price::fmv_of(&prices, date, t.sat) else {
+            continue;
+        };
+        let payload = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: out_event.clone(),
+            as_: OutflowClass::Dispose { kind },
+            principal_proceeds_or_fmv: fmv,
+            fee_usd: None,
+            donee: None,
+        });
+        // `?` on a mid-batch failure returns before `save` — the in-memory session is discarded, so
+        // nothing lands on disk (CLI atomicity; the TUI path instead ROLLS BACK).
+        append_decision(session.conn(), payload, now, UtcOffset::UTC, None)?;
+        // Flag the ESTIMATED proceeds in the side-table (same in-memory conn, flushed by the single
+        // save below; discarded together with the append on any mid-batch failure — [R0-M2]).
+        crate::bulk_estimated::mark(session.conn(), out_event, &marked_at)?;
+        n += 1;
+    }
+    session.save()?;
+    Ok(n)
+}
+
 /// bulk-resolve-conflict D2 — Phase 1 (read): open the session and compute the bulk resolve-conflict
 /// plan. Two-phase by design (mirrors `bulk_link_plan`): this read phase renders NOTHING to the vault,
 /// so the interactive `y/N` confirmation stays a thin, untested shell in the `main.rs` dispatch. The
@@ -454,6 +541,19 @@ pub fn apply_bulk_void(
     now: OffsetDateTime,
 ) -> Result<usize, CliError> {
     let mut session = Session::open(vault_path, pp)?;
+    // Map ReclassifyOutflow decision id → its transfer_out_event, so voiding one clears its
+    // bulk_estimated `[est]` flag — symmetric with single `void` + TUI persist_bulk_void [WB — R0-I1
+    // closed on the CLI bulk path]. Idempotent clear; O(n) build, void is infrequent.
+    let events = load_all(session.conn())?;
+    let reclass_map: std::collections::HashMap<EventId, EventId> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::ReclassifyOutflow(ro) => {
+                Some((e.id.clone(), ro.transfer_out_event.clone()))
+            }
+            _ => None,
+        })
+        .collect();
     for (target_event_id, disposal_to_clear) in &targets {
         // `?` on a mid-batch failure returns before `save` — the in-memory session is discarded, so
         // nothing lands on disk (CLI atomicity; the TUI path instead ROLLS BACK via persist_bulk_void).
@@ -470,6 +570,10 @@ pub fn apply_bulk_void(
         // in-memory conn, flushed by the single save below). Idempotent — clearing an absent row is Ok.
         if let Some(disposal) = disposal_to_clear {
             crate::optimize_attest::clear(session.conn(), disposal)?;
+        }
+        // Symmetric ReclassifyOutflow side-effect: clear its bulk_estimated flag in the same batch.
+        if let Some(out_event) = reclass_map.get(target_event_id) {
+            crate::bulk_estimated::clear(session.conn(), out_event)?;
         }
     }
     session.save()?;

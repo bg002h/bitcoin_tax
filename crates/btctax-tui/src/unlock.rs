@@ -175,6 +175,8 @@ pub fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
     let cli_config = session.config()?;
     let tables = BundledTaxTables::load();
     let donation_details = session.donation_details()?;
+    // [R0-M1] the `[est]` marker set — loaded via the typed accessor, NEVER `conn()` directly.
+    let bulk_estimated = session.bulk_estimated()?;
     let year = latest_year(&state);
     let snapshot = Snapshot {
         events,
@@ -183,6 +185,7 @@ pub fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
         profiles,
         tables,
         donation_details,
+        bulk_estimated,
     };
     Ok((snapshot, year))
 }

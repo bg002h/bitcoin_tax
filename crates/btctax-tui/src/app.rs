@@ -108,6 +108,11 @@ pub struct Snapshot {
     pub profiles: BTreeMap<i32, TaxProfile>,
     pub tables: BundledTaxTables,
     pub donation_details: BTreeMap<EventId, DonationDetails>,
+    /// Disposals flagged as estimated-FMV proceeds by the bulk-reclassify-outflow path (Cycle 5),
+    /// keyed by `transfer_out_event` (== `Disposal.event`); value = the `date_marked` provenance
+    /// stamp. The Disposals tab renders an `[est]` marker on flagged rows; the Compliance tab shows
+    /// an advisory count. Loaded via `Session::bulk_estimated()` [R0-M1], never `conn()` directly.
+    pub bulk_estimated: BTreeMap<EventId, String>,
 }
 
 /// Top-level application state.

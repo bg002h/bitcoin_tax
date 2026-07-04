@@ -830,6 +830,7 @@ mod tests {
             profiles: BTreeMap::new(),
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
         };
 
         let mut test_app = App::new(vault_path);
@@ -936,6 +937,7 @@ mod tests {
             profiles,
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
         };
 
         let mut test_app = App::new(vault);

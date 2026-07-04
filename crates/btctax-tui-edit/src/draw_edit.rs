@@ -10,23 +10,25 @@
 
 use crate::edit::form::{
     amount_label, basis_source_display, bulk_checked_totals, bulk_income_checked_totals,
-    bulk_resolve_checked_count, bulk_sti_checked_totals, bulk_usd_floor_label,
-    bulk_void_checked_count, bulk_void_lot_selection_checked_count, income_kind_display,
-    wallet_label, BulkIncomeFlowState, BulkIncomeModalState, BulkIncomeStep, BulkLinkFlowState,
-    BulkLinkModalState, BulkLinkStep, BulkResolveFlowState, BulkResolveModalState, BulkResolveStep,
-    BulkStiFlowState, BulkStiModalState, BulkStiStep, BulkVoidFlowState, BulkVoidModalState,
-    ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
-    ClassifyRawStep, ClassifyRawVariant, DisposalKind, FieldBuffer, InboundVariant, LinkMode,
-    LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, MatchSelfTransfersFlowState,
-    MatchSelfTransfersModalState, MutationModalState, OptimizeAcceptFlowState,
-    OptimizeAcceptModalState, OptimizeAcceptStep, OutflowKind, ProfileFormState,
-    ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
-    ReclassifyOutflowModalState, ReclassifyOutflowStep, ResolveConflictFlowState,
-    ResolveConflictModalState, ResolveConflictStep, ResolveKind, SafeHarborAllocateFlowState,
-    SafeHarborAllocateModalState, SafeHarborAttestFlowState, SafeHarborAttestStep,
-    SelectLotsFlowState, SelectLotsModalState, SelectLotsStep, SetDonationDetailsFlowState,
-    SetDonationDetailsModalState, SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState,
-    SetFmvStep, VoidFlowState, VoidModalState, DONATION_FIELD_LABELS, FIELD_LABELS,
+    bulk_reclassify_outflow_checked_totals, bulk_resolve_checked_count, bulk_sti_checked_totals,
+    bulk_usd_floor_label, bulk_void_checked_count, bulk_void_lot_selection_checked_count,
+    income_kind_display, wallet_label, BulkIncomeFlowState, BulkIncomeModalState, BulkIncomeStep,
+    BulkLinkFlowState, BulkLinkModalState, BulkLinkStep, BulkReclassifyOutflowFlowState,
+    BulkReclassifyOutflowModalState, BulkReclassifyOutflowStep, BulkResolveFlowState,
+    BulkResolveModalState, BulkResolveStep, BulkStiFlowState, BulkStiModalState, BulkStiStep,
+    BulkVoidFlowState, BulkVoidModalState, ClassifyInboundModalState, ClassifyInboundStep,
+    ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep, ClassifyRawVariant, DisposalKind,
+    FieldBuffer, InboundVariant, LinkMode, LinkTransferFlowState, LinkTransferModalState,
+    LinkTransferStep, MatchSelfTransfersFlowState, MatchSelfTransfersModalState,
+    MutationModalState, OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep,
+    OutflowKind, ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState,
+    ReclassifyIncomeStep, ReclassifyOutflowModalState, ReclassifyOutflowStep,
+    ResolveConflictFlowState, ResolveConflictModalState, ResolveConflictStep, ResolveKind,
+    SafeHarborAllocateFlowState, SafeHarborAllocateModalState, SafeHarborAttestFlowState,
+    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
+    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
+    SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState, VoidModalState,
+    DONATION_FIELD_LABELS, FIELD_LABELS,
 };
 use crate::editor::{EditorApp, EditorScreen};
 use btctax_core::{DisposeKind, InboundClass, OutflowClass, Persistability};
@@ -388,6 +390,13 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.bulk_void_modal.as_ref() {
         draw_bulk_void_modal(frame, area, modal);
+    }
+    // Bulk reclassify-outflow flow overlay (bulk-reclassify-outflow, Cycle 5).
+    if let Some(flow) = app.bulk_reclassify_outflow_flow.as_mut() {
+        draw_bulk_reclassify_outflow_flow(frame, area, flow);
+    }
+    if let Some(modal) = app.bulk_reclassify_outflow_modal.as_ref() {
+        draw_bulk_reclassify_outflow_modal(frame, area, modal);
     }
     // Match-self-transfers flow overlay (self-transfer-passthrough C3).
     if let Some(flow) = app.match_self_transfers_flow.as_mut() {
@@ -4366,6 +4375,254 @@ fn draw_bulk_void_modal(frame: &mut Frame, area: Rect, modal: &BulkVoidModalStat
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
+/// Short display for the batch-wide disposition kind (Sell/Spend).
+fn dispose_kind_display(kind: DisposeKind) -> &'static str {
+    match kind {
+        DisposeKind::Sell => "sell",
+        DisposeKind::Spend => "spend",
+    }
+}
+
+/// Render the bulk reclassify-outflow flow (Cycle 5). Step 1 chooses the uniform disposition kind
+/// (Sell/Spend), source-wallet, and time-frame. Step 2 is a per-row exclude checklist over the PRICED
+/// plan with date/BTC/est.proceeds/est.basis/est.gain columns + the total ESTIMATED gain + excluded note.
+fn draw_bulk_reclassify_outflow_flow(
+    frame: &mut Frame,
+    area: Rect,
+    flow: &mut BulkReclassifyOutflowFlowState,
+) {
+    let modal_rect = centered_rect(98, 26, area);
+    frame.render_widget(Clear, modal_rect);
+    let outer = Block::default().borders(Borders::ALL).title(
+        " BULK RECLASSIFY OUTFLOWS — reclassify many pending outflows as dispositions at ESTIMATED FMV ",
+    );
+    let inner = outer.inner(modal_rect);
+    frame.render_widget(outer, modal_rect);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(0),
+            Constraint::Length(6),
+        ])
+        .split(inner);
+
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let hl = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let focus = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+
+    frame.render_widget(
+        Paragraph::new(vec![Line::from(Span::styled(
+            "each selected outflow → a disposition; the daily-close FMV is the ESTIMATED proceeds (voidable)",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ))]),
+        chunks[0],
+    );
+
+    match flow.step {
+        BulkReclassifyOutflowStep::Filter => {
+            let wallet_label_str = match flow.wallet_choices.get(flow.wallet_idx) {
+                Some(Some(w)) => wallet_label(w),
+                _ => "Any".to_string(),
+            };
+            let year_label = match flow.year_choices.get(flow.year_idx) {
+                Some(Some(y)) => y.to_string(),
+                _ => "All".to_string(),
+            };
+            let style_for = |i: usize| {
+                if flow.filter_focus == i {
+                    focus
+                } else {
+                    Style::default()
+                }
+            };
+            let lines = vec![
+                Line::from(Span::styled("Step 1/2 — kind + filter", bold)),
+                Line::from(""),
+                Line::from(vec![
+                    Span::raw("  disposition kind: "),
+                    Span::styled(
+                        format!("[{}]", dispose_kind_display(flow.kind)),
+                        style_for(0),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::raw("  source wallet   : "),
+                    Span::styled(format!("[{wallet_label_str}]"), style_for(1)),
+                ]),
+                Line::from(vec![
+                    Span::raw("  time frame      : "),
+                    Span::styled(format!("[{year_label}]"), style_for(2)),
+                ]),
+            ];
+            frame.render_widget(Paragraph::new(lines), chunks[1]);
+        }
+        BulkReclassifyOutflowStep::Preview => {
+            let selected = flow.preview.table_state.selected();
+            let rows: Vec<Row> = flow
+                .preview
+                .items
+                .iter()
+                .enumerate()
+                .map(|(i, it)| {
+                    let base = if selected == Some(i) {
+                        hl
+                    } else {
+                        Style::default()
+                    };
+                    let mark = if it.checked { "[x]" } else { "[ ]" };
+                    Row::new(vec![
+                        Cell::from(mark).style(base),
+                        Cell::from(it.date.to_string()).style(base),
+                        Cell::from(fmt_btc(it.principal_sat)).style(base),
+                        Cell::from(format!("${}", it.fmv)).style(base),
+                        Cell::from(format!("${}", it.basis_usd)).style(base),
+                        Cell::from(format!("${}", it.estimated_gain)).style(base),
+                    ])
+                })
+                .collect();
+            let header = Row::new(
+                ["", "date", "BTC", "est.proceeds", "est.basis", "est.gain"]
+                    .iter()
+                    .map(|h| Cell::from(*h).style(bold)),
+            );
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Length(3),
+                    Constraint::Length(12),
+                    Constraint::Length(14),
+                    Constraint::Length(14),
+                    Constraint::Length(14),
+                    Constraint::Min(12),
+                ],
+            )
+            .header(header);
+            frame.render_stateful_widget(table, chunks[1], &mut flow.preview.table_state);
+        }
+    }
+
+    // Footer: live totals (Preview only) + excluded-missing-price note + step hint + transient error.
+    let mut footer: Vec<Line> = Vec::new();
+    if matches!(flow.step, BulkReclassifyOutflowStep::Preview) {
+        let (count, sat, proceeds, _basis, gain) =
+            bulk_reclassify_outflow_checked_totals(&flow.preview.items);
+        footer.push(Line::from(Span::styled(
+            format!(
+                "checked {count} · Σ {} BTC · total ESTIMATED proceeds ${proceeds} · total ESTIMATED gain ${gain}",
+                fmt_btc(sat)
+            ),
+            bold,
+        )));
+        if flow.excluded_missing_price > 0 {
+            footer.push(Line::from(Span::styled(
+                format!(
+                    "⚠ {} outflow(s) excluded — no price available for their date (stay pending)",
+                    flow.excluded_missing_price
+                ),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
+    }
+    let hint = match flow.step {
+        BulkReclassifyOutflowStep::Filter => "↑/↓: focus  ←/→: change  Enter: preview  Esc: cancel",
+        BulkReclassifyOutflowStep::Preview => {
+            "↑/↓: scroll  Space/x: toggle  Enter: confirm  Esc: back"
+        }
+    };
+    footer.push(Line::from(Span::styled(
+        hint,
+        Style::default().fg(Color::Cyan),
+    )));
+    if let Some(err) = &flow.error {
+        footer.push(Line::from(Span::styled(
+            format!("⚠ {err}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+    frame.render_widget(Paragraph::new(footer), chunks[2]);
+}
+
+/// Render the bulk reclassify-outflow confirmation modal (explicit; NOT typed-word — each reclassify is
+/// voidable, the REVOCABLE tier). Prominently BOLDS the total ESTIMATED proceeds AND the total ESTIMATED
+/// gain (the word "ESTIMATED" adjacent to both), plus the excluded-missing-price note.
+fn draw_bulk_reclassify_outflow_modal(
+    frame: &mut Frame,
+    area: Rect,
+    modal: &BulkReclassifyOutflowModalState,
+) {
+    let mut lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Apply BULK reclassify-outflow?",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!(
+            "    outflows    : {}  ({})",
+            modal.count,
+            dispose_kind_display(modal.kind)
+        )),
+        Line::from(format!("    Σ BTC       : {}", fmt_btc(modal.total_sat))),
+        Line::from(Span::styled(
+            format!("    ESTIMATED proceeds : ${}", modal.total_proceeds_usd),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!(
+            "    basis              : ${}",
+            modal.total_basis_usd
+        )),
+        Line::from(Span::styled(
+            format!("    ESTIMATED gain     : ${}", modal.total_estimated_gain),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+    ];
+    if modal.excluded_missing_price > 0 {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "    excluded (no price): {} outflow(s) stay pending",
+                modal.excluded_missing_price
+            ),
+            Style::default().fg(Color::Yellow),
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  The proceeds are ESTIMATED — the daily-close market FMV of the BTC that left, not a",
+        Style::default().fg(Color::Yellow),
+    )));
+    lines.push(Line::from(Span::styled(
+        "  recorded sale price. Each is a VOIDABLE decision ('v') — refine the FMV later.",
+        Style::default().fg(Color::Yellow),
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(
+        "  Appended as N decisions + flagged [est], saved via the vault's atomic write path.",
+    ));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  [Enter] Apply — writes the vault    [Esc] Cancel — writes nothing",
+        Style::default().fg(Color::Cyan),
+    )));
+    lines.push(Line::from(""));
+
+    let height = (lines.len() + 2) as u16;
+    let modal_rect = centered_rect(84, height, area);
+    frame.render_widget(Clear, modal_rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(" Confirm: bulk reclassify-outflow — WRITES THE VAULT (ESTIMATED proceeds) ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
 /// Render the match-self-transfers proposal list (self-transfer-passthrough C3). One row per proposed
 /// pair: suggested action, both legs' date/wallet/sat, USD value, and the AMBIGUOUS / txid flags.
 fn draw_match_self_transfers_flow(
@@ -4741,6 +4998,7 @@ mod tests {
             profiles: BTreeMap::new(),
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
         };
 
         let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
