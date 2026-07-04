@@ -34,6 +34,25 @@ sells) now import.**
 
 ---
 
+## ✅ bulk-resolve-conflict — SHIPPED (2026-07-03) — QUEUE ITEM 3, CYCLE 2 DONE
+
+Bulk `C` flow to accept/reject many `ImportConflict` blockers at once, + **Task 1**: extract the shared
+`persist_bulk_decisions` helper (empty-guard + mid-batch rollback + single save) and re-point
+bulk-link-transfer & bulk-self-transfer-in through it (zero-behavior). CLI: two apply fns
+(`apply_bulk_accept_conflicts` → `SupersedeImport` / `apply_bulk_reject_conflicts` → `RejectImport`) behind
+a clap ArgGroup — **NO `ResolveKind` in btctax-cli** (R0-I1: it lives only in tui-edit; referencing it from
+cli = dependency cycle). Structured `BulkResolveRow` (current/new payloads); Tier-B non-revocable confirm
+(not typed-word); candidate = live `ImportConflict` blockers only; not added to `is_revocable_payload`.
+R0 GREEN (2 rounds; r1 caught the `ResolveKind` cycle); whole-diff review 0C/0I — two fault-injections
+(mid-batch rollback removed → 3 KATs RED incl. both re-pointed callers; accept→`RejectImport` →
+`accept_adopts_new` RED). **1016 workspace tests.** Reviews:
+`reviews/R0-spec-bulk-resolve-conflict-round-{1,2}.md`,
+`reviews/whole-branch-review-bulk-resolve-conflict-round-1.md`.
+**Remaining queue-item-3 cycles: Cycle 3 bulk-void · Cycle 4 bulk-classify-inbound-income · Cycle 5
+bulk-reclassify-outflow.**
+
+---
+
 ## ✅ bulk-classify-inbound-self-transfer — SHIPPED (2026-07-03) — QUEUE ITEM 2 DONE
 
 The inbound mirror of `bulk-link-transfer` applied to Cycle A's `InboundClass::SelfTransferMine`: sweep
