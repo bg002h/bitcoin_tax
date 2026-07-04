@@ -4,6 +4,25 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ frozen column totals (btctax-tui) — SHIPPED (2026-07-03) — PARKED ITEM 2 DONE → QUEUE CLEAR
+
+Column totals as a FROZEN `Table::footer()` on the output tabs. **Disposals**: freeze the existing scrolling
+TOTAL row + add Σ BTC (basis stays SUMMED — `Σ gain = Σ proceeds − Σ basis`). **Holdings**: Σ BTC +
+**weighted-average cost $/BTC** (`round_cents((Σbasis×1e8)/Σsat)`, multiply-first ROUND_HALF_EVEN; `Σsat==0
+→ —`). **Income**: Σ BTC + Σ FMV. **Height gate** (user req): shown only when the tab area ≥ 10 rows
+(`MIN_ROWS_FOR_TOTALS`), else omitted so data keeps the space. **Forms deferred** (its ST/LT totals are
+already the Schedule D summary — a footer would duplicate). `btctax-tui` only; the editor inherits via the
+shared renderers; no core change. R0 GREEN (2 rounds; r1 caught the weighted-avg change breaking an existing
+Holdings KAT + 2 more test-side issues); whole-diff 0C/0I (weighted-avg + height-gate fault-injections).
+**1084 tests.** Reviews: `reviews/R0-spec-column-totals-round-{1,2}.md`,
+`reviews/whole-branch-review-column-totals-round-1.md`.
+
+**★★ QUEUE CLEAR (2026-07-03):** the 5-cycle bulk-reconcile program (extract → resolve-conflict → void →
+inbound-income → outflow-reclassify) + both parked TUI-polish items (`?` help overlay, column totals) — ALL
+shipped to `main`. No outstanding user-directed work.
+
+---
+
 ## ✅ `?` help overlay (btctax-tui-edit) — SHIPPED (2026-07-03) — PARKED ITEM 1 DONE
 
 A `?` shortcut opens a **full-keymap help overlay** in the Browse screen — same on every tab (the reconcile
