@@ -34,6 +34,27 @@ sells) now import.**
 
 ---
 
+## ✅✅ bulk-reclassify-outflow — SHIPPED (2026-07-03) — QUEUE ITEM 3, CYCLE 5 DONE → **PROGRAM COMPLETE**
+
+The LAST cycle. Bulk reclassify pending outflows → `Dispose{Sell,Spend}` with auto-FMV as **ESTIMATED
+proceeds** (TUI `O` / CLI `reconcile bulk-reclassify-outflow --kind sell|spend`). **Primary driver:** Spend
+on goods/services — no price exists, so the FMV of the BTC that left is the correct+only valuation. The
+estimate is flagged **persistently** via a `btctax-cli`-only `bulk_estimated_proceeds` side-table (keyed by
+`transfer_out_event` == `Disposal.event`; **core UNCHANGED**) and shown as an **`[est]`** marker on the
+Disposals tab + a Compliance advisory count. Tax-safety: #a `fmv_of==None` excluded (silent-fabricated-proceeds
+defense); `estimated_gain = fmv − Σ fold-computed leg basis` (not double-counted); **clear-on-void** wired
+into BOTH the TUI (`persist_void`/`persist_bulk_void`) AND CLI (`void`/`apply_bulk_void`) paths. Sell/Spend
+only (Gift/Donate deferred — donee not uniform; §170 appraisal). R0 GREEN (2 rounds; r1 caught clear-on-void);
+whole-diff 0C/0I — the CLI-void-clear parity gap folded + 4 tax-critical fault-injections. **1072 tests.**
+Reviews: `reviews/R0-spec-bulk-reclassify-outflow-round-{1,2}.md`,
+`reviews/whole-branch-review-bulk-reclassify-outflow-round-1.md`.
+
+**★ QUEUE ITEM 3 — the 5-cycle bulk-reconcile-other-types program — is COMPLETE** (extract →
+bulk-resolve-conflict → bulk-void → bulk-classify-inbound-income → bulk-reclassify-outflow). Next: the two
+parked TUI-polish items (`?` help overlay, then column totals) — user-authorized 2026-07-03.
+
+---
+
 ## ✅ bulk-classify-inbound-income — SHIPPED (2026-07-03) — QUEUE ITEM 3, CYCLE 4 DONE
 
 Bulk classify many pending unknown-basis inbounds → `Income` (uniform `IncomeKind` {Mining/Staking/Interest/
