@@ -1,8 +1,8 @@
 # SPEC — bulk-void (queue item 3, Cycle 3) — sweep-void many reconcile decisions at once
 
-**Source baseline:** `main` @ `13cb135` (branch `feat/bulk-void`). **Review status: R0 round 1 folded
-(0C / 0I / 3M / 3N — all folded; both flagged decisions ADJUDICATED: bespoke persist, Tier-B). Review:
-`reviews/R0-spec-bulk-void-round-1.md`. Awaiting R0 round 2.**
+**Source baseline:** `main` @ `13cb135` (branch `feat/bulk-void`). **Review status: R0-GREEN (2 rounds;
+0 Critical / 0 Important). Reviews: `reviews/R0-spec-bulk-void-round-{1,2}.md` (both flagged decisions
+adjudicated: bespoke persist, Tier-B). Cleared to implement.**
 **Lineage:** queue item 3 of `bulk-reconcile-other-types` (architect-designed 2026-07-03, user-approved
 safety-first sequencing). Cycles 1 (`persist_bulk_decisions` extract) + 2 (bulk-resolve-conflict) SHIPPED;
 this is **Cycle 3 — the DANGEROUS one** (void has blast radius + a side-effect + a tax-safety trap).
@@ -106,7 +106,7 @@ Reuse the shipped `TargetList` per-row-exclude widget (as bulk-link / bulk-sti /
   `bulk_void_plan` rows (predicate-filtered), re-derived from the vault inside the dispatch — NEVER raw
   `--ref` ids from the user. The single CLI `void` does NO `effective_alloc` check, so a raw-id bulk path
   would let a caller void an effective allocation → Hard `DecisionConflict`. The dispatch re-runs the plan
-  and passes its ids (mirror the bulk-resolve dispatch, `main.rs:1267-1268`); a KAT feeds an effective
+  and passes its ids (mirror the bulk-resolve dispatch, `btctax-cli/src/main.rs:1267-1268`); a KAT feeds an effective
   allocation's id and asserts the plan omits it so apply never sees it.
 - No `--accept/--reject` flags (void is single-valued); a `--dry-run` xor `--yes` guard as usual.
 
