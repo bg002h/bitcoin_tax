@@ -1,9 +1,9 @@
 # SPEC — pseudo-reconcile mode (sub-project 2 of auto-pseudo-reconcile)
 
-**Source baseline:** `main` @ `514875b` (branch `feat/pseudo-reconcile-mode`). **Review status: R0 round 2
-folded surgically (round 1: 2C/5I/6M/2N; round 2: 0C/1I/4M/2N — all merged IN-PLACE; the earlier appended
-"folds" section is removed, body is now self-consistent). Awaiting R0 round 3.** Reviews:
-`reviews/R0-spec-pseudo-reconcile-mode-round-{1,2}.md`. Design of record:
+**Source baseline:** `main` @ `514875b` (branch `feat/pseudo-reconcile-mode`). **Review status: R0-GREEN (3 rounds; 0C/0I).
+Cleared to implement.** Reviews: `reviews/R0-spec-pseudo-reconcile-mode-round-{1,2,3}.md`. Round 1 2C/5I,
+round 2 0C/1I (I2-R), round 3 0C/0I/2M/2N — all folded IN-PLACE (surgical; no append). M2 (Unclassified →
+`ClassifyRaw`) folded into the defaults table. Design of record:
 `design/BRAINSTORM_auto_pseudo_reconcile.md`; roadmap memory `auto-pseudo-reconcile-roadmap`. **Cross-cutting
 decisions settled — do NOT re-brainstorm.** Sub-project 1 (per-exchange method election) is SHIPPED (`514875b`)
 and is the method source for pseudo Sells.
@@ -43,7 +43,8 @@ user sees the flagged HOLDINGS/skeleton (and those blockers) but not a tax numbe
 ## The defaults (only where no real decision exists)
 | Blocker / event | Synthetic default |
 |---|---|
-| `UnknownBasisInbound` / `Unclassified` inbound | `ClassifyInbound(SelfTransferMine{ basis:$0 })` — never income (assumption 3) |
+| `UnknownBasisInbound` inbound | `ClassifyInbound(SelfTransferMine{ basis:$0 })` — never income (assumption 3) |
+| `Unclassified` inbound [R0-M2] | `ClassifyRaw` synthetic (resolve.rs:474-492) — NOT `ClassifyInbound` (rejected on a non-`TransferIn` `Unclassified` → `DecisionConflict`, resolve.rs:642-654) |
 | `TransferOut` withdrawal (unmatched) [R0-I5] | **leave as `Op::PendingOut`** (fold.rs:698-740 — already non-taxable, no dest fabricated); `approve` writes the concrete self-transfer decision the user confirms |
 | Outbound network fee | de-minimis: drop fee sats; basis stays with held coins; NO re-homing |
 | `ImportConflict` [R0-C2] | accept-first: synthetic `SupersedeImport` of the first-seen (map-clearable, resolve.rs:430-472) |
