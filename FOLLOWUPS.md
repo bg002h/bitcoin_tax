@@ -4,6 +4,19 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ README (install + verified tutorial) — SHIPPED (2026-07-04)
+
+Greenfield end-user `README.md`: what btctax is, install-from-source (`cargo install --path crates/*`; crates.io
+deferred to the publishing task), and a hands-on tutorial (init → import → verify → reconcile → tax-profile →
+report → export-snapshot) with a synthetic Coinbase CSV. R0-GREEN 2 rounds (round 2 EXECUTED the tutorial
+verbatim); whole-diff re-ran all 6 steps against the built binary — every command works with the promised
+outputs/exit codes. Notable review catches: `report --tax-year` needs a `tax-profile` step first; the
+`export-snapshot` CSVs are NOT git-ignored (warn: export outside the repo); the reconcile event-ref contains
+`|` and must be single-quoted. Merge `926b51a`. Reviews:
+`reviews/{R0-spec-readme-round-{1,2},whole-branch-review-readme-round-1}.md`.
+
+---
+
 ## ✅ cross-platform CI (macOS + Windows test matrix, NFR8) — SHIPPED (2026-07-04)
 
 Matrixed the CI `test` job over ubuntu/macos/windows (`fail-fast:false`) + `.gitattributes` (`* text=auto
