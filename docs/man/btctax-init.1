@@ -1,0 +1,26 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-init 1  btctax "btctax manual"
+.SH NAME
+init \- Create the encrypted vault + force a key backup
+.SH SYNOPSIS
+\fBinit\fR <\fB\-\-key\-backup\fR> [\fB\-\-repair\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Create the encrypted vault + force a key backup
+.SH OPTIONS
+.TP
+\fB\-\-key\-backup\fR \fI<KEY_BACKUP>\fR
+File to write the forced key backup to: an ASCII\-armored, passphrase(S2K)\-encrypted
+private key, owner\-only (mode 0600). Identical format to `backup\-key \-\-out`. Store it
+offline — it is the only way to recover the vault if you lose `vault.key`.
+
+FORMAT (structure — NOT a real key):
+  \-\-\-\-\-BEGIN PGP PRIVATE KEY BLOCK\-\-\-\-\-
+  ... base64 armor of the S2K\-encrypted secret key ...
+  \-\-\-\-\-END PGP PRIVATE KEY BLOCK\-\-\-\-\-
+.TP
+\fB\-\-repair\fR
+Clear an interrupted/half\-created init (orphan `vault.key`, no encrypted store) and start fresh
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)

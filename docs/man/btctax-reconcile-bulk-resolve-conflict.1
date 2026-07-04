@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-bulk-resolve-conflict 1  btctax "btctax manual"
+.SH NAME
+bulk\-resolve\-conflict \- Bulk\-resolve import conflicts: ACCEPT (adopt each new payload) or REJECT (keep each current payload) MANY flagged `ImportConflict`s in one confirmed batch. Shows a `current → new` preview, then requires \-\-yes (or interactive y/N). Exactly one of \-\-accept / \-\-reject is required. Each resolution is NON\-REVOCABLE (`SupersedeImport`/`RejectImport` cannot be voided); to resolve a conflict differently, exclude it and use single\-item `accept\-conflict`/`reject\-conflict`
+.SH SYNOPSIS
+\fBbulk\-resolve\-conflict\fR [\fB\-\-accept\fR] [\fB\-\-reject\fR] [\fB\-\-dry\-run\fR] [\fB\-\-yes\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Bulk\-resolve import conflicts: ACCEPT (adopt each new payload) or REJECT (keep each current payload) MANY flagged `ImportConflict`s in one confirmed batch. Shows a `current → new` preview, then requires \-\-yes (or interactive y/N). Exactly one of \-\-accept / \-\-reject is required. Each resolution is NON\-REVOCABLE (`SupersedeImport`/`RejectImport` cannot be voided); to resolve a conflict differently, exclude it and use single\-item `accept\-conflict`/`reject\-conflict`
+.SH OPTIONS
+.TP
+\fB\-\-accept\fR
+Accept every listed conflict (adopt each new payload onto its target)
+.TP
+\fB\-\-reject\fR
+Reject every listed conflict (keep each target\*(Aqs current payload)
+.TP
+\fB\-\-dry\-run\fR
+Print the preview and exit without writing
+.TP
+\fB\-\-yes\fR
+Skip the interactive confirmation (non\-interactive apply)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

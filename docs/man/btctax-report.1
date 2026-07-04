@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-report 1  btctax "btctax manual"
+.SH NAME
+report \- Show holdings + realized disposals/removals/income. With \-\-tax\-year: standalone TaxResult
+.SH SYNOPSIS
+\fBreport\fR [\fB\-\-year\fR] [\fB\-\-tax\-year\fR] [\fB\-\-prior\-taxable\-gifts\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Show holdings + realized disposals/removals/income. With \-\-tax\-year: standalone TaxResult
+.SH OPTIONS
+.TP
+\fB\-\-year\fR \fI<YEAR>\fR
+Filter realized disposals/removals/income to a specific calendar year (display path)
+.TP
+\fB\-\-tax\-year\fR \fI<TAX_YEAR>\fR
+Compute the crypto\-attributable federal tax for the given tax year (B.5 / Task 9). Requires a stored tax profile (`tax\-profile \-\-year Y ...`) and the bundled TY table. Independent of \-\-year; the two flags are not aliased
+.TP
+\fB\-\-prior\-taxable\-gifts\fR \fI<PRIOR_TAXABLE_GIFTS>\fR
+Cumulative prior\-year TAXABLE gifts (post\-annual\-exclusion Form 709 amounts), not gross gifts. Used for the §2505 lifetime\-exclusion consumption advisory. Defaults to $0 when omitted (the advisory discloses this assumption). Must not be negative
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

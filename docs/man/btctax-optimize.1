@@ -1,0 +1,23 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-optimize 1  btctax "btctax manual"
+.SH NAME
+optimize \- Lot\-specific\-identification optimizer (§C — read\-only proposal or gated persistence)
+.SH SYNOPSIS
+\fBoptimize\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Lot\-specific\-identification optimizer (§C — read\-only proposal or gated persistence)
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+optimize\-run(1)
+Mode\-1 what\-if: print the tax\-saving lot\-selection proposal. NOTHING is filed or bound
+.TP
+optimize\-accept(1)
+Mode\-1 gated persistence: recompute the optimum and persist the proposed LotSelection(s), gated per disposal (§1.1012\-1(j)). A genuinely\-contemporaneous pick (made ≤ sale) persists freely; an already\-executed disposal persists ONLY with a narrow per\-disposal `\-\-attest` scoped to one `\-\-disposal`; a 2027+ broker\-held pick is refused. Revoke via `reconcile void`
+.TP
+optimize\-consult(1)
+Mode\-2 read\-only pre\-trade what\-if (§C.3): tax\-min lots + ST/LT split + federal tax + ST→LT timing. NOTHING is written — no event, no side\-table row. Tax decision\-support only; not buy/sell/hold advice

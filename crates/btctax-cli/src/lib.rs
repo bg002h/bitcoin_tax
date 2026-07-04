@@ -3,6 +3,7 @@
 //! (spec §11). The library is I/O-explicit and deterministic; the binary (`main.rs`) is a thin clap
 //! dispatch. PRIVACY: tests use only temp vaults + synthetic fixtures; no real user file is ever read.
 pub mod bulk_estimated;
+pub mod cli;
 pub mod cmd;
 pub mod config;
 pub mod donation_details;
@@ -12,6 +13,7 @@ pub mod render;
 pub mod session;
 pub mod tax_profile;
 
+pub use cli::Cli;
 pub use config::CliConfig;
 pub use session::{
     BulkFilter, BulkIncomeFilter, BulkIncomePlan, BulkIncomeRow, BulkLinkPlan, BulkLinkRow,

@@ -1,0 +1,26 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-select-lots 1  btctax "btctax manual"
+.SH NAME
+select\-lots \- §A.4 Specific\-ID: pick the exact lots a disposal consumes
+.SH SYNOPSIS
+\fBselect\-lots\fR <\fB\-\-from\fR> [\fB\-h\fR|\fB\-\-help\fR] <\fIDISPOSAL\fR> 
+.SH DESCRIPTION
+§A.4 Specific\-ID: pick the exact lots a disposal consumes
+.SH OPTIONS
+.TP
+\fB\-\-from\fR \fI<FROM>\fR
+One lot pick per \-\-from flag (repeatable). Each PICK is
+`<origin_event_id>#<split_sequence>:<sat>`. The origin_event_id + split come from the
+`lot` column of disposals.csv or the `origin_event`/`split` columns of lots.csv
+(export\-snapshot). The total sat across the picks must equal the disposal\*(Aqs principal
+(validated in the fold).
+
+FORMAT (two picks):
+  \-\-from import|coinbase|X#0:25000 \-\-from import|river|Y#1:5000
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fIDISPOSAL\fR>
+

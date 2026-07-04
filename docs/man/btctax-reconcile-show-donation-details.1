@@ -1,0 +1,16 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-show-donation-details 1  btctax "btctax manual"
+.SH NAME
+show\-donation\-details \- Show stored Form 8283 donation details for a donation event
+.SH SYNOPSIS
+\fBshow\-donation\-details\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIOUT_EVENT_REF\fR> 
+.SH DESCRIPTION
+Show stored Form 8283 donation details for a donation event
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIOUT_EVENT_REF\fR>
+TransferOut event reference for the donation (from removals.csv \*(Aqevent\*(Aq column)

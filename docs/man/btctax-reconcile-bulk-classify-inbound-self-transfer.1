@@ -1,0 +1,31 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-bulk-classify-inbound-self-transfer 1  btctax "btctax manual"
+.SH NAME
+bulk\-classify\-inbound\-self\-transfer \- Bulk\-classify unknown\-basis inbound deposits as self\-transfer\-ins ("my own coins"): apply Cycle A\*(Aqs `SelfTransferMine` ($0 conservative basis, non\-taxable) to MANY pending inbounds in a time frame at once. Shows a preview surfacing the total USD given $0 basis (the over\-tax exposure) + requires \-\-yes (or interactive y/N). Each is a voidable decision; for a deposit whose real cost you can substantiate, classify it single\-item with `classify\-inbound\-self\-transfer \-\-basis`
+.SH SYNOPSIS
+\fBbulk\-classify\-inbound\-self\-transfer\fR [\fB\-\-year\fR] [\fB\-\-from\fR] [\fB\-\-to\fR] [\fB\-\-wallet\fR] [\fB\-\-dry\-run\fR] [\fB\-\-yes\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Bulk\-classify unknown\-basis inbound deposits as self\-transfer\-ins ("my own coins"): apply Cycle A\*(Aqs `SelfTransferMine` ($0 conservative basis, non\-taxable) to MANY pending inbounds in a time frame at once. Shows a preview surfacing the total USD given $0 basis (the over\-tax exposure) + requires \-\-yes (or interactive y/N). Each is a voidable decision; for a deposit whose real cost you can substantiate, classify it single\-item with `classify\-inbound\-self\-transfer \-\-basis`
+.SH OPTIONS
+.TP
+\fB\-\-year\fR \fI<YEAR>\fR
+Restrict to a single tax year (mutually exclusive with \-\-from/\-\-to)
+.TP
+\fB\-\-from\fR \fI<FROM>\fR
+Range start (YYYY\-MM\-DD; requires \-\-to)
+.TP
+\fB\-\-to\fR \fI<TO>\fR
+Range end (YYYY\-MM\-DD, inclusive; requires \-\-from)
+.TP
+\fB\-\-wallet\fR \fI<WALLET>\fR
+Only inbounds received INTO this wallet
+.TP
+\fB\-\-dry\-run\fR
+Print the preview and exit without writing
+.TP
+\fB\-\-yes\fR
+Skip the interactive confirmation (non\-interactive apply)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

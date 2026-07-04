@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-bulk-void 1  btctax "btctax manual"
+.SH NAME
+bulk\-void \- Bulk\-void MANY revocable reconcile decisions in one confirmed batch (bulk\-void). Shows a preview of every voidable decision (the SHARED `voidable_decisions` predicate — effective safe\-harbor allocations are OMITTED, #7), then requires \-\-yes (or interactive y/N). Each void is NON\-REVOCABLE (a `VoidDecisionEvent` cannot itself be voided — re\-apply the original decision to restore). Voiding a `LotSelection` also re\-exposes its disposal to the default method and clears its optimizer attestation
+.SH SYNOPSIS
+\fBbulk\-void\fR [\fB\-\-dry\-run\fR] [\fB\-\-yes\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Bulk\-void MANY revocable reconcile decisions in one confirmed batch (bulk\-void). Shows a preview of every voidable decision (the SHARED `voidable_decisions` predicate — effective safe\-harbor allocations are OMITTED, #7), then requires \-\-yes (or interactive y/N). Each void is NON\-REVOCABLE (a `VoidDecisionEvent` cannot itself be voided — re\-apply the original decision to restore). Voiding a `LotSelection` also re\-exposes its disposal to the default method and clears its optimizer attestation
+.SH OPTIONS
+.TP
+\fB\-\-dry\-run\fR
+Print the preview and exit without writing
+.TP
+\fB\-\-yes\fR
+Skip the interactive confirmation (non\-interactive apply)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

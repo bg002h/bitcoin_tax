@@ -1,0 +1,43 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-reclassify-outflow 1  btctax "btctax manual"
+.SH NAME
+reclassify\-outflow \- Reclassify a pending TransferOut
+.SH SYNOPSIS
+\fBreclassify\-outflow\fR <\fB\-\-as\-kind\fR> <\fB\-\-amount\fR> [\fB\-\-fee\fR] [\fB\-\-appraisal\fR] [\fB\-\-donee\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIOUT\fR> 
+.SH DESCRIPTION
+Reclassify a pending TransferOut
+.SH OPTIONS
+.TP
+\fB\-\-as\-kind\fR \fI<AS_KIND>\fR
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+sell
+.IP \(bu 2
+spend
+.IP \(bu 2
+gift
+.IP \(bu 2
+donate
+.RE
+.TP
+\fB\-\-amount\fR \fI<AMOUNT>\fR
+
+.TP
+\fB\-\-fee\fR \fI<FEE>\fR
+
+.TP
+\fB\-\-appraisal\fR
+
+.TP
+\fB\-\-donee\fR \fI<DONEE>\fR
+Free\-form donee identifier (e.g. "Alice", "Charity X"). Carried through to removals.csv and Form 8283; does not affect tax math
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIOUT\fR>
+

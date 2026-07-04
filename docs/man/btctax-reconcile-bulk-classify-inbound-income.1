@@ -1,0 +1,37 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-bulk-classify-inbound-income 1  btctax "btctax manual"
+.SH NAME
+bulk\-classify\-inbound\-income \- Bulk\-classify unknown\-basis inbound deposits as INCOME (mining|staking|interest|airdrop|reward): recognize MANY pending inbounds as ordinary income at their auto\-FMV (the daily\-close market value at receipt) in one confirmed batch, with a UNIFORM `\-\-kind` + `\-\-business` flag. Shows a preview surfacing the total income recognized + the count of inbounds EXCLUDED because no price was available for their date (those stay pending — an income row with no FMV would year\-gate). Each is a voidable decision; for a single deposit use `classify\-inbound\-income`
+.SH SYNOPSIS
+\fBbulk\-classify\-inbound\-income\fR <\fB\-\-kind\fR> [\fB\-\-business\fR] [\fB\-\-year\fR] [\fB\-\-from\fR] [\fB\-\-to\fR] [\fB\-\-wallet\fR] [\fB\-\-dry\-run\fR] [\fB\-\-yes\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Bulk\-classify unknown\-basis inbound deposits as INCOME (mining|staking|interest|airdrop|reward): recognize MANY pending inbounds as ordinary income at their auto\-FMV (the daily\-close market value at receipt) in one confirmed batch, with a UNIFORM `\-\-kind` + `\-\-business` flag. Shows a preview surfacing the total income recognized + the count of inbounds EXCLUDED because no price was available for their date (those stay pending — an income row with no FMV would year\-gate). Each is a voidable decision; for a single deposit use `classify\-inbound\-income`
+.SH OPTIONS
+.TP
+\fB\-\-kind\fR \fI<KIND>\fR
+Income kind for the whole batch: mining|staking|interest|airdrop|reward
+.TP
+\fB\-\-business\fR
+Whether this income is from a trade or business (true → SE\-tax eligible)
+.TP
+\fB\-\-year\fR \fI<YEAR>\fR
+Restrict to a single tax year (mutually exclusive with \-\-from/\-\-to)
+.TP
+\fB\-\-from\fR \fI<FROM>\fR
+Range start (YYYY\-MM\-DD; requires \-\-to)
+.TP
+\fB\-\-to\fR \fI<TO>\fR
+Range end (YYYY\-MM\-DD, inclusive; requires \-\-from)
+.TP
+\fB\-\-wallet\fR \fI<WALLET>\fR
+Only inbounds received INTO this wallet
+.TP
+\fB\-\-dry\-run\fR
+Print the preview and exit without writing
+.TP
+\fB\-\-yes\fR
+Skip the interactive confirmation (non\-interactive apply)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

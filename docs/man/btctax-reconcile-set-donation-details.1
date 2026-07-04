@@ -1,0 +1,46 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-set-donation-details 1  btctax "btctax manual"
+.SH NAME
+set\-donation\-details \- Store Form 8283 Section\-B donation + appraiser details for a donation event. The event ref is the TransferOut EventId from the removals.csv \*(Aqevent\*(Aq column
+.SH SYNOPSIS
+\fBset\-donation\-details\fR <\fB\-\-donee\-name\fR> [\fB\-\-donee\-address\fR] [\fB\-\-donee\-ein\fR] <\fB\-\-appraiser\-name\fR> [\fB\-\-appraiser\-address\fR] [\fB\-\-appraiser\-tin\fR] [\fB\-\-appraiser\-ptin\fR] [\fB\-\-appraiser\-qualifications\fR] [\fB\-\-appraisal\-date\fR] [\fB\-\-fmv\-method\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIOUT_EVENT_REF\fR> 
+.SH DESCRIPTION
+Store Form 8283 Section\-B donation + appraiser details for a donation event. The event ref is the TransferOut EventId from the removals.csv \*(Aqevent\*(Aq column
+.SH OPTIONS
+.TP
+\fB\-\-donee\-name\fR \fI<DONEE_NAME>\fR
+Donee organization name (Part IV; required)
+.TP
+\fB\-\-donee\-address\fR \fI<DONEE_ADDRESS>\fR
+Donee mailing address (Part IV; optional)
+.TP
+\fB\-\-donee\-ein\fR \fI<DONEE_EIN>\fR
+Donee EIN (Part IV; required for Section\-B completeness)
+.TP
+\fB\-\-appraiser\-name\fR \fI<APPRAISER_NAME>\fR
+Qualified appraiser name (Part III; required)
+.TP
+\fB\-\-appraiser\-address\fR \fI<APPRAISER_ADDRESS>\fR
+Appraiser mailing address (Part III; optional)
+.TP
+\fB\-\-appraiser\-tin\fR \fI<APPRAISER_TIN>\fR
+Appraiser TIN/SSN/EIN (Part III §6695A; satisfies the TIN\-or\-PTIN requirement)
+.TP
+\fB\-\-appraiser\-ptin\fR \fI<APPRAISER_PTIN>\fR
+Appraiser PTIN (Part III §6695A; satisfies the TIN\-or\-PTIN requirement)
+.TP
+\fB\-\-appraiser\-qualifications\fR \fI<APPRAISER_QUALIFICATIONS>\fR
+Appraiser qualifications declaration (§170(f)(11)(E))
+.TP
+\fB\-\-appraisal\-date\fR \fI<APPRAISAL_DATE>\fR
+Date the qualified appraisal was made (YYYY\-MM\-DD)
+.TP
+\fB\-\-fmv\-method\fR \fI<FMV_METHOD>\fR
+FMV determination method override (overrides the section\-derived default on the Form 8283 carrier row; resolves the Section\-A fmv_method deferral when supplied)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIOUT_EVENT_REF\fR>
+TransferOut event reference for the donation (from removals.csv \*(Aqevent\*(Aq column)

@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-optimize-accept 1  btctax "btctax manual"
+.SH NAME
+accept \- Mode\-1 gated persistence: recompute the optimum and persist the proposed LotSelection(s), gated per disposal (§1.1012\-1(j)). A genuinely\-contemporaneous pick (made ≤ sale) persists freely; an already\-executed disposal persists ONLY with a narrow per\-disposal `\-\-attest` scoped to one `\-\-disposal`; a 2027+ broker\-held pick is refused. Revoke via `reconcile void`
+.SH SYNOPSIS
+\fBaccept\fR <\fB\-\-tax\-year\fR> [\fB\-\-disposal\fR] [\fB\-\-attest\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Mode\-1 gated persistence: recompute the optimum and persist the proposed LotSelection(s), gated per disposal (§1.1012\-1(j)). A genuinely\-contemporaneous pick (made ≤ sale) persists freely; an already\-executed disposal persists ONLY with a narrow per\-disposal `\-\-attest` scoped to one `\-\-disposal`; a 2027+ broker\-held pick is refused. Revoke via `reconcile void`
+.SH OPTIONS
+.TP
+\fB\-\-tax\-year\fR \fI<TAX_YEAR>\fR
+The tax year to accept (must be 2025 or later)
+.TP
+\fB\-\-disposal\fR \fI<DISPOSAL>\fR
+Restrict to ONE disposal (required to carry `\-\-attest`)
+.TP
+\fB\-\-attest\fR \fI<ATTEST>\fR
+Narrow contemporaneous\-ID attestation for an already\-executed disposal. Requires `\-\-disposal` (no blanket attestation across all disposals)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
