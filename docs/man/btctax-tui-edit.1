@@ -1,0 +1,121 @@
+.TH btctax-tui-edit 1  btctax "btctax manual"
+.SH NAME
+btctax\-tui\-edit \- interactive editor for a btctax vault (records reconciliation decisions)
+.SH SYNOPSIS
+.B btctax\-tui\-edit
+[\fB\-\-vault\fR \fIPATH\fR | \fIPATH\fR]
+.SH DESCRIPTION
+.B btctax\-tui\-edit
+is the interactive terminal EDITOR for a btctax vault. It shows the same tabs as the
+read\-only viewer
+.BR btctax\-tui (1)
+and adds the full set of reconciliation actions. Every write is an append\-only event (or a
+typed side\-table upsert) recorded only AFTER an explicit, payload\-showing confirmation; the
+vault file itself is written only via the atomic save path.
+.PP
+On launch it prompts for the vault passphrase. The vault path is taken from
+.B \-\-vault
+.I PATH
+or a bare positional
+.IR PATH ;
+when omitted it defaults to
+.BR ~/Documents/BitcoinTax/vault.pgp .
+Press
+.B ?
+at any time for the in\-app keymap overlay (the same bindings listed below).
+.SH TABS
+Holdings, Disposals, Income, Tax, Forms, Compliance \(em identical to
+.BR btctax\-tui (1).
+.SH KEY BINDINGS
+.SS Navigation
+.TP
+.B Tab / Shift\-Tab
+Switch tab.
+.TP
+.B \(<- / \(->
+Change tax year.
+.TP
+.B j / k , Up / Down
+Scroll.
+.TP
+.B PgUp / PgDn
+Page.
+.TP
+.B g / G
+Top / bottom.
+.SS Reconcile
+.TP
+.B c
+classify\-inbound
+.TP
+.B o
+reclassify\-outflow
+.TP
+.B r
+reclassify\-income
+.TP
+.B f
+set\-fmv
+.TP
+.B v
+void
+.TP
+.B s
+select\-lots
+.TP
+.B d
+donation\-details
+.TP
+.B l
+link\-transfer
+.TP
+.B u
+classify\-raw
+.TP
+.B m
+match\-self\-transfers
+.TP
+.B i
+resolve\-conflict
+.TP
+.B z
+optimize
+.TP
+.B a / A
+safe\-harbor attest / allocate
+.SS Bulk
+.TP
+.B b
+link
+.TP
+.B B
+self\-transfer\-in
+.TP
+.B C
+resolve\-conflict
+.TP
+.B V
+void
+.TP
+.B I
+income
+.TP
+.B O
+reclassify\-outflow
+.SS App
+.TP
+.B p
+profile
+.TP
+.B ?
+help overlay
+.TP
+.B q / Esc
+close / quit
+.SH FILES
+.TP
+.B ~/Documents/BitcoinTax/vault.pgp
+Default vault path (override with \fB\-\-vault\fR or a positional path).
+.SH SEE ALSO
+.BR btctax (1),
+.BR btctax\-tui (1)

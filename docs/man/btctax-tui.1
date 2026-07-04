@@ -1,0 +1,87 @@
+.TH btctax-tui 1  btctax "btctax manual"
+.SH NAME
+btctax\-tui \- interactive read\-only viewer for a btctax vault
+.SH SYNOPSIS
+.B btctax\-tui
+[\fB\-\-vault\fR \fIPATH\fR | \fIPATH\fR]
+.SH DESCRIPTION
+.B btctax\-tui
+is the interactive, READ\-ONLY terminal viewer for a btctax vault. It never writes to the
+vault \(em use
+.BR btctax\-tui\-edit (1)
+to record reconciliation decisions, or
+.BR btctax (1)
+for the scriptable command line.
+.PP
+On launch it prompts for the vault passphrase (the Unlock screen). Once unlocked it shows a
+tab bar across the projections; use the keys below to switch tabs, change the tax year, and
+scroll. Press
+.B e
+to export the decrypted snapshot + CSVs for the selected year.
+.PP
+The vault path is taken from
+.B \-\-vault
+.I PATH
+or a bare positional
+.IR PATH ;
+when omitted it defaults to
+.BR ~/Documents/BitcoinTax/vault.pgp .
+.SH TABS
+.TP
+.B Holdings
+Current per\-wallet lots and remaining balances.
+.TP
+.B Disposals
+Realized sales/spends with gain/loss and holding term.
+.TP
+.B Income
+Recognized ordinary income (mining/staking/interest/airdrop/reward).
+.TP
+.B Tax
+Per\-tax\-year federal tax summary for the selected year.
+.TP
+.B Forms
+Generated filing artifacts (Form 8949 / Schedule D / Schedule SE / Form 8283).
+.TP
+.B Compliance
+FR9 integrity checks and open reconciliation blockers.
+.SH KEY BINDINGS
+.SS Unlock screen
+.TP
+.B (type)
+Enter the vault passphrase.
+.B Enter
+unlocks;
+.B Backspace
+edits;
+.B Esc
+quits.
+.SS Viewer
+.TP
+.B Tab / Shift\-Tab
+Next / previous tab.
+.TP
+.B \(<- / \(->
+Previous / next tax year (resets the row selection).
+.TP
+.B Up / k , Down / j
+Scroll the table up / down.
+.TP
+.B PgUp / PgDn
+Page up / down.
+.TP
+.B g / G
+Jump to top / bottom.
+.TP
+.B e
+Export the decrypted snapshot + projection CSVs for the selected year (confirmation modal).
+.TP
+.B q / Esc
+Quit.
+.SH FILES
+.TP
+.B ~/Documents/BitcoinTax/vault.pgp
+Default vault path (override with \fB\-\-vault\fR or a positional path).
+.SH SEE ALSO
+.BR btctax (1),
+.BR btctax\-tui\-edit (1)

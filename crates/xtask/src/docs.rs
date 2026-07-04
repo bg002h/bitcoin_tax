@@ -307,4 +307,63 @@ mod tests {
             );
         }
     }
+
+    /// Structural guard over EVERY committed page (generated + the hand-authored TUI pages):
+    /// each has NAME + SYNOPSIS; the root btctax.1 has DESCRIPTION + FILES + EXAMPLES; and the
+    /// hand-authored TUI pages document their tab set + keys (tui-edit lists `?`, `V`, `O`).
+    #[test]
+    fn manpages_have_required_sections() {
+        let dir = man_dir();
+        let mut pages: Vec<String> = std::fs::read_dir(&dir)
+            .expect("docs/man exists")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".1"))
+            .collect();
+        pages.sort();
+        assert!(
+            pages.len() >= 40,
+            "expected root + subcommands + 2 TUI pages, got {pages:?}"
+        );
+
+        for name in &pages {
+            let page = committed(name);
+            assert!(
+                page.contains(".SH NAME"),
+                "{name} is missing a NAME section"
+            );
+            assert!(
+                page.contains(".SH SYNOPSIS"),
+                "{name} is missing a SYNOPSIS section"
+            );
+        }
+
+        // Root: the hand-authored DESCRIPTION / FILES / EXAMPLES stitched by render_root.
+        let root = committed("btctax.1");
+        for sec in [".SH DESCRIPTION", ".SH FILES", ".SH EXAMPLES"] {
+            assert!(root.contains(sec), "root btctax.1 missing {sec}");
+        }
+
+        // Hand-authored TUI pages: tab set + keymap.
+        for tui in ["btctax-tui.1", "btctax-tui-edit.1"] {
+            let p = committed(tui);
+            for tab in [
+                "Holdings",
+                "Disposals",
+                "Income",
+                "Tax",
+                "Forms",
+                "Compliance",
+            ] {
+                assert!(p.contains(tab), "{tui} must document the {tab} tab");
+            }
+        }
+        let edit = committed("btctax-tui-edit.1");
+        for key in ["\n.B ?", "\n.B V", "\n.B O"] {
+            assert!(
+                edit.contains(key),
+                "btctax-tui-edit.1 must list the {key:?} action key (copy of the ? overlay)"
+            );
+        }
+    }
 }
