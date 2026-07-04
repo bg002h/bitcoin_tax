@@ -342,12 +342,18 @@ pub fn apply_bulk_classify_inbound_income(
             continue;
         };
         let date = btctax_core::conventions::tax_date(ev.utc_timestamp, ev.original_tz);
-        let fmv = btctax_core::price::fmv_of(&prices, date, ti.sat);
+        // #a defense-in-depth: a missing-price row must NEVER be emitted as `Income { fmv: None }`
+        // (→ Hard `FmvMissing` year-gate, unrecoverable without void+reclassify). The plan already
+        // excludes these; skipping here makes `Income{fmv:None}` STRUCTURALLY unreachable from this
+        // `pub` apply even if a future caller passed a non-plan-filtered id.
+        let Some(fmv) = btctax_core::price::fmv_of(&prices, date, ti.sat) else {
+            continue;
+        };
         let payload = EventPayload::ClassifyInbound(ClassifyInbound {
             transfer_in_event: in_event.clone(),
             as_: InboundClass::Income {
                 kind,
-                fmv,
+                fmv: Some(fmv),
                 business,
             },
         });
