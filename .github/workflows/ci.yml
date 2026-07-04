@@ -12,9 +12,16 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Runs on all three target OSes (NFR8). The macOS + Windows legs are what actually
+  # EXERCISE the store's cfg-gated OS primitives (fs2 file locks, mlock/VirtualLock,
+  # atomic rename, owner-only perms) — compile-checked on Linux, executed here.
   test:
     name: test
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # see all three OS results, not just the first failure
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # v1
