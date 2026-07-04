@@ -3,6 +3,11 @@ name = "btctax-store"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
+description = "Encrypted, atomic, single-user vault storage for the btctax Bitcoin tax ledger."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories = ["finance"]
 
 [dependencies]
 # crypto-rust = pure-Rust backend (no system crypto lib) → cross-platform (NFR8); allow-variable-time-crypto needed for RSA.

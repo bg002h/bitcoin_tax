@@ -10,6 +10,6 @@ publish = false
 # `btctax` binary / btctax-cli). `cargo run -p xtask -- docs` regenerates docs/man/*.1 + PDFs.
 
 [dependencies]
-btctax-cli = { path = "../btctax-cli" }
+btctax-cli = { path = "../btctax-cli", version = "0.1.0" }
 clap = "4.5"          # for `clap::Command` + the `CommandFactory` trait (Cli::command())
 clap_mangen = "0.2"   # roff man-page generator (clap 4.x-compatible); generator-only

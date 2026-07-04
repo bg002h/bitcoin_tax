@@ -5,3 +5,6 @@ members = ["crates/btctax-store", "crates/btctax-core", "crates/btctax-adapters"
 edition = "2021"
 license = "MIT OR Unlicense"
 rust-version = "1.88"
+repository = "https://github.com/bg002h/bitcoin_tax"
+homepage = "https://github.com/bg002h/bitcoin_tax"
+keywords = ["bitcoin", "tax", "cryptocurrency", "accounting", "ledger"]
