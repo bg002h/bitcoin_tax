@@ -133,3 +133,121 @@ fn config_binary_attest_without_set_pre2025_method_is_an_error() {
         "config --attest-pre2025-method without --set-pre2025-method must exit non-zero (Usage error)"
     );
 }
+
+/// §A.5(a) T3 — `config --set-forward-method <m> --exchange exchange:PROVIDER:ACCOUNT` appends a
+/// SCOPED `MethodElection` (wallet in the PAYLOAD) when the account is known; and rejects LOUDLY an
+/// unknown account, a `self:` scope, and an orphan `--exchange` (no `--set-forward-method`).
+#[test]
+fn config_set_forward_method_exchange_scoped() {
+    use btctax_core::event::{Acquire, BasisSource};
+    use btctax_core::identity::{Source, SourceRef, WalletId};
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::{EventId, LedgerEvent};
+    use time::macros::datetime;
+    use time::UtcOffset;
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Seed a KNOWN exchange account (coinbase:main) via a synthetic Acquire import.
+    let acquire = LedgerEvent {
+        id: EventId::import(Source::Coinbase, SourceRef::new("cb-buy-1")),
+        utc_timestamp: datetime!(2025-02-01 00:00:00 UTC),
+        original_tz: UtcOffset::UTC,
+        wallet: Some(WalletId::Exchange {
+            provider: "coinbase".into(),
+            account: "main".into(),
+        }),
+        payload: EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: rust_decimal_macros::dec!(50.00),
+            fee_usd: rust_decimal_macros::dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    };
+    {
+        let mut s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        append_import_batch(s.conn(), &[acquire]).unwrap();
+        s.save().unwrap();
+    }
+
+    // (1) Known account → success; a SCOPED MethodElection is persisted (wallet in the payload).
+    let (code, stdout) = run_config(
+        &vault,
+        &[
+            "--set-forward-method",
+            "hifo",
+            "--exchange",
+            "exchange:coinbase:main",
+        ],
+    );
+    assert_eq!(
+        code, 0,
+        "scoped election on a known account must exit 0; stdout: {stdout}"
+    );
+    {
+        let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        let events = persistence::load_all(s.conn()).unwrap();
+        let me = events
+            .iter()
+            .find_map(|e| match &e.payload {
+                EventPayload::MethodElection(m) => Some(m.clone()),
+                _ => None,
+            })
+            .expect("a MethodElection must be persisted");
+        assert_eq!(me.method, LotMethod::Hifo);
+        assert_eq!(
+            me.wallet,
+            Some(WalletId::Exchange {
+                provider: "coinbase".into(),
+                account: "main".into()
+            }),
+            "the per-account scope must ride in the MethodElection PAYLOAD"
+        );
+    }
+
+    // (2) Unknown account → rejected LOUDLY (a typo can't create a dead election).
+    let (code_unknown, _) = run_config(
+        &vault,
+        &[
+            "--set-forward-method",
+            "hifo",
+            "--exchange",
+            "exchange:bogus:acct",
+        ],
+    );
+    assert_ne!(
+        code_unknown, 0,
+        "an unknown exchange account must be rejected (non-zero exit)"
+    );
+
+    // (3) self:LABEL scope → rejected (only exchange accounts are electable).
+    let (code_self, _) = run_config(
+        &vault,
+        &["--set-forward-method", "hifo", "--exchange", "self:cold"],
+    );
+    assert_ne!(
+        code_self, 0,
+        "a self:LABEL scope must be rejected (only exchange accounts are electable)"
+    );
+
+    // (4) Orphan --exchange (no --set-forward-method) → rejected (mirror the attest-guard).
+    let (code_orphan, _) = run_config(&vault, &["--exchange", "exchange:coinbase:main"]);
+    assert_ne!(
+        code_orphan, 0,
+        "--exchange without --set-forward-method must exit non-zero"
+    );
+
+    // Exactly ONE MethodElection remains (the rejected attempts appended nothing).
+    let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+    let events = persistence::load_all(s.conn()).unwrap();
+    let n = events
+        .iter()
+        .filter(|e| matches!(e.payload, EventPayload::MethodElection(_)))
+        .count();
+    assert_eq!(
+        n, 1,
+        "rejected scoped-election attempts must append nothing"
+    );
+}

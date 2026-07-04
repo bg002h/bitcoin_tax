@@ -7,7 +7,7 @@ use btctax_cli::cli::{
 use btctax_cli::{cmd, eventref, render, CliError};
 use btctax_core::{
     AllocMethod, Carryforward, DisposeKind, DonationDetails, FeeTreatment, FilingStatus,
-    InboundClass, IncomeKind, OutflowClass, TaxProfile, TransferTarget,
+    InboundClass, IncomeKind, LotMethod, OutflowClass, TaxProfile, TransferTarget,
 };
 use btctax_store::Passphrase;
 use clap::Parser;
@@ -213,6 +213,7 @@ fn run() -> Result<ExitCode, CliError> {
             set_pre2025_method,
             attest_pre2025_method,
             set_forward_method,
+            exchange,
             effective_from,
         } => {
             let pp = passphrase(false)?;
@@ -226,6 +227,14 @@ fn run() -> Result<ExitCode, CliError> {
                 ));
             }
 
+            // Mirror the attest-guard for the per-account scope: --exchange without
+            // --set-forward-method would silently no-op. Reject loudly (no event recorded).
+            if exchange.is_some() && set_forward_method.is_none() {
+                return Err(CliError::Usage(
+                    "--exchange requires --set-forward-method".into(),
+                ));
+            }
+
             // M3 (apply-all, no silent drop): --set-forward-method APPENDS a MethodElection
             // decision (SPEC A.1 standing order) — it is an event, not a flag mutation. The old
             // dispatch returned early here, silently dropping any co-passed --set-fee-treatment /
@@ -236,11 +245,27 @@ fn run() -> Result<ExitCode, CliError> {
                     .as_deref()
                     .map(eventref::parse_date_arg)
                     .transpose()?;
-                let id = cmd::reconcile::set_forward_method(vault, &pp, m.into(), eff, now)?;
-                println!(
-                    "Recorded standing order (MethodElection) {}",
-                    id.canonical()
-                );
+                // [R0-I2] Parse --exchange via the CANONICAL wallet grammar
+                // (exchange:PROVIDER:ACCOUNT) — never a forked `/` delimiter. Validation against the
+                // vault's known Exchange accounts (and self:LABEL rejection) happens in
+                // `set_forward_method`, which has the loaded events.
+                let wallet = exchange
+                    .as_deref()
+                    .map(eventref::parse_wallet_id)
+                    .transpose()?;
+                let lm: LotMethod = m.into();
+                let id = cmd::reconcile::set_forward_method(vault, &pp, lm, wallet, eff, now)?;
+                match &exchange {
+                    Some(x) => println!(
+                        "Recorded per-account standing order (MethodElection) {} — attests {:?} for {x}",
+                        id.canonical(),
+                        lm
+                    ),
+                    None => println!(
+                        "Recorded standing order (MethodElection) {}",
+                        id.canonical()
+                    ),
+                }
             }
 
             // Task-1 review Minor (apply-all): apply each provided flag independently — no

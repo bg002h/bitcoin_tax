@@ -323,6 +323,7 @@ fn verify_lists_election_history_and_selection_count_and_compliance() {
         &vault,
         &pp(),
         btctax_core::LotMethod::Hifo,
+        None, // global scope (unchanged behavior)
         Some(date!(2025 - 06 - 01)),
         now(),
     )

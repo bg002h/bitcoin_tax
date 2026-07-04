@@ -241,10 +241,21 @@ pub struct LotPick {
 /// that tax-date to `method`; it CANNOT be back-dated (must be ≥ its made-date and ≥ TRANSITION_DATE, else
 /// the `MethodElectionBackdated` hard blocker fires in `resolve`). The latest-in-force election (by
 /// `effective_from`, tie `decision_seq`) governs; FIFO is the regulatory default before any election.
+///
+/// `wallet` scopes the election (IRS 2025+ per-account rule): `None` = a GLOBAL forward standing order
+/// (today's exact behavior); `Some(WalletId::Exchange{..})` = the method for THAT exchange ACCOUNT only.
+/// Resolution is TWO INDEPENDENT TIERS (`fold::applicable_method` / `disposal_compliance` via the shared
+/// `resolve::resolve_election`): the latest in-force SCOPED election for the disposal's wallet wins; only
+/// if none is in force does the latest in-force GLOBAL election govern; else FIFO. `#[serde(default)]` is
+/// MANDATORY — pre-existing on-disk events (no `wallet` field) deserialize as `wallet: None` = global
+/// (precedent: `#[serde(default)] pre2025_method`, event.rs). Only `Exchange` wallets are electable (a
+/// method election is a brokerage-account concept); a non-`Exchange` scope is rejected at the CLI/TUI edge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MethodElection {
     pub effective_from: TaxDate,
     pub method: LotMethod,
+    #[serde(default)]
+    pub wallet: Option<WalletId>,
 }
 
 /// Self-transfer completion Cycle B (C1): the DROP primitive. Confirms that an inbound leg (`in_event`,
@@ -497,6 +508,7 @@ mod tests {
             EventPayload::MethodElection(MethodElection {
                 effective_from: time::Date::from_calendar_date(2025, time::Month::June, 1).unwrap(),
                 method: crate::LotMethod::Hifo,
+                wallet: None,
             }),
             EventPayload::LotSelection(LotSelection {
                 disposal_event: EventId::import(Source::Coinbase, SourceRef::new("P")),
@@ -549,8 +561,46 @@ mod tests {
         let me = EventPayload::MethodElection(MethodElection {
             effective_from: time::Date::from_calendar_date(2025, time::Month::June, 1).unwrap(),
             method: crate::LotMethod::Lifo,
+            wallet: None,
         });
         assert!(crate::persistence::fingerprint(&me).is_none());
+    }
+
+    /// [T1 back-compat KAT] An on-disk `MethodElection` written BEFORE the per-account scope existed
+    /// (no `wallet` field) MUST deserialize to `wallet: None` = a GLOBAL election (today's exact
+    /// behavior). `#[serde(default)]` is load-bearing — without it every pre-existing vault fails to
+    /// load with a missing-field error. Pinned with a fixed old-JSON fixture (precedent: the
+    /// `#[serde(default)] pre2025_method` / `donee` back-compat guarantees). `time::Date` serializes
+    /// as a `[year, ordinal]` array under the `serde` feature (2025-06-01 = ordinal 152).
+    #[test]
+    fn serde_backcompat_old_methodelection_loads_as_global() {
+        // Fixed fixture: the exact JSON an OLD binary wrote — NO `wallet` key.
+        let old_json = r#"{"effective_from":[2025,152],"method":"Hifo"}"#;
+        assert!(
+            !old_json.contains("wallet"),
+            "fixture must model pre-scope on-disk JSON (no wallet field)"
+        );
+        let back: MethodElection = serde_json::from_str(old_json).unwrap();
+        assert_eq!(
+            back,
+            MethodElection {
+                effective_from: time::Date::from_calendar_date(2025, time::Month::June, 1).unwrap(),
+                method: crate::LotMethod::Hifo,
+                wallet: None, // missing field defaults to None = global (today's behavior)
+            }
+        );
+        // And a SCOPED election round-trips (the new capability): Some(Exchange{..}) survives.
+        let scoped = MethodElection {
+            effective_from: time::Date::from_calendar_date(2025, time::Month::June, 1).unwrap(),
+            method: crate::LotMethod::Lifo,
+            wallet: Some(crate::identity::WalletId::Exchange {
+                provider: "coinbase".into(),
+                account: "main".into(),
+            }),
+        };
+        let round: MethodElection =
+            serde_json::from_str(&serde_json::to_string(&scoped).unwrap()).unwrap();
+        assert_eq!(round, scoped);
     }
 
     /// [R0-Minor] SE Chunk C KAT: `ReclassifyIncome.fingerprint() == None` (decision variant;

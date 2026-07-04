@@ -465,6 +465,34 @@ impl Session {
         Ok((events, state, cfg))
     }
 
+    /// §A.5(a): the distinct Exchange accounts in the vault, each with its currently-in-force
+    /// cost-basis method and whether that method is an explicit per-account election (`true`) vs
+    /// inherited from a global election / FIFO default (`false`), as of `date`. Feeds the
+    /// btctax-tui-edit method-election flow's account list. Uses the SHARED resolver via
+    /// `btctax_core::in_force_methods` (the sole precedence path). Sorted by `WalletId: Ord`.
+    pub fn exchange_method_election_rows(
+        &self,
+        date: TaxDate,
+    ) -> Result<Vec<(WalletId, LotMethod, bool)>, CliError> {
+        let events = load_all(self.conn())?;
+        let cfg = self.config()?.to_projection();
+        let prices = BundledPrices::load()?;
+        // Distinct Exchange wallets (BTreeSet dedups AND sorts — NFR4).
+        let wallets: Vec<WalletId> = events
+            .iter()
+            .filter_map(|e| e.wallet.clone())
+            .filter(|w| matches!(w, WalletId::Exchange { .. }))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let methods = btctax_core::in_force_methods(&events, &prices, &cfg, date, &wallets);
+        Ok(wallets
+            .into_iter()
+            .zip(methods)
+            .map(|(w, m)| (w, m.method, m.scoped))
+            .collect())
+    }
+
     /// Recompute the Mode-1 optimizer proposal for `year` on the HELD session. READ-ONLY: appends and
     /// persists NOTHING (a clone-fold-discard recompute).
     ///

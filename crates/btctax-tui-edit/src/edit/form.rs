@@ -842,6 +842,61 @@ pub fn cycle_business_optional(b: Option<bool>) -> Option<bool> {
     }
 }
 
+// ── Method-election flow types (§A.5(a) per-account cost-basis method) ─────────
+
+/// Cycle through the lot method (Fifo → Hifo → Lifo → Fifo). The chosen method is REQUIRED — there is
+/// no None state (unlike the reclassify-income pickers): the flow seeds the picker to the account's
+/// currently-resolved method, so Enter always has a concrete method.
+pub fn cycle_lot_method(m: LotMethod) -> LotMethod {
+    match m {
+        LotMethod::Fifo => LotMethod::Hifo,
+        LotMethod::Hifo => LotMethod::Lifo,
+        LotMethod::Lifo => LotMethod::Fifo,
+    }
+}
+
+/// Human-readable method label for the list/modal (FIFO/HIFO/LIFO).
+pub fn lot_method_label(m: LotMethod) -> &'static str {
+    match m {
+        LotMethod::Fifo => "FIFO",
+        LotMethod::Hifo => "HIFO",
+        LotMethod::Lifo => "LIFO",
+    }
+}
+
+/// Pre-computed display data for a method-election account row: an Exchange account, its
+/// currently-resolved method, and whether that method is an explicit per-account election (`scoped`)
+/// or inherited from a global election / the FIFO default.
+#[derive(Clone)]
+pub struct MethodElectionListItem {
+    pub wallet: WalletId,
+    pub current: LotMethod,
+    pub scoped: bool,
+}
+
+/// Step in the method-election flow.
+pub enum MethodElectionStep {
+    List,
+    Choose {
+        item: MethodElectionListItem,
+        /// The method being elected — seeded to `item.current`; Tab cycles it. Always concrete.
+        method: LotMethod,
+        error: Option<String>,
+    },
+}
+
+/// Full state for the method-election flow.
+pub struct MethodElectionFlowState {
+    pub list: TargetList<MethodElectionListItem>,
+    pub step: MethodElectionStep,
+}
+
+/// Payload for the method-election confirmation ("attest") modal.
+pub struct MethodElectionModalState {
+    pub wallet: WalletId,
+    pub method: LotMethod,
+}
+
 // ── Void flow types ───────────────────────────────────────────────────────────
 
 /// Pre-computed display data for a void-decision list row.

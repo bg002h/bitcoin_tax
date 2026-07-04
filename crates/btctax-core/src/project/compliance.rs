@@ -6,7 +6,7 @@
 use crate::conventions::{tax_date, TaxDate, TRANSITION_DATE};
 use crate::event::{EventPayload, LedgerEvent};
 use crate::identity::{EventId, WalletId};
-use crate::project::resolve::method_election_is_forward;
+use crate::project::resolve::{method_election_is_forward, resolve_election, ElectionRec};
 use crate::state::LedgerState;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -33,18 +33,17 @@ pub struct DisposalCompliance {
     pub status: ComplianceStatus,
 }
 
-/// Internal: a non-voided `MethodElection` whose `effective_from` passes the backdating guard.
-struct Election {
-    effective_from: TaxDate,
-    decision_seq: u64,
-}
-
 /// Collect all non-voided, non-backdated `MethodElection` decisions that are on or after
-/// `TRANSITION_DATE` and whose `effective_from` ≥ their made-date (the backdating guard).
+/// `TRANSITION_DATE` and whose `effective_from` ≥ their made-date (the backdating guard) into
+/// `ElectionRec`s — CARRYING THE PER-WALLET SCOPE — so the SHARED `resolve_election` resolver
+/// (the same one the fold uses) can apply the two-independent-tiers precedence here [R0-I1]. Without
+/// the scope, a scoped `Coinbase→HIFO` election would falsely tag a `Gemini` disposal as
+/// `StandingOrder` (over-reporting §A.5(a)); with it, tier 1 (scoped) is empty for Gemini and tier 2
+/// (global) is empty, so the Gemini disposal is correctly `NonCompliant`.
 ///
 /// Uses the shared `method_election_is_forward` predicate from `resolve.rs` so that both callers
 /// stay in sync with the §A.5(a) spec rule without duplicating the guard condition.
-fn collect_elections(events: &[LedgerEvent], voided: &BTreeSet<EventId>) -> Vec<Election> {
+fn collect_elections(events: &[LedgerEvent], voided: &BTreeSet<EventId>) -> Vec<ElectionRec> {
     let mut out = Vec::new();
     for e in events {
         let EventId::Decision { seq } = e.id else {
@@ -56,9 +55,11 @@ fn collect_elections(events: &[LedgerEvent], voided: &BTreeSet<EventId>) -> Vec<
         if let EventPayload::MethodElection(me) = &e.payload {
             let made = tax_date(e.utc_timestamp, e.original_tz);
             if method_election_is_forward(me, made) {
-                out.push(Election {
+                out.push(ElectionRec {
                     effective_from: me.effective_from,
+                    method: me.method,
                     decision_seq: seq,
+                    wallet: me.wallet.clone(),
                 });
             }
         }
@@ -142,11 +143,11 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
     //      NonCompliant. A standing order may NEVER rescue a post-hoc selection.
     //   3. Only when NO selection was applied: an in-force `MethodElection` → StandingOrder.
     //   4. Otherwise → NonCompliant.
-    let classify = |disposal: &EventId, date: TaxDate| -> ComplianceStatus {
+    let classify = |disposal: &EventId, wallet: &WalletId, date: TaxDate| -> ComplianceStatus {
         // (1) Broker-communication envelope (2027+): own-books identification is insufficient for
         // broker-custodied units — the broker side must communicate the basis. `AttestedRecording`
         // (§C.2) is the C gate; A cannot confer it here.
-        let broker = matches!(wallet_of.get(disposal), Some(WalletId::Exchange { .. }));
+        let broker = matches!(wallet, WalletId::Exchange { .. });
         if broker && date.year() >= 2027 {
             return ComplianceStatus::NonCompliant;
         }
@@ -163,19 +164,12 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
             return ComplianceStatus::NonCompliant;
         }
 
-        // (3) §A.5(a) standing order — only reachable when NO selection was applied: the latest
-        // in-force election (by effective_from, tie: decision_seq) whose effective_from ≤ disposal
-        // date.
-        if let Some(ef) = elections
-            .iter()
-            .filter(|e| e.effective_from <= date)
-            .max_by(|a, b| {
-                a.effective_from
-                    .cmp(&b.effective_from)
-                    .then(a.decision_seq.cmp(&b.decision_seq))
-            })
-            .map(|e| e.effective_from)
-        {
+        // (3) §A.5(a) standing order — only reachable when NO selection was applied: the SHARED
+        // wallet-aware `resolve_election` (the SAME resolver the fold uses) selects the in-force
+        // election for THIS wallet via two independent tiers (scoped, then global) [R0-I1/R0-M2]. Its
+        // `effective_from` becomes the StandingOrder date. A scoped election on a DIFFERENT wallet
+        // never taints this disposal (tier 1 empty, tier 2 global empty ⇒ None ⇒ NonCompliant).
+        if let Some(ef) = resolve_election(date, wallet, &elections).map(|e| e.effective_from) {
             return ComplianceStatus::StandingOrder { effective_from: ef };
         }
 
@@ -196,7 +190,7 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
                 disposal: d.event.clone(),
                 wallet: w.clone(),
                 date: d.disposed_at,
-                status: classify(&d.event, d.disposed_at),
+                status: classify(&d.event, w, d.disposed_at),
             });
         }
     }
@@ -210,7 +204,7 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
                 disposal: r.event.clone(),
                 wallet: w.clone(),
                 date: r.removed_at,
-                status: classify(&r.event, r.removed_at),
+                status: classify(&r.event, w, r.removed_at),
             });
         }
     }

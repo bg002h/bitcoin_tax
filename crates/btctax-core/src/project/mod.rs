@@ -59,3 +59,50 @@ pub fn project(
     let resolution = resolve::resolve(events, prices, config);
     fold::fold(resolution, prices, config)
 }
+
+/// The cost-basis method currently in force for a wallet, plus its provenance — the UI-facing answer
+/// to "what method governs this account, and is it an explicit per-account election or inherited?"
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InForceMethod {
+    pub method: LotMethod,
+    /// `true` ⇒ the method came from a PER-ACCOUNT (scoped) election for this wallet; `false` ⇒ it is
+    /// inherited from a GLOBAL election or the FIFO default (pre-2025 dates: the `pre2025_method`).
+    pub scoped: bool,
+}
+
+/// §A.5(a) UI helper: the in-force method for each of `wallets` as of `date`, resolved by the SAME
+/// shared two-tier resolver (`resolve::resolve_election`) the fold and compliance use — scoped
+/// election → global election → FIFO — never a re-implementation of the precedence. Pre-2025 `date`s
+/// report `pre2025_method` (inherited). Runs `resolve` ONCE; the returned Vec is aligned with
+/// `wallets`. Used by the btctax-tui-edit method-election flow to show each account's resolved method.
+pub fn in_force_methods(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    date: crate::conventions::TaxDate,
+    wallets: &[crate::identity::WalletId],
+) -> Vec<InForceMethod> {
+    let res = resolve::resolve(events, prices, config);
+    wallets
+        .iter()
+        .map(|w| {
+            if date < crate::conventions::TRANSITION_DATE {
+                InForceMethod {
+                    method: config.pre2025_method,
+                    scoped: false,
+                }
+            } else {
+                match resolve::resolve_election(date, w, &res.elections) {
+                    Some(e) => InForceMethod {
+                        method: e.method,
+                        scoped: e.wallet.is_some(),
+                    },
+                    None => InForceMethod {
+                        method: LotMethod::Fifo,
+                        scoped: false,
+                    },
+                }
+            }
+        })
+        .collect()
+}

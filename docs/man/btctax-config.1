@@ -4,7 +4,7 @@
 .SH NAME
 config \- Show or set projection config (TP8 fee treatment / pre\-2025 lot method / forward method)
 .SH SYNOPSIS
-\fBconfig\fR [\fB\-\-set\-fee\-treatment\fR] [\fB\-\-set\-pre2025\-method\fR] [\fB\-\-attest\-pre2025\-method\fR] [\fB\-\-set\-forward\-method\fR] [\fB\-\-effective\-from\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBconfig\fR [\fB\-\-set\-fee\-treatment\fR] [\fB\-\-set\-pre2025\-method\fR] [\fB\-\-attest\-pre2025\-method\fR] [\fB\-\-set\-forward\-method\fR] [\fB\-\-exchange\fR] [\fB\-\-effective\-from\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 Show or set projection config (TP8 fee treatment / pre\-2025 lot method / forward method)
 .SH OPTIONS
@@ -50,6 +50,9 @@ lifo
 .IP \(bu 2
 hifo
 .RE
+.TP
+\fB\-\-exchange\fR \fI<EXCHANGE>\fR
+§A.5(a) per\-ACCOUNT scope for \-\-set\-forward\-method (IRS 2025+ per\-account rule): exchange:PROVIDER:ACCOUNT (the canonical wallet grammar). Omit for a GLOBAL election (the existing behavior). Only exchange accounts are electable (a method election is a brokerage\-account concept; self:LABEL is rejected). The account MUST already exist in the vault — an unknown/typo\*(Aqd account is rejected LOUDLY so it can\*(Aqt create a dead election
 .TP
 \fB\-\-effective\-from\fR \fI<EFFECTIVE_FROM>\fR
 Effective\-from date for \-\-set\-forward\-method (YYYY\-MM\-DD). Defaults to made\-date

@@ -23,22 +23,20 @@ pub(crate) struct FoldCtx<'a> {
     pub selections: &'a BTreeMap<EventId, Vec<crate::event::LotPick>>,
 }
 
-/// The lot-identification method applicable to a disposal at `date`:
-/// pre-2025 (Universal pool) → the declared `pre2025_method`; post-2025 (Wallet pool) → the
-/// latest-in-force `MethodElection` on/before `date` (total order: `effective_from`, tie `decision_seq`),
-/// FIFO before any election (the §1.1012-1(j)(3) regulatory default).
-fn applicable_method(date: TaxDate, ctx: &FoldCtx) -> LotMethod {
+/// The lot-identification method applicable to a disposal on `wallet` at `date`:
+/// pre-2025 (Universal pool) → the declared `pre2025_method`; post-2025 (Wallet pool) → the SHARED
+/// wallet-aware resolver `resolve::resolve_election` (§A.5(a), two independent tiers: latest in-force
+/// election SCOPED to `wallet`, else latest in-force GLOBAL election, else FIFO). `None ⇒ Fifo` here.
+/// This is the ONLY method-resolution path in the fold; `disposal_compliance` calls the same resolver.
+fn applicable_method(
+    date: TaxDate,
+    wallet: &crate::identity::WalletId,
+    ctx: &FoldCtx,
+) -> LotMethod {
     if date < TRANSITION_DATE {
         ctx.config.pre2025_method
     } else {
-        ctx.elections
-            .iter()
-            .filter(|e| e.effective_from <= date)
-            .max_by(|a, b| {
-                a.effective_from
-                    .cmp(&b.effective_from)
-                    .then(a.decision_seq.cmp(&b.decision_seq))
-            })
+        crate::project::resolve::resolve_election(date, wallet, ctx.elections)
             .map(|e| e.method)
             .unwrap_or(LotMethod::Fifo)
     }
@@ -48,16 +46,18 @@ fn applicable_method(date: TaxDate, ctx: &FoldCtx) -> LotMethod {
 /// On a selection-validation failure → hard `LotSelectionInvalid` (carrying the disposal id + reason);
 /// consumption falls back to method order so Σsat conservation holds and the hard blocker gates tax.
 /// (Selections are an empty map this task; the fallback path is exercised once Task 4 populates them.)
+#[allow(clippy::too_many_arguments)]
 fn consume_principal(
     pools: &mut PoolSet,
     key: &PoolKey,
     need: Sat,
     date: TaxDate,
+    wallet: &crate::identity::WalletId,
     ctx: &FoldCtx,
     st: &mut LedgerState,
     ev: &EventId,
 ) -> (Vec<Consumed>, Sat) {
-    let method = applicable_method(date, ctx);
+    let method = applicable_method(date, wallet, ctx);
     let selection = ctx.selections.get(ev).map(|v| v.as_slice());
     let r = pools.consume(key, need, method, selection);
     if let Some(reason) = r.selection_error {
@@ -593,7 +593,7 @@ pub(crate) fn fold_event(
                 ctx.config.pre2025_method_attested,
             ); // §7.4: pre-2025 disposal advisory (once)
             let (consumed, shortfall) =
-                consume_principal(pools, &key, *sat, date, ctx, st, &eff.id);
+                consume_principal(pools, &key, *sat, date, &wallet, ctx, st, &eff.id);
             if shortfall > 0 {
                 st.add_blocker(
                     BlockerKind::UncoveredDisposal,
@@ -753,7 +753,7 @@ pub(crate) fn fold_event(
             };
             let key = pool_key(date, &wallet);
             let (consumed, shortfall) =
-                consume_principal(pools, &key, *sat, date, ctx, st, &eff.id);
+                consume_principal(pools, &key, *sat, date, &wallet, ctx, st, &eff.id);
             if shortfall > 0 {
                 st.add_blocker(
                     BlockerKind::UncoveredDisposal,
@@ -1039,7 +1039,7 @@ pub(crate) fn fold_event(
                 ctx.config.pre2025_method_attested,
             ); // §7.4: pre-2025 removal advisory (once)
             let (consumed, shortfall) =
-                consume_principal(pools, &key, *sat, date, ctx, st, &eff.id);
+                consume_principal(pools, &key, *sat, date, &wallet, ctx, st, &eff.id);
             if shortfall > 0 {
                 st.add_blocker(
                     BlockerKind::UncoveredDisposal,
@@ -1115,7 +1115,7 @@ pub(crate) fn fold_event(
                 ctx.config.pre2025_method_attested,
             ); // §7.4: pre-2025 removal advisory (once)
             let (consumed, shortfall) =
-                consume_principal(pools, &key, *sat, date, ctx, st, &eff.id);
+                consume_principal(pools, &key, *sat, date, &wallet, ctx, st, &eff.id);
             if shortfall > 0 {
                 st.add_blocker(
                     BlockerKind::UncoveredDisposal,

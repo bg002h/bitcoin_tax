@@ -71,6 +71,7 @@ fn election(seq: u64, made: time::OffsetDateTime, eff: time::Date, m: LotMethod)
         EventPayload::MethodElection(MethodElection {
             effective_from: eff,
             method: m,
+            wallet: None,
         }),
     )
 }

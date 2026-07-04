@@ -27,9 +27,9 @@ pub use optimize::{
 };
 pub use price::PriceProvider;
 pub use project::{
-    conservation_report, disposal_compliance, evaluate_disposal, project, CandidateDisposal,
-    ComplianceStatus, ConservationReport, DisposalCompliance, EvaluateError, EvaluateOutcome,
-    FeeTreatment, LotMethod, ProjectionConfig,
+    conservation_report, disposal_compliance, evaluate_disposal, in_force_methods, project,
+    CandidateDisposal, ComplianceStatus, ConservationReport, DisposalCompliance, EvaluateError,
+    EvaluateOutcome, FeeTreatment, InForceMethod, LotMethod, ProjectionConfig,
 };
 pub use state::*;
 pub use tax::{

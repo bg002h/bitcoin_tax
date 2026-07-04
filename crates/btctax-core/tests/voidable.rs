@@ -44,6 +44,7 @@ fn method_election(seq: u64) -> LedgerEvent {
         EventPayload::MethodElection(MethodElection {
             effective_from: date!(2024 - 01 - 01),
             method: LotMethod::Fifo,
+            wallet: None,
         }),
     )
 }

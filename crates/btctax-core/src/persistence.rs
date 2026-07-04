@@ -432,10 +432,12 @@ mod tests {
         let p1 = EventPayload::MethodElection(MethodElection {
             effective_from: date!(2024 - 01 - 01),
             method: LotMethod::Fifo,
+            wallet: None,
         });
         let p2 = EventPayload::MethodElection(MethodElection {
             effective_from: date!(2025 - 01 - 01),
             method: LotMethod::Hifo,
+            wallet: None,
         });
         append_decision(&conn, p1, now, tz, None).unwrap();
         append_decision(&conn, p2, now, tz, None).unwrap();
