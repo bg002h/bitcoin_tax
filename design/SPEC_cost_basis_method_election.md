@@ -1,8 +1,9 @@
 # SPEC — per-exchange cost-basis method election + attestation (sub-project 1 of auto-pseudo-reconcile)
 
-**Source baseline:** `main` @ `fa675bb` (branch `feat/cost-basis-method-election`). **Review status: R0 round 1
-folded (0C / 2I / 3M / 2N — all folded). Review: `reviews/R0-spec-cost-basis-method-election-round-1.md`.
-Awaiting R0 round 2.** Headline risks came back CLEAN: serde/fingerprint back-compat SAFE (decision payloads
+**Source baseline:** `main` @ `fa675bb` (branch `feat/cost-basis-method-election`). **Review status: R0-GREEN
+(2 rounds; 0C/0I). Reviews: `reviews/R0-spec-cost-basis-method-election-round-{1,2}.md`. Cleared to implement.**
+Round 2 verified all folds + confirmed no third resolution site; folded 2 impl Minors (tier-1 respects
+`effective_from ≤ D`; shared resolver returns `Option<&ElectionRec>`). Headline risks came back CLEAN: serde/fingerprint back-compat SAFE (decision payloads
 return `None` from `persistence::fingerprint`, `EventId=f("decision",seq)` is payload-independent; precedent
 `#[serde(default)] pre2025_method` event.rs:188); precedence reachable (single caller `consume_principal`
 fold.rs:60, wallet bound at every arm). Key folds: **[I1] `compliance.rs` is a SECOND election-resolution site
@@ -55,6 +56,14 @@ TRANSITION_DATE ∧ ≥ made-date`, else `MethodElectionBackdated`).
   is decided purely among `wallet==Some(W)` elections; only if that set is empty do we fall to step 2). Do NOT
   implement as a single `max_by` over all elections merged — that would let a fresh global election silently
   flip a wallet the user scoped. Fault-inject this.
+- **[R0-r2-M1 — tier 1 respects `effective_from ≤ D`]** a scoped election that is NOT YET effective (`effective_from
+  > D`) must NOT suppress an in-force GLOBAL election: tier 1 selects among `wallet==Some(W)` elections *with
+  `effective_from ≤ D`*; if none qualify, fall to tier 2 (global), NOT straight to FIFO. KAT:
+  `not_yet_effective_scoped_falls_to_global`.
+- **[R0-r2-M2 — resolver return contract]** the shared resolver returns `Option<&ElectionRec>` (the winning
+  election, or `None` ⇒ FIFO) — NOT a FIFO-defaulted `LotMethod` — because `disposal_compliance` needs both
+  existence AND `effective_from` to emit `StandingOrder{effective_from}`. `fold::applicable_method` maps
+  `None ⇒ Fifo`.
 - **[R0-I1 — `compliance.rs` is a SECOND resolution site — MUST use the same rule]** `disposal_compliance`
   (`compliance.rs:47-67,169-180`) independently collects elections (no wallet) and picks the standing order as a
   GLOBAL max — so a scoped `Coinbase→HIFO` election would falsely tag a `Gemini` disposal as `StandingOrder` in
