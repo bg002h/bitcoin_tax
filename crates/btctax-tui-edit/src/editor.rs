@@ -15,8 +15,9 @@
 
 use crate::edit::form::{
     BulkLinkFlowState, BulkLinkModalState, BulkResolveFlowState, BulkResolveModalState,
-    BulkStiFlowState, BulkStiModalState, ClassifyInboundFlowState, ClassifyInboundModalState,
-    ClassifyRawFlowState, ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
+    BulkStiFlowState, BulkStiModalState, BulkVoidFlowState, BulkVoidModalState,
+    ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyRawFlowState,
+    ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
     MatchSelfTransfersFlowState, MatchSelfTransfersModalState, MutationModalState,
     OptimizeAcceptFlowState, OptimizeAcceptModalState, ProfileFormState, ReclassifyIncomeFlowState,
     ReclassifyIncomeModalState, ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
@@ -194,6 +195,14 @@ pub struct EditorApp {
     pub bulk_resolve_flow: Option<BulkResolveFlowState>,
     /// Bulk resolve-conflict confirmation modal.  `Some` while awaiting Enter/Esc.
     pub bulk_resolve_modal: Option<BulkResolveModalState>,
+    /// Full bulk-void flow state (bulk-void D3).  `Some` while open.
+    ///
+    /// Dispatch order: bulk_void_modal (modal layer) → bulk_void_flow (flow layer). Each void is
+    /// NON-REVOCABLE (a `VoidDecisionEvent` is excluded from `is_revocable_payload`) AND high
+    /// blast-radius, so the confirm is Tier-B (red, prominent warning) — NOT typed-word.
+    pub bulk_void_flow: Option<BulkVoidFlowState>,
+    /// Bulk-void confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub bulk_void_modal: Option<BulkVoidModalState>,
     /// Full match-self-transfers flow state (self-transfer-passthrough C3).  `Some` while open.
     ///
     /// Dispatch order: match_self_transfers_modal (modal layer) → match_self_transfers_flow (flow
@@ -265,6 +274,8 @@ impl EditorApp {
             bulk_sti_modal: None,
             bulk_resolve_flow: None,
             bulk_resolve_modal: None,
+            bulk_void_flow: None,
+            bulk_void_modal: None,
             match_self_transfers_flow: None,
             match_self_transfers_modal: None,
             attest_save_failed: false,

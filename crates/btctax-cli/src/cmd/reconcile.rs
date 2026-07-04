@@ -6,8 +6,8 @@
 //! Also contains the `set-donation-details` / `show-donation-details` side-table commands (no decision
 //! append — these write to the `donation_details` side-table directly, like `tax-profile set`).
 use crate::{
-    BulkFilter, BulkLinkPlan, BulkResolvePlan, BulkStiFilter, BulkStiPlan, CliError, MatchProposal,
-    Session,
+    BulkFilter, BulkLinkPlan, BulkResolvePlan, BulkStiFilter, BulkStiPlan, BulkVoidPlan, CliError,
+    MatchProposal, Session,
 };
 use btctax_core::conventions::TRANSITION_DATE;
 use btctax_core::persistence::{append_decision, load_all};
@@ -349,6 +349,58 @@ pub fn apply_bulk_reject_conflicts(
     }
     session.save()?;
     Ok(conflict_events.len())
+}
+
+/// bulk-void D2 — Phase 1 (read): open the session and compute the bulk-void plan. Two-phase by design
+/// (mirrors `bulk_resolve_conflict_plan`): this read phase renders NOTHING to the vault, so the
+/// interactive `y/N` confirmation stays a thin, untested shell in the `main.rs` dispatch. The plan is
+/// the shared read helper `Session::bulk_void_plan` (D1) — the SINGLE `voidable_decisions` predicate,
+/// which OMITS effective allocations (#7). The session (and its VaultLock) is dropped on return.
+pub fn bulk_void_plan(vault_path: &Path, pp: &Passphrase) -> Result<BulkVoidPlan, CliError> {
+    let session = Session::open(vault_path, pp)?;
+    session.bulk_void_plan()
+}
+
+/// bulk-void D2 — Phase 2 (write): atomically append one `VoidDecisionEvent` per `target` AND, for each
+/// `LotSelection` target, clear its optimizer attestation (`optimize_attest::clear`), then a SINGLE
+/// `save`. All-or-nothing: a mid-batch `append_decision` / `clear` failure returns `Err` BEFORE the
+/// save, and the local `Session` is dropped with nothing written — the exact one-session / N-append /
+/// one-save atomicity of `apply_bulk_accept_conflicts` (the TUI path instead ROLLS BACK explicitly via
+/// `persist_bulk_void`).
+///
+/// # [R0-M3] the ONLY CLI-layer #7 defense
+/// `targets` MUST be exactly the `bulk_void_plan` rows (predicate-filtered), re-derived from the vault
+/// inside the dispatch — NEVER raw `--ref` ids. The single CLI `void` does NO `effective_alloc` check,
+/// so a raw-id bulk path would let a caller void an effective allocation → Hard `DecisionConflict`.
+/// Each target is `(target_event_id, disposal_to_clear)` carried straight from the plan row. Returns
+/// the number voided.
+pub fn apply_bulk_void(
+    vault_path: &Path,
+    pp: &Passphrase,
+    targets: Vec<(EventId, Option<EventId>)>,
+    now: OffsetDateTime,
+) -> Result<usize, CliError> {
+    let mut session = Session::open(vault_path, pp)?;
+    for (target_event_id, disposal_to_clear) in &targets {
+        // `?` on a mid-batch failure returns before `save` — the in-memory session is discarded, so
+        // nothing lands on disk (CLI atomicity; the TUI path instead ROLLS BACK via persist_bulk_void).
+        append_decision(
+            session.conn(),
+            EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+                target_event_id: target_event_id.clone(),
+            }),
+            now,
+            UtcOffset::UTC,
+            None,
+        )?;
+        // Per-LotSelection side-effect: clear its disposal's optimizer attestation ATOMICALLY (same
+        // in-memory conn, flushed by the single save below). Idempotent — clearing an absent row is Ok.
+        if let Some(disposal) = disposal_to_clear {
+            crate::optimize_attest::clear(session.conn(), disposal)?;
+        }
+    }
+    session.save()?;
+    Ok(targets.len())
 }
 
 /// FR6/TP7: confirm a self-transfer. `target` is a destination `TransferIn` event (`--to-event`) or a

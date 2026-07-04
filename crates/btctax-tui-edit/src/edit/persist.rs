@@ -510,6 +510,65 @@ pub fn persist_bulk_resolve_conflict(
     )
 }
 
+/// Sweep-void N revocable decisions in ONE atomic batch (bulk-void D3) — the BESPOKE bulk analog of the
+/// single `persist_void` (persist.rs:248-300) across N. Appends one `VoidDecisionEvent` per target AND,
+/// for each `LotSelection` target, clears its optimizer attestation (`optimize_attest::clear`), ALL
+/// inside ONE atomic envelope; a mid-batch append OR clear failure reverts the WHOLE batch (both void
+/// rows AND side-table clears — whole-DB restore covers the side-table for free, per persist_void [M1]).
+///
+/// # Bespoke — NOT a hook on `persist_bulk_decisions` [R0-adjudicated: blast-radius isolation]
+/// LOCKSTEP with `persist_bulk_decisions` (the shared bulk safety skeleton): the empty guard + the
+/// mid-batch `rollback(session, &pre, e)`-not-`?` discipline + the single trailing `save_or_rollback`
+/// are IDENTICAL — a future edit to that shared invariant MUST be echoed here. This fn stays separate
+/// only because it carries the dangerous per-`LotSelection` side-effect (`optimize_attest::clear`),
+/// which is safer isolated than threaded as a closure through the 3-flow shared helper.
+///
+/// `targets` carry `disposal_to_clear` PRECOMPUTED ONCE by the caller from the snapshot (a `LotSelection`
+/// target → `Some(ls.disposal_event)`), so this fn never re-loads the log per row. [R0-N1] if two voided
+/// `LotSelection`s target the SAME disposal, `clear` runs twice — harmless (a pure idempotent DELETE).
+pub fn persist_bulk_void(
+    session: &mut btctax_cli::Session,
+    targets: Vec<crate::edit::form::VoidTarget>,
+    now: time::OffsetDateTime,
+    empty_label: &str,
+) -> Result<usize, PersistError> {
+    use btctax_core::{event::VoidDecisionEvent, persistence::append_decision, EventPayload};
+
+    // Empty guard [mirrors persist_bulk_decisions]: refuse BEFORE any snapshot/append.
+    if targets.is_empty() {
+        return Err(PersistError::NoChange(btctax_cli::CliError::Usage(
+            empty_label.into(),
+        )));
+    }
+    let n = targets.len();
+    let pre = session.snapshot()?;
+    for t in targets {
+        // Do NOT use `?`: a mid-batch append at row k>1 that fails leaves appends/clears 1..k-1 as live
+        // residue AND would leak a bare NoChange over phantom voids. Revert the WHOLE batch.
+        if let Err(e) = append_decision(
+            session.conn(),
+            EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+                target_event_id: t.target_event_id,
+            }),
+            now,
+            time::UtcOffset::UTC,
+            None,
+        ) {
+            return Err(rollback(session, &pre, e.into()));
+        }
+        // The per-LotSelection clear is INSIDE the envelope — a failure AFTER the committed append must
+        // roll back the WHOLE batch (symmetric with persist_void's clear-then-rollback arm), else the
+        // committed void rows become residue that piggy-backs a later save.
+        if let Some(disposal) = t.disposal_to_clear {
+            if let Err(e) = btctax_cli::optimize_attest::clear(session.conn(), &disposal) {
+                return Err(rollback(session, &pre, e));
+            }
+        }
+    }
+    save_or_rollback(session, pre)?; // ONE save; on failure the whole batch reverts
+    Ok(n)
+}
+
 /// Append a `ClassifyRaw` decision event and atomically save the vault (chunk 4a, D2).
 ///
 /// `payload` is the VALIDATED `EventPayload::ClassifyRaw(…)` built by the classify-raw flow (its
@@ -2323,6 +2382,160 @@ mod tests {
             attest.as_deref(),
             Some("attestation"),
             "rollback must restore the optimize_attest row cleared before the failed save"
+        );
+    }
+
+    // ── persist_bulk_void: empty targets → NoChange, no snapshot/append (bulk-void D3) ──
+    #[test]
+    fn kat_bulk_void_empty_refuses() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_store::Passphrase;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulk-void-empty-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+
+        let result = persist_bulk_void(&mut session, vec![], now, "bulk void: nothing selected");
+        match result {
+            Err(PersistError::NoChange(btctax_cli::CliError::Usage(label))) => {
+                assert_eq!(
+                    label, "bulk void: nothing selected",
+                    "empty guard must carry the caller-supplied empty label"
+                );
+            }
+            other => panic!("empty targets must be NoChange(Usage(label)); got {other:?}"),
+        }
+
+        // No snapshot/append: the log is byte-for-byte unchanged.
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post, pre, "empty refuse must append nothing");
+    }
+
+    // ── persist_bulk_void: a failing save reverts the WHOLE batch (bulk-void D3, safety) ──
+    //
+    // Two LotSelection targets + two attestation rows. persist_bulk_void appends BOTH void rows and
+    // clears BOTH attestations in-memory, then save() fails (read-only parent) → the whole-DB restore
+    // must revert EVERYTHING: no phantom void rows AND both attestations survive (snapshot == post).
+    // This is the batch analog of kat_persist_void_rollback (same rollback machinery, N targets).
+    #[cfg(unix)]
+    #[test]
+    fn kat_bulk_void_reverts_mid_batch() {
+        use crate::edit::form::VoidTarget;
+        use btctax_core::event::{EventPayload, LotPick, LotSelection};
+        use btctax_core::identity::{LotId, Source, SourceRef};
+        use btctax_core::persistence::{append_decision, load_all_ordered};
+        use btctax_core::EventId;
+        use btctax_store::Passphrase;
+        use std::os::unix::fs::PermissionsExt;
+        use time::{OffsetDateTime, UtcOffset};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulk-void-revert-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        let disposal_a = EventId::import(Source::River, SourceRef::new("bvr-disposal-a"));
+        let disposal_b = EventId::import(Source::River, SourceRef::new("bvr-disposal-b"));
+        let lot_origin = EventId::import(Source::River, SourceRef::new("bvr-lot"));
+
+        let (ls_a, ls_b): (EventId, EventId);
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let t0 = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
+            let t1 = OffsetDateTime::from_unix_timestamp(1_748_000_100).unwrap();
+            let mk_ls = |disposal: &EventId| {
+                EventPayload::LotSelection(LotSelection {
+                    disposal_event: disposal.clone(),
+                    lots: vec![LotPick {
+                        lot: LotId {
+                            origin_event_id: lot_origin.clone(),
+                            split_sequence: 0,
+                        },
+                        sat: 100_000,
+                    }],
+                })
+            };
+            ls_a = append_decision(session.conn(), mk_ls(&disposal_a), t0, UtcOffset::UTC, None)
+                .unwrap();
+            ls_b = append_decision(session.conn(), mk_ls(&disposal_b), t1, UtcOffset::UTC, None)
+                .unwrap();
+            btctax_cli::optimize_attest::set(session.conn(), &disposal_a, "attest-a", "2025-06-01")
+                .unwrap();
+            btctax_cli::optimize_attest::set(session.conn(), &disposal_b, "attest-b", "2025-06-02")
+                .unwrap();
+            session.save().unwrap();
+        }
+
+        // Root-skip guard (chmod is a no-op as root).
+        {
+            let probe = dir.path().join("probe.tmp");
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+            let can_write = std::fs::write(&probe, b"x").is_ok();
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            if can_write {
+                eprintln!("bulk-void-revert KAT: skipping — chmod did not deny writes (root?)");
+                return;
+            }
+        }
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+        let targets = vec![
+            VoidTarget {
+                target_event_id: ls_a.clone(),
+                disposal_to_clear: Some(disposal_a.clone()),
+            },
+            VoidTarget {
+                target_event_id: ls_b.clone(),
+                disposal_to_clear: Some(disposal_b.clone()),
+            },
+        ];
+
+        let parent = vault.parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result = persist_bulk_void(&mut session, targets, now, "bulk void: nothing selected");
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(
+            matches!(result, Err(PersistError::RolledBack(_))),
+            "failed save must revert the WHOLE batch as RolledBack; got: {result:?}"
+        );
+
+        // No phantom void rows: the log is reverted to the pre-batch snapshot.
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post.len(),
+            pre.len(),
+            "rollback must revert BOTH void appends (no residue)"
+        );
+        assert_eq!(post, pre, "whole-batch restore == pre-batch snapshot");
+
+        // No phantom-cleared attestations: BOTH side-table rows survive.
+        assert_eq!(
+            btctax_cli::optimize_attest::get(session.conn(), &disposal_a)
+                .unwrap()
+                .as_deref(),
+            Some("attest-a"),
+            "rollback must restore attestation A cleared before the failed save"
+        );
+        assert_eq!(
+            btctax_cli::optimize_attest::get(session.conn(), &disposal_b)
+                .unwrap()
+                .as_deref(),
+            Some("attest-b"),
+            "rollback must restore attestation B cleared before the failed save"
         );
     }
 

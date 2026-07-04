@@ -734,3 +734,60 @@ fn void_clears_attestation_row_prevents_mislabel_as_attested_recording() {
         "D has no in-force explicit selection and no method election → NonCompliant"
     );
 }
+
+/// bulk-void [D2]: sweeping a `LotSelection` decision through `apply_bulk_void` clears its disposal's
+/// optimizer attestation row inside the batch — exactly the single-void side-effect, done across N. The
+/// plan precomputes `disposal_to_clear = Some(ls.disposal_event)`; apply clears it atomically.
+#[test]
+fn bulk_void_clears_attestation_for_lotselection() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_tax_saving_csv(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    let proposal = cmd::optimize::run(&vault, &pp(), 2025, AFTER_SALE).unwrap();
+    let disposal = proposal.per_disposal[0].disposal.clone();
+
+    // Accept + attest the HIFO pick → a LotSelection decision + an attestation row.
+    let out = cmd::optimize::accept(
+        &vault,
+        &pp(),
+        2025,
+        Some(&disposal.canonical()),
+        Some("contemporaneous records identify Lot B"),
+        AFTER_SALE,
+    )
+    .unwrap();
+    let (_, decision, _) = out.persisted[0].clone();
+    assert!(
+        attestation_of(&vault, &disposal).is_some(),
+        "pre-void: attestation row present after accept+attest"
+    );
+
+    // The bulk-void plan must list the LotSelection with its precomputed disposal_to_clear.
+    let plan = cmd::reconcile::bulk_void_plan(&vault, &pp()).unwrap();
+    let row = plan
+        .rows
+        .iter()
+        .find(|r| r.target_event_id == decision)
+        .expect("the LotSelection decision must be a bulk-void candidate");
+    assert_eq!(
+        row.disposal_to_clear.as_ref(),
+        Some(&disposal),
+        "the plan precomputes disposal_to_clear = the LotSelection's disposal_event"
+    );
+
+    // Apply the sweep (targets derived from the plan) → attestation cleared atomically.
+    let targets: Vec<_> = plan
+        .rows
+        .iter()
+        .map(|r| (r.target_event_id.clone(), r.disposal_to_clear.clone()))
+        .collect();
+    cmd::reconcile::apply_bulk_void(&vault, &pp(), targets, AFTER_SALE).unwrap();
+
+    assert_eq!(
+        attestation_of(&vault, &disposal),
+        None,
+        "bulk-void of a LotSelection must clear its optimize_attest row inside the batch"
+    );
+}

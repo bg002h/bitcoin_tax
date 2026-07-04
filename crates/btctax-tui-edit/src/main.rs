@@ -27,12 +27,13 @@ use edit::form::{
     validate_reclassify_income, validate_reclassify_outflow, validate_select_lots,
     validate_set_fmv, AllocLotRow, BulkLinkFlowState, BulkLinkModalState, BulkLinkRowItem,
     BulkLinkStep, BulkResolveFlowState, BulkResolveModalState, BulkResolveRowItem, BulkResolveStep,
-    BulkStiFlowState, BulkStiModalState, BulkStiRowItem, BulkStiStep, ClassifyInboundFlowState,
-    ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
-    ClassifyRawStep, ClassifyRawVariant, ConflictItem, DisposalKind, DisposalListItem,
-    DonationListItem, FieldBuffer, FmvListItem, InEventItem, InboundListItem, InboundVariant,
-    IncomeListItem, LinkMode, LinkTransferFlowState, LinkTransferModalState, LinkTransferStep,
-    LotPickFormRow, MatchPairAction, MatchSelfTransferItem, MatchSelfTransfersFlowState,
+    BulkStiFlowState, BulkStiModalState, BulkStiRowItem, BulkStiStep, BulkVoidFlowState,
+    BulkVoidModalState, BulkVoidRowItem, ClassifyInboundFlowState, ClassifyInboundModalState,
+    ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep,
+    ClassifyRawVariant, ConflictItem, DisposalKind, DisposalListItem, DonationListItem,
+    FieldBuffer, FmvListItem, InEventItem, InboundListItem, InboundVariant, IncomeListItem,
+    LinkMode, LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, LotPickFormRow,
+    MatchPairAction, MatchSelfTransferItem, MatchSelfTransfersFlowState,
     MatchSelfTransfersModalState, MutationModalState, OptimizeAcceptFlowState,
     OptimizeAcceptModalState, OptimizeAcceptStep, OptimizeCandidateItem, OutflowKind,
     OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
@@ -43,7 +44,7 @@ use edit::form::{
     SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
     SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
     SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TransferOutItem, VoidFlowState,
-    VoidListItem, VoidModalState, VoidStep, WalletItem, FREETEXT_CAP,
+    VoidListItem, VoidModalState, VoidStep, VoidTarget, WalletItem, FREETEXT_CAP,
 };
 use editor::{EditorApp, EditorScreen};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -219,6 +220,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Bulk-void-modal dispatch — BEFORE flow, form, screen ─────────────────
+    if app.bulk_void_modal.is_some() {
+        handle_bulk_void_modal_key(app, key);
+        return;
+    }
+
     // ── Match-self-transfers-modal dispatch — BEFORE flow, form, screen ──────
     if app.match_self_transfers_modal.is_some() {
         handle_match_self_transfers_modal_key(app, key);
@@ -278,6 +285,10 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.bulk_resolve_flow.is_some() {
         handle_bulk_resolve_flow_key(app, key);
+        return;
+    }
+    if app.bulk_void_flow.is_some() {
+        handle_bulk_void_flow_key(app, key);
         return;
     }
     if app.match_self_transfers_flow.is_some() {
@@ -363,6 +374,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('b') => open_bulk_link_transfer_flow(app),
                 KeyCode::Char('B') => open_bulk_self_transfer_in_flow(app),
                 KeyCode::Char('C') => open_bulk_resolve_conflict_flow(app),
+                KeyCode::Char('V') => open_bulk_void_flow(app),
                 KeyCode::Char('m') => open_match_self_transfers_flow(app),
                 KeyCode::Char('i') => open_resolve_conflict_flow(app),
                 KeyCode::Char('z') => open_optimize_accept_flow(app),
@@ -598,6 +610,8 @@ impl EditorApp {
         self.bulk_sti_modal = None;
         self.bulk_resolve_flow = None;
         self.bulk_resolve_modal = None;
+        self.bulk_void_flow = None;
+        self.bulk_void_modal = None;
         self.match_self_transfers_flow = None;
         self.match_self_transfers_modal = None;
     }
@@ -6506,6 +6520,224 @@ fn derive_bulk_resolve_status(
         ResolveKind::Reject => "Rejected",
     };
     format!("{verb} {n} import conflict(s); {remaining} unresolved remain.")
+}
+
+// ── Bulk-void flow (bulk-void D3) ─────────────────────────────────────────────
+
+/// Browse-key `V`: open the bulk-void sweep flow. READ-ONLY at open — it enumerates candidates via the
+/// SINGLE shared `btctax_core::voidable_decisions` predicate over the snapshot (the SAME source the
+/// single `v` flow and `Session::bulk_void_plan` use; effective allocations are OMITTED, #7) and appends
+/// NOTHING. An empty candidate set sets a status and never opens the flow. Residue-latch gated like
+/// every mutating opener. `disposal_to_clear` is precomputed here ONCE per row (a `LotSelection` target
+/// → `ls.disposal_event`) so `persist_bulk_void` never re-loads the log.
+fn open_bulk_void_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let mut items: Vec<BulkVoidRowItem> =
+        btctax_core::voidable_decisions(&snap.events, &snap.state.blockers)
+            .into_iter()
+            .map(|e| {
+                let seq = match &e.id {
+                    EventId::Decision { seq } => *seq,
+                    _ => 0,
+                };
+                let (payload_tag, target_summary, _inner_target, _is_sha) =
+                    summarize_void_payload(&e.payload);
+                let disposal_to_clear = match &e.payload {
+                    EventPayload::LotSelection(ls) => Some(ls.disposal_event.clone()),
+                    _ => None,
+                };
+                BulkVoidRowItem {
+                    target_event_id: e.id.clone(),
+                    seq,
+                    payload_tag,
+                    target_summary,
+                    disposal_to_clear,
+                    checked: true,
+                }
+            })
+            .collect();
+    items.sort_by_key(|i| i.seq);
+
+    if items.is_empty() {
+        app.status = Some("No revocable decisions to void".to_string());
+        return;
+    }
+
+    app.bulk_void_flow = Some(BulkVoidFlowState {
+        preview: TargetList::new(items),
+        error: None,
+    });
+}
+
+/// Per-row exclude checklist: `k/j/g/G` scroll; `Space`/`x` toggles the row's exclusion; Enter → confirm
+/// modal over the CHECKED rows (refuse if none); Esc → close the flow (nothing written); `q` swallowed.
+fn handle_bulk_void_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(f) = app.bulk_void_flow.as_mut() {
+                f.preview.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(f) = app.bulk_void_flow.as_mut() {
+                f.preview.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(f) = app.bulk_void_flow.as_mut() {
+                f.preview.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(f) = app.bulk_void_flow.as_mut() {
+                f.preview.go_bottom();
+            }
+        }
+        KeyCode::Char(' ') | KeyCode::Char('x') => {
+            if let Some(f) = app.bulk_void_flow.as_mut() {
+                if let Some(i) = f.preview.table_state.selected() {
+                    if let Some(item) = f.preview.items.get_mut(i) {
+                        item.checked = !item.checked;
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => open_bulk_void_modal(app),
+        KeyCode::Esc => {
+            app.bulk_void_flow = None;
+        }
+        KeyCode::Char('q') => {}
+        _ => {}
+    }
+}
+
+/// Capture the CHECKED preview rows into the confirmation modal (their `VoidTarget`s + count +
+/// LotSelection blast-radius count). Empty selection → refuse (stay on the checklist with a "Nothing
+/// selected" error), never open the modal.
+fn open_bulk_void_modal(app: &mut EditorApp) {
+    let modal = {
+        let f = match app.bulk_void_flow.as_ref() {
+            Some(f) => f,
+            None => return,
+        };
+        let count = crate::edit::form::bulk_void_checked_count(&f.preview.items);
+        if count == 0 {
+            None
+        } else {
+            let targets: Vec<VoidTarget> = f
+                .preview
+                .items
+                .iter()
+                .filter(|i| i.checked)
+                .map(|i| VoidTarget {
+                    target_event_id: i.target_event_id.clone(),
+                    disposal_to_clear: i.disposal_to_clear.clone(),
+                })
+                .collect();
+            let lot_selection_count =
+                crate::edit::form::bulk_void_lot_selection_checked_count(&f.preview.items);
+            Some(BulkVoidModalState {
+                targets,
+                count,
+                lot_selection_count,
+            })
+        }
+    };
+    match modal {
+        Some(m) => app.bulk_void_modal = Some(m),
+        None => {
+            if let Some(f) = app.bulk_void_flow.as_mut() {
+                f.error = Some("Nothing selected — check at least one row".to_string());
+            }
+        }
+    }
+}
+
+/// Handle a key press while the bulk-void confirmation modal is open (Tier-B non-revocable + high
+/// blast-radius; explicit confirm, NOT typed-word).
+///
+/// Enter → `persist_bulk_void` (batch append + per-`LotSelection` `optimize_attest::clear`, single save,
+/// mid-batch rollback) → re-project + `derive_bulk_void_status` + close; `Err(e)` → close modal, route
+/// `on_persist_error`. Esc → close modal only (back to the checklist; nothing written). All else swallowed.
+fn handle_bulk_void_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (targets, count, lot_selection_count) = match app.bulk_void_modal.as_ref() {
+                Some(m) => (m.targets.clone(), m.count, m.lot_selection_count),
+                None => return,
+            };
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.bulk_void_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_bulk_void(
+                    session,
+                    targets,
+                    now,
+                    "bulk void: nothing selected",
+                )
+            };
+
+            match save_result {
+                Ok(n) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            app.snapshot = Some(snap);
+                            app.status = Some(derive_bulk_void_status(n, lot_selection_count));
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.bulk_void_modal = None;
+                    app.bulk_void_flow = None;
+                }
+                Err(e) => {
+                    app.bulk_void_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+            let _ = count; // count is surfaced in the modal; the status uses the persisted `n`.
+        }
+        KeyCode::Esc => {
+            app.bulk_void_modal = None;
+        }
+        _ => {}
+    }
+}
+
+/// Post-apply status for the bulk-void sweep: the number voided + the blast radius (how many were
+/// `LotSelection` voids that re-exposed disposals + cleared attestations). Voids are NON-REVOCABLE —
+/// the status tells the truth (recovery = re-apply the original decision).
+fn derive_bulk_void_status(n: usize, lot_selection_count: usize) -> String {
+    if lot_selection_count > 0 {
+        format!(
+            "Voided {n} decision(s) ({lot_selection_count} lot-selection void(s) re-exposed disposals + \
+             cleared attestations) — voids are NON-REVOCABLE; re-apply a decision to restore."
+        )
+    } else {
+        format!("Voided {n} decision(s) — voids are NON-REVOCABLE; re-apply a decision to restore.")
+    }
 }
 
 // ── Match-self-transfers flow (self-transfer-passthrough C3) ──────────────────
@@ -19347,6 +19579,254 @@ mod tests {
             total_basis,
             rust_decimal_macros::dec!(55000),
             "included t2 adopts new basis; excluded t1 keeps current"
+        );
+    }
+
+    // ── Bulk-void flow (bulk-void D3) ─────────────────────────────────────────
+
+    /// Seed a vault with two `TransferIn`s (→ UnknownBasisInbound) + two `ClassifyInbound(Income)`
+    /// decisions that resolve them. Returns the two TransferIn ids (voiding the classifications
+    /// re-exposes their UnknownBasisInbound blockers). Both classifications are voidable candidates.
+    fn seed_two_classified_inbounds_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> [EventId; 2] {
+        use btctax_core::event::{ClassifyInbound, EventPayload, LedgerEvent, TransferIn};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::{append_decision, append_import_batch};
+        use btctax_core::{InboundClass, IncomeKind, WalletId};
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let ti1 = EventId::import(Source::River, SourceRef::new("bv-ti-1"));
+        let ti2 = EventId::import(Source::River, SourceRef::new("bv-ti-2"));
+        let wallet = Some(WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        });
+        let now = |secs: i64| OffsetDateTime::from_unix_timestamp(secs).unwrap();
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let ti = |id: &EventId, secs, sat| LedgerEvent {
+            id: id.clone(),
+            utc_timestamp: now(secs),
+            original_tz: UtcOffset::UTC,
+            wallet: wallet.clone(),
+            payload: EventPayload::TransferIn(TransferIn {
+                sat,
+                src_addr: None,
+                txid: None,
+            }),
+        };
+        append_import_batch(
+            session.conn(),
+            &[
+                ti(&ti1, 1_748_000_000, 100_000),
+                ti(&ti2, 1_748_000_100, 50_000),
+            ],
+        )
+        .unwrap();
+        for (id, secs) in [(&ti1, 1_748_001_000), (&ti2, 1_748_001_100)] {
+            append_decision(
+                session.conn(),
+                EventPayload::ClassifyInbound(ClassifyInbound {
+                    transfer_in_event: id.clone(),
+                    as_: InboundClass::Income {
+                        kind: IncomeKind::Staking,
+                        fmv: Some(dec!(100)),
+                        business: false,
+                    },
+                }),
+                now(secs),
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+        }
+        session.save().unwrap();
+        [ti1, ti2]
+    }
+
+    /// `V` with NO revocable decisions → flow never opens; status set.
+    #[test]
+    fn bulk_void_refuses_when_no_candidates() {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use rust_decimal_macros::dec;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulkvoid-nocand";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            // A single clean Acquire (imported) → no revocable DECISION exists.
+            let batch = vec![LedgerEvent {
+                id: EventId::import(Source::River, SourceRef::new("acq-only")),
+                utc_timestamp: datetime!(2024-12-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(btctax_core::WalletId::Exchange {
+                    provider: "River".into(),
+                    account: "main".into(),
+                }),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(3000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            session.save().unwrap();
+        }
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('V')));
+        assert!(
+            app.bulk_void_flow.is_none(),
+            "no revocable decisions → flow must NOT open"
+        );
+        assert_eq!(
+            app.status.as_deref(),
+            Some("No revocable decisions to void")
+        );
+    }
+
+    /// Unchecking a preview row omits its decision from the confirm modal's batch.
+    #[test]
+    fn bulk_void_per_row_exclude_drops_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulkvoid-exclude";
+        let [_ti1, _ti2] = seed_two_classified_inbounds_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('V')));
+        {
+            let f = app.bulk_void_flow.as_ref().expect("V opens the flow");
+            assert_eq!(
+                f.preview.items.len(),
+                2,
+                "both classifications, all checked"
+            );
+            assert!(f.preview.items.iter().all(|i| i.checked));
+        }
+        // Capture row 1's target, then exclude row 0 → only row 1 remains checked.
+        let row1_target = app.bulk_void_flow.as_ref().unwrap().preview.items[1]
+            .target_event_id
+            .clone();
+        handle_key(&mut app, press(KeyCode::Char(' ')));
+        assert!(!app.bulk_void_flow.as_ref().unwrap().preview.items[0].checked);
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal
+        let m = app
+            .bulk_void_modal
+            .as_ref()
+            .expect("confirm modal must open over checked rows");
+        assert_eq!(m.count, 1, "one row excluded → one remains");
+        assert_eq!(m.targets.len(), 1);
+        assert_eq!(
+            m.targets[0].target_event_id, row1_target,
+            "excluded row 0 is absent from the batch (only row 1's decision)"
+        );
+    }
+
+    /// The bulk-void confirm modal is Tier-B: red border, NON-REVOCABLE copy ("CANNOT themselves be
+    /// undone"), the blast-radius line — and NOT a typed-word gate (no "type the word" prompt).
+    #[test]
+    fn bulk_void_tier_b_not_typed_word() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulkvoid-tierb";
+        seed_two_classified_inbounds_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('V')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal (all checked)
+        assert!(app.bulk_void_modal.is_some(), "confirm modal must open");
+
+        let backend = TestBackend::new(110, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let text = rendered_text(&terminal);
+
+        assert!(
+            text.contains("NON-REVOCABLE"),
+            "modal must carry the NON-REVOCABLE (Tier-B) warning"
+        );
+        assert!(
+            text.contains("CANNOT themselves be undone"),
+            "modal must state the voids cannot be undone"
+        );
+        assert!(
+            text.to_lowercase().contains("re-apply"),
+            "modal must advise re-applying the original decision to restore"
+        );
+        // NOT a typed-word gate (Tier-C, reserved for the §7.4 attest batch).
+        assert!(
+            !text.to_lowercase().contains("type the word"),
+            "bulk-void is Tier-B — it must NOT be a typed-word confirmation"
+        );
+    }
+
+    /// E2E: `V` → confirm → APPLY voids both ClassifyInbound decisions; their UnknownBasisInbound
+    /// blockers are RE-EXPOSED in the re-projected snapshot.
+    #[test]
+    fn bulk_void_then_blockers_reexposed() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-bulkvoid";
+        seed_two_classified_inbounds_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        // Pre: both classified → no UnknownBasisInbound.
+        {
+            let n = app
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .state
+                .blockers
+                .iter()
+                .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+                .count();
+            assert_eq!(n, 0, "both inbounds classified pre-void");
+        }
+
+        handle_key(&mut app, press(KeyCode::Char('V'))); // → checklist (all checked)
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal
+        assert!(app.bulk_void_modal.is_some());
+        handle_key(&mut app, press(KeyCode::Enter)); // APPLY (persist + re-project)
+
+        assert!(app.bulk_void_modal.is_none() && app.bulk_void_flow.is_none());
+        let reexposed = app
+            .snapshot
+            .as_ref()
+            .unwrap()
+            .state
+            .blockers
+            .iter()
+            .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+            .count();
+        assert_eq!(
+            reexposed, 2,
+            "voiding the two ClassifyInbounds re-exposes both UnknownBasisInbound blockers"
+        );
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.contains("Voided 2") && status.contains("NON-REVOCABLE"),
+            "status reports 2 voided + the non-revocable truth; got {status:?}"
         );
     }
 

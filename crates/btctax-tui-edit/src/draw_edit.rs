@@ -10,9 +10,10 @@
 
 use crate::edit::form::{
     amount_label, basis_source_display, bulk_checked_totals, bulk_resolve_checked_count,
-    bulk_sti_checked_totals, bulk_usd_floor_label, income_kind_display, wallet_label,
-    BulkLinkFlowState, BulkLinkModalState, BulkLinkStep, BulkResolveFlowState,
-    BulkResolveModalState, BulkResolveStep, BulkStiFlowState, BulkStiModalState, BulkStiStep,
+    bulk_sti_checked_totals, bulk_usd_floor_label, bulk_void_checked_count,
+    bulk_void_lot_selection_checked_count, income_kind_display, wallet_label, BulkLinkFlowState,
+    BulkLinkModalState, BulkLinkStep, BulkResolveFlowState, BulkResolveModalState, BulkResolveStep,
+    BulkStiFlowState, BulkStiModalState, BulkStiStep, BulkVoidFlowState, BulkVoidModalState,
     ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
     ClassifyRawStep, ClassifyRawVariant, DisposalKind, FieldBuffer, InboundVariant, LinkMode,
     LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, MatchSelfTransfersFlowState,
@@ -372,6 +373,13 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.bulk_resolve_modal.as_ref() {
         draw_bulk_resolve_modal(frame, area, modal);
+    }
+    // Bulk-void flow overlay (bulk-void D3).
+    if let Some(flow) = app.bulk_void_flow.as_mut() {
+        draw_bulk_void_flow(frame, area, flow);
+    }
+    if let Some(modal) = app.bulk_void_modal.as_ref() {
+        draw_bulk_void_modal(frame, area, modal);
     }
     // Match-self-transfers flow overlay (self-transfer-passthrough C3).
     if let Some(flow) = app.match_self_transfers_flow.as_mut() {
@@ -3966,6 +3974,161 @@ fn draw_bulk_resolve_modal(frame: &mut Frame, area: Rect, modal: &BulkResolveMod
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Red))
         .title(" Confirm: bulk resolve-conflict — WRITES THE VAULT (NON-REVOCABLE) ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Render the bulk-void flow (bulk-void D3): a single per-row-exclude checklist over the voidable
+/// decisions (`seq · type · what the void undoes`); each row rendered from `summarize_void_payload`.
+fn draw_bulk_void_flow(frame: &mut Frame, area: Rect, flow: &mut BulkVoidFlowState) {
+    let modal_rect = centered_rect(98, 26, area);
+    frame.render_widget(Clear, modal_rect);
+    let outer = Block::default().borders(Borders::ALL).title(
+        " BULK VOID DECISIONS — sweep-void MANY revocable decisions at once (NON-REVOCABLE) ",
+    );
+    let inner = outer.inner(modal_rect);
+    frame.render_widget(outer, modal_rect);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(5)])
+        .split(inner);
+
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let hl = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    let selected = flow.preview.table_state.selected();
+    let rows: Vec<Row> = flow
+        .preview
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, it)| {
+            let base = if selected == Some(i) {
+                hl
+            } else {
+                Style::default()
+            };
+            let mark = if it.checked { "[x]" } else { "[ ]" };
+            // Flag the blast-radius rows (LotSelection voids re-expose disposals + clear attestations).
+            let ls_flag = if it.disposal_to_clear.is_some() {
+                " (re-exposes disposal)"
+            } else {
+                ""
+            };
+            let summary = format!("{}{}", it.target_summary, ls_flag);
+            Row::new(vec![
+                Cell::from(mark).style(base),
+                Cell::from(it.seq.to_string()).style(base),
+                Cell::from(it.payload_tag).style(base),
+                Cell::from(summary).style(base),
+            ])
+        })
+        .collect();
+    let header = Row::new(
+        ["", "seq", "type", "what the void undoes"]
+            .iter()
+            .map(|h| Cell::from(*h).style(bold)),
+    );
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(3),
+            Constraint::Length(8),
+            Constraint::Length(24),
+            Constraint::Min(30),
+        ],
+    )
+    .header(header);
+    frame.render_stateful_widget(table, chunks[0], &mut flow.preview.table_state);
+
+    // Footer: checked count + LotSelection blast-radius count + hint + transient error.
+    let checked = bulk_void_checked_count(&flow.preview.items);
+    let ls = bulk_void_lot_selection_checked_count(&flow.preview.items);
+    let mut footer: Vec<Line> = vec![
+        Line::from(Span::styled(
+            format!("checked {checked} · {ls} lot-selection void(s) re-expose disposals"),
+            bold,
+        )),
+        Line::from(Span::styled(
+            "↑/↓: scroll  Space/x: toggle  Enter: confirm  Esc: cancel",
+            Style::default().fg(Color::Cyan),
+        )),
+    ];
+    if let Some(err) = &flow.error {
+        footer.push(Line::from(Span::styled(
+            format!("⚠ {err}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+    frame.render_widget(Paragraph::new(footer), chunks[1]);
+}
+
+/// Render the bulk-void confirmation modal — Tier-B NON-REVOCABLE + high blast-radius (red border,
+/// prominent warning, NOT a typed-word). States N voids, that these voids CANNOT themselves be undone
+/// (re-apply the original decision to restore), and how many are LotSelection voids that re-expose
+/// disposals + clear attestations.
+fn draw_bulk_void_modal(frame: &mut Frame, area: Rect, modal: &BulkVoidModalState) {
+    let blast = if modal.lot_selection_count > 0 {
+        format!(
+            "{} of these are LotSelection voids — they re-expose their disposals to the default \
+             method and clear their optimizer attestation.",
+            modal.lot_selection_count
+        )
+    } else {
+        "None of these are LotSelection voids (no disposals re-exposed).".to_string()
+    };
+
+    let lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Void ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}", modal.count),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " revocable decision(s)?",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  !! These voids CANNOT themselves be undone (a void is non-revocable).",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "  To restore a voided decision, RE-APPLY the original decision.",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  {blast}"),
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+        Line::from("  Appended as N VoidDecisionEvents, saved via the vault's atomic write path."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  [Enter] Void — writes the vault    [Esc] Cancel — writes nothing",
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from(""),
+    ];
+
+    let height = (lines.len() + 2) as u16;
+    let modal_rect = centered_rect(88, height, area);
+    frame.render_widget(Clear, modal_rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red))
+        .title(" Confirm: BULK VOID — WRITES THE VAULT (NON-REVOCABLE) ");
     let inner = block.inner(modal_rect);
     frame.render_widget(block, modal_rect);
     frame.render_widget(Paragraph::new(lines), inner);

@@ -427,6 +427,20 @@ enum Reconcile {
         #[arg(long)]
         yes: bool,
     },
+    /// Bulk-void MANY revocable reconcile decisions in one confirmed batch (bulk-void). Shows a preview
+    /// of every voidable decision (the SHARED `voidable_decisions` predicate — effective safe-harbor
+    /// allocations are OMITTED, #7), then requires --yes (or interactive y/N). Each void is
+    /// NON-REVOCABLE (a `VoidDecisionEvent` cannot itself be voided — re-apply the original decision to
+    /// restore). Voiding a `LotSelection` also re-exposes its disposal to the default method and clears
+    /// its optimizer attestation.
+    BulkVoid {
+        /// Print the preview and exit without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip the interactive confirmation (non-interactive apply).
+        #[arg(long)]
+        yes: bool,
+    },
     /// Match unreconciled inbound + outbound legs as self-transfers (self-transfer-passthrough C3).
     /// With no --in/--out: PREVIEW the proposed pairs (read-only). With --in and --out: confirm ONE
     /// pair (DROP for a same-wallet passthrough, RELOCATE for a cross-wallet transfer). NEVER automatic.
@@ -1277,6 +1291,45 @@ fn dispatch_reconcile(
             }
             return Ok(());
         }
+        Reconcile::BulkVoid { dry_run, yes } => {
+            let plan = cmd::reconcile::bulk_void_plan(vault, &pp)?;
+            render_bulk_void_preview(&plan);
+
+            if plan.rows.is_empty() {
+                println!("no revocable decisions to void");
+                return Ok(());
+            }
+            if dry_run {
+                return Ok(());
+            }
+            let confirmed = if yes {
+                true
+            } else {
+                print!(
+                    "Void {} decision(s)? THESE VOIDS CANNOT THEMSELVES BE UNDONE [y/N] ",
+                    plan.rows.len()
+                );
+                use std::io::Write;
+                std::io::stdout().flush().ok();
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line)?;
+                matches!(line.trim(), "y" | "Y" | "yes" | "YES")
+            };
+            if !confirmed {
+                println!("aborted; nothing written");
+                return Ok(());
+            }
+            // [R0-M3] targets are derived from the predicate-filtered plan rows — NEVER raw ids — so an
+            // effective allocation (omitted by the plan) can never reach `apply_bulk_void`.
+            let targets: Vec<_> = plan
+                .rows
+                .iter()
+                .map(|r| (r.target_event_id.clone(), r.disposal_to_clear.clone()))
+                .collect();
+            let n = cmd::reconcile::apply_bulk_void(vault, &pp, targets, now)?;
+            println!("voided {n} decisions");
+            return Ok(());
+        }
         Reconcile::MatchSelfTransfers {
             in_ref,
             out_ref,
@@ -1540,6 +1593,84 @@ fn render_bulk_resolve_preview(plan: &btctax_cli::BulkResolvePlan, accept: bool)
     println!("conflicts {}", plan.rows.len());
 }
 
+/// One-line human summary of a voidable decision for the bulk-void preview (the CLI front-end's own
+/// summary formatter — `summarize_void_payload` is a private tui-edit binary fn). Shows the payload tag
+/// + the inner target the void undoes.
+fn bulk_void_payload_summary(p: &btctax_core::EventPayload) -> String {
+    use btctax_core::EventPayload;
+    match p {
+        EventPayload::TransferLink(tl) => {
+            format!("TransferLink out {}", tl.out_event.canonical())
+        }
+        EventPayload::ReclassifyOutflow(ro) => format!(
+            "ReclassifyOutflow out {} as {:?}",
+            ro.transfer_out_event.canonical(),
+            ro.as_
+        ),
+        EventPayload::ClassifyInbound(ci) => format!(
+            "ClassifyInbound in {} as {:?}",
+            ci.transfer_in_event.canonical(),
+            ci.as_
+        ),
+        EventPayload::ManualFmv(m) => {
+            format!("ManualFmv {} for {}", m.usd_fmv, m.event.canonical())
+        }
+        EventPayload::ClassifyRaw(cr) => format!("ClassifyRaw {}", cr.target.canonical()),
+        EventPayload::MethodElection(me) => {
+            format!("MethodElection {:?} from {}", me.method, me.effective_from)
+        }
+        EventPayload::LotSelection(ls) => {
+            format!("LotSelection lots for {}", ls.disposal_event.canonical())
+        }
+        EventPayload::ReclassifyIncome(ri) => format!(
+            "ReclassifyIncome {} biz={}",
+            ri.income_event.canonical(),
+            ri.business
+        ),
+        EventPayload::SelfTransferPassthrough(stp) => format!(
+            "SelfTransferPassthrough in {} out {}",
+            stp.in_event.canonical(),
+            stp.out_event.canonical()
+        ),
+        EventPayload::SafeHarborAllocation(a) => {
+            format!(
+                "SafeHarborAllocation {} lots as_of {}",
+                a.lots.len(),
+                a.as_of_date
+            )
+        }
+        other => format!("{other:?}"),
+    }
+}
+
+/// Render the bulk-void preview: a `seq · date · decision` table (bulk-void D2). Flags the count of
+/// `LotSelection` voids that re-expose disposals + clear attestations (the blast radius). No $ number.
+fn render_bulk_void_preview(plan: &btctax_cli::BulkVoidPlan) {
+    println!("Bulk-void preview — these voids CANNOT themselves be undone (NON-REVOCABLE)");
+    println!(
+        "{:<10}  {:<12}  {:<60}",
+        "seq", "date", "decision (what the void undoes)"
+    );
+    for r in &plan.rows {
+        println!(
+            "{:<10}  {:<12}  {:<60}",
+            r.seq,
+            r.date,
+            bulk_void_payload_summary(&r.payload),
+        );
+    }
+    let lot_selections = plan
+        .rows
+        .iter()
+        .filter(|r| r.disposal_to_clear.is_some())
+        .count();
+    println!(
+        "voidable {} ({} LotSelection void(s) re-expose disposals + clear attestations)",
+        plan.rows.len(),
+        lot_selections
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1568,6 +1699,26 @@ mod tests {
         assert!(
             parse_brc(&["--reject", "--dry-run"]).is_ok(),
             "--reject --dry-run parses"
+        );
+    }
+
+    /// Parse a `reconcile bulk-void …` invocation via the real clap derivation.
+    fn parse_bv(args: &[&str]) -> Result<Cli, clap::Error> {
+        let mut full = vec!["btctax", "reconcile", "bulk-void"];
+        full.extend_from_slice(args);
+        Cli::try_parse_from(full)
+    }
+
+    /// bulk-void takes no --accept/--reject (void is single-valued); the two-phase --dry-run / --yes
+    /// flags parse, and there is no required arg group.
+    #[test]
+    fn bulk_void_cli_flags_parse() {
+        assert!(parse_bv(&[]).is_ok(), "bare bulk-void parses (interactive)");
+        assert!(parse_bv(&["--dry-run"]).is_ok(), "--dry-run parses");
+        assert!(parse_bv(&["--yes"]).is_ok(), "--yes parses");
+        assert!(
+            parse_bv(&["--accept"]).is_err(),
+            "bulk-void has no --accept flag"
         );
     }
 }
