@@ -1,0 +1,40 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-pseudo-approve 1  btctax "btctax manual"
+.SH NAME
+approve \- Promote pseudo default decisions to REAL (attested) decisions in bulk. Shows a preview + requires `\-\-yes` (or `\-\-dry\-run` to preview only). Optional filters restrict which defaults are approved
+.SH SYNOPSIS
+\fBapprove\fR [\fB\-\-kind\fR] [\fB\-\-wallet\fR] [\fB\-\-year\fR] [\fB\-\-dry\-run\fR] [\fB\-\-yes\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Promote pseudo default decisions to REAL (attested) decisions in bulk. Shows a preview + requires `\-\-yes` (or `\-\-dry\-run` to preview only). Optional filters restrict which defaults are approved
+.SH OPTIONS
+.TP
+\fB\-\-kind\fR \fI<KIND>\fR
+Only approve defaults of this TYPE: `self\-transfer` (unknown\-basis inbound → $0 self\-transfer), `raw` (unclassified row placeholder), or `conflict` (import conflict accept\-first). Omit = all
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+self\-transfer: Unknown\-basis inbound defaulted to a $0\-basis self\-transfer\-in
+.IP \(bu 2
+raw: Unclassified row defaulted to a zero\-value placeholder (ClassifyRaw)
+.IP \(bu 2
+conflict: Import conflict defaulted to accept\-first (SupersedeImport)
+.RE
+.TP
+\fB\-\-wallet\fR \fI<WALLET>\fR
+Only approve defaults whose target event is in this wallet (e.g. `exchange:coinbase:main`)
+.TP
+\fB\-\-year\fR \fI<YEAR>\fR
+Only approve defaults whose target event falls in this tax year
+.TP
+\fB\-\-dry\-run\fR
+Print the preview and exit without writing
+.TP
+\fB\-\-yes\fR
+Skip the interactive confirmation (non\-interactive apply)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
