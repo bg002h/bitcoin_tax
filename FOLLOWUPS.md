@@ -4,9 +4,20 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
-## ⏸ crate publishing — PREPPED + MERGED, publish HELD by user (2026-07-04)
+## ✅ crate publishing — PUBLISHED to crates.io + repo made PUBLIC (2026-07-04)
 
-Publish-ready but **NOT published** (user chose "hold for now" at the go-ahead gate). Merged to main
+**All 7 crates are LIVE on crates.io at v0.1.0** — `btctax` (name-reservation crate → `btctax-cli`),
+`btctax-core`, `btctax-store`, `btctax-adapters`, `btctax-cli`, `btctax-tui`, `btctax-tui-edit`
+(`xtask` stays `publish=false`). `cargo install btctax-cli` works. The **GitHub repo `bg002h/bitcoin_tax` is now
+PUBLIC** (full git-history audited clean first — no keys/tokens/vault/tax data ever committed; `main` pushed to
+origin `5662c3c`). Published with a user-supplied temporary `publish-new`-scoped token via `CARGO_REGISTRY_TOKEN`
+(not persisted; the stored `~/.cargo` token lacked publish perms). Hit the new-crate 5-burst limit → the 7th
+(`btctax-tui-edit`) 429'd and was retried after the ~10-min window. **v0.1.0 is permanently burned — future
+releases are 0.1.1+.** See memory [[crate-publishing-state]].
+
+_(historical prep record below.)_
+
+Publish-ready, merged to main
 (`3492023`): crates.io metadata (description per crate, shared repository/homepage/keywords in
 `[workspace.package]`, per-crate categories — libs `finance`, bins `command-line-utilities`+`finance`) +
 `version = "0.1.0"` on all 14 internal path deps. **Coordinated `cargo publish --dry-run --workspace` PASSES**
