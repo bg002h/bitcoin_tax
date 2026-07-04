@@ -4,6 +4,25 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ binary documentation (man pages + PDFs + inline file-format docs) — SHIPPED (2026-07-04)
+
+Man pages for all three binaries + PDFs + inline FILE-FORMAT docs. **Single source of truth:** the file-format
+docs (format + text example) live in the clap doc-comments in `crates/btctax-cli/src/cli.rs` (the `Cli` was
+extracted from `main.rs` to a lib module so the generator can reach `Cli::command()`), each with
+`#[arg(verbatim_doc_comment)]` — they flow to BOTH `--help` AND the man page (via `clap_mangen`), so no drift.
+**Layout:** git-style per-subcommand pages (`docs/man/btctax.1` + `btctax-<path>.1`, 40 total) — because
+`clap_mangen` renders only ONE command's args per call, NOT subcommand args from a single root render.
+**Generator:** `crates/xtask` (clap_mangen is generator-only — the shipped `btctax` gained no runtime dep).
+**Documented formats** (not vault / not exchange-import): key-backup armor, export-snapshot CSV set
+(`income.csv` etc., headers read from the `render.rs` writer), import-selections CSV, classify-raw JSON,
+select-lots picks. **Regenerate:** `make docs` (man+PDF, deterministic `.1`); `make bundles` → one combined
+PDF per binary (`docs/pdf/btctax-manual.pdf` + the 2 TUI manuals; PDFs git-ignored — gropdf embeds a
+timestamp). R0-GREEN 2 rounds (r1 caught the clap_mangen single-root limitation); whole-diff 0C/0I (help KAT
+fault-injection-confirmed load-bearing). **1095 tests.** Merge `04d27ce`. Reviews:
+`reviews/{R0-spec-binary-documentation-round-{1,2},whole-branch-review-binary-documentation-round-1}.md`.
+
+---
+
 ## ✅ frozen column totals (btctax-tui) — SHIPPED (2026-07-03) — PARKED ITEM 2 DONE → QUEUE CLEAR
 
 Column totals as a FROZEN `Table::footer()` on the output tabs. **Disposals**: freeze the existing scrolling
