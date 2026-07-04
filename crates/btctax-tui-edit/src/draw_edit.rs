@@ -157,13 +157,16 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
         status.to_string()
     } else {
         "Tab/Shift-Tab: switch tab   ←/→: change year   ↑/↓ j/k: scroll   \
-         PgUp/PgDn: page   g/G: top/bottom   p: edit tax profile   q/Esc: quit   [EDITOR]"
+         PgUp/PgDn: page   g/G: top/bottom   p: profile   ?: help   q/Esc: quit   [EDITOR]"
             .to_string()
     };
     let footer = Paragraph::new(footer_text).alignment(Alignment::Center);
     frame.render_widget(footer, chunks[2]);
 
     // ── Overlays (drawn AFTER content so they appear on top) ─────────────────
+    if app.help_open {
+        draw_help_overlay(frame, area);
+    }
     if let Some(form) = app.profile_form.as_ref() {
         draw_profile_form(frame, area, form);
     }
@@ -1687,6 +1690,53 @@ fn draw_void_modal(frame: &mut Frame, area: Rect, modal: &VoidModalState) {
 }
 
 /// Compute a centered `Rect` of the given dimensions within `area`.
+/// The `?` full-keymap help overlay — a centered modal, the SAME on every tab (the reconcile action
+/// keys are global). Lines are sized to fit an 80×24 terminal (no scroll; `centered_rect` truncates).
+/// KEEP IN SYNC with the Browse key handler (`handle_key` in main.rs) — the KAT
+/// `help_lists_every_browse_action_key` pins that every action key appears here.
+fn draw_help_overlay(frame: &mut Frame, area: Rect) {
+    let hdr = |s: &'static str| {
+        Line::from(Span::styled(
+            s,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+    };
+    let lines = vec![
+        hdr("Navigation"),
+        Line::from("  Tab/Shift-Tab switch tab    ←/→ change year    j/k or ↑/↓ scroll"),
+        Line::from("  PgUp/PgDn page    g/G top/bottom"),
+        Line::from(""),
+        hdr("Reconcile"),
+        Line::from("  c classify-inbound   o reclassify-outflow   r reclassify-income"),
+        Line::from("  f set-fmv   v void   s select-lots   d donation-details"),
+        Line::from("  l link-transfer   u classify-raw   m match-self-transfers"),
+        Line::from("  i resolve-conflict   z optimize   a/A safe-harbor attest/allocate"),
+        Line::from("  Bulk:  b link   B self-transfer-in   C resolve-conflict"),
+        Line::from("         V void   I income   O reclassify-outflow"),
+        Line::from(""),
+        hdr("App"),
+        Line::from("  p profile   ? help   q/Esc close"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  ? · Esc · q  to close",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    let width: u16 = 72;
+    let height: u16 = lines.len() as u16 + 2;
+    let rect = centered_rect(width, height, area);
+    frame.render_widget(Clear, rect);
+    let p = Paragraph::new(lines).block(
+        Block::default()
+            .title(" Help — keyboard shortcuts ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+    frame.render_widget(p, rect);
+}
+
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;

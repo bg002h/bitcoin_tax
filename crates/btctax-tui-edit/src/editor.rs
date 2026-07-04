@@ -65,6 +65,8 @@ pub struct EditorApp {
     pub screen: EditorScreen,
     pub tab: Tab,
     pub should_quit: bool,
+    /// `?` help overlay open (Browse screen). Pure runtime UI state (no serde). Modal while open.
+    pub help_open: bool,
     /// The LIVE session — held for the whole TUI session.
     ///
     /// # VaultLock exclusivity (documented concurrency story)
@@ -251,6 +253,7 @@ impl EditorApp {
             screen: EditorScreen::Unlock,
             tab: Tab::Holdings,
             should_quit: false,
+            help_open: false,
             session: None,
             snapshot: None,
             selected_year: 2025,

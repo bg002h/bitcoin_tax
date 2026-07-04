@@ -126,6 +126,19 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── 0. Help overlay — MODAL, before everything: ?/Esc/q close it, all else ignored ──
+    // `help_open` is only ever set from the deepest Browse dispatch (no modal/flow open), so this
+    // top-level return is safe AND pre-empts the Browse quit arm (Esc/q must NOT quit while help is up).
+    if app.help_open {
+        if matches!(
+            key.code,
+            KeyCode::Char('?') | KeyCode::Esc | KeyCode::Char('q')
+        ) {
+            app.help_open = false;
+        }
+        return;
+    }
+
     // ── 1. Mutation-modal dispatch — BEFORE everything else ───────────────────
     if app.mutation_modal.is_some() {
         handle_modal_key(app, key);
@@ -402,6 +415,8 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('m') => open_match_self_transfers_flow(app),
                 KeyCode::Char('i') => open_resolve_conflict_flow(app),
                 KeyCode::Char('z') => open_optimize_accept_flow(app),
+                // KEEP IN SYNC with KEYMAP overlay (draw_help_overlay). `?` opens the full-keymap help.
+                KeyCode::Char('?') => app.help_open = true,
                 _ => {}
             }
         }
@@ -8802,6 +8817,141 @@ mod tests {
         assert!(!app.should_quit);
         handle_key(&mut app, press(KeyCode::Char('q')));
         assert!(app.should_quit, "'q' on Browse must quit");
+    }
+
+    // ── `?` help overlay ──────────────────────────────────────────────────────
+    #[test]
+    fn help_opens_on_question_mark() {
+        let mut app = EditorApp::new(PathBuf::new());
+        app.screen = EditorScreen::Browse;
+        assert!(!app.help_open);
+        handle_key(&mut app, press(KeyCode::Char('?')));
+        assert!(app.help_open, "'?' on Browse opens the help overlay");
+    }
+
+    #[test]
+    fn help_closes_on_esc_q_and_question() {
+        for close in [KeyCode::Esc, KeyCode::Char('q'), KeyCode::Char('?')] {
+            let mut app = EditorApp::new(PathBuf::new());
+            app.screen = EditorScreen::Browse;
+            app.help_open = true;
+            handle_key(&mut app, press(close));
+            assert!(!app.help_open, "{close:?} must close the help overlay");
+            assert!(
+                !app.should_quit,
+                "{close:?} while help_open must NOT quit (precedence guard)"
+            );
+        }
+    }
+
+    #[test]
+    fn help_modal_swallows_action_keys() {
+        let mut app = EditorApp::new(PathBuf::new());
+        app.screen = EditorScreen::Browse;
+        app.help_open = true;
+        // Tab has an observable effect with NO snapshot needed — if the overlay weren't modal it would
+        // cycle the tab. (A snapshot-less `v` can't open the void flow either way, so it's not a
+        // load-bearing probe on its own — Tab is.)
+        let tab0 = app.tab;
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert_eq!(
+            app.tab, tab0,
+            "Tab while help_open must be SWALLOWED (overlay is modal), not cycle tabs"
+        );
+        handle_key(&mut app, press(KeyCode::Char('v')));
+        assert!(
+            app.void_flow.is_none(),
+            "'v' while help_open must be swallowed, NOT open the void flow"
+        );
+        assert!(app.help_open, "a non-close key leaves the overlay open");
+    }
+
+    #[test]
+    fn question_mark_ignored_while_flow_open() {
+        use crate::edit::form::{TargetList, VoidFlowState, VoidStep};
+        let mut app = EditorApp::new(PathBuf::new());
+        app.screen = EditorScreen::Browse;
+        app.void_flow = Some(VoidFlowState {
+            list: TargetList::new(vec![]),
+            step: VoidStep::List,
+        });
+        handle_key(&mut app, press(KeyCode::Char('?')));
+        assert!(
+            !app.help_open,
+            "'?' is swallowed by the open flow's gate, not the Browse handler"
+        );
+    }
+
+    fn render_browse_to_string(help_open: bool) -> String {
+        use btctax_adapters::BundledTaxTables;
+        use btctax_cli::CliConfig;
+        use btctax_tui::app::Snapshot;
+        use ratatui::{backend::TestBackend, Terminal};
+        use std::collections::BTreeMap;
+        let snap = Snapshot {
+            events: vec![],
+            state: btctax_core::state::LedgerState::default(),
+            cli_config: CliConfig::default(),
+            profiles: BTreeMap::new(),
+            tables: BundledTaxTables::load(),
+            donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
+        };
+        let mut app = EditorApp::new(PathBuf::from("/help/vault.pgp"));
+        app.screen = EditorScreen::Browse;
+        app.snapshot = Some(snap);
+        app.selected_year = 2025;
+        app.help_open = help_open;
+        let backend = TestBackend::new(160, 44);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .clone()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    #[test]
+    fn footer_advertises_help() {
+        // Footer visible without the overlay — the feature's own entry point [R0-I1].
+        let rendered = render_browse_to_string(false);
+        assert!(
+            rendered.contains("?: help"),
+            "footer must advertise '?: help'; rendered:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn help_lists_every_browse_action_key() {
+        let rendered = render_browse_to_string(true);
+        for token in [
+            "classify-inbound",
+            "reclassify-outflow",
+            "reclassify-income",
+            "set-fmv",
+            "void",
+            "select-lots",
+            "donation-details",
+            "link-transfer",
+            "classify-raw",
+            "match-self-transfers",
+            "resolve-conflict",
+            "optimize",
+            "safe-harbor",
+            "self-transfer-in",
+            "income",
+            "profile",
+            "Bulk",
+        ] {
+            assert!(
+                rendered.contains(token),
+                "help overlay must list '{token}'; rendered:\n{rendered}"
+            );
+        }
     }
 
     #[test]
