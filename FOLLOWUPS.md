@@ -4,6 +4,29 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ⏸ crate publishing — PREPPED + MERGED, publish HELD by user (2026-07-04)
+
+Publish-ready but **NOT published** (user chose "hold for now" at the go-ahead gate). Merged to main
+(`3492023`): crates.io metadata (description per crate, shared repository/homepage/keywords in
+`[workspace.package]`, per-crate categories — libs `finance`, bins `command-line-utilities`+`finance`) +
+`version = "0.1.0"` on all 14 internal path deps. **Coordinated `cargo publish --dry-run --workspace` PASSES**
+(6 crates packaged + build-verified in topo order: core→store→adapters→cli→tui→tui-edit; `xtask` is
+`publish=false`). Safety audited twice — no vault/key/tax data ships (only the public `btc_usd_daily_close.csv`).
+R0-GREEN 2 rounds + whole-diff 0C/0I. Reviews: `reviews/{R0-spec-crate-publishing-round-{1,2},
+whole-branch-review-crate-publishing-round-1}.md`.
+
+**TO PUBLISH (when the user says go):** from a CLEAN committed `main` (no `--allow-dirty`, token already in
+`~/.cargo/credentials.toml`), run `cargo publish --workspace`. Expect a **429 on the 6th crate**
+(`btctax-tui-edit`) — crates.io's new-crate 5-burst limit — wait ~10 min and re-run (`cargo publish
+--workspace` or `-p btctax-tui-edit`); safe + resumable.
+**USER DECISION — reserve the bare `btctax` name:** the user said YES. When publishing, ALSO publish a minimal
+`btctax` v0.1.0 name-reservation crate (design: a lib-only placeholder whose description/doc points to
+`btctax-cli`, `cargo install btctax-cli`; no internal deps so it can publish independently). This makes 7 new
+crates → the rate-limit retry applies to the last 2. **Irreversibility reminders for the go:** names + v0.1.0
+permanent; source becomes public (regardless of repo privacy); MIT-OR-Unlicense = freely reusable.
+
+---
+
 ## ✅ README (install + verified tutorial) — SHIPPED (2026-07-04)
 
 Greenfield end-user `README.md`: what btctax is, install-from-source (`cargo install --path crates/*`; crates.io
