@@ -12,6 +12,9 @@ vault*
 *.vault
 *-snapshot.*
 snapshot.*
+# Committed man pages are generated from the CLI command structure (no user/vault data);
+# the `*-snapshot.*` rule above otherwise silently eats `btctax-export-snapshot.1`.
+!docs/man/*.1
 *.sqlite
 *.sqlite3
 *.db

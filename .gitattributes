@@ -1,0 +1,6 @@
+# Normalize all text files to LF in the repo and on checkout, on every platform.
+# Without this, a Windows checkout (default core.autocrlf) would convert source and
+# CSV/text test fixtures to CRLF and break the adapter parsers + exact-text/snapshot
+# tests. `text=auto` lets git auto-detect binary (NUL-bearing) files (e.g. the tracked
+# PDFs) and leave them untouched; `eol=lf` forces LF for everything detected as text.
+* text=auto eol=lf
