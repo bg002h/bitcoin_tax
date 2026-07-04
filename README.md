@@ -195,6 +195,20 @@ truthfulness of the inputs you give it.
 Use it to help yourself get it right. Do not use it — or point to it — as cover for a return you know to be
 wrong: it tells you plainly, right here, that it is not preparing your taxes. **You are.**
 
+## No warranty — verify it yourself
+
+**btctax is early-stage, pre-release software, provided "as is" and without warranty of any kind.** It has not
+been independently audited, professionally reviewed, or validated against real-world tax filings, and it may
+contain errors that produce incorrect results.
+
+Do not trust its output without checking it yourself. Before you rely on anything btctax computes — for a
+filing or any other purpose — independently verify it: reconcile the numbers against your own records, test it
+on inputs whose answers you already know, and confirm the results with a qualified tax professional. Treat
+every figure as something you are responsible for satisfying yourself is correct, not as an authoritative
+answer.
+
+**If in doubt, don't rely on it.**
+
 ## License
 
 Licensed under either of **MIT** or **The Unlicense** at your option.
