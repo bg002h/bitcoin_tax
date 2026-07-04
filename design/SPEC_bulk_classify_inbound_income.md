@@ -1,8 +1,9 @@
 # SPEC — bulk-classify-inbound-income (queue item 3, Cycle 4)
 
-**Source baseline:** `main` @ `c643ddd` (branch `feat/bulk-classify-inbound-income`). **Review status: R0 round 1 folded
-(0C / 1I / 4M / 2N — all folded; confirm-tier flag adjudicated GREEN = reuse bulk-sti's revocable tier).
-Review: `reviews/R0-spec-bulk-classify-inbound-income-round-1.md`. Awaiting R0 round 2.**
+**Source baseline:** `main` @ `c643ddd` (branch `feat/bulk-classify-inbound-income`). **Review status: R0-GREEN (2 rounds; 0 Critical / 0 Important). Reviews:
+`reviews/R0-spec-bulk-classify-inbound-income-round-{1,2}.md` (round 1: 0C/1I — the persist dependency
+cycle; round 2: 0C/0I, residuals folded). Confirm-tier adjudicated: reuse bulk-sti's revocable tier.
+Cleared to implement.**
 **Lineage:** queue item 3 of `bulk-reconcile-other-types` (architect-designed, user-approved safety-first
 sequencing). Cycles 1-3 SHIPPED (extract → resolve-conflict → void). This is **Cycle 4**.
 
@@ -107,7 +108,8 @@ note) → `persist_bulk_decisions`. Mirror the shipped bulk-sti (`B`) flow struc
 - **`bulk_income_plan_excludes_missing_price`** [#a tax-safety] — a row whose date has NO bundled price is
   NOT in `included` and IS counted in `excluded_missing_price`; a persisted batch therefore NEVER creates
   an `Income{fmv:None}` → NO Hard `FmvMissing`. Pair: `bulk_income_apply_sets_autofmv` (an included row's
-  persisted `Income.usd_fmv == fmv_of(date, sat)`).
+  resolved decision `fmv` — and thus the projected `Income.usd_fmv` — `== fmv_of(date, sat)`; note the
+  DECISION field is `.fmv`, `usd_fmv` is the PROJECTED value).
 - **`bulk_income_plan_excludes_wallet_less`** [R0-M4 — a wallet-less inbound is ALSO a Hard-`FmvMissing`/
   no-lot vector (fold.rs:833), same year-gating class as missing-price] — a wallet-less pending inbound is
   NOT in `included` (mirrors bulk-sti's wallet-less exclusion).
@@ -132,5 +134,7 @@ note) → `persist_bulk_decisions`. Mirror the shipped bulk-sti (`B`) flow struc
 - **Surface, don't drop** — report `excluded_missing_price` in the preview (honest; the user chooses what
   to do with those rows). Silent exclusion reads as "classified everything."
 - **auto-FMV is per-row** (`fmv_of(date, sat)`), never a uniform user number. Only `kind` + `business` are uniform.
-- **No bespoke persist** — reuse `persist_bulk_decisions`; classify-income has no side-effect.
+- **Persist split (R0-I1)** — TUI reuses `persist_bulk_decisions` via the thin `persist_bulk_classify_income`
+  wrapper (no side-effect); the **CLI uses its OWN append-loop** (it cannot reach the tui-edit helper —
+  dependency cycle). Do NOT write a "delegates to persist_bulk_decisions" CLI path.
 - Dispatch derives targets from the plan's `included` rows, never raw ids (the fmv-exclusion must not be bypassable).
