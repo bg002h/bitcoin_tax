@@ -5,6 +5,7 @@ use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 
+#[derive(Debug)]
 pub struct VaultLock(File);
 
 impl VaultLock {
@@ -16,14 +17,31 @@ impl VaultLock {
             .open(paths::lock_of(vault))?;
         match f.try_lock_exclusive() {
             Ok(()) => Ok(VaultLock(f)),
-            // On contention fs2 surfaces WouldBlock: Unix EWOULDBLOCK; Windows ERROR_LOCK_VIOLATION(33)
-            // mapped to WouldBlock by Rust >=1.64's decode_error_kind (PR #95306) — MSRV (1.88; ≥1.64 required) satisfies this.
-            // If MSRV is ever lowered below 1.64, fall back to e.raw_os_error()==Some(33). (fs2 0.4 is dormant;
-            // fd-lock is a maintained alternative that normalizes this mapping — see FOLLOWUPS.)
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Err(StoreError::Locked),
+            Err(e) if is_contention(&e) => Err(StoreError::Locked),
             Err(e) => Err(StoreError::Io(e)),
         }
     }
+}
+
+/// Is this `try_lock_exclusive` error lock contention (the file is already locked), as opposed to a
+/// real I/O failure?
+///
+/// Platforms surface contention differently:
+/// - **Unix:** `flock`/`EWOULDBLOCK` → `ErrorKind::WouldBlock`.
+/// - **Windows:** `LockFileEx(LOCKFILE_FAIL_IMMEDIATELY)` fails with `ERROR_LOCK_VIOLATION` (33) — and,
+///   for a sharing conflict, `ERROR_SHARING_VIOLATION` (32). Current stable std does **NOT** normalize
+///   33 to `WouldBlock` (verified empirically on `windows-latest` CI — an earlier assumption that it did
+///   was wrong), so match the raw OS codes directly. The codes are Windows-specific, hence `cfg(windows)`
+///   (32/33 mean unrelated errors — `EPIPE`/`EDOM` — on Unix).
+fn is_contention(e: &std::io::Error) -> bool {
+    if e.kind() == std::io::ErrorKind::WouldBlock {
+        return true;
+    }
+    #[cfg(windows)]
+    if matches!(e.raw_os_error(), Some(32) | Some(33)) {
+        return true;
+    }
+    false
 }
 
 impl Drop for VaultLock {
@@ -41,7 +59,11 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let v = d.path().join("vault.pgp");
         let a = VaultLock::acquire(&v).unwrap();
-        assert!(matches!(VaultLock::acquire(&v), Err(StoreError::Locked)));
+        let second = VaultLock::acquire(&v);
+        assert!(
+            matches!(second, Err(StoreError::Locked)),
+            "second acquire must be refused as Locked (contention); got {second:?}"
+        );
         drop(a);
         assert!(VaultLock::acquire(&v).is_ok());
     }
