@@ -138,11 +138,16 @@ pub struct AllocationVoid {
 /// An in-force forward method election (§A.5(a)). Collected in `resolve` from non-voided, non-backdated
 /// `MethodElection` decisions; the latest-in-force by `(effective_from, decision_seq)` governs per-wallet
 /// disposals on/after `effective_from` (NFR4: a total order, no `Date::now`/RNG).
+///
+/// `wallet` carries the election's scope through resolve→fold/compliance: `None` = GLOBAL,
+/// `Some(w)` = scoped to exchange account `w`. The shared `resolve_election` resolver applies the
+/// two-independent-tiers precedence (scoped-then-global).
 #[derive(Debug, Clone)]
 pub struct ElectionRec {
     pub effective_from: TaxDate,
     pub method: crate::LotMethod,
     pub decision_seq: u64,
+    pub wallet: Option<WalletId>,
 }
 
 pub struct Resolution {
@@ -858,6 +863,7 @@ pub fn resolve(
                 effective_from: me.effective_from,
                 method: me.method,
                 decision_seq: *seq,
+                wallet: me.wallet.clone(), // §A.5(a) scope: None = global, Some(w) = per-account
             });
         }
     }

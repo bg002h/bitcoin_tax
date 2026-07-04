@@ -11862,6 +11862,7 @@ mod tests {
                 // Hard MethodElectionBackdated blocker and would gate compute_tax_year.
                 effective_from: date!(2025 - 06 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             btctax_core::persistence::append_decision(session.conn(), p, now, UtcOffset::UTC, None)
                 .unwrap();
@@ -11912,6 +11913,7 @@ mod tests {
                 // Hard MethodElectionBackdated blocker and would gate compute_tax_year.
                 effective_from: date!(2025 - 06 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             btctax_core::persistence::append_decision(session.conn(), p, now, UtcOffset::UTC, None)
                 .unwrap();
@@ -13099,6 +13101,7 @@ mod tests {
             let p = EventPayload::MethodElection(MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             append_decision(
                 session.conn(),
@@ -13850,6 +13853,7 @@ mod tests {
             let p = EventPayload::MethodElection(MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             me_id = append_decision(
                 session.conn(),
@@ -14067,6 +14071,7 @@ mod tests {
                 EventPayload::MethodElection(MethodElection {
                     effective_from: date!(2024 - 01 - 01),
                     method: btctax_core::LotMethod::Fifo,
+                    wallet: None,
                 }),
                 now(1_748_001_500),
                 tz,
@@ -14205,6 +14210,7 @@ mod tests {
             let me = EventPayload::MethodElection(btctax_core::event::MethodElection {
                 effective_from: time::macros::date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             btctax_core::persistence::append_decision(session.conn(), me, t2, UtcOffset::UTC, None)
                 .unwrap();
@@ -14307,6 +14313,7 @@ mod tests {
             let me = EventPayload::MethodElection(btctax_core::event::MethodElection {
                 effective_from: time::macros::date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             btctax_core::persistence::append_decision(session.conn(), me, td, UtcOffset::UTC, None)
                 .unwrap();
@@ -16768,6 +16775,7 @@ mod tests {
                 EventPayload::MethodElection(MethodElection {
                     effective_from: date!(2024 - 01 - 01),
                     method: LotMethod::Fifo,
+                    wallet: None,
                 }),
                 OffsetDateTime::from_unix_timestamp(1_748_001_000).unwrap(),
                 UtcOffset::UTC,

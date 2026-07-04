@@ -175,6 +175,7 @@ fn method_election(seq: u64, ts: time::OffsetDateTime, method: LotMethod) -> Led
         payload: EventPayload::MethodElection(MethodElection {
             effective_from: date!(2025 - 01 - 01),
             method,
+            wallet: None,
         }),
     }
 }

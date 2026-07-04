@@ -837,6 +837,7 @@ pub fn set_forward_method(
         EventPayload::MethodElection(MethodElection {
             effective_from,
             method: m,
+            wallet: None,
         }),
         now,
     )

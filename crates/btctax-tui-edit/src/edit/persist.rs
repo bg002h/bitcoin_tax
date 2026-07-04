@@ -990,10 +990,12 @@ mod tests {
             let p1 = EventPayload::MethodElection(MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: LotMethod::Fifo,
+                wallet: None,
             });
             let p2 = EventPayload::MethodElection(MethodElection {
                 effective_from: date!(2025 - 01 - 01),
                 method: LotMethod::Hifo,
+                wallet: None,
             });
             append_decision(session.conn(), p1, now, tz, None).unwrap();
             append_decision(session.conn(), p2, now, tz, None).unwrap();
@@ -1103,6 +1105,7 @@ mod tests {
             let p = EventPayload::MethodElection(btctax_core::event::MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
             session.save().unwrap();
@@ -1239,6 +1242,7 @@ mod tests {
             let p = EventPayload::MethodElection(btctax_core::event::MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
             session.save().unwrap();
@@ -1369,6 +1373,7 @@ mod tests {
             let p = EventPayload::MethodElection(btctax_core::event::MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
             session.save().unwrap();
@@ -1484,6 +1489,7 @@ mod tests {
             let p = EventPayload::MethodElection(btctax_core::event::MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
             session.save().unwrap();
@@ -1576,6 +1582,7 @@ mod tests {
             let p = EventPayload::MethodElection(btctax_core::event::MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
             session.save().unwrap();
@@ -2003,6 +2010,7 @@ mod tests {
             let p = EventPayload::MethodElection(MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
             session.save().unwrap();
@@ -2101,6 +2109,7 @@ mod tests {
             let p = EventPayload::MethodElection(MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
             session.save().unwrap();
@@ -2174,6 +2183,7 @@ mod tests {
             let p = EventPayload::MethodElection(MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             let id = append_decision(session.conn(), p, now, UtcOffset::UTC, None).unwrap();
             me_id = id;
@@ -2283,6 +2293,7 @@ mod tests {
             let me_payload = EventPayload::MethodElection(MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             me_id = append_decision(session.conn(), me_payload, t1, UtcOffset::UTC, None).unwrap();
 
@@ -3047,6 +3058,7 @@ mod tests {
             let me_payload = EventPayload::MethodElection(MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             });
             append_decision(session.conn(), me_payload, t2, UtcOffset::UTC, None).unwrap();
             session.save().unwrap();
@@ -3339,6 +3351,7 @@ mod tests {
                 EventPayload::MethodElection(btctax_core::event::MethodElection {
                     effective_from: date!(2024 - 01 - 01),
                     method: LotMethod::Fifo,
+                    wallet: None,
                 }),
                 t0,
                 UtcOffset::UTC,
@@ -3794,6 +3807,7 @@ mod tests {
             EventPayload::MethodElection(MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
+                wallet: None,
             }),
             t0,
             UtcOffset::UTC,
@@ -4000,6 +4014,7 @@ mod tests {
             let p = EventPayload::MethodElection(btctax_core::event::MethodElection {
                 effective_from: date!(2024 - 01 - 01),
                 method: LotMethod::Fifo,
+                wallet: None,
             });
             append_decision(
                 session.conn(),
@@ -4216,6 +4231,7 @@ mod tests {
         let p = EventPayload::MethodElection(MethodElection {
             effective_from: date!(2024 - 01 - 01),
             method: btctax_core::LotMethod::Fifo,
+            wallet: None,
         });
         append_decision(
             session.conn(),
