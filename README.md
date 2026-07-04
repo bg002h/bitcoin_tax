@@ -12,8 +12,9 @@ reproducible and auditable.
 - **Encrypted at rest.** The vault (`vault.pgp`) is passphrase-encrypted (OpenPGP, pure-Rust crypto).
 - **Reproducible.** The tax result is a pure function of the ledger.
 
-> ⚠️ **This is software, not tax advice.** Scope is **US federal** and **BTC-only**. Review everything with a
-> qualified professional before filing.
+> ⚠️ **This is software, not tax advice — and it does not file or prepare your taxes.** Scope is **US federal**
+> and **BTC-only**. Review everything with a qualified professional before filing. Please read the
+> [Disclaimer](#disclaimer).
 
 ---
 
@@ -173,6 +174,26 @@ location outside any git repo.
 Build and test the workspace with `cargo test --workspace`. All non-trivial work follows
 [`STANDARD_WORKFLOW.md`](./STANDARD_WORKFLOW.md) (spec → independent review to green → phased TDD → whole-diff
 review → ship). CI runs the test suite on Linux, macOS, and Windows.
+
+## Disclaimer
+
+**btctax does not file or prepare your tax return.** It is not tax-preparation software, it is not a tax
+preparer, and it is not a substitute for professional tax or legal advice.
+
+What btctax *does* is help you **document and attest to what is true** — your acquisitions, disposals,
+transfers, income, gifts, and the cost-basis and reconciliation decisions you make about them — so that the
+figures you take to your return (or to your accountant) are as accurate, complete, and defensible as you can
+make them. Every number it produces is a consequence of the facts you import and the decisions you confirm.
+The software surfaces what follows from those inputs; it does not decide, on your behalf, what to report.
+
+**You are the preparer.** You choose the transactions, you make the reconciliation and basis decisions, and
+you — together with any tax professional you engage — are responsible for the accuracy and honesty of what you
+ultimately file. btctax is a record-keeping and computation aid built on the principle that an accurate,
+auditable, honest ledger is the best foundation for filing correctly. It cannot and does not vouch for the
+truthfulness of the inputs you give it.
+
+Use it to help yourself get it right. Do not use it — or point to it — as cover for a return you know to be
+wrong: it tells you plainly, right here, that it is not preparing your taxes. **You are.**
 
 ## License
 
