@@ -20,13 +20,14 @@ use crossterm::{
 use edit::form::{
     bulk_checked_totals, cycle_alloc_method, cycle_basis_source, cycle_business_optional,
     cycle_classify_raw_variant, cycle_filing_status, cycle_income_kind, cycle_income_kind_optional,
-    cycle_outflow_kind, filter_optimize_candidates, income_kind_display, next_focus,
-    optimize_basis_label, prev_focus, validate, validate_classify_inbound_gift,
-    validate_classify_inbound_income, validate_classify_inbound_self_transfer,
-    validate_classify_raw_acquire, validate_classify_raw_income, validate_donation_details,
-    validate_reclassify_income, validate_reclassify_outflow, validate_select_lots,
-    validate_set_fmv, AllocLotRow, BulkIncomeFlowState, BulkIncomeModalState, BulkIncomeRowItem,
-    BulkIncomeStep, BulkLinkFlowState, BulkLinkModalState, BulkLinkRowItem, BulkLinkStep,
+    cycle_lot_method, cycle_outflow_kind, filter_optimize_candidates, income_kind_display,
+    lot_method_label, next_focus, optimize_basis_label, prev_focus, validate,
+    validate_classify_inbound_gift, validate_classify_inbound_income,
+    validate_classify_inbound_self_transfer, validate_classify_raw_acquire,
+    validate_classify_raw_income, validate_donation_details, validate_reclassify_income,
+    validate_reclassify_outflow, validate_select_lots, validate_set_fmv, wallet_label, AllocLotRow,
+    BulkIncomeFlowState, BulkIncomeModalState, BulkIncomeRowItem, BulkIncomeStep,
+    BulkLinkFlowState, BulkLinkModalState, BulkLinkRowItem, BulkLinkStep,
     BulkReclassifyOutflowFlowState, BulkReclassifyOutflowModalState, BulkReclassifyOutflowRowItem,
     BulkReclassifyOutflowStep, BulkResolveFlowState, BulkResolveModalState, BulkResolveRowItem,
     BulkResolveStep, BulkStiFlowState, BulkStiModalState, BulkStiRowItem, BulkStiStep,
@@ -36,7 +37,8 @@ use edit::form::{
     DonationListItem, FieldBuffer, FmvListItem, InEventItem, InboundListItem, InboundVariant,
     IncomeListItem, LinkMode, LinkTransferFlowState, LinkTransferModalState, LinkTransferStep,
     LotPickFormRow, MatchPairAction, MatchSelfTransferItem, MatchSelfTransfersFlowState,
-    MatchSelfTransfersModalState, MutationModalState, OptimizeAcceptFlowState,
+    MatchSelfTransfersModalState, MethodElectionFlowState, MethodElectionListItem,
+    MethodElectionModalState, MethodElectionStep, MutationModalState, OptimizeAcceptFlowState,
     OptimizeAcceptModalState, OptimizeAcceptStep, OptimizeCandidateItem, OutflowKind,
     OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
     ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowFlowState,
@@ -58,8 +60,8 @@ use std::time::Duration;
 use btctax_core::conventions::TRANSITION_DATE;
 use btctax_core::{
     BasisSource, BlockerKind, ClassifyInbound, DisposeKind, DonationDetails, EventId, EventPayload,
-    Form8283Section, InboundClass, IncomeKind, ManualFmv, OutflowClass, Persistability,
-    ReclassifyIncome, RemovalKind, TransferTarget,
+    Form8283Section, InboundClass, IncomeKind, ManualFmv, MethodElection, OutflowClass,
+    Persistability, ReclassifyIncome, RemovalKind, TransferTarget,
 };
 use btctax_tui::app::Tab;
 use btctax_tui::{restore_terminal, setup_panic_hook, TerminalGuard};
@@ -259,6 +261,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Method-election-modal dispatch — BEFORE flow, form, screen ───────────
+    if app.method_election_modal.is_some() {
+        handle_method_election_modal_key(app, key);
+        return;
+    }
+
     // ── 9. Flow dispatch — the FLOW Option (not the step) is the guard [R0-I2] ─
     //    Every step of an open flow is claimed here; 'q' and Esc can never
     //    fall through to a Browse quit arm mid-flow.
@@ -328,6 +336,10 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.match_self_transfers_flow.is_some() {
         handle_match_self_transfers_flow_key(app, key);
+        return;
+    }
+    if app.method_election_flow.is_some() {
+        handle_method_election_flow_key(app, key);
         return;
     }
     if app.safe_harbor_attest_flow.is_some() {
@@ -415,6 +427,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('m') => open_match_self_transfers_flow(app),
                 KeyCode::Char('i') => open_resolve_conflict_flow(app),
                 KeyCode::Char('z') => open_optimize_accept_flow(app),
+                KeyCode::Char('e') => open_method_election_flow(app),
                 // KEEP IN SYNC with KEYMAP overlay (draw_help_overlay). `?` opens the full-keymap help.
                 KeyCode::Char('?') => app.help_open = true,
                 _ => {}
@@ -655,6 +668,8 @@ impl EditorApp {
         self.bulk_reclassify_outflow_modal = None;
         self.match_self_transfers_flow = None;
         self.match_self_transfers_modal = None;
+        self.method_election_flow = None;
+        self.method_election_modal = None;
     }
 }
 
@@ -1762,6 +1777,211 @@ fn handle_set_fmv_modal_key(app: &mut EditorApp, key: KeyEvent) {
         }
         KeyCode::Esc => {
             app.set_fmv_modal = None;
+        }
+        _ => {}
+    }
+}
+
+// ── Method-election flow (§A.5(a) per-account cost-basis method) ──────────────
+
+/// Open the method-election flow. Lists the vault's distinct Exchange accounts with each one's
+/// currently-resolved method (scoped election → global → FIFO) + whether it is explicitly elected vs
+/// inherited (via the SHARED resolver, `Session::exchange_method_election_rows`). Empty account list →
+/// status, flow NOT opened [R0-M8].
+fn open_method_election_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    if app.snapshot.is_none() {
+        return;
+    }
+    // Today's date = the election's default effective date (also the "resolved as of" date shown).
+    let today = time::OffsetDateTime::now_utc()
+        .to_offset(time::UtcOffset::UTC)
+        .date();
+    let rows = match app.session.as_ref() {
+        Some(session) => match session.exchange_method_election_rows(today) {
+            Ok(r) => r,
+            Err(e) => {
+                app.status = Some(format!("Could not list exchange accounts: {e}"));
+                return;
+            }
+        },
+        None => return,
+    };
+    if rows.is_empty() {
+        // R0-M8: empty account list never opens a flow.
+        app.status = Some("No exchange accounts to elect a method for".to_string());
+        return;
+    }
+    let items: Vec<MethodElectionListItem> = rows
+        .into_iter()
+        .map(|(wallet, current, scoped)| MethodElectionListItem {
+            wallet,
+            current,
+            scoped,
+        })
+        .collect();
+    app.method_election_flow = Some(MethodElectionFlowState {
+        list: TargetList::new(items),
+        step: MethodElectionStep::List,
+    });
+}
+
+fn handle_method_election_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step_kind: u8 = match app.method_election_flow.as_ref().map(|f| &f.step) {
+        Some(MethodElectionStep::List) => 0,
+        Some(MethodElectionStep::Choose { .. }) => 1,
+        None => return,
+    };
+    match step_kind {
+        0 => handle_me_list_key(app, key),
+        1 => handle_me_choose_key(app, key),
+        _ => {}
+    }
+}
+
+fn handle_me_list_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(flow) = app.method_election_flow.as_mut() {
+                flow.list.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(flow) = app.method_election_flow.as_mut() {
+                flow.list.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(flow) = app.method_election_flow.as_mut() {
+                flow.list.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(flow) = app.method_election_flow.as_mut() {
+                flow.list.go_bottom();
+            }
+        }
+        KeyCode::Enter => {
+            let selected = app
+                .method_election_flow
+                .as_ref()
+                .and_then(|f| f.list.selected())
+                .cloned();
+            if let Some(item) = selected {
+                if let Some(flow) = app.method_election_flow.as_mut() {
+                    // Seed the picker to the account's currently-resolved method (Tab cycles from there).
+                    let method = item.current;
+                    flow.step = MethodElectionStep::Choose {
+                        item,
+                        method,
+                        error: None,
+                    };
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.method_election_flow = None;
+        }
+        _ => {}
+    }
+}
+
+fn handle_me_choose_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let chosen = match app.method_election_flow.as_ref() {
+                Some(f) => match &f.step {
+                    MethodElectionStep::Choose { item, method, .. } => {
+                        Some((item.wallet.clone(), *method))
+                    }
+                    _ => None,
+                },
+                None => None,
+            };
+            if let Some((wallet, method)) = chosen {
+                app.method_election_modal = Some(MethodElectionModalState { wallet, method });
+            }
+        }
+        KeyCode::Esc => {
+            if let Some(flow) = app.method_election_flow.as_mut() {
+                flow.step = MethodElectionStep::List;
+            }
+        }
+        KeyCode::Tab => {
+            if let Some(flow) = app.method_election_flow.as_mut() {
+                if let MethodElectionStep::Choose { method, .. } = &mut flow.step {
+                    *method = cycle_lot_method(*method);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+// ── Method-election modal handler ─────────────────────────────────────────────
+
+fn handle_method_election_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (wallet, method) = match app.method_election_modal.as_ref() {
+                Some(m) => (m.wallet.clone(), m.method),
+                None => return,
+            };
+            let now = time::OffsetDateTime::now_utc();
+            // effective_from defaults to the made-date (satisfies effective_from >= made-date).
+            let effective_from = now.to_offset(time::UtcOffset::UTC).date();
+            let payload = EventPayload::MethodElection(MethodElection {
+                effective_from,
+                method,
+                wallet: Some(wallet.clone()), // [R0-M1] scope in the PAYLOAD
+            });
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.method_election_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_method_election(session, payload, now)
+            };
+
+            match save_result {
+                Ok(_decision_id) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            app.snapshot = Some(snap);
+                            app.status = Some(format!(
+                                "Elected + attested {} for {} (per-account standing order)",
+                                lot_method_label(method),
+                                wallet_label(&wallet)
+                            ));
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.method_election_modal = None;
+                    app.method_election_flow = None;
+                }
+                Err(e) => {
+                    app.method_election_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.method_election_modal = None;
         }
         _ => {}
     }
@@ -8606,6 +8826,7 @@ fn main() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use btctax_core::LotMethod;
     use btctax_store::Passphrase;
     use crossterm::event::{KeyEvent, KeyEventKind, KeyModifiers};
     use editor::{EditorApp, EditorScreen};
@@ -21783,6 +22004,225 @@ mod tests {
         assert_eq!(
             before, after,
             "cancel writes nothing (vault bytes unchanged)"
+        );
+    }
+
+    // ── Method-election flow (§A.5(a) per-account cost-basis method) ──────────
+
+    /// Seed a vault with one Exchange account (coinbase:main) via a single Acquire import — enough for
+    /// the method-election flow to list one electable account (resolved method defaults to FIFO).
+    fn seed_exchange_account_vault(vault: &std::path::Path, key: &std::path::Path, pp_str: &str) {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let ts = OffsetDateTime::from_unix_timestamp(1_740_000_000).unwrap(); // 2025-02 (post-2025)
+        let batch = vec![LedgerEvent {
+            id: EventId::import(Source::Coinbase, SourceRef::new("cb-buy-1")),
+            utc_timestamp: ts,
+            original_tz: UtcOffset::UTC,
+            wallet: Some(btctax_core::WalletId::Exchange {
+                provider: "coinbase".to_string(),
+                account: "main".to_string(),
+            }),
+            payload: EventPayload::Acquire(Acquire {
+                sat: 1_000_000,
+                usd_cost: dec!(30000),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ExchangeProvided,
+            }),
+        }];
+        btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+        session.save().unwrap();
+    }
+
+    /// TUI KAT (spec §KATs): the method-election flow lists the exchange account, lets the user pick a
+    /// method, and on confirm ("attest") appends a SCOPED `MethodElection` (wallet in the payload).
+    #[test]
+    fn method_election_flow_sets_and_attests_per_account() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-method-election";
+        seed_exchange_account_vault(&vault, &key, pp_str);
+
+        let before = std::fs::read(&vault).unwrap();
+        let mut app = open_app(&vault, pp_str);
+
+        // Open the flow: 'e'.
+        handle_key(&mut app, press(KeyCode::Char('e')));
+        assert!(
+            app.method_election_flow.is_some(),
+            "'e' opens the method-election flow"
+        );
+        {
+            let flow = app.method_election_flow.as_ref().unwrap();
+            assert!(
+                matches!(flow.step, MethodElectionStep::List),
+                "flow starts at the account List step"
+            );
+            assert_eq!(
+                flow.list.items.len(),
+                1,
+                "one exchange account to elect for"
+            );
+            let item = &flow.list.items[0];
+            assert_eq!(
+                item.wallet,
+                btctax_core::WalletId::Exchange {
+                    provider: "coinbase".into(),
+                    account: "main".into()
+                }
+            );
+            assert_eq!(item.current, LotMethod::Fifo, "resolved default is FIFO");
+            assert!(!item.scoped, "no election yet -> inherited (not scoped)");
+        }
+
+        // Enter → Choose step (method seeded to the resolved FIFO); Tab cycles FIFO→HIFO.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(matches!(
+            app.method_election_flow.as_ref().unwrap().step,
+            MethodElectionStep::Choose {
+                method: LotMethod::Fifo,
+                ..
+            }
+        ));
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert!(matches!(
+            app.method_election_flow.as_ref().unwrap().step,
+            MethodElectionStep::Choose {
+                method: LotMethod::Hifo,
+                ..
+            }
+        ));
+
+        // Enter → attest modal (wallet + method).
+        handle_key(&mut app, press(KeyCode::Enter));
+        {
+            let modal = app
+                .method_election_modal
+                .as_ref()
+                .expect("Enter opens the attest modal");
+            assert_eq!(modal.method, LotMethod::Hifo);
+            assert_eq!(
+                modal.wallet,
+                btctax_core::WalletId::Exchange {
+                    provider: "coinbase".into(),
+                    account: "main".into()
+                }
+            );
+        }
+
+        // Enter → persist + attest. Flow and modal close.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.method_election_modal.is_none() && app.method_election_flow.is_none(),
+            "confirm closes both the modal and the flow"
+        );
+
+        // A SCOPED MethodElection is now in the vault (wallet in the PAYLOAD). Read via the held
+        // session's conn (opening a second Session would deadlock on the VaultLock).
+        let events =
+            btctax_core::persistence::load_all(app.session.as_ref().unwrap().conn()).unwrap();
+        let me = events
+            .iter()
+            .find_map(|e| match &e.payload {
+                EventPayload::MethodElection(m) => Some(m.clone()),
+                _ => None,
+            })
+            .expect("a MethodElection decision must be persisted");
+        assert_eq!(me.method, LotMethod::Hifo);
+        assert_eq!(
+            me.wallet,
+            Some(btctax_core::WalletId::Exchange {
+                provider: "coinbase".into(),
+                account: "main".into()
+            }),
+            "the per-account scope rides in the MethodElection PAYLOAD"
+        );
+
+        let after = std::fs::read(&vault).unwrap();
+        assert_ne!(before, after, "confirm writes the vault");
+    }
+
+    /// Cancel path: opening the flow and pressing Esc writes NOTHING (vault bytes unchanged).
+    #[test]
+    fn method_election_flow_cancel_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-method-election-cancel";
+        seed_exchange_account_vault(&vault, &key, pp_str);
+
+        let before = std::fs::read(&vault).unwrap();
+        let mut app = open_app(&vault, pp_str);
+
+        handle_key(&mut app, press(KeyCode::Char('e')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → Choose
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(app.method_election_modal.is_some());
+        handle_key(&mut app, press(KeyCode::Esc)); // close modal only
+        assert!(
+            app.method_election_modal.is_none() && app.method_election_flow.is_some(),
+            "Esc closes the modal but keeps the flow open"
+        );
+        handle_key(&mut app, press(KeyCode::Esc)); // Choose → List
+        handle_key(&mut app, press(KeyCode::Esc)); // close flow
+        assert!(
+            app.method_election_flow.is_none(),
+            "Esc unwinds Choose → List → closed"
+        );
+
+        let after = std::fs::read(&vault).unwrap();
+        assert_eq!(
+            before, after,
+            "cancel writes nothing (vault bytes unchanged)"
+        );
+    }
+
+    /// Render smoke test (TestBackend): each method-election overlay (List → Choose → attest modal)
+    /// draws without panicking and shows the expected labels.
+    #[test]
+    fn method_election_flow_renders_each_step() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-method-election-render";
+        seed_exchange_account_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        handle_key(&mut app, press(KeyCode::Char('e'))); // List
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let list = rendered_text(&terminal);
+        assert!(
+            list.contains("Method Election") && list.contains("coinbase/main"),
+            "List step must render the account; got:\n{list}"
+        );
+
+        handle_key(&mut app, press(KeyCode::Enter)); // Choose
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let choose = rendered_text(&terminal);
+        assert!(
+            choose.contains("choose method") && choose.contains("FIFO"),
+            "Choose step must render the method picker; got:\n{choose}"
+        );
+
+        handle_key(&mut app, press(KeyCode::Enter)); // attest modal
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let modal = rendered_text(&terminal);
+        assert!(
+            modal.contains("WRITES THE VAULT") && modal.contains("attestation"),
+            "attest modal must render; got:\n{modal}"
         );
     }
 }

@@ -12,23 +12,24 @@ use crate::edit::form::{
     amount_label, basis_source_display, bulk_checked_totals, bulk_income_checked_totals,
     bulk_reclassify_outflow_checked_totals, bulk_resolve_checked_count, bulk_sti_checked_totals,
     bulk_usd_floor_label, bulk_void_checked_count, bulk_void_lot_selection_checked_count,
-    income_kind_display, wallet_label, BulkIncomeFlowState, BulkIncomeModalState, BulkIncomeStep,
-    BulkLinkFlowState, BulkLinkModalState, BulkLinkStep, BulkReclassifyOutflowFlowState,
-    BulkReclassifyOutflowModalState, BulkReclassifyOutflowStep, BulkResolveFlowState,
-    BulkResolveModalState, BulkResolveStep, BulkStiFlowState, BulkStiModalState, BulkStiStep,
-    BulkVoidFlowState, BulkVoidModalState, ClassifyInboundModalState, ClassifyInboundStep,
-    ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep, ClassifyRawVariant, DisposalKind,
-    FieldBuffer, InboundVariant, LinkMode, LinkTransferFlowState, LinkTransferModalState,
-    LinkTransferStep, MatchSelfTransfersFlowState, MatchSelfTransfersModalState,
-    MutationModalState, OptimizeAcceptFlowState, OptimizeAcceptModalState, OptimizeAcceptStep,
-    OutflowKind, ProfileFormState, ReclassifyIncomeFlowState, ReclassifyIncomeModalState,
-    ReclassifyIncomeStep, ReclassifyOutflowModalState, ReclassifyOutflowStep,
-    ResolveConflictFlowState, ResolveConflictModalState, ResolveConflictStep, ResolveKind,
-    SafeHarborAllocateFlowState, SafeHarborAllocateModalState, SafeHarborAttestFlowState,
-    SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
-    SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
-    SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState, VoidModalState,
-    DONATION_FIELD_LABELS, FIELD_LABELS,
+    income_kind_display, lot_method_label, wallet_label, BulkIncomeFlowState, BulkIncomeModalState,
+    BulkIncomeStep, BulkLinkFlowState, BulkLinkModalState, BulkLinkStep,
+    BulkReclassifyOutflowFlowState, BulkReclassifyOutflowModalState, BulkReclassifyOutflowStep,
+    BulkResolveFlowState, BulkResolveModalState, BulkResolveStep, BulkStiFlowState,
+    BulkStiModalState, BulkStiStep, BulkVoidFlowState, BulkVoidModalState,
+    ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
+    ClassifyRawStep, ClassifyRawVariant, DisposalKind, FieldBuffer, InboundVariant, LinkMode,
+    LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, MatchSelfTransfersFlowState,
+    MatchSelfTransfersModalState, MethodElectionFlowState, MethodElectionModalState,
+    MethodElectionStep, MutationModalState, OptimizeAcceptFlowState, OptimizeAcceptModalState,
+    OptimizeAcceptStep, OutflowKind, ProfileFormState, ReclassifyIncomeFlowState,
+    ReclassifyIncomeModalState, ReclassifyIncomeStep, ReclassifyOutflowModalState,
+    ReclassifyOutflowStep, ResolveConflictFlowState, ResolveConflictModalState,
+    ResolveConflictStep, ResolveKind, SafeHarborAllocateFlowState, SafeHarborAllocateModalState,
+    SafeHarborAttestFlowState, SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState,
+    SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
+    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState,
+    VoidModalState, DONATION_FIELD_LABELS, FIELD_LABELS,
 };
 use crate::editor::{EditorApp, EditorScreen};
 use btctax_core::{DisposeKind, InboundClass, OutflowClass, Persistability};
@@ -407,6 +408,23 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.match_self_transfers_modal.as_ref() {
         draw_match_self_transfers_modal(frame, area, modal);
+    }
+    // Method-election flow overlay (§A.5(a) per-account cost-basis method).
+    if app.method_election_flow.is_some() {
+        let is_list = matches!(
+            app.method_election_flow.as_ref().map(|f| &f.step),
+            Some(MethodElectionStep::List)
+        );
+        if is_list {
+            if let Some(flow) = app.method_election_flow.as_mut() {
+                draw_method_election_list(frame, area, flow);
+            }
+        } else if let Some(flow) = app.method_election_flow.as_ref() {
+            draw_method_election_choose(frame, area, &flow.step);
+        }
+    }
+    if let Some(modal) = app.method_election_modal.as_ref() {
+        draw_method_election_modal(frame, area, modal);
     }
 }
 
@@ -1560,6 +1578,164 @@ fn draw_set_fmv_modal(frame: &mut Frame, area: Rect, modal: &SetFmvModalState) {
     frame.render_widget(paragraph, modal_rect);
 }
 
+// ── Method-election flow draw functions (§A.5(a) per-account cost-basis method) ─
+
+/// Render the method-election account list: each Exchange account, its currently-resolved method, and
+/// whether that method is an explicit per-account election ("elected") or inherited (global / FIFO).
+fn draw_method_election_list(frame: &mut Frame, area: Rect, flow: &mut MethodElectionFlowState) {
+    let modal_width: u16 = 84;
+    let modal_height: u16 = (flow.list.items.len() as u16 + 6).min(area.height.saturating_sub(2));
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Method Election — select exchange account  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let header = Row::new(vec![
+        Cell::from("Account"),
+        Cell::from("Resolved method"),
+        Cell::from("Source"),
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
+
+    let rows: Vec<Row> = if flow.list.items.is_empty() {
+        vec![Row::new(vec![Cell::from("(no exchange accounts)")])]
+    } else {
+        flow.list
+            .items
+            .iter()
+            .map(|item| {
+                Row::new(vec![
+                    Cell::from(wallet_label(&item.wallet)),
+                    Cell::from(lot_method_label(item.current)),
+                    Cell::from(if item.scoped {
+                        "elected (per-account)"
+                    } else {
+                        "inherited (global/FIFO)"
+                    }),
+                ])
+            })
+            .collect()
+    };
+
+    let widths = [
+        Constraint::Min(28),
+        Constraint::Length(16),
+        Constraint::Length(24),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        )
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(table, modal_rect, &mut flow.list.table_state);
+
+    let footer_area = Rect {
+        x: modal_rect.x,
+        y: modal_rect.y + modal_rect.height.saturating_sub(1),
+        width: modal_rect.width,
+        height: 1,
+    };
+    let footer = Paragraph::new("↑/↓: scroll   Enter: choose method   Esc: close   q: swallowed")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(footer, footer_area);
+}
+
+/// Render the method-election Choose step: a single FIFO/HIFO/LIFO picker (Tab cycles).
+fn draw_method_election_choose(frame: &mut Frame, area: Rect, step: &MethodElectionStep) {
+    let modal_width: u16 = 72;
+    let modal_height: u16 = 12;
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+    frame.render_widget(Clear, modal_rect);
+
+    let MethodElectionStep::Choose {
+        item,
+        method,
+        error,
+    } = step
+    else {
+        return;
+    };
+
+    let method_line = format!(
+        "  > method: {}   (Tab: cycle FIFO/HIFO/LIFO)",
+        lot_method_label(*method)
+    );
+    let err_line = error
+        .as_deref()
+        .map(|e| format!("\n  Error: {e}"))
+        .unwrap_or_default();
+
+    let content = format!(
+        "  account: {account}\n\
+           currently resolved: {current} ({src})\n\
+         \n\
+         {method_line}\
+         {err_line}\n\
+         \n\
+         \n  Enter: attest & confirm   Esc: back to list   q: swallowed",
+        account = wallet_label(&item.wallet),
+        current = lot_method_label(item.current),
+        src = if item.scoped { "elected" } else { "inherited" },
+    );
+
+    let block = Block::default()
+        .title(" Method Election — choose method  [EDITOR] ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
+/// Render the method-election confirmation ("attest") modal.
+fn draw_method_election_modal(frame: &mut Frame, area: Rect, modal: &MethodElectionModalState) {
+    let content = format!(
+        "  account: {account}\n\
+           method:  {method}\n\
+         \n\
+           Setting a per-account method IS the attestation: this affirms you\n\
+           use/elected {method} for {account} (IRS 2025+ per-account rule).\n\
+         \n\
+           A forward standing order you can update going forward. Governs\n\
+           method-honoring disposals on this account on/after today.\n\
+         \n\
+           Appended as a decision event (append-only log).\n\
+           Saved immediately via the vault's atomic write path.\n\
+         \n\
+         [Enter] Confirm & attest     [Esc] Cancel — writes nothing",
+        account = wallet_label(&modal.wallet),
+        method = lot_method_label(modal.method),
+    );
+
+    let modal_width: u16 = 66;
+    let content_lines = content.lines().count() as u16 + 2;
+    let modal_height = content_lines.max(14);
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .title(" Confirm: method-election — WRITES THE VAULT ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, modal_rect);
+}
+
 // ── Void-decision flow draw functions ─────────────────────────────────────────
 
 /// Render the void-decision target list overlay.
@@ -1712,7 +1888,8 @@ fn draw_help_overlay(frame: &mut Frame, area: Rect) {
         Line::from("  c classify-inbound   o reclassify-outflow   r reclassify-income"),
         Line::from("  f set-fmv   v void   s select-lots   d donation-details"),
         Line::from("  l link-transfer   u classify-raw   m match-self-transfers"),
-        Line::from("  i resolve-conflict   z optimize   a/A safe-harbor attest/allocate"),
+        Line::from("  i resolve-conflict   z optimize   e method-election"),
+        Line::from("  a/A safe-harbor attest/allocate"),
         Line::from("  Bulk:  b link   B self-transfer-in   C resolve-conflict"),
         Line::from("         V void   I income   O reclassify-outflow"),
         Line::from(""),

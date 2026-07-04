@@ -228,6 +228,31 @@ pub fn persist_set_fmv(
     Ok(id)
 }
 
+/// Append a per-account `MethodElection` decision (§A.5(a)) and atomically save the vault.
+///
+/// `payload` is the **fully-built** `EventPayload::MethodElection(…)` — the flow constructs it with a
+/// `Some(WalletId::Exchange{..})` scope (in the PAYLOAD, [R0-M1]) and `effective_from` defaulted to the
+/// made-date. Setting the method IS the attestation (a forward election the user can update going
+/// forward — NOT the irrevocable typed-word safe-harbor flow). `now` is INJECTED at Enter-press for
+/// test determinism. Strict-append: `append_decision` assigns `decision_seq = MAX(existing) + 1`; a
+/// SINGLE `save_or_rollback` reverts the whole append on a save failure (mirrors `persist_set_fmv`).
+pub fn persist_method_election(
+    session: &mut btctax_cli::Session,
+    payload: btctax_core::event::EventPayload,
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, PersistError> {
+    let pre = session.snapshot()?;
+    let id = btctax_core::persistence::append_decision(
+        session.conn(),
+        payload,
+        now,
+        time::UtcOffset::UTC,
+        None,
+    )?;
+    save_or_rollback(session, pre)?;
+    Ok(id)
+}
+
 /// Append a `VoidDecisionEvent` decision and atomically save the vault.
 ///
 /// `target_event_id` is the EventId of the revocable decision to void.

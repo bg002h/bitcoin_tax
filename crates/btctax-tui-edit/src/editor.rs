@@ -19,8 +19,9 @@ use crate::edit::form::{
     BulkResolveModalState, BulkStiFlowState, BulkStiModalState, BulkVoidFlowState,
     BulkVoidModalState, ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyRawFlowState,
     ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
-    MatchSelfTransfersFlowState, MatchSelfTransfersModalState, MutationModalState,
-    OptimizeAcceptFlowState, OptimizeAcceptModalState, ProfileFormState, ReclassifyIncomeFlowState,
+    MatchSelfTransfersFlowState, MatchSelfTransfersModalState, MethodElectionFlowState,
+    MethodElectionModalState, MutationModalState, OptimizeAcceptFlowState,
+    OptimizeAcceptModalState, ProfileFormState, ReclassifyIncomeFlowState,
     ReclassifyIncomeModalState, ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
     ResolveConflictFlowState, ResolveConflictModalState, SafeHarborAllocateFlowState,
     SafeHarborAllocateModalState, SafeHarborAttestFlowState, SelectLotsFlowState,
@@ -229,6 +230,14 @@ pub struct EditorApp {
     pub match_self_transfers_flow: Option<MatchSelfTransfersFlowState>,
     /// Match-self-transfers confirmation modal.  `Some` while awaiting Enter/Esc.
     pub match_self_transfers_modal: Option<MatchSelfTransfersModalState>,
+    /// Full method-election flow state (§A.5(a) per-account cost-basis method).  `Some` while open.
+    ///
+    /// Dispatch order: method_election_modal (modal layer) → method_election_flow (flow layer).
+    /// A forward election the user can update going forward (NOT the irrevocable typed-word gate), so
+    /// the confirmation is a plain modal — NO typed-word. Setting the method IS the attestation.
+    pub method_election_flow: Option<MethodElectionFlowState>,
+    /// Method-election confirmation ("attest") modal.  `Some` while awaiting Enter/Esc.
+    pub method_election_modal: Option<MethodElectionModalState>,
     /// Residue latch [R0-C1]: set to `true` when `persist_safe_harbor_attest` returns Err.
     ///
     /// While `true`, ALL mutating openers (p/c/o/r/f/v/s/d/a) refuse with the
@@ -302,6 +311,8 @@ impl EditorApp {
             bulk_reclassify_outflow_modal: None,
             match_self_transfers_flow: None,
             match_self_transfers_modal: None,
+            method_election_flow: None,
+            method_election_modal: None,
             attest_save_failed: false,
             rollback_failed: false,
             status: None,
