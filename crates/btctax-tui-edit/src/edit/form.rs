@@ -1885,6 +1885,85 @@ pub fn bulk_sti_checked_totals(items: &[BulkStiRowItem]) -> (usize, Sat, Usd, us
     (count, sat, floor, missing)
 }
 
+// ── Bulk classify-inbound-income flow types (bulk-classify-inbound-income, Cycle 4) ──
+
+/// One preview-checklist row: an enriched pending unknown-basis inbound + its `checked` flag. Every row
+/// starts CHECKED; `Space`/`x` toggles `checked` (exclude). Mirrors `session::BulkIncomeRow` + the UI
+/// flag. [#a] `fmv` is the RESOLVED auto-value (never `None` — the `None` rows are excluded upstream);
+/// it is BOTH the income recognized AND the lot basis for this row.
+#[derive(Clone)]
+pub struct BulkIncomeRowItem {
+    pub in_event: EventId,
+    pub date: TaxDate,
+    pub sat: Sat,
+    pub fmv: Usd,
+    pub checked: bool,
+}
+
+/// Step in the bulk classify-income flow (two steps — the uniform kind/business + wallet/year filter,
+/// then the per-row exclude checklist).
+pub enum BulkIncomeStep {
+    /// 1 — income-kind + business-flag + receiving-wallet + time-frame toggles.
+    Filter,
+    /// 2 — per-row exclude checklist over the PRICED plan; `Space`/`x` toggles a row.
+    Preview,
+}
+
+/// Full state for the bulk classify-income flow. The wallet/year filter choices are read from the
+/// snapshot at open (KAT-G1-clean, like the STI flow); only the PRICED preview (step 1→2) routes
+/// through the `Session::bulk_classify_income_plan` helper.
+pub struct BulkIncomeFlowState {
+    pub step: BulkIncomeStep,
+    /// The UNIFORM income kind for the batch; `←/→` cycles it (`cycle_income_kind`). Starts `Mining`.
+    pub kind: IncomeKind,
+    /// The UNIFORM business flag for the batch; `←/→` toggles it. Starts `false`.
+    pub business: bool,
+    /// `[None = Any, Some(w), …]` — Any + each distinct receiving wallet of the candidates.
+    pub wallet_choices: Vec<Option<WalletId>>,
+    pub wallet_idx: usize,
+    /// `[None = All, Some(y), …]` — All + each distinct year present in the candidates.
+    pub year_choices: Vec<Option<i32>>,
+    pub year_idx: usize,
+    /// 0 = kind, 1 = business, 2 = receiving-wallet, 3 = time-frame.
+    pub filter_focus: usize,
+    /// Preview checklist over the priced plan.
+    pub preview: TargetList<BulkIncomeRowItem>,
+    /// [#a] From the last recomputed plan: candidates dropped for a MISSING price (surfaced, not
+    /// silently dropped — the user learns N inbounds could not be auto-valued as income).
+    pub excluded_missing_price: usize,
+    /// Cross-step transient error (empty plan / nothing selected).
+    pub error: Option<String>,
+}
+
+/// Payload for the bulk classify-income confirmation modal (explicit confirm; NOT typed-word — each
+/// classification is voidable per-`v`, matching the STI tier). Captures the CHECKED rows' per-row
+/// `ClassifyInbound{Income{kind, Some(fmv), business}}` decisions + the preview totals.
+pub struct BulkIncomeModalState {
+    pub payloads: Vec<btctax_core::EventPayload>,
+    pub count: usize,
+    pub total_sat: Sat,
+    /// Σ per-row auto-FMV over the CHECKED rows — the total income being recognized (prominent).
+    pub total_income_usd: Usd,
+    /// [#a] Carried forward from the plan: inbounds NOT auto-valuable (surfaced in the modal note).
+    pub excluded_missing_price: usize,
+    pub kind: IncomeKind,
+    pub business: bool,
+}
+
+/// Live footer/modal totals over the CHECKED rows: `(count, Σ sat, Σ income USD)`. Every checked row is
+/// priced (the plan excluded the unpriced ones), so the income total is always a real number.
+pub fn bulk_income_checked_totals(items: &[BulkIncomeRowItem]) -> (usize, Sat, Usd) {
+    let mut count = 0usize;
+    let mut sat: Sat = 0;
+    let mut income: Usd = Usd::ZERO;
+    for it in items.iter().filter(|i| i.checked) {
+        count += 1;
+        sat += it.sat;
+        income += it.fmv;
+    }
+    (count, sat, income)
+}
+
 // ── Bulk resolve-conflict flow types (bulk-resolve-conflict D3) ──────────────
 
 /// One preview-checklist row: a flagged import conflict + its `checked` (included) flag. Every row

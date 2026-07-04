@@ -25,8 +25,9 @@ use edit::form::{
     validate_classify_inbound_income, validate_classify_inbound_self_transfer,
     validate_classify_raw_acquire, validate_classify_raw_income, validate_donation_details,
     validate_reclassify_income, validate_reclassify_outflow, validate_select_lots,
-    validate_set_fmv, AllocLotRow, BulkLinkFlowState, BulkLinkModalState, BulkLinkRowItem,
-    BulkLinkStep, BulkResolveFlowState, BulkResolveModalState, BulkResolveRowItem, BulkResolveStep,
+    validate_set_fmv, AllocLotRow, BulkIncomeFlowState, BulkIncomeModalState, BulkIncomeRowItem,
+    BulkIncomeStep, BulkLinkFlowState, BulkLinkModalState, BulkLinkRowItem, BulkLinkStep,
+    BulkResolveFlowState, BulkResolveModalState, BulkResolveRowItem, BulkResolveStep,
     BulkStiFlowState, BulkStiModalState, BulkStiRowItem, BulkStiStep, BulkVoidFlowState,
     BulkVoidModalState, BulkVoidRowItem, ClassifyInboundFlowState, ClassifyInboundModalState,
     ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep,
@@ -214,6 +215,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Bulk-classify-income-modal dispatch — BEFORE flow, form, screen ──────
+    if app.bulk_income_modal.is_some() {
+        handle_bulk_income_modal_key(app, key);
+        return;
+    }
+
     // ── Bulk-resolve-conflict-modal dispatch — BEFORE flow, form, screen ─────
     if app.bulk_resolve_modal.is_some() {
         handle_bulk_resolve_modal_key(app, key);
@@ -281,6 +288,10 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.bulk_sti_flow.is_some() {
         handle_bulk_sti_flow_key(app, key);
+        return;
+    }
+    if app.bulk_income_flow.is_some() {
+        handle_bulk_income_flow_key(app, key);
         return;
     }
     if app.bulk_resolve_flow.is_some() {
@@ -373,6 +384,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('A') => open_safe_harbor_allocate_flow(app),
                 KeyCode::Char('b') => open_bulk_link_transfer_flow(app),
                 KeyCode::Char('B') => open_bulk_self_transfer_in_flow(app),
+                KeyCode::Char('I') => open_bulk_classify_income_flow(app),
                 KeyCode::Char('C') => open_bulk_resolve_conflict_flow(app),
                 KeyCode::Char('V') => open_bulk_void_flow(app),
                 KeyCode::Char('m') => open_match_self_transfers_flow(app),
@@ -6263,6 +6275,429 @@ fn derive_bulk_sti_status(snap: &btctax_tui::app::Snapshot, n: usize) -> String 
         .count();
     format!(
         "Classified {n} inbound deposit(s) as self-transfer-in ($0 basis); \
+         {remaining} unclassified inbound(s) remain."
+    )
+}
+
+// ── Bulk classify-inbound-income flow (bulk-classify-inbound-income, Cycle 4) ──
+
+/// Open the bulk classify-inbound-income flow from Browse (`I`). A NEAR-CLONE of the STI opener
+/// (`open_bulk_self_transfer_in_flow`): latch → snapshot → candidate set non-empty (else status). The
+/// candidate enumeration + filter choices (distinct receiving wallets + years) are read from `snap`
+/// DIRECTLY — KAT-G1-clean; only the PRICED preview (step 1→2) routes through
+/// `Session::bulk_classify_income_plan` (which additionally EXCLUDES missing-price rows [#a]).
+fn open_bulk_classify_income_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+    let ev_idx = events_by_id(snap);
+
+    // filter-3 sets (mirror the STI opener): voided decision ids, then TransferIn ids already targeted
+    // by a NON-VOIDED ClassifyInbound.
+    let voided: BTreeSet<EventId> = snap
+        .events
+        .iter()
+        .filter_map(|e| {
+            if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                Some(v.target_event_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    let already_classified: BTreeSet<EventId> = snap
+        .events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .filter_map(|e| {
+            if let EventPayload::ClassifyInbound(ci) = &e.payload {
+                Some(ci.transfer_in_event.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Enumerate candidates (wallet, year) from snap directly. NOTE: the missing-price [#a] exclusion is
+    // NOT applied here — it happens in the plan (recompute) and surfaces as `excluded_missing_price`; a
+    // candidate whose date is unpriced still contributes its wallet/year to the filter choices.
+    let mut wallet_set: BTreeSet<btctax_core::WalletId> = BTreeSet::new();
+    let mut year_set: BTreeSet<i32> = BTreeSet::new();
+    let mut any = false;
+    for b in &snap.state.blockers {
+        if b.kind != BlockerKind::UnknownBasisInbound {
+            continue;
+        }
+        let Some(id) = b.event.as_ref() else { continue };
+        if already_classified.contains(id) {
+            continue;
+        }
+        let Some(ev) = ev_idx.get(id) else { continue };
+        if !matches!(ev.payload, EventPayload::TransferIn(_)) {
+            continue;
+        }
+        let Some(w) = ev.wallet.as_ref() else {
+            continue;
+        };
+        let date = btctax_core::conventions::tax_date(ev.utc_timestamp, ev.original_tz);
+        wallet_set.insert(w.clone());
+        year_set.insert(date.year());
+        any = true;
+    }
+
+    if !any {
+        app.status =
+            Some("No unclassified inbound deposits to bulk-classify as income".to_string());
+        return;
+    }
+
+    let mut wallet_choices: Vec<Option<btctax_core::WalletId>> = vec![None]; // Any
+    wallet_choices.extend(wallet_set.into_iter().map(Some));
+    let mut year_choices: Vec<Option<i32>> = vec![None]; // All
+    year_choices.extend(year_set.into_iter().map(Some));
+
+    app.bulk_income_flow = Some(BulkIncomeFlowState {
+        step: BulkIncomeStep::Filter,
+        kind: IncomeKind::Mining,
+        business: false,
+        wallet_choices,
+        wallet_idx: 0,
+        year_choices,
+        year_idx: 0,
+        filter_focus: 0,
+        preview: TargetList::new(Vec::new()),
+        excluded_missing_price: 0,
+        error: None,
+    });
+}
+
+/// Dispatch to the correct sub-handler depending on `BulkIncomeStep`.
+fn handle_bulk_income_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.bulk_income_flow.as_ref() {
+        Some(f) => match f.step {
+            BulkIncomeStep::Filter => 0u8,
+            BulkIncomeStep::Preview => 1,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_bulk_income_filter_key(app, key),
+        _ => handle_bulk_income_preview_key(app, key),
+    }
+}
+
+/// Step 1 — filter. `k/j`/`↑/↓` move focus (kind → business → receiving-wallet → time-frame); `←/→`
+/// cycle the focused choice (kind cycles the 5 IncomeKinds; business toggles); Enter → recompute the
+/// PRICED plan → Preview; Esc → close flow; `q` swallowed.
+fn handle_bulk_income_filter_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(f) = app.bulk_income_flow.as_mut() {
+                f.filter_focus = f.filter_focus.saturating_sub(1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(f) = app.bulk_income_flow.as_mut() {
+                f.filter_focus = (f.filter_focus + 1).min(3);
+            }
+        }
+        KeyCode::Left | KeyCode::Right => {
+            if let Some(f) = app.bulk_income_flow.as_mut() {
+                match f.filter_focus {
+                    // The IncomeKind ring is small; both ←/→ advance it (any variant is reachable).
+                    0 => f.kind = crate::edit::form::cycle_income_kind(f.kind),
+                    1 => f.business = !f.business,
+                    2 => {
+                        let n = f.wallet_choices.len();
+                        f.wallet_idx = if matches!(key.code, KeyCode::Left) {
+                            (f.wallet_idx + n - 1) % n
+                        } else {
+                            (f.wallet_idx + 1) % n
+                        };
+                    }
+                    _ => {
+                        let n = f.year_choices.len();
+                        f.year_idx = if matches!(key.code, KeyCode::Left) {
+                            (f.year_idx + n - 1) % n
+                        } else {
+                            (f.year_idx + 1) % n
+                        };
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => bulk_income_recompute_preview(app),
+        KeyCode::Esc => {
+            app.bulk_income_flow = None;
+        }
+        KeyCode::Char('q') => {}
+        _ => {}
+    }
+}
+
+/// Recompute the priced plan from the current filter selections and transition to Preview (all rows
+/// checked). Records `excluded_missing_price` [#a]. Empty plan → stay on Filter with an explanatory
+/// error. This is the ONLY Session-helper call in the flow (KAT-G1: the opener reads `snap` directly).
+fn bulk_income_recompute_preview(app: &mut EditorApp) {
+    let filter = match app.bulk_income_flow.as_ref() {
+        Some(f) => {
+            let wallet = f.wallet_choices.get(f.wallet_idx).cloned().flatten();
+            let frame = match f.year_choices.get(f.year_idx).copied().flatten() {
+                Some(y) => btctax_cli::Frame::Year(y),
+                None => btctax_cli::Frame::All,
+            };
+            btctax_cli::BulkIncomeFilter { frame, wallet }
+        }
+        None => return,
+    };
+    let plan = match app.session.as_ref() {
+        Some(s) => s.bulk_classify_income_plan(filter),
+        None => return,
+    };
+    match plan {
+        Ok(plan) => {
+            let items: Vec<BulkIncomeRowItem> = plan
+                .included
+                .iter()
+                .map(|r| BulkIncomeRowItem {
+                    in_event: r.in_event.clone(),
+                    date: r.date,
+                    sat: r.sat,
+                    fmv: r.fmv,
+                    checked: true,
+                })
+                .collect();
+            if let Some(f) = app.bulk_income_flow.as_mut() {
+                f.excluded_missing_price = plan.excluded_missing_price;
+                if items.is_empty() {
+                    f.error = Some("No priced inbound deposits match this filter".to_string());
+                } else {
+                    f.error = None;
+                    f.preview = TargetList::new(items);
+                    f.step = BulkIncomeStep::Preview;
+                }
+            }
+        }
+        Err(e) => {
+            if let Some(f) = app.bulk_income_flow.as_mut() {
+                f.error = Some(format!("Plan error: {e}"));
+            }
+        }
+    }
+}
+
+/// Step 2 — per-row exclude checklist. `k/j/g/G` scroll; `Space`/`x` toggles the row's exclusion;
+/// Enter → confirm modal over the CHECKED rows (refuse if none); Esc → back to Filter; `q` swallowed.
+fn handle_bulk_income_preview_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(f) = app.bulk_income_flow.as_mut() {
+                f.preview.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(f) = app.bulk_income_flow.as_mut() {
+                f.preview.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(f) = app.bulk_income_flow.as_mut() {
+                f.preview.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(f) = app.bulk_income_flow.as_mut() {
+                f.preview.go_bottom();
+            }
+        }
+        KeyCode::Char(' ') | KeyCode::Char('x') => {
+            if let Some(f) = app.bulk_income_flow.as_mut() {
+                if let Some(i) = f.preview.table_state.selected() {
+                    if let Some(item) = f.preview.items.get_mut(i) {
+                        item.checked = !item.checked;
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => open_bulk_income_modal(app),
+        KeyCode::Esc => {
+            if let Some(f) = app.bulk_income_flow.as_mut() {
+                f.error = None;
+                f.step = BulkIncomeStep::Filter;
+            }
+        }
+        KeyCode::Char('q') => {}
+        _ => {}
+    }
+}
+
+/// Capture the CHECKED preview rows into the confirmation modal, building one
+/// `ClassifyInbound{Income{kind, Some(fmv), business}}` per checked row (the per-row auto-FMV comes from
+/// the plan; [#a] `fmv` is `Some(row.fmv)` so `Income{fmv:None}` is unrepresentable). Empty selection →
+/// refuse (stay on Preview with an error), never open the modal.
+fn open_bulk_income_modal(app: &mut EditorApp) {
+    let modal = {
+        let f = match app.bulk_income_flow.as_ref() {
+            Some(f) => f,
+            None => return,
+        };
+        let (count, total_sat, total_income_usd) =
+            crate::edit::form::bulk_income_checked_totals(&f.preview.items);
+        if count == 0 {
+            None
+        } else {
+            let payloads: Vec<EventPayload> = f
+                .preview
+                .items
+                .iter()
+                .filter(|i| i.checked)
+                .map(|i| {
+                    EventPayload::ClassifyInbound(ClassifyInbound {
+                        transfer_in_event: i.in_event.clone(),
+                        as_: InboundClass::Income {
+                            kind: f.kind,
+                            fmv: Some(i.fmv),
+                            business: f.business,
+                        },
+                    })
+                })
+                .collect();
+            Some(BulkIncomeModalState {
+                payloads,
+                count,
+                total_sat,
+                total_income_usd,
+                excluded_missing_price: f.excluded_missing_price,
+                kind: f.kind,
+                business: f.business,
+            })
+        }
+    };
+    match modal {
+        Some(m) => app.bulk_income_modal = Some(m),
+        None => {
+            if let Some(f) = app.bulk_income_flow.as_mut() {
+                f.error = Some("Nothing selected — check at least one row".to_string());
+            }
+        }
+    }
+}
+
+/// Handle a key press while the bulk classify-income confirmation modal is open (explicit confirm; NOT
+/// typed — each classification is voidable, matching the STI tier).
+///
+/// Enter → `persist_bulk_classify_income` (batch append + single save, mid-batch rollback via
+/// `persist_bulk_decisions`) → re-project + `derive_bulk_income_status` + close; `Err(e)` → close modal,
+/// route `on_persist_error`. Esc → close modal only (back to Preview; nothing written). All else swallowed.
+fn handle_bulk_income_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let payloads = match app.bulk_income_modal.as_ref() {
+                Some(m) => m.payloads.clone(),
+                None => return,
+            };
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.bulk_income_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_bulk_classify_income(session, payloads, now)
+            };
+
+            match save_result {
+                Ok(n) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_bulk_income_status(&snap, n);
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.bulk_income_modal = None;
+                    app.bulk_income_flow = None;
+                }
+                Err(e) => {
+                    app.bulk_income_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.bulk_income_modal = None;
+        }
+        _ => {}
+    }
+}
+
+/// Derive the post-apply status from RE-PROJECTED state: the applied count + the number of unclassified
+/// inbound deposits that REMAIN (still flagged `UnknownBasisInbound` on a raw wallet-bearing
+/// `TransferIn`, minus already-classified — the same candidate predicate as the opener).
+fn derive_bulk_income_status(snap: &btctax_tui::app::Snapshot, n: usize) -> String {
+    let ev_idx = events_by_id(snap);
+    let voided: BTreeSet<EventId> = snap
+        .events
+        .iter()
+        .filter_map(|e| {
+            if let EventPayload::VoidDecisionEvent(v) = &e.payload {
+                Some(v.target_event_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    let already_classified: BTreeSet<EventId> = snap
+        .events
+        .iter()
+        .filter(|e| !voided.contains(&e.id))
+        .filter_map(|e| {
+            if let EventPayload::ClassifyInbound(ci) = &e.payload {
+                Some(ci.transfer_in_event.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    let remaining = snap
+        .state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+        .filter(|b| {
+            let Some(id) = b.event.as_ref() else {
+                return false;
+            };
+            if already_classified.contains(id) {
+                return false;
+            }
+            match ev_idx.get(id) {
+                Some(ev) => {
+                    matches!(ev.payload, EventPayload::TransferIn(_)) && ev.wallet.is_some()
+                }
+                None => false,
+            }
+        })
+        .count();
+    format!(
+        "Recognized {n} inbound deposit(s) as income; \
          {remaining} unclassified inbound(s) remain."
     )
 }
@@ -19348,6 +19783,259 @@ mod tests {
         assert!(
             included.contains(&i1) && !included.contains(&i2),
             "voided i1 is a fresh candidate again; classified i2 is not"
+        );
+    }
+
+    // ── Bulk classify-inbound-income flow KATs (bulk-classify-inbound-income, Cycle 4) ─────────
+
+    /// Seed a vault with THREE raw (unclassified) `TransferIn` deposits into wallet A, each firing
+    /// `UnknownBasisInbound`. Returns `(i1, i2, i3)`:
+    ///   i1 = 2025-03-01, 100_000 sat (PRICED → $84.00; preview row 0 after sort)
+    ///   i2 = 2025-06-15,  50_000 sat (PRICED → $33.75; preview row 1)
+    ///   i3 = 2025-04-01,  40_000 sat (UNPRICED → excluded_missing_price, never a preview row)
+    fn seed_income_inbounds(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> (
+        btctax_core::EventId,
+        btctax_core::EventId,
+        btctax_core::EventId,
+    ) {
+        use btctax_core::event::{EventPayload, LedgerEvent, TransferIn};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let wallet = Some(btctax_core::WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        });
+        let i1 = EventId::import(Source::River, SourceRef::new("inc-i1"));
+        let i2 = EventId::import(Source::River, SourceRef::new("inc-i2"));
+        let i3 = EventId::import(Source::River, SourceRef::new("inc-i3"));
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let tin = |sat: i64| {
+            EventPayload::TransferIn(TransferIn {
+                sat,
+                src_addr: None,
+                txid: None,
+            })
+        };
+        let batch = vec![
+            LedgerEvent {
+                id: i1.clone(),
+                utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: tin(100_000),
+            },
+            LedgerEvent {
+                id: i2.clone(),
+                utc_timestamp: datetime!(2025-06-15 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: wallet.clone(),
+                payload: tin(50_000),
+            },
+            LedgerEvent {
+                id: i3.clone(),
+                utc_timestamp: datetime!(2025-04-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet,
+                payload: tin(40_000),
+            },
+        ];
+        btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+        session.save().unwrap();
+        (i1, i2, i3)
+    }
+
+    /// Pull the `transfer_in_event`s out of a batch of `ClassifyInbound{Income}` payloads.
+    fn income_targets(payloads: &[EventPayload]) -> Vec<btctax_core::EventId> {
+        payloads
+            .iter()
+            .filter_map(|p| match p {
+                EventPayload::ClassifyInbound(ci) => match ci.as_ {
+                    InboundClass::Income { .. } => Some(ci.transfer_in_event.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// `I` on a vault with NO unknown-basis inbound deposits refuses (no flow opened, status set).
+    #[test]
+    fn bulk_income_refuses_when_no_candidates() {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulkincome-nocand";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            let batch = vec![LedgerEvent {
+                id: EventId::import(Source::River, SourceRef::new("acq-only")),
+                utc_timestamp: datetime!(2024-12-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(btctax_core::WalletId::Exchange {
+                    provider: "River".into(),
+                    account: "main".into(),
+                }),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(3000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            session.save().unwrap();
+        }
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('I')));
+        assert!(
+            app.bulk_income_flow.is_none(),
+            "no candidates → flow must NOT open"
+        );
+        assert_eq!(
+            app.status.as_deref(),
+            Some("No unclassified inbound deposits to bulk-classify as income")
+        );
+    }
+
+    /// Unchecking a preview row omits it from the confirm modal's appended batch.
+    #[test]
+    fn bulk_income_per_row_exclude_drops_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulkincome-exclude";
+        let (i1, i2, _i3) = seed_income_inbounds(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('I'))); // → Filter
+        assert!(matches!(
+            app.bulk_income_flow.as_ref().map(|f| &f.step),
+            Some(BulkIncomeStep::Filter)
+        ));
+        handle_key(&mut app, press(KeyCode::Enter)); // Filter (Mining/no/Any/All) → Preview
+        {
+            let f = app.bulk_income_flow.as_ref().unwrap();
+            assert!(matches!(f.step, BulkIncomeStep::Preview));
+            assert_eq!(
+                f.preview.items.len(),
+                2,
+                "the two PRICED inbounds are included, all checked"
+            );
+            assert_eq!(
+                f.excluded_missing_price, 1,
+                "the unpriced i3 is excluded (not a preview row)"
+            );
+            assert!(f.preview.items.iter().all(|i| i.checked));
+            assert_eq!(
+                f.preview.items[0].in_event, i1,
+                "row 0 sorted-by-date is i1"
+            );
+        }
+        // Exclude row 0 (i1) → only i2 remains checked.
+        handle_key(&mut app, press(KeyCode::Char(' ')));
+        assert!(!app.bulk_income_flow.as_ref().unwrap().preview.items[0].checked);
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal
+        let m = app
+            .bulk_income_modal
+            .as_ref()
+            .expect("confirm modal must open over checked rows");
+        assert_eq!(m.count, 1, "one row excluded → one remains");
+        assert_eq!(
+            income_targets(&m.payloads),
+            vec![i2],
+            "excluded i1 is absent from the batch"
+        );
+    }
+
+    /// The confirm modal surfaces BOTH the total income being recognized (Σ per-row auto-FMV over the
+    /// checked rows) AND the count of inbounds EXCLUDED for a missing price [#a] — an E2E apply then
+    /// recognizes exactly that income with NO Hard `FmvMissing`.
+    #[test]
+    fn bulk_income_preview_shows_total_and_excluded() {
+        use std::collections::BTreeSet;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulkincome-total";
+        let (i1, i2, i3) = seed_income_inbounds(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('I'))); // → Filter
+        handle_key(&mut app, press(KeyCode::Enter)); // → Preview (both priced checked)
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal (no exclude)
+
+        let m = app.bulk_income_modal.as_ref().expect("modal must open");
+        assert_eq!(m.count, 2, "both priced inbounds recognized");
+        assert_eq!(
+            m.total_income_usd,
+            rust_decimal_macros::dec!(117.75),
+            "total income = $84.00 (i1) + $33.75 (i2)"
+        );
+        assert_eq!(
+            m.excluded_missing_price, 1,
+            "the unpriced i3 is surfaced as excluded"
+        );
+
+        handle_key(&mut app, press(KeyCode::Enter)); // APPLY
+        assert!(app.bulk_income_flow.is_none() && app.bulk_income_modal.is_none());
+        let snap = app.snapshot.as_ref().unwrap();
+
+        // i1 + i2 recognized as income; i3 (unpriced) stays flagged; NO FmvMissing traded in.
+        let recognized: BTreeSet<_> = snap
+            .state
+            .income_recognized
+            .iter()
+            .map(|r| r.event.clone())
+            .collect();
+        assert!(
+            recognized.contains(&i1) && recognized.contains(&i2),
+            "both priced inbounds recognized as income"
+        );
+        let flagged: BTreeSet<_> = snap
+            .state
+            .blockers
+            .iter()
+            .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+            .filter_map(|b| b.event.clone())
+            .collect();
+        assert!(
+            flagged.contains(&i3),
+            "the unpriced i3 stays pending (never auto-valued as income)"
+        );
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::FmvMissing),
+            "a priced income batch introduces NO FmvMissing year-gate"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Recognized 2 inbound"),
+            "status reports the applied count; got {:?}",
+            app.status
         );
     }
 

@@ -14,10 +14,10 @@
 //! session-holding TUI editor.
 
 use crate::edit::form::{
-    BulkLinkFlowState, BulkLinkModalState, BulkResolveFlowState, BulkResolveModalState,
-    BulkStiFlowState, BulkStiModalState, BulkVoidFlowState, BulkVoidModalState,
-    ClassifyInboundFlowState, ClassifyInboundModalState, ClassifyRawFlowState,
-    ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
+    BulkIncomeFlowState, BulkIncomeModalState, BulkLinkFlowState, BulkLinkModalState,
+    BulkResolveFlowState, BulkResolveModalState, BulkStiFlowState, BulkStiModalState,
+    BulkVoidFlowState, BulkVoidModalState, ClassifyInboundFlowState, ClassifyInboundModalState,
+    ClassifyRawFlowState, ClassifyRawModalState, LinkTransferFlowState, LinkTransferModalState,
     MatchSelfTransfersFlowState, MatchSelfTransfersModalState, MutationModalState,
     OptimizeAcceptFlowState, OptimizeAcceptModalState, ProfileFormState, ReclassifyIncomeFlowState,
     ReclassifyIncomeModalState, ReclassifyOutflowFlowState, ReclassifyOutflowModalState,
@@ -187,6 +187,14 @@ pub struct EditorApp {
     pub bulk_sti_flow: Option<BulkStiFlowState>,
     /// Bulk STI confirmation modal.  `Some` while awaiting Enter/Esc.
     pub bulk_sti_modal: Option<BulkStiModalState>,
+    /// Full bulk classify-inbound-income flow state (bulk-classify-inbound-income, Cycle 4).
+    ///
+    /// Dispatch order: bulk_income_modal (modal layer) → bulk_income_flow (flow layer). Creation is
+    /// REVOCABLE (each classification voidable via `v`, matching the STI tier), so the confirmation is
+    /// a plain modal — NO typed-word.
+    pub bulk_income_flow: Option<BulkIncomeFlowState>,
+    /// Bulk classify-income confirmation modal.  `Some` while awaiting Enter/Esc.
+    pub bulk_income_modal: Option<BulkIncomeModalState>,
     /// Full bulk resolve-conflict flow state (bulk-resolve-conflict D3).  `Some` while open.
     ///
     /// Dispatch order: bulk_resolve_modal (modal layer) → bulk_resolve_flow (flow layer). Each
@@ -272,6 +280,8 @@ impl EditorApp {
             bulk_link_modal: None,
             bulk_sti_flow: None,
             bulk_sti_modal: None,
+            bulk_income_flow: None,
+            bulk_income_modal: None,
             bulk_resolve_flow: None,
             bulk_resolve_modal: None,
             bulk_void_flow: None,

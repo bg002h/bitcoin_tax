@@ -9,9 +9,10 @@
 //! Unlock screen. This module performs no writes.
 
 use crate::edit::form::{
-    amount_label, basis_source_display, bulk_checked_totals, bulk_resolve_checked_count,
-    bulk_sti_checked_totals, bulk_usd_floor_label, bulk_void_checked_count,
-    bulk_void_lot_selection_checked_count, income_kind_display, wallet_label, BulkLinkFlowState,
+    amount_label, basis_source_display, bulk_checked_totals, bulk_income_checked_totals,
+    bulk_resolve_checked_count, bulk_sti_checked_totals, bulk_usd_floor_label,
+    bulk_void_checked_count, bulk_void_lot_selection_checked_count, income_kind_display,
+    wallet_label, BulkIncomeFlowState, BulkIncomeModalState, BulkIncomeStep, BulkLinkFlowState,
     BulkLinkModalState, BulkLinkStep, BulkResolveFlowState, BulkResolveModalState, BulkResolveStep,
     BulkStiFlowState, BulkStiModalState, BulkStiStep, BulkVoidFlowState, BulkVoidModalState,
     ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
@@ -366,6 +367,13 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.bulk_sti_modal.as_ref() {
         draw_bulk_sti_modal(frame, area, modal);
+    }
+    // Bulk classify-inbound-income flow overlay (bulk-classify-inbound-income, Cycle 4).
+    if let Some(flow) = app.bulk_income_flow.as_mut() {
+        draw_bulk_income_flow(frame, area, flow);
+    }
+    if let Some(modal) = app.bulk_income_modal.as_ref() {
+        draw_bulk_income_modal(frame, area, modal);
     }
     // Bulk resolve-conflict flow overlay (bulk-resolve-conflict D3).
     if let Some(flow) = app.bulk_resolve_flow.as_mut() {
@@ -3768,6 +3776,230 @@ fn draw_bulk_sti_modal(frame: &mut Frame, area: Rect, modal: &BulkStiModalState)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Red))
         .title(" Confirm: bulk classify-inbound-self-transfer — WRITES THE VAULT ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Render the bulk classify-inbound-income flow (Cycle 4). Step 1 chooses the uniform income-kind,
+/// business-flag, receiving-wallet, and time-frame. Step 2 is a per-row exclude checklist over the
+/// PRICED plan with date/BTC/income-USD columns, the total income recognized, and the excluded note.
+fn draw_bulk_income_flow(frame: &mut Frame, area: Rect, flow: &mut BulkIncomeFlowState) {
+    let modal_rect = centered_rect(96, 26, area);
+    frame.render_widget(Clear, modal_rect);
+    let outer = Block::default().borders(Borders::ALL).title(
+        " BULK CLASSIFY INBOUND INCOME — recognize many unknown-basis deposits as income at auto-FMV ",
+    );
+    let inner = outer.inner(modal_rect);
+    frame.render_widget(outer, modal_rect);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(0),
+            Constraint::Length(6),
+        ])
+        .split(inner);
+
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let hl = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let focus = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+
+    frame.render_widget(
+        Paragraph::new(vec![Line::from(Span::styled(
+            "each selected deposit → Income at its receipt-date FMV (ordinary income + lot basis; voidable)",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ))]),
+        chunks[0],
+    );
+
+    match flow.step {
+        BulkIncomeStep::Filter => {
+            let wallet_label_str = match flow.wallet_choices.get(flow.wallet_idx) {
+                Some(Some(w)) => wallet_label(w),
+                _ => "Any".to_string(),
+            };
+            let year_label = match flow.year_choices.get(flow.year_idx) {
+                Some(Some(y)) => y.to_string(),
+                _ => "All".to_string(),
+            };
+            let style_for = |i: usize| {
+                if flow.filter_focus == i {
+                    focus
+                } else {
+                    Style::default()
+                }
+            };
+            let lines = vec![
+                Line::from(Span::styled("Step 1/2 — kind + filter", bold)),
+                Line::from(""),
+                Line::from(vec![
+                    Span::raw("  income kind     : "),
+                    Span::styled(
+                        format!("[{}]", income_kind_display(flow.kind)),
+                        style_for(0),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::raw("  business (SE)   : "),
+                    Span::styled(
+                        format!("[{}]", if flow.business { "yes" } else { "no" }),
+                        style_for(1),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::raw("  receiving wallet: "),
+                    Span::styled(format!("[{wallet_label_str}]"), style_for(2)),
+                ]),
+                Line::from(vec![
+                    Span::raw("  time frame      : "),
+                    Span::styled(format!("[{year_label}]"), style_for(3)),
+                ]),
+            ];
+            frame.render_widget(Paragraph::new(lines), chunks[1]);
+        }
+        BulkIncomeStep::Preview => {
+            let selected = flow.preview.table_state.selected();
+            let rows: Vec<Row> = flow
+                .preview
+                .items
+                .iter()
+                .enumerate()
+                .map(|(i, it)| {
+                    let base = if selected == Some(i) {
+                        hl
+                    } else {
+                        Style::default()
+                    };
+                    let mark = if it.checked { "[x]" } else { "[ ]" };
+                    Row::new(vec![
+                        Cell::from(mark).style(base),
+                        Cell::from(it.date.to_string()).style(base),
+                        Cell::from(fmt_btc(it.sat)).style(base),
+                        Cell::from(format!("${}", it.fmv)).style(base),
+                    ])
+                })
+                .collect();
+            let header = Row::new(
+                ["", "date", "BTC", "income USD"]
+                    .iter()
+                    .map(|h| Cell::from(*h).style(bold)),
+            );
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Length(3),
+                    Constraint::Length(12),
+                    Constraint::Length(16),
+                    Constraint::Min(12),
+                ],
+            )
+            .header(header);
+            frame.render_stateful_widget(table, chunks[1], &mut flow.preview.table_state);
+        }
+    }
+
+    // Footer: live totals (Preview only) + excluded-missing-price note + step hint + transient error.
+    let mut footer: Vec<Line> = Vec::new();
+    if matches!(flow.step, BulkIncomeStep::Preview) {
+        let (count, sat, income) = bulk_income_checked_totals(&flow.preview.items);
+        footer.push(Line::from(Span::styled(
+            format!(
+                "checked {count} · Σ {} BTC · total income recognized ${income}",
+                fmt_btc(sat)
+            ),
+            bold,
+        )));
+        if flow.excluded_missing_price > 0 {
+            footer.push(Line::from(Span::styled(
+                format!(
+                    "⚠ {} inbound(s) excluded — no price available for their date (stay pending)",
+                    flow.excluded_missing_price
+                ),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
+    }
+    let hint = match flow.step {
+        BulkIncomeStep::Filter => "↑/↓: focus  ←/→: change  Enter: preview  Esc: cancel",
+        BulkIncomeStep::Preview => "↑/↓: scroll  Space/x: toggle  Enter: confirm  Esc: back",
+    };
+    footer.push(Line::from(Span::styled(
+        hint,
+        Style::default().fg(Color::Cyan),
+    )));
+    if let Some(err) = &flow.error {
+        footer.push(Line::from(Span::styled(
+            format!("⚠ {err}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+    frame.render_widget(Paragraph::new(footer), chunks[2]);
+}
+
+/// Render the bulk classify-income confirmation modal (explicit; NOT typed-word — each classification is
+/// voidable). Prominently shows the TOTAL income being recognized + the excluded-missing-price count.
+fn draw_bulk_income_modal(frame: &mut Frame, area: Rect, modal: &BulkIncomeModalState) {
+    let mut lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Apply BULK classify-inbound-income?",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!(
+            "    deposits    : {}  ({}{})",
+            modal.count,
+            income_kind_display(modal.kind),
+            if modal.business { ", business" } else { "" }
+        )),
+        Line::from(format!("    Σ BTC       : {}", fmt_btc(modal.total_sat))),
+        Line::from(Span::styled(
+            format!("    income recognized : ${}", modal.total_income_usd),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+    ];
+    if modal.excluded_missing_price > 0 {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "    excluded (no price): {} inbound(s) stay pending",
+                modal.excluded_missing_price
+            ),
+            Style::default().fg(Color::Yellow),
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Each is a voidable classify-inbound decision ('v'). The FMV is the daily-close market",
+        Style::default().fg(Color::Yellow),
+    )));
+    lines.push(Line::from(Span::styled(
+        "  value at receipt — ordinary income now AND the lot's cost basis.",
+        Style::default().fg(Color::Yellow),
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(
+        "  Appended as N decisions, saved via the vault's atomic write path.",
+    ));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  [Enter] Apply — writes the vault    [Esc] Cancel — writes nothing",
+        Style::default().fg(Color::Cyan),
+    )));
+    lines.push(Line::from(""));
+
+    let height = (lines.len() + 2) as u16;
+    let modal_rect = centered_rect(82, height, area);
+    frame.render_widget(Clear, modal_rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red))
+        .title(" Confirm: bulk classify-inbound-income — WRITES THE VAULT ");
     let inner = block.inner(modal_rect);
     frame.render_widget(block, modal_rect);
     frame.render_widget(Paragraph::new(lines), inner);

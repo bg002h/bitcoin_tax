@@ -113,6 +113,50 @@ pub struct BulkStiPlan {
     pub missing_price_count: usize,
 }
 
+// ── Bulk classify-inbound-income plan (bulk-classify-inbound-income, Cycle 4) ─
+//
+// The shared, READ-ONLY plan both the CLI (`cmd::reconcile::bulk_classify_income_plan`) and the TUI
+// `I` flow compute from the HELD session. A NEAR-CLONE of `bulk_self_transfer_in_plan` with ONE
+// load-bearing difference [#a tax-safety]: a candidate whose `fmv_of(date, sat)` is `None` (no bundled
+// price / overflow) is EXCLUDED from `included` (counted in `excluded_missing_price`), NOT included —
+// because a persisted `InboundClass::Income { fmv: None }` projects to a Hard `FmvMissing` year-gate
+// (and on the inbound path that is NOT clearable by `ManualFmv` — the sole escape is void + reclassify).
+// So `included` carries a RESOLVED `fmv: Usd` (non-Option), making `Income{fmv:None}` structurally
+// unrepresentable from the bulk path. Appends and persists NOTHING.
+
+/// Filter narrowing which pending unknown-basis inbound deposits a bulk classify-income plan selects.
+/// Mirrors `BulkStiFilter`; `wallet` filters the RECEIVING wallet (the inbound IS the receiving leg).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkIncomeFilter {
+    pub frame: Frame,
+    pub wallet: Option<WalletId>,
+}
+
+/// One enriched pending unknown-basis inbound in a bulk classify-income plan, carrying a RESOLVED FMV.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkIncomeRow {
+    pub in_event: EventId,
+    pub date: TaxDate,
+    pub sat: Sat,
+    /// [#a] The RESOLVED auto-FMV `fmv_of(&prices, date, sat)` — ALWAYS a real number (the `None`
+    /// rows are EXCLUDED upstream). This is the income recognized AND the lot basis.
+    pub fmv: Usd,
+}
+
+/// The read-only plan a bulk classify-income would execute: the eligible/in-frame `included` rows (each
+/// with a resolved `fmv`) + the count of candidates dropped for a MISSING price + preview totals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkIncomePlan {
+    /// Eligible + in-frame + passes `wallet` filter + HAS a price. Sorted by `date`.
+    pub included: Vec<BulkIncomeRow>,
+    /// [#a] Candidates dropped because `fmv_of == None` (surfaced, NOT silently dropped — the user
+    /// learns N inbounds could not be auto-valued as income; they stay pending).
+    pub excluded_missing_price: usize,
+    pub total_sat: Sat,
+    /// Σ `fmv` over `included` — the total income being recognized (always a real number).
+    pub total_income_usd: Usd,
+}
+
 // ── Bulk resolve-conflict plan (bulk-resolve-conflict D1) ────────────────────
 //
 // The shared, READ-ONLY plan both the CLI (`cmd::reconcile::bulk_resolve_conflict_plan`) and the TUI
@@ -615,6 +659,107 @@ impl Session {
             total_sat,
             total_usd_fmv_floor,
             missing_price_count,
+        })
+    }
+
+    /// READ-ONLY: compute the bulk classify-inbound-income plan (bulk-classify-inbound-income, Cycle 4).
+    /// A NEAR-CLONE of `bulk_self_transfer_in_plan`: candidates are `TransferIn`s still flagged
+    /// `UnknownBasisInbound` MINUS any already targeted by a NON-VOIDED `ClassifyInbound` (filter-3;
+    /// a second `ClassifyInbound` fires a Hard `DecisionConflict`) MINUS wallet-less inbounds (create no
+    /// lot; also a Hard-`FmvMissing` vector). Then the **Cycle-4 tax-safety difference [#a]**: any
+    /// candidate whose `fmv_of(date, sat)` is `None` (missing daily-close price OR overflow) is EXCLUDED
+    /// from `included` and counted in `excluded_missing_price` — a persisted `Income{fmv:None}` projects
+    /// to a Hard `FmvMissing` year-gate (NOT clearable by `ManualFmv` on the inbound path). `included`
+    /// therefore carries a RESOLVED `fmv: Usd` (non-Option). Appends/persists NOTHING.
+    pub fn bulk_classify_income_plan(
+        &self,
+        filter: BulkIncomeFilter,
+    ) -> Result<BulkIncomePlan, CliError> {
+        let (events, state, _cfg) = self.load_events_and_project()?;
+        let prices = BundledPrices::load()?;
+        let index: std::collections::HashMap<EventId, &LedgerEvent> =
+            events.iter().map(|e| (e.id.clone(), e)).collect();
+
+        // filter-3, mirroring `bulk_self_transfer_in_plan`: the set of TransferIn ids already targeted
+        // by a NON-VOIDED `ClassifyInbound` (build the voided-decision-id set first, keep only
+        // ClassifyInbounds whose OWN id is not voided, map the survivor to its `transfer_in_event`).
+        let voided: std::collections::BTreeSet<EventId> = events
+            .iter()
+            .filter_map(|e| match &e.payload {
+                EventPayload::VoidDecisionEvent(v) => Some(v.target_event_id.clone()),
+                _ => None,
+            })
+            .collect();
+        let already_classified: std::collections::BTreeSet<EventId> = events
+            .iter()
+            .filter(|e| !voided.contains(&e.id))
+            .filter_map(|e| match &e.payload {
+                EventPayload::ClassifyInbound(ci) => Some(ci.transfer_in_event.clone()),
+                _ => None,
+            })
+            .collect();
+
+        let in_frame = |date: TaxDate| match &filter.frame {
+            Frame::All => true,
+            Frame::Year(y) => date.year() == *y,
+            Frame::Range { from, to } => *from <= date && date <= *to,
+        };
+
+        let mut included: Vec<BulkIncomeRow> = Vec::new();
+        let mut excluded_missing_price = 0usize;
+        for b in &state.blockers {
+            if b.kind != BlockerKind::UnknownBasisInbound {
+                continue;
+            }
+            let Some(id) = &b.event else { continue };
+            // filter-3: EXCLUDE any inbound already carrying a live ClassifyInbound (a second one →
+            // Hard DecisionConflict blocks compute_tax_year).
+            if already_classified.contains(id) {
+                continue;
+            }
+            let Some(ev) = index.get(id) else { continue };
+            let EventPayload::TransferIn(ti) = &ev.payload else {
+                continue;
+            };
+            // EXCLUDE wallet-less inbounds — an income inbound without a wallet creates no lot and
+            // itself raises a Hard FmvMissing (fold.rs); the matcher skips them too.
+            let Some(wallet) = ev.wallet.clone() else {
+                continue;
+            };
+            let date = tax_date(ev.utc_timestamp, ev.original_tz);
+            if !in_frame(date) {
+                continue;
+            }
+            if let Some(w) = &filter.wallet {
+                if &wallet != w {
+                    continue;
+                }
+            }
+            let sat = ti.sat;
+            // [#a tax-safety — the whole cycle] a candidate with no price is EXCLUDED (counted), NEVER
+            // classified as income: an Income{fmv:None} would trade UnknownBasisInbound for a Hard
+            // FmvMissing year-gate. bulk-sti INCLUDES these rows ($0-basis needs no FMV); bulk-income
+            // must NOT. `included` carries the resolved non-Option fmv.
+            match btctax_core::price::fmv_of(&prices, date, sat) {
+                Some(fmv) => included.push(BulkIncomeRow {
+                    in_event: id.clone(),
+                    date,
+                    sat,
+                    fmv,
+                }),
+                None => excluded_missing_price += 1,
+            }
+        }
+        included.sort_by_key(|r| r.date);
+
+        let total_sat: Sat = included.iter().map(|r| r.sat).sum();
+        let total_income_usd: Usd = included.iter().map(|r| r.fmv).sum();
+
+        Ok(BulkIncomePlan {
+            included,
+            excluded_missing_price,
+            total_sat,
+            total_income_usd,
         })
     }
 
