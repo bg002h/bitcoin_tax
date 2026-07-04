@@ -2296,6 +2296,430 @@ fn bulk_sti_cli_no_match_exits_clean() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
+// bulk-classify-inbound-income (Cycle 4) — `Session::bulk_classify_income_plan` +
+// `cmd::reconcile::{bulk_classify_income_plan, apply_bulk_classify_inbound_income}`. A NEAR-CLONE of
+// bulk-sti with ONE load-bearing difference [#a tax-safety]: a MISSING-PRICE candidate is EXCLUDED
+// from `included` (counted in `excluded_missing_price`), NEVER classified as `Income{fmv:None}` (which
+// would trade `UnknownBasisInbound` for a Hard `FmvMissing` year-gate). Reuses `sti_fixture` (same seed).
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The plan selects UnknownBasisInbound TransferIns in-frame, applies the wallet filter, sorts by date,
+/// and carries a RESOLVED per-row FMV; the 2024 inbound is out of frame and the unpriced one is excluded.
+#[test]
+fn bulk_income_plan_lists_pending_inbounds() {
+    use btctax_cli::{BulkIncomeFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [i1, _i2, i3, _i4]) = sti_fixture(dir.path());
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    // Year(2025), wallet None → i1 (priced $84.00) + i3 (priced $27.00); i2 (2025, unpriced) is
+    // EXCLUDED (missing price), i4 (2024) is out of frame.
+    let plan = s
+        .bulk_classify_income_plan(BulkIncomeFilter {
+            frame: Frame::Year(2025),
+            wallet: None,
+        })
+        .unwrap();
+    let included: Vec<_> = plan.included.iter().map(|r| r.in_event.clone()).collect();
+    assert_eq!(
+        included,
+        vec![i1, i3],
+        "included = priced 2025 inbounds sorted by date (i2 unpriced, i4 out of frame dropped)"
+    );
+    assert_eq!(
+        plan.excluded_missing_price, 1,
+        "i2 (2025-04-01) has no price"
+    );
+    assert_eq!(plan.total_sat, 140_000, "Σ included sat");
+    assert_eq!(
+        plan.total_income_usd,
+        dec!(111.00),
+        "Σ income = $84.00 + $27.00"
+    );
+    assert_eq!(
+        plan.included.iter().map(|r| r.fmv).collect::<Vec<_>>(),
+        vec![dec!(84.00), dec!(27.00)],
+        "each included row carries its resolved auto-FMV"
+    );
+}
+
+/// [filter-3] The candidate set EXCLUDES any inbound already targeted by a non-voided `ClassifyInbound`
+/// (a gift-case-4 `GiftReceived{None,None}` that RE-FIRES `UnknownBasisInbound` yet is already
+/// classified — a second `ClassifyInbound{Income}` would fire a Hard `DecisionConflict`).
+#[test]
+fn bulk_income_plan_excludes_already_classified() {
+    use btctax_cli::{BulkIncomeFilter, Frame};
+    use btctax_core::event::TransferIn;
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::LedgerEvent;
+    use time::UtcOffset;
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("inc-excl.pgp");
+    let mut session = Session::create(&vault, &pp()).unwrap();
+
+    let mkid = |r: &str| EventId::import(Source::Coinbase, SourceRef::new(r));
+    let tin = |sat: i64| {
+        EventPayload::TransferIn(TransferIn {
+            sat,
+            src_addr: None,
+            txid: None,
+        })
+    };
+    let normal = mkid("inc-normal");
+    let gift4 = mkid("inc-gift4");
+    let batch = vec![
+        // plain unclassified, wallet A, PRICED date → the ONLY expected candidate.
+        LedgerEvent {
+            id: normal.clone(),
+            utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_a()),
+            payload: tin(100_000),
+        },
+        // will be classified gift-case-4 → re-fires UnknownBasisInbound but is already-classified.
+        LedgerEvent {
+            id: gift4.clone(),
+            utc_timestamp: datetime!(2025-03-02 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_a()),
+            payload: tin(70_000),
+        },
+    ];
+    append_import_batch(session.conn(), &batch).unwrap();
+    session.save().unwrap();
+    drop(session);
+
+    cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &gift4.canonical(),
+        InboundClass::GiftReceived {
+            donor_basis: None,
+            donor_acquired_at: None,
+            fmv_at_gift: dec!(1000),
+        },
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    // Sanity: both still carry UnknownBasisInbound (so the exclusion is MEANINGFUL, not vacuous).
+    let (state, _) = s.project().unwrap();
+    let flagged: std::collections::BTreeSet<_> = state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+        .filter_map(|b| b.event.clone())
+        .collect();
+    assert!(
+        flagged.contains(&normal) && flagged.contains(&gift4),
+        "both inbounds re-fire UnknownBasisInbound: {flagged:?}"
+    );
+
+    let plan = s
+        .bulk_classify_income_plan(BulkIncomeFilter {
+            frame: Frame::All,
+            wallet: None,
+        })
+        .unwrap();
+    let included: Vec<_> = plan.included.iter().map(|r| r.in_event.clone()).collect();
+    assert_eq!(
+        included,
+        vec![normal],
+        "only the plain unclassified inbound is a candidate; the already-classified gift-case-4 is excluded"
+    );
+}
+
+/// [#a tax-safety] A row whose date has NO bundled price is NOT in `included` and IS counted in
+/// `excluded_missing_price` — so a persisted batch NEVER creates an `Income{fmv:None}` → NO Hard
+/// `FmvMissing`. (i2 = 2025-04-01 has no bundled price.)
+#[test]
+fn bulk_income_plan_excludes_missing_price() {
+    use btctax_cli::{BulkIncomeFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [i1, i2, _i3, _i4]) = sti_fixture(dir.path());
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    // wallet A / Year 2025 → i1 (2025-03-01, priced) + i2 (2025-04-01, UNPRICED).
+    let plan = s
+        .bulk_classify_income_plan(BulkIncomeFilter {
+            frame: Frame::Year(2025),
+            wallet: Some(wallet_a()),
+        })
+        .unwrap();
+    let included: Vec<_> = plan.included.iter().map(|r| r.in_event.clone()).collect();
+    assert_eq!(included, vec![i1], "only the priced inbound is included");
+    assert!(
+        !included.contains(&i2),
+        "the unpriced inbound (i2) is NOT classified as income (would year-gate)"
+    );
+    assert_eq!(plan.excluded_missing_price, 1, "i2 surfaced as excluded");
+    assert_eq!(
+        plan.total_income_usd,
+        dec!(84.00),
+        "income = priced row only"
+    );
+}
+
+/// [R0-M4] A wallet-less pending inbound (a Hard-`FmvMissing`/no-lot vector) is NOT in `included`
+/// (mirrors bulk-sti's wallet-less exclusion) — and is NOT counted as missing-price (a distinct
+/// exclusion, earlier in the pipeline).
+#[test]
+fn bulk_income_plan_excludes_wallet_less() {
+    use btctax_cli::{BulkIncomeFilter, Frame};
+    use btctax_core::event::TransferIn;
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::LedgerEvent;
+    use time::UtcOffset;
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("inc-walletless.pgp");
+    let mut session = Session::create(&vault, &pp()).unwrap();
+
+    let mkid = |r: &str| EventId::import(Source::Coinbase, SourceRef::new(r));
+    let tin = |sat: i64| {
+        EventPayload::TransferIn(TransferIn {
+            sat,
+            src_addr: None,
+            txid: None,
+        })
+    };
+    let normal = mkid("inc-normal");
+    let walletless = mkid("inc-walletless");
+    let batch = vec![
+        LedgerEvent {
+            id: normal.clone(),
+            utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_a()),
+            payload: tin(100_000),
+        },
+        // wallet-less → fires UnknownBasisInbound with wallet None (excluded; creates no lot).
+        LedgerEvent {
+            id: walletless.clone(),
+            utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: None,
+            payload: tin(60_000),
+        },
+    ];
+    append_import_batch(session.conn(), &batch).unwrap();
+    session.save().unwrap();
+    drop(session); // release the VaultLock before re-opening
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let plan = s
+        .bulk_classify_income_plan(BulkIncomeFilter {
+            frame: Frame::All,
+            wallet: None,
+        })
+        .unwrap();
+    let included: Vec<_> = plan.included.iter().map(|r| r.in_event.clone()).collect();
+    assert_eq!(
+        included,
+        vec![normal],
+        "the wallet-less inbound is excluded (creates no lot; no missing-price count)"
+    );
+    assert_eq!(
+        plan.excluded_missing_price, 0,
+        "wallet-less is a DISTINCT exclusion, not counted as missing-price"
+    );
+}
+
+/// Phase 1 (`bulk_classify_income_plan`) is READ-ONLY: computing the plan writes nothing to the vault.
+#[test]
+fn bulk_income_dry_run_writes_nothing() {
+    use btctax_cli::{BulkIncomeFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _ids) = sti_fixture(dir.path());
+
+    let before = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::load_all(s.conn()).unwrap().len()
+    };
+    let plan = cmd::reconcile::bulk_classify_income_plan(
+        &vault,
+        &pp(),
+        BulkIncomeFilter {
+            frame: Frame::All,
+            wallet: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        !plan.included.is_empty(),
+        "plan must select rows (so the no-write is meaningful)"
+    );
+    let after = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::load_all(s.conn()).unwrap().len()
+    };
+    assert_eq!(
+        before, after,
+        "computing the plan must not append any event"
+    );
+}
+
+/// [#a] The persisted decision's `fmv` — and thus the PROJECTED `Income.usd_fmv` (the recognized
+/// income AND the lot basis) — equals `fmv_of(date, sat)`.
+#[test]
+fn bulk_income_apply_sets_autofmv() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [i1, _i2, _i3, _i4]) = sti_fixture(dir.path());
+
+    let n = cmd::reconcile::apply_bulk_classify_inbound_income(
+        &vault,
+        &pp(),
+        vec![i1.clone()],
+        IncomeKind::Mining,
+        false,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(n, 1);
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    // The DECISION field is `.fmv` = Some($84.00) (the auto-FMV; NEVER None on an included row).
+    let ci = btctax_core::persistence::load_all(s.conn())
+        .unwrap()
+        .into_iter()
+        .find_map(|e| match e.payload {
+            EventPayload::ClassifyInbound(ci) if ci.transfer_in_event == i1 => Some(ci),
+            _ => None,
+        })
+        .expect("a ClassifyInbound for i1");
+    assert!(
+        matches!(
+            ci.as_,
+            InboundClass::Income {
+                fmv: Some(v),
+                kind: IncomeKind::Mining,
+                business: false
+            } if v == dec!(84.00)
+        ),
+        "decision fmv == fmv_of(date, sat) == $84.00; got {:?}",
+        ci.as_
+    );
+
+    // The PROJECTED income record + lot basis both == the auto-FMV.
+    let (state, _) = s.project().unwrap();
+    let rec = state
+        .income_recognized
+        .iter()
+        .find(|r| r.event == i1)
+        .expect("i1 recognized as income");
+    assert_eq!(
+        rec.usd_fmv,
+        dec!(84.00),
+        "projected Income.usd_fmv == fmv_of"
+    );
+    let lot = state
+        .lots
+        .iter()
+        .find(|l| l.lot_id.origin_event_id == i1)
+        .expect("income lot created");
+    assert_eq!(
+        lot.usd_basis,
+        dec!(84.00),
+        "lot basis == the recognized FMV"
+    );
+}
+
+/// E2E: after apply, `income_recognized` grows by the included count, the `UnknownBasisInbound`
+/// blockers clear, and NO new Hard blocker appears (crucially NO `FmvMissing`).
+#[test]
+fn bulk_income_apply_recognizes_income() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [i1, i2, i3, _i4]) = sti_fixture(dir.path());
+
+    let income_before = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        s.project().unwrap().0.income_recognized.len()
+    };
+
+    let n = cmd::reconcile::apply_bulk_classify_inbound_income(
+        &vault,
+        &pp(),
+        vec![i1.clone(), i3.clone()],
+        IncomeKind::Staking,
+        false,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(n, 2);
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert_eq!(
+        state.income_recognized.len(),
+        income_before + 2,
+        "income_recognized grew by the included count"
+    );
+
+    // i1 + i3 no longer flagged UnknownBasisInbound; the untouched i2 stays flagged.
+    let flagged: std::collections::BTreeSet<_> = state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+        .filter_map(|b| b.event.clone())
+        .collect();
+    assert!(
+        !flagged.contains(&i1) && !flagged.contains(&i3),
+        "classified inbounds' UnknownBasisInbound cleared"
+    );
+    assert!(flagged.contains(&i2), "the untouched i2 stays flagged");
+
+    // The whole point [#a]: NO Hard FmvMissing was traded in.
+    assert!(
+        state
+            .blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::FmvMissing),
+        "a priced income batch introduces NO FmvMissing year-gate"
+    );
+}
+
+/// `--kind`/`--business` are UNIFORM: every persisted row carries the chosen kind + business flag.
+#[test]
+fn bulk_income_uniform_kind_and_business() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [i1, _i2, i3, _i4]) = sti_fixture(dir.path());
+
+    cmd::reconcile::apply_bulk_classify_inbound_income(
+        &vault,
+        &pp(),
+        vec![i1, i3],
+        IncomeKind::Interest,
+        true,
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let classified: Vec<_> = btctax_core::persistence::load_all(s.conn())
+        .unwrap()
+        .into_iter()
+        .filter_map(|e| match e.payload {
+            EventPayload::ClassifyInbound(ci) => Some(ci.as_),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(classified.len(), 2);
+    assert!(
+        classified.iter().all(|c| matches!(
+            c,
+            InboundClass::Income {
+                kind: IncomeKind::Interest,
+                business: true,
+                fmv: Some(_)
+            }
+        )),
+        "every row carries the uniform kind=Interest + business=true (each fmv is Some)"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 // self-transfer-passthrough C2 — the matcher `Session::self_transfer_match_plan`. READ-ONLY: pairs
 // ONLY unreconciled legs (candidate ins = UnknownBasisInbound TransferIns; candidate outs = pending
 // outflows), proposes DROP (same wallet) vs RELOCATE (cross wallet), flags ambiguity, NEVER auto-applies.

@@ -4,7 +4,7 @@
 use btctax_cli::{cmd, eventref, render, CliError};
 use btctax_core::{
     AllocMethod, Carryforward, DisposeKind, DonationDetails, FeeTreatment, FilingStatus,
-    InboundClass, LotMethod, OutflowClass, TaxProfile, TransferTarget,
+    InboundClass, IncomeKind, LotMethod, OutflowClass, TaxProfile, TransferTarget,
 };
 use btctax_store::Passphrase;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -388,6 +388,38 @@ enum Reconcile {
     /// exposure) + requires --yes (or interactive y/N). Each is a voidable decision; for a deposit
     /// whose real cost you can substantiate, classify it single-item with `classify-inbound-self-transfer --basis`.
     BulkClassifyInboundSelfTransfer {
+        /// Restrict to a single tax year (mutually exclusive with --from/--to).
+        #[arg(long, conflicts_with_all = ["from", "to"])]
+        year: Option<i32>,
+        /// Range start (YYYY-MM-DD; requires --to).
+        #[arg(long, requires = "to")]
+        from: Option<String>,
+        /// Range end (YYYY-MM-DD, inclusive; requires --from).
+        #[arg(long, requires = "from")]
+        to: Option<String>,
+        /// Only inbounds received INTO this wallet.
+        #[arg(long)]
+        wallet: Option<String>,
+        /// Print the preview and exit without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip the interactive confirmation (non-interactive apply).
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Bulk-classify unknown-basis inbound deposits as INCOME (mining|staking|interest|airdrop|reward):
+    /// recognize MANY pending inbounds as ordinary income at their auto-FMV (the daily-close market
+    /// value at receipt) in one confirmed batch, with a UNIFORM `--kind` + `--business` flag. Shows a
+    /// preview surfacing the total income recognized + the count of inbounds EXCLUDED because no price
+    /// was available for their date (those stay pending — an income row with no FMV would year-gate).
+    /// Each is a voidable decision; for a single deposit use `classify-inbound-income`.
+    BulkClassifyInboundIncome {
+        /// Income kind for the whole batch: mining|staking|interest|airdrop|reward.
+        #[arg(long)]
+        kind: String,
+        /// Whether this income is from a trade or business (true → SE-tax eligible).
+        #[arg(long)]
+        business: bool,
         /// Restrict to a single tax year (mutually exclusive with --from/--to).
         #[arg(long, conflicts_with_all = ["from", "to"])]
         year: Option<i32>,
@@ -1246,6 +1278,77 @@ fn dispatch_reconcile(
             println!("classified {n} inbound deposits as self-transfer-in ($0 basis)");
             return Ok(());
         }
+        Reconcile::BulkClassifyInboundIncome {
+            kind,
+            business,
+            year,
+            from,
+            to,
+            wallet,
+            dry_run,
+            yes,
+        } => {
+            let kind = eventref::parse_income_kind(&kind)?;
+            let wallet = wallet
+                .as_deref()
+                .map(eventref::parse_wallet_id)
+                .transpose()?;
+            // clap enforces: none / --year alone / --from + --to. The catch-all is defensive.
+            let frame =
+                match (year, from, to) {
+                    (Some(y), None, None) => btctax_cli::Frame::Year(y),
+                    (None, Some(f), Some(t)) => btctax_cli::Frame::Range {
+                        from: eventref::parse_date_arg(&f)?,
+                        to: eventref::parse_date_arg(&t)?,
+                    },
+                    (None, None, None) => btctax_cli::Frame::All,
+                    _ => return Err(CliError::Usage(
+                        "bulk-classify-inbound-income: use --year, or --from with --to, or neither"
+                            .into(),
+                    )),
+                };
+            let filter = btctax_cli::BulkIncomeFilter { frame, wallet };
+            let plan = cmd::reconcile::bulk_classify_income_plan(vault, &pp, filter)?;
+
+            render_bulk_income_preview(&plan, kind, business);
+
+            if plan.included.is_empty() {
+                println!("no unclassified inbound deposits match");
+                return Ok(());
+            }
+            if dry_run {
+                return Ok(());
+            }
+            let confirmed = if yes {
+                true
+            } else {
+                print!(
+                    "Recognize {} inbound deposit(s) as {} income (total ${})? [y/N] ",
+                    plan.included.len(),
+                    kind_label(kind),
+                    plan.total_income_usd
+                );
+                use std::io::Write;
+                std::io::stdout().flush().ok();
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line)?;
+                matches!(line.trim(), "y" | "Y" | "yes" | "YES")
+            };
+            if !confirmed {
+                println!("aborted; nothing written");
+                return Ok(());
+            }
+            let in_events: Vec<_> = plan.included.iter().map(|r| r.in_event.clone()).collect();
+            let n = cmd::reconcile::apply_bulk_classify_inbound_income(
+                vault, &pp, in_events, kind, business, now,
+            )?;
+            println!(
+                "recognized {n} inbound deposit(s) as {} income (total ${})",
+                kind_label(kind),
+                plan.total_income_usd
+            );
+            return Ok(());
+        }
         Reconcile::BulkResolveConflict {
             accept,
             reject: _, // clap's ArgGroup guarantees EXACTLY one of --accept/--reject; dispatch on `accept`.
@@ -1536,6 +1639,51 @@ fn render_bulk_sti_preview(plan: &btctax_cli::BulkStiPlan) {
         plan.total_sat,
         total
     );
+}
+
+/// Lower-case CLI label for an `IncomeKind` (matches `parse_income_kind`'s accepted spellings).
+fn kind_label(kind: IncomeKind) -> &'static str {
+    match kind {
+        IncomeKind::Mining => "mining",
+        IncomeKind::Staking => "staking",
+        IncomeKind::Interest => "interest",
+        IncomeKind::Airdrop => "airdrop",
+        IncomeKind::Reward => "reward",
+    }
+}
+
+/// Preview for `bulk-classify-inbound-income`: the included rows (each auto-valued at its receipt-date
+/// FMV = the income recognized), the total income being recognized, and the count of inbounds EXCLUDED
+/// because their date has no bundled price (those stay pending — an income row with no FMV would raise a
+/// Hard `FmvMissing` year-gate, so they are surfaced here, NOT silently dropped).
+fn render_bulk_income_preview(plan: &btctax_cli::BulkIncomePlan, kind: IncomeKind, business: bool) {
+    println!(
+        "Bulk classify-inbound-income preview ({} income{}, auto-FMV at receipt)",
+        kind_label(kind),
+        if business { ", business" } else { "" }
+    );
+    println!("{:<12}  {:>14}  {:>16}", "date", "sat", "income USD");
+    for r in &plan.included {
+        println!(
+            "{:<12}  {:>14}  {:>16}",
+            r.date,
+            r.sat,
+            format!("${}", r.fmv)
+        );
+    }
+    println!(
+        "included {} | {} sat | total income recognized ${}",
+        plan.included.len(),
+        plan.total_sat,
+        plan.total_income_usd
+    );
+    if plan.excluded_missing_price > 0 {
+        println!(
+            "excluded {} inbound(s) with no available price (still pending — set FMV manually or \
+             classify as self-transfer instead)",
+            plan.excluded_missing_price
+        );
+    }
 }
 
 /// One-line human summary of an imported payload for the bulk resolve-conflict preview. The CLI

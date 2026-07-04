@@ -293,6 +293,73 @@ pub fn apply_bulk_self_transfer_in(
     Ok(in_events.len())
 }
 
+/// bulk-classify-inbound-income (Cycle 4) — Phase 1 (read): open the session and compute the bulk
+/// classify-income plan. Two-phase by design (mirrors `bulk_self_transfer_in_plan`): this read phase
+/// renders NOTHING to the vault. The plan is the shared read helper `Session::bulk_classify_income_plan`
+/// — it excludes missing-price rows [#a tax-safety] and reports them as `excluded_missing_price`.
+pub fn bulk_classify_income_plan(
+    vault_path: &Path,
+    pp: &Passphrase,
+    filter: crate::BulkIncomeFilter,
+) -> Result<crate::BulkIncomePlan, CliError> {
+    let session = Session::open(vault_path, pp)?;
+    session.bulk_classify_income_plan(filter)
+}
+
+/// bulk-classify-inbound-income (Cycle 4) — Phase 2 (write): atomically classify every `in_event` as
+/// `Income { kind, fmv, business }` with a PER-ROW auto-FMV. Its OWN append-loop (mirrors
+/// `apply_bulk_self_transfer_in`; NOT the tui-edit `persist_bulk_decisions`, which btctax-cli cannot
+/// reach — dependency cycle, R0-I1). One `ClassifyInbound { transfer_in_event, Income{..} }` per row,
+/// bare `?`-before-`save` (a mid-batch failure returns before `save` → the in-memory session is
+/// discarded, nothing lands on disk = CLI atomicity), then a SINGLE `session.save()`.
+///
+/// **[#a] Auto-FMV is resolved per-row via `fmv_of(date, sat)`.** The dispatch derives `in_events`
+/// from `plan.included` (the fmv-`Some` rows only), so every id here resolves to a real price and the
+/// `fmv: Option<Usd>` field is `Some` — a persisted `Income{fmv:None}` (→ Hard `FmvMissing` year-gate)
+/// is never emitted. `kind` + `business` are UNIFORM across the batch; `fmv` is per-row. Returns the
+/// number classified.
+pub fn apply_bulk_classify_inbound_income(
+    vault_path: &Path,
+    pp: &Passphrase,
+    in_events: Vec<EventId>,
+    kind: IncomeKind,
+    business: bool,
+    now: OffsetDateTime,
+) -> Result<usize, CliError> {
+    let mut session = Session::open(vault_path, pp)?;
+    let prices = btctax_adapters::BundledPrices::load()?;
+    let events = load_all(session.conn())?;
+    let index: std::collections::HashMap<&EventId, &btctax_core::LedgerEvent> =
+        events.iter().map(|e| (&e.id, e)).collect();
+    // Resolve (sat, date) per in_event from the event log (the FMV is a per-row auto-value; R0-M3:
+    // `fmv` is already Option<Usd> so it takes `fmv_of(..)` DIRECTLY — never `Some(fmv_of(..))`).
+    let mut n = 0usize;
+    for in_event in &in_events {
+        let Some(ev) = index.get(in_event) else {
+            continue;
+        };
+        let EventPayload::TransferIn(ti) = &ev.payload else {
+            continue;
+        };
+        let date = btctax_core::conventions::tax_date(ev.utc_timestamp, ev.original_tz);
+        let fmv = btctax_core::price::fmv_of(&prices, date, ti.sat);
+        let payload = EventPayload::ClassifyInbound(ClassifyInbound {
+            transfer_in_event: in_event.clone(),
+            as_: InboundClass::Income {
+                kind,
+                fmv,
+                business,
+            },
+        });
+        // `?` on a mid-batch failure returns before `save` — the in-memory session is discarded, so
+        // nothing lands on disk (CLI atomicity; the TUI path instead ROLLS BACK).
+        append_decision(session.conn(), payload, now, UtcOffset::UTC, None)?;
+        n += 1;
+    }
+    session.save()?;
+    Ok(n)
+}
+
 /// bulk-resolve-conflict D2 — Phase 1 (read): open the session and compute the bulk resolve-conflict
 /// plan. Two-phase by design (mirrors `bulk_link_plan`): this read phase renders NOTHING to the vault,
 /// so the interactive `y/N` confirmation stays a thin, untested shell in the `main.rs` dispatch. The
