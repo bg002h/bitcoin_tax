@@ -49,12 +49,18 @@ pub fn export_snapshot(
     tax_year: Option<i32>,
 ) -> Result<PathBuf, CliError> {
     let session = Session::open(vault_path, pp)?;
-    let sqlite = session.vault().export_snapshot(out_dir)?; // writes out_dir/snapshot.sqlite
+    // [R0-I3] interim pseudo-reconcile guard: REFUSE before ANY bytes are written when a synthetic
+    // default contributes — no fictional snapshot/8949/Schedule D leaves the machine unguarded. Checked
+    // FIRST (before the vault snapshot / CSV writes), so a refused export leaves the out_dir untouched.
     let (state, _cfg) = session.project()?;
-    // P2-D: standalone Schedule SE §1401 figure for the year-scoped export. Needs the year's filing
-    // status (profile) + the year's ss_wage_base (bundled table); `None` when either is absent or
-    // there is no business SE income. The "present but no table" note is a text-report concern
-    // (render_schedule_se) — the CSV carries the computed figure only.
+    if state.pseudo_active() {
+        return Err(CliError::PseudoActiveExport(state.pseudo_synthetic_count));
+    }
+    let sqlite = session.vault().export_snapshot(out_dir)?; // writes out_dir/snapshot.sqlite
+                                                            // P2-D: standalone Schedule SE §1401 figure for the year-scoped export. Needs the year's filing
+                                                            // status (profile) + the year's ss_wage_base (bundled table); `None` when either is absent or
+                                                            // there is no business SE income. The "present but no table" note is a text-report concern
+                                                            // (render_schedule_se) — the CSV carries the computed figure only.
     let se_result = match tax_year {
         Some(y) => {
             let tables = BundledTaxTables::load();
