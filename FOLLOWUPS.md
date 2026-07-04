@@ -4,6 +4,28 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ cross-platform CI (macOS + Windows test matrix, NFR8) — SHIPPED (2026-07-04)
+
+Matrixed the CI `test` job over ubuntu/macos/windows (`fail-fast:false`) + `.gitattributes` (`* text=auto
+eol=lf`) so the store's `cfg`-gated OS primitives (fs2 locks, mlock/VirtualLock, atomic rename, owner-only
+perms) are EXECUTED on every OS, not just compile-checked. The three `test (<os>)` legs are the required
+checks (user sets branch protection). Merge `b0b5676`; all 3 legs green (run 28707743830); Linux suite 1095/0.
+**Resolves the "Cross-platform validation … executed under per-OS CI (set up later) — OPEN (CI)" items below
+(NFR8 / crypto-rust) and exercises the M-3 owner-only-perms sinks on Windows.**
+The matrix immediately caught **3 real bugs** invisible on any single dev machine, each root-caused +
+Linux-reproduced + CI-verified:
+1. `.gitignore` `*-snapshot.*` silently un-committed `docs/man/btctax-export-snapshot.1` (xtask docs KATs fail
+   on a clean checkout) → `!docs/man/*.1` negation. **This was a latent binary-docs bug.**
+2. `btctax` `STATUS_STACK_OVERFLOW` on Windows (1 MiB main stack) in classify-inbound-self-transfer → run the
+   CLI on a 64 MiB worker thread (`crates/btctax-cli/src/main.rs`).
+3. Windows `ERROR_LOCK_VIOLATION(33)` not recognized as lock contention (std doesn't normalize it to
+   `WouldBlock` — the old `lock.rs` comment's assumption was wrong) → `is_contention()` matches raw codes
+   32/33 under `cfg(windows)`. **The `fs2`→`fd-lock` swap note below is now moot for correctness** (contention
+   is handled explicitly); fd-lock remains a maintenance-only consideration.
+Reviews: `reviews/{R0-spec-cross-platform-ci-round-1,whole-branch-review-cross-platform-ci-round-1}.md`.
+
+---
+
 ## ✅ binary documentation (man pages + PDFs + inline file-format docs) — SHIPPED (2026-07-04)
 
 Man pages for all three binaries + PDFs + inline FILE-FORMAT docs. **Single source of truth:** the file-format
