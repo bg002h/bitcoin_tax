@@ -20,8 +20,8 @@ use crossterm::{
 use edit::form::{
     bulk_checked_totals, cycle_alloc_method, cycle_basis_source, cycle_business_optional,
     cycle_classify_raw_variant, cycle_filing_status, cycle_income_kind, cycle_income_kind_optional,
-    cycle_outflow_kind, filter_optimize_candidates, income_kind_display, is_revocable_payload,
-    next_focus, optimize_basis_label, prev_focus, validate, validate_classify_inbound_gift,
+    cycle_outflow_kind, filter_optimize_candidates, income_kind_display, next_focus,
+    optimize_basis_label, prev_focus, validate, validate_classify_inbound_gift,
     validate_classify_inbound_income, validate_classify_inbound_self_transfer,
     validate_classify_raw_acquire, validate_classify_raw_income, validate_donation_details,
     validate_reclassify_income, validate_reclassify_outflow, validate_select_lots,
@@ -2730,60 +2730,30 @@ fn open_void_flow(app: &mut EditorApp) {
         None => return,
     };
 
-    // Build voided set (IDs targeted by any VoidDecisionEvent).
-    let voided: std::collections::BTreeSet<EventId> = snap
-        .events
-        .iter()
-        .filter_map(|e| {
-            if let EventPayload::VoidDecisionEvent(v) = &e.payload {
-                Some(v.target_event_id.clone())
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // #7: exclude EFFECTIVE SafeHarborAllocations (irrevocable, §7.4). A confirmed void of an
-    // effective allocation writes a permanent VoidDecisionEvent the engine rejects with
-    // DecisionConflict (a damaging no-op). "Effective" = a non-voided SafeHarborAllocation on
-    // whose id NEITHER SafeHarborTimebar NOR SafeHarborUnconservable fired (resolve.rs:865-921).
-    // Inert allocations (timebarred OR unconservable) STAY voidable — voiding them applies
-    // cleanly (transition.rs:403) — so they remain listed.
-    let effective_alloc = |e: &btctax_core::LedgerEvent| {
-        matches!(e.payload, EventPayload::SafeHarborAllocation(_)) && {
-            let has = |k| {
-                snap.state
-                    .blockers
-                    .iter()
-                    .any(|b| b.kind == k && b.event.as_ref() == Some(&e.id))
-            };
-            !has(BlockerKind::SafeHarborTimebar) && !has(BlockerKind::SafeHarborUnconservable)
-        }
-    };
-
-    let mut items: Vec<VoidListItem> = snap
-        .events
-        .iter()
-        .filter(|e| matches!(e.id, EventId::Decision { .. }))
-        .filter(|e| !voided.contains(&e.id))
-        .filter(|e| is_revocable_payload(&e.payload))
-        .filter(|e| !effective_alloc(e))
-        .map(|e| {
-            let seq = match &e.id {
-                EventId::Decision { seq } => *seq,
-                _ => 0,
-            };
-            let (payload_tag, target_summary, inner_target, _is_sha) =
-                summarize_void_payload(&e.payload);
-            VoidListItem {
-                event_id: e.id.clone(),
-                seq,
-                payload_tag,
-                target_summary,
-                inner_target,
-            }
-        })
-        .collect();
+    // The candidate set is the SINGLE shared predicate in btctax-core [SPEC_bulk_void Task 1] — the
+    // exact former inline filter chain (Decision-id ∧ not-voided ∧ is_revocable_payload ∧ #7
+    // !effective_alloc): the ONLY defense against voiding an effective SafeHarborAllocation (→ Hard
+    // DecisionConflict). Bulk-void (`open_bulk_void_flow` / `Session::bulk_void_plan`) enumerates via
+    // the SAME function; there is no second copy.
+    let mut items: Vec<VoidListItem> =
+        btctax_core::voidable_decisions(&snap.events, &snap.state.blockers)
+            .into_iter()
+            .map(|e| {
+                let seq = match &e.id {
+                    EventId::Decision { seq } => *seq,
+                    _ => 0,
+                };
+                let (payload_tag, target_summary, inner_target, _is_sha) =
+                    summarize_void_payload(&e.payload);
+                VoidListItem {
+                    event_id: e.id.clone(),
+                    seq,
+                    payload_tag,
+                    target_summary,
+                    inner_target,
+                }
+            })
+            .collect();
 
     // Sort by seq for deterministic display.
     items.sort_by_key(|i| i.seq);

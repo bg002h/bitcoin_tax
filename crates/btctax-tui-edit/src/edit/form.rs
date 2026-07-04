@@ -885,30 +885,9 @@ pub struct VoidModalState {
     pub is_safe_harbor: bool,
 }
 
-/// Return `true` when `payload` is a revocable decision type.
-///
-/// Revocable: TransferLink, ReclassifyOutflow, ClassifyInbound, ManualFmv, ClassifyRaw,
-/// MethodElection, LotSelection, ReclassifyIncome, SelfTransferPassthrough, SafeHarborAllocation.
-/// Non-revocable (excluded from void list): SupersedeImport, RejectImport, VoidDecisionEvent,
-/// and imported event payloads (Acquire, Income, Dispose, TransferOut, TransferIn, Unclassified,
-/// ImportConflict — these carry Import EventIds, not Decision EventIds, so they cannot appear in
-/// the void list; the check on Decision-id'd events guards the decision payload variants only).
-pub fn is_revocable_payload(payload: &btctax_core::EventPayload) -> bool {
-    use btctax_core::EventPayload;
-    matches!(
-        payload,
-        EventPayload::TransferLink(_)
-            | EventPayload::ReclassifyOutflow(_)
-            | EventPayload::ClassifyInbound(_)
-            | EventPayload::ManualFmv(_)
-            | EventPayload::ClassifyRaw(_)
-            | EventPayload::MethodElection(_)
-            | EventPayload::LotSelection(_)
-            | EventPayload::ReclassifyIncome(_)
-            | EventPayload::SelfTransferPassthrough(_)
-            | EventPayload::SafeHarborAllocation(_)
-    )
-}
+// The voidable-decision predicate now lives in btctax-core (`btctax_core::is_revocable_payload`) so
+// the CLI (`Session::bulk_void_plan`) and the TUI share ONE copy (SPEC_bulk_void Task 1). Callers
+// reference it directly via `btctax_core::is_revocable_payload` (was `edit::form::is_revocable_payload`).
 
 // ── Select-lots flow types ────────────────────────────────────────────────────
 

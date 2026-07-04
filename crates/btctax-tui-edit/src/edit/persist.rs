@@ -3143,15 +3143,13 @@ mod tests {
         use btctax_core::{EventId, EventPayload};
         let ce = EventId::decision(1);
         assert!(
-            !crate::edit::form::is_revocable_payload(&EventPayload::SupersedeImport(
-                SupersedeImport {
-                    conflict_event: ce.clone()
-                }
-            )),
+            !btctax_core::is_revocable_payload(&EventPayload::SupersedeImport(SupersedeImport {
+                conflict_event: ce.clone()
+            })),
             "SupersedeImport must NOT be revocable"
         );
         assert!(
-            !crate::edit::form::is_revocable_payload(&EventPayload::RejectImport(RejectImport {
+            !btctax_core::is_revocable_payload(&EventPayload::RejectImport(RejectImport {
                 conflict_event: ce
             })),
             "RejectImport must NOT be revocable"
