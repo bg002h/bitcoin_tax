@@ -30,6 +30,12 @@ pub fn man_dir() -> PathBuf {
     repo_root().join("docs/man")
 }
 
+/// `<repo>/docs/pdf` (build artifacts; git-ignored — gropdf embeds a timestamp so PDFs are not
+/// byte-reproducible).
+pub fn pdf_dir() -> PathBuf {
+    repo_root().join("docs/pdf")
+}
+
 /// Deterministic `.TH` source/manual for every page.
 const SOURCE: &str = "btctax";
 const MANUAL: &str = "btctax manual";
@@ -42,6 +48,48 @@ pub fn write_man_pages() -> std::io::Result<()> {
         let path = dir.join(&name);
         std::fs::write(&path, &bytes)?;
         println!("wrote {}", path.display());
+    }
+    Ok(())
+}
+
+/// Render a PDF for EVERY committed `.1` in `docs/man/` (generated CLI pages + the hand-authored
+/// TUI pages) into `docs/pdf/`, via `groff -k -man -T pdf`. Smoke-checks the `%PDF` magic on each
+/// output (a build-step guard, not a unit test). Requires `groff` with the `pdf` device on PATH.
+pub fn write_pdfs() -> std::io::Result<()> {
+    let man = man_dir();
+    let out_dir = pdf_dir();
+    std::fs::create_dir_all(&out_dir)?;
+
+    let mut names: Vec<String> = std::fs::read_dir(&man)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".1"))
+        .collect();
+    names.sort();
+
+    for name in names {
+        let src = man.join(&name);
+        let stem = name.strip_suffix(".1").expect("filtered to *.1");
+        let out = out_dir.join(format!("{stem}.pdf"));
+        // -k runs preconv so the UTF-8 in the pages (§, em-dash, arrows) is handled.
+        let result = std::process::Command::new("groff")
+            .args(["-k", "-man", "-T", "pdf"])
+            .arg(&src)
+            .output()?;
+        if !result.status.success() {
+            return Err(std::io::Error::other(format!(
+                "groff failed for {name}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            )));
+        }
+        // Smoke-check: a valid PDF starts with the %PDF magic.
+        if !result.stdout.starts_with(b"%PDF") {
+            return Err(std::io::Error::other(format!(
+                "groff output for {name} is not a PDF (missing %PDF magic)"
+            )));
+        }
+        std::fs::write(&out, &result.stdout)?;
+        println!("wrote {}", out.display());
     }
     Ok(())
 }

@@ -1,7 +1,7 @@
 //! xtask — developer tooling for the btctax workspace.
 //!
 //! `cargo run -p xtask -- docs` regenerates the committed man pages under `docs/man/`.
-//! (PDF generation is wired in by Task 4.)
+//! `cargo run -p xtask -- docs --pdf` additionally renders `docs/pdf/*.pdf` (requires `groff`).
 
 mod docs;
 
@@ -13,9 +13,15 @@ fn main() {
                 eprintln!("xtask docs: {e}");
                 std::process::exit(1);
             }
+            if args.iter().any(|a| a == "--pdf") {
+                if let Err(e) = docs::write_pdfs() {
+                    eprintln!("xtask docs --pdf: {e}");
+                    std::process::exit(1);
+                }
+            }
         }
         _ => {
-            eprintln!("usage: cargo run -p xtask -- docs");
+            eprintln!("usage: cargo run -p xtask -- docs [--pdf]");
             std::process::exit(2);
         }
     }
