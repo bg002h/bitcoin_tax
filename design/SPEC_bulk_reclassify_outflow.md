@@ -1,7 +1,8 @@
 # SPEC — bulk-reclassify-outflow (queue item 3, Cycle 5 — the LAST)
 
-**Source baseline:** `main` @ `a241705` (branch `feat/bulk-reclassify-outflow`). **Review status: DRAFT —
-awaiting R0 (2-round independent architect loop to 0C/0I before implementation).**
+**Source baseline:** `main` @ `a241705` (branch `feat/bulk-reclassify-outflow`). **Review status: R0 round 1 folded
+(0C / 1I / 3M / 2N — all folded; the two tax-number vectors [side-table join key, gain double-counting]
+verified CORRECT by R0). Review: `reviews/R0-spec-bulk-reclassify-outflow-round-1.md`. Awaiting R0 round 2.**
 **Lineage:** final cycle of `bulk-reconcile-other-types` (architect-designed 2026-07-03, transcript;
 Cycles 1-4 SHIPPED). **User decisions (2026-07-03):** outflow→Sell with FMV as ESTIMATED proceeds
 (approved earlier); the estimate **must be flagged PERSISTENTLY and shown on the Disposals tab**
@@ -51,7 +52,8 @@ would be **SILENT** — it gates nothing and misreports gain/loss. So the plan's
 - **Proceeds** = `fmv = fmv_of(&prices, date, pt.principal_sat)` (the market value that day — ESTIMATED).
 - **Basis** = `Σ pt.legs.usd_basis` — **already computed by the fold**. `Op::PendingOut` (fold.rs:698-734)
   runs `consume_fifo` in the fold's SINGLE real chronological pass and stores the consumed `legs`
-  (`lot_id, sat, usd_basis, acquired_at`) on each `PendingTransfer` (state.rs:198-210). Because it is ONE
+  (`lot_id, sat, usd_basis, acquired_at`) on each `PendingTransfer` (state.rs:197-210 — `PendingLeg`
+  197-203, `PendingTransfer` 204-210 [R0-N2]). Because it is ONE
   pass over the whole ledger with all N candidate `PendingOut`s pending, **`Σ` over multiple entries'
   legs is NEVER double-counted** — an earlier-dated `PendingOut` has already drawn the pool down before a
   later one folds. This resolves the ordering hazard with **no re-fold**. Precedent: `bulk_link_transfer_plan`
@@ -77,14 +79,33 @@ use the established **`btctax-cli`-only side-table** pattern (`donation_details.
 - **New `crates/btctax-cli/src/bulk_estimated.rs`** (~90 lines, mirror `donation_details.rs`): idempotent
   `CREATE TABLE IF NOT EXISTS bulk_estimated_proceeds`, keyed by `EventId::canonical()` of the
   **`transfer_out_event`** — which IS the eventual `Disposal.event` (fold.rs:633 pushes
-  `Disposal{event: eff.id.clone()}` using the ORIGINAL TransferOut id, not the decision's id). Stores the
-  estimate provenance (date marked; optionally the estimated proceeds/gain snapshot for display).
+  `Disposal{event: eff.id.clone()}` using the ORIGINAL TransferOut id, not the decision's id). Stores
+  ONLY the flag + date-marked (provenance) — **NOT** the estimated numbers [R0-M3]: the Disposals tab
+  renders the EXACT fold-computed `leg.proceeds/basis/gain` (disposals.rs:40-51) plus an `[est]` MARKER; a
+  stored preview figure must NEVER override the exact numbers.
+- **Session accessor [R0-M1]:** add `Session::bulk_estimated() -> Result<BTreeMap<EventId, …>>` (typed,
+  mirror `donation_details()` session.rs:369-373); `build_snapshot` (unlock.rs:168-188) loads it via that
+  accessor, NEVER `conn()` directly. The editor's post-mutation `build_snapshot` (editor.rs:79-80) refreshes
+  the `[est]` in-session.
   `init_table` called in `Session::from_fresh_vault` (session.rs:296-304); loaded into `Snapshot` (new field)
   like `donation_details` (app.rs:104-111, unlock.rs:170).
 - **Display (user-mandated "shown on Disposals"):** the Disposals tab (disposals.rs:39-54) joins the
   side-table against `Disposal.event` and renders an **`[est]`** marker on flagged rows (+ a legend note).
   The Compliance tab adds a small **advisory count** ("N disposals use estimated FMV proceeds") — closes the
   loop so the estimate is visible at tax-review time.
+- **Clear-on-void [R0-I1 — mirror `optimize_attest`'s DEFINING discipline].** A `bulk_estimated` flag MUST
+  be cleared when its `ReclassifyOutflow` is VOIDED — else a stale `[est]` survives: bulk-reclassify X →
+  void (X → `PendingOut`, orphan row survives) → re-reclassify X via single `o` with a REAL price → the
+  orphan row would falsely flag a now-exact disposal. Wire `bulk_estimated::clear(transfer_out_event)` into
+  BOTH `persist_void` (single) and `persist_bulk_void` (bulk): for a `VoidDecisionEvent` whose target is a
+  `ReclassifyOutflow` decision, look up its `transfer_out_event` and clear that key — INSIDE the same atomic
+  envelope, guarded, exactly as `persist_void` already clears `optimize_attest` for a `LotSelection` target
+  (persist.rs:284,585-589). Idempotent (clearing an absent row is Ok), so single-`o` reclassifies that were
+  never flagged are unaffected. **This makes Cycle 5 also touch `persist_void` + `persist_bulk_void`** (add
+  the clear arm) — an intended, KAT-pinned change, not scope creep.
+- **Single-`o` reclassify is intentionally NOT flagged** — it may carry a real user-entered proceeds, whereas
+  a bulk reclassify is ALWAYS auto-FMV. The `[est]` marks "proceeds derived from market FMV", which is the
+  bulk path's defining property. (A control KAT asserts a single-`o` Sell is not flagged.)
 - **btctax-core stays UNCHANGED** (the flag lives outside the append-only event log entirely; no serde risk).
 
 ## Persist — bespoke (the side-table write is a per-row side-effect in the atomic envelope)
@@ -109,7 +130,8 @@ mid-batch failure must not leave a decision without its flag, or vice versa), th
 
 ## Plan struct (session.rs — mirror BulkIncomePlan)
 ```
-BulkReclassifyOutflowRow { out_event, date, wallet (always Some), principal_sat, fmv: Usd (resolved),
+BulkReclassifyOutflowRow { out_event, date, wallet: Option<WalletId> (defensive — mirror
+                           BulkLinkRow.source_wallet [R0-N1]), principal_sat, fmv: Usd (resolved),
                            basis_usd: Usd, estimated_gain: Usd }
 BulkReclassifyOutflowPlan { included: Vec<Row> (sorted by date), excluded_missing_price: usize,
                             total_sat, total_proceeds_usd (Σ fmv), total_basis_usd,
@@ -155,6 +177,12 @@ outbound transfers"). Enrich over `pending_reconciliation` exactly as `bulk_link
   side-table row exists per applied `transfer_out_event`, and a control single-item `o` Sell is NOT flagged);
   `..side_table_reverts_on_mid_batch_failure` (mirror `bulk_void_reverts_mid_batch` — a failing row k>1 leaves
   no phantom flag rows either); `..disposals_tab_shows_est_marker` (the flagged Disposal row renders `[est]`).
+- **[R0-I1] `bulk_reclassify_outflow_void_clears_estimated_flag`** — bulk-reclassify X → void → `bulk_estimated[X]`
+  is GONE; re-reclassify X via single `o` (real price) → NO `[est]`. Covers BOTH the `persist_void` and
+  `persist_bulk_void` clear arms; plus a control that a single-`o` Sell is never flagged.
+- **[R0-M2] `bulk_reclassify_outflow_cli_mid_batch_failure_writes_nothing`** — a CLI apply that fails mid-batch
+  leaves NO `ReclassifyOutflow` appends AND NO `bulk_estimated` rows (the bare-`?`-before-`save` discard covers
+  the side-table too).
 - E2E `bulk_reclassify_outflow_apply_then_disposals_reflect` (`state.disposals` grows by the included count,
   `pending_reconciliation` shrinks by the same, NO new Hard blocker kind).
 - TUI `..refuses_when_no_candidates`, `..per_row_exclude_drops_row`, `..preview_shows_estimated_gain_flagged`
@@ -165,7 +193,9 @@ outbound transfers"). Enrich over `pending_reconciliation` exactly as `bulk_link
   + CLI `apply_bulk_reclassify_outflow` (own-loop + `mark`) + subcommand. KATs: plan/apply/#a/gain/ordering/side-table.
 - **Task 2 — TUI (btctax-tui-edit + btctax-tui):** bespoke `persist_bulk_reclassify_outflow` (atomic + side-table
   in-envelope + rollback) + `O` flow + the **Disposals `[est]` marker + Compliance advisory count** (the
-  user-mandated display) + `Snapshot` side-table field/load. TUI KATs.
+  user-mandated display) + `Snapshot` side-table field/load (via the typed `Session::bulk_estimated()`
+  accessor) + **the clear-on-void arm in `persist_void` + `persist_bulk_void` [R0-I1]**. TUI KATs (incl.
+  void-clears-flag).
 - **Task 3 — whole-diff review (Phase E)** + full workspace suite + FOLLOWUPS + roadmap (program COMPLETE).
 
 ## Gotchas
