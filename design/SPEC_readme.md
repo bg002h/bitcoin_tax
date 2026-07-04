@@ -1,10 +1,8 @@
 # SPEC — project README (install instructions + tutorial)
 
-**Source baseline:** `main` @ `f7408f3` (branch `feat/readme`). **Review status: R0 round 1 folded
-(0C / 5I / 1M / 1N — all folded). Review: `reviews/R0-spec-readme-round-1.md`. Awaiting R0 round 2.
-Key folds: distinct key-backup path (I1); tax-profile step before report (I2); export CSVs are NOT
-git-ignored — export outside the repo (I3); exact importable Coinbase CSV w/ a Receive row (I4); IN_REF comes
-from `verify`'s blocker line, single-quoted (I5); fresh-import exit-1 framed as expected (M1); 24 not 25 (N1).**
+**Source baseline:** `main` @ `f7408f3` (branch `feat/readme`). **Review status: R0-GREEN (2 rounds; 0C/0I).
+Reviews: `reviews/R0-spec-readme-round-{1,2}.md`. Round 2 EXECUTED the full tutorial verbatim on a throwaway
+vault — every step works end-to-end with the promised exit codes/outputs. Cleared to implement.**
 **Lineage:** user request (2026-07-04): "a readme with install instructions and tutorial." Crate publishing is
 the NEXT task (#35) — so install is source-based for now, with a note that crates.io install is coming.
 
