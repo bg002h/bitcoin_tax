@@ -1,7 +1,8 @@
 # SPEC — bulk-void (queue item 3, Cycle 3) — sweep-void many reconcile decisions at once
 
-**Source baseline:** `main` @ `13cb135` (branch `feat/bulk-void`). **Review status: DRAFT — awaiting R0
-(2-round independent architect loop to 0C/0I before any implementation).**
+**Source baseline:** `main` @ `13cb135` (branch `feat/bulk-void`). **Review status: R0 round 1 folded
+(0C / 0I / 3M / 3N — all folded; both flagged decisions ADJUDICATED: bespoke persist, Tier-B). Review:
+`reviews/R0-spec-bulk-void-round-1.md`. Awaiting R0 round 2.**
 **Lineage:** queue item 3 of `bulk-reconcile-other-types` (architect-designed 2026-07-03, user-approved
 safety-first sequencing). Cycles 1 (`persist_bulk_decisions` extract) + 2 (bulk-resolve-conflict) SHIPPED;
 this is **Cycle 3 — the DANGEROUS one** (void has blast radius + a side-effect + a tax-safety trap).
@@ -30,8 +31,13 @@ The predicate, verbatim from the shipped single-void (`main.rs:2733-2770`):
    (so a void is never itself voidable, and Cycle-2's resolve decisions aren't swept here).
 4. `!effective_alloc(e)` — **the #7 exclusion.** `effective_alloc` = `e.payload` is
    `SafeHarborAllocation` AND NEITHER `SafeHarborTimebar` NOR `SafeHarborUnconservable` blocker fired on
-   `e.id` (resolve.rs:865-921). INERT allocations (timebarred OR unconservable) STAY voidable (voiding
-   them applies cleanly — transition.rs:403).
+   `e.id`. Engine evidence [R0-M1 — corrected cite; the `865-921` range in `main.rs:2749`/this spec was
+   wrong]: unconservable ⟹ blocker (`resolve.rs:989-994`), timebarred ⟹ blocker (`resolve.rs:997-1002`),
+   and voiding an EFFECTIVE allocation → Hard `DecisionConflict` (`resolve.rs:1030-1039`). INERT
+   allocations (timebarred OR unconservable) STAY voidable — the void applies cleanly [R0-M2: source
+   invariant `resolve.rs:1030-1031`; the "cleanly applies" behavior is pinned by KAT
+   `crates/btctax-core/tests/transition.rs:403`, NOT a source line]. **Fix the same stale cite in
+   `main.rs:2749` during Task 1.**
 
 Both `Session::bulk_void_plan` (CLI) and `open_bulk_void_flow` (TUI) enumerate candidates via this one
 function; `open_void_flow` is re-pointed to it. **No second copy of the predicate exists after Task 1.**
@@ -43,7 +49,11 @@ envelope. This mirrors the shipped single `persist_void` (`persist.rs:248-300`) 
 **bespoke fn** (NOT a hook bolted onto the shared `persist_bulk_decisions`): keeping the dangerous
 side-effect path isolated is safer than threading a closure through the 3-flow shared helper, at the cost
 of ~15 mirrored lines (pinned by the mid-batch-rollback KAT, same shape as `persist_bulk_decisions`).
-[R0: confirm bespoke-vs-hook — I chose bespoke for blast-radius isolation.]
+[R0-adjudicated: bespoke — blast-radius isolation.] **[R0-N2]** the bespoke fn carries a lockstep comment
+cross-referencing `persist_bulk_decisions` (the mirrored safety skeleton) so a future edit to the shared
+invariant is echoed here. **[R0-N1]** if two voided `LotSelection`s target the SAME disposal,
+`optimize_attest::clear(disposal)` runs twice — harmless (a pure idempotent DELETE); the precompute may
+dedup `disposal_to_clear`, but correctness does not depend on it.
 
 ```
 pub fn persist_bulk_void(session, targets: Vec<VoidTarget>, now, empty_label) -> Result<usize, PersistError>
@@ -92,12 +102,19 @@ Reuse the shipped `TargetList` per-row-exclude widget (as bulk-link / bulk-sti /
   `btctax-cli/cmd/reconcile.rs` — opens the session, appends N `VoidDecisionEvent`s + per-`LotSelection`
   `optimize_attest::clear`, single `save`. CLI atomicity = bare `?` before `save` (in-memory discard);
   the TUI path uses `persist_bulk_void`'s explicit rollback. Returns the count voided.
+- **[R0-M3 — the ONLY CLI-layer #7 defense]** `apply_bulk_void`'s `targets` MUST be exactly the
+  `bulk_void_plan` rows (predicate-filtered), re-derived from the vault inside the dispatch — NEVER raw
+  `--ref` ids from the user. The single CLI `void` does NO `effective_alloc` check, so a raw-id bulk path
+  would let a caller void an effective allocation → Hard `DecisionConflict`. The dispatch re-runs the plan
+  and passes its ids (mirror the bulk-resolve dispatch, `main.rs:1267-1268`); a KAT feeds an effective
+  allocation's id and asserts the plan omits it so apply never sees it.
 - No `--accept/--reject` flags (void is single-valued); a `--dry-run` xor `--yes` guard as usual.
 
 ## Core / SemVer
 - **btctax-core:** RELOCATION only — `is_revocable_payload` moves in from tui-edit + new pure
-  `voidable_decisions(events, blockers)`. Reuses the existing `VoidDecisionEvent` + `optimize_attest`
-  side-table. **No new `EventPayload` variant → no forward-only serde break; no behavior change** (the
+  `voidable_decisions(events, blockers)`. Reuses the existing `VoidDecisionEvent`. **No new `EventPayload`
+  variant → no forward-only serde break; no behavior change** [R0-N3: the `optimize_attest` side-table is
+  `btctax-cli`, not core — the per-`LotSelection` clear is a cli/tui-edit concern, not a core change] (the
   projection already handles `VoidDecisionEvent`). Additive cli + tui-edit. No `docs/manual`/GUI mirror
   beyond the new `bulk-void` subcommand's reference row + the `V` key in the (parked) help overlay.
 
