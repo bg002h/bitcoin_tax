@@ -474,6 +474,29 @@ pub fn persist_bulk_self_transfer_in(
     )
 }
 
+/// Append the pre-built `ClassifyInbound{Income{kind, Some(fmv), business}}` payloads (one per included
+/// row; the per-row auto-FMV is resolved by the flow from the plan), then a SINGLE `save_or_rollback`
+/// (bulk-classify-inbound-income, Cycle 4). All-or-nothing. UNLIKE the STI/link wrappers, the payloads
+/// are built by the CALLER (each row carries a DISTINCT `fmv`, so there is no uniform per-id payload to
+/// synthesize here) and passed straight through — this is the thin classify-income wrapper the R0-I1
+/// split calls for: the TUI CAN reach `persist_bulk_decisions` (the empty guard + mid-batch rollback +
+/// single save all live there); the CLI, which cannot, uses its OWN append-loop
+/// (`apply_bulk_classify_inbound_income`). Passes the classify-income empty-label so the empty guard's
+/// message is exact. [#a] `Income{fmv:None}` is structurally unrepresentable from the bulk path: the
+/// plan excluded the missing-price rows, so every `payload`'s `fmv` is `Some(_)`.
+pub fn persist_bulk_classify_income(
+    session: &mut btctax_cli::Session,
+    payloads: Vec<btctax_core::EventPayload>,
+    now: time::OffsetDateTime,
+) -> Result<usize, PersistError> {
+    persist_bulk_decisions(
+        session,
+        payloads,
+        now,
+        "bulk classify-inbound-income: nothing selected",
+    )
+}
+
 /// Append ONE `SupersedeImport` (accept) or `RejectImport` (reject) per `conflict_event`, then a SINGLE
 /// `save_or_rollback` (bulk-resolve-conflict D3). All-or-nothing; a thin wrapper that builds the
 /// per-row payload from the batch-wide `kind` and delegates to `persist_bulk_decisions` (Task 1) — the
@@ -4364,5 +4387,34 @@ mod tests {
         assert_eq!(n, 3, "retry classifies all three cleanly");
         let post2 = load_all_ordered(session.conn()).unwrap();
         assert_eq!(post2.len(), pre.len() + 3);
+    }
+
+    // ── KAT-BULK-INCOME — persist_bulk_classify_income (bulk-classify-inbound-income, Cycle 4) ─────
+
+    /// [empty-guard] Empty `payloads` → `NoChange`, log byte-unchanged (never append zero + save). The
+    /// classify-income wrapper delegates to `persist_bulk_decisions`, so the empty guard is inherited.
+    #[test]
+    fn bulk_income_empty_refuses() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_store::Passphrase;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bulkincome-empty-pass";
+        bulk_seed(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let now = OffsetDateTime::from_unix_timestamp(1_700_002_000).unwrap();
+        let result = persist_bulk_classify_income(&mut session, vec![], now);
+        assert!(
+            matches!(result, Err(PersistError::NoChange(_))),
+            "empty selection must refuse with NoChange; got {result:?}"
+        );
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post, pre, "refusal writes nothing");
     }
 }
