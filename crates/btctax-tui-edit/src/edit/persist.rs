@@ -258,13 +258,19 @@ pub fn persist_void(
 
     let pre = session.snapshot()?;
 
-    // Detect LotSelection target for the optimize_attest side-effect.
+    // Detect the target's side-effect keys BEFORE appending the void:
+    //  - a `LotSelection` target → clear its optimizer attestation (`optimize_attest`);
+    //  - [R0-I1] a `ReclassifyOutflow` target → clear its `bulk_estimated` flag (else a stale `[est]`
+    //    survives a void + single-`o` re-reclassify that carries a REAL price).
     let events = load_all(session.conn())?;
-    let disposal_to_clear: Option<btctax_core::EventId> = events
-        .iter()
-        .find(|e| e.id == target_event_id)
-        .and_then(|e| match &e.payload {
-            EventPayload::LotSelection(ls) => Some(ls.disposal_event.clone()),
+    let target = events.iter().find(|e| e.id == target_event_id);
+    let disposal_to_clear: Option<btctax_core::EventId> = target.and_then(|e| match &e.payload {
+        EventPayload::LotSelection(ls) => Some(ls.disposal_event.clone()),
+        _ => None,
+    });
+    let reclass_out_to_clear: Option<btctax_core::EventId> =
+        target.and_then(|e| match &e.payload {
+            EventPayload::ReclassifyOutflow(ro) => Some(ro.transfer_out_event.clone()),
             _ => None,
         });
 
@@ -282,6 +288,13 @@ pub fn persist_void(
     // now airtight and symmetric with `save_or_rollback`.)
     if let Some(disposal) = disposal_to_clear {
         if let Err(e) = btctax_cli::optimize_attest::clear(session.conn(), &disposal) {
+            return Err(rollback(session, &pre, e));
+        }
+    }
+    // [R0-I1] Idempotent — clearing an absent row is Ok, so voiding a single-`o` reclassify that was
+    // never flagged is a harmless no-op (mirrors the LotSelection arm exactly).
+    if let Some(out_event) = reclass_out_to_clear {
+        if let Err(e) = btctax_cli::bulk_estimated::clear(session.conn(), &out_event) {
             return Err(rollback(session, &pre, e));
         }
     }
@@ -586,6 +599,80 @@ pub fn persist_bulk_void(
             if let Err(e) = btctax_cli::optimize_attest::clear(session.conn(), &disposal) {
                 return Err(rollback(session, &pre, e));
             }
+        }
+        // [R0-I1] The per-ReclassifyOutflow `bulk_estimated` clear — same in-envelope, guarded arm as
+        // above (mirrors persist_void's ReclassifyOutflow clear). Idempotent (an absent row is Ok).
+        if let Some(out_event) = t.reclass_out_to_clear {
+            if let Err(e) = btctax_cli::bulk_estimated::clear(session.conn(), &out_event) {
+                return Err(rollback(session, &pre, e));
+            }
+        }
+    }
+    save_or_rollback(session, pre)?; // ONE save; on failure the whole batch reverts
+    Ok(n)
+}
+
+/// Reclassify N pending outflows as `Dispose{kind}` with an auto-FMV as ESTIMATED proceeds, AND flag
+/// each in the `bulk_estimated` side-table, in ONE atomic batch (bulk-reclassify-outflow D3, Cycle 5 —
+/// the LAST) — the BESPOKE bulk analog of the single `persist_reclassify_outflow` across N, with the
+/// per-row side-table `mark` co-persisted.
+///
+/// # Bespoke — NOT a hook on `persist_bulk_decisions` [mirror `persist_bulk_void`]
+/// LOCKSTEP with `persist_bulk_decisions` (the shared bulk safety skeleton): the empty guard + the
+/// mid-batch `rollback(session, &pre, e)`-not-`?` discipline + the single trailing `save_or_rollback`
+/// are IDENTICAL — a future edit to that shared invariant MUST be echoed here. This fn stays separate
+/// only because it carries the per-row side-effect (`bulk_estimated::mark`) that must land in the SAME
+/// atomic envelope as the `ReclassifyOutflow` append (a mid-batch failure must not leave a decision
+/// without its flag, or vice versa). The whole-DB restore covers the side-table for free on any failure
+/// (documented invariant, same as `persist_optimize_accept`/`optimize_attestation`).
+///
+/// `rows` carry `(out_event, resolved fmv)` — the fmv is the plan's per-row auto-FMV (the modal captured
+/// the CHECKED rows), so a missing-price row is never here [#a: the plan excluded them; `fmv: Usd`].
+/// `kind` is UNIFORM; `fee_usd: None` always (the on-chain `fee_sat` still flows); `donee: None`.
+pub fn persist_bulk_reclassify_outflow(
+    session: &mut btctax_cli::Session,
+    rows: Vec<(btctax_core::EventId, btctax_core::Usd)>,
+    kind: btctax_core::DisposeKind,
+    now: time::OffsetDateTime,
+    empty_label: &str,
+) -> Result<usize, PersistError> {
+    use btctax_core::event::ReclassifyOutflow;
+    use btctax_core::persistence::append_decision;
+    use btctax_core::{EventPayload, OutflowClass};
+
+    // Empty guard [mirrors persist_bulk_decisions]: refuse BEFORE any snapshot/append.
+    if rows.is_empty() {
+        return Err(PersistError::NoChange(btctax_cli::CliError::Usage(
+            empty_label.into(),
+        )));
+    }
+    let n = rows.len();
+    let pre = session.snapshot()?;
+    // Provenance stamp (the batch made-date) recorded on each side-table row.
+    let marked_at = btctax_core::conventions::tax_date(now, time::UtcOffset::UTC).to_string();
+    for (out_event, fmv) in rows {
+        // Do NOT use `?`: a mid-batch append at row k>1 that fails leaves appends/marks 1..k-1 as live
+        // residue AND would leak a bare NoChange over phantom decisions. Revert the WHOLE batch.
+        if let Err(e) = append_decision(
+            session.conn(),
+            EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                transfer_out_event: out_event.clone(),
+                as_: OutflowClass::Dispose { kind },
+                principal_proceeds_or_fmv: fmv,
+                fee_usd: None,
+                donee: None,
+            }),
+            now,
+            time::UtcOffset::UTC,
+            None,
+        ) {
+            return Err(rollback(session, &pre, e.into()));
+        }
+        // The side-table mark is INSIDE the envelope — a failure AFTER the committed append must roll
+        // back the WHOLE batch (symmetric with persist_bulk_void's clear-then-rollback arm), else the
+        // committed decision rows become residue that piggy-backs a later save.
+        if let Err(e) = btctax_cli::bulk_estimated::mark(session.conn(), &out_event, &marked_at) {
+            return Err(rollback(session, &pre, e));
         }
     }
     save_or_rollback(session, pre)?; // ONE save; on failure the whole batch reverts
@@ -2519,10 +2606,12 @@ mod tests {
             VoidTarget {
                 target_event_id: ls_a.clone(),
                 disposal_to_clear: Some(disposal_a.clone()),
+                reclass_out_to_clear: None,
             },
             VoidTarget {
                 target_event_id: ls_b.clone(),
                 disposal_to_clear: Some(disposal_b.clone()),
+                reclass_out_to_clear: None,
             },
         ];
 
@@ -2559,6 +2648,235 @@ mod tests {
                 .as_deref(),
             Some("attest-b"),
             "rollback must restore attestation B cleared before the failed save"
+        );
+    }
+
+    // ── Bulk reclassify-outflow (bulk-reclassify-outflow, Cycle 5) ────────────
+
+    /// Seed a vault with an Acquire (backing lot) + two PRICED pending `TransferOut`s. Returns the two
+    /// TransferOut ids. Shared by the persist-layer reclassify KATs.
+    fn seed_bulk_reclass_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> [btctax_core::EventId; 2] {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent, TransferOut};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::append_import_batch;
+        use btctax_core::{EventId, WalletId};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let wallet = Some(WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        });
+        let acq = EventId::import(Source::River, SourceRef::new("bro-acq"));
+        let o1 = EventId::import(Source::River, SourceRef::new("bro-o1"));
+        let o2 = EventId::import(Source::River, SourceRef::new("bro-o2"));
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let out = |id: &EventId, ts, sat| LedgerEvent {
+            id: id.clone(),
+            utc_timestamp: ts,
+            original_tz: UtcOffset::UTC,
+            wallet: wallet.clone(),
+            payload: EventPayload::TransferOut(TransferOut {
+                sat,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        };
+        append_import_batch(
+            session.conn(),
+            &[
+                LedgerEvent {
+                    id: acq.clone(),
+                    utc_timestamp: datetime!(2025-01-15 12:00:00 UTC),
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 1_000_000,
+                        usd_cost: dec!(100.00),
+                        fee_usd: dec!(0),
+                        basis_source: BasisSource::ComputedFromCost,
+                    }),
+                },
+                out(&o1, datetime!(2025-03-01 12:00:00 UTC), 60_000),
+                out(&o2, datetime!(2025-06-15 12:00:00 UTC), 80_000),
+            ],
+        )
+        .unwrap();
+        session.save().unwrap();
+        [o1, o2]
+    }
+
+    /// The `bulk_estimated` flag is CLEARED when its `ReclassifyOutflow` is voided — via BOTH
+    /// `persist_void` (single) and `persist_bulk_void` (bulk) — and a single-`o` reclassify is NEVER
+    /// flagged (a control). Closes the R0-I1 stale-`[est]` hole.
+    #[test]
+    fn kat_bulk_reclassify_void_clears_estimated_flag() {
+        use btctax_core::event::{EventPayload, OutflowClass, ReclassifyOutflow};
+        use btctax_core::persistence::load_all;
+        use btctax_core::{DisposeKind, EventId};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bro-voidclear";
+        let [o1, o2] = seed_bulk_reclass_vault(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let t = |s: i64| OffsetDateTime::from_unix_timestamp(s).unwrap();
+
+        // Bulk-reclassify BOTH → both flagged.
+        persist_bulk_reclassify_outflow(
+            &mut session,
+            vec![(o1.clone(), dec!(50.40)), (o2.clone(), dec!(54.00))],
+            DisposeKind::Sell,
+            t(1_748_000_000),
+            "bulk reclassify-outflow: nothing selected",
+        )
+        .unwrap();
+        {
+            let flagged = session.bulk_estimated().unwrap();
+            assert!(
+                flagged.contains_key(&o1) && flagged.contains_key(&o2),
+                "both outflows flagged after bulk reclassify"
+            );
+        }
+
+        // Find the ReclassifyOutflow decision ids (transfer_out_event → decision id).
+        let ro_id = |session: &btctax_cli::Session, out: &EventId| -> EventId {
+            load_all(session.conn())
+                .unwrap()
+                .into_iter()
+                .find_map(|e| match &e.payload {
+                    EventPayload::ReclassifyOutflow(ro) if &ro.transfer_out_event == out => {
+                        Some(e.id.clone())
+                    }
+                    _ => None,
+                })
+                .expect("a live ReclassifyOutflow for the outflow")
+        };
+
+        // Arm 1 — persist_void (single) clears o1's flag; o2 survives.
+        let ro1 = ro_id(&session, &o1);
+        persist_void(&mut session, ro1, t(1_748_000_100)).unwrap();
+        {
+            let flagged = session.bulk_estimated().unwrap();
+            assert!(!flagged.contains_key(&o1), "persist_void cleared o1's flag");
+            assert!(
+                flagged.contains_key(&o2),
+                "o2's flag untouched by the single void"
+            );
+        }
+
+        // Arm 2 — persist_bulk_void clears o2's flag (VoidTarget carries reclass_out_to_clear).
+        let ro2 = ro_id(&session, &o2);
+        persist_bulk_void(
+            &mut session,
+            vec![crate::edit::form::VoidTarget {
+                target_event_id: ro2,
+                disposal_to_clear: None,
+                reclass_out_to_clear: Some(o2.clone()),
+            }],
+            t(1_748_000_200),
+            "bulk void: nothing selected",
+        )
+        .unwrap();
+        assert!(
+            session.bulk_estimated().unwrap().is_empty(),
+            "persist_bulk_void cleared o2's flag — no orphan rows remain"
+        );
+
+        // Control — o1 is pending again; re-reclassify via SINGLE `o` (a real price) → NOT flagged.
+        persist_reclassify_outflow(
+            &mut session,
+            EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                transfer_out_event: o1.clone(),
+                as_: OutflowClass::Dispose {
+                    kind: DisposeKind::Sell,
+                },
+                principal_proceeds_or_fmv: dec!(99.99), // a REAL user-entered price
+                fee_usd: None,
+                donee: None,
+            }),
+            t(1_748_000_300),
+        )
+        .unwrap();
+        assert!(
+            !session.bulk_estimated().unwrap().contains_key(&o1),
+            "single-`o` reclassify is NEVER flagged (no stale [est] survives the void)"
+        );
+    }
+
+    /// [mirror `kat_bulk_void_reverts_mid_batch`] A mid-batch APPEND failure at row k>1 in
+    /// `persist_bulk_reclassify_outflow` reverts the WHOLE batch — event log byte-unchanged AND NO
+    /// phantom `bulk_estimated` flag rows survive (the whole-DB restore covers the side-table).
+    #[test]
+    fn kat_persist_bulk_reclassify_side_table_reverts_on_mid_batch_failure() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_core::DisposeKind;
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bro-midbatch";
+        let [o1, o2] = seed_bulk_reclass_vault(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+
+        // Fail the SECOND decision append (decision_seq 2): append #1 + its mark commit in-memory,
+        // append #2 aborts → the WHOLE batch (incl. the row-1 mark) reverts.
+        session
+            .conn()
+            .execute_batch(
+                "CREATE TRIGGER inject_bro_midbatch BEFORE INSERT ON events \
+                 WHEN NEW.decision_seq = 2 \
+                 BEGIN SELECT RAISE(ABORT, 'injected mid-batch append failure'); END;",
+            )
+            .unwrap();
+
+        let now = OffsetDateTime::from_unix_timestamp(1_748_002_000).unwrap();
+        let result = persist_bulk_reclassify_outflow(
+            &mut session,
+            vec![(o1.clone(), dec!(50.40)), (o2.clone(), dec!(54.00))],
+            DisposeKind::Sell,
+            now,
+            "bulk reclassify-outflow: nothing selected",
+        );
+        assert!(
+            matches!(result, Err(PersistError::RolledBack(_))),
+            "mid-batch append failure must revert the whole batch (RolledBack); got {result:?}"
+        );
+
+        // Drop the trigger, then assert: event log reverted AND no phantom flag rows.
+        session
+            .conn()
+            .execute_batch("DROP TRIGGER inject_bro_midbatch;")
+            .unwrap();
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post, pre,
+            "whole batch reverted — no phantom decision survives"
+        );
+        assert!(
+            session.bulk_estimated().unwrap().is_empty(),
+            "NO phantom bulk_estimated flag rows survive (row-1 mark reverted too)"
         );
     }
 

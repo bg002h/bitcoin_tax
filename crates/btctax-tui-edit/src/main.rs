@@ -27,14 +27,15 @@ use edit::form::{
     validate_reclassify_income, validate_reclassify_outflow, validate_select_lots,
     validate_set_fmv, AllocLotRow, BulkIncomeFlowState, BulkIncomeModalState, BulkIncomeRowItem,
     BulkIncomeStep, BulkLinkFlowState, BulkLinkModalState, BulkLinkRowItem, BulkLinkStep,
-    BulkResolveFlowState, BulkResolveModalState, BulkResolveRowItem, BulkResolveStep,
-    BulkStiFlowState, BulkStiModalState, BulkStiRowItem, BulkStiStep, BulkVoidFlowState,
-    BulkVoidModalState, BulkVoidRowItem, ClassifyInboundFlowState, ClassifyInboundModalState,
-    ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep,
-    ClassifyRawVariant, ConflictItem, DisposalKind, DisposalListItem, DonationListItem,
-    FieldBuffer, FmvListItem, InEventItem, InboundListItem, InboundVariant, IncomeListItem,
-    LinkMode, LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, LotPickFormRow,
-    MatchPairAction, MatchSelfTransferItem, MatchSelfTransfersFlowState,
+    BulkReclassifyOutflowFlowState, BulkReclassifyOutflowModalState, BulkReclassifyOutflowRowItem,
+    BulkReclassifyOutflowStep, BulkResolveFlowState, BulkResolveModalState, BulkResolveRowItem,
+    BulkResolveStep, BulkStiFlowState, BulkStiModalState, BulkStiRowItem, BulkStiStep,
+    BulkVoidFlowState, BulkVoidModalState, BulkVoidRowItem, ClassifyInboundFlowState,
+    ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
+    ClassifyRawStep, ClassifyRawVariant, ConflictItem, DisposalKind, DisposalListItem,
+    DonationListItem, FieldBuffer, FmvListItem, InEventItem, InboundListItem, InboundVariant,
+    IncomeListItem, LinkMode, LinkTransferFlowState, LinkTransferModalState, LinkTransferStep,
+    LotPickFormRow, MatchPairAction, MatchSelfTransferItem, MatchSelfTransfersFlowState,
     MatchSelfTransfersModalState, MutationModalState, OptimizeAcceptFlowState,
     OptimizeAcceptModalState, OptimizeAcceptStep, OptimizeCandidateItem, OutflowKind,
     OutflowListItem, ProfileFormState, RawListItem, ReclassifyIncomeFlowState,
@@ -233,6 +234,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Bulk-reclassify-outflow-modal dispatch — BEFORE flow, form, screen ───
+    if app.bulk_reclassify_outflow_modal.is_some() {
+        handle_bulk_reclassify_outflow_modal_key(app, key);
+        return;
+    }
+
     // ── Match-self-transfers-modal dispatch — BEFORE flow, form, screen ──────
     if app.match_self_transfers_modal.is_some() {
         handle_match_self_transfers_modal_key(app, key);
@@ -300,6 +307,10 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     }
     if app.bulk_void_flow.is_some() {
         handle_bulk_void_flow_key(app, key);
+        return;
+    }
+    if app.bulk_reclassify_outflow_flow.is_some() {
+        handle_bulk_reclassify_outflow_flow_key(app, key);
         return;
     }
     if app.match_self_transfers_flow.is_some() {
@@ -387,6 +398,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('I') => open_bulk_classify_income_flow(app),
                 KeyCode::Char('C') => open_bulk_resolve_conflict_flow(app),
                 KeyCode::Char('V') => open_bulk_void_flow(app),
+                KeyCode::Char('O') => open_bulk_reclassify_outflow_flow(app),
                 KeyCode::Char('m') => open_match_self_transfers_flow(app),
                 KeyCode::Char('i') => open_resolve_conflict_flow(app),
                 KeyCode::Char('z') => open_optimize_accept_flow(app),
@@ -624,6 +636,8 @@ impl EditorApp {
         self.bulk_resolve_modal = None;
         self.bulk_void_flow = None;
         self.bulk_void_modal = None;
+        self.bulk_reclassify_outflow_flow = None;
+        self.bulk_reclassify_outflow_modal = None;
         self.match_self_transfers_flow = None;
         self.match_self_transfers_modal = None;
     }
@@ -6989,12 +7003,18 @@ fn open_bulk_void_flow(app: &mut EditorApp) {
                     EventPayload::LotSelection(ls) => Some(ls.disposal_event.clone()),
                     _ => None,
                 };
+                // [R0-I1] a ReclassifyOutflow void clears its bulk_estimated flag.
+                let reclass_out_to_clear = match &e.payload {
+                    EventPayload::ReclassifyOutflow(ro) => Some(ro.transfer_out_event.clone()),
+                    _ => None,
+                };
                 BulkVoidRowItem {
                     target_event_id: e.id.clone(),
                     seq,
                     payload_tag,
                     target_summary,
                     disposal_to_clear,
+                    reclass_out_to_clear,
                     checked: true,
                 }
             })
@@ -7075,6 +7095,7 @@ fn open_bulk_void_modal(app: &mut EditorApp) {
                 .map(|i| VoidTarget {
                     target_event_id: i.target_event_id.clone(),
                     disposal_to_clear: i.disposal_to_clear.clone(),
+                    reclass_out_to_clear: i.reclass_out_to_clear.clone(),
                 })
                 .collect();
             let lot_selection_count =
@@ -7173,6 +7194,346 @@ fn derive_bulk_void_status(n: usize, lot_selection_count: usize) -> String {
     } else {
         format!("Voided {n} decision(s) — voids are NON-REVOCABLE; re-apply a decision to restore.")
     }
+}
+
+// ── Bulk reclassify-outflow flow (bulk-reclassify-outflow, Cycle 5 — the LAST) ─
+
+/// Browse-key `O`: open the bulk reclassify-outflow flow (mirror `open_bulk_classify_income_flow`).
+/// READ-ONLY at open — it enumerates the (source-wallet, year) filter choices from
+/// `snap.state.pending_reconciliation` directly (KAT-G1-clean; the plan helper runs only on recompute)
+/// and appends NOTHING. The missing-price [#a] exclusion is NOT applied here — it happens in the plan
+/// and surfaces as `excluded_missing_price`. An empty candidate set sets a status and never opens the
+/// flow. Residue-latch gated like every mutating opener.
+fn open_bulk_reclassify_outflow_flow(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let snap = match app.snapshot.as_ref() {
+        Some(s) => s,
+        None => return,
+    };
+    let ev_idx = events_by_id(snap);
+
+    let mut wallet_set: BTreeSet<btctax_core::WalletId> = BTreeSet::new();
+    let mut year_set: BTreeSet<i32> = BTreeSet::new();
+    let mut any = false;
+    for pt in &snap.state.pending_reconciliation {
+        let Some(ev) = ev_idx.get(&pt.event) else {
+            continue;
+        };
+        let date = btctax_core::conventions::tax_date(ev.utc_timestamp, ev.original_tz);
+        year_set.insert(date.year());
+        if let Some(w) = ev.wallet.as_ref() {
+            wallet_set.insert(w.clone());
+        }
+        any = true;
+    }
+
+    if !any {
+        app.status = Some("No pending outflows to bulk-reclassify".to_string());
+        return;
+    }
+
+    let mut wallet_choices: Vec<Option<btctax_core::WalletId>> = vec![None]; // Any
+    wallet_choices.extend(wallet_set.into_iter().map(Some));
+    let mut year_choices: Vec<Option<i32>> = vec![None]; // All
+    year_choices.extend(year_set.into_iter().map(Some));
+
+    app.bulk_reclassify_outflow_flow = Some(BulkReclassifyOutflowFlowState {
+        step: BulkReclassifyOutflowStep::Filter,
+        kind: DisposeKind::Sell,
+        wallet_choices,
+        wallet_idx: 0,
+        year_choices,
+        year_idx: 0,
+        filter_focus: 0,
+        preview: TargetList::new(Vec::new()),
+        excluded_missing_price: 0,
+        error: None,
+    });
+}
+
+/// Dispatch to the correct sub-handler depending on `BulkReclassifyOutflowStep`.
+fn handle_bulk_reclassify_outflow_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    let step = match app.bulk_reclassify_outflow_flow.as_ref() {
+        Some(f) => match f.step {
+            BulkReclassifyOutflowStep::Filter => 0u8,
+            BulkReclassifyOutflowStep::Preview => 1,
+        },
+        None => return,
+    };
+    match step {
+        0 => handle_bulk_reclassify_outflow_filter_key(app, key),
+        _ => handle_bulk_reclassify_outflow_preview_key(app, key),
+    }
+}
+
+/// Step 1 — filter. `k/j`/`↑/↓` move focus (kind → source-wallet → time-frame); `←/→` toggle the focused
+/// choice (kind toggles Sell/Spend); Enter → recompute the PRICED plan → Preview; Esc → close; `q` swallowed.
+fn handle_bulk_reclassify_outflow_filter_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(f) = app.bulk_reclassify_outflow_flow.as_mut() {
+                f.filter_focus = f.filter_focus.saturating_sub(1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(f) = app.bulk_reclassify_outflow_flow.as_mut() {
+                f.filter_focus = (f.filter_focus + 1).min(2);
+            }
+        }
+        KeyCode::Left | KeyCode::Right => {
+            if let Some(f) = app.bulk_reclassify_outflow_flow.as_mut() {
+                match f.filter_focus {
+                    // Only two kinds; both ←/→ toggle Sell↔Spend.
+                    0 => f.kind = crate::edit::form::cycle_dispose_kind(f.kind),
+                    1 => {
+                        let n = f.wallet_choices.len();
+                        f.wallet_idx = if matches!(key.code, KeyCode::Left) {
+                            (f.wallet_idx + n - 1) % n
+                        } else {
+                            (f.wallet_idx + 1) % n
+                        };
+                    }
+                    _ => {
+                        let n = f.year_choices.len();
+                        f.year_idx = if matches!(key.code, KeyCode::Left) {
+                            (f.year_idx + n - 1) % n
+                        } else {
+                            (f.year_idx + 1) % n
+                        };
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => bulk_reclassify_outflow_recompute_preview(app),
+        KeyCode::Esc => {
+            app.bulk_reclassify_outflow_flow = None;
+        }
+        KeyCode::Char('q') => {}
+        _ => {}
+    }
+}
+
+/// Recompute the priced plan from the current filter selections and transition to Preview (all rows
+/// checked). Records `excluded_missing_price` [#a]. Empty plan → stay on Filter with an explanatory
+/// error. The ONLY Session-helper call in the flow (KAT-G1: the opener reads `snap` directly).
+fn bulk_reclassify_outflow_recompute_preview(app: &mut EditorApp) {
+    let filter = match app.bulk_reclassify_outflow_flow.as_ref() {
+        Some(f) => {
+            let wallet = f.wallet_choices.get(f.wallet_idx).cloned().flatten();
+            let frame = match f.year_choices.get(f.year_idx).copied().flatten() {
+                Some(y) => btctax_cli::Frame::Year(y),
+                None => btctax_cli::Frame::All,
+            };
+            btctax_cli::BulkFilter {
+                frame,
+                from_wallet: wallet,
+            }
+        }
+        None => return,
+    };
+    let plan = match app.session.as_ref() {
+        Some(s) => s.bulk_reclassify_outflow_plan(filter),
+        None => return,
+    };
+    match plan {
+        Ok(plan) => {
+            let items: Vec<BulkReclassifyOutflowRowItem> = plan
+                .included
+                .iter()
+                .map(|r| BulkReclassifyOutflowRowItem {
+                    out_event: r.out_event.clone(),
+                    date: r.date,
+                    principal_sat: r.principal_sat,
+                    fmv: r.fmv,
+                    basis_usd: r.basis_usd,
+                    estimated_gain: r.estimated_gain,
+                    checked: true,
+                })
+                .collect();
+            if let Some(f) = app.bulk_reclassify_outflow_flow.as_mut() {
+                f.excluded_missing_price = plan.excluded_missing_price;
+                if items.is_empty() {
+                    f.error = Some("No priced pending outflows match this filter".to_string());
+                } else {
+                    f.error = None;
+                    f.preview = TargetList::new(items);
+                    f.step = BulkReclassifyOutflowStep::Preview;
+                }
+            }
+        }
+        Err(e) => {
+            if let Some(f) = app.bulk_reclassify_outflow_flow.as_mut() {
+                f.error = Some(format!("Plan error: {e}"));
+            }
+        }
+    }
+}
+
+/// Step 2 — per-row exclude checklist. `k/j/g/G` scroll; `Space`/`x` toggles the row's exclusion;
+/// Enter → confirm modal over the CHECKED rows (refuse if none); Esc → back to Filter; `q` swallowed.
+fn handle_bulk_reclassify_outflow_preview_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(f) = app.bulk_reclassify_outflow_flow.as_mut() {
+                f.preview.scroll_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(f) = app.bulk_reclassify_outflow_flow.as_mut() {
+                f.preview.scroll_down();
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(f) = app.bulk_reclassify_outflow_flow.as_mut() {
+                f.preview.go_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(f) = app.bulk_reclassify_outflow_flow.as_mut() {
+                f.preview.go_bottom();
+            }
+        }
+        KeyCode::Char(' ') | KeyCode::Char('x') => {
+            if let Some(f) = app.bulk_reclassify_outflow_flow.as_mut() {
+                if let Some(i) = f.preview.table_state.selected() {
+                    if let Some(item) = f.preview.items.get_mut(i) {
+                        item.checked = !item.checked;
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => open_bulk_reclassify_outflow_modal(app),
+        KeyCode::Esc => {
+            if let Some(f) = app.bulk_reclassify_outflow_flow.as_mut() {
+                f.error = None;
+                f.step = BulkReclassifyOutflowStep::Filter;
+            }
+        }
+        KeyCode::Char('q') => {}
+        _ => {}
+    }
+}
+
+/// Capture the CHECKED preview rows into the confirmation modal, keeping each row's `(out_event, fmv)`
+/// (the persist builds the `ReclassifyOutflow` + `bulk_estimated::mark` per row). Empty selection →
+/// refuse (stay on Preview with an error), never open the modal.
+fn open_bulk_reclassify_outflow_modal(app: &mut EditorApp) {
+    let modal = {
+        let f = match app.bulk_reclassify_outflow_flow.as_ref() {
+            Some(f) => f,
+            None => return,
+        };
+        let (count, total_sat, total_proceeds_usd, total_basis_usd, total_estimated_gain) =
+            crate::edit::form::bulk_reclassify_outflow_checked_totals(&f.preview.items);
+        if count == 0 {
+            None
+        } else {
+            let rows: Vec<(EventId, btctax_core::Usd)> = f
+                .preview
+                .items
+                .iter()
+                .filter(|i| i.checked)
+                .map(|i| (i.out_event.clone(), i.fmv))
+                .collect();
+            Some(BulkReclassifyOutflowModalState {
+                rows,
+                count,
+                total_sat,
+                total_proceeds_usd,
+                total_basis_usd,
+                total_estimated_gain,
+                excluded_missing_price: f.excluded_missing_price,
+                kind: f.kind,
+            })
+        }
+    };
+    match modal {
+        Some(m) => app.bulk_reclassify_outflow_modal = Some(m),
+        None => {
+            if let Some(f) = app.bulk_reclassify_outflow_flow.as_mut() {
+                f.error = Some("Nothing selected — check at least one row".to_string());
+            }
+        }
+    }
+}
+
+/// Handle a key press while the bulk reclassify-outflow confirmation modal is open (explicit confirm;
+/// NOT typed — each `ReclassifyOutflow` is voidable, the REVOCABLE tier + a prominent ESTIMATED warning).
+///
+/// Enter → `persist_bulk_reclassify_outflow` (batch append + per-row `bulk_estimated::mark`, single
+/// save, mid-batch rollback) → re-project + `derive_bulk_reclassify_outflow_status` + close; `Err(e)` →
+/// close modal, route `on_persist_error`. Esc → close modal only (back to Preview; nothing written).
+fn handle_bulk_reclassify_outflow_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let (rows, kind) = match app.bulk_reclassify_outflow_modal.as_ref() {
+                Some(m) => (m.rows.clone(), m.kind),
+                None => return,
+            };
+            let now = time::OffsetDateTime::now_utc();
+
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.bulk_reclassify_outflow_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_bulk_reclassify_outflow(
+                    session,
+                    rows,
+                    kind,
+                    now,
+                    "bulk reclassify-outflow: nothing selected",
+                )
+            };
+
+            match save_result {
+                Ok(n) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let status = derive_bulk_reclassify_outflow_status(&snap, n);
+                            app.snapshot = Some(snap);
+                            app.status = Some(status);
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.bulk_reclassify_outflow_modal = None;
+                    app.bulk_reclassify_outflow_flow = None;
+                }
+                Err(e) => {
+                    app.bulk_reclassify_outflow_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.bulk_reclassify_outflow_modal = None;
+        }
+        _ => {}
+    }
+}
+
+/// Derive the post-apply status from RE-PROJECTED state: the applied count + the number of pending
+/// outflows that REMAIN (still in `pending_reconciliation` — the same candidate source as the opener).
+fn derive_bulk_reclassify_outflow_status(snap: &btctax_tui::app::Snapshot, n: usize) -> String {
+    let remaining = snap.state.pending_reconciliation.len();
+    format!(
+        "Reclassified {n} pending outflow(s) as disposition(s) with ESTIMATED proceeds; \
+         {remaining} pending outflow(s) remain. (Voidable via `v`; refine the FMV later.)"
+    )
 }
 
 // ── Match-self-transfers flow (self-transfer-passthrough C3) ──────────────────
@@ -8404,6 +8765,7 @@ mod tests {
             profiles: BTreeMap::new(),
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
         };
 
         let mut app = EditorApp::new(PathBuf::from("/smoke/vault.pgp"));
@@ -8666,6 +9028,7 @@ mod tests {
             profiles,
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
         };
 
         let mut app = EditorApp::new(PathBuf::new());
@@ -12290,6 +12653,7 @@ mod tests {
             profiles: BTreeMap::new(),
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
         }
     }
 
@@ -12314,6 +12678,7 @@ mod tests {
             profiles: BTreeMap::new(),
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
         }
     }
 
@@ -20515,6 +20880,287 @@ mod tests {
         assert!(
             status.contains("Voided 2") && status.contains("NON-REVOCABLE"),
             "status reports 2 voided + the non-revocable truth; got {status:?}"
+        );
+    }
+
+    // ── Bulk reclassify-outflow flow (bulk-reclassify-outflow, Cycle 5) ───────
+
+    /// Seed a vault with an Acquire (backing lot) + two PRICED pending `TransferOut`s (→
+    /// pending_reconciliation). Returns the two TransferOut ids. Dates 2025-03-01 / 2025-06-15 are
+    /// bundled-priced so the plan includes both with a resolved FMV.
+    fn seed_pending_outflows_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> [EventId; 2] {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent, TransferOut};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::persistence::append_import_batch;
+        use btctax_core::WalletId;
+        use rust_decimal_macros::dec;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+        let wallet = Some(WalletId::Exchange {
+            provider: "River".into(),
+            account: "main".into(),
+        });
+        let acq = EventId::import(Source::River, SourceRef::new("bro-acq"));
+        let o1 = EventId::import(Source::River, SourceRef::new("bro-o1"));
+        let o2 = EventId::import(Source::River, SourceRef::new("bro-o2"));
+        let mut session =
+            btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+        let out = |id: &EventId, ts, sat| LedgerEvent {
+            id: id.clone(),
+            utc_timestamp: ts,
+            original_tz: UtcOffset::UTC,
+            wallet: wallet.clone(),
+            payload: EventPayload::TransferOut(TransferOut {
+                sat,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        };
+        append_import_batch(
+            session.conn(),
+            &[
+                LedgerEvent {
+                    id: acq.clone(),
+                    utc_timestamp: datetime!(2025-01-15 12:00:00 UTC),
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 1_000_000,
+                        usd_cost: dec!(100.00),
+                        fee_usd: dec!(0),
+                        basis_source: BasisSource::ComputedFromCost,
+                    }),
+                },
+                out(&o1, datetime!(2025-03-01 12:00:00 UTC), 60_000),
+                out(&o2, datetime!(2025-06-15 12:00:00 UTC), 80_000),
+            ],
+        )
+        .unwrap();
+        session.save().unwrap();
+        [o1, o2]
+    }
+
+    /// `O` with NO pending outflows → flow never opens; status set.
+    #[test]
+    fn bulk_reclassify_outflow_refuses_when_no_candidates() {
+        use btctax_core::event::{Acquire, BasisSource, EventPayload, LedgerEvent};
+        use btctax_core::identity::{Source, SourceRef};
+        use rust_decimal_macros::dec;
+        use time::macros::datetime;
+        use time::UtcOffset;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bro-nocand";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+        {
+            let mut session =
+                btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+            // A single clean Acquire (imported) → NO pending outflow exists.
+            let batch = vec![LedgerEvent {
+                id: EventId::import(Source::River, SourceRef::new("acq-only")),
+                utc_timestamp: datetime!(2024-12-01 12:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(btctax_core::WalletId::Exchange {
+                    provider: "River".into(),
+                    account: "main".into(),
+                }),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(3000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            session.save().unwrap();
+        }
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('O')));
+        assert!(
+            app.bulk_reclassify_outflow_flow.is_none(),
+            "no pending outflows → flow must NOT open"
+        );
+        assert_eq!(
+            app.status.as_deref(),
+            Some("No pending outflows to bulk-reclassify")
+        );
+    }
+
+    /// Unchecking a preview row omits its outflow from the confirm modal's batch.
+    #[test]
+    fn bulk_reclassify_outflow_per_row_exclude_drops_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bro-exclude";
+        let [o1, _o2] = seed_pending_outflows_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('O'))); // → Filter
+        handle_key(&mut app, press(KeyCode::Enter)); // recompute → Preview (all checked)
+        {
+            let f = app
+                .bulk_reclassify_outflow_flow
+                .as_ref()
+                .expect("O opens the flow");
+            assert_eq!(
+                f.preview.items.len(),
+                2,
+                "both pending outflows, all checked"
+            );
+            assert!(f.preview.items.iter().all(|i| i.checked));
+            // Row 0 is the earlier-dated o1 (sorted by date).
+            assert_eq!(f.preview.items[0].out_event, o1);
+        }
+        handle_key(&mut app, press(KeyCode::Char(' '))); // exclude row 0 (o1)
+        assert!(
+            !app.bulk_reclassify_outflow_flow
+                .as_ref()
+                .unwrap()
+                .preview
+                .items[0]
+                .checked
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal
+        let m = app
+            .bulk_reclassify_outflow_modal
+            .as_ref()
+            .expect("confirm modal must open over checked rows");
+        assert_eq!(m.count, 1, "one row excluded → one remains");
+        assert_eq!(m.rows.len(), 1);
+        assert_ne!(
+            m.rows[0].0, o1,
+            "excluded row 0 (o1) is absent from the batch"
+        );
+    }
+
+    /// The confirm modal is REVOCABLE-tier (voidable copy, NOT typed-word) and shows "ESTIMATED"
+    /// adjacent to BOTH the proceeds and the gain totals.
+    #[test]
+    fn bulk_reclassify_outflow_preview_shows_estimated_gain_flagged() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bro-estimated";
+        seed_pending_outflows_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('O')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → Preview
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal (all checked)
+        assert!(
+            app.bulk_reclassify_outflow_modal.is_some(),
+            "confirm modal must open"
+        );
+
+        let backend = TestBackend::new(110, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let text = rendered_text(&terminal);
+
+        assert!(
+            text.contains("ESTIMATED proceeds"),
+            "modal must flag the proceeds as ESTIMATED"
+        );
+        assert!(
+            text.contains("ESTIMATED gain"),
+            "modal must flag the gain as ESTIMATED"
+        );
+        // REVOCABLE tier — voidable copy, NOT a typed-word gate.
+        assert!(
+            text.to_lowercase().contains("voidable"),
+            "modal must state each reclassify is voidable (revocable tier)"
+        );
+        assert!(
+            !text.to_lowercase().contains("type the word"),
+            "bulk-reclassify-outflow is REVOCABLE — it must NOT be a typed-word confirmation"
+        );
+    }
+
+    /// E2E: `O` → confirm → APPLY reclassifies both outflows; the Disposals tab renders `[est]` on the
+    /// flagged rows + the legend, and the Compliance tab advisory counts them.
+    #[test]
+    fn bulk_reclassify_outflow_disposals_tab_shows_est_marker() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bro-estmarker";
+        seed_pending_outflows_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        handle_key(&mut app, press(KeyCode::Char('O')));
+        handle_key(&mut app, press(KeyCode::Enter)); // → Preview
+        handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal
+        assert!(app.bulk_reclassify_outflow_modal.is_some());
+        handle_key(&mut app, press(KeyCode::Enter)); // APPLY (persist + re-project)
+
+        assert!(
+            app.bulk_reclassify_outflow_modal.is_none()
+                && app.bulk_reclassify_outflow_flow.is_none()
+        );
+        let snap = app.snapshot.as_ref().unwrap();
+        // Both disposals exist and are flagged in the side-table (join = Disposal.event).
+        assert_eq!(
+            snap.state.disposals.len(),
+            2,
+            "both outflows became disposals"
+        );
+        assert_eq!(
+            snap.bulk_estimated.len(),
+            2,
+            "both flagged in the side-table"
+        );
+        assert!(snap
+            .state
+            .disposals
+            .iter()
+            .all(|d| snap.bulk_estimated.contains_key(&d.event)));
+
+        // Render the Disposals tab (year 2025) directly → the `[est]` marker + legend appear.
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ts = ratatui::widgets::TableState::default();
+        terminal
+            .draw(|f| {
+                btctax_tui::tabs::disposals::render(f, f.area(), snap, 2025, &mut ts);
+            })
+            .unwrap();
+        let text = rendered_text(&terminal);
+        assert!(
+            text.contains("[est]"),
+            "the flagged disposal rows render [est]"
+        );
+        assert!(
+            text.contains("estimated FMV proceeds"),
+            "the Disposals legend note is shown"
+        );
+
+        // Compliance advisory count — render the public Compliance tab into a wide backend.
+        let cbackend = TestBackend::new(140, 40);
+        let mut cterminal = Terminal::new(cbackend).unwrap();
+        cterminal
+            .draw(|f| btctax_tui::tabs::compliance::render(f, f.area(), snap, 2025))
+            .unwrap();
+        let ctext = rendered_text(&cterminal);
+        assert!(
+            ctext.contains("Disposals using estimated FMV proceeds: 2"),
+            "Compliance advisory counts the two estimated-FMV disposals; got:\n{ctext}"
         );
     }
 

@@ -97,6 +97,21 @@ pub(crate) fn render_compliance_content(snap: &Snapshot) -> String {
     // ── Pending-basis count ───────────────────────────────────────────────────────────────────
     let _ = writeln!(s, "  Pending transfers (unreconciled): {}", verify.pending);
 
+    // ── Estimated-FMV proceeds advisory (Cycle 5) ─────────────────────────────────────────────
+    // Count the flagged disposals that still exist in the projected ledger (join the side-table
+    // against `Disposal.event`) — so a voided reclassify (whose disposal is gone) does not inflate
+    // the count. Closes the loop: the auto-FMV estimate is visible at tax-review time.
+    let estimated_disposals = snap
+        .state
+        .disposals
+        .iter()
+        .filter(|d| snap.bulk_estimated.contains_key(&d.event))
+        .count();
+    let _ = writeln!(
+        s,
+        "  Disposals using estimated FMV proceeds: {estimated_disposals}"
+    );
+
     // ── Hard blockers ─────────────────────────────────────────────────────────────────────────
     let _ = writeln!(s);
     let _ = writeln!(s, "  Hard blockers ({}):", verify.hard.len());

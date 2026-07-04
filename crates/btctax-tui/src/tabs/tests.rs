@@ -48,6 +48,7 @@ fn make_snapshot(state: LedgerState) -> Snapshot {
         profiles: BTreeMap::new(),
         tables: BundledTaxTables::load(),
         donation_details: BTreeMap::new(),
+        bulk_estimated: BTreeMap::new(),
     }
 }
 
@@ -784,6 +785,7 @@ fn make_snapshot_with_profile(state: LedgerState) -> Snapshot {
         profiles,
         tables: BundledTaxTables::load(),
         donation_details: BTreeMap::new(),
+        bulk_estimated: BTreeMap::new(),
     }
 }
 
@@ -1212,6 +1214,7 @@ fn make_se_snapshot(
         profiles,
         tables: BundledTaxTables::load(),
         donation_details: BTreeMap::new(),
+        bulk_estimated: BTreeMap::new(),
     }
 }
 
@@ -1391,6 +1394,7 @@ fn e7e_not_computable_year_with_profile_shows_se_section() {
         profiles,
         tables: BundledTaxTables::load(),
         donation_details: BTreeMap::new(),
+        bulk_estimated: BTreeMap::new(),
     };
 
     let content = super::tax::render_tax_content(&snap, 2025);

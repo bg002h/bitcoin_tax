@@ -1964,6 +1964,106 @@ pub fn bulk_income_checked_totals(items: &[BulkIncomeRowItem]) -> (usize, Sat, U
     (count, sat, income)
 }
 
+// ── Bulk reclassify-outflow flow types (bulk-reclassify-outflow, Cycle 5 — the LAST) ──
+
+/// Toggle the batch-wide disposition kind (Sell ↔ Spend). The ONLY two kinds in scope — gift/donate
+/// are excluded (they need a per-row donee + appraisal FMV, so a uniform bulk substitution is wrong).
+pub fn cycle_dispose_kind(kind: DisposeKind) -> DisposeKind {
+    match kind {
+        DisposeKind::Sell => DisposeKind::Spend,
+        DisposeKind::Spend => DisposeKind::Sell,
+    }
+}
+
+/// One preview-checklist row: an enriched pending outflow + its `checked` flag. Every row starts
+/// CHECKED; `Space`/`x` toggles `checked` (exclude). Mirrors `session::BulkReclassifyOutflowRow`.
+/// [#a] `fmv` is the RESOLVED auto-value (never `None` — the `None` rows are excluded upstream); it is
+/// the ESTIMATED proceeds. `estimated_gain = round_cents(fmv − basis_usd)` (never double-counted).
+#[derive(Clone)]
+pub struct BulkReclassifyOutflowRowItem {
+    pub out_event: EventId,
+    pub date: TaxDate,
+    pub principal_sat: Sat,
+    pub fmv: Usd,
+    pub basis_usd: Usd,
+    pub estimated_gain: Usd,
+    pub checked: bool,
+}
+
+/// Step in the bulk reclassify-outflow flow (two steps — the uniform kind + source-wallet/frame
+/// filter, then the per-row exclude checklist).
+pub enum BulkReclassifyOutflowStep {
+    /// 1 — dispose-kind (Sell/Spend) + source-wallet + time-frame toggles.
+    Filter,
+    /// 2 — per-row exclude checklist over the PRICED plan; `Space`/`x` toggles a row.
+    Preview,
+}
+
+/// Full state for the bulk reclassify-outflow flow. The wallet/year filter choices are read from the
+/// snapshot at open (KAT-G1-clean, like the income flow); only the PRICED preview (step 1→2) routes
+/// through the `Session::bulk_reclassify_outflow_plan` helper.
+pub struct BulkReclassifyOutflowFlowState {
+    pub step: BulkReclassifyOutflowStep,
+    /// The UNIFORM disposition kind for the batch; `←/→` toggles it (`cycle_dispose_kind`). Starts `Sell`.
+    pub kind: DisposeKind,
+    /// `[None = Any, Some(w), …]` — Any + each distinct SOURCE wallet of the candidates.
+    pub wallet_choices: Vec<Option<WalletId>>,
+    pub wallet_idx: usize,
+    /// `[None = All, Some(y), …]` — All + each distinct year present in the candidates.
+    pub year_choices: Vec<Option<i32>>,
+    pub year_idx: usize,
+    /// 0 = kind, 1 = source-wallet, 2 = time-frame.
+    pub filter_focus: usize,
+    /// Preview checklist over the priced plan.
+    pub preview: TargetList<BulkReclassifyOutflowRowItem>,
+    /// [#a] From the last recomputed plan: candidates dropped for a MISSING price (surfaced, not
+    /// silently dropped — a Sell with fabricated proceeds would be a SILENT misreport).
+    pub excluded_missing_price: usize,
+    /// Cross-step transient error (empty plan / nothing selected).
+    pub error: Option<String>,
+}
+
+/// Payload for the bulk reclassify-outflow confirmation modal (explicit confirm; NOT typed-word — each
+/// `ReclassifyOutflow` is voidable per-`v`, the REVOCABLE tier + a prominent ESTIMATED warning).
+/// Captures the CHECKED rows' `(out_event, fmv)` pairs (the persist builds the `ReclassifyOutflow` +
+/// side-table mark) + the preview totals + the batch-wide kind.
+pub struct BulkReclassifyOutflowModalState {
+    /// The CHECKED rows as `(out_event, resolved fmv proceeds)` — the persist builds the decision +
+    /// `bulk_estimated::mark` per row.
+    pub rows: Vec<(EventId, Usd)>,
+    pub count: usize,
+    pub total_sat: Sat,
+    /// Σ per-row auto-FMV over the CHECKED rows — the total ESTIMATED proceeds (prominent).
+    pub total_proceeds_usd: Usd,
+    /// Σ per-row basis over the CHECKED rows.
+    pub total_basis_usd: Usd,
+    /// Σ per-row estimated gain over the CHECKED rows — the total ESTIMATED gain (prominent).
+    pub total_estimated_gain: Usd,
+    /// [#a] Carried forward from the plan: outflows NOT auto-valuable (surfaced in the modal note).
+    pub excluded_missing_price: usize,
+    pub kind: DisposeKind,
+}
+
+/// Live footer/modal totals over the CHECKED rows: `(count, Σ sat, Σ proceeds, Σ basis, Σ gain)`. Every
+/// checked row is priced (the plan excluded the unpriced ones), so the totals are always real numbers.
+pub fn bulk_reclassify_outflow_checked_totals(
+    items: &[BulkReclassifyOutflowRowItem],
+) -> (usize, Sat, Usd, Usd, Usd) {
+    let mut count = 0usize;
+    let mut sat: Sat = 0;
+    let mut proceeds: Usd = Usd::ZERO;
+    let mut basis: Usd = Usd::ZERO;
+    let mut gain: Usd = Usd::ZERO;
+    for it in items.iter().filter(|i| i.checked) {
+        count += 1;
+        sat += it.principal_sat;
+        proceeds += it.fmv;
+        basis += it.basis_usd;
+        gain += it.estimated_gain;
+    }
+    (count, sat, proceeds, basis, gain)
+}
+
 // ── Bulk resolve-conflict flow types (bulk-resolve-conflict D3) ──────────────
 
 /// One preview-checklist row: a flagged import conflict + its `checked` (included) flag. Every row
@@ -2026,13 +2126,18 @@ pub fn bulk_resolve_checked_count(items: &[BulkResolveRowItem]) -> usize {
 // ── Bulk-void flow types (bulk-void D3) ──────────────────────────────────────
 
 /// The persist-layer target of one void in a bulk-void batch: the decision id to void + its
-/// precomputed `disposal_to_clear` (a `LotSelection` target → `Some(ls.disposal_event)`, else `None`).
-/// Precomputed ONCE by `open_bulk_void_flow` from the snapshot (mirrors `Session::bulk_void_plan`), so
-/// `persist_bulk_void` never re-loads the log per row.
+/// precomputed side-effect keys. Precomputed ONCE by `open_bulk_void_flow` from the snapshot (mirrors
+/// `Session::bulk_void_plan`), so `persist_bulk_void` never re-loads the log per row.
+/// - `disposal_to_clear`: a `LotSelection` target → `Some(ls.disposal_event)` (clear its optimizer
+///   attestation on void), else `None`.
+/// - `reclass_out_to_clear` [R0-I1]: a `ReclassifyOutflow` target → `Some(ro.transfer_out_event)`
+///   (clear its `bulk_estimated` flag on void — else a stale `[est]` survives a void + re-reclassify),
+///   else `None`.
 #[derive(Clone)]
 pub struct VoidTarget {
     pub target_event_id: EventId,
     pub disposal_to_clear: Option<EventId>,
+    pub reclass_out_to_clear: Option<EventId>,
 }
 
 /// One preview-checklist row for the bulk-void sweep: a voidable decision + its `checked` (included)
@@ -2051,6 +2156,9 @@ pub struct BulkVoidRowItem {
     /// Precomputed side-effect target: a `LotSelection` → `Some(ls.disposal_event)` (re-exposes the
     /// disposal to the default method + clears its optimizer attestation on void); else `None`.
     pub disposal_to_clear: Option<EventId>,
+    /// [R0-I1] Precomputed side-effect target: a `ReclassifyOutflow` → `Some(ro.transfer_out_event)`
+    /// (clears its `bulk_estimated` flag on void); else `None`.
+    pub reclass_out_to_clear: Option<EventId>,
     pub checked: bool,
 }
 

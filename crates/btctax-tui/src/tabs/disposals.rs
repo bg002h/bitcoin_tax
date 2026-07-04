@@ -30,12 +30,23 @@ pub fn render(
     let mut total_proceeds = rust_decimal::Decimal::ZERO;
     let mut total_basis = rust_decimal::Decimal::ZERO;
     let mut total_gain = rust_decimal::Decimal::ZERO;
+    // Cycle-5: any flagged row shown → surface the `[est]` legend in the block title.
+    let mut any_estimated = false;
 
     for disposal in &snap.state.disposals {
         if disposal.disposed_at.year() != year {
             continue;
         }
-        let disposed_str = disposal.disposed_at.to_string();
+        // [est] marker: this disposal's proceeds were derived from an auto-FMV by the bulk-reclassify-
+        // outflow path (join the side-table against `Disposal.event`). The EXACT fold-computed
+        // proceeds/basis/gain are rendered as-is — the marker only annotates provenance.
+        let estimated = snap.bulk_estimated.contains_key(&disposal.event);
+        any_estimated |= estimated;
+        let disposed_str = if estimated {
+            format!("{} [est]", disposal.disposed_at)
+        } else {
+            disposal.disposed_at.to_string()
+        };
         for leg in &disposal.legs {
             total_proceeds += leg.proceeds;
             total_basis += leg.basis;
@@ -96,13 +107,16 @@ pub fn render(
         Constraint::Percentage(17),
     ];
 
+    // Legend note only when a flagged row is actually shown (Cycle-5 `[est]` provenance marker).
+    let title = if any_estimated {
+        format!(" Disposals — {year}   [est] = estimated FMV proceeds ")
+    } else {
+        format!(" Disposals — {year} ")
+    };
+
     let table = Table::new(rows, widths)
         .header(header)
-        .block(
-            Block::default()
-                .title(format!(" Disposals — {year} "))
-                .borders(Borders::ALL),
-        )
+        .block(Block::default().title(title).borders(Borders::ALL))
         .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     frame.render_stateful_widget(table, area, table_state);

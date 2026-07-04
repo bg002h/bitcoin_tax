@@ -188,6 +188,7 @@ mod tests {
             profiles,
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
         }
     }
 
@@ -417,6 +418,7 @@ mod tests {
             profiles: BTreeMap::new(),
             tables: BundledTaxTables::load(),
             donation_details,
+            bulk_estimated: BTreeMap::new(),
         };
 
         let out_dir = export_dir_for(&vault, export_now);
