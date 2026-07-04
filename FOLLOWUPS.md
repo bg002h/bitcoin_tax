@@ -34,6 +34,24 @@ sells) now import.**
 
 ---
 
+## ✅ bulk-classify-inbound-income — SHIPPED (2026-07-03) — QUEUE ITEM 3, CYCLE 4 DONE
+
+Bulk classify many pending unknown-basis inbounds → `Income` (uniform `IncomeKind` {Mining/Staking/Interest/
+Airdrop/Reward} + `business`, per-row auto-FMV) — TUI `I` / CLI `reconcile bulk-classify-inbound-income`.
+Near-clone of the shipped bulk-sti (`B`) with the ONE tax-safety twist [#a]: **EXCLUDE `fmv_of == None`
+rows** (missing daily-close price). A persisted `Income{fmv:None}` raises a Hard `FmvMissing` that gates the
+year AND is unrecoverable without void+reclassify (a `ManualFmv` on a classified inbound is itself Hard
+`DecisionConflict`); bulk-sti INCLUDES those rows ($0-basis needs no FMV), bulk-income must NOT. `plan.included`
+carries a resolved `fmv: Usd`; the CLI apply uses its OWN append-loop (NOT the tui-edit `persist_bulk_decisions`
+— dependency cycle, the Cycle-2 trap; R0-I1) with a defensive `let Some(fmv)=fmv_of(..) else continue` so
+`Income{fmv:None}` is STRUCTURALLY unreachable. R0 GREEN (2 rounds; r1 caught the persist cycle); whole-diff
+0C/0I (#a exclusion fault-injected + the defense-in-depth fold). **1044 workspace tests.** Reviews:
+`reviews/R0-spec-bulk-classify-inbound-income-round-{1,2}.md`,
+`reviews/whole-branch-review-bulk-classify-inbound-income-round-1.md`.
+**Remaining: Cycle 5 bulk-reclassify-outflow (the last — highest value, estimated-proceeds Sells).**
+
+---
+
 ## ✅ bulk-void — SHIPPED (2026-07-03) — QUEUE ITEM 3, CYCLE 3 DONE (the dangerous one)
 
 Sweep-void many reconcile decisions at once (TUI `V` / CLI `reconcile bulk-void`). **Task 1** extracted the
