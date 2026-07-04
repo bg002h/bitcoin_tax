@@ -1,10 +1,42 @@
 # SPEC — pseudo-reconcile mode (sub-project 2 of auto-pseudo-reconcile)
 
-**Source baseline:** `main` @ `514875b` (branch `feat/pseudo-reconcile-mode`). **Review status: DRAFT — awaiting
-R0 (2 rounds to 0C/0I).** Design of record: `design/BRAINSTORM_auto_pseudo_reconcile.md`; roadmap memory
+**Source baseline:** `main` @ `514875b` (branch `feat/pseudo-reconcile-mode`). **Review status: R0 round 1 folded (2C/5I/6M/2N — all
+resolved in the "R0 round-1 folds" section below, which is AUTHORITATIVE over conflicting text). Awaiting R0
+round 2.** Design of record: `design/BRAINSTORM_auto_pseudo_reconcile.md`; roadmap memory
 `auto-pseudo-reconcile-roadmap`. **All cross-cutting decisions are settled with the user — do NOT
 re-brainstorm.** Sub-project 1 (per-exchange method election) is SHIPPED (`514875b`) and is the method source
 for pseudo Sells.
+
+## R0 round-1 folds — AUTHORITATIVE (override the sections below where they conflict)
+Review `reviews/R0-spec-pseudo-reconcile-mode-round-1.md` (2C/5I/6M/2N). Pillars held: `project()`/`resolve`
+are pure reads (session.rs:446-466) → synthetics cannot persist; render (`render_verify`/`render_report`) vs
+export (`write_csv_exports`/`export_snapshot`) are distinct fns; `snapshot.sqlite` is the event DB (auto-clean).
+- **C1 — pseudo taint MUST propagate through basis, not just existence.** A per-EVENT flag is insufficient: a
+  REAL imported Sell (pseudo never touches Sells) consuming a pseudo $0-basis self-transfer lot (fold.rs:958-1012)
+  would render gain = proceeds − 0 UNFLAGGED (render.rs:617-639). Thread a `pseudo` bit **Lot → Consumed → leg**;
+  a row is `[PSEUDO]` if its existence OR its basis traces to any synthetic default. This is the headline guard.
+- **C2 — accept-first clears `ImportConflict` ONLY.** ImportConflict is a system event awaiting a choice
+  (synthesize `SupersedeImport`). `DecisionConflict` is a collision of REAL decisions (resolve.rs:630-640) —
+  clearing it would require persisting a void (breaks not-persisted) or suppressing a real decision (breaks
+  real-supersedes). DecisionConflicts STAY surfaced.
+- **I1 — do NOT mint `EventId::Decision{seq}` in the injection** (collides the real decision_seq space,
+  identity.rs:69). Inject at the resolve MAP layer + a `pseudo_ids` set on `Eff`; reserve seq-minting for `approve`.
+- **I2 — the goal is "0 Hard CLASSIFICATION blockers," not literally 0.** Never cleared: `UncoveredDisposal`
+  (under-covered real Sells — fabricating acquisitions would be max-gain fiction), native-`Income` `FmvMissing`
+  (pseudo defaults only TransferIn inbounds), and real-decision-defect Hard kinds (incl. DecisionConflict, C2).
+  Enumerate these exclusions; the estimate still computes with them surfaced.
+- **I3 — interim export guard (until sub-3 ships).** sub-2 emits the fiction generator; `export_snapshot`
+  (admin.rs:45-85) must consume sub-2's "pseudo-active" signal and REFUSE while pseudo is contributing (or ship
+  lockstep with sub-3). No fictional 8949/Schedule D leaves the machine unguarded.
+- **I4 — marker channel = a dedicated bool the export writers OMIT** — NOT a `BasisSource::Pseudo` variant
+  (`lots.csv` writes `basis_source_tag`, render.rs:596 → would leak "PSEUDO" into the export and fail the grep-KAT).
+- **I5 — `TransferOut → self-transfer` mechanism.** An unmatched outflow has no dest wallet (`Op::SelfTransfer`
+  needs `dest`); today it → advisory `Op::PendingOut` (already non-taxable, no gain). Default = **leave-as-pending**
+  (already non-taxable) rather than fabricate a dest; `approve` writes the concrete self-transfer decision the
+  user confirms. (If a fabricated `SelfCustody` dest is wanted later, spec it explicitly then.)
+- **M4** — CLI `approve` reuses the `apply_bulk_*` OWN-LOOP (btctax-cli), NOT tui-edit's `persist_bulk_decisions`
+  (dep cycle, Cargo.toml:19). **M6** — the placeholder profile is a CLI-layer injection at `report_tax_year` +
+  `export_snapshot`, not `resolve`. **N1** — the mode flag defaults `false`. **N2** — deterministic approve order.
 
 ## Goal
 A reversible **mode** that takes an unreconciled ledger from N blockers → 0 by filling DELIBERATELY-FICTIONAL,
