@@ -126,6 +126,16 @@ pub fn void(
             EventPayload::LotSelection(ls) => Some(ls.disposal_event.clone()),
             _ => None,
         });
+    // Symmetric side-effect [WB]: voiding a ReclassifyOutflow must clear its `bulk_estimated` `[est]`
+    // flag (keyed by transfer_out_event == Disposal.event) — else a stale marker survives a
+    // void→re-reclassify (the R0-I1 gap, closed on the CLI path too, mirroring optimize_attest above).
+    let reclass_out_to_clear: Option<EventId> = events
+        .iter()
+        .find(|e| e.id == target_event_id)
+        .and_then(|e| match &e.payload {
+            EventPayload::ReclassifyOutflow(ro) => Some(ro.transfer_out_event.clone()),
+            _ => None,
+        });
 
     // Append the VoidDecisionEvent (no save yet — we batch with the attestation clear below).
     let id = append_decision(
@@ -142,6 +152,9 @@ pub fn void(
     // co-persist). Idempotent: clearing an absent row is Ok (no error).
     if let Some(disposal) = disposal_to_clear {
         crate::optimize_attest::clear(session.conn(), &disposal)?;
+    }
+    if let Some(out_event) = reclass_out_to_clear {
+        crate::bulk_estimated::clear(session.conn(), &out_event)?;
     }
 
     session.save()?;
@@ -528,6 +541,19 @@ pub fn apply_bulk_void(
     now: OffsetDateTime,
 ) -> Result<usize, CliError> {
     let mut session = Session::open(vault_path, pp)?;
+    // Map ReclassifyOutflow decision id → its transfer_out_event, so voiding one clears its
+    // bulk_estimated `[est]` flag — symmetric with single `void` + TUI persist_bulk_void [WB — R0-I1
+    // closed on the CLI bulk path]. Idempotent clear; O(n) build, void is infrequent.
+    let events = load_all(session.conn())?;
+    let reclass_map: std::collections::HashMap<EventId, EventId> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::ReclassifyOutflow(ro) => {
+                Some((e.id.clone(), ro.transfer_out_event.clone()))
+            }
+            _ => None,
+        })
+        .collect();
     for (target_event_id, disposal_to_clear) in &targets {
         // `?` on a mid-batch failure returns before `save` — the in-memory session is discarded, so
         // nothing lands on disk (CLI atomicity; the TUI path instead ROLLS BACK via persist_bulk_void).
@@ -544,6 +570,10 @@ pub fn apply_bulk_void(
         // in-memory conn, flushed by the single save below). Idempotent — clearing an absent row is Ok.
         if let Some(disposal) = disposal_to_clear {
             crate::optimize_attest::clear(session.conn(), disposal)?;
+        }
+        // Symmetric ReclassifyOutflow side-effect: clear its bulk_estimated flag in the same batch.
+        if let Some(out_event) = reclass_map.get(target_event_id) {
+            crate::bulk_estimated::clear(session.conn(), out_event)?;
         }
     }
     session.save()?;

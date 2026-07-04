@@ -3675,6 +3675,62 @@ fn bulk_reclassify_outflow_estimated_flag_persists_and_joins() {
     );
 }
 
+/// [WB — R0-I1 CLI parity] Voiding a ReclassifyOutflow via the CLI `void` path MUST clear its
+/// `bulk_estimated` `[est]` flag — else a stale marker survives a void→re-reclassify (the exact I1 gap,
+/// which the fold closed only on the TUI persist paths). Mirrors the TUI `void_clears_estimated_flag`.
+#[test]
+fn bulk_reclassify_outflow_cli_void_clears_estimated_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _w, _acqs, outs) = reclass_batch_vault(
+        dir.path(),
+        &[(
+            "ro-cli-void-clear",
+            40_000,
+            datetime!(2025-03-01 12:00:00 UTC),
+        )],
+    );
+    let bulk_out = outs[0].clone();
+
+    // Bulk-reclassify → flag set.
+    cmd::reconcile::apply_bulk_reclassify_outflow(
+        &vault,
+        &pp(),
+        vec![bulk_out.clone()],
+        DisposeKind::Sell,
+        now(),
+    )
+    .unwrap();
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        assert!(
+            s.bulk_estimated().unwrap().contains_key(&bulk_out),
+            "flag set after bulk reclassify"
+        );
+    }
+
+    // Find the ReclassifyOutflow decision id (its target is bulk_out) and void it via the CLI.
+    let reclass_id = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (events, _st, _c) = s.load_events_and_project().unwrap();
+        events
+            .iter()
+            .find_map(|e| match &e.payload {
+                EventPayload::ReclassifyOutflow(ro) if ro.transfer_out_event == bulk_out => {
+                    Some(e.id.clone())
+                }
+                _ => None,
+            })
+            .expect("reclassify decision exists")
+    };
+    cmd::reconcile::void(&vault, &pp(), &reclass_id.canonical(), now()).unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    assert!(
+        !s.bulk_estimated().unwrap().contains_key(&bulk_out),
+        "CLI void of a reclassify MUST clear its [est] flag (stale-marker gap)"
+    );
+}
+
 /// [R0-M2] A CLI apply that fails mid-batch leaves NO ReclassifyOutflow appends AND NO `bulk_estimated`
 /// rows (the bare-`?`-before-`save` discard covers the side-table too).
 #[test]
