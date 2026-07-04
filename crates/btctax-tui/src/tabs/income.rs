@@ -12,7 +12,7 @@ use ratatui::{
 use rust_decimal::Decimal;
 
 use super::tags::income_kind_tag;
-use super::utils::sat_to_btc;
+use super::utils::{sat_to_btc, MIN_ROWS_FOR_TOTALS};
 
 /// App-free renderer for the Income tab.
 ///
@@ -28,7 +28,7 @@ pub fn render(
     let mut total_sat: i64 = 0;
     let mut total_fmv = Decimal::ZERO;
 
-    let mut rows: Vec<Row> = snap
+    let rows: Vec<Row> = snap
         .state
         .income_recognized
         .iter()
@@ -55,15 +55,17 @@ pub fn render(
         return;
     }
 
-    // TOTAL row — rendered but NEVER selectable (selection capped at data_rows-1 in scroll helpers).
+    // TOTAL row — a FROZEN footer (pinned, non-scrolling, non-selectable) built via
+    // `Table::footer` below: Σ BTC (from Σ sat) and Σ income (FMV recognized), both sums.
     let total_btc = sat_to_btc(total_sat);
-    rows.push(Row::new(vec![
+    let total_row = Row::new(vec![
         Cell::from("TOTAL"),
         Cell::from(""),
         Cell::from(""),
         Cell::from(format!("{:.8}", total_btc)),
         Cell::from(format!("{:.2}", total_fmv)),
-    ]));
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD));
 
     let header = Row::new(vec![
         Cell::from("Recognized"),
@@ -89,6 +91,14 @@ pub fn render(
                 .borders(Borders::ALL),
         )
         .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    // Height gate: only pin the frozen totals footer when the area is tall enough; otherwise
+    // give the vertical space to data rows.
+    let table = if area.height >= MIN_ROWS_FOR_TOTALS {
+        table.footer(total_row)
+    } else {
+        table
+    };
 
     frame.render_stateful_widget(table, area, table_state);
 }
