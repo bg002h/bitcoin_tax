@@ -1,6 +1,10 @@
 # SPEC — project README (install instructions + tutorial)
 
-**Source baseline:** `main` @ `f7408f3` (branch `feat/readme`). **Review status: DRAFT — awaiting R0.**
+**Source baseline:** `main` @ `f7408f3` (branch `feat/readme`). **Review status: R0 round 1 folded
+(0C / 5I / 1M / 1N — all folded). Review: `reviews/R0-spec-readme-round-1.md`. Awaiting R0 round 2.
+Key folds: distinct key-backup path (I1); tax-profile step before report (I2); export CSVs are NOT
+git-ignored — export outside the repo (I3); exact importable Coinbase CSV w/ a Receive row (I4); IN_REF comes
+from `verify`'s blocker line, single-quoted (I5); fresh-import exit-1 framed as expected (M1); 24 not 25 (N1).**
 **Lineage:** user request (2026-07-04): "a readme with install instructions and tutorial." Crate publishing is
 the NEXT task (#35) — so install is source-based for now, with a note that crates.io install is coming.
 
@@ -32,24 +36,46 @@ pointer, not the bulk).
    - From a clone: `cargo install --path crates/btctax-cli` (+ `btctax-tui`, `btctax-tui-edit`), or
      `cargo build --release` → `target/release/`.
    - Platforms: Linux/macOS/Windows (CI-tested — link the matrix). "crates.io publish coming (#35)."
-5. **Quickstart tutorial** — the canonical flow, each step a verified command + a one-line "what it does":
-   1. `btctax --vault ./vault.pgp init --key-backup ./vault.key` (creates the encrypted vault + key backup;
-      document the key-backup format link to `btctax-init(1)`). Set `BTCTAX_PASSPHRASE` or prompt.
-   2. `btctax --vault ./vault.pgp import statement.csv …` (ingest exchange CSVs; a tiny synthetic Coinbase-shape
-      example inline). Note the ReadOnly-files convention (keep real data out of the repo).
-   3. `btctax --vault ./vault.pgp verify` (shows blockers/advisories; exit 1 iff Hard blockers — the gate).
-   4. **Reconcile** the blockers — show ONE representative CLI example
-      (`reconcile classify-inbound-self-transfer <IN_REF>`) AND point to `btctax-tui-edit` for the guided,
-      full-surface flow (the 25 reconcile subcommands + bulk ops are man-page/`--help` territory, not the README).
-   5. `btctax --vault ./vault.pgp report --tax-year 2025` (the per-year TaxResult + Schedule D). Also plain
-      `report` for holdings/realized.
-   6. `btctax --vault ./vault.pgp export-snapshot --out ./export --tax-year 2025` (decrypted SQLite + the
-      Form 8949 / Schedule D CSVs — the NFR2 plaintext exception; **warn: contains your data, keep it out of
-      any repo / git-ignored**).
+5. **Quickstart tutorial** — the canonical flow; each step a verified command + a one-line "what it does".
+   Uses `export BTCTAX_PASSPHRASE=...` up front (else each command prompts).
+   1. **[R0-I1]** `btctax --vault ./vault.pgp init --key-backup ./vault-key-backup.asc` — creates the
+      encrypted vault. `init` ALSO auto-writes the sidecar `./vault.key` (needed to open the vault), so the
+      `--key-backup` path MUST be distinct (an offline backup) — do NOT point it at `./vault.key` (that
+      clobbers the live sidecar). Link `btctax-init(1)` for the armor format.
+   2. **[R0-I4]** `btctax --vault ./vault.pgp import ./coinbase.csv` — ingest exchange CSVs. Pin the EXACT
+      importable synthetic Coinbase example (verified against `btctax-adapters/src/coinbase.rs`; header needs
+      `ID`/`Transaction Type`/`Asset`/`Quantity Transacted`/`Subtotal`, `Asset=BTC`, and a `Receive` row so
+      step 4 has something to reconcile):
+      ```
+      Transactions
+      User,00000000-0000-0000-0000-000000000000
+      ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address
+      RCV-1,2025-03-01 12:00:00 UTC,Receive,BTC,0.05000000,USD,84000.00,,,,,bc1qsender,
+      ```
+      Note the ReadOnly-files convention (keep real exchange data out of the repo).
+   3. **[R0-M1]** `btctax --vault ./vault.pgp verify` — shows blockers/advisories. A fresh import of an inbound
+      Receive legitimately produces a Hard `UnknownBasisInbound` blocker → `verify` exits 1. Frame this as the
+      EXPECTED next-step signal, not an error; it's the gate that tax computation waits on.
+   4. **[R0-I5]** Reconcile the blocker. `verify`'s Hard-blocker line prints the event ref, e.g.
+      `[UnknownBasisInbound] import|coinbase|in|RCV-1 :: ...`. Feed it back (SINGLE-QUOTED — the ref contains
+      `|`, a shell pipe): `btctax --vault ./vault.pgp reconcile classify-inbound-self-transfer
+      'import|coinbase|in|RCV-1'`. Then point to `btctax-tui-edit` for the guided, full-surface flow (the 24
+      reconcile subcommands + bulk ops are man-page/`--help` territory, not the README).
+   5. **[R0-I2]** Set a tax profile (required before per-year tax — else `report --tax-year` prints "not
+      computable"): `btctax --vault ./vault.pgp tax-profile --year 2025 --filing-status single
+      --ordinary-taxable-income 80000 --magi-excluding-crypto 80000 --qualified-dividends 0`. Then
+      `btctax --vault ./vault.pgp report --tax-year 2025` (per-year TaxResult + Schedule D). Plain `report`
+      (or `report --year 2025`) shows holdings/realized without a profile.
+   6. **[R0-I3]** `btctax --vault ./vault.pgp export-snapshot --out ./export --tax-year 2025` — writes the
+      decrypted SQLite + the Form 8949 / Schedule D CSVs (the NFR2 plaintext exception). **⚠ These files
+      contain your tax data and are NOT git-ignored** (only `snapshot.sqlite` matches a rule; the CSVs do
+      not) — write `--out` to a directory OUTSIDE any git repo.
 6. **Getting help** — `btctax <cmd> --help` (rich, with inline file-format docs), `man -l docs/man/btctax.1`
    (or the PDFs via `make bundles`), the `?` overlay in the editor.
-7. **Data & privacy** — offline; the vault is passphrase-encrypted at rest; NEVER commit `vault.pgp` / exports
-   (`.gitignore` already guards them); this is software, not tax advice.
+7. **Data & privacy** — offline; the vault is passphrase-encrypted at rest. NEVER commit `vault.pgp` (the
+   `.gitignore` guards `vault*`/`*.pgp`/`*.asc`) — but **[R0-I3] it does NOT guard the `export-snapshot` CSVs**
+   (only `snapshot.sqlite` matches a rule), so write exports to a directory OUTSIDE any git repo. This is
+   software, not tax advice; US-only; BTC-only.
 8. **Build/test/docs (contributors)** — `cargo test --workspace`, `make docs`; link `STANDARD_WORKFLOW.md`.
 9. **License** — MIT OR Unlicense (matches `Cargo.toml`).
 
