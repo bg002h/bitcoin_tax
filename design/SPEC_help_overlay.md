@@ -1,7 +1,8 @@
 # SPEC — `?` help overlay (btctax-tui-edit)
 
-**Source baseline:** `main` @ `00cfd86` (branch `feat/tui-help-overlay`). **Review status: DRAFT — awaiting
-R0 (2-round loop to 0C/0I; small feature → ceremony scaled DOWN per §8, not removed).**
+**Source baseline:** `main` @ `00cfd86` (branch `feat/tui-help-overlay`). **Review status: R0 round 1 folded
+(0C / 1I / 4M / 2N — all folded; the correctness spine [complete key list, modal gate, no height gate,
+scope] verified SOUND). Review: `reviews/R0-spec-help-overlay-round-1.md`. Awaiting R0 round 2.**
 **Lineage:** parked item 1 (user-requested; design SETTLED earlier this session — "full keymap, same on every
 tab; per-tab dropped as unnecessary since the action keys are global"). User standing-authorized proceeding.
 
@@ -14,10 +15,13 @@ on-screen hint today — the footer (`draw_edit.rs:154-155`) advertises only nav
 ## Behavior
 - **Open:** `?` (KeyCode::Char('?'), confirmed FREE) in `EditorScreen::Browse` sets a new `EditorApp.help_open`
   bool → the overlay renders.
-- **Modal gate:** while `help_open`, the key dispatch handles ONLY `?`/`Esc`/`q` (all close it) and IGNORES
-  every other key (the overlay is on top; a reconcile key like `v` must NOT open its flow). Checked in the
-  dispatch alongside the existing `*_modal.is_some()` gates (`main.rs:130-142`).
-- **Dismiss:** `?` (toggle) / `Esc` / `q`.
+- **Modal gate [R0-#2 — the correctness point]:** a top-level `if app.help_open { … return; }` at the START
+  of `handle_key`, alongside the existing `*_modal.is_some()` short-circuits (`main.rs:130-247`). While open,
+  `?`/`Esc`/`q` CLOSE it and every other key is IGNORED (a reconcile key like `v` must NOT open its flow).
+  Because `?` opens help ONLY from the deepest Browse dispatch, `help_open` implies no modal/flow is open, so
+  the top-level gate is safe. **`Esc`/`q` while help_open must set `help_open = false` and NOT `should_quit`**
+  — the gate pre-empts the Browse quit arm (`Char('q')|Esc => should_quit`, `main.rs:367`).
+- **Dismiss:** `?` (toggle) / `Esc` / `q` — all clear `help_open`, none quits.
 - **Render:** a centered modal (`centered_rect` + `Clear`, drawn AFTER content like the other overlays —
   `draw_edit.rs:414-416` pattern). No height gate — `centered_rect` clamps to the area (the ≥10-row gate is
   the SEPARATE parked column-totals feature, not this one). If content exceeds a tiny terminal, it clamps;
@@ -33,9 +37,15 @@ Render from a SINGLE keymap list (const/builder) so the footer and the overlay c
 - **Reconcile (bulk):** `b` bulk-link-transfer · `B` bulk-self-transfer-in · `C` bulk-resolve-conflict ·
   `V` bulk-void · `I` bulk-classify-income · `O` bulk-reclassify-outflow
 - **App:** `p` edit tax profile · `?` help · `q`/`Esc` quit
-- **[R0: DoD]** every key in the live `EditorScreen::Browse` handler (`main.rs`) appears in the list — a KAT
-  cross-checks so a future new flow-key can't silently omit itself. **The existing footer SHOULD be derived
-  from (or a documented compact subset of) the same source** so the two never disagree.
+- **[R0-M1] completeness (best-effort):** every action key bound in the live `EditorScreen::Browse` handler
+  appears in the overlay's single authored `KEYMAP` const. A KAT pins TODAY's keys against the const — a
+  test CANNOT reflect over `match` arms, so this is a best-effort guard, not a compile-time proof; a
+  `// KEEP IN SYNC with KEYMAP overlay` comment sits at the handler (`main.rs:366`).
+- **[R0-I1 + R0-#3] the footer MUST advertise `?`.** The overlay is the single authored `KEYMAP` const; the
+  footer stays a deliberately-partial hand-written inline `[EDITOR]` hint — do NOT coerce both through one
+  rendered structure (the drift that matters is handler→overlay, best-effort-pinned above; footer↔overlay
+  coercion adds a formatting abstraction worth more than the risk it removes). But the footer **MUST add
+  `?: help`** so the feature's own entry point is discoverable. KAT `footer_advertises_help` pins it.
 
 ## Scope / SemVer
 - **btctax-tui-edit ONLY.** New `EditorApp.help_open: bool` (default false), a `?` arm + the modal gate in the
@@ -44,14 +54,20 @@ Render from a SINGLE keymap list (const/builder) so the footer and the overlay c
   CLI reference is unaffected; this is TUI-interactive help).
 
 ## KATs (btctax-tui-edit)
-- `help_opens_on_question_mark` — `?` in Browse sets `help_open` and the overlay renders (TestBackend: the
-  rendered frame contains a help title + a reconcile key absent from the footer, e.g. `V bulk-void`).
-- `help_closes_on_esc_q_and_question` — each of `Esc`/`q`/`?` clears `help_open`.
+- **All KATs render on a ≥`100×40` `TestBackend`** [R0-M4] — `centered_rect` TRUNCATES (no scroll); the
+  authored list must ALSO fit `80×24` or a small terminal truncates it.
+- `help_opens_on_question_mark` — `?` in Browse sets `help_open`; the rendered frame contains a help title +
+  a reconcile key absent from the footer (e.g. `V bulk-void`).
+- `help_closes_on_esc_q_and_question` — each of `Esc`/`q`/`?` clears `help_open` **AND** `!app.should_quit`
+  after `Esc`/`q` [R0-M2 — the precedence guard is the real assertion].
 - `help_modal_swallows_action_keys` — while `help_open`, pressing `v` does NOT open the void flow
   (`app.void_flow.is_none()` after) — the overlay is modal.
-- **`help_lists_every_browse_action_key`** — the overlay text contains EVERY action key bound in the Browse
-  handler (esp. the bulk `C/V/I/O` + reconcile keys the footer omits) — the discoverability guarantee.
-- (if the footer is derived) `footer_and_overlay_share_source` — both render from the one keymap const.
+- `question_mark_ignored_while_flow_open` [R0-M3] — open the void flow, press `?`, assert `!app.help_open`
+  (the `?` is swallowed by the flow/modal gate first).
+- **`help_lists_every_browse_action_key`** — the overlay contains every action key in the current Browse
+  handler (esp. the bulk `C/V/I/O` + reconcile keys the footer omits) — the discoverability guarantee
+  (best-effort per M1).
+- **`footer_advertises_help`** [R0-I1] — the rendered footer contains `?: help`.
 
 ## Plan (TDD)
 - **Task 1** — `help_open` field + the `?`/modal-gate/dismiss handling + `draw_help_overlay` + the shared
@@ -60,8 +76,12 @@ Render from a SINGLE keymap list (const/builder) so the footer and the overlay c
 
 ## Gotchas
 - **Modal gate is the correctness point** — while `help_open`, action keys must be SWALLOWED (not fall
-  through to the flow openers), mirroring how `*_modal.is_some()` short-circuits the dispatch.
-- **One source of truth** — do not hand-maintain the overlay list separately from the footer; a KAT pins that
-  every live Browse key is listed, so an omission fails CI.
+  through to the flow openers), mirroring how `*_modal.is_some()` short-circuits the dispatch; `Esc`/`q`
+  close help and must NOT quit (the gate pre-empts the Browse quit arm).
+- **Overlay = the authored `KEYMAP` const** [R0-M1] — a KAT pins today's Browse keys against it (best-effort;
+  a test can't reflect over `match` arms), with a `// KEEP IN SYNC with KEYMAP overlay` comment at the
+  handler. The footer stays hand-written but MUST include `?: help` — do NOT coerce both through one structure.
+- **`q` closes help** [R0-N1] — a friendly divergence from other overlays (whose footers say `q: swallowed`);
+  say so in the overlay's own footer hint so it is self-documenting.
 - **No height gate here** — that requirement belongs to the parked column-totals feature; this is a clamped modal.
 - `?` is Shift-/ → `KeyCode::Char('?')`; confirmed unbound.
