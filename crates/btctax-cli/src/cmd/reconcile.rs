@@ -161,6 +161,17 @@ pub fn void(
     Ok(id)
 }
 
+/// Pseudo-reconcile mode toggle (sub-project 2). Persists the `pseudo_reconcile` flag in `cli_config`
+/// (a projection input parameter, NOT ledger state — NFR6). `on = true` ⇒ projection synthesizes
+/// non-persisted default decisions to clear the Hard classification blockers; `off` reverts to real-only
+/// instantly (no fictional events were ever written). Returns the new flag value.
+pub fn pseudo_set_mode(vault_path: &Path, pp: &Passphrase, on: bool) -> Result<bool, CliError> {
+    let mut session = Session::open(vault_path, pp)?;
+    crate::config::set_pseudo_reconcile(session.conn(), on)?;
+    session.save()?;
+    Ok(on)
+}
+
 /// FR2/§7.3: resolve an `Unclassified` row to a real imported payload (preserving the target EventId).
 /// The payload is supplied as JSON (`EventPayload` is `Deserialize`) — e.g. `{"Acquire":{…}}`.
 pub fn classify_raw(

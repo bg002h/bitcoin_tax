@@ -2,7 +2,7 @@
 //! non-interactive use; otherwise a secure prompt), calls one library command, renders, and sets the
 //! exit code (non-zero on FR9 hard blockers / on any CliError). NO business logic lives here.
 use btctax_cli::cli::{
-    Cli, Command, FeeArg, MethodArg, Optimize, OutKindArg, Reconcile, SelfTransferActionArg,
+    Cli, Command, FeeArg, MethodArg, Optimize, OutKindArg, Pseudo, Reconcile, SelfTransferActionArg,
 };
 use btctax_cli::{cmd, eventref, render, CliError};
 use btctax_core::{
@@ -1079,6 +1079,27 @@ fn dispatch_reconcile(
                         out_id.canonical(),
                         in_id.canonical(),
                         id.canonical()
+                    );
+                }
+            }
+            return Ok(());
+        }
+        Reconcile::Pseudo(action) => {
+            match action {
+                Pseudo::On => {
+                    cmd::reconcile::pseudo_set_mode(vault, &pp, true)?;
+                    println!(
+                        "pseudo-reconcile mode ON — projection now fills non-persisted default \
+                         decisions to clear the Hard classification blockers. Rows sourced from a \
+                         synthetic default are flagged [PSEUDO] on screen; export/forms are BLOCKED \
+                         while the mode contributes. Turn off with `reconcile pseudo off`."
+                    );
+                }
+                Pseudo::Off => {
+                    cmd::reconcile::pseudo_set_mode(vault, &pp, false)?;
+                    println!(
+                        "pseudo-reconcile mode OFF — projection reverts to real-only (no fictional \
+                         events were ever written). Any decisions you approved remain (they are real now)."
                     );
                 }
             }

@@ -580,6 +580,24 @@ pub enum Reconcile {
         #[arg(long, conflicts_with_all = ["in_ref", "out_ref"])]
         dry_run: bool,
     },
+    /// Pseudo-reconcile MODE (sub-project 2): fill deliberately-fictional default decisions at
+    /// projection time (NEVER persisted) to clear the Hard classification blockers — a loudly-flagged
+    /// `[PSEUDO]` on-screen estimate you correct toward truth. `on`/`off` toggle the mode; `approve`
+    /// promotes chosen defaults to real (attested) decisions.
+    #[command(subcommand)]
+    Pseudo(Pseudo),
+}
+
+/// `reconcile pseudo <action>` — the pseudo-reconcile mode sub-verbs (sub-project 2).
+#[derive(Subcommand)]
+pub enum Pseudo {
+    /// Turn pseudo-reconcile mode ON. Projection now synthesizes non-persisted default decisions for
+    /// unresolved unknown-basis inbounds (self-transfer $0), unclassified rows, and import conflicts
+    /// (accept-first); every synthetic contribution is flagged `[PSEUDO]` on screen and BLOCKS export.
+    On,
+    /// Turn pseudo-reconcile mode OFF. Projection reverts to real-only instantly and totally (no
+    /// fictional events were ever written). Already-approved decisions REMAIN (they are real now).
+    Off,
 }
 
 #[derive(Copy, Clone, ValueEnum)]

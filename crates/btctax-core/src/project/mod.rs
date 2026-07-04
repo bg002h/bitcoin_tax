@@ -37,6 +37,13 @@ pub struct ProjectionConfig {
     /// `false` (the default) makes the advisory louder and actionable; `true` produces an
     /// informational acknowledgment. Neither value gates `compute_tax_year` (§D1).
     pub pre2025_method_attested: bool,
+    /// Pseudo-reconcile mode (sub-project 2). When `true`, `resolve` synthesizes DELIBERATELY-FICTIONAL
+    /// default decisions at PROJECTION time (never persisted) to clear the Hard *classification* blockers,
+    /// producing a loudly-flagged on-screen estimate the user corrects toward truth. Default `false` [N1];
+    /// mode-off ⇒ projection is byte-identical to today (no synthetics injected). Real decisions always
+    /// supersede synthetics. Synthetics are NEVER written to the ledger by projection — only
+    /// `reconcile pseudo approve` promotes chosen defaults to real (attested) decisions.
+    pub pseudo_reconcile: bool,
 }
 impl Default for ProjectionConfig {
     fn default() -> Self {
@@ -45,6 +52,7 @@ impl Default for ProjectionConfig {
             self_transfer_fee: FeeTreatment::TreatmentC,
             pre2025_method: LotMethod::Fifo,
             pre2025_method_attested: false,
+            pseudo_reconcile: false,
         }
     }
 }
