@@ -22,6 +22,8 @@ there is no drift. The two TUI pages are hand-authored roff and edited directly.
 
 - Man pages only (no external tools): `cargo run -p xtask -- docs`  (or `make docs-man`)
 - Man pages **and** PDFs: `cargo run -p xtask -- docs --pdf`         (or `make docs`)
+- One combined PDF **per binary** (`docs/pdf/btctax-manual.pdf` = CLI root + every subcommand;
+  `btctax-tui.pdf` / `btctax-tui-edit.pdf` = the TUI manuals): `make bundles`  (needs `gs`)
 
 Generation is deterministic (no embedded dates, no `#[command(version)]`).
 `cargo test -p xtask` fails if the committed `.1` pages are stale (regenerate and commit).
