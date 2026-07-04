@@ -34,6 +34,25 @@ sells) now import.**
 
 ---
 
+## ✅ bulk-void — SHIPPED (2026-07-03) — QUEUE ITEM 3, CYCLE 3 DONE (the dangerous one)
+
+Sweep-void many reconcile decisions at once (TUI `V` / CLI `reconcile bulk-void`). **Task 1** extracted the
+voidable-candidate predicate to `btctax-core::voidable_decisions` (+ moved `is_revocable_payload` to
+`btctax-core/src/void.rs`) so bulk == single-void on the **#7 tax-safety exclusion** — voiding an EFFECTIVE
+`SafeHarborAllocation` fires a Hard `DecisionConflict` that gates the whole year; `!effective_alloc`
+(SafeHarborAllocation with no timebar/unconservable blocker) is the sole defense, now one shared predicate
+(no drift). `open_void_flow` re-pointed (zero-behavior; stale `resolve.rs:865-921` cite fixed). **Task 2**:
+`Session::bulk_void_plan` + bespoke atomic `persist_bulk_void` (N `VoidDecisionEvent` appends + per-`LotSelection`
+`optimize_attest::clear` inside ONE envelope, mid-batch rollback) + CLI dispatch derives targets from
+`bulk_void_plan().rows` (NEVER raw `--ref` ids — the CLI-layer #7 defense) + TUI Tier-B blast-radius confirm
+(non-revocable, NOT typed-word). Core relocation-only (no new variant, no serde break). R0 GREEN (2 rounds);
+whole-diff review 0C/0I — **three tax-critical fault-injections** (drop #7 filter → 2 KATs RED; bypass
+save_or_rollback → revert KAT RED; drop attestation clear → clear KAT RED). **1032 workspace tests.** Reviews:
+`reviews/R0-spec-bulk-void-round-{1,2}.md`, `reviews/whole-branch-review-bulk-void-round-1.md`.
+**Remaining queue-item-3 cycles: Cycle 4 bulk-classify-inbound-income · Cycle 5 bulk-reclassify-outflow.**
+
+---
+
 ## ✅ bulk-resolve-conflict — SHIPPED (2026-07-03) — QUEUE ITEM 3, CYCLE 2 DONE
 
 Bulk `C` flow to accept/reject many `ImportConflict` blockers at once, + **Task 1**: extract the shared
