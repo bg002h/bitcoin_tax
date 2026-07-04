@@ -12,7 +12,7 @@ use ratatui::{
 };
 
 use super::tags::term_tag;
-use super::utils::sat_to_btc;
+use super::utils::{sat_to_btc, MIN_ROWS_FOR_TOTALS};
 
 /// App-free renderer for the Disposals tab.
 ///
@@ -27,6 +27,7 @@ pub fn render(
 ) {
     // Flatten disposals for the selected year into legs.
     let mut rows: Vec<Row> = Vec::new();
+    let mut total_sat: i64 = 0;
     let mut total_proceeds = rust_decimal::Decimal::ZERO;
     let mut total_basis = rust_decimal::Decimal::ZERO;
     let mut total_gain = rust_decimal::Decimal::ZERO;
@@ -48,6 +49,7 @@ pub fn render(
             disposal.disposed_at.to_string()
         };
         for leg in &disposal.legs {
+            total_sat += leg.sat;
             total_proceeds += leg.proceeds;
             total_basis += leg.basis;
             total_gain += leg.gain;
@@ -73,17 +75,21 @@ pub fn render(
         return;
     }
 
-    // TOTAL row — rendered but NEVER selectable (selection capped at data_rows-1 in scroll helpers).
-    rows.push(Row::new(vec![
+    // TOTAL row — a FROZEN footer (pinned, non-scrolling, non-selectable) built via
+    // `Table::footer` below. Σ BTC is now surfaced; basis stays SUMMED so the row is additive
+    // (`Σ gain = Σ proceeds − Σ basis`).
+    let total_btc = sat_to_btc(total_sat);
+    let total_row = Row::new(vec![
         Cell::from("TOTAL"),
         Cell::from(""),
-        Cell::from(""),
+        Cell::from(format!("{:.8}", total_btc)),
         Cell::from(format!("{:.2}", total_proceeds)),
         Cell::from(format!("{:.2}", total_basis)),
         Cell::from(format!("{:.2}", total_gain)),
         Cell::from(""),
         Cell::from(""),
-    ]));
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD));
 
     let header = Row::new(vec![
         Cell::from("Disposed"),
@@ -118,6 +124,14 @@ pub fn render(
         .header(header)
         .block(Block::default().title(title).borders(Borders::ALL))
         .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    // Height gate: only pin the frozen totals footer when the area is tall enough; otherwise
+    // give the vertical space to data rows.
+    let table = if area.height >= MIN_ROWS_FOR_TOTALS {
+        table.footer(total_row)
+    } else {
+        table
+    };
 
     frame.render_stateful_widget(table, area, table_state);
 }

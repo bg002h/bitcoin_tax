@@ -171,10 +171,12 @@ fn holdings_renders_header_and_known_row() {
     );
 }
 
-/// 2. Two-lot fixture — assert TOTAL row (Σ BTC, Σ USD basis) shows the sum,
-///    which differs from every individual lot's value.
+/// 2. Two-lot fixture — assert the frozen footer shows Σ BTC and the WEIGHTED-AVERAGE basis
+///    $/BTC (`round_cents((Σ usd_basis × 1e8) / Σ sat)`), provably distinct from each lot's
+///    $/BTC, the simple average, and the summed basis. (Re-pointed from the old summed-basis
+///    `holdings_renders_total_row`.)
 #[test]
-fn holdings_renders_total_row() {
+fn holdings_footer_weighted_average_basis() {
     // lot A: 50M sat = 0.50000000 BTC, $2500.00
     let lot_a = Lot {
         lot_id: make_lot_id("h2a"),
@@ -208,7 +210,7 @@ fn holdings_renders_total_row() {
     let mut app = make_app(state, 2025);
     let buf = render_holdings(&mut app);
 
-    assert!(buffer_has(&buf, "TOTAL"), "must have TOTAL row");
+    assert!(buffer_has(&buf, "TOTAL"), "must have TOTAL footer");
     // Individual row values still appear in data rows
     assert!(
         buffer_has(&buf, "0.50000000"),
@@ -218,15 +220,81 @@ fn holdings_renders_total_row() {
         buffer_has(&buf, "0.25000000"),
         "second lot BTC must be present"
     );
-    // TOTAL must show the summed values: 0.75000000 BTC, $4000.00
-    // (0.75 ≠ 0.50 ≠ 0.25; 4000.00 ≠ 2500.00 ≠ 1500.00 — broken sum would fail)
+    // Σ BTC unchanged: 0.75000000 (0.75 ≠ 0.50 ≠ 0.25).
     assert!(
         buffer_has(&buf, "0.75000000"),
-        "TOTAL BTC must be the sum: 0.75000000"
+        "footer Σ BTC must be the sum: 0.75000000"
+    );
+
+    // Weighted-average basis $/BTC — computed with the SAME expression/rounding as the impl.
+    // Σ usd_basis = 2500 + 1500 = 4000.00; Σ sat = 75_000_000; (4000 × 1e8) / 75e6 = 5333.33̅.
+    let total_basis = Decimal::new(400000, 2); // 4000.00
+    let total_sat: i64 = 75_000_000;
+    let expected = btctax_core::conventions::round_cents(
+        (total_basis * Decimal::from(100_000_000i64)) / Decimal::from(total_sat),
+    );
+    assert_eq!(
+        expected,
+        "5333.33".parse::<Decimal>().unwrap(),
+        "pinned weighted-avg formula must yield 5333.33"
     );
     assert!(
-        buffer_has(&buf, "4000.00"),
-        "TOTAL USD basis must be the sum: 4000.00"
+        buffer_has(&buf, "5333.33"),
+        "footer basis must be the WEIGHTED AVERAGE 5333.33"
+    );
+    // Provably distinct from lot A $/BTC (2500/0.5=5000), lot B (1500/0.25=6000),
+    // the simple average (5500), and the summed basis (4000).
+    assert!(
+        !buffer_has(&buf, "5000.00"),
+        "must NOT be lot A $/BTC 5000.00"
+    );
+    assert!(
+        !buffer_has(&buf, "6000.00"),
+        "must NOT be lot B $/BTC 6000.00"
+    );
+    assert!(
+        !buffer_has(&buf, "5500.00"),
+        "must NOT be the simple average 5500.00"
+    );
+    assert!(
+        !buffer_has(&buf, "4000.00"),
+        "must NOT be the summed basis 4000.00"
+    );
+}
+
+/// 2b. Zero-sat guard: a NON-empty `lots` whose `remaining_sat` sum to 0 (a fully-consumed lot
+///     still in `state.lots`) must render the footer basis as an em-dash `—`, not panic on a
+///     divide-by-zero. (Empty `lots` short-circuits to "no holdings" before any total.)
+#[test]
+fn holdings_footer_zero_sat_shows_dash() {
+    // Fully-consumed lot: remaining_sat = 0 but a non-zero basis → without the guard this would
+    // divide by zero. The lot is still present, so we do NOT hit the "no holdings" placeholder.
+    let lot = Lot {
+        lot_id: make_lot_id("hz"),
+        wallet: make_wallet(),
+        acquired_at: make_date(2024, 1, 1),
+        original_sat: 50_000_000,
+        remaining_sat: 0,
+        usd_basis: Decimal::new(100000, 2), // 1000.00 — non-zero, to make the div-by-zero real
+        basis_source: BasisSource::ExchangeProvided,
+        dual_loss_basis: None,
+        donor_acquired_at: None,
+        basis_pending: false,
+    };
+    let mut state = LedgerState::default();
+    state.lots.push(lot);
+
+    let mut app = make_app(state, 2025);
+    let buf = render_holdings(&mut app); // must not panic
+
+    assert!(
+        !buffer_has(&buf, "no holdings"),
+        "a non-empty lots vec must NOT hit the 'no holdings' placeholder"
+    );
+    assert!(buffer_has(&buf, "TOTAL"), "footer must still render");
+    assert!(
+        buffer_has(&buf, "\u{2014}"),
+        "footer basis must show the em-dash — when Σ sat == 0"
     );
 }
 
@@ -1169,6 +1237,190 @@ fn scroll_down_does_not_advance_past_last_data_row_to_total() {
         app.holdings_state.selected(),
         Some(1),
         "scroll_down past last data row must stay at index 1 (TOTAL is not selectable)"
+    );
+}
+
+// ── Frozen column-totals footer KATs (feat/tui-column-totals) ────────────────
+
+/// Render a tab into an explicitly-sized backend (for the height-gate KAT).
+fn render_disposals_sized(app: &mut App, w: u16, h: u16) -> ratatui::buffer::Buffer {
+    let backend = TestBackend::new(w, h);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            super::disposals::draw(f, area, app);
+        })
+        .unwrap();
+    terminal.backend().buffer().clone()
+}
+
+/// Return the y-coordinate of the first buffer row whose text contains `needle`.
+fn buffer_find_y(buf: &ratatui::buffer::Buffer, needle: &str) -> Option<u16> {
+    let area = buf.area();
+    for y in 0..area.height {
+        let row: String = (0..area.width)
+            .map(|x| buf.cell((x, y)).map_or(" ", |c| c.symbol()))
+            .collect();
+        if row.contains(needle) {
+            return Some(y);
+        }
+    }
+    None
+}
+
+/// CT1. Disposals footer shows the SUMMED Σ BTC / Σ proceeds / Σ basis / Σ gain, and the
+/// gain identity `Σ gain == Σ proceeds − Σ basis` holds.
+#[test]
+fn disposals_footer_shows_summed_totals() {
+    let mut state = LedgerState::default();
+    // Leg A: 50M sat, proceeds 30000.00, basis 20000.00, gain 10000.00
+    state.disposals.push(make_disposal_tagged(
+        "ctd_a", 2025, 50_000_000, "30000.00", "20000.00", "10000.00",
+    ));
+    // Leg B: 25M sat, proceeds 15000.00, basis 8000.00, gain 7000.00
+    // Σ:      75M sat = 0.75000000 BTC, proceeds 45000.00, basis 28000.00, gain 17000.00
+    state.disposals.push(make_disposal_tagged(
+        "ctd_b", 2025, 25_000_000, "15000.00", "8000.00", "7000.00",
+    ));
+
+    let mut app = make_app(state, 2025);
+    let buf = render_disposals(&mut app);
+
+    // Σ BTC = (50M + 25M) / 1e8 = 0.75000000 (appears ONLY in the footer — legs are 0.50/0.25).
+    assert!(
+        buffer_has(&buf, "0.75000000"),
+        "footer must show Σ BTC 0.75000000"
+    );
+    assert!(
+        buffer_has(&buf, "45000.00"),
+        "footer must show Σ proceeds 45000.00"
+    );
+    assert!(
+        buffer_has(&buf, "28000.00"),
+        "footer must show Σ basis 28000.00 (SUMMED, not averaged)"
+    );
+    assert!(
+        buffer_has(&buf, "17000.00"),
+        "footer must show Σ gain 17000.00"
+    );
+
+    // Gain identity: Σ gain == Σ proceeds − Σ basis (keeps the row additive).
+    let proceeds: Decimal = "45000.00".parse().unwrap();
+    let basis: Decimal = "28000.00".parse().unwrap();
+    let gain: Decimal = "17000.00".parse().unwrap();
+    assert_eq!(
+        gain,
+        proceeds - basis,
+        "Σ gain must equal Σ proceeds − Σ basis"
+    );
+}
+
+/// CT2. The Disposals "TOTAL" renders as the PINNED footer (bottom of the table), not as a
+/// scrolling body row, and is NOT selectable (G caps at the last data leg).
+#[test]
+fn disposals_total_row_no_longer_scrolls() {
+    let mut state = LedgerState::default();
+    state.disposals.push(make_disposal_tagged(
+        "ctns_a", 2025, 50_000_000, "30000.00", "20000.00", "10000.00",
+    ));
+    state.disposals.push(make_disposal_tagged(
+        "ctns_b", 2025, 25_000_000, "15000.00", "8000.00", "7000.00",
+    ));
+
+    let mut app = make_app(state, 2025);
+    app.tab = crate::app::Tab::Disposals;
+    let buf = render_disposals(&mut app); // TestBackend 120×40
+
+    let h = buf.area().height;
+    let total_y = buffer_find_y(&buf, "TOTAL").expect("TOTAL must render");
+    let data_y = buffer_find_y(&buf, "0.50000000").expect("a data leg must render");
+
+    // Footer is pinned just above the bottom border (y == h-2), FAR below the top-of-table
+    // data rows — a scrolling body TOTAL would sit immediately after the data (small y).
+    assert!(
+        total_y >= h - 2,
+        "TOTAL must be the pinned footer at the bottom (y={total_y}, h={h}), not a body row"
+    );
+    assert!(
+        data_y < total_y,
+        "data rows must sit above the pinned footer (data_y={data_y}, total_y={total_y})"
+    );
+
+    // Not selectable: G (go_bottom) caps at the last DATA leg (index 1), never the TOTAL.
+    crate::handle_key(&mut app, press(KeyCode::Char('G')));
+    assert_eq!(
+        app.disposals_state.selected(),
+        Some(1),
+        "G must select the last data leg (index 1), never the TOTAL footer"
+    );
+}
+
+/// CT3. Height gate: below MIN_ROWS_FOR_TOTALS the frozen footer is omitted (data gets the
+/// space); at/above the threshold it is present. Pins the boundary at exactly 10.
+#[test]
+fn totals_footer_hidden_on_short_terminal() {
+    let mut state = LedgerState::default();
+    state.disposals.push(make_disposal_tagged(
+        "ctg_a", 2025, 50_000_000, "30000.00", "20000.00", "10000.00",
+    ));
+    state.disposals.push(make_disposal_tagged(
+        "ctg_b", 2025, 25_000_000, "15000.00", "8000.00", "7000.00",
+    ));
+
+    let mut app = make_app(state, 2025);
+
+    // Height 9 (< 10): footer omitted → no "TOTAL".
+    let short = render_disposals_sized(&mut app, 120, 9);
+    assert!(
+        !buffer_has(&short, "TOTAL"),
+        "footer must be hidden on a <10-row area (height 9)"
+    );
+
+    // Height 10 (== threshold): footer present → "TOTAL".
+    let tall = render_disposals_sized(&mut app, 120, 10);
+    assert!(
+        buffer_has(&tall, "TOTAL"),
+        "footer must be present at the threshold (height 10)"
+    );
+}
+
+/// CT4. Income footer sums Σ sat (as BTC) and Σ income (FMV), and renders as the pinned footer
+/// (bottom), not a scrolling body row.
+#[test]
+fn income_footer_sums_sat_and_fmv() {
+    let mut state = LedgerState::default();
+    state.income_recognized.push(make_income_tagged(
+        "if_a",
+        2025,
+        1_000_000,
+        "600.00",
+        IncomeKind::Staking,
+    ));
+    state.income_recognized.push(make_income_tagged(
+        "if_b",
+        2025,
+        500_000,
+        "300.00",
+        IncomeKind::Mining,
+    ));
+    // Σ: 1_500_000 sat = 0.01500000 BTC, FMV 900.00
+
+    let mut app = make_app(state, 2025);
+    let buf = render_income(&mut app);
+
+    assert!(
+        buffer_has(&buf, "0.01500000"),
+        "footer must show Σ BTC 0.01500000"
+    );
+    assert!(buffer_has(&buf, "900.00"), "footer must show Σ FMV 900.00");
+
+    // TOTAL is the pinned footer (bottom), not a scrolling body row.
+    let h = buf.area().height;
+    let total_y = buffer_find_y(&buf, "TOTAL").expect("TOTAL must render");
+    assert!(
+        total_y >= h - 2,
+        "income TOTAL must be the pinned footer at the bottom (y={total_y}, h={h})"
     );
 }
 

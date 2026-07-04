@@ -13,7 +13,7 @@ use ratatui::{
 use rust_decimal::Decimal;
 
 use super::tags::basis_source_tag;
-use super::utils::sat_to_btc;
+use super::utils::{sat_to_btc, MIN_ROWS_FOR_TOTALS};
 
 /// App-free renderer for the Holdings tab.
 ///
@@ -41,7 +41,7 @@ pub fn render(
     let mut total_sat: i64 = 0;
     let mut total_basis = Decimal::ZERO;
 
-    let mut rows: Vec<Row> = lots
+    let rows: Vec<Row> = lots
         .iter()
         .map(|lot| {
             total_sat += lot.remaining_sat;
@@ -59,16 +59,29 @@ pub fn render(
         })
         .collect();
 
-    // TOTAL row — rendered but NEVER selectable (selection capped at data_rows-1 in scroll helpers).
+    // TOTAL row — a FROZEN footer (pinned, non-scrolling, non-selectable) built via
+    // `Table::footer` below. The basis cell is the WEIGHTED-AVERAGE cost $/BTC of the stack
+    // (`round_cents((Σ usd_basis × 1e8) / Σ sat)`, multiply-first) — an unrealized gain cannot
+    // be summed, so a total-basis-$ pairs with nothing. Guard `Σ sat == 0` → `—` (reachable only
+    // with a non-empty `lots` whose remaining_sat sum to 0; empty `lots` short-circuits above).
     let total_btc = sat_to_btc(total_sat);
-    rows.push(Row::new(vec![
+    let avg_basis_cell = if total_sat == 0 {
+        "—".to_string()
+    } else {
+        let avg = btctax_core::conventions::round_cents(
+            (total_basis * Decimal::from(100_000_000i64)) / Decimal::from(total_sat),
+        );
+        format!("{:.2}", avg)
+    };
+    let total_row = Row::new(vec![
         Cell::from("TOTAL"),
         Cell::from(""),
         Cell::from(format!("{:.8}", total_btc)),
-        Cell::from(format!("{:.2}", total_basis)),
+        Cell::from(avg_basis_cell),
         Cell::from(""),
         Cell::from(""),
-    ]));
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD));
 
     let header = Row::new(vec![
         Cell::from("Wallet"),
@@ -92,6 +105,14 @@ pub fn render(
         .header(header)
         .block(Block::default().title(" Holdings ").borders(Borders::ALL))
         .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    // Height gate: only pin the frozen totals footer when the area is tall enough; otherwise
+    // give the vertical space to data rows.
+    let table = if area.height >= MIN_ROWS_FOR_TOTALS {
+        table.footer(total_row)
+    } else {
+        table
+    };
 
     frame.render_stateful_widget(table, area, table_state);
 }
