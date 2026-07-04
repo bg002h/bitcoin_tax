@@ -1,8 +1,9 @@
 # SPEC — bulk-reclassify-outflow (queue item 3, Cycle 5 — the LAST)
 
-**Source baseline:** `main` @ `a241705` (branch `feat/bulk-reclassify-outflow`). **Review status: R0 round 1 folded
-(0C / 1I / 3M / 2N — all folded; the two tax-number vectors [side-table join key, gain double-counting]
-verified CORRECT by R0). Review: `reviews/R0-spec-bulk-reclassify-outflow-round-1.md`. Awaiting R0 round 2.**
+**Source baseline:** `main` @ `a241705` (branch `feat/bulk-reclassify-outflow`). **Review status: R0-GREEN (2 rounds; 0 Critical / 0 Important). Reviews:
+`reviews/R0-spec-bulk-reclassify-outflow-round-{1,2}.md` (round 1: 0C/1I — the clear-on-void gap; round 2:
+0C/0I/0M/0N). The two tax-number vectors [side-table join key = Disposal.event; gain = Σ fold-computed leg
+basis, not double-counted] verified CORRECT. Cleared to implement.**
 **Lineage:** final cycle of `bulk-reconcile-other-types` (architect-designed 2026-07-03, transcript;
 Cycles 1-4 SHIPPED). **User decisions (2026-07-03):** outflow→Sell with FMV as ESTIMATED proceeds
 (approved earlier); the estimate **must be flagged PERSISTENTLY and shown on the Disposals tab**
