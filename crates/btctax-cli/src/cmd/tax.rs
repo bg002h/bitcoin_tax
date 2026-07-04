@@ -5,10 +5,27 @@ use crate::{tax_profile, CliError, Session};
 use btctax_adapters::BundledTaxTables;
 use btctax_core::{
     carryforward_consistency, compute_se_tax, compute_tax_year, schedule_d, se_net_income,
-    ScheduleDTotals, TaxOutcome, TaxProfile, TaxTables, Usd,
+    Carryforward, FilingStatus, ScheduleDTotals, TaxOutcome, TaxProfile, TaxTables, Usd,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
+
+/// Pseudo-reconcile (sub-project 2, [R0-M6]): the CLI-layer PLACEHOLDER tax profile — a single filer with
+/// $0 income / MAGI / qualified-dividends / carryforward. Injected (never persisted) at `report_tax_year`
+/// when the mode is on and the year has no stored profile, to clear `TaxProfileMissing` ONLY.
+fn placeholder_tax_profile() -> TaxProfile {
+    TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: Usd::ZERO,
+        magi_excluding_crypto: Usd::ZERO,
+        qualified_dividends_and_other_pref_income: Usd::ZERO,
+        other_net_capital_gain: Usd::ZERO,
+        capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: Usd::ZERO,
+        w2_medicare_wages: Usd::ZERO,
+        schedule_c_expenses: Usd::ZERO,
+    }
+}
 
 /// Persist `p` as the tax profile for `year` in the vault at `vault`, then save.
 pub fn set_profile(
@@ -62,8 +79,17 @@ pub fn report_tax_year(
     prior_taxable_gifts: Usd,
 ) -> Result<TaxYearReport, CliError> {
     let s = Session::open(vault, pp)?;
-    let (events, state, _cfg) = s.load_events_and_project()?;
-    let profile = s.tax_profile(year)?;
+    let (events, state, cfg) = s.load_events_and_project()?;
+    // Pseudo-reconcile (sub-project 2, [R0-M6]): when the mode is ON and the year has NO stored profile,
+    // inject a CLI-layer PLACEHOLDER profile (single filer, $0 income/MAGI/qual-div) so the estimate can
+    // proceed with zero setup. This clears `TaxProfileMissing` ONLY — it is injected AFTER the projection,
+    // so it never touches `state.blockers` and thus can NEVER clear the Hard `TaxYearNotComputable` gate
+    // (compute.rs checks Hard blockers BEFORE the profile branch). A real stored profile always wins.
+    let profile = match s.tax_profile(year)? {
+        Some(p) => Some(p),
+        None if cfg.pseudo_reconcile => Some(placeholder_tax_profile()),
+        None => None,
+    };
     let tables = BundledTaxTables::load();
     let outcome = compute_tax_year(&events, &state, year, profile.as_ref(), &tables);
     // P2-B: the RAW pre-netting Schedule D part totals for the same year, from the same projection.

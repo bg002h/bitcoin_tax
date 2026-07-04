@@ -87,6 +87,32 @@ fn make_vault_with(csv: &Path) -> (tempfile::TempDir, PathBuf) {
     (dir, vault)
 }
 
+/// [pseudo-reconcile T3 / R0-M6] With pseudo mode ON and NO stored profile for the year, the CLI-layer
+/// PLACEHOLDER profile (single filer, $0) is injected so the report computes — clearing `TaxProfileMissing`
+/// ONLY. With the mode OFF and no profile, the same ledger reports `NotComputable(TaxProfileMissing)`.
+#[test]
+fn pseudo_mode_injects_placeholder_profile_clearing_tax_profile_missing() {
+    use btctax_core::{BlockerKind, TaxOutcome};
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path()); // fully-real buy+sell, NO blockers
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // Mode OFF + no profile ⇒ NotComputable(TaxProfileMissing).
+    let (out_off, ..) = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    match out_off {
+        TaxOutcome::NotComputable(b) => assert_eq!(b.kind, BlockerKind::TaxProfileMissing),
+        other => panic!("mode-off, no profile: expected TaxProfileMissing, got {other:?}"),
+    }
+
+    // Turn pseudo mode ON, still NO profile ⇒ the placeholder is injected ⇒ Computed.
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+    let (out_on, ..) = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    assert!(
+        matches!(out_on, TaxOutcome::Computed(_)),
+        "pseudo mode must inject a placeholder profile so the year computes: {out_on:?}"
+    );
+}
+
 /// Golden render test: Single, LT gain=20,000, OTI=40k, MAGI excl=60k → total=1,747.50.
 /// Asserts the rendered output contains the expected TOTAL line.
 #[test]

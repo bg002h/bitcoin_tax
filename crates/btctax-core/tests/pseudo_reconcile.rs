@@ -249,6 +249,72 @@ fn walletless_unclassified_left_surfaced() {
     assert_eq!(st.pseudo_synthetic_count, 0);
 }
 
+/// Per-default [R0-C2]: an unresolved `ImportConflict` is cleared by accept-first — the first-seen
+/// conflict's new payload governs its target, the target lot is flagged pseudo, and the Hard
+/// `ImportConflict` blocker is gone.
+#[test]
+fn import_conflict_cleared_via_accept_first() {
+    let target_id = EventId::import(Source::Coinbase, SourceRef::new("a-1"));
+    // The original import: Acquire 1 BTC @ $100 basis.
+    let original = imp(
+        "a-1",
+        datetime!(2025-03-01 12:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 1_000_000,
+            usd_cost: dec!(100),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    // A re-import that CONFLICTS (different cost $700) → an unresolved ImportConflict.
+    let new_payload = EventPayload::Acquire(Acquire {
+        sat: 1_000_000,
+        usd_cost: dec!(700),
+        fee_usd: dec!(0),
+        basis_source: BasisSource::ExchangeProvided,
+    });
+    let fp = Fingerprint::of_bytes(b"new-content");
+    let conflict = LedgerEvent {
+        id: EventId::conflict(Source::Coinbase, SourceRef::new("a-1"), &fp),
+        utc_timestamp: datetime!(2025-03-01 12:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(w()),
+        payload: EventPayload::ImportConflict(ImportConflict {
+            target: target_id,
+            new_payload: Box::new(new_payload),
+            new_fingerprint: fp.clone(),
+        }),
+    };
+    let evs = vec![original, conflict];
+
+    // Mode OFF ⇒ the ImportConflict is a Hard blocker (today's behavior); the ORIGINAL $100 basis stands.
+    let off = project(&evs, &prices(), &cfg_off());
+    assert!(off
+        .blockers
+        .iter()
+        .any(|b| b.kind == BlockerKind::ImportConflict));
+    assert_eq!(off.lots[0].usd_basis, dec!(100));
+    assert!(!off.lots[0].pseudo);
+
+    // Mode ON ⇒ accept-first adopts the new $700 payload onto the target, flagged pseudo, blocker gone.
+    let on = project(&evs, &prices(), &cfg_on());
+    assert!(!on
+        .blockers
+        .iter()
+        .any(|b| b.kind == BlockerKind::ImportConflict));
+    assert_eq!(on.lots.len(), 1);
+    assert_eq!(
+        on.lots[0].usd_basis,
+        dec!(700),
+        "accept-first adopted the new payload"
+    );
+    assert!(
+        on.lots[0].pseudo,
+        "the accepted-first target lot is flagged pseudo"
+    );
+    assert_eq!(on.pseudo_synthetic_count, 1);
+}
+
 /// Determinism (NFR4): two pseudo projections of the same ledger are byte-identical (PartialEq on the
 /// whole `LedgerState`, incl. the new `pseudo` bits and the synthetic count).
 #[test]
@@ -268,5 +334,151 @@ fn pseudo_projection_is_deterministic() {
     assert_eq!(
         a, b,
         "identical (events, prices, config) ⇒ identical projection"
+    );
+}
+
+// ── I2-precise: "0 Hard classification blockers; a tax TOTAL only at 0 Hard total" ───────────────
+// Pseudo clears the Hard *classification* kinds it can honestly default, but a tax number computes
+// only when 0 Hard blockers of ANY kind remain (compute_tax_year returns NotComputable on the first
+// Hard blocker). Excluded kinds (native-Income FmvMissing, UncoveredDisposal, DecisionConflict, …) are
+// NOT cleared and still gate the total.
+use btctax_core::tax::compute::compute_tax_year;
+use btctax_core::tax::tables::{
+    LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
+};
+use btctax_core::tax::types::{Carryforward, FilingStatus, TaxOutcome, TaxProfile};
+
+struct OneTable(TaxTable);
+impl TaxTables for OneTable {
+    fn table_for(&self, year: i32) -> Option<&TaxTable> {
+        (year == self.0.year).then_some(&self.0)
+    }
+}
+fn synth_table(year: i32) -> OneTable {
+    let mut ordinary = BTreeMap::new();
+    ordinary.insert(
+        FilingStatus::Single,
+        OrdinarySchedule {
+            brackets: vec![OrdinaryBracket {
+                lower: dec!(0),
+                rate: dec!(0.10),
+            }],
+        },
+    );
+    let mut ltcg = BTreeMap::new();
+    ltcg.insert(
+        FilingStatus::Single,
+        LtcgBreakpoints {
+            max_zero: dec!(40000),
+            max_fifteen: dec!(400000),
+        },
+    );
+    OneTable(TaxTable {
+        year,
+        source: "SYNTHETIC",
+        ordinary,
+        ltcg,
+        gift_annual_exclusion: dec!(19000),
+        ss_wage_base: dec!(176100),
+        gift_lifetime_exclusion: dec!(13_990_000),
+    })
+}
+fn single_zero_profile() -> TaxProfile {
+    TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(0),
+        magi_excluding_crypto: dec!(0),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward {
+            short: dec!(0),
+            long: dec!(0),
+        },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
+    }
+}
+fn native_income_fmv_missing(rf: &str, ts: time::OffsetDateTime, sat: i64) -> LedgerEvent {
+    imp(
+        rf,
+        ts,
+        EventPayload::Income(Income {
+            sat,
+            usd_fmv: None,
+            fmv_status: FmvStatus::Missing,
+            kind: IncomeKind::Mining,
+            business: false,
+        }),
+    )
+}
+
+/// With pseudo ON and the ONLY Hard blockers being classification kinds it clears, a tax TOTAL computes
+/// (I2). NOTE (M1 residual): the total is HIGH, not zero — the real Sell consumes a pseudo `$0`-basis lot
+/// so gain = proceeds − 0. Clearing all Hard blockers makes *a* total assertable, not a ≈zero one.
+#[test]
+fn tax_total_computes_when_pseudo_clears_all_hard_blockers() {
+    let evs = vec![
+        transfer_in("in-1", datetime!(2025-03-01 12:00 UTC), 1_000_000),
+        sell(
+            "sell-1",
+            datetime!(2025-06-01 12:00 UTC),
+            1_000_000,
+            dec!(900),
+        ),
+    ];
+    let st = project(&evs, &prices(), &cfg_on());
+    let out = compute_tax_year(
+        &evs,
+        &st,
+        2025,
+        Some(&single_zero_profile()),
+        &synth_table(2025),
+    );
+    match out {
+        TaxOutcome::Computed(r) => {
+            // A number IS produced — and it is not zero (the pseudo $0-basis Sell realizes gain).
+            assert!(r.total_federal_tax_attributable >= dec!(0));
+            assert!(
+                r.st_net > dec!(0),
+                "the $0-basis Sell produced a positive ST gain"
+            );
+        }
+        TaxOutcome::NotComputable(b) => {
+            panic!("expected a computable total once pseudo cleared all Hard blockers, got {b:?}")
+        }
+    }
+}
+
+/// A native-`Income` `FmvMissing` is a Hard blocker pseudo does NOT clear (pseudo defaults only inbound
+/// TransferIns, never invents income). So even with the classification blocker cleared, NO total computes
+/// — proving "a tax TOTAL only at 0 Hard total" (I2-precise).
+#[test]
+fn no_tax_total_while_a_non_classification_hard_blocker_remains() {
+    let evs = vec![
+        transfer_in("in-1", datetime!(2025-03-01 12:00 UTC), 1_000_000),
+        native_income_fmv_missing("inc-1", datetime!(2025-03-01 13:00 UTC), 500_000),
+    ];
+    let st = project(&evs, &prices(), &cfg_on());
+    // The classification blocker IS cleared…
+    assert!(!st
+        .blockers
+        .iter()
+        .any(|b| b.kind == BlockerKind::UnknownBasisInbound));
+    // …but the native-Income FmvMissing remains Hard and is NOT cleared.
+    assert!(st
+        .blockers
+        .iter()
+        .any(|b| b.kind == BlockerKind::FmvMissing));
+    let out = compute_tax_year(
+        &evs,
+        &st,
+        2025,
+        Some(&single_zero_profile()),
+        &synth_table(2025),
+    );
+    assert!(
+        matches!(out, TaxOutcome::NotComputable(_)),
+        "no tax total while ANY Hard blocker (native-Income FmvMissing) remains"
     );
 }
