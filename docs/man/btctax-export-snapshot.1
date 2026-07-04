@@ -1,0 +1,29 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-export-snapshot 1  btctax "btctax manual"
+.SH NAME
+export\-snapshot \- FR10: export decrypted SQLite + CSV (the NFR2 plaintext exception)
+.SH SYNOPSIS
+\fBexport\-snapshot\fR <\fB\-\-out\fR> [\fB\-\-tax\-year\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+FR10: export decrypted SQLite + CSV (the NFR2 plaintext exception)
+.SH OPTIONS
+.TP
+\fB\-\-out\fR \fI<OUT>\fR
+Output DIRECTORY receiving the decrypted SQLite DB (snapshot.sqlite) + projection CSVs
+(the NFR2 plaintext exception; created owner\-only). ALWAYS writes: lots.csv,
+disposals.csv, removals.csv, income.csv. With \-\-tax\-year it ALSO writes form8949.csv,
+schedule_d.csv, form8283.csv, and schedule_se.csv (schedule_se only when there is
+business self\-employment income). The `event` column in disposals.csv / removals.csv /
+income.csv is the event\-ref that reconcile commands consume (select\-lots,
+set\-donation\-details, reclassify\-income, …).
+
+FORMAT (removals.csv header + one sample donation row):
+  event,kind,removed_at,lot,sat,basis,fmv_at_transfer,term,acquired_at,claimed_deduction,donee
+  import|coinbase|X,donation,2025\-03\-01,import|coinbase|X#0,25000,120.00,150.00,long,2023\-01\-05,150.00,Charity Y
+.TP
+\fB\-\-tax\-year\fR \fI<TAX_YEAR>\fR
+Also emit the per\-tax\-year Form 8949 + Schedule D CSVs (form8949.csv / schedule_d.csv), scoped to this calendar year. Omit to write only the all\-years projection CSVs
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
