@@ -296,6 +296,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "btctax"
+version = "0.1.0"
+
+[[package]]
 name = "btctax-adapters"
 version = "0.1.0"
 dependencies = [
