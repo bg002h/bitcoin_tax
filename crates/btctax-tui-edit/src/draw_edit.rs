@@ -1724,7 +1724,7 @@ fn draw_help_overlay(frame: &mut Frame, area: Rect) {
             Style::default().fg(Color::DarkGray),
         )),
     ];
-    let width: u16 = 70;
+    let width: u16 = 72;
     let height: u16 = lines.len() as u16 + 2;
     let rect = centered_rect(width, height, area);
     frame.render_widget(Clear, rect);
