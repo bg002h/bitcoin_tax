@@ -157,6 +157,7 @@ fn disposal(d: time::Date, gain: Usd, term: Term) -> Disposal {
                 provider: "cb".into(),
                 account: "m".into(),
             }, // synthetic
+            pseudo: false,
         }],
         fee_mini_disposition: false,
     }

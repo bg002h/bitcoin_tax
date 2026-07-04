@@ -1258,6 +1258,7 @@ fn synthetic_state(
             fee_sat: None,
             kind: candidate.kind,
         },
+        pseudo: false, // synthetic optimizer candidate — unrelated to pseudo-reconcile mode
     });
     res.selections.insert(id, picks.to_vec());
     Ok(fold(res, prices, config))
@@ -1499,6 +1500,7 @@ mod candidate_tests {
             dual_loss_basis: None,
             donor_acquired_at: None,
             basis_pending: false,
+            pseudo: false,
         }
     }
     fn ev(rf: &str, ts: time::OffsetDateTime, wallet: WalletId, p: EventPayload) -> LedgerEvent {

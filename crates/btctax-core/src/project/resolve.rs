@@ -108,6 +108,11 @@ pub struct Eff {
     pub src_ref: SourceRef,
     pub wallet: Option<crate::identity::WalletId>,
     pub op: Op,
+    /// Pseudo-reconcile taint (sub-project 2, [R0-I1/C1]): `true` when this event's effective `Op` is
+    /// governed by a synthetic (non-persisted) default injected in pseudo mode — the seam that carries
+    /// pseudo-ness from the map/`Eff` layer into every `Lot`/leg the fold builds from it. Always `false`
+    /// outside pseudo mode (⇒ projection byte-identical).
+    pub pseudo: bool,
 }
 impl Eff {
     pub fn date(&self) -> TaxDate {
@@ -201,6 +206,36 @@ pub struct Resolution {
     pub elections: Vec<ElectionRec>,
     /// Per-disposal named-lot selections (§A.4). Empty this task; populated in Task 4.
     pub selections: BTreeMap<EventId, Vec<crate::event::LotPick>>,
+    /// Pseudo-reconcile synthetic defaults injected this projection (sub-project 2). EMPTY unless
+    /// `config.pseudo_reconcile` is on. Each entry is a materializable REAL decision — the SAME payload
+    /// `reconcile pseudo approve` persists — so "what you see == what you approve". Never written to the
+    /// ledger by projection; only surfaced (count/advisory/`[PSEUDO]`) and consumed by `approve`.
+    pub pseudo_decisions: Vec<PseudoDefault>,
+}
+
+/// The TYPE of a pseudo-reconcile synthetic default (sub-project 2) — drives the `approve` filter and the
+/// per-default KATs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PseudoKind {
+    /// Unknown-basis inbound `TransferIn` → `ClassifyInbound(SelfTransferMine{$0})` (conservative $0,
+    /// non-taxable; never income — assumption 3).
+    SelfTransferInbound,
+    /// `Unclassified` row (determinable-inbound, has a wallet) → `ClassifyRaw` to a zero-value placeholder
+    /// (the row carries no structured amount, so pseudo books nothing until the user classifies it for real).
+    RawInbound,
+    /// Unresolved `ImportConflict` → accept-first `SupersedeImport` of the first-seen conflict.
+    AcceptConflict,
+}
+
+/// One pseudo-reconcile synthetic default (sub-project 2). `target` is the IMPORTED event whose effective
+/// `Op` the synthetic governs (the pseudo-taint carrier + the display/filter anchor); `decision` is the
+/// REAL decision payload `approve` persists to make it permanent (attested). For `AcceptConflict`, `target`
+/// is the ImportConflict event while the decision's `SupersedeImport.conflict_event` points at it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PseudoDefault {
+    pub target: EventId,
+    pub decision: EventPayload,
+    pub kind: PseudoKind,
 }
 
 /// Private outcome of resolving an `ImportConflict` via a decision.
@@ -369,6 +404,18 @@ pub fn resolve(
     let by_id: BTreeMap<EventId, &LedgerEvent> = events.iter().map(|e| (e.id.clone(), e)).collect();
     let mut blockers: Vec<Blocker> = Vec::new();
 
+    // ── Pseudo-reconcile mode (sub-project 2) ────────────────────────────────────────────────────
+    // When on, synthesize DELIBERATELY-FICTIONAL default decisions at the map/`Eff` layer (never
+    // persisted) to clear the Hard classification blockers. Real decisions are collected FIRST (below)
+    // so an event with ANY real decision gets NO synthetic (real supersedes). `pseudo_ids` = the IMPORT
+    // events whose effective `Op` a synthetic governs (→ `Eff.pseudo` → `Lot`/leg taint, [R0-C1]);
+    // `pseudo_decisions` = the materializable REAL decisions `approve` persists ("see == approve").
+    // NOTE [R0-I1]: synthetics are MAP-layer entries — we NEVER mint `EventId::Decision{seq}` here
+    // (that u64 collides the real decision_seq space, identity.rs:69); seq-minting lives only in `approve`.
+    let pseudo_on = config.pseudo_reconcile;
+    let mut pseudo_ids: BTreeSet<EventId> = BTreeSet::new();
+    let mut pseudo_decisions: Vec<PseudoDefault> = Vec::new();
+
     // ── 1a. Collect Voids; classify each target's revocability ──────────────────────────────────
     //   Revocable targets: TransferLink, ReclassifyOutflow, ClassifyInbound, ManualFmv, ClassifyRaw,
     //   MethodElection, LotSelection, ReclassifyIncome.
@@ -456,17 +503,35 @@ pub fn resolve(
 
     // Unresolved conflicts → ImportConflict blocker; accepted → applied override on the target id.
     for e in events {
-        if let EventPayload::ImportConflict(_) = &e.payload {
+        if let EventPayload::ImportConflict(c) = &e.payload {
             match conflict_res.get(&e.id) {
                 Some(Resolved::Accept(payload, target)) => {
                     applied.insert(target.clone(), payload.clone());
                 }
                 Some(Resolved::Reject) => {} // original import stands unchanged
-                None => blockers.push(Blocker {
-                    kind: BlockerKind::ImportConflict,
-                    event: Some(e.id.clone()),
-                    detail: "unresolved import conflict".into(),
-                }),
+                None => {
+                    // [R0-C2] pseudo accept-first: an unresolved ImportConflict adopts the FIRST-SEEN
+                    // conflict's new payload onto its target (map-clearable), flagged pseudo — no blocker.
+                    // First-wins guard: skip if the target already has a governing override (real or a
+                    // prior accept-first). `DecisionConflict` (a REAL-decision collision) is NOT cleared.
+                    if pseudo_on && !applied.contains_key(&c.target) {
+                        applied.insert(c.target.clone(), (*c.new_payload).clone());
+                        pseudo_ids.insert(c.target.clone()); // the TARGET lot's basis now traces to pseudo
+                        pseudo_decisions.push(PseudoDefault {
+                            target: e.id.clone(), // the conflict event the SupersedeImport references
+                            decision: EventPayload::SupersedeImport(SupersedeImport {
+                                conflict_event: e.id.clone(),
+                            }),
+                            kind: PseudoKind::AcceptConflict,
+                        });
+                    } else {
+                        blockers.push(Blocker {
+                            kind: BlockerKind::ImportConflict,
+                            event: Some(e.id.clone()),
+                            detail: "unresolved import conflict".into(),
+                        });
+                    }
+                }
             }
         }
     }
@@ -849,6 +914,83 @@ pub fn resolve(
         }
     }
 
+    // ── 1f. Pseudo-reconcile classification defaults (sub-project 2) ──────────────────────────────
+    // Injected AFTER every real-decision map is built (real supersedes) and BEFORE the timeline build,
+    // so the synthetics flow through the SAME `build_op` → fold path as real decisions.
+    //   Phase A — `Unclassified` (determinable-inbound: has a wallet) with no real ClassifyRaw →
+    //             synthetic `ClassifyRaw` to a zero-value placeholder [R0-M2]. The `Unclassified` row
+    //             carries NO structured amount, so pseudo books a $0/0-sat placeholder (Op::Acquire) that
+    //             clears the blocker but fabricates no holdings — the user supplies the real classification
+    //             + amount when correcting. NOT `ClassifyInbound` (rejected on a non-`TransferIn` target →
+    //             `DecisionConflict`). A wallet-less `Unclassified` is LEFT SURFACED (nowhere to home a lot).
+    //   Phase B — an effective `TransferIn` (real, OR one just conjured) with no real inbound
+    //             classification / link / passthrough → synthetic `ClassifyInbound(SelfTransferMine{$0})`
+    //             (conservative $0, non-taxable — never income, assumption 3). Clears `UnknownBasisInbound`.
+    if pseudo_on {
+        // Phase A: Unclassified → ClassifyRaw(zero-value placeholder). Iterate in event order.
+        for e in events {
+            if !matches!(e.id, EventId::Import { .. }) || e.wallet.is_none() {
+                continue;
+            }
+            if applied.contains_key(&e.id) {
+                continue; // a real (or accept-first) override already governs this row
+            }
+            if matches!(&e.payload, EventPayload::Unclassified(_)) {
+                let placeholder = EventPayload::Acquire(Acquire {
+                    sat: 0,
+                    usd_cost: Usd::ZERO,
+                    fee_usd: Usd::ZERO,
+                    basis_source: BasisSource::SelfTransferInbound,
+                });
+                applied.insert(e.id.clone(), placeholder.clone());
+                pseudo_ids.insert(e.id.clone());
+                pseudo_decisions.push(PseudoDefault {
+                    target: e.id.clone(),
+                    decision: EventPayload::ClassifyRaw(ClassifyRaw {
+                        target: e.id.clone(),
+                        as_: Box::new(placeholder),
+                    }),
+                    kind: PseudoKind::RawInbound,
+                });
+            }
+        }
+        // Phase B: effective TransferIn with no real classification → SelfTransferMine{$0}.
+        for e in events {
+            if !matches!(e.id, EventId::Import { .. }) || e.wallet.is_none() {
+                continue;
+            }
+            let eff_payload = applied.get(&e.id).unwrap_or(&e.payload);
+            let is_unresolved_transfer_in = matches!(eff_payload, EventPayload::TransferIn(_))
+                && !inbound_class.contains_key(&e.id)
+                && !consumed_ins.contains(&e.id)
+                && !passthrough_skip.contains(&e.id);
+            if is_unresolved_transfer_in {
+                let as_ = InboundClass::SelfTransferMine {
+                    basis: None, // defaulted $0 (conservative, max eventual gain) + the honesty advisory
+                    acquired_at: None, // defaulted receipt date (short-term)
+                };
+                inbound_class.insert(e.id.clone(), as_.clone());
+                pseudo_ids.insert(e.id.clone());
+                pseudo_decisions.push(PseudoDefault {
+                    target: e.id.clone(),
+                    decision: EventPayload::ClassifyInbound(ClassifyInbound {
+                        transfer_in_event: e.id.clone(),
+                        as_,
+                    }),
+                    kind: PseudoKind::SelfTransferInbound,
+                });
+            }
+        }
+        // NFR4/[N2]: a stable order independent of the input `events` order — approve materializes in
+        // this order, and two projections of the same ledger produce byte-identical `pseudo_decisions`.
+        pseudo_decisions.sort_by(|a, b| {
+            a.target
+                .canonical()
+                .cmp(&b.target.canonical())
+                .then((a.kind as u8).cmp(&(b.kind as u8)))
+        });
+    }
+
     // ── 2. Build the effective imported timeline ─────────────────────────────────────────────────
     // For each imported event, apply `applied` overrides then `manual_fmv`, emit an `Eff`.
     // Unclassified with no ClassifyRaw → Op::Unclassified (blocker added in fold).
@@ -880,6 +1022,7 @@ pub fn resolve(
             src_ref,
             wallet: e.wallet.clone(),
             op,
+            pseudo: pseudo_ids.contains(&e.id), // [R0-I1/C1] carry pseudo-ness into the fold's Lot/leg build
         });
     }
 
@@ -1071,6 +1214,7 @@ pub fn resolve(
                 dual_loss_basis: l.dual_loss_basis,
                 donor_acquired_at: l.donor_acquired_at,
                 basis_pending: false,
+                pseudo: false, // SafeHarbor seed lots are real attested allocations — never pseudo
             })
             .collect();
         effective.push((d.id.clone(), seed, a.pre2025_method));
@@ -1128,6 +1272,7 @@ pub fn resolve(
         blockers,
         elections,
         selections,
+        pseudo_decisions,
     }
 }
 

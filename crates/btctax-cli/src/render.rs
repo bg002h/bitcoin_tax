@@ -1890,6 +1890,7 @@ mod gift_advisory_tests {
                 term: Term::LongTerm,
                 basis_source: BasisSource::ComputedFromCost,
                 acquired_at: date!(2024 - 01 - 01),
+                pseudo: false,
             }],
             appraisal_required: false,
             donor_acquired_at: None,
@@ -2157,6 +2158,7 @@ mod gift_advisory_tests {
                 term: Term::LongTerm,
                 basis_source: BasisSource::ComputedFromCost,
                 acquired_at: date!(2024 - 01 - 01),
+                pseudo: false,
             }],
             appraisal_required: false,
             donor_acquired_at: None,
@@ -2924,6 +2926,7 @@ mod form8283_csv_tests {
             term: Term::LongTerm,
             basis_source: BasisSource::ComputedFromCost,
             acquired_at: date!(2025 - 01 - 01),
+            pseudo: false,
         };
         let removal = Removal {
             event: event.clone(),
@@ -2948,6 +2951,7 @@ mod form8283_csv_tests {
             term: Term::LongTerm,
             basis_source: BasisSource::ComputedFromCost,
             acquired_at: date!(2025 - 01 - 15),
+            pseudo: false,
         };
         let removal2 = Removal {
             event: event2.clone(),

@@ -150,6 +150,7 @@ pub fn evaluate_disposal(
                     fee_sat: None,
                     kind: candidate.kind,
                 },
+                pseudo: false, // synthetic optimizer candidate — unrelated to pseudo-reconcile mode
             });
             (id, candidate.sat)
         }

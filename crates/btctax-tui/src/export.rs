@@ -378,6 +378,7 @@ mod tests {
             term: Term::LongTerm,
             basis_source: BasisSource::ComputedFromCost,
             acquired_at: make_date(2024, 1, 1),
+            pseudo: false,
         };
 
         let removal = Removal {

@@ -149,6 +149,7 @@ fn holdings_renders_header_and_known_row() {
         dual_loss_basis: None,
         donor_acquired_at: None,
         basis_pending: false,
+        pseudo: false,
     };
     let mut state = LedgerState::default();
     state.lots.push(lot);
@@ -189,6 +190,7 @@ fn holdings_footer_weighted_average_basis() {
         dual_loss_basis: None,
         donor_acquired_at: None,
         basis_pending: false,
+        pseudo: false,
     };
     // lot B: 25M sat = 0.25000000 BTC, $1500.00
     let lot_b = Lot {
@@ -202,6 +204,7 @@ fn holdings_footer_weighted_average_basis() {
         dual_loss_basis: None,
         donor_acquired_at: None,
         basis_pending: false,
+        pseudo: false,
     };
     let mut state = LedgerState::default();
     state.lots.push(lot_a);
@@ -280,6 +283,7 @@ fn holdings_footer_zero_sat_shows_dash() {
         dual_loss_basis: None,
         donor_acquired_at: None,
         basis_pending: false,
+        pseudo: false,
     };
     let mut state = LedgerState::default();
     state.lots.push(lot);
@@ -325,6 +329,7 @@ fn holdings_up_down_moves_selection() {
         dual_loss_basis: None,
         donor_acquired_at: None,
         basis_pending: false,
+        pseudo: false,
     };
     let lot2 = Lot {
         lot_id: make_lot_id("hud2"),
@@ -337,6 +342,7 @@ fn holdings_up_down_moves_selection() {
         dual_loss_basis: None,
         donor_acquired_at: None,
         basis_pending: false,
+        pseudo: false,
     };
     let mut state = LedgerState::default();
     state.lots.push(lot1);
@@ -385,6 +391,7 @@ fn make_disposal(
             gift_zone: None,
             acquired_at: make_date(disposed_year - 2, 1, 1),
             wallet: make_wallet(),
+            pseudo: false,
         }],
         fee_mini_disposition: false,
     }
@@ -414,6 +421,7 @@ fn make_disposal_tagged(
             gift_zone: None,
             acquired_at: make_date(disposed_year - 2, 1, 1),
             wallet: make_wallet(),
+            pseudo: false,
         }],
         fee_mini_disposition: false,
     }
@@ -718,6 +726,7 @@ fn up_down_via_handle_key_moves_selection() {
         dual_loss_basis: None,
         donor_acquired_at: None,
         basis_pending: false,
+        pseudo: false,
     };
     let lot2 = Lot {
         lot_id: make_lot_id("hk2"),
@@ -730,6 +739,7 @@ fn up_down_via_handle_key_moves_selection() {
         dual_loss_basis: None,
         donor_acquired_at: None,
         basis_pending: false,
+        pseudo: false,
     };
     let mut state = LedgerState::default();
     state.lots.push(lot1);
@@ -883,6 +893,7 @@ fn make_lt_disposal(year: i32) -> Disposal {
             gift_zone: None,
             acquired_at: make_date(year - 2, 1, 1), // > 1 year before disposal
             wallet: make_wallet(),
+            pseudo: false,
         }],
         fee_mini_disposition: false,
     }
@@ -1153,6 +1164,7 @@ fn total_row_not_selectable_g_selects_last_data_row() {
         dual_loss_basis: None,
         donor_acquired_at: None,
         basis_pending: false,
+        pseudo: false,
     };
     let lot2 = Lot {
         lot_id: make_lot_id("mb2"),
@@ -1165,6 +1177,7 @@ fn total_row_not_selectable_g_selects_last_data_row() {
         dual_loss_basis: None,
         donor_acquired_at: None,
         basis_pending: false,
+        pseudo: false,
     };
     let mut state = LedgerState::default();
     state.lots.push(lot1);
@@ -1202,6 +1215,7 @@ fn scroll_down_does_not_advance_past_last_data_row_to_total() {
         dual_loss_basis: None,
         donor_acquired_at: None,
         basis_pending: false,
+        pseudo: false,
     };
     let lot2 = Lot {
         lot_id: make_lot_id("mb4"),
@@ -1214,6 +1228,7 @@ fn scroll_down_does_not_advance_past_last_data_row_to_total() {
         dual_loss_basis: None,
         donor_acquired_at: None,
         basis_pending: false,
+        pseudo: false,
     };
     let mut state = LedgerState::default();
     state.lots.push(lot1);

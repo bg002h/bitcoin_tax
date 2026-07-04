@@ -53,6 +53,7 @@ fn base_leg() -> DisposalLeg {
         gift_zone: None,
         acquired_at: date!(2025 - 01 - 01),
         wallet: exch(),
+        pseudo: false,
     }
 }
 fn disposal(seq: u64, disposed_at: TaxDate, kind: DisposeKind, legs: Vec<DisposalLeg>) -> Disposal {
@@ -510,6 +511,7 @@ fn base_removal_leg() -> RemovalLeg {
         term: Term::LongTerm,
         basis_source: BasisSource::ComputedFromCost,
         acquired_at: date!(2025 - 01 - 01),
+        pseudo: false,
     }
 }
 fn donation(

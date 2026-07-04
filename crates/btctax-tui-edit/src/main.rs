@@ -9060,6 +9060,7 @@ mod tests {
             gift_zone: None,
             acquired_at: time::Date::from_calendar_date(2023, time::Month::January, 1).unwrap(),
             wallet: wallet.clone(),
+            pseudo: false,
         };
         let mut state = LedgerState::default();
         state.disposals.push(Disposal {
