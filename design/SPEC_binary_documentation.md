@@ -1,9 +1,9 @@
 # SPEC — man pages + PDFs for the three btctax binaries (with inline file-format docs)
 
-**Source baseline:** `main` @ `13b3b17` (branch `feat/binary-docs`). **Review status: R0 round 1 folded
-(1C / 2I / 4M / 2N — all folded). Review: `reviews/R0-spec-binary-documentation-round-1.md`. Awaiting R0
-round 2. Key fold: clap_mangen does NOT render subcommand args from a single root render → PER-SUBCOMMAND
-man pages (git-style, recurse `get_subcommands()`); file list confirmed complete.**
+**Source baseline:** `main` @ `13b3b17` (branch `feat/binary-docs`). **Review status: R0-GREEN (2 rounds; 0 Critical / 0 Important). Reviews:
+`reviews/R0-spec-binary-documentation-round-{1,2}.md` (round 1: 1C — clap_mangen doesn't render subcommand
+args from a single root render → PER-SUBCOMMAND man pages, recurse `get_subcommands()`; round 2: 0C/0I).
+File list confirmed complete (the 6); export CSVs verified against the `render.rs` writer. Cleared to implement.**
 **Lineage:** user request (2026-07-04): documentation for each binary — **man pages first, then PDFs**;
 authoring = **HYBRID** (clap_mangen auto-gen + hand-authored). PLUS: wherever a command references a file
 (or a structured format) OTHER than the vault or an exchange-transaction list, document its FORMAT with a
@@ -42,15 +42,16 @@ chosen).
   is a hand-authored COPY of the `?`-overlay content (`draw_help_overlay` is styled ratatui `Line`s, not a
   reusable const [R0-M2]) — a KAT pins the man page lists the current action keys (same guard as the overlay's).
 - **PDFs:** `groff -man -T pdf <x.1> > <x.pdf>` (verified `groff -T pdf` emits `%PDF-1.7`). Man FIRST, PDF after.
-- **Locations:** generated `docs/man/{btctax,btctax-tui,btctax-tui-edit}.1` (committed — browsable/installable
-  without a build), hand-authored roff/markdown supplements in `docs/man/src/`, `docs/pdf/*.pdf`, and the
-  `gen-docs` bin. A `make docs` / `just docs` (or the bin itself) regenerates all.
+- **Locations [R0-M1/M3]:** generated `docs/man/*.1` (committed — browsable/installable): the root `btctax.1`,
+  one `btctax-<path>.1` per subcommand (git-style — e.g. `btctax-init.1`, `btctax-reconcile-import-selections.1`),
+  and the 2 hand-authored `btctax-tui.1` / `btctax-tui-edit.1`; hand-authored roff supplements in `docs/man/src/`;
+  `docs/pdf/*.pdf`; and the **`crates/xtask`** generator. `cargo run -p xtask -- docs` (or `make docs`) regenerates all.
 
 ## The inline file-format docs [requirement 3 — the enumerated set]
 Extend the clap `///` long-help on each of these with **FORMAT + a text EXAMPLE** (flows to `--help` + the
 subcommand's man page `btctax-<sub>.1`). **[R0-I1] each carries `#[arg(verbatim_doc_comment)]` (or
 `#[command(verbatim_doc_comment)]`)** so the multi-line examples (armor block, 2-line CSV, JSON) are NOT
-reflowed by clap — the codebase already uses this workaround at main.rs:111-119; the verbatim text flows to
+reflowed by clap — the codebase already handles multi-line help via `long_help=` at main.rs:111-119 (verbatim_doc_comment is the doc-comment equivalent); the verbatim text flows to
 clap_mangen too.
 - **`init --key-backup <FILE>` and `backup-key --out <FILE>`** — an ASCII-armored, passphrase(S2K)-encrypted
   private key, owner-only (mode 0600). Example (structure, NOT a real key):
@@ -105,6 +106,9 @@ clap_mangen too.
 - **`file_format_examples_present_in_manpage`** [C1] — each format example appears in ITS subcommand's page
   (e.g. `btctax-reconcile-import-selections.1` contains the CSV header; `btctax-init.1` the armor block;
   `btctax-reconcile-classify-raw.1` the JSON; `btctax-reconcile-select-lots.1` the `#split:sat` spec).
+- **`manpage_multiline_examples_survive`** [R0-M4] — the multi-line examples are NOT reflowed: the armor
+  block appears across MULTIPLE lines in `btctax-init.1` (the `BEGIN`/`END` markers on separate lines), the
+  CSV header + sample on 2 lines in `btctax-reconcile-import-selections.1`. Pins `verbatim_doc_comment`.
 - **`gen_docs_is_deterministic`** — running the generator twice yields byte-identical `.1` (no timestamps /
   no `#[command(version)]`); the committed `docs/man/*.1` match a fresh generation (fails if stale).
 - **`manpages_have_required_sections`** — each page has `NAME`/`SYNOPSIS`; the ROOT `btctax.1` has
@@ -125,7 +129,9 @@ clap_mangen too.
   `file_format_examples_present`, `gen_docs_is_deterministic`.
 - **Task 3 — hand-authored `btctax-tui.1` + `btctax-tui-edit.1`** (tabs + keys; editor reuses the `?` keymap);
   commit. KAT `manpages_have_required_sections`.
-- **Task 4 — PDFs:** `groff -T pdf` for all three → `docs/pdf/*.pdf`; wire into the generator/`make docs`.
+- **Task 4 — PDFs [R0-M2]:** `groff -man -T pdf` for EVERY generated `.1` (the root `btctax.1`, ALL
+  `btctax-<path>.1` subcommand pages, and the 2 TUI pages) → `docs/pdf/*.pdf`; wire into the xtask/`make docs`.
+  Smoke-check each output starts with `%PDF`.
 - **Task 5 — whole-diff review** + full workspace suite + FOLLOWUPS + a `docs/man/README` (how to regenerate + `man -l`).
 
 ## Gotchas
@@ -134,7 +140,7 @@ clap_mangen too.
   (`btctax-<path>.1`); the file-format long-help lands on ITS subcommand page. A single-`btctax.1` design is
   wrong.
 - **[I1] `verbatim_doc_comment`** on the file-format args — else clap reflows the multi-line armor/CSV/JSON
-  examples into one paragraph (both `--help` and the man page). Mirror the existing use at main.rs:111-119.
+  examples into one paragraph (both `--help` and the man page). The codebase uses `long_help=` at main.rs:111-119 for this; `verbatim_doc_comment` is the doc-comment form.
 - **One source of truth** — file-format docs live in the clap long-help ONLY; the subcommand man page inherits
   them via clap_mangen. Do NOT hand-duplicate them in the roff (drift). The hand-authored roff is ONLY the
   root DESCRIPTION/FILES-overview/EXAMPLES + the TUI content.
