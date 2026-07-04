@@ -815,11 +815,18 @@ pub fn import_selections(
     Ok(ids)
 }
 
-/// M3 / SPEC A.1: append a `MethodElection` decision — the forward standing order.
+/// M3 / SPEC A.1 / A.5(a): append a `MethodElection` decision — the forward standing order.
 ///
 /// This is an EVENT, not a config flag mutation. The standing order is irrevocable (unless voided)
 /// and governs all method-honoring disposals on/after `effective_from`. Back-dating is blocked by
 /// the engine (`MethodElectionBackdated` hard blocker when `effective_from < made-date`).
+///
+/// `wallet` carries the optional per-ACCOUNT scope (§A.5(a)): `None` = a GLOBAL election (unchanged);
+/// `Some(WalletId::Exchange{..})` = that exchange account's method. [R0-M3] Only `Exchange` wallets
+/// are electable (a `self:LABEL` scope is rejected), and the account MUST be one the vault already
+/// knows — an unknown/typo'd account is rejected LOUDLY so it can't silently create a dead election
+/// the user believes is in force. [R0-M1] The scope lives in the `MethodElection` PAYLOAD, not the
+/// `LedgerEvent.wallet` column (`append_decision` passes `None` for the event-level wallet).
 ///
 /// When `effective_from` is `None`, defaults to the decision's made-date (`now` in UTC), which
 /// satisfies the `effective_from >= made-date` invariant by construction.
@@ -827,17 +834,52 @@ pub fn set_forward_method(
     vault_path: &Path,
     pp: &Passphrase,
     m: LotMethod,
+    wallet: Option<WalletId>,
     effective_from: Option<TaxDate>,
     now: OffsetDateTime,
 ) -> Result<EventId, CliError> {
     let effective_from = effective_from.unwrap_or_else(|| now.to_offset(UtcOffset::UTC).date());
     let mut session = Session::open(vault_path, pp)?;
+    // [R0-M3] Validate an explicit --exchange scope BEFORE appending: only Exchange wallets are
+    // electable, and the account must be present in the loaded events (enumerate distinct
+    // WalletId::Exchange). A silent dead election (typo'd provider/account) would mislead the user
+    // into thinking a method is in force when it isn't — so reject unknown scopes loudly.
+    if let Some(w) = &wallet {
+        let WalletId::Exchange { .. } = w else {
+            return Err(CliError::Usage(format!(
+                "--exchange must name an exchange account (exchange:PROVIDER:ACCOUNT); \
+                 {w:?} is not electable — a method election is a brokerage-account concept"
+            )));
+        };
+        let events = load_all(session.conn())?;
+        let known: std::collections::BTreeSet<WalletId> = events
+            .iter()
+            .filter_map(|e| e.wallet.clone())
+            .filter(|w| matches!(w, WalletId::Exchange { .. }))
+            .collect();
+        if !known.contains(w) {
+            let names: Vec<String> = known
+                .iter()
+                .map(|k| match k {
+                    WalletId::Exchange { provider, account } => {
+                        format!("exchange:{provider}:{account}")
+                    }
+                    other => format!("{other:?}"),
+                })
+                .collect();
+            return Err(CliError::Usage(format!(
+                "--exchange {w:?} is not a known exchange account in this vault \
+                 (accounts are created by importing events). Known exchange accounts: [{}]",
+                names.join(", ")
+            )));
+        }
+    }
     append_and_save(
         &mut session,
         EventPayload::MethodElection(MethodElection {
             effective_from,
             method: m,
-            wallet: None,
+            wallet,
         }),
         now,
     )

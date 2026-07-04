@@ -1443,6 +1443,7 @@ fn set_forward_method_appends_a_method_election_decision() {
         &vault,
         &pp(),
         LotMethod::Hifo,
+        None, // global scope
         Some(date!(2025 - 06 - 01)),
         now(),
     )
@@ -1476,7 +1477,7 @@ fn set_forward_method_defaults_effective_from_to_made_date() {
     let vault = dir.path().join("vault.pgp");
     cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
     // now() = datetime!(2026-02-01 12:00:00 UTC) → made-date in UTC = 2026-02-01
-    cmd::reconcile::set_forward_method(&vault, &pp(), LotMethod::Lifo, None, now()).unwrap();
+    cmd::reconcile::set_forward_method(&vault, &pp(), LotMethod::Lifo, None, None, now()).unwrap();
     let s = Session::open(&vault, &pp()).unwrap();
     let events = btctax_core::persistence::load_all(s.conn()).unwrap();
     let me = events
@@ -1532,7 +1533,7 @@ fn config_set_forward_method_and_fee_treatment_both_take_effect() {
 
     // Simulate the FIXED Config dispatch: append the MethodElection AND apply the fee-treatment
     // mutation (apply-all — neither silently dropped by an early return).
-    cmd::reconcile::set_forward_method(&vault, &pp(), LotMethod::Hifo, None, now()).unwrap();
+    cmd::reconcile::set_forward_method(&vault, &pp(), LotMethod::Hifo, None, None, now()).unwrap();
     cmd::admin::set_config(&vault, &pp(), Some(FeeTreatment::TreatmentB)).unwrap();
 
     // (1) the MethodElection was appended (forward standing order took effect)...

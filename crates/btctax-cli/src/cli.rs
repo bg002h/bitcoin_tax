@@ -78,6 +78,13 @@ pub enum Command {
         /// (default: today / the decision's made-date).
         #[arg(long, value_enum)]
         set_forward_method: Option<MethodLotArg>,
+        /// §A.5(a) per-ACCOUNT scope for --set-forward-method (IRS 2025+ per-account rule):
+        /// exchange:PROVIDER:ACCOUNT (the canonical wallet grammar). Omit for a GLOBAL election
+        /// (the existing behavior). Only exchange accounts are electable (a method election is a
+        /// brokerage-account concept; self:LABEL is rejected). The account MUST already exist in the
+        /// vault — an unknown/typo'd account is rejected LOUDLY so it can't create a dead election.
+        #[arg(long)]
+        exchange: Option<String>,
         /// Effective-from date for --set-forward-method (YYYY-MM-DD). Defaults to made-date.
         #[arg(long)]
         effective_from: Option<String>,
