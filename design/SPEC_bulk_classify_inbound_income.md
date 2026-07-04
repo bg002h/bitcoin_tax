@@ -1,7 +1,8 @@
 # SPEC — bulk-classify-inbound-income (queue item 3, Cycle 4)
 
-**Source baseline:** `main` @ `c643ddd` (branch `feat/bulk-classify-inbound-income`). **Review status:
-DRAFT — awaiting R0 (2-round independent architect loop to 0C/0I before implementation).**
+**Source baseline:** `main` @ `c643ddd` (branch `feat/bulk-classify-inbound-income`). **Review status: R0 round 1 folded
+(0C / 1I / 4M / 2N — all folded; confirm-tier flag adjudicated GREEN = reuse bulk-sti's revocable tier).
+Review: `reviews/R0-spec-bulk-classify-inbound-income-round-1.md`. Awaiting R0 round 2.**
 **Lineage:** queue item 3 of `bulk-reconcile-other-types` (architect-designed, user-approved safety-first
 sequencing). Cycles 1-3 SHIPPED (extract → resolve-conflict → void). This is **Cycle 4**.
 
@@ -16,9 +17,10 @@ bulk-classify-inbound-income`.
 
 ## Candidate set — mirror bulk-sti, then EXCLUDE missing-price [tax-safety-critical]
 Start from the EXACT bulk-sti candidate set (`session.rs` `bulk_self_transfer_in_plan`, filter-3 lineage):
-`TransferIn` events (as `self_transfer_match_plan` enumerates) **MINUS** any already targeted by a
-NON-VOIDED `ClassifyInbound` (mirror `open_classify_inbound_flow` filter-3 — a second `ClassifyInbound`
-fires a return-blocking Hard `DecisionConflict`) **MINUS** wallet-less inbounds (create no lot). Then the
+the pending unknown-basis inbounds = `state.blockers` with `kind == UnknownBasisInbound`
+(`session.rs:569-573`, the bulk-sti seed) **MINUS** any already targeted by a NON-VOIDED `ClassifyInbound`
+(mirror `open_classify_inbound_flow` filter-3 — a second `ClassifyInbound` fires a return-blocking Hard
+`DecisionConflict`, `resolve.rs:582-592`) **MINUS** wallet-less inbounds (create no lot). Then the
 **Cycle-4 addition**:
 - **MINUS every row where `fmv_of(&prices, date, sat) == None`** (missing daily-close price OR overflow).
   These are EXCLUDED from `included` and reported separately as `excluded_missing_price` (NOT silently
@@ -31,10 +33,13 @@ excluded]), `excluded_missing_price: usize`, `total_sat`, `total_income_usd` (Σ
 ## Tax-safety — the #a point (the whole ballgame for this cycle)
 **Auto-FMV is TAX-AFFECTING.** Classifying an inbound as `Income` sets `usd_fmv` = the recognized income
 (and the lot basis). If `fmv_of` returns `None` (no price for that date), a persisted
-`InboundClass::Income { fmv: None, … }` projects to `Income { usd_fmv: None }` → the engine re-fires a
-**Hard `FmvMissing`** blocker (resolve.rs:167 — `ManualFmv` is what clears it), which GATES the whole tax
-year. So a bulk-income that included a missing-price row would trade one blocker (`UnknownBasisInbound`)
-for another Hard one (`FmvMissing`) — a damaging no-op. **The `fmv_of == None` exclusion is the sole
+`InboundClass::Income { fmv: None, … }` projects (`Op::IncomeInbound`, resolve.rs:273-282) to
+`Income { usd_fmv: None }` → the engine raises a **Hard `FmvMissing`** blocker (fold.rs:853-860) that GATES
+the whole tax year. So a bulk-income that included a missing-price row would trade one blocker
+(`UnknownBasisInbound`) for another Hard one (`FmvMissing`) — a damaging no-op. **Worse [R0-M1]: on the
+inbound path this is NOT clearable by `ManualFmv`** — a `ManualFmv` aimed at a classified `TransferIn` is
+itself rejected as a Hard `DecisionConflict` (resolve.rs:476-495), so the ONLY escape is void + reclassify.
+Emitting such a row creates an unrecoverable-without-void year-gate. **The `fmv_of == None` exclusion is the sole
 defense** and is the ONLY behavioral difference from bulk-sti (where missing-price rows are INCLUDED — a
 $0-basis self-transfer needs no FMV, the price is a mere advisory floor). The preview surfaces
 `excluded_missing_price` so the user knows N inbounds could NOT be auto-valued as income (they stay
@@ -42,17 +47,32 @@ pending; the user can set FMV manually or classify them as self-transfer instead
 - The other roadmap tax-safety points (b) estimated-gain, (c) void `#7` do NOT apply to this cycle.
 
 ## Uniform parameters (applied to every included row)
-`InboundClass::Income { kind: IncomeKind, fmv: Some(fmv_of(date, sat)), business: bool }`. `IncomeKind` is
-one of {Mining, Staking, Interest, Airdrop, Reward} (user picks ONE for the batch); `business: bool`
-(user toggles). `fmv` is PER-ROW auto-computed (`fmv_of(date, sat)`), never uniform. `fmv_status` = the
-auto/ingest status the single classify-income arm already assigns (reuse it — do not invent a new status).
+`InboundClass::Income { kind: IncomeKind, fmv: Some(row.fmv), business: bool }` where `row.fmv: Usd` is the
+plan-resolved per-row auto-FMV. `IncomeKind` is one of {Mining, Staking, Interest, Airdrop, Reward} (user
+picks ONE for the batch); `business: bool` (user toggles). `fmv` is PER-ROW (`fmv_of(date, sat)`, resolved
+to `Some` at filter time), never a uniform user number. **[R0-M3]** `InboundClass::Income` has ONLY
+`{ kind, fmv, business }` (`event.rs:127-132`) — there is **no `fmv_status` field** to set (that lives on
+the imported-`Income` payload and is the engine's concern, not the classify decision's); and `fmv` is
+already `Option<Usd>`, so it is `fmv: fmv_of(...)` / `Some(row.fmv)`, never `Some(fmv_of(...))`.
 
-## Persist — REUSES the shared `persist_bulk_decisions` (no side-effect)
-Unlike bulk-void, classify-income has NO side-effect (no attestation clear) — it is N `ClassifyInbound`
-appends. So it uses the shipped `persist_bulk_decisions(session, payloads, now, empty_label)` directly
-(empty-guard + mid-batch rollback + single save all already there + pinned). Each payload =
-`EventPayload::ClassifyInbound(ClassifyInbound { transfer_in_event, as_: InboundClass::Income{…} })`. No new
-persist fn.
+## Persist — CLI own-loop + TUI wrapper [R0-I1 — the shared helper is NOT cli-reachable]
+`persist_bulk_decisions` lives in **btctax-tui-edit** (`edit/persist.rs:394`); **btctax-cli does NOT depend
+on tui-edit** (tui-edit → cli, so the reverse is a dependency cycle) — the CLI CANNOT call it. This is the
+same trap as Cycle-2's R0-I1. Mirror the SHIPPED `apply_bulk_self_transfer_in` (`reconcile.rs:273-294`)
+exactly:
+- **CLI** `apply_bulk_classify_inbound_income` — its OWN append-loop over the plan's `in_events` (one
+  `ClassifyInbound{Income}` per row), bare `?`-before-`save` (a mid-batch failure returns before `save` →
+  the in-memory session is discarded, nothing lands on disk = CLI atomicity), then a single
+  `session.save()`. NOT the shared helper.
+- **TUI** — a thin `persist_bulk_classify_income(session, payloads, now)` in `edit/persist.rs` that DOES
+  delegate to `persist_bulk_decisions` (tui-edit CAN reach it) with the classify-income empty-label; the
+  editor path thus keeps the explicit mid-batch rollback + empty-guard for free.
+- **Structural no-`None` guarantee:** `plan.included` carries the RESOLVED `fmv: Usd` (NON-Option — the
+  `None` rows were excluded upstream), and BOTH builders construct
+  `InboundClass::Income { fmv: Some(row.fmv), kind, business }`. So `Income{fmv:None}` is structurally
+  UNREPRESENTABLE from the bulk path — the #a exclusion cannot be defeated by a later construction bug.
+  (`InboundClass::Income.fmv` is `Option<Usd>`, and `fmv_of` already returns `Option<Usd>`; the plan
+  unwraps once at filter time and the builders re-wrap `Some(_)`.)
 
 ## Confirm — match bulk-sti's tier (revocable, tax-affecting preview)
 `ClassifyInbound` is REVOCABLE (voidable), so NOT Tier-B/typed-word. Use the SAME confirm strength as the
@@ -65,8 +85,9 @@ matches bulk-sti exactly — reuse, don't diverge.]
   --dry-run` (Phase 1): `bulk_classify_income_plan` lists `included` + totals + `excluded_missing_price`;
   writes NOTHING.
 - `… --yes` (Phase 2): `apply_bulk_classify_inbound_income(vault, pp, in_events, kind, business, now)` —
-  builds one `ClassifyInbound{Income}` per row (auto-FMV per row) and delegates to `persist_bulk_decisions`
-  (single session, atomic). Dispatch derives `in_events` from the PLAN's `included` rows (predicate +
+  its OWN append-loop (one `ClassifyInbound{Income{Some(row.fmv)}}` per row) + single `session.save()`,
+  mirroring the shipped `apply_bulk_self_transfer_in` (NOT the tui-edit `persist_bulk_decisions`, which the
+  CLI can't reach — R0-I1). Dispatch derives `in_events` from the PLAN's `included` rows (predicate +
   fmv-exclusion filtered), never raw `--ref` ids.
 
 ## TUI — `I` flow
@@ -87,6 +108,9 @@ note) → `persist_bulk_decisions`. Mirror the shipped bulk-sti (`B`) flow struc
   NOT in `included` and IS counted in `excluded_missing_price`; a persisted batch therefore NEVER creates
   an `Income{fmv:None}` → NO Hard `FmvMissing`. Pair: `bulk_income_apply_sets_autofmv` (an included row's
   persisted `Income.usd_fmv == fmv_of(date, sat)`).
+- **`bulk_income_plan_excludes_wallet_less`** [R0-M4 — a wallet-less inbound is ALSO a Hard-`FmvMissing`/
+  no-lot vector (fold.rs:833), same year-gating class as missing-price] — a wallet-less pending inbound is
+  NOT in `included` (mirrors bulk-sti's wallet-less exclusion).
 - `bulk_income_apply_recognizes_income` (E2E: after apply, `state.income_recognized` grows by the
   included count and the `UnknownBasisInbound` blockers clear; NO new Hard blocker).
 - `bulk_income_empty_refuses` (via persist_bulk_decisions empty-guard); `bulk_income_dry_run_writes_nothing`;
@@ -96,7 +120,8 @@ note) → `persist_bulk_decisions`. Mirror the shipped bulk-sti (`B`) flow struc
 
 ## Plan (TDD)
 - **Task 1 — bulk-classify-inbound-income:** `Session::bulk_classify_income_plan` (mirror bulk-sti + the
-  fmv-exclusion) + CLI `apply_bulk_classify_inbound_income` (two-phase, `--kind`/`--business`) via
+  fmv-exclusion, `included` carries resolved `fmv: Usd`) + CLI `apply_bulk_classify_inbound_income`
+  (two-phase, `--kind`/`--business`; CLI OWN append-loop) + TUI `persist_bulk_classify_income` wrapper →
   `persist_bulk_decisions` + TUI `I` flow. All KATs above.
 - **Task 2 — whole-diff review (Phase E)** + full workspace suite + FOLLOWUPS.
 
