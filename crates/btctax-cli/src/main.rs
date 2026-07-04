@@ -15,6 +15,26 @@ use std::process::ExitCode;
 use time::{OffsetDateTime, UtcOffset};
 
 fn main() -> ExitCode {
+    // Windows' default main-thread stack is 1 MiB, and some ledger-fold code paths have large stack
+    // frames (especially in debug builds) that exceed it → a hard STATUS_STACK_OVERFLOW crash (empty
+    // stderr, exit 0xC00000FD), observed on windows-latest CI in the classify-inbound-self-transfer
+    // flow. Linux/macOS default to 8 MiB and are unaffected. Run the CLI on a worker thread with an
+    // explicit, generous stack so behavior is identical on every platform — the same approach
+    // rustc/cargo take (RUST_MIN_STACK). The 64 MiB reservation is virtual (not committed until
+    // touched), so it is effectively free where it is not needed.
+    let worker = std::thread::Builder::new()
+        .name("btctax-main".into())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(run_to_exit)
+        .expect("spawn btctax worker thread");
+    // The worker's own default panic hook prints any panic to stderr before unwinding; a join Err
+    // means it panicked, so surface the generic error exit code (2), matching the Err(e) arm below.
+    worker.join().unwrap_or(ExitCode::from(2))
+}
+
+/// Run the CLI and map its result to a process exit code. Extracted from `main` so it executes on the
+/// large-stack worker thread `main` spawns (see the stack-size rationale there).
+fn run_to_exit() -> ExitCode {
     match run() {
         Ok(code) => code,
         Err(e) => {
