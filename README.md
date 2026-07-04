@@ -1,0 +1,179 @@
+# btctax
+
+**An offline, single-user US Bitcoin tax ledger.**
+
+`btctax` computes your US federal tax picture for Bitcoin — per-lot cost basis, realized
+short-/long-term gains, income, gifts and donations, and the IRS forms (8949, Schedule D, 8283,
+Schedule SE) — from your exchange CSVs, entirely on your own machine. It is an **event-sourced ledger**:
+every fact and every decision is an append-only event in a passphrase-encrypted vault, so results are
+reproducible and auditable.
+
+- **Offline.** No network calls. Your data never leaves your machine.
+- **Encrypted at rest.** The vault (`vault.pgp`) is passphrase-encrypted (OpenPGP, pure-Rust crypto).
+- **Reproducible.** The tax result is a pure function of the ledger.
+
+> ⚠️ **This is software, not tax advice.** Scope is **US federal** and **BTC-only**. Review everything with a
+> qualified professional before filing.
+
+---
+
+## The three tools
+
+| Binary | What it is |
+|---|---|
+| **`btctax`** | The CLI engine — init, import, reconcile, and compute. Everything scriptable lives here. |
+| **`btctax-tui`** | A read-only terminal viewer for your holdings, disposals, income, and forms. |
+| **`btctax-tui-edit`** | An interactive terminal editor for reconciling — guided flows over the full decision surface. Press **`?`** in-app for the keymap. |
+
+Every command has rich `--help` (including inline file-format examples), and there are man pages for all
+three binaries — see [Getting help](#getting-help).
+
+---
+
+## Install
+
+**Prerequisites:** [Rust](https://rustup.rs) ≥ **1.88** and a C toolchain (the bundled SQLite is compiled
+from source — `cc`/clang/MSVC). Linux, macOS, and Windows are all supported and CI-tested.
+
+From a clone of this repository:
+
+```sh
+# install all three binaries into ~/.cargo/bin
+cargo install --path crates/btctax-cli       # -> btctax
+cargo install --path crates/btctax-tui       # -> btctax-tui
+cargo install --path crates/btctax-tui-edit  # -> btctax-tui-edit
+```
+
+Or build without installing:
+
+```sh
+cargo build --release      # binaries land in ./target/release/
+```
+
+> **crates.io:** publishing is planned — until then, install from source as above.
+
+---
+
+## Quickstart tutorial
+
+This walks the canonical workflow end-to-end with a tiny synthetic dataset. Every command below has been run
+verbatim. Work in a scratch directory (not a git repo, since you'll be handling tax data).
+
+Set your passphrase once so the commands don't prompt each time (or omit this and you'll be prompted):
+
+```sh
+export BTCTAX_PASSPHRASE='choose-a-strong-passphrase'
+```
+
+### 1. Create the vault
+
+```sh
+btctax --vault ./vault.pgp init --key-backup ./vault-key-backup.asc
+```
+
+This creates the encrypted `vault.pgp` **and** an adjacent key file `vault.key` (needed to open the vault).
+`--key-backup` writes a **separate** armored backup of that key — keep it somewhere safe and offline. Point
+`--key-backup` at a distinct path (not `./vault.key`, which is the live sidecar).
+
+### 2. Import an exchange CSV
+
+Save this minimal Coinbase-format file as `coinbase.csv` (a single inbound receive of 0.05 BTC):
+
+```csv
+Transactions
+User,00000000-0000-0000-0000-000000000000
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address
+RCV-1,2025-03-01 12:00:00 UTC,Receive,BTC,0.05000000,USD,84000.00,,,,,bc1qsender,
+```
+
+```sh
+btctax --vault ./vault.pgp import ./coinbase.csv
+```
+
+> Keep your **real** exchange exports outside the repository (a `ReadOnly/` folder elsewhere is a good
+> convention). Never commit them.
+
+### 3. Verify — find what needs reconciling
+
+```sh
+btctax --vault ./vault.pgp verify
+```
+
+A freshly imported inbound receive has no known cost basis, so `verify` reports a **Hard blocker**
+(`UnknownBasisInbound`) and **exits 1**. That's expected — it's the gate that tax computation waits on, and it
+tells you exactly what to resolve next. The blocker line prints the event reference, e.g.:
+
+```
+[UnknownBasisInbound] import|coinbase|in|RCV-1 :: inbound transfer has no basis
+```
+
+### 4. Reconcile the blocker
+
+Classify that inbound as a transfer from your own wallet (non-taxable, conservative $0 basis). Feed back the
+reference from step 3 — **single-quote it**, because it contains `|` (a shell pipe):
+
+```sh
+btctax --vault ./vault.pgp reconcile classify-inbound-self-transfer 'import|coinbase|in|RCV-1'
+```
+
+Run `btctax --vault ./vault.pgp verify` again — it now exits 0.
+
+> This is one of **24** `reconcile` subcommands (income, gifts, donations, disposals, safe-harbor lot
+> selection, bulk operations, …). For the guided, discoverable way to work through everything, use the
+> editor: `btctax-tui-edit --vault ./vault.pgp` (press `?` for the keymap). See `btctax reconcile --help` and
+> the man pages for the full surface.
+
+### 5. Set a tax profile, then report
+
+Per-year tax needs your filing status and income (otherwise `report --tax-year` says "not computable"):
+
+```sh
+btctax --vault ./vault.pgp tax-profile --year 2025 \
+  --filing-status single \
+  --ordinary-taxable-income 80000 \
+  --magi-excluding-crypto 80000 \
+  --qualified-dividends 0
+
+btctax --vault ./vault.pgp report --tax-year 2025
+```
+
+`report --tax-year 2025` prints the year's tax result and Schedule D summary. Plain `report` (or
+`report --year 2025`) shows holdings and realized activity without a profile.
+
+### 6. Export the forms
+
+```sh
+btctax --vault ./vault.pgp export-snapshot --out ./export --tax-year 2025
+```
+
+This writes a decrypted SQLite database plus CSVs — including Form 8949 and Schedule D — into `./export/`.
+
+> ⚠️ **These files contain your unencrypted tax data and are _not_ git-ignored.** Write `--out` to a
+> directory **outside** any git repository.
+
+---
+
+## Getting help
+
+- **`btctax <command> --help`** — every command documents its arguments, including file formats with examples.
+- **Man pages** — `man -l docs/man/btctax.1` (and one page per subcommand, e.g.
+  `man -l docs/man/btctax-reconcile-import-selections.1`), plus `btctax-tui.1` / `btctax-tui-edit.1`.
+  Run `make docs` to regenerate them, or `make bundles` for one combined PDF per binary.
+- **In the editor** — press **`?`** for the keyboard shortcuts.
+
+## Data & privacy
+
+`btctax` is offline and stores everything in the passphrase-encrypted `vault.pgp`. **Never commit `vault.pgp`,
+`vault.key`, or your exchange exports** — the repository's `.gitignore` already excludes `vault*` / `*.pgp` /
+`*.asc`. Note that the `.gitignore` does **not** cover the `export-snapshot` CSVs, so always export to a
+location outside any git repo.
+
+## Contributing
+
+Build and test the workspace with `cargo test --workspace`. All non-trivial work follows
+[`STANDARD_WORKFLOW.md`](./STANDARD_WORKFLOW.md) (spec → independent review to green → phased TDD → whole-diff
+review → ship). CI runs the test suite on Linux, macOS, and Windows.
+
+## License
+
+Licensed under either of **MIT** or **The Unlicense** at your option.
