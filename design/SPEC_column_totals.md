@@ -1,8 +1,8 @@
 # SPEC — frozen column totals on the TUI output tabs (btctax-tui)
 
-**Source baseline:** `main` @ `6a78edb` (branch `feat/tui-column-totals`). **Review status: R0 round 1 folded
-(0C / 3I / 3M / 1N — all folded; the two headline checks PASSED: weighted-avg formula dimensionally correct,
-Disposals scroll-cap verified safe). Review: `reviews/R0-spec-column-totals-round-1.md`. Awaiting R0 round 2.**
+**Source baseline:** `main` @ `6a78edb` (branch `feat/tui-column-totals`). **Review status: R0-GREEN (2 rounds; 0 Critical / 0 Important). Reviews:
+`reviews/R0-spec-column-totals-round-{1,2}.md` (round 1: 0C/3I — all test-side; round 2: 0C/0I/0M/0N).
+Weighted-avg formula + Disposals scroll-cap both verified. Cleared to implement.**
 **Lineage:** parked item 2 (user-requested 2026-07-03; totals SEMANTICS settled with the user — Holdings
 weighted-avg basis, Disposals summed basis; see below). Follows the shipped `?` help overlay (parked item 1).
 
