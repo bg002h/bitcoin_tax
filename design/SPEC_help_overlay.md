@@ -1,8 +1,9 @@
 # SPEC — `?` help overlay (btctax-tui-edit)
 
-**Source baseline:** `main` @ `00cfd86` (branch `feat/tui-help-overlay`). **Review status: R0 round 1 folded
-(0C / 1I / 4M / 2N — all folded; the correctness spine [complete key list, modal gate, no height gate,
-scope] verified SOUND). Review: `reviews/R0-spec-help-overlay-round-1.md`. Awaiting R0 round 2.**
+**Source baseline:** `main` @ `00cfd86` (branch `feat/tui-help-overlay`). **Review status: R0-GREEN (2 rounds; 0 Critical / 0 Important). Reviews:
+`reviews/R0-spec-help-overlay-round-{1,2}.md` (round 1: 0C/1I — footer must advertise `?`; round 2:
+0C/0I/0M/1N). Correctness spine [complete key list, top-level modal gate, no height gate, scope] verified.
+Cleared to implement.**
 **Lineage:** parked item 1 (user-requested; design SETTLED earlier this session — "full keymap, same on every
 tab; per-tab dropped as unnecessary since the action keys are global"). User standing-authorized proceeding.
 
@@ -10,7 +11,7 @@ tab; per-tab dropped as unnecessary since the action keys are global"). User sta
 A `?` shortcut in the Browse screen opens a **full-keymap help overlay** listing every keyboard shortcut,
 grouped. The reconcile action keys are GLOBAL (work from any tab), so the overlay is the **SAME on every
 tab** — there is no per-tab content. **Value:** the ~20 action keys (esp. the reconcile + bulk keys) have NO
-on-screen hint today — the footer (`draw_edit.rs:154-155`) advertises only navigation + `p` + `q`.
+on-screen hint today — the footer (`draw_edit.rs:156-162`, text 159-160) advertises only nav + `p` + `q`.
 
 ## Behavior
 - **Open:** `?` (KeyCode::Char('?'), confirmed FREE) in `EditorScreen::Browse` sets a new `EditorApp.help_open`
