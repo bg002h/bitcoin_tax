@@ -4,7 +4,18 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
-## ✅ fix: round sub-satoshi BTC amounts (Gemini import unblocked) — SHIPPED (2026-07-03)
+## 🔲 `?` help overlay (btctax-tui-edit) — DESIGN SETTLED, PARKED (2026-07-03)
+
+Add a `?` shortcut that opens a **full-keymap help overlay** in the Browse screen. **Design settled with
+the user (per-tab dropped as unnecessary):** the reconcile action keys are all GLOBAL (work from any tab),
+so the overlay is the SAME on every tab — grouped **Navigation** (`Tab`/`⇧Tab`, `←/→` year [mark
+year-tabs-only], `j/k`, `PgUp/Dn`, `g/G`) / **Reconcile** (`c o r f v s d l u i m` + `b B` + `a A` + `z`) /
+**App** (`p` profile, `?` help, `q`/`Esc` quit). Value: the ~17 reconcile keys currently have NO on-screen
+hint (footer only shows nav + `p` + `q` — `draw_edit.rs:154`). Presentation: a centered modal overlay
+(reuse the existing overlay pattern in `draw_edit.rs`, drawn after content); dismiss with `?`/`Esc`/`q`.
+Content source: a single static keymap list (one source of truth; consider deriving the footer from it too).
+Scope: `btctax-tui-edit` only (new key in the Browse handler `main.rs:~340` + a `draw_help` overlay + a
+`help_open` bool on `EditorApp`). Small — one pass. NOT yet spec'd/R0'd (still needs the gate before code).
 
 User-reported bug: `btctax import .../ReadOnly/*` → `gemini row 2: fractional satoshi in BTC amount
 "0.0010216163"`. Gemini exports 10-dp internal-ledger artifacts (fee splits / interest / averaged fills —
