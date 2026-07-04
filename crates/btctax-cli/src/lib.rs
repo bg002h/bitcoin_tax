@@ -2,6 +2,7 @@
 //! ingest (btctax-adapters), and the pure projection (btctax-core) into the Phase-1 command surface
 //! (spec §11). The library is I/O-explicit and deterministic; the binary (`main.rs`) is a thin clap
 //! dispatch. PRIVACY: tests use only temp vaults + synthetic fixtures; no real user file is ever read.
+pub mod bulk_estimated;
 pub mod cmd;
 pub mod config;
 pub mod donation_details;
@@ -14,8 +15,9 @@ pub mod tax_profile;
 pub use config::CliConfig;
 pub use session::{
     BulkFilter, BulkIncomeFilter, BulkIncomePlan, BulkIncomeRow, BulkLinkPlan, BulkLinkRow,
-    BulkResolvePlan, BulkResolveRow, BulkStiFilter, BulkStiPlan, BulkStiRow, BulkVoidPlan,
-    BulkVoidRow, Frame, MatchAction, MatchProposal, Session,
+    BulkReclassifyOutflowPlan, BulkReclassifyOutflowRow, BulkResolvePlan, BulkResolveRow,
+    BulkStiFilter, BulkStiPlan, BulkStiRow, BulkVoidPlan, BulkVoidRow, Frame, MatchAction,
+    MatchProposal, Session,
 };
 
 #[derive(Debug, thiserror::Error)]

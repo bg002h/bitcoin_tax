@@ -3038,3 +3038,751 @@ fn apply_self_transfer_passthrough_drops_both_legs() {
         "both legs vanish cleanly"
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// bulk-reclassify-outflow (Cycle 5 — the LAST) — `Session::bulk_reclassify_outflow_plan` +
+// `cmd::reconcile::{bulk_reclassify_outflow_plan, apply_bulk_reclassify_outflow}` + the
+// `bulk_estimated` side-table. The bulk analog of the single `o`: sweep MANY pending outflows to a
+// `Dispose{Sell|Spend}` with the daily-close FMV as ESTIMATED proceeds, flagged persistently. Load-
+// bearing [#a]: a MISSING-PRICE candidate is EXCLUDED (counted), NEVER emitted as a Sell with
+// fabricated proceeds (a SILENT misreport). Estimated gain = round_cents(fmv − Σ pending legs basis),
+// never double-counted across the batch (the fold's single chronological pass draws the pool down).
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+use btctax_core::event::{Acquire, BasisSource, TransferOut};
+use btctax_core::persistence::append_import_batch;
+use btctax_core::LedgerEvent;
+use time::UtcOffset;
+
+/// One wallet, TWO lots of DIFFERENT bases, and configurable outflows. Returns (vault, wallet, [acq_a,
+/// acq_b], out_ids). `acq_a` (basis $40) is acquired BEFORE `acq_b` (basis $80) so FIFO draws A first.
+fn reclass_batch_vault(
+    dir: &std::path::Path,
+    outs: &[(&str, i64, time::OffsetDateTime)],
+) -> (std::path::PathBuf, WalletId, [EventId; 2], Vec<EventId>) {
+    let vault = dir.join("reclass-batch.pgp");
+    let mut session = Session::create(&vault, &pp()).unwrap();
+    let w = wallet_a();
+    let mkid = |r: &str| EventId::import(Source::Coinbase, SourceRef::new(r));
+    let acq_a = mkid("racq-a");
+    let acq_b = mkid("racq-b");
+
+    let mut batch = vec![
+        LedgerEvent {
+            id: acq_a.clone(),
+            utc_timestamp: datetime!(2025-01-15 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(w.clone()),
+            payload: EventPayload::Acquire(Acquire {
+                sat: 100_000,
+                usd_cost: dec!(40.00),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ComputedFromCost,
+            }),
+        },
+        LedgerEvent {
+            id: acq_b.clone(),
+            utc_timestamp: datetime!(2025-01-20 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(w.clone()),
+            payload: EventPayload::Acquire(Acquire {
+                sat: 100_000,
+                usd_cost: dec!(80.00),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ComputedFromCost,
+            }),
+        },
+    ];
+    let mut out_ids = Vec::new();
+    for (label, sat, ts) in outs {
+        let id = mkid(label);
+        out_ids.push(id.clone());
+        batch.push(LedgerEvent {
+            id,
+            utc_timestamp: *ts,
+            original_tz: UtcOffset::UTC,
+            wallet: Some(w.clone()),
+            payload: EventPayload::TransferOut(TransferOut {
+                sat: *sat,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        });
+    }
+    append_import_batch(session.conn(), &batch).unwrap();
+    session.save().unwrap();
+    (vault, w, [acq_a, acq_b], out_ids)
+}
+
+/// The plan selects pending outs in-frame, applies the from_wallet filter, sorts by date, and carries
+/// a RESOLVED per-row FMV; the 2024 out (o4) is out of frame and the unpriced one (o5) is excluded.
+#[test]
+fn bulk_reclassify_outflow_plan_lists_pending_outflows() {
+    use btctax_cli::{BulkFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [o1, o2, o3, _o4, _o5]) = bulk_fixture(dir.path());
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    // Year(2025), wallet None → o1 (2025-03-01), o3 (2025-03-01), o2 (2025-06-15); o5 (2025-04-01)
+    // is EXCLUDED (unpriced), o4 (2024) is out of frame.
+    let plan = s
+        .bulk_reclassify_outflow_plan(BulkFilter {
+            frame: Frame::Year(2025),
+            from_wallet: None,
+        })
+        .unwrap();
+    let included: Vec<_> = plan.included.iter().map(|r| r.out_event.clone()).collect();
+    // o1 and o3 share 2025-03-01; sort is stable by date so both precede o2. Assert as a set on date.
+    assert_eq!(
+        included.len(),
+        3,
+        "o1 + o3 + o2 included (o5 unpriced, o4 out of frame)"
+    );
+    assert!(included.contains(&o1) && included.contains(&o3) && included.contains(&o2));
+    assert_eq!(
+        plan.excluded_missing_price, 1,
+        "o5 (2025-04-01) has no price"
+    );
+    assert_eq!(
+        plan.included.last().unwrap().out_event,
+        o2,
+        "latest-dated row sorts last"
+    );
+
+    // from_wallet = Some(B) → only o3 (wallet B, 2025-03-01).
+    let plan_b = s
+        .bulk_reclassify_outflow_plan(BulkFilter {
+            frame: Frame::Year(2025),
+            from_wallet: Some(wallet_b()),
+        })
+        .unwrap();
+    let included_b: Vec<_> = plan_b
+        .included
+        .iter()
+        .map(|r| r.out_event.clone())
+        .collect();
+    assert_eq!(
+        included_b,
+        vec![o3],
+        "from_wallet filter keeps only wallet-B outs"
+    );
+}
+
+/// [#a] A row whose date has NO bundled price is NOT in `included` and IS counted in
+/// `excluded_missing_price` — so a persisted batch NEVER creates a Sell with fabricated proceeds.
+#[test]
+fn bulk_reclassify_outflow_plan_excludes_missing_price() {
+    use btctax_cli::{BulkFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [_o1, _o2, _o3, _o4, o5]) = bulk_fixture(dir.path());
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    let plan = s
+        .bulk_reclassify_outflow_plan(BulkFilter {
+            frame: Frame::Year(2025),
+            from_wallet: Some(wallet_a()),
+        })
+        .unwrap();
+    let included: Vec<_> = plan.included.iter().map(|r| r.out_event.clone()).collect();
+    assert!(
+        !included.contains(&o5),
+        "the unpriced out (o5, 2025-04-01) is NOT reclassified"
+    );
+    assert_eq!(plan.excluded_missing_price, 1, "o5 surfaced as excluded");
+}
+
+/// [#a defense-in-depth] Fed a NON-plan id (an unpriced out, or a bogus id), the apply's
+/// `let Some(fmv)=… else continue` skips it — never a `0`/fabricated proceeds appended.
+#[test]
+fn bulk_reclassify_outflow_apply_never_emits_fabricated_proceeds() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [_o1, _o2, _o3, _o4, o5]) = bulk_fixture(dir.path());
+    let bogus = EventId::import(Source::Coinbase, SourceRef::new("no-such-out"));
+
+    // o5 (unpriced) + a bogus id → both skipped; nothing appended.
+    let n = cmd::reconcile::apply_bulk_reclassify_outflow(
+        &vault,
+        &pp(),
+        vec![o5.clone(), bogus],
+        DisposeKind::Sell,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(
+        n, 0,
+        "no fabricated-proceeds Sell appended for an unpriced / bogus id"
+    );
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let ro_count = btctax_core::persistence::load_all(s.conn())
+        .unwrap()
+        .into_iter()
+        .filter(|e| matches!(e.payload, EventPayload::ReclassifyOutflow(_)))
+        .count();
+    assert_eq!(ro_count, 0, "no ReclassifyOutflow appended");
+    assert!(
+        s.bulk_estimated().unwrap().is_empty(),
+        "no side-table row for a skipped row"
+    );
+}
+
+/// The row's `fmv` equals `fmv_of(date, sat)`, and the persisted decision's
+/// `principal_proceeds_or_fmv` equals that same resolved FMV.
+#[test]
+fn bulk_reclassify_outflow_plan_resolves_fmv_as_proceeds() {
+    use btctax_cli::{BulkFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    // Single 100_000-sat outflow @ 2025-03-01 ($84,000/BTC → $84.00).
+    let (vault, _w, _acqs, outs) = reclass_batch_vault(
+        dir.path(),
+        &[("ro-1", 100_000, datetime!(2025-03-01 12:00:00 UTC))],
+    );
+    let o = outs[0].clone();
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    let plan = s
+        .bulk_reclassify_outflow_plan(BulkFilter {
+            frame: Frame::All,
+            from_wallet: None,
+        })
+        .unwrap();
+    assert_eq!(plan.included.len(), 1);
+    assert_eq!(
+        plan.included[0].fmv,
+        dec!(84.00),
+        "row.fmv == fmv_of(date, sat)"
+    );
+    drop(s);
+
+    cmd::reconcile::apply_bulk_reclassify_outflow(
+        &vault,
+        &pp(),
+        vec![o.clone()],
+        DisposeKind::Sell,
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let ro = btctax_core::persistence::load_all(s.conn())
+        .unwrap()
+        .into_iter()
+        .find_map(|e| match e.payload {
+            EventPayload::ReclassifyOutflow(ro) if ro.transfer_out_event == o => Some(ro),
+            _ => None,
+        })
+        .expect("a ReclassifyOutflow for o");
+    assert_eq!(
+        ro.principal_proceeds_or_fmv,
+        dec!(84.00),
+        "payload proceeds == row.fmv"
+    );
+    assert!(matches!(
+        ro.as_,
+        OutflowClass::Dispose {
+            kind: DisposeKind::Sell
+        }
+    ));
+}
+
+/// [gain] TWO lots of DIFFERENT bases consumed by one outflow → `estimated_gain ==
+/// round_cents(fmv − Σ pending legs basis)`, provably not a coincidental zero.
+#[test]
+fn bulk_reclassify_outflow_plan_estimated_gain_matches_pending_legs_basis() {
+    use btctax_cli::{BulkFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    // One 150_000-sat outflow spans lot A (100k @ $40) fully + lot B (50k @ $40.00 of $80/100k).
+    let (vault, _w, [acq_a, acq_b], outs) = reclass_batch_vault(
+        dir.path(),
+        &[("ro-span", 150_000, datetime!(2025-03-01 12:00:00 UTC))],
+    );
+    let o = outs[0].clone();
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    // fmv = $84,000/BTC × 150_000/1e8 = $126.00. Σ basis = $40.00 (all of A) + $40.00 (half of B) = $80.00.
+    let plan = s
+        .bulk_reclassify_outflow_plan(BulkFilter {
+            frame: Frame::All,
+            from_wallet: None,
+        })
+        .unwrap();
+    assert_eq!(plan.included.len(), 1);
+    let row = &plan.included[0];
+    assert_eq!(row.fmv, dec!(126.00), "resolved FMV");
+    assert_eq!(
+        row.basis_usd,
+        dec!(80.00),
+        "Σ pending legs basis (A $40 + half-B $40)"
+    );
+    assert_eq!(
+        row.estimated_gain,
+        dec!(46.00),
+        "round_cents(126.00 − 80.00)"
+    );
+    assert_ne!(
+        row.estimated_gain,
+        dec!(0),
+        "provably not a coincidental zero"
+    );
+
+    // Cross-check against the fold's pending legs directly (basis is proportional, not double-counted).
+    let (state, _) = s.project().unwrap();
+    let pt = state
+        .pending_reconciliation
+        .iter()
+        .find(|p| p.event == o)
+        .unwrap();
+    let legs_basis: btctax_core::Usd = pt.legs.iter().map(|l| l.usd_basis).sum();
+    assert_eq!(legs_basis, dec!(80.00));
+    let a_leg = pt
+        .legs
+        .iter()
+        .find(|l| l.lot_id.origin_event_id == acq_a)
+        .unwrap();
+    let b_leg = pt
+        .legs
+        .iter()
+        .find(|l| l.lot_id.origin_event_id == acq_b)
+        .unwrap();
+    assert_eq!(a_leg.sat, 100_000, "all of A consumed");
+    assert_eq!(b_leg.sat, 50_000, "half of B consumed");
+}
+
+/// [the ordering-hazard pin] Lot A then Lot B (higher basis) in one wallet; TWO outflows (60k @ d1,
+/// 80k @ d2>d1) so #2 spills A→B. `total_estimated_gain == Σ row.estimated_gain` AND row2's A-leg is
+/// exactly A's REMAINDER after row1 (40k), never A's original size (100k).
+#[test]
+fn bulk_reclassify_outflow_plan_batch_gain_not_double_counted() {
+    use btctax_cli::{BulkFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _w, [acq_a, _acq_b], outs) = reclass_batch_vault(
+        dir.path(),
+        &[
+            ("ro-d1", 60_000, datetime!(2025-03-01 12:00:00 UTC)), // fmv $50.40
+            ("ro-d2", 80_000, datetime!(2025-06-15 12:00:00 UTC)), // fmv $54.00, spills A→B
+        ],
+    );
+    let (o1, o2) = (outs[0].clone(), outs[1].clone());
+    let s = Session::open(&vault, &pp()).unwrap();
+
+    let plan = s
+        .bulk_reclassify_outflow_plan(BulkFilter {
+            frame: Frame::All,
+            from_wallet: None,
+        })
+        .unwrap();
+    assert_eq!(plan.included.len(), 2);
+    let r1 = plan.included.iter().find(|r| r.out_event == o1).unwrap();
+    let r2 = plan.included.iter().find(|r| r.out_event == o2).unwrap();
+    // o1: 60k from A → basis $24.00, fmv $50.40, gain $26.40.
+    assert_eq!(r1.basis_usd, dec!(24.00));
+    assert_eq!(r1.estimated_gain, dec!(26.40));
+    // o2: 40k A-remainder ($16) + 40k B ($32) → basis $48.00, fmv $54.00, gain $6.00.
+    assert_eq!(r2.basis_usd, dec!(48.00));
+    assert_eq!(r2.estimated_gain, dec!(6.00));
+    // NOT double-counted: the plan total equals the sum of per-row gains.
+    assert_eq!(
+        plan.total_estimated_gain,
+        r1.estimated_gain + r2.estimated_gain,
+        "Σ row gains == plan total (no double-count)"
+    );
+    assert_eq!(plan.total_estimated_gain, dec!(32.40));
+
+    // row2's A-leg is exactly A's REMAINDER (40k) after row1 drew 60k — NEVER A's original 100k.
+    let (state, _) = s.project().unwrap();
+    let pt2 = state
+        .pending_reconciliation
+        .iter()
+        .find(|p| p.event == o2)
+        .unwrap();
+    let a_leg2 = pt2
+        .legs
+        .iter()
+        .find(|l| l.lot_id.origin_event_id == acq_a)
+        .unwrap();
+    assert_eq!(
+        a_leg2.sat, 40_000,
+        "o2 consumes A's 40k remainder, not A's original 100k"
+    );
+}
+
+/// Scope-lock: the CLI `--kind` parser accepts sell|spend and REJECTS gift/donate (and junk).
+#[test]
+fn bulk_reclassify_outflow_scope_excludes_gift_and_donate() {
+    use btctax_cli::eventref::parse_dispose_kind;
+    assert!(matches!(
+        parse_dispose_kind("sell").unwrap(),
+        DisposeKind::Sell
+    ));
+    assert!(matches!(
+        parse_dispose_kind("spend").unwrap(),
+        DisposeKind::Spend
+    ));
+    for bad in ["gift", "donate", "GIFT", "Donate"] {
+        let err = parse_dispose_kind(bad).unwrap_err();
+        assert!(
+            matches!(err, CliError::Usage(_)),
+            "{bad} must be a Usage error"
+        );
+    }
+    assert!(parse_dispose_kind("junk").is_err());
+}
+
+/// `--kind` is UNIFORM: every persisted row carries the chosen `Dispose{kind}`.
+#[test]
+fn bulk_reclassify_outflow_apply_uniform_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _w, _acqs, outs) = reclass_batch_vault(
+        dir.path(),
+        &[
+            ("ro-u1", 40_000, datetime!(2025-03-01 12:00:00 UTC)),
+            ("ro-u2", 40_000, datetime!(2025-06-15 12:00:00 UTC)),
+        ],
+    );
+    cmd::reconcile::apply_bulk_reclassify_outflow(
+        &vault,
+        &pp(),
+        outs.clone(),
+        DisposeKind::Spend,
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let kinds: Vec<_> = btctax_core::persistence::load_all(s.conn())
+        .unwrap()
+        .into_iter()
+        .filter_map(|e| match e.payload {
+            EventPayload::ReclassifyOutflow(ro) => Some(ro.as_),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(kinds.len(), 2);
+    assert!(
+        kinds.iter().all(|k| matches!(
+            k,
+            OutflowClass::Dispose {
+                kind: DisposeKind::Spend
+            }
+        )),
+        "every row is Dispose{{Spend}}"
+    );
+}
+
+/// `fee_usd` is always None on the emitted payload, yet the on-chain `fee_sat` still flows through to
+/// consumption (the lot is drawn down by principal + fee).
+#[test]
+fn bulk_reclassify_outflow_fee_usd_none_but_fee_sat_flows() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("reclass-fee.pgp");
+    let mut session = Session::create(&vault, &pp()).unwrap();
+    let w = wallet_a();
+    let acq = EventId::import(Source::Coinbase, SourceRef::new("fee-acq"));
+    let out = EventId::import(Source::Coinbase, SourceRef::new("fee-out"));
+    let batch = vec![
+        LedgerEvent {
+            id: acq.clone(),
+            utc_timestamp: datetime!(2025-01-15 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(w.clone()),
+            payload: EventPayload::Acquire(Acquire {
+                sat: 1_000_000,
+                usd_cost: dec!(100.00),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ComputedFromCost,
+            }),
+        },
+        LedgerEvent {
+            id: out.clone(),
+            utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(w.clone()),
+            payload: EventPayload::TransferOut(TransferOut {
+                sat: 100_000,
+                fee_sat: Some(5_000),
+                dest_addr: None,
+                txid: None,
+            }),
+        },
+    ];
+    append_import_batch(session.conn(), &batch).unwrap();
+    session.save().unwrap();
+    drop(session);
+
+    cmd::reconcile::apply_bulk_reclassify_outflow(
+        &vault,
+        &pp(),
+        vec![out.clone()],
+        DisposeKind::Sell,
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let ro = btctax_core::persistence::load_all(s.conn())
+        .unwrap()
+        .into_iter()
+        .find_map(|e| match e.payload {
+            EventPayload::ReclassifyOutflow(ro) => Some(ro),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        ro.fee_usd, None,
+        "fee_usd is always None on a bulk reclassify"
+    );
+
+    // The fee_sat flowed: the backing lot is drawn down by principal (100k) + fee (5k) = 105k.
+    let (state, _) = s.project().unwrap();
+    let lot = state
+        .lots
+        .iter()
+        .find(|l| l.lot_id.origin_event_id == acq)
+        .unwrap();
+    assert_eq!(
+        lot.remaining_sat, 895_000,
+        "lot drawn down by principal + fee (fee_sat flows)"
+    );
+}
+
+/// Empty refuses to write: a no-candidate frame yields an empty plan, and applying an empty id list
+/// appends nothing.
+#[test]
+fn bulk_reclassify_outflow_empty_refuses() {
+    use btctax_cli::{BulkFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _ids) = bulk_fixture(dir.path());
+    let s = Session::open(&vault, &pp()).unwrap();
+    let plan = s
+        .bulk_reclassify_outflow_plan(BulkFilter {
+            frame: Frame::Year(2030),
+            from_wallet: None,
+        })
+        .unwrap();
+    assert!(plan.included.is_empty(), "no pending outs in 2030");
+    assert_eq!(plan.total_sat, 0);
+    assert_eq!(plan.excluded_missing_price, 0);
+    drop(s);
+
+    let before = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::load_all(s.conn()).unwrap().len()
+    };
+    let n = cmd::reconcile::apply_bulk_reclassify_outflow(
+        &vault,
+        &pp(),
+        vec![],
+        DisposeKind::Sell,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(n, 0, "empty id list appends nothing");
+    let after = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::load_all(s.conn()).unwrap().len()
+    };
+    assert_eq!(before, after, "no event appended for an empty batch");
+}
+
+/// Phase 1 (`bulk_reclassify_outflow_plan`) is READ-ONLY: computing the plan writes nothing.
+#[test]
+fn bulk_reclassify_outflow_dry_run_writes_nothing() {
+    use btctax_cli::{BulkFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _ids) = bulk_fixture(dir.path());
+    let before = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::load_all(s.conn()).unwrap().len()
+    };
+    let plan = cmd::reconcile::bulk_reclassify_outflow_plan(
+        &vault,
+        &pp(),
+        BulkFilter {
+            frame: Frame::All,
+            from_wallet: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        !plan.included.is_empty(),
+        "plan must select rows (so the no-write is meaningful)"
+    );
+    let after = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::load_all(s.conn()).unwrap().len()
+    };
+    assert_eq!(
+        before, after,
+        "computing the plan must not append any event"
+    );
+}
+
+/// [side-table A+] After apply + REOPEN, the `bulk_estimated` side-table has a row per applied
+/// `transfer_out_event` (== `Disposal.event`), and a control single-item `o` reclassify is NOT flagged.
+#[test]
+fn bulk_reclassify_outflow_estimated_flag_persists_and_joins() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _w, _acqs, outs) = reclass_batch_vault(
+        dir.path(),
+        &[
+            ("ro-flag-bulk", 40_000, datetime!(2025-03-01 12:00:00 UTC)),
+            ("ro-flag-solo", 40_000, datetime!(2025-06-15 12:00:00 UTC)),
+        ],
+    );
+    let (bulk_out, solo_out) = (outs[0].clone(), outs[1].clone());
+
+    // Bulk-reclassify the first; single-`o` reclassify the second (a control — NEVER flagged).
+    cmd::reconcile::apply_bulk_reclassify_outflow(
+        &vault,
+        &pp(),
+        vec![bulk_out.clone()],
+        DisposeKind::Sell,
+        now(),
+    )
+    .unwrap();
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &solo_out.canonical(),
+        OutflowClass::Dispose {
+            kind: DisposeKind::Sell,
+        },
+        dec!(54.00),
+        None,
+        None,
+        now(),
+    )
+    .unwrap();
+
+    // REOPEN: the flag persisted for the bulk out only.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let flagged = s.bulk_estimated().unwrap();
+    assert!(
+        flagged.contains_key(&bulk_out),
+        "bulk reclassify is flagged"
+    );
+    assert!(
+        !flagged.contains_key(&solo_out),
+        "single-`o` reclassify is NOT flagged (control)"
+    );
+
+    // The flag key JOINS against Disposal.event (both disposals exist in the projection).
+    let (state, _) = s.project().unwrap();
+    assert!(
+        state.disposals.iter().any(|d| d.event == bulk_out),
+        "the flagged key == a real Disposal.event (the Disposals-tab join lands)"
+    );
+}
+
+/// [R0-M2] A CLI apply that fails mid-batch leaves NO ReclassifyOutflow appends AND NO `bulk_estimated`
+/// rows (the bare-`?`-before-`save` discard covers the side-table too).
+#[test]
+fn bulk_reclassify_outflow_cli_mid_batch_failure_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _w, _acqs, outs) = reclass_batch_vault(
+        dir.path(),
+        &[
+            ("ro-mb1", 40_000, datetime!(2025-03-01 12:00:00 UTC)),
+            ("ro-mb2", 40_000, datetime!(2025-06-15 12:00:00 UTC)),
+        ],
+    );
+
+    // Inject a persistent BEFORE-INSERT trigger that ABORTS the SECOND decision append (decision_seq 2).
+    {
+        let mut session = Session::open(&vault, &pp()).unwrap();
+        session
+            .conn()
+            .execute_batch(
+                "CREATE TRIGGER inject_reclass_midbatch BEFORE INSERT ON events \
+                 WHEN NEW.decision_seq = 2 \
+                 BEGIN SELECT RAISE(ABORT, 'injected mid-batch append failure'); END;",
+            )
+            .unwrap();
+        session.save().unwrap();
+    }
+
+    // The apply opens its OWN session; append #1 commits in-memory, append #2 aborts → `?` returns
+    // Err BEFORE save → the whole in-memory session is discarded (nothing saved).
+    let res = cmd::reconcile::apply_bulk_reclassify_outflow(
+        &vault,
+        &pp(),
+        outs.clone(),
+        DisposeKind::Sell,
+        now(),
+    );
+    assert!(res.is_err(), "a mid-batch abort surfaces as Err");
+
+    // REOPEN: neither the appends nor the side-table marks landed.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let ro_count = btctax_core::persistence::load_all(s.conn())
+        .unwrap()
+        .into_iter()
+        .filter(|e| matches!(e.payload, EventPayload::ReclassifyOutflow(_)))
+        .count();
+    assert_eq!(
+        ro_count, 0,
+        "no ReclassifyOutflow appended after a mid-batch failure"
+    );
+    assert!(
+        s.bulk_estimated().unwrap().is_empty(),
+        "no phantom side-table rows after a mid-batch failure"
+    );
+}
+
+/// E2E: after apply, `state.disposals` grows by the included count, `pending_reconciliation` shrinks
+/// by the same, and NO new Hard blocker appears.
+#[test]
+fn bulk_reclassify_outflow_apply_then_disposals_reflect() {
+    use btctax_cli::{BulkFilter, Frame};
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _w, _acqs, _outs) = reclass_batch_vault(
+        dir.path(),
+        &[
+            ("ro-e1", 40_000, datetime!(2025-03-01 12:00:00 UTC)),
+            ("ro-e2", 40_000, datetime!(2025-06-15 12:00:00 UTC)),
+        ],
+    );
+
+    let (disp_before, pend_before) = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (st, _) = s.project().unwrap();
+        (st.disposals.len(), st.pending_reconciliation.len())
+    };
+    assert_eq!(pend_before, 2, "both outs start pending");
+
+    let plan = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        s.bulk_reclassify_outflow_plan(BulkFilter {
+            frame: Frame::All,
+            from_wallet: None,
+        })
+        .unwrap()
+    };
+    let ids: Vec<_> = plan.included.iter().map(|r| r.out_event.clone()).collect();
+    let n =
+        cmd::reconcile::apply_bulk_reclassify_outflow(&vault, &pp(), ids, DisposeKind::Sell, now())
+            .unwrap();
+    assert_eq!(n, 2);
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert_eq!(
+        state.disposals.len(),
+        disp_before + 2,
+        "disposals grew by the included count"
+    );
+    assert_eq!(
+        state.pending_reconciliation.len(),
+        pend_before - 2,
+        "pending shrank by the same count"
+    );
+    // No new Hard blocker (crucially no fabricated-proceeds artifact / FmvMissing).
+    assert!(
+        state
+            .blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::FmvMissing),
+        "a priced reclassify batch introduces NO FmvMissing"
+    );
+}

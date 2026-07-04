@@ -4,7 +4,8 @@
 //! `out|cb-send`), so import rejoins parts[2..] and conflict takes the LAST part as the fingerprint.
 use crate::CliError;
 use btctax_core::{
-    EventId, Fingerprint, IncomeKind, LotId, LotPick, Source, SourceRef, TaxDate, Usd, WalletId,
+    DisposeKind, EventId, Fingerprint, IncomeKind, LotId, LotPick, Source, SourceRef, TaxDate, Usd,
+    WalletId,
 };
 use rust_decimal::Decimal;
 use std::str::FromStr;
@@ -127,6 +128,24 @@ pub fn parse_income_kind(s: &str) -> Result<IncomeKind, CliError> {
         "airdrop" => Ok(IncomeKind::Airdrop),
         "reward" => Ok(IncomeKind::Reward),
         _ => Err(CliError::Usage(format!("bad income kind {s:?}"))),
+    }
+}
+
+/// Parse a bulk-reclassify-outflow `--kind` argument. Accepts ONLY `sell`/`spend`; REJECTS `gift` and
+/// `donate` (and any other value) — the structural scope-lock [Q2]: `GiftOut`/`Donate` need a per-row
+/// `donee` and (for Donate) a qualified-appraisal FMV, so a uniform-across-many-rows bulk substitution
+/// of a market close price is semantically wrong. Those stay single-item (`reclassify-outflow`).
+pub fn parse_dispose_kind(s: &str) -> Result<DisposeKind, CliError> {
+    match s.to_ascii_lowercase().as_str() {
+        "sell" => Ok(DisposeKind::Sell),
+        "spend" => Ok(DisposeKind::Spend),
+        "gift" | "donate" => Err(CliError::Usage(format!(
+            "bulk-reclassify-outflow --kind {s:?} is out of scope: gift/donate need a per-row donee \
+             (and donate a qualified-appraisal FMV); use single-item `reclassify-outflow` instead"
+        ))),
+        _ => Err(CliError::Usage(format!(
+            "bad dispose kind {s:?} (expected sell|spend)"
+        ))),
     }
 }
 
