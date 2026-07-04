@@ -4,17 +4,22 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description = "Interactive terminal editor for reconciling the btctax Bitcoin tax ledger."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories = ["command-line-utilities", "finance"]
 
 [[bin]]
 name = "btctax-tui-edit"
 path = "src/main.rs"
 
 [dependencies]
-btctax-tui      = { path = "../btctax-tui" }
-btctax-cli      = { path = "../btctax-cli" }
-btctax-core     = { path = "../btctax-core" }
-btctax-store    = { path = "../btctax-store" }
-btctax-adapters = { path = "../btctax-adapters" }
+btctax-tui      = { path = "../btctax-tui", version = "0.1.0" }
+btctax-cli      = { path = "../btctax-cli", version = "0.1.0" }
+btctax-core     = { path = "../btctax-core", version = "0.1.0" }
+btctax-store    = { path = "../btctax-store", version = "0.1.0" }
+btctax-adapters = { path = "../btctax-adapters", version = "0.1.0" }
 # [R0-M1] Explicit pinned versions — NO [workspace.dependencies] table exists.
 ratatui      = "0.29"
 crossterm    = "0.28"

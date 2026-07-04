@@ -3,6 +3,11 @@ name = "btctax-cli"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
+description = "btctax — an offline, single-user US Bitcoin tax ledger (CLI: import, reconcile, and compute)."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories = ["command-line-utilities", "finance"]
 rust-version.workspace = true   # M3: enforce the workspace MSRV (1.88 — raised from 1.74, see FOLLOWUPS CI entry) like the other 3 crates
 
 [lib]
@@ -14,9 +19,9 @@ name = "btctax"
 path = "src/main.rs"
 
 [dependencies]
-btctax-core = { path = "../btctax-core" }
-btctax-store = { path = "../btctax-store" }
-btctax-adapters = { path = "../btctax-adapters" }
+btctax-core = { path = "../btctax-core", version = "0.1.0" }
+btctax-store = { path = "../btctax-store", version = "0.1.0" }
+btctax-adapters = { path = "../btctax-adapters", version = "0.1.0" }
 rust_decimal = { version = "1.36", default-features = false, features = ["std"] }
 time = { version = "0.3", features = ["macros", "parsing", "formatting"] }
 rusqlite = { version = "0.31", features = ["bundled"] } # cli_config side-table over the vault Connection
