@@ -175,6 +175,171 @@ fn verify_shows_pseudo_reconcile_active_advisory() {
     );
 }
 
+use btctax_cli::cmd::reconcile::PseudoApproveFilter;
+use btctax_core::PseudoKind;
+
+fn unclassified(rf: &str, ts: time::OffsetDateTime) -> LedgerEvent {
+    imp(
+        rf,
+        ts,
+        EventPayload::Unclassified(Unclassified {
+            raw: "weird".into(),
+        }),
+    )
+}
+fn now_ts() -> time::OffsetDateTime {
+    datetime!(2026-01-15 00:00 UTC)
+}
+
+/// [T5] `approve` materializes pseudo defaults as REAL (attested) decisions via the own-loop: after
+/// approval the ledger has a NEW real decision, the default is no longer `[PSEUDO]`, and it SURVIVES
+/// turning the mode off (it is real now — the whole point).
+#[test]
+fn approve_materializes_real_decisions_that_survive_mode_off() {
+    let inbound = vec![imp(
+        "in-1",
+        datetime!(2025-03-01 12:00 UTC),
+        EventPayload::TransferIn(TransferIn {
+            sat: 1_000_000,
+            src_addr: None,
+            txid: None,
+        }),
+    )];
+    let (_dir, vault) = make_vault(&inbound);
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+
+    let before = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        load_all(s.conn()).unwrap().len()
+    };
+    let n = cmd::reconcile::apply_bulk_pseudo_approve(
+        &vault,
+        &pp(),
+        PseudoApproveFilter::default(),
+        now_ts(),
+    )
+    .unwrap();
+    assert_eq!(n, 1, "the single unknown-basis inbound default is approved");
+
+    // A NEW real decision was persisted.
+    let after = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        load_all(s.conn()).unwrap().len()
+    };
+    assert_eq!(
+        after,
+        before + 1,
+        "approve persists exactly one real decision"
+    );
+
+    // Re-project (mode still on): the default is now governed by the REAL decision ⇒ NOT pseudo anymore.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (st, _cfg) = s.project().unwrap();
+        assert_eq!(st.lots.len(), 1);
+        assert!(
+            !st.lots[0].pseudo,
+            "an approved default is real ⇒ no longer [PSEUDO]"
+        );
+        assert_eq!(st.pseudo_synthetic_count, 0, "no synthetic remains for it");
+    }
+
+    // Turn the mode OFF: the approved (real) decision REMAINS — the inbound is a real $0 self-transfer lot,
+    // NOT an UnknownBasisInbound blocker.
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), false).unwrap();
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (st, _cfg) = s.project().unwrap();
+    assert!(
+        !st.blockers
+            .iter()
+            .any(|b| b.kind == btctax_core::BlockerKind::UnknownBasisInbound),
+        "the approved real decision persists after the mode is turned off"
+    );
+    assert_eq!(st.lots.len(), 1);
+    assert!(!st.lots[0].pseudo);
+}
+
+/// [T5] `approve --kind self-transfer` promotes ONLY the self-transfer defaults; the unclassified-row
+/// default stays pending (still `[PSEUDO]`). Deterministic own-loop filter.
+#[test]
+fn approve_filter_by_kind_promotes_only_that_type() {
+    let evs = vec![
+        imp(
+            "in-1",
+            datetime!(2025-03-01 12:00 UTC),
+            EventPayload::TransferIn(TransferIn {
+                sat: 1_000_000,
+                src_addr: None,
+                txid: None,
+            }),
+        ),
+        unclassified("u-1", datetime!(2025-03-01 13:00 UTC)),
+    ];
+    let (_dir, vault) = make_vault(&evs);
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+
+    // Two synthetic defaults present (one self-transfer, one raw).
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (st, _cfg) = s.project().unwrap();
+        assert_eq!(st.pseudo_synthetic_count, 2);
+    }
+    // Approve ONLY the self-transfer kind.
+    let n = cmd::reconcile::apply_bulk_pseudo_approve(
+        &vault,
+        &pp(),
+        PseudoApproveFilter {
+            kind: Some(PseudoKind::SelfTransferInbound),
+            ..Default::default()
+        },
+        now_ts(),
+    )
+    .unwrap();
+    assert_eq!(n, 1, "only the self-transfer default is approved");
+
+    // The raw (unclassified) default is STILL a pending synthetic.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (st, _cfg) = s.project().unwrap();
+    assert_eq!(
+        st.pseudo_synthetic_count, 1,
+        "the unclassified-row default is still pending (not approved)"
+    );
+}
+
+/// [T5] Revert is TOTAL: turning the mode off with NO approvals reverts the projection to real-only
+/// (the Hard blocker returns; no lot; 0 synthetics) — and NO fictional event was ever written.
+#[test]
+fn revert_is_total_when_nothing_approved() {
+    let inbound = vec![imp(
+        "in-1",
+        datetime!(2025-03-01 12:00 UTC),
+        EventPayload::TransferIn(TransferIn {
+            sat: 1_000_000,
+            src_addr: None,
+            txid: None,
+        }),
+    )];
+    let (_dir, vault) = make_vault(&inbound);
+    let n_events = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        load_all(s.conn()).unwrap().len()
+    };
+
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), false).unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (st, _cfg) = s.project().unwrap();
+    assert!(st
+        .blockers
+        .iter()
+        .any(|b| b.kind == btctax_core::BlockerKind::UnknownBasisInbound));
+    assert!(st.lots.is_empty());
+    assert_eq!(st.pseudo_synthetic_count, 0);
+    // Not one fictional event was written across on→off.
+    assert_eq!(load_all(s.conn()).unwrap().len(), n_events);
+}
+
 /// Synthetics are NEVER persisted by projection: after projecting in pseudo mode, `load_all` shows the
 /// SAME events (only `reconcile pseudo approve` writes). The event count is unchanged.
 #[test]

@@ -2,7 +2,8 @@
 //! non-interactive use; otherwise a secure prompt), calls one library command, renders, and sets the
 //! exit code (non-zero on FR9 hard blockers / on any CliError). NO business logic lives here.
 use btctax_cli::cli::{
-    Cli, Command, FeeArg, MethodArg, Optimize, OutKindArg, Pseudo, Reconcile, SelfTransferActionArg,
+    Cli, Command, FeeArg, MethodArg, Optimize, OutKindArg, Pseudo, PseudoKindArg, Reconcile,
+    SelfTransferActionArg,
 };
 use btctax_cli::{cmd, eventref, render, CliError};
 use btctax_core::{
@@ -1102,12 +1103,91 @@ fn dispatch_reconcile(
                          events were ever written). Any decisions you approved remain (they are real now)."
                     );
                 }
+                Pseudo::Approve {
+                    kind,
+                    wallet,
+                    year,
+                    dry_run,
+                    yes,
+                } => {
+                    let filter = btctax_cli::cmd::reconcile::PseudoApproveFilter {
+                        kind: kind.map(|k| match k {
+                            PseudoKindArg::SelfTransfer => {
+                                btctax_core::PseudoKind::SelfTransferInbound
+                            }
+                            PseudoKindArg::Raw => btctax_core::PseudoKind::RawInbound,
+                            PseudoKindArg::Conflict => btctax_core::PseudoKind::AcceptConflict,
+                        }),
+                        wallet: wallet
+                            .as_deref()
+                            .map(eventref::parse_wallet_id)
+                            .transpose()?,
+                        year,
+                    };
+                    let plan = cmd::reconcile::pseudo_approve_plan(vault, &pp, filter.clone())?;
+                    render_pseudo_approve_preview(&plan);
+                    if plan.is_empty() {
+                        println!("no pseudo defaults match the filter; nothing to approve");
+                        return Ok(());
+                    }
+                    if dry_run {
+                        return Ok(());
+                    }
+                    let confirmed = if yes {
+                        true
+                    } else {
+                        print!(
+                            "Promote {} pseudo default(s) to REAL attested decisions? [y/N] ",
+                            plan.len()
+                        );
+                        use std::io::Write;
+                        std::io::stdout().flush().ok();
+                        let mut line = String::new();
+                        std::io::stdin().read_line(&mut line)?;
+                        matches!(line.trim(), "y" | "Y" | "yes" | "YES")
+                    };
+                    if !confirmed {
+                        println!("aborted; nothing written");
+                        return Ok(());
+                    }
+                    let n = cmd::reconcile::apply_bulk_pseudo_approve(vault, &pp, filter, now)?;
+                    println!(
+                        "approved {n} pseudo default(s) as real decisions — they are no longer [PSEUDO]. \
+                         Turn the mode off with `reconcile pseudo off` when done."
+                    );
+                }
             }
             return Ok(());
         }
     };
     println!("Recorded decision {}", id.canonical());
     Ok(())
+}
+
+/// Render the pseudo-approve preview (sub-project 2, T5): each pseudo default's TYPE, its target event,
+/// and the target's wallet + tax-year — the rows that WOULD be promoted to real attested decisions.
+fn render_pseudo_approve_preview(rows: &[btctax_cli::cmd::reconcile::PseudoApproveRow]) {
+    if rows.is_empty() {
+        return;
+    }
+    println!("Pseudo defaults to approve (promote to REAL attested decisions):");
+    for r in rows {
+        let kind = match r.kind {
+            btctax_core::PseudoKind::SelfTransferInbound => "self-transfer-in ($0 basis)",
+            btctax_core::PseudoKind::RawInbound => "unclassified placeholder",
+            btctax_core::PseudoKind::AcceptConflict => "import-conflict accept-first",
+        };
+        let wallet = r
+            .wallet
+            .as_ref()
+            .map(render::wallet_label)
+            .unwrap_or_else(|| "(no wallet)".to_string());
+        let year = r
+            .year
+            .map(|y| y.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        println!("  [{kind}] {} | {wallet} | {year}", r.target.canonical());
+    }
 }
 
 /// Render the self-transfer match proposals (self-transfer-passthrough C3, Phase 1). Read-only preview:

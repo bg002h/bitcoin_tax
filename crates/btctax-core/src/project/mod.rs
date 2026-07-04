@@ -9,6 +9,7 @@ pub mod transition;
 pub use compliance::{disposal_compliance, ComplianceStatus, DisposalCompliance};
 pub use conservation::{conservation_report, ConservationReport};
 pub use evaluate::{evaluate_disposal, CandidateDisposal, EvaluateError, EvaluateOutcome};
+pub use resolve::{PseudoDefault, PseudoKind};
 
 use crate::event::LedgerEvent;
 use crate::price::PriceProvider;
@@ -66,6 +67,21 @@ pub fn project(
     // I-2: `resolve` takes (events, prices, config) — Task-12 transition effectiveness needs both.
     let resolution = resolve::resolve(events, prices, config);
     fold::fold(resolution, prices, config)
+}
+
+/// Pseudo-reconcile (sub-project 2): the ordered list of synthetic default decisions the projection WOULD
+/// inject in pseudo mode — the SAME `PseudoDefault`s carried on the `Resolution` (so "what you see == what
+/// you approve"). Pure/deterministic (NFR4). Pseudo mode is FORCED on for this computation, so `approve`
+/// can enumerate the defaults independent of the stored flag; each `PseudoDefault.decision` is a
+/// materializable REAL decision. NEVER writes anything — approve persists via the CLI `apply_bulk_*` loop.
+pub fn pseudo_plan(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+) -> Vec<PseudoDefault> {
+    let mut cfg = *config;
+    cfg.pseudo_reconcile = true;
+    resolve::resolve(events, prices, &cfg).pseudo_decisions
 }
 
 /// The cost-basis method currently in force for a wallet, plus its provenance — the UI-facing answer
