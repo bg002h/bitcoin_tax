@@ -376,103 +376,138 @@ pub fn persist_self_transfer_passthrough(
     Ok(id)
 }
 
-/// Append ONE `TransferLink { out_event, Wallet(dest) }` per `out_event`, then a SINGLE
-/// `save_or_rollback` (bulk-link-transfer D3). All-or-nothing.
+/// The shared bulk-persist loop every batch flow delegates to (bulk-resolve-conflict Task 1): refuse
+/// empty, snapshot, append EACH payload, and on ANY append error revert the WHOLE batch, then ONE save.
 ///
-/// # Empty guard
-/// An empty `out_events` (user unchecked everything) is REFUSED before any snapshot/append — a
-/// `NoChange` so the caller never appends zero + saves. The UI gate also refuses earlier; this is the
-/// belt-and-suspenders guard the `kat_persist_bulk_link_refuses_empty` KAT locks.
+/// # Empty guard [R0-M2]
+/// An empty `payloads` (user unchecked everything) is REFUSED BEFORE any snapshot/append — a
+/// `NoChange(CliError::Usage(empty_label.into()))`, so the caller never appends zero + saves. The
+/// `empty_label` is CALLER-SUPPLIED so each front-end preserves its EXACT "nothing selected" string
+/// (the re-point of the two shipped bulk flows is therefore truly byte-for-byte / zero-behavior).
 ///
-/// # [R0-I1] Mid-batch append rollback (the load-bearing distinction from the CLI path)
+/// # Mid-batch append rollback (the load-bearing distinction from the CLI path)
 /// `append_decision` commits per-call to the in-memory conn. If the append at row k>1 fails, appends
 /// 1..k-1 are ALREADY LIVE residue; a bare `?` would return `NoChange` (contract: "vault unchanged")
 /// while phantom decisions sit in the DB. So on ANY append error the WHOLE batch is reverted via
 /// `rollback(session, &pre, e.into())` (whole-DB restore to the pre-batch snapshot) — NOT `?`. A
 /// `save` failure likewise reverts the whole batch via `save_or_rollback`. Never a partial apply.
+pub fn persist_bulk_decisions(
+    session: &mut btctax_cli::Session,
+    payloads: Vec<btctax_core::EventPayload>,
+    now: time::OffsetDateTime,
+    empty_label: &str,
+) -> Result<usize, PersistError> {
+    if payloads.is_empty() {
+        return Err(PersistError::NoChange(btctax_cli::CliError::Usage(
+            empty_label.into(),
+        )));
+    }
+    let n = payloads.len();
+    let pre = session.snapshot()?;
+    for payload in payloads {
+        // Do NOT use `?` here: a mid-batch failure at row k>1 leaves appends 1..k-1 as live residue
+        // AND would leak a bare NoChange over phantom decisions. Revert the WHOLE batch.
+        if let Err(e) = btctax_core::persistence::append_decision(
+            session.conn(),
+            payload,
+            now,
+            time::UtcOffset::UTC,
+            None,
+        ) {
+            return Err(rollback(session, &pre, e.into()));
+        }
+    }
+    save_or_rollback(session, pre)?; // ONE save; on failure the whole batch reverts
+    Ok(n)
+}
+
+/// Append ONE `TransferLink { out_event, Wallet(dest) }` per `out_event`, then a SINGLE
+/// `save_or_rollback` (bulk-link-transfer D3). All-or-nothing. Builds its `Vec<EventPayload>` and
+/// delegates to the shared `persist_bulk_decisions` (Task 1) — the empty guard + mid-batch rollback +
+/// single save all live there. Passes its EXACT empty-label string so the re-point is zero-behavior.
 pub fn persist_bulk_link_transfer(
     session: &mut btctax_cli::Session,
     out_events: Vec<btctax_core::EventId>,
     dest: btctax_core::WalletId,
     now: time::OffsetDateTime,
 ) -> Result<usize, PersistError> {
-    if out_events.is_empty() {
-        return Err(PersistError::NoChange(btctax_cli::CliError::Usage(
-            "bulk link: nothing selected".into(),
-        )));
-    }
-    let pre = session.snapshot()?;
-    for out_event in &out_events {
-        let payload = btctax_core::EventPayload::TransferLink(btctax_core::event::TransferLink {
-            out_event: out_event.clone(),
-            in_event_or_wallet: btctax_core::TransferTarget::Wallet(dest.clone()),
-        });
-        // [R0-I1] Do NOT use `?` here: a mid-batch failure at row k>1 leaves appends 1..k-1 as live
-        // residue AND would leak a bare NoChange over phantom decisions. Revert the WHOLE batch.
-        if let Err(e) = btctax_core::persistence::append_decision(
-            session.conn(),
-            payload,
-            now,
-            time::UtcOffset::UTC,
-            None,
-        ) {
-            return Err(rollback(session, &pre, e.into()));
-        }
-    }
-    save_or_rollback(session, pre)?; // ONE save; on failure the whole batch reverts
-    Ok(out_events.len())
+    let payloads = out_events
+        .into_iter()
+        .map(|out_event| {
+            btctax_core::EventPayload::TransferLink(btctax_core::event::TransferLink {
+                out_event,
+                in_event_or_wallet: btctax_core::TransferTarget::Wallet(dest.clone()),
+            })
+        })
+        .collect();
+    persist_bulk_decisions(session, payloads, now, "bulk link: nothing selected")
 }
 
 /// Append ONE `ClassifyInbound { transfer_in_event, SelfTransferMine{None,None} }` per `in_event`,
 /// then a SINGLE `save_or_rollback` (bulk-classify-inbound-self-transfer D3). All-or-nothing; each
-/// inbound is given the $0 conservative basis / receipt-date HP (non-taxable "my own coins").
-///
-/// # Empty guard [R0-M1]
-/// An empty `in_events` (user unchecked everything) is REFUSED BEFORE any snapshot/append — a
-/// `NoChange(CliError::Usage(..))` (same shape as `persist_bulk_link_transfer`) so the caller never
-/// appends zero + saves. The UI gate also refuses earlier; this is the belt-and-suspenders guard the
-/// `persist_bulk_sti_refuses_empty` KAT locks.
-///
-/// # [bulk-I1] Mid-batch append rollback (the load-bearing distinction from the CLI path)
-/// `append_decision` commits per-call to the in-memory conn. If the append at row k>1 fails, appends
-/// 1..k-1 are ALREADY LIVE residue; a bare `?` would return `NoChange` (contract: "vault unchanged")
-/// while phantom decisions sit in the DB. So on ANY append error the WHOLE batch is reverted via
-/// `rollback(session, &pre, e.into())` (whole-DB restore to the pre-batch snapshot) — NOT `?`. A
-/// `save` failure likewise reverts the whole batch via `save_or_rollback`. Never a partial apply.
+/// inbound is given the $0 conservative basis / receipt-date HP (non-taxable "my own coins"). Builds
+/// its `Vec<EventPayload>` and delegates to the shared `persist_bulk_decisions` (Task 1) — the empty
+/// guard + mid-batch rollback + single save all live there. Passes its EXACT empty-label string so the
+/// re-point is zero-behavior.
 pub fn persist_bulk_self_transfer_in(
     session: &mut btctax_cli::Session,
     in_events: Vec<btctax_core::EventId>,
     now: time::OffsetDateTime,
 ) -> Result<usize, PersistError> {
-    if in_events.is_empty() {
-        return Err(PersistError::NoChange(btctax_cli::CliError::Usage(
-            "bulk classify-inbound-self-transfer: nothing selected".into(),
-        )));
-    }
-    let pre = session.snapshot()?;
-    for in_event in &in_events {
-        let payload =
+    let payloads = in_events
+        .into_iter()
+        .map(|in_event| {
             btctax_core::EventPayload::ClassifyInbound(btctax_core::event::ClassifyInbound {
-                transfer_in_event: in_event.clone(),
+                transfer_in_event: in_event,
                 as_: btctax_core::InboundClass::SelfTransferMine {
                     basis: None,
                     acquired_at: None,
                 },
-            });
-        // [bulk-I1] Do NOT use `?` here: a mid-batch failure at row k>1 leaves appends 1..k-1 as live
-        // residue AND would leak a bare NoChange over phantom decisions. Revert the WHOLE batch.
-        if let Err(e) = btctax_core::persistence::append_decision(
-            session.conn(),
-            payload,
-            now,
-            time::UtcOffset::UTC,
-            None,
-        ) {
-            return Err(rollback(session, &pre, e.into()));
-        }
-    }
-    save_or_rollback(session, pre)?; // ONE save; on failure the whole batch reverts
-    Ok(in_events.len())
+            })
+        })
+        .collect();
+    persist_bulk_decisions(
+        session,
+        payloads,
+        now,
+        "bulk classify-inbound-self-transfer: nothing selected",
+    )
+}
+
+/// Append ONE `SupersedeImport` (accept) or `RejectImport` (reject) per `conflict_event`, then a SINGLE
+/// `save_or_rollback` (bulk-resolve-conflict D3). All-or-nothing; a thin wrapper that builds the
+/// per-row payload from the batch-wide `kind` and delegates to `persist_bulk_decisions` (Task 1) — the
+/// empty guard + mid-batch rollback + single save all live there.
+///
+/// # Non-revocable [G2]
+/// `SupersedeImport`/`RejectImport` are EXCLUDED from `is_revocable_payload`, so a wrong accept/reject
+/// CANNOT be voided in-editor (a later void fires `DecisionConflict`). The confirm modal carries the
+/// Tier-B non-revocable warning (NOT a typed-word gate, which is reserved for the §7.4 attest).
+pub fn persist_bulk_resolve_conflict(
+    session: &mut btctax_cli::Session,
+    conflict_events: Vec<btctax_core::EventId>,
+    kind: crate::edit::form::ResolveKind,
+    now: time::OffsetDateTime,
+) -> Result<usize, PersistError> {
+    use btctax_core::event::{RejectImport, SupersedeImport};
+    use btctax_core::EventPayload;
+    let payloads = conflict_events
+        .into_iter()
+        .map(|conflict_event| match kind {
+            crate::edit::form::ResolveKind::Accept => {
+                EventPayload::SupersedeImport(SupersedeImport { conflict_event })
+            }
+            crate::edit::form::ResolveKind::Reject => {
+                EventPayload::RejectImport(RejectImport { conflict_event })
+            }
+        })
+        .collect();
+    persist_bulk_decisions(
+        session,
+        payloads,
+        now,
+        "bulk resolve-conflict: nothing selected",
+    )
 }
 
 /// Append a `ClassifyRaw` decision event and atomically save the vault (chunk 4a, D2).
@@ -3858,6 +3893,109 @@ mod tests {
             .unwrap();
         let n = persist_bulk_link_transfer(&mut session, outs, cold_dest(), now).unwrap();
         assert_eq!(n, 3, "retry links all three cleanly");
+        let post2 = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post2.len(), pre.len() + 3);
+    }
+
+    // ── KAT-BULK-DECISIONS — persist_bulk_decisions direct unit KATs (Task 1) ─────────────────────
+
+    /// Build N `TransferLink { out_event, Wallet(cold) }` payloads over `synth_outs` — a concrete
+    /// payload vec to drive the shared helper directly (any decision payload would do).
+    fn synth_link_payloads(n: usize) -> Vec<btctax_core::EventPayload> {
+        synth_outs(n)
+            .into_iter()
+            .map(|out_event| {
+                btctax_core::EventPayload::TransferLink(btctax_core::event::TransferLink {
+                    out_event,
+                    in_event_or_wallet: btctax_core::TransferTarget::Wallet(cold_dest()),
+                })
+            })
+            .collect()
+    }
+
+    /// Empty `payloads` → `NoChange` carrying the CALLER-SUPPLIED label; log byte-unchanged.
+    #[test]
+    fn kat_persist_bulk_decisions_refuses_empty() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_store::Passphrase;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bd-empty-pass";
+        bulk_seed(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let now = OffsetDateTime::from_unix_timestamp(1_700_002_000).unwrap();
+        let result = persist_bulk_decisions(&mut session, vec![], now, "custom-empty-label");
+        match result {
+            Err(PersistError::NoChange(btctax_cli::CliError::Usage(msg))) => {
+                assert_eq!(
+                    msg, "custom-empty-label",
+                    "empty label passes through verbatim"
+                );
+            }
+            other => panic!("empty payloads must refuse with NoChange(Usage); got {other:?}"),
+        }
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(post, pre, "refusal writes nothing");
+    }
+
+    /// A mid-batch APPEND failure at row k>1 reverts the WHOLE batch via the shared helper — event-log
+    /// byte-unchanged, NO phantom residue, retry clean.
+    #[test]
+    fn kat_persist_bulk_decisions_reverts_mid_batch() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_store::Passphrase;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-bd-midbatch-pass";
+        bulk_seed(&vault, &key, pp_str);
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let pre = load_all_ordered(session.conn()).unwrap();
+        let pre_max_seq = pre.iter().filter_map(|r| r.decision_seq).max().unwrap_or(0);
+        assert_eq!(pre_max_seq, 1, "pre max decision_seq must be 1");
+
+        // Fail the SECOND append: pre_max+1 (seq 2) commits, pre_max+2 (seq 3) aborts.
+        let target = pre_max_seq + 2;
+        session
+            .conn()
+            .execute_batch(&format!(
+                "CREATE TRIGGER inject_bd_midbatch_fail BEFORE INSERT ON events \
+                 WHEN NEW.decision_seq = {target} \
+                 BEGIN SELECT RAISE(ABORT, 'injected mid-batch append failure'); END;"
+            ))
+            .unwrap();
+
+        let now = OffsetDateTime::from_unix_timestamp(1_700_002_000).unwrap();
+        let result =
+            persist_bulk_decisions(&mut session, synth_link_payloads(3), now, "bd: nothing");
+        assert!(
+            matches!(result, Err(PersistError::RolledBack(_))),
+            "mid-batch append failure must revert the whole batch (RolledBack); got {result:?}"
+        );
+        let post = load_all_ordered(session.conn()).unwrap();
+        assert_eq!(
+            post, pre,
+            "whole batch reverted — no phantom decision from append #1 survives"
+        );
+
+        // Retry after removing the injection is clean (all three appended).
+        session
+            .conn()
+            .execute_batch("DROP TRIGGER inject_bd_midbatch_fail;")
+            .unwrap();
+        let n = persist_bulk_decisions(&mut session, synth_link_payloads(3), now, "bd: nothing")
+            .unwrap();
+        assert_eq!(n, 3, "retry appends all three cleanly");
         let post2 = load_all_ordered(session.conn()).unwrap();
         assert_eq!(post2.len(), pre.len() + 3);
     }

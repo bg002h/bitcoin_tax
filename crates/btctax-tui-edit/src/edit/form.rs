@@ -1906,6 +1906,65 @@ pub fn bulk_sti_checked_totals(items: &[BulkStiRowItem]) -> (usize, Sat, Usd, us
     (count, sat, floor, missing)
 }
 
+// ── Bulk resolve-conflict flow types (bulk-resolve-conflict D3) ──────────────
+
+/// One preview-checklist row: a flagged import conflict + its `checked` (included) flag. Every row
+/// starts CHECKED; `Space`/`x` toggles `checked` (exclude). The `current`/`new` summaries are computed
+/// at open time (via `import_payload_summary` over the plan's STRUCTURED payloads) so the flow/modal
+/// render no live event lookups.
+#[derive(Clone)]
+pub struct BulkResolveRowItem {
+    /// The `ImportConflict` event id — the resolution target (`SupersedeImport`/`RejectImport` carry
+    /// this as `conflict_event`).
+    pub conflict_event: EventId,
+    /// The TARGET import event id whose payload the conflict proposes to supersede.
+    pub target: EventId,
+    /// Calendar date (tax tz) of the conflict event.
+    pub date: TaxDate,
+    /// One-line summary of the TARGET's CURRENT payload (kept on reject; replaced on accept).
+    pub current_summary: String,
+    /// One-line summary of the conflict's NEW payload (adopted on accept).
+    pub new_summary: String,
+    /// Short `new_fingerprint` disambiguator (table column).
+    pub new_fingerprint: String,
+    pub checked: bool,
+}
+
+/// Step in the bulk resolve-conflict flow (two steps — NO filter; the batch-wide accept/reject toggle
+/// is the ONLY param, per-row exclude is the precision tool).
+pub enum BulkResolveStep {
+    /// 1 — batch-wide Accept/Reject toggle (`←/→`); the ONLY "param".
+    Choose,
+    /// 2 — per-row exclude checklist over the live conflicts; `Space`/`x` toggles a row.
+    Preview,
+}
+
+/// Full state for the bulk resolve-conflict flow. The candidate rows are the live `ImportConflict`
+/// blockers (from `Session::bulk_resolve_conflict_plan`); `kind` is the batch-wide accept/reject choice.
+pub struct BulkResolveFlowState {
+    pub step: BulkResolveStep,
+    /// The batch-wide Accept/Reject choice (the ONLY param; the shipped `ResolveKind`).
+    pub kind: ResolveKind,
+    /// Preview checklist over the live conflicts (all start checked).
+    pub preview: TargetList<BulkResolveRowItem>,
+    /// Cross-step transient error (nothing selected).
+    pub error: Option<String>,
+}
+
+/// Payload for the bulk resolve-conflict confirmation modal — Tier-B NON-REVOCABLE (NOT typed-word;
+/// `SupersedeImport`/`RejectImport` are excluded from `is_revocable_payload`, so a wrong accept/reject
+/// CANNOT be voided). Captures the CHECKED rows' conflict-event ids + the count + the action.
+pub struct BulkResolveModalState {
+    pub kind: ResolveKind,
+    pub conflict_events: Vec<EventId>,
+    pub count: usize,
+}
+
+/// The count of CHECKED rows in a bulk resolve-conflict preview (footer + modal gate).
+pub fn bulk_resolve_checked_count(items: &[BulkResolveRowItem]) -> usize {
+    items.iter().filter(|i| i.checked).count()
+}
+
 /// The §A.5 basis label for a `Persistability`. `ForbiddenBroker2027` is never persisted (pre-filtered),
 /// so it maps to a placeholder that is unreachable at the modal.
 pub fn optimize_basis_label(p: Persistability) -> &'static str {

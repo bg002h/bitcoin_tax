@@ -564,6 +564,186 @@ fn reject_conflict_clears_import_conflict_blocker() {
     );
 }
 
+// ── bulk-resolve-conflict KATs (bulk-resolve-conflict Task 2) ────────────────
+
+/// Seed a vault with TWO Acquires (cf-1 = 30_000 cost, cf-2 = 20_000 cost), then re-import BOTH with a
+/// changed `usd_cost` (31_000 / 21_000) → TWO live `ImportConflict`s. Returns `(vault, [target1,
+/// target2])`. Accept adopts the new (higher) cost; reject keeps the current. PRIVACY: synthetic only.
+fn bulk_conflict_fixture(dir: &std::path::Path) -> (std::path::PathBuf, [EventId; 2]) {
+    use btctax_core::event::{Acquire, BasisSource};
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::LedgerEvent;
+    use time::UtcOffset;
+
+    let vault = dir.join("bulk_conflict.pgp");
+    let mut session = Session::create(&vault, &pp()).unwrap();
+    let wallet = WalletId::Exchange {
+        provider: "coinbase".into(),
+        account: "main".into(),
+    };
+    let t1 = EventId::import(Source::Coinbase, SourceRef::new("cf-1"));
+    let t2 = EventId::import(Source::Coinbase, SourceRef::new("cf-2"));
+    let acq = |sat: i64, cost| {
+        EventPayload::Acquire(Acquire {
+            sat,
+            usd_cost: cost,
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ComputedFromCost,
+        })
+    };
+    let mk = |id: &EventId, payload| LedgerEvent {
+        id: id.clone(),
+        utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+        original_tz: UtcOffset::UTC,
+        wallet: Some(wallet.clone()),
+        payload,
+    };
+    // v1 import.
+    append_import_batch(
+        session.conn(),
+        &[
+            mk(&t1, acq(1_000_000, dec!(30000))),
+            mk(&t2, acq(500_000, dec!(20000))),
+        ],
+    )
+    .unwrap();
+    session.save().unwrap();
+    // v2 re-import (changed cost) → two ImportConflicts.
+    append_import_batch(
+        session.conn(),
+        &[
+            mk(&t1, acq(1_000_000, dec!(31000))),
+            mk(&t2, acq(500_000, dec!(21000))),
+        ],
+    )
+    .unwrap();
+    session.save().unwrap();
+    (vault, [t1, t2])
+}
+
+/// The plan lists ONLY live `ImportConflict`s (structured current/new payloads + 8-char fingerprint);
+/// resolving one single-item drops it from a subsequent plan (structural idempotence).
+#[test]
+fn bulk_resolve_plan_lists_unresolved_conflicts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [t1, t2]) = bulk_conflict_fixture(dir.path());
+
+    let plan = cmd::reconcile::bulk_resolve_conflict_plan(&vault, &pp()).unwrap();
+    assert_eq!(plan.rows.len(), 2, "both live conflicts listed");
+    let targets: Vec<_> = plan.rows.iter().map(|r| r.target.clone()).collect();
+    assert!(
+        targets.contains(&t1) && targets.contains(&t2),
+        "rows join to the two import targets"
+    );
+    for r in &plan.rows {
+        // Structured: current = the v1 Acquire, new = the changed v2 Acquire (different cost).
+        match (&r.current_payload, &r.new_payload) {
+            (EventPayload::Acquire(cur), EventPayload::Acquire(new)) => {
+                assert_ne!(cur.usd_cost, new.usd_cost, "current cost != new cost");
+            }
+            other => panic!("expected Acquire current/new payloads, got {other:?}"),
+        }
+        assert_eq!(
+            r.new_fingerprint.len(),
+            8,
+            "8-char fingerprint disambiguator"
+        );
+        assert_ne!(r.conflict_event, r.target, "conflict event != target");
+    }
+
+    // Resolve ONE single-item → a later plan lists only the OTHER (resolved excluded).
+    let conflict1 = plan
+        .rows
+        .iter()
+        .find(|r| r.target == t1)
+        .unwrap()
+        .conflict_event
+        .canonical();
+    cmd::reconcile::accept_conflict(&vault, &pp(), &conflict1, now()).unwrap();
+    let plan2 = cmd::reconcile::bulk_resolve_conflict_plan(&vault, &pp()).unwrap();
+    assert_eq!(plan2.rows.len(), 1, "resolved conflict excluded from plan");
+    assert_eq!(
+        plan2.rows[0].target, t2,
+        "only the unresolved conflict remains"
+    );
+}
+
+/// E2E accept: every target's `ImportConflict` blocker clears AND the projection adopts each
+/// `new_payload` (total lot basis reflects the higher v2 costs: 31_000 + 21_000 = 52_000).
+#[test]
+fn bulk_resolve_cli_accept_adopts_new() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _) = bulk_conflict_fixture(dir.path());
+
+    let plan = cmd::reconcile::bulk_resolve_conflict_plan(&vault, &pp()).unwrap();
+    let conflict_events: Vec<_> = plan.rows.iter().map(|r| r.conflict_event.clone()).collect();
+    let n =
+        cmd::reconcile::apply_bulk_accept_conflicts(&vault, &pp(), conflict_events, now()).unwrap();
+    assert_eq!(n, 2, "two conflicts accepted");
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert!(
+        state
+            .blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::ImportConflict),
+        "all ImportConflict blockers cleared after bulk accept"
+    );
+    let total_basis: btctax_core::Usd = state.lots.iter().map(|l| l.usd_basis).sum();
+    assert_eq!(
+        total_basis,
+        dec!(52000),
+        "accept adopts each new_payload (higher v2 costs)"
+    );
+}
+
+/// E2E reject: every target's `ImportConflict` blocker clears AND the projection KEEPS each current
+/// payload (total lot basis reflects the original v1 costs: 30_000 + 20_000 = 50_000).
+#[test]
+fn bulk_resolve_cli_reject_keeps_current() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _) = bulk_conflict_fixture(dir.path());
+
+    let plan = cmd::reconcile::bulk_resolve_conflict_plan(&vault, &pp()).unwrap();
+    let conflict_events: Vec<_> = plan.rows.iter().map(|r| r.conflict_event.clone()).collect();
+    let n =
+        cmd::reconcile::apply_bulk_reject_conflicts(&vault, &pp(), conflict_events, now()).unwrap();
+    assert_eq!(n, 2, "two conflicts rejected");
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert!(
+        state
+            .blockers
+            .iter()
+            .all(|b| b.kind != BlockerKind::ImportConflict),
+        "all ImportConflict blockers cleared after bulk reject"
+    );
+    let total_basis: btctax_core::Usd = state.lots.iter().map(|l| l.usd_basis).sum();
+    assert_eq!(
+        total_basis,
+        dec!(50000),
+        "reject keeps each current payload (original v1 costs)"
+    );
+}
+
+/// The Phase-1 read (`bulk_resolve_conflict_plan`, which `--dry-run` invokes and then STOPS) writes
+/// nothing — a subsequent plan still lists both conflicts.
+#[test]
+fn bulk_resolve_cli_dry_run_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _) = bulk_conflict_fixture(dir.path());
+
+    let _preview = cmd::reconcile::bulk_resolve_conflict_plan(&vault, &pp()).unwrap();
+    let plan2 = cmd::reconcile::bulk_resolve_conflict_plan(&vault, &pp()).unwrap();
+    assert_eq!(
+        plan2.rows.len(),
+        2,
+        "the read/preview phase resolves nothing (dry-run writes nothing)"
+    );
+}
+
 // ── Task 13: safe-harbor allocate + attest ──────────────────────────────────
 
 #[test]

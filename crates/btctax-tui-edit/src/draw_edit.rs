@@ -9,12 +9,13 @@
 //! Unlock screen. This module performs no writes.
 
 use crate::edit::form::{
-    amount_label, basis_source_display, bulk_checked_totals, bulk_sti_checked_totals,
-    bulk_usd_floor_label, income_kind_display, wallet_label, BulkLinkFlowState, BulkLinkModalState,
-    BulkLinkStep, BulkStiFlowState, BulkStiModalState, BulkStiStep, ClassifyInboundModalState,
-    ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState, ClassifyRawStep,
-    ClassifyRawVariant, DisposalKind, FieldBuffer, InboundVariant, LinkMode, LinkTransferFlowState,
-    LinkTransferModalState, LinkTransferStep, MatchSelfTransfersFlowState,
+    amount_label, basis_source_display, bulk_checked_totals, bulk_resolve_checked_count,
+    bulk_sti_checked_totals, bulk_usd_floor_label, income_kind_display, wallet_label,
+    BulkLinkFlowState, BulkLinkModalState, BulkLinkStep, BulkResolveFlowState,
+    BulkResolveModalState, BulkResolveStep, BulkStiFlowState, BulkStiModalState, BulkStiStep,
+    ClassifyInboundModalState, ClassifyInboundStep, ClassifyRawFlowState, ClassifyRawModalState,
+    ClassifyRawStep, ClassifyRawVariant, DisposalKind, FieldBuffer, InboundVariant, LinkMode,
+    LinkTransferFlowState, LinkTransferModalState, LinkTransferStep, MatchSelfTransfersFlowState,
     MatchSelfTransfersModalState, MutationModalState, OptimizeAcceptFlowState,
     OptimizeAcceptModalState, OptimizeAcceptStep, OutflowKind, ProfileFormState,
     ReclassifyIncomeFlowState, ReclassifyIncomeModalState, ReclassifyIncomeStep,
@@ -364,6 +365,13 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.bulk_sti_modal.as_ref() {
         draw_bulk_sti_modal(frame, area, modal);
+    }
+    // Bulk resolve-conflict flow overlay (bulk-resolve-conflict D3).
+    if let Some(flow) = app.bulk_resolve_flow.as_mut() {
+        draw_bulk_resolve_flow(frame, area, flow);
+    }
+    if let Some(modal) = app.bulk_resolve_modal.as_ref() {
+        draw_bulk_resolve_modal(frame, area, modal);
     }
     // Match-self-transfers flow overlay (self-transfer-passthrough C3).
     if let Some(flow) = app.match_self_transfers_flow.as_mut() {
@@ -3752,6 +3760,212 @@ fn draw_bulk_sti_modal(frame: &mut Frame, area: Rect, modal: &BulkStiModalState)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Red))
         .title(" Confirm: bulk classify-inbound-self-transfer — WRITES THE VAULT ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Render the bulk resolve-conflict flow (bulk-resolve-conflict D3): step 1 = batch-wide Accept/Reject
+/// toggle; step 2 = per-row exclude checklist over the live conflicts (`date · target · current → new`).
+fn draw_bulk_resolve_flow(frame: &mut Frame, area: Rect, flow: &mut BulkResolveFlowState) {
+    let modal_rect = centered_rect(98, 26, area);
+    frame.render_widget(Clear, modal_rect);
+    let outer = Block::default().borders(Borders::ALL).title(
+        " BULK RESOLVE IMPORT CONFLICTS — accept (adopt new) or reject (keep current) MANY at once ",
+    );
+    let inner = outer.inner(modal_rect);
+    frame.render_widget(outer, modal_rect);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(0),
+            Constraint::Length(5),
+        ])
+        .split(inner);
+
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let hl = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    // Banner — the batch-wide action toggle (highlighted side).
+    let (accept_span, reject_span) = match flow.kind {
+        ResolveKind::Accept => (
+            Span::styled(
+                " ACCEPT ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  reject  "),
+        ),
+        ResolveKind::Reject => (
+            Span::raw("  accept  "),
+            Span::styled(
+                " REJECT ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ),
+    };
+    frame.render_widget(
+        Paragraph::new(vec![Line::from(vec![
+            Span::styled("action:  ", bold),
+            accept_span,
+            reject_span,
+            Span::styled(
+                match flow.kind {
+                    ResolveKind::Accept => "   (ACCEPT adopts each new payload)",
+                    ResolveKind::Reject => "   (REJECT keeps each current payload)",
+                },
+                Style::default().fg(Color::Cyan),
+            ),
+        ])]),
+        chunks[0],
+    );
+
+    match flow.step {
+        BulkResolveStep::Choose => {
+            let lines = vec![
+                Line::from(Span::styled("Step 1/2 — choose the batch-wide action", bold)),
+                Line::from(""),
+                Line::from(format!("  {} conflict(s) flagged", flow.preview.items.len())),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  These resolutions are NON-REVOCABLE (a wrong accept/reject cannot be voided).",
+                    Style::default().fg(Color::Yellow),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(lines), chunks[1]);
+        }
+        BulkResolveStep::Preview => {
+            let selected = flow.preview.table_state.selected();
+            let rows: Vec<Row> = flow
+                .preview
+                .items
+                .iter()
+                .enumerate()
+                .map(|(i, it)| {
+                    let base = if selected == Some(i) {
+                        hl
+                    } else {
+                        Style::default()
+                    };
+                    let mark = if it.checked { "[x]" } else { "[ ]" };
+                    let change = format!("{} → {}", it.current_summary, it.new_summary);
+                    Row::new(vec![
+                        Cell::from(mark).style(base),
+                        Cell::from(it.date.to_string()).style(base),
+                        Cell::from(it.target.canonical()).style(base),
+                        Cell::from(it.new_fingerprint.clone()).style(base),
+                        Cell::from(change).style(base),
+                    ])
+                })
+                .collect();
+            let header = Row::new(
+                ["", "date", "target", "new-fp", "current → new"]
+                    .iter()
+                    .map(|h| Cell::from(*h).style(bold)),
+            );
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Length(3),
+                    Constraint::Length(12),
+                    Constraint::Length(22),
+                    Constraint::Length(10),
+                    Constraint::Min(24),
+                ],
+            )
+            .header(header);
+            frame.render_stateful_widget(table, chunks[1], &mut flow.preview.table_state);
+        }
+    }
+
+    // Footer: checked count + action (Preview only) + step hint + transient error.
+    let mut footer: Vec<Line> = Vec::new();
+    if matches!(flow.step, BulkResolveStep::Preview) {
+        let count = bulk_resolve_checked_count(&flow.preview.items);
+        let action = match flow.kind {
+            ResolveKind::Accept => "Accept",
+            ResolveKind::Reject => "Reject",
+        };
+        footer.push(Line::from(Span::styled(
+            format!("checked {count} · action {action}"),
+            bold,
+        )));
+    }
+    let hint = match flow.step {
+        BulkResolveStep::Choose => "←/→ (h/l): toggle accept/reject  Enter: preview  Esc: cancel",
+        BulkResolveStep::Preview => "↑/↓: scroll  Space/x: toggle  Enter: confirm  Esc: back",
+    };
+    footer.push(Line::from(Span::styled(
+        hint,
+        Style::default().fg(Color::Cyan),
+    )));
+    if let Some(err) = &flow.error {
+        footer.push(Line::from(Span::styled(
+            format!("⚠ {err}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+    frame.render_widget(Paragraph::new(footer), chunks[2]);
+}
+
+/// Render the bulk resolve-conflict confirmation modal — Tier-B NON-REVOCABLE (NOT typed-word). Reuses
+/// the shipped non-revocable warning framing, PLURALIZED, plus the checked count + the chosen action.
+fn draw_bulk_resolve_modal(frame: &mut Frame, area: Rect, modal: &BulkResolveModalState) {
+    let (action, adopt_note) = match modal.kind {
+        ResolveKind::Accept => ("ACCEPT", "(ACCEPT adopts each new payload)"),
+        ResolveKind::Reject => ("REJECT", "(REJECT keeps each current, discards new)"),
+    };
+    let lines: Vec<Line> =
+        vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Apply BULK ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                action,
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" over {} import conflict(s)?", modal.count),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(format!("    conflicts : {}   {adopt_note}", modal.count)),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  !! These decisions CANNOT be voided (non-revocable).",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "  A wrong accept/reject is recoverable only out-of-band (re-import / classify-raw).",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+        Line::from("  Appended as N decisions, saved via the vault's atomic write path."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  [Enter] Apply — writes the vault    [Esc] Cancel — writes nothing",
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from(""),
+    ];
+
+    let height = (lines.len() + 2) as u16;
+    let modal_rect = centered_rect(84, height, area);
+    frame.render_widget(Clear, modal_rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red))
+        .title(" Confirm: bulk resolve-conflict — WRITES THE VAULT (NON-REVOCABLE) ");
     let inner = block.inner(modal_rect);
     frame.render_widget(block, modal_rect);
     frame.render_widget(Paragraph::new(lines), inner);
