@@ -147,6 +147,40 @@ pub struct BulkResolvePlan {
     pub rows: Vec<BulkResolveRow>,
 }
 
+// ── Bulk void plan (bulk-void D1) ────────────────────────────────────────────
+//
+// The shared, READ-ONLY plan both the CLI (`cmd::reconcile::bulk_void_plan`) and the TUI `V` sweep
+// compute from the HELD session. Candidate set = the SINGLE shared predicate `voidable_decisions`
+// (btctax-core) over the projected events + blockers — the ONLY defense against voiding an EFFECTIVE
+// `SafeHarborAllocation` (#7 → Hard `DecisionConflict`). Each row carries the STRUCTURED decision
+// `payload` (front-ends render `summarize_void_payload`) + the precomputed `disposal_to_clear` (a
+// `LotSelection` target → `ls.disposal_event`) so the persist path never re-loads the log per row.
+// Appends/persists NOTHING; mirrors `bulk_resolve_conflict_plan`.
+
+/// One voidable reconcile decision in a bulk-void plan. STRUCTURED (front-ends render summaries).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkVoidRow {
+    /// The Decision event id to void (`VoidDecisionEvent.target_event_id`).
+    pub target_event_id: EventId,
+    /// `decision|seq` sequence number (display + deterministic sort).
+    pub seq: u64,
+    /// Calendar date (tax tz) of the decision event.
+    pub date: TaxDate,
+    /// The decision's payload — front-ends render `summarize_void_payload` (tag + what the void undoes).
+    pub payload: EventPayload,
+    /// Precomputed side-effect target: a `LotSelection` target → `Some(ls.disposal_event)` (whose
+    /// optimizer attestation the void clears); every other decision → `None`.
+    pub disposal_to_clear: Option<EventId>,
+}
+
+/// The read-only plan a bulk-void would execute: the voidable decisions (shared predicate), sorted by
+/// `seq`. No $ number (a void recognizes no gain); no time/wallet filter (per-row exclude is the
+/// front-end precision tool).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkVoidPlan {
+    pub rows: Vec<BulkVoidRow>,
+}
+
 // ── Self-transfer matcher (self-transfer-passthrough C2) ─────────────────────
 //
 // A READ-ONLY proposal helper (mirrors `bulk_link_transfer_plan`/`safe_harbor_residue`): it appends and
@@ -626,6 +660,39 @@ impl Session {
         }
         rows.sort_by_key(|r| r.date);
         Ok(BulkResolvePlan { rows })
+    }
+
+    /// READ-ONLY: compute the bulk-void plan (bulk-void D1). Candidate set = the SINGLE shared
+    /// predicate `btctax_core::voidable_decisions` over the projected events + blockers (Decision-id ∧
+    /// not-voided ∧ `is_revocable_payload` ∧ #7 `!effective_alloc`) — the ONLY defense against sweeping
+    /// an EFFECTIVE `SafeHarborAllocation` into a Hard `DecisionConflict`. Each row precomputes its
+    /// `disposal_to_clear` ONCE from the same event set (a `LotSelection` target → `ls.disposal_event`)
+    /// so `apply_bulk_void`/`persist_bulk_void` never re-load the log per row. Appends/persists NOTHING;
+    /// mirrors `bulk_resolve_conflict_plan`. Sorted by `seq` for deterministic display.
+    pub fn bulk_void_plan(&self) -> Result<BulkVoidPlan, CliError> {
+        let (events, state, _cfg) = self.load_events_and_project()?;
+        let mut rows: Vec<BulkVoidRow> = btctax_core::voidable_decisions(&events, &state.blockers)
+            .into_iter()
+            .map(|e| {
+                let seq = match &e.id {
+                    EventId::Decision { seq } => *seq,
+                    _ => 0,
+                };
+                let disposal_to_clear = match &e.payload {
+                    EventPayload::LotSelection(ls) => Some(ls.disposal_event.clone()),
+                    _ => None,
+                };
+                BulkVoidRow {
+                    target_event_id: e.id.clone(),
+                    seq,
+                    date: tax_date(e.utc_timestamp, e.original_tz),
+                    payload: e.payload.clone(),
+                    disposal_to_clear,
+                }
+            })
+            .collect();
+        rows.sort_by_key(|r| r.seq);
+        Ok(BulkVoidPlan { rows })
     }
 
     /// READ-ONLY: propose self-transfer matches (self-transfer-passthrough C2). Appends/persists NOTHING

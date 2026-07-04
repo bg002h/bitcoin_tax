@@ -744,6 +744,196 @@ fn bulk_resolve_cli_dry_run_writes_nothing() {
     );
 }
 
+// ── bulk-void (Cycle 3) ──────────────────────────────────────────────────────
+
+/// Import two Receives (→ two UnknownBasisInbound TransferIns) and classify BOTH as income (two
+/// revocable `ClassifyInbound` decisions). Returns (vault, [ti1, ti2]) — the TransferIn ids the
+/// classifications target (so voiding them re-exposes UnknownBasisInbound).
+fn vault_with_two_classified_inbounds(dir: &std::path::Path) -> (std::path::PathBuf, [String; 2]) {
+    let vault = dir.join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.join("k.asc")).unwrap();
+    let p = dir.join("cb_two_recv.csv");
+    std::fs::write(&p, "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-recv-1,2025-03-01 12:00:00 UTC,Receive,BTC,0.05000000,USD,84000.00,,,,,bc1qsender,\r\n\
+cb-recv-2,2025-04-01 12:00:00 UTC,Receive,BTC,0.03000000,USD,86000.00,,,,,bc1qsender,\r\n").unwrap();
+    cmd::import::run(&vault, &pp(), &[p]).unwrap();
+
+    let ti_refs: Vec<String> = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .filter(|e| matches!(e.payload, EventPayload::TransferIn(_)))
+            .map(|e| e.id.canonical())
+            .collect()
+    };
+    assert_eq!(ti_refs.len(), 2, "two TransferIns imported");
+    for ti in &ti_refs {
+        let class = InboundClass::Income {
+            kind: IncomeKind::Reward,
+            fmv: Some(btctax_cli::eventref::parse_usd_arg("4200.00").unwrap()),
+            business: false,
+        };
+        cmd::reconcile::classify_inbound(&vault, &pp(), ti, class, now()).unwrap();
+    }
+    (vault, [ti_refs[0].clone(), ti_refs[1].clone()])
+}
+
+/// The plan lists the voidable revocable decisions (both ClassifyInbounds); the Phase-1 read writes
+/// nothing (a second plan is identical), and applying it voids every row.
+#[test]
+fn bulk_void_dry_run_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _) = vault_with_two_classified_inbounds(dir.path());
+
+    let plan = cmd::reconcile::bulk_void_plan(&vault, &pp()).unwrap();
+    assert_eq!(
+        plan.rows.len(),
+        2,
+        "both ClassifyInbound decisions voidable"
+    );
+    assert!(
+        plan.rows.iter().all(|r| r.disposal_to_clear.is_none()),
+        "ClassifyInbound targets carry no disposal_to_clear"
+    );
+
+    // Dry-run == re-run the plan; nothing written.
+    let plan2 = cmd::reconcile::bulk_void_plan(&vault, &pp()).unwrap();
+    assert_eq!(
+        plan2.rows.len(),
+        2,
+        "the read/preview phase voids nothing (dry-run writes nothing)"
+    );
+}
+
+/// [R0-M3 / #7] `bulk_void_plan` OMITS an effective `SafeHarborAllocation` — so `apply_bulk_void`
+/// (whose targets are the plan rows) can never sweep it into a Hard `DecisionConflict`. A pre-2025 lot
+/// with NO 2025 disposition makes an unattested allocation ALREADY EFFECTIVE (Path B).
+#[test]
+fn bulk_void_plan_omits_effective_allocation() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    let p = dir.path().join("cb_pre.csv");
+    std::fs::write(&p, "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-pre,2024-01-15 12:00:00 UTC,Buy,BTC,0.20000000,USD,42500.00,8500.00,8550.00,50.00,,,\r\n").unwrap();
+    cmd::import::run(&vault, &pp(), &[p]).unwrap();
+    cmd::admin::set_pre2025_method(&vault, &pp(), LotMethod::Fifo, true).unwrap();
+    let alloc = cmd::reconcile::safe_harbor_allocate(
+        &vault,
+        &pp(),
+        AllocMethod::ActualPosition,
+        false,
+        now(),
+    )
+    .unwrap();
+
+    // Sanity: the allocation is effective (no timebar / unconservable blocker on its id). Scoped so the
+    // session's VaultLock is dropped before `bulk_void_plan` re-opens the vault.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert!(
+            state.blockers.iter().all(|b| {
+                !(matches!(
+                    b.kind,
+                    BlockerKind::SafeHarborTimebar | BlockerKind::SafeHarborUnconservable
+                ) && b.event.as_ref() == Some(&alloc))
+            }),
+            "the allocation must be effective (Path B) for this KAT"
+        );
+    }
+
+    let plan = cmd::reconcile::bulk_void_plan(&vault, &pp()).unwrap();
+    assert!(
+        !plan.rows.iter().any(|r| r.target_event_id == alloc),
+        "an effective allocation must NOT be a bulk-void candidate (#7)"
+    );
+    assert!(
+        plan.rows.is_empty(),
+        "the effective allocation is the only decision → plan is empty"
+    );
+}
+
+/// An INERT (time-barred) allocation STAYS a bulk-void candidate — voiding it applies cleanly.
+#[test]
+fn bulk_void_plan_includes_inert_allocation() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_timebarred(dir.path());
+    cmd::admin::set_pre2025_method(&vault, &pp(), LotMethod::Fifo, true).unwrap();
+    // Unattested → time-barred by the 2025 Sell → inert.
+    let alloc = cmd::reconcile::safe_harbor_allocate(
+        &vault,
+        &pp(),
+        AllocMethod::ActualPosition,
+        false,
+        now(),
+    )
+    .unwrap();
+
+    // Scoped so the session's VaultLock is dropped before `bulk_void_plan` re-opens the vault.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert!(
+            state.blockers.iter().any(|b| {
+                b.kind == BlockerKind::SafeHarborTimebar && b.event.as_ref() == Some(&alloc)
+            }),
+            "the allocation must be time-barred (inert) for this KAT"
+        );
+    }
+
+    let plan = cmd::reconcile::bulk_void_plan(&vault, &pp()).unwrap();
+    assert!(
+        plan.rows.iter().any(|r| r.target_event_id == alloc),
+        "an inert (time-barred) allocation MUST stay a bulk-void candidate"
+    );
+}
+
+/// E2E: bulk-voiding the two ClassifyInbound decisions re-exposes their UnknownBasisInbound blockers.
+#[test]
+fn bulk_void_cli_reexposes_inbound_blockers() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _) = vault_with_two_classified_inbounds(dir.path());
+
+    // Pre: both classified → no UnknownBasisInbound.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert!(
+            state
+                .blockers
+                .iter()
+                .all(|b| b.kind != BlockerKind::UnknownBasisInbound),
+            "both inbounds classified → no UnknownBasisInbound pre-void"
+        );
+    }
+
+    let plan = cmd::reconcile::bulk_void_plan(&vault, &pp()).unwrap();
+    let targets: Vec<_> = plan
+        .rows
+        .iter()
+        .map(|r| (r.target_event_id.clone(), r.disposal_to_clear.clone()))
+        .collect();
+    let n = cmd::reconcile::apply_bulk_void(&vault, &pp(), targets, now()).unwrap();
+    assert_eq!(n, 2, "two decisions voided");
+
+    // Post: both UnknownBasisInbound blockers re-exposed.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    let unknown = state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+        .count();
+    assert_eq!(
+        unknown, 2,
+        "voiding the two ClassifyInbounds re-exposes both UnknownBasisInbound blockers"
+    );
+}
+
 // ── Task 13: safe-harbor allocate + attest ──────────────────────────────────
 
 #[test]

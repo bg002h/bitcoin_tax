@@ -885,30 +885,9 @@ pub struct VoidModalState {
     pub is_safe_harbor: bool,
 }
 
-/// Return `true` when `payload` is a revocable decision type.
-///
-/// Revocable: TransferLink, ReclassifyOutflow, ClassifyInbound, ManualFmv, ClassifyRaw,
-/// MethodElection, LotSelection, ReclassifyIncome, SelfTransferPassthrough, SafeHarborAllocation.
-/// Non-revocable (excluded from void list): SupersedeImport, RejectImport, VoidDecisionEvent,
-/// and imported event payloads (Acquire, Income, Dispose, TransferOut, TransferIn, Unclassified,
-/// ImportConflict — these carry Import EventIds, not Decision EventIds, so they cannot appear in
-/// the void list; the check on Decision-id'd events guards the decision payload variants only).
-pub fn is_revocable_payload(payload: &btctax_core::EventPayload) -> bool {
-    use btctax_core::EventPayload;
-    matches!(
-        payload,
-        EventPayload::TransferLink(_)
-            | EventPayload::ReclassifyOutflow(_)
-            | EventPayload::ClassifyInbound(_)
-            | EventPayload::ManualFmv(_)
-            | EventPayload::ClassifyRaw(_)
-            | EventPayload::MethodElection(_)
-            | EventPayload::LotSelection(_)
-            | EventPayload::ReclassifyIncome(_)
-            | EventPayload::SelfTransferPassthrough(_)
-            | EventPayload::SafeHarborAllocation(_)
-    )
-}
+// The voidable-decision predicate now lives in btctax-core (`btctax_core::is_revocable_payload`) so
+// the CLI (`Session::bulk_void_plan`) and the TUI share ONE copy (SPEC_bulk_void Task 1). Callers
+// reference it directly via `btctax_core::is_revocable_payload` (was `edit::form::is_revocable_payload`).
 
 // ── Select-lots flow types ────────────────────────────────────────────────────
 
@@ -1963,6 +1942,70 @@ pub struct BulkResolveModalState {
 /// The count of CHECKED rows in a bulk resolve-conflict preview (footer + modal gate).
 pub fn bulk_resolve_checked_count(items: &[BulkResolveRowItem]) -> usize {
     items.iter().filter(|i| i.checked).count()
+}
+
+// ── Bulk-void flow types (bulk-void D3) ──────────────────────────────────────
+
+/// The persist-layer target of one void in a bulk-void batch: the decision id to void + its
+/// precomputed `disposal_to_clear` (a `LotSelection` target → `Some(ls.disposal_event)`, else `None`).
+/// Precomputed ONCE by `open_bulk_void_flow` from the snapshot (mirrors `Session::bulk_void_plan`), so
+/// `persist_bulk_void` never re-loads the log per row.
+#[derive(Clone)]
+pub struct VoidTarget {
+    pub target_event_id: EventId,
+    pub disposal_to_clear: Option<EventId>,
+}
+
+/// One preview-checklist row for the bulk-void sweep: a voidable decision + its `checked` (included)
+/// flag. Every row starts CHECKED; `Space`/`x` toggles `checked` (exclude). The tag/summary are
+/// computed at open time via `summarize_void_payload` so the flow/modal render no live event lookups.
+#[derive(Clone)]
+pub struct BulkVoidRowItem {
+    /// The Decision event id to void.
+    pub target_event_id: EventId,
+    /// `decision|seq` sequence number (table column + deterministic sort).
+    pub seq: u64,
+    /// Payload tag (`summarize_void_payload`) — e.g. "ClassifyInbound", "LotSelection".
+    pub payload_tag: &'static str,
+    /// One-line summary of what the void UNDOES (the inner target).
+    pub target_summary: String,
+    /// Precomputed side-effect target: a `LotSelection` → `Some(ls.disposal_event)` (re-exposes the
+    /// disposal to the default method + clears its optimizer attestation on void); else `None`.
+    pub disposal_to_clear: Option<EventId>,
+    pub checked: bool,
+}
+
+/// Full state for the bulk-void flow (a single per-row-exclude checklist step — NO batch-wide param;
+/// void is single-valued). The candidate rows are the shared `voidable_decisions` predicate output.
+pub struct BulkVoidFlowState {
+    /// Preview checklist over the voidable decisions (all start checked).
+    pub preview: TargetList<BulkVoidRowItem>,
+    /// Cross-step transient error (nothing selected).
+    pub error: Option<String>,
+}
+
+/// Payload for the bulk-void confirmation modal — Tier-B NON-REVOCABLE + high blast-radius (red border,
+/// prominent warning, NOT a typed-word — Tier-C is reserved for the §7.4 attest batch). Captures the
+/// CHECKED rows' `VoidTarget`s + the count + how many are `LotSelection` voids (the blast radius).
+pub struct BulkVoidModalState {
+    pub targets: Vec<VoidTarget>,
+    pub count: usize,
+    /// How many of the checked voids are `LotSelection`s that re-expose disposals + clear attestations.
+    pub lot_selection_count: usize,
+}
+
+/// The count of CHECKED rows in a bulk-void preview (footer + modal gate).
+pub fn bulk_void_checked_count(items: &[BulkVoidRowItem]) -> usize {
+    items.iter().filter(|i| i.checked).count()
+}
+
+/// The count of CHECKED rows that are `LotSelection` voids (blast-radius line — `disposal_to_clear` is
+/// `Some` exactly for `LotSelection` targets).
+pub fn bulk_void_lot_selection_checked_count(items: &[BulkVoidRowItem]) -> usize {
+    items
+        .iter()
+        .filter(|i| i.checked && i.disposal_to_clear.is_some())
+        .count()
 }
 
 /// The §A.5 basis label for a `Persistability`. `ForbiddenBroker2027` is never persisted (pre-filtered),
