@@ -1,0 +1,28 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-optimize-consult 1  btctax "btctax manual"
+.SH NAME
+consult \- Mode\-2 read\-only pre\-trade what\-if (§C.3): tax\-min lots + ST/LT split + federal tax + ST→LT timing. NOTHING is written — no event, no side\-table row. Tax decision\-support only; not buy/sell/hold advice
+.SH SYNOPSIS
+\fBconsult\fR <\fB\-\-sell\fR> [\fB\-\-wallet\fR] [\fB\-\-at\fR] [\fB\-\-proceeds\fR] [\fB\-\-fmv\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Mode\-2 read\-only pre\-trade what\-if (§C.3): tax\-min lots + ST/LT split + federal tax + ST→LT timing. NOTHING is written — no event, no side\-table row. Tax decision\-support only; not buy/sell/hold advice
+.SH OPTIONS
+.TP
+\fB\-\-sell\fR \fI<SELL>\fR
+Hypothetical sale amount in satoshis (required)
+.TP
+\fB\-\-wallet\fR \fI<WALLET>\fR
+Wallet to sell from, e.g. `self:cold` or `exchange:coinbase:default` (required; per\-wallet pool is mandatory post\-2025)
+.TP
+\fB\-\-at\fR \fI<AT>\fR
+Sale date for the what\-if (YYYY\-MM\-DD; defaults to today UTC if omitted)
+.TP
+\fB\-\-proceeds\fR \fI<PROCEEDS>\fR
+Explicit USD proceeds for the hypothetical sale. Required when `\-\-at` is a future date with no bundled dataset price and `\-\-fmv` is not used. Mutually exclusive with `\-\-fmv`
+.TP
+\fB\-\-fmv\fR
+Use the bundled daily\-close FMV for `\-\-at` instead of an explicit proceeds amount. A future date with no dataset price will return a ProceedsRequired error. Mutually exclusive with `\-\-proceeds`
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

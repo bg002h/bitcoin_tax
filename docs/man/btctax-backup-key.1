@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-backup-key 1  btctax "btctax manual"
+.SH NAME
+backup\-key \- Export the passphrase\-protected key
+.SH SYNOPSIS
+\fBbackup\-key\fR <\fB\-\-out\fR> [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Export the passphrase\-protected key
+.SH OPTIONS
+.TP
+\fB\-\-out\fR \fI<OUT>\fR
+File to write the exported key to: an ASCII\-armored, passphrase(S2K)\-encrypted private
+key, owner\-only (mode 0600). Identical format to `init \-\-key\-backup`.
+
+FORMAT (structure — NOT a real key):
+  \-\-\-\-\-BEGIN PGP PRIVATE KEY BLOCK\-\-\-\-\-
+  ... base64 armor of the S2K\-encrypted secret key ...
+  \-\-\-\-\-END PGP PRIVATE KEY BLOCK\-\-\-\-\-
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)

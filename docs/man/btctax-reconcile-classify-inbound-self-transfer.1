@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-classify-inbound-self-transfer 1  btctax "btctax manual"
+.SH NAME
+classify\-inbound\-self\-transfer \- Classify an inbound TransferIn as an inbound self\-transfer ("my own coins" returning) — non\-taxable, creates a fresh lot. `\-\-basis` defaults to $0 (conservative; fires the honest zero\-basis advisory when omitted); `\-\-acquired` defaults to the receipt date (short\-term)
+.SH SYNOPSIS
+\fBclassify\-inbound\-self\-transfer\fR [\fB\-\-basis\fR] [\fB\-\-acquired\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIIN_REF\fR> 
+.SH DESCRIPTION
+Classify an inbound TransferIn as an inbound self\-transfer ("my own coins" returning) — non\-taxable, creates a fresh lot. `\-\-basis` defaults to $0 (conservative; fires the honest zero\-basis advisory when omitted); `\-\-acquired` defaults to the receipt date (short\-term)
+.SH OPTIONS
+.TP
+\fB\-\-basis\fR \fI<BASIS>\fR
+
+.TP
+\fB\-\-acquired\fR \fI<ACQUIRED>\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIIN_REF\fR>
+

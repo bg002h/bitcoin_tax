@@ -1,0 +1,23 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-import-selections 1  btctax "btctax manual"
+.SH NAME
+import\-selections \- §A.4 Batch import LotSelections from a CSV (disposal_ref,origin_event_id,split_sequence,sat)
+.SH SYNOPSIS
+\fBimport\-selections\fR [\fB\-h\fR|\fB\-\-help\fR] <\fICSV\fR> 
+.SH DESCRIPTION
+§A.4 Batch import LotSelections from a CSV (disposal_ref,origin_event_id,split_sequence,sat)
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fICSV\fR>
+CSV of lot picks imported as LotSelection decisions (§A.4). The header is REQUIRED and
+validated loudly; rows sharing a disposal_ref are grouped into a single decision.
+disposal_ref is the disposal event\*(Aqs ref (disposals.csv `event` column); origin_event_id
+is the lot\*(Aqs origin (lots.csv `origin_event` column).
+
+FORMAT (header + one sample row):
+  disposal_ref,origin_event_id,split_sequence,sat
+  import|gemini|trade|T\-2.O\-2,import|coinbase|X,0,1000000

@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-classify-raw 1  btctax "btctax manual"
+.SH NAME
+classify\-raw \- Resolve an Unclassified row from a JSON imported payload
+.SH SYNOPSIS
+\fBclassify\-raw\fR <\fB\-\-payload\-json\fR> [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET\fR> 
+.SH DESCRIPTION
+Resolve an Unclassified row from a JSON imported payload
+.SH OPTIONS
+.TP
+\fB\-\-payload\-json\fR \fI<PAYLOAD_JSON>\fR
+A JSON\-encoded imported EventPayload (serde externally\-tagged: `{"Variant":{...}}`) to
+resolve the Unclassified target as. Must be an IMPORTED variant — Acquire, Income,
+Dispose, TransferOut, TransferIn, or Unclassified. USD fields (usd_cost, fee_usd, …) are
+decimal STRINGS; `sat` is an integer.
+
+FORMAT (Acquire example):
+  {"Acquire":{"sat":2000000,"usd_cost":"1680.00","fee_usd":"5.00","basis_source":"ExchangeProvided"}}
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fITARGET\fR>
+

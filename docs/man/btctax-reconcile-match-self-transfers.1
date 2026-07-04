@@ -1,0 +1,35 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-match-self-transfers 1  btctax "btctax manual"
+.SH NAME
+match\-self\-transfers \- Match unreconciled inbound + outbound legs as self\-transfers (self\-transfer\-passthrough C3). With no \-\-in/\-\-out: PREVIEW the proposed pairs (read\-only). With \-\-in and \-\-out: confirm ONE pair (DROP for a same\-wallet passthrough, RELOCATE for a cross\-wallet transfer). NEVER automatic
+.SH SYNOPSIS
+\fBmatch\-self\-transfers\fR [\fB\-\-in\fR] [\fB\-\-out\fR] [\fB\-\-action\fR] [\fB\-\-dry\-run\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Match unreconciled inbound + outbound legs as self\-transfers (self\-transfer\-passthrough C3). With no \-\-in/\-\-out: PREVIEW the proposed pairs (read\-only). With \-\-in and \-\-out: confirm ONE pair (DROP for a same\-wallet passthrough, RELOCATE for a cross\-wallet transfer). NEVER automatic
+.SH OPTIONS
+.TP
+\fB\-\-in\fR \fI<IN_REF>\fR
+Confirm this in\-leg (TransferIn eventref); requires \-\-out
+.TP
+\fB\-\-out\fR \fI<OUT_REF>\fR
+Confirm this out\-leg (TransferOut eventref); requires \-\-in
+.TP
+\fB\-\-action\fR \fI<ACTION>\fR
+Override the suggested action (else the proposal\*(Aqs topology\-derived action is used)
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+drop: Same\-wallet passthrough → SelfTransferPassthrough (both legs skipped, non\-taxable)
+.IP \(bu 2
+relocate: Cross\-wallet transfer → TransferLink (relocate the lots to the destination wallet)
+.RE
+.TP
+\fB\-\-dry\-run\fR
+Print the preview and exit without writing (conflicts with \-\-in/\-\-out)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)

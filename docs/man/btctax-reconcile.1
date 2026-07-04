@@ -1,0 +1,86 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile 1  btctax "btctax manual"
+.SH NAME
+reconcile \- Emit a reconciliation decision event
+.SH SYNOPSIS
+\fBreconcile\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Emit a reconciliation decision event
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+reconcile\-link\-transfer(1)
+Confirm a self\-transfer (TransferLink)
+.TP
+reconcile\-classify\-inbound\-income(1)
+Classify an inbound TransferIn as income
+.TP
+reconcile\-classify\-inbound\-gift(1)
+Classify an inbound TransferIn as a received gift
+.TP
+reconcile\-classify\-inbound\-self\-transfer(1)
+Classify an inbound TransferIn as an inbound self\-transfer ("my own coins" returning) — non\-taxable, creates a fresh lot. `\-\-basis` defaults to $0 (conservative; fires the honest zero\-basis advisory when omitted); `\-\-acquired` defaults to the receipt date (short\-term)
+.TP
+reconcile\-reclassify\-outflow(1)
+Reclassify a pending TransferOut
+.TP
+reconcile\-set\-fmv(1)
+Set a manual FMV on an event
+.TP
+reconcile\-void(1)
+Void a revocable decision
+.TP
+reconcile\-classify\-raw(1)
+Resolve an Unclassified row from a JSON imported payload
+.TP
+reconcile\-accept\-conflict(1)
+Accept an import conflict
+.TP
+reconcile\-reject\-conflict(1)
+Reject an import conflict
+.TP
+reconcile\-safe\-harbor\-allocate(1)
+Path\-B safe\-harbor allocate (from the actual pre\-2025 position)
+.TP
+reconcile\-safe\-harbor\-attest(1)
+Attest an existing allocation as timely
+.TP
+reconcile\-select\-lots(1)
+§A.4 Specific\-ID: pick the exact lots a disposal consumes
+.TP
+reconcile\-import\-selections(1)
+§A.4 Batch import LotSelections from a CSV (disposal_ref,origin_event_id,split_sequence,sat)
+.TP
+reconcile\-reclassify\-income(1)
+SE\-completion Chunk C: flip `business` (and optionally `kind`) on an already\-imported Income event
+.TP
+reconcile\-set\-donation\-details(1)
+Store Form 8283 Section\-B donation + appraiser details for a donation event. The event ref is the TransferOut EventId from the removals.csv \*(Aqevent\*(Aq column
+.TP
+reconcile\-show\-donation\-details(1)
+Show stored Form 8283 donation details for a donation event
+.TP
+reconcile\-bulk\-link\-transfer(1)
+Bulk\-confirm self\-transfers: link every PENDING outbound transfer in a time frame to one destination wallet (non\-taxable). Shows a preview + requires \-\-yes (or interactive y/N)
+.TP
+reconcile\-bulk\-classify\-inbound\-self\-transfer(1)
+Bulk\-classify unknown\-basis inbound deposits as self\-transfer\-ins ("my own coins"): apply Cycle A\*(Aqs `SelfTransferMine` ($0 conservative basis, non\-taxable) to MANY pending inbounds in a time frame at once. Shows a preview surfacing the total USD given $0 basis (the over\-tax exposure) + requires \-\-yes (or interactive y/N). Each is a voidable decision; for a deposit whose real cost you can substantiate, classify it single\-item with `classify\-inbound\-self\-transfer \-\-basis`
+.TP
+reconcile\-bulk\-classify\-inbound\-income(1)
+Bulk\-classify unknown\-basis inbound deposits as INCOME (mining|staking|interest|airdrop|reward): recognize MANY pending inbounds as ordinary income at their auto\-FMV (the daily\-close market value at receipt) in one confirmed batch, with a UNIFORM `\-\-kind` + `\-\-business` flag. Shows a preview surfacing the total income recognized + the count of inbounds EXCLUDED because no price was available for their date (those stay pending — an income row with no FMV would year\-gate). Each is a voidable decision; for a single deposit use `classify\-inbound\-income`
+.TP
+reconcile\-bulk\-reclassify\-outflow(1)
+Bulk\-reclassify unknown pending OUTFLOWS as dispositions (Sell|Spend): reclassify MANY pending `TransferOut`s as a `Dispose` in one confirmed batch, with the daily\-close market value at the outflow date as the ESTIMATED proceeds. Shows a preview surfacing the total ESTIMATED proceeds AND the total ESTIMATED gain (sum(fmv) \- sum(basis)) + the count of outflows EXCLUDED because no price was available for their date (those stay pending — a Sell with fabricated proceeds would be a SILENT misreport). `\-\-kind` is UNIFORM and accepts ONLY sell|spend (gift/donate are out of scope). Each is a voidable decision; for a single outflow use `reclassify\-outflow`
+.TP
+reconcile\-bulk\-resolve\-conflict(1)
+Bulk\-resolve import conflicts: ACCEPT (adopt each new payload) or REJECT (keep each current payload) MANY flagged `ImportConflict`s in one confirmed batch. Shows a `current → new` preview, then requires \-\-yes (or interactive y/N). Exactly one of \-\-accept / \-\-reject is required. Each resolution is NON\-REVOCABLE (`SupersedeImport`/`RejectImport` cannot be voided); to resolve a conflict differently, exclude it and use single\-item `accept\-conflict`/`reject\-conflict`
+.TP
+reconcile\-bulk\-void(1)
+Bulk\-void MANY revocable reconcile decisions in one confirmed batch (bulk\-void). Shows a preview of every voidable decision (the SHARED `voidable_decisions` predicate — effective safe\-harbor allocations are OMITTED, #7), then requires \-\-yes (or interactive y/N). Each void is NON\-REVOCABLE (a `VoidDecisionEvent` cannot itself be voided — re\-apply the original decision to restore). Voiding a `LotSelection` also re\-exposes its disposal to the default method and clears its optimizer attestation
+.TP
+reconcile\-match\-self\-transfers(1)
+Match unreconciled inbound + outbound legs as self\-transfers (self\-transfer\-passthrough C3). With no \-\-in/\-\-out: PREVIEW the proposed pairs (read\-only). With \-\-in and \-\-out: confirm ONE pair (DROP for a same\-wallet passthrough, RELOCATE for a cross\-wallet transfer). NEVER automatic

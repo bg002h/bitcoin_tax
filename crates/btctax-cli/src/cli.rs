@@ -327,8 +327,8 @@ pub enum Reconcile {
         /// One lot pick per --from flag (repeatable). Each PICK is
         /// `<origin_event_id>#<split_sequence>:<sat>`. The origin_event_id + split come from the
         /// `lot` column of disposals.csv or the `origin_event`/`split` columns of lots.csv
-        /// (export-snapshot). Σsat across the picks must equal the disposal's principal (validated
-        /// in the fold).
+        /// (export-snapshot). The total sat across the picks must equal the disposal's principal
+        /// (validated in the fold).
         ///
         /// FORMAT (two picks):
         ///   --from import|coinbase|X#0:25000 --from import|river|Y#1:5000
@@ -495,7 +495,7 @@ pub enum Reconcile {
     /// Bulk-reclassify unknown pending OUTFLOWS as dispositions (Sell|Spend): reclassify MANY pending
     /// `TransferOut`s as a `Dispose` in one confirmed batch, with the daily-close market value at the
     /// outflow date as the ESTIMATED proceeds. Shows a preview surfacing the total ESTIMATED proceeds
-    /// AND the total ESTIMATED gain (Σ fmv − Σ basis) + the count of outflows EXCLUDED because no price
+    /// AND the total ESTIMATED gain (sum(fmv) - sum(basis)) + the count of outflows EXCLUDED because no price
     /// was available for their date (those stay pending — a Sell with fabricated proceeds would be a
     /// SILENT misreport). `--kind` is UNIFORM and accepts ONLY sell|spend (gift/donate are out of
     /// scope). Each is a voidable decision; for a single outflow use `reclassify-outflow`.

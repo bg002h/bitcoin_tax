@@ -1,0 +1,67 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-tax-profile 1  btctax "btctax manual"
+.SH NAME
+tax\-profile \- Set or show the per\-tax\-year tax profile (filing status, income, MAGI, etc.)
+.SH SYNOPSIS
+\fBtax\-profile\fR <\fB\-\-year\fR> [\fB\-\-filing\-status\fR] [\fB\-\-ordinary\-taxable\-income\fR] [\fB\-\-magi\-excluding\-crypto\fR] [\fB\-\-qualified\-dividends\fR] [\fB\-\-other\-net\-capital\-gain\fR] [\fB\-\-carryforward\-short\fR] [\fB\-\-carryforward\-long\fR] [\fB\-\-w2\-ss\-wages\fR] [\fB\-\-w2\-medicare\-wages\fR] [\fB\-\-schedule\-c\-expenses\fR] [\fB\-\-show\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Set or show the per\-tax\-year tax profile (filing status, income, MAGI, etc.)
+.SH OPTIONS
+.TP
+\fB\-\-year\fR \fI<YEAR>\fR
+The tax year (e.g. 2025)
+.TP
+\fB\-\-filing\-status\fR \fI<FILING_STATUS>\fR
+IRS filing status
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+single
+.IP \(bu 2
+mfj
+.IP \(bu 2
+mfs
+.IP \(bu 2
+hoh
+.IP \(bu 2
+qss
+.RE
+.TP
+\fB\-\-ordinary\-taxable\-income\fR \fI<ORDINARY_TAXABLE_INCOME>\fR
+Ordinary taxable income EXCLUDING all app\-computed crypto items (net ST gains, mining/staking ordinary income). The engine adds the crypto items on top (B.1 / I5)
+.TP
+\fB\-\-magi\-excluding\-crypto\fR \fI<MAGI_EXCLUDING_CRYPTO>\fR
+Modified AGI excluding crypto items, for the §1411 NIIT threshold comparison.
+
+IMPORTANT (§1411 contract): this value MUST already include the taxpayer\*(Aqs qualified dividends and non\-crypto net capital gains (and any other MAGI add\-backs from §1411(d)). The engine adds ONLY the crypto AGI delta on top (ambiguity #5 in the design). Omitting QD or non\-crypto cap gains from this figure understates NIIT.
+.TP
+\fB\-\-qualified\-dividends\fR \fI<QUALIFIED_DIVIDENDS>\fR
+Qualified dividends + other preferential\-rate income sharing the §1(h) 0/15/20 LTCG rate stack. Required when setting a profile
+.TP
+\fB\-\-other\-net\-capital\-gain\fR \fI<OTHER_NET_CAPITAL_GAIN>\fR
+Non\-crypto net LT\-character capital gain already in the profile (optional; defaults to 0 when omitted)
+.TP
+\fB\-\-carryforward\-short\fR \fI<CARRYFORWARD_SHORT>\fR
+§1212(b) short\-term capital loss carryforward into this year (optional; defaults to 0)
+.TP
+\fB\-\-carryforward\-long\fR \fI<CARRYFORWARD_LONG>\fR
+§1212(b) long\-term capital loss carryforward into this year (optional; defaults to 0)
+.TP
+\fB\-\-w2\-ss\-wages\fR \fI<W2_SS_WAGES>\fR
+Form W\-2 Social Security wages (Box 3 + Box 7 tips; Schedule SE line 8a). Reduces the §1401(a) SS cap: ss_cap = max(0, wage_base − w2_ss_wages). Optional; defaults to $0. Must not be negative
+.TP
+\fB\-\-w2\-medicare\-wages\fR \fI<W2_MEDICARE_WAGES>\fR
+Medicare wages (Box 5; Form 8959 line 1). Reduces the Additional\-Medicare threshold: addl_threshold = max(0, threshold − w2_medicare_wages) (§1401(b)(2)(B)/Form 8959 Part II). Optional; defaults to $0. Must not be negative
+.TP
+\fB\-\-schedule\-c\-expenses\fR \fI<SCHEDULE_C_EXPENSES>\fR
+Schedule C deductible business expenses for the year — reduces net SE earnings; the income\-tax stack above is NOT adjusted (see the advisory). Optional; defaults to $0. Must not be negative
+.TP
+\fB\-\-show\fR
+Show the stored profile for `\-\-year` instead of setting it
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)

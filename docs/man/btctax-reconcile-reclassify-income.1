@@ -1,0 +1,36 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-reclassify-income 1  btctax "btctax manual"
+.SH NAME
+reclassify\-income \- SE\-completion Chunk C: flip `business` (and optionally `kind`) on an already\-imported Income event
+.SH SYNOPSIS
+\fBreclassify\-income\fR <\fB\-\-business\fR> [\fB\-\-kind\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIINCOME_EVENT\fR> 
+.SH DESCRIPTION
+SE\-completion Chunk C: flip `business` (and optionally `kind`) on an already\-imported Income event.
+.PP
+Corrects the `business: false` hard\-code that River (and other adapters) emit at ingest time, enabling SE\-tax treatment for professional miners / stakers. The engine validates that the target event exists and is an Income event — a missing or non\-Income target fires a Hard DecisionConflict blocker (decision excluded). For TransferIn rows use `classify\-inbound\-income` instead.
+.PP
+DecisionConflict is Hard — to re\-decide, `void` the prior decision first, then re\-issue.
+.SH OPTIONS
+.TP
+\fB\-\-business\fR \fI<BUSINESS>\fR
+Whether this income is from a trade or business (true → SE\-tax eligible). Must be supplied explicitly: `\-\-business true` or `\-\-business false`
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+true
+.IP \(bu 2
+false
+.RE
+.TP
+\fB\-\-kind\fR \fI<KIND>\fR
+Optional income kind correction: mining|staking|interest|airdrop|reward. Omit to keep the original kind (only flip `business`)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fIINCOME_EVENT\fR>
+The Income event reference (from `report` or `income_recognized.csv` \*(Aqevent\*(Aq column)
