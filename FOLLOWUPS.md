@@ -1230,12 +1230,31 @@ Ran `cycle-prep` recon (`reviews/cycle-prep-recon-2026-06-29.md`) on four slugs,
   needs the `CliConfig` (declared `pre2025_method` + `pre2025_method_attested`) for its new surfacing, so the separate
   `session.config()?` read is **required**, not redundant. No change. — R0-plan N3.
 
-## Sub-project A (lot-id substrate) — whole-branch review round 1 deferrals (2026-06-29)
+## ✅ Sub-project A (lot-id substrate) — whole-branch review round 1 deferrals — ALL RESOLVED (verified in source 2026-07-04)
 
 The blocking Important (post-hoc selection + in-force election mis-labeled `StandingOrder`) and in-area Minors
 **M2** (`evaluate_disposal` existing-event principal) + **M3** (`config --set-forward-method` apply-all) were FIXED
-on `feat/lot-id-substrate` (Task-10 fold). The remaining items below are deferred (non-blocking).
-Source: `reviews/whole-branch-review-lot-id-substrate-round-1.md`.
+on `feat/lot-id-substrate` (Task-10 fold). Source: `reviews/whole-branch-review-lot-id-substrate-round-1.md`.
+
+**★ 2026-07-04 verification (all remaining items below were addressed by later cycles but never struck):**
+- **M1 (SelfTransfer compliance coverage) — RESOLVED (documented).** `project/compliance.rs:71-83` carries a
+  "Scope boundary — `SelfTransfer` is intentionally excluded" doc-comment with the §1.1012-1(j) rationale (a
+  self-transfer is non-taxable → no identification obligation attaches; §A.3 method-honoring is about the
+  selection mechanism, not compliance-flagging). This is exactly the "if intentionally excluded, document it"
+  disposition.
+- **Task-4 (`90.00`→`90.25` plan doc) — RESOLVED.** No `90.00`/`90.25` figure remains in
+  `IMPLEMENTATION_PLAN_lot_id_substrate.md`.
+- **Task-7-M2 (shared election-collector DRY) — RESOLVED.** `project/compliance.rs::collect_elections`
+  (lines 47-67) uses the shared `resolve::method_election_is_forward` predicate — no duplicated guard.
+- **Task-8 nits — RESOLVED.** (a) `render.rs:133-149 compliance_status_tag` is the stable display
+  (`standing_order`/`contemporaneous`/`attested_recording`/`non_compliant`), used at render.rs:1625 — no
+  `{:?}`. (b) `render.rs:531-533` documents the intentionally-omitted `Decision`-id guard on `selection_count`.
+- **Task-9 nits — RESOLVED.** (a) the `u64::MAX` sentinel is documented at `optimize.rs:1227` ("unreachable
+  for real sequences, never persisted"). (b) the no-op identity KAT exists:
+  `tests/evaluate.rs:267 evaluate_disposal_existing_no_selection_is_no_op_identity` (asserts legs + st/lt gain
+  match `project()`).
+
+_(original deferral text kept below for record.)_
 
 - **M1 (Minor coverage gap) — `disposal_compliance` omits method-honoring SelfTransfers.** SelfTransfers produce no
   Disposal/Removal record, so they never get a compliance row (`compliance.rs` iterates only `state.disposals` /
