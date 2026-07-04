@@ -4,6 +4,16 @@
 
 use rust_decimal::Decimal;
 
+/// Minimum content-area height (in rows, border-INCLUSIVE) at which a tabular output tab
+/// renders its frozen column-totals footer. Below this, the vertical space is given to data
+/// rows instead (the footer is dropped).
+///
+/// The gate measures the `area: Rect` passed to each tab's `render` (`chunks[1]` / `Min(0)`,
+/// border-inclusive). At 10 the usable inner height is 8 = header(1) + footer(1) + 6 data rows,
+/// comfortably more than one data row. On a standard ≥24-row terminal the content pane is ~20
+/// rows, so the footer always shows; only a very short terminal drops it.
+pub(crate) const MIN_ROWS_FOR_TOTALS: u16 = 10;
+
 /// Convert a satoshi count to its exact BTC representation as a [`Decimal`].
 ///
 /// 100_000_000 sat = 1.00000000 BTC.

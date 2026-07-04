@@ -1172,6 +1172,151 @@ fn scroll_down_does_not_advance_past_last_data_row_to_total() {
     );
 }
 
+// ── Frozen column-totals footer KATs (feat/tui-column-totals) ────────────────
+
+/// Render a tab into an explicitly-sized backend (for the height-gate KAT).
+fn render_disposals_sized(app: &mut App, w: u16, h: u16) -> ratatui::buffer::Buffer {
+    let backend = TestBackend::new(w, h);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            super::disposals::draw(f, area, app);
+        })
+        .unwrap();
+    terminal.backend().buffer().clone()
+}
+
+/// Return the y-coordinate of the first buffer row whose text contains `needle`.
+fn buffer_find_y(buf: &ratatui::buffer::Buffer, needle: &str) -> Option<u16> {
+    let area = buf.area();
+    for y in 0..area.height {
+        let row: String = (0..area.width)
+            .map(|x| buf.cell((x, y)).map_or(" ", |c| c.symbol()))
+            .collect();
+        if row.contains(needle) {
+            return Some(y);
+        }
+    }
+    None
+}
+
+/// CT1. Disposals footer shows the SUMMED Σ BTC / Σ proceeds / Σ basis / Σ gain, and the
+/// gain identity `Σ gain == Σ proceeds − Σ basis` holds.
+#[test]
+fn disposals_footer_shows_summed_totals() {
+    let mut state = LedgerState::default();
+    // Leg A: 50M sat, proceeds 30000.00, basis 20000.00, gain 10000.00
+    state.disposals.push(make_disposal_tagged(
+        "ctd_a", 2025, 50_000_000, "30000.00", "20000.00", "10000.00",
+    ));
+    // Leg B: 25M sat, proceeds 15000.00, basis 8000.00, gain 7000.00
+    // Σ:      75M sat = 0.75000000 BTC, proceeds 45000.00, basis 28000.00, gain 17000.00
+    state.disposals.push(make_disposal_tagged(
+        "ctd_b", 2025, 25_000_000, "15000.00", "8000.00", "7000.00",
+    ));
+
+    let mut app = make_app(state, 2025);
+    let buf = render_disposals(&mut app);
+
+    // Σ BTC = (50M + 25M) / 1e8 = 0.75000000 (appears ONLY in the footer — legs are 0.50/0.25).
+    assert!(
+        buffer_has(&buf, "0.75000000"),
+        "footer must show Σ BTC 0.75000000"
+    );
+    assert!(
+        buffer_has(&buf, "45000.00"),
+        "footer must show Σ proceeds 45000.00"
+    );
+    assert!(
+        buffer_has(&buf, "28000.00"),
+        "footer must show Σ basis 28000.00 (SUMMED, not averaged)"
+    );
+    assert!(
+        buffer_has(&buf, "17000.00"),
+        "footer must show Σ gain 17000.00"
+    );
+
+    // Gain identity: Σ gain == Σ proceeds − Σ basis (keeps the row additive).
+    let proceeds: Decimal = "45000.00".parse().unwrap();
+    let basis: Decimal = "28000.00".parse().unwrap();
+    let gain: Decimal = "17000.00".parse().unwrap();
+    assert_eq!(
+        gain,
+        proceeds - basis,
+        "Σ gain must equal Σ proceeds − Σ basis"
+    );
+}
+
+/// CT2. The Disposals "TOTAL" renders as the PINNED footer (bottom of the table), not as a
+/// scrolling body row, and is NOT selectable (G caps at the last data leg).
+#[test]
+fn disposals_total_row_no_longer_scrolls() {
+    let mut state = LedgerState::default();
+    state.disposals.push(make_disposal_tagged(
+        "ctns_a", 2025, 50_000_000, "30000.00", "20000.00", "10000.00",
+    ));
+    state.disposals.push(make_disposal_tagged(
+        "ctns_b", 2025, 25_000_000, "15000.00", "8000.00", "7000.00",
+    ));
+
+    let mut app = make_app(state, 2025);
+    app.tab = crate::app::Tab::Disposals;
+    let buf = render_disposals(&mut app); // TestBackend 120×40
+
+    let h = buf.area().height;
+    let total_y = buffer_find_y(&buf, "TOTAL").expect("TOTAL must render");
+    let data_y = buffer_find_y(&buf, "0.50000000").expect("a data leg must render");
+
+    // Footer is pinned just above the bottom border (y == h-2), FAR below the top-of-table
+    // data rows — a scrolling body TOTAL would sit immediately after the data (small y).
+    assert!(
+        total_y >= h - 2,
+        "TOTAL must be the pinned footer at the bottom (y={total_y}, h={h}), not a body row"
+    );
+    assert!(
+        data_y < total_y,
+        "data rows must sit above the pinned footer (data_y={data_y}, total_y={total_y})"
+    );
+
+    // Not selectable: G (go_bottom) caps at the last DATA leg (index 1), never the TOTAL.
+    crate::handle_key(&mut app, press(KeyCode::Char('G')));
+    assert_eq!(
+        app.disposals_state.selected(),
+        Some(1),
+        "G must select the last data leg (index 1), never the TOTAL footer"
+    );
+}
+
+/// CT3. Height gate: below MIN_ROWS_FOR_TOTALS the frozen footer is omitted (data gets the
+/// space); at/above the threshold it is present. Pins the boundary at exactly 10.
+#[test]
+fn totals_footer_hidden_on_short_terminal() {
+    let mut state = LedgerState::default();
+    state.disposals.push(make_disposal_tagged(
+        "ctg_a", 2025, 50_000_000, "30000.00", "20000.00", "10000.00",
+    ));
+    state.disposals.push(make_disposal_tagged(
+        "ctg_b", 2025, 25_000_000, "15000.00", "8000.00", "7000.00",
+    ));
+
+    let mut app = make_app(state, 2025);
+
+    // Height 9 (< 10): footer omitted → no "TOTAL".
+    let short = render_disposals_sized(&mut app, 120, 9);
+    assert!(
+        !buffer_has(&short, "TOTAL"),
+        "footer must be hidden on a <10-row area (height 9)"
+    );
+
+    // Height 10 (== threshold): footer present → "TOTAL".
+    let tall = render_disposals_sized(&mut app, 120, 10);
+    assert!(
+        buffer_has(&tall, "TOTAL"),
+        "footer must be present at the threshold (height 10)"
+    );
+}
+
 // ── KAT-E7 — Disclosure-line KATs (Tax tab, render_tax_content) ──────────────
 
 /// Fixture builder: Snapshot with business mining income and a TaxProfile.

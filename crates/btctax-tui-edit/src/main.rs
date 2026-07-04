@@ -8808,6 +8808,92 @@ mod tests {
         );
     }
 
+    /// The editor delegates the Disposals tab to the shared `btctax_tui::tabs::disposals::render`
+    /// (draw_edit.rs), so it inherits the frozen column-totals footer for free — no editor code.
+    #[test]
+    fn editor_inherits_totals_footer() {
+        use btctax_adapters::BundledTaxTables;
+        use btctax_cli::CliConfig;
+        use btctax_core::event::{BasisSource, DisposeKind};
+        use btctax_core::identity::{EventId, LotId, Source, SourceRef, WalletId};
+        use btctax_core::state::{Disposal, DisposalLeg, LedgerState, Term};
+        use btctax_tui::app::Snapshot;
+        use ratatui::{backend::TestBackend, Terminal};
+        use std::collections::BTreeMap;
+
+        let wallet = WalletId::Exchange {
+            provider: "coinbase".into(),
+            account: "main".into(),
+        };
+        let mk_leg = |tag: &str, sat: i64, proceeds: &str, basis: &str, gain: &str| DisposalLeg {
+            lot_id: LotId {
+                origin_event_id: EventId::import(Source::Coinbase, SourceRef::new(tag)),
+                split_sequence: 0,
+            },
+            sat,
+            proceeds: proceeds.parse().unwrap(),
+            basis: basis.parse().unwrap(),
+            gain: gain.parse().unwrap(),
+            term: Term::LongTerm,
+            basis_source: BasisSource::ExchangeProvided,
+            gift_zone: None,
+            acquired_at: time::Date::from_calendar_date(2023, time::Month::January, 1).unwrap(),
+            wallet: wallet.clone(),
+        };
+        let mut state = LedgerState::default();
+        state.disposals.push(Disposal {
+            event: EventId::import(Source::Coinbase, SourceRef::new("ed-disp")),
+            kind: DisposeKind::Sell,
+            disposed_at: time::Date::from_calendar_date(2025, time::Month::June, 15).unwrap(),
+            legs: vec![
+                mk_leg("ed-a", 50_000_000, "30000.00", "20000.00", "10000.00"),
+                mk_leg("ed-b", 25_000_000, "15000.00", "8000.00", "7000.00"),
+            ],
+            fee_mini_disposition: false,
+        });
+
+        let snap = Snapshot {
+            events: vec![],
+            state,
+            cli_config: CliConfig::default(),
+            profiles: BTreeMap::new(),
+            tables: BundledTaxTables::load(),
+            donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
+        };
+
+        let mut app = EditorApp::new(PathBuf::from("/inherit/vault.pgp"));
+        app.screen = EditorScreen::Browse;
+        app.snapshot = Some(snap);
+        app.selected_year = 2025;
+        app.tab = Tab::Disposals;
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        let area = buf.area();
+        let joined: String = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf.cell((x, y)).map_or(" ", |c| c.symbol()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            joined.contains("TOTAL"),
+            "editor Disposals must inherit the frozen TOTAL footer:\n{joined}"
+        );
+        // Σ BTC 0.75000000 is a footer-ONLY value (legs are 0.50000000 / 0.25000000).
+        assert!(
+            joined.contains("0.75000000"),
+            "editor footer must show Σ BTC 0.75000000 (footer-only value)"
+        );
+    }
+
     // ── handle_key: regression guards ────────────────────────────────────────
 
     #[test]
