@@ -1,9 +1,14 @@
 # SPEC — per-exchange cost-basis method election + attestation (sub-project 1 of auto-pseudo-reconcile)
 
-**Source baseline:** `main` @ `fa675bb` (branch `feat/cost-basis-method-election`). **Review status: DRAFT —
-awaiting R0 (2 rounds to 0C/0I).** Design of record: `design/BRAINSTORM_auto_pseudo_reconcile.md`; roadmap
-memory `auto-pseudo-reconcile-roadmap`. **All cross-cutting decisions are settled with the user — do NOT
-re-brainstorm.**
+**Source baseline:** `main` @ `fa675bb` (branch `feat/cost-basis-method-election`). **Review status: R0 round 1
+folded (0C / 2I / 3M / 2N — all folded). Review: `reviews/R0-spec-cost-basis-method-election-round-1.md`.
+Awaiting R0 round 2.** Headline risks came back CLEAN: serde/fingerprint back-compat SAFE (decision payloads
+return `None` from `persistence::fingerprint`, `EventId=f("decision",seq)` is payload-independent; precedent
+`#[serde(default)] pre2025_method` event.rs:188); precedence reachable (single caller `consume_principal`
+fold.rs:60, wallet bound at every arm). Key folds: **[I1] `compliance.rs` is a SECOND election-resolution site
+— scope it too**; **[I2] reuse the canonical `parse_wallet_id` grammar** (`exchange:PROVIDER:ACCOUNT`), do NOT
+invent `/`. Design of record: `design/BRAINSTORM_auto_pseudo_reconcile.md`. **Cross-cutting decisions settled —
+do NOT re-brainstorm.**
 
 ## Goal
 Let the user declare + attest a cost-basis lot method (FIFO/HIFO/LIFO) **per exchange ACCOUNT**, matching what
@@ -40,10 +45,22 @@ standalone-useful.
    decision_seq)`), else
 2. latest-in-force GLOBAL election (`wallet == None`, `effective_from ≤ D`), else
 3. `Fifo`.
-Signature changes `applicable_method(date, ctx)` → `applicable_method(date, wallet, ctx)`; `fold.rs:60` passes
-the disposal's wallet. **`LotSelection` still overrides everything per-disposal**; `pre2025_method` unchanged.
-Backdating guard applies to BOTH scoped + global elections (a per-wallet election is still a forward standing
-order — `effective_from ≥ TRANSITION_DATE ∧ ≥ made-date`, else `MethodElectionBackdated`).
+Signature changes `applicable_method(date, ctx)` → `applicable_method(date, wallet, ctx)`; `fold.rs:60`
+(`consume_principal`, the single caller — wallet already bound at every arm) passes the disposal's wallet.
+**`LotSelection` still overrides everything per-disposal**; `pre2025_method` unchanged. Backdating guard applies
+to BOTH scoped + global elections (a per-wallet election is still a forward standing order — `effective_from ≥
+TRANSITION_DATE ∧ ≥ made-date`, else `MethodElectionBackdated`).
+- **[R0-M2 — TWO SEPARATE TIERS, not one merged max]** the scoped tier and the global tier are resolved
+  INDEPENDENTLY: a later-dated GLOBAL election does NOT override an in-force SCOPED one for its wallet (step 1
+  is decided purely among `wallet==Some(W)` elections; only if that set is empty do we fall to step 2). Do NOT
+  implement as a single `max_by` over all elections merged — that would let a fresh global election silently
+  flip a wallet the user scoped. Fault-inject this.
+- **[R0-I1 — `compliance.rs` is a SECOND resolution site — MUST use the same rule]** `disposal_compliance`
+  (`compliance.rs:47-67,169-180`) independently collects elections (no wallet) and picks the standing order as a
+  GLOBAL max — so a scoped `Coinbase→HIFO` election would falsely tag a `Gemini` disposal as `StandingOrder` in
+  `verify` (render.rs:540), over-reporting §A.5(a). Fix: extract a SHARED wallet-aware resolver used by BOTH
+  `fold::applicable_method` AND `compliance` (compliance already builds `wallet_of` at :105-108). One rule, two
+  callers — never two divergent implementations.
 
 ### 3. Attestation
 Setting a per-exchange method IS the attestation: a user-made, timestamped `MethodElection` event affirming "I
@@ -53,11 +70,16 @@ separate attestation table. (The CLI/TUI confirmation text states it's an attest
 
 ### 4. CLI surface
 Extend the election path with an optional exchange scope:
-`btctax config --set-forward-method <fifo|hifo|lifo> [--exchange <provider/account>] [--effective-from <d>]`.
-- `--exchange` value = `<provider>/<account>` (impl defines + validates the exact delimiter; VALIDATE against
-  the vault's known Exchange wallets — reject an unknown provider/account loudly so a typo can't silently
-  create a dead election). No `--exchange` = the existing global election (unchanged).
-- `cmd::reconcile::set_forward_method` gains an `Option<WalletId>` param; the arm parses/validates `--exchange`.
+`btctax config --set-forward-method <fifo|hifo|lifo> [--exchange <exchange:PROVIDER:ACCOUNT>] [--effective-from <d>]`.
+- **[R0-I2] `--exchange` uses the CANONICAL wallet grammar `eventref::parse_wallet_id`** (`exchange:PROVIDER:ACCOUNT`,
+  eventref.rs:57-74) — do NOT invent a `/` delimiter (accounts can contain `/`; forking the grammar mis-parses).
+- **[R0-M3] reject the `self:LABEL` form** (only `exchange:` wallets are electable — a method election is a
+  brokerage-account concept). VALIDATE the parsed `WalletId` against the vault's known Exchange wallets
+  (enumerate distinct `WalletId::Exchange` from the loaded events) — reject an unknown one LOUDLY so a typo
+  can't silently create a dead election. No `--exchange` = the existing global election (unchanged).
+- `cmd::reconcile::set_forward_method` gains an `Option<WalletId>` param; the arm parses via `parse_wallet_id`
+  + validates. **[R0-M1] the scope lives in the `MethodElection` PAYLOAD**, not the `LedgerEvent.wallet` column
+  (`append_decision` passes `wallet=None` for decisions).
 
 ### 5. btctax-tui-edit flow
 A new editor flow mirroring the existing reconcile flows (`ClassifyInboundFlowState`/`ModalState`/`Step`
@@ -78,21 +100,32 @@ pattern, main.rs). New keybinding (pick a free key; document in the `?` overlay 
 - `serde_backcompat_old_methodelection_loads_as_global` — an on-disk `MethodElection` WITHOUT `wallet`
   deserializes to `wallet: None` and behaves exactly as today (pin with a fixed JSON fixture).
 - `determinism_two_scoped_elections_latest_wins` — `(effective_from, decision_seq)` total order per wallet.
+- **[R0-I1] `scoped_election_does_not_taint_compliance_of_other_wallets`** — a `Coinbase→HIFO` election; a
+  `Gemini` disposal's `verify` compliance is NOT `StandingOrder` on account of it (the shared resolver scopes
+  correctly in `disposal_compliance`).
+- **[R0-M2] `later_global_does_not_override_in_force_scoped`** — scoped `Coinbase→HIFO` (Jan) then a LATER
+  global `LIFO` (Mar): a Coinbase disposal in Apr still uses HIFO (two independent tiers, not a merged max).
+- **[R0-M2] gaps:** `two_accounts_same_provider_independent` (exchange:coinbase:A=HIFO vs :B=FIFO);
+  `voided_scoped_election_falls_back` (void → wallet reverts to global/FIFO);
+  `pre2025_residue_plus_post2025_scoped_election` (a scoped election on a wallet with pre-2025 residue —
+  `pre2025_method` still governs the residue lots; the scoped method governs post-2025 disposals).
 - CLI: `config_set_forward_method_exchange_scoped` (appends a scoped election; unknown exchange rejected);
   TUI: `method_election_flow_sets_and_attests_per_account` (TestBackend snapshot).
 
 ## Scope / SemVer / lockstep
-btctax-core (model + fold + resolve) + btctax-cli (CLI arm) + btctax-tui-edit (flow). **Additive serde field**
-(`#[serde(default)]`) — old vaults load unchanged. New CLI arg + TUI flow. **PATCH-class** (additive; no
-behavior change when no scoped election exists). Lockstep: GUI `schema_mirror` if any clap flag NAME changes
-(here only an added `--exchange` arg — confirm mirror policy); regen man pages (`make docs`); update the
-`MethodElection` doc-comments (event.rs) + the `?` overlay keymap.
+btctax-core (model + fold + resolve + **compliance.rs** [R0-I1] + a shared wallet-aware resolver) + btctax-cli
+(CLI arm) + btctax-tui-edit (flow). **Additive serde field** (`#[serde(default)]`) — old vaults load unchanged.
+New CLI arg + TUI flow. **PATCH-class** (additive; no behavior change when no scoped election exists).
+**[R0-N1] NO GUI `schema_mirror`** — there is no GUI/tauri crate in the tree (verified). Real lockstep = regen
+man pages (`make docs`), the `?`-overlay keymap, and the `MethodElection` doc-comments (event.rs).
 
 ## Plan (TDD)
 - **Task 1** — model: add `wallet: Option<WalletId>` to `MethodElection` (serde-default) + `ElectionRec`;
   serde-backcompat KAT.
-- **Task 2** — resolve + fold: collect the scope; `applicable_method(date, wallet, ctx)` precedence; the
-  governance/precedence/backdating/determinism KATs.
+- **Task 2** — resolve + fold + **compliance** [R0-I1]: collect the scope; extract ONE shared wallet-aware
+  resolver (two independent tiers — scoped, then global; [R0-M2]) used by `fold::applicable_method(date,
+  wallet, ctx)` AND `disposal_compliance`; the governance/precedence/backdating/determinism/compliance KATs
+  (incl. later-global-doesn't-override-scoped + the compliance-taint KAT).
 - **Task 3** — CLI `--exchange` scope (parse + validate against known wallets); CLI KAT.
 - **Task 4** — btctax-tui-edit flow (list accounts + set/attest); TUI KAT; `?`-overlay + man-page update.
 - **Task 5** — whole-diff review + full suite + `make docs` + FOLLOWUPS.
