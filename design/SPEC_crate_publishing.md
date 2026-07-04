@@ -1,11 +1,10 @@
 # SPEC — publish the btctax crates to crates.io
 
-**Source baseline:** `main` @ `2bd11ba` (branch `feat/crate-publishing`). **Review status: R0 round 1 folded
-(0C / 1I / 2M / 2N — all folded; the safety check [no data leaks] was independently CLEARED). Review:
-`reviews/R0-spec-crate-publishing-round-1.md`. Awaiting R0 round 2. Key folds: coordinated
-`cargo publish --dry-run --workspace` (per-crate dry-run would fail — path stripped, deps not yet on registry)
-[I1]; `categories` per-crate not workspace-shared [M1]; v0.1.0-permanently-burned in the go-ahead gate [M2];
-bare-`btctax`-name + `cargo publish --workspace` notes [N1/N2].**
+**Source baseline:** `main` @ `2bd11ba` (branch `feat/crate-publishing`). **Review status: R0-GREEN (2 rounds;
+0C/0I). Reviews: `reviews/R0-spec-crate-publishing-round-{1,2}.md`. Safety (no data leaks) independently
+CLEARED both rounds. Round-2 folds: the new-crate 5-burst rate limit → expect a 429 on the 6th
+(`btctax-tui-edit`), safe/resumable with a ~10-min retry [Mnew-1]; license-reuse note [Nnew-1]. Cleared to
+implement (metadata + version-ify deps → workspace dry-run → whole-diff → STOP at the go-ahead gate).**
 **Lineage:** user request (2026-07-04): "crate publishing (you might find credentials in shibboleth project
 folder)." Follows the README (#34). **The `cargo publish` step is IRREVERSIBLE + PUBLIC — it happens ONLY
 after an explicit user go-ahead (§Go-ahead gate); all prep + dry-runs are done first.**
@@ -76,9 +75,19 @@ After the workspace dry-run passes, STOP and present to the user for explicit co
 - The bundled public price CSV ships; this is the point of no return.
 - **[R0-N1]** the CLI installs the `btctax` BINARY from the `btctax-cli` CRATE; the bare `btctax` crate name is
   NOT among the six — ask whether the user also wants to reserve/publish `btctax` (optional).
+- **[R0-Nnew-1]** the workspace license is `MIT OR Unlicense` — publishing makes the code freely
+  reusable/redistributable/relicensable by anyone, permanently (Unlicense ≈ public-domain dedication).
+- **[R0-Mnew-1 — expect a rate-limit on the 6th] crates.io caps NEW crate-name creation at a 5-burst**
+  (then 1 per ~10 min). This publishes **6 brand-new** crates, so `cargo publish --workspace` will upload the
+  first 5 (core, store, adapters, cli, tui) and then be **throttled (HTTP 429) on `btctax-tui-edit`**. This is
+  EXPECTED and SAFE/RESUMABLE — the 5 that landed are published; just wait ~10 min and re-run
+  `cargo publish --workspace` (or `cargo publish -p btctax-tui-edit`) to finish. Do NOT read the 429 as a real
+  failure or re-attempt the already-published 5.
+
 Only on an explicit "yes, publish" does the real publish run: **[R0-N2] `cargo publish --workspace`** (from a
 clean committed tree, NO `--allow-dirty`) — packages, verifies, uploads in dependency order, and waits for each
-crate to hit the index before the next. (Fallback: `cargo publish -p <crate>` per crate in topological order.)
+crate to hit the index before the next; then finish `btctax-tui-edit` after the rate-limit window. (Fallback:
+`cargo publish -p <crate>` per crate in topological order, same 5-then-wait behavior.)
 
 ## Scope / SemVer
 Additive Cargo.toml metadata + the publish action. No source/behavior change. The metadata commit is PATCH-class;
