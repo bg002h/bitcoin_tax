@@ -1,8 +1,9 @@
 # SPEC — export-snapshot unresolved-Hard-blocker summary (no more silent empty forms)
 
-**Source baseline:** `main` @ `e9a3690` (branch `feat/export-blocker-summary`). **Review status: R0 round 1
-folded (0C/4I/4M/2N — merged IN-PLACE; surgical). Awaiting R0 round 2.** Review:
-`reviews/R0-spec-export-blocker-summary-round-1.md`. Fixes the real-vault-test finding: `export-snapshot`
+**Source baseline:** `main` @ `e9a3690` (branch `feat/export-blocker-summary`). **Review status: R0-GREEN (2 rounds; 0C/0I).
+Cleared to implement.** Reviews: `reviews/R0-spec-export-blocker-summary-round-{1,2}.md`. Round 1 0C/4I
+(redundancy removal + binary-test split + generated-docs), round 2 0C/0I/1M/1N (Message-B "figures" not "forms";
+binary KAT uses `Command::output()`). Fixes the real-vault-test finding: `export-snapshot`
 silently writes an EMPTY Form 8949 / zero Schedule D when unresolved Hard blockers make years `NotComputable`,
 with no warning. User-approved (2026-07-05). btctax-cli only.
 
@@ -32,7 +33,8 @@ by `unresolved_hard > 0` + whether a `--tax-year` was requested.
     exported Form 8949 / Schedule D are INFORMATIONAL, not final. Run `btctax verify` to resolve them."`
   - no `--tax-year` (full export writes ALL years, cli.rs:94-100 — every year is NOT COMPUTABLE under any Hard
     blocker, so the risk is BROADER): `"⚠ {n} unresolved Hard blocker(s) remain — every affected year is NOT
-    COMPUTABLE; the exported forms are INFORMATIONAL, not final. Run `btctax verify`."`
+    COMPUTABLE; the exported figures are INFORMATIONAL, not final. Run `btctax verify`."` [R0-r2-M: "figures"
+    not "forms" — no `--tax-year` writes the projection CSVs, not the 8949/Schedule D forms.]
   - `unresolved_hard == 0` → NO warning (stdout byte-identical to today).
 - Exit code stays 0 (a warning, not an error). stderr so it never pollutes a redirected stdout.
 - **Attest-gate ordering (verified):** `require_attestation` (admin.rs:62-64) runs FIRST, before any byte /
@@ -48,7 +50,8 @@ by `unresolved_hard > 0` + whether a `--tax-year` was requested.
   (Hard→counted; an Advisory-only ledger — use a REAL Advisory e.g. `SelfTransferInboundZeroBasis` [R0-N2] —
   → `unresolved_hard == 0`); `export_report_path_points_at_snapshot`; `export_still_writes_files_with_blockers`.
 - **Binary integration** (drive the built binary via `env!("CARGO_BIN_EXE_btctax")` + `std::process::Command`,
-  capturing stderr/exit — the `tests/fr9_exit_code.rs:53` / `tests/tax_report.rs:728` pattern):
+  **using `Command::output()` to CAPTURE stderr** [R0-r2-N] — not the cited sites' `.status()` shape — the
+  `tests/fr9_exit_code.rs:53` / `tests/tax_report.rs:728` bin-name pattern):
   `export_with_hard_blockers_warns_on_stderr` — Hard-blocker vault + `--tax-year Y` → stderr contains "NOT
   COMPUTABLE" + the count + "verify"; files exist; **exit 0**. `export_full_no_year_warns_informational` — no
   `--tax-year` → stderr contains "INFORMATIONAL"/"NOT COMPUTABLE". `export_clean_ledger_no_warning` → stderr
