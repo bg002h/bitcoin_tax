@@ -115,6 +115,160 @@ fn open_recovers_from_bak_if_target_missing() {
     );
 }
 
+// ── T2: recover from `.bak` on a GENUINELY-CORRUPT present vault (M-1) ────────────
+
+/// Build a saved vault holding `t.x == 5`, then drop it (releasing the lock) and return the
+/// vault path plus its good ciphertext bytes. The `.key` sidecar stays on disk next to it.
+fn make_saved_vault(d: &std::path::Path) -> (std::path::PathBuf, Vec<u8>) {
+    let vp = d.join("vault.pgp");
+    {
+        let mut v = Vault::create(&vp, &Passphrase::new("pw".into())).unwrap();
+        v.conn()
+            .execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES(5);")
+            .unwrap();
+        v.save().unwrap();
+    }
+    let good = std::fs::read(&vp).unwrap();
+    (vp, good)
+}
+
+/// Deterministically corrupt ciphertext: flip a byte in the SEIP body. With the CORRECT
+/// passphrase this always classifies as `Crypto` (the key unlocks → `unlocked=true`), never
+/// `WrongPassphrase` — i.e. GENUINE corruption. (No RNG — NFR4 determinism.)
+fn corrupt(mut b: Vec<u8>) -> Vec<u8> {
+    let i = b.len() / 2;
+    b[i] ^= 0xFF;
+    b
+}
+
+/// [T2 KAT] A genuinely-corrupt present `vault.pgp` with a good `.bak` recovers the `.bak`
+/// state, restores `vault.pgp`, and leaves `.bak` STILL present (the safety net is preserved).
+#[test]
+fn open_recovers_from_bak_when_target_genuinely_corrupt() {
+    let d = tempfile::tempdir().unwrap();
+    let (vp, good) = make_saved_vault(d.path());
+    let bak = btctax_store::paths::bak_of(&vp);
+    // Good `.bak`, corrupt target.
+    std::fs::write(&bak, &good).unwrap();
+    std::fs::write(&vp, corrupt(good.clone())).unwrap();
+
+    // Recovers (a WARNING is emitted to stderr — precedent memlock.rs, not stderr-captured here).
+    let v = Vault::open(&vp, &Passphrase::new("pw".into())).unwrap();
+    assert_eq!(
+        v.conn()
+            .query_row("SELECT x FROM t", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        5,
+        "recovered vault must hold the `.bak` row"
+    );
+    drop(v); // release the lock before inspecting files
+    assert_eq!(
+        std::fs::read(&vp).unwrap(),
+        good,
+        "vault.pgp must be RESTORED to the good `.bak` bytes"
+    );
+    assert!(bak.exists(), "`.bak` must STILL be present after recovery");
+    assert_eq!(
+        std::fs::read(&bak).unwrap(),
+        good,
+        "`.bak` must be untouched (it stays the safety net)"
+    );
+}
+
+/// [T2 KAT / R0-C1] A NEWER-schema present vault (decode SUCCEEDS, version > current) with an
+/// OLDER good `.bak` must propagate `UnsupportedSchema` and NEVER recover — recovering the `.bak`
+/// would silently DOWNGRADE and lose newer tax data. `.bak` untouched; target NOT downgraded.
+#[test]
+fn open_unsupported_schema_never_recovers_from_bak() {
+    let d = tempfile::tempdir().unwrap();
+    let (vp, good) = make_saved_vault(d.path());
+    let bak = btctax_store::paths::bak_of(&vp);
+    let kp = btctax_store::paths::suffixed_key(&vp);
+
+    // Craft a ciphertext whose blob decodes to a FUTURE schema version (decode succeeds → migrate
+    // rejects with UnsupportedSchema). Uses the vault's own cert so decryption succeeds.
+    let cert = sequoia_openpgp::Cert::from_bytes(&std::fs::read(&kp).unwrap()).unwrap();
+    let mut future_blob = (btctax_store::SCHEMA_VERSION + 1).to_be_bytes().to_vec();
+    future_blob.extend_from_slice(b"img"); // image body is irrelevant — migrate fails first
+    let newer_ct = btctax_store::crypto::encrypt_to(&cert, &future_blob).unwrap();
+
+    std::fs::write(&bak, &good).unwrap(); // OLDER good copy
+    std::fs::write(&vp, &newer_ct).unwrap(); // NEWER present vault
+
+    let err = Vault::open(&vp, &Passphrase::new("pw".into())).unwrap_err();
+    assert!(
+        matches!(err, StoreError::UnsupportedSchema(v) if v == btctax_store::SCHEMA_VERSION + 1),
+        "expected UnsupportedSchema, got: {err:?}"
+    );
+    assert_eq!(
+        std::fs::read(&vp).unwrap(),
+        newer_ct,
+        "NEWER vault must NOT be downgraded/restored from `.bak`"
+    );
+    assert_eq!(
+        std::fs::read(&bak).unwrap(),
+        good,
+        "`.bak` must be untouched (no recovery attempted)"
+    );
+}
+
+/// [T2 KAT] A wrong passphrase must propagate `WrongPassphrase` and NEVER touch `.bak`
+/// (caller error, not corruption; the `.bak` shares the key and would also fail).
+#[test]
+fn open_wrong_passphrase_never_touches_bak() {
+    let d = tempfile::tempdir().unwrap();
+    let (vp, good) = make_saved_vault(d.path());
+    let bak = btctax_store::paths::bak_of(&vp);
+    std::fs::write(&bak, &good).unwrap();
+
+    let err = Vault::open(&vp, &Passphrase::new("WRONG".into())).unwrap_err();
+    assert!(
+        matches!(err, StoreError::WrongPassphrase),
+        "expected WrongPassphrase, got: {err:?}"
+    );
+    assert_eq!(
+        std::fs::read(&vp).unwrap(),
+        good,
+        "target must be untouched on WrongPassphrase"
+    );
+    assert_eq!(
+        std::fs::read(&bak).unwrap(),
+        good,
+        "`.bak` must be untouched on WrongPassphrase"
+    );
+}
+
+/// [T2 KAT] When BOTH the present vault and its `.bak` are corrupt, `open` propagates the
+/// ORIGINAL target error (a clear, bounded single attempt — never a panic/loop) and the
+/// `.bak` bytes are left intact.
+#[test]
+fn open_both_corrupt_propagates_and_bak_intact() {
+    let d = tempfile::tempdir().unwrap();
+    let (vp, good) = make_saved_vault(d.path());
+    let bak = btctax_store::paths::bak_of(&vp);
+    let corrupt_bak = corrupt({
+        let mut g = good.clone();
+        g[good.len() / 3] ^= 0xAA; // a DIFFERENT corruption than the target's
+        g
+    });
+    std::fs::write(&vp, corrupt(good.clone())).unwrap();
+    std::fs::write(&bak, &corrupt_bak).unwrap();
+
+    let err = Vault::open(&vp, &Passphrase::new("pw".into())).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            StoreError::Crypto(_) | StoreError::Corrupt(_) | StoreError::Sqlite(_)
+        ),
+        "both-corrupt must yield the original corruption error, got: {err:?}"
+    );
+    assert_eq!(
+        std::fs::read(&bak).unwrap(),
+        corrupt_bak,
+        "`.bak` must be intact (untouched) even when unusable"
+    );
+}
+
 #[test]
 fn export_snapshot_is_readable_sqlite() {
     let d = tempfile::tempdir().unwrap();
@@ -252,5 +406,126 @@ fn backup_key_is_armored_and_parseable() {
             "backup file must be owner-only (0o600), got {:04o}",
             mode & 0o777
         );
+    }
+}
+
+// ── T3: kill-mid-save state-enumeration harness ───────────────────────────────────
+
+/// Deterministic (NFR4 — no RNG / `Date::now`) enumeration of EVERY on-disk state a kill during
+/// `save`/`create`/restore can leave, with the key always present:
+///   `vault.pgp` ∈ {absent, good, corrupt}
+///   × `.bak`    ∈ {absent, good, corrupt}
+///   × `.tmp`    ∈ {absent, present-ciphertext-of-a-good-save, present-garbage}
+/// For each of the 27 states, `open` must be SAFE: either `Ok(valid)` (with the known row) or a
+/// specific typed `StoreError` — NEVER a panic and NEVER a silently-wrong DB. A good `.bak` recovers;
+/// and the C2 crash-window (a mid-`.tmp` restore: corrupt/absent target + good `.bak` + good-ciphertext
+/// `.tmp`) NEVER loses the good `.bak`. Exercises T2 + the half-created path (vault.rs). A true `kill -9`
+/// OS-level harness remains a FOLLOWUP.
+#[test]
+fn kill_mid_save_state_enumeration_open_is_always_safe() {
+    // Source ONE real vault → its `.key` + a good ciphertext holding `t.x == 5`.
+    let src = tempfile::tempdir().unwrap();
+    let (svp, good) = make_saved_vault(src.path());
+    let key_bytes = std::fs::read(btctax_store::paths::suffixed_key(&svp)).unwrap();
+    let corrupt_ct = corrupt(good.clone()); // genuine corruption → Crypto with the right pass
+    let garbage = b"not-a-pgp-message-at-all\x00\xff\xfe".to_vec();
+
+    #[derive(Clone, Copy, Debug)]
+    enum F {
+        Absent,
+        Good,
+        Corrupt,
+    }
+    #[derive(Clone, Copy, Debug)]
+    enum T {
+        Absent,
+        GoodCt,
+        Garbage,
+    }
+    let files = [F::Absent, F::Good, F::Corrupt];
+    let tmps = [T::Absent, T::GoodCt, T::Garbage];
+
+    for pgp in files {
+        for bak in files {
+            for tmp in tmps {
+                let d = tempfile::tempdir().unwrap();
+                let vp = d.path().join("vault.pgp");
+                let kp = btctax_store::paths::suffixed_key(&vp);
+                let bakp = btctax_store::paths::bak_of(&vp);
+                let tmpp = btctax_store::paths::tmp_of(&vp);
+                let ctx = format!("[pgp={pgp:?} bak={bak:?} tmp={tmp:?}]");
+
+                std::fs::write(&kp, &key_bytes).unwrap(); // key ALWAYS present
+                match pgp {
+                    F::Absent => {}
+                    F::Good => std::fs::write(&vp, &good).unwrap(),
+                    F::Corrupt => std::fs::write(&vp, &corrupt_ct).unwrap(),
+                }
+                match bak {
+                    F::Absent => {}
+                    F::Good => std::fs::write(&bakp, &good).unwrap(),
+                    F::Corrupt => std::fs::write(&bakp, &corrupt_ct).unwrap(),
+                }
+                match tmp {
+                    T::Absent => {}
+                    T::GoodCt => std::fs::write(&tmpp, &good).unwrap(),
+                    T::Garbage => std::fs::write(&tmpp, &garbage).unwrap(),
+                }
+
+                let res = Vault::open(&vp, &Passphrase::new("pw".into()));
+
+                // Expected outcome depends ONLY on (pgp, bak); `.tmp` never changes safety.
+                match (pgp, bak) {
+                    // A readable present target OR a good `.bak` to fall back to → Ok(valid row).
+                    (F::Good, _) | (F::Corrupt, F::Good) | (F::Absent, F::Good) => {
+                        let v = res.unwrap_or_else(|e| {
+                            panic!("{ctx}: expected Ok(valid), got Err({e:?})")
+                        });
+                        assert_eq!(
+                            v.conn()
+                                .query_row("SELECT x FROM t", [], |r| r.get::<_, i64>(0))
+                                .unwrap(),
+                            5,
+                            "{ctx}: opened/recovered vault must hold the known row (never silent-wrong)"
+                        );
+                        drop(v); // release the lock before inspecting `.bak` below
+                    }
+                    // Key present, target + `.bak` both absent → the half-created signature.
+                    (F::Absent, F::Absent) => {
+                        let e = res.err().unwrap_or_else(|| panic!("{ctx}: expected Err"));
+                        assert!(
+                            matches!(e, StoreError::HalfCreatedVault(_)),
+                            "{ctx}: expected HalfCreatedVault, got {e:?}"
+                        );
+                    }
+                    // Corruption with no usable `.bak` → a specific corruption error (never panic).
+                    (F::Corrupt, F::Absent)
+                    | (F::Corrupt, F::Corrupt)
+                    | (F::Absent, F::Corrupt) => {
+                        let e = res.err().unwrap_or_else(|| panic!("{ctx}: expected Err"));
+                        assert!(
+                            matches!(
+                                e,
+                                StoreError::Crypto(_)
+                                    | StoreError::Corrupt(_)
+                                    | StoreError::Sqlite(_)
+                            ),
+                            "{ctx}: expected a corruption error, got {e:?}"
+                        );
+                    }
+                }
+
+                // [R0-C2] Crash-window invariant: a GOOD `.bak` is NEVER lost or clobbered by `open`
+                // — not even mid-`.tmp`-restore. It stays the byte-identical safety net.
+                if matches!(bak, F::Good) {
+                    assert!(bakp.exists(), "{ctx}: good `.bak` must survive `open`");
+                    assert_eq!(
+                        std::fs::read(&bakp).unwrap(),
+                        good,
+                        "{ctx}: good `.bak` must remain byte-identical"
+                    );
+                }
+            }
+        }
     }
 }
