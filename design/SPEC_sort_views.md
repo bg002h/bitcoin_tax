@@ -1,9 +1,11 @@
 # SPEC — sortable Holdings / Disposals / Income views (viewer + editor)
 
-**Source baseline:** `main` @ `1837917` (branch `feat/sort-views`). **Review status: R0 round 2 folded (round 1
-0C/4I/4M/2N; round 2 0C/1I/3N — I5 the 23-test rebind migration + IncomeRecord type + N-3 phrasing). Awaiting
-R0 round 3.** Reviews: `reviews/R0-spec-sort-views-round-{1,2}.md`. **R0 confirmed there is NO data-safety bug**
-(edit flows build their own pickers — see Safety). User-approved design (2026-07-05).
+**Source baseline:** `main` @ `1837917` (branch `feat/sort-views`). **Review status: R0-GREEN (3 rounds; 0C/0I).
+Cleared to implement.** Reviews: `reviews/R0-spec-sort-views-round-{1,2,3}.md`. Round 1 0C/4I (my column/arch
+facts), round 2 0C/1I (I5 the 23-test rebind migration), round 3 0C/0I/0M/1N. **R0 confirmed NO data-safety
+bug** (edit flows build their own pickers — see Safety). **[R0-N-2] T3 note:** the man-page sync test
+(docs.rs:410-415, asserting `?`/`V`/`O`) is NOT touched by the T3 hand-edits — verified stays green.
+User-approved design (2026-07-05).
 
 ## Goal
 Interactive column sorting of the **Holdings**, **Disposals**, **Income** row views in BOTH `btctax-tui`
