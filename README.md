@@ -154,6 +154,85 @@ This writes a decrypted SQLite database plus CSVs — including Form 8949 and Sc
 
 ---
 
+## Pseudo-reconcile — a fast, honest starting point
+
+Reconciling a fresh import can mean resolving hundreds of blockers before anything computes. **Pseudo-reconcile
+mode** gets you from *N blockers → an on-screen estimate in one command*, by filling deliberately-fictional but
+reasonable **default** decisions — so you have a scaffold to correct toward the truth instead of a blank wall.
+
+It is built to be **unmistakably a placeholder**: every fictional value is flagged `[PSEUDO]` on screen, the
+defaults assume *all movement is non-taxable* (so the estimate trends toward ~zero tax — nobody's real activity
+does that), and **you cannot export a form or CSV from a pseudo state without personally attesting**. Real
+decisions you make always win over the defaults. Nothing fictional is ever written to your vault.
+
+> This is exactly the "help yourself prepare, but *you* are the preparer" philosophy from the
+> [Disclaimer](#disclaimer). The defaults are a starting point, not an answer.
+
+### 1. Turn it on and see the estimate
+
+```sh
+btctax --vault ./vault.pgp reconcile pseudo on
+btctax --vault ./vault.pgp verify        # blockers cleared; synthetic defaults marked [PSEUDO]
+btctax --vault ./vault.pgp report --tax-year 2025   # a flagged estimate (a placeholder profile fills in)
+```
+
+While the mode is on, the engine synthesizes defaults *only where you haven't made a real decision*: unknown-basis
+inbounds become **$0-basis self-transfers**, unclassified rows and import conflicts get accept-first defaults,
+and a placeholder tax profile lets a per-year estimate compute. Every one of those shows up as `[PSEUDO]`.
+
+### 2. Correct the ones that are actually taxable
+
+The defaults are wrong on purpose — fix the events that really were sales, income, or had a known basis. Each
+real decision **supersedes** the pseudo default for that event (no conflict, no undo needed). For example, mark
+a withdrawal that was really a sale, or attest the cost-basis method your broker used **per exchange account**:
+
+```sh
+# Attest the cost-basis method a specific brokerage account used (IRS 2025+ per-account rule).
+# The account must already exist in your vault — it's created when you import that exchange's
+# transactions; btctax lists the known accounts if you mistype one:
+btctax --vault ./vault.pgp config --set-forward-method hifo --exchange exchange:coinbase:<your-account-id>
+```
+
+(A global election is just `--set-forward-method fifo` with no `--exchange`.)
+
+### 3. Bulk-approve the defaults you accept
+
+Where a default *is* right (e.g. an outbound transfer really was a move to your own wallet), promote it from
+fiction to a **real, attested** decision — in bulk, with a preview:
+
+```sh
+btctax --vault ./vault.pgp reconcile pseudo approve --dry-run     # preview what would be promoted
+btctax --vault ./vault.pgp reconcile pseudo approve --yes         # promote all remaining defaults
+# or filter: --kind <type>  --wallet exchange:PROVIDER:ACCOUNT  --year 2025
+```
+
+Approved decisions are real and survive `pseudo off`.
+
+### 4. Export requires an attestation (only while pseudo values remain)
+
+As long as any `[PSEUDO]` value is contributing, producing a form or CSV requires you to type the exact phrase,
+which the tool displays for you to type or paste:
+
+```sh
+btctax --vault ./vault.pgp export-snapshot --out ../export --tax-year 2025 \
+  --attest "I attest this is true"
+```
+
+Without `--attest`, an interactive run **prompts** for the phrase; a scripted (non-terminal) run **refuses**
+rather than silently exporting a draft. The `btctax-tui` viewer's `e` export is gated the same way. Once you've
+replaced or approved every default so nothing is `[PSEUDO]` anymore, exports need no attestation — you've already
+attested through your real decisions.
+
+### 5. Turn it off
+
+```sh
+btctax --vault ./vault.pgp reconcile pseudo off   # reverts instantly; approved (real) decisions remain
+```
+
+> The exported files themselves are **clean** — the `[PSEUDO]` markers are on-screen only; they never appear in
+> a CSV or form. The attestation is what lets a draft be exported on purpose while making an accidental filing
+> impossible.
+
 ## Getting help
 
 - **`btctax <command> --help`** — every command documents its arguments, including file formats with examples.
