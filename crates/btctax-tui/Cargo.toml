@@ -1,6 +1,6 @@
 [package]
 name = "btctax-tui"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -19,10 +19,10 @@ name = "btctax-tui"
 path = "src/main.rs"
 
 [dependencies]
-btctax-cli      = { path = "../btctax-cli", version = "0.1.0" }
-btctax-store    = { path = "../btctax-store", version = "0.1.0" }
-btctax-core     = { path = "../btctax-core", version = "0.1.0" }
-btctax-adapters = { path = "../btctax-adapters", version = "0.1.0" }
+btctax-cli      = { path = "../btctax-cli", version = "0.2.0" }
+btctax-store    = { path = "../btctax-store", version = "0.2.0" }
+btctax-core     = { path = "../btctax-core", version = "0.2.0" }
+btctax-adapters = { path = "../btctax-adapters", version = "0.2.0" }
 # [R0-M1] Explicit pinned versions — NO [workspace.dependencies] table exists.
 ratatui   = "0.29"
 crossterm = "0.28"
