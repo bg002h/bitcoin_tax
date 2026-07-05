@@ -65,8 +65,17 @@ quits.
 .B Tab / Shift\-Tab
 Next / previous tab.
 .TP
-.B \(<- / \(->
-Previous / next tax year (resets the row selection).
+.B \(<- / \(-> , h / l
+Move the column cursor left / right on the Holdings, Disposals, and Income tabs
+(highlights the focused column).
+.TP
+.B s
+Sort the focused column: toggles ascending / descending; focusing a new column
+sorts ascending first. A \(<- / \(-> arrow in the header marks the sort column.
+.TP
+.B [ / ]
+Previous / next tax year (resets the row selection). No effect on Holdings, which
+is not year\-scoped.
 .TP
 .B Up / k , Down / j
 Scroll the table up / down.

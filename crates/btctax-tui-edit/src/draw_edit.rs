@@ -191,8 +191,8 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     let footer_text = if let Some(status) = app.status.as_deref() {
         status.to_string()
     } else {
-        "Tab/Shift-Tab: switch tab   ←/→: change year   ↑/↓ j/k: scroll   \
-         PgUp/PgDn: page   g/G: top/bottom   p: profile   ?: help   q/Esc: quit   [EDITOR]"
+        "Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   \
+         g/G: top/bottom   p: profile   ?: help   q/Esc: quit   [EDITOR]"
             .to_string()
     };
     let footer = Paragraph::new(footer_text).alignment(Alignment::Center);
@@ -1919,13 +1919,13 @@ fn draw_help_overlay(frame: &mut Frame, area: Rect) {
     };
     let lines = vec![
         hdr("Navigation"),
-        Line::from("  Tab/Shift-Tab switch tab    ←/→ change year    j/k or ↑/↓ scroll"),
-        Line::from("  PgUp/PgDn page    g/G top/bottom"),
+        Line::from("  Tab/Shift-Tab switch tab    ←/→ or h/l column cursor    s sort column"),
+        Line::from("  [ / ] change year    j/k or ↑/↓ scroll    PgUp/PgDn page    g/G top/bottom"),
         Line::from(""),
         hdr("Reconcile"),
         Line::from("  c classify-inbound   o reclassify-outflow   r reclassify-income"),
-        Line::from("  f set-fmv   v void   s select-lots   d donation-details"),
-        Line::from("  l link-transfer   u classify-raw   m match-self-transfers"),
+        Line::from("  f set-fmv   v void   S select-lots   d donation-details"),
+        Line::from("  L link-transfer   u classify-raw   m match-self-transfers"),
         Line::from("  i resolve-conflict   z optimize   e method-election"),
         Line::from("  a/A safe-harbor attest/allocate"),
         Line::from("  Bulk:  b link   B self-transfer-in   C resolve-conflict"),
