@@ -5,7 +5,8 @@ use btctax_core::{EventPayload, FmvStatus, IncomeKind, Source};
 
 // SYNTHETIC River CSV: the REAL §9.1 header names (8-col universal Sent/Received shape), INVENTED
 // values. CRLF, no preamble, real naive timestamp format. The Interest row carries NO USD → must
-// resolve from the bundled dataset (date 2025-06-15 = 67500.00).
+// resolve from the price provider (date 2025-06-15 = 67500.00). We inject a CONTROLLED synthetic
+// price at that date [R0-C1] so the asserted $6.75 FMV is independent of the shipped dataset.
 const CSV: &str = "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Fee Currency,Tag\r\n\
 2025-03-01 12:00:00,4200.00,USD,0.05000000,BTC,3.00,USD,Buy\r\n\
 2025-06-15 00:00:00,,,0.00010000,BTC,,,Interest\r\n\
@@ -16,7 +17,7 @@ fn river_semantic_refs_and_dataset_fmv_for_interest() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("river_universal.csv");
     std::fs::write(&path, CSV).unwrap();
-    let prices = BundledPrices::load().unwrap();
+    let prices = BundledPrices::from_csv_str("date,usd_close\n2025-06-15,67500.00\n").unwrap();
     let rv = River;
     let g = FileGroup {
         source: Source::River,

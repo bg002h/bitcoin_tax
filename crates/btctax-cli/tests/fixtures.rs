@@ -61,6 +61,43 @@ cb-donate-send,2026-03-01 12:00:00 UTC,Send,BTC,2.00000000,USD,50000.00,,,,,,bc1
     p
 }
 
+/// [M5] A committed fixture reproducing the SHAPE of the real-vault income events that project to a Hard
+/// `FmvMissing`: native `Income{fmv_status: Missing, usd_fmv: None}` events dated on days the NOW-real
+/// bundled dataset covers. A alone canNOT back-fill their already-imported Missing status (idempotent
+/// ingest, [R0-I1]); B's pseudo default CAN synthesize an FMV from the daily close. Returns `n` such
+/// events on consecutive covered days from 2025-06-01 into one exchange wallet. The T2 "27 clear under
+/// pseudo" gate seeds `income_fmv_missing_batch(27)`; the committed T1 KAT pins the pre-B behavior.
+#[allow(dead_code)]
+pub fn income_fmv_missing_batch(n: usize) -> Vec<btctax_core::LedgerEvent> {
+    use btctax_core::event::{EventPayload, Income, LedgerEvent};
+    use btctax_core::identity::{EventId, Source, SourceRef};
+    use btctax_core::{FmvStatus, IncomeKind, WalletId};
+    use time::macros::datetime;
+    let base = datetime!(2025-06-01 12:00:00 UTC);
+    let wallet = WalletId::Exchange {
+        provider: "River".into(),
+        account: "main".into(),
+    };
+    (0..n)
+        .map(|i| LedgerEvent {
+            id: EventId::import(
+                Source::River,
+                SourceRef::new(format!("inc-fmv-missing-{i}")),
+            ),
+            utc_timestamp: base + time::Duration::days(i as i64),
+            original_tz: time::UtcOffset::UTC,
+            wallet: Some(wallet.clone()),
+            payload: EventPayload::Income(Income {
+                sat: 10_000,
+                usd_fmv: None,
+                fmv_status: FmvStatus::Missing,
+                kind: IncomeKind::Staking,
+                business: false,
+            }),
+        })
+        .collect()
+}
+
 /// A Coinbase CSV with a single Buy only (self-contained USD; no price-dataset dependency).
 #[allow(dead_code)] // used in init_import.rs; appears unused in verify_report.rs compilation unit
 pub fn coinbase_single_buy(dir: &Path) -> PathBuf {

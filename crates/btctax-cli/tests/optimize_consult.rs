@@ -154,8 +154,10 @@ fn consult_what_if_picks_high_basis_lot_and_writes_nothing() {
         &pp(),
         100_000_000, // sell 1 BTC = 100,000,000 sat
         coinbase_wallet(),
-        date!(2025 - 06 - 15), // bundled FMV = $67,500
-        None,                  // --fmv: use dataset price
+        // The real 2025-06-15 close differs from the legacy $67,500 stub; pass it as EXPLICIT proceeds
+        // so the golden ST/LT tax figures (all hand-derived from $67,500) hold independent of the dataset.
+        date!(2025 - 06 - 15),
+        Some(dec!(67500)),
         DisposeKind::Sell,
     )
     .unwrap();
@@ -231,7 +233,7 @@ fn consult_is_deterministic() {
         100_000_000,
         coinbase_wallet(),
         date!(2025 - 06 - 15),
-        None,
+        Some(dec!(67500)), // explicit proceeds = the legacy stub close; golden tax figures preserved
         DisposeKind::Sell,
     )
     .unwrap();
@@ -242,7 +244,7 @@ fn consult_is_deterministic() {
         100_000_000,
         coinbase_wallet(),
         date!(2025 - 06 - 15),
-        None,
+        Some(dec!(67500)), // explicit proceeds = the legacy stub close; golden tax figures preserved
         DisposeKind::Sell,
     )
     .unwrap();
@@ -272,7 +274,7 @@ fn consult_timing_insight_present_for_soon_to_cross_st_lot() {
         100_000_000,
         coinbase_wallet(),
         date!(2025 - 06 - 15),
-        None,
+        Some(dec!(67500)), // explicit proceeds = the legacy stub close; golden tax figures preserved
         DisposeKind::Sell,
     )
     .unwrap();
@@ -365,7 +367,7 @@ fn consult_timing_absent_for_purely_lt_lot() {
         100_000_000,
         coinbase_wallet(),
         date!(2025 - 06 - 15),
-        None,
+        Some(dec!(67500)), // explicit proceeds = the legacy stub close; golden tax figures preserved
         DisposeKind::Sell,
     )
     .unwrap();
@@ -405,18 +407,18 @@ fn consult_timing_absent_for_purely_lt_lot() {
 
 /// Future date with no bundled dataset price and `proceeds = None` → ProceedsRequired error.
 ///
-/// The bundled dataset's last entry is 2025-06-15. `at = 2025-12-31` has no dataset price.
-/// With `proceeds = None` (--fmv path), `consult_sale` returns
-/// `OptimizeError::Evaluate(EvaluateError::ProceedsRequired)` → `CliError::Usage` mentioning "proceeds".
-/// With `proceeds = Some(70000)`, the same date → Ok (proceeds are explicit).
+/// The bundled dataset's last entry is 2026-06-03. `at = 2026-12-31` is beyond the priced range (so no
+/// dataset price) yet still has a bundled TY2026 tax table. With `proceeds = None` (--fmv path),
+/// `consult_sale` returns `OptimizeError::Evaluate(EvaluateError::ProceedsRequired)` → `CliError::Usage`
+/// mentioning "proceeds". With `proceeds = Some(70000)`, the same date → Ok (proceeds are explicit).
 #[test]
 fn consult_future_date_requires_proceeds() {
     let csv_dir = tempfile::tempdir().unwrap();
-    // Use the two-lots fixture so lots are available at 2025-12-31 (none sold before that date).
+    // Use the two-lots fixture so lots are available at 2026-12-31 (none sold before that date).
     let csv = write_two_lots_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    // Need a 2025 profile for score_synthetic to work when proceeds are provided.
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    // Need a 2026 profile (the consult year) for score_synthetic to work when proceeds are provided.
+    cmd::tax::set_profile(&vault, &pp(), 2026, single_100k_profile()).unwrap();
 
     // -- fmv (proceeds = None) at off-dataset date → ProceedsRequired.
     let err = cmd::optimize::consult(
@@ -424,7 +426,7 @@ fn consult_future_date_requires_proceeds() {
         &pp(),
         100_000_000,
         coinbase_wallet(),
-        date!(2025 - 12 - 31), // no bundled price for this date
+        date!(2026 - 12 - 31), // beyond the priced range (last is 2026-06-03) → no bundled price
         None,                  // --fmv: dataset FMV → fails (no price)
         DisposeKind::Sell,
     )
@@ -442,7 +444,7 @@ fn consult_future_date_requires_proceeds() {
         &pp(),
         100_000_000,
         coinbase_wallet(),
-        date!(2025 - 12 - 31),
+        date!(2026 - 12 - 31),
         Some(dec!(70000)), // --proceeds 70000 → explicit; no dataset price needed
         DisposeKind::Sell,
     );
@@ -494,7 +496,7 @@ fn consult_no_lots_is_usage_error() {
         100_000_000,
         coinbase_wallet(),
         date!(2025 - 06 - 15),
-        None,
+        Some(dec!(67500)), // explicit proceeds = the legacy stub close; golden tax figures preserved
         DisposeKind::Sell,
     )
     .unwrap_err();
@@ -582,7 +584,7 @@ fn consult_small_pool_approximate_false_no_note() {
         100_000_000,
         coinbase_wallet(),
         date!(2025 - 06 - 15),
-        None,
+        Some(dec!(67500)), // explicit proceeds = the legacy stub close; golden tax figures preserved
         DisposeKind::Sell,
     )
     .unwrap();

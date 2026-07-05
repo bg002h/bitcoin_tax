@@ -35,3 +35,5 @@ thiserror = "1"
 tempfile = "3"
 rust_decimal_macros = "1.36"
 time = { version = "0.3", features = ["macros"] }
+# Integration tests inject a controlled synthetic price provider via `Session::set_prices` [R0-C1].
+btctax-adapters = { path = "../btctax-adapters", version = "0.2.0" }

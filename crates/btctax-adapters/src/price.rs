@@ -78,4 +78,87 @@ mod tests {
         let p = BundledPrices::from_csv_str("date,usd_close\n2024-02-01,43100.50\n").unwrap();
         assert_eq!(p.usd_per_btc(date!(2024 - 02 - 01)), Some(dec!(43100.50)));
     }
+
+    // ── #41 A-KATs: the SHIPPED bundled daily-close dataset (5,801 rows, 2010-07-17 → 2026-06-03) ──
+
+    /// Exact row count — a truncation / accidental-regeneration guard.
+    #[test]
+    fn bundled_dataset_row_count() {
+        let p = BundledPrices::load().unwrap();
+        assert_eq!(
+            p.by_date.len(),
+            5801,
+            "bundled daily-close row count changed — regenerate intentionally + update this pin"
+        );
+    }
+
+    /// Every non-header CSV line is a UNIQUE, strictly-ascending date: len == raw line count proves no
+    /// row was collapsed by dedup (already deduped), and the ascending window proves sorted + unique.
+    #[test]
+    fn bundled_dataset_parses_sorted_deduped() {
+        let raw_lines = DATASET_CSV
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with("date"))
+            .count();
+        let p = BundledPrices::load().unwrap();
+        assert_eq!(
+            p.by_date.len(),
+            raw_lines,
+            "a duplicate date collapsed on load — the source dataset is not deduped"
+        );
+        let dates: Vec<_> = p.by_date.keys().copied().collect();
+        assert!(
+            dates.windows(2).all(|w| w[0] < w[1]),
+            "dates must be strictly ascending (sorted, no duplicates)"
+        );
+    }
+
+    /// Coverage spot-check across the whole span + out-of-range → None (no gap-fill / extrapolation).
+    #[test]
+    fn bundled_dataset_covers_2010_to_2026() {
+        let p = BundledPrices::load().unwrap();
+        assert_eq!(
+            p.usd_per_btc(date!(2010 - 07 - 17)),
+            Some(dec!(0.05)),
+            "first close (2010-07-17)"
+        );
+        assert_eq!(
+            p.usd_per_btc(date!(2025 - 06 - 15)),
+            Some(dec!(105651.98)),
+            "mid-range spot (2025-06-15)"
+        );
+        assert_eq!(
+            p.usd_per_btc(date!(2026 - 06 - 03)),
+            Some(dec!(64813.38)),
+            "last close (2026-06-03)"
+        );
+        assert_eq!(
+            p.usd_per_btc(date!(2009 - 01 - 03)),
+            None,
+            "before coverage → None"
+        );
+        assert_eq!(
+            p.usd_per_btc(date!(2030 - 01 - 01)),
+            None,
+            "after coverage → None"
+        );
+    }
+
+    /// [M4] Pin ONE real date's FMV end-to-end through `fmv_of` (the exact 2dp cents source is fine —
+    /// `fmv_of` already `round_cents`): 2025-06-15 close 105651.98/BTC.
+    #[test]
+    fn real_date_fmv_is_exact() {
+        let p = BundledPrices::load().unwrap();
+        // 1 BTC = 100_000_000 sat → the whole-BTC close.
+        assert_eq!(
+            fmv_of(&p, date!(2025 - 06 - 15), 100_000_000),
+            Some(dec!(105651.98))
+        );
+        // 0.5 BTC = 50_000_000 sat → round_cents(52825.99).
+        assert_eq!(
+            fmv_of(&p, date!(2025 - 06 - 15), 50_000_000),
+            Some(dec!(52825.99))
+        );
+    }
 }

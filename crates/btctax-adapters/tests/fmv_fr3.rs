@@ -1,10 +1,13 @@
-use btctax_adapters::ingest_files_bundled;
+use btctax_adapters::ingest_files;
+use btctax_adapters::price::BundledPrices;
 use btctax_core::{EventPayload, FmvStatus};
 use rust_decimal_macros::dec;
 
 // River rows (REAL §9.1 headers, invented values): Interest on a dataset date (→ PriceDataset),
-// Interest on a NON-dataset date (→ Missing), Buy (no FMV needed). Bundled dataset has 2025-06-15
-// @ 67500.00 but NOT 2025-07-04.
+// Interest on a NON-dataset date (→ Missing), Buy (no FMV needed). We inject a CONTROLLED synthetic
+// price set (2025-06-15 @ 67500.00, and NOTHING on 2025-07-04) via `ingest_files` [R0-C1] so the FR3
+// PriceDataset/Missing matrix is independent of the shipped daily-close dataset (which now covers BOTH
+// 2025-06-15 and 2025-07-04 with real closes — the old `ingest_files_bundled` path would resolve BOTH).
 // FR3 income events can only produce two statuses through the income path:
 // - PriceDataset: when the date exists in the bundled price dataset (e.g., 2025-06-15)
 // - Missing: when the date does not exist in the dataset (e.g., 2025-07-04)
@@ -19,7 +22,9 @@ fn fr3_matrix_through_full_pipeline() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("river.csv");
     std::fs::write(&path, CSV).unwrap();
-    let batch = ingest_files_bundled(&[path]).unwrap();
+    // Synthetic controlled prices: 2025-06-15 present (→ PriceDataset), 2025-07-04 absent (→ Missing).
+    let prices = BundledPrices::from_csv_str("date,usd_close\n2025-06-15,67500.00\n").unwrap();
+    let batch = ingest_files(&[path], &prices).unwrap();
 
     let income_events: Vec<_> = batch
         .events
