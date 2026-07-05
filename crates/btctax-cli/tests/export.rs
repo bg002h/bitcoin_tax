@@ -23,7 +23,7 @@ fn export_snapshot_writes_sqlite_and_csvs_and_backup_key() {
     .unwrap();
 
     let out = dir.path().join("export");
-    let sqlite = cmd::admin::export_snapshot(&vault, &pp(), &out, None).unwrap();
+    let sqlite = cmd::admin::export_snapshot(&vault, &pp(), &out, None, None).unwrap();
     assert!(sqlite.exists(), "snapshot.sqlite (store)");
 
     let lots_path = out.join("lots.csv");
@@ -131,7 +131,7 @@ fn export_writes_year_scoped_form8949_and_schedule_d() {
 
     // With None: the year-scoped filing artifacts are NOT written.
     let out_none = dir.path().join("export_none");
-    cmd::admin::export_snapshot(&vault, &pp(), &out_none, None).unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), &out_none, None, None).unwrap();
     assert!(
         !out_none.join("form8949.csv").exists(),
         "form8949.csv must be omitted without --tax-year"
@@ -140,7 +140,7 @@ fn export_writes_year_scoped_form8949_and_schedule_d() {
 
     // With Some(2025): both are written, year-scoped.
     let out = dir.path().join("export_2025");
-    cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2025)).unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2025), None).unwrap();
 
     let f8949 = out.join("form8949.csv");
     let schedd = out.join("schedule_d.csv");
@@ -264,7 +264,7 @@ fn removals_csv_multi_leg_donation_no_double_count() {
     .unwrap();
 
     let out = dir.path().join("export");
-    cmd::admin::export_snapshot(&vault, &pp(), &out, None).unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), &out, None, None).unwrap();
 
     let removals_path = out.join("removals.csv");
     assert!(removals_path.exists(), "removals.csv must exist");
@@ -385,7 +385,7 @@ fn export_writes_form8283_with_section_b_and_aggregation_caveat() {
 
     // The donation is contributed 2026-03-01 → export for tax-year 2026.
     let out = dir.path().join("export_2026");
-    cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2026)).unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2026), None).unwrap();
 
     let f8283 = out.join("form8283.csv");
     assert!(
@@ -536,7 +536,7 @@ sd-send,2025-06-01 12:00:00 UTC,Send,BTC,0.00100000,USD,300.00,,,,,,bc1qsyntheti
     .unwrap();
 
     let out = dir.path().join("export_2025_small");
-    cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2025)).unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2025), None).unwrap();
 
     let raw = std::fs::read_to_string(out.join("form8283.csv")).unwrap();
     assert!(
@@ -579,7 +579,7 @@ fn csv_exports_are_owner_only_on_pre_existing_dir() {
     let out = dir.path().join("exports_pre");
     std::fs::create_dir_all(&out).unwrap();
 
-    cmd::admin::export_snapshot(&vault, &pp(), &out, None).unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), &out, None, None).unwrap();
 
     for name in ["lots.csv", "disposals.csv", "removals.csv", "income.csv"] {
         let path = out.join(name);
@@ -636,7 +636,7 @@ fn removals_csv_has_donee_column_populated_and_empty() {
     .unwrap();
 
     let out = dir.path().join("export_donee");
-    cmd::admin::export_snapshot(&vault, &pp(), &out, None).unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), &out, None, None).unwrap();
 
     let removals_path = out.join("removals.csv");
     assert!(removals_path.exists(), "removals.csv must exist");

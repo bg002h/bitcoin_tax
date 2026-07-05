@@ -24,15 +24,20 @@ estimate the user corrects toward truth. R0-GREEN spec `design/SPEC_pseudo_recon
   REAL Sell on a pseudo `$0` lot is flagged) and PROVABLY ABSENT from every export CSV/form (a dedicated
   `pseudo` bool the writers OMIT, never a `BasisSource` variant); mode-off byte-identical; determinism.
 - **Surfaces:** `reconcile pseudo on|off|approve` (own-loop bulk-approve, `--kind/--wallet/--year` filter);
-  `[PSEUDO]` on report/TUI rows + a `PseudoReconcileActive` advisory in `verify`; `export-snapshot` REFUSES
-  while pseudo-active (**interim [I3] guard** — sub-project 3 replaces it with the typed-attest gate);
-  btctax-tui-edit loud banner + `P` approve flow. Man pages regenerated (`make docs`).
+  `[PSEUDO]` on report/TUI rows + a `PseudoReconcileActive` advisory in `verify`; `export-snapshot` while
+  pseudo-active is **REPLACED by sub-3 (attestation gate — both the CLI and the btctax-tui viewer)** — the
+  interim [I3] blanket refusal is gone; btctax-tui-edit loud banner + `P` approve flow. Man pages regenerated
+  (`make docs`).
 
-**NEXT (not started):** **sub-project 3 — attestation export gate**: producing `export-snapshot` / any IRS
-form when the ledger is pseudo-active requires typing **"I attest this is true"** (typed-phrase gate,
-mirroring safe-harbor-attest); a fully-real, fully-attested ledger exports with no prompt. It REPLACES the
-sub-2 [I3] blanket refusal. Consumes the `state.pseudo_active()` / `pseudo_synthetic_count` signal sub-2
-already exposes. Design of record: `design/BRAINSTORM_auto_pseudo_reconcile.md`.
+**sub-project 3 — attestation export gate: IMPLEMENTED on `feat/attest-export-gate` (base `main` `afb0807`),
+AWAITING WHOLE-DIFF REVIEW (not merged).** Producing `export-snapshot` / any form/data file while the ledger
+is pseudo-active requires the exact phrase **`I attest this is true`** (trimmed, case-sensitive) — a
+fully-real ledger exports with no prompt. Both form-writing paths are gated [R0-C1]: the CLI
+(`cmd::admin::export_snapshot` + `--attest`/TTY prompt) AND the btctax-tui viewer `e` export (typed-word
+modal). Pure `btctax_cli::require_attestation` exact-compare helper + `ATTEST_PHRASE` const (both `pub`,
+shared by the viewer); errors `AttestationRequired`/`AttestationFailed` name the phrase. Output stays clean
+(no markers added). R0-GREEN spec `design/SPEC_attest_export_gate.md` (2 rounds, 0C/0I). **This closes the
+auto-pseudo-reconcile program.**
 
 ---
 

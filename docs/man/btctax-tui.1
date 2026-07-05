@@ -17,7 +17,11 @@ On launch it prompts for the vault passphrase (the Unlock screen). Once unlocked
 tab bar across the projections; use the keys below to switch tabs, change the tax year, and
 scroll. Press
 .B e
-to export the decrypted snapshot + CSVs for the selected year.
+to export the decrypted snapshot + CSVs for the selected year. If the ledger is
+PSEUDO\-RECONCILED (a synthetic default contributes to the projection), the export modal
+requires typing the exact attestation phrase
+.B I attest this is true
+before it will write the fictional draft \(em a fully\-real ledger exports with a plain confirm.
 .PP
 The vault path is taken from
 .B \-\-vault
@@ -75,6 +79,9 @@ Jump to top / bottom.
 .TP
 .B e
 Export the decrypted snapshot + projection CSVs for the selected year (confirmation modal).
+While pseudo\-reconciled, the modal is a typed\-word gate requiring the exact phrase
+.B I attest this is true
+before it writes.
 .TP
 .B q / Esc
 Quit.

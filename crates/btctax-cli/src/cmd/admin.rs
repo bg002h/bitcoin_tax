@@ -2,7 +2,7 @@
 //! (c)/(b) treatment + the pre-2025 lot method; export/backup arrive in Task 15.
 use crate::config::{set_fee_treatment, set_pre2025_method as config_set_pre2025_method};
 use crate::render::write_csv_exports;
-use crate::{CliConfig, CliError, Session};
+use crate::{require_attestation, CliConfig, CliError, Session};
 use btctax_adapters::BundledTaxTables;
 use btctax_core::{compute_se_tax, FeeTreatment, LotMethod, TaxTables};
 use btctax_store::Passphrase;
@@ -42,19 +42,25 @@ pub fn set_pre2025_method(
 /// FR10 / NFR2 exception: decrypted SQLite image (via the store) + the projected ledger as CSV.
 /// When `tax_year` is `Some(y)`, the per-tax-year Form 8949 + Schedule D CSVs are also written,
 /// year-scoped to `y` (P2-B); when `None`, only the all-years CSVs are written.
+///
+/// Sub-project 3 attestation gate: when the projection is pseudo-active (a synthetic default
+/// contributes), producing any form/data file requires the exact `ATTEST_PHRASE` in `attest`
+/// (trimmed, case-sensitive). Checked FIRST — before any bytes are written — so a refused export
+/// leaves `out_dir` untouched. A fully-real (not-pseudo-active) ledger ignores `attest` entirely.
 pub fn export_snapshot(
     vault_path: &Path,
     pp: &Passphrase,
     out_dir: &Path,
     tax_year: Option<i32>,
+    attest: Option<&str>,
 ) -> Result<PathBuf, CliError> {
     let session = Session::open(vault_path, pp)?;
-    // [R0-I3] interim pseudo-reconcile guard: REFUSE before ANY bytes are written when a synthetic
-    // default contributes — no fictional snapshot/8949/Schedule D leaves the machine unguarded. Checked
-    // FIRST (before the vault snapshot / CSV writes), so a refused export leaves the out_dir untouched.
+    // Attestation gate: REFUSE before ANY bytes are written when a synthetic default contributes and the
+    // attestation is missing/wrong — no fictional snapshot/8949/Schedule D leaves the machine unguarded.
+    // Checked FIRST (before the vault snapshot / CSV writes), so a refused export leaves out_dir untouched.
     let (state, _cfg) = session.project()?;
     if state.pseudo_active() {
-        return Err(CliError::PseudoActiveExport(state.pseudo_synthetic_count));
+        require_attestation(attest)?;
     }
     let sqlite = session.vault().export_snapshot(out_dir)?; // writes out_dir/snapshot.sqlite
                                                             // P2-D: standalone Schedule SE §1401 figure for the year-scoped export. Needs the year's filing
@@ -89,6 +95,15 @@ pub fn export_snapshot(
         &donation_details,
     )?;
     Ok(sqlite)
+}
+
+/// Probe: would an export be gated? `true` when the projection is pseudo-active (a synthetic default
+/// contributes). Used by the `export-snapshot` CLI arm to decide whether to PROMPT for the attestation
+/// phrase; the authoritative gate lives inside `export_snapshot` itself. Kept in the library so main.rs
+/// stays a thin dispatch (no session-open / projection business logic in the binary).
+pub fn export_pseudo_active(vault_path: &Path, pp: &Passphrase) -> Result<bool, CliError> {
+    let (state, _cfg) = Session::open(vault_path, pp)?.project()?;
+    Ok(state.pseudo_active())
 }
 
 /// §8: export the passphrase-protected key (escape hatch; HIGH-security write).

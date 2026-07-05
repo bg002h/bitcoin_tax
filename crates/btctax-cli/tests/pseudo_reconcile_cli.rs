@@ -133,31 +133,216 @@ fn make_vault(evs: &[LedgerEvent]) -> (tempfile::TempDir, PathBuf) {
     (dir, vault)
 }
 
-/// [R0-I3] `export-snapshot` REFUSES while pseudo synthetics contribute; OFF ⇒ it proceeds.
+/// [sub-3, ex-I3] The attestation gate SUPERSEDES sub-2's interim blanket refusal: while pseudo-active,
+/// a MISSING attestation refuses the export (nothing written); a CORRECT attestation PERMITS it; turning
+/// the mode OFF exports with no attestation at all.
 #[test]
-fn export_snapshot_refused_while_pseudo_active() {
+fn attest_gate_supersedes_interim_i3_refusal() {
     let (_dir, vault) = make_vault(&taint_events());
     let out = tempfile::tempdir().unwrap();
 
-    // Pseudo ON ⇒ the projection has synthetics ⇒ export is refused, nothing written.
+    // Pseudo ON + no attestation ⇒ refused (AttestationRequired), nothing written.
     cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
-    let err = cmd::admin::export_snapshot(&vault, &pp(), out.path(), Some(2025)).unwrap_err();
+    let err = cmd::admin::export_snapshot(&vault, &pp(), out.path(), Some(2025), None).unwrap_err();
     assert!(
-        matches!(err, btctax_cli::CliError::PseudoActiveExport(n) if n > 0),
-        "expected PseudoActiveExport, got {err:?}"
+        matches!(err, btctax_cli::CliError::AttestationRequired),
+        "expected AttestationRequired (supersedes the interim refusal), got {err:?}"
     );
     assert!(
         !out.path().join("snapshot.sqlite").exists(),
         "a refused export must leave the out_dir untouched"
     );
 
-    // Pseudo OFF ⇒ the unknown-basis inbound is a Hard blocker again, but export itself is not refused
-    // by the pseudo guard (it proceeds to write the snapshot).
-    cmd::reconcile::pseudo_set_mode(&vault, &pp(), false).unwrap();
-    let ok = cmd::admin::export_snapshot(&vault, &pp(), out.path(), Some(2025));
+    // Pseudo ON + the CORRECT attestation ⇒ PERMITTED (this is the whole point of sub-3): the draft is
+    // exported ON PURPOSE.
+    let ok = cmd::admin::export_snapshot(
+        &vault,
+        &pp(),
+        out.path(),
+        Some(2025),
+        Some(btctax_cli::ATTEST_PHRASE),
+    );
     assert!(
         ok.is_ok(),
-        "mode-off export must not be refused by the pseudo guard: {ok:?}"
+        "a correct attestation must PERMIT the pseudo-active export: {ok:?}"
+    );
+
+    // Pseudo OFF ⇒ the unknown-basis inbound is a Hard blocker again, but export itself is not gated
+    // (it proceeds to write the snapshot) even with NO attestation.
+    let out2 = tempfile::tempdir().unwrap();
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), false).unwrap();
+    let ok = cmd::admin::export_snapshot(&vault, &pp(), out2.path(), Some(2025), None);
+    assert!(
+        ok.is_ok(),
+        "mode-off export must not be gated by the attestation guard: {ok:?}"
+    );
+}
+
+/// The pure `require_attestation` exact-compare helper [R0-I2]: correct (trimmed) ⇒ Ok;
+/// wrong ⇒ AttestationFailed; missing ⇒ AttestationRequired. Exact, trimmed, case-SENSITIVE.
+/// (★ fault-inject target — break the exact-compare and this goes RED.)
+#[test]
+fn require_attestation_is_exact_trimmed_case_sensitive() {
+    use btctax_cli::{require_attestation, CliError, ATTEST_PHRASE};
+    // Correct — exact.
+    assert!(require_attestation(Some(ATTEST_PHRASE)).is_ok());
+    // Correct — surrounding whitespace is TRIMMED before comparison.
+    assert!(require_attestation(Some("  I attest this is true  ")).is_ok());
+    assert!(require_attestation(Some("\tI attest this is true\n")).is_ok());
+    // Wrong — case-sensitive (lower-case i) ⇒ FAILED, not required.
+    assert!(matches!(
+        require_attestation(Some("i attest this is true")),
+        Err(CliError::AttestationFailed)
+    ));
+    // Wrong — trailing junk that survives trim ⇒ FAILED.
+    assert!(matches!(
+        require_attestation(Some("I attest this is true!!")),
+        Err(CliError::AttestationFailed)
+    ));
+    // Wrong — interior text (a contains()-style bug would let this through) ⇒ FAILED.
+    assert!(matches!(
+        require_attestation(Some("I do not attest this is true")),
+        Err(CliError::AttestationFailed)
+    ));
+    // Missing ⇒ Required (distinct from Failed) [R0-I1].
+    assert!(matches!(
+        require_attestation(None),
+        Err(CliError::AttestationRequired)
+    ));
+    // Empty string is a supplied-but-wrong phrase ⇒ FAILED, not Required.
+    assert!(matches!(
+        require_attestation(Some("")),
+        Err(CliError::AttestationFailed)
+    ));
+}
+
+/// While pseudo-active, the CORRECT attestation writes the files (the draft exports ON PURPOSE).
+#[test]
+fn export_pseudo_active_correct_attest_writes_files() {
+    let (_dir, vault) = make_vault(&taint_events());
+    let out = tempfile::tempdir().unwrap();
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+
+    let sqlite = cmd::admin::export_snapshot(
+        &vault,
+        &pp(),
+        out.path(),
+        Some(2025),
+        Some(btctax_cli::ATTEST_PHRASE),
+    )
+    .expect("a correct attestation must permit the export");
+
+    assert!(sqlite.exists(), "the snapshot.sqlite must be written");
+    // The all-years + year-scoped form CSVs must all be present.
+    for name in [
+        "lots.csv",
+        "disposals.csv",
+        "form8949.csv",
+        "schedule_d.csv",
+    ] {
+        assert!(
+            out.path().join(name).exists(),
+            "{name} must be written after a correct attestation"
+        );
+    }
+}
+
+/// While pseudo-active, a MISSING attestation (`None`) ⇒ AttestationRequired and out_dir untouched.
+#[test]
+fn export_pseudo_active_missing_attest_refused_out_dir_untouched() {
+    let (_dir, vault) = make_vault(&taint_events());
+    let out = tempfile::tempdir().unwrap();
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+
+    let err = cmd::admin::export_snapshot(&vault, &pp(), out.path(), Some(2025), None).unwrap_err();
+    assert!(
+        matches!(err, btctax_cli::CliError::AttestationRequired),
+        "missing attestation ⇒ AttestationRequired, got {err:?}"
+    );
+    // NOTHING written — checked FIRST, before any bytes.
+    assert!(!out.path().join("snapshot.sqlite").exists());
+    assert!(!out.path().join("form8949.csv").exists());
+    let count = std::fs::read_dir(out.path()).unwrap().count();
+    assert_eq!(count, 0, "a refused export must leave out_dir empty");
+}
+
+/// While pseudo-active, a WRONG phrase ⇒ AttestationFailed and out_dir untouched — exact/trimmed/
+/// case-sensitive at the command boundary. (★ fault-inject target — break the exact-compare ⇒ RED.)
+#[test]
+fn export_pseudo_active_wrong_phrase_refused() {
+    let (_dir, vault) = make_vault(&taint_events());
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+
+    for wrong in [
+        "i attest this is true",   // wrong case
+        "I attest this is true!!", // trailing junk (survives trim)
+        "I attest this is  true",  // interior whitespace differs
+        "attest",                  // substring — a contains() bug would pass this
+    ] {
+        let out = tempfile::tempdir().unwrap();
+        let err = cmd::admin::export_snapshot(&vault, &pp(), out.path(), Some(2025), Some(wrong))
+            .unwrap_err();
+        assert!(
+            matches!(err, btctax_cli::CliError::AttestationFailed),
+            "wrong phrase {wrong:?} ⇒ AttestationFailed, got {err:?}"
+        );
+        assert!(
+            !out.path().join("snapshot.sqlite").exists(),
+            "a refused export ({wrong:?}) must leave the out_dir untouched"
+        );
+        assert_eq!(
+            std::fs::read_dir(out.path()).unwrap().count(),
+            0,
+            "out_dir must be empty after a refused export ({wrong:?})"
+        );
+    }
+}
+
+/// A fully-real (NOT pseudo-active) ledger exports with NO `--attest` — and even a bogus attest is
+/// simply IGNORED [R0-N1]. Same file SET each way (bytes differ — sqlite embeds timestamps).
+#[test]
+fn export_not_pseudo_active_ignores_attest() {
+    // Mode never turned on ⇒ no synthetics ⇒ pseudo_active() is false, even though the unknown-basis
+    // inbound is a Hard blocker (export itself is not gated by blockers).
+    let (_dir, vault) = make_vault(&taint_events());
+
+    // No attestation → exports fine.
+    let out_a = tempfile::tempdir().unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), out_a.path(), Some(2025), None)
+        .expect("a fully-real ledger must export with no attestation");
+    assert!(out_a.path().join("snapshot.sqlite").exists());
+    assert!(out_a.path().join("form8949.csv").exists());
+
+    // A bogus attestation is IGNORED (not validated) when not pseudo-active → still exports.
+    let out_b = tempfile::tempdir().unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), out_b.path(), Some(2025), Some("nonsense"))
+        .expect("attest is ignored when not pseudo-active");
+    assert!(out_b.path().join("snapshot.sqlite").exists());
+    assert!(out_b.path().join("form8949.csv").exists());
+}
+
+/// [R0-M1] The attestation error strings are BUILT from `ATTEST_PHRASE` (no drift): both variants name
+/// the exact phrase AND the pseudo-reconciled state.
+#[test]
+fn attest_strings_contain_phrase() {
+    use btctax_cli::{CliError, ATTEST_PHRASE};
+    let required = CliError::AttestationRequired.to_string();
+    let failed = CliError::AttestationFailed.to_string();
+    assert!(
+        required.contains(ATTEST_PHRASE),
+        "AttestationRequired must name the exact phrase: {required}"
+    );
+    assert!(
+        failed.contains(ATTEST_PHRASE),
+        "AttestationFailed must name the exact phrase: {failed}"
+    );
+    assert!(
+        required.to_lowercase().contains("pseudo"),
+        "AttestationRequired must name the pseudo-reconciled state: {required}"
+    );
+    assert!(
+        failed.to_lowercase().contains("pseudo"),
+        "AttestationFailed must name the pseudo-reconciled state: {failed}"
     );
 }
 

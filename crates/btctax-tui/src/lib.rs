@@ -162,33 +162,12 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
     }
 
     // ── Modal dispatch — BEFORE screen dispatch [R0-M4] ──────────────────────
-    // When the export confirmation modal is open, ONLY Enter and Esc are acted on.
-    // ALL other keys (including 'q') are swallowed — the modal is blocking.
+    // When the export confirmation modal is open it consumes the key entirely (the modal is
+    // blocking; 'q' never quits while it is open). Two modes, decided at modal-open time:
+    //   • plain confirm (not pseudo-active): only Enter/Esc are acted on;
+    //   • typed-word attest (pseudo-active) [R0-C1]: printable chars edit the phrase buffer.
     if app.export_modal.is_some() {
-        match key.code {
-            KeyCode::Enter => {
-                // Take the modal state (clearing app.export_modal = None).
-                let modal = app.export_modal.take().expect("checked is_some above");
-                if let Some(snap) = app.snapshot.as_ref() {
-                    match export::do_export(snap, &modal) {
-                        Ok(dir) => {
-                            app.export_status = Some(format!("Exported to {}", dir.display()));
-                        }
-                        Err(e) => {
-                            app.export_status = Some(format!("Export error: {e}"));
-                        }
-                    }
-                }
-                // export_modal is already None (taken above); drop modal.
-            }
-            KeyCode::Esc => {
-                // Cancel — writes nothing. Does NOT quit [R0-M4].
-                app.export_modal = None;
-            }
-            _ => {
-                // Swallowed. 'q' does NOT quit while the modal is open.
-            }
-        }
+        handle_export_modal_key(app, key);
         return; // Modal consumed the key — skip screen dispatch.
     }
 
@@ -248,15 +227,107 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
                         let export_now = OffsetDateTime::now_utc();
                         let out_dir = export::export_dir_for(&app.vault_path, export_now);
                         let files = export::compute_files(snap, app.selected_year);
+                        // [sub-3 / R0-C1] When the ledger is PSEUDO-ACTIVE the modal becomes a
+                        // typed-word attest gate (the exact ATTEST_PHRASE required before export);
+                        // a fully-real ledger gets today's plain Enter/Esc confirm.
+                        let attest = if snap.state.pseudo_active() {
+                            Some(export::AttestInput::default())
+                        } else {
+                            None
+                        };
                         app.export_modal = Some(export::ExportConfirmState {
                             year: app.selected_year,
                             out_dir,
                             files,
                             export_now,
+                            attest,
                         });
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+}
+
+// ── Export modal dispatch ──────────────────────────────────────────────────────
+
+/// Dispatch a key while the export confirmation modal is open.
+///
+/// Two modes, decided at modal-open time from `snap.state.pseudo_active()`:
+///  - **plain confirm** (`attest == None`, not pseudo-active): today's behavior — `Enter` runs the
+///    export, `Esc` cancels, every other key is swallowed.
+///  - **typed-word attest** (`attest == Some`, pseudo-active) [R0-C1]: the user must type the exact
+///    `btctax_cli::ATTEST_PHRASE` before the export runs. Printable chars / `Backspace` edit the
+///    buffer (clearing any prior error); `Enter` validates via the shared `require_attestation`
+///    exact-compare — a wrong phrase sets an error and does NOT export (buffer PRESERVED); `Esc`
+///    cancels. Mirrors tui-edit's SafeHarborAttest TypedWord gate.
+fn handle_export_modal_key(app: &mut App, key: KeyEvent) {
+    let is_attest = app
+        .export_modal
+        .as_ref()
+        .is_some_and(|m| m.attest.is_some());
+
+    if !is_attest {
+        // Plain confirm (not pseudo-active).
+        match key.code {
+            KeyCode::Enter => run_export(app),
+            KeyCode::Esc => app.export_modal = None, // cancel — writes nothing; does NOT quit.
+            _ => {}                                  // swallowed ('q' does not quit).
+        }
+        return;
+    }
+
+    // Typed-word attest (pseudo-active) [R0-C1].
+    match key.code {
+        KeyCode::Char(c) => {
+            if let Some(a) = app.export_modal.as_mut().and_then(|m| m.attest.as_mut()) {
+                a.buf.push(c);
+                a.error = None;
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(a) = app.export_modal.as_mut().and_then(|m| m.attest.as_mut()) {
+                a.buf.pop();
+                a.error = None;
+            }
+        }
+        KeyCode::Esc => app.export_modal = None, // cancel — writes nothing.
+        KeyCode::Enter => {
+            let typed = app
+                .export_modal
+                .as_ref()
+                .and_then(|m| m.attest.as_ref())
+                .map(|a| a.buf.clone())
+                .unwrap_or_default();
+            // Shared exact-compare (trimmed, case-sensitive) — the SAME gate the CLI uses.
+            if btctax_cli::require_attestation(Some(&typed)).is_ok() {
+                run_export(app);
+            } else if let Some(a) = app.export_modal.as_mut().and_then(|m| m.attest.as_mut()) {
+                // Wrong phrase: NO export; keep the modal open, PRESERVE the buffer, show the error.
+                a.error = Some(format!(
+                    "type '{}' exactly to attest and export",
+                    btctax_cli::ATTEST_PHRASE
+                ));
+            }
+        }
+        _ => {} // swallowed.
+    }
+}
+
+/// Take the export modal and run the export, recording the one-line status. Shared by both modal
+/// modes (plain confirm and the attested typed-word path). Clears `export_modal` (takes it).
+fn run_export(app: &mut App) {
+    let Some(modal) = app.export_modal.take() else {
+        return;
+    };
+    if let Some(snap) = app.snapshot.as_ref() {
+        match export::do_export(snap, &modal) {
+            Ok(dir) => {
+                app.export_status = Some(format!("Exported to {}", dir.display()));
+            }
+            Err(e) => {
+                app.export_status = Some(format!("Export error: {e}"));
             }
         }
     }
@@ -1002,6 +1073,178 @@ mod tests {
         assert!(
             out_dir.join("schedule_se.csv").exists(),
             "schedule_se.csv must exist (SE income present + profile)"
+        );
+    }
+
+    // ── sub-3 / R0-C1 — viewer export attestation gate ───────────────────────
+
+    use btctax_adapters::BundledTaxTables;
+    use btctax_cli::CliConfig;
+    use btctax_core::state::LedgerState;
+    use btctax_store::Passphrase;
+    use std::collections::BTreeMap;
+
+    /// Build a real (empty) vault so the export dir's parent exists + `do_export` can write, then
+    /// return `(tempdir, vault_path)`. The tempdir must be kept alive for the vault to persist.
+    fn export_vault(pass: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pass.into()), &key).unwrap();
+        (dir, vault)
+    }
+
+    fn viewer_app_with_state(vault: PathBuf, state: LedgerState) -> App {
+        let snap = app::Snapshot {
+            events: vec![],
+            state,
+            cli_config: CliConfig::default(),
+            profiles: BTreeMap::new(),
+            tables: BundledTaxTables::load(),
+            donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
+        };
+        let mut a = App::new(vault);
+        a.screen = Screen::Viewer;
+        a.selected_year = 2025;
+        a.snapshot = Some(snap);
+        a
+    }
+
+    /// [sub-3 / R0-C1] While PSEUDO-ACTIVE, the viewer `e` export is a TYPED-WORD attest modal:
+    /// Esc cancels (nothing written); an empty/wrong phrase is REFUSED (nothing written, error set);
+    /// only typing the EXACT `ATTEST_PHRASE` exports. This is the accidental-filing bypass sub-3 closes.
+    #[test]
+    fn viewer_pseudo_active_export_requires_typed_phrase() {
+        let (_dir, vault) = export_vault("pseudo-attest-pw");
+
+        // Pseudo-active state (a synthetic default contributes).
+        let state = LedgerState {
+            pseudo_synthetic_count: 1,
+            ..LedgerState::default()
+        };
+        assert!(state.pseudo_active(), "fixture must be pseudo-active");
+        let mut app = viewer_app_with_state(vault, state);
+
+        // 'e' opens a TYPED-WORD attest modal (NOT the plain confirm).
+        handle_key(&mut app, press(KeyCode::Char('e')));
+        assert!(
+            app.export_modal
+                .as_ref()
+                .is_some_and(|m| m.attest.is_some()),
+            "pseudo-active export must open the typed-word attest modal"
+        );
+        let out_dir = app.export_modal.as_ref().unwrap().out_dir.clone();
+
+        // (1) Esc cancels — nothing written, no quit.
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(app.export_modal.is_none(), "Esc cancels the attest modal");
+        assert!(!app.should_quit, "Esc on modal must not quit");
+        assert!(!out_dir.exists(), "Esc must write nothing");
+
+        // Reopen for the phrase flow.
+        handle_key(&mut app, press(KeyCode::Char('e')));
+        assert!(app.export_modal.is_some());
+
+        // (2) Empty buffer + Enter → refused: modal stays open, an error is set, nothing written.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.export_modal.is_some(),
+            "empty-phrase Enter must NOT export (modal stays open)"
+        );
+        assert!(
+            app.export_modal
+                .as_ref()
+                .unwrap()
+                .attest
+                .as_ref()
+                .unwrap()
+                .error
+                .is_some(),
+            "empty phrase must set the error"
+        );
+        assert!(!out_dir.exists(), "empty phrase writes nothing");
+
+        // (3) WRONG phrase (case differs) + Enter → refused, buffer PRESERVED, error set.
+        for c in "i attest this is true".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.export_modal.is_some(),
+            "wrong phrase must NOT export (modal stays open)"
+        );
+        {
+            let a = app.export_modal.as_ref().unwrap().attest.as_ref().unwrap();
+            assert_eq!(
+                a.buf, "i attest this is true",
+                "wrong phrase preserves buffer"
+            );
+            assert!(a.error.is_some(), "wrong phrase sets the error");
+        }
+        assert!(!out_dir.exists(), "wrong phrase writes nothing");
+        assert!(
+            app.export_status.is_none(),
+            "no export status while still refused"
+        );
+
+        // (4) Correct the phrase: backspace the whole buffer, type the EXACT phrase, Enter → exports.
+        for _ in 0.."i attest this is true".chars().count() {
+            handle_key(&mut app, press(KeyCode::Backspace));
+        }
+        for c in btctax_cli::ATTEST_PHRASE.chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.export_modal.is_none(),
+            "the exact phrase closes the modal"
+        );
+        assert!(
+            app.export_status
+                .as_deref()
+                .is_some_and(|s| s.contains("Exported to")),
+            "the exact phrase exports; got status {:?}",
+            app.export_status
+        );
+        assert!(
+            out_dir.join("form8949.csv").exists(),
+            "form8949.csv must be written after a correct attestation"
+        );
+    }
+
+    /// [sub-3] While NOT pseudo-active, the viewer `e` export is TODAY's plain Enter/Esc confirm —
+    /// no phrase required (a fully-real ledger is never gated).
+    #[test]
+    fn viewer_not_pseudo_active_export_plain_confirm() {
+        let (_dir, vault) = export_vault("plain-confirm-pw");
+
+        let state = LedgerState::default(); // pseudo_synthetic_count == 0 → not pseudo-active
+        assert!(!state.pseudo_active());
+        let mut app = viewer_app_with_state(vault, state);
+
+        handle_key(&mut app, press(KeyCode::Char('e')));
+        assert!(
+            app.export_modal
+                .as_ref()
+                .is_some_and(|m| m.attest.is_none()),
+            "a fully-real ledger opens the PLAIN confirm modal (no attest)"
+        );
+        let out_dir = app.export_modal.as_ref().unwrap().out_dir.clone();
+
+        // Plain Enter exports immediately — no phrase needed.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(app.export_modal.is_none(), "plain Enter closes the modal");
+        assert!(
+            app.export_status
+                .as_deref()
+                .is_some_and(|s| s.contains("Exported to")),
+            "plain confirm exports; got status {:?}",
+            app.export_status
+        );
+        assert!(
+            out_dir.join("form8949.csv").exists(),
+            "form8949.csv must be written on plain confirm"
         );
     }
 }

@@ -572,6 +572,7 @@ mod tests {
                 out_dir,
                 files: crate::export::compute_files(&snapshot, year),
                 export_now,
+                attest: None,
             };
             crate::export::do_export(&snapshot, &modal).expect("[KAT-E3] do_export must succeed");
             // snapshot drops here

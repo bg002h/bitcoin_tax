@@ -49,14 +49,47 @@ pub enum CliError {
     /// edit gone wrong). Returning an error is safer than silently misreading the stored intent.
     #[error("unrecognized stored config value: key={key:?} value={value:?}")]
     BadConfigValue { key: String, value: String },
-    /// [R0-I3] Interim pseudo-reconcile export guard (sub-project 2): `export-snapshot` / IRS-form output
-    /// is REFUSED while any synthetic (non-persisted) default contributes to the projection — no fictional
-    /// 8949/Schedule D leaves the machine unguarded. Turn the mode off (`reconcile pseudo off`) or approve
-    /// + attest the defaults first. (Sub-project 3 replaces this with the "I attest this is true" gate.)
+    /// Sub-project 3 attestation gate: an export was attempted while the ledger is pseudo-reconciled
+    /// (a synthetic, non-persisted default contributes to the projection) and NO attestation phrase was
+    /// supplied. Producing a form/data file from a fictional draft requires typing the exact phrase.
+    /// (Supersedes sub-2's interim [I3] blanket refusal.)
     #[error(
-        "export refused: pseudo-reconcile mode is active ({0} synthetic default(s) contributing to the \
-         projection). No fictional forms leave the machine. Run `reconcile pseudo off` (or approve + \
-         attest the defaults) before exporting."
+        "export refused: the ledger is pseudo-reconciled (a synthetic default contributes to the \
+         projection). To export this draft ON PURPOSE, attest the exact phrase {:?} (pass --attest, or \
+         type it at the prompt). Otherwise run `reconcile pseudo off` (or approve + attest the defaults).",
+        ATTEST_PHRASE
     )]
-    PseudoActiveExport(usize),
+    AttestationRequired,
+    /// Sub-project 3 attestation gate: an export was attempted while the ledger is pseudo-reconciled and
+    /// the supplied attestation phrase did NOT match (trimmed, case-sensitive, exact). A wrong phrase is
+    /// FAILED regardless of environment [R0-I1] — no fictional form leaves the machine.
+    #[error(
+        "export refused: the attestation phrase did not match. The ledger is pseudo-reconciled; type the \
+         phrase EXACTLY (trimmed, case-sensitive): {:?}.",
+        ATTEST_PHRASE
+    )]
+    AttestationFailed,
+}
+
+/// The exact phrase a user must affirm to export a form/data file while the ledger is pseudo-reconciled
+/// (sub-project 3). Compared TRIMMED, case-SENSITIVE, exact. The prompt + both error strings are BUILT
+/// from this constant [R0-M1] so there is no drift (a KAT asserts they contain it). `pub` so btctax-tui
+/// shares it [R0-r2-N2].
+pub const ATTEST_PHRASE: &str = "I attest this is true";
+
+/// PURE exact-compare attestation gate — NO I/O, NO TTY read [R0-I2]. The interactive prompt lives in
+/// the caller (the `export-snapshot` main.rs arm / the btctax-tui export modal); this helper only
+/// compares, keeping the library I/O-explicit and the KATs deterministic (no env-dependent branch).
+///
+/// - `attest.map(str::trim) == Some(ATTEST_PHRASE)` → `Ok(())`.
+/// - `Some(_)` non-matching → `Err(AttestationFailed)` (a wrong phrase FAILS regardless of env) [R0-I1].
+/// - `None` → `Err(AttestationRequired)`.
+///
+/// `pub` so btctax-tui shares the exact-compare [R0-r2-N2].
+pub fn require_attestation(attest: Option<&str>) -> Result<(), CliError> {
+    match attest.map(str::trim) {
+        Some(p) if p == ATTEST_PHRASE => Ok(()),
+        Some(_) => Err(CliError::AttestationFailed),
+        None => Err(CliError::AttestationRequired),
+    }
 }
