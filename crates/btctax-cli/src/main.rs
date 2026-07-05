@@ -288,9 +288,41 @@ fn run() -> Result<ExitCode, CliError> {
                 cfg.fee_treatment, cfg.pre2025_method, cfg.pre2025_method_attested
             );
         }
-        Command::ExportSnapshot { out, tax_year } => {
-            // T1: threaded `None` for now; T2 adds the `--attest` flag + the TTY prompt.
-            let p = cmd::admin::export_snapshot(vault, &passphrase(false)?, &out, tax_year, None)?;
+        Command::ExportSnapshot {
+            out,
+            tax_year,
+            attest,
+        } => {
+            let pp = passphrase(false)?;
+            // Resolve the attestation phrase (mirrors plan→prompt→apply). If `--attest` was given, use
+            // it verbatim. Otherwise, on an interactive terminal, PROMPT — but only when the ledger is
+            // pseudo-active (a fully-real ledger is never gated, so it must not prompt). When piped
+            // (non-TTY) and no `--attest`, pass `None`: export_snapshot refuses with AttestationRequired
+            // if pseudo-active, else exports normally. The gate itself lives in export_snapshot.
+            let attest = match attest {
+                Some(phrase) => Some(phrase),
+                None => {
+                    use std::io::IsTerminal;
+                    // `&&` short-circuits so a NON-TTY (scripted) export never does the extra probe-open.
+                    if std::io::stdin().is_terminal()
+                        && cmd::admin::export_pseudo_active(vault, &pp)?
+                    {
+                        print!(
+                            "The ledger is pseudo-reconciled (a fictional draft). To export it ON \
+                             PURPOSE, type the exact phrase\n  {}\n> ",
+                            btctax_cli::ATTEST_PHRASE
+                        );
+                        use std::io::Write;
+                        std::io::stdout().flush().ok();
+                        let mut line = String::new();
+                        std::io::stdin().read_line(&mut line)?;
+                        Some(line)
+                    } else {
+                        None
+                    }
+                }
+            };
+            let p = cmd::admin::export_snapshot(vault, &pp, &out, tax_year, attest.as_deref())?;
             println!("Exported {} + CSVs to {}", p.display(), out.display());
         }
         Command::BackupKey { out } => {

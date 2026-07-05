@@ -108,6 +108,13 @@ pub enum Command {
         /// scoped to this calendar year. Omit to write only the all-years projection CSVs.
         #[arg(long)]
         tax_year: Option<i32>,
+        /// Attestation phrase required to export while the ledger is PSEUDO-RECONCILED (a synthetic
+        /// default contributes to the projection). Pass the exact phrase `I attest this is true`
+        /// (trimmed, case-sensitive) to export the fictional draft ON PURPOSE. Omit on a fully-real
+        /// ledger (never gated). Omit on an interactive terminal to be prompted; omit when piped
+        /// (non-TTY) while pseudo-active and the export is refused.
+        #[arg(long)]
+        attest: Option<String>,
     },
     /// Export the passphrase-protected key.
     BackupKey {
