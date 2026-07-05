@@ -289,7 +289,8 @@ fn run() -> Result<ExitCode, CliError> {
             );
         }
         Command::ExportSnapshot { out, tax_year } => {
-            let p = cmd::admin::export_snapshot(vault, &passphrase(false)?, &out, tax_year)?;
+            // T1: threaded `None` for now; T2 adds the `--attest` flag + the TTY prompt.
+            let p = cmd::admin::export_snapshot(vault, &passphrase(false)?, &out, tax_year, None)?;
             println!("Exported {} + CSVs to {}", p.display(), out.display());
         }
         Command::BackupKey { out } => {

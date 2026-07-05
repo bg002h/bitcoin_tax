@@ -389,7 +389,7 @@ fn chunk_a_export_parity_asymmetric_w2() {
 
     // Get export figures (cmd/admin.rs call site) and compare with report.
     let export_dir = tempfile::tempdir().unwrap();
-    cmd::admin::export_snapshot(&vault, &pp(), export_dir.path(), Some(2025)).unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), export_dir.path(), Some(2025), None).unwrap();
     let csv_path = export_dir.path().join("schedule_se.csv");
     assert!(csv_path.exists(), "schedule_se.csv must be written");
     let content = std::fs::read_to_string(&csv_path).unwrap();
@@ -955,7 +955,7 @@ fn chunkb_expensed_profile_report_and_csv_parity() {
 
     // ── CSV export path ────────────────────────────────────────────────────────────────────────
     let export_dir = tempfile::tempdir().unwrap();
-    cmd::admin::export_snapshot(&vault, &pp(), export_dir.path(), Some(2025)).unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), export_dir.path(), Some(2025), None).unwrap();
     let csv_path = export_dir.path().join("schedule_se.csv");
     assert!(
         csv_path.exists(),
@@ -1044,7 +1044,7 @@ fn chunkb_fully_expensed_integration_no_se_tax_no_csv() {
 
     // ── Export path: no schedule_se.csv written (se_result=None) ──────────────────────────────
     let export_dir = tempfile::tempdir().unwrap();
-    cmd::admin::export_snapshot(&vault, &pp(), export_dir.path(), Some(2025)).unwrap();
+    cmd::admin::export_snapshot(&vault, &pp(), export_dir.path(), Some(2025), None).unwrap();
     let csv_path = export_dir.path().join("schedule_se.csv");
     assert!(
         !csv_path.exists(),
