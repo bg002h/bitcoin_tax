@@ -144,9 +144,20 @@ impl Vault {
     pub fn conn(&self) -> &Connection {
         &self.conn
     }
+    /// Serialize the in-memory DB, wrap it in the versioned blob, encrypt, and atomically persist.
+    ///
+    /// **Zeroize bound (defense-in-depth — honest, NOT full at-rest secrecy) [M-2]:** the plaintext
+    /// SQLite image and the encoded blob are held in [`SecretBuf`]s that mlock + scrub on drop, so
+    /// each plaintext copy on the save path has the smallest possible count and lifetime. This does
+    /// NOT make the vault secret at rest while open: the live SQLite connection keeps the plaintext
+    /// in its own heap for the whole session (accepted bound). The `.tmp`/`.bak` that `atomic_write`
+    /// writes to disk are CIPHERTEXT, not plaintext, so they are not a zeroize concern. [N2r] the
+    /// `data.to_vec()` inside `db_to_bytes` (sqlite_io.rs) is a transient plaintext copy that is
+    /// moved straight into the `SecretBuf` below and scrubbed with it.
     pub fn save(&mut self) -> Result<(), StoreError> {
-        let image = sqlite_io::db_to_bytes(&self.conn)?;
-        let ct = crypto::encrypt_to(&self.cert, &blob::encode_blob(SCHEMA_VERSION, &image))?;
+        let image = SecretBuf::new(sqlite_io::db_to_bytes(&self.conn)?);
+        let blob = SecretBuf::new(blob::encode_blob(SCHEMA_VERSION, image.as_slice()));
+        let ct = crypto::encrypt_to(&self.cert, blob.as_slice())?;
         atomic::atomic_write(&self.path, &ct)
     }
 
@@ -168,9 +179,11 @@ impl Vault {
     pub fn export_snapshot(&self, out_dir: &Path) -> Result<PathBuf, StoreError> {
         // [MEDIUM security] restricted directory + owner-only file (plaintext tax data)
         mkdir_owner_only(out_dir)?;
-        let image = sqlite_io::db_to_bytes(&self.conn)?;
+        // [M-2] scrub the transient plaintext image on drop (the on-disk export is
+        // deliberately plaintext SQLite; only the in-memory intermediate is wrapped).
+        let image = SecretBuf::new(sqlite_io::db_to_bytes(&self.conn)?);
         let out = out_dir.join("snapshot.sqlite");
-        write_owner_only(&out, &image)?;
+        write_owner_only(&out, image.as_slice())?;
         Ok(out)
     }
     pub fn backup_key(&self, out_path: &Path) -> Result<(), StoreError> {
@@ -181,13 +194,15 @@ impl Vault {
             }
         }
         // [HIGH security] write S2K-encrypted private key owner-only (mode 0o600 on Unix)
-        let armored = self
-            .cert
-            .as_tsk()
-            .armored()
-            .to_vec()
-            .map_err(StoreError::Crypto)?;
-        write_owner_only(out_path, &armored)?;
+        // [M-2] wrap the armored key bytes so the in-memory copy scrubs on drop.
+        let armored = SecretBuf::new(
+            self.cert
+                .as_tsk()
+                .armored()
+                .to_vec()
+                .map_err(StoreError::Crypto)?,
+        );
+        write_owner_only(out_path, armored.as_slice())?;
         Ok(())
     }
 }
