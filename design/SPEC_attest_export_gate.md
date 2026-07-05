@@ -1,8 +1,10 @@
 # SPEC — attestation export gate (sub-project 3 of auto-pseudo-reconcile — FINAL)
 
-**Source baseline:** `main` @ `afb0807` (branch `feat/attest-export-gate`). **Review status: R0 round 1 folded
-(1C/3I/1M/1N — all merged IN-PLACE; surgical, no append). Awaiting R0 round 2.** Review:
-`reviews/R0-spec-attest-export-gate-round-1.md`. Design of record: `design/BRAINSTORM_auto_pseudo_reconcile.md`.
+**Source baseline:** `main` @ `afb0807` (branch `feat/attest-export-gate`). **Review status: R0-GREEN (2 rounds; 0C/0I).
+Cleared to implement.** Reviews: `reviews/R0-spec-attest-export-gate-round-{1,2}.md`. Round 1 1C/3I (C1 = the
+btctax-tui viewer form-export bypass — folded to gate BOTH paths), round 2 0C/0I/0M/2N. **[R0-r2-N2]
+`ATTEST_PHRASE` + `require_attestation` are `pub` in btctax-cli so btctax-tui shares them.** ([R0-r2-N1]
+`state.rs:268` = `btctax-core`.) Design of record: `design/BRAINSTORM_auto_pseudo_reconcile.md`.
 **Cross-cutting decisions settled — do NOT re-brainstorm.** Sub-projects 1 (`514875b`) + 2 (`afb0807`) SHIPPED.
 
 ## Goal
