@@ -1,7 +1,7 @@
 use crate::{
     atomic, blob,
     crypto::{self, Passphrase},
-    fsperms::{mkdir_owner_only, write_owner_only},
+    fsperms::{mkdir_owner_only, open_owner_only, write_owner_only},
     lock::VaultLock,
     memlock::SecretBuf,
     paths, sqlite_io, StoreError, SCHEMA_VERSION,
@@ -10,6 +10,7 @@ use openpgp::parse::Parse;
 use openpgp::serialize::{Serialize, SerializeInto};
 use rusqlite::Connection;
 use sequoia_openpgp as openpgp;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 // ── Vault ─────────────────────────────────────────────────────────────────────
@@ -129,17 +130,100 @@ impl Vault {
         if !vault.exists() && kp.exists() {
             return Err(StoreError::HalfCreatedVault(kp));
         }
+        // [R0-N1r] A corrupt `vault.key` surfaces here at `Cert::from_bytes` and PROPAGATES with
+        // NO `.bak` retry — the KEY is not `.bak`-recoverable (only the encrypted image is).
         let cert = openpgp::Cert::from_bytes(&std::fs::read(&kp)?).map_err(StoreError::Crypto)?;
-        let plaintext = SecretBuf::new(crypto::decrypt_with(&cert, pp, &std::fs::read(vault)?)?);
+        let ct = std::fs::read(vault)?;
+        match Self::decode_conn(&cert, pp, &ct) {
+            Ok(conn) => Ok(Vault {
+                path: vault.to_path_buf(),
+                cert,
+                conn,
+                _lock: lock,
+            }),
+            // [R0-M1] GENUINE corruption of the PRESENT vault AND a `.bak` exists → ONE bounded
+            // recovery attempt from `.bak`. WrongPassphrase / UnsupportedSchema / Io / Locked never
+            // satisfy `is_genuine_corruption`, so they propagate unchanged and NEVER touch `.bak`.
+            Err(orig) if Self::is_genuine_corruption(&orig) && paths::bak_of(vault).exists() => {
+                let bak_ct = std::fs::read(paths::bak_of(vault))?;
+                match Self::decode_conn(&cert, pp, &bak_ct) {
+                    Ok(conn) => {
+                        // [R0-I2] WARN — a silent revert to the prior save generation is a
+                        // data-integrity surprise the operator must see (precedent: memlock.rs:16).
+                        eprintln!(
+                            "warning: vault.pgp was corrupt; recovered from vault.pgp.bak (prior save generation)"
+                        );
+                        // [R0-C2] `.bak`-preserving crash-safe restore; NEVER touches `.bak`.
+                        Self::restore_from_bak(vault, &bak_ct)?;
+                        Ok(Vault {
+                            path: vault.to_path_buf(),
+                            cert,
+                            conn,
+                            _lock: lock,
+                        })
+                    }
+                    // `.bak` also unusable → propagate the ORIGINAL target error (bounded: one try,
+                    // no panic/loop).
+                    Err(_) => Err(orig),
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// [R0-M1] Decode ONE encrypted vault blob (`vault.pgp` or its `.bak`) into an in-memory SQLite
+    /// connection: `decrypt` → decode blob header → `migrate` → `db_from_bytes`. Shared by `open`
+    /// for BOTH the primary target and the `.bak` fallback so the two decode paths are identical.
+    /// Holds the plaintext only inside [`SecretBuf`]s (scrubbed on drop). Does NOT touch the
+    /// `VaultLock`: the single lock is acquired once in `open` and attached to the resulting Vault.
+    fn decode_conn(
+        cert: &openpgp::Cert,
+        pp: &Passphrase,
+        ct: &[u8],
+    ) -> Result<Connection, StoreError> {
+        let plaintext = SecretBuf::new(crypto::decrypt_with(cert, pp, ct)?);
         let (ver, image) = blob::decode_blob(plaintext.as_slice())?;
         let image = SecretBuf::new(blob::migrate(ver, image.to_vec())?);
-        let conn = sqlite_io::db_from_bytes(image.as_slice())?;
-        Ok(Vault {
-            path: vault.to_path_buf(),
-            cert,
-            conn,
-            _lock: lock,
-        })
+        sqlite_io::db_from_bytes(image.as_slice())
+    }
+
+    /// Genuine on-disk corruption of a PRESENT `vault.pgp` that a `.bak` might recover:
+    /// bad ciphertext (`Crypto`), bad blob framing (`Corrupt`), or a SQLite deserialize failure
+    /// (`Sqlite`). Deliberately EXCLUDES:
+    ///   * `WrongPassphrase` — caller error; the `.bak` shares the key and would also fail.
+    ///   * [R0-C1] `UnsupportedSchema` — a NEWER vault (decode SUCCEEDED); recovering the older
+    ///     `.bak` would silently DOWNGRADE and lose newer tax data. NOT corruption.
+    ///   * `Io` / `Locked` — not corruption.
+    ///
+    /// [R0-M2] INVARIANT (pinned): `db_from_bytes` remaps a `sqlite3_malloc64` OOM to
+    /// `StoreError::Io` (sqlite_io.rs:40-43), so a `Sqlite` reaching this classifier is ALWAYS a
+    /// deserialize failure of a corrupt image, NEVER an allocation failure. If that remap is ever
+    /// changed, this classifier must be revisited (an OOM must not be treated as corruption).
+    fn is_genuine_corruption(e: &StoreError) -> bool {
+        matches!(
+            e,
+            StoreError::Crypto(_) | StoreError::Corrupt(_) | StoreError::Sqlite(_)
+        )
+    }
+
+    /// [R0-C2] Crash-safe, `.bak`-PRESERVING restore of `vault.pgp` from already-read `.bak` bytes.
+    /// Writes `<vault>.tmp` owner-only → fsync file → rename `.tmp`→`vault.pgp` → [R0-M1r] fsync the
+    /// parent dir (mirrors atomic.rs:27-29). **NEVER touches `.bak`** — it stays the sole surviving
+    /// good copy, so a crash anywhere in this sequence leaves `.bak` intact and a re-`open` recovers
+    /// again. Deliberately does NOT reuse `atomic::atomic_write`, which copies the (corrupt) target
+    /// over `.bak` BEFORE the rename — that would clobber the good `.bak` (the C2 bug).
+    fn restore_from_bak(vault: &Path, bak_bytes: &[u8]) -> Result<(), StoreError> {
+        let tmp = paths::tmp_of(vault);
+        {
+            let mut f = open_owner_only(&tmp)?;
+            f.write_all(bak_bytes)?;
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, vault)?;
+        if let Some(dir) = vault.parent() {
+            let _ = std::fs::File::open(dir).and_then(|d| d.sync_all());
+        }
+        Ok(())
     }
     pub fn conn(&self) -> &Connection {
         &self.conn
@@ -367,6 +451,47 @@ mod tests {
             .execute("CREATE TABLE IF NOT EXISTS t (x TEXT)", [])
             .unwrap();
         v.save().unwrap();
+    }
+
+    /// [R0-C2] The restore primitive is `.bak`-PRESERVING and crash-safe: it writes via `.tmp`
+    /// → rename to `vault.pgp` and NEVER reads or writes `.bak`. Even with a pre-existing garbage
+    /// `.tmp` present, the good `.bak` is byte-identical afterwards (so a crash mid-restore — before
+    /// the rename — leaves the sole good copy intact and a re-`open` recovers again), and the target
+    /// ends up byte-identical to the `.bak` bytes it was restored from.
+    #[test]
+    fn restore_preserves_bak_and_is_crash_safe() {
+        let dir = tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let bak = paths::bak_of(&vault);
+        let tmp = paths::tmp_of(&vault);
+
+        // Pre-state: a corrupt target, a GOOD `.bak`, and a stray garbage `.tmp` (the exact
+        // artifacts a kill mid-save/restore can leave). `.bak` bytes are distinct + known.
+        let good_bak = b"GOOD-BAK-CIPHERTEXT-BYTES".to_vec();
+        std::fs::write(&vault, b"corrupt-target").unwrap();
+        std::fs::write(&bak, &good_bak).unwrap();
+        std::fs::write(&tmp, b"stray-garbage-tmp").unwrap();
+
+        Vault::restore_from_bak(&vault, &good_bak).unwrap();
+
+        // Target restored to the `.bak` bytes.
+        assert_eq!(
+            std::fs::read(&vault).unwrap(),
+            good_bak,
+            "target must be restored byte-for-byte from the `.bak` bytes"
+        );
+        // `.bak` NEVER touched — still the exact good copy (the C2 guarantee).
+        assert!(bak.exists(), "`.bak` must still be present after restore");
+        assert_eq!(
+            std::fs::read(&bak).unwrap(),
+            good_bak,
+            "restore must NOT modify `.bak` (it is the sole surviving good copy)"
+        );
+        // `.tmp` consumed by the rename — no stray left behind.
+        assert!(
+            !tmp.exists(),
+            "`.tmp` must be renamed away, not left as a stray"
+        );
     }
 
     /// [R0-M2] `repair` removes orphan `.tmp` sidecars alongside the orphan key.

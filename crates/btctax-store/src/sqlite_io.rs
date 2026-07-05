@@ -37,6 +37,11 @@ pub fn db_from_bytes(image: &[u8]) -> Result<Connection, StoreError> {
         let n = image.len();
         let p = rusqlite::ffi::sqlite3_malloc64(n as u64) as *mut u8;
         if p.is_null() {
+            // [R0-M2] LOAD-BEARING for the vault corruption classifier: an allocation failure is
+            // remapped to `StoreError::Io` (OutOfMemory), NEVER `StoreError::Sqlite`. Vault::open's
+            // `is_genuine_corruption` treats `Sqlite` as genuine corruption (→ `.bak` recovery) and
+            // `Io` as non-corruption (→ propagate). Do NOT change this to a `Sqlite`/`Corrupt`
+            // variant: an OOM must not be misread as corruption and silently trigger a `.bak` revert.
             return Err(StoreError::Io(std::io::Error::new(
                 std::io::ErrorKind::OutOfMemory,
                 "sqlite3_malloc64 failed",
