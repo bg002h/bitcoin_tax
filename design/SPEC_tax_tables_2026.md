@@ -1,8 +1,12 @@
 # SPEC — bundled tax tables for TY2026
 
-**Source baseline:** `main` @ `f97adac` (branch `feat/tax-tables-2026`). **Review status: R0 round 1 folded
-(0C/2I/3M/2N — figures ALL verified exact against the primary source; folds were wiring/regression only).
-Awaiting R0 round 2.** Review: `reviews/R0-spec-tax-tables-2026-round-1.md`.
+**Source baseline:** `main` @ `f97adac` (branch `feat/tax-tables-2026`). **Review status: R0-GREEN (2 rounds; 0C/0I).
+Cleared to implement.** Reviews: `reviews/R0-spec-tax-tables-2026-round-{1,2}.md`. Round 1 0C/2I (figures ALL
+verified exact against the primary source; folds were wiring/regression only), round 2 0C/0I/2M/2N. **Fold
+during T1:** [R0-r2-M-a] this is NOT "no logic change" — it ARMS 2026 (NotComputable→Computed); [R0-r2-M-b]
+"re-point to 2027" = shift the WHOLE `carryforward_mismatch_advisory_rendered` scenario forward one year (CSV
+dates + BOTH profiles + docstring 586-598), NOT a literal 2026→2027 swap (the carryforward loss lives in the
+prior-year CSV, so a naive swap zeroes the mismatch and fails).
 Adds the TY2026 bundled `TaxTable` (the deferred "2026/2027 backfill" FOLLOWUP; 2027 is NOT possible — IRS
 publishes 2027 figures in fall 2026, after our data horizon). Data-add only; no logic change. **Every figure
 below was verified against the PRIMARY source (Rev. Proc. 2025-32 PDF + SSA) by reading the actual tables.**
