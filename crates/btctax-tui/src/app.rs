@@ -139,6 +139,15 @@ pub(crate) struct App {
     pub holdings_state: TableState,
     pub disposals_state: TableState,
     pub income_state: TableState,
+    /// Per-view, session-only column-sort state (`{sort_col, dir}`) and the column cursor.
+    /// Display-only — reordering rows NEVER mutates `snapshot`/`events`/state (sort borrows).
+    /// Reset on reload; each row view keeps its own. Defaults = primary date column, ascending.
+    pub holdings_sort: crate::sort::ViewSort,
+    pub holdings_cursor: usize,
+    pub disposals_sort: crate::sort::ViewSort,
+    pub disposals_cursor: usize,
+    pub income_sort: crate::sort::ViewSort,
+    pub income_cursor: usize,
     /// Scroll/selection state for the Form 8949 table in the Forms tab.
     pub forms_state: TableState,
     /// Export confirmation modal state. `Some` while the modal is open; `None` otherwise.
@@ -162,6 +171,12 @@ impl App {
             holdings_state: TableState::default(),
             disposals_state: TableState::default(),
             income_state: TableState::default(),
+            holdings_sort: crate::tabs::holdings::DEFAULT_SORT,
+            holdings_cursor: crate::tabs::holdings::DEFAULT_SORT.col,
+            disposals_sort: crate::tabs::disposals::DEFAULT_SORT,
+            disposals_cursor: crate::tabs::disposals::DEFAULT_SORT.col,
+            income_sort: crate::tabs::income::DEFAULT_SORT,
+            income_cursor: crate::tabs::income::DEFAULT_SORT.col,
             forms_state: TableState::default(),
             export_modal: None,
             export_status: None,

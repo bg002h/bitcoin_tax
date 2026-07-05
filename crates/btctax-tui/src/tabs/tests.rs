@@ -776,7 +776,7 @@ fn up_down_via_handle_key_moves_selection() {
     );
 }
 
-/// 15. ←/→ year change via handle_key updates the filtered rows rendered by a year-scoped tab.
+/// 15. `[`/`]` year change via handle_key updates the filtered rows rendered by a year-scoped tab.
 ///     Covers the brief requirement "changes selected_year AND updates the filtered rows".
 #[test]
 fn year_change_via_handle_key_updates_filtered_rows() {
@@ -808,11 +808,11 @@ fn year_change_via_handle_key_updates_filtered_rows() {
         "2024 disposal proceeds must NOT appear at selected_year=2025"
     );
 
-    // ── Switch to year 2024 via Left key ────────────────────────────────────
-    crate::handle_key(&mut app, press(KeyCode::Left));
+    // ── Switch to year 2024 via '[' key ([R0-M-3] year MOVED off arrows to [ / ]) ────
+    crate::handle_key(&mut app, press(KeyCode::Char('[')));
     assert_eq!(
         app.selected_year, 2024,
-        "Left key must decrement selected_year to 2024"
+        "'[' key must decrement selected_year to 2024"
     );
 
     // ── Re-render at year 2024 ───────────────────────────────────────────────
@@ -1000,7 +1000,7 @@ fn tax_tab_not_computable_no_profile_shows_blocker_no_numbers() {
     );
 }
 
-/// T3. ←/→ year change updates the Tax tab figures.
+/// T3. `[`/`]` year change updates the Tax tab figures.
 ///
 /// At 2025 (profile exists): Computed result appears.
 /// After Left → 2024 (no profile): NotComputable appears.
@@ -1023,9 +1023,9 @@ fn tax_tab_year_change_updates_figures() {
         "Tax tab at 2025 must NOT show NOT COMPUTABLE"
     );
 
-    // Switch to 2024 via Left key
-    crate::handle_key(&mut app, press(KeyCode::Left));
-    assert_eq!(app.selected_year, 2024, "Left key must change year to 2024");
+    // Switch to 2024 via '[' key ([R0-M-3] year MOVED off arrows to [ / ])
+    crate::handle_key(&mut app, press(KeyCode::Char('[')));
+    assert_eq!(app.selected_year, 2024, "'[' key must change year to 2024");
 
     let buf_2024 = render_tax(&app);
     assert!(
@@ -1677,5 +1677,99 @@ fn e7e_not_computable_year_with_profile_shows_se_section() {
         content.contains("Schedule SE") || content.contains("§1401"),
         "SE section must appear even for NotComputable year when profile + business income present; \
          content:\n{content}"
+    );
+}
+
+// ── [R0-I1] display-only: sorting NEVER mutates events/state ───────────────────
+
+/// Driving every sort/cursor key across all three sortable views (and rendering after each) leaves
+/// `snapshot.state` and `snapshot.events` BYTE-IDENTICAL — sorting reorders DISPLAY rows only (it
+/// sorts borrows/indices, never the ledger). Regression guard for the display-only invariant.
+#[test]
+fn sorting_does_not_mutate_events_or_state() {
+    let inline_lot = |tag: &str, wprov: &str, acq: (i32, u8, u8), sat: i64, basis: i64| Lot {
+        lot_id: make_lot_id(tag),
+        wallet: WalletId::Exchange {
+            provider: wprov.into(),
+            account: "main".into(),
+        },
+        acquired_at: make_date(acq.0, acq.1, acq.2),
+        original_sat: sat,
+        remaining_sat: sat,
+        usd_basis: Decimal::from(basis),
+        basis_source: BasisSource::ExchangeProvided,
+        dual_loss_basis: None,
+        donor_acquired_at: None,
+        basis_pending: false,
+        pseudo: false,
+    };
+
+    let mut state = LedgerState::default();
+    state
+        .lots
+        .push(inline_lot("l1", "kraken", (2024, 3, 1), 300, 900));
+    state
+        .lots
+        .push(inline_lot("l2", "coinbase", (2022, 1, 1), 100, 500));
+    state.disposals.push(make_disposal_tagged(
+        "dA", 2025, 50_000_000, "30000.00", "20000.00", "10000.00",
+    ));
+    state.disposals.push(make_disposal_tagged(
+        "dB", 2025, 25_000_000, "15000.00", "8000.00", "7000.00",
+    ));
+    state.income_recognized.push(make_income_tagged(
+        "iA",
+        2025,
+        1_000_000,
+        "600.00",
+        IncomeKind::Staking,
+    ));
+    state.income_recognized.push(make_income_tagged(
+        "iB",
+        2025,
+        2_000_000,
+        "700.00",
+        IncomeKind::Mining,
+    ));
+
+    let mut app = make_app(state, 2025);
+
+    // Snapshot the ledger BEFORE any sorting.
+    let events_before = app.snapshot.as_ref().unwrap().events.clone();
+    let state_before = app.snapshot.as_ref().unwrap().state.clone();
+
+    // Exercise cursor + sort keys on each sortable view, rendering after each to run the sort path.
+    for tab in [
+        crate::app::Tab::Holdings,
+        crate::app::Tab::Disposals,
+        crate::app::Tab::Income,
+    ] {
+        app.tab = tab;
+        for key in [
+            KeyCode::Char('l'),
+            KeyCode::Char('s'),
+            KeyCode::Char('s'), // toggle back
+            KeyCode::Char('h'),
+            KeyCode::Char('s'),
+            KeyCode::Right,
+            KeyCode::Left,
+        ] {
+            crate::handle_key(&mut app, press(key));
+            let _ = match tab {
+                crate::app::Tab::Holdings => render_holdings(&mut app),
+                crate::app::Tab::Disposals => render_disposals(&mut app),
+                _ => render_income(&mut app),
+            };
+        }
+    }
+
+    let snap = app.snapshot.as_ref().unwrap();
+    assert_eq!(
+        snap.events, events_before,
+        "sorting must NOT mutate snapshot.events"
+    );
+    assert!(
+        snap.state == state_before,
+        "sorting must NOT mutate snapshot.state (display-only)"
     );
 }
