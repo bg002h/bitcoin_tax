@@ -29,6 +29,11 @@ reproducible and auditable.
 Every command has rich `--help` (including inline file-format examples), and there are man pages for all
 three binaries — see [Getting help](#getting-help).
 
+> **TUI keys (both viewer and editor):** the Holdings / Disposals / Income tables are now column-sortable.
+> `←`/`→` (or `h`/`l`) move the column cursor, `s` sorts the focused column (toggling ascending/descending),
+> and `[` / `]` change the tax year (previously `←`/`→`). In the editor, select-lots and link-transfer moved
+> to **`S`** and **`L`** (freeing `s`/`l` for sorting/cursor).
+
 ---
 
 ## Install

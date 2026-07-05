@@ -35,6 +35,8 @@ pub mod app;
 pub mod draw;
 /// Form CSV export (crate-internal; `ExportConfirmState` not in external surface).
 pub(crate) mod export;
+/// Shared display-only column-sort primitives (`Dir`/`ViewSort`/cursor helpers + `stable_sort_by`).
+pub mod sort;
 /// Per-tab renderers: each tab exposes a `pub fn render` + a `pub(crate) fn draw` wrapper.
 pub mod tabs;
 /// Vault-open logic and unlock screen state.
@@ -212,11 +214,19 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
                 KeyCode::PageDown => page_down(app),
                 KeyCode::Char('g') => go_top(app),
                 KeyCode::Char('G') => go_bottom(app),
-                KeyCode::Left => {
+                // Column cursor: h/← move left, l/→ move right (was tax year — the year MOVED to
+                // the [ / ] keys below so s/h/l are free for sorting).
+                KeyCode::Left | KeyCode::Char('h') => move_cursor_left(app),
+                KeyCode::Right | KeyCode::Char('l') => move_cursor_right(app),
+                // Sort the focused column: toggle asc↔desc; focusing a NEW column sorts ascending.
+                KeyCode::Char('s') => sort_focused(app),
+                // Tax year prev / next. Holdings is NOT year-scoped, so this is a no-op there
+                // (year still steps on Disposals/Income) [R0-N-2].
+                KeyCode::Char('[') => {
                     app.selected_year -= 1;
                     reset_selections(app);
                 }
-                KeyCode::Right => {
+                KeyCode::Char(']') => {
                     app.selected_year += 1;
                     reset_selections(app);
                 }
@@ -330,6 +340,56 @@ fn run_export(app: &mut App) {
                 app.export_status = Some(format!("Export error: {e}"));
             }
         }
+    }
+}
+
+// ── Column-sort helpers ─────────────────────────────────────────────────────────
+
+/// Return the active `(ViewSort, cursor, column_count)` triple for the currently focused row view.
+///
+/// Only the three row views (Holdings/Disposals/Income) are sortable; other tabs return `None` and
+/// the cursor/sort keys are a no-op there.
+fn active_sort(app: &mut App) -> Option<(&mut sort::ViewSort, &mut usize, usize)> {
+    match app.tab {
+        Tab::Holdings => Some((
+            &mut app.holdings_sort,
+            &mut app.holdings_cursor,
+            tabs::holdings::COLUMN_COUNT,
+        )),
+        Tab::Disposals => Some((
+            &mut app.disposals_sort,
+            &mut app.disposals_cursor,
+            tabs::disposals::COLUMN_COUNT,
+        )),
+        Tab::Income => Some((
+            &mut app.income_sort,
+            &mut app.income_cursor,
+            tabs::income::COLUMN_COUNT,
+        )),
+        _ => None,
+    }
+}
+
+/// Move the focused row view's column cursor one column left (clamped at 0).
+fn move_cursor_left(app: &mut App) {
+    if let Some((_, cursor, _)) = active_sort(app) {
+        *cursor = sort::cursor_left(*cursor);
+    }
+}
+
+/// Move the focused row view's column cursor one column right (clamped at the last column).
+fn move_cursor_right(app: &mut App) {
+    if let Some((_, cursor, count)) = active_sort(app) {
+        *cursor = sort::cursor_right(*cursor, count);
+    }
+}
+
+/// Sort the focused row view by its cursor column (`s`): toggle direction if it is already the sort
+/// column, else focus the new column ascending. Display-only — never mutates ledger state.
+fn sort_focused(app: &mut App) {
+    if let Some((view_sort, cursor, _)) = active_sort(app) {
+        let c = *cursor;
+        sort::apply_sort_key(view_sort, c);
     }
 }
 
@@ -770,32 +830,136 @@ mod tests {
         assert!(!app.should_quit, "Tab on Unlock must not quit");
     }
 
-    /// 12. Left arrow decrements selected_year; Right arrow increments it.
-    ///     Also verifies that table selections are reset on year change.
+    /// [R0-M-3] The tax year now steps on `[` / `]` (MOVED off `←`/`→`, which move the column
+    /// cursor). Also verifies arrows no longer change the year.
     #[test]
-    fn left_right_changes_selected_year() {
+    fn tax_year_moves_to_bracket_keys() {
         let mut app = new_app();
         app.screen = Screen::Viewer;
+        app.tab = Tab::Disposals; // a year-scoped tab
         let initial_year = app.selected_year;
 
-        handle_key(&mut app, press(KeyCode::Left));
+        handle_key(&mut app, press(KeyCode::Char('[')));
         assert_eq!(
             app.selected_year,
             initial_year - 1,
-            "Left must decrement selected_year"
+            "'[' must decrement selected_year"
         );
 
+        handle_key(&mut app, press(KeyCode::Char(']')));
+        assert_eq!(
+            app.selected_year, initial_year,
+            "']' must increment selected_year back"
+        );
+
+        // Arrows NO LONGER change the year — they move the column cursor.
+        handle_key(&mut app, press(KeyCode::Left));
         handle_key(&mut app, press(KeyCode::Right));
         assert_eq!(
             app.selected_year, initial_year,
-            "Right must increment selected_year back"
+            "←/→ must NOT change the year anymore (they move the column cursor)"
         );
+    }
 
+    /// The column cursor moves with h/l and ←/→, clamped at both ends per view.
+    #[test]
+    fn cursor_moves_h_l_and_arrows() {
+        let mut app = new_app();
+        app.screen = Screen::Viewer;
+        app.tab = Tab::Holdings;
+        // Start at the default sort column (Acquired = col 1).
+        assert_eq!(app.holdings_cursor, 1);
+
+        handle_key(&mut app, press(KeyCode::Char('l')));
+        assert_eq!(app.holdings_cursor, 2, "'l' moves cursor right");
         handle_key(&mut app, press(KeyCode::Right));
+        assert_eq!(app.holdings_cursor, 3, "'→' moves cursor right");
+        handle_key(&mut app, press(KeyCode::Char('h')));
+        assert_eq!(app.holdings_cursor, 2, "'h' moves cursor left");
+        handle_key(&mut app, press(KeyCode::Left));
+        assert_eq!(app.holdings_cursor, 1, "'←' moves cursor left");
+
+        // Clamp left at 0.
+        for _ in 0..5 {
+            handle_key(&mut app, press(KeyCode::Char('h')));
+        }
+        assert_eq!(app.holdings_cursor, 0, "cursor clamps at 0");
+        // Clamp right at COLUMN_COUNT-1 (6 holdings columns → last index 5).
+        for _ in 0..20 {
+            handle_key(&mut app, press(KeyCode::Char('l')));
+        }
+        assert_eq!(app.holdings_cursor, 5, "cursor clamps at last column");
+    }
+
+    /// `s` toggles the sort direction when re-pressed on the same column; focusing a NEW column
+    /// sorts ascending first.
+    #[test]
+    fn s_toggles_direction_on_repeat() {
+        use sort::Dir;
+        let mut app = new_app();
+        app.screen = Screen::Viewer;
+        app.tab = Tab::Holdings;
+        // Cursor starts on Acquired (col 1) = the default sort column, ascending.
+        assert_eq!(app.holdings_sort, tabs::holdings::DEFAULT_SORT);
+
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert_eq!(app.holdings_sort.col, 1);
+        assert_eq!(app.holdings_sort.dir, Dir::Desc, "same col toggles to desc");
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert_eq!(app.holdings_sort.dir, Dir::Asc, "toggles back to asc");
+
+        // Move to a new column and sort → ascending first.
+        handle_key(&mut app, press(KeyCode::Char('l'))); // col 2 (BTC)
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert_eq!(app.holdings_sort.col, 2, "new column becomes the sort key");
         assert_eq!(
-            app.selected_year,
-            initial_year + 1,
-            "Right must increment selected_year"
+            app.holdings_sort.dir,
+            Dir::Asc,
+            "new column sorts ascending"
+        );
+    }
+
+    /// Sort state is per-view: sorting on Holdings does not touch Disposals/Income sort state.
+    #[test]
+    fn sort_state_is_per_view() {
+        let mut app = new_app();
+        app.screen = Screen::Viewer;
+        app.tab = Tab::Holdings;
+        let disposals_before = app.disposals_sort;
+        let income_before = app.income_sort;
+
+        handle_key(&mut app, press(KeyCode::Char('s'))); // toggle Holdings
+        handle_key(&mut app, press(KeyCode::Char('l')));
+        handle_key(&mut app, press(KeyCode::Char('s')));
+
+        assert_ne!(
+            app.holdings_sort,
+            tabs::holdings::DEFAULT_SORT,
+            "Holdings sort changed"
+        );
+        assert_eq!(
+            app.disposals_sort, disposals_before,
+            "Disposals sort untouched"
+        );
+        assert_eq!(app.income_sort, income_before, "Income sort untouched");
+    }
+
+    /// [R0-N-2] Holdings is not year-scoped, so `[`/`]` still step `selected_year` but the view is
+    /// unaffected; asserts the key does not panic and the year field still changes (a shared field).
+    #[test]
+    fn holdings_year_keys_are_noop_on_view() {
+        let mut app = new_app();
+        app.screen = Screen::Viewer;
+        app.tab = Tab::Holdings;
+        let before = app.selected_year;
+        // The key is accepted (year field steps), but Holdings ignores year when rendering — so the
+        // holdings sort/cursor state is what matters and remains untouched.
+        handle_key(&mut app, press(KeyCode::Char(']')));
+        assert_eq!(app.selected_year, before + 1);
+        assert_eq!(
+            app.holdings_sort,
+            tabs::holdings::DEFAULT_SORT,
+            "year keys never disturb the Holdings sort"
         );
     }
 

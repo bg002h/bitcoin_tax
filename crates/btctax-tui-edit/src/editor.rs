@@ -32,6 +32,7 @@ use btctax_cli::Session;
 use btctax_store::Passphrase;
 use btctax_tui::{
     app::{Snapshot, Tab},
+    sort::ViewSort,
     unlock::{open_session, SessionOpenOutcome, UnlockState},
 };
 use ratatui::widgets::TableState;
@@ -96,6 +97,15 @@ pub struct EditorApp {
     pub holdings_state: TableState,
     pub disposals_state: TableState,
     pub income_state: TableState,
+    /// Per-view, session-only column-sort state + column cursor, mirroring the viewer's `App`
+    /// fields. Display-only — reordering rows NEVER mutates the session / snapshot / events (sort
+    /// borrows). Defaults = each view's primary date column, ascending.
+    pub holdings_sort: ViewSort,
+    pub holdings_cursor: usize,
+    pub disposals_sort: ViewSort,
+    pub disposals_cursor: usize,
+    pub income_sort: ViewSort,
+    pub income_cursor: usize,
     pub forms_state: TableState,
     /// The tax-profile form. `Some` while the form is open.
     /// Pre-populated from the selected year's existing profile when present.
@@ -280,6 +290,12 @@ impl EditorApp {
             holdings_state: TableState::default(),
             disposals_state: TableState::default(),
             income_state: TableState::default(),
+            holdings_sort: btctax_tui::tabs::holdings::DEFAULT_SORT,
+            holdings_cursor: btctax_tui::tabs::holdings::DEFAULT_SORT.col,
+            disposals_sort: btctax_tui::tabs::disposals::DEFAULT_SORT,
+            disposals_cursor: btctax_tui::tabs::disposals::DEFAULT_SORT.col,
+            income_sort: btctax_tui::tabs::income::DEFAULT_SORT,
+            income_cursor: btctax_tui::tabs::income::DEFAULT_SORT.col,
             forms_state: TableState::default(),
             profile_form: None,
             mutation_modal: None,

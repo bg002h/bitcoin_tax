@@ -147,8 +147,8 @@ fn draw_viewer(frame: &mut Frame, app: &mut App) {
     let footer_text = if let Some(status) = app.export_status.as_deref() {
         status.to_string()
     } else {
-        "Tab/Shift-Tab: switch tab   ←/→: change year   ↑/↓ j/k: scroll   \
-         PgUp/PgDn: page   g/G: top/bottom   e: export CSVs   q/Esc: quit"
+        "Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   \
+         g/G: top/bottom   e: export   q/Esc: quit"
             .to_string()
     };
     let footer = Paragraph::new(footer_text).alignment(Alignment::Center);
