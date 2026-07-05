@@ -25,8 +25,9 @@ local cache.
 
 ## Data facts (verified)
 - Quantoshi `BitcoinPricesDaily.csv`: header `Date,Price`; `M/D/YY` dates; float = **daily close** (Binance
-  klines primary 8-dp; CoinGecko fallback; `--lag 8` settle). **BSD-2-Clause, ©2026 bg002h** → redistributable
-  WITH attribution.
+  klines primary 8-dp; CoinGecko fallback; `--lag 8` settle). **The prices are public MARKET FACTS originally
+  sourced from Binance/CoinGecko — factual data is not copyrightable, so NO license/attribution attaches** (the
+  Quantoshi repo's BSD-2 covers its CODE, not these facts). Freely bundlable.
 - btctax format (price.rs:8-45): `date,usd_close`, ISO, `Decimal`; `BundledPrices` = `BTreeMap<TaxDate,Usd>`,
   EXACT-date lookup. `fmv_of` already `round_cents` [R0-M4] → **2dp source is fine.** Pure/deterministic (NFR4).
 - Wiring: session.rs:449-450 `BundledPrices::load()` (hard-wired — see [R0-C1] seam). No HTTP client exists.
@@ -34,9 +35,10 @@ local cache.
 ## Part A — bundle the dataset + [★ R0-C1] the test-migration (the Critical)
 - Convert once (committed data file): `M/D/YY → YYYY-MM-DD`; price → `Decimal` **rounded to 2dp cents** [M4];
   header `date,usd_close`; sorted asc, one row/day, deduped. `from_csv_str` parses it unchanged.
-- **[R0-I4] License:** ship a SEPARATE `data/BitcoinPricesDaily.NOTICE` (BSD-2 + ©2026 bg002h) — do NOT put a
-  header comment in the CSV (the parser errors on any non-`date` line, price.rs:28-41). Packaging is fine
-  (adapters has no include/exclude).
+- **No attribution file needed** (user-corrected 2026-07-05): the data are public daily-close market FACTS
+  (Binance/CoinGecko-sourced) — facts aren't copyrightable, so NO BSD-2/NOTICE. A one-line provenance note
+  ("daily closes derived from public Binance/CoinGecko market data") may go in the README — **NOT** in the CSV
+  ([R0-I4] the parser errors on any non-`date` line, price.rs:28-41). Packaging is fine (no include/exclude).
 - **[R0-C1] Migrate the tests broken by real data (the plan OWNS this — "existing KATs stay green" was FALSE):**
   - *Exact-FMV pins computed from stub prices* — `adapters/tests/river.rs:54-56` ($6.75←67500),
     `adapters/tests/fmv_fr3.rs:57-61`, `cli/tests/reconcile.rs` `sti_fixture` ($84.00←84000@2025-03-01 + the
@@ -136,11 +138,12 @@ provider seam + `dirs` cache-path + `PseudoKind` + `pseudo_tag` income flag + th
 **8 → 9 members** (8 publishable + xtask). **[R0-M3]
 current versions are 0.2.0 → target 0.3.0**; the new crate is a FIRST-time publish (the new-crate 5-burst rate
 limit applies — [[crate-publishing-state]]). Docs: new `btctax-update-prices` man page (clap doc-comment →
-regenerate); README (offline-by-default, the separate updater, BSD-2 attribution, the cache-as-local-input
-note); FOLLOWUPS. Note: this touches the R0-GREEN'd `SPEC_pseudo_reconcile_mode.md` contract [I1] — record it.
+regenerate); README (offline-by-default, the separate updater, the price-data provenance note = public
+Binance/CoinGecko market facts, the cache-as-local-input note); FOLLOWUPS. Note: this touches the R0-GREEN'd `SPEC_pseudo_reconcile_mode.md` contract [I1] — record it.
 
 ## Plan (TDD; phased — a phase may stop-at-green if budget-bound)
-- **T1 (A)** — convert + commit the dataset + the NOTICE; **the C1 test-migration + provider-injection seam**;
+- **T1 (A)** — convert + commit the dataset (NO attribution file — public market facts); **the C1
+  test-migration + provider-injection seam**;
   the A KATs + the committed vault-income fixture [M5]; confirm the (now migrated) suite green.
 - **T2 (B)** — `IncomeRecord.pseudo` + the pseudo income-FMV `PseudoDefault` (resolve injection + taint + render
   + `PseudoKind` + approve→`ManualFmv`); the B KATs + the ★ fault-inject; the "27 clear under pseudo" fixture gate.
@@ -156,5 +159,6 @@ note); FOLLOWUPS. Note: this touches the R0-GREEN'd `SPEC_pseudo_reconcile_mode.
 - **[I2] the pseudo taint MUST reach `IncomeRecord` + its render** — else an unflagged pseudo dollar figure (★ guard).
 - **[I3] the cache is a documented LOCAL INPUT** — bundled-only is the reproducible baseline; pseudo FMV is flagged.
 - **[C] the tax binaries link NO HTTP client** (cargo-tree check); network ONLY in btctax-update-prices; canned-JSON tests.
-- **[B] no price ⇒ stay blocked** (fault-inject); **[I4] separate NOTICE file** (CSV header comment breaks the parser).
+- **[B] no price ⇒ stay blocked** (fault-inject); **the price data are public market FACTS — no
+  BSD-2/attribution file**; any provenance note goes in the README, never a CSV header comment ([I4] breaks the parser).
 - Deterministic; `Decimal` 2dp; conservation unaffected.
