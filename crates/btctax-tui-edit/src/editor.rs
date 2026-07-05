@@ -51,6 +51,13 @@ pub enum EditorScreen {
 /// `handle_key` mutates ONLY UI navigation fields until a confirmed mutation fires
 /// `edit::persist::persist_tax_profile` (the ONE place mutations are permitted, per D3).
 ///
+/// Pseudo-reconcile (sub-project 2) approve confirmation modal state. Carries only the count of pending
+/// synthetic defaults for the prompt; the actual plan is RE-derived from the snapshot at Enter time
+/// (`btctax_core::pseudo_plan`) so it can never drift from what the banner shows.
+pub struct PseudoApproveModalState {
+    pub count: usize,
+}
+
 /// # VaultLock exclusivity
 /// The `session` field holds the live `Session` — and therefore the vault's `VaultLock` —
 /// for the entire TUI session. The CLI and viewer cannot open the same vault concurrently
@@ -191,6 +198,10 @@ pub struct EditorApp {
     pub bulk_sti_flow: Option<BulkStiFlowState>,
     /// Bulk STI confirmation modal.  `Some` while awaiting Enter/Esc.
     pub bulk_sti_modal: Option<BulkStiModalState>,
+    /// Pseudo-reconcile (sub-project 2) approve confirmation modal. `Some` (carrying the count of pending
+    /// synthetic defaults) while awaiting Enter/Esc. Enter promotes ALL pending pseudo defaults to REAL
+    /// (attested) decisions — REVOCABLE (each voidable via `v`), so a plain modal (no typed-word).
+    pub pseudo_approve_modal: Option<PseudoApproveModalState>,
     /// Full bulk classify-inbound-income flow state (bulk-classify-inbound-income, Cycle 4).
     ///
     /// Dispatch order: bulk_income_modal (modal layer) → bulk_income_flow (flow layer). Creation is
@@ -301,6 +312,7 @@ impl EditorApp {
             bulk_link_modal: None,
             bulk_sti_flow: None,
             bulk_sti_modal: None,
+            pseudo_approve_modal: None,
             bulk_income_flow: None,
             bulk_income_modal: None,
             bulk_resolve_flow: None,
