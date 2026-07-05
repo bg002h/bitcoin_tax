@@ -1,7 +1,12 @@
 # SPEC — btctax-store security/durability hardening
 
-**Source baseline:** `main` @ `9763331` (branch `feat/store-hardening`). **Review status: R0 round 1 folded
-(2C/3I/2M/2N — all merged IN-PLACE; surgical, no append). Awaiting R0 round 2.** Review:
+**Source baseline:** `main` @ `9763331` (branch `feat/store-hardening`). **Review status: R0-GREEN (2 rounds; 0C/0I).
+Cleared to implement.** Reviews: `reviews/R0-spec-store-hardening-round-{1,2}.md`. Round 1 2C/3I (both C's were
+durability regressions), round 2 0C/0I/1M/2N. **Carry into implementation:** [R0-M1r] the `.bak`-preserving
+restore ALSO fsyncs the parent dir after the rename (mirror atomic.rs:27-29); [R0-N1r] a corrupt vault.key
+(`Cert::from_bytes` fail, vault.rs:132) propagates with NO `.bak` retry (the KEY is not `.bak`-recoverable);
+[R0-N2r] `db_to_bytes`'s internal `data.to_vec()` (sqlite_io.rs:11) is a transient plaintext copy — note under
+the honesty bound. Review:
 `reviews/R0-spec-store-hardening-round-1.md`. Resolves 3 deferred `btctax-store` FOLLOWUPS. User-approved
 (2026-07-05). Storage-layer only; no tax-logic change. **Both round-1 Criticals were durability REGRESSIONS —
 the folds below are load-bearing for the "strictly safer" claim.**
