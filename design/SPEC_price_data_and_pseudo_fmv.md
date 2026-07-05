@@ -1,8 +1,10 @@
 # SPEC — comprehensive price data + pseudo-FMV + a separate online updater
 
-**Source baseline:** `main` @ `019ed3f` (branch `feat/price-data-fmv`). **Review status: R0 round 1 folded
-(1C/4I/5M/3N — merged IN-PLACE; surgical) + Part C = a SEPARATE `btctax-update-prices` binary (user-directed
-2026-07-05). Awaiting R0 round 2.** Review: `reviews/R0-spec-price-data-and-pseudo-fmv-round-1.md`. Tax-critical;
+**Source baseline:** `main` @ `019ed3f` (branch `feat/price-data-fmv`). **Review status: R0 round 2 folded (r1
+1C/4I/5M/3N; r2 0C/2I/3M/2N — both residual Importants were understated cross-crate blast radius: the tui-edit
+test + Session-level seam [I-A], both income push-sites + `pseudo_tag` + the two TUI crates in scope [I-B]) +
+Part C = a SEPARATE `btctax-update-prices` binary (user-directed 2026-07-05). Awaiting R0 round 3.** Reviews:
+`reviews/R0-spec-price-data-and-pseudo-fmv-round-{1,2}.md`. Tax-critical;
 introduces the app's first (isolated) network binary. All-three-together; online = explicit dedicated binary →
 local cache.
 
@@ -42,12 +44,18 @@ local cache.
   - *"No bundled price" assumptions now COVERED by real data* — `2025-07-04` (fmv_fr3.rs), `2025-12-31`
     (`optimize_consult.rs:406-453`), `2025-04-01` (reconcile.rs `missing_price_count`/`excluded_missing_price`,
     ~1811/2164/2332/2445).
-  - **Approach:** add a **test-only provider-injection seam** so these tests use a CONTROLLED synthetic
-    `BundledPrices::from_csv_str(...)` instead of `BundledPrices::load()` — decoupling them from the bundled
-    dataset (robust + refresh-proof). `session.rs:449` + the bulk plans hard-wire `load()`; add a
-    `pub(crate)`/`#[cfg(test)]` constructor or a `project_with_prices` seam to inject `&dyn PriceProvider`. For
-    the few genuinely testing bundled coverage, recompute expected values from the real data. A far-future
-    unpriced date (>2026-06-03) is the fallback ONLY where injection is infeasible (mark it refresh-fragile).
+  - **[R0-r2 I-A] A THIRD crate also breaks:** `btctax-tui-edit/src/main.rs` `seed_income_inbounds` bulk-income
+    KAT (~21063-21266) — BOTH modes at once: exact-FMV pins `$84.00`/`$33.75`/`$117.75` (from stub 84000/67500)
+    AND the `2025-04-01 → excluded_missing_price==1` sentinel (real data covers it ⇒ 2→3). It routes through
+    `Session::bulk_classify_income_plan` (session.rs:771/776).
+  - **Approach — a Session-LEVEL injectable provider (not a free fn) [R0-r2 I-A]:** core `project()` ALREADY
+    takes `&dyn PriceProvider` (mod.rs:62/64), so the seam is feasible — but the hard-wire is at the CLI
+    `Session` layer across **~15 `BundledPrices::load()` sites** (incl. session.rs:449/771/776). Add an
+    instance-level provider on `Session` (a `#[cfg(test)]`/`pub(crate)` constructor accepting `&dyn
+    PriceProvider`, defaulting to the layered bundled+cache) so ALL these tests inject a CONTROLLED synthetic
+    `from_csv_str(...)` — decoupled + refresh-proof. Recompute expected values only where a test genuinely
+    asserts bundled coverage; a >2026-06-03 unpriced date is the fallback ONLY where injection is infeasible
+    (mark refresh-fragile).
   - Unaffected (confirmed): `normalize.rs:88` StaticPrices double, price.rs `from_csv_str` unit tests,
     integration.rs, exchange-provided-CSV tests.
 - KATs: `bundled_dataset_covers_2010_to_2026` (spot-dates); `bundled_dataset_parses_sorted_deduped`;
@@ -62,11 +70,18 @@ local cache.
 - **Mechanism:** new `PseudoDefault` flavor. For an unresolved native-income event with `fmv == None` AND
   `prices.usd_per_btc(date).is_some()`, inject a synthetic FMV `= fmv_of(prices, date, sat)` at the resolve/`Eff`
   layer (resolve.rs `pseudo_decisions` seam) — like the existing self-transfer-$0 / classify-raw defaults.
-- **[R0-I2] Taint MUST reach the income row (the ★ guard):** `IncomeRecord` (state.rs:211-218) has NO `pseudo`
-  field and `fold.rs:689-696` pushes it UNFLAGGED (only the lot is tainted, fold.rs:722). Add `pub pseudo: bool`
-  to `IncomeRecord`; set it from `eff.pseudo`; render the `[PSEUDO]` marker on the Income tab (render.rs:299-312
-  + the sort-views Income render) — mirroring the Lot/leg taint. Without this a pseudo income shows a CLEAN
-  dollar figure (guard violation).
+- **[R0-I2 + r2 I-B] Taint MUST reach the income row (the ★ guard):** `IncomeRecord` (state.rs:211-218) has NO
+  `pseudo` field. Add `pub pseudo: bool`; set it from `eff.pseudo` at **BOTH push sites — fold.rs:689 (native
+  `Op::Income`) AND fold.rs:877 (`Op::IncomeInbound`)** [R0-r2 I-B]; mirroring the Lot taint (fold.rs:722).
+  - **CLI report** — flag via the real helper **`pseudo_tag` (render.rs:61, used at 239/353/365)**, NOT the
+    unused `pseudo_marker` [R0-r2 I-B]. This is the primary tax-output guard surface.
+  - **TUI** — `Lot`/`DisposalLeg` already carry `pseudo` (holdings.rs:223/disposals.rs:254) and the TUI surfaces
+    pseudo via the **mode BANNER** (draw_edit.rs:126 "[PSEUDO] rows are placeholders"), not per-row marks. So:
+    thread the new `IncomeRecord.pseudo` through `btctax-tui` + `btctax-tui-edit` income construction (~11
+    fixture sites + the projection) so they COMPILE, and surface income pseudo the SAME way the TUI already
+    surfaces pseudo lots/disposals (the banner + the field). If the TUI viewer lacks any pseudo-row convention,
+    a per-row TUI marker for ALL row types is a pre-existing sub-2 gap → FOLLOWUP, NOT #41's scope to retrofit.
+  Without the field, a pseudo income shows a CLEAN dollar figure (guard violation).
 - **[R0-M1] Approve target:** there is no `SetFmv` — the real payload is `ManualFmv` (event.rs:157; CLI
   `set-fmv` main.rs:590). `approve` promotes the pseudo FMV to a `ManualFmv` decision (the approve loop
   reconcile.rs:283-292 is already generic); add a new `PseudoKind` + `PseudoKindArg` (cli.rs:638,
@@ -82,9 +97,10 @@ local cache.
 ## Part C — SEPARATE `btctax-update-prices` binary (network isolated)
 - **Layered provider (btctax-adapters, NO network):** `LayeredPrices { bundled, cache: BundledPrices }` (or
   `BundledPrices::load_with_cache(cache_path)`): `usd_per_btc` = cache-over-bundled (both local → deterministic).
-  Cache = `date,usd_close` at `dirs::data_dir()/btctax/price_cache.csv` (a shared `--price-cache`/env override).
-  Cache absent → byte-identical to bundled-only. **[R0-M2] `dirs` is NOT a dep today — add it** (path resolved
-  in the cli, passed into adapters). btctax-adapters gains NO network dep.
+  Cache = `date,usd_close` at `dirs::data_dir()/btctax/price_cache.csv` (a `--price-cache`/env override). Cache
+  absent → byte-identical to bundled-only. **[R0-M2/r2 M-A] `dirs` is NOT a dep today; put it in `btctax-cli`
+  AND `btctax-update-prices` (each resolves the default path) — NOT in `btctax-adapters`**, which takes an
+  already-resolved `cache_path: Option<&Path>` and stays a pure format/provider crate (no `dirs`, no network).
 - **[R0-I3] Cache-derived FMV provenance/reproducibility (NFR4):** a cache-sourced price feeds the REAL
   auto-FMV path (disposal proceeds evaluate.rs:93/129) UNFLAGGED, yet the cache isn't in the published crate →
   not reproducible from it. Resolution: **treat the cache as a documented LOCAL INPUT** (like the vault) — a
@@ -96,21 +112,26 @@ local cache.
   rustls-tls, blocking**): `btctax-update-prices [--from D][--to D][--lag N=8][--dry-run][--source auto|binance|
   coingecko][--price-cache PATH]`. Binance klines primary, CoinGecko `market_chart/range` fallback (mirror
   `update_prices.py`); skip `--lag` recent days; APPEND to the cache (idempotent — skip present dates; never
-  touches bundled); summary + `--dry-run`. User-Agent; timeouts; graceful offline error. Deps: btctax-adapters
-  (format/path) + ureq ONLY — NOT btctax-core/cli.
+  touches bundled); summary + `--dry-run`. User-Agent; timeouts; graceful offline error. Direct deps:
+  btctax-adapters (format/path) + `dirs` + ureq ONLY — **no DIRECT dep on btctax-core/cli** [R0-r2 M-C]
+  (btctax-core arrives TRANSITIVELY via adapters — fine: core is itself network-free).
 - **btctax-cli stays network-free:** the "no price for {date}" surfaces (the B no-price case + the FmvMissing
   hint) print `run \`btctax-update-prices\`` — a STRING, no dep, no shell-out.
-- **[★] Verifiable isolation KAT/CI check:** `ureq`/rustls absent from `cargo tree` of btctax-cli / -tui /
-  -tui-edit / -core / -adapters (present ONLY in btctax-update-prices).
+- **[★] Verifiable isolation check [R0-r2 M-B]:** an **xtask/CI step** (NOT a non-hermetic `#[test]`) asserting
+  `ureq`/rustls is absent from `cargo tree` of btctax-cli / -tui / -tui-edit / -core / -adapters (present ONLY
+  in btctax-update-prices).
 - KATs: `layered_prices_cache_over_bundled`, `cache_absent_is_bundled_only` (btctax-adapters);
   `update_prices_dry_run_writes_nothing`, `update_prices_appends_and_is_idempotent` (CANNED Binance/CoinGecko
   JSON fixtures — NO live network), `update_prices_respects_lag` (btctax-update-prices). Live-network smoke =
   `#[ignore]`.
 
 ## Scope / SemVer / lockstep
-`btctax-adapters` (data + `LayeredPrices` + `dirs`, no network) + `btctax-core` (`IncomeRecord.pseudo` + the
-pseudo FMV `PseudoDefault` + render taint) + `btctax-cli` (session wiring + `PseudoKind` + the pointer string,
-**no ureq**) + **NEW `btctax-update-prices`** (ureq). Workspace **8 → 9 members** (8 publishable + xtask). **[R0-M3]
+`btctax-adapters` (data + `LayeredPrices` taking a `cache_path`, **no `dirs`**, no network) + `btctax-core`
+(`IncomeRecord.pseudo` at BOTH push sites + the pseudo FMV `PseudoDefault`) + `btctax-cli` (Session-level
+provider seam + `dirs` cache-path + `PseudoKind` + `pseudo_tag` income flag + the pointer string, **no ureq**) +
+**`btctax-tui` + `btctax-tui-edit`** (thread `IncomeRecord.pseudo` through income construction/render + the
+`seed_income_inbounds` test migration) [R0-r2 I-A/I-B] + **NEW `btctax-update-prices`** (ureq + `dirs`). Workspace
+**8 → 9 members** (8 publishable + xtask). **[R0-M3]
 current versions are 0.2.0 → target 0.3.0**; the new crate is a FIRST-time publish (the new-crate 5-burst rate
 limit applies — [[crate-publishing-state]]). Docs: new `btctax-update-prices` man page (clap doc-comment →
 regenerate); README (offline-by-default, the separate updater, BSD-2 attribution, the cache-as-local-input
