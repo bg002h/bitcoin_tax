@@ -1,5 +1,5 @@
-//! Bundled per-year tax tables — TY2024 and TY2025 indexed numbers from Rev. Proc. 2023-34
-//! and Rev. Proc. 2024-40 respectively.
+//! Bundled per-year tax tables — TY2024, TY2025, and TY2026 indexed numbers from Rev. Proc.
+//! 2023-34, Rev. Proc. 2024-40, and Rev. Proc. 2025-32 respectively.
 //!
 //! # What is bundled here
 //! **Indexed** values only (ordinary brackets + §1(h) LTCG breakpoints).  These are
@@ -34,8 +34,17 @@
 //! use the standard deduction, so the TY2025 indexed values are exactly Rev. Proc. 2024-40.
 //! (OBBBA is a 2025 enactment and does not affect TY2024 values.)
 //!
-//! # TY2026
-//! TY2026 is omitted (pending verification against Rev. Proc. 2025-32 + OBBBA structural law).
+//! TY2026 values are encoded verbatim from:
+//! - **Rev. Proc. 2025-32 §4.01** — rate tables under §1(j)(2) (ordinary brackets)
+//! - **Rev. Proc. 2025-32 §4.03** — Maximum Capital Gains Rate under §1(h) (LTCG breakpoints)
+//! - **Rev. Proc. 2025-32 §4.42(1)** — §2503(b) gift-tax annual exclusion per donee ($19,000)
+//! - **OBBBA Pub. L. 119-21 §70106** — §2010(c)(3) basic exclusion (flat statutory $15,000,000
+//!   for CY2026; Rev. Proc. 2025-32 §2.14 confirms; first inflation-indexed 2027)
+//! - **SSA determination (Fed. Reg. 2025-11-03)** — §230 Social Security Act (42 U.S.C. §430)
+//!   wage base ($184,500)
+//!
+//! # Later years
+//! TY2027+ are omitted: the IRS/SSA publish those figures in fall 2026, after our data horizon.
 //! Callers requesting a year with no bundled table receive `None` from [`TaxTables::table_for`],
 //! which the compute layer converts to `TaxOutcome::NotComputable(TaxTableMissing)` (B.4/I6).
 use btctax_core::tax::tables::{
@@ -47,8 +56,9 @@ use std::collections::BTreeMap;
 
 /// Compiled-in tax tables for the years whose Rev. Procs. have been independently verified.
 ///
-/// Currently contains **TY2024** (Rev. Proc. 2023-34) and **TY2025** (Rev. Proc. 2024-40).
-/// TY2026 will be added once verified against Rev. Proc. 2025-32 + OBBBA structural law.
+/// Currently contains **TY2024** (Rev. Proc. 2023-34), **TY2025** (Rev. Proc. 2024-40), and
+/// **TY2026** (Rev. Proc. 2025-32 + OBBBA Pub. L. 119-21). TY2027+ are added once the IRS/SSA
+/// publish those figures (fall 2026).
 ///
 /// Mirrors the `BundledPrices` load-invariant: pure, deterministic, no I/O.
 #[derive(Debug, Clone)]
@@ -57,14 +67,13 @@ pub struct BundledTaxTables {
 }
 
 impl BundledTaxTables {
-    /// Build the compiled-in tables (TY2024 and TY2025 bundled; later years added as their
-    /// Rev. Procs. are verified).
+    /// Build the compiled-in tables (TY2024, TY2025, and TY2026 bundled; later years added as
+    /// their Rev. Procs. are verified).
     pub fn load() -> Self {
         let mut by_year = BTreeMap::new();
         by_year.insert(2024, ty2024());
         by_year.insert(2025, ty2025());
-        // by_year.insert(2026, ty2026());
-        // ^ add ONLY when verified vs Rev. Proc. 2025-32 + OBBBA structural law
+        by_year.insert(2026, ty2026());
         Self { by_year }
     }
 }
@@ -340,6 +349,147 @@ fn ty2025() -> TaxTable {
     }
 }
 
+/// TY2026 — Rev. Proc. 2025-32 §4.01 (rate tables) + §4.03 (Maximum Capital Gains Rate).
+///
+/// Values verified against the PRIMARY sources (Rev. Proc. 2025-32, I.R.B. 2025-45; SSA
+/// determination Fed. Reg. 2025-11-03; OBBBA Pub. L. 119-21 §70106):
+/// - §4.01 Tables 1–4 — §1(j)(2) ordinary rate tables.
+/// - §4.03 — §1(h) Maximum Capital Gains Rate (LTCG breakpoints).
+/// - §4.42(1) — §2503(b) gift-tax annual exclusion per donee ($19,000, unchanged from TY2025).
+/// - §2010(c)(3) basic exclusion — a flat statutory $15,000,000 set by OBBBA Pub. L. 119-21
+///   §70106 (Rev. Proc. 2025-32 §2.14 confirms); first inflation-indexed in 2027, so NOT a
+///   §1(f) item this year.
+/// - §230 SSA (42 U.S.C. §430) SS wage base $184,500 — SSA determination (Fed. Reg. 2025-11-03),
+///   up from TY2025 $176,100.
+///
+/// Traps (transcribed, never re-derived): HoH 32%/35% start at $201,750/$256,200 — NOT Single's
+/// $201,775/$256,225. MFS lower bands 10%–35% mirror Single, but 37% starts at $384,350
+/// (= ½ of MFJ $768,700).
+///
+/// QSS is not inserted explicitly; `TaxTable::key` maps `Qss → Mfj` at lookup time, avoiding
+/// drift between the two identical schedules.
+fn ty2026() -> TaxTable {
+    let mut ordinary = BTreeMap::new();
+
+    // §4.01 Table 3 — Single (§1(j)(2)(C): Unmarried Individuals rate table)
+    ordinary.insert(
+        FilingStatus::Single,
+        OrdinarySchedule {
+            brackets: vec![
+                br(dec!(0), dec!(0.10)),
+                br(dec!(12400), dec!(0.12)),
+                br(dec!(50400), dec!(0.22)),
+                br(dec!(105700), dec!(0.24)),
+                br(dec!(201775), dec!(0.32)),
+                br(dec!(256225), dec!(0.35)),
+                br(dec!(640600), dec!(0.37)),
+            ],
+        },
+    );
+
+    // §4.01 Table 1 — Married Filing Jointly / Qualifying Surviving Spouse (§1(j)(2)(A) rate table)
+    // QSS aliases MFJ via TaxTable::key; no separate QSS entry needed.
+    ordinary.insert(
+        FilingStatus::Mfj,
+        OrdinarySchedule {
+            brackets: vec![
+                br(dec!(0), dec!(0.10)),
+                br(dec!(24800), dec!(0.12)),
+                br(dec!(100800), dec!(0.22)),
+                br(dec!(211400), dec!(0.24)),
+                br(dec!(403550), dec!(0.32)),
+                br(dec!(512450), dec!(0.35)),
+                br(dec!(768700), dec!(0.37)),
+            ],
+        },
+    );
+
+    // §4.01 Table 2 — Head of Household (§1(j)(2)(B) rate table)
+    // TRAP: 32%/35% start at $201,750/$256,200 — distinct from Single's $201,775/$256,225.
+    ordinary.insert(
+        FilingStatus::HoH,
+        OrdinarySchedule {
+            brackets: vec![
+                br(dec!(0), dec!(0.10)),
+                br(dec!(17700), dec!(0.12)),
+                br(dec!(67450), dec!(0.22)),
+                br(dec!(105700), dec!(0.24)),
+                br(dec!(201750), dec!(0.32)),
+                br(dec!(256200), dec!(0.35)),
+                br(dec!(640600), dec!(0.37)),
+            ],
+        },
+    );
+
+    // §4.01 Table 4 — Married Filing Separately (§1(j)(2)(D) rate table)
+    // Note: lower bands 10%–35% mirror Single; 37% starts at $384,350 (half of MFJ $768,700).
+    ordinary.insert(
+        FilingStatus::Mfs,
+        OrdinarySchedule {
+            brackets: vec![
+                br(dec!(0), dec!(0.10)),
+                br(dec!(12400), dec!(0.12)),
+                br(dec!(50400), dec!(0.22)),
+                br(dec!(105700), dec!(0.24)),
+                br(dec!(201775), dec!(0.32)),
+                br(dec!(256225), dec!(0.35)),
+                br(dec!(384350), dec!(0.37)),
+            ],
+        },
+    );
+
+    // §4.03 — §1(h) LTCG breakpoints (max_zero = top of 0% band; max_fifteen = top of 15% band)
+    // QSS aliases MFJ via TaxTable::key; no separate QSS entry needed.
+    let mut ltcg = BTreeMap::new();
+    ltcg.insert(
+        FilingStatus::Single,
+        LtcgBreakpoints {
+            max_zero: dec!(49450),
+            max_fifteen: dec!(545500),
+        },
+    );
+    ltcg.insert(
+        FilingStatus::Mfj,
+        LtcgBreakpoints {
+            max_zero: dec!(98900),
+            max_fifteen: dec!(613700),
+        },
+    );
+    ltcg.insert(
+        FilingStatus::HoH,
+        LtcgBreakpoints {
+            max_zero: dec!(66200),
+            max_fifteen: dec!(579600),
+        },
+    );
+    ltcg.insert(
+        FilingStatus::Mfs,
+        LtcgBreakpoints {
+            max_zero: dec!(49450),
+            max_fifteen: dec!(306850),
+        },
+    );
+
+    TaxTable {
+        year: 2026,
+        source: "Rev. Proc. 2025-32 §4.01/§4.03 + §4.42 (TY2026); §2010(c)(3) basic exclusion \
+                 $15,000,000 per OBBBA Pub. L. 119-21 §70106; SS wage base $184,500 per SSA \
+                 (Fed. Reg. 2025-11-03)",
+        ordinary,
+        ltcg,
+        // §2503(b) gift annual exclusion per donee — Rev. Proc. 2025-32 §4.42(1)
+        // (TY2026 = $19,000; unchanged from TY2025).
+        gift_annual_exclusion: dec!(19000),
+        // §230 SSA (42 U.S.C. §430) Social Security wage base — SSA determination
+        // (Fed. Reg. 2025-11-03; TY2026 = $184,500, up from $176,100).
+        ss_wage_base: dec!(184500),
+        // §2010(c)(3) basic exclusion amount (unified credit / lifetime gift+estate exclusion) —
+        // flat statutory $15,000,000 set by OBBBA Pub. L. 119-21 §70106 (Rev. Proc. 2025-32 §2.14
+        // confirms; first inflation-indexed 2027, NOT a §1(f) item for TY2026).
+        gift_lifetime_exclusion: dec!(15_000_000),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,8 +600,199 @@ mod tests {
         assert_eq!(niit_threshold(FilingStatus::Mfj), dec!(250000));
         assert_eq!(loss_limit(FilingStatus::Mfs), dec!(1500));
         assert_eq!(NIIT_RATE, dec!(0.038));
-        // If TY2026 is bundled, assert its indexed breakpoints DIFFER from TY2025 while the
-        // statutory values above remain identical — the indexed-moves / statutory-fixed contrast.
+
+        // Indexed-moves / statutory-fixed contrast: TY2026 indexed breakpoints DIFFER from TY2025
+        // (inflation-adjusted under §1(f)) while the statutory values above are unchanged for 2026.
+        let t = BundledTaxTables::load();
+        let s25 = t
+            .table_for(2025)
+            .unwrap()
+            .ordinary_for(FilingStatus::Single);
+        let s26 = t
+            .table_for(2026)
+            .unwrap()
+            .ordinary_for(FilingStatus::Single);
+        assert_ne!(s25.brackets[1].lower, s26.brackets[1].lower); // 12% start moved
+        assert_ne!(
+            t.table_for(2025)
+                .unwrap()
+                .ltcg_for(FilingStatus::Single)
+                .max_zero,
+            t.table_for(2026)
+                .unwrap()
+                .ltcg_for(FilingStatus::Single)
+                .max_zero
+        );
+        // Statutory functions are the same regardless of year (no per-year table field for them).
+        assert_eq!(niit_threshold(FilingStatus::Mfj), dec!(250000));
+        assert_eq!(NIIT_RATE, dec!(0.038));
+    }
+
+    // ── TY2026 KATs (Rev. Proc. 2025-32 §4.01/§4.03 + §4.42; OBBBA §70106; SSA Fed. Reg. 2025-11-03)
+
+    #[test]
+    fn ty2026_single_ordinary_brackets_match_rev_proc_2025_32() {
+        let t = BundledTaxTables::load();
+        let s = t
+            .table_for(2026)
+            .unwrap()
+            .ordinary_for(FilingStatus::Single);
+        assert_eq!(s.brackets[1].lower, dec!(12400)); // 12% start
+        assert_eq!(s.brackets[2].lower, dec!(50400)); // 22% start
+        assert_eq!(s.brackets[3].lower, dec!(105700)); // 24% start
+        assert_eq!(s.brackets[4].lower, dec!(201775)); // 32% start
+        assert_eq!(s.brackets[5].lower, dec!(256225)); // 35% start
+        assert_eq!(s.brackets[6].lower, dec!(640600)); // 37% start
+        assert_eq!(s.brackets[6].rate, dec!(0.37));
+    }
+
+    #[test]
+    fn ty2026_mfj_ordinary_brackets_match_rev_proc_2025_32() {
+        let t = BundledTaxTables::load();
+        let s = t.table_for(2026).unwrap().ordinary_for(FilingStatus::Mfj);
+        assert_eq!(s.brackets[1].lower, dec!(24800)); // 12% start
+        assert_eq!(s.brackets[2].lower, dec!(100800)); // 22% start
+        assert_eq!(s.brackets[3].lower, dec!(211400)); // 24% start
+        assert_eq!(s.brackets[4].lower, dec!(403550)); // 32% start
+        assert_eq!(s.brackets[5].lower, dec!(512450)); // 35% start
+        assert_eq!(s.brackets[6].lower, dec!(768700)); // 37% start
+        assert_eq!(s.brackets[6].rate, dec!(0.37));
+    }
+
+    /// ★ Fault-inject target: HoH 32%/35% start at $201,750/$256,200 — NOT Single's
+    /// $201,775/$256,225. Swapping either to the Single value must turn this RED.
+    #[test]
+    fn ty2026_hoh_ordinary_brackets_match_rev_proc_2025_32() {
+        let t = BundledTaxTables::load();
+        let s = t.table_for(2026).unwrap().ordinary_for(FilingStatus::HoH);
+        assert_eq!(s.brackets[1].lower, dec!(17700)); // 12% start
+        assert_eq!(s.brackets[2].lower, dec!(67450)); // 22% start
+        assert_eq!(s.brackets[3].lower, dec!(105700)); // 24% start
+        assert_eq!(s.brackets[4].lower, dec!(201750)); // 32% start — TRAP: NOT Single's $201,775
+        assert_eq!(s.brackets[5].lower, dec!(256200)); // 35% start — TRAP: NOT Single's $256,225
+        assert_eq!(s.brackets[6].lower, dec!(640600)); // 37% start
+        assert_eq!(s.brackets[6].rate, dec!(0.37));
+    }
+
+    #[test]
+    fn ty2026_mfs_37_pct_starts_at_384350() {
+        let t = BundledTaxTables::load();
+        let s = t.table_for(2026).unwrap().ordinary_for(FilingStatus::Mfs);
+        // Lower bands 10%–35% mirror Single.
+        assert_eq!(s.brackets[1].lower, dec!(12400)); // 12% start
+        assert_eq!(s.brackets[4].lower, dec!(201775)); // 32% start
+        assert_eq!(s.brackets[5].lower, dec!(256225)); // 35% start
+        assert_eq!(s.brackets.last().unwrap().lower, dec!(384350)); // 37% start = ½ MFJ $768,700
+        assert_eq!(s.brackets.last().unwrap().rate, dec!(0.37));
+    }
+
+    #[test]
+    fn ty2026_ltcg_breakpoints_all_statuses() {
+        let t = BundledTaxTables::load();
+        let tt = t.table_for(2026).unwrap();
+        assert_eq!(
+            *tt.ltcg_for(FilingStatus::Single),
+            LtcgBreakpoints {
+                max_zero: dec!(49450),
+                max_fifteen: dec!(545500)
+            }
+        );
+        assert_eq!(
+            *tt.ltcg_for(FilingStatus::Mfj),
+            LtcgBreakpoints {
+                max_zero: dec!(98900),
+                max_fifteen: dec!(613700)
+            }
+        );
+        // QSS ≡ MFJ (TaxTable::key maps Qss → Mfj)
+        assert_eq!(
+            *tt.ltcg_for(FilingStatus::Qss),
+            LtcgBreakpoints {
+                max_zero: dec!(98900),
+                max_fifteen: dec!(613700)
+            }
+        );
+        assert_eq!(
+            *tt.ltcg_for(FilingStatus::HoH),
+            LtcgBreakpoints {
+                max_zero: dec!(66200),
+                max_fifteen: dec!(579600)
+            }
+        );
+        assert_eq!(
+            *tt.ltcg_for(FilingStatus::Mfs),
+            LtcgBreakpoints {
+                max_zero: dec!(49450),
+                max_fifteen: dec!(306850)
+            }
+        );
+    }
+
+    #[test]
+    fn ty2026_gift_annual_exclusion_is_19000() {
+        let t = BundledTaxTables::load();
+        assert_eq!(
+            t.table_for(2026).unwrap().gift_annual_exclusion,
+            dec!(19000)
+        );
+    }
+
+    #[test]
+    fn ty2026_ss_wage_base_is_184500() {
+        let t = BundledTaxTables::load();
+        assert_eq!(t.table_for(2026).unwrap().ss_wage_base, dec!(184500));
+    }
+
+    #[test]
+    fn ty2026_lifetime_exclusion_is_15_million() {
+        let t = BundledTaxTables::load();
+        assert_eq!(
+            t.table_for(2026).unwrap().gift_lifetime_exclusion,
+            dec!(15_000_000)
+        );
+    }
+
+    #[test]
+    fn ty2026_table_is_available() {
+        assert!(BundledTaxTables::load().table_for(2026).is_some());
+    }
+
+    /// [R0-N1] Bundling TY2026 must not perturb the older tables — spot-check their headline values.
+    #[test]
+    fn ty2024_and_2025_tables_unchanged() {
+        let t = BundledTaxTables::load();
+
+        let t24 = t.table_for(2024).unwrap();
+        assert_eq!(
+            t24.ordinary_for(FilingStatus::Single).brackets[6].lower,
+            dec!(609350)
+        );
+        assert_eq!(
+            *t24.ltcg_for(FilingStatus::Single),
+            LtcgBreakpoints {
+                max_zero: dec!(47025),
+                max_fifteen: dec!(518900)
+            }
+        );
+        assert_eq!(t24.gift_annual_exclusion, dec!(18000));
+        assert_eq!(t24.ss_wage_base, dec!(168600));
+        assert_eq!(t24.gift_lifetime_exclusion, dec!(13_610_000));
+
+        let t25 = t.table_for(2025).unwrap();
+        assert_eq!(
+            t25.ordinary_for(FilingStatus::Single).brackets[6].lower,
+            dec!(626350)
+        );
+        assert_eq!(
+            *t25.ltcg_for(FilingStatus::Single),
+            LtcgBreakpoints {
+                max_zero: dec!(48350),
+                max_fifteen: dec!(533400)
+            }
+        );
+        assert_eq!(t25.gift_annual_exclusion, dec!(19000));
+        assert_eq!(t25.ss_wage_base, dec!(176100));
+        assert_eq!(t25.gift_lifetime_exclusion, dec!(13_990_000));
     }
 
     // ── TY2024 KATs ──────────────────────────────────────────────────────────────────────────────────

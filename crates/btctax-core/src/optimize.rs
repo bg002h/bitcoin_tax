@@ -1306,8 +1306,11 @@ fn score_synthetic(
 /// synthetic disposal dated `latest_crossover` — so the short-term legs flip to long-term while the price
 /// is unchanged (lots already LT as of `at` stay LT). Done ONLY when `latest_crossover.year() ==
 /// at.year()` AND `at`'s table + profile are present; OTHERWISE `None` — NEVER re-score in a future
-/// crossover year (a 2026+ re-score would hit a missing bundled table → `NotComputable` and fail the
-/// whole consult). `saving_if_waited = (total_now − tax_if_sold_long_term).max(0)`.
+/// crossover year. The real guard is the `latest_crossover.year() != at.year()` check below: a forward
+/// re-score would need that later year's bundled table AND profile, and any crossover year past the
+/// bundled/profiled horizon would resolve to `NotComputable` and fail the whole consult — so the
+/// same-year guard keeps the insight self-consistent regardless of which years are bundled.
+/// `saving_if_waited = (total_now − tax_if_sold_long_term).max(0)`.
 #[allow(clippy::too_many_arguments)]
 fn timing_insight(
     events: &[LedgerEvent],

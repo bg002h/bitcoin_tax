@@ -4,6 +4,25 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ TY2026 tax-table backfill — SHIPPED (2026-07-05) — 2027 DEFERRED (unpublished)
+
+`ty2026()` in `BundledTaxTables` (`btctax-adapters/src/tax_tables.rs`), wired via
+`by_year.insert(2026, ty2026())` in `load()`. Figures transcribed VERBATIM from the primary sources
+(Rev. Proc. 2025-32 §4.01/§4.03/§4.42; OBBBA Pub. L. 119-21 §70106; SSA Fed. Reg. 2025-11-03) per the
+R0-GREEN spec `design/SPEC_tax_tables_2026.md` (2 rounds, 0C/0I): 28 ordinary edges (4 statuses × 7 —
+incl. the **HoH 32%/35% = $201,750/$256,200 trap**, distinct from Single's $201,775/$256,225; MFS 37% =
+$384,350 = ½ MFJ), 4 LTCG pairs, gift annual $19,000, SS wage base $184,500, lifetime exclusion flat
+$15,000,000 (OBBBA, not §1(f)). KATs per-status + fault-inject HoH + `ty2024_and_2025_tables_unchanged`.
+**ARMS TY2026**: `table_for(2026)` flips `None → Some`, so a 2026 compute is now `Computed`, not
+`NotComputable(TaxTableMissing)`. Owned regressions: `tax_report.rs carryforward_mismatch_advisory_rendered`
+re-pointed 2026→2027 (the whole scenario, since the loss lives in the prior-year CSV); `optimize.rs`
+timing-insight doc reworded (the real guard is the same-year check, not "2026 hits a missing table").
+
+**Deferred (OPEN): TY2027 tables** — IRS/SSA publish those figures in fall 2026, after our data horizon;
+do NOT fabricate. Backfill when published (mirror this cycle: verify vs the TY2027 Rev. Proc. + SSA).
+
+---
+
 ## 🟡 pseudo-reconcile mode (auto-pseudo-reconcile sub-project 2) — IMPLEMENTED on `feat/pseudo-reconcile-mode`, AWAITING WHOLE-DIFF REVIEW (2026-07-04)
 
 A reversible **mode** that fills DELIBERATELY-FICTIONAL default decisions at PROJECTION time (NEVER
@@ -808,7 +827,8 @@ ST-gains-ARE-NII omission: MFS $396.00 incl. $38.00 NIIT) + structural + report-
 regression. `report --tax-year 2024` now computes. R0 2 rounds → 0C/0I; whole-diff 0C/0I. 692 tests.
 
 Deferred (OPEN): full-schedule equality KATs per status (M1 — the A6 delta KATs can cancel lower-edge
-errors; pin all 28 edges directly); TY2026/2027 tables stay BLOCKED on IRS/SSA publication (~Dec 2026).
+errors; pin all 28 edges directly). **TY2026 tables SHIPPED 2026-07-05** (Rev. Proc. 2025-32 — see the
+top-of-file entry); **TY2027 stays BLOCKED on IRS/SSA publication (fall 2026).**
 
 **Queue COMPLETE (NII slice → SE cluster → TY2024). Next: the user-approved form-program sequence** —
 CI infrastructure → small-FOLLOWUPS burndown → export-from-TUI → 5a FDF/XFDF → the mutating-TUI program
