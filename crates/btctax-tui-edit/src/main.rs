@@ -404,11 +404,18 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::PageDown => page_down(app),
                 KeyCode::Char('g') => go_top(app),
                 KeyCode::Char('G') => go_bottom(app),
-                KeyCode::Left => {
+                // Column cursor: h/← move left, l/→ move right. The tax year MOVED off the arrows
+                // to the [ / ] keys below, freeing s/l for sorting / cursor.
+                KeyCode::Left | KeyCode::Char('h') => move_cursor_left(app),
+                KeyCode::Right | KeyCode::Char('l') => move_cursor_right(app),
+                // Sort the focused column: toggle asc↔desc; focusing a NEW column sorts ascending.
+                KeyCode::Char('s') => sort_focused(app),
+                // Tax year prev / next (Holdings is not year-scoped → a no-op there [R0-N-2]).
+                KeyCode::Char('[') => {
                     app.selected_year -= 1;
                     reset_selections(app);
                 }
-                KeyCode::Right => {
+                KeyCode::Char(']') => {
                     app.selected_year += 1;
                     reset_selections(app);
                 }
@@ -418,9 +425,11 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('r') => open_reclassify_income_flow(app),
                 KeyCode::Char('f') => open_set_fmv_flow(app),
                 KeyCode::Char('v') => open_void_flow(app),
-                KeyCode::Char('s') => open_select_lots_flow(app),
+                // Rebound off `s` (now sort) — select-lots opens on `S` [R0-I5].
+                KeyCode::Char('S') => open_select_lots_flow(app),
                 KeyCode::Char('d') => open_set_donation_details_flow(app),
-                KeyCode::Char('l') => open_link_transfer_flow(app),
+                // Rebound off `l` (now cursor-right) — link-transfer opens on `L` [R0-I5].
+                KeyCode::Char('L') => open_link_transfer_flow(app),
                 KeyCode::Char('u') => open_classify_raw_flow(app),
                 KeyCode::Char('a') => open_safe_harbor_attest_flow(app),
                 KeyCode::Char('A') => open_safe_harbor_allocate_flow(app),
@@ -8778,6 +8787,56 @@ fn active_state(app: &mut EditorApp) -> Option<&mut TableState> {
     }
 }
 
+// ── Column-sort helpers (mirror the viewer's) ────────────────────────────────────
+
+/// Return the active `(ViewSort, cursor, column_count)` triple for the currently focused row view.
+/// Only Holdings/Disposals/Income are sortable; other tabs return `None` (cursor/sort keys no-op).
+fn active_sort(
+    app: &mut EditorApp,
+) -> Option<(&mut btctax_tui::sort::ViewSort, &mut usize, usize)> {
+    match app.tab {
+        Tab::Holdings => Some((
+            &mut app.holdings_sort,
+            &mut app.holdings_cursor,
+            btctax_tui::tabs::holdings::COLUMN_COUNT,
+        )),
+        Tab::Disposals => Some((
+            &mut app.disposals_sort,
+            &mut app.disposals_cursor,
+            btctax_tui::tabs::disposals::COLUMN_COUNT,
+        )),
+        Tab::Income => Some((
+            &mut app.income_sort,
+            &mut app.income_cursor,
+            btctax_tui::tabs::income::COLUMN_COUNT,
+        )),
+        _ => None,
+    }
+}
+
+/// Move the focused row view's column cursor one column left (clamped at 0).
+fn move_cursor_left(app: &mut EditorApp) {
+    if let Some((_, cursor, _)) = active_sort(app) {
+        *cursor = btctax_tui::sort::cursor_left(*cursor);
+    }
+}
+
+/// Move the focused row view's column cursor one column right (clamped at the last column).
+fn move_cursor_right(app: &mut EditorApp) {
+    if let Some((_, cursor, count)) = active_sort(app) {
+        *cursor = btctax_tui::sort::cursor_right(*cursor, count);
+    }
+}
+
+/// Sort the focused row view by its cursor column (`s`): toggle direction on the current sort
+/// column, else focus the new column ascending. Display-only — never mutates the session/snapshot.
+fn sort_focused(app: &mut EditorApp) {
+    if let Some((view_sort, cursor, _)) = active_sort(app) {
+        let c = *cursor;
+        btctax_tui::sort::apply_sort_key(view_sort, c);
+    }
+}
+
 /// Number of selectable data rows for the active tab (TOTAL row excluded, same as viewer).
 fn active_row_count(app: &EditorApp) -> usize {
     let Some(snap) = app.snapshot.as_ref() else {
@@ -9490,15 +9549,230 @@ mod tests {
         assert!(!app.should_quit);
     }
 
+    /// [R0-M-3] The tax year now steps on `[` / `]` (MOVED off `←`/`→`, which move the column
+    /// cursor). Arrows must NOT change the year anymore.
     #[test]
-    fn left_right_on_browse_changes_selected_year() {
+    fn tax_year_moves_to_bracket_keys_on_browse() {
         let mut app = EditorApp::new(PathBuf::new());
         app.screen = EditorScreen::Browse;
+        app.tab = Tab::Disposals; // a year-scoped tab
         let initial = app.selected_year;
+        handle_key(&mut app, press(KeyCode::Char('[')));
+        assert_eq!(app.selected_year, initial - 1, "'[' decrements the year");
+        handle_key(&mut app, press(KeyCode::Char(']')));
+        assert_eq!(app.selected_year, initial, "']' increments the year back");
+        // Arrows no longer change the year — they move the column cursor.
         handle_key(&mut app, press(KeyCode::Left));
-        assert_eq!(app.selected_year, initial - 1);
         handle_key(&mut app, press(KeyCode::Right));
-        assert_eq!(app.selected_year, initial);
+        assert_eq!(
+            app.selected_year, initial,
+            "←/→ must NOT change the year (they move the column cursor)"
+        );
+    }
+
+    // ── [R0-I5] Editor rebinds: s→sort, l→cursor; S→select-lots, L→link-transfer ──────
+
+    /// Build a Browse-screen editor with an EMPTY snapshot (no session). Enough to route the
+    /// top-level Browse keys and observe the openers' empty-state side effects.
+    fn browse_app_with_empty_snapshot() -> EditorApp {
+        use btctax_adapters::BundledTaxTables;
+        use btctax_cli::CliConfig;
+        use btctax_tui::app::Snapshot;
+        use std::collections::BTreeMap;
+        let snap = Snapshot {
+            events: vec![],
+            state: btctax_core::state::LedgerState::default(),
+            cli_config: CliConfig::default(),
+            profiles: BTreeMap::new(),
+            tables: BundledTaxTables::load(),
+            donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
+        };
+        let mut app = EditorApp::new(PathBuf::from("/edit/vault.pgp"));
+        app.screen = EditorScreen::Browse;
+        app.snapshot = Some(snap);
+        app.selected_year = 2025;
+        app
+    }
+
+    /// `s` now SORTS the focused column (toggles direction) and NO LONGER opens select-lots.
+    #[test]
+    fn editor_s_now_sorts() {
+        use btctax_tui::sort::Dir;
+        let mut app = browse_app_with_empty_snapshot();
+        app.tab = Tab::Holdings;
+        let before = app.holdings_sort;
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert_eq!(app.holdings_sort.dir, Dir::Desc, "'s' toggles the sort dir");
+        assert_ne!(app.holdings_sort, before, "'s' changed the sort state");
+        assert!(
+            app.select_lots_flow.is_none(),
+            "'s' must NOT open select-lots anymore (it sorts)"
+        );
+        assert!(
+            app.status.is_none(),
+            "'s' sorts locally — it never runs the select-lots opener (which would set a status)"
+        );
+    }
+
+    /// `S` (rebound off `s`) routes to the select-lots opener.
+    #[test]
+    fn editor_shift_s_opens_select_lots() {
+        let mut app = browse_app_with_empty_snapshot();
+        app.tab = Tab::Holdings;
+        let sort_before = app.holdings_sort;
+        handle_key(&mut app, press(KeyCode::Char('S')));
+        // Empty snapshot → the opener runs and reports its empty pre-filter (proves S→select-lots).
+        assert!(
+            app.status
+                .as_deref()
+                .is_some_and(|s| s.contains("select-lots") || s.contains("method-honoring")),
+            "'S' must route to the select-lots opener; status: {:?}",
+            app.status
+        );
+        assert_eq!(app.holdings_sort, sort_before, "'S' must NOT sort");
+    }
+
+    /// `L` (rebound off `l`) routes to the link-transfer opener; `L` must not move the cursor.
+    #[test]
+    fn editor_shift_l_opens_link_transfer() {
+        let mut app = browse_app_with_empty_snapshot();
+        app.tab = Tab::Holdings;
+        let cursor_before = app.holdings_cursor;
+        handle_key(&mut app, press(KeyCode::Char('L')));
+        assert!(
+            app.status
+                .as_deref()
+                .is_some_and(|s| s.contains("pending outbound")),
+            "'L' must route to the link-transfer opener; status: {:?}",
+            app.status
+        );
+        assert_eq!(
+            app.holdings_cursor, cursor_before,
+            "'L' must NOT move the column cursor (only lowercase 'l' does)"
+        );
+    }
+
+    /// The column cursor moves with h/l and ←/→, clamped per view; `s` toggles direction.
+    #[test]
+    fn editor_cursor_and_sort_keys() {
+        use btctax_tui::sort::Dir;
+        let mut app = browse_app_with_empty_snapshot();
+        app.tab = Tab::Disposals;
+        assert_eq!(app.disposals_cursor, 0, "default cursor = Disposed (col 0)");
+
+        handle_key(&mut app, press(KeyCode::Char('l')));
+        assert_eq!(app.disposals_cursor, 1, "'l' moves cursor right");
+        handle_key(&mut app, press(KeyCode::Right));
+        assert_eq!(app.disposals_cursor, 2, "'→' moves cursor right");
+        handle_key(&mut app, press(KeyCode::Char('h')));
+        assert_eq!(app.disposals_cursor, 1, "'h' moves cursor left");
+
+        // Sort the focused column (col 1 = Acquired) → ascending first.
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert_eq!(app.disposals_sort.col, 1);
+        assert_eq!(app.disposals_sort.dir, Dir::Asc);
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert_eq!(app.disposals_sort.dir, Dir::Desc, "repeat toggles to desc");
+
+        // Clamp right at COLUMN_COUNT-1 (8 disposal columns → last index 7).
+        for _ in 0..20 {
+            handle_key(&mut app, press(KeyCode::Char('l')));
+        }
+        assert_eq!(app.disposals_cursor, 7, "cursor clamps at the last column");
+    }
+
+    // ── [R0-I1] display-only: sorting never mutates the session / snapshot / events ──────
+
+    /// Driving sort/cursor keys across the sortable views (and rendering) leaves `snapshot.state`
+    /// and `snapshot.events` BYTE-IDENTICAL — sorting reorders DISPLAY rows only.
+    #[test]
+    fn sorting_does_not_mutate_events_or_state() {
+        let mut app = browse_app_with_empty_snapshot();
+        let events_before = app.snapshot.as_ref().unwrap().events.clone();
+        let state_before = app.snapshot.as_ref().unwrap().state.clone();
+
+        for tab in [Tab::Holdings, Tab::Disposals, Tab::Income] {
+            app.tab = tab;
+            for key in [
+                KeyCode::Char('l'),
+                KeyCode::Char('s'),
+                KeyCode::Char('s'),
+                KeyCode::Char('h'),
+                KeyCode::Char('s'),
+                KeyCode::Right,
+                KeyCode::Left,
+            ] {
+                handle_key(&mut app, press(key));
+            }
+            // Render this tab to exercise the sort path.
+            let backend = ratatui::backend::TestBackend::new(160, 44);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        }
+
+        let snap = app.snapshot.as_ref().unwrap();
+        assert_eq!(
+            snap.events, events_before,
+            "sorting must NOT mutate snapshot.events"
+        );
+        assert!(
+            snap.state == state_before,
+            "sorting must NOT mutate snapshot.state (display-only)"
+        );
+    }
+
+    /// [R0-I1] An edit flow's picker list is built from `snap.state`/`snap.events` — it is
+    /// INDEPENDENT of the tab's current display sort/cursor. Opening select-lots under two very
+    /// different display-sort states yields the SAME target list (order + contents).
+    #[test]
+    fn edit_flow_targets_are_independent_of_display_order() {
+        use btctax_tui::sort::{Dir, ViewSort};
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-independence-pass";
+        let (_a, _b, _to) = seed_two_lot_sell_vault(&vault, &key, pp_str);
+
+        // (1) Open select-lots with the DEFAULT display sort; capture the target list.
+        let mut app = open_app(&vault, pp_str);
+        app.disposals_sort = btctax_tui::tabs::disposals::DEFAULT_SORT;
+        app.disposals_cursor = 0;
+        handle_key(&mut app, press(KeyCode::Char('S')));
+        let list_a: Vec<btctax_core::EventId> = app
+            .select_lots_flow
+            .as_ref()
+            .expect("S opens select-lots")
+            .list
+            .items
+            .iter()
+            .map(|i| i.disposal_event.clone())
+            .collect();
+
+        // Close the flow, then flip the display sort/cursor to the OPPOSITE and reopen.
+        handle_key(&mut app, press(KeyCode::Esc));
+        app.disposals_sort = ViewSort::new(3, Dir::Desc); // Proceeds, descending
+        app.disposals_cursor = 5;
+        app.holdings_sort = ViewSort::new(2, Dir::Desc);
+        handle_key(&mut app, press(KeyCode::Char('S')));
+        let list_b: Vec<btctax_core::EventId> = app
+            .select_lots_flow
+            .as_ref()
+            .expect("S opens select-lots again")
+            .list
+            .items
+            .iter()
+            .map(|i| i.disposal_event.clone())
+            .collect();
+
+        assert!(
+            !list_a.is_empty(),
+            "fixture must produce a select-lots target"
+        );
+        assert_eq!(
+            list_a, list_b,
+            "the flow's target list must be independent of the display sort/cursor [R0-I1]"
+        );
     }
 
     // ── Modal: q is swallowed while modal is open ────────────────────────────
@@ -14732,7 +15006,7 @@ mod tests {
             let mut app = open_app(&vault, pp_str);
 
             // ── s → flow opens at List step ──────────────────────────────────
-            handle_key(&mut app, press(KeyCode::Char('s')));
+            handle_key(&mut app, press(KeyCode::Char('S')));
             assert!(
                 app.select_lots_flow.is_some(),
                 "C2f: select_lots_flow must open on 's'"
@@ -14959,7 +15233,7 @@ mod tests {
 
         // Drive s → LotsForm → pick 500000 → modal.
         // Lot A (cursor=0) has 500K remaining; disposal principal is 500K. Pick exact.
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         handle_key(&mut app, press(KeyCode::Enter)); // List → LotsForm
         for c in "500000".chars() {
             handle_key(&mut app, press(KeyCode::Char(c)));
@@ -15138,7 +15412,7 @@ mod tests {
         );
     }
 
-    /// CONSUMER test: while `rollback_failed` is set, EVERY mutating opener (p/c/o/r/f/v/s/d/a)
+    /// CONSUMER test: while `rollback_failed` is set, EVERY mutating opener (p/c/o/r/f/v/S/d/a)
     /// refuses with the CRITICAL residue status and opens no flow. Mirrors the attest ERRLATCH loop.
     #[test]
     fn kat_rollback_failed_latch_refuses_all_openers() {
@@ -15150,7 +15424,7 @@ mod tests {
         let mut app = open_app(&vault, pp_str);
         app.rollback_failed = true;
 
-        for k in ['p', 'c', 'o', 'r', 'f', 'v', 's', 'd', 'a'] {
+        for k in ['p', 'c', 'o', 'r', 'f', 'v', 'S', 'd', 'a'] {
             app.status = None;
             handle_key(&mut app, press(KeyCode::Char(k)));
             assert!(
@@ -15209,7 +15483,7 @@ mod tests {
         );
 
         // 2. Drive s → list → Enter → LotsForm.
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         assert!(
             app.select_lots_flow.is_some(),
             "E2E-SL: flow must open on 's'"
@@ -15302,7 +15576,7 @@ mod tests {
 
         // 4. The disposal NO LONGER appears in the 's' list (already-selected pre-filter).
         app.status = None;
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         assert!(
             app.select_lots_flow.is_none(),
             "E2E-SL: flow must NOT open — no eligible disposals after selection (pre-filter)"
@@ -15336,7 +15610,7 @@ mod tests {
         );
 
         // 2. Drive s → list shows the donate removal.
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         assert!(
             app.select_lots_flow.is_some(),
             "E2E-SL-DONATE: flow must open"
@@ -15421,7 +15695,7 @@ mod tests {
         let mut app = open_app(&vault, pp_str);
 
         // Step 1: select lots (lot B, non-FIFO).
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         handle_key(&mut app, press(KeyCode::Enter)); // → LotsForm
         handle_key(&mut app, press(KeyCode::Down)); // cursor to lot B
         for c in "500000".chars() {
@@ -15476,7 +15750,7 @@ mod tests {
 
         // Step 3: disposal re-appears in select-lots list.
         app.status = None;
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         assert!(
             app.select_lots_flow.is_some(),
             "SL-VOID: disposal must re-appear in select-lots list after void"
@@ -17344,12 +17618,12 @@ mod tests {
             "ERRLATCH: vault bytes must be unchanged after failed save"
         );
 
-        // While the latch is set, EVERY mutating opener (p/c/o/r/f/v/s/d/a) must refuse
+        // While the latch is set, EVERY mutating opener (p/c/o/r/f/v/S/d/a) must refuse
         // with the latch status — this is the piggy-back guard: with every mutating opener
         // latched shut, no later session.save() can flush the in-memory Void+Attest residue.
         // [round-1 whole-branch review TF-M1: cover all 9 openers, not just a/f/p, so a
         // future opener added without the guard is caught here.]
-        for k in ['p', 'c', 'o', 'r', 'f', 'v', 's', 'd', 'a'] {
+        for k in ['p', 'c', 'o', 'r', 'f', 'v', 'S', 'd', 'a'] {
             app.status = None;
             handle_key(&mut app, press(KeyCode::Char(k)));
             assert!(
@@ -17513,7 +17787,7 @@ mod tests {
         let mut app = open_app(&vault, pp_str);
 
         // s → the SelfTransfer row is listed with principal = TransferOut.sat + source wallet.
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         {
             let flow = app
                 .select_lots_flow
@@ -17610,7 +17884,7 @@ mod tests {
         }
 
         let mut app = open_app(&vault, pp_str);
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         assert!(
             app.select_lots_flow.is_none(),
             "ST-VOID: a voided TransferLink → no self-transfer → empty list → flow must NOT open"
@@ -17764,7 +18038,7 @@ mod tests {
         );
 
         let mut app = open_app(&vault, pp_str);
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         {
             let flow = app
                 .select_lots_flow
@@ -17904,7 +18178,7 @@ mod tests {
             );
         }
 
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         {
             let flow = app
                 .select_lots_flow
@@ -18027,7 +18301,7 @@ mod tests {
         }
 
         let mut app = open_app(&vault, pp_str);
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         {
             let flow = app.select_lots_flow.as_ref().expect("WS: flow must open");
             let idx = flow
@@ -18092,7 +18366,7 @@ mod tests {
         );
 
         let mut app = open_app(&vault, pp_str);
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         {
             let flow = app.select_lots_flow.as_ref().expect("EXCL: flow must open");
             let idx = flow
@@ -18213,7 +18487,7 @@ mod tests {
             );
         }
 
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         assert!(
             app.select_lots_flow.is_none(),
             "UNCOV: the under-covered disposal is the only candidate and is pre-filtered → \
@@ -18325,7 +18599,7 @@ mod tests {
         );
 
         // l → out-list → Enter → TargetPick(InEvent) → Tab → Wallet mode.
-        handle_key(&mut app, press(KeyCode::Char('l')));
+        handle_key(&mut app, press(KeyCode::Char('L')));
         assert!(
             app.link_transfer_flow.is_some(),
             "LT-W: flow must open on 'l'"
@@ -18399,7 +18673,7 @@ mod tests {
         );
 
         // Direct SelfTransfer confirmation: the out now reconstructs as a select-lots SelfTransfer row.
-        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Char('S')));
         let sl = app
             .select_lots_flow
             .as_ref()
@@ -18446,7 +18720,7 @@ mod tests {
         let mut app = open_app(&vault, pp_str);
 
         // l → out-list → Enter → TargetPick(InEvent); the TransferIn is in the in-list.
-        handle_key(&mut app, press(KeyCode::Char('l')));
+        handle_key(&mut app, press(KeyCode::Char('L')));
         handle_key(&mut app, press(KeyCode::Enter));
         {
             let flow = app.link_transfer_flow.as_ref().unwrap();
@@ -18518,7 +18792,7 @@ mod tests {
         {
             let mut app = open_app(&vault, pp_str);
 
-            handle_key(&mut app, press(KeyCode::Char('l')));
+            handle_key(&mut app, press(KeyCode::Char('L')));
             assert!(app.link_transfer_flow.is_some(), "C2-LT: flow opens on 'l'");
 
             // 'q' swallowed at OutList.
@@ -18629,7 +18903,7 @@ mod tests {
         let mut app = open_app(&vault, pp_str);
 
         // l → TargetPick → Tab (Wallet mode) → Enter (select river) → modal.
-        handle_key(&mut app, press(KeyCode::Char('l')));
+        handle_key(&mut app, press(KeyCode::Char('L')));
         handle_key(&mut app, press(KeyCode::Enter));
         handle_key(&mut app, press(KeyCode::Tab));
         handle_key(&mut app, press(KeyCode::Enter));
@@ -18703,7 +18977,7 @@ mod tests {
         let mut app = open_app(&vault, pp_str);
 
         // The out is already linked → resolved → NOT in pending → the flow does not open.
-        handle_key(&mut app, press(KeyCode::Char('l')));
+        handle_key(&mut app, press(KeyCode::Char('L')));
         assert!(
             app.link_transfer_flow.is_none(),
             "LT-DUP: an already-linked out is pre-filtered out (empty out-list → no flow)"
@@ -18802,7 +19076,7 @@ mod tests {
         }
 
         let mut app = open_app(&vault, pp_str);
-        handle_key(&mut app, press(KeyCode::Char('l')));
+        handle_key(&mut app, press(KeyCode::Char('L')));
         {
             let flow = app
                 .link_transfer_flow
@@ -18876,7 +19150,7 @@ mod tests {
             "LT-UNION: precondition — kraken is a zero-balance wallet (not in holdings_by_wallet)"
         );
 
-        handle_key(&mut app, press(KeyCode::Char('l')));
+        handle_key(&mut app, press(KeyCode::Char('L')));
         handle_key(&mut app, press(KeyCode::Enter)); // → TargetPick
         handle_key(&mut app, press(KeyCode::Tab)); // → Wallet mode
         let flow = app.link_transfer_flow.as_ref().unwrap();
@@ -19475,7 +19749,7 @@ mod tests {
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        handle_key(&mut app, press(KeyCode::Char('l')));
+        handle_key(&mut app, press(KeyCode::Char('L')));
         terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
         assert!(
             rendered_text(&terminal).contains("Link Transfer"),
@@ -21771,7 +22045,15 @@ mod tests {
         let mut ts = ratatui::widgets::TableState::default();
         terminal
             .draw(|f| {
-                btctax_tui::tabs::disposals::render(f, f.area(), snap, 2025, &mut ts);
+                btctax_tui::tabs::disposals::render(
+                    f,
+                    f.area(),
+                    snap,
+                    2025,
+                    btctax_tui::tabs::disposals::DEFAULT_SORT,
+                    btctax_tui::tabs::disposals::DEFAULT_SORT.col,
+                    &mut ts,
+                );
             })
             .unwrap();
         let text = rendered_text(&terminal);

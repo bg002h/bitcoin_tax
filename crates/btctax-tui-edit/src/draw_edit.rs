@@ -145,6 +145,8 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
                 content_area,
                 snap,
                 year,
+                app.holdings_sort,
+                app.holdings_cursor,
                 &mut app.holdings_state,
             ),
             Tab::Disposals => btctax_tui::tabs::disposals::render(
@@ -152,6 +154,8 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
                 content_area,
                 snap,
                 year,
+                app.disposals_sort,
+                app.disposals_cursor,
                 &mut app.disposals_state,
             ),
             Tab::Income => btctax_tui::tabs::income::render(
@@ -159,6 +163,8 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
                 content_area,
                 snap,
                 year,
+                app.income_sort,
+                app.income_cursor,
                 &mut app.income_state,
             ),
             Tab::Tax => {
