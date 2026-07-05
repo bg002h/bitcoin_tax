@@ -84,3 +84,6 @@ Bulk\-void MANY revocable reconcile decisions in one confirmed batch (bulk\-void
 .TP
 reconcile\-match\-self\-transfers(1)
 Match unreconciled inbound + outbound legs as self\-transfers (self\-transfer\-passthrough C3). With no \-\-in/\-\-out: PREVIEW the proposed pairs (read\-only). With \-\-in and \-\-out: confirm ONE pair (DROP for a same\-wallet passthrough, RELOCATE for a cross\-wallet transfer). NEVER automatic
+.TP
+reconcile\-pseudo(1)
+Pseudo\-reconcile MODE (sub\-project 2): fill deliberately\-fictional default decisions at projection time (NEVER persisted) to clear the Hard classification blockers — a loudly\-flagged `[PSEUDO]` on\-screen estimate you correct toward truth. `on`/`off` toggle the mode; `approve` promotes chosen defaults to real (attested) decisions

@@ -161,6 +161,141 @@ pub fn void(
     Ok(id)
 }
 
+/// Pseudo-reconcile mode toggle (sub-project 2). Persists the `pseudo_reconcile` flag in `cli_config`
+/// (a projection input parameter, NOT ledger state — NFR6). `on = true` ⇒ projection synthesizes
+/// non-persisted default decisions to clear the Hard classification blockers; `off` reverts to real-only
+/// instantly (no fictional events were ever written). Returns the new flag value.
+pub fn pseudo_set_mode(vault_path: &Path, pp: &Passphrase, on: bool) -> Result<bool, CliError> {
+    let mut session = Session::open(vault_path, pp)?;
+    crate::config::set_pseudo_reconcile(session.conn(), on)?;
+    session.save()?;
+    Ok(on)
+}
+
+/// One row of a `reconcile pseudo approve` preview (sub-project 2, T5). `target` is the imported event the
+/// synthetic governs; `kind` is the default TYPE; `wallet`/`year` are the target's provenance (for the
+/// filter + preview). Deterministic order (mirrors `pseudo_plan`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PseudoApproveRow {
+    pub target: EventId,
+    pub kind: btctax_core::PseudoKind,
+    pub wallet: Option<WalletId>,
+    pub year: Option<i32>,
+}
+
+/// The `--kind`/`--wallet`/`--year` filter for `reconcile pseudo approve`. `None` fields = no restriction.
+#[derive(Debug, Clone, Default)]
+pub struct PseudoApproveFilter {
+    pub kind: Option<btctax_core::PseudoKind>,
+    pub wallet: Option<WalletId>,
+    pub year: Option<i32>,
+}
+
+/// Compute the pseudo-default plan and KEEP only the entries matching `filter`, paired with the target's
+/// (wallet, tax-year) provenance. Shared by the read (`pseudo_approve_plan`) and write
+/// (`apply_bulk_pseudo_approve`) phases so the preview and the apply are guaranteed identical (the
+/// own-loop RE-derives — never trusts a threaded list). `plan` order is `pseudo_plan`'s stable order [N2].
+fn filtered_pseudo_plan<'a>(
+    plan: &'a [btctax_core::PseudoDefault],
+    index: &std::collections::HashMap<&EventId, &btctax_core::LedgerEvent>,
+    filter: &PseudoApproveFilter,
+) -> Vec<(
+    &'a btctax_core::PseudoDefault,
+    Option<WalletId>,
+    Option<i32>,
+)> {
+    plan.iter()
+        .filter_map(|pd| {
+            let ev = index.get(&pd.target);
+            let wallet = ev.and_then(|e| e.wallet.clone());
+            let year = ev.map(|e| tax_date(e.utc_timestamp, e.original_tz).year());
+            if let Some(k) = filter.kind {
+                if pd.kind != k {
+                    return None;
+                }
+            }
+            if let Some(want) = &filter.wallet {
+                if wallet.as_ref() != Some(want) {
+                    return None;
+                }
+            }
+            if let Some(y) = filter.year {
+                if year != Some(y) {
+                    return None;
+                }
+            }
+            Some((pd, wallet, year))
+        })
+        .collect()
+}
+
+/// Pseudo-approve — Phase 1 (read): compute the filtered plan of pseudo defaults that WOULD be promoted to
+/// real decisions. Renders NOTHING to the vault (the confirmation stays a thin shell in `main.rs`).
+pub fn pseudo_approve_plan(
+    vault_path: &Path,
+    pp: &Passphrase,
+    filter: PseudoApproveFilter,
+) -> Result<Vec<PseudoApproveRow>, CliError> {
+    let session = Session::open(vault_path, pp)?;
+    let prices = btctax_adapters::BundledPrices::load()?;
+    let events = load_all(session.conn())?;
+    let cfg = session.config()?.to_projection();
+    let plan = btctax_core::pseudo_plan(&events, &prices, &cfg);
+    let index: std::collections::HashMap<&EventId, &btctax_core::LedgerEvent> =
+        events.iter().map(|e| (&e.id, e)).collect();
+    Ok(filtered_pseudo_plan(&plan, &index, &filter)
+        .into_iter()
+        .map(|(pd, wallet, year)| PseudoApproveRow {
+            target: pd.target.clone(),
+            kind: pd.kind,
+            wallet,
+            year,
+        })
+        .collect())
+}
+
+/// Pseudo-approve — Phase 2 (write): materialize the filtered pseudo defaults as REAL (attested) decisions
+/// via btctax-cli's OWN append-loop [R0-M4] (mirrors `apply_bulk_classify_inbound_income`; the CLI CANNOT
+/// reach the tui-edit `persist_bulk_decisions` — dependency cycle, Cargo.toml:19). Empty-guard (no matches
+/// ⇒ NO save); bare `?`-before-`save` (a mid-batch failure returns before `save`, discarding the in-memory
+/// session = CLI atomicity); a SINGLE `save`. Defense-in-depth: RE-derives the plan here (never trusts a
+/// threaded list). After approval these decisions are REAL → the next projection resolves them via the real
+/// decision path, so pseudo mode injects NO synthetic for them (no longer `[PSEUDO]`). Returns the count.
+pub fn apply_bulk_pseudo_approve(
+    vault_path: &Path,
+    pp: &Passphrase,
+    filter: PseudoApproveFilter,
+    now: OffsetDateTime,
+) -> Result<usize, CliError> {
+    let mut session = Session::open(vault_path, pp)?;
+    let prices = btctax_adapters::BundledPrices::load()?;
+    let events = load_all(session.conn())?;
+    let cfg = session.config()?.to_projection();
+    let plan = btctax_core::pseudo_plan(&events, &prices, &cfg);
+    let index: std::collections::HashMap<&EventId, &btctax_core::LedgerEvent> =
+        events.iter().map(|e| (&e.id, e)).collect();
+    let selected = filtered_pseudo_plan(&plan, &index, &filter);
+    // Empty-guard: nothing to approve ⇒ do NOT touch the vault.
+    if selected.is_empty() {
+        return Ok(0);
+    }
+    let mut n = 0usize;
+    for (pd, _wallet, _year) in &selected {
+        // `?` on a mid-batch failure returns before `save` — the in-memory session is discarded, so
+        // nothing lands on disk (CLI atomicity; the TUI path instead ROLLS BACK).
+        append_decision(
+            session.conn(),
+            pd.decision.clone(),
+            now,
+            UtcOffset::UTC,
+            None,
+        )?;
+        n += 1;
+    }
+    session.save()?;
+    Ok(n)
+}
+
 /// FR2/§7.3: resolve an `Unclassified` row to a real imported payload (preserving the target EventId).
 /// The payload is supplied as JSON (`EventPayload` is `Deserialize`) — e.g. `{"Acquire":{…}}`.
 pub fn classify_raw(

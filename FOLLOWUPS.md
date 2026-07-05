@@ -4,6 +4,38 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## 🟡 pseudo-reconcile mode (auto-pseudo-reconcile sub-project 2) — IMPLEMENTED on `feat/pseudo-reconcile-mode`, AWAITING WHOLE-DIFF REVIEW (2026-07-04)
+
+A reversible **mode** that fills DELIBERATELY-FICTIONAL default decisions at PROJECTION time (NEVER
+persisted) to clear the Hard **classification** blockers, producing a loudly-flagged `[PSEUDO]` on-screen
+estimate the user corrects toward truth. R0-GREEN spec `design/SPEC_pseudo_reconcile_mode.md` (3 rounds,
+0C/0I). Tasks **T1–T6 all implemented + committed** on branch `feat/pseudo-reconcile-mode` (base `main`
+`514875b`); left for the human whole-diff review + merge (NOT merged).
+
+- **Defaults (only where no real decision):** `UnknownBasisInbound`→`ClassifyInbound(SelfTransferMine $0)`;
+  `Unclassified` (determinable-inbound)→`ClassifyRaw` zero-value placeholder (the row carries no structured
+  amount, so pseudo fabricates no holdings; wallet-less Unclassified LEFT SURFACED); `TransferOut`→left as
+  `PendingOut` (already non-taxable); `ImportConflict`→accept-first `SupersedeImport`. `DecisionConflict`,
+  `UncoveredDisposal`, native-Income `FmvMissing`, `TaxTableMissing` are NOT cleared (stay surfaced).
+  CLI placeholder tax profile at `report_tax_year` clears `TaxProfileMissing` ONLY. A tax TOTAL computes
+  only at 0 Hard blockers of ANY kind (pseudo `$0`-basis Sells make it HIGH, not zero).
+- **Tax-safety (all fault-inject KAT'd):** synthetics NEVER persisted by projection (only `approve` writes);
+  real supersedes pseudo; the ★ headline guard — `[PSEUDO]` is on-screen (incl. the C1 basis-taint case: a
+  REAL Sell on a pseudo `$0` lot is flagged) and PROVABLY ABSENT from every export CSV/form (a dedicated
+  `pseudo` bool the writers OMIT, never a `BasisSource` variant); mode-off byte-identical; determinism.
+- **Surfaces:** `reconcile pseudo on|off|approve` (own-loop bulk-approve, `--kind/--wallet/--year` filter);
+  `[PSEUDO]` on report/TUI rows + a `PseudoReconcileActive` advisory in `verify`; `export-snapshot` REFUSES
+  while pseudo-active (**interim [I3] guard** — sub-project 3 replaces it with the typed-attest gate);
+  btctax-tui-edit loud banner + `P` approve flow. Man pages regenerated (`make docs`).
+
+**NEXT (not started):** **sub-project 3 — attestation export gate**: producing `export-snapshot` / any IRS
+form when the ledger is pseudo-active requires typing **"I attest this is true"** (typed-phrase gate,
+mirroring safe-harbor-attest); a fully-real, fully-attested ledger exports with no prompt. It REPLACES the
+sub-2 [I3] blanket refusal. Consumes the `state.pseudo_active()` / `pseudo_synthetic_count` signal sub-2
+already exposes. Design of record: `design/BRAINSTORM_auto_pseudo_reconcile.md`.
+
+---
+
 ## ✅ crate publishing — PUBLISHED to crates.io + repo made PUBLIC (2026-07-04)
 
 **All 7 crates are LIVE on crates.io at v0.1.0** — `btctax` (name-reservation crate → `btctax-cli`),

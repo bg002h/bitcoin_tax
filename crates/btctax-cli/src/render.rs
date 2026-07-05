@@ -53,6 +53,19 @@ fn basis_source_tag(bs: BasisSource) -> &'static str {
     }
 }
 
+/// Pseudo-reconcile (sub-project 2, [R0-I4]): the ON-SCREEN-ONLY `[PSEUDO]` marker for a row whose
+/// existence or basis traces to a synthetic (non-persisted) default. Driven by the DEDICATED `pseudo`
+/// bool on `Lot`/`DisposalLeg`/`RemovalLeg` — NEVER a `BasisSource` variant (which the CSV writers emit
+/// via `basis_source_tag`, and would LEAK "PSEUDO" into lots.csv). The CSV/form writers OMIT this marker
+/// entirely (they never call this helper), so it can never reach any export file (the ★ headline guard).
+fn pseudo_tag(pseudo: bool) -> &'static str {
+    if pseudo {
+        " [PSEUDO]"
+    } else {
+        ""
+    }
+}
+
 fn dispose_kind_tag(dk: DisposeKind) -> &'static str {
     match dk {
         DisposeKind::Sell => "sell",
@@ -211,7 +224,7 @@ pub fn render_report(state: &LedgerState, year: Option<i32>) -> String {
     for l in &state.lots {
         let _ = writeln!(
             out,
-            "  {}#{} {} remaining {} sat | basis {} ({}){}",
+            "  {}#{} {} remaining {} sat | basis {} ({}){}{}",
             l.lot_id.origin_event_id.canonical(),
             l.lot_id.split_sequence,
             wallet_label(&l.wallet),
@@ -222,7 +235,8 @@ pub fn render_report(state: &LedgerState, year: Option<i32>) -> String {
                 " [basis pending]"
             } else {
                 ""
-            }
+            },
+            pseudo_tag(l.pseudo),
         );
     }
 
@@ -329,24 +343,26 @@ fn render_disposal_leg(out: &mut String, leg: &DisposalLeg) {
         .unwrap_or_default();
     let _ = writeln!(
         out,
-        "    {} sat: proceeds {} basis {} gain {} {}{}",
+        "    {} sat: proceeds {} basis {} gain {} {}{}{}",
         leg.sat,
         leg.proceeds,
         leg.basis,
         leg.gain,
         term_tag(leg.term),
-        zone
+        zone,
+        pseudo_tag(leg.pseudo),
     );
 }
 
 fn render_removal_leg(out: &mut String, leg: &RemovalLeg) {
     let _ = writeln!(
         out,
-        "    {} sat: basis {} fmv {} {} (zero gain)",
+        "    {} sat: basis {} fmv {} {} (zero gain){}",
         leg.sat,
         leg.basis,
         leg.fmv_at_transfer,
-        term_tag(leg.term)
+        term_tag(leg.term),
+        pseudo_tag(leg.pseudo),
     );
 }
 
@@ -1890,6 +1906,7 @@ mod gift_advisory_tests {
                 term: Term::LongTerm,
                 basis_source: BasisSource::ComputedFromCost,
                 acquired_at: date!(2024 - 01 - 01),
+                pseudo: false,
             }],
             appraisal_required: false,
             donor_acquired_at: None,
@@ -2157,6 +2174,7 @@ mod gift_advisory_tests {
                 term: Term::LongTerm,
                 basis_source: BasisSource::ComputedFromCost,
                 acquired_at: date!(2024 - 01 - 01),
+                pseudo: false,
             }],
             appraisal_required: false,
             donor_acquired_at: None,
@@ -2924,6 +2942,7 @@ mod form8283_csv_tests {
             term: Term::LongTerm,
             basis_source: BasisSource::ComputedFromCost,
             acquired_at: date!(2025 - 01 - 01),
+            pseudo: false,
         };
         let removal = Removal {
             event: event.clone(),
@@ -2948,6 +2967,7 @@ mod form8283_csv_tests {
             term: Term::LongTerm,
             basis_source: BasisSource::ComputedFromCost,
             acquired_at: date!(2025 - 01 - 15),
+            pseudo: false,
         };
         let removal2 = Removal {
             event: event2.clone(),

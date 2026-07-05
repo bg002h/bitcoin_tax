@@ -12,6 +12,10 @@ pub struct CliConfig {
     pub fee_treatment: FeeTreatment,
     pub pre2025_method: LotMethod,
     pub pre2025_method_attested: bool,
+    /// Pseudo-reconcile mode flag (sub-project 2). Default `false`; toggled by `reconcile pseudo on|off`.
+    /// A projection *input parameter*, not ledger state (NFR6) — stored in `cli_config`, mirrors
+    /// `fee_treatment`/`pre2025_method`.
+    pub pseudo_reconcile: bool,
 }
 
 impl Default for CliConfig {
@@ -21,6 +25,7 @@ impl Default for CliConfig {
             fee_treatment: FeeTreatment::TreatmentC,
             pre2025_method: LotMethod::Fifo,
             pre2025_method_attested: false,
+            pseudo_reconcile: false,
         }
     }
 }
@@ -32,6 +37,7 @@ impl CliConfig {
             self_transfer_fee: self.fee_treatment,
             pre2025_method: self.pre2025_method,
             pre2025_method_attested: self.pre2025_method_attested,
+            pseudo_reconcile: self.pseudo_reconcile,
         }
     }
 }
@@ -116,7 +122,29 @@ pub fn read_config(conn: &Connection) -> Result<CliConfig, CliError> {
             }
         };
     }
+    if let Some(v) = get(conn, "pseudo_reconcile")? {
+        cfg.pseudo_reconcile = match v.as_str() {
+            "true" => true,
+            "false" => false,
+            _ => {
+                return Err(CliError::BadConfigValue {
+                    key: "pseudo_reconcile".into(),
+                    value: v,
+                })
+            }
+        };
+    }
     Ok(cfg)
+}
+
+/// Persist the pseudo-reconcile mode flag (sub-project 2). `reconcile pseudo on|off`.
+pub fn set_pseudo_reconcile(conn: &Connection, on: bool) -> Result<(), CliError> {
+    conn.execute(
+        "INSERT INTO cli_config(key,value) VALUES('pseudo_reconcile',?1)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        [if on { "true" } else { "false" }],
+    )?;
+    Ok(())
 }
 
 /// Persist the pre-2025 lot identification method and its attestation flag.
@@ -227,6 +255,34 @@ mod tests {
         // Deliberately do NOT call init_config_table — simulate an older vault.
         let cfg = read_config(&c).unwrap(); // must not error
         assert_eq!(cfg.fee_treatment, FeeTreatment::TreatmentC);
+    }
+
+    // [T1 pseudo] mode flag defaults false, round-trips on/off, and maps into ProjectionConfig.
+    #[test]
+    fn pseudo_reconcile_defaults_false_and_round_trips() {
+        let c = mem();
+        // Default (unset key) → false [N1].
+        assert!(!read_config(&c).unwrap().pseudo_reconcile);
+        assert!(!read_config(&c).unwrap().to_projection().pseudo_reconcile);
+        // on
+        set_pseudo_reconcile(&c, true).unwrap();
+        assert!(read_config(&c).unwrap().pseudo_reconcile);
+        assert!(read_config(&c).unwrap().to_projection().pseudo_reconcile);
+        // off
+        set_pseudo_reconcile(&c, false).unwrap();
+        assert!(!read_config(&c).unwrap().pseudo_reconcile);
+    }
+
+    #[test]
+    fn bad_pseudo_reconcile_value_is_an_error() {
+        let c = mem();
+        c.execute(
+            "INSERT INTO cli_config(key,value) VALUES('pseudo_reconcile','maybe')",
+            [],
+        )
+        .unwrap();
+        assert!(matches!(read_config(&c).unwrap_err(),
+            CliError::BadConfigValue { ref key, .. } if key == "pseudo_reconcile"));
     }
 
     // M1: an unrecognized stored value must surface as an error, not a silent default.

@@ -50,7 +50,7 @@ use edit::form::{
     SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TransferOutItem, VoidFlowState,
     VoidListItem, VoidModalState, VoidStep, VoidTarget, WalletItem, FREETEXT_CAP,
 };
-use editor::{EditorApp, EditorScreen};
+use editor::{EditorApp, EditorScreen, PseudoApproveModalState};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
 use std::collections::BTreeSet;
 use std::io;
@@ -222,6 +222,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
     // ── Bulk-link-transfer-modal dispatch — BEFORE flow, form, screen ────────
     if app.bulk_link_modal.is_some() {
         handle_bulk_link_modal_key(app, key);
+        return;
+    }
+
+    // ── Pseudo-approve-modal dispatch — BEFORE flow, form, screen ────────────
+    if app.pseudo_approve_modal.is_some() {
+        handle_pseudo_approve_modal_key(app, key);
         return;
     }
 
@@ -428,6 +434,9 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('i') => open_resolve_conflict_flow(app),
                 KeyCode::Char('z') => open_optimize_accept_flow(app),
                 KeyCode::Char('e') => open_method_election_flow(app),
+                // Pseudo-reconcile (sub-project 2): approve pending synthetic defaults (only meaningful
+                // when the pseudo banner is showing; a no-op status otherwise).
+                KeyCode::Char('P') => open_pseudo_approve_flow(app),
                 // KEEP IN SYNC with KEYMAP overlay (draw_help_overlay). `?` opens the full-keymap help.
                 KeyCode::Char('?') => app.help_open = true,
                 _ => {}
@@ -660,6 +669,7 @@ impl EditorApp {
         self.bulk_link_modal = None;
         self.bulk_sti_flow = None;
         self.bulk_sti_modal = None;
+        self.pseudo_approve_modal = None;
         self.bulk_resolve_flow = None;
         self.bulk_resolve_modal = None;
         self.bulk_void_flow = None;
@@ -6474,6 +6484,113 @@ fn handle_bulk_sti_modal_key(app: &mut EditorApp, key: KeyEvent) {
     }
 }
 
+/// Pseudo-reconcile (sub-project 2): open the approve confirmation modal, carrying the count of pending
+/// synthetic defaults. A no-op (status only) when nothing is contributing.
+fn open_pseudo_approve_flow(app: &mut EditorApp) {
+    let count = app
+        .snapshot
+        .as_ref()
+        .map(|s| s.state.pseudo_synthetic_count)
+        .unwrap_or(0);
+    if count == 0 {
+        app.status = Some(
+            "No pseudo defaults to approve (pseudo-reconcile mode is not contributing).".into(),
+        );
+        return;
+    }
+    app.pseudo_approve_modal = Some(PseudoApproveModalState { count });
+}
+
+/// Pseudo-reconcile (sub-project 2): the approve confirm handler. Enter promotes ALL pending synthetic
+/// defaults to REAL (attested) decisions. The plan is RE-derived here from the held snapshot via the
+/// SHARED `btctax_core::pseudo_plan` (see == approve), then persisted through the TUI's OWN held-session
+/// idiom `persist_bulk_decisions` (append_decision + whole-batch rollback + single save) — NOT a second
+/// `Session::open` (which would deadlock on the held VaultLock). Re-projects afterward; the approved
+/// decisions are real now → no longer `[PSEUDO]`.
+fn handle_pseudo_approve_modal_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Enter => {
+            let now = time::OffsetDateTime::now_utc();
+            // Compute the decision payloads from the immutable snapshot (drops the borrow before persist).
+            let payloads: Vec<btctax_core::EventPayload> = match app.snapshot.as_ref() {
+                Some(snap) => {
+                    let prices = match btctax_adapters::BundledPrices::load() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            app.pseudo_approve_modal = None;
+                            app.status = Some(format!("price data unavailable: {e}"));
+                            return;
+                        }
+                    };
+                    let cfg = snap.cli_config.to_projection();
+                    btctax_core::pseudo_plan(&snap.events, &prices, &cfg)
+                        .into_iter()
+                        .map(|pd| pd.decision)
+                        .collect()
+                }
+                None => {
+                    app.pseudo_approve_modal = None;
+                    return;
+                }
+            };
+            if payloads.is_empty() {
+                app.pseudo_approve_modal = None;
+                app.status = Some("No pseudo defaults to approve.".into());
+                return;
+            }
+            let n = payloads.len();
+            let save_result = {
+                let session = match app.session.as_mut() {
+                    Some(s) => s,
+                    None => {
+                        app.pseudo_approve_modal = None;
+                        return;
+                    }
+                };
+                crate::edit::persist::persist_bulk_decisions(
+                    session,
+                    payloads,
+                    now,
+                    "No pseudo defaults to approve.",
+                )
+            };
+            match save_result {
+                Ok(_) => {
+                    let new_snap = {
+                        let session = app.session.as_ref().unwrap();
+                        btctax_tui::unlock::build_snapshot(session)
+                    };
+                    match new_snap {
+                        Ok((snap, _)) => {
+                            let remaining = snap.state.pseudo_synthetic_count;
+                            app.snapshot = Some(snap);
+                            app.status = Some(format!(
+                                "Approved {n} pseudo default(s) as real decisions \
+                                 ({remaining} still pending). Turn the mode off with \
+                                 `reconcile pseudo off` when done."
+                            ));
+                        }
+                        Err(e) => {
+                            app.status = Some(format!(
+                                "Saved but re-projection failed ({e}) — restart to refresh"
+                            ));
+                        }
+                    }
+                    app.pseudo_approve_modal = None;
+                }
+                Err(e) => {
+                    app.pseudo_approve_modal = None;
+                    app.on_persist_error(e);
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.pseudo_approve_modal = None;
+        }
+        _ => {}
+    }
+}
+
 /// Derive the post-apply status from RE-PROJECTED state (bulk-classify-inbound-self-transfer D3): the
 /// applied count + the number of unclassified inbound deposits that REMAIN (still flagged
 /// `UnknownBasisInbound` on a raw `TransferIn`, minus wallet-less — the same candidate predicate).
@@ -9029,6 +9146,56 @@ mod tests {
         );
     }
 
+    /// [pseudo-reconcile T6] The Browse screen shows the loud [PSEUDO] banner exactly when the projected
+    /// state has contributing synthetics (`pseudo_active()`), and hides it otherwise.
+    #[test]
+    fn pseudo_banner_shows_iff_pseudo_active() {
+        use btctax_adapters::BundledTaxTables;
+        use btctax_cli::CliConfig;
+        use btctax_tui::app::Snapshot;
+        use ratatui::{backend::TestBackend, Terminal};
+        use std::collections::BTreeMap;
+
+        let render = |count: usize| -> String {
+            let backend = TestBackend::new(120, 24);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let snap = Snapshot {
+                events: vec![],
+                state: btctax_core::state::LedgerState {
+                    pseudo_synthetic_count: count,
+                    ..Default::default()
+                },
+                cli_config: CliConfig::default(),
+                profiles: BTreeMap::new(),
+                tables: BundledTaxTables::load(),
+                donation_details: BTreeMap::new(),
+                bulk_estimated: BTreeMap::new(),
+            };
+            let mut app = EditorApp::new(PathBuf::from("/smoke/vault.pgp"));
+            app.screen = EditorScreen::Browse;
+            app.snapshot = Some(snap);
+            app.selected_year = 2025;
+            terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .clone()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+                .collect()
+        };
+
+        assert!(
+            render(2).contains("PSEUDO"),
+            "banner MUST show when synthetics contribute"
+        );
+        assert!(
+            !render(0).contains("PSEUDO-RECONCILE"),
+            "banner MUST be hidden when no synthetic contributes"
+        );
+    }
+
     /// The editor delegates the Disposals tab to the shared `btctax_tui::tabs::disposals::render`
     /// (draw_edit.rs), so it inherits the frozen column-totals footer for free — no editor code.
     #[test]
@@ -9060,6 +9227,7 @@ mod tests {
             gift_zone: None,
             acquired_at: time::Date::from_calendar_date(2023, time::Month::January, 1).unwrap(),
             wallet: wallet.clone(),
+            pseudo: false,
         };
         let mut state = LedgerState::default();
         state.disposals.push(Disposal {

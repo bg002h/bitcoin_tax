@@ -580,6 +580,55 @@ pub enum Reconcile {
         #[arg(long, conflicts_with_all = ["in_ref", "out_ref"])]
         dry_run: bool,
     },
+    /// Pseudo-reconcile MODE (sub-project 2): fill deliberately-fictional default decisions at
+    /// projection time (NEVER persisted) to clear the Hard classification blockers — a loudly-flagged
+    /// `[PSEUDO]` on-screen estimate you correct toward truth. `on`/`off` toggle the mode; `approve`
+    /// promotes chosen defaults to real (attested) decisions.
+    #[command(subcommand)]
+    Pseudo(Pseudo),
+}
+
+/// `reconcile pseudo <action>` — the pseudo-reconcile mode sub-verbs (sub-project 2).
+#[derive(Subcommand)]
+pub enum Pseudo {
+    /// Turn pseudo-reconcile mode ON. Projection now synthesizes non-persisted default decisions for
+    /// unresolved unknown-basis inbounds (self-transfer $0), unclassified rows, and import conflicts
+    /// (accept-first); every synthetic contribution is flagged `[PSEUDO]` on screen and BLOCKS export.
+    On,
+    /// Turn pseudo-reconcile mode OFF. Projection reverts to real-only instantly and totally (no
+    /// fictional events were ever written). Already-approved decisions REMAIN (they are real now).
+    Off,
+    /// Promote pseudo default decisions to REAL (attested) decisions in bulk. Shows a preview + requires
+    /// `--yes` (or `--dry-run` to preview only). Optional filters restrict which defaults are approved.
+    Approve {
+        /// Only approve defaults of this TYPE: `self-transfer` (unknown-basis inbound → $0 self-transfer),
+        /// `raw` (unclassified row placeholder), or `conflict` (import conflict accept-first). Omit = all.
+        #[arg(long, value_enum)]
+        kind: Option<PseudoKindArg>,
+        /// Only approve defaults whose target event is in this wallet (e.g. `exchange:coinbase:main`).
+        #[arg(long)]
+        wallet: Option<String>,
+        /// Only approve defaults whose target event falls in this tax year.
+        #[arg(long)]
+        year: Option<i32>,
+        /// Print the preview and exit without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip the interactive confirmation (non-interactive apply).
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+/// The pseudo-default TYPE filter for `reconcile pseudo approve --kind`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum PseudoKindArg {
+    /// Unknown-basis inbound defaulted to a $0-basis self-transfer-in.
+    SelfTransfer,
+    /// Unclassified row defaulted to a zero-value placeholder (ClassifyRaw).
+    Raw,
+    /// Import conflict defaulted to accept-first (SupersedeImport).
+    Conflict,
 }
 
 #[derive(Copy, Clone, ValueEnum)]

@@ -63,6 +63,12 @@ pub enum BlockerKind {
     /// supply the real cost. Fires on `None` only, never on an attested `Some(0)`.
     /// **Advisory** — never gates `compute_tax_year`.
     SelfTransferInboundZeroBasis,
+    /// Pseudo-reconcile mode (sub-project 2) is ON and at least one synthetic (non-persisted) default
+    /// is CONTRIBUTING to this projection. A loud "this picture is a placeholder — correct it toward
+    /// truth, and do NOT file it" banner (renders automatically via `{:?}` in `verify`). Drives the
+    /// interim export-refusal guard (sub-2) until the sub-3 typed-attest gate ships.
+    /// **Advisory** — never gates `compute_tax_year` (the mode's whole point is to PRESENT a number).
+    PseudoReconcileActive,
 }
 impl BlockerKind {
     pub fn severity(self) -> Severity {
@@ -85,7 +91,8 @@ impl BlockerKind {
             | UnmatchedOutflows
             | Pre2025MethodNote
             | QualifiedAppraisalNote
-            | SelfTransferInboundZeroBasis => Severity::Advisory,
+            | SelfTransferInboundZeroBasis
+            | PseudoReconcileActive => Severity::Advisory,
         }
     }
 }
@@ -108,6 +115,13 @@ pub struct Lot {
     pub dual_loss_basis: Option<Usd>, // received gifts (TP11): loss basis when FMV-at-gift < donor basis
     pub donor_acquired_at: Option<TaxDate>, // tacking (TP11/§1223(2)); gain/no-dual HP start
     pub basis_pending: bool, // FMV-missing income / unknown-basis gift: gain is gated until resolved
+    /// Pseudo-reconcile taint (sub-project 2, [R0-C1]): `true` when this lot's EXISTENCE or its BASIS
+    /// traces to a synthetic (non-persisted) default decision — e.g. a `SelfTransferMine{$0}` conjured
+    /// for an unknown-basis inbound, or a relocated fragment carrying a pseudo source lot's taint. Rides
+    /// the DATA (`Lot`→`Consumed`→leg) so a REAL Sell consuming a pseudo `$0`-basis lot renders FLAGGED,
+    /// never as a clean `proceeds − 0`. A DEDICATED bool — never a `BasisSource` variant — so the
+    /// CSV/form writers OMIT it (it must NEVER reach any export file). Always `false` outside pseudo mode.
+    pub pseudo: bool,
 }
 impl Lot {
     /// HP start used on the gain side / no-dual case (tacks donor period when present).
@@ -137,6 +151,10 @@ pub struct DisposalLeg {
     pub acquired_at: TaxDate,
     /// The wallet that held the consumed lot at disposal time — the ONLY sound source (D1 [R0-I1]).
     pub wallet: WalletId,
+    /// Pseudo-reconcile taint (sub-project 2, [R0-C1]): `true` when this leg's basis/existence traces to
+    /// a synthetic default — set from the consumed lot's `pseudo` bit OR the disposal event itself being
+    /// synthetic. Renders `[PSEUDO]` on screen; OMITTED from every CSV/form writer.
+    pub pseudo: bool,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Disposal {
@@ -168,6 +186,10 @@ pub struct RemovalLeg {
     /// tacked donor acquisition date (§1223), which is the correct Form 8283 "date acquired" because
     /// it matches the leg's holding-period `term` [R0-M2]. Must never contradict `leg.term`. [D1]
     pub acquired_at: TaxDate,
+    /// Pseudo-reconcile taint (sub-project 2, [R0-C1]): `true` when this removal leg's basis/existence
+    /// traces to a synthetic default (consumed lot pseudo OR the removal event synthetic). Renders
+    /// `[PSEUDO]` on screen; OMITTED from removals.csv / Form 8283.
+    pub pseudo: bool,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Removal {
@@ -200,6 +222,9 @@ pub struct PendingLeg {
     pub sat: Sat,
     pub usd_basis: Usd,
     pub acquired_at: TaxDate,
+    /// Pseudo-reconcile taint (sub-project 2, [R0-C1]): `true` when the lot removed into pending traces
+    /// to a synthetic default (e.g. a pseudo self-transfer-in lot later withdrawn). Never exported.
+    pub pseudo: bool,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingTransfer {
@@ -231,8 +256,19 @@ pub struct LedgerState {
     pub pending_reconciliation: Vec<PendingTransfer>,
     pub blockers: Vec<Blocker>,
     pub stats: FoldStats, // M3: fold accumulators (FR9), on-state field — never a tuple return
+    /// Pseudo-reconcile (sub-project 2): count of synthetic (non-persisted) default decisions
+    /// CONTRIBUTING to this projection. `0` outside pseudo mode. Queryable signal for the banner, the
+    /// interim export-refusal guard [R0-I3], and sub-3's typed-attest gate. `> 0` ⇔ a
+    /// `PseudoReconcileActive` advisory blocker is present and every `[PSEUDO]`-flagged row is fictional.
+    pub pseudo_synthetic_count: usize,
 }
 impl LedgerState {
+    /// Pseudo-reconcile (sub-project 2): `true` when any synthetic default contributes to this
+    /// projection. The single load-bearing signal for the export-refusal guard [R0-I3].
+    pub fn pseudo_active(&self) -> bool {
+        self.pseudo_synthetic_count > 0
+    }
+
     pub(crate) fn add_blocker(
         &mut self,
         kind: BlockerKind,

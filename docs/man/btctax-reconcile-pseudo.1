@@ -1,0 +1,23 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-pseudo 1  btctax "btctax manual"
+.SH NAME
+pseudo \- Pseudo\-reconcile MODE (sub\-project 2): fill deliberately\-fictional default decisions at projection time (NEVER persisted) to clear the Hard classification blockers — a loudly\-flagged `[PSEUDO]` on\-screen estimate you correct toward truth. `on`/`off` toggle the mode; `approve` promotes chosen defaults to real (attested) decisions
+.SH SYNOPSIS
+\fBpseudo\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Pseudo\-reconcile MODE (sub\-project 2): fill deliberately\-fictional default decisions at projection time (NEVER persisted) to clear the Hard classification blockers — a loudly\-flagged `[PSEUDO]` on\-screen estimate you correct toward truth. `on`/`off` toggle the mode; `approve` promotes chosen defaults to real (attested) decisions
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+pseudo\-on(1)
+Turn pseudo\-reconcile mode ON. Projection now synthesizes non\-persisted default decisions for unresolved unknown\-basis inbounds (self\-transfer $0), unclassified rows, and import conflicts (accept\-first); every synthetic contribution is flagged `[PSEUDO]` on screen and BLOCKS export
+.TP
+pseudo\-off(1)
+Turn pseudo\-reconcile mode OFF. Projection reverts to real\-only instantly and totally (no fictional events were ever written). Already\-approved decisions REMAIN (they are real now)
+.TP
+pseudo\-approve(1)
+Promote pseudo default decisions to REAL (attested) decisions in bulk. Shows a preview + requires `\-\-yes` (or `\-\-dry\-run` to preview only). Optional filters restrict which defaults are approved

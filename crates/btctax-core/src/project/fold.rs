@@ -123,6 +123,7 @@ fn make_disposal_legs(
     disposed: TaxDate,
     st: &mut LedgerState,
     ev: &EventId,
+    ev_pseudo: bool,
 ) -> Vec<DisposalLeg> {
     let total_sat: i64 = consumed.iter().map(|c| c.sat).sum();
     let mut legs = Vec::new();
@@ -208,6 +209,9 @@ fn make_disposal_legs(
             gift_zone,
             acquired_at,
             wallet: c.wallet.clone(),
+            // [R0-C1] leg is [PSEUDO] if its BASIS traces to a pseudo lot (`c.pseudo`) OR the disposal
+            // event itself is synthetic (`ev_pseudo`). A REAL Sell on a pseudo $0-basis lot ⇒ flagged.
+            pseudo: c.pseudo || ev_pseudo,
         });
     }
     legs
@@ -222,6 +226,7 @@ fn make_removal_legs(
     removed: TaxDate,
     st: &mut LedgerState,
     ev: &EventId,
+    ev_pseudo: bool,
 ) -> (Vec<RemovalLeg>, Option<TaxDate>) {
     let total_sat: i64 = consumed.iter().map(|c| c.sat).sum();
     let mut legs = Vec::new();
@@ -255,6 +260,7 @@ fn make_removal_legs(
             term: term_for(c.gain_hp_start, removed),
             basis_source: c.basis_source,
             acquired_at: c.gain_hp_start,
+            pseudo: c.pseudo || ev_pseudo, // [R0-C1] a pseudo lot gifted/donated flags the removal leg
         });
     }
     (legs, donor)
@@ -322,6 +328,7 @@ fn consume_fee(
     stats: &mut FoldStats,
     st: &mut LedgerState,
     ev: &EventId,
+    ev_pseudo: bool,
 ) -> FeeCarry {
     if fee_sat <= 0 {
         return FeeCarry::default();
@@ -350,7 +357,7 @@ fn consume_fee(
             // mini-disposition recognition record; proceeds = FMV(fee_sat); basis rides it (NOT re-homed).
             if !consumed.is_empty() {
                 let net = fmv_of(prices, date, fee_sat).unwrap_or(Usd::ZERO);
-                let legs = make_disposal_legs(&consumed, net, date, st, ev);
+                let legs = make_disposal_legs(&consumed, net, date, st, ev, ev_pseudo);
                 st.disposals.push(Disposal {
                     event: ev.clone(),
                     kind: DisposeKind::Spend,
@@ -376,10 +383,26 @@ pub fn fold(
     // of the one-shot seed, and the pre-seed Universal residue matches `transition::universal_snapshot`
     // exactly (I-1). `sort_by_key` is stable, so canonical FIFO order is preserved within each side.
     res.timeline.sort_by_key(|e| e.date() >= TRANSITION_DATE);
+    // Pseudo-reconcile (sub-project 2): the count of contributing synthetics (the projection-wide signal
+    // for the banner + [R0-I3] export guard) and the loud `PseudoReconcileActive` advisory.
+    let pseudo_count = res.pseudo_decisions.len();
     let mut st = LedgerState {
         blockers: res.blockers,
+        pseudo_synthetic_count: pseudo_count,
         ..Default::default()
     };
+    if pseudo_count > 0 {
+        st.add_blocker(
+            BlockerKind::PseudoReconcileActive,
+            None,
+            format!(
+                "pseudo-reconcile mode is ON — {pseudo_count} synthetic default(s) are filling \
+                 unresolved classifications with DELIBERATELY-FICTIONAL guesses. Rows flagged [PSEUDO] \
+                 are placeholders, NOT real tax data. Correct them toward truth (or `reconcile pseudo \
+                 approve` to attest chosen ones); export/forms are BLOCKED while this is active."
+            ),
+        );
+    }
     let mut pools = PoolSet::default();
     let mut stats = FoldStats::default(); // M3/FR9: fee_sats_consumed (Task 11), sigma_in here
     let mut seeded = false;
@@ -535,6 +558,9 @@ pub(crate) fn fold_event(
     stats: &mut FoldStats,
 ) {
     let date = eff.date();
+    // [R0-C1] pseudo taint seam: an event whose effective `Op` is a synthetic default (pseudo mode)
+    // stamps every `Lot`/leg it creates. `false` outside pseudo mode ⇒ byte-identical projection.
+    let ev_pseudo = eff.pseudo;
     match &eff.op {
         Op::Acquire(a) => {
             let wallet = match &eff.wallet {
@@ -562,6 +588,7 @@ pub(crate) fn fold_event(
                 dual_loss_basis: None,
                 donor_acquired_at: None,
                 basis_pending: false,
+                pseudo: ev_pseudo, // [R0-C1] e.g. an accept-first ImportConflict that became an Acquire
             };
             pools.new_origin_lot(pool_key(date, &wallet), lot);
             stats.sigma_in += a.sat; // FR9 Σin: externally-sourced acquisition
@@ -603,7 +630,7 @@ pub(crate) fn fold_event(
             }
             if !consumed.is_empty() {
                 let net = round_cents(*proceeds - *fee_usd); // TP2: disposition fee reduces proceeds
-                let mut legs = make_disposal_legs(&consumed, net, date, st, &eff.id);
+                let mut legs = make_disposal_legs(&consumed, net, date, st, &eff.id, ev_pseudo);
                 // I-1: Task 11 fee step — consume fee_sat FIFO from source pool AFTER principal.
                 // Mirrors the gift/SelfTransfer pattern; native Dispose passes fee_sat=None (no-op).
                 // (c) default: re-home carry onto last disposal leg; fee-sat basis rolls into the
@@ -619,6 +646,7 @@ pub(crate) fn fold_event(
                     stats,
                     st,
                     &eff.id,
+                    ev_pseudo,
                 );
                 if let Some(last) = legs.last_mut() {
                     carry.rehome_onto_disposal_leg(last);
@@ -691,6 +719,7 @@ pub(crate) fn fold_event(
                 dual_loss_basis: None,
                 donor_acquired_at: None,
                 basis_pending: pending,
+                pseudo: ev_pseudo,
             };
             pools.new_origin_lot(pool_key(date, &wallet), lot);
             stats.sigma_in += *sat; // FR9 Σin: income is externally-sourced (counts even while FMV is pending)
@@ -724,6 +753,7 @@ pub(crate) fn fold_event(
                     sat: c.sat,
                     usd_basis: c.gain_basis,
                     acquired_at: c.acquired_at,
+                    pseudo: c.pseudo || ev_pseudo, // [R0-C1] a pseudo lot withdrawn into pending stays tainted
                 })
                 .collect();
             st.pending_reconciliation.push(PendingTransfer {
@@ -780,6 +810,9 @@ pub(crate) fn fold_event(
                     dual_loss_basis: c.loss_basis,
                     donor_acquired_at: c.donor_acquired_at,
                     basis_pending: c.basis_pending,
+                    // [R0-C1] relocated fragment: taint propagates from the consumed source lot (fold.rs:766-813)
+                    // OR the self-transfer event itself being synthetic.
+                    pseudo: c.pseudo || ev_pseudo,
                 });
             }
             // Task 11: fee handling — consume fee_sat FIFO from source pool AFTER principal (FIFO order).
@@ -795,6 +828,7 @@ pub(crate) fn fold_event(
                 stats,
                 st,
                 &eff.id,
+                ev_pseudo,
             );
             if let Some(last) = relocated.last_mut() {
                 carry.rehome_onto_lot(last);
@@ -873,6 +907,7 @@ pub(crate) fn fold_event(
                 dual_loss_basis: None,
                 donor_acquired_at: None,
                 basis_pending: pending,
+                pseudo: ev_pseudo,
             };
             pools.new_origin_lot(pool_key(date, &wallet), lot);
             stats.sigma_in += *sat;
@@ -951,6 +986,7 @@ pub(crate) fn fold_event(
                 dual_loss_basis,
                 donor_acquired_at: *donor_acquired_at,
                 basis_pending: pending,
+                pseudo: ev_pseudo,
             };
             pools.new_origin_lot(pool_key(date, &wallet), lot);
             stats.sigma_in += *sat; // classified GiftReceived is externally-sourced (FR9)
@@ -1005,6 +1041,9 @@ pub(crate) fn fold_event(
                 dual_loss_basis: None,
                 donor_acquired_at: None, // NOT a gift — it's your own coin
                 basis_pending: false, // (G1) $0 is computable → NEVER gated (contrast Income-FMV-missing)
+                // [R0-C1] the HEADLINE taint case: a pseudo `SelfTransferMine{$0}` default → this lot is
+                // pseudo, so a later REAL Sell consuming it renders FLAGGED, never a clean `proceeds − 0`.
+                pseudo: ev_pseudo,
             };
             // pool_key uses the RECEIPT date (`date`), while acquired_at carries the supplied-or-receipt
             // date — orthogonal (mirrors the gift path): a real old date lands in the receipt-year pool.
@@ -1049,7 +1088,7 @@ pub(crate) fn fold_event(
             }
             if !consumed.is_empty() {
                 let (mut legs, donor_acquired_at) =
-                    make_removal_legs(&consumed, *fmv, date, st, &eff.id);
+                    make_removal_legs(&consumed, *fmv, date, st, &eff.id, ev_pseudo);
                 // Task 11: fee step — consume fee_sat FIFO from source pool AFTER principal.
                 // (c) default: re-home carry onto last removal leg so donee carries FULL basis (C1).
                 // (b) config:  emits mini-disposition; empty carry; donee gets principal-only basis.
@@ -1063,6 +1102,7 @@ pub(crate) fn fold_event(
                     stats,
                     st,
                     &eff.id,
+                    ev_pseudo,
                 );
                 if let Some(last) = legs.last_mut() {
                     carry.rehome_onto_removal_leg(last);
@@ -1125,7 +1165,7 @@ pub(crate) fn fold_event(
             }
             if !consumed.is_empty() {
                 let (mut legs, donor_acquired_at) =
-                    make_removal_legs(&consumed, *fmv, date, st, &eff.id);
+                    make_removal_legs(&consumed, *fmv, date, st, &eff.id, ev_pseudo);
                 // Task 11: fee step — consume fee_sat FIFO from source pool AFTER principal.
                 // (c) default: re-home carry onto last removal leg so donee carries FULL basis (C1).
                 // (b) config:  emits mini-disposition; empty carry; donee gets principal-only basis.
@@ -1139,6 +1179,7 @@ pub(crate) fn fold_event(
                     stats,
                     st,
                     &eff.id,
+                    ev_pseudo,
                 );
                 if let Some(last) = legs.last_mut() {
                     carry.rehome_onto_removal_leg(last);

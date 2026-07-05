@@ -223,6 +223,7 @@ impl PoolSet {
             wallet: lot.wallet.clone(),
             acquired_at: lot.acquired_at,
             donor_acquired_at: lot.donor_acquired_at,
+            pseudo: lot.pseudo, // [R0-C1] taint rides the DATA: pseudo lot → pseudo consumed fragment
         };
         lot.usd_basis -= gain_basis;
         if let (Some(dl), Some(taken)) = (lot.dual_loss_basis.as_mut(), loss_basis) {
@@ -299,6 +300,9 @@ pub struct Consumed {
     pub wallet: WalletId,
     pub acquired_at: TaxDate,
     pub donor_acquired_at: Option<TaxDate>,
+    /// Pseudo-reconcile taint (sub-project 2, [R0-C1]): copied from the source lot's `pseudo` bit in
+    /// `take_from`, so a disposal/relocation that consumes a pseudo lot carries the taint onto its legs.
+    pub pseudo: bool,
 }
 
 #[cfg(test)]
@@ -329,6 +333,7 @@ mod tests {
             dual_loss_basis: None,
             donor_acquired_at: None,
             basis_pending: false,
+            pseudo: false,
         }
     }
     fn pid(rf: &str) -> LotId {

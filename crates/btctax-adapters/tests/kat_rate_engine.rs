@@ -130,6 +130,7 @@ fn leg(gain: Usd, term: Term) -> DisposalLeg {
             provider: "cb".into(),
             account: "m".into(),
         }, // synthetic
+        pseudo: false,
     }
 }
 

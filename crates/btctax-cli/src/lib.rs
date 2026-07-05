@@ -49,4 +49,14 @@ pub enum CliError {
     /// edit gone wrong). Returning an error is safer than silently misreading the stored intent.
     #[error("unrecognized stored config value: key={key:?} value={value:?}")]
     BadConfigValue { key: String, value: String },
+    /// [R0-I3] Interim pseudo-reconcile export guard (sub-project 2): `export-snapshot` / IRS-form output
+    /// is REFUSED while any synthetic (non-persisted) default contributes to the projection — no fictional
+    /// 8949/Schedule D leaves the machine unguarded. Turn the mode off (`reconcile pseudo off`) or approve
+    /// + attest the defaults first. (Sub-project 3 replaces this with the "I attest this is true" gate.)
+    #[error(
+        "export refused: pseudo-reconcile mode is active ({0} synthetic default(s) contributing to the \
+         projection). No fictional forms leave the machine. Run `reconcile pseudo off` (or approve + \
+         attest the defaults) before exporting."
+    )]
+    PseudoActiveExport(usize),
 }

@@ -487,6 +487,7 @@ mod tests {
                 provider: "cb".into(),
                 account: "m".into(),
             },
+            pseudo: false,
         }
     }
 

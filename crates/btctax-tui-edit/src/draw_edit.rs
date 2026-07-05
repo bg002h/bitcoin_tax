@@ -83,14 +83,27 @@ fn draw_locked(frame: &mut Frame) {
 /// Form and modal overlays are drawn on top.
 fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     let area = frame.area();
+    // Pseudo-reconcile (sub-project 2): a LOUD banner whenever a synthetic default contributes to the
+    // projection — keyed off `state.pseudo_active()` (the effect), so it stays in lock-step with the
+    // re-projected snapshot the TUI already redraws. A dedicated row inserted below the tab bar.
+    let (show_banner, pseudo_count) = app
+        .snapshot
+        .as_ref()
+        .map(|s| (s.state.pseudo_active(), s.state.pseudo_synthetic_count))
+        .unwrap_or((false, 0));
+    let mut constraints = vec![Constraint::Length(3)]; // tab bar
+    if show_banner {
+        constraints.push(Constraint::Length(1)); // pseudo banner
+    }
+    constraints.push(Constraint::Min(0)); // content pane
+    constraints.push(Constraint::Length(1)); // footer keybindings
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // tab bar
-            Constraint::Min(0),    // content pane
-            Constraint::Length(1), // footer keybindings
-        ])
+        .constraints(constraints)
         .split(area);
+    // Index bookkeeping: the banner (when present) shifts content/footer down by one.
+    let content_idx = if show_banner { 2 } else { 1 };
+    let footer_idx = if show_banner { 3 } else { 2 };
 
     // ── Tab bar with [EDITOR] badge ───────────────────────────────────────────
     let tab_titles: Vec<&str> = Tab::ALL.iter().map(|t| t.title()).collect();
@@ -107,8 +120,23 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
         );
     frame.render_widget(tabs_widget, chunks[0]);
 
+    // ── Pseudo-reconcile banner (loud red/reversed) ───────────────────────────
+    if show_banner {
+        let banner = Paragraph::new(format!(
+            " PSEUDO-RECONCILE MODE ACTIVE — {pseudo_count} synthetic default(s): [PSEUDO] rows are \
+             FICTIONAL placeholders — DO NOT FILE. Export blocked. 'P' to approve, off via CLI. "
+        ))
+        .alignment(Alignment::Center)
+        .style(
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        );
+        frame.render_widget(banner, chunks[1]);
+    }
+
     // ── Content pane — delegate to viewer's App-free tab renderers ────────────
-    let content_area = chunks[1];
+    let content_area = chunks[content_idx];
     if let Some(snap) = app.snapshot.as_ref() {
         let year = app.selected_year;
         match app.tab {
@@ -162,7 +190,7 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
             .to_string()
     };
     let footer = Paragraph::new(footer_text).alignment(Alignment::Center);
-    frame.render_widget(footer, chunks[2]);
+    frame.render_widget(footer, chunks[footer_idx]);
 
     // ── Overlays (drawn AFTER content so they appear on top) ─────────────────
     if app.help_open {
@@ -373,6 +401,10 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(modal) = app.bulk_sti_modal.as_ref() {
         draw_bulk_sti_modal(frame, area, modal);
+    }
+    // Pseudo-reconcile approve confirmation modal (sub-project 2).
+    if let Some(modal) = app.pseudo_approve_modal.as_ref() {
+        draw_pseudo_approve_modal(frame, area, modal);
     }
     // Bulk classify-inbound-income flow overlay (bulk-classify-inbound-income, Cycle 4).
     if let Some(flow) = app.bulk_income_flow.as_mut() {
@@ -1892,6 +1924,7 @@ fn draw_help_overlay(frame: &mut Frame, area: Rect) {
         Line::from("  a/A safe-harbor attest/allocate"),
         Line::from("  Bulk:  b link   B self-transfer-in   C resolve-conflict"),
         Line::from("         V void   I income   O reclassify-outflow"),
+        Line::from("  P approve pseudo-reconcile defaults (when the [PSEUDO] banner shows)"),
         Line::from(""),
         hdr("App"),
         Line::from("  p profile   ? help   q/Esc close"),
@@ -3969,6 +4002,52 @@ fn draw_bulk_sti_flow(frame: &mut Frame, area: Rect, flow: &mut BulkStiFlowState
 }
 
 /// Render the bulk STI confirmation modal (explicit; NOT typed-word — each classification voidable).
+fn draw_pseudo_approve_modal(
+    frame: &mut Frame,
+    area: Rect,
+    modal: &crate::editor::PseudoApproveModalState,
+) {
+    let lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Approve pseudo-reconcile defaults as REAL decisions?",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!("    pending synthetic defaults : {}", modal.count)),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Each becomes a REAL (attested) decision — no longer [PSEUDO]. Every one is voidable",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "  ('v'). Unknown-basis inbounds are approved at a conservative $0 basis; correct any",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "  with a real cost afterward. This does NOT turn the mode off (`reconcile pseudo off`).",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+        Line::from("  Appended as N decisions, saved via the vault's atomic write path."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  [Enter] Approve — writes the vault    [Esc] Cancel — writes nothing",
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from(""),
+    ];
+    let height = (lines.len() + 2) as u16;
+    let modal_rect = centered_rect(84, height, area);
+    frame.render_widget(Clear, modal_rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red))
+        .title(" Confirm: approve pseudo-reconcile defaults — WRITES THE VAULT ");
+    let inner = block.inner(modal_rect);
+    frame.render_widget(block, modal_rect);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
 fn draw_bulk_sti_modal(frame: &mut Frame, area: Rect, modal: &BulkStiModalState) {
     let lines: Vec<Line> = vec![
         Line::from(""),
