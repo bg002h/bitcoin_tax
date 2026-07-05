@@ -297,11 +297,11 @@ dependencies = [
 
 [[package]]
 name = "btctax"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "btctax-adapters"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "btctax-core",
  "calamine",
@@ -316,7 +316,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "btctax-adapters",
  "btctax-core",
@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "rusqlite",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "fs2",
@@ -365,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "btctax-adapters",
  "btctax-cli",
@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-tui-edit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "btctax-adapters",
  "btctax-cli",
@@ -3311,7 +3311,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "btctax-cli",
  "clap",
