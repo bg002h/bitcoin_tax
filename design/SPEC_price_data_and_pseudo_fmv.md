@@ -1,10 +1,10 @@
 # SPEC — comprehensive price data + pseudo-FMV + a separate online updater
 
-**Source baseline:** `main` @ `019ed3f` (branch `feat/price-data-fmv`). **Review status: R0 round 2 folded (r1
-1C/4I/5M/3N; r2 0C/2I/3M/2N — both residual Importants were understated cross-crate blast radius: the tui-edit
-test + Session-level seam [I-A], both income push-sites + `pseudo_tag` + the two TUI crates in scope [I-B]) +
-Part C = a SEPARATE `btctax-update-prices` binary (user-directed 2026-07-05). Awaiting R0 round 3.** Reviews:
-`reviews/R0-spec-price-data-and-pseudo-fmv-round-{1,2}.md`. Tax-critical;
+**Source baseline:** `main` @ `019ed3f` (branch `feat/price-data-fmv`). **Review status: R0-GREEN (3 rounds; 0C/0I).
+Cleared to implement.** Reviews: `reviews/R0-spec-price-data-and-pseudo-fmv-round-{1,2,3}.md`. r1 1C/4I, r2
+0C/2I (both = understated cross-crate blast radius), r3 0C/0I/3M/2N (M-D the kat_rate_engine construction site;
+M-E/M-F/N-A/N-B opportunistic during T1/T2). Part C = a SEPARATE `btctax-update-prices` binary (user-directed
+2026-07-05, so the tax binaries have zero network deps). Tax-critical;
 introduces the app's first (isolated) network binary. All-three-together; online = explicit dedicated binary →
 local cache.
 
@@ -73,8 +73,10 @@ local cache.
 - **[R0-I2 + r2 I-B] Taint MUST reach the income row (the ★ guard):** `IncomeRecord` (state.rs:211-218) has NO
   `pseudo` field. Add `pub pseudo: bool`; set it from `eff.pseudo` at **BOTH push sites — fold.rs:689 (native
   `Op::Income`) AND fold.rs:877 (`Op::IncomeInbound`)** [R0-r2 I-B]; mirroring the Lot taint (fold.rs:722).
-  - **CLI report** — flag via the real helper **`pseudo_tag` (render.rs:61, used at 239/353/365)**, NOT the
-    unused `pseudo_marker` [R0-r2 I-B]. This is the primary tax-output guard surface.
+  - **CLI report** — flag via the real helper **`pseudo_tag` (render.rs:61, used at 239/353/365)** [R0-r2 I-B]
+    (there is no `pseudo_marker` symbol [R0-r3 N-A]). This is the primary tax-output guard surface.
+  - **[R0-r3 M-D] Also update `btctax-adapters/tests/kat_rate_engine.rs:167/190`** — it constructs `IncomeRecord`
+    and needs a compiler-forced `pseudo: false` (no stub coupling, no recompute; caught by full-suite-green).
   - **TUI** — `Lot`/`DisposalLeg` already carry `pseudo` (holdings.rs:223/disposals.rs:254) and the TUI surfaces
     pseudo via the **mode BANNER** (draw_edit.rs:126 "[PSEUDO] rows are placeholders"), not per-row marks. So:
     thread the new `IncomeRecord.pseudo` through `btctax-tui` + `btctax-tui-edit` income construction (~11
