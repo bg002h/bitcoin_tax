@@ -1,80 +1,97 @@
 # SPEC — btctax-store security/durability hardening
 
-**Source baseline:** `main` @ `9763331` (branch `feat/store-hardening`). **Review status: DRAFT — awaiting R0
-(2 rounds to 0C/0I).** Resolves the three deferred `btctax-store` FOLLOWUPS (M-2 zeroize, M-1 .bak-on-corrupt,
-kill-mid-save fuzz). User-approved (2026-07-05). No tax-logic change — storage-layer only.
+**Source baseline:** `main` @ `9763331` (branch `feat/store-hardening`). **Review status: R0 round 1 folded
+(2C/3I/2M/2N — all merged IN-PLACE; surgical, no append). Awaiting R0 round 2.** Review:
+`reviews/R0-spec-store-hardening-round-1.md`. Resolves 3 deferred `btctax-store` FOLLOWUPS. User-approved
+(2026-07-05). Storage-layer only; no tax-logic change. **Both round-1 Criticals were durability REGRESSIONS —
+the folds below are load-bearing for the "strictly safer" claim.**
 
 ## Goal
-Three focused hardening improvements to `btctax-store`, each independently valuable + testable:
 1. **Zeroize the save-path plaintext buffers** (M-2).
-2. **Recover from `.bak` when the present vault is CORRUPT** (not only when missing) — but NEVER on
-   `WrongPassphrase` (M-1).
+2. **Recover from `.bak` when the present vault is GENUINELY CORRUPT** — never on `WrongPassphrase` NOR
+   `UnsupportedSchema`, and without clobbering the good `.bak` (M-1).
 3. **A kill-mid-save state-enumeration harness** proving `open` is safe from every intermediate on-disk state.
 
 ## Current state (verified)
-- `save()` (vault.rs:147-149): `image = sqlite_io::db_to_bytes(&conn)` (plaintext SQLite `Vec<u8>`) →
-  `blob::encode_blob(SCHEMA_VERSION, &image)` (plaintext `Vec<u8>`) → `crypto::encrypt_to(..)`. Neither the
-  `image` nor the encoded blob is zeroized on drop. Same for `snapshot()` (156-157) + the backup path (171).
-  The READ path already zeroizes via `SecretBuf` (vault.rs:133-135) — the pattern to reuse.
-- `open()` (vault.rs:116-136): `recover_target(f)?` restores from `.bak` only when the target is **absent**
-  (atomic.rs:35); a PRESENT-but-corrupt vault is NOT retried. Corruption surfaces at decrypt/decode
-  (vault.rs:133 `decrypt_with` → `Crypto`; :134 `decode_blob` → `Corrupt`; :136 `db_from_bytes` → `Sqlite`;
-  `UnsupportedSchema`) — all DISTINCT from `WrongPassphrase` (crypto.rs:140/168; the test
-  `corrupted_ciphertext_with_correct_pass_is_crypto_err_not_wrongpass` crypto.rs:173 pins the distinction).
+- `save()` (vault.rs:147-149): `image = db_to_bytes(&conn)` (plaintext) → `encode_blob(SCHEMA_VERSION,&image)`
+  (plaintext) → `encrypt_to(..)` — neither zeroized. READ path zeroizes via `SecretBuf` (vault.rs:133-135).
+- `open()` (vault.rs:116-136): `recover_target(f)?` restores from `.bak` only when the target is ABSENT
+  (atomic.rs:35). Corruption of a PRESENT vault surfaces at decrypt/decode (:133 `decrypt_with`→`Crypto`; :134
+  `decode_blob`→`Corrupt`; :135 `migrate`→`UnsupportedSchema`; :136 `db_from_bytes`→`Sqlite`) — `WrongPassphrase`
+  is DISTINCT (crypto.rs:137-142, test :173-187). No existing test asserts "corrupt present vault → error" — T2
+  flips nothing.
+- `atomic_write` (atomic.rs:16-23) copies the CURRENT target over `.bak` BEFORE the rename — safe for a normal
+  save, DANGEROUS for a restore (would copy corrupt-over-good, C2).
 
-## T1 — zeroize the save-path plaintext (M-2)
-Wrap every save-path plaintext `Vec<u8>` in the existing zeroizing wrapper (`SecretBuf`, as the read path
-does) so it is scrubbed on drop: the `db_to_bytes` image + the `encode_blob` output in `save()`, `snapshot()`,
-and the backup path. `encrypt_to`/`encode_blob` take `&[u8]` → `SecretBuf::as_slice()`. `snapshot()` returns
-`Vec<u8>` (the FR10 plaintext-export exception) — keep its return type, but zeroize the intermediate.
-- **Bound (state honestly):** the live SQLite connection holds plaintext in heap all session (accepted R1
-  bound) — zeroizing the save buffers is defense-in-depth (shrinks the plaintext-copy lifetime/count), NOT
-  full at-rest secrecy. Document it; do not overclaim.
-- KAT: a test that the save path produces a `SecretBuf` (compile-level) + (best-effort) that no extra
-  un-zeroized plaintext `Vec` remains in `save()` (code-review-enforced; a unit test asserts the wrapper type).
+## T1 — zeroize the save-path plaintext (M-2) [R0-I1 buffer list corrected]
+`SecretBuf`-wrap the plaintext intermediates so they scrub on drop, at the ACTUAL sites:
+- `save()` — the `db_to_bytes` image + the `encode_blob` output (vault.rs:148-149).
+- `export_snapshot` — the `db_to_bytes` image (vault.rs:171) [R0-I1: this is the real site, mislabeled
+  "backup path" in round 1].
+- `backup_key` — the `armored` secret-key bytes (vault.rs:184) [R0-I1: was unaddressed].
+- **NOT `snapshot()`** — its only `Vec` is the caller-owned FR10 return (vault.rs:156-158); there is no
+  wrappable intermediate (wrapping the return would break FR10 / be a no-op) [R0-I1].
+- **Bound (honest):** the live SQLite connection holds plaintext in heap all session (accepted R1 bound) —
+  this is defense-in-depth (shrinks copy count/lifetime), NOT full at-rest secrecy. State it; don't overclaim.
+  [R0-N1: the `.bak`/`.tmp` on disk are CIPHERTEXT, not plaintext — not a zeroize concern.]
+- KAT: the save path binds `SecretBuf` (type-level); code-review-enforced no-stray-plaintext-`Vec`.
 
-## T2 — recover from `.bak` on a CORRUPT present vault (M-1)
-In `open()`, after the existing `recover_target` (missing-target case), when decrypt/decode of the PRESENT
-`vault.pgp` fails:
-- if the error is `WrongPassphrase` → **propagate immediately** (never touch `.bak` — it would also
-  `WrongPassphrase`; a caller error, not corruption).
-- else (a corruption class: `Crypto` / `Corrupt` / `Sqlite` / `UnsupportedSchema`) AND a `.bak` exists → retry
-  the open using the `.bak`; if the `.bak` decrypts+decodes cleanly → **atomically restore** it
-  (`.bak` → `vault.pgp`, via the existing atomic write) and return the recovered vault; else → propagate the
-  ORIGINAL target error (both corrupt).
+## T2 — recover from `.bak` on a GENUINELY-CORRUPT present vault (M-1)
+In `open()`, when decrypt/decode of the PRESENT `vault.pgp` fails, branch on the exact `StoreError`:
+- **`WrongPassphrase`** → propagate immediately (never touch `.bak` — caller error; `.bak` would also fail).
+- **[R0-C1] `UnsupportedSchema`** → propagate immediately (the vault was written by a NEWER app — decode
+  SUCCEEDED; recovering the older `.bak` would silently DOWNGRADE + lose newer tax data). NOT corruption.
+- **`Io` (other than the already-handled missing-target)** / **`Locked`** → propagate (not corruption).
+- **GENUINE corruption** = `Crypto` (bad ciphertext, correct pass) OR `Corrupt` (bad blob decode) OR a
+  deserialize-`Sqlite` (bad image; NOT OOM — `db_from_bytes` remaps OOM→`Io`, sqlite_io.rs:40-43 [R0-M2, pin
+  with an assertion]) AND a `.bak` exists → attempt to open the `.bak` (same decrypt+decode helper):
+  - `.bak` opens cleanly → **[R0-C1] additionally require the `.bak` schema ≥ target's decoded schema** is
+    N/A here (target didn't decode); **[R0-I2] WARN** (`eprintln!` — precedent memlock.rs:16 — "vault.pgp was
+    corrupt; recovered from vault.pgp.bak (prior save generation)") + return the recovered Vault, after a
+    **[R0-C2] `.bak`-PRESERVING crash-safe restore**: read `.bak` bytes → write `<vault>.tmp` (owner-only) →
+    fsync → rename `.tmp`→`vault.pgp`. **NEVER touch `.bak`** (it stays the safety net; a crash mid-restore
+    leaves `.bak` intact). Do NOT reuse `atomic_write` (it clobbers `.bak`, C2).
+  - `.bak` also fails → propagate the ORIGINAL target corruption error (both unusable; a clear error, never a
+    panic/loop — a bounded single `.bak` attempt).
 - no `.bak` → propagate the corruption error.
-Factor the "decrypt+decode+db_from_bytes into a Vault" steps into a helper reused for target + `.bak`.
-- KATs: `open_recovers_from_bak_when_target_corrupt` (present target = garbage bytes, good `.bak` → opens the
-  `.bak` state + `vault.pgp` is restored); `open_wrong_passphrase_never_touches_bak` (wrong pp, valid target +
-  `.bak` → `WrongPassphrase`, `.bak` untouched, no recovery); `open_both_corrupt_propagates`
-  (target + `.bak` both garbage → the corruption error, not a panic); `open_missing_target_still_recovers`
-  (the existing behavior unchanged).
+- **[R0-M1]** factor `decrypt+decode+db_from_bytes → Vault` into a helper reused for target + `.bak`; attach
+  the single held lock once (don't re-acquire).
+- KATs: `open_recovers_from_bak_when_target_genuinely_corrupt` (garbage target bytes, good `.bak` → opens
+  `.bak` state, `vault.pgp` restored, `.bak` STILL present, warning emitted); `open_wrong_passphrase_never_touches_bak`;
+  **`open_unsupported_schema_never_recovers_from_bak`** [R0-C1] (newer target + older `.bak` → `UnsupportedSchema`,
+  `.bak` untouched, NO downgrade); `open_both_corrupt_propagates_and_bak_intact`; `open_missing_target_still_recovers`
+  (unchanged); `restore_preserves_bak_and_is_crash_safe` [R0-C2] (after restore, `.bak` bytes unchanged).
 
-## T3 — kill-mid-save state-enumeration harness
-A deterministic test enumerating the on-disk states a kill during `save`/`create` can leave, asserting `open`
-is always SAFE (yields a valid Vault OR a clear typed error — never a panic or a silently-wrong state). States
-(the cross-product that actually occurs): `vault.pgp` ∈ {absent, good, corrupt} × `.bak` ∈ {absent, good} ×
-`.tmp` ∈ {absent, present}, with `vault.key` present. For each: `open` → assert Ok(valid) or a specific
-`StoreError` (e.g. `HalfCreatedVault`, `WrongPassphrase` N/A here, a corruption error only when BOTH
-target+bak unusable), and that a recoverable state (good `.bak`) recovers. (Deterministic NFR4 — a systematic
-enumeration, not RNG; a true `kill -9` OS harness stays a FOLLOWUP.) Reuses T2's recovery.
+## T3 — kill-mid-save state-enumeration harness [R0-I3 extended]
+Deterministic (NFR4) enumeration of the on-disk states a kill during `save`/`create`/restore can leave,
+asserting `open` is always SAFE (valid Vault OR a specific typed error — never a panic or silent-wrong):
+`vault.pgp` ∈ {absent, good, corrupt} × `.bak` ∈ {absent, good, **corrupt** [R0-I3]} × `.tmp` ∈ {absent,
+**present-ciphertext-of-a-good-save**, present-garbage} [R0-I3 specify content], `vault.key` present. For each:
+assert `Ok(valid)` or the specific `StoreError` (`HalfCreatedVault` for the half-created signature; a
+corruption error ONLY when target+bak both unusable); a good `.bak` recovers; the C2 crash-window state (mid
+`.tmp` restore) never loses the good `.bak`. Exercises T2 + the half-created path (vault.rs:38). True `kill -9`
+OS harness stays a FOLLOWUP.
 
 ## Scope / SemVer / lockstep
-`btctax-store` only (vault.rs save/open + a recovery helper; tests). No public-API break (save/open/snapshot
-signatures unchanged; `SecretBuf` is internal). No btctax-core/cli/tui change. PATCH-class (internal hardening;
-no behavior change except a corrupt-vault now recovers from `.bak` instead of erroring — strictly safer).
-Lockstep: none (no CLI/doc surface). Update the FOLLOWUPS `btctax-store` M-1/M-2 + kill-mid-save entries → resolved.
+`btctax-store` only (vault.rs save/open + a recovery helper + a `.bak`-preserving restore primitive; tests). No
+public-API break. PATCH-class **(now strictly safer with C1/C2 folded)** — a genuinely-corrupt vault recovers
+from `.bak`; a NEWER vault + wrong pass are unchanged (propagate). No btctax-core/cli/tui change; no CLI/doc
+surface. Update FOLLOWUPS M-1/M-2/kill-mid-save → resolved.
 
 ## Plan (TDD)
-- **T1** — `SecretBuf`-wrap the save-path plaintext; the wrapper KAT; note the R1 bound in the doc-comment.
-- **T2** — the `.bak`-on-corrupt recovery helper + `open` wiring (WrongPassphrase-never); the 4 recovery KATs.
-- **T3** — the state-enumeration harness; FOLLOWUPS update; whole-diff + full suite.
+- **T1** — `SecretBuf`-wrap the save/`export_snapshot`/`backup_key` plaintext (NOT snapshot); the R1-bound note.
+- **T2** — the `decrypt+decode→Vault` helper + `.bak`-preserving crash-safe restore primitive + `open` wiring
+  (WrongPassphrase & UnsupportedSchema NEVER recover; only genuine corruption); the 6 recovery KATs + the
+  Sqlite-not-OOM assertion.
+- **T3** — the extended state-enumeration harness (incl. corrupt `.bak`, `.tmp` content, the C2 window);
+  FOLLOWUPS update; whole-diff + full suite.
 
 ## Gotchas
-- **NEVER retry `.bak` on `WrongPassphrase`** — it would also fail + mislead ("recovered" when the password is
-  just wrong). Discriminate on the exact `StoreError` variant.
-- **Restore atomically** — recovering `.bak → vault.pgp` must use the existing atomic write (crash-safe), not a
-  bare copy.
-- **Don't overclaim zeroize** — the live SQLite heap holds plaintext all session; this is defense-in-depth.
-- **Both-corrupt = a clear error, never a panic/loop** — bounded single retry of `.bak`.
+- **[C1] `UnsupportedSchema` ≠ corruption** — it's a NEWER vault (decode succeeded); recovering `.bak` would
+  downgrade + lose data. Propagate. Same for `WrongPassphrase`.
+- **[C2] restore must PRESERVE `.bak`** — write via `.tmp`→rename to `vault.pgp` ONLY; never copy target→`.bak`
+  (that clobbers the sole good copy). Do NOT reuse `atomic_write`.
+- **[I2] WARN on recovery** — a silent revert to the prior save generation is a data-integrity surprise.
+- **Both-corrupt = a clear error, bounded single `.bak` attempt** — never a panic/loop.
+- **Don't overclaim zeroize** (SQLite heap holds plaintext all session); on-disk `.bak`/`.tmp` are ciphertext.
 - **Determinism** — the harness enumerates states; no RNG/`Date::now`.
