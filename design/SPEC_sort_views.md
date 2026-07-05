@@ -1,9 +1,9 @@
 # SPEC — sortable Holdings / Disposals / Income views (viewer + editor)
 
-**Source baseline:** `main` @ `1837917` (branch `feat/sort-views`). **Review status: R0 round 1 folded
-(0C/4I/4M/2N — all merged IN-PLACE; surgical). Awaiting R0 round 2.** Review:
-`reviews/R0-spec-sort-views-round-1.md`. **R0 confirmed there is NO data-safety bug** (edit flows build their
-own pickers — see Safety). User-approved design (2026-07-05).
+**Source baseline:** `main` @ `1837917` (branch `feat/sort-views`). **Review status: R0 round 2 folded (round 1
+0C/4I/4M/2N; round 2 0C/1I/3N — I5 the 23-test rebind migration + IncomeRecord type + N-3 phrasing). Awaiting
+R0 round 3.** Reviews: `reviews/R0-spec-sort-views-round-{1,2}.md`. **R0 confirmed there is NO data-safety bug**
+(edit flows build their own pickers — see Safety). User-approved design (2026-07-05).
 
 ## Goal
 Interactive column sorting of the **Holdings**, **Disposals**, **Income** row views in BOTH `btctax-tui`
@@ -19,9 +19,11 @@ Interactive column sorting of the **Holdings**, **Disposals**, **Income** row vi
 | `[` / `]` | **tax year** prev / next — **MOVED off `←`/`→`** (viewer lib.rs:215/219; editor main.rs:407/411) |
 
 **Editor-only rebinds** (free `s`/`l` for sorting — user-directed): `s` (select-lots, main.rs:421) → **`S`**;
-`l` (link-transfer, main.rs:423) → **`L`**. R0-confirmed `S`/`L`/`[`/`]` are unbound in the editor and `h`/`l`
-appear only inside flow contexts (main.rs:7138/8271), so the top-level rebinds are conflict-free. No dedicated
-force-descending key — `s` toggling covers both directions.
+`l` (link-transfer, main.rs:423) → **`L`**. R0-confirmed `S`/`L`/`[`/`]` are unbound in the editor; `h` appears
+only inside flow contexts (main.rs:7138/8271); `l` IS bound top-level (main.rs:423) and is freed by this rebind
+[R0-N-3]. So the top-level rebinds are conflict-free. **[R0-I5] The rebind ALSO breaks 23 browse-level tests
+that press top-level `s`/`l` — they must migrate to `S`/`L` (see KATs).** No dedicated force-descending key —
+`s` toggling covers both directions.
 
 ## [R0-I3] Sortable columns = EXACTLY what each view renders today (verified against source)
 The column cursor lands on each RENDERED column; sorting keys off the underlying TYPED field (not the formatted
@@ -33,7 +35,7 @@ string).
   `Gain`(Decimal) · `Term`(short<long) · `Wallet`(WalletId).
 - **Income** (tabs/income.rs:41-45, source `snap.state.income_recognized`): `Recognized`(Date) ·
   `Kind`(IncomeKind) · `Business`(bool) · `BTC` · `USD FMV`(Decimal). **[R0-I3] NO wallet column** —
-  `IncomeRecognized` has no wallet field (state.rs:213-217); do not invent one.
+  `IncomeRecord` has no wallet field (state.rs:213-217); do not invent one.
 
 ## Semantics
 - **Default sort = by the primary DATE column, ascending**, per view: Holdings→`Acquired`, Disposals→`Disposed`
@@ -64,7 +66,7 @@ display rows CANNOT retarget an edit.** So: sorting reorders display rows only; 
 The rendered rows are `Vec<ratatui::Row>` of formatted strings with no readable typed fields, so sorting must
 happen BEFORE formatting:
 - Each view builds a typed, borrowed working set from the snapshot — Holdings `Vec<&Lot>`; Disposals
-  `Vec<(&Disposal, &DisposalLeg, usize /*leg idx*/)>` (flatten); Income `Vec<&IncomeRecognized>` — sorts THAT
+  `Vec<(&Disposal, &DisposalLeg, usize /*leg idx*/)>` (flatten); Income `Vec<&IncomeRecord>` — sorts THAT
   by the focused column + dir + tie-break, THEN formats the sorted items into `Row`s (the existing formatting,
   reordered). The read-only `snap.state.*` is never mutated (we sort borrows/indices).
 - **Shared `btctax-tui::sort`**: the `Dir {Asc,Desc}` + `ViewSort {col, dir}` + `cursor` types + toggle/step
@@ -88,8 +90,13 @@ happen BEFORE formatting:
 - **[R0-I1] display-only:** `sorting_does_not_mutate_events_or_state` (events/LedgerState byte-identical
   before/after any sort); `edit_flow_targets_are_independent_of_display_order` (a flow's picker list is built
   from `snap.state.*` regardless of the tab's current sort/cursor).
-- **[R0-M-3]** UPDATE the existing arrow-steps-year tests: viewer `lib.rs:776`, editor `main.rs:~9494` (they
+- **[R0-M-3]** UPDATE the existing arrow-steps-year tests: viewer `lib.rs:776`, editor `main.rs:9493` (they
   assert `←`/`→` change the year — now `[`/`]` do). The plan owns these edits, not just new KATs.
+- **[R0-I5] MIGRATE the 23 browse-level rebind tests** — the **15** that press top-level `s` to open select-lots
+  (main.rs ~14735-18402, e.g. :14738 "select_lots_flow must open on 's'") and the **8** that press top-level
+  `l` for link-transfer (main.rs ~18328-19478, e.g. :18522) → press `S`/`L`. Both are top-level openers (the
+  flow key handlers `handle_select_lots_flow_key`:3197 / `handle_link_transfer_flow_key`:4247 bind neither `s`
+  nor `l` internally), so all 23 break on the rebind unless migrated. This is a mechanical find-and-replace in T2.
 
 ## Scope / SemVer / lockstep
 `btctax-tui` (sort module + viewer keys/state/render) + `btctax-tui-edit` (editor keys incl. `S`/`L` rebind +
@@ -105,7 +112,8 @@ overlay — footer only.) Add the key change to README (no CHANGELOG file exists
   VIEWER: App state, the 3 typed-working-set + sorted render, key handler (cursor/`s`/`[`/`]`, arrows→year
   removed), header highlight + `▲`/`▼`; viewer key KATs + update `lib.rs:776`.
 - **T2** — wire the EDITOR: Editor state, render, key handler INCLUDING select-lots→`S` / link-transfer→`L` +
-  the year `[`/`]` move; editor rebind + display-only + edit-independence KATs + update `main.rs:~9494`.
+  the year `[`/`]` move; editor rebind + display-only + edit-independence KATs + update the arrow=year test
+(`main.rs:9493`) + **[I5] migrate the 23 browse `s`/`l`→`S`/`L` opener tests** (mechanical find-and-replace).
 - **T3** — hand-edit the man-page + footer/overlay hints + README note; whole-diff + full suite.
 
 ## Gotchas
