@@ -1,9 +1,10 @@
 mod fixtures;
 use btctax_cli::{cmd, Session};
-use btctax_core::OutflowClass;
+use btctax_core::{BlockerKind, EventPayload, InboundClass, OutflowClass, Severity};
 use btctax_store::Passphrase;
 use csv::Reader;
 use std::fs::File;
+use std::path::Path;
 use time::macros::datetime;
 
 fn pp() -> Passphrase {
@@ -23,7 +24,9 @@ fn export_snapshot_writes_sqlite_and_csvs_and_backup_key() {
     .unwrap();
 
     let out = dir.path().join("export");
-    let sqlite = cmd::admin::export_snapshot(&vault, &pp(), &out, None, None).unwrap();
+    let sqlite = cmd::admin::export_snapshot(&vault, &pp(), &out, None, None)
+        .unwrap()
+        .path;
     assert!(sqlite.exists(), "snapshot.sqlite (store)");
 
     let lots_path = out.join("lots.csv");
@@ -746,4 +749,307 @@ fn engine_b_tax_math_unchanged_by_donee() {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// export-blocker-summary: `ExportReport { path, unresolved_hard }` + the main.rs stderr warning.
+// Library KATs call `cmd::admin::export_snapshot` directly (they see only the struct); the binary
+// KATs drive the compiled `btctax` so they can observe the `eprintln!` in the main.rs arm.
+// ---------------------------------------------------------------------------------------------
+
+/// Run the compiled `btctax export-snapshot` binary; returns (exit_code, stderr). Uses
+/// `Command::output()` to CAPTURE stderr — the `fr9_exit_code.rs` / `tax_report.rs` bin pattern
+/// [R0-r2-N]. The vault is built with the library (init + import); the binary only opens it.
+fn run_export_bin(vault: &Path, out: &Path, tax_year: Option<i32>) -> (i32, String) {
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let mut command = std::process::Command::new(bin);
+    command
+        .arg("--vault")
+        .arg(vault.to_str().expect("vault path is valid UTF-8"))
+        .arg("export-snapshot")
+        .arg("--out")
+        .arg(out.to_str().expect("out path is valid UTF-8"));
+    if let Some(y) = tax_year {
+        command.arg("--tax-year").arg(y.to_string());
+    }
+    let output = command
+        .env("BTCTAX_PASSPHRASE", "pw")
+        .output()
+        .expect("btctax binary must execute");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let code = output
+        .status
+        .code()
+        .expect("btctax process must exit normally (not via signal)");
+    (code, stderr)
+}
+
+/// `unresolved_hard` counts Hard blockers ONLY. A real Advisory (`SelfTransferInboundZeroBasis`,
+/// fired by classifying an inbound as a self-transfer with the DEFAULT $0 basis) must NOT count
+/// (→ 0), while a Hard blocker (`UnknownBasisInbound`, an unclassified inbound) does (→ ≥ 1). [R0-N2]
+#[test]
+fn export_report_counts_only_hard() {
+    // (a) Advisory-only ledger: classify the raw inbound as a self-transfer with defaulted $0 basis
+    //     → clears the Hard `UnknownBasisInbound`, fires the honest `SelfTransferInboundZeroBasis`.
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    let now = datetime!(2026-04-01 12:00:00 UTC);
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(&vault, &pp(), &[fixtures::coinbase_buy_receive(dir.path())]).unwrap();
+
+    let in_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
+            .expect("the Receive must fold to a TransferIn")
+            .id
+            .canonical()
+    };
+    cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &in_ref,
+        InboundClass::SelfTransferMine {
+            basis: None,
+            acquired_at: None,
+        },
+        now,
+    )
+    .unwrap();
+
+    // Sanity: the ledger now carries a REAL Advisory but NO Hard blocker.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert!(
+            state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::SelfTransferInboundZeroBasis),
+            "the zero-basis Advisory must be present"
+        );
+        assert!(
+            state
+                .blockers
+                .iter()
+                .all(|b| b.kind.severity() != Severity::Hard),
+            "an Advisory-only ledger has no Hard blocker"
+        );
+    }
+
+    let out = dir.path().join("export_advisory");
+    let report = cmd::admin::export_snapshot(&vault, &pp(), &out, None, None).unwrap();
+    assert_eq!(
+        report.unresolved_hard, 0,
+        "a real Advisory (SelfTransferInboundZeroBasis) must NOT count as a Hard blocker"
+    );
+
+    // (b) Hard ledger: a bare unclassified Receive → `UnknownBasisInbound` Hard blocker → counted.
+    let dir2 = tempfile::tempdir().unwrap();
+    let vault2 = dir2.path().join("vault.pgp");
+    cmd::init::run(&vault2, &pp(), &dir2.path().join("k.asc")).unwrap();
+    cmd::import::run(
+        &vault2,
+        &pp(),
+        &[fixtures::coinbase_buy_receive(dir2.path())],
+    )
+    .unwrap();
+    let out2 = dir2.path().join("export_hard");
+    let report2 = cmd::admin::export_snapshot(&vault2, &pp(), &out2, None, None).unwrap();
+    assert!(
+        report2.unresolved_hard >= 1,
+        "an unclassified inbound (UnknownBasisInbound) is a Hard blocker and must be counted; got {}",
+        report2.unresolved_hard
+    );
+}
+
+/// `report.path` points at the store's `snapshot.sqlite`, inside the requested out-dir.
+#[test]
+fn export_report_path_points_at_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(
+        &vault,
+        &pp(),
+        &[fixtures::coinbase_buy_sell_send(dir.path())],
+    )
+    .unwrap();
+
+    let out = dir.path().join("export");
+    let report = cmd::admin::export_snapshot(&vault, &pp(), &out, None, None).unwrap();
+    assert!(report.path.exists(), "the returned path must exist");
+    assert_eq!(
+        report.path.file_name().and_then(|n| n.to_str()),
+        Some("snapshot.sqlite"),
+        "report.path must point at the store snapshot.sqlite; got {:?}",
+        report.path
+    );
+    assert!(
+        report.path.starts_with(&out),
+        "the snapshot must live inside the requested out-dir"
+    );
+}
+
+/// Export is a DISCLOSURE, not a refusal: even with an unresolved Hard blocker it STILL writes the
+/// snapshot + all-years CSVs + the (empty) year-scoped forms — the "silent empty forms" scenario,
+/// now flagged via `unresolved_hard` rather than blocked.
+#[test]
+fn export_still_writes_files_with_blockers() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(&vault, &pp(), &[fixtures::coinbase_buy_receive(dir.path())]).unwrap();
+
+    let out = dir.path().join("export_blocked");
+    let report = cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2025), None).unwrap();
+
+    assert!(
+        report.unresolved_hard >= 1,
+        "the unclassified inbound is a Hard blocker"
+    );
+    // The files are written REGARDLESS — the warning is a disclosure, not a gate.
+    for name in [
+        "snapshot.sqlite",
+        "lots.csv",
+        "disposals.csv",
+        "removals.csv",
+        "income.csv",
+        "form8949.csv",
+        "schedule_d.csv",
+    ] {
+        assert!(
+            out.join(name).exists(),
+            "{name} must still be written despite the Hard blocker"
+        );
+    }
+}
+
+/// BINARY KAT — with an unresolved Hard blocker + `--tax-year`, the compiled binary WARNS on stderr
+/// ("NOT COMPUTABLE" + the exact count + "verify"), still writes the files, and exits 0. [★ fault-
+/// inject target: deleting the `unresolved_hard > 0` eprintln! in the main.rs arm turns this RED.]
+#[test]
+fn export_with_hard_blockers_warns_on_stderr() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(&vault, &pp(), &[fixtures::coinbase_buy_receive(dir.path())]).unwrap();
+
+    // The real Hard-blocker count (drives the exact "{n} unresolved Hard blocker(s)" string).
+    let n = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        state
+            .blockers
+            .iter()
+            .filter(|b| b.kind.severity() == Severity::Hard)
+            .count()
+    };
+    assert!(n >= 1, "the fixture must carry at least one Hard blocker");
+
+    let out = dir.path().join("export_warn");
+    let (code, stderr) = run_export_bin(&vault, &out, Some(2025));
+
+    assert_eq!(
+        code, 0,
+        "export is a disclosure, not a refusal — exit 0; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("NOT COMPUTABLE"),
+        "stderr must flag the year NOT COMPUTABLE; got: {stderr}"
+    );
+    assert!(
+        stderr.contains(&format!("{n} unresolved Hard blocker")),
+        "stderr must carry the exact unresolved-Hard count ({n}); got: {stderr}"
+    );
+    assert!(
+        stderr.contains("verify"),
+        "stderr must direct the user to `btctax verify`; got: {stderr}"
+    );
+    assert!(
+        stderr.contains("INFORMATIONAL, not final"),
+        "stderr must state the forms are INFORMATIONAL, not final; got: {stderr}"
+    );
+    // Files are still written (the empty-forms scenario, now disclosed).
+    assert!(
+        out.join("snapshot.sqlite").exists(),
+        "snapshot must be written"
+    );
+    assert!(
+        out.join("form8949.csv").exists(),
+        "form8949.csv must be written"
+    );
+}
+
+/// BINARY KAT — a FULL export (no `--tax-year`) with unresolved Hard blockers warns that the
+/// exported FIGURES (projection CSVs, not the 8949/Schedule D forms) are INFORMATIONAL, and every
+/// affected year is NOT COMPUTABLE. Exit 0.
+#[test]
+fn export_full_no_year_warns_informational() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(&vault, &pp(), &[fixtures::coinbase_buy_receive(dir.path())]).unwrap();
+
+    let out = dir.path().join("export_full");
+    let (code, stderr) = run_export_bin(&vault, &out, None);
+
+    assert_eq!(code, 0, "exit 0; stderr: {stderr}");
+    assert!(
+        stderr.contains("INFORMATIONAL, not final"),
+        "the full-export warning must say INFORMATIONAL, not final; got: {stderr}"
+    );
+    assert!(
+        stderr.contains("NOT COMPUTABLE"),
+        "the full-export warning must say every affected year is NOT COMPUTABLE; got: {stderr}"
+    );
+    // "figures" (not "forms") — the no-year path writes projection CSVs, not the 8949/Schedule D.
+    assert!(
+        stderr.contains("figures"),
+        "the no-year message must say 'figures' (projection CSVs), not 'forms'; got: {stderr}"
+    );
+}
+
+/// BINARY KAT — a fully-resolved (0 Hard) ledger exports with NO warning: stderr carries no ⚠ /
+/// "NOT COMPUTABLE", stdout still confirms the export, exit 0.
+#[test]
+fn export_clean_ledger_no_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    // A Buy + Sell + (pending) Send — a real disposal + an Advisory UnmatchedOutflows, NO Hard.
+    cmd::import::run(
+        &vault,
+        &pp(),
+        &[fixtures::coinbase_buy_sell_send(dir.path())],
+    )
+    .unwrap();
+
+    // Guard: this ledger really is clean of Hard blockers.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert!(
+            state
+                .blockers
+                .iter()
+                .all(|b| b.kind.severity() != Severity::Hard),
+            "the clean fixture must carry zero Hard blockers"
+        );
+    }
+
+    let out = dir.path().join("export_clean");
+    let (code, stderr) = run_export_bin(&vault, &out, Some(2025));
+
+    assert_eq!(code, 0, "clean export exits 0; stderr: {stderr}");
+    assert!(
+        !stderr.contains('\u{26a0}'),
+        "a clean ledger must print NO ⚠ warning; got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("NOT COMPUTABLE"),
+        "a clean ledger must not flag NOT COMPUTABLE; got: {stderr}"
+    );
 }

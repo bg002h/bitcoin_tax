@@ -4,6 +4,28 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ export-snapshot unresolved-Hard-blocker summary — SHIPPED (2026-07-05) — real-vault "silent empty forms" finding RESOLVED
+
+The real-vault finding — `export-snapshot` silently wrote an EMPTY Form 8949 / zero Schedule D (and
+empty projection CSVs) when unresolved Hard blockers made every year `NotComputable`, with NO warning
+— is FIXED. `cmd::admin::export_snapshot` (`crates/btctax-cli/src/cmd/admin.rs`) now returns
+`ExportReport { path, unresolved_hard }` (`#[derive(Debug, Clone)]`) instead of a bare `PathBuf`;
+`unresolved_hard = blockers.filter(severity()==Hard).count()` (NO `compute_tax_year` call — any Hard
+blocker gates every year, so the count alone drives the disclosure). The `ExportSnapshot` main.rs arm
+(`main.rs:325`) prints `Exported …` as before, THEN — only when `unresolved_hard > 0` — an
+`eprintln!` to STDERR: a `--tax-year` export names the year NOT COMPUTABLE + "Form 8949 / Schedule D
+are INFORMATIONAL, not final"; a full export says "every affected year is NOT COMPUTABLE" + "the
+exported figures are INFORMATIONAL, not final" ("figures", since no `--tax-year` writes projection
+CSVs not the forms). Both say "Run `btctax verify`". It WARNS, does not refuse — export still writes
+the files and exits 0; a clean (0 Hard) ledger prints no warning (stdout byte-identical to before).
+The store method (`vault.rs:263`) stays `PathBuf`. Clap doc-comment note added at `cli.rs:92` +
+`btctax-export-snapshot.1` regenerated (`cargo run -p xtask -- docs`). R0-GREEN spec (2 rounds, 0C/0I):
+`design/SPEC_export_blocker_summary.md`. New KATs (`tests/export.rs`): lib `export_report_counts_only_hard`
+/ `export_report_path_points_at_snapshot` / `export_still_writes_files_with_blockers`; binary
+`export_with_hard_blockers_warns_on_stderr` (★ fault-inject verified RED) /
+`export_full_no_year_warns_informational` / `export_clean_ledger_no_warning`. Automation that must GATE
+on unresolved blockers checks `btctax verify` (exits non-zero), since export stays exit 0.
+
 ## ✅ TY2026 tax-table backfill — SHIPPED (2026-07-05) — 2027 DEFERRED (unpublished)
 
 `ty2026()` in `BundledTaxTables` (`btctax-adapters/src/tax_tables.rs`), wired via

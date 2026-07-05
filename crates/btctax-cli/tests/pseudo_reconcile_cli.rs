@@ -230,7 +230,8 @@ fn export_pseudo_active_correct_attest_writes_files() {
         Some(2025),
         Some(btctax_cli::ATTEST_PHRASE),
     )
-    .expect("a correct attestation must permit the export");
+    .expect("a correct attestation must permit the export")
+    .path;
 
     assert!(sqlite.exists(), "the snapshot.sqlite must be written");
     // The all-years + year-scoped form CSVs must all be present.

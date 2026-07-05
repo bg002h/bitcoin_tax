@@ -90,6 +90,12 @@ pub enum Command {
         effective_from: Option<String>,
     },
     /// FR10: export decrypted SQLite + CSV (the NFR2 plaintext exception).
+    ///
+    /// WARNS (does not refuse) on unresolved Hard blockers: any Hard blocker makes every affected
+    /// tax year NOT COMPUTABLE, so the exported Form 8949 / Schedule D / figures are INFORMATIONAL,
+    /// not final. A warning is printed to stderr and the export still succeeds (exit 0). Automation
+    /// that must GATE on unresolved blockers should check `btctax verify` (which exits non-zero),
+    /// since export-snapshot itself stays exit 0.
     ExportSnapshot {
         /// Output DIRECTORY receiving the decrypted SQLite DB (snapshot.sqlite) + projection CSVs
         /// (the NFR2 plaintext exception; created owner-only). ALWAYS writes: lots.csv,

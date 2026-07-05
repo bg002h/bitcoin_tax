@@ -322,8 +322,34 @@ fn run() -> Result<ExitCode, CliError> {
                     }
                 }
             };
-            let p = cmd::admin::export_snapshot(vault, &pp, &out, tax_year, attest.as_deref())?;
-            println!("Exported {} + CSVs to {}", p.display(), out.display());
+            let report =
+                cmd::admin::export_snapshot(vault, &pp, &out, tax_year, attest.as_deref())?;
+            println!(
+                "Exported {} + CSVs to {}",
+                report.path.display(),
+                out.display()
+            );
+            // Disclosure (NOT a refusal): unresolved Hard blockers make every affected tax year
+            // NotComputable, so the exported forms/figures are INFORMATIONAL. Warn on STDERR (never
+            // pollutes a redirected stdout); the export still SUCCEEDS and exit stays 0. A clean
+            // ledger (0 Hard) prints no warning → stdout byte-identical to today.
+            if report.unresolved_hard > 0 {
+                let n = report.unresolved_hard;
+                match tax_year {
+                    Some(y) => eprintln!(
+                        "⚠ tax year {y} is NOT COMPUTABLE — {n} unresolved Hard blocker(s) remain; \
+                         the exported Form 8949 / Schedule D are INFORMATIONAL, not final. \
+                         Run `btctax verify` to resolve them."
+                    ),
+                    // No --tax-year writes the projection CSVs (figures), not the 8949/Schedule D
+                    // forms — and the risk is BROADER (every year). "figures" not "forms" [R0-r2-M].
+                    None => eprintln!(
+                        "⚠ {n} unresolved Hard blocker(s) remain — every affected year is NOT \
+                         COMPUTABLE; the exported figures are INFORMATIONAL, not final. \
+                         Run `btctax verify`."
+                    ),
+                }
+            }
         }
         Command::BackupKey { out } => {
             cmd::admin::backup_key(vault, &passphrase(false)?, &out)?;

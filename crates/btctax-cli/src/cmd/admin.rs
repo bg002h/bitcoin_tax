@@ -4,9 +4,22 @@ use crate::config::{set_fee_treatment, set_pre2025_method as config_set_pre2025_
 use crate::render::write_csv_exports;
 use crate::{require_attestation, CliConfig, CliError, Session};
 use btctax_adapters::BundledTaxTables;
-use btctax_core::{compute_se_tax, FeeTreatment, LotMethod, TaxTables};
+use btctax_core::{compute_se_tax, FeeTreatment, LotMethod, Severity, TaxTables};
 use btctax_store::Passphrase;
 use std::path::{Path, PathBuf};
+
+/// Outcome of the CLI `export_snapshot` wrapper: the written snapshot path plus the count of
+/// UNRESOLVED Hard blockers (`severity() == Hard`) in the projection. Any Hard blocker gates EVERY
+/// tax year (`compute_tax_year` short-circuits on the projection-wide first Hard blocker), so
+/// `unresolved_hard > 0` means every exported Form 8949 / Schedule D / projection CSV is
+/// INFORMATIONAL, not final — the `ExportSnapshot` main.rs arm warns on stderr accordingly. A
+/// fully-resolved ledger yields `0` and no warning. Advisory blockers (incl. `PseudoReconcileActive`,
+/// `SelfTransferInboundZeroBasis`) never count.
+#[derive(Debug, Clone)]
+pub struct ExportReport {
+    pub path: PathBuf,
+    pub unresolved_hard: usize,
+}
 
 pub fn show_config(vault_path: &Path, pp: &Passphrase) -> Result<CliConfig, CliError> {
     Session::open(vault_path, pp)?.config()
@@ -53,7 +66,7 @@ pub fn export_snapshot(
     out_dir: &Path,
     tax_year: Option<i32>,
     attest: Option<&str>,
-) -> Result<PathBuf, CliError> {
+) -> Result<ExportReport, CliError> {
     let session = Session::open(vault_path, pp)?;
     // Attestation gate: REFUSE before ANY bytes are written when a synthetic default contributes and the
     // attestation is missing/wrong — no fictional snapshot/8949/Schedule D leaves the machine unguarded.
@@ -94,7 +107,18 @@ pub fn export_snapshot(
         se_result.as_ref(),
         &donation_details,
     )?;
-    Ok(sqlite)
+    // [R0-I1] Count UNRESOLVED Hard blockers only. Any Hard blocker gates every year, so the count
+    // alone (no per-year `compute_tax_year` call, no profile/tables dependency) drives the main.rs
+    // stderr "INFORMATIONAL, not final" disclosure. Advisory blockers never count.
+    let unresolved_hard = state
+        .blockers
+        .iter()
+        .filter(|b| b.kind.severity() == Severity::Hard)
+        .count();
+    Ok(ExportReport {
+        path: sqlite,
+        unresolved_hard,
+    })
 }
 
 /// Probe: would an export be gated? `true` when the projection is pseudo-active (a synthetic default
