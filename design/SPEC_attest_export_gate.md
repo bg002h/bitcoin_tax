@@ -1,79 +1,96 @@
 # SPEC — attestation export gate (sub-project 3 of auto-pseudo-reconcile — FINAL)
 
-**Source baseline:** `main` @ `afb0807` (branch `feat/attest-export-gate`). **Review status: DRAFT — awaiting R0
-(2 rounds to 0C/0I).** Design of record: `design/BRAINSTORM_auto_pseudo_reconcile.md`; roadmap memory
-`auto-pseudo-reconcile-roadmap`. **Cross-cutting decisions settled — do NOT re-brainstorm.** Sub-projects 1
-(per-exchange method election, `514875b`) + 2 (pseudo-reconcile mode, `afb0807`) are SHIPPED.
+**Source baseline:** `main` @ `afb0807` (branch `feat/attest-export-gate`). **Review status: R0 round 1 folded
+(1C/3I/1M/1N — all merged IN-PLACE; surgical, no append). Awaiting R0 round 2.** Review:
+`reviews/R0-spec-attest-export-gate-round-1.md`. Design of record: `design/BRAINSTORM_auto_pseudo_reconcile.md`.
+**Cross-cutting decisions settled — do NOT re-brainstorm.** Sub-projects 1 (`514875b`) + 2 (`afb0807`) SHIPPED.
 
 ## Goal
-Replace sub-2's **interim [I3] export refusal** with the settled **typed-attestation gate**: producing
-`export-snapshot` output (the snapshot SQLite + projection CSVs + the tax-year Form 8949 / Schedule D / 8283 /
-Schedule SE forms) while the ledger is **pseudo-active** requires the user to type the exact phrase
-**`I attest this is true`**. A ledger that is NOT pseudo-active exports with NO prompt (today's behavior — the
-user has already attested via their real decisions). This is the deliberate, friction-ful acknowledgment that
-lets a pseudo-reconciled draft be exported ON PURPOSE while making an accidental filing impossible.
+Replace sub-2's **interim [I3] export refusal** with the settled **typed-attestation gate**: producing any
+Form 8949 / Schedule D / 8283 / Schedule SE (or the snapshot SQLite + projection CSVs) while the ledger is
+**pseudo-active** requires the user to affirm the exact phrase **`I attest this is true`**. A NOT-pseudo-active
+ledger exports with no prompt (today's behavior). The deliberate friction that lets a fictional draft be
+exported ON PURPOSE while making accidental filing impossible.
 
-## Settled decisions (from the brainstorm)
-- **Trigger = pseudo-active ONLY** (`state.pseudo_active()`, state.rs:268 = `pseudo_synthetic_count > 0`). A
-  fully-real ledger is never gated.
-- **Exact phrase** `I attest this is true` — a `const ATTEST_PHRASE`, compared TRIMMED, case-SENSITIVE, exact
-  (a near-miss or extra text is rejected).
-- **Scope = `export-snapshot` only** — it is the sole path that writes data/form FILES. `report --tax-year` is
-  on-screen (already `[PSEUDO]`-flagged by sub-2, never a file) — NOT gated.
-- **Output stays clean** — sub-2's guard is unchanged: the written files carry NO `[PSEUDO]` marker; the
-  attestation merely PERMITS the export. (The user attesting owns the numbers — README disclaimer alignment.)
-- Not persisted — a one-shot per-invocation command gate; no event/side-table.
+## [R0-C1] The gate covers BOTH form-writing paths (the "sole path" premise was FALSE)
+Two shipped commands write the form CSVs; **both** must be gated:
+1. **`btctax export-snapshot` (CLI)** — `cmd::admin::export_snapshot`, currently the interim [I3] refusal
+   (admin.rs:56-57).
+2. **`btctax-tui` VIEWER export** — `btctax-tui/src/export.rs:115 do_export` → `:143 write_form_csvs`, reached
+   via `lib.rs:246` (`e` opens a modal) → `:169-181` (Enter → do_export). Currently a plain Enter/Esc confirm,
+   **no pseudo check** — the exact bypass this sub-project exists to prevent (`pseudo on` → viewer `e`/Enter →
+   fictional 8949 on disk). The viewer's projection honors the persisted pseudo flag (unlock.rs:173 →
+   session.rs:461-464 → config.rs:125-126,40), so `pseudo_active()` is available there.
+`btctax-tui-edit` is CLEAN — its source-gate (edit/persist.rs:1708-1757) forbids the form writers; NOT in scope.
+
+## Settled decisions
+- **Trigger = pseudo-active ONLY** (`state.pseudo_active()`, state.rs:268 = `pseudo_synthetic_count > 0` —
+  complete, catches the basis-taint case). A fully-real ledger (even with the mode flag ON but 0 synthetics) is
+  never gated. Gate ONLY when pseudo-active; not "always."
+- **Exact phrase** `const ATTEST_PHRASE = "I attest this is true"` — compared TRIMMED, case-SENSITIVE, exact.
+  **[R0-M1]** the prompt + error strings are BUILT from `ATTEST_PHRASE` (a KAT asserts they contain it — no drift).
+- **Output stays clean** — sub-2's guard is unchanged: written files carry NO `[PSEUDO]` marker; the attestation
+  merely PERMITS the export.
+- Not persisted — a one-shot per-invocation gate; no event/side-table.
 
 ## Mechanism
-- `cmd::admin::export_snapshot` (admin.rs) — REPLACE the `if state.pseudo_active() { return
-  Err(PseudoActiveExport(..)) }` block (admin.rs:56-57) with: `if state.pseudo_active() {
-  require_attestation(attest)?; }`. Still checked FIRST (before any bytes are written — a rejected attestation
-  leaves `out_dir` untouched).
-- `require_attestation(attest: Option<&str>) -> Result<(), CliError>`:
-  - if `attest.map(str::trim) == Some(ATTEST_PHRASE)` → Ok.
-  - else if stdin is a TTY → PROMPT (`"This snapshot includes pseudo-reconciled placeholder values, NOT real
-    tax data. To export it, type exactly: I attest this is true\n> "`), read one line, trim, exact-compare →
-    Ok / `Err(CliError::AttestationFailed)`.
-  - else (non-interactive, no/wrong `--attest`) → `Err(CliError::AttestationRequired)` naming the phrase.
-- Error variants: replace `PseudoActiveExport(usize)` with `AttestationRequired` (non-interactive, phrase
-  missing) + `AttestationFailed` (phrase typed but wrong) — both name the exact phrase + that the state is
-  pseudo-reconciled. main() maps to exit 2 (error), stderr.
+- **[R0-I2] Pure library helper (no I/O):** `require_attestation(attest: Option<&str>) -> Result<(), CliError>`
+  in btctax-cli — EXACT-COMPARE ONLY, no TTY read:
+  - `attest.map(str::trim) == Some(ATTEST_PHRASE)` → `Ok(())`.
+  - **[R0-I1]** `Some(_)` non-matching → `Err(AttestationFailed)` (a wrong phrase is FAILED regardless of env).
+  - `None` → `Err(AttestationRequired)`.
+  Keeps the library I/O-explicit (lib.rs:3, session.rs:2 invariant) and the KATs deterministic (no env-dependent
+  TTY branch inside the fn — the round-1 hang risk).
+- **CLI (`export-snapshot`):** `cmd::admin::export_snapshot` gains `attest: Option<&str>`; REPLACE admin.rs:56-57
+  with `if state.pseudo_active() { require_attestation(attest)?; }` — still checked FIRST (before any bytes; a
+  rejected attestation leaves `out_dir` untouched). The **TTY prompt** lives in the `ExportSnapshot` **main.rs
+  arm** (main.rs:291-294, where every other prompt lives, e.g. :692-701): if pseudo-active + `--attest` absent
+  + stdin is a TTY → prompt (built from `ATTEST_PHRASE`), read a line, pass as `Some(line)`; non-TTY + absent →
+  the helper's `AttestationRequired`. (Mirrors plan→prompt→apply.)
+- **TUI (`btctax-tui` viewer) [R0-C1]:** in the export flow, when `pseudo_active()`, the `e` modal becomes a
+  TYPED-WORD modal (mirror the tui-edit safe-harbor-attest typed-word pattern) requiring `ATTEST_PHRASE` before
+  `do_export`; Esc cancels; a wrong phrase does not export. When NOT pseudo-active → today's plain Enter/Esc
+  confirm. Uses the shared `ATTEST_PHRASE`/exact-compare (btctax-tui depends on btctax-cli).
+- **Errors:** replace `PseudoActiveExport(usize)` with `AttestationRequired` + `AttestationFailed` (both name
+  `ATTEST_PHRASE` + that the state is pseudo-reconciled); main() → exit 2 / stderr (main.rs:42-43).
 
-## CLI
-`btctax export-snapshot --out <dir> [--tax-year <Y>] [--attest "I attest this is true"]`. The `--attest` arg
-(`Option<String>`) is the non-interactive path (scripts/tests); absent + pseudo-active + TTY → interactive
-prompt; absent + pseudo-active + non-TTY → `AttestationRequired`. Threaded to `export_snapshot`.
+## [R0-I3] Sub-2 KAT to UPDATE (removing `PseudoActiveExport` won't compile otherwise)
+`crates/btctax-cli/tests/pseudo_reconcile_cli.rs:138-162 export_snapshot_refused_while_pseudo_active` asserts
+the removed `PseudoActiveExport` variant (:145-148) → rewrite it to the attestation behavior (missing/wrong →
+refused; correct → permitted). Only references to the variant: admin.rs:57, lib.rs:61, that test — the plan
+covers all three.
 
-## KATs (btctax-cli tests)
-- `export_pseudo_active_with_correct_attest_writes_files` — pseudo-active + `--attest "I attest this is true"`
-  → export succeeds, files present.
-- `export_pseudo_active_missing_attest_refused_out_dir_untouched` — pseudo-active, no `--attest`, non-TTY →
-  `AttestationRequired`; `out_dir` has NO files (checked FIRST).
-- `export_pseudo_active_wrong_phrase_refused` — `--attest "i attest this is true"` / `--attest "I attest this
-  is true!!"` / trailing-junk → `AttestationFailed` (exact, trimmed, case-sensitive).
-- `export_not_pseudo_active_needs_no_attest` — a fully-real ledger exports with NO `--attest` (byte-identical
-  to today).
-- `attest_gate_supersedes_interim_i3_refusal` — the old `PseudoActiveExport` unconditional refusal is gone; a
-  correct attestation now PERMITS the export (the [I3] behavior change).
-- **[★ fault-inject target]** the phrase check is load-bearing — breaking the exact-compare (accept any string)
-  ⇒ `export_pseudo_active_wrong_phrase_refused` goes RED.
-- Output cleanliness still holds (sub-2's `pseudo_marker_...absent_from_every_export_file` — re-run, still green).
+## KATs
+CLI (pseudo_reconcile_cli.rs): `export_pseudo_active_correct_attest_writes_files`;
+`export_pseudo_active_missing_attest_refused_out_dir_untouched` (`None`→`AttestationRequired`, no files);
+`export_pseudo_active_wrong_phrase_refused` (`Some("i attest…")`/`Some("…!!")`/trailing-junk → `AttestationFailed`
+— exact/trimmed/case-sensitive; **★ fault-inject target** — break the exact-compare ⇒ RED);
+`export_not_pseudo_active_ignores_attest` **[R0-N1]** (fully-real ledger exports with no `--attest`; same file
+SET, not byte-identical — sqlite embeds timestamps); the rewritten `export_snapshot_refused_...` →
+`attest_gate_supersedes_interim_i3_refusal`; `attest_strings_contain_phrase` **[M1]**.
+TUI (btctax-tui tests): `viewer_pseudo_active_export_requires_typed_phrase` (typing the phrase exports; wrong/
+Esc does not); `viewer_not_pseudo_active_export_plain_confirm`. Re-run sub-2's
+`pseudo_marker_...absent_from_every_export_file` (still green — output stays clean, both paths).
 
 ## Scope / SemVer / lockstep
-btctax-cli only (admin.rs export path + CLI arg + error variants). No core change. Behavior change: pseudo-active
-export goes from unconditional-refusal → attestable (MINOR — a new capability + a new flag). Lockstep: `make
-docs` (regen `btctax-export-snapshot.1` — its inline `--help` gains `--attest` + the gate note), doc-comments.
-No GUI schema_mirror (no GUI crate). Update the sub-2 FOLLOWUPS "interim [I3]" note to "replaced by sub-3".
+**btctax-cli** (helper + admin.rs + main.rs arm + error variants) **+ btctax-tui** (viewer export modal) [R0-C1].
+No core change. Behavior change: pseudo-active export refusal → attestable (MINOR — new capability + `--attest`
+flag + a TUI modal). Lockstep: `make docs` (regen `btctax-export-snapshot.1` + the `?`-overlay note for the
+viewer modal), doc-comments. No GUI schema_mirror (no GUI/tauri crate — verified). Update the sub-2 FOLLOWUPS
+"interim [I3]" note → "replaced by sub-3 (attestation gate, both CLI + viewer)".
 
 ## Plan (TDD)
-- **T1** — `ATTEST_PHRASE` const + `require_attestation` + error variants; replace the admin.rs:56-57 [I3] block;
-  the exact-phrase KATs (correct/missing/wrong) + out-dir-untouched + not-pseudo-active-no-attest.
-- **T2** — CLI `--attest` arg threaded; the supersedes-[I3] KAT; the ★ fault-inject; re-run sub-2's
-  output-cleanliness KAT. `make docs`; whole-diff review + full suite + FOLLOWUPS (program COMPLETE).
+- **T1** — `ATTEST_PHRASE` + pure `require_attestation` + error variants; replace admin.rs:56-57; **rewrite the
+  sub-2 `export_snapshot_refused_...` KAT** [I3]; the exact-phrase KATs (correct/missing/wrong/not-active) +
+  out-dir-untouched + `attest_strings_contain_phrase` + the ★ fault-inject.
+- **T2** — CLI `--attest` arg + main.rs-arm TTY prompt; the supersedes KAT.
+- **T3** — btctax-tui viewer typed-word export modal (mirror safe-harbor-attest) + the 2 viewer KATs; re-run
+  sub-2 output-cleanliness. `make docs`; whole-diff review + full suite + FOLLOWUPS (**program COMPLETE**).
 
 ## Gotchas
-- **Gate ONLY when pseudo-active** — a fully-real export must stay prompt-free + byte-identical (KAT).
-- **Check FIRST, before any bytes** — a rejected attestation leaves `out_dir` untouched (mirror the [I3] order).
-- **Exact phrase** — trimmed, case-sensitive; a near-miss is rejected (fault-inject the compare).
-- **Output stays clean** — the attestation PERMITS export; it does NOT add markers to the files (sub-2 guard holds).
-- **Non-interactive safety** — no TTY + no/wrong `--attest` ⇒ refuse (never silently export a pseudo draft in a script).
+- **[C1] TWO paths** — CLI export-snapshot AND the btctax-tui viewer `e` export both gate; missing the viewer
+  is the accidental-filing bypass.
+- **[I2] pure helper** — no TTY read in `require_attestation` (env-dependent hang); prompt lives in the main.rs arm / TUI modal.
+- **[I1] wrong phrase ⇒ `AttestationFailed`** regardless of TTY; only `None` ⇒ `AttestationRequired`.
+- **Gate ONLY when pseudo-active**; check FIRST (out_dir untouched on refuse); exact/trimmed/case-sensitive phrase.
+- **Output stays clean** — attestation permits; adds no markers (sub-2 guard holds).
