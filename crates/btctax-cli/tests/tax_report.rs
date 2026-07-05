@@ -583,23 +583,27 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
     );
 }
 
-/// M4 (Task 10): when the declared 2026 `carryforward_in` ≠ 2025's computed `carryforward_out`,
-/// `report --tax-year 2026` renders the advisory line and still exits 0 (non-gating).
+/// M4 (Task 10): when the declared 2027 `carryforward_in` ≠ 2026's computed `carryforward_out`,
+/// `report --tax-year 2027` renders the advisory line and still exits 0 (non-gating).
+///
+/// (Re-pointed from 2026→2027 after TY2026 was bundled: 2026 now COMPUTES, so it can no longer be
+/// the "unbundled → NotComputable" year. The WHOLE scenario shifts forward one year — the loss and
+/// its carryforward must stay in the prior-year CSV, else the mismatch zeroes out and this fails.)
 ///
 /// Scenario derivation (hand-verified):
-///   2025 vault: buy 1 BTC @ $50,000 on 2025-01-15 (ST); sell 1 BTC @ $40,000 on 2025-06-15 (ST).
-///   → crypto_st = −$10,000; no LT; no carryforward-in declared in the 2025 profile.
+///   2026 vault: buy 1 BTC @ $50,000 on 2026-01-15 (ST); sell 1 BTC @ $40,000 on 2026-06-15 (ST).
+///   → crypto_st = −$10,000; no LT; no carryforward-in declared in the 2026 profile.
 ///   net_1222(−10000, 0, 0, 0, 0, 3000):
 ///     st_net = −10000; lt_net = 0; both losses cross-net: no cross.
 ///     loss_deduction = min(10000, 3000) = 3000; absorbed_st = 3000; absorbed_lt = 0.
 ///     st_carry = 10000 − 3000 = 7000; lt_carry = 0.
-///   carryforward_out TY2025 = { short: 7000, long: 0 }.
-///   2026 profile declares carryforward_in = { short: 0, long: 0 } (deliberately wrong).
+///   carryforward_out TY2026 = { short: 7000, long: 0 } (2026 IS bundled, so the prior year computes).
+///   2027 profile declares carryforward_in = { short: 0, long: 0 } (deliberately wrong).
 ///   → Advisory fires: "does not match" is in rendered output.
-///   2026 TaxTable is not bundled → main outcome is NotComputable(TaxTableMissing); exit 0.
+///   2027 TaxTable is not bundled → main outcome is NotComputable(TaxTableMissing); exit 0.
 #[test]
 fn carryforward_mismatch_advisory_rendered() {
-    // Synthetic Coinbase CSV: ST buy+sell in 2025 at a loss.
+    // Synthetic Coinbase CSV: ST buy+sell in 2026 at a loss.
     let csv_dir = tempfile::tempdir().unwrap();
     let csv_path = csv_dir.path().join("coinbase_st_loss.csv");
     std::fs::write(
@@ -607,17 +611,17 @@ fn carryforward_mismatch_advisory_rendered() {
         "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
 ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
 Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
-st-buy,2025-01-15 12:00:00 UTC,Buy,BTC,1.00000000,USD,50000.00,50000.00,50000.00,0.00,,,\r\n\
-st-sell,2025-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.00,0.00,,,\r\n",
+st-buy,2026-01-15 12:00:00 UTC,Buy,BTC,1.00000000,USD,50000.00,50000.00,50000.00,0.00,,,\r\n\
+st-sell,2026-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.00,0.00,,,\r\n",
     )
     .unwrap();
     let (_dir, vault) = make_vault_with(&csv_path);
 
-    // 2025 profile: Single, OTI=100k, MAGI=100k, QD=0, carryforward_in=0/0.
+    // 2026 profile: Single, OTI=100k, MAGI=100k, QD=0, carryforward_in=0/0 (the prior/loss year).
     cmd::tax::set_profile(
         &vault,
         &pp(),
-        2025,
+        2026,
         TaxProfile {
             filing_status: btctax_core::FilingStatus::Single,
             ordinary_taxable_income: dec!(100000),
@@ -632,11 +636,11 @@ st-sell,2025-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
     )
     .unwrap();
 
-    // 2026 profile: declares carryforward_in={short:0, long:0} — wrong (should be {7000,0}).
+    // 2027 profile: declares carryforward_in={short:0, long:0} — wrong (should be {7000,0}).
     cmd::tax::set_profile(
         &vault,
         &pp(),
-        2026,
+        2027,
         TaxProfile {
             filing_status: btctax_core::FilingStatus::Single,
             ordinary_taxable_income: dec!(100000),
@@ -651,10 +655,10 @@ st-sell,2025-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
     )
     .unwrap();
 
-    // report --tax-year 2026: main outcome is NotComputable (no TY2026 table); advisory fires.
+    // report --tax-year 2027: main outcome is NotComputable (no TY2027 table); advisory fires.
     let (outcome, advisory, _sched_d, _gift, _se, _appraisal) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2026, dec!(0)).unwrap();
-    let rendered = render::render_tax_outcome(2026, &outcome, advisory.as_deref());
+        cmd::tax::report_tax_year(&vault, &pp(), 2027, dec!(0)).unwrap();
+    let rendered = render::render_tax_outcome(2027, &outcome, advisory.as_deref());
 
     // Advisory must contain the mismatch message.
     assert!(
