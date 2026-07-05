@@ -4,7 +4,7 @@
 .SH NAME
 export\-snapshot \- FR10: export decrypted SQLite + CSV (the NFR2 plaintext exception)
 .SH SYNOPSIS
-\fBexport\-snapshot\fR <\fB\-\-out\fR> [\fB\-\-tax\-year\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBexport\-snapshot\fR <\fB\-\-out\fR> [\fB\-\-tax\-year\fR] [\fB\-\-attest\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 FR10: export decrypted SQLite + CSV (the NFR2 plaintext exception)
 .SH OPTIONS
@@ -24,6 +24,9 @@ FORMAT (removals.csv header + one sample donation row):
 .TP
 \fB\-\-tax\-year\fR \fI<TAX_YEAR>\fR
 Also emit the per\-tax\-year Form 8949 + Schedule D CSVs (form8949.csv / schedule_d.csv), scoped to this calendar year. Omit to write only the all\-years projection CSVs
+.TP
+\fB\-\-attest\fR \fI<ATTEST>\fR
+Attestation phrase required to export while the ledger is PSEUDO\-RECONCILED (a synthetic default contributes to the projection). Pass the exact phrase `I attest this is true` (trimmed, case\-sensitive) to export the fictional draft ON PURPOSE. Omit on a fully\-real ledger (never gated). Omit on an interactive terminal to be prompted; omit when piped (non\-TTY) while pseudo\-active and the export is refused
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help (see a summary with \*(Aq\-h\*(Aq)

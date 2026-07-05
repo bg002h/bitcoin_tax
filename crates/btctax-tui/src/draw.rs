@@ -6,6 +6,7 @@ use crate::unlock::UnlockState;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Tabs, Wrap},
     Frame,
 };
@@ -164,6 +165,12 @@ fn draw_viewer(frame: &mut Frame, app: &mut App) {
 /// Clears the underlying content first, then draws the modal box with the export details.
 /// This is drawn AFTER the tab content so it appears on top.
 fn draw_export_modal(frame: &mut Frame, area: Rect, modal: &crate::export::ExportConfirmState) {
+    // [sub-3 / R0-C1] Pseudo-active exports use a TYPED-WORD attest modal instead of the plain confirm.
+    if let Some(attest) = modal.attest.as_ref() {
+        draw_export_attest_modal(frame, area, modal, attest);
+        return;
+    }
+
     // Build modal content text.
     let file_lines: String = modal.files.iter().map(|f| format!("    {f}\n")).collect();
 
@@ -189,6 +196,70 @@ fn draw_export_modal(frame: &mut Frame, area: Rect, modal: &crate::export::Expor
         .block(
             Block::default()
                 .title(format!(" Export form CSVs for {} ", modal.year))
+                .borders(Borders::ALL),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(p, modal_rect);
+}
+
+/// Render the PSEUDO-ACTIVE export modal: a typed-word attestation gate [sub-3 / R0-C1].
+///
+/// The user must type the exact `btctax_cli::ATTEST_PHRASE` before the export runs; a wrong phrase
+/// shows an error (buffer preserved) and does NOT export; `Esc` cancels. Mirrors tui-edit's
+/// SafeHarborAttest TypedWord modal. The prompt line is BUILT from `ATTEST_PHRASE` (no drift).
+fn draw_export_attest_modal(
+    frame: &mut Frame,
+    area: Rect,
+    modal: &crate::export::ExportConfirmState,
+    attest: &crate::export::AttestInput,
+) {
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(
+            "  The ledger is PSEUDO-RECONCILED — this would export a",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "  FICTIONAL draft. Attest ON PURPOSE to proceed.",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+        Line::from(format!("  Type exactly:  {}", btctax_cli::ATTEST_PHRASE)),
+        Line::from(format!("  Your input:    {}_", attest.buf)),
+        Line::from(""),
+        Line::from(format!("  Output directory:  {}", modal.out_dir.display())),
+        Line::from("  Files to write:"),
+    ];
+    for f in modal.files.iter() {
+        lines.push(Line::from(format!("    {f}")));
+    }
+    lines.push(Line::from(""));
+
+    if let Some(err) = attest.error.as_deref() {
+        lines.push(Line::from(Span::styled(
+            format!("  {err}"),
+            Style::default().fg(Color::Red),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    lines.push(Line::from(Span::styled(
+        "  [Enter] Attest & export     [Esc] Cancel — writes nothing",
+        Style::default().fg(Color::Cyan),
+    )));
+
+    // Height: content + border; file_lines already folded into `lines`, so size off `lines`.
+    let modal_width: u16 = 64;
+    let modal_height = (lines.len() as u16 + 2).max(13);
+    let modal_rect = centered_rect(modal_width, modal_height, area);
+
+    frame.render_widget(Clear, modal_rect);
+    let p = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .title(format!(
+                    " Attest to export form CSVs for {} (pseudo-active) ",
+                    modal.year
+                ))
                 .borders(Borders::ALL),
         )
         .wrap(Wrap { trim: false });

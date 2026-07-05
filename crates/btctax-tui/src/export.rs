@@ -61,6 +61,22 @@ pub struct ExportConfirmState {
     /// public struct contract and may be read by future callers or tests.
     #[allow(dead_code)]
     pub export_now: OffsetDateTime,
+    /// [sub-3 / R0-C1] Typed-attestation gate. `Some` iff the snapshot is PSEUDO-ACTIVE at modal-open
+    /// time (`snap.state.pseudo_active()`): the modal becomes a TYPED-WORD modal requiring the exact
+    /// `btctax_cli::ATTEST_PHRASE` before the export runs (mirrors tui-edit's SafeHarborAttest TypedWord
+    /// gate). `None` on a fully-real ledger → today's plain Enter/Esc confirm. The gate is procedural in
+    /// the modal (`handle_key`); `do_export` stays a pure writer.
+    pub attest: Option<AttestInput>,
+}
+
+/// Typed-attestation input state for the pseudo-active export modal.
+///
+/// `buf` accumulates the user's keystrokes; `error` holds the "wrong phrase" message (buffer is
+/// PRESERVED on a wrong phrase so the user corrects with Backspace). Mirrors tui-edit's TypedWord.
+#[derive(Default)]
+pub struct AttestInput {
+    pub buf: String,
+    pub error: Option<String>,
 }
 
 // ── SE assembly helpers ───────────────────────────────────────────────────────
@@ -295,6 +311,7 @@ mod tests {
             out_dir: out_dir.clone(),
             files: compute_files(&snap, 2025),
             export_now,
+            attest: None,
         };
 
         do_export(&snap, &modal).expect("export must succeed");
@@ -428,6 +445,7 @@ mod tests {
             out_dir: out_dir.clone(),
             files: compute_files(&snap, 2025),
             export_now,
+            attest: None,
         };
 
         do_export(&snap, &modal).expect("export must succeed");
@@ -477,6 +495,7 @@ mod tests {
             out_dir: out_dir.clone(),
             files: compute_files(&snap, 2025),
             export_now,
+            attest: None,
         };
 
         do_export(&snap, &modal).expect("export must succeed");
@@ -547,6 +566,7 @@ mod tests {
             out_dir: out_dir.clone(),
             files,
             export_now,
+            attest: None,
         };
 
         do_export(&snap, &modal).expect("export must succeed");
@@ -588,6 +608,7 @@ mod tests {
             out_dir: out_dir.clone(),
             files,
             export_now,
+            attest: None,
         };
 
         do_export(&snap, &modal).expect("export must succeed");
@@ -635,6 +656,7 @@ mod tests {
             out_dir: out_dir.clone(),
             files: compute_files(&snap, 2025),
             export_now,
+            attest: None,
         };
 
         // Export must fail — pre-existing dir triggers AlreadyExists.
