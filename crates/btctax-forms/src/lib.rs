@@ -16,6 +16,7 @@
 //! The tax data is REUSED verbatim from the projection (`btctax_core::form_8949` /
 //! `btctax_core::schedule_d`) — this crate never recomputes gains.
 
+mod cells;
 mod error;
 mod fill8949;
 mod form1040;
@@ -40,7 +41,7 @@ use time::macros::format_description;
 /// The tax years this build bundles forms + maps for. Each fill dispatches to the year's committed
 /// map + bundled PDF via the `Map::for_year` constructors; an unlisted year fails closed with
 /// [`FormsError::UnsupportedYear`].
-pub const SUPPORTED_YEARS: &[i32] = &[2024, 2025];
+pub const SUPPORTED_YEARS: &[i32] = &[2017, 2024, 2025];
 
 /// Format a date as **MM/DD/YYYY** — Form 8949's native date format for columns (b)/(c).
 pub(crate) fn fmt_date(d: TaxDate) -> Result<String, FormsError> {
@@ -154,16 +155,19 @@ pub fn rows_possibly_broker_reported(rows: &[Form8949Row]) -> usize {
 // ── Internals exposed for the KATs (fault injection needs a corruptible map + the verifier). ──────
 #[doc(hidden)]
 pub mod testonly {
+    pub use crate::cells::fmt_money_pair;
     pub use crate::fill8949::{fill_8949_parts, part_data, pdf_has_xfa, split_parts, PartData};
     pub use crate::form1040::{fill_form_1040_capgains as fill_1040_with_map, Form1040Fill};
     pub use crate::form8283::fill_form_8283 as fill_8283_with_map;
     pub use crate::map::{
-        AmountCols, Form1040Map, Form8283Map, Form8949Map, PartMap, ScheduleDMap, ScheduleSeMap,
+        AmountCols, Form1040Map, Form8283Map, Form8949Map, MoneyCell, MoneyPair, PartMap,
+        ScheduleDMap, ScheduleSeMap,
     };
     pub use crate::pdf::{
         button_on_states, checkbox_on, collect_fields, index, load, text_value, Field,
-        F1040_PDF_2024, F1040_PDF_2025, F8283_PDF_2024, F8283_PDF_2025, F8949_PDF_2024,
-        F8949_PDF_2025, SCHEDULE_D_PDF_2024, SCHEDULE_D_PDF_2025, SCHEDULE_SE_PDF_2024,
+        F1040_PDF_2017, F1040_PDF_2024, F1040_PDF_2025, F8283_PDF_2017, F8283_PDF_2024,
+        F8283_PDF_2025, F8949_PDF_2017, F8949_PDF_2024, F8949_PDF_2025, SCHEDULE_D_PDF_2017,
+        SCHEDULE_D_PDF_2024, SCHEDULE_D_PDF_2025, SCHEDULE_SE_PDF_2017, SCHEDULE_SE_PDF_2024,
         SCHEDULE_SE_PDF_2025,
     };
     pub use crate::schedule_d::fill_schedule_d_totals;

@@ -14,8 +14,6 @@ use crate::verify::{column_x_bands, in_band, no_unmapped_filled, Geo, Placement}
 use crate::{fmt_money, pdf};
 use btctax_core::ScheduleDTotals;
 
-/// Schedule D's Part I amount-column subform token (columns d,e,g,h).
-const SCHED_D_TABLE_TOKEN: &str = "Table_PartI";
 /// Amount-column indices as ordered left→right in the Part I grid: d=0, e=1, g=2, h=3.
 const SD_COL_D: usize = 0;
 const SD_COL_E: usize = 1;
@@ -108,17 +106,20 @@ pub fn fill_schedule_d_totals(
             &mut placements,
         );
     }
-    // Always answer the QOF question — No for SP1.
-    writes.push((
-        map.qof_no.field.clone(),
-        pdf::FieldValue::Check {
-            on: map.qof_no.on.clone(),
-        },
-    ));
-    placements.push(Placement {
-        fqn: map.qof_no.field.clone(),
-        geo: Geo::Check,
-    });
+    // Answer the QOF question — No — on years that HAVE one (2024/2025). The 2017 Schedule D predates
+    // Qualified Opportunity Funds (2019), so its map omits the field and nothing is written.
+    if let Some(qof_no) = &map.qof_no {
+        writes.push((
+            qof_no.field.clone(),
+            pdf::FieldValue::Check {
+                on: qof_no.on.clone(),
+            },
+        ));
+        placements.push(Placement {
+            fqn: qof_no.field.clone(),
+            geo: Geo::Check,
+        });
+    }
 
     let mut doc = pdf::load(pdf::schedule_d_pdf(map.year)?)?;
     let index = pdf::index(&pdf::collect_fields(&doc)?);
@@ -130,7 +131,7 @@ pub fn fill_schedule_d_totals(
     // Read back the serialized output.
     let check = pdf::load(&bytes)?;
     let fields = pdf::collect_fields(&check)?;
-    verify_schedule_d(&check, &fields, &placements)?;
+    verify_schedule_d(&check, &fields, &placements, &map.table_token)?;
     Ok(bytes)
 }
 
@@ -155,8 +156,9 @@ pub fn verify_schedule_d(
     doc: &lopdf::Document,
     fields: &[pdf::Field],
     placements: &[Placement],
+    table_token: &str,
 ) -> Result<(), FormsError> {
-    let bands = column_x_bands(fields, 0, SCHED_D_TABLE_TOKEN)?;
+    let bands = column_x_bands(fields, 0, table_token)?;
     let index: std::collections::HashMap<&str, &pdf::Field> =
         fields.iter().map(|f| (f.fqn.as_str(), f)).collect();
     for p in placements {

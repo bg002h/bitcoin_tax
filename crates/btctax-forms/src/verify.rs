@@ -49,12 +49,17 @@ fn page_of(fqn: &str) -> usize {
     }
 }
 
-/// Extract the `Row{n}` number from a data-grid field's fqn.
-fn row_num(fqn: &str) -> Option<u32> {
-    let i = fqn.find(".Row")? + 4;
-    let rest = &fqn[i..];
-    let end = rest.find('[')?;
-    rest[..end].parse().ok()
+/// The row-group key of a data-grid cell: the subform component **immediately after the table token**
+/// (`Row1[0]` on Form 8949, `Line3[0]`/`Line1b[0]` on the 2017 Schedule D whose grid rows are named
+/// `Line{n}`, not `Row{n}`). Rows are later ordered by geometry (widget y-center), so the key need
+/// only be unique per row, not numeric. Returns `None` for a non-grid field.
+fn row_key(fqn: &str, table_token: &str) -> Option<String> {
+    let after = fqn.split_once(table_token)?.1; // e.g. "[0].Row1[0].f1_3[0]"
+    let mut it = after.split('.');
+    it.next()?; // the table token's own "[0]"
+    let key = it.next()?; // "Row1[0]" / "Line3[0]"
+    it.next()?; // require a leaf beyond the row subform (so the table node itself is skipped)
+    Some(key.to_string())
 }
 
 /// Column-x and row-y bands re-derived from one page's data grid — the geometry oracle.
@@ -68,12 +73,12 @@ struct GridBands {
 }
 
 fn derive_bands(fields: &[Field], page: usize, table_token: &str) -> Result<GridBands, FormsError> {
-    // Group this page's data-grid widgets by structural Row number (independent of the map).
-    let mut rows: HashMap<u32, Vec<&Field>> = HashMap::new();
+    // Group this page's data-grid widgets by structural row subform (independent of the map).
+    let mut rows: HashMap<String, Vec<&Field>> = HashMap::new();
     for f in fields {
         if page_of(&f.fqn) == page && f.fqn.contains(table_token) && f.rect.is_some() {
-            if let Some(n) = row_num(&f.fqn) {
-                rows.entry(n).or_default().push(f);
+            if let Some(k) = row_key(&f.fqn, table_token) {
+                rows.entry(k).or_default().push(f);
             }
         }
     }
@@ -82,8 +87,8 @@ fn derive_bands(fields: &[Field], page: usize, table_token: &str) -> Result<Grid
             "page {page}: no data-grid widgets found for band derivation"
         )));
     }
-    // Order rows top→bottom by widget y-center (geometry, NOT the Row number label).
-    let mut ordered: Vec<(u32, Vec<&Field>)> = rows.into_iter().collect();
+    // Order rows top→bottom by widget y-center (geometry, NOT the row subform label).
+    let mut ordered: Vec<(String, Vec<&Field>)> = rows.into_iter().collect();
     let row_cy =
         |v: &[&Field]| -> f32 { v.iter().filter_map(|f| f.cy()).sum::<f32>() / (v.len() as f32) };
     ordered.sort_by(|a, b| row_cy(&b.1).partial_cmp(&row_cy(&a.1)).unwrap());

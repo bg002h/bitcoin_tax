@@ -396,8 +396,7 @@ fn form_1040_7b_checkboxes_untouched() {
 fn fault_injected_1040_da_yes_no_swap_is_red() {
     // Swap the map's Yes/No entries → the same-y-pair oracle catches it (Yes must be the LEFT member).
     let mut map = Form1040Map::ty2025();
-    std::mem::swap(&mut map.da_yes.field, &mut map.da_no.field);
-    std::mem::swap(&mut map.da_yes.on, &mut map.da_no.on);
+    std::mem::swap(&mut map.da_yes, &mut map.da_no);
     let err = fill_1040_with_map(
         &Form1040Inputs {
             da_yes: true,
@@ -793,9 +792,12 @@ fn map_2025_matches_bundled_pdf_fieldset() {
     }
     let m = Form1040Map::ty2025();
     let f1040_set = fieldset(F1040_PDF_2025);
-    for name in [&m.line7a, &m.da_yes.field, &m.da_no.field] {
+    let mut f1040_names: Vec<String> = m.line7a.fields().iter().map(|s| s.to_string()).collect();
+    f1040_names.push(m.da_yes.as_ref().unwrap().field.clone());
+    f1040_names.push(m.da_no.as_ref().unwrap().field.clone());
+    for name in &f1040_names {
         assert!(
-            f1040_set.contains(name),
+            f1040_set.contains(name.as_str()),
             "1040 map field absent from PDF: {name}"
         );
     }

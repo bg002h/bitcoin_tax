@@ -71,6 +71,7 @@ impl BundledTaxTables {
     /// their Rev. Procs. are verified).
     pub fn load() -> Self {
         let mut by_year = BTreeMap::new();
+        by_year.insert(2017, ty2017());
         by_year.insert(2024, ty2024());
         by_year.insert(2025, ty2025());
         by_year.insert(2026, ty2026());
@@ -87,6 +88,134 @@ impl TaxTables for BundledTaxTables {
 /// Construct an `OrdinaryBracket` from a (lower, rate) pair.
 fn br(lower: Usd, rate: Usd) -> OrdinaryBracket {
     OrdinaryBracket { lower, rate }
+}
+
+/// TY2017 — **pre-TCJA** — Rev. Proc. 2016-55 §2.01 (rate tables) + §2.03 (Maximum Capital Gains
+/// Rate), with the SSA §230 Social Security wage base ($127,200, SSA 2016-10-18).
+///
+/// 2017 is the last full pre-TCJA year: **seven** ordinary brackets at the historic
+/// **10 / 15 / 25 / 28 / 33 / 35 / 39.6%** rates (NOT the TCJA 10/12/22/24/32/35/37 of 2018+), and the
+/// §1(h) preferential rates keyed to the ordinary brackets (0% through the top of the 15% bracket,
+/// 20% starting at the 39.6% threshold). Encoded VERBATIM from Rev. Proc. 2016-55 (I.R.B. 2016-49);
+/// transcribed, never re-derived; pinned by `ty2017_table_matches_rev_proc_2016_55`.
+///
+/// This table exists so `export-irs-pdf --tax-year 2017` can compute the Schedule SE §1401 figure
+/// (which needs the year's `ss_wage_base`); the 8949 / Schedule D / 8283 / 1040 packets are
+/// table-free. QSS is not inserted explicitly; `TaxTable::key` maps `Qss → Mfj` at lookup time.
+fn ty2017() -> TaxTable {
+    let mut ordinary = BTreeMap::new();
+
+    // §2.01 Table 3 — Single (§1(c) rate schedule).
+    ordinary.insert(
+        FilingStatus::Single,
+        OrdinarySchedule {
+            brackets: vec![
+                br(dec!(0), dec!(0.10)),
+                br(dec!(9325), dec!(0.15)),
+                br(dec!(37950), dec!(0.25)),
+                br(dec!(91900), dec!(0.28)),
+                br(dec!(191650), dec!(0.33)),
+                br(dec!(416700), dec!(0.35)),
+                br(dec!(418400), dec!(0.396)),
+            ],
+        },
+    );
+
+    // §2.01 Table 1 — Married Filing Jointly / Qualifying Surviving Spouse (§1(a) rate schedule).
+    ordinary.insert(
+        FilingStatus::Mfj,
+        OrdinarySchedule {
+            brackets: vec![
+                br(dec!(0), dec!(0.10)),
+                br(dec!(18650), dec!(0.15)),
+                br(dec!(75900), dec!(0.25)),
+                br(dec!(153100), dec!(0.28)),
+                br(dec!(233350), dec!(0.33)),
+                br(dec!(416700), dec!(0.35)),
+                br(dec!(470700), dec!(0.396)),
+            ],
+        },
+    );
+
+    // §2.01 Table 2 — Head of Household (§1(b) rate schedule).
+    ordinary.insert(
+        FilingStatus::HoH,
+        OrdinarySchedule {
+            brackets: vec![
+                br(dec!(0), dec!(0.10)),
+                br(dec!(13350), dec!(0.15)),
+                br(dec!(50800), dec!(0.25)),
+                br(dec!(131200), dec!(0.28)),
+                br(dec!(212500), dec!(0.33)),
+                br(dec!(416700), dec!(0.35)),
+                br(dec!(444550), dec!(0.396)),
+            ],
+        },
+    );
+
+    // §2.01 Table 4 — Married Filing Separately (§1(d) rate schedule).
+    ordinary.insert(
+        FilingStatus::Mfs,
+        OrdinarySchedule {
+            brackets: vec![
+                br(dec!(0), dec!(0.10)),
+                br(dec!(9325), dec!(0.15)),
+                br(dec!(37950), dec!(0.25)),
+                br(dec!(76550), dec!(0.28)),
+                br(dec!(116675), dec!(0.33)),
+                br(dec!(208350), dec!(0.35)),
+                br(dec!(235350), dec!(0.396)),
+            ],
+        },
+    );
+
+    // §2.03 — §1(h) LTCG breakpoints (0% through top of the 15% ordinary bracket; 20% from the 39.6%
+    // ordinary threshold). max_zero = top of the 0% band; max_fifteen = top of the 15% band.
+    let mut ltcg = BTreeMap::new();
+    ltcg.insert(
+        FilingStatus::Single,
+        LtcgBreakpoints {
+            max_zero: dec!(37950),
+            max_fifteen: dec!(418400),
+        },
+    );
+    ltcg.insert(
+        FilingStatus::Mfj,
+        LtcgBreakpoints {
+            max_zero: dec!(75900),
+            max_fifteen: dec!(470700),
+        },
+    );
+    ltcg.insert(
+        FilingStatus::HoH,
+        LtcgBreakpoints {
+            max_zero: dec!(50800),
+            max_fifteen: dec!(444550),
+        },
+    );
+    ltcg.insert(
+        FilingStatus::Mfs,
+        LtcgBreakpoints {
+            max_zero: dec!(37950),
+            max_fifteen: dec!(235350),
+        },
+    );
+
+    TaxTable {
+        year: 2017,
+        source: "Rev. Proc. 2016-55 §2.01/§2.03 (TY2017, pre-TCJA 10/15/25/28/33/35/39.6%); \
+                 SSA 2016-10-18 (ss_wage_base $127,200)",
+        ordinary,
+        ltcg,
+        // §2503(b) gift annual exclusion per donee — Rev. Proc. 2016-55 §2.35(1) (TY2017 = $14,000).
+        gift_annual_exclusion: dec!(14000),
+        // §230 SSA (42 U.S.C. §430) Social Security wage base — SSA announced 2016-10-18
+        // (TY2017 = $127,200, up from TY2016 $118,500).
+        ss_wage_base: dec!(127200),
+        // §2010(c)(3) basic exclusion amount (unified credit / lifetime gift+estate exclusion) —
+        // Rev. Proc. 2016-55 §2.41 (TY2017 = $5,490,000).
+        gift_lifetime_exclusion: dec!(5_490_000),
+    }
 }
 
 /// TY2024 — Rev. Proc. 2023-34 §3.01 (rate tables) + §3.03 (Maximum Capital Gains Rate).
@@ -793,6 +922,134 @@ mod tests {
         assert_eq!(t25.gift_annual_exclusion, dec!(19000));
         assert_eq!(t25.ss_wage_base, dec!(176100));
         assert_eq!(t25.gift_lifetime_exclusion, dec!(13_990_000));
+    }
+
+    // ── TY2017 KATs (pre-TCJA; Rev. Proc. 2016-55 §2.01/§2.03; SSA 2016-10-18) ─────────────────────
+
+    /// ★ [tax-critical, R0-r2-M1] TY2017 FULL-SCHEDULE equality lock: every one of the 28 ordinary
+    /// bracket edges (4 statuses × 7) AND all 28 rates AND the four §1(h) LTCG pairs AND the
+    /// $127,200 SS wage base, asserted by DIRECT equality against arrays transcribed VERBATIM from
+    /// Rev. Proc. 2016-55 §2.01 Tables 1–4 / §2.03. A wrong 2017 rate or edge = a wrong 2017 return,
+    /// so this is the primary-source gate (a few spot-pins would leave the delta-cancellation hole).
+    ///
+    /// [R0-r3-Mb] the NIIT threshold is NOT asserted here — it is the year-independent statutory
+    /// `niit_threshold()` fn, never a `TaxTable` field.
+    #[test]
+    fn ty2017_table_matches_rev_proc_2016_55() {
+        let t = BundledTaxTables::load();
+        let tt = t.table_for(2017).unwrap();
+
+        // §2.01 Tables 1–4 — (lower, rate) pairs, verbatim. Historic pre-TCJA rates.
+        // Table 3 — Single.
+        let single: [(Usd, Usd); 7] = [
+            (dec!(0), dec!(0.10)),
+            (dec!(9325), dec!(0.15)),
+            (dec!(37950), dec!(0.25)),
+            (dec!(91900), dec!(0.28)),
+            (dec!(191650), dec!(0.33)),
+            (dec!(416700), dec!(0.35)),
+            (dec!(418400), dec!(0.396)),
+        ];
+        // Table 1 — Married Filing Jointly / Qualifying Surviving Spouse.
+        let mfj: [(Usd, Usd); 7] = [
+            (dec!(0), dec!(0.10)),
+            (dec!(18650), dec!(0.15)),
+            (dec!(75900), dec!(0.25)),
+            (dec!(153100), dec!(0.28)),
+            (dec!(233350), dec!(0.33)),
+            (dec!(416700), dec!(0.35)),
+            (dec!(470700), dec!(0.396)),
+        ];
+        // Table 2 — Head of Household.
+        let hoh: [(Usd, Usd); 7] = [
+            (dec!(0), dec!(0.10)),
+            (dec!(13350), dec!(0.15)),
+            (dec!(50800), dec!(0.25)),
+            (dec!(131200), dec!(0.28)),
+            (dec!(212500), dec!(0.33)),
+            (dec!(416700), dec!(0.35)),
+            (dec!(444550), dec!(0.396)),
+        ];
+        // Table 4 — Married Filing Separately.
+        let mfs: [(Usd, Usd); 7] = [
+            (dec!(0), dec!(0.10)),
+            (dec!(9325), dec!(0.15)),
+            (dec!(37950), dec!(0.25)),
+            (dec!(76550), dec!(0.28)),
+            (dec!(116675), dec!(0.33)),
+            (dec!(208350), dec!(0.35)),
+            (dec!(235350), dec!(0.396)),
+        ];
+
+        for (status, expected) in [
+            (FilingStatus::Single, &single),
+            (FilingStatus::Mfj, &mfj),
+            (FilingStatus::HoH, &hoh),
+            (FilingStatus::Mfs, &mfs),
+        ] {
+            let sched = tt.ordinary_for(status);
+            assert_eq!(
+                sched.brackets.len(),
+                7,
+                "{status:?}: TY2017 must have exactly 7 ordinary brackets"
+            );
+            for (i, (lower, rate)) in expected.iter().enumerate() {
+                assert_eq!(
+                    sched.brackets[i].lower, *lower,
+                    "{status:?} bracket[{i}] lower must match Rev. Proc. 2016-55 §2.01 verbatim"
+                );
+                assert_eq!(
+                    sched.brackets[i].rate, *rate,
+                    "{status:?} bracket[{i}] rate must match Rev. Proc. 2016-55 §2.01 verbatim"
+                );
+            }
+        }
+
+        // §2.03 §1(h) LTCG pairs.
+        for (status, max_zero, max_fifteen) in [
+            (FilingStatus::Single, dec!(37950), dec!(418400)),
+            (FilingStatus::Mfj, dec!(75900), dec!(470700)),
+            (FilingStatus::HoH, dec!(50800), dec!(444550)),
+            (FilingStatus::Mfs, dec!(37950), dec!(235350)),
+        ] {
+            assert_eq!(
+                *tt.ltcg_for(status),
+                LtcgBreakpoints {
+                    max_zero,
+                    max_fifteen
+                },
+                "{status:?} LTCG pair must match Rev. Proc. 2016-55 §2.03 verbatim"
+            );
+        }
+
+        // ★ the $127,200 SS wage base (the SE leg's dependency — the reason this table exists).
+        assert_eq!(
+            tt.ss_wage_base,
+            dec!(127200),
+            "TY2017 SS wage base must be $127,200 (SSA 2016-10-18)"
+        );
+
+        // Qss aliases MFJ (not a stored key).
+        assert!(!tt.ordinary.contains_key(&FilingStatus::Qss));
+        assert_eq!(
+            tt.ordinary_for(FilingStatus::Qss),
+            tt.ordinary_for(FilingStatus::Mfj)
+        );
+    }
+
+    /// TY2017 ancillary indexed fields (Rev. Proc. 2016-55 §2.35 / §2.41).
+    #[test]
+    fn ty2017_ancillary_fields() {
+        let t = BundledTaxTables::load();
+        let tt = t.table_for(2017).unwrap();
+        assert_eq!(tt.gift_annual_exclusion, dec!(14000));
+        assert_eq!(tt.gift_lifetime_exclusion, dec!(5_490_000));
+        assert_eq!(tt.ss_wage_base, dec!(127200));
+    }
+
+    #[test]
+    fn ty2017_table_is_available() {
+        assert!(BundledTaxTables::load().table_for(2017).is_some());
     }
 
     // ── TY2024 KATs ──────────────────────────────────────────────────────────────────────────────────

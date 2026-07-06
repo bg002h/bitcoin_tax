@@ -1,0 +1,30 @@
+# Schedule SE (Form 1040), tax year 2017 — the OLD short+long form. btctax fills the §B LONG SCHEDULE
+# SE on PAGE 2. Every money amount is split into a dollars field + a 2-digit cents field (a MoneyPair);
+# the geometric oracle checks the dollars field's column-x and the ordinal-y descent, and the cents
+# field rides along as an authorized-but-geometry-exempt write. Column x-clusters (code-side oracle,
+# schedule_se.rs SE_CLUSTERS_2017): AMOUNT dollars cx ≈ 514, MID (lines 8a/13) dollars cx ≈ 392.
+# Line 12 = lines 10 + 11 (SS + regular Medicare ONLY; the 0.9% Additional Medicare Tax has been
+# off-Schedule-SE since 2013). $400 floor holds (line 4c STOP). The blank form pre-prints line 7
+# (127,200/00) and line 14 (5,200/00) — listed in prefilled_exempt so they don't read as stray writes.
+form = "schedule_se"
+year = 2017
+
+line2  = { dollars_field = "topmostSubform[0].Page2[0].f2_7[0]",  cents_field = "topmostSubform[0].Page2[0].f2_8[0]" }
+line3  = { dollars_field = "topmostSubform[0].Page2[0].f2_9[0]",  cents_field = "topmostSubform[0].Page2[0].f2_10[0]" }
+line4a = { dollars_field = "topmostSubform[0].Page2[0].f2_11[0]", cents_field = "topmostSubform[0].Page2[0].f2_12[0]" }
+line4c = { dollars_field = "topmostSubform[0].Page2[0].f2_15[0]", cents_field = "topmostSubform[0].Page2[0].f2_16[0]" }
+line6  = { dollars_field = "topmostSubform[0].Page2[0].f2_21[0]", cents_field = "topmostSubform[0].Page2[0].f2_22[0]" }
+line8a = { dollars_field = "topmostSubform[0].Page2[0].f2_25[0]", cents_field = "topmostSubform[0].Page2[0].f2_26[0]" }
+line8d = { dollars_field = "topmostSubform[0].Page2[0].f2_31[0]", cents_field = "topmostSubform[0].Page2[0].f2_32[0]" }
+line9  = { dollars_field = "topmostSubform[0].Page2[0].f2_33[0]", cents_field = "topmostSubform[0].Page2[0].f2_34[0]" }
+line10 = { dollars_field = "topmostSubform[0].Page2[0].f2_35[0]", cents_field = "topmostSubform[0].Page2[0].f2_36[0]" }
+line11 = { dollars_field = "topmostSubform[0].Page2[0].f2_37[0]", cents_field = "topmostSubform[0].Page2[0].f2_38[0]" }
+line12 = { dollars_field = "topmostSubform[0].Page2[0].f2_39[0]", cents_field = "topmostSubform[0].Page2[0].f2_40[0]" }
+line13 = { dollars_field = "topmostSubform[0].Page2[0].f2_41[0]", cents_field = "topmostSubform[0].Page2[0].f2_42[0]" }
+
+prefilled_exempt = [
+  "topmostSubform[0].Page2[0].Line7Dollars[0]",
+  "topmostSubform[0].Page2[0].Line7Cents[0]",
+  "topmostSubform[0].Page2[0].Line14Dollars[0]",
+  "topmostSubform[0].Page2[0].Line14Cents[0]",
+]

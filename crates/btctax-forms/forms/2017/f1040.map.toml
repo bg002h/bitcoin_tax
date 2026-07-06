@@ -1,0 +1,15 @@
+# Form 1040 (2017), capital-gains cell ONLY — logical cell → fully-qualified PDF field name.
+# The 2017 capital gain is on LINE 13 ("Capital gain or (loss). Attach Schedule D if required"),
+# split into a dollars field + a 2-digit cents field (a MoneyPair). The dollars field carries the
+# IRS-glitched name `f1-_51` (with the stray hyphen — verified against the bundled PDF); its cents
+# field is the adjacent `f1_52`. Amount column x-cluster (code-side oracle, form1040.rs
+# F1040_CLUSTERS_2017): dollars cx ≈ 518 (the cluster excludes the cents widget at cx ≈ 565).
+#
+# The 2017 Form 1040 has NO Digital-Asset question (that began in 2020) → da_present = false and the
+# map omits da_yes/da_no. The fill therefore produces the 1040 iff there is reportable CAPITAL activity
+# (Schedule D active with line 16 ≥ 0); an income-only 2017 year yields no line-13 value ⇒ skipped.
+form = "f1040"
+year = 2017
+da_present = false
+
+line7a = { dollars_field = "topmostSubform[0].Page1[0].f1-_51[0]", cents_field = "topmostSubform[0].Page1[0].f1_52[0]" }

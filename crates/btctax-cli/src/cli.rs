@@ -128,23 +128,25 @@ pub enum Command {
     /// capital-gains figure is recomputed:
     ///   - f8949.pdf + schedule_d.pdf — ALWAYS. On the 2025 (1099-DA) revision Bitcoin is filed under
     ///     Box I (short-term) / Box L (long-term) — the digital-asset boxes; on the pre-1099-DA 2024
-    ///     revision it is Box C / Box F ("not reported on a 1099-B"). Never the wrong pair for the
-    ///     year. More rows than a part's grid holds (11 in 2025, 14 in 2024) paginate onto multiple
-    ///     copies, each with its own totals.
+    ///     and 2017 revisions it is Box C / Box F ("not reported on a 1099-B"). Never the wrong pair
+    ///     for the year. More rows than a part's grid holds (11 in 2025, 14 in 2024/2017) paginate
+    ///     onto multiple copies, each with its own totals.
     ///   - schedule_se.pdf — when there is business self-employment income and net earnings are ≥ the
     ///     $400 floor. Line 12 (SE tax) = Social Security + regular Medicare ONLY; the 0.9% Additional
     ///     Medicare Tax is a Form 8959 item (flagged on stderr, not put on Schedule SE). Requires a
     ///     stored `tax-profile` for the year (filing status); missing profile ⇒ a NOTE, not a form.
     ///   - form_8283.pdf — when there are BTC donations. Fills the donee/appraiser IDENTITY + per-
-    ///     donation property rows (Section A ≤ $5,000 or Section B > $5,000, with the "k Digital assets"
-    ///     box checked); leaves every OTHER party's declaration/signature BLANK (Part III taxpayer sig,
-    ///     Part IV appraiser sig, Part V donee acknowledgment) — a Section B 8283 is NOT filing-ready
-    ///     without those signed. Overflows onto additional copies.
-    ///   - form_1040_capgains.pdf — when there is reportable digital-asset activity. Fills ONLY the
-    ///     capital-gain line (line 7a in 2025 / line 7 in 2024, when Schedule D is active and line 16 ≥
-    ///     0; active-and-zero → "-0-"; a net loss
-    ///     leaves 7a blank — the §1211 line-21 cap is yours) and the Digital-Asset question (YES iff any
-    ///     disposal, income, gift, or donation; never a "No"). 7b checkboxes are untouched.
+    ///     donation property rows (Section A ≤ $5,000 or Section B > $5,000). The property-type box is
+    ///     "k Digital assets" on the Rev. 12-2023/2025 forms (2024/2025); the 2017 Rev. 12-2014 form
+    ///     has no such box, so BTC uses "j Other" + a printed note. Leaves every OTHER party's
+    ///     declaration/signature BLANK — a Section B 8283 is NOT filing-ready without those signed.
+    ///     Overflows onto additional copies.
+    ///   - form_1040_capgains.pdf — when there is reportable capital/digital-asset activity. Fills the
+    ///     capital-gain line (line 7a in 2025 / line 7 in 2024 / line 13 in 2017, when Schedule D is
+    ///     active and line 16 ≥ 0; active-and-zero → "-0-"; a net loss leaves it blank — the §1211
+    ///     line-21 cap is yours) and, on 2024/2025, the Digital-Asset question (YES iff any disposal,
+    ///     income, gift, or donation; never a "No"). The 2017 form has no Digital-Asset question, so an
+    ///     income-only 2017 year produces no 1040. 7b checkboxes are untouched.
     ///
     /// Every written value is read back GEOMETRICALLY against the blank PDF's own field coordinates and
     /// the fill FAILS CLOSED on any mis-placement — a wrong tax form is never written. The engine drops
@@ -162,9 +164,11 @@ pub enum Command {
         /// git repo.
         #[arg(long, verbatim_doc_comment)]
         out: PathBuf,
-        /// The tax year to fill (this build bundles TY2024 and TY2025; other years are refused).
-        /// TY2024 is the pre-1099-DA revision: Bitcoin is filed under Box C/F (not Box I/L) and the
-        /// 1040 capital gain is on line 7 (not 7a).
+        /// The tax year to fill (this build bundles TY2017, TY2024 and TY2025; other years are
+        /// refused). TY2024/TY2017 are pre-1099-DA revisions: Bitcoin is filed under Box C/F (not Box
+        /// I/L). TY2017 additionally uses the OLD forms — the §B long Schedule SE, Form 8283 Rev.
+        /// 12-2014 ("j Other", no digital-asset box), the 1040 capital gain on line 13, and NO
+        /// Digital-Asset question.
         #[arg(long)]
         tax_year: i32,
         /// Restrict the packet to specific forms (repeat or comma-separate). Default = every

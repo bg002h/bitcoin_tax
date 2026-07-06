@@ -1,0 +1,20 @@
+# Schedule D, tax year 2017 (pre-TCJA / pre-QOF) — logical line → fully-qualified PDF field name.
+# Part I/II amount columns (d,e,g,h) live under TablePartI / TablePartII. The 2017 grid token is
+# "TablePartI" (NO underscore — vs "Table_PartI" on 2024/2025); the grid rows are named Line{n}, not
+# Row{n} (the geometry oracle groups by the subform after the token, so both work). Box C (short-term)
+# totals go on LINE 3; Box F (long-term) totals on LINE 10; line 16 (total) is on page 2. QOF began in
+# 2019, so the 2017 Schedule D has NO QOF question — the map omits qof_yes/qof_no.
+form = "schedule_d"
+year = 2017
+table_token = "TablePartI"
+
+# Line 3 — Part I total (Box C): d,e,g,h.
+line3 = { proceeds_d = "topmostSubform[0].Page1[0].TablePartI[0].Line3[0].f1_011[0]", cost_e = "topmostSubform[0].Page1[0].TablePartI[0].Line3[0].f1_012[0]", adj_g = "topmostSubform[0].Page1[0].TablePartI[0].Line3[0].f1_013[0]", gain_h = "topmostSubform[0].Page1[0].TablePartI[0].Line3[0].f1_014[0]" }
+# Line 7 — net short-term gain/loss (column h).
+line7_h = "topmostSubform[0].Page1[0].f1_018[0]"
+# Line 10 — Part II total (Box F): d,e,g,h.
+line10 = { proceeds_d = "topmostSubform[0].Page1[0].TablePartII[0].Line10[0].f1_027[0]", cost_e = "topmostSubform[0].Page1[0].TablePartII[0].Line10[0].f1_028[0]", adj_g = "topmostSubform[0].Page1[0].TablePartII[0].Line10[0].f1_029[0]", gain_h = "topmostSubform[0].Page1[0].TablePartII[0].Line10[0].f1_030[0]" }
+# Line 15 — net long-term gain/loss (column h).
+line15_h = "topmostSubform[0].Page1[0].f1_035[0]"
+# Line 16 — total (line 7 + line 15), page 2.
+line16_h = "topmostSubform[0].Page2[0].f2_001[0]"

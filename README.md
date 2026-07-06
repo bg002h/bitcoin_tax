@@ -164,38 +164,45 @@ This writes a decrypted SQLite database plus CSVs — including Form 8949 and Sc
 ```sh
 btctax --vault ./vault.pgp export-irs-pdf --out ./export --tax-year 2025
 # or an earlier year:      export-irs-pdf --out ./export --tax-year 2024
+# or a historical year:    export-irs-pdf --out ./export --tax-year 2017
 # or restrict the packet: --forms f8949,schedule-d
 ```
 
-Supported years: **2024** and **2025**. The two revisions differ (btctax fills the right one per year):
-on **2025** (the 1099-DA revision) Bitcoin goes in **Box I/L** and the 1040 capital gain is **line 7a**;
-on **2024** (pre-1099-DA) it is **Box C/F** ("not reported on a 1099-B"), the 8949 grid holds **14
-rows/part**, the 1040 capital gain is **line 7**, and Form 8283 is **Rev. 12-2023**.
+Supported years: **2017**, **2024** and **2025** — btctax fills the right revision per year. On **2025**
+(the 1099-DA revision) Bitcoin goes in **Box I/L** and the 1040 capital gain is **line 7a**. On **2024**
+(pre-1099-DA) it is **Box C/F** ("not reported on a 1099-B"), the 8949 grid holds **14 rows/part**, the
+1040 capital gain is **line 7**, and Form 8283 is **Rev. 12-2023**. **2017** is the OLD pre-TCJA packet:
+still **Box C/F** (14 rows/part), but the **§B long Schedule SE**, Form 8283 **Rev. 12-2014** (no
+digital-asset box — BTC uses **"j Other" + a printed note**), the 1040 capital gain on **line 13**, and
+**no Digital-Asset question** (so an income-only 2017 year produces no 1040). Each money amount on the
+2017 SE/1040/8283 is split into a **dollars field + a cents field**.
 
 This writes a whole packet, each form only when it applies, populated from btctax's projection
 (no capital-gains figure is recomputed):
 
 - **`f8949.pdf` + `schedule_d.pdf`** — always. Bitcoin is filed under the year's digital-asset boxes
-  (**Box I/L** on 2025, **Box C/F** on 2024) — never the wrong pair. Rows beyond a part's grid (11 in
-  2025, 14 in 2024) paginate onto multiple copies, each with its own totals; Schedule D carries the
-  grand totals.
+  (**Box I/L** on 2025, **Box C/F** on 2024/2017) — never the wrong pair. Rows beyond a part's grid (11
+  in 2025, 14 in 2024/2017) paginate onto multiple copies, each with its own totals; Schedule D carries
+  the grand totals (2017's Schedule D predates the QOF question, so it is omitted).
 - **`schedule_se.pdf`** — when you have **business** self-employment income (mining, etc.) whose net
   earnings are **≥ the $400 floor** (below it, no SE tax is owed and the form is skipped). Line 12
   (SE tax) = **Social Security + regular Medicare only**; the 0.9% **Additional Medicare Tax** is a
   **Form 8959** item and is flagged on stderr, *not* placed on Schedule SE. Needs a stored
   `tax-profile` (filing status) for the year — a missing profile prints a NOTE, not a fabricated form.
 - **`form_8283.pdf`** — when you made **BTC donations**. Fills the donee/appraiser **identity** and
-  the per-donation property rows (Section A ≤ $5,000, or **Section B** > $5,000 with the
-  **"k Digital assets"** box checked); it leaves **every other party's declaration/signature blank**
+  the per-donation property rows (Section A ≤ $5,000, or **Section B** > $5,000). The property-type box
+  is **"k Digital assets"** on the Rev. 12-2023/2025 forms; the 2017 **Rev. 12-2014** form has no such
+  box, so BTC uses **"j Other" + a printed note**. It leaves **every other party's declaration/signature blank**
   (Part III taxpayer signature, Part IV appraiser signature, Part V donee acknowledgment) — a Section
   B 8283 is **not filing-ready** until those are signed, and a donation with incomplete appraiser
   details is escalated for review. Multi-lot donations overflow onto additional copies.
-- **`form_1040_capgains.pdf`** — when there is reportable digital-asset activity. btctax fills **only
-  two cells**: the **capital-gain line** (**7a** in 2025, **7** in 2024, when Schedule D is active and line 16 ≥ 0;
-  active-and-netted-to-zero prints `-0-`; a **net loss leaves 7a blank** — the §1211
-  $3,000/$1,500-MFS cap on Schedule D line 21 is yours), and the **Digital-Asset question** (**Yes**
-  iff you had any disposal, income, gift, or donation — never a "No"). The 7b checkboxes are left
-  untouched, and a partial-scope notice lists exactly what was filled.
+- **`form_1040_capgains.pdf`** — when there is reportable capital/digital-asset activity. btctax fills
+  the **capital-gain line** (**7a** in 2025, **7** in 2024, **13** in 2017, when Schedule D is active and
+  line 16 ≥ 0; active-and-netted-to-zero prints `-0-`; a **net loss leaves it blank** — the §1211
+  $3,000/$1,500-MFS cap on Schedule D line 21 is yours), and — on 2024/2025 — the **Digital-Asset
+  question** (**Yes** iff you had any disposal, income, gift, or donation — never a "No"). The **2017
+  form has no Digital-Asset question**, so an income-only 2017 year produces no 1040. The 7b checkboxes
+  are left untouched, and a partial-scope notice lists exactly what was filled.
 - **Verified placement.** Every written value is read back _geometrically_ against the blank form's
   own field coordinates; a mis-placed cell fails closed, so a wrong tax form is never written.
 - **XFA dropped.** The engine removes the forms' XFA layer (otherwise Acrobat opens them blank) and
