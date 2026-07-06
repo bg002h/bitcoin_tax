@@ -14,6 +14,7 @@ const TAX_CRATES: &[&str] = &[
     "btctax-tui-edit",
     "btctax-core",
     "btctax-adapters",
+    "btctax-forms",
 ];
 /// Crate names whose presence in a tax crate's tree is a violation (the HTTP client + its TLS stack).
 const FORBIDDEN: &[&str] = &["ureq", "rustls"];
