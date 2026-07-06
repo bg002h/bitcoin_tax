@@ -1,6 +1,6 @@
 [package]
 name = "btctax"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 license.workspace = true
 description = "btctax — an offline, single-user US Bitcoin tax ledger. This crate reserves the name; the CLI ships as `btctax-cli` (install with `cargo install btctax-cli`)."

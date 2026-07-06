@@ -16,6 +16,62 @@ fn now() -> time::OffsetDateTime {
     datetime!(2026-02-01 12:00:00 UTC) // fixed decision clock (NFR4 deterministic tests)
 }
 
+/// The pre-#41 6-row STUB daily-close dataset. Injected into a `Session` via `set_prices` [R0-C1] so
+/// price-derived KAT assertions (whose expected FMV floors were computed from these exact stub closes,
+/// AND whose `missing_price`/`excluded` sentinels rely on 2025-04-01 being ABSENT) stay independent of
+/// the now-real bundled data (which is contiguous daily 2010-07-17→2026-06-03, so every 2025 date is
+/// priced). Injecting the stub reproduces the exact pre-swap projection for these read-only plan KATs.
+const STUB_PRICES_CSV: &str = "date,usd_close\n\
+2024-01-15,42500.00\n\
+2024-02-01,43100.50\n\
+2025-01-10,91000.00\n\
+2025-03-01,84000.00\n\
+2025-03-02,84250.25\n\
+2025-06-15,67500.00\n";
+
+/// Open a session then inject the stub price provider (the read-only plan KATs' controlled dataset).
+fn open_stub(vault: &std::path::Path) -> Session {
+    let mut s = Session::open(vault, &pp()).unwrap();
+    s.set_prices(Box::new(
+        btctax_adapters::BundledPrices::from_csv_str(STUB_PRICES_CSV).unwrap(),
+    ));
+    s
+}
+
+/// [M5 + R0-I1] A batch of native `Income{fmv_status: Missing}` events on NOW-covered bundled dates
+/// stays Hard-`FmvMissing` under the bundled provider ALONE — the already-imported Missing status is
+/// never back-filled by better data (idempotent ingest). This is the committed source-of-truth the T2
+/// "27 clear under pseudo" gate flips (A supplies the data; only B synthesizes the FMV).
+#[test]
+fn income_fmv_missing_batch_stays_blocked_under_bundled() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("m5.pgp");
+    {
+        let mut session = Session::create(&vault, &pp()).unwrap();
+        let batch = fixtures::income_fmv_missing_batch(27);
+        btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+        session.save().unwrap();
+    } // drop the create session → release the vault lock before re-opening
+
+    // REAL bundled data (covers all 27 dates) — yet the imported Missing status is not back-filled.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    let fmv_missing = state
+        .blockers
+        .iter()
+        .filter(|b| b.kind == BlockerKind::FmvMissing)
+        .count();
+    assert_eq!(
+        fmv_missing, 27,
+        "A alone leaves all 27 income events FmvMissing (idempotent import; R0-I1)"
+    );
+    assert_eq!(
+        state.income_recognized.len(),
+        0,
+        "none recognized while FMV is pending"
+    );
+}
+
 fn coinbase_with_receive(dir: &std::path::Path) -> std::path::PathBuf {
     let p = dir.join("cb_recv.csv");
     std::fs::write(&p, "\r\nTransactions\r\nUser,x\r\n\
@@ -1793,7 +1849,7 @@ fn bulk_plan_usd_total_floor_when_price_missing() {
     use rust_decimal_macros::dec;
     let dir = tempfile::tempdir().unwrap();
     let (vault, _ids) = bulk_fixture(dir.path());
-    let s = Session::open(&vault, &pp()).unwrap();
+    let s = open_stub(&vault);
 
     let plan = s
         .bulk_link_transfer_plan(
@@ -2149,7 +2205,7 @@ fn bulk_sti_plan_fmv_floor_when_price_missing() {
     use btctax_cli::{BulkStiFilter, Frame};
     let dir = tempfile::tempdir().unwrap();
     let (vault, _ids) = sti_fixture(dir.path());
-    let s = Session::open(&vault, &pp()).unwrap();
+    let s = open_stub(&vault);
 
     // wallet A / Year 2025 → i1 (2025-03-01, priced $84.00) + i2 (2025-04-01, unpriced).
     let plan = s
@@ -2311,7 +2367,7 @@ fn bulk_income_plan_lists_pending_inbounds() {
     use btctax_cli::{BulkIncomeFilter, Frame};
     let dir = tempfile::tempdir().unwrap();
     let (vault, [i1, _i2, i3, _i4]) = sti_fixture(dir.path());
-    let s = Session::open(&vault, &pp()).unwrap();
+    let s = open_stub(&vault);
 
     // Year(2025), wallet None → i1 (priced $84.00) + i3 (priced $27.00); i2 (2025, unpriced) is
     // EXCLUDED (missing price), i4 (2024) is out of frame.
@@ -2440,7 +2496,7 @@ fn bulk_income_plan_excludes_missing_price() {
     use btctax_cli::{BulkIncomeFilter, Frame};
     let dir = tempfile::tempdir().unwrap();
     let (vault, [i1, i2, _i3, _i4]) = sti_fixture(dir.path());
-    let s = Session::open(&vault, &pp()).unwrap();
+    let s = open_stub(&vault);
 
     // wallet A / Year 2025 → i1 (2025-03-01, priced) + i2 (2025-04-01, UNPRICED).
     let plan = s
@@ -2581,7 +2637,8 @@ fn bulk_income_apply_sets_autofmv() {
     assert_eq!(n, 1);
 
     let s = Session::open(&vault, &pp()).unwrap();
-    // The DECISION field is `.fmv` = Some($84.00) (the auto-FMV; NEVER None on an included row).
+    // The apply + this projection BOTH read the REAL bundled close at 2025-03-01 (85435.58/BTC → the
+    // 100_000-sat auto-FMV = $85.44); the decision `.fmv` is Some($85.44) (NEVER None on an included row).
     let ci = btctax_core::persistence::load_all(s.conn())
         .unwrap()
         .into_iter()
@@ -2597,9 +2654,9 @@ fn bulk_income_apply_sets_autofmv() {
                 fmv: Some(v),
                 kind: IncomeKind::Mining,
                 business: false
-            } if v == dec!(84.00)
+            } if v == dec!(85.44)
         ),
-        "decision fmv == fmv_of(date, sat) == $84.00; got {:?}",
+        "decision fmv == fmv_of(date, sat) == $85.44; got {:?}",
         ci.as_
     );
 
@@ -2612,7 +2669,7 @@ fn bulk_income_apply_sets_autofmv() {
         .expect("i1 recognized as income");
     assert_eq!(
         rec.usd_fmv,
-        dec!(84.00),
+        dec!(85.44),
         "projected Income.usd_fmv == fmv_of"
     );
     let lot = state
@@ -2622,7 +2679,7 @@ fn bulk_income_apply_sets_autofmv() {
         .expect("income lot created");
     assert_eq!(
         lot.usd_basis,
-        dec!(84.00),
+        dec!(85.44),
         "lot basis == the recognized FMV"
     );
 }
@@ -3123,7 +3180,7 @@ fn bulk_reclassify_outflow_plan_lists_pending_outflows() {
     use btctax_cli::{BulkFilter, Frame};
     let dir = tempfile::tempdir().unwrap();
     let (vault, [o1, o2, o3, _o4, _o5]) = bulk_fixture(dir.path());
-    let s = Session::open(&vault, &pp()).unwrap();
+    let s = open_stub(&vault);
 
     // Year(2025), wallet None → o1 (2025-03-01), o3 (2025-03-01), o2 (2025-06-15); o5 (2025-04-01)
     // is EXCLUDED (unpriced), o4 (2024) is out of frame.
@@ -3177,7 +3234,7 @@ fn bulk_reclassify_outflow_plan_excludes_missing_price() {
     use btctax_cli::{BulkFilter, Frame};
     let dir = tempfile::tempdir().unwrap();
     let (vault, [_o1, _o2, _o3, _o4, o5]) = bulk_fixture(dir.path());
-    let s = Session::open(&vault, &pp()).unwrap();
+    let s = open_stub(&vault);
 
     let plan = s
         .bulk_reclassify_outflow_plan(BulkFilter {
@@ -3198,14 +3255,21 @@ fn bulk_reclassify_outflow_plan_excludes_missing_price() {
 #[test]
 fn bulk_reclassify_outflow_apply_never_emits_fabricated_proceeds() {
     let dir = tempfile::tempdir().unwrap();
-    let (vault, [_o1, _o2, _o3, _o4, o5]) = bulk_fixture(dir.path());
+    // The bundled daily-close dataset is CONTIGUOUS through 2026-06-03, so an unpriced date must lie
+    // BEYOND it. This outflow at 2030-01-01 has no bundled price ⇒ the apply cannot resolve an
+    // auto-FMV and skips it (as it skips the bogus id below) — never a fabricated-proceeds Sell.
+    let (vault, _w, _acqs, outs) = reclass_batch_vault(
+        dir.path(),
+        &[("ro-unpriced", 40_000, datetime!(2030-01-01 12:00:00 UTC))],
+    );
+    let o_unpriced = outs[0].clone();
     let bogus = EventId::import(Source::Coinbase, SourceRef::new("no-such-out"));
 
-    // o5 (unpriced) + a bogus id → both skipped; nothing appended.
+    // unpriced out + a bogus id → both skipped; nothing appended.
     let n = cmd::reconcile::apply_bulk_reclassify_outflow(
         &vault,
         &pp(),
-        vec![o5.clone(), bogus],
+        vec![o_unpriced, bogus],
         DisposeKind::Sell,
         now(),
     )
@@ -3234,7 +3298,8 @@ fn bulk_reclassify_outflow_apply_never_emits_fabricated_proceeds() {
 fn bulk_reclassify_outflow_plan_resolves_fmv_as_proceeds() {
     use btctax_cli::{BulkFilter, Frame};
     let dir = tempfile::tempdir().unwrap();
-    // Single 100_000-sat outflow @ 2025-03-01 ($84,000/BTC → $84.00).
+    // Single 100_000-sat outflow @ 2025-03-01 (real bundled close 85435.58/BTC → $85.44). The plan and
+    // the apply BOTH read the real dataset, so `row.fmv` and the persisted proceeds agree.
     let (vault, _w, _acqs, outs) = reclass_batch_vault(
         dir.path(),
         &[("ro-1", 100_000, datetime!(2025-03-01 12:00:00 UTC))],
@@ -3251,7 +3316,7 @@ fn bulk_reclassify_outflow_plan_resolves_fmv_as_proceeds() {
     assert_eq!(plan.included.len(), 1);
     assert_eq!(
         plan.included[0].fmv,
-        dec!(84.00),
+        dec!(85.44),
         "row.fmv == fmv_of(date, sat)"
     );
     drop(s);
@@ -3276,7 +3341,7 @@ fn bulk_reclassify_outflow_plan_resolves_fmv_as_proceeds() {
         .expect("a ReclassifyOutflow for o");
     assert_eq!(
         ro.principal_proceeds_or_fmv,
-        dec!(84.00),
+        dec!(85.44),
         "payload proceeds == row.fmv"
     );
     assert!(matches!(
@@ -3299,7 +3364,7 @@ fn bulk_reclassify_outflow_plan_estimated_gain_matches_pending_legs_basis() {
         &[("ro-span", 150_000, datetime!(2025-03-01 12:00:00 UTC))],
     );
     let o = outs[0].clone();
-    let s = Session::open(&vault, &pp()).unwrap();
+    let s = open_stub(&vault);
 
     // fmv = $84,000/BTC × 150_000/1e8 = $126.00. Σ basis = $40.00 (all of A) + $40.00 (half of B) = $80.00.
     let plan = s
@@ -3365,7 +3430,7 @@ fn bulk_reclassify_outflow_plan_batch_gain_not_double_counted() {
         ],
     );
     let (o1, o2) = (outs[0].clone(), outs[1].clone());
-    let s = Session::open(&vault, &pp()).unwrap();
+    let s = open_stub(&vault);
 
     let plan = s
         .bulk_reclassify_outflow_plan(BulkFilter {

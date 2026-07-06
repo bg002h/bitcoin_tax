@@ -237,10 +237,10 @@ pub fn pseudo_approve_plan(
     filter: PseudoApproveFilter,
 ) -> Result<Vec<PseudoApproveRow>, CliError> {
     let session = Session::open(vault_path, pp)?;
-    let prices = btctax_adapters::BundledPrices::load()?;
+    let prices = session.prices();
     let events = load_all(session.conn())?;
     let cfg = session.config()?.to_projection();
-    let plan = btctax_core::pseudo_plan(&events, &prices, &cfg);
+    let plan = btctax_core::pseudo_plan(&events, prices, &cfg);
     let index: std::collections::HashMap<&EventId, &btctax_core::LedgerEvent> =
         events.iter().map(|e| (&e.id, e)).collect();
     Ok(filtered_pseudo_plan(&plan, &index, &filter)
@@ -268,10 +268,10 @@ pub fn apply_bulk_pseudo_approve(
     now: OffsetDateTime,
 ) -> Result<usize, CliError> {
     let mut session = Session::open(vault_path, pp)?;
-    let prices = btctax_adapters::BundledPrices::load()?;
+    let prices = session.prices();
     let events = load_all(session.conn())?;
     let cfg = session.config()?.to_projection();
-    let plan = btctax_core::pseudo_plan(&events, &prices, &cfg);
+    let plan = btctax_core::pseudo_plan(&events, prices, &cfg);
     let index: std::collections::HashMap<&EventId, &btctax_core::LedgerEvent> =
         events.iter().map(|e| (&e.id, e)).collect();
     let selected = filtered_pseudo_plan(&plan, &index, &filter);
@@ -475,7 +475,7 @@ pub fn apply_bulk_classify_inbound_income(
     now: OffsetDateTime,
 ) -> Result<usize, CliError> {
     let mut session = Session::open(vault_path, pp)?;
-    let prices = btctax_adapters::BundledPrices::load()?;
+    let prices = session.prices();
     let events = load_all(session.conn())?;
     let index: std::collections::HashMap<&EventId, &btctax_core::LedgerEvent> =
         events.iter().map(|e| (&e.id, e)).collect();
@@ -494,7 +494,7 @@ pub fn apply_bulk_classify_inbound_income(
         // (→ Hard `FmvMissing` year-gate, unrecoverable without void+reclassify). The plan already
         // excludes these; skipping here makes `Income{fmv:None}` STRUCTURALLY unreachable from this
         // `pub` apply even if a future caller passed a non-plan-filtered id.
-        let Some(fmv) = btctax_core::price::fmv_of(&prices, date, ti.sat) else {
+        let Some(fmv) = btctax_core::price::fmv_of(prices, date, ti.sat) else {
             continue;
         };
         let payload = EventPayload::ClassifyInbound(ClassifyInbound {
@@ -549,7 +549,7 @@ pub fn apply_bulk_reclassify_outflow(
     now: OffsetDateTime,
 ) -> Result<usize, CliError> {
     let mut session = Session::open(vault_path, pp)?;
-    let prices = btctax_adapters::BundledPrices::load()?;
+    let prices = session.prices();
     let events = load_all(session.conn())?;
     let index: std::collections::HashMap<&EventId, &btctax_core::LedgerEvent> =
         events.iter().map(|e| (&e.id, e)).collect();
@@ -566,7 +566,7 @@ pub fn apply_bulk_reclassify_outflow(
         let date = tax_date(ev.utc_timestamp, ev.original_tz);
         // #a defense-in-depth: re-derive the fmv; a missing-price row is skipped, NEVER emitted as a
         // Dispose with fabricated proceeds. Makes a fabricated-proceeds Sell structurally unreachable.
-        let Some(fmv) = btctax_core::price::fmv_of(&prices, date, t.sat) else {
+        let Some(fmv) = btctax_core::price::fmv_of(prices, date, t.sat) else {
             continue;
         };
         let payload = EventPayload::ReclassifyOutflow(ReclassifyOutflow {

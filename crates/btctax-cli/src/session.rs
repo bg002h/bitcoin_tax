@@ -7,10 +7,10 @@ use crate::donation_details;
 use crate::optimize_attest;
 use crate::tax_profile;
 use crate::CliError;
-use btctax_adapters::{BundledPrices, BundledTaxTables};
+use btctax_adapters::BundledTaxTables;
 use btctax_core::conventions::{round_cents, tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{init_schema, load_all};
-use btctax_core::{project, LedgerEvent, LedgerState, ProjectionConfig};
+use btctax_core::{project, LedgerEvent, LedgerState, PriceProvider, ProjectionConfig};
 use btctax_core::{
     AllocLot, BlockerKind, DonationDetails, EventId, EventPayload, LotMethod, PendingTransfer, Sat,
     TaxDate, TaxProfile, Usd, WalletId,
@@ -49,7 +49,7 @@ pub struct BulkLinkRow {
     /// `pending_reconciliation`); `Option` kept defensively.
     pub source_wallet: Option<WalletId>,
     pub principal_sat: Sat,
-    /// `fmv_of(&prices, date, principal_sat)` [R0-M1]; advisory, `None` on missing price / overflow.
+    /// `fmv_of(prices, date, principal_sat)` [R0-M1]; advisory, `None` on missing price / overflow.
     pub usd_value: Option<Usd>,
     /// Σ leg `usd_basis` carried (over the principal+fee sats the legs cover); non-taxable → carries.
     pub basis_usd: Usd,
@@ -97,7 +97,7 @@ pub struct BulkStiRow {
     /// defensively / for display symmetry with `BulkLinkRow`.
     pub wallet: Option<WalletId>,
     pub sat: Sat,
-    /// `fmv_of(&prices, date, sat)` — the market value being given $0 basis; `None` on missing price.
+    /// `fmv_of(prices, date, sat)` — the market value being given $0 basis; `None` on missing price.
     pub usd_fmv: Option<Usd>,
 }
 
@@ -139,7 +139,7 @@ pub struct BulkIncomeRow {
     pub in_event: EventId,
     pub date: TaxDate,
     pub sat: Sat,
-    /// [#a] The RESOLVED auto-FMV `fmv_of(&prices, date, sat)` — ALWAYS a real number (the `None`
+    /// [#a] The RESOLVED auto-FMV `fmv_of(prices, date, sat)` — ALWAYS a real number (the `None`
     /// rows are EXCLUDED upstream). This is the income recognized AND the lot basis.
     pub fmv: Usd,
 }
@@ -188,7 +188,7 @@ pub struct BulkReclassifyOutflowRow {
     /// `pending_reconciliation`); `Option` kept defensively (mirror `BulkLinkRow.source_wallet`).
     pub wallet: Option<WalletId>,
     pub principal_sat: Sat,
-    /// [#a] The RESOLVED auto-FMV `fmv_of(&prices, date, principal_sat)` — ALWAYS a real number (the
+    /// [#a] The RESOLVED auto-FMV `fmv_of(prices, date, principal_sat)` — ALWAYS a real number (the
     /// `None` rows are EXCLUDED upstream). This is the ESTIMATED proceeds a `Dispose` recognizes.
     pub fmv: Usd,
     /// Σ leg `usd_basis` carried by the fold's PendingOut consumption (the disposal's basis).
@@ -328,12 +328,30 @@ pub struct MatchProposal {
 
 pub struct Session {
     vault: Vault,
+    /// The active price provider (§9.2 bundled daily-close dataset, cache-layered in Part C). The
+    /// projection and every priced plan read prices through THIS instance seam [R0-C1/r2 I-A] rather
+    /// than a hard-wired `BundledPrices::load()`, so tests inject a CONTROLLED synthetic dataset
+    /// (`set_prices`) — decoupling their asserted FMVs from the shipped data. Pure/deterministic; the
+    /// default is the layered bundled+cache provider (resolved at open time).
+    prices: Box<dyn PriceProvider>,
 }
 
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Session").finish_non_exhaustive()
     }
+}
+
+/// Build the DEFAULT price provider a freshly-opened `Session` carries: the bundled daily-close dataset
+/// (§9.2) with the local price cache layered OVER it (Part C — cache-over-bundled; cache absent ⇒
+/// byte-identical to bundled-only). Pure/deterministic; NO network — the cache is a documented LOCAL
+/// INPUT populated only by the separate `btctax-update-prices` binary. The cache PATH is resolved HERE
+/// (btctax-cli, via `dirs`), NOT in btctax-adapters.
+fn default_prices() -> Result<Box<dyn PriceProvider>, CliError> {
+    let cache_path = crate::price_cache::default_cache_path();
+    Ok(Box::new(btctax_adapters::LayeredPrices::load_with_cache(
+        cache_path.as_deref(),
+    )?))
 }
 
 impl Session {
@@ -360,14 +378,31 @@ impl Session {
         donation_details::init_table(vault.conn())?;
         bulk_estimated::init_table(vault.conn())?;
         vault.save()?;
-        Ok(Session { vault })
+        Ok(Session {
+            vault,
+            prices: default_prices()?,
+        })
     }
 
     /// Open an existing vault (acquires the store single-instance lock; NFR7).
     pub fn open(vault_path: &Path, pp: &Passphrase) -> Result<Session, CliError> {
         Ok(Session {
             vault: Vault::open(vault_path, pp)?,
+            prices: default_prices()?,
         })
+    }
+
+    /// Borrow the active price provider (§9.2). The projection and every priced plan read prices
+    /// through this instance seam [R0-C1].
+    pub fn prices(&self) -> &dyn PriceProvider {
+        self.prices.as_ref()
+    }
+
+    /// Test / advanced seam [R0-C1/r2 I-A]: replace the price provider on an OPEN session. A KAT injects
+    /// a CONTROLLED synthetic `BundledPrices::from_csv_str(...)` so its asserted FMVs are independent of
+    /// the shipped dataset; a caller may also inject a pre-resolved layered/cache provider. Pure; no I/O.
+    pub fn set_prices(&mut self, prices: Box<dyn PriceProvider>) {
+        self.prices = prices;
     }
 
     /// Borrow the live in-memory SQLite handle (core appenders use interior mutability over `&Connection`).
@@ -446,8 +481,8 @@ impl Session {
     pub fn project(&self) -> Result<(LedgerState, ProjectionConfig), CliError> {
         let events = load_all(self.conn())?;
         let cfg = self.config()?.to_projection();
-        let prices = BundledPrices::load()?;
-        let state = project(&events, &prices, &cfg);
+        let prices = self.prices();
+        let state = project(&events, prices, &cfg);
         Ok((state, cfg))
     }
 
@@ -460,8 +495,8 @@ impl Session {
     ) -> Result<(Vec<LedgerEvent>, LedgerState, ProjectionConfig), CliError> {
         let events = load_all(self.conn())?;
         let cfg = self.config()?.to_projection();
-        let prices = BundledPrices::load()?;
-        let state = project(&events, &prices, &cfg);
+        let prices = self.prices();
+        let state = project(&events, prices, &cfg);
         Ok((events, state, cfg))
     }
 
@@ -476,7 +511,7 @@ impl Session {
     ) -> Result<Vec<(WalletId, LotMethod, bool)>, CliError> {
         let events = load_all(self.conn())?;
         let cfg = self.config()?.to_projection();
-        let prices = BundledPrices::load()?;
+        let prices = self.prices();
         // Distinct Exchange wallets (BTreeSet dedups AND sorts — NFR4).
         let wallets: Vec<WalletId> = events
             .iter()
@@ -485,7 +520,7 @@ impl Session {
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
-        let methods = btctax_core::in_force_methods(&events, &prices, &cfg, date, &wallets);
+        let methods = btctax_core::in_force_methods(&events, prices, &cfg, date, &wallets);
         Ok(wallets
             .into_iter()
             .zip(methods)
@@ -511,13 +546,13 @@ impl Session {
     ) -> Result<btctax_core::OptimizeProposal, CliError> {
         let (events, _state, cfg) = self.load_events_and_project()?;
         let profile = self.tax_profile(year)?;
-        let prices = BundledPrices::load()?;
+        let prices = self.prices();
         let tables = BundledTaxTables::load();
         let attested = self.optimize_attested_set()?;
         let proposal_made = tax_date(now, time::UtcOffset::UTC);
         btctax_core::optimize_year(
             &events,
-            &prices,
+            prices,
             &cfg,
             year,
             profile.as_ref(),
@@ -551,8 +586,8 @@ impl Session {
                 _ => !matches!(e.payload, EventPayload::SafeHarborAllocation(_)),
             })
             .collect();
-        let prices = BundledPrices::load()?;
-        let residue = project(&pre2025, &prices, &proj);
+        let prices = self.prices();
+        let residue = project(&pre2025, prices, &proj);
         let lots = residue
             .lots
             .iter()
@@ -575,7 +610,7 @@ impl Session {
     /// basis, applies the frame + `from_wallet` filters, and routes `source == dest` rows to
     /// `skipped_same_wallet`. Appends and persists NOTHING; mirrors `safe_harbor_residue`.
     ///
-    /// The USD value is `btctax_core::price::fmv_of(&prices, date, principal_sat)` [R0-M1] — the
+    /// The USD value is `btctax_core::price::fmv_of(prices, date, principal_sat)` [R0-M1] — the
     /// vetted checked helper (round_cents + overflow→`None`), NOT a hand-rolled `principal × price`.
     /// The total is the HONEST FLOOR [R0-I2]: `total_usd_value_floor` is Σ of the PRICED rows only,
     /// and `missing_price_count` records how many rows lacked a price, so the caller renders exact
@@ -586,7 +621,7 @@ impl Session {
         dest: WalletId,
     ) -> Result<BulkLinkPlan, CliError> {
         let (events, state, _cfg) = self.load_events_and_project()?;
-        let prices = BundledPrices::load()?;
+        let prices = self.prices();
         let index: std::collections::HashMap<EventId, &LedgerEvent> =
             events.iter().map(|e| (e.id.clone(), e)).collect();
 
@@ -603,7 +638,7 @@ impl Session {
                     )
                 });
             let source_wallet = ev.and_then(|e| e.wallet.clone());
-            let usd_value = btctax_core::price::fmv_of(&prices, date, pt.principal_sat);
+            let usd_value = btctax_core::price::fmv_of(prices, date, pt.principal_sat);
             let basis_usd: Usd = pt.legs.iter().map(|l| l.usd_basis).sum();
             BulkLinkRow {
                 out_event: pt.event.clone(),
@@ -675,7 +710,7 @@ impl Session {
         filter: BulkStiFilter,
     ) -> Result<BulkStiPlan, CliError> {
         let (events, state, _cfg) = self.load_events_and_project()?;
-        let prices = BundledPrices::load()?;
+        let prices = self.prices();
         let index: std::collections::HashMap<EventId, &LedgerEvent> =
             events.iter().map(|e| (e.id.clone(), e)).collect();
 
@@ -736,7 +771,7 @@ impl Session {
                 }
             }
             let sat = ti.sat;
-            let usd_fmv = btctax_core::price::fmv_of(&prices, date, sat);
+            let usd_fmv = btctax_core::price::fmv_of(prices, date, sat);
             included.push(BulkStiRow {
                 in_event: id.clone(),
                 date,
@@ -773,7 +808,7 @@ impl Session {
         filter: BulkIncomeFilter,
     ) -> Result<BulkIncomePlan, CliError> {
         let (events, state, _cfg) = self.load_events_and_project()?;
-        let prices = BundledPrices::load()?;
+        let prices = self.prices();
         let index: std::collections::HashMap<EventId, &LedgerEvent> =
             events.iter().map(|e| (e.id.clone(), e)).collect();
 
@@ -837,7 +872,7 @@ impl Session {
             // classified as income: an Income{fmv:None} would trade UnknownBasisInbound for a Hard
             // FmvMissing year-gate. bulk-sti INCLUDES these rows ($0-basis needs no FMV); bulk-income
             // must NOT. `included` carries the resolved non-Option fmv.
-            match btctax_core::price::fmv_of(&prices, date, sat) {
+            match btctax_core::price::fmv_of(prices, date, sat) {
                 Some(fmv) => included.push(BulkIncomeRow {
                     in_event: id.clone(),
                     date,
@@ -883,7 +918,7 @@ impl Session {
         filter: BulkFilter,
     ) -> Result<BulkReclassifyOutflowPlan, CliError> {
         let (events, state, _cfg) = self.load_events_and_project()?;
-        let prices = BundledPrices::load()?;
+        let prices = self.prices();
         let index: std::collections::HashMap<EventId, &LedgerEvent> =
             events.iter().map(|e| (e.id.clone(), e)).collect();
 
@@ -918,7 +953,7 @@ impl Session {
             }
             // [#a] EXCLUDE (count) a missing-price row — a Sell with fabricated proceeds is a SILENT
             // misreport. `included` carries the resolved non-Option fmv.
-            let fmv = match btctax_core::price::fmv_of(&prices, date, pt.principal_sat) {
+            let fmv = match btctax_core::price::fmv_of(prices, date, pt.principal_sat) {
                 Some(v) => v,
                 None => {
                     excluded_missing_price += 1;
@@ -1043,7 +1078,7 @@ impl Session {
     /// A leg matching >1 counterpart is flagged `ambiguous` (surfaced, NEVER auto-picked — G-FALSE-MATCH).
     pub fn self_transfer_match_plan(&self) -> Result<Vec<MatchProposal>, CliError> {
         let (events, state, _cfg) = self.load_events_and_project()?;
-        let prices = BundledPrices::load()?;
+        let prices = self.prices();
         let index: std::collections::HashMap<EventId, &LedgerEvent> =
             events.iter().map(|e| (e.id.clone(), e)).collect();
 
@@ -1182,7 +1217,7 @@ impl Session {
                     out_wallet: co.wallet.clone(),
                     in_sat: ci.sat,
                     out_principal_sat: co.principal,
-                    usd_value: btctax_core::price::fmv_of(&prices, co.date, co.principal),
+                    usd_value: btctax_core::price::fmv_of(prices, co.date, co.principal),
                     action: *action,
                     ambiguous,
                     txid_match: *txid_match,

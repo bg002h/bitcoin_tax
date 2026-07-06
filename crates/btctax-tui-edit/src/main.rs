@@ -6521,27 +6521,23 @@ fn handle_pseudo_approve_modal_key(app: &mut EditorApp, key: KeyEvent) {
         KeyCode::Enter => {
             let now = time::OffsetDateTime::now_utc();
             // Compute the decision payloads from the immutable snapshot (drops the borrow before persist).
-            let payloads: Vec<btctax_core::EventPayload> = match app.snapshot.as_ref() {
-                Some(snap) => {
-                    let prices = match btctax_adapters::BundledPrices::load() {
-                        Ok(p) => p,
-                        Err(e) => {
-                            app.pseudo_approve_modal = None;
-                            app.status = Some(format!("price data unavailable: {e}"));
-                            return;
-                        }
-                    };
-                    let cfg = snap.cli_config.to_projection();
-                    btctax_core::pseudo_plan(&snap.events, &prices, &cfg)
-                        .into_iter()
-                        .map(|pd| pd.decision)
-                        .collect()
-                }
-                None => {
-                    app.pseudo_approve_modal = None;
-                    return;
-                }
-            };
+            let payloads: Vec<btctax_core::EventPayload> =
+                match (app.snapshot.as_ref(), app.session.as_ref()) {
+                    (Some(snap), Some(session)) => {
+                        // Read prices through the HELD session's provider seam (the same instance the
+                        // projection used — never a second `Session::open`, which would deadlock the lock).
+                        let prices = session.prices();
+                        let cfg = snap.cli_config.to_projection();
+                        btctax_core::pseudo_plan(&snap.events, prices, &cfg)
+                            .into_iter()
+                            .map(|pd| pd.decision)
+                            .collect()
+                    }
+                    _ => {
+                        app.pseudo_approve_modal = None;
+                        return;
+                    }
+                };
             if payloads.is_empty() {
                 app.pseudo_approve_modal = None;
                 app.status = Some("No pseudo defaults to approve.".into());
@@ -10414,6 +10410,26 @@ mod tests {
         app.do_unlock();
         assert_eq!(app.screen, EditorScreen::Browse, "must open to Browse");
         app
+    }
+
+    /// Inject the pre-#41 6-row STUB daily-close dataset into the app's HELD session [R0-C1] so a
+    /// bulk-income preview's auto-FMV floors ($84.00 @ 2025-03-01, $33.75 @ 2025-06-15) and its
+    /// missing-price sentinel (2025-04-01 ABSENT) stay independent of the now-real bundled data (which
+    /// is contiguous daily → every 2025 date is priced). The plan recomputes via `session.prices()`.
+    fn inject_stub_prices(app: &mut EditorApp) {
+        const STUB: &str = "date,usd_close\n\
+2024-01-15,42500.00\n\
+2024-02-01,43100.50\n\
+2025-01-10,91000.00\n\
+2025-03-01,84000.00\n\
+2025-03-02,84250.25\n\
+2025-06-15,67500.00\n";
+        app.session
+            .as_mut()
+            .expect("held session")
+            .set_prices(Box::new(
+                btctax_adapters::BundledPrices::from_csv_str(STUB).unwrap(),
+            ));
     }
 
     // Helper: collect a string from a TestBackend terminal buffer
@@ -21198,6 +21214,7 @@ mod tests {
         let (i1, i2, _i3) = seed_income_inbounds(&vault, &key, pp_str);
 
         let mut app = open_app(&vault, pp_str);
+        inject_stub_prices(&mut app);
         handle_key(&mut app, press(KeyCode::Char('I'))); // → Filter
         assert!(matches!(
             app.bulk_income_flow.as_ref().map(|f| &f.step),
@@ -21252,6 +21269,7 @@ mod tests {
         let (i1, i2, i3) = seed_income_inbounds(&vault, &key, pp_str);
 
         let mut app = open_app(&vault, pp_str);
+        inject_stub_prices(&mut app);
         handle_key(&mut app, press(KeyCode::Char('I'))); // → Filter
         handle_key(&mut app, press(KeyCode::Enter)); // → Preview (both priced checked)
         handle_key(&mut app, press(KeyCode::Enter)); // → confirm modal (no exclude)

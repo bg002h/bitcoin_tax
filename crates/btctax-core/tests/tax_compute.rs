@@ -170,6 +170,7 @@ fn income_rec(d: time::Date, fmv: Usd) -> IncomeRecord {
         usd_fmv: fmv,
         kind: IncomeKind::Mining,
         business: false,
+        pseudo: false,
     }
 }
 fn income_rec_interest(d: time::Date, fmv: Usd) -> IncomeRecord {
@@ -180,6 +181,7 @@ fn income_rec_interest(d: time::Date, fmv: Usd) -> IncomeRecord {
         usd_fmv: fmv,
         kind: IncomeKind::Interest,
         business: false,
+        pseudo: false,
     }
 }
 fn state_with(disposals: Vec<Disposal>, income: Vec<IncomeRecord>) -> LedgerState {
@@ -261,6 +263,7 @@ fn se_tax_is_standalone_not_in_total_federal_tax_attributable() {
         usd_fmv: dec!(100000),
         kind: IncomeKind::Mining,
         business: true,
+        pseudo: false,
     };
     let st = state_with(vec![], vec![biz_mining]);
     let table = synth(2025);

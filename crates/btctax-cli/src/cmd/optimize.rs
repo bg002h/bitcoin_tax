@@ -17,7 +17,7 @@
 //! decision, no side-table write (Mode-2 produces nothing). Tax decision-support (consequences),
 //! NOT buy/sell advice.
 use crate::{CliError, Session};
-use btctax_adapters::{BundledPrices, BundledTaxTables};
+use btctax_adapters::BundledTaxTables;
 use btctax_core::conventions::tax_date;
 use btctax_core::persistence::append_decision;
 use btctax_core::{
@@ -41,13 +41,13 @@ pub fn run(
     let s = Session::open(vault, pp)?;
     let (events, _state, cfg) = s.load_events_and_project()?;
     let profile = s.tax_profile(year)?;
-    let prices = BundledPrices::load()?;
+    let prices = s.prices();
     let tables = BundledTaxTables::load();
     let attested = s.optimize_attested_set()?;
     let proposal_made = tax_date(now, UtcOffset::UTC); // R0-C2: real made-date threaded into core
     let p = optimize_year(
         &events,
-        &prices,
+        prices,
         &cfg,
         year,
         profile.as_ref(),
@@ -108,7 +108,7 @@ pub fn consult(
     let s = Session::open(vault, pp)?;
     let (events, _state, cfg) = s.load_events_and_project()?;
     let profile = s.tax_profile(at.year())?;
-    let prices = BundledPrices::load()?;
+    let prices = s.prices();
     let tables = BundledTaxTables::load();
     let req = ConsultRequest {
         sell_sat,
@@ -118,7 +118,7 @@ pub fn consult(
         kind,
     };
     // consult_sale is READ-ONLY (clone-fold-discard on every call); no save() is ever called.
-    consult_sale(&events, &prices, &cfg, profile.as_ref(), &tables, &req).map_err(map_opt_err)
+    consult_sale(&events, prices, &cfg, profile.as_ref(), &tables, &req).map_err(map_opt_err)
 }
 
 /// The result of `optimize accept` — what was persisted vs skipped (for rendering). `persisted` carries
@@ -176,7 +176,7 @@ pub fn accept_with_tables(
     let mut session = Session::open(vault, pp)?;
     let (events, _state, cfg) = session.load_events_and_project()?;
     let profile = session.tax_profile(year)?;
-    let prices = BundledPrices::load()?;
+    let prices = session.prices();
     let attested = session.optimize_attested_set()?;
     let made = tax_date(now, UtcOffset::UTC); // the LotSelection's made-date (decisions are UTC)
     let only_id = only.map(crate::eventref::parse_event_id).transpose()?;
@@ -196,7 +196,7 @@ pub fn accept_with_tables(
     // proposal against the REAL made-date (`made`) so `run` and `accept` agree on persistability.
     let proposal = optimize_year(
         &events,
-        &prices,
+        prices,
         &cfg,
         year,
         profile.as_ref(),

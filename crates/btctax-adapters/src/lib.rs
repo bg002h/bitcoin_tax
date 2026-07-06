@@ -15,7 +15,7 @@ pub mod tax_tables;
 
 pub use adapter::{Adapter, FileGroup, FileReport, GroupOutput, IngestBatch, SourceFile};
 pub use ingest::{ingest_files, ingest_files_bundled};
-pub use price::BundledPrices;
+pub use price::{BundledPrices, LayeredPrices};
 pub use tax_tables::BundledTaxTables;
 
 #[derive(Debug, thiserror::Error)]

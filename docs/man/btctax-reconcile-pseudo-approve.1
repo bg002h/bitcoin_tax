@@ -10,7 +10,7 @@ Promote pseudo default decisions to REAL (attested) decisions in bulk. Shows a p
 .SH OPTIONS
 .TP
 \fB\-\-kind\fR \fI<KIND>\fR
-Only approve defaults of this TYPE: `self\-transfer` (unknown\-basis inbound → $0 self\-transfer), `raw` (unclassified row placeholder), or `conflict` (import conflict accept\-first). Omit = all
+Only approve defaults of this TYPE: `self\-transfer` (unknown\-basis inbound → $0 self\-transfer), `raw` (unclassified row placeholder), `conflict` (import conflict accept\-first), or `fmv` (native income FMV synthesized from the daily close). Omit = all
 .br
 
 .br
@@ -22,6 +22,8 @@ self\-transfer: Unknown\-basis inbound defaulted to a $0\-basis self\-transfer\-
 raw: Unclassified row defaulted to a zero\-value placeholder (ClassifyRaw)
 .IP \(bu 2
 conflict: Import conflict defaulted to accept\-first (SupersedeImport)
+.IP \(bu 2
+fmv: Native income with a missing FMV defaulted to the daily\-close value (ManualFmv)
 .RE
 .TP
 \fB\-\-wallet\fR \fI<WALLET>\fR

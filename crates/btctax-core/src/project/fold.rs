@@ -693,6 +693,7 @@ pub(crate) fn fold_event(
                         usd_fmv: *v,
                         kind: *kind,
                         business: *business,
+                        pseudo: ev_pseudo, // [R0-I2] a pseudo daily-close FMV taints the income row
                     });
                     (*v, false)
                 }
@@ -881,6 +882,7 @@ pub(crate) fn fold_event(
                         usd_fmv: *v,
                         kind: *kind,
                         business: *business,
+                        pseudo: ev_pseudo, // [R0-r2 I-B] taint the IncomeInbound row too (both push sites)
                     });
                     (*v, false)
                 }

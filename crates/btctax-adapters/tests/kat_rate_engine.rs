@@ -171,6 +171,7 @@ fn state_with_mining(amount: Usd) -> LedgerState {
             usd_fmv: amount,
             kind: IncomeKind::Mining,
             business: false,
+            pseudo: false,
         }],
         ..LedgerState::default()
     }
@@ -194,6 +195,7 @@ fn state_lt_with_mining(lt_gain: Usd, mining: Usd) -> LedgerState {
             usd_fmv: mining,
             kind: IncomeKind::Mining,
             business: false,
+            pseudo: false,
         }],
         ..LedgerState::default()
     }

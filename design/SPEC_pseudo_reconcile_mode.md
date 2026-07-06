@@ -15,10 +15,13 @@ toward truth. Real decisions always supersede. **Bulk-approve** promotes chosen 
 decisions; `off` reverts everything.
 
 **What "0 blockers" means [R0-I2 — precise]:** pseudo clears the Hard *classification* kinds it can honestly
-default (`UnknownBasisInbound`, `Unclassified` inbound, `ImportConflict`). It does NOT clear, and leaves
-SURFACED: `UncoveredDisposal` (under-covered real Sells — fabricating acquisitions would be max-gain fiction),
-native-`Income` `FmvMissing` (pseudo defaults only inbound TransferIns), `DecisionConflict` (a collision of REAL
-decisions — see Mechanism), and `TaxTableMissing` (a missing-bundle defect). **A tax TOTAL computes only when
+default (`UnknownBasisInbound`, `Unclassified` inbound, `ImportConflict`) — AND, since **#41 Part B (REVERSAL of
+the original decision below)**, native-`Income` `FmvMissing` **WHEN a local daily-close price exists** (it is
+synthesized from that close as a `PseudoKind::PseudoFmv` `ManualFmv` default, flagged `[PSEUDO]`, approve-able).
+It does NOT clear, and leaves SURFACED: `UncoveredDisposal` (under-covered real Sells — fabricating acquisitions
+would be max-gain fiction), native-`Income` `FmvMissing` **when NO local price exists** (the residual #41 Part C's
+online updater addresses), `DecisionConflict` (a collision of REAL decisions — see Mechanism), and
+`TaxTableMissing` (a missing-bundle defect). **A tax TOTAL computes only when
 0 Hard blockers of ANY kind remain** — `compute_tax_year` returns `NotComputable` on the first Hard blocker
 (compute.rs:242,445-450; every excluded kind is Hard, state.rs:71-83). So with any excluded kind present, the
 user sees the flagged HOLDINGS/skeleton (and those blockers) but not a tax number until they resolve them; the
@@ -104,6 +107,6 @@ the new subcommands. Lockstep: `make docs`, `?`-overlay, doc-comments. **No GUI 
 - **[★] flags on-screen, clean output** — the load-bearing guard; the fault-inject KAT (incl. C1 basis taint) is mandatory.
 - **Real supersedes pseudo** — collect real first; an event with a real decision gets no default.
 - **Sells are NOT self-transfers** — only `TransferOut` withdrawals default (to leave-pending); imported `Dispose(Sell)` stays taxable (sub-1 method).
-- **`DecisionConflict` + `UncoveredDisposal` + native-Income `FmvMissing` + `TaxTableMissing` are NOT cleared** — surfaced; a tax TOTAL needs them resolved by the user.
+- **`DecisionConflict` + `UncoveredDisposal` + `TaxTableMissing` are NOT cleared** — surfaced; a tax TOTAL needs them resolved by the user. (native-Income `FmvMissing` is now cleared by #41 Part B WHEN a local daily-close price exists — flagged `[PSEUDO]`; it stays surfaced only when no price is available.)
 - **No `EventId::Decision{seq}` minting in injection** (real-seq collision) — map-layer only; seq-minting in `approve`.
 - **Marker via a dedicated bool the writers omit** — never a `BasisSource` variant (export leak).

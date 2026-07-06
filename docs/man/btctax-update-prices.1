@@ -1,0 +1,48 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-update-prices 1  btctax "btctax manual"
+.SH NAME
+btctax\-update\-prices \- Opt\-in online updater that fetches newer daily BTC/USD closes into a local cache for the btctax Bitcoin tax ledger. The ONLY btctax crate with a network dependency.
+.SH SYNOPSIS
+\fBbtctax\-update\-prices\fR [\fB\-\-from\fR] [\fB\-\-to\fR] [\fB\-\-lag\fR] [\fB\-\-dry\-run\fR] [\fB\-\-source\fR] [\fB\-\-price\-cache\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] 
+.SH DESCRIPTION
+Opt\-in online updater that fetches newer daily BTC/USD closes into a local cache for the btctax Bitcoin tax ledger. The ONLY btctax crate with a network dependency.
+.SH OPTIONS
+.TP
+\fB\-\-from\fR \fI<FROM>\fR
+First date to fetch (YYYY\-MM\-DD). Default: the day after the last known close
+.TP
+\fB\-\-to\fR \fI<TO>\fR
+Last date to fetch (YYYY\-MM\-DD). Default: today − <lag> days
+.TP
+\fB\-\-lag\fR \fI<LAG>\fR [default: 8]
+Skip the N most recent days (the settling window; sources revise recent closes for ~7 days)
+.TP
+\fB\-\-dry\-run\fR
+Preview what WOULD be appended; write nothing
+.TP
+\fB\-\-source\fR \fI<SOURCE>\fR [default: auto]
+Price source (`auto` = Binance then CoinGecko fallback)
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+auto: Binance first, CoinGecko fallback (the default)
+.IP \(bu 2
+binance: Binance klines only
+.IP \(bu 2
+coingecko: CoinGecko market_chart/range only
+.RE
+.TP
+\fB\-\-price\-cache\fR \fI<PATH>\fR
+Override the cache path (default: $BTCTAX_PRICE_CACHE, else <data_dir>/btctax/price_cache.csv)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
+.SH VERSION
+v0.3.0
