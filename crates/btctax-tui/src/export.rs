@@ -236,6 +236,7 @@ mod tests {
             usd_fmv: fmv,
             kind: IncomeKind::Mining,
             business: true,
+            pseudo: false,
         });
     }
 

@@ -1176,6 +1176,7 @@ fn dispatch_reconcile(
                             }
                             PseudoKindArg::Raw => btctax_core::PseudoKind::RawInbound,
                             PseudoKindArg::Conflict => btctax_core::PseudoKind::AcceptConflict,
+                            PseudoKindArg::Fmv => btctax_core::PseudoKind::PseudoFmv,
                         }),
                         wallet: wallet
                             .as_deref()
@@ -1235,6 +1236,7 @@ fn render_pseudo_approve_preview(rows: &[btctax_cli::cmd::reconcile::PseudoAppro
             btctax_core::PseudoKind::SelfTransferInbound => "self-transfer-in ($0 basis)",
             btctax_core::PseudoKind::RawInbound => "unclassified placeholder",
             btctax_core::PseudoKind::AcceptConflict => "import-conflict accept-first",
+            btctax_core::PseudoKind::PseudoFmv => "income FMV @ daily close",
         };
         let wallet = r
             .wallet

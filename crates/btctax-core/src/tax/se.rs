@@ -192,6 +192,7 @@ mod tests {
             usd_fmv: fmv,
             kind,
             business,
+            pseudo: false,
         }
     }
     fn state_with(income: Vec<IncomeRecord>) -> LedgerState {

@@ -6,6 +6,7 @@
 //!    file (the headline guard: a dedicated bool the writers OMIT, never a `BasisSource` variant);
 //!  - [R0-I3] `export-snapshot` REFUSES while any synthetic contributes;
 //!  - synthetics are NEVER persisted: after projecting in pseudo mode, `load_all` shows no new events.
+mod fixtures;
 use btctax_cli::{cmd, render, Session};
 use btctax_core::event::*;
 use btctax_core::identity::*;
@@ -548,5 +549,140 @@ fn pseudo_projection_persists_no_events() {
     assert_eq!(
         before, after,
         "projection in pseudo mode must NEVER append events — only `approve` writes"
+    );
+}
+
+// ── #41 Part B: pseudo income-FMV default — CLI-level KATs ────────────────────────────────────────
+
+fn now() -> time::OffsetDateTime {
+    datetime!(2026-02-01 12:00 UTC)
+}
+
+/// A native `Income{Missing}` on a PRICED date renders its recognized daily-close FMV FLAGGED `[PSEUDO]`
+/// on the ON-SCREEN report (the primary tax-output guard surface) — and the value is the daily close.
+#[test]
+fn pseudo_income_fmv_flagged_on_render() {
+    let evs = vec![imp(
+        "inc-1",
+        datetime!(2025-03-01 13:00 UTC),
+        EventPayload::Income(Income {
+            sat: 500_000,
+            usd_fmv: None,
+            fmv_status: FmvStatus::Missing,
+            kind: IncomeKind::Mining,
+            business: false,
+        }),
+    )];
+    let st = project(&evs, &prices(), &cfg_on());
+    assert_eq!(st.income_recognized.len(), 1);
+    assert!(st.income_recognized[0].pseudo);
+    let screen = render::render_report(&st, None);
+    // The income line (`… sat = <fmv> USD …`) carries the synthesized value AND the [PSEUDO] flag.
+    let income_line = screen
+        .lines()
+        .find(|l| l.contains("sat =") && l.contains("USD"))
+        .unwrap_or_else(|| panic!("income line missing:\n{screen}"));
+    assert!(
+        income_line.contains("500"),
+        "income line shows the synthesized daily-close FMV:\n{income_line}"
+    );
+    assert!(
+        income_line.contains("[PSEUDO]"),
+        "the pseudo income FMV line MUST be flagged:\n{income_line}"
+    );
+}
+
+/// [M5 gate] A committed batch of 27 native `Income{Missing}` events (bundled-covered dates) is Hard
+/// `FmvMissing` under real data ALONE; turning pseudo mode ON clears ALL 27 (recognized at the daily
+/// close, each flagged pseudo) — the "27 clear under pseudo" contract Part B delivers.
+#[test]
+fn income_fmv_27_clear_under_pseudo() {
+    let (_dir, vault) = make_vault(&fixtures::income_fmv_missing_batch(27));
+
+    // Baseline (A alone): 27 FmvMissing, none recognized.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        assert_eq!(
+            state
+                .blockers
+                .iter()
+                .filter(|b| b.kind == btctax_core::BlockerKind::FmvMissing)
+                .count(),
+            27
+        );
+        assert_eq!(state.income_recognized.len(), 0);
+    }
+
+    // Pseudo ON → all 27 clear.
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert_eq!(
+        state
+            .blockers
+            .iter()
+            .filter(|b| b.kind == btctax_core::BlockerKind::FmvMissing)
+            .count(),
+        0,
+        "pseudo cleared every income FmvMissing (all dates are bundled-covered)"
+    );
+    assert_eq!(
+        state.income_recognized.len(),
+        27,
+        "all 27 recognized at the daily close"
+    );
+    assert!(
+        state.income_recognized.iter().all(|r| r.pseudo),
+        "every synthesized income row is flagged pseudo"
+    );
+}
+
+/// While pseudo-active from a synthesized income FMV, `export-snapshot` is GATED (a missing attestation
+/// refuses) — the estimate never silently reaches an export.
+#[test]
+fn pseudo_income_fmv_export_gated() {
+    let (_dir, vault) = make_vault(&fixtures::income_fmv_missing_batch(3));
+    let out = tempfile::tempdir().unwrap();
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+    let err = cmd::admin::export_snapshot(&vault, &pp(), out.path(), Some(2025), None).unwrap_err();
+    assert!(
+        matches!(err, btctax_cli::CliError::AttestationRequired),
+        "a pseudo-active income estimate must gate the export, got {err:?}"
+    );
+    assert!(
+        !out.path().join("snapshot.sqlite").exists(),
+        "a refused export writes nothing"
+    );
+}
+
+/// `reconcile pseudo approve --kind fmv` promotes the income-FMV default to a REAL `ManualFmv` decision;
+/// the next projection resolves it via the real path (recognized, NO longer `[PSEUDO]`).
+#[test]
+fn approve_promotes_pseudo_fmv_to_manualfmv() {
+    let (_dir, vault) = make_vault(&fixtures::income_fmv_missing_batch(1));
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+
+    let filter = cmd::reconcile::PseudoApproveFilter {
+        kind: Some(btctax_core::PseudoKind::PseudoFmv),
+        ..Default::default()
+    };
+    let n = cmd::reconcile::apply_bulk_pseudo_approve(&vault, &pp(), filter, now()).unwrap();
+    assert_eq!(n, 1, "the single income-FMV default is promoted");
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let has_manual_fmv = load_all(s.conn())
+        .unwrap()
+        .iter()
+        .any(|e| matches!(e.payload, EventPayload::ManualFmv(_)));
+    assert!(has_manual_fmv, "a real ManualFmv decision was persisted");
+
+    // Re-project (pseudo still ON in config): the income resolves via the REAL ManualFmv → recognized,
+    // and NO synthetic is injected for it (no longer pseudo).
+    let (state, _) = s.project().unwrap();
+    assert_eq!(state.income_recognized.len(), 1);
+    assert!(
+        !state.income_recognized[0].pseudo,
+        "an approved (now real) income FMV is no longer flagged pseudo"
     );
 }

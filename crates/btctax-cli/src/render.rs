@@ -308,12 +308,13 @@ pub fn render_report(state: &LedgerState, year: Option<i32>) -> String {
         for i in income {
             let _ = writeln!(
                 out,
-                "  {} @ {} {} sat = {} USD{}",
+                "  {} @ {} {} sat = {} USD{}{}",
                 income_kind_tag(i.kind),
                 i.recognized_at,
                 i.sat,
                 i.usd_fmv,
-                if i.business { " [business]" } else { "" }
+                if i.business { " [business]" } else { "" },
+                pseudo_tag(i.pseudo), // [R0-I2] a pseudo daily-close income FMV is flagged on screen
             );
         }
     }

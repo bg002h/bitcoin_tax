@@ -1149,6 +1149,7 @@ mod tests {
             usd_fmv: Decimal::from(50_000i64),
             kind: IncomeKind::Mining,
             business: true,
+            pseudo: false,
         });
         let mut profiles = BTreeMap::new();
         profiles.insert(

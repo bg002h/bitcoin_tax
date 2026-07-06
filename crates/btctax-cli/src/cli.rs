@@ -615,7 +615,8 @@ pub enum Pseudo {
     /// `--yes` (or `--dry-run` to preview only). Optional filters restrict which defaults are approved.
     Approve {
         /// Only approve defaults of this TYPE: `self-transfer` (unknown-basis inbound → $0 self-transfer),
-        /// `raw` (unclassified row placeholder), or `conflict` (import conflict accept-first). Omit = all.
+        /// `raw` (unclassified row placeholder), `conflict` (import conflict accept-first), or `fmv`
+        /// (native income FMV synthesized from the daily close). Omit = all.
         #[arg(long, value_enum)]
         kind: Option<PseudoKindArg>,
         /// Only approve defaults whose target event is in this wallet (e.g. `exchange:coinbase:main`).
@@ -642,6 +643,8 @@ pub enum PseudoKindArg {
     Raw,
     /// Import conflict defaulted to accept-first (SupersedeImport).
     Conflict,
+    /// Native income with a missing FMV defaulted to the daily-close value (ManualFmv).
+    Fmv,
 }
 
 #[derive(Copy, Clone, ValueEnum)]

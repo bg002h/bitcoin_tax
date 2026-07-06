@@ -340,8 +340,9 @@ fn pseudo_projection_is_deterministic() {
 // ── I2-precise: "0 Hard classification blockers; a tax TOTAL only at 0 Hard total" ───────────────
 // Pseudo clears the Hard *classification* kinds it can honestly default, but a tax number computes
 // only when 0 Hard blockers of ANY kind remain (compute_tax_year returns NotComputable on the first
-// Hard blocker). Excluded kinds (native-Income FmvMissing, UncoveredDisposal, DecisionConflict, …) are
-// NOT cleared and still gate the total.
+// Hard blocker). Excluded kinds (UncoveredDisposal, DecisionConflict, …) are NOT cleared and still gate
+// the total. (#41 Part B: native-Income FmvMissing IS now cleared WHEN a local price exists — it stays
+// Hard only when the daily close is unavailable, the case exercised below.)
 use btctax_core::tax::compute::compute_tax_year;
 use btctax_core::tax::tables::{
     LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
@@ -450,14 +451,17 @@ fn tax_total_computes_when_pseudo_clears_all_hard_blockers() {
     }
 }
 
-/// A native-`Income` `FmvMissing` is a Hard blocker pseudo does NOT clear (pseudo defaults only inbound
-/// TransferIns, never invents income). So even with the classification blocker cleared, NO total computes
-/// — proving "a tax TOTAL only at 0 Hard total" (I2-precise).
+/// A native-`Income` `FmvMissing` on a date with NO local price is a Hard blocker pseudo does NOT clear.
+/// (#41 Part B REVERSES the blanket leave-uncleared rule: pseudo NOW synthesizes the income FMV from the
+/// daily close WHEN a price exists — but with NO price it stays FmvMissing, the residual the online
+/// updater addresses.) So even with the classification blocker cleared, NO total computes here — proving
+/// "a tax TOTAL only at 0 Hard total" (I2-precise). The income date (2025-04-15) is deliberately absent
+/// from `prices()`.
 #[test]
 fn no_tax_total_while_a_non_classification_hard_blocker_remains() {
     let evs = vec![
         transfer_in("in-1", datetime!(2025-03-01 12:00 UTC), 1_000_000),
-        native_income_fmv_missing("inc-1", datetime!(2025-03-01 13:00 UTC), 500_000),
+        native_income_fmv_missing("inc-1", datetime!(2025-04-15 13:00 UTC), 500_000),
     ];
     let st = project(&evs, &prices(), &cfg_on());
     // The classification blocker IS cleared…
@@ -481,4 +485,122 @@ fn no_tax_total_while_a_non_classification_hard_blocker_remains() {
         matches!(out, TaxOutcome::NotComputable(_)),
         "no tax total while ANY Hard blocker (native-Income FmvMissing) remains"
     );
+}
+
+// ── #41 Part B: pseudo income-FMV default (PseudoKind::PseudoFmv) ─────────────────────────────────
+
+/// A decision-event `ManualFmv` targeting `target`, at `seq`.
+fn manual_fmv_decision(seq: u64, target: &LedgerEvent, usd: rust_decimal::Decimal) -> LedgerEvent {
+    LedgerEvent {
+        id: EventId::decision(seq),
+        utc_timestamp: datetime!(2025-06-02 00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: None,
+        payload: EventPayload::ManualFmv(ManualFmv {
+            event: target.id.clone(),
+            usd_fmv: usd,
+        }),
+    }
+}
+
+/// Pseudo ON: a native `Income{Missing}` on a PRICED date is recognized at the daily close
+/// (100000/BTC × 0.005 BTC = $500.00), FmvMissing clears, and the row is tainted `pseudo`.
+#[test]
+fn pseudo_fills_income_fmv_from_daily_close() {
+    let evs = vec![native_income_fmv_missing(
+        "inc-1",
+        datetime!(2025-03-01 13:00 UTC),
+        500_000,
+    )];
+    let st = project(&evs, &prices(), &cfg_on());
+    assert!(
+        !st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::FmvMissing),
+        "the priced income FmvMissing is cleared by the pseudo default"
+    );
+    assert_eq!(st.income_recognized.len(), 1);
+    let rec = &st.income_recognized[0];
+    assert_eq!(
+        rec.usd_fmv,
+        dec!(500.00),
+        "synthesized FMV = 100000/BTC × 0.005 BTC"
+    );
+    assert!(rec.pseudo, "[R0-I2] the income row is flagged pseudo");
+    assert!(
+        st.pseudo_active(),
+        "the synthetic contributes to the pseudo count (banner + export gate)"
+    );
+}
+
+/// ★ fault-inject guard: a native `Income{Missing}` on an UNPRICED date gets NO synthetic — it stays
+/// Hard `FmvMissing` and NOTHING is recognized. Forcing the synthetic regardless of price ⇒ this RED.
+#[test]
+fn pseudo_fmv_absent_when_no_price() {
+    let evs = vec![native_income_fmv_missing(
+        "inc-1",
+        datetime!(2025-04-15 13:00 UTC), // absent from prices()
+        500_000,
+    )];
+    let st = project(&evs, &prices(), &cfg_on());
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::FmvMissing),
+        "no local price ⇒ the income stays Hard FmvMissing"
+    );
+    assert_eq!(
+        st.income_recognized.len(),
+        0,
+        "no synthetic income recognized without a price"
+    );
+    assert!(
+        !st.pseudo_active(),
+        "no pseudo default was injected for the unpriced income"
+    );
+}
+
+/// A REAL `ManualFmv` on the income supersedes the synthetic default: the recognized FMV is the user's
+/// value (not the daily close) and the row is NOT tainted pseudo (Phase C skips an already-FMV'd event).
+#[test]
+fn real_manualfmv_supersedes_pseudo_fmv() {
+    let inc = native_income_fmv_missing("inc-1", datetime!(2025-03-01 13:00 UTC), 500_000);
+    let mf = manual_fmv_decision(1, &inc, dec!(777.00));
+    let evs = vec![inc, mf];
+    let st = project(&evs, &prices(), &cfg_on());
+    assert_eq!(st.income_recognized.len(), 1);
+    let rec = &st.income_recognized[0];
+    assert_eq!(
+        rec.usd_fmv,
+        dec!(777.00),
+        "the REAL ManualFmv wins over the synthetic $500.00"
+    );
+    assert!(!rec.pseudo, "a real FMV ⇒ the row is NOT tainted pseudo");
+}
+
+/// The pseudo PLAN surfaces the income-FMV default as a materializable `ManualFmv` decision carrying the
+/// daily-close value — the exact payload `reconcile pseudo approve` persists ("see == approve").
+#[test]
+fn pseudo_plan_income_fmv_is_a_manualfmv_default() {
+    use btctax_core::project::{pseudo_plan, PseudoKind};
+    let inc = native_income_fmv_missing("inc-1", datetime!(2025-03-01 13:00 UTC), 500_000);
+    let evs = vec![inc.clone()];
+    let plan = pseudo_plan(&evs, &prices(), &cfg_on());
+    let fmv_defaults: Vec<_> = plan
+        .iter()
+        .filter(|pd| pd.kind == PseudoKind::PseudoFmv)
+        .collect();
+    assert_eq!(fmv_defaults.len(), 1, "exactly one income-FMV default");
+    assert_eq!(fmv_defaults[0].target, inc.id);
+    match &fmv_defaults[0].decision {
+        EventPayload::ManualFmv(m) => {
+            assert_eq!(m.event, inc.id, "targets the income event");
+            assert_eq!(
+                m.usd_fmv,
+                dec!(500.00),
+                "the materializable decision carries the daily-close FMV"
+            );
+        }
+        other => panic!("expected a ManualFmv decision, got {other:?}"),
+    }
 }

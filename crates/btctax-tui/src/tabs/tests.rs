@@ -555,6 +555,7 @@ fn make_income(year: i32, sat: i64, usd_fmv: &str, kind: IncomeKind) -> IncomeRe
         usd_fmv: usd_fmv.parse().unwrap(),
         kind,
         business: false,
+        pseudo: false,
     }
 }
 
@@ -573,6 +574,7 @@ fn make_income_tagged(
         usd_fmv: usd_fmv.parse().unwrap(),
         kind,
         business: false,
+        pseudo: false,
     }
 }
 
@@ -1456,6 +1458,7 @@ fn make_se_snapshot(
         usd_fmv: Decimal::from(fmv),
         kind: IncomeKind::Mining,
         business: true,
+        pseudo: false,
     });
 
     let mut profiles = BTreeMap::new();
@@ -1602,6 +1605,7 @@ fn e7d_profile_gate_no_profile_means_no_se_section() {
         usd_fmv: Decimal::from(50_000i64),
         kind: IncomeKind::Mining,
         business: true,
+        pseudo: false,
     });
     let snap = make_snapshot(state); // empty profiles BTreeMap
 
@@ -1636,6 +1640,7 @@ fn e7e_not_computable_year_with_profile_shows_se_section() {
         usd_fmv: Decimal::from(50_000i64),
         kind: IncomeKind::Mining,
         business: true,
+        pseudo: false,
     });
 
     // Snapshot with a profile for 2025 (even though the year is NotComputable).

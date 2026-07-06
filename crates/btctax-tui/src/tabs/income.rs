@@ -193,6 +193,7 @@ mod sort_tests {
             usd_fmv: Decimal::from(fmv),
             kind,
             business,
+            pseudo: false,
         }
     }
 

@@ -1,7 +1,7 @@
 use crate::conventions::{tax_date, Sat, TaxDate, Usd, TRANSITION_DATE, TY2025_RETURN_DUE};
 use crate::event::*;
 use crate::identity::{EventId, LotId, SourceRef, WalletId};
-use crate::price::PriceProvider;
+use crate::price::{fmv_of, PriceProvider};
 use crate::project::{FeeTreatment, LotMethod, ProjectionConfig};
 use crate::state::{Blocker, BlockerKind, Lot};
 use std::collections::{BTreeMap, BTreeSet};
@@ -225,6 +225,10 @@ pub enum PseudoKind {
     RawInbound,
     /// Unresolved `ImportConflict` → accept-first `SupersedeImport` of the first-seen conflict.
     AcceptConflict,
+    /// #41 Part B: an unresolved NATIVE `Income` with no effective FMV, on a date the local price data
+    /// covers → synthetic `ManualFmv` at the daily close (`fmv_of(prices, date, sat)`). NO price ⇒ NO
+    /// synthetic (the row stays Hard `FmvMissing` — the residual the online updater, Part C, addresses).
+    PseudoFmv,
 }
 
 /// One pseudo-reconcile synthetic default (sub-project 2). `target` is the IMPORTED event whose effective
@@ -980,6 +984,41 @@ pub fn resolve(
                     kind: PseudoKind::SelfTransferInbound,
                 });
             }
+        }
+        // Phase C (#41 Part B): a NATIVE `Income` whose EFFECTIVE FMV is missing (no real `ManualFmv`
+        // AND the import carried no usable FMV) → synthetic `ManualFmv` at the daily close. Injected as
+        // a `manual_fmv` entry so it flows through the SAME `build_op` path as a real ManualFmv, and the
+        // event id joins `pseudo_ids` so the taint reaches the `IncomeRecord` [R0-I2]. Guarded on BOTH a
+        // wallet (wallet-less income is a separate FmvMissing the FMV can't fix) AND `prices` HAVING a
+        // close at the date — NO price ⇒ NO synthetic (stay [FmvMissing]; the ★ fault-inject guard).
+        for e in events {
+            if !matches!(e.id, EventId::Import { .. }) || e.wallet.is_none() {
+                continue;
+            }
+            let eff_payload = applied.get(&e.id).unwrap_or(&e.payload);
+            let EventPayload::Income(x) = eff_payload else {
+                continue;
+            };
+            // Already has an effective FMV (a real ManualFmv, or the import's own non-Missing FMV)? skip.
+            if manual_fmv.contains_key(&e.id)
+                || (x.usd_fmv.is_some() && x.fmv_status != FmvStatus::Missing)
+            {
+                continue;
+            }
+            let date = tax_date(e.utc_timestamp, e.original_tz);
+            let Some(synth) = fmv_of(prices, date, x.sat) else {
+                continue; // NO local price ⇒ NO synthetic — the row stays Hard FmvMissing.
+            };
+            manual_fmv.insert(e.id.clone(), synth);
+            pseudo_ids.insert(e.id.clone());
+            pseudo_decisions.push(PseudoDefault {
+                target: e.id.clone(),
+                decision: EventPayload::ManualFmv(ManualFmv {
+                    event: e.id.clone(),
+                    usd_fmv: synth,
+                }),
+                kind: PseudoKind::PseudoFmv,
+            });
         }
         // NFR4/[N2]: a stable order independent of the input `events` order — approve materializes in
         // this order, and two projections of the same ledger produce byte-identical `pseudo_decisions`.

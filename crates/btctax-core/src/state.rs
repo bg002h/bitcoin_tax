@@ -215,6 +215,13 @@ pub struct IncomeRecord {
     pub usd_fmv: Usd,
     pub kind: IncomeKind,
     pub business: bool,
+    /// Pseudo-reconcile taint (sub-project 2 / #41 Part B, [R0-I2]): `true` when this income's
+    /// recognized `usd_fmv` was SYNTHESIZED from the daily-close default in pseudo mode (a
+    /// `PseudoKind::PseudoFmv` — the import carried no FMV and a local price existed). Set from
+    /// `eff.pseudo` at BOTH fold push sites. The on-screen report flags such a row `[PSEUDO]`; the CSV
+    /// writers OMIT it (never exported — the estimate is export-gated). Always `false` outside pseudo
+    /// mode ⇒ projection byte-identical.
+    pub pseudo: bool,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingLeg {
