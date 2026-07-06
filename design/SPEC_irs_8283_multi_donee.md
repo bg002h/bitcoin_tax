@@ -1,8 +1,9 @@
 # SPEC — Form 8283 multi-donee fix (fill one 8283 per donee)
 
-**Source baseline:** `main` @ `d43d294` (branch `fix/irs-8283-multi-donee`). **Review status: R0 round 1 folded
-(1C/4I/4M/2N — Opus; merged IN-PLACE). Awaiting R0 round 2.** Review:
-`reviews/R0-spec-irs-8283-multi-donee-round-1.md`. Resolves the `irs-8283-multi-donee-identity` FOLLOWUP.
+**Source baseline:** `main` @ `d43d294` (branch `fix/irs-8283-multi-donee`). **Review status: R0-GREEN (2 rounds; 0C/0I).
+Cleared to implement.** Reviews: `reviews/R0-spec-irs-8283-multi-donee-round-{1,2}.md`. r1 1C/4I (Opus — the
+`details.is_some()` carrier bug + Section-A pagination + appraiser-key + byte-identity); r2 0C/0I/3M/1N (Opus —
+folds corroborated; 3 doc-precision Minors synced). Resolves the `irs-8283-multi-donee-identity` FOLLOWUP.
 (R0 also surfaced a SECOND latent bug the fix cures: an overflowing single donee gets NO identity on page 2
 today — `find_map` over leg rows that all carry `details: None`.)
 
@@ -22,7 +23,7 @@ sanctions multiple). **[R0-I2] Apply the grouping to SECTION B ONLY** — Sectio
 unblessed). So, for Section B:
 1. **[★ R0-C1] Partition `rows` into donations** at carrier boundaries — a new donation starts at a row with
    **`row.section.is_some()`** (set UNCONDITIONALLY on every carrier by `form_8283()`, forms.rs:401; already the
-   module's canonical carrier probe, form8283.rs:107). **NOT `details.is_some()`** — `details` is `None` on the
+   module's canonical carrier probe, form8283.rs:108 `find_map(|r| r.section)`). **NOT `details.is_some()`** — `details` is `None` on the
    carrier of any donation with no captured `DonationDetails` (forms.rs:395-431), so `details.is_some()` would
    absorb a no-details second donee onto the PREVIOUS donee's form under a named Part V (worse than today).
    Leg rows (`section: None`) attach to their carrier.
@@ -32,6 +33,9 @@ unblessed). So, for Section B:
    (form8283.rs:265-289). **Split-on-difference** (same donee, different appraiser ⇒ separate forms — a shared
    form would print a wrong Part IV). A carrier with `details: None` keys on `row.donee` (empty ⇒ its own
    singleton group — [R0-M] never merged with another empty-key donation). Single-donee year ⇒ ONE group.
+   **[R0-r2-m1] A group carries its FIRST-SEEN carrier's `details`** — the key omits the printed-but-non-keyed
+   `donee_address`/`appraiser_address`, so within a split-on-difference group those addresses are the first
+   carrier's (correct by construction since name+EIN+appraiser match).
 3. **For each group:** count-overflow its rows (`div_ceil(cap)`), passing the group's `details` EXPLICITLY into
    each copy's identity block (not `find_map` within the chunk) so a donee whose legs overflow to a 2nd page
    carries the identity on BOTH pages (also cures the R0-noted page-2-blank bug).
@@ -70,6 +74,9 @@ groups is ≥ 2.
   donee identity on BOTH.
 - **[R0-I2] `form_8283_section_a_multi_donee_stays_one_form`** — Section A ≤$5k with 2 donees ⇒ still ONE form
   (per-row donee column; pagination unchanged).
+- **[R0-r2-m2] `form_8283_multi_group_with_overflow_global_rename`** — donee A overflows to 2 copies + donee B
+  1 copy ⇒ 3 copies with GLOBALLY-unique renamed fields (no shared `/V` across groups; `merge_copies` copy-index
+  is global, not per-group).
 - **★ geometric read-back fail-closed** still holds per copy (swap two map entries ⇒ RED) — unchanged oracle.
 - **regression:** the existing 2024/2025 8283 KATs + the full suite stay green.
 
@@ -93,3 +100,6 @@ byte-identical). No man-page/README change (the capability was already documente
 - **[overflow identity on every page]** pass the group's `details` explicitly; don't rely on a carrier in each
   chunk (also cures the page-2-blank bug R0 found).
 - **[fail-closed unchanged]** the per-copy geometric read-back is not modified.
+- **[R0-r2-m3 degenerate input]** any leading leg-rows (`section: None`) before the first carrier (shouldn't
+  occur — `form_8283()` always emits the carrier first) attach to the first group; an all-`None` input keeps
+  today's flat count-overflow (no crash).
