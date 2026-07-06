@@ -1,0 +1,21 @@
+# Schedule SE (Form 1040), tax year 2024 — logical line → fully-qualified PDF field name.
+# The 2024 unified Schedule SE is field-name-IDENTICAL to TY2025 (verified at extraction); only the
+# wage base differs ($168,600 for 2024, threaded in from the ty2024 TaxTable, not encoded here).
+# Column x-clusters (hand-pinned, map-independent oracle): amount x ≈ [504,576]; mid x ≈ [410,482]
+# (lines 8a and 13). Spacers excluded (never map targets): line 7 constant $168,600 = f1_13
+# [575,384,576,396] (1-pt wide); Part II line 14 constant = Page2 f2_1 [575,696,576,708] (1-pt wide).
+form = "schedule_se"
+year = 2024
+
+line2  = "topmostSubform[0].Page1[0].f1_5[0]"
+line3  = "topmostSubform[0].Page1[0].f1_6[0]"
+line4a = "topmostSubform[0].Page1[0].f1_7[0]"
+line4c = "topmostSubform[0].Page1[0].f1_9[0]"
+line6  = "topmostSubform[0].Page1[0].f1_12[0]"
+line8a = "topmostSubform[0].Page1[0].Line8a_ReadOrder[0].f1_14[0]"
+line8d = "topmostSubform[0].Page1[0].f1_17[0]"
+line9  = "topmostSubform[0].Page1[0].f1_18[0]"
+line10 = "topmostSubform[0].Page1[0].f1_19[0]"
+line11 = "topmostSubform[0].Page1[0].f1_20[0]"
+line12 = "topmostSubform[0].Page1[0].f1_21[0]"
+line13 = "topmostSubform[0].Page1[0].f1_22[0]"

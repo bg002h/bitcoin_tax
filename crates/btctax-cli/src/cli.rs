@@ -126,9 +126,11 @@ pub enum Command {
     ///
     /// Writes (owner-only) into --out, populated from btctax's already-computed projection — no
     /// capital-gains figure is recomputed:
-    ///   - f8949.pdf + schedule_d.pdf — ALWAYS. The 2025 (1099-DA) revision, so Bitcoin is filed under
-    ///     Box I (short-term) / Box L (long-term) — the digital-asset boxes — NOT Box C/F. More than 11
-    ///     rows per part paginate onto multiple copies, each with its own totals.
+    ///   - f8949.pdf + schedule_d.pdf — ALWAYS. On the 2025 (1099-DA) revision Bitcoin is filed under
+    ///     Box I (short-term) / Box L (long-term) — the digital-asset boxes; on the pre-1099-DA 2024
+    ///     revision it is Box C / Box F ("not reported on a 1099-B"). Never the wrong pair for the
+    ///     year. More rows than a part's grid holds (11 in 2025, 14 in 2024) paginate onto multiple
+    ///     copies, each with its own totals.
     ///   - schedule_se.pdf — when there is business self-employment income and net earnings are ≥ the
     ///     $400 floor. Line 12 (SE tax) = Social Security + regular Medicare ONLY; the 0.9% Additional
     ///     Medicare Tax is a Form 8959 item (flagged on stderr, not put on Schedule SE). Requires a
@@ -138,8 +140,9 @@ pub enum Command {
     ///     box checked); leaves every OTHER party's declaration/signature BLANK (Part III taxpayer sig,
     ///     Part IV appraiser sig, Part V donee acknowledgment) — a Section B 8283 is NOT filing-ready
     ///     without those signed. Overflows onto additional copies.
-    ///   - form_1040_capgains.pdf — when there is reportable digital-asset activity. Fills ONLY line 7a
-    ///     (capital gain, when Schedule D is active and line 16 ≥ 0; active-and-zero → "-0-"; a net loss
+    ///   - form_1040_capgains.pdf — when there is reportable digital-asset activity. Fills ONLY the
+    ///     capital-gain line (line 7a in 2025 / line 7 in 2024, when Schedule D is active and line 16 ≥
+    ///     0; active-and-zero → "-0-"; a net loss
     ///     leaves 7a blank — the §1211 line-21 cap is yours) and the Digital-Asset question (YES iff any
     ///     disposal, income, gift, or donation; never a "No"). 7b checkboxes are untouched.
     ///
@@ -159,7 +162,9 @@ pub enum Command {
         /// git repo.
         #[arg(long, verbatim_doc_comment)]
         out: PathBuf,
-        /// The tax year to fill (this build bundles TY2025 only; other years are refused).
+        /// The tax year to fill (this build bundles TY2024 and TY2025; other years are refused).
+        /// TY2024 is the pre-1099-DA revision: Bitcoin is filed under Box C/F (not Box I/L) and the
+        /// 1040 capital gain is on line 7 (not 7a).
         #[arg(long)]
         tax_year: i32,
         /// Restrict the packet to specific forms (repeat or comma-separate). Default = every

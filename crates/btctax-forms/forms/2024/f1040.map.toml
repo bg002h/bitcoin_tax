@@ -1,0 +1,18 @@
+# Form 1040 (2024), capital-gains cells ONLY — logical cell → fully-qualified PDF field name.
+# Amount column x-cluster (hand-pinned): [504,576]. Capital gain is on LINE 7 (2024 is NOT split into
+# 7a/7b like 2025): f1_52 [504,162,576,174].
+# Digital-Asset question is a same-y {/1,/2} /Btn pair at y≈487 selected map-independently by the
+# horizontal-ADJACENCY oracle (topmost_yes_no_pair): the two boxes are ~36pt apart, vs the
+# filing-status {/1,/2} row higher up whose boxes are ~266pt apart (NOT adjacent → rejected).
+# Yes = c1_5[0] (LEFT, on-state /1); No = c1_5[1] (on-state /2).
+form = "f1040"
+year = 2024
+
+# The capital-gain amount cell (line 7 for 2024). The struct field is named `line7a` for cross-year
+# uniformity; the value here is 2024's line-7 field.
+line7a = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_52[0]"
+# da_present = true → this year HAS the Digital-Asset question (the adjacency guard runs). A future
+# no-DA year (2017) sets da_present = false and makes da_yes/da_no optional.
+da_present = true
+da_yes = { field = "topmostSubform[0].Page1[0].c1_5[0]", on = "1" }
+da_no = { field = "topmostSubform[0].Page1[0].c1_5[1]", on = "2" }

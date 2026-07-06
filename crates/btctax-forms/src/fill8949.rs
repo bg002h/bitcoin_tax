@@ -166,7 +166,7 @@ pub fn fill_8949_parts(
         place_part(p, long, &mut writes, &mut placements);
     }
 
-    let mut doc = pdf::load(pdf::F8949_PDF_2025)?;
+    let mut doc = pdf::load(pdf::f8949_pdf(map.year)?)?;
     let index = pdf::index(&pdf::collect_fields(&doc)?);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
@@ -176,7 +176,7 @@ pub fn fill_8949_parts(
     // True read-back: re-parse the SERIALIZED output and verify geometry against the PDF's own rects.
     let check = pdf::load(&bytes)?;
     let fields = pdf::collect_fields(&check)?;
-    verify_8949(&check, &fields, &placements)?;
+    verify_8949(&check, &fields, &placements, &map.table_token)?;
     // XFA must be gone on the actual output.
     if pdf_has_xfa(&check)? {
         return Err(FormsError::Structure(

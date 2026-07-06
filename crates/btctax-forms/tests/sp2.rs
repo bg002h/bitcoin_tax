@@ -803,14 +803,15 @@ fn map_2025_matches_bundled_pdf_fieldset() {
 
 #[test]
 fn unsupported_year_rejected_for_sp2_forms() {
+    // 2023 is not bundled (this build ships 2024 + 2025).
     assert!(matches!(
-        btctax_forms::fill_schedule_se(&se_300k(), Usd::ZERO, SS_WAGE_BASE_2025, 2024).unwrap_err(),
-        FormsError::UnsupportedYear(2024)
+        btctax_forms::fill_schedule_se(&se_300k(), Usd::ZERO, SS_WAGE_BASE_2025, 2023).unwrap_err(),
+        FormsError::UnsupportedYear(2023)
     ));
     assert!(matches!(
-        btctax_forms::fill_form_8283(&[b_row("1.00000000 BTC", dec!(1), dec!(2), true)], 2024)
+        btctax_forms::fill_form_8283(&[b_row("1.00000000 BTC", dec!(1), dec!(2), true)], 2023)
             .unwrap_err(),
-        FormsError::UnsupportedYear(2024)
+        FormsError::UnsupportedYear(2023)
     ));
     assert!(matches!(
         btctax_forms::fill_form_1040_capgains(
@@ -819,9 +820,9 @@ fn unsupported_year_rejected_for_sp2_forms() {
                 schedule_d_active: false,
                 schedule_d_line16: Usd::ZERO
             },
-            2024
+            2023
         )
         .unwrap_err(),
-        FormsError::UnsupportedYear(2024)
+        FormsError::UnsupportedYear(2023)
     ));
 }

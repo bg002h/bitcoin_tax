@@ -86,7 +86,7 @@ pub fn fill_schedule_se_with_map(
         placements.push(FlatPlacement::cell(fqn.to_string(), 0, col, 0, ord));
     }
 
-    let mut doc = pdf::load(pdf::SCHEDULE_SE_PDF_2025)?;
+    let mut doc = pdf::load(pdf::schedule_se_pdf(map.year)?)?;
     let index = pdf::index(&pdf::collect_fields(&doc)?);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;

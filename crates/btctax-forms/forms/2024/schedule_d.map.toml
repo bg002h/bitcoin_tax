@@ -1,0 +1,15 @@
+# Schedule D, tax year 2024 — logical line → fully-qualified PDF field name.
+# Part I/II amount columns (d,e,g,h) live under Table_PartI / Table_PartII (the hardcoded
+# SCHED_D_TABLE_TOKEN "Table_PartI" matches both, unchanged for 2024/2025). Line 16 sits on page 2.
+# Field names match TY2025 EXCEPT line 16 (2024 = f2_01, not 2025's f2_1) — verified at extraction.
+form = "schedule_d"
+year = 2024
+
+line3 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_15[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_16[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_17[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_18[0]" }
+line7_h = "topmostSubform[0].Page1[0].f1_22[0]"
+line10 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_35[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_36[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_37[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_38[0]" }
+line15_h = "topmostSubform[0].Page1[0].f1_43[0]"
+line16_h = "topmostSubform[0].Page2[0].f2_01[0]"
+
+qof_yes = { field = "topmostSubform[0].Page1[0].c1_1[0]", on = "1" }
+qof_no = { field = "topmostSubform[0].Page1[0].c1_1[1]", on = "2" }
