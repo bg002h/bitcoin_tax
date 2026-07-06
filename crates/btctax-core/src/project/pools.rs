@@ -369,6 +369,19 @@ mod tests {
         assert_eq!(r.consumed[0].lot_id, pid("A"));
     }
     #[test]
+    fn pools_mechanic_stays_fifo() {
+        // [reconcile-defaults] The FIFO-pinned mechanic (`consume_fifo`, used for fee/PendingOut/relocation
+        // consumption) is INDEPENDENT of the electable/default lot method: it always consumes the
+        // oldest-acquired lot first (A), even though the app's no-election tax default is now HIFO (B $90).
+        let (consumed, shortfall) = three().consume_fifo(&PoolKey::Universal, 100_000);
+        assert_eq!(shortfall, 0);
+        assert_eq!(
+            consumed[0].lot_id,
+            pid("A"),
+            "consume_fifo must pin oldest-first (FIFO), never follow the HIFO default"
+        );
+    }
+    #[test]
     fn lifo_consumes_newest_first() {
         let r = three().consume(&PoolKey::Universal, 100_000, LotMethod::Lifo, None);
         assert_eq!(r.consumed[0].lot_id, pid("C"));

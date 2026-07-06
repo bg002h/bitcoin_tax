@@ -15,7 +15,7 @@ use btctax_core::event::*;
 use btctax_core::identity::*;
 use btctax_core::optimize::score_assignment;
 use btctax_core::price::StaticPrices;
-use btctax_core::project::{project, ProjectionConfig};
+use btctax_core::project::{project, LotMethod, ProjectionConfig};
 use btctax_core::tax::compute::compute_tax_year;
 use btctax_core::tax::tables::{
     LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
@@ -145,10 +145,27 @@ fn sell_id() -> EventId {
     EventId::import(Source::Swan, SourceRef::new("SELL"))
 }
 
+/// [reconcile-defaults] A global FIFO standing order so the BASELINE stays FIFO (the app default is now
+/// HIFO). Keeps "FIFO consumes low-basis A; the optimizer draws from high-basis B" the meaningful test.
+fn fifo_election() -> LedgerEvent {
+    LedgerEvent {
+        id: EventId::decision(1),
+        utc_timestamp: datetime!(2025-01-01 00:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: None,
+        payload: EventPayload::MethodElection(MethodElection {
+            effective_from: time::macros::date!(2025 - 01 - 01),
+            method: LotMethod::Fifo,
+            wallet: None,
+        }),
+    }
+}
+
 /// Two equal-sat lots of different basis + one 2025 sell of one lot's worth.
 /// FIFO consumes low-basis "A" (gain 40,000); high-basis "B" is held in reserve.
 fn fixture() -> Vec<LedgerEvent> {
     vec![
+        fifo_election(),
         buy(
             "A",
             datetime!(2025-02-01 00:00:00 UTC),

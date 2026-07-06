@@ -1,6 +1,6 @@
 //! Exact money/time conventions (NFR5, §6.1). No floats anywhere.
 use rust_decimal::{Decimal, RoundingStrategy};
-use time::{Date, OffsetDateTime, UtcOffset};
+use time::{Date, Month, OffsetDateTime, UtcOffset};
 
 /// Bitcoin is integer satoshis (NFR5/§6.1). Signed so shortfall/overshoot math is total; quantities are non-negative.
 pub type Sat = i64;
@@ -64,6 +64,23 @@ pub fn one_year_after(d: TaxDate) -> TaxDate {
 /// TP4: long-term iff the disposition date is strictly more than one year after acquisition.
 pub fn is_long_term(acquired: TaxDate, disposed: TaxDate) -> bool {
     disposed > one_year_after(acquired)
+}
+
+/// The DEFAULT acquisition date for an inbound self-transfer when the taxpayer supplies no `--acquired`:
+/// **one calendar year + one day before the receipt `date`**, which GUARANTEES long-term treatment for
+/// ANY disposal on or after receipt. Proof: `one_year_after(acquired) ≤ acquired + 366d` and this returns
+/// at most `date − 1d`, so `one_year_after(acquired) < date ≤ disposed` ⇒ `is_long_term` (conventions
+/// §65). Leap-safe: `replace_year(y−1)` falls back Feb-29 → Feb-28 (the prior year has no Feb-29), then
+/// one calendar day is subtracted. Deliberately NOT `date − Duration::days(366)`, which FAILS across a leap
+/// boundary (a 366-day span lands `one_year_after` exactly ON `date`, so a same-day sale is NOT long-term).
+/// Saturating on the (unreachable for BTC dates ≥ 2009) day-underflow.
+pub fn long_term_default_acquired(date: TaxDate) -> TaxDate {
+    let prior_year = date.replace_year(date.year() - 1).unwrap_or_else(|_| {
+        // Feb-29 receipt: the prior (non-leap) year has no Feb-29 — anchor to Feb-28.
+        Date::from_calendar_date(date.year() - 1, Month::February, 28)
+            .expect("Feb 28 is always valid")
+    });
+    prior_year.previous_day().unwrap_or(prior_year) // −1 calendar day; saturating (no real underflow)
 }
 
 #[cfg(test)]

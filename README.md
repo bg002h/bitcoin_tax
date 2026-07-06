@@ -190,6 +190,17 @@ While the mode is on, the engine synthesizes defaults *only where you haven't ma
 inbounds become **$0-basis self-transfers**, unclassified rows and import conflicts get accept-first defaults,
 and a placeholder tax profile lets a per-year estimate compute. Every one of those shows up as `[PSEUDO]`.
 
+> **Realistic reconcile defaults (behavior change).** Two fallbacks were made less punitive, since they
+> better match how most people actually hold BTC:
+> - **Cost-basis method defaults to HIFO** (the most commonly elected method), not FIFO — global, for
+>   both real projection and the auto-reconcile estimate, wherever no per-account/global method election
+>   is on file. It stays *unattested*, so you're still prompted to affirm it per exchange (HIFO requires
+>   specific-identification records). An explicit `--set-forward-method fifo` election still yields FIFO.
+> - **An unknown-basis inbound self-transfer now defaults to a *long-term* holding period** — the
+>   acquisition date is dated **one year + one day before receipt** (most received BTC is a long-held
+>   cold-storage deposit). Basis still defaults to a conservative **$0**. Both are disclosed by advisories;
+>   supply the real values with `classify-inbound-self-transfer --basis <cost> --acquired <YYYY-MM-DD>`.
+
 ### 2. Correct the ones that are actually taxable
 
 The defaults are wrong on purpose — fix the events that really were sales, income, or had a known basis. Each

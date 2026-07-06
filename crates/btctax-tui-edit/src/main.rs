@@ -14988,14 +14988,24 @@ mod tests {
             });
             btctax_core::persistence::append_decision(session.conn(), ro, td, UtcOffset::UTC, None)
                 .unwrap();
-            // MethodElection (FIFO — so lot A is consumed by default).
+            // MethodElection (FIFO — so lot A, not the higher-basis lot B, is consumed). [reconcile-
+            // defaults] effective_from MUST be ≥ TRANSITION_DATE (2025-01-01) to be in force — the prior
+            // 2024-01-01 was pre-transition (inert) and only worked because the default WAS FIFO; the
+            // default is now HIFO, so pin a valid FIFO standing order (made-date 2024-12-24 ≤ effective).
             let me = EventPayload::MethodElection(btctax_core::event::MethodElection {
-                effective_from: time::macros::date!(2024 - 01 - 01),
+                effective_from: time::macros::date!(2025 - 01 - 01),
                 method: btctax_core::LotMethod::Fifo,
                 wallet: None,
             });
-            btctax_core::persistence::append_decision(session.conn(), me, td, UtcOffset::UTC, None)
-                .unwrap();
+            let tme = OffsetDateTime::from_unix_timestamp(1_735_000_000).unwrap(); // 2024-12-24 (made ≤ eff)
+            btctax_core::persistence::append_decision(
+                session.conn(),
+                me,
+                tme,
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
             session.save().unwrap();
         }
 
@@ -20174,6 +20184,17 @@ mod tests {
         });
         btctax_core::persistence::append_decision(session.conn(), ro, td, UtcOffset::UTC, None)
             .unwrap();
+        // [reconcile-defaults] pin a global FIFO standing order so the BASELINE picks the older lot_a and
+        // the optimizer proposes the dearer lot_b (a divergent, persistable candidate). The app default is
+        // now HIFO, which would already pick lot_b → no proposal. Made 2024-12-24 ≤ effective 2025-01-01.
+        let me = EventPayload::MethodElection(btctax_core::event::MethodElection {
+            effective_from: time::macros::date!(2025 - 01 - 01),
+            method: btctax_core::LotMethod::Fifo,
+            wallet: None,
+        });
+        let tme = OffsetDateTime::from_unix_timestamp(1_735_000_000).unwrap();
+        btctax_core::persistence::append_decision(session.conn(), me, tme, UtcOffset::UTC, None)
+            .unwrap();
         session.save().unwrap();
         to_id
     }
@@ -22547,16 +22568,18 @@ mod tests {
                     account: "main".into()
                 }
             );
-            assert_eq!(item.current, LotMethod::Fifo, "resolved default is FIFO");
+            // [reconcile-defaults] the resolved no-election default is now HIFO (was FIFO).
+            assert_eq!(item.current, LotMethod::Hifo, "resolved default is HIFO");
             assert!(!item.scoped, "no election yet -> inherited (not scoped)");
         }
 
-        // Enter → Choose step (method seeded to the resolved FIFO); Tab cycles FIFO→HIFO.
+        // Enter → Choose step (method seeded to the resolved HIFO); Tab cycles HIFO→LIFO. Electing LIFO
+        // (a NON-default) keeps this a clear per-account scoped election now that HIFO is the default.
         handle_key(&mut app, press(KeyCode::Enter));
         assert!(matches!(
             app.method_election_flow.as_ref().unwrap().step,
             MethodElectionStep::Choose {
-                method: LotMethod::Fifo,
+                method: LotMethod::Hifo,
                 ..
             }
         ));
@@ -22564,7 +22587,7 @@ mod tests {
         assert!(matches!(
             app.method_election_flow.as_ref().unwrap().step,
             MethodElectionStep::Choose {
-                method: LotMethod::Hifo,
+                method: LotMethod::Lifo,
                 ..
             }
         ));
@@ -22576,7 +22599,7 @@ mod tests {
                 .method_election_modal
                 .as_ref()
                 .expect("Enter opens the attest modal");
-            assert_eq!(modal.method, LotMethod::Hifo);
+            assert_eq!(modal.method, LotMethod::Lifo);
             assert_eq!(
                 modal.wallet,
                 btctax_core::WalletId::Exchange {
@@ -22604,7 +22627,7 @@ mod tests {
                 _ => None,
             })
             .expect("a MethodElection decision must be persisted");
-        assert_eq!(me.method, LotMethod::Hifo);
+        assert_eq!(me.method, LotMethod::Lifo);
         assert_eq!(
             me.wallet,
             Some(btctax_core::WalletId::Exchange {

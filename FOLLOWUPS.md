@@ -4,6 +4,31 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ reconcile defaults: HIFO global default + long-term self-transfer-in — IMPLEMENTED on `feat/reconcile-defaults` (2026-07-05) — the auto-reconcile estimate is less punitive
+
+Two user-mandated tax-policy default changes (revises [[self-transfer-completion-policy]]), per
+`design/SPEC_reconcile_defaults.md` (R0-GREEN, 2 rounds):
+
+- **Default lot method FIFO → HIFO** — GLOBAL (real + auto-reconcile), the fallback when no per-account/
+  global `MethodElection` is on file. Four explicit `LotMethod::Fifo` default literals flipped to `Hifo`
+  (`project/fold.rs:41` — the fold's only method-resolution default; `cli/config.rs` `CliConfig::default`;
+  `project/mod.rs` `ProjectionConfig::default` + `in_force_methods` None arm). Stays `attested: false`
+  (user still affirms HIFO per exchange). The enum `#[default]` (event.rs) is UNCHANGED — flipping it would
+  silently rewrite pre-A.7 irrevocable `SafeHarborAllocation`s (`#[serde(default)] pre2025_method`); the
+  FIFO relocation/fee mechanic (`pools.rs consume_fifo`) is also unchanged.
+- **Self-transfer-in acquisition defaults to LONG-TERM** — when no `--acquired` is supplied,
+  `fold.rs:1019` dates the acquisition **1 year + 1 day before receipt** (leap-safe
+  `conventions::long_term_default_acquired`), so any later sale is long-term. Basis still defaults to $0.
+  A new `SelfTransferInboundDefaultedAcquired` advisory discloses the assumption INDEPENDENT of basis
+  (so `--basis` with no `--acquired` no longer silently backdates).
+
+Both REDUCE the estimate (HIFO minimizes gain; long-term lowers the rate); basis stays $0 (conservative on
+the amount). Test blast radius: 42 migrated (optimizer clusters pinned to explicit FIFO elections; the
+inverted short-term KAT replaced) + new KATs; whole-suite GREEN. README "Realistic reconcile defaults" note
+added; man pages regenerated.
+
+---
+
 ## ✅ comprehensive price data + pseudo income-FMV + online updater (#41) — IMPLEMENTED on `feat/price-data-fmv` (2026-07-05) — real-vault income `FmvMissing` now RESOLVABLE
 
 The bundled `btc_usd_daily_close.csv` was a 6-row STUB; the real-vault income events with no export FMV

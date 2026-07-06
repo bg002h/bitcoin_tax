@@ -971,7 +971,7 @@ pub fn resolve(
             if is_unresolved_transfer_in {
                 let as_ = InboundClass::SelfTransferMine {
                     basis: None, // defaulted $0 (conservative, max eventual gain) + the honesty advisory
-                    acquired_at: None, // defaulted receipt date (short-term)
+                    acquired_at: None, // defaulted to 1yr+1day before receipt → long-term (disclosed)
                 };
                 inbound_class.insert(e.id.clone(), as_.clone());
                 pseudo_ids.insert(e.id.clone());

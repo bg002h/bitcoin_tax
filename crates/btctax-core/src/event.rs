@@ -143,7 +143,7 @@ pub enum InboundClass {
         /// honored WITHOUT the advisory — the flag keys on `None`, not the numeric value.
         #[serde(default)]
         basis: Option<Usd>,
-        /// Original acquisition date. `None` ⇒ default = receipt date (short-term). `Some(d)` ⇒ real date.
+        /// Original acquisition date. `None` ⇒ default = 1yr+1day before receipt (long-term). `Some(d)` ⇒ real date.
         #[serde(default)]
         acquired_at: Option<TaxDate>,
     },

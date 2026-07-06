@@ -251,6 +251,8 @@ fn oracle_min_total(
 #[test]
 fn hifo_beats_fifo_matches_oracle() {
     let events = vec![
+        // [reconcile-defaults] pin the BASELINE to FIFO (default is now HIFO) so this FIFO-vs-HIFO KAT holds.
+        method_election(1, datetime!(2025-01-01 00:00:00 UTC), LotMethod::Fifo),
         buy(
             "LB",
             datetime!(2025-01-02 00:00:00 UTC),
@@ -418,6 +420,8 @@ fn loss_harvest_within_3k_limit() {
     let g = wallet("g");
     let h = wallet("h");
     let events = vec![
+        // [reconcile-defaults] pin the BASELINE to FIFO (default is now HIFO) so the harvest beats it.
+        method_election(1, datetime!(2025-01-01 00:00:00 UTC), LotMethod::Fifo),
         buy(
             "GLO",
             datetime!(2026-05-01 00:00:00 UTC),
@@ -519,6 +523,8 @@ fn loss_harvest_within_3k_limit() {
 fn per_wallet_constraint_respected() {
     let hot = wallet("hot");
     let events = vec![
+        // [reconcile-defaults] pin the BASELINE to FIFO (default is now HIFO) so FIFO baseline = CL_LOW.
+        method_election(1, datetime!(2025-01-01 00:00:00 UTC), LotMethod::Fifo),
         buy(
             "CL_LOW",
             datetime!(2026-05-01 00:00:00 UTC),

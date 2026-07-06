@@ -51,7 +51,8 @@ impl Default for ProjectionConfig {
         // DO NOT change: TP8 default is (c); the spec/memory forbid flipping it to (b).
         ProjectionConfig {
             self_transfer_fee: FeeTreatment::TreatmentC,
-            pre2025_method: LotMethod::Fifo,
+            // Realistic no-election default: HIFO (kept in sync with `CliConfig::default`, §reconcile-defaults).
+            pre2025_method: LotMethod::Hifo,
             pre2025_method_attested: false,
             pseudo_reconcile: false,
         }
@@ -90,13 +91,13 @@ pub fn pseudo_plan(
 pub struct InForceMethod {
     pub method: LotMethod,
     /// `true` ⇒ the method came from a PER-ACCOUNT (scoped) election for this wallet; `false` ⇒ it is
-    /// inherited from a GLOBAL election or the FIFO default (pre-2025 dates: the `pre2025_method`).
+    /// inherited from a GLOBAL election or the HIFO default (pre-2025 dates: the `pre2025_method`).
     pub scoped: bool,
 }
 
 /// §A.5(a) UI helper: the in-force method for each of `wallets` as of `date`, resolved by the SAME
 /// shared two-tier resolver (`resolve::resolve_election`) the fold and compliance use — scoped
-/// election → global election → FIFO — never a re-implementation of the precedence. Pre-2025 `date`s
+/// election → global election → HIFO default — never a re-implementation of the precedence. Pre-2025 `date`s
 /// report `pre2025_method` (inherited). Runs `resolve` ONCE; the returned Vec is aligned with
 /// `wallets`. Used by the btctax-tui-edit method-election flow to show each account's resolved method.
 pub fn in_force_methods(
@@ -122,7 +123,9 @@ pub fn in_force_methods(
                         scoped: e.wallet.is_some(),
                     },
                     None => InForceMethod {
-                        method: LotMethod::Fifo,
+                        // No election on file → the HIFO app default (§reconcile-defaults); reported so
+                        // the UI matches the computation's `applicable_method` fall-through exactly.
+                        method: LotMethod::Hifo,
                         scoped: false,
                     },
                 }

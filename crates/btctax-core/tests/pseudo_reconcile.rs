@@ -439,10 +439,12 @@ fn tax_total_computes_when_pseudo_clears_all_hard_blockers() {
     match out {
         TaxOutcome::Computed(r) => {
             // A number IS produced — and it is not zero (the pseudo $0-basis Sell realizes gain).
+            // [reconcile-defaults] The pseudo self-transfer-in now defaults its acquisition to 1yr+1day
+            // before receipt → the gain is LONG-TERM (was short-term under the old receipt-date default).
             assert!(r.total_federal_tax_attributable >= dec!(0));
             assert!(
-                r.st_net > dec!(0),
-                "the $0-basis Sell produced a positive ST gain"
+                r.lt_net > dec!(0),
+                "the $0-basis Sell produced a positive LT gain (long-term default acquisition)"
             );
         }
         TaxOutcome::NotComputable(b) => {

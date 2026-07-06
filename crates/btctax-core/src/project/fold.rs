@@ -1,5 +1,6 @@
 use crate::conventions::{
-    is_long_term, round_cents, split_pro_rata, Sat, TaxDate, Usd, TRANSITION_DATE,
+    is_long_term, long_term_default_acquired, round_cents, split_pro_rata, Sat, TaxDate, Usd,
+    TRANSITION_DATE,
 };
 use crate::event::{BasisSource, DisposeKind};
 use crate::identity::{EventId, LotId};
@@ -26,7 +27,8 @@ pub(crate) struct FoldCtx<'a> {
 /// The lot-identification method applicable to a disposal on `wallet` at `date`:
 /// pre-2025 (Universal pool) → the declared `pre2025_method`; post-2025 (Wallet pool) → the SHARED
 /// wallet-aware resolver `resolve::resolve_election` (§A.5(a), two independent tiers: latest in-force
-/// election SCOPED to `wallet`, else latest in-force GLOBAL election, else FIFO). `None ⇒ Fifo` here.
+/// election SCOPED to `wallet`, else latest in-force GLOBAL election, else the HIFO default).
+/// `None ⇒ Hifo` here — the app's realistic no-election default (most elected method; §reconcile-defaults).
 /// This is the ONLY method-resolution path in the fold; `disposal_compliance` calls the same resolver.
 fn applicable_method(
     date: TaxDate,
@@ -38,7 +40,7 @@ fn applicable_method(
     } else {
         crate::project::resolve::resolve_election(date, wallet, ctx.elections)
             .map(|e| e.method)
-            .unwrap_or(LotMethod::Fifo)
+            .unwrap_or(LotMethod::Hifo)
     }
 }
 
@@ -1016,17 +1018,32 @@ pub(crate) fn fold_event(
                 }
             };
             let usd_basis = basis.unwrap_or(Usd::ZERO); // conservative $0 default (max eventual gain)
-            let acq = acquired_at.unwrap_or(date); // conservative receipt-date default (date = event date)
+                                                        // [reconcile-defaults C2] When no acquisition date is supplied, default to 1yr+1day before the
+                                                        // receipt (`date`) so the holding period is LONG-TERM (leap-safe helper). Most received BTC is a
+                                                        // long-held cold-storage deposit; this default is DISCLOSED below (independent of `basis`).
+            let acq = acquired_at.unwrap_or_else(|| long_term_default_acquired(date));
             if basis.is_none() {
                 // (G4) ADVISORY only — fires on None, NOT on usd_basis == 0 (an attested Some(0) is silent).
                 st.add_blocker(
                     BlockerKind::SelfTransferInboundZeroBasis,
                     Some(eff.id.clone()),
-                    "basis defaulted to $0 — likely overstates your eventual gain (holding period also \
-                     defaults to the receipt date = short-term). To supply the real cost/date, VOID this \
-                     classification (press 'v', or run: btctax reconcile void) and re-classify with \
-                     --basis/--acquired — classify-inbound is first-wins, so re-running without voiding \
-                     first would conflict, not update.",
+                    "basis defaulted to $0 — likely overstates your eventual gain. To supply the real \
+                     cost, VOID this classification (press 'v', or run: btctax reconcile void) and \
+                     re-classify with --basis — classify-inbound is first-wins, so re-running without \
+                     voiding first would conflict, not update.",
+                );
+            }
+            if acquired_at.is_none() {
+                // [reconcile-defaults I2] Disclose the DEFAULTED long-term acquisition — gated on the
+                // acquisition being defaulted (NOT on basis), so a supplied `--basis` with no `--acquired`
+                // cannot silently backdate the holding period to long-term.
+                st.add_blocker(
+                    BlockerKind::SelfTransferInboundDefaultedAcquired,
+                    Some(eff.id.clone()),
+                    "acquisition date defaulted to 1 year + 1 day before receipt — holding period assumed \
+                     LONG-TERM. If these coins were held for a year or less, correct it with --acquired \
+                     (VOID this classification first: press 'v', or run btctax reconcile void — \
+                     classify-inbound is first-wins).",
                 );
             }
             let lot = Lot {

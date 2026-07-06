@@ -99,9 +99,62 @@ fn three_post2025() -> Vec<LedgerEvent> {
     ]
 }
 
+/// [reconcile-defaults] With NO election on file, the post-2025 default is HIFO (was FIFO): the sale
+/// consumes the HIGHEST-basis lot (B $90), not the oldest (A $50). ★ fault-inject target.
+#[test]
+fn default_method_is_hifo() {
+    let mut evs = three_post2025();
+    evs.push(sell(
+        "D",
+        datetime!(2025-07-01 00:00:00 UTC),
+        100_000,
+        dec!(95.00),
+    ));
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    assert_eq!(
+        st.disposals[0].legs[0].basis,
+        dec!(90.00),
+        "no election → HIFO default → highest-basis lot B"
+    );
+}
+
+/// [reconcile-defaults] An explicit GLOBAL FIFO election still yields FIFO — the flip changed ONLY the
+/// no-election default, not the resolver: FIFO stays electable and honored (consumes oldest A $50).
+#[test]
+fn explicit_fifo_election_still_fifo() {
+    let mut evs = three_post2025();
+    evs.push(election(
+        1,
+        datetime!(2025-01-01 00:00:00 UTC),
+        date!(2025 - 01 - 01),
+        LotMethod::Fifo,
+    ));
+    evs.push(sell(
+        "D",
+        datetime!(2025-07-01 00:00:00 UTC),
+        100_000,
+        dec!(95.00),
+    ));
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    assert!(!has(&st, BlockerKind::MethodElectionBackdated));
+    assert_eq!(
+        st.disposals[0].legs[0].basis,
+        dec!(50.00),
+        "explicit FIFO election → oldest lot A"
+    );
+}
+
 #[test]
 fn election_applies_on_or_after_effective_from_else_fifo() {
     let mut evs = three_post2025();
+    // [reconcile-defaults] pin the pre-election baseline to FIFO explicitly (default is now HIFO), so
+    // "before effective_from" resolves to this in-force FIFO election rather than the HIFO default.
+    evs.push(election(
+        5,
+        datetime!(2025-01-01 00:00:00 UTC),
+        date!(2025 - 01 - 01),
+        LotMethod::Fifo,
+    ));
     // HIFO standing order recorded 2025-05-01, effective 2025-06-01.
     evs.push(election(
         1,
@@ -168,6 +221,14 @@ fn latest_in_force_election_wins() {
 #[test]
 fn backdated_election_is_rejected() {
     let mut evs = three_post2025();
+    // [reconcile-defaults] a valid global FIFO election is the fall-through once the backdated one is
+    // rejected (the default is now HIFO), so the rejection is still observable as FIFO -> A.
+    evs.push(election(
+        5,
+        datetime!(2025-01-01 00:00:00 UTC),
+        date!(2025 - 01 - 01),
+        LotMethod::Fifo,
+    ));
     // effective_from (2025-02-10) precedes the made-date (2025-05-01) -> backdated.
     evs.push(election(
         1,
@@ -189,6 +250,14 @@ fn backdated_election_is_rejected() {
 #[test]
 fn pre_transition_election_is_rejected() {
     let mut evs = three_post2025();
+    // [reconcile-defaults] valid FIFO fall-through so the pre-transition rejection reads as FIFO -> A
+    // (the default is now HIFO).
+    evs.push(election(
+        5,
+        datetime!(2025-01-01 00:00:00 UTC),
+        date!(2025 - 01 - 01),
+        LotMethod::Fifo,
+    ));
     evs.push(election(
         1,
         datetime!(2024-06-01 00:00:00 UTC),
@@ -209,6 +278,14 @@ fn pre_transition_election_is_rejected() {
 #[test]
 fn voided_election_is_excluded() {
     let mut evs = three_post2025();
+    // [reconcile-defaults] valid FIFO fall-through so voiding the HIFO election is observable as a revert
+    // to FIFO -> A (default is now HIFO; without this the voided-HIFO and HIFO-default picks would tie).
+    evs.push(election(
+        5,
+        datetime!(2025-01-01 00:00:00 UTC),
+        date!(2025 - 01 - 01),
+        LotMethod::Fifo,
+    ));
     evs.push(election(
         1,
         datetime!(2025-01-02 00:00:00 UTC),
@@ -589,6 +666,14 @@ fn relocated_older_lot_consumed_first_under_acq_date_fifo_diverging_from_inserti
                 }),
             ), // relocate Z' -> HOT (pushed AFTER A)
         ];
+        // [reconcile-defaults] pin the no-election baseline to FIFO (default is now HIFO); the LIFO/HIFO
+        // `extra` elections (effective 2025-10-01) still supersede this for those branches.
+        evs.push(election(
+            3,
+            datetime!(2025-01-01 00:00:00 UTC),
+            date!(2025 - 01 - 01),
+            LotMethod::Fifo,
+        ));
         evs.extend(extra);
         evs.push(LedgerEvent {
             id: EventId::import(Source::Coinbase, SourceRef::new("D")),

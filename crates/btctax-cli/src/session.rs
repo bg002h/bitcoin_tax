@@ -1332,12 +1332,12 @@ mod tests {
     #[test]
     fn optimize_proposal_recomputes_a_persistable_proposal_on_held_session() {
         use btctax_core::event::{
-            Acquire, BasisSource, DisposeKind, EventPayload, LedgerEvent, OutflowClass,
-            ReclassifyOutflow, TransferOut,
+            Acquire, BasisSource, DisposeKind, EventPayload, LedgerEvent, MethodElection,
+            OutflowClass, ReclassifyOutflow, TransferOut,
         };
         use btctax_core::identity::{Source, SourceRef};
         use btctax_core::persistence::{append_decision, append_import_batch};
-        use btctax_core::{Carryforward, EventId, FilingStatus, TaxProfile, WalletId};
+        use btctax_core::{Carryforward, EventId, FilingStatus, LotMethod, TaxProfile, WalletId};
         use rust_decimal_macros::dec;
         use time::{OffsetDateTime, UtcOffset};
 
@@ -1406,6 +1406,21 @@ mod tests {
             donee: None,
         });
         append_decision(s.conn(), ro, td, UtcOffset::UTC, None).unwrap();
+        // [reconcile-defaults] pin a global FIFO standing order so the BASELINE picks the older lot_a
+        // (the app default is now HIFO, which would already pick the dearer lot_b → nothing to propose).
+        // Made-date 2024-12-24 ≤ effective 2025-01-01 → not backdated.
+        append_decision(
+            s.conn(),
+            EventPayload::MethodElection(MethodElection {
+                effective_from: time::macros::date!(2025 - 01 - 01),
+                method: LotMethod::Fifo,
+                wallet: None,
+            }),
+            OffsetDateTime::from_unix_timestamp(1_735_000_000).unwrap(),
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
         let profile = TaxProfile {
             filing_status: FilingStatus::Single,
             ordinary_taxable_income: dec!(100000),

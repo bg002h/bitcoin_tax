@@ -23,7 +23,7 @@ reconcile\-classify\-inbound\-gift(1)
 Classify an inbound TransferIn as a received gift
 .TP
 reconcile\-classify\-inbound\-self\-transfer(1)
-Classify an inbound TransferIn as an inbound self\-transfer ("my own coins" returning) — non\-taxable, creates a fresh lot. `\-\-basis` defaults to $0 (conservative; fires the honest zero\-basis advisory when omitted); `\-\-acquired` defaults to the receipt date (short\-term)
+Classify an inbound TransferIn as an inbound self\-transfer ("my own coins" returning) — non\-taxable, creates a fresh lot. `\-\-basis` defaults to $0 (conservative; fires the honest zero\-basis advisory when omitted); `\-\-acquired` defaults to 1 year + 1 day before receipt (assumed long\-term for a cold\-storage deposit; discloses an advisory so you can correct it)
 .TP
 reconcile\-reclassify\-outflow(1)
 Reclassify a pending TransferOut

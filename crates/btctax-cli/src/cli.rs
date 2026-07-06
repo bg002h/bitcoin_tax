@@ -283,7 +283,8 @@ pub enum Reconcile {
     },
     /// Classify an inbound TransferIn as an inbound self-transfer ("my own coins" returning) —
     /// non-taxable, creates a fresh lot. `--basis` defaults to $0 (conservative; fires the honest
-    /// zero-basis advisory when omitted); `--acquired` defaults to the receipt date (short-term).
+    /// zero-basis advisory when omitted); `--acquired` defaults to 1 year + 1 day before receipt
+    /// (assumed long-term for a cold-storage deposit; discloses an advisory so you can correct it).
     ClassifyInboundSelfTransfer {
         in_ref: String,
         #[arg(long)]

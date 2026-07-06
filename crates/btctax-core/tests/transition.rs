@@ -82,6 +82,20 @@ fn sell(
         }),
     )
 }
+/// [reconcile-defaults] A global FIFO standing order effective at TRANSITION_DATE — pins the post-2025
+/// disposal method to FIFO so these tests keep their pre-change (FIFO) lot ordering after the default
+/// flipped to HIFO. Made-date == effective_from (2025-01-01) → not backdated.
+fn elect_fifo(seq: u64) -> LedgerEvent {
+    dec_ev(
+        seq,
+        datetime!(2025-01-01 00:00:00 UTC),
+        EventPayload::MethodElection(MethodElection {
+            effective_from: date!(2025 - 01 - 01),
+            method: LotMethod::Fifo,
+            wallet: None,
+        }),
+    )
+}
 #[allow(clippy::too_many_arguments)]
 fn alloc(
     seq: u64,
@@ -523,6 +537,7 @@ fn path_a_mixed_vintages_post_2025_term_and_conservation() {
             dec!(40.00),
         ),
         sell("S", datetime!(2025-08-01 00:00:00 UTC), 50_000, dec!(60.00)), // FIFO consumes the 2024 lot
+        elect_fifo(1), // pin FIFO (post-2025 default is now HIFO) so the older 2024 lot is consumed
     ];
     let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
     let leg = &st.disposals[0].legs[0];
@@ -655,6 +670,7 @@ fn reversed_offset_straddle_seeds_on_tax_date_not_utc_order() {
         },
         // a 2025 sale that must FIFO-consume the pre-2025 (OLD) lot FIRST (acq 2024-12-31 < 2025-01-01).
         sell("S", datetime!(2026-06-01 00:00:00 UTC), 50_000, dec!(80.00)),
+        elect_fifo(1), // pin FIFO (post-2025 default is now HIFO) so the older OLD lot is consumed first
     ];
     let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
     assert!(!has(&st, BlockerKind::UncoveredDisposal)); // OLD seeded into cb, not stranded in Universal
@@ -891,7 +907,16 @@ fn path_b_preserves_gift_dual_loss_basis() {
             dec!(30.00),
         ),
     ];
-    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    // [reconcile-defaults] The allocation records pre2025_method Fifo; keep the live config in sync so it
+    // does not fire Pre2025MethodConflictsAllocation against the now-HIFO default.
+    let st = project(
+        &evs,
+        &StaticPrices::default(),
+        &ProjectionConfig {
+            pre2025_method: LotMethod::Fifo,
+            ..ProjectionConfig::default()
+        },
+    );
 
     // No blockers: allocation is effective (timely, conserved); no uncovered disposals.
     assert!(
@@ -969,7 +994,16 @@ fn path_b_preserves_gift_tacking() {
             dec!(150.00),
         ),
     ];
-    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    // [reconcile-defaults] Allocation records pre2025_method Fifo → keep the live config in sync (else the
+    // now-HIFO default fires Pre2025MethodConflictsAllocation).
+    let st = project(
+        &evs,
+        &StaticPrices::default(),
+        &ProjectionConfig {
+            pre2025_method: LotMethod::Fifo,
+            ..ProjectionConfig::default()
+        },
+    );
 
     assert!(
         st.blockers.is_empty(),
