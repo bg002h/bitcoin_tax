@@ -291,6 +291,79 @@ fn run() -> Result<ExitCode, CliError> {
                     render::render_whatif_sell(&outcome.report, outcome.magi_caveat)
                 );
             }
+            WhatIf::Harvest {
+                target,
+                wallet,
+                at,
+                price,
+                filing_status,
+                income,
+                magi,
+                carryforward_in,
+            } => {
+                let pp = passphrase(false)?;
+                let target = cmd::whatif::parse_harvest_target(&target)?;
+                // --wallet is semantically required: the per-wallet pool is mandatory post-2025.
+                let wallet_id = wallet
+                    .as_deref()
+                    .ok_or_else(|| {
+                        CliError::Usage(
+                            "--wallet is required for `what-if harvest` (per-wallet pool is mandatory \
+                             post-2025; use e.g. self:cold or exchange:coinbase:default)"
+                                .into(),
+                        )
+                    })
+                    .and_then(eventref::parse_wallet_id)?;
+                let at_date = at
+                    .as_deref()
+                    .map(eventref::parse_date_arg)
+                    .transpose()?
+                    .unwrap_or_else(|| btctax_core::conventions::tax_date(now, UtcOffset::UTC));
+                let price_usd = price.as_deref().map(eventref::parse_usd_arg).transpose()?;
+
+                // Ad-hoc (non-persisted) profile: identical shape to `what-if sell` (R0-M4 --magi floor).
+                let adhoc = if filing_status.is_some()
+                    || income.is_some()
+                    || magi.is_some()
+                    || carryforward_in.is_some()
+                {
+                    let fs = filing_status.ok_or_else(|| {
+                        CliError::Usage(
+                            "--filing-status is required to build an ad-hoc profile (with --income)"
+                                .into(),
+                        )
+                    })?;
+                    let inc = income
+                        .as_deref()
+                        .ok_or_else(|| {
+                            CliError::Usage(
+                                "--income is required to build an ad-hoc profile".into(),
+                            )
+                        })
+                        .and_then(eventref::parse_usd_arg)?;
+                    let magi_usd = magi.as_deref().map(eventref::parse_usd_arg).transpose()?;
+                    let cf_long = carryforward_in
+                        .as_deref()
+                        .map(eventref::parse_usd_arg)
+                        .transpose()?
+                        .unwrap_or_default();
+                    Some(cmd::whatif::AdhocProfile {
+                        filing_status: FilingStatus::from(fs),
+                        income: inc,
+                        magi: magi_usd,
+                        cf_long,
+                    })
+                } else {
+                    None
+                };
+
+                let outcome =
+                    cmd::whatif::harvest(vault, &pp, wallet_id, at_date, price_usd, target, adhoc)?;
+                print!(
+                    "{}",
+                    render::render_whatif_harvest(&outcome.report, outcome.magi_caveat)
+                );
+            }
         },
         Command::Reconcile(r) => dispatch_reconcile(vault, r, now)?,
         Command::Config {

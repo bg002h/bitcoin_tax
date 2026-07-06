@@ -254,6 +254,39 @@ btctax --vault ./vault.pgp what-if sell --sell 50000000 --wallet self:cold --at 
 disclosure); a caveat notes the assumption. With no ad-hoc flags, the stored `tax-profile` for the sale
 year is used.
 
+### Harvest — the max BTC to sell under a target
+
+`what-if harvest` answers the inverse question: **how much can I sell such that a target still holds?**
+It finds the largest N such that the target holds on the *entire prefix* `[0, N]` — safe even under a
+partial fill — computed through the same audited engine, consuming lots in your **standing method**'s
+order (never re-optimized). Four `--target`s:
+
+```sh
+btctax --vault ./vault.pgp what-if harvest --target zero-ltcg \
+  --wallet self:cold --at 2025-08-01 --price 95000 --filing-status single --income 40000
+```
+
+- **`zero-ltcg`** — sell all the gain that fits entirely in the §1(h) **0% bracket**.
+- **`fifteen-ltcg`** — stay at/under **15%** (no 20%-bracket dollars).
+- **`gain=$X`** — realize **at most $X** of gain *with this sale* (e.g. `gain=$25,000`).
+- **`tax=$X`** — add **at most $X** of *marginal* federal tax; **`tax=$0`** is the flagship "sell as much
+  as possible while adding **zero** federal tax" harvest.
+
+The optimizer is a **lot-edge segment walk**, not a bisection: because HIFO realizes losses first, the
+marginal-tax curve is genuinely non-monotone (a loss-first dip, the §1211(b) $3,000 pin, and a §1212
+carryforward-absorption plateau), so a naive bisection would land on the wrong side. Every answer is
+**engine-verified** (never an unfolded number). The report reads your *whole stacked position*, so a
+short-term gain lot correctly shrinks the 0% room, and it **discloses**:
+
+- the **§1212(b) carryforward burn** (a gain that spends a carried loss for $0 current-year tax is not
+  free — the carryforward is gone),
+- the **§1411 NIIT kink** (a 0%/15%-bracket answer can *still* cost +3.8%), and
+- the **§1211(b) plateau** on an all-loss position (only $3,000 / $1,500 MFS is deductible this year).
+
+The ad-hoc profile (`--filing-status`/`--income`/`--magi`/`--carryforward-in`) works exactly as for
+`sell`; a long-term `--carryforward-in` *expands* the harvestable-gain room. Like every what-if, it
+**writes nothing**.
+
 ---
 
 ## Pseudo-reconcile — a fast, honest starting point

@@ -1,0 +1,53 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-what-if-harvest 1  btctax "btctax manual"
+.SH NAME
+harvest \- Posit a hypothetical, NON\-persisted HARVEST and find the MAX BTC to sell such that a target holds on the ENTIRE prefix [0, N]: `\-\-target zero\-ltcg` (sell all that fits in the §1(h) 0% bracket), `fifteen\-ltcg` (stay at/under 15%), `gain=$X` (realize at most $X of gain WITH this sale), or `tax=$X` (add at most $X of marginal federal tax; `tax=$0` is the flagship "zero\-tax harvest"). Uses the STANDING lot method\*(Aqs consumption order (never re\-optimized). Discloses the §1212(b) carryforward burn, the §1411 NIIT kink (a 0%/15% answer can still cost +3.8%), and the plateau notes. The answer is ALWAYS engine\-verified. Writes NOTHING
+.SH SYNOPSIS
+\fBharvest\fR <\fB\-\-target\fR> [\fB\-\-wallet\fR] [\fB\-\-at\fR] [\fB\-\-price\fR] [\fB\-\-filing\-status\fR] [\fB\-\-income\fR] [\fB\-\-magi\fR] [\fB\-\-carryforward\-in\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Posit a hypothetical, NON\-persisted HARVEST and find the MAX BTC to sell such that a target holds on the ENTIRE prefix [0, N]: `\-\-target zero\-ltcg` (sell all that fits in the §1(h) 0% bracket), `fifteen\-ltcg` (stay at/under 15%), `gain=$X` (realize at most $X of gain WITH this sale), or `tax=$X` (add at most $X of marginal federal tax; `tax=$0` is the flagship "zero\-tax harvest"). Uses the STANDING lot method\*(Aqs consumption order (never re\-optimized). Discloses the §1212(b) carryforward burn, the §1411 NIIT kink (a 0%/15% answer can still cost +3.8%), and the plateau notes. The answer is ALWAYS engine\-verified. Writes NOTHING
+.SH OPTIONS
+.TP
+\fB\-\-target\fR \fI<TARGET>\fR
+The harvest target: `zero\-ltcg` | `fifteen\-ltcg` | `gain=$X` | `tax=$X` (X >= 0). `$` and commas are optional (e.g. `gain=25000`, `tax=$0`, `gain=$1,000`)
+.TP
+\fB\-\-wallet\fR \fI<WALLET>\fR
+Wallet to harvest from, e.g. `self:cold` or `exchange:coinbase:default` (required; the per\-wallet pool is mandatory post\-2025)
+.TP
+\fB\-\-at\fR \fI<AT>\fR
+Harvest date for the what\-if (YYYY\-MM\-DD; defaults to today UTC if omitted)
+.TP
+\fB\-\-price\fR \fI<PRICE>\fR
+USD price per WHOLE BTC. Omit to use the bundled daily\-close FMV for `\-\-at`; REQUIRED for a future/off\-dataset `\-\-at` with no bundled price
+.TP
+\fB\-\-filing\-status\fR \fI<FILING_STATUS>\fR
+AD\-HOC filing status (single|mfj|mfs|hoh|qss). Supplying this (with `\-\-income`) builds a NON\-persisted profile for the plan instead of the stored `tax\-profile`. Omit ALL ad\-hoc flags to use the stored profile for the harvest year
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+single
+.IP \(bu 2
+mfj
+.IP \(bu 2
+mfs
+.IP \(bu 2
+hoh
+.IP \(bu 2
+qss
+.RE
+.TP
+\fB\-\-income\fR \fI<INCOME>\fR
+AD\-HOC ordinary taxable income EXCLUDING crypto (the base the crypto stacks on). Required when building an ad\-hoc profile
+.TP
+\fB\-\-magi\fR \fI<MAGI>\fR
+AD\-HOC modified AGI excluding crypto, for the §1411 NIIT threshold. DEFAULTS TO `\-\-income` when omitted (never $0 — a $0 MAGI would silently suppress every NIIT disclosure); a printed caveat notes the assumption
+.TP
+\fB\-\-carryforward\-in\fR \fI<CARRYFORWARD_IN>\fR
+AD\-HOC §1212(b) LONG\-TERM capital\-loss carryforward INTO the harvest year (optional; defaults to $0) — expands the harvestable\-gain room (gains are absorbed before touching the pref stack)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

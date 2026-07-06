@@ -373,6 +373,48 @@ pub enum WhatIf {
         #[arg(long)]
         carryforward_in: Option<String>,
     },
+    /// Posit a hypothetical, NON-persisted HARVEST and find the MAX BTC to sell such that a target holds
+    /// on the ENTIRE prefix [0, N]: `--target zero-ltcg` (sell all that fits in the §1(h) 0% bracket),
+    /// `fifteen-ltcg` (stay at/under 15%), `gain=$X` (realize at most $X of gain WITH this sale), or
+    /// `tax=$X` (add at most $X of marginal federal tax; `tax=$0` is the flagship "zero-tax harvest").
+    /// Uses the STANDING lot method's consumption order (never re-optimized). Discloses the §1212(b)
+    /// carryforward burn, the §1411 NIIT kink (a 0%/15% answer can still cost +3.8%), and the plateau
+    /// notes. The answer is ALWAYS engine-verified. Writes NOTHING.
+    Harvest {
+        /// The harvest target: `zero-ltcg` | `fifteen-ltcg` | `gain=$X` | `tax=$X` (X >= 0). `$` and
+        /// commas are optional (e.g. `gain=25000`, `tax=$0`, `gain=$1,000`).
+        #[arg(long)]
+        target: String,
+        /// Wallet to harvest from, e.g. `self:cold` or `exchange:coinbase:default` (required; the
+        /// per-wallet pool is mandatory post-2025).
+        #[arg(long)]
+        wallet: Option<String>,
+        /// Harvest date for the what-if (YYYY-MM-DD; defaults to today UTC if omitted).
+        #[arg(long)]
+        at: Option<String>,
+        /// USD price per WHOLE BTC. Omit to use the bundled daily-close FMV for `--at`; REQUIRED for a
+        /// future/off-dataset `--at` with no bundled price.
+        #[arg(long)]
+        price: Option<String>,
+        /// AD-HOC filing status (single|mfj|mfs|hoh|qss). Supplying this (with `--income`) builds a
+        /// NON-persisted profile for the plan instead of the stored `tax-profile`. Omit ALL ad-hoc
+        /// flags to use the stored profile for the harvest year.
+        #[arg(long, value_enum)]
+        filing_status: Option<FilingStatusArg>,
+        /// AD-HOC ordinary taxable income EXCLUDING crypto (the base the crypto stacks on). Required
+        /// when building an ad-hoc profile.
+        #[arg(long)]
+        income: Option<String>,
+        /// AD-HOC modified AGI excluding crypto, for the §1411 NIIT threshold. DEFAULTS TO `--income`
+        /// when omitted (never $0 — a $0 MAGI would silently suppress every NIIT disclosure); a printed
+        /// caveat notes the assumption.
+        #[arg(long)]
+        magi: Option<String>,
+        /// AD-HOC §1212(b) LONG-TERM capital-loss carryforward INTO the harvest year (optional; defaults
+        /// to $0) — expands the harvestable-gain room (gains are absorbed before touching the pref stack).
+        #[arg(long)]
+        carryforward_in: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
