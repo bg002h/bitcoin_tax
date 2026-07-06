@@ -101,6 +101,17 @@ pub fn render_generated_pages() -> BTreeMap<String, Vec<u8>> {
     let mut pages = BTreeMap::new();
     pages.insert("btctax.1".to_string(), render_root(&root));
     render_subtree(&root, "btctax", &mut pages);
+    // #41 Part C: the SEPARATE online updater binary — its own single root page (no subcommands),
+    // rendered from its clap doc-comments exactly like the tax pages (single-source docs).
+    let updater = btctax_update_prices::Cli::command().disable_help_subcommand(true);
+    let man = clap_mangen::Man::new(updater)
+        .title("btctax-update-prices")
+        .source(SOURCE)
+        .manual(MANUAL);
+    let mut buf = Vec::new();
+    man.render(&mut buf)
+        .expect("clap_mangen render is infallible for in-memory writer");
+    pages.insert("btctax-update-prices.1".to_string(), buf);
     pages
 }
 

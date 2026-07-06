@@ -8,9 +8,13 @@ Schedule SE) — from your exchange CSVs, entirely on your own machine. It is an
 every fact and every decision is an append-only event in a passphrase-encrypted vault, so results are
 reproducible and auditable.
 
-- **Offline.** No network calls. Your data never leaves your machine.
+- **Offline by default.** The tax binaries (`btctax`, `btctax-tui`, `btctax-tui-edit`) make **no network
+  calls** — verifiably (they link no HTTP client). Your data never leaves your machine. A **separate,
+  opt-in** tool, `btctax-update-prices`, is the *only* online path; you run it explicitly, and it only
+  ever writes to a local price cache.
 - **Encrypted at rest.** The vault (`vault.pgp`) is passphrase-encrypted (OpenPGP, pure-Rust crypto).
-- **Reproducible.** The tax result is a pure function of the ledger.
+- **Reproducible.** The tax result is a pure function of the ledger **and** its price inputs (the bundled
+  daily-close dataset, plus the optional local price cache — see [Price data](#price-data)).
 
 > ⚠️ **This is software, not tax advice — and it does not file or prepare your taxes.** Scope is **US federal**
 > and **BTC-only**. Review everything with a qualified professional before filing. Please read the
@@ -25,6 +29,7 @@ reproducible and auditable.
 | **`btctax`** | The CLI engine — init, import, reconcile, and compute. Everything scriptable lives here. |
 | **`btctax-tui`** | A read-only terminal viewer for your holdings, disposals, income, and forms. |
 | **`btctax-tui-edit`** | An interactive terminal editor for reconciling — guided flows over the full decision surface. Press **`?`** in-app for the keymap. |
+| **`btctax-update-prices`** | An **optional, online** helper that fetches newer daily BTC/USD closes into a local price cache. The **only** tool that touches the network; the three tax binaries above never do. See [Price data](#price-data). |
 
 Every command has rich `--help` (including inline file-format examples), and there are man pages for all
 three binaries — see [Getting help](#getting-help).
@@ -246,12 +251,41 @@ btctax --vault ./vault.pgp reconcile pseudo off   # reverts instantly; approved 
   Run `make docs` to regenerate them, or `make bundles` for one combined PDF per binary.
 - **In the editor** — press **`?`** for the keyboard shortcuts.
 
+## Price data
+
+Income fair-market values and disposal proceeds (when you don't supply an explicit price) resolve against a
+**bundled daily-close BTC/USD dataset** — one row per calendar day, ~2010-07-17 through mid-2026, compiled
+into the binaries. It is derived from Quantoshi's `BitcoinPricesDaily.csv` and redistributed under the
+**BSD 2-Clause License with attribution** (see
+[`crates/btctax-adapters/data/BitcoinPricesDaily.NOTICE`](./crates/btctax-adapters/data/BitcoinPricesDaily.NOTICE)).
+
+**Newer dates than the bundle** (or dates it doesn't cover) are handled by the optional
+`btctax-update-prices` tool, which fetches daily closes (Binance primary, CoinGecko fallback) into a **local
+price cache** (`<data-dir>/btctax/price_cache.csv`, overridable with `--price-cache` or `$BTCTAX_PRICE_CACHE`):
+
+```console
+$ btctax-update-prices              # fetch newer closes into the cache
+$ btctax-update-prices --dry-run    # preview only; write nothing
+$ btctax-update-prices --lag 8      # skip the N most-recent (still-settling) days (default 8)
+```
+
+The tax binaries then read **cache-over-bundled** with no network access of their own. Two reproducibility
+notes:
+
+- The **cache is a documented local input**, like your vault: a projection is reproducible *given* (events +
+  bundled dataset + cache). The **bundled-only** projection (no cache) is the published-reproducible
+  baseline — delete the cache to reproduce it exactly.
+- Under **pseudo-reconcile** mode, a missing income FMV can be filled from the daily close as a loudly
+  `[PSEUDO]`-flagged estimate; those never reach an export unless you explicitly attest.
+
 ## Data & privacy
 
 `btctax` is offline and stores everything in the passphrase-encrypted `vault.pgp`. **Never commit `vault.pgp`,
 `vault.key`, or your exchange exports** — the repository's `.gitignore` already excludes `vault*` / `*.pgp` /
 `*.asc`. Note that the `.gitignore` does **not** cover the `export-snapshot` CSVs, so always export to a
-location outside any git repo.
+location outside any git repo. The **online** `btctax-update-prices` tool contacts public price APIs (Binance,
+CoinGecko) and sends a generic User-Agent with no personal data; the three tax binaries never touch the
+network.
 
 ## Contributing
 
@@ -296,3 +330,7 @@ answer.
 ## License
 
 Licensed under either of **MIT** or **The Unlicense** at your option.
+
+The bundled daily-close price dataset (`crates/btctax-adapters/data/btc_usd_daily_close.csv`) is a separate
+work redistributed under the **BSD 2-Clause License** with attribution — see
+[`crates/btctax-adapters/data/BitcoinPricesDaily.NOTICE`](./crates/btctax-adapters/data/BitcoinPricesDaily.NOTICE).

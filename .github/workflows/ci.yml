@@ -66,6 +66,19 @@ jobs:
           key: msrv-1.88
       - run: cargo check --workspace --locked
 
+  # #41 Part C: the tax binaries must link NO HTTP client — network code lives ONLY in
+  # btctax-update-prices. Asserts ureq/rustls are absent from the tax crates' cargo tree.
+  net-isolation:
+    name: net-isolation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - run: cargo run -p xtask -- check-isolation
+
   pii-scan:
     name: pii-scan
     runs-on: ubuntu-latest

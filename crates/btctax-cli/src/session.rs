@@ -7,7 +7,7 @@ use crate::donation_details;
 use crate::optimize_attest;
 use crate::tax_profile;
 use crate::CliError;
-use btctax_adapters::{BundledPrices, BundledTaxTables};
+use btctax_adapters::BundledTaxTables;
 use btctax_core::conventions::{round_cents, tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{init_schema, load_all};
 use btctax_core::{project, LedgerEvent, LedgerState, PriceProvider, ProjectionConfig};
@@ -342,11 +342,16 @@ impl std::fmt::Debug for Session {
     }
 }
 
-/// Build the DEFAULT price provider a freshly-opened `Session` carries: the bundled daily-close
-/// dataset (§9.2). Pure/deterministic; NO network. Part C layers a local price cache over this (the
-/// online refresh lives in the separate `btctax-update-prices` binary).
+/// Build the DEFAULT price provider a freshly-opened `Session` carries: the bundled daily-close dataset
+/// (§9.2) with the local price cache layered OVER it (Part C — cache-over-bundled; cache absent ⇒
+/// byte-identical to bundled-only). Pure/deterministic; NO network — the cache is a documented LOCAL
+/// INPUT populated only by the separate `btctax-update-prices` binary. The cache PATH is resolved HERE
+/// (btctax-cli, via `dirs`), NOT in btctax-adapters.
 fn default_prices() -> Result<Box<dyn PriceProvider>, CliError> {
-    Ok(Box::new(BundledPrices::load()?))
+    let cache_path = crate::price_cache::default_cache_path();
+    Ok(Box::new(btctax_adapters::LayeredPrices::load_with_cache(
+        cache_path.as_deref(),
+    )?))
 }
 
 impl Session {

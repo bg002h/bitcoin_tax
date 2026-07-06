@@ -2,7 +2,9 @@
 //!
 //! `cargo run -p xtask -- docs` regenerates the committed man pages under `docs/man/`.
 //! `cargo run -p xtask -- docs --pdf` additionally renders `docs/pdf/*.pdf` (requires `groff`).
+//! `cargo run -p xtask -- check-isolation` asserts no HTTP client in the tax crates (#41 Part C).
 
+mod check_isolation;
 mod docs;
 
 fn main() {
@@ -20,8 +22,14 @@ fn main() {
                 }
             }
         }
+        Some("check-isolation") => {
+            if let Err(e) = check_isolation::run() {
+                eprintln!("xtask check-isolation: {e}");
+                std::process::exit(1);
+            }
+        }
         _ => {
-            eprintln!("usage: cargo run -p xtask -- docs [--pdf]");
+            eprintln!("usage: cargo run -p xtask -- <docs [--pdf] | check-isolation>");
             std::process::exit(2);
         }
     }

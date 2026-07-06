@@ -4,6 +4,36 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ comprehensive price data + pseudo income-FMV + online updater (#41) — IMPLEMENTED on `feat/price-data-fmv` (2026-07-05) — real-vault income `FmvMissing` now RESOLVABLE
+
+The bundled `btc_usd_daily_close.csv` was a 6-row STUB; the real-vault income events with no export FMV
+therefore projected to Hard `FmvMissing` with no way to fill them offline. Three parts, per
+`design/SPEC_price_data_and_pseudo_fmv.md` (R0-GREEN, 3 rounds):
+
+- **A — real dataset.** Bundled Quantoshi's daily closes (5,801 rows, 2010-07-17 → 2026-06-03; ISO,
+  `Decimal` 2dp; sorted/deduped) + a separate **BSD-2** `data/BitcoinPricesDaily.NOTICE`. The stub-swap
+  broke ~50 assertions across 3 crates; migrated via a **Session-level injectable price provider**
+  (`Session::set_prices`) — plan KATs inject the old stub (zero recompute), free-function KATs recompute
+  to real / move unpriced sentinels beyond the dataset.
+- **B — pseudo income-FMV.** `IncomeRecord.pseudo` (set at both fold push sites) + a new
+  `PseudoKind::PseudoFmv`: in pseudo mode an unresolved native `Income{Missing}` on a **priced** date is
+  filled from the daily close (`ManualFmv` default, `[PSEUDO]`-flagged, approve→real, export-gated). NO
+  price ⇒ stays `FmvMissing`. **This REVERSES `SPEC_pseudo_reconcile_mode.md`'s leave-uncleared decision**
+  (contract comment updated). So the real-vault "27 income `FmvMissing`" are now clearable under pseudo
+  mode wherever the bundled dataset covers the date — the M5 fixture (`income_fmv_missing_batch`) + the
+  `income_fmv_27_clear_under_pseudo` KAT pin it.
+- **C — separate `btctax-update-prices` binary.** `LayeredPrices` (cache-over-bundled, no `dirs`/network)
+  in adapters; the NEW `crates/btctax-update-prices` is the ONLY crate linking an HTTP client (`ureq`
+  rustls-tls + `dirs`). An xtask gate (`cargo run -p xtask -- check-isolation`) asserts ureq/rustls are
+  ABSENT from every tax crate. **Add this step to CI** (alongside `cargo test`) so a stray network dep
+  fails the build.
+
+**OPEN (residual):** income `FmvMissing` on a date BEYOND the bundled range still needs the user to run
+`btctax-update-prices` first (populating the cache) before pseudo mode can fill it — the "no price → run
+`btctax-update-prices`" hint surfaces this. A per-value **cache-provenance marker** on auto-FMV disposal
+proceeds (a cache-sourced price feeds the real proceeds path unflagged) is deferred — the bundled-only
+projection remains the reproducible baseline. Whole-diff review + ship still pending.
+
 ## ✅ export-snapshot unresolved-Hard-blocker summary — SHIPPED (2026-07-05) — real-vault "silent empty forms" finding RESOLVED
 
 The real-vault finding — `export-snapshot` silently wrote an EMPTY Form 8949 / zero Schedule D (and

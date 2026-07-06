@@ -1827,6 +1827,11 @@ pub fn render_verify(r: &VerifyReport) -> String {
             .map(|e| e.canonical())
             .unwrap_or_else(|| "-".to_string());
         let _ = writeln!(out, "  [{:?}] {} :: {}", b.kind, evt, b.detail);
+        // #41 Part C: an FMV gap can be a missing daily close — point at the separate updater (a STRING
+        // only; the tax binaries never fetch). Pseudo mode can also fill it from the cache (Part B).
+        if b.kind == BlockerKind::FmvMissing {
+            let _ = writeln!(out, "         ↳ {}", crate::price_cache::UPDATE_PRICES_HINT);
+        }
     }
     let _ = writeln!(out, "Advisory blockers: {}", r.advisory.len());
     for b in &r.advisory {

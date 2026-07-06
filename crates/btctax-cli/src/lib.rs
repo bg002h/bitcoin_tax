@@ -9,6 +9,7 @@ pub mod config;
 pub mod donation_details;
 pub mod eventref;
 pub mod optimize_attest;
+pub mod price_cache;
 pub mod render;
 pub mod session;
 pub mod tax_profile;
