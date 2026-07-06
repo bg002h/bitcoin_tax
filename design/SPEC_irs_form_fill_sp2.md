@@ -1,8 +1,8 @@
 # SPEC — official IRS PDF form-fill, sub-project 2 (Form 8283 + Schedule SE + Form 1040 cap-gains, TY2025)
 
-**Source baseline:** `main` @ `99f26ca` (branch `feat/irs-form-fill-sp2`). **Review status: R0 round 1 folded
-(4C/4I/3M/2N — Fable; merged IN-PLACE, surgical). Awaiting R0 round 2.** Review:
-`reviews/R0-spec-irs-form-fill-sp2-round-1.md`. SP2 of task #45; builds on the shipped SP1 engine. **Every
+**Source baseline:** `main` @ `99f26ca` (branch `feat/irs-form-fill-sp2`). **Review status: R0 round 2 folded
+(r1 4C/4I on Fable; r2 0C/1I/3M/2N on Opus — all r1 folds PDF-verified correct, the C3 oracle proven sound).
+Awaiting R0 round 3 (changed lines only).** Reviews: `reviews/R0-spec-irs-form-fill-sp2-round-{1,2}.md`. SP2 of task #45; builds on the shipped SP1 engine. **Every
 load-bearing fact below was PDF-verified by the Fable R0 (fill-experiment per form).**
 
 ## Goal (SP2)
@@ -24,12 +24,16 @@ primitive, honestly (partial-scope, conditional, correct lines).
      cluster (SE amount col x≈[504,576]; SE mid col x≈[410,482]; catches right↔mid swaps, e.g. SE 12 vs 13);
   2. **ordinal-y descent** — for a logically ordered line sequence (SE 2,3,4a,4c,6,8a,8d,9,10,11,12; 8283 rows
      A→D), assert the written widgets' center-y are strictly descending in logical order (a swap breaks
-     monotonicity);
+     monotonicity). **[R0-M1] 8283 ordinal-y must be PER-COLUMN** — Section A rows A–D split across two
+     y-bands / two tables, so the descent is asserted within each column's own field set, not globally;
   3. **same-y pair predicate** for the DA question — the Yes box is the LEFT member of the top-most same-y
      `/Btn` pair on page 1 with on-states {`/1`,`/2`} (measured: `c1_10[0]`=/1 @[518,497], `c1_10[1]`=/2 @[554,497]);
   4. **spacer + page pins** — exclude 1-pt preprinted-constant spacer fields (rect width <2pt — SE line 7
      `f1_13`=[575,384,576,396], line 14 `f2_1`); assert correct page membership. Keep `no_unmapped_filled` + the
-     swap-two-map-entries ⇒ RED fault-inject against THESE pins + `map_2025_matches_bundled_pdf_fieldset` per form.
+     swap-two-map-entries ⇒ RED fault-inject against THESE pins + `map_2025_matches_bundled_pdf_fieldset` per
+     form. **[R0-M2] the column-x logical→cluster table is hand-pinned, so the fault-inject KAT must cover BOTH
+     a cross-column swap (caught by column-x, e.g. SE 12↔13) AND a same-column swap (caught by ordinal-y, e.g.
+     SE 10↔11)** — one of each proves both oracle legs bite.
 
 ## Form 8283 (Rev. 12-2025) — `fill_form_8283`
 - **[R0-I3] Revision facts:** Section A = 4 rows (A–D); Section B Part I = 3 rows (A–C); parts renumbered —
@@ -60,8 +64,9 @@ primitive, honestly (partial-scope, conditional, correct lines).
   c1_lock golden: line 12 = 29,870.85 NOT 30,564.30).
 - **[R0-I1] Full arithmetic chain (self-consistency, like SP1's Sch D 7/15):** fill 2 (net_se), 3(=2), 4a(base),
   4c(=4a), 6(=4c), **8a (W-2 SS wages — needs `session.tax_profile(y).w2_ss_wages`, NOT in `SeTaxResult` —
-  thread it in via the fill signature)**, 8d(=8a), 9(=7−8d), 10(ss), 11(medicare), 12, 13(=12×50%, MID-column
-  `f1_22`). Explicit BLANK set: A-checkbox, 1a/1b, 4b, 5a/5b, 8b/8c, Part II. If 8a≥$176,100, follow the form
+  thread it in via the fill signature)**, 8d(=8a), **9(= line 7 − 8d, where line 7 is the `ss_wage_base`
+  $176,100 constant — [R0-M3] thread `ss_wage_base` in too, not just `w2_ss_wages`)**, 10(ss), 11(medicare),
+  12, 13(=12×50%, MID-column `f1_22`). Explicit BLANK set: A-checkbox, 1a/1b, 4b, 5a/5b, 8b/8c, Part II. If 8a≥$176,100, follow the form
   ("skip 8b–10"; 9/10 blank, matching ss==0).
 - **[★ R0-I2] $400 floor:** the form line 4c says "if less than $400, STOP; you don't owe SE tax", but
   `compute_se_tax` has no $400 threshold (se.rs:109 → None only when net_se==0). **SP2 skips Schedule SE when
@@ -72,17 +77,25 @@ primitive, honestly (partial-scope, conditional, correct lines).
   gets a NOTE, not a silent skip. **[R0-M1]** exclude the 1-pt spacer constant fields from map targets.
 
 ## Form 1040 (capital-gains cells ONLY) — `fill_form_1040_capgains`
-- **[★ R0-C2] Line is 7a (renumbered in 2025), with a new 7b checkbox pair.** Amount field `f1_70`
-  ([504,90,576,102]). **Fill 7a ONLY when Schedule D line 16 ≥ 0** (gain → line 16; zero → "-0-"). **On a NET
-  LOSS, leave 7a BLANK** + a loud notice ("line 16 is a loss — the §1211 $3,000/$1,500-MFS cap on Schedule D
-  line 21 is yours to complete and enter on 1040 line 7a"); SP1 scoped out line 21, so SP2 does not auto-fill
-  an uncapped loss. **7b checkboxes stay UNCHECKED** (Schedule D IS attached; the child-gain box is not
-  btctax's). Notice text says **"line 7a"**, never "line 7". KATs: `form_1040_line7a_gain_equals_schedule_d_line16`,
-  `form_1040_line7a_loss_is_blank_with_notice`, `form_1040_7b_checkboxes_untouched`.
+- **[★ R0-C2 + R0-r2-I★1] Line is 7a (renumbered in 2025), with a new 7b checkbox pair.** Amount field `f1_70`
+  ([504,90,576,102]). **Fill 7a ONLY when Schedule D is ACTIVE (there are capital disposals) AND line 16 ≥ 0**
+  (gain → line 16; **active-and-netted-to-zero → "-0-"**). **[★ I★1] If Schedule D is INACTIVE** (an income-only
+  / donation-only year — DA question may be YES but there are no capital disposals; `schedule_d()` forms.rs:172
+  returns zero totals but the attached Schedule D `active()`-gates line 16 to BLANK), **leave 7a BLANK even when
+  DA = YES** — stamping "-0-" against a blank Schedule D line 16 is an unearned zero-capital-gains claim on one
+  of the two cells btctax vouches for. Reserve "-0-" for the active-netted-to-zero case only. **On a NET LOSS,
+  leave 7a BLANK** + a loud notice ("line 16 is a loss — the §1211 $3,000/$1,500-MFS cap on Schedule D line 21
+  is yours to complete and enter on 1040 line 7a"); SP1 scoped out line 21, so SP2 does not auto-fill an
+  uncapped loss. **7b checkboxes stay UNCHECKED** (Schedule D IS attached; the child-gain box is not btctax's).
+  Notice text says **"line 7a"**, never "line 7". KATs: `form_1040_line7a_gain_equals_schedule_d_line16`,
+  `form_1040_line7a_loss_is_blank_with_notice`, `form_1040_7a_blank_when_schedule_d_inactive` (income-only year,
+  DA=YES, 7a empty), `form_1040_7b_checkboxes_untouched`.
 - **[★ R0-C4] Digital-asset question = YES only with btctax-evidenced qualifying activity.** The question is
   answered under penalty of perjury; buy-and-hold is a **No**. Yes = `c1_10[0]`, on-state `/1` ([518,497]).
-  **Check YES iff** any `form_8949` row (disposal) ∨ any `income_recognized` (reward/mining/staking/airdrop =
-  clause (a)) ∨ any Gift/Donate removal. Otherwise **leave BOTH boxes blank** (never fill No — btctax cannot
+  **Check YES iff** any `form_8949` row (disposal) ∨ ANY `income_recognized` entry ∨ any Gift/Donate removal
+  (source the gift signal from `state.removals` — `form_8283()` emits no gift rows; r2-confirmed). **[R0-N1]**
+  treat ANY income_recognized as qualifying (mining/staking/airdrop/interest/reward all = clause-(a) receipt) —
+  NOT a narrow kind whitelist. Otherwise **leave BOTH boxes blank** (never fill No — btctax cannot
   know the filer's full digital-asset universe) — and **skip the whole 1040 when there is no reportable
   activity** (no 7a value either) + a note. KATs: `form_1040_da_yes_iff_reportable_activity`,
   `form_1040_present_iff_reportable_activity`, `form_1040_da_blank_when_hold_only`.
@@ -106,10 +119,14 @@ packet; 1040 partial-scope & 7a; conditional 8283/SE + $400 floor; the addl-Medi
 - **T0 (engine)** — the per-form geometric oracle in `btctax-forms` (`Geo` extension: column-x clusters,
   ordinal-y descent, same-y `/Btn` pair, spacer/page pins) + per-form verify fns; unit-test against the bundled
   PDFs. (This is the C3 work the spec now owns.)
-- **T1 (Schedule SE)** — the 2025 SE map (spacers excluded) + `fill_schedule_se(se_result, w2_ss_wages, year)`
-  (line 12 = ss+medicare; full chain; $400 skip; addl advisory) + the SE oracle + KATs.
+- **T1 (Schedule SE)** — the 2025 SE map (spacers excluded) + `fill_schedule_se(se_result, w2_ss_wages,
+  ss_wage_base, year)` (line 12 = ss+medicare; full chain; $400 skip; addl advisory) + the SE oracle + KATs.
+  **NOTE: `export_irs_pdf` today computes only 8949+SchedD — T1 must ADD the SE computation** (`compute_se_tax`
+  via `session.tax_profile(y)`; `w2_ss_wages` is reachable there, admin.rs:86) to the command.
 - **T2 (Form 8283)** — the 2025 map (k-Digital-Assets `/11`, part renumbering, mo/yr dates) + `fill_form_8283`
-  (fill/blank scope table + notice) + overflow + the 8283 oracle + KATs.
+  (fill/blank scope table + notice) + overflow + the 8283 oracle + KATs. **[R0-N2] verify Part IV/V field
+  positions at map-extraction** — the round-1 appendix's tentative Part V donee cells actually fall in the
+  Part IV appraiser block; pin each by its own `/Rect`, do not trust the appendix names.
 - **T3 (Form 1040)** — the 2025 map (7a `f1_70`, DA `c1_10[0]`=/1) + `fill_form_1040_capgains` (gain-only 7a,
   loss-blank+notice, DA-iff-activity, 7b untouched, partial-scope notice) + the 1040 oracle + KATs; man page +
   README; whole-diff.
