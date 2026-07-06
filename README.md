@@ -159,21 +159,38 @@ btctax --vault ./vault.pgp export-snapshot --out ./export --tax-year 2025
 
 This writes a decrypted SQLite database plus CSVs — including Form 8949 and Schedule D — into `./export/`.
 
-**Fill the official IRS PDFs** (Form 8949 + Schedule D) directly from the same computed data:
+**Fill the official IRS PDFs** directly from the same computed data:
 
 ```sh
 btctax --vault ./vault.pgp export-irs-pdf --out ./export --tax-year 2025
+# or restrict the packet: --forms f8949,schedule-d
 ```
 
-This writes `f8949.pdf` and `schedule_d.pdf` populated from btctax's projection (nothing is
-recomputed):
+This writes a whole packet, each form only when it applies, populated from btctax's projection
+(no capital-gains figure is recomputed):
 
-- **Digital-asset boxes.** Bitcoin is filed under **Box I** (short-term) / **Box L** (long-term) —
-  the 2025 1099-DA revision — never Box C/F ("other than digital asset transactions").
+- **`f8949.pdf` + `schedule_d.pdf`** — always. Bitcoin is filed under **Box I** (short-term) /
+  **Box L** (long-term) — the 2025 1099-DA revision — never Box C/F. `> 11` rows/part paginate onto
+  multiple copies, each with its own totals; Schedule D carries the grand totals.
+- **`schedule_se.pdf`** — when you have **business** self-employment income (mining, etc.) whose net
+  earnings are **≥ the $400 floor** (below it, no SE tax is owed and the form is skipped). Line 12
+  (SE tax) = **Social Security + regular Medicare only**; the 0.9% **Additional Medicare Tax** is a
+  **Form 8959** item and is flagged on stderr, *not* placed on Schedule SE. Needs a stored
+  `tax-profile` (filing status) for the year — a missing profile prints a NOTE, not a fabricated form.
+- **`form_8283.pdf`** — when you made **BTC donations**. Fills the donee/appraiser **identity** and
+  the per-donation property rows (Section A ≤ $5,000, or **Section B** > $5,000 with the
+  **"k Digital assets"** box checked); it leaves **every other party's declaration/signature blank**
+  (Part III taxpayer signature, Part IV appraiser signature, Part V donee acknowledgment) — a Section
+  B 8283 is **not filing-ready** until those are signed, and a donation with incomplete appraiser
+  details is escalated for review. Multi-lot donations overflow onto additional copies.
+- **`form_1040_capgains.pdf`** — when there is reportable digital-asset activity. btctax fills **only
+  two cells**: **line 7a** (the capital gain, when Schedule D is active and line 16 ≥ 0;
+  active-and-netted-to-zero prints `-0-`; a **net loss leaves 7a blank** — the §1211
+  $3,000/$1,500-MFS cap on Schedule D line 21 is yours), and the **Digital-Asset question** (**Yes**
+  iff you had any disposal, income, gift, or donation — never a "No"). The 7b checkboxes are left
+  untouched, and a partial-scope notice lists exactly what was filled.
 - **Verified placement.** Every written value is read back _geometrically_ against the blank form's
   own field coordinates; a mis-placed cell fails closed, so a wrong tax form is never written.
-- **> 11 rows/part paginate** onto multiple form copies, each with its own totals; Schedule D
-  carries the grand totals.
 - **XFA dropped.** The engine removes the forms' XFA layer (otherwise Acrobat opens them blank) and
   sets `NeedAppearances`.
 - **Estimates are watermarked.** A pseudo-reconciled ledger requires the same attestation as

@@ -2,25 +2,46 @@
 .el .ds Aq '
 .TH btctax-export-irs-pdf 1  btctax "btctax manual"
 .SH NAME
-export\-irs\-pdf \- Fill the OFFICIAL IRS fillable PDFs (Form 8949 + Schedule D) for a tax year
+export\-irs\-pdf \- Fill the OFFICIAL IRS fillable PDFs for a tax year (a whole packet)
 .SH SYNOPSIS
-\fBexport\-irs\-pdf\fR <\fB\-\-out\fR> <\fB\-\-tax\-year\fR> [\fB\-\-attest\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBexport\-irs\-pdf\fR <\fB\-\-out\fR> <\fB\-\-tax\-year\fR> [\fB\-\-forms\fR] [\fB\-\-attest\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
-Fill the OFFICIAL IRS fillable PDFs (Form 8949 + Schedule D) for a tax year.
+Fill the OFFICIAL IRS fillable PDFs for a tax year (a whole packet).
 .PP
-Writes f8949.pdf + schedule_d.pdf (owner\-only) into \-\-out, populated from btctax\*(Aqs already\-computed projection — no figure is recomputed. The forms are the 2025 (1099\-DA) revision, so Bitcoin is filed under Box I (short\-term) / Box L (long\-term) — the digital\-asset boxes — NOT Box C/F ("other than digital asset transactions"). More than 11 rows per part paginate onto multiple form copies, each with its own totals; Schedule D carries the grand totals. Every written value is read back GEOMETRICALLY against the blank PDF\*(Aqs own field coordinates and the fill FAILS CLOSED on any mis\-placement — a wrong tax form is never written.
+Writes (owner\-only) into \-\-out, populated from btctax\*(Aqs already\-computed projection — no capital\-gains figure is recomputed: \- f8949.pdf + schedule_d.pdf — ALWAYS. The 2025 (1099\-DA) revision, so Bitcoin is filed under Box I (short\-term) / Box L (long\-term) — the digital\-asset boxes — NOT Box C/F. More than 11 rows per part paginate onto multiple copies, each with its own totals. \- schedule_se.pdf — when there is business self\-employment income and net earnings are ≥ the $400 floor. Line 12 (SE tax) = Social Security + regular Medicare ONLY; the 0.9% Additional Medicare Tax is a Form 8959 item (flagged on stderr, not put on Schedule SE). Requires a stored `tax\-profile` for the year (filing status); missing profile ⇒ a NOTE, not a form. \- form_8283.pdf — when there are BTC donations. Fills the donee/appraiser IDENTITY + per\- donation property rows (Section A ≤ $5,000 or Section B > $5,000, with the "k Digital assets" box checked); leaves every OTHER party\*(Aqs declaration/signature BLANK (Part III taxpayer sig, Part IV appraiser sig, Part V donee acknowledgment) — a Section B 8283 is NOT filing\-ready without those signed. Overflows onto additional copies. \- form_1040_capgains.pdf — when there is reportable digital\-asset activity. Fills ONLY line 7a (capital gain, when Schedule D is active and line 16 ≥ 0; active\-and\-zero → "\-0\-"; a net loss leaves 7a blank — the §1211 line\-21 cap is yours) and the Digital\-Asset question (YES iff any disposal, income, gift, or donation; never a "No"). 7b checkboxes are untouched.
 .PP
-The engine drops the forms\*(Aq XFA layer (else Acrobat opens them blank) and sets NeedAppearances so a viewer regenerates the visible values. Schedule D lines 17\-22 (28%\-rate / unrecaptured\-§1250 / QDI worksheet, incl. the line\-21 loss limit) are OUT OF SCOPE — a notice is printed. Rows on an exchange that MAY carry 1099\-DA broker reporting are flagged on stderr (SP1 files them all under Box I/L and says so).
+Every written value is read back GEOMETRICALLY against the blank PDF\*(Aqs own field coordinates and the fill FAILS CLOSED on any mis\-placement — a wrong tax form is never written. The engine drops the forms\*(Aq XFA layer (else Acrobat opens them blank) and sets NeedAppearances so a viewer regenerates the visible values. Schedule D lines 17\-22 (28%\-rate / unrecaptured\-§1250 / QDI worksheet, incl. the line\-21 loss limit) are OUT OF SCOPE. Rows on an exchange that MAY carry 1099\-DA broker reporting are flagged on stderr (btctax files them all under Box I/L and says so).
 .PP
 PSEUDO\-RECONCILED ledgers: the same attestation gate as export\-snapshot applies, AND every page is stamped with a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` watermark.
 .SH OPTIONS
 .TP
 \fB\-\-out\fR \fI<OUT>\fR
-Output DIRECTORY receiving the filled official PDFs (created owner\-only): f8949.pdf +
-schedule_d.pdf. These contain your unencrypted tax data — write \-\-out OUTSIDE any git repo.
+Output DIRECTORY receiving the filled official PDFs (created owner\-only): f8949.pdf,
+schedule_d.pdf, and — when applicable — schedule_se.pdf, form_8283.pdf,
+form_1040_capgains.pdf. These contain your unencrypted tax data — write \-\-out OUTSIDE any
+git repo.
 .TP
 \fB\-\-tax\-year\fR \fI<TAX_YEAR>\fR
-The tax year to fill (SP1 bundles TY2025 only; other years are refused)
+The tax year to fill (this build bundles TY2025 only; other years are refused)
+.TP
+\fB\-\-forms\fR \fI<FORMS>\fR
+Restrict the packet to specific forms (repeat or comma\-separate). Default = every applicable form (f8949 + schedule\-d always; schedule\-se when SE income ≥ the $400 floor; form\-8283 when there are donations; form\-1040 when there is reportable digital\-asset activity). A named form is still skipped when it does not apply
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+f8949: Form 8949 (per\-disposition capital\-gains rows)
+.IP \(bu 2
+schedule\-d: Schedule D (aggregated capital\-gains totals)
+.IP \(bu 2
+schedule\-se: Schedule SE (self\-employment tax)
+.IP \(bu 2
+form8283: Form 8283 (noncash charitable contributions)
+.IP \(bu 2
+form1040: Form 1040 (capital\-gains cells + the digital\-asset question)
+.RE
 .TP
 \fB\-\-attest\fR \fI<ATTEST>\fR
 Attestation phrase required to export while the ledger is PSEUDO\-RECONCILED (a synthetic default contributes to the projection). Pass the exact phrase `I attest this is true` (trimmed, case\-sensitive) to fill the DRAFT\-watermarked forms ON PURPOSE. Omit on a fully\-real ledger (never gated). Omit on an interactive terminal to be prompted; omit when piped (non\-TTY) while pseudo\-active and the export is refused
