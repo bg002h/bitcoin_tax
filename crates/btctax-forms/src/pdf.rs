@@ -13,6 +13,12 @@ use std::collections::HashMap;
 pub const F8949_PDF_2025: &[u8] = include_bytes!("../forms/2025/f8949.pdf");
 /// The bundled TY2025 Schedule D (official IRS fillable PDF, US-gov public domain).
 pub const SCHEDULE_D_PDF_2025: &[u8] = include_bytes!("../forms/2025/schedule_d.pdf");
+/// The bundled TY2025 Schedule SE (official IRS fillable PDF, US-gov public domain).
+pub const SCHEDULE_SE_PDF_2025: &[u8] = include_bytes!("../forms/2025/schedule_se.pdf");
+/// The bundled Form 8283, Rev. 12-2025 (official IRS fillable PDF, US-gov public domain).
+pub const F8283_PDF_2025: &[u8] = include_bytes!("../forms/2025/f8283.pdf");
+/// The bundled TY2025 Form 1040 (official IRS fillable PDF, US-gov public domain).
+pub const F1040_PDF_2025: &[u8] = include_bytes!("../forms/2025/f1040.pdf");
 
 /// One terminal (leaf) AcroForm field: its object id, fully-qualified name, widget rectangle, and
 /// whether it is a checkbox (`/FT /Btn`).
@@ -251,4 +257,34 @@ pub fn checkbox_on(doc: &Document, id: ObjectId) -> Option<String> {
         Object::Name(b) if b != b"Off" => Some(String::from_utf8_lossy(b).into_owned()),
         _ => None,
     }
+}
+
+/// The possible ON-state name(s) of a button widget — the `/AP` `/N` appearance keys other than
+/// `/Off` (without the leading `/`). Read straight from the bundled PDF, so the SP2 same-y `/Btn`
+/// pair oracle (the 1040 Digital-Asset Yes/No question) is map-INDEPENDENT. Empty when the widget
+/// carries no `/AP`/`/N`.
+pub fn button_on_states(doc: &Document, id: ObjectId) -> Vec<String> {
+    let mut out = Vec::new();
+    let Ok(dict) = doc.get_dictionary(id) else {
+        return out;
+    };
+    let ap = match dict.get(b"AP") {
+        Ok(Object::Reference(r)) => doc.get_dictionary(*r).ok(),
+        Ok(Object::Dictionary(d)) => Some(d),
+        _ => None,
+    };
+    let n = ap.and_then(|ap| match ap.get(b"N") {
+        Ok(Object::Reference(r)) => doc.get_dictionary(*r).ok(),
+        Ok(Object::Dictionary(d)) => Some(d),
+        _ => None,
+    });
+    if let Some(n) = n {
+        for (k, _) in n.iter() {
+            if k != b"Off" {
+                out.push(String::from_utf8_lossy(k).into_owned());
+            }
+        }
+    }
+    out.sort();
+    out
 }

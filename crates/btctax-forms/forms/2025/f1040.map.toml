@@ -1,0 +1,10 @@
+# Form 1040 (2025), capital-gains cells ONLY — logical cell → fully-qualified PDF field name.
+# Amount column x-cluster (hand-pinned): [504, 576] (col 0). Line 7a f1_70 = [504,90,576,102].
+# Digital-Asset question is a same-y {/1,/2} /Btn pair at y≈497 (verified map-independently by the
+# topmost_yes_no_pair oracle): Yes = c1_10[0] (LEFT, on-state /1); No = c1_10[1] (on-state /2).
+form = "f1040"
+year = 2025
+
+line7a = "topmostSubform[0].Page1[0].f1_70[0]"
+da_yes = { field = "topmostSubform[0].Page1[0].c1_10[0]", on = "1" }
+da_no = { field = "topmostSubform[0].Page1[0].c1_10[1]", on = "2" }

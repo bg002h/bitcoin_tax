@@ -1,10 +1,14 @@
 //! `config`, `export-snapshot` (FR10), `backup-key` — administrative commands. Config surfaces the TP8
 //! (c)/(b) treatment + the pre-2025 lot method; export/backup arrive in Task 15.
+use crate::cli::FormArg;
 use crate::config::{set_fee_treatment, set_pre2025_method as config_set_pre2025_method};
 use crate::render::write_csv_exports;
 use crate::{require_attestation, CliConfig, CliError, Session};
 use btctax_adapters::BundledTaxTables;
-use btctax_core::{compute_se_tax, FeeTreatment, LotMethod, Severity, TaxTables};
+use btctax_core::{
+    compute_se_tax, se_net_income, FeeTreatment, LotMethod, ScheduleDPart, Severity, TaxTables, Usd,
+};
+use btctax_forms::Form1040Inputs;
 use btctax_store::{fsperms, Passphrase};
 use std::path::{Path, PathBuf};
 
@@ -130,29 +134,68 @@ pub fn export_pseudo_active(vault_path: &Path, pp: &Passphrase) -> Result<bool, 
     Ok(state.pseudo_active())
 }
 
-/// Outcome of `export_irs_pdf`: the two written PDF paths, the unresolved-Hard-blocker count (same
+/// Outcome of `export_irs_pdf`: the written PDF paths, the unresolved-Hard-blocker count (same
 /// INFORMATIONAL disclosure as `export-snapshot`), whether the fill was watermarked (pseudo-active),
-/// and the count of rows that MIGHT belong on a separate 1099-DA-reported 8949 (Box G/H/J/K — the
-/// [I5] advisory). SP1 files EVERY Bitcoin row under Box I/L and says so.
+/// the count of rows that MIGHT belong on a separate 1099-DA-reported 8949 (Box G/H/J/K — the [I5]
+/// advisory), and the SP2 packet (Schedule SE + Form 8283 + Form 1040 cap-gains) with the advisories
+/// each one drives.
 #[derive(Debug, Clone)]
 pub struct IrsPdfReport {
-    pub f8949_path: PathBuf,
-    pub schedule_d_path: PathBuf,
+    pub f8949_path: Option<PathBuf>,
+    pub schedule_d_path: Option<PathBuf>,
     pub tax_year: i32,
     pub unresolved_hard: usize,
     pub broker_reported_rows: usize,
     pub watermarked: bool,
+    /// Schedule SE — written only when SE income ≥ the $400 floor (and selected).
+    pub schedule_se_path: Option<PathBuf>,
+    /// SE tax was computed but net earnings were below the $400 floor → SE not owed, form skipped.
+    pub se_below_floor: bool,
+    /// `Some(addl)` when the §1401(b)(2) Additional Medicare Tax is nonzero — a Form 8959 item, NOT on
+    /// Schedule SE (a loud advisory).
+    pub se_addl_medicare: Option<Usd>,
+    /// SE-eligible business income exists but no profile/table was available (`compute_se_tax` → None
+    /// for a reason other than "no SE income") → a NOTE, not a silent skip (the `se_net_income`
+    /// discriminator).
+    pub se_income_without_profile: bool,
+    /// Form 8283 — written only when there are donations (and selected).
+    pub form_8283_path: Option<PathBuf>,
+    /// Any Form 8283 row needs manual review (incomplete appraiser/donee declaration) → escalate.
+    pub form_8283_needs_review: bool,
+    /// The Form 8283 section actually written (`Some(true)` = Section B, `Some(false)` = Section A).
+    pub form_8283_section_b: Option<bool>,
+    /// Form 1040 cap-gains — written only when there is reportable digital-asset activity (and selected).
+    pub form_1040_path: Option<PathBuf>,
+    /// Line 7a received a value on the written 1040.
+    pub form_1040_filled_7a: bool,
+    /// The 1040 was skipped for a NET LOSS on line 7a (the §1211 line-21 cap is the filer's).
+    pub form_1040_loss: bool,
 }
 
-/// `export-irs-pdf`: fill the OFFICIAL IRS PDFs (Form 8949 + Schedule D) for `tax_year` and write them
-/// (owner-only) to `out_dir`. The form data is REUSED from the projection (`form_8949`/`schedule_d`) —
-/// nothing is recomputed. Same pseudo-active attestation gate as `export-snapshot`: checked FIRST, so
-/// a refused export leaves `out_dir` untouched; a pseudo fill is additionally DRAFT-watermarked.
+/// Whether a form is included: the packet is every applicable form unless `--forms` opts in to a subset.
+fn wants(selected: &[FormArg], f: FormArg) -> bool {
+    selected.is_empty() || selected.contains(&f)
+}
+
+/// A Schedule D part is "active" (worth reporting) iff it has any proceeds/cost/gain.
+fn sd_part_active(p: &ScheduleDPart) -> bool {
+    !p.proceeds.is_zero() || !p.cost_basis.is_zero() || !p.gain.is_zero()
+}
+
+/// `export-irs-pdf`: fill the OFFICIAL IRS PDFs for `tax_year` and write them (owner-only) to
+/// `out_dir`. The packet is Form 8949 + Schedule D (always applicable) plus — when applicable and
+/// selected — Schedule SE (SE income ≥ $400), Form 8283 (donations), and Form 1040 cap-gains
+/// (reportable digital-asset activity). The form data is REUSED from the projection
+/// (`form_8949`/`schedule_d`/`form_8283`/`compute_se_tax`) — nothing capital-gains is recomputed; the
+/// SE §1401 figure is computed here from the year's stored `TaxProfile`. Same pseudo-active
+/// attestation gate as `export-snapshot`: checked FIRST, so a refused export leaves `out_dir`
+/// untouched; a pseudo fill is additionally DRAFT-watermarked.
 pub fn export_irs_pdf(
     vault_path: &Path,
     pp: &Passphrase,
     out_dir: &Path,
     tax_year: i32,
+    forms: &[FormArg],
     attest: Option<&str>,
 ) -> Result<IrsPdfReport, CliError> {
     let session = Session::open(vault_path, pp)?;
@@ -164,24 +207,129 @@ pub fn export_irs_pdf(
         require_attestation(attest)?;
     }
 
-    // Reuse the projection's form data verbatim (no recompute).
+    // Reuse the projection's capital-gains data verbatim (no recompute).
     let rows = btctax_core::form_8949(&state, tax_year);
     let totals = btctax_core::schedule_d(&state, tax_year);
 
-    // Fill the official PDFs. The engine reads each output back geometrically and FAILS CLOSED on a
-    // mis-mapped cell (→ CliError::FormFill) — a wrong tax form is never written.
-    let mut f8949 = btctax_forms::fill_form_8949(&rows, tax_year)?;
-    let mut schedule_d = btctax_forms::fill_schedule_d(&totals, tax_year)?;
-    if watermarked {
-        f8949 = btctax_forms::stamp_draft_watermark(&f8949)?;
-        schedule_d = btctax_forms::stamp_draft_watermark(&schedule_d)?;
-    }
+    // A pseudo-active fill DRAFT-watermarks every page before it hits disk.
+    let stamp = |bytes: Vec<u8>| -> Result<Vec<u8>, CliError> {
+        Ok(if watermarked {
+            btctax_forms::stamp_draft_watermark(&bytes)?
+        } else {
+            bytes
+        })
+    };
 
     fsperms::mkdir_owner_only(out_dir)?;
-    let f8949_path = out_dir.join("f8949.pdf");
-    let schedule_d_path = out_dir.join("schedule_d.pdf");
-    write_bytes_owner_only(&f8949_path, &f8949)?;
-    write_bytes_owner_only(&schedule_d_path, &schedule_d)?;
+
+    // ── Form 8949 + Schedule D (always applicable). ──
+    let f8949_path = if wants(forms, FormArg::F8949) {
+        let bytes = stamp(btctax_forms::fill_form_8949(&rows, tax_year)?)?;
+        let path = out_dir.join("f8949.pdf");
+        write_bytes_owner_only(&path, &bytes)?;
+        Some(path)
+    } else {
+        None
+    };
+    let schedule_d_path = if wants(forms, FormArg::ScheduleD) {
+        let bytes = stamp(btctax_forms::fill_schedule_d(&totals, tax_year)?)?;
+        let path = out_dir.join("schedule_d.pdf");
+        write_bytes_owner_only(&path, &bytes)?;
+        Some(path)
+    } else {
+        None
+    };
+
+    // ── Schedule SE (self-employment tax). Compute the §1401 figure from the year's TaxProfile. ──
+    let se_computed = {
+        let tables = BundledTaxTables::load();
+        session.tax_profile(tax_year)?.and_then(|p| {
+            tables.table_for(tax_year).and_then(|t| {
+                compute_se_tax(
+                    &state,
+                    tax_year,
+                    p.filing_status,
+                    t,
+                    p.w2_ss_wages,
+                    p.w2_medicare_wages,
+                    p.schedule_c_expenses,
+                )
+                .map(|se| (se, p.w2_ss_wages, t.ss_wage_base))
+            })
+        })
+    };
+    // Discriminator: SE income present but `compute_se_tax` returned None (no profile / no table) → a
+    // NOTE, not a silent skip (mirrors the render layer; never a fabricated form).
+    let se_income_without_profile =
+        se_computed.is_none() && !se_net_income(&state, tax_year).is_zero();
+    let mut schedule_se_path = None;
+    let mut se_below_floor = false;
+    let mut se_addl_medicare = None;
+    if wants(forms, FormArg::ScheduleSe) {
+        if let Some((se, w2_ss_wages, ss_wage_base)) = se_computed {
+            if !se.addl.is_zero() {
+                se_addl_medicare = Some(se.addl);
+            }
+            match btctax_forms::fill_schedule_se(&se, w2_ss_wages, ss_wage_base, tax_year)? {
+                Some(bytes) => {
+                    let bytes = stamp(bytes)?;
+                    let path = out_dir.join("schedule_se.pdf");
+                    write_bytes_owner_only(&path, &bytes)?;
+                    schedule_se_path = Some(path);
+                }
+                None => se_below_floor = true, // below the $400 floor — SE not owed.
+            }
+        }
+    }
+
+    // ── Form 8283 (noncash charitable contributions). ──
+    let mut form_8283_path = None;
+    let mut form_8283_needs_review = false;
+    let mut form_8283_section_b = None;
+    if wants(forms, FormArg::Form8283) {
+        let details = session.donation_details()?;
+        let rows_8283 = btctax_core::form_8283(&state, tax_year, &details);
+        if let Some(bytes) = btctax_forms::fill_form_8283(&rows_8283, tax_year)? {
+            form_8283_needs_review = rows_8283.iter().any(|r| r.needs_review);
+            form_8283_section_b = rows_8283
+                .iter()
+                .find_map(|r| r.section)
+                .map(|s| s == btctax_core::Form8283Section::B);
+            let bytes = stamp(bytes)?;
+            let path = out_dir.join("form_8283.pdf");
+            write_bytes_owner_only(&path, &bytes)?;
+            form_8283_path = Some(path);
+        }
+    }
+
+    // ── Form 1040 cap-gains cells + the digital-asset question. ──
+    let mut form_1040_path = None;
+    let mut form_1040_filled_7a = false;
+    let mut form_1040_loss = false;
+    if wants(forms, FormArg::Form1040) {
+        let da_yes = !rows.is_empty()
+            || state
+                .income_recognized
+                .iter()
+                .any(|i| i.recognized_at.year() == tax_year)
+            || state
+                .removals
+                .iter()
+                .any(|r| r.removed_at.year() == tax_year);
+        let inputs = Form1040Inputs {
+            da_yes,
+            schedule_d_active: sd_part_active(&totals.st) || sd_part_active(&totals.lt),
+            schedule_d_line16: totals.st.gain + totals.lt.gain,
+        };
+        if let Some(fill) = btctax_forms::fill_form_1040_capgains(&inputs, tax_year)? {
+            form_1040_filled_7a = fill.filled_7a;
+            form_1040_loss = fill.loss;
+            let bytes = stamp(fill.pdf)?;
+            let path = out_dir.join("form_1040_capgains.pdf");
+            write_bytes_owner_only(&path, &bytes)?;
+            form_1040_path = Some(path);
+        }
+    }
 
     let unresolved_hard = state
         .blockers
@@ -195,6 +343,16 @@ pub fn export_irs_pdf(
         unresolved_hard,
         broker_reported_rows: btctax_forms::rows_possibly_broker_reported(&rows),
         watermarked,
+        schedule_se_path,
+        se_below_floor,
+        se_addl_medicare,
+        se_income_without_profile,
+        form_8283_path,
+        form_8283_needs_review,
+        form_8283_section_b,
+        form_1040_path,
+        form_1040_filled_7a,
+        form_1040_loss,
     })
 }
 

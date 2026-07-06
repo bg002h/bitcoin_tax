@@ -1,0 +1,24 @@
+# Schedule SE (Form 1040), tax year 2025 — logical line → fully-qualified PDF field name.
+# Column x-clusters (hand-pinned from the blank PDF, map-independent oracle):
+#   amount column x ≈ [504, 576]   (col 1)
+#   mid    column x ≈ [410, 482]   (col 0)  — lines 8a and 13 sit here
+# Spacers excluded (never map targets): line 7 constant $176,100 = f1_13 [575,384,576,396] (1-pt wide);
+# Part II line 14 constant = Page2 f2_1 [575,696,576,708] (1-pt wide).
+form = "schedule_se"
+year = 2025
+
+# Part I — the filled §1401 chain. line 2 (net_se), 3(=2), 4a(base), 4c(=4a), 6(=4c),
+# 8a (W-2 SS wages, MID col), 8d(=8a), 9(= line 7 176,100 − 8d), 10(ss), 11(medicare),
+# 12 (= 10 + 11 = SS + regular Medicare ONLY), 13 (= 12 × 50%, MID col = deductible_half).
+line2  = "topmostSubform[0].Page1[0].f1_5[0]"
+line3  = "topmostSubform[0].Page1[0].f1_6[0]"
+line4a = "topmostSubform[0].Page1[0].f1_7[0]"
+line4c = "topmostSubform[0].Page1[0].f1_9[0]"
+line6  = "topmostSubform[0].Page1[0].f1_12[0]"
+line8a = "topmostSubform[0].Page1[0].Line8a_ReadOrder[0].f1_14[0]"
+line8d = "topmostSubform[0].Page1[0].f1_17[0]"
+line9  = "topmostSubform[0].Page1[0].f1_18[0]"
+line10 = "topmostSubform[0].Page1[0].f1_19[0]"
+line11 = "topmostSubform[0].Page1[0].f1_20[0]"
+line12 = "topmostSubform[0].Page1[0].f1_21[0]"
+line13 = "topmostSubform[0].Page1[0].f1_22[0]"
