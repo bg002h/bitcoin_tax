@@ -1,0 +1,30 @@
+[package]
+name = "btctax-forms"
+version = "0.3.0"
+edition.workspace = true
+license.workspace = true
+description = "Fill the official IRS fillable PDFs (Form 8949 + Schedule D) from btctax's computed tax data — offline, deterministic, geometry-verified (part of btctax)."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories = ["finance"]
+
+[dependencies]
+# Pure-Rust PDF read/modify/write — NO network, NO TLS (the isolation gate forbids ureq/rustls).
+lopdf = { version = "0.36", default-features = false }
+# The tax data model (Form8949Row / ScheduleDTotals) + Usd/TaxDate conventions.
+btctax-core = { path = "../btctax-core", version = "0.3.0" }
+# Committed per-year field maps (logical cell -> fully-qualified PDF field name).
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+# Money is exact Decimal (NFR5); dates render MM/DD/YYYY for the form boxes.
+rust_decimal = { version = "1.36", default-features = false, features = ["std"] }
+time = { version = "0.3", features = ["macros", "formatting"] }
+thiserror = "1"
+
+[dev-dependencies]
+# Golden byte-determinism KAT: pin the fill output's content hash (no committed binary blob).
+sha2 = "0.10"
+# Synthetic Form8949Row / ScheduleDTotals fixtures (KAT convention, no real files).
+rust_decimal_macros = "1.36"
+time = { version = "0.3", features = ["macros"] }

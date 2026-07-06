@@ -40,6 +40,10 @@ pub enum CliError {
     Csv(#[from] csv::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    /// `export-irs-pdf`: an official IRS PDF fill failed — most importantly the geometric read-back
+    /// FAILING CLOSED on a mis-mapped cell, so no wrong tax form is ever written.
+    #[error("IRS form fill: {0}")]
+    FormFill(#[from] btctax_forms::FormsError),
     /// A user-supplied event reference did not parse as a canonical `EventId` (eventref.rs).
     #[error("not a valid event reference: {0:?}")]
     BadEventRef(String),

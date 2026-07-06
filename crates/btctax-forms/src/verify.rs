@@ -1,0 +1,242 @@
+//! **Geometric, map-INDEPENDENT read-back.** The naive "re-read each value through the same map"
+//! is circular — a swapped-column map would pass. Instead we re-derive the column-x / row-y bands
+//! straight from the bundled PDF's widget `/Rect`s (structural grouping by `Row{n}` subform, column
+//! order by x-position, row order by y-position) and assert that every value we wrote landed in the
+//! band its LOGICAL cell demands. A mis-mapped cell puts the value in the wrong band → we fail
+//! closed. We also assert NO field outside the authorized set carries a value. **The map is what we
+//! distrust; the PDF's geometry is the oracle.**
+
+use crate::error::FormsError;
+use crate::pdf::{checkbox_on, text_value, Field};
+use lopdf::Document;
+use std::collections::{HashMap, HashSet};
+
+const EPS: f32 = 1.0;
+
+/// Where a written value is supposed to land.
+#[derive(Debug, Clone)]
+pub enum Geo {
+    /// A data-grid cell: 0-based row (top→bottom) and column (a=0 … h=7).
+    Data {
+        /// 0-based data row (Row1 = 0, the topmost).
+        row: usize,
+        /// 0-based column (a=0, b=1, … h=7).
+        col: usize,
+    },
+    /// A per-part totals-row cell in column `col`, which must sit BELOW the data grid.
+    Total {
+        /// 0-based column (d=3, e=4, g=6, h=7).
+        col: usize,
+    },
+    /// A checkbox / non-grid value — excluded from the column geometry, still in the no-unmapped set.
+    Check,
+}
+
+/// One authorized write: the field we set, and the logical cell it must occupy.
+#[derive(Debug, Clone)]
+pub struct Placement {
+    /// Fully-qualified field name that was written.
+    pub fqn: String,
+    /// The logical cell the value must land in.
+    pub geo: Geo,
+}
+
+fn page_of(fqn: &str) -> usize {
+    if fqn.contains("Page2") {
+        1
+    } else {
+        0
+    }
+}
+
+/// The Form 8949 data-grid subform token.
+pub const F8949_TABLE_TOKEN: &str = "Table_Line1_Part";
+
+/// Extract the `Row{n}` number from a data-grid field's fqn.
+fn row_num(fqn: &str) -> Option<u32> {
+    let i = fqn.find(".Row")? + 4;
+    let rest = &fqn[i..];
+    let end = rest.find('[')?;
+    rest[..end].parse().ok()
+}
+
+/// Column-x and row-y bands re-derived from one page's data grid — the geometry oracle.
+struct GridBands {
+    /// Per-column-index (0..=7) x-interval `(min_x0, max_x1)`, ordered left→right by geometry.
+    col_x: Vec<(f32, f32)>,
+    /// Per-row-index (0.., top→bottom by geometry) y-interval `(y0, y1)`.
+    row_y: Vec<(f32, f32)>,
+    /// The lowest data-row bottom edge — the totals row must sit below this.
+    min_row_y0: f32,
+}
+
+fn derive_bands(fields: &[Field], page: usize, table_token: &str) -> Result<GridBands, FormsError> {
+    // Group this page's data-grid widgets by structural Row number (independent of the map).
+    let mut rows: HashMap<u32, Vec<&Field>> = HashMap::new();
+    for f in fields {
+        if page_of(&f.fqn) == page && f.fqn.contains(table_token) && f.rect.is_some() {
+            if let Some(n) = row_num(&f.fqn) {
+                rows.entry(n).or_default().push(f);
+            }
+        }
+    }
+    if rows.is_empty() {
+        return Err(FormsError::Structure(format!(
+            "page {page}: no data-grid widgets found for band derivation"
+        )));
+    }
+    // Order rows top→bottom by widget y-center (geometry, NOT the Row number label).
+    let mut ordered: Vec<(u32, Vec<&Field>)> = rows.into_iter().collect();
+    let row_cy =
+        |v: &[&Field]| -> f32 { v.iter().filter_map(|f| f.cy()).sum::<f32>() / (v.len() as f32) };
+    ordered.sort_by(|a, b| row_cy(&b.1).partial_cmp(&row_cy(&a.1)).unwrap());
+
+    let ncols = ordered[0].1.len();
+    let mut col_x: Vec<(f32, f32)> = vec![(f32::INFINITY, f32::NEG_INFINITY); ncols];
+    let mut row_y: Vec<(f32, f32)> = Vec::with_capacity(ordered.len());
+    let mut min_row_y0 = f32::INFINITY;
+
+    for (_n, mut widgets) in ordered {
+        if widgets.len() != ncols {
+            return Err(FormsError::Structure(format!(
+                "page {page}: inconsistent column count ({} vs {ncols})",
+                widgets.len()
+            )));
+        }
+        // Column order is defined by x-position, purely from geometry.
+        widgets.sort_by(|a, b| a.rect.unwrap()[0].partial_cmp(&b.rect.unwrap()[0]).unwrap());
+        let mut y0 = f32::INFINITY;
+        let mut y1 = f32::NEG_INFINITY;
+        for (c, w) in widgets.iter().enumerate() {
+            let r = w.rect.unwrap();
+            col_x[c].0 = col_x[c].0.min(r[0]);
+            col_x[c].1 = col_x[c].1.max(r[2]);
+            y0 = y0.min(r[1]);
+            y1 = y1.max(r[3]);
+        }
+        min_row_y0 = min_row_y0.min(y0);
+        row_y.push((y0, y1));
+    }
+    Ok(GridBands {
+        col_x,
+        row_y,
+        min_row_y0,
+    })
+}
+
+/// Whether a coordinate lies within a band (with float tolerance).
+pub fn in_band(v: f32, band: (f32, f32)) -> bool {
+    v >= band.0 - EPS && v <= band.1 + EPS
+}
+
+/// Left→right x-bands of a table's amount columns, re-derived from the PDF geometry (independent of
+/// any map). Used by the Schedule D read-back to catch a mis-mapped d/e/g/h column.
+pub fn column_x_bands(
+    fields: &[Field],
+    page: usize,
+    table_token: &str,
+) -> Result<Vec<(f32, f32)>, FormsError> {
+    Ok(derive_bands(fields, page, table_token)?.col_x)
+}
+
+/// Verify a Form 8949 fill: (1) every written value lands in the geometrically-expected column/row
+/// band, and (2) no unmapped field carries a value. Fails closed.
+pub fn verify_8949(
+    doc: &Document,
+    fields: &[Field],
+    placements: &[Placement],
+) -> Result<(), FormsError> {
+    let index: HashMap<&str, &Field> = fields.iter().map(|f| (f.fqn.as_str(), f)).collect();
+    // Independently derive the geometry oracle for every page a placement touches (0 = Part I,
+    // 1 = Part II) — up front, so a mis-mapped cell cannot dodge the check.
+    let mut pages: Vec<usize> = placements
+        .iter()
+        .filter(|p| matches!(p.geo, Geo::Data { .. } | Geo::Total { .. }))
+        .map(|p| page_of(&p.fqn))
+        .collect();
+    pages.sort_unstable();
+    pages.dedup();
+    let mut bands: HashMap<usize, GridBands> = HashMap::new();
+    for page in pages {
+        bands.insert(page, derive_bands(fields, page, F8949_TABLE_TOKEN)?);
+    }
+
+    for p in placements {
+        let field = index
+            .get(p.fqn.as_str())
+            .ok_or_else(|| FormsError::MapFieldMissing(p.fqn.clone()))?;
+        match &p.geo {
+            Geo::Check => {} // geometry N/A; only participates in the no-unmapped scan below
+            Geo::Data { row, col } => {
+                let page = page_of(&p.fqn);
+                let b = &bands[&page];
+                let cx = field.cx().ok_or_else(|| miss_rect(&p.fqn))?;
+                let cy = field.cy().ok_or_else(|| miss_rect(&p.fqn))?;
+                let colb = *b.col_x.get(*col).ok_or_else(|| {
+                    FormsError::Geometry(format!("column {col} out of range on page {page}"))
+                })?;
+                let rowb = *b.row_y.get(*row).ok_or_else(|| {
+                    FormsError::Geometry(format!("row {row} out of range on page {page}"))
+                })?;
+                if !in_band(cx, colb) {
+                    return Err(FormsError::Geometry(format!(
+                        "{}: x-center {cx:.1} not in column {col} band {colb:?} (mis-mapped column)",
+                        p.fqn
+                    )));
+                }
+                if !in_band(cy, rowb) {
+                    return Err(FormsError::Geometry(format!(
+                        "{}: y-center {cy:.1} not in row {row} band {rowb:?} (mis-mapped row)",
+                        p.fqn
+                    )));
+                }
+            }
+            Geo::Total { col } => {
+                let page = page_of(&p.fqn);
+                let b = &bands[&page];
+                let cx = field.cx().ok_or_else(|| miss_rect(&p.fqn))?;
+                let cy = field.cy().ok_or_else(|| miss_rect(&p.fqn))?;
+                let colb = *b.col_x.get(*col).ok_or_else(|| {
+                    FormsError::Geometry(format!("total column {col} out of range on page {page}"))
+                })?;
+                if !in_band(cx, colb) {
+                    return Err(FormsError::Geometry(format!(
+                        "{}: total x-center {cx:.1} not in column {col} band {colb:?}",
+                        p.fqn
+                    )));
+                }
+                if cy >= b.min_row_y0 {
+                    return Err(FormsError::Geometry(format!(
+                        "{}: total y-center {cy:.1} is not below the data grid (>= {:.1})",
+                        p.fqn, b.min_row_y0
+                    )));
+                }
+            }
+        }
+    }
+    no_unmapped_filled(doc, fields, placements)
+}
+
+fn miss_rect(fqn: &str) -> FormsError {
+    FormsError::Geometry(format!("{fqn}: field has no /Rect to verify"))
+}
+
+/// Assert that every field carrying a value is in the authorized (placement) set.
+pub fn no_unmapped_filled(
+    doc: &Document,
+    fields: &[Field],
+    placements: &[Placement],
+) -> Result<(), FormsError> {
+    let allowed: HashSet<&str> = placements.iter().map(|p| p.fqn.as_str()).collect();
+    for f in fields {
+        let filled = if f.is_button {
+            checkbox_on(doc, f.id).is_some()
+        } else {
+            text_value(doc, f.id).is_some_and(|s| !s.is_empty())
+        };
+        if filled && !allowed.contains(f.fqn.as_str()) {
+            return Err(FormsError::UnmappedField(f.fqn.clone()));
+        }
+    }
+    Ok(())
+}

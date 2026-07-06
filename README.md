@@ -159,6 +159,29 @@ btctax --vault ./vault.pgp export-snapshot --out ./export --tax-year 2025
 
 This writes a decrypted SQLite database plus CSVs — including Form 8949 and Schedule D — into `./export/`.
 
+**Fill the official IRS PDFs** (Form 8949 + Schedule D) directly from the same computed data:
+
+```sh
+btctax --vault ./vault.pgp export-irs-pdf --out ./export --tax-year 2025
+```
+
+This writes `f8949.pdf` and `schedule_d.pdf` populated from btctax's projection (nothing is
+recomputed):
+
+- **Digital-asset boxes.** Bitcoin is filed under **Box I** (short-term) / **Box L** (long-term) —
+  the 2025 1099-DA revision — never Box C/F ("other than digital asset transactions").
+- **Verified placement.** Every written value is read back _geometrically_ against the blank form's
+  own field coordinates; a mis-placed cell fails closed, so a wrong tax form is never written.
+- **> 11 rows/part paginate** onto multiple form copies, each with its own totals; Schedule D
+  carries the grand totals.
+- **XFA dropped.** The engine removes the forms' XFA layer (otherwise Acrobat opens them blank) and
+  sets `NeedAppearances`.
+- **Estimates are watermarked.** A pseudo-reconciled ledger requires the same attestation as
+  `export-snapshot` **and** stamps a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` on every page.
+- **Scope.** Schedule D lines **17–22** (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. the
+  line-21 loss limit) are out of scope and left blank — a notice is printed. Rows on an exchange
+  that may carry 1099-DA broker reporting are flagged on stderr.
+
 > ⚠️ **These files contain your unencrypted tax data and are _not_ git-ignored.** Write `--out` to a
 > directory **outside** any git repository.
 
