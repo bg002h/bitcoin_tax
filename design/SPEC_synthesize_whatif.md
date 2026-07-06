@@ -1,8 +1,9 @@
 # SPEC — what-if / synthesize-transaction tax-planning tool (task #43)
 
-**Source baseline:** `main` @ `283238f`. **Review status: R0 round 1 folded (0C/2I/5M/5N — Opus;
-algorithm rendered faithfully, no Fable re-consult; 2 report-signal Importants + minors merged IN-PLACE).
-Awaiting R0 round 2.** Review: `reviews/R0-spec-whatif-round-1.md`.** Brainstorm: `design/BRAINSTORM_synthesize_whatif.md`. Optimizer algorithm (authoritative):
+**Source baseline:** `main` @ `283238f`. **Review status: R0-GREEN (2 rounds; 0C/0I).
+Cleared to implement (P0 first).** Reviews: `reviews/R0-spec-whatif-round-{1,2}.md`. r1 0C/2I (Opus — the
+algorithm rendered faithfully, no Fable re-consult; 2 report-signal baseline-subtraction Importants + minors);
+r2 0C/0I/2M/2N (Opus — folds verified vs source; SemVer precision synced: this is a 0.4.0 breaking cycle).** Brainstorm: `design/BRAINSTORM_synthesize_whatif.md`. Optimizer algorithm (authoritative):
 `design/agent-reports/fable-harvest-optimizer-advice.md`. Memory: [[future-synthesize-transaction-tax-planning]].
 Reuses the proven non-persisted synthetic-disposal seam (`synthetic_state` optimize.rs:1230 / `score_synthetic`
 :1274). Scope: **sell what-if + harvest optimizer**, **CLI + TUI overlay**, + the `optimize consult` marginal fix.
@@ -126,11 +127,12 @@ never mutates the vault. (Detailed TUI state/keybindings in the P3 spec-slice at
 
 ## Scope / SemVer / lockstep
 btctax-core (+`whatif` module, +`pref_split`/`bottom_with` on `TaxResult`) + btctax-cli (`what-if` command +
-ad-hoc profile + render + the consult fix) + btctax-tui (P3 overlay). No persistence surface. **[R0-M3 SemVer]
-adding pub fields to the re-exported, non-`#[non_exhaustive]` `TaxResult` is a BREAKING change** → either bump
-0.3.0→**0.4.0**, OR (preferred) add `#[non_exhaustive]` to `TaxResult` (and to the newly-exposed `PrefSplit`,
-which must also be `pub`-re-exported from btctax-core) NOW so this + all future field additions are non-breaking
-→ then MINOR. Recommend `#[non_exhaustive]`. Man page + README (`what-if`, the ad-hoc profile, the disclosures).
+ad-hoc profile + render + the consult fix) + btctax-tui (P3 overlay). No persistence surface. **[R0-M3+r2-m1/m2 SemVer]
+This is a 0.3.0→0.4.0 (breaking) cycle REGARDLESS** — adding pub fields to the re-exported, non-`#[non_exhaustive]`
+`TaxResult` is breaking, and adding `#[non_exhaustive]` to an already-exposed struct is *itself* breaking. So:
+bump to **0.4.0**, AND add `#[non_exhaustive]` to `TaxResult` + `PrefSplit` in THIS cycle to future-proof all
+*future* field additions (it does not make this release non-breaking). `PrefSplit` is ALREADY public at
+`btctax_core::tax::PrefSplit` (tax/mod.rs:11) — the action is a crate-ROOT re-export for parity with `TaxResult`. Man page + README (`what-if`, the ad-hoc profile, the disclosures).
 Network isolation unchanged (all pure compute). No new tax authority — cites the same tables.
 
 ## Plan (TDD, phased; each slice: R0-cleared → tests-first → whole-diff)
