@@ -1,0 +1,68 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-what-if-sell 1  btctax "btctax manual"
+.SH NAME
+sell \- Posit a hypothetical, NON\-persisted SALE and see its MARGINAL federal tax: the lots it would consume, the ST/LT split, which §1(h) LTCG bracket (0/15/20) it lands in + room to the next breakpoint, the exact marginal tax (with\-hypothetical minus baseline — the sale\*(Aqs OWN effect, not the whole\-year figure), the effective rate, the §1212(b) carryforward carried to next year, this year\*(Aqs ordinary offset, and the §1411 NIIT delta. A net loss surfaces the carryforward disclosure (its value is NOT this\-year tax). Writes NOTHING
+.SH SYNOPSIS
+\fBsell\fR <\fB\-\-sell\fR> [\fB\-\-wallet\fR] [\fB\-\-at\fR] [\fB\-\-price\fR] [\fB\-\-method\fR] [\fB\-\-filing\-status\fR] [\fB\-\-income\fR] [\fB\-\-magi\fR] [\fB\-\-carryforward\-in\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Posit a hypothetical, NON\-persisted SALE and see its MARGINAL federal tax: the lots it would consume, the ST/LT split, which §1(h) LTCG bracket (0/15/20) it lands in + room to the next breakpoint, the exact marginal tax (with\-hypothetical minus baseline — the sale\*(Aqs OWN effect, not the whole\-year figure), the effective rate, the §1212(b) carryforward carried to next year, this year\*(Aqs ordinary offset, and the §1411 NIIT delta. A net loss surfaces the carryforward disclosure (its value is NOT this\-year tax). Writes NOTHING
+.SH OPTIONS
+.TP
+\fB\-\-sell\fR \fI<SELL>\fR
+Hypothetical sale amount in satoshis (required)
+.TP
+\fB\-\-wallet\fR \fI<WALLET>\fR
+Wallet to sell from, e.g. `self:cold` or `exchange:coinbase:default` (required; the per\-wallet pool is mandatory post\-2025)
+.TP
+\fB\-\-at\fR \fI<AT>\fR
+Sale date for the what\-if (YYYY\-MM\-DD; defaults to today UTC if omitted)
+.TP
+\fB\-\-price\fR \fI<PRICE>\fR
+USD price per WHOLE BTC for the hypothetical sale (proceeds = price × sat / 1e8). Omit to use the bundled daily\-close FMV for `\-\-at`; REQUIRED for a future/off\-dataset `\-\-at` with no bundled price (else the what\-if returns a ProceedsRequired error)
+.TP
+\fB\-\-method\fR \fI<METHOD>\fR
+Lot\-selection method for the hypothetical sale: fifo|lifo|hifo. Omit to consume by the STANDING method (the account\*(Aqs in\-force election / the default), exactly as a real disposal on that date would
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+fifo
+.IP \(bu 2
+lifo
+.IP \(bu 2
+hifo
+.RE
+.TP
+\fB\-\-filing\-status\fR \fI<FILING_STATUS>\fR
+AD\-HOC filing status (single|mfj|mfs|hoh|qss). Supplying this (with `\-\-income`) builds a NON\-persisted profile for the plan instead of the stored `tax\-profile`. Omit ALL ad\-hoc flags to use the stored profile for the sale year
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+single
+.IP \(bu 2
+mfj
+.IP \(bu 2
+mfs
+.IP \(bu 2
+hoh
+.IP \(bu 2
+qss
+.RE
+.TP
+\fB\-\-income\fR \fI<INCOME>\fR
+AD\-HOC ordinary taxable income EXCLUDING crypto (the base the crypto stacks on). Required when building an ad\-hoc profile
+.TP
+\fB\-\-magi\fR \fI<MAGI>\fR
+AD\-HOC modified AGI excluding crypto, for the §1411 NIIT threshold. DEFAULTS TO `\-\-income` when omitted (never $0 — a $0 MAGI would silently suppress every NIIT disclosure); a printed caveat notes the assumption. Supply the true MAGI (incl. QD + non\-crypto cap gains) to avoid understating NIIT
+.TP
+\fB\-\-carryforward\-in\fR \fI<CARRYFORWARD_IN>\fR
+AD\-HOC §1212(b) LONG\-TERM capital\-loss carryforward INTO the sale year (optional; defaults to $0). The dominant BTC case; short\-term carryforward\-in is out of scope for the ad\-hoc profile (set a stored `tax\-profile` for that)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

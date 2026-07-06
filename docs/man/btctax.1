@@ -75,6 +75,9 @@ Export the passphrase\-protected key
 btctax\-optimize(1)
 Lot\-specific\-identification optimizer (§C — read\-only proposal or gated persistence)
 .TP
+btctax\-what\-if(1)
+Read\-only what\-if tax planning (task #43): posit a HYPOTHETICAL, NON\-persisted transaction and see its MARGINAL federal\-tax effect on the current\-year position. Routes through the same audited tax engine as `report \-\-tax\-year`; invents no tax authority. Writes NOTHING — no event, no side\-table row, no vault mutation. Tax decision\-support (consequences), not buy/sell/hold advice
+.TP
 btctax\-tax\-profile(1)
 Set or show the per\-tax\-year tax profile (filing status, income, MAGI, etc.)
 .SH FILES

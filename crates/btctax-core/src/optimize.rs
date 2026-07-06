@@ -128,7 +128,14 @@ pub struct ConsultReport {
     pub proposed_selection: Vec<LotPick>,
     pub st_gain: Usd,
     pub lt_gain: Usd,
+    /// The WHOLE-YEAR crypto-attributable federal tax WITH this hypothetical sale (real disposals +
+    /// hyp, vs no crypto). On a year that ALREADY has real disposals this OVER-states the hypothetical's
+    /// own effect — read `marginal_tax` for the sale's incremental cost. Kept + relabeled, not removed.
     pub total_federal_tax_attributable: Usd,
+    /// The EXACT marginal federal tax THIS hypothetical sale causes = `withhyp.total − baseline.total`
+    /// (baseline = the real projection WITHOUT the synthetic sale). The shared no-crypto term cancels,
+    /// so this is the sale's own effect — the figure to headline (the identity the old report violated).
+    pub marginal_tax: Usd,
     pub timing: Option<TimingInsight>,
     /// `true` when the available pool exceeded `LOT_ENUM_BOUND` (12) and `candidate_selections`
     /// returned a deterministic but INCOMPLETE heuristic subset — the proposed selection may not be
@@ -1179,6 +1186,22 @@ pub fn consult_sale(
     }
     let (total, proposed_selection, st_gain, lt_gain) = best.ok_or(OptimizeError::NoLots)?;
 
+    // [consult fix] `total` above is the WHOLE-YEAR figure (real disposals + this hyp, vs no crypto).
+    // On a year that already has real disposals it over-reports the hypothetical's OWN effect. Subtract
+    // the baseline (the real projection WITHOUT the synthetic sale) — the shared no-crypto term cancels
+    // exactly — to get the sale's true marginal cost. Same seam as `whatif::synthetic_year`.
+    let baseline_total = match compute_tax_year(
+        events,
+        &fold(resolve(events, prices, config), prices, config),
+        year,
+        year_profile,
+        tables,
+    ) {
+        TaxOutcome::Computed(r) => r.total_federal_tax_attributable,
+        TaxOutcome::NotComputable(b) => return Err(OptimizeError::YearNotComputable(b)),
+    };
+    let marginal_tax = total - baseline_total;
+
     // ST→LT timing insight (R0-I4/M4): OMITTED (None) — never `Err` — when no leg is short-term, when a
     // contributing lot's crossover hits the `next_day` max-date edge, or when the crossover lands outside
     // `at`'s bundled year/profile. An unbundled crossover year degrades gracefully (the consult still
@@ -1201,6 +1224,7 @@ pub fn consult_sale(
         st_gain,
         lt_gain,
         total_federal_tax_attributable: total,
+        marginal_tax, // [consult fix] the sale's own effect (headline); `total` is the whole-year figure
         timing,
         approximate: heuristic, // C-M2: surface the incomplete-pool flag for the renderer
     })
@@ -1211,7 +1235,7 @@ pub fn consult_sale(
 /// fires the boundary seed at the correct point). Sibling of `available_lots_before` (which truncates
 /// before a specific disposal id rather than at a date). Read-only: `resolve` yields an owned
 /// `Resolution`, the resulting `LedgerState` is the caller's to read then discard.
-fn fold_as_of(
+pub(crate) fn fold_as_of(
     events: &[LedgerEvent],
     prices: &dyn PriceProvider,
     config: &ProjectionConfig,
@@ -1227,12 +1251,17 @@ fn fold_as_of(
 /// the reserved sentinel id `EventId::Decision { seq: u64::MAX }` (unreachable for real sequences,
 /// never persisted — no I/O on this path). Proceeds resolve explicit > dataset FMV > `ProceedsRequired`,
 /// identically to `evaluate_disposal`, so the parallel fold's legs match A's split.
-fn synthetic_state(
+///
+/// `picks == None` ⇒ NO selection is injected, so the fold consumes the synthetic disposal by the
+/// STANDING method (`applicable_method`) — used by `whatif::sell`'s default path and `whatif::harvest`.
+/// `Some(picks)` ⇒ that exact selection is injected (the optimizer's scoring path). `pub(crate)` so the
+/// crate-internal `whatif` module can reuse the seam without widening the public API.
+pub(crate) fn synthetic_state(
     events: &[LedgerEvent],
     prices: &dyn PriceProvider,
     config: &ProjectionConfig,
     candidate: &CandidateDisposal,
-    picks: &[LotPick],
+    picks: Option<&[LotPick]>,
 ) -> Result<LedgerState, EvaluateError> {
     let mut res = resolve(events, prices, config);
     let proceeds = match candidate.proceeds {
@@ -1260,7 +1289,10 @@ fn synthetic_state(
         },
         pseudo: false, // synthetic optimizer candidate — unrelated to pseudo-reconcile mode
     });
-    res.selections.insert(id, picks.to_vec());
+    // Inject the selection only when one is given; otherwise the fold consumes by the standing method.
+    if let Some(picks) = picks {
+        res.selections.insert(id, picks.to_vec());
+    }
     Ok(fold(res, prices, config))
 }
 
@@ -1284,7 +1316,7 @@ fn score_synthetic(
     let out = evaluate_disposal(events, prices, config, candidate, Some(picks))
         .map_err(OptimizeError::Evaluate)?;
     // 2) Full-year federal tax via a parallel synthetic fold (same append + injected selection).
-    let state = synthetic_state(events, prices, config, candidate, picks)
+    let state = synthetic_state(events, prices, config, candidate, Some(picks))
         .map_err(OptimizeError::Evaluate)?;
     let year = candidate.date.year();
     match compute_tax_year(events, &state, year, year_profile, tables) {

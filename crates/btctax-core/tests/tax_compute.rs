@@ -14,7 +14,7 @@ use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
 use btctax_core::project::{project, ProjectionConfig};
 use btctax_core::state::*;
-use btctax_core::tax::compute::compute_tax_year;
+use btctax_core::tax::compute::{compute_tax_year, preferential_tax};
 use btctax_core::tax::tables::{
     LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
 };
@@ -832,4 +832,40 @@ fn interest_nii_mixed_mining_plus_interest_exclusion_boundary() {
     // Wrong-inclusion of Mining would give 3.8% × min(40,000, 40,000) = 1,520.00.
     assert_eq!(r.niit, dec!(380.00));
     assert!(r.marginal_rates.niit_applies);
+}
+
+/// P0 (task #43) — the surfaced `TaxResult.pref_split` / `bottom_with` are EXACTLY the values
+/// `compute_tax_year` used internally: re-running `preferential_tax` against the surfaced
+/// `bottom_with` and the known preferential dollars reproduces the surfaced `pref_split` byte-for-byte.
+///
+/// Scenario (Single, synth): OTI 40,000, QD 0, crypto LT gain 20,000 (no ST, no other) →
+/// `bottom_with == 40,000`; preferential = 20,000 sitting on top; synth breakpoints max_zero=40,000,
+/// max_fifteen=400,000 ⇒ all 20,000 at 15% = 3,000 tax (at_0=0, at_15=20,000, at_20=0).
+#[test]
+fn taxresult_pref_split_matches_internal() {
+    let st = state_with(
+        vec![disposal(date!(2025 - 09 - 01), dec!(20000), Term::LongTerm)],
+        vec![],
+    );
+    let p = profile(dec!(40000), dec!(40000), dec!(0));
+    let out = compute_tax_year(&[], &st, 2025, Some(&p), &synth(2025));
+    let TaxOutcome::Computed(r) = out else {
+        panic!("computable")
+    };
+    // Surfaced values.
+    assert_eq!(r.bottom_with, dec!(40000));
+    assert_eq!(r.pref_split.at_0, dec!(0));
+    assert_eq!(r.pref_split.at_15, dec!(20000));
+    assert_eq!(r.pref_split.at_20, dec!(0));
+    assert_eq!(r.pref_split.tax, dec!(3000.00));
+    // The split must equal an INDEPENDENT `preferential_tax` on the SAME surfaced bottom + the known
+    // preferential dollars (qd 0 + net LT gain 20,000) — proving `pref_split` is the value compute used.
+    let bp = LtcgBreakpoints {
+        max_zero: dec!(40000),
+        max_fifteen: dec!(400000),
+    };
+    let independent = preferential_tax(&bp, r.bottom_with, dec!(0) + dec!(20000));
+    assert_eq!(r.pref_split, independent);
+    // And the surfaced §1(h) tax feeds the reported ltcg_tax (no ordinary QD baseline here → equal).
+    assert_eq!(r.ltcg_tax, r.pref_split.tax);
 }

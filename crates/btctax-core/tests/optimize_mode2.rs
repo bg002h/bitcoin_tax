@@ -623,6 +623,75 @@ fn consult_writes_nothing() {
     );
 }
 
+// ── KAT: [consult fix] marginal subtracts the baseline (year WITH real disposals) ──────────────────
+
+/// [consult fix] On a year that ALREADY has a real disposal, `ConsultReport::marginal_tax` is the
+/// hypothetical's OWN effect (`withhyp.total − baseline.total`), which DIFFERS from the whole-year
+/// `total_federal_tax_attributable`. The old report headlined the whole-year figure and over-reported.
+///
+/// Single, ord 60,000. Real LT disposal (A, FIFO): $30,000 − $10,000 = $20,000 → pref 3,000 (15% band).
+/// Consult a second 1 BTC sale (B): $20,000 more LT gain → whole-year pref 6,000. marginal = 6,000 −
+/// 3,000 = 3,000 (≠ the 6,000 whole-year figure).
+#[test]
+fn consult_marginal_subtracts_baseline() {
+    let events = vec![
+        buy(
+            "A",
+            datetime!(2024-06-01 00:00:00 UTC),
+            cold(),
+            LOT,
+            dec!(10000),
+        ),
+        buy(
+            "B",
+            datetime!(2024-06-01 00:00:00 UTC),
+            cold(),
+            LOT,
+            dec!(10000),
+        ),
+        sell(
+            "DISP",
+            datetime!(2025-07-01 00:00:00 UTC), // LT: > 1yr after 2024-06-01
+            cold(),
+            LOT,
+            dec!(30000),
+        ),
+    ];
+    let prices = StaticPrices::default();
+    let tables = synth(2025);
+    let prof = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(60000),
+        magi_excluding_crypto: dec!(60000),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward {
+            short: dec!(0),
+            long: dec!(0),
+        },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
+    };
+    let r = consult_sale(
+        &events,
+        &prices,
+        &cfg(),
+        Some(&prof),
+        &tables,
+        &req(LOT, date!(2025 - 08 - 01), Some(dec!(30000))),
+    )
+    .expect("consult succeeds");
+
+    assert_eq!(r.lt_gain, dec!(20000));
+    assert_eq!(r.total_federal_tax_attributable, dec!(6000.00)); // whole-year (real + hyp)
+    assert_eq!(r.marginal_tax, dec!(3000.00)); // the sale's OWN effect
+    assert_ne!(
+        r.marginal_tax, r.total_federal_tax_attributable,
+        "on a year with real disposals, marginal ≠ the whole-year figure"
+    );
+}
+
 // ── KAT: determinism ───────────────────────────────────────────────────────────────────────────────
 
 /// NFR4: identical inputs → byte-identical `ConsultReport`.
