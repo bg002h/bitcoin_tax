@@ -25,6 +25,8 @@ use crate::project::{
 };
 use crate::state::{Blocker, Lot, Term};
 use crate::tax::{compute_tax_year, TaxOutcome, TaxProfile, TaxResult, TaxTables};
+use rust_decimal::prelude::ToPrimitive;
+use std::collections::BTreeSet;
 
 /// The lot-selection choice for a hypothetical sale.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +135,9 @@ pub enum WhatIfError {
     NoLots,
     /// The date is pre-2025 — a restatement of a closed year, not a plan.
     PreTransitionYear(i32),
+    /// A `harvest` target amount is ill-posed (a `Gain(X)`/`Tax(X)` with X < 0 ⇒ an EMPTY prefix
+    /// feasible set — loss harvesting is a different problem; use `what-if sell`).
+    InvalidTarget(String),
 }
 
 fn computed(o: TaxOutcome) -> Result<TaxResult, WhatIfError> {
@@ -342,4 +347,518 @@ pub fn sell(
         baseline,
         withhyp,
     })
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// P2 — the harvest optimizer (task #43). The architect's lot-edge SEGMENT WALK (fable report §2/§5/§6):
+// NOT global bisection (marginal-tax(N) is non-monotone — HIFO realizes losses first ⇒ a dip, the §1211
+// $3k pin, and the §1212 carryforward-absorption plateau). The engine (`compute_tax_year`) is the ONLY
+// oracle; the analytic solve is a SEED, sat-bisection is the DECIDER, and the returned N* is ALWAYS
+// re-folded + verified true. Answer semantics for EVERY target: the max N such that the predicate holds
+// on the ENTIRE PREFIX [0, N] (safe under partial fills + non-contiguous feasible sets under a FIFO/LIFO
+// election). Writes NOTHING (clone-fold-discard, same seam as `sell`).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The tolerance band (§4.3): N* is the maximum within τ sats. 1,024 sats is < $0.05 of tax at any
+/// realistic BTC price — sub-materiality. Bisection stops here so the per-leg cent-rounding wiggle (up
+/// to ⌈legs/2⌉ cents inside a segment) can never mislocate the boundary below the noise floor.
+pub const HARVEST_TAU_SAT: Sat = 1_024;
+
+/// The harvest optimization target. `Gain`/`Tax` amounts are USD and MUST be ≥ 0 (v1: a negative cap ⇒
+/// an empty prefix set — loss harvesting is `what-if sell`, a different problem — rejected as
+/// `InvalidTarget`). The two bracket targets are threshold-free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HarvestTarget {
+    /// Max N with ZERO preferential dollars above `max_zero` (`pref_split.at_15 + at_20 == 0`) — sell
+    /// as much long-term gain as fits entirely in the §1(h) 0% bracket.
+    ZeroLtcg,
+    /// Max N with ZERO 20%-bracket preferential dollars (`pref_split.at_20 == 0`) — stay at/under 15%.
+    FifteenLtcg,
+    /// Max N whose SALE-LOCAL realized net gain (`st_gain + lt_gain`, the synthetic disposal's own legs)
+    /// is ≤ X. "Realize at most $X of gain WITH this sale." Requires X ≥ 0.
+    Gain(Usd),
+    /// Max N whose MARGINAL federal tax (`total(N) − total(0)`) is ≤ X. `tax=$0` is the flagship harvest
+    /// primitive ("sell as much as possible adding zero federal tax"). Requires X ≥ 0.
+    Tax(Usd),
+}
+
+/// A hypothetical, NON-persisted harvest question.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HarvestRequest {
+    pub wallet: WalletId,
+    pub at: TaxDate,
+    /// USD per WHOLE BTC (each candidate N's proceeds = `round_cents(price × N / 1e8)`). `None` ⇒ the
+    /// bundled dataset daily-close FMV prices each candidate N (a future/off-dataset date then needs
+    /// an explicit price).
+    pub price: Option<Usd>,
+    pub target: HarvestTarget,
+}
+
+/// The OUTCOME CHARACTER of a computed harvest answer. The architect's full status taxonomy also names
+/// the REFUSALS (`NoLots` / `ProceedsRequired` / `PreTransitionYear` / `YearNotComputable`); those are
+/// surfaced through the shared `WhatIfError` (mirroring `whatif::sell`) and mapped back to this label by
+/// [`HarvestStatus::of_refusal`], so the CLI can show a consistent status line either way.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HarvestStatus {
+    /// The target binds inside the pool: N* is the max prefix-feasible amount.
+    Found,
+    /// The target never binds over the available pool — the full position fits (answer = N_avail).
+    NotBinding,
+    /// The predicate already fails at N = 0 (e.g. baseline QD alone exceeds `max_zero`); answer = 0.
+    AlreadyBreached,
+    /// The wallet's as-of pool has no harvestable sats (empty, or the first lot in consumption order has
+    /// pending basis so N_avail == 0). Answer = 0.
+    NoLots,
+    /// (refusal label) A future/off-dataset date with no `--price` and no dataset FMV.
+    ProceedsRequired,
+    /// (refusal label) A pre-2025 date — a restatement of a closed year, not a plan.
+    PreTransitionYear,
+    /// (refusal label) The engine refuses the year (any Hard blocker anywhere, or a missing table/profile).
+    YearNotComputable(Blocker),
+}
+
+impl HarvestStatus {
+    /// The status LABEL for a refusal `WhatIfError` (so the CLI can render a uniform "status:" line for
+    /// both the `Ok` answers and the `Err` refusals). Never returns `Found`/`NotBinding`/`AlreadyBreached`.
+    pub fn of_refusal(e: &WhatIfError) -> HarvestStatus {
+        match e {
+            WhatIfError::NoLots => HarvestStatus::NoLots,
+            WhatIfError::Evaluate(_) => HarvestStatus::ProceedsRequired,
+            WhatIfError::PreTransitionYear(_) => HarvestStatus::PreTransitionYear,
+            WhatIfError::YearNotComputable(b) => HarvestStatus::YearNotComputable(b.clone()),
+            WhatIfError::InvalidTarget(_) => HarvestStatus::NoLots,
+        }
+    }
+}
+
+/// The read-only result of `whatif::harvest`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HarvestReport {
+    pub req: HarvestRequest,
+    /// The answer: the max prefix-feasible amount, in sats (0 for `NoLots`/`AlreadyBreached`).
+    pub n_sat: Sat,
+    /// `n_sat` in whole BTC (= `n_sat / 1e8`), for display.
+    pub n_btc: Usd,
+    pub status: HarvestStatus,
+    /// Human-readable statement of the constraint that bound N* (or why it didn't bind).
+    pub binding_constraint: String,
+    /// The SALE-LOCAL realized gain at N* (Σ the synthetic disposal's leg gains), by character.
+    pub st_gain: Usd,
+    pub lt_gain: Usd,
+    /// The ENGINE-VERIFIED with-N* `TaxResult` (== `baseline` when n_sat == 0).
+    pub with_result: TaxResult,
+    /// The baseline (N = 0) `TaxResult` — the reference for every marginal field / disclosure.
+    pub baseline: TaxResult,
+    /// The EXACT marginal federal tax at N* = `with_result.total − baseline.total`.
+    pub marginal_tax: Usd,
+    /// §1212(b) carryforward-out delta at N* (SIGNED, `with − baseline`, by character). A NEGATIVE value
+    /// is the carryforward BURN — a gain that absorbed a carried loss for $0 current-year tax.
+    pub carryforward_delta: CarryforwardDelta,
+    /// §1411 NIIT delta at N* = `with_result.niit − baseline.niit` (NOT the raw `niit_applies` flag).
+    pub niit_incremental: Usd,
+    /// `niit_incremental != 0` (the harvest actually moved NIIT). On a bracket target a nonzero value is
+    /// the NIIT-kink disclosure: a 0%/15% answer can still cost +3.8%.
+    pub niit_applies: bool,
+    /// N_avail was TRUNCATED at a basis-pending lot in consumption order (further lots not harvestable).
+    pub pending_capped: bool,
+    /// The MANDATORY §1212 disclosure: the carryforward BURN (a gain harvest spending a carried loss) or
+    /// the §1211(b) $3k-pin plateau (an all-loss position — only the cap is deductible this year). `None`
+    /// when neither applies.
+    pub plateau_note: Option<String>,
+}
+
+/// One engine probe at a candidate N: the full with-N `TaxResult` plus the SALE-LOCAL ST/LT gain split
+/// (from the synthetic disposal's own legs — the `gain=$X` predicate is sale-local per the architect).
+#[derive(Debug, Clone)]
+struct Probe {
+    tax: TaxResult,
+    st_gain: Usd,
+    lt_gain: Usd,
+}
+
+/// The per-target predicate on a with-N engine scenario. Prefix semantics: the answer is the max N such
+/// that THIS holds for every probed n in [0, N]. Bracket targets read the with-scenario `PrefSplit`
+/// (`at_*` are UNROUNDED Decimals — exact) — NEVER `MarginalRates.ltcg` (which reports a rate off `top`
+/// even with zero preferential dollars, disagreeing with the vacuous case).
+fn predicate_holds(target: HarvestTarget, p: &Probe, baseline: &TaxResult) -> bool {
+    match target {
+        HarvestTarget::ZeroLtcg => p.tax.pref_split.at_15 + p.tax.pref_split.at_20 <= Usd::ZERO,
+        HarvestTarget::FifteenLtcg => p.tax.pref_split.at_20 <= Usd::ZERO,
+        HarvestTarget::Gain(x) => p.st_gain + p.lt_gain <= x,
+        HarvestTarget::Tax(x) => {
+            p.tax.total_federal_tax_attributable - baseline.total_federal_tax_attributable <= x
+        }
+    }
+}
+
+/// The analytic SEED (never the decider): a linear solve on the segment's exact-Decimal slope against the
+/// numeric threshold, for the `Gain`/`Tax` targets only (the bracket targets bisect from the midpoint).
+/// Returns a sat offset-into-`(lo, hi)` or `None` (degenerate slope ⇒ fall back to midpoint bisection).
+fn analytic_seed(
+    target: HarvestTarget,
+    baseline: &TaxResult,
+    lo: Sat,
+    lo_p: &Probe,
+    hi: Sat,
+    hi_p: &Probe,
+) -> Option<Sat> {
+    let span = hi - lo;
+    if span <= 1 {
+        return None;
+    }
+    let (x, f_lo, f_hi) = match target {
+        HarvestTarget::Tax(x) => (
+            x,
+            lo_p.tax.total_federal_tax_attributable - baseline.total_federal_tax_attributable,
+            hi_p.tax.total_federal_tax_attributable - baseline.total_federal_tax_attributable,
+        ),
+        HarvestTarget::Gain(x) => (x, lo_p.st_gain + lo_p.lt_gain, hi_p.st_gain + hi_p.lt_gain),
+        _ => return None,
+    };
+    if f_hi <= f_lo {
+        return None; // non-increasing across the segment (a plateau) ⇒ midpoint is fine
+    }
+    // n ≈ lo + (x − f_lo)/(f_hi − f_lo) · span, floored to a sat, kept STRICTLY inside (lo, hi).
+    let offset = ((x - f_lo) * Usd::from(span) / (f_hi - f_lo))
+        .floor()
+        .to_i64()?;
+    Some((lo + offset).clamp(lo + 1, hi - 1))
+}
+
+/// READ-ONLY harvest optimizer. Finds the MAX N (in sats) sellable from `req.wallet`'s as-of pool such
+/// that `req.target` holds on the entire prefix [0, N], computed ONLY through `compute_tax_year` via the
+/// standing-method consumption schedule. Writes NOTHING (clone-fold-discard throughout). Refusals mirror
+/// `sell` (the shared `WhatIfError` taxonomy).
+#[allow(clippy::too_many_arguments)]
+pub fn harvest(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+    req: &HarvestRequest,
+) -> Result<HarvestReport, WhatIfError> {
+    let year = req.at.year();
+    if year < TRANSITION_DATE.year() {
+        return Err(WhatIfError::PreTransitionYear(year));
+    }
+    let kind = DisposeKind::Sell;
+
+    // v1 well-posedness: a Gain/Tax cap of X < 0 makes the prefix set EMPTY (G(0)=0, marginal(0)=0).
+    if let HarvestTarget::Gain(x) | HarvestTarget::Tax(x) = req.target {
+        if x < Usd::ZERO {
+            return Err(WhatIfError::InvalidTarget(format!(
+                "target amount must be >= 0 (got {x}); to harvest LOSSES use `what-if sell` \
+                 (a loss sale is not a max-N-under-a-cap problem)"
+            )));
+        }
+    }
+
+    // ── P0: baseline `total(0)` (also the refusal gate: missing table/profile / any Hard blocker). ──
+    let baseline_state = project(events, prices, config);
+    let baseline = computed(compute_tax_year(
+        events,
+        &baseline_state,
+        year,
+        profile,
+        tables,
+    ))?;
+
+    // ── P0: the wallet's as-of pool (mirror `sell`): the NoLots gate + basis-pending detection. ──
+    let pre = fold_as_of(events, prices, config, req.at);
+    let want = pool_key(req.at, &req.wallet);
+    let mut lots: Vec<Lot> = pre
+        .lots
+        .into_iter()
+        .filter(|l| {
+            l.remaining_sat > 0 && pool_key(req.at, &l.wallet) == want && l.acquired_at <= req.at
+        })
+        .collect();
+    lots.sort_by(|a, b| a.lot_id.cmp(&b.lot_id));
+    let total_all: Sat = lots.iter().map(|l| l.remaining_sat).sum();
+    let pending_ids: BTreeSet<LotId> = lots
+        .iter()
+        .filter(|l| l.basis_pending)
+        .map(|l| l.lot_id.clone())
+        .collect();
+
+    if total_all == 0 {
+        return Ok(no_op_report(
+            req,
+            &baseline,
+            HarvestStatus::NoLots,
+            "no lots available to harvest from that wallet as of that date".into(),
+            false,
+        ));
+    }
+    // Proceeds availability (mirror `sell`): explicit `--price` OR a dataset FMV, else ProceedsRequired.
+    if req.price.is_none() && fmv_of(prices, req.at, total_all).is_none() {
+        return Err(WhatIfError::Evaluate(EvaluateError::ProceedsRequired));
+    }
+
+    // ── P1: ONE fold of the whole pool (NO injected selection ⇒ the STANDING method) gives the exact
+    // consumption ORDER. The lot EDGES are the cumulative leg sats, truncated at the first basis-pending
+    // lot (consuming one fires FmvMissing ⇒ the engine refuses). Proceeds don't affect the ORDER, but
+    // `evaluate_disposal` needs some resolvable proceeds (guarded above).
+    //
+    // NOTE (belt-and-suspenders): in THIS engine every basis-pending origin (unknown-basis gift OR
+    // FMV-missing income) also raises a RESTING Hard blocker at its origin event, so the `baseline`
+    // compute above already refused with `YearNotComputable` before we get here — a pending lot in the
+    // pool ⇒ the whole year is uncomputable (the conservative, correct behavior). The truncation is kept
+    // per the architect's design so N_avail stays sound should a future NON-gating pending lot ever exist.
+    let full_proceeds = req
+        .price
+        .map(|px| round_cents(px * Usd::from(total_all) / Usd::from(SATS_PER_BTC)));
+    let full_candidate = CandidateDisposal {
+        existing_event: None,
+        wallet: req.wallet.clone(),
+        date: req.at,
+        sat: total_all,
+        kind,
+        proceeds: full_proceeds,
+    };
+    let full = evaluate_disposal(events, prices, config, &full_candidate, None)
+        .map_err(WhatIfError::Evaluate)?;
+    let mut edges: Vec<Sat> = Vec::new();
+    let mut cum: Sat = 0;
+    let mut pending_capped = false;
+    for leg in &full.legs {
+        if pending_ids.contains(&leg.lot_id) {
+            pending_capped = true;
+            break;
+        }
+        cum += leg.sat;
+        edges.push(cum);
+    }
+    let n_avail = edges.last().copied().unwrap_or(0);
+    if n_avail == 0 {
+        return Ok(no_op_report(
+            req,
+            &baseline,
+            HarvestStatus::NoLots,
+            "N capped at 0 — the first lot in consumption order has pending basis".into(),
+            true,
+        ));
+    }
+
+    // The engine probe at a candidate N (clone-fold-discard): the with-N `TaxResult` + sale-local ST/LT.
+    let probe = |n: Sat| -> Result<Probe, WhatIfError> {
+        if n <= 0 {
+            return Ok(Probe {
+                tax: baseline.clone(),
+                st_gain: Usd::ZERO,
+                lt_gain: Usd::ZERO,
+            });
+        }
+        let proceeds = req
+            .price
+            .map(|px| round_cents(px * Usd::from(n) / Usd::from(SATS_PER_BTC)));
+        let cand = CandidateDisposal {
+            existing_event: None,
+            wallet: req.wallet.clone(),
+            date: req.at,
+            sat: n,
+            kind,
+            proceeds,
+        };
+        let out = evaluate_disposal(events, prices, config, &cand, None)
+            .map_err(WhatIfError::Evaluate)?;
+        let state =
+            synthetic_state(events, prices, config, &cand, None).map_err(WhatIfError::Evaluate)?;
+        let tax = computed(compute_tax_year(events, &state, year, profile, tables))?;
+        Ok(Probe {
+            tax,
+            st_gain: out.st_gain,
+            lt_gain: out.lt_gain,
+        })
+    };
+
+    // ── P0: already breached at N = 0? (only the bracket targets can — Gain/Tax hold vacuously at 0.) ──
+    let base_probe = Probe {
+        tax: baseline.clone(),
+        st_gain: Usd::ZERO,
+        lt_gain: Usd::ZERO,
+    };
+    if !predicate_holds(req.target, &base_probe, &baseline) {
+        return Ok(no_op_report(
+            req,
+            &baseline,
+            HarvestStatus::AlreadyBreached,
+            format!(
+                "target already breached at N=0 ({})",
+                binding_label(req.target)
+            ),
+            pending_capped,
+        ));
+    }
+
+    // ── P2: lot-edge walk — first edge where the predicate goes true→false. Per T1 (tax(N) monotone
+    // WITHIN a lot segment) the edge checks bound the interior, so the prefix condition is verified by
+    // the walk itself.
+    let mut lo_edge: Sat = 0;
+    let mut lo_probe = base_probe;
+    let mut break_edge: Option<(Sat, Probe)> = None;
+    for &e in &edges {
+        let p = probe(e)?;
+        if predicate_holds(req.target, &p, &baseline) {
+            lo_edge = e;
+            lo_probe = p;
+        } else {
+            break_edge = Some((e, p));
+            break;
+        }
+    }
+
+    // ── P3: resolve the answer (NotBinding, or the boundary inside the first failing segment). ──
+    let (n_star, star_probe, status) = match break_edge {
+        None => (n_avail, lo_probe, HarvestStatus::NotBinding),
+        Some((hi_edge, hi_probe)) => {
+            // Boundary in (lo_edge, hi_edge]: predicate holds at lo_edge, fails at hi_edge. Within one
+            // segment tax(N)/gain(N) are monotone (T1) ⇒ sat-bisection is SOUND. Analytic seed → bisect.
+            // `lo` always holds the largest KNOWN-true N; the seed is only a first probe (never trusted).
+            let mut lo = lo_edge;
+            let mut hi = hi_edge;
+            if let Some(seed) = analytic_seed(req.target, &baseline, lo, &lo_probe, hi, &hi_probe) {
+                if predicate_holds(req.target, &probe(seed)?, &baseline) {
+                    lo = seed;
+                } else {
+                    hi = seed;
+                }
+            }
+            while hi - lo > HARVEST_TAU_SAT {
+                let mid = lo + (hi - lo) / 2;
+                if predicate_holds(req.target, &probe(mid)?, &baseline) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            // MANDATORY final engine-verify: re-fold N* and confirm the predicate holds (never return an
+            // N the engine did not fold + verify true).
+            let final_p = probe(lo)?;
+            debug_assert!(
+                predicate_holds(req.target, &final_p, &baseline),
+                "harvest invariant: the returned N* must be engine-verified true"
+            );
+            (lo, final_p, HarvestStatus::Found)
+        }
+    };
+
+    // ── P4: report + the mandatory disclosures. ──
+    let with_result = star_probe.tax.clone();
+    let marginal_tax =
+        with_result.total_federal_tax_attributable - baseline.total_federal_tax_attributable;
+    let carryforward_delta = CarryforwardDelta {
+        short: with_result.carryforward_out.short - baseline.carryforward_out.short,
+        long: with_result.carryforward_out.long - baseline.carryforward_out.long,
+    };
+    let niit_incremental = with_result.niit - baseline.niit;
+    let plateau_note = plateau_note(&baseline, &with_result, carryforward_delta, pending_capped);
+    let binding_constraint = match status {
+        HarvestStatus::NotBinding => {
+            "available pool exhausted — the target does not bind (the full position fits)"
+                .to_string()
+        }
+        _ => binding_label(req.target),
+    };
+
+    Ok(HarvestReport {
+        req: req.clone(),
+        n_sat: n_star,
+        n_btc: Usd::from(n_star) / Usd::from(SATS_PER_BTC),
+        status,
+        binding_constraint,
+        st_gain: star_probe.st_gain,
+        lt_gain: star_probe.lt_gain,
+        with_result,
+        baseline,
+        marginal_tax,
+        carryforward_delta,
+        niit_incremental,
+        niit_applies: niit_incremental != Usd::ZERO,
+        pending_capped,
+        plateau_note,
+    })
+}
+
+/// A human label for the constraint a `Found`/`AlreadyBreached` answer is measured against.
+fn binding_label(target: HarvestTarget) -> String {
+    match target {
+        HarvestTarget::ZeroLtcg => "0% LTCG bracket ceiling (\u{00a7}1(h) max_zero)".to_string(),
+        HarvestTarget::FifteenLtcg => {
+            "15% LTCG bracket ceiling (\u{00a7}1(h) max_fifteen)".to_string()
+        }
+        HarvestTarget::Gain(x) => format!("realized-gain cap {x}"),
+        HarvestTarget::Tax(x) => format!("marginal federal-tax cap {x}"),
+    }
+}
+
+/// The §1212 disclosure (mandatory when material): the carryforward BURN (a gain harvest spending a
+/// carried loss for $0 current-year tax) or the §1211(b) $3k-pin plateau (an all-loss position). Also
+/// carries the pending-basis-cap note. `None` when nothing material happened.
+fn plateau_note(
+    baseline: &TaxResult,
+    with_result: &TaxResult,
+    cf_delta: CarryforwardDelta,
+    pending_capped: bool,
+) -> Option<String> {
+    let carried = cf_delta.short + cf_delta.long;
+    let mut parts: Vec<String> = Vec::new();
+    if carried < Usd::ZERO {
+        // A gain absorbed a carried loss: the carryforward is BURNED (spent for $0 current-year tax).
+        parts.push(format!(
+            "this harvest absorbs {} of loss carryforward (short {} / long {}) \u{2014} the \
+             carryforward is SPENT, not deductible again",
+            -carried, -cf_delta.short, -cf_delta.long
+        ));
+    } else if carried > Usd::ZERO {
+        // A net-loss position: only the §1211(b) cap is deductible this year; the rest is carried.
+        let offset = with_result.loss_deduction - baseline.loss_deduction;
+        parts.push(format!(
+            "net loss: only {} is deductible against ordinary income this year (\u{00a7}1211(b) cap); \
+             {} carried to next year (short {} / long {})",
+            offset, carried, cf_delta.short, cf_delta.long
+        ));
+    }
+    if pending_capped {
+        parts.push(
+            "N capped: further lots in consumption order have PENDING basis (resolve them to harvest more)"
+                .to_string(),
+        );
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("; "))
+    }
+}
+
+/// Build a zero-N report (NoLots / AlreadyBreached): the with-scenario == the baseline (no sale).
+fn no_op_report(
+    req: &HarvestRequest,
+    baseline: &TaxResult,
+    status: HarvestStatus,
+    binding_constraint: String,
+    pending_capped: bool,
+) -> HarvestReport {
+    HarvestReport {
+        req: req.clone(),
+        n_sat: 0,
+        n_btc: Usd::ZERO,
+        status,
+        binding_constraint,
+        st_gain: Usd::ZERO,
+        lt_gain: Usd::ZERO,
+        with_result: baseline.clone(),
+        baseline: baseline.clone(),
+        marginal_tax: Usd::ZERO,
+        carryforward_delta: CarryforwardDelta {
+            short: Usd::ZERO,
+            long: Usd::ZERO,
+        },
+        niit_incremental: Usd::ZERO,
+        niit_applies: false,
+        pending_capped,
+        plateau_note: None,
+    }
 }

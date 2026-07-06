@@ -43,8 +43,8 @@ pub use tax::{
 };
 pub use void::{is_revocable_payload, voidable_decisions};
 pub use whatif::{
-    CarryforwardDelta, ConsumedLot, LtcgBracket, SellMethod, SellReport, SellRequest, SellStatus,
-    WhatIfError,
+    CarryforwardDelta, ConsumedLot, HarvestReport, HarvestRequest, HarvestStatus, HarvestTarget,
+    LtcgBracket, SellMethod, SellReport, SellRequest, SellStatus, WhatIfError, HARVEST_TAU_SAT,
 };
 
 #[derive(Debug, thiserror::Error)]

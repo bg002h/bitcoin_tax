@@ -9,9 +9,10 @@ use btctax_core::{
     conservation_report, disposal_compliance, form_8283, form_8949, schedule_d,
     year_donation_deduction, BasisSource, Blocker, BlockerKind, ComplianceStatus,
     ConservationReport, DisposalCompliance, DisposalLeg, DisposeKind, EventId, EventPayload,
-    Form8283HowAcquired, Form8283Section, Form8949Box, Form8949Part, GiftZone, IncomeKind,
-    LedgerEvent, LedgerState, LotMethod, LtcgBracket, RemovalKind, RemovalLeg, ScheduleDTotals,
-    SeTaxResult, SellReport, SellStatus, Severity, TaxDate, Term, WalletId,
+    Form8283HowAcquired, Form8283Section, Form8949Box, Form8949Part, GiftZone, HarvestReport,
+    HarvestStatus, HarvestTarget, IncomeKind, LedgerEvent, LedgerState, LotMethod, LtcgBracket,
+    RemovalKind, RemovalLeg, ScheduleDTotals, SeTaxResult, SellReport, SellStatus, Severity,
+    TaxDate, Term, WalletId,
 };
 use btctax_store::fsperms;
 use csv::Writer;
@@ -1906,6 +1907,108 @@ pub fn render_whatif_sell(r: &SellReport, magi_caveat: bool) -> String {
     let _ = writeln!(
         s,
         "Tax decision-support only \u{2014} consequences of a contemplated sale; \
+         not investment advice (no buy/sell/hold recommendation)."
+    );
+    s
+}
+
+/// A human label for a harvest target.
+fn harvest_target_label(t: &HarvestTarget) -> String {
+    match t {
+        HarvestTarget::ZeroLtcg => {
+            "zero-ltcg (all gain in the \u{00a7}1(h) 0% bracket)".to_string()
+        }
+        HarvestTarget::FifteenLtcg => "fifteen-ltcg (stay at/under 15%)".to_string(),
+        HarvestTarget::Gain(x) => format!("gain \u{2264} {x}"),
+        HarvestTarget::Tax(x) => format!("marginal tax \u{2264} {x}"),
+    }
+}
+
+/// Render a `what-if harvest` `HarvestReport` (task #43). Headlines the MAX BTC to sell (N*), the binding
+/// constraint, the realized ST/LT split at N*, which §1(h) bracket the surviving preferential dollars
+/// land in, the exact marginal federal tax, and the MANDATORY disclosures — the §1212(b) carryforward
+/// delta/burn, the §1411 NIIT kink (a 0%/15% answer can still cost +3.8%), and the plateau note. The
+/// answer is engine-verified. `magi_caveat` prints the ad-hoc "MAGI assumed = ordinary income" note.
+pub fn render_whatif_harvest(r: &HarvestReport, magi_caveat: bool) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "What-if HARVEST (read-only): {} from {} on {}",
+        harvest_target_label(&r.req.target),
+        wallet_label(&r.req.wallet),
+        r.req.at
+    );
+    if magi_caveat {
+        let _ = writeln!(
+            s,
+            "  \u{26a0} MAGI assumed = ordinary income; NIIT may be understated if you have other MAGI."
+        );
+    }
+    let status = match &r.status {
+        HarvestStatus::Found => "FOUND (the target binds)",
+        HarvestStatus::NotBinding => "NOT BINDING (the whole position fits)",
+        HarvestStatus::AlreadyBreached => "ALREADY BREACHED at N=0 (nothing can be harvested)",
+        HarvestStatus::NoLots => "NO LOTS (nothing to harvest from that wallet)",
+        HarvestStatus::ProceedsRequired => "PROCEEDS REQUIRED",
+        HarvestStatus::PreTransitionYear => "PRE-2025 (a closed year, not a plan)",
+        HarvestStatus::YearNotComputable(_) => "YEAR NOT COMPUTABLE",
+    };
+    let _ = writeln!(s, "  status: {status}");
+    let _ = writeln!(s, "  \u{2192} sell up to {} BTC ({} sat)", r.n_btc, r.n_sat);
+    let _ = writeln!(s, "  bound by: {}", r.binding_constraint);
+    let _ = writeln!(
+        s,
+        "  realized gain at N*: short-term {}   long-term {}",
+        r.st_gain, r.lt_gain
+    );
+    // §1(h) bracket of the surviving preferential dollars at N*.
+    let ps = &r.with_result.pref_split;
+    let bracket = if ps.at_20 > Usd::ZERO {
+        "20%"
+    } else if ps.at_15 > Usd::ZERO {
+        "15%"
+    } else {
+        "0%"
+    };
+    let _ = writeln!(
+        s,
+        "  \u{00a7}1(h) preferential dollars at N*: {} in 0% / {} in 15% / {} in 20% (top bracket: {})",
+        ps.at_0, ps.at_15, ps.at_20, bracket
+    );
+    let _ = writeln!(s, "  marginal federal tax at N*: {}", r.marginal_tax);
+    // §1212 carryforward delta (burn = a gain absorbing a carried loss).
+    let carried = r.carryforward_delta.short + r.carryforward_delta.long;
+    if carried != Usd::ZERO {
+        let dir = if carried < Usd::ZERO {
+            "burned (spent)"
+        } else {
+            "carried to next year"
+        };
+        let _ = writeln!(
+            s,
+            "  \u{00a7}1212 carryforward {}: {} (short {} / long {})",
+            dir, carried, r.carryforward_delta.short, r.carryforward_delta.long
+        );
+    }
+    // §1411 NIIT kink — surfaced on bracket targets too (a 0%/15% answer can still cost +3.8%).
+    if r.niit_applies {
+        let dir = if r.niit_incremental < Usd::ZERO {
+            "decrease"
+        } else {
+            "increase"
+        };
+        let _ = writeln!(
+            s,
+            "  \u{00a7}1411 NIIT: {} ({dir}) at N* \u{2014} the +3.8% kink applies even inside a 0%/15% bracket answer",
+            r.niit_incremental
+        );
+    }
+    if let Some(note) = &r.plateau_note {
+        let _ = writeln!(s, "  \u{2139} {note}");
+    }
+    let _ = writeln!(
+        s,
+        "Tax decision-support only \u{2014} the engine-verified consequences of a contemplated harvest; \
          not investment advice (no buy/sell/hold recommendation)."
     );
     s

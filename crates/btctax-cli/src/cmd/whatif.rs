@@ -10,13 +10,16 @@
 //! the caller prints the caveat when the default is used.
 use crate::{CliError, Session};
 use btctax_adapters::BundledTaxTables;
-use btctax_core::whatif::{self, SellMethod, SellReport, SellRequest};
+use btctax_core::whatif::{
+    self, HarvestReport, HarvestRequest, HarvestTarget, SellMethod, SellReport, SellRequest,
+};
 use btctax_core::{
     Carryforward, EvaluateError, FilingStatus, LotMethod, TaxDate, TaxProfile, Usd, WalletId,
     WhatIfError,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
+use std::str::FromStr;
 
 /// A validated ad-hoc (non-persisted) profile spec built from the `what-if sell` flags. `filing_status`
 /// + `income` are mandatory to enter ad-hoc mode; `magi` is optional (defaults to `income`).
@@ -97,6 +100,79 @@ pub fn sell(
     })
 }
 
+/// The outcome of `what-if harvest`: the report + whether `--magi` defaulted to `--income`.
+#[derive(Debug)]
+pub struct HarvestOutcome {
+    pub report: HarvestReport,
+    pub magi_caveat: bool,
+}
+
+/// Parse `--target`: `zero-ltcg` | `fifteen-ltcg` | `gain=$X` | `tax=$X` (X >= 0; `$`/commas optional).
+pub fn parse_harvest_target(s: &str) -> Result<HarvestTarget, CliError> {
+    let lower = s.trim().to_ascii_lowercase();
+    match lower.as_str() {
+        "zero-ltcg" | "zero_ltcg" | "zeroltcg" => return Ok(HarvestTarget::ZeroLtcg),
+        "fifteen-ltcg" | "fifteen_ltcg" | "fifteenltcg" => return Ok(HarvestTarget::FifteenLtcg),
+        _ => {}
+    }
+    if let Some(v) = lower.strip_prefix("gain=") {
+        return Ok(HarvestTarget::Gain(parse_target_amount(v)?));
+    }
+    if let Some(v) = lower.strip_prefix("tax=") {
+        return Ok(HarvestTarget::Tax(parse_target_amount(v)?));
+    }
+    Err(CliError::Usage(format!(
+        "bad --target {s:?}: expected zero-ltcg | fifteen-ltcg | gain=$X | tax=$X"
+    )))
+}
+fn parse_target_amount(v: &str) -> Result<Usd, CliError> {
+    let cleaned = v.trim().replace(['$', ','], "");
+    Usd::from_str(&cleaned).map_err(|e| {
+        CliError::Usage(format!(
+            "bad --target amount {v:?}: expected a USD number: {e}"
+        ))
+    })
+}
+
+/// `what-if harvest` — READ-ONLY harvest optimizer. Resolves the profile (ad-hoc if supplied, else the
+/// stored one for the harvest year), builds the `HarvestRequest`, and calls the core segment-walk
+/// optimizer. No `save()`.
+#[allow(clippy::too_many_arguments)]
+pub fn harvest(
+    vault: &Path,
+    pp: &Passphrase,
+    wallet: WalletId,
+    at: TaxDate,
+    price: Option<Usd>,
+    target: HarvestTarget,
+    adhoc: Option<AdhocProfile>,
+) -> Result<HarvestOutcome, CliError> {
+    let s = Session::open(vault, pp)?;
+    let (events, _state, cfg) = s.load_events_and_project()?;
+    let year = at.year();
+
+    let (profile, magi_caveat) = match &adhoc {
+        Some(a) => (Some(adhoc_profile(a)), a.magi.is_none()),
+        None => (s.tax_profile(year)?, false),
+    };
+
+    let prices = s.prices();
+    let tables = BundledTaxTables::load();
+    let req = HarvestRequest {
+        wallet,
+        at,
+        price,
+        target,
+    };
+    // whatif::harvest is READ-ONLY (clone-fold-discard); no save() is ever called.
+    let report = whatif::harvest(&events, prices, &cfg, profile.as_ref(), &tables, &req)
+        .map_err(map_whatif_err)?;
+    Ok(HarvestOutcome {
+        report,
+        magi_caveat,
+    })
+}
+
 /// Map a `WhatIfError` to a user-facing `CliError` (mirrors `cmd::optimize::map_opt_err`).
 pub fn map_whatif_err(e: WhatIfError) -> CliError {
     match e {
@@ -115,6 +191,7 @@ pub fn map_whatif_err(e: WhatIfError) -> CliError {
                 .into(),
         ),
         WhatIfError::Evaluate(ev) => CliError::Usage(format!("evaluate error: {ev:?}")),
+        WhatIfError::InvalidTarget(msg) => CliError::Usage(msg),
     }
 }
 
@@ -146,6 +223,33 @@ mod tests {
             cf_long: Usd::ZERO,
         });
         assert_eq!(explicit.magi_excluding_crypto, dec!(130000));
+    }
+
+    /// `--target` parses the four forms; `$`/commas are optional; a bad form / negative is rejected.
+    #[test]
+    fn parse_harvest_target_forms() {
+        assert_eq!(
+            parse_harvest_target("zero-ltcg").unwrap(),
+            HarvestTarget::ZeroLtcg
+        );
+        assert_eq!(
+            parse_harvest_target("FIFTEEN-LTCG").unwrap(),
+            HarvestTarget::FifteenLtcg
+        );
+        assert_eq!(
+            parse_harvest_target("gain=$25,000").unwrap(),
+            HarvestTarget::Gain(dec!(25000))
+        );
+        assert_eq!(
+            parse_harvest_target("tax=$0").unwrap(),
+            HarvestTarget::Tax(dec!(0))
+        );
+        assert_eq!(
+            parse_harvest_target("tax=1500.50").unwrap(),
+            HarvestTarget::Tax(dec!(1500.50))
+        );
+        assert!(parse_harvest_target("nonsense").is_err());
+        assert!(parse_harvest_target("gain=abc").is_err());
     }
 
     /// The ad-hoc long-term carryforward-in flows into the profile (short stays $0).

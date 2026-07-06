@@ -15,3 +15,6 @@ Print help
 .TP
 what\-if\-sell(1)
 Posit a hypothetical, NON\-persisted SALE and see its MARGINAL federal tax: the lots it would consume, the ST/LT split, which §1(h) LTCG bracket (0/15/20) it lands in + room to the next breakpoint, the exact marginal tax (with\-hypothetical minus baseline — the sale\*(Aqs OWN effect, not the whole\-year figure), the effective rate, the §1212(b) carryforward carried to next year, this year\*(Aqs ordinary offset, and the §1411 NIIT delta. A net loss surfaces the carryforward disclosure (its value is NOT this\-year tax). Writes NOTHING
+.TP
+what\-if\-harvest(1)
+Posit a hypothetical, NON\-persisted HARVEST and find the MAX BTC to sell such that a target holds on the ENTIRE prefix [0, N]: `\-\-target zero\-ltcg` (sell all that fits in the §1(h) 0% bracket), `fifteen\-ltcg` (stay at/under 15%), `gain=$X` (realize at most $X of gain WITH this sale), or `tax=$X` (add at most $X of marginal federal tax; `tax=$0` is the flagship "zero\-tax harvest"). Uses the STANDING lot method\*(Aqs consumption order (never re\-optimized). Discloses the §1212(b) carryforward burn, the §1411 NIIT kink (a 0%/15% answer can still cost +3.8%), and the plateau notes. The answer is ALWAYS engine\-verified. Writes NOTHING
