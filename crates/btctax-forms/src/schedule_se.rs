@@ -15,18 +15,31 @@
 //! 9, 10, 11, 12, 13. Line 9 uses the threaded `ss_wage_base` ($176,100 for 2025). Per the form, if
 //! W-2 SS wages (line 8a) ≥ `ss_wage_base`, lines 8b–10 are skipped (8d/9/10 blank, matching `ss == 0`).
 
+use crate::cells::push_money;
 use crate::error::FormsError;
 use crate::map::ScheduleSeMap;
+use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
-use crate::{fmt_money, pdf};
 use btctax_core::{SeTaxResult, Usd};
 use rust_decimal_macros::dec;
 
-/// Hand-pinned Schedule SE column-x clusters (measured from the blank PDF): col 0 = MID [410,482],
-/// col 1 = AMOUNT [504,576].
+/// Logical Schedule SE columns: col 0 = MID (lines 8a, 13), col 1 = AMOUNT (all other lines).
 const SE_COL_MID: usize = 0;
 const SE_COL_AMOUNT: usize = 1;
-const SE_CLUSTERS: &[(f32, f32)] = &[(410.0, 482.0), (504.0, 576.0)];
+/// Hand-pinned column-x clusters (measured from the blank PDF), **per form revision**. On the 2024/
+/// 2025 unified SE the amount fields sit at x ≈ [504,576] / MID ≈ [410,482]; on the OLD 2017 §B long
+/// form the (dollars) fields sit further left and each cluster must EXCLUDE its narrow cents widget so
+/// a dollars↔cents swap fails closed (2017 dollars: MID cx ≈ 392, AMOUNT cx ≈ 514; cents cx ≈ 443 /
+/// 566). These are the geometry ORACLE — deliberately code-side, never taken from the (distrusted) map.
+const SE_CLUSTERS_UNIFIED: &[(f32, f32)] = &[(410.0, 482.0), (504.0, 576.0)];
+const SE_CLUSTERS_2017: &[(f32, f32)] = &[(350.0, 433.0), (476.0, 554.0)];
+
+fn se_clusters(year: i32) -> &'static [(f32, f32)] {
+    match year {
+        2017 => SE_CLUSTERS_2017,
+        _ => SE_CLUSTERS_UNIFIED,
+    }
+}
 
 /// The §1401 net-earnings STOP floor: Schedule SE is not owed when line 4c (`base`) is below $400.
 pub const SE_FLOOR: Usd = dec!(400);
@@ -63,27 +76,39 @@ pub fn fill_schedule_se_with_map(
 
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<FlatPlacement> = Vec::new();
-    // (fqn, value, column, descent-ordinal, include?)
-    let chain: [(&str, Usd, usize, u32, bool); 12] = [
-        (&map.line2, se.net_se, SE_COL_AMOUNT, 0, true),
-        (&map.line3, se.net_se, SE_COL_AMOUNT, 1, true),
-        (&map.line4a, se.base, SE_COL_AMOUNT, 2, true),
-        (&map.line4c, se.base, SE_COL_AMOUNT, 3, true),
-        (&map.line6, se.base, SE_COL_AMOUNT, 4, true),
-        (&map.line8a, w2_ss_wages, SE_COL_MID, 5, true),
-        (&map.line8d, w2_ss_wages, SE_COL_AMOUNT, 6, !skip_8b_to_10),
-        (&map.line9, line9, SE_COL_AMOUNT, 7, !skip_8b_to_10),
-        (&map.line10, se.ss, SE_COL_AMOUNT, 8, !skip_8b_to_10),
-        (&map.line11, se.medicare, SE_COL_AMOUNT, 9, true),
-        (&map.line12, line12, SE_COL_AMOUNT, 10, true),
-        (&map.line13, se.deductible_half, SE_COL_MID, 11, true),
+    // (value, column, include?) parallel to `map.lines()` — one shared chain for every revision; the
+    // 2017 form's fields are dollars+cents pairs, which `push_money` emits transparently.
+    let plan: [(Usd, usize, bool); 12] = [
+        (se.net_se, SE_COL_AMOUNT, true),             // 2
+        (se.net_se, SE_COL_AMOUNT, true),             // 3
+        (se.base, SE_COL_AMOUNT, true),               // 4a
+        (se.base, SE_COL_AMOUNT, true),               // 4c
+        (se.base, SE_COL_AMOUNT, true),               // 6
+        (w2_ss_wages, SE_COL_MID, true),              // 8a
+        (w2_ss_wages, SE_COL_AMOUNT, !skip_8b_to_10), // 8d
+        (line9, SE_COL_AMOUNT, !skip_8b_to_10),       // 9
+        (se.ss, SE_COL_AMOUNT, !skip_8b_to_10),       // 10
+        (se.medicare, SE_COL_AMOUNT, true),           // 11
+        (line12, SE_COL_AMOUNT, true),                // 12
+        (se.deductible_half, SE_COL_MID, true),       // 13
     ];
-    for (fqn, value, col, ord, include) in chain {
+    for (ord, (cell, (value, col, include))) in map.lines().iter().zip(plan).enumerate() {
         if !include {
             continue;
         }
-        writes.push((fqn.to_string(), pdf::FieldValue::Text(fmt_money(value))));
-        placements.push(FlatPlacement::cell(fqn.to_string(), 0, col, 0, ord));
+        push_money(
+            &mut writes,
+            &mut placements,
+            cell,
+            value,
+            col,
+            Some((0, ord as u32)),
+        );
+    }
+    // Pre-filled factory constants (2017 §B line 7 = 127,200/00, line 14 = 5,200/00): authorize them
+    // so the blank's own `/V` values don't trip `no_unmapped_filled`. Never written, only exempted.
+    for fqn in &map.prefilled_exempt {
+        placements.push(FlatPlacement::free(fqn.clone(), crate::cells::page_of(fqn)));
     }
 
     let mut doc = pdf::load(pdf::schedule_se_pdf(map.year)?)?;
@@ -96,6 +121,6 @@ pub fn fill_schedule_se_with_map(
     // True read-back: re-parse the SERIALIZED output and verify geometry against the PDF's own rects.
     let check = pdf::load(&bytes)?;
     let fields = pdf::collect_fields(&check)?;
-    verify_flat(&check, &fields, &placements, SE_CLUSTERS)?;
+    verify_flat(&check, &fields, &placements, se_clusters(map.year))?;
     Ok(Some(bytes))
 }

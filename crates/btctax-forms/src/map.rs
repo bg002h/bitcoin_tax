@@ -33,6 +33,17 @@ pub const F8283_MAP_2024: &str = include_str!("../forms/2024/f8283.map.toml");
 /// The TY2024 Form 1040 map (embedded at compile time).
 pub const F1040_MAP_2024: &str = include_str!("../forms/2024/f1040.map.toml");
 
+/// The TY2017 Form 8949 map (embedded at compile time).
+pub const F8949_MAP_2017: &str = include_str!("../forms/2017/f8949.map.toml");
+/// The TY2017 Schedule D map (embedded at compile time).
+pub const SCHEDULE_D_MAP_2017: &str = include_str!("../forms/2017/schedule_d.map.toml");
+/// The TY2017 Schedule SE map (OLD short+long form; btctax fills §B long — embedded at compile time).
+pub const SCHEDULE_SE_MAP_2017: &str = include_str!("../forms/2017/schedule_se.map.toml");
+/// The TY2017 Form 8283 map (Rev. 12-2014, "j Other" — embedded at compile time).
+pub const F8283_MAP_2017: &str = include_str!("../forms/2017/f8283.map.toml");
+/// The TY2017 Form 1040 map (line 13, no DA question — embedded at compile time).
+pub const F1040_MAP_2017: &str = include_str!("../forms/2017/f1040.map.toml");
+
 /// The 4 monetary "amount" columns of a Form 8949 / Schedule D totals row: (d) proceeds, (e) cost,
 /// (g) adjustment, (h) gain. Column (f) — the code column — has no total (a spacer), so it is absent.
 #[derive(Debug, Clone, Deserialize)]
@@ -97,9 +108,15 @@ impl Form8949Map {
         Self::parse(F8949_MAP_2024).expect("bundled f8949 2024 map parses")
     }
 
+    /// The TY2017 map (pre-1099-DA: Box C/F, `/3`; field-identical grid to 2024).
+    pub fn ty2017() -> Self {
+        Self::parse(F8949_MAP_2017).expect("bundled f8949 2017 map parses")
+    }
+
     /// The map for a supported tax year.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
         match year {
+            2017 => Ok(Self::ty2017()),
             2024 => Ok(Self::ty2024()),
             2025 => Ok(Self::ty2025()),
             _ => Err(FormsError::UnsupportedYear(year)),
@@ -122,30 +139,72 @@ pub struct CheckChoice {
     pub on: String,
 }
 
+/// A dollars-field + cents-field PAIR (the 2017 Schedule SE / Form 1040 / Form 8283 split every money
+/// amount into a whole-dollars field and a 2-digit cents field). The geometric oracle treats the pair
+/// as ONE logical cell **at the dollars-field geometry** (the cents field rides along as an authorized
+/// but geometry-exempt write). Because both fields descend from the same AcroForm root, `merge_copies`
+/// (which renames only the root `/T`) rewrites BOTH names as a unit — so overflow is safe.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MoneyPair {
+    /// The whole-dollars field (the one the geometry oracle checks — column-x + row/descent).
+    pub dollars_field: String,
+    /// The 2-digit cents field (an authorized write; NOT independently geometry-checked).
+    pub cents_field: String,
+}
+
+/// A monetary cell: a single field carrying the whole formatted amount (2024/2025), or a
+/// dollars+cents [`MoneyPair`] (the 2017 forms). Deserializes untagged: a TOML **string** →
+/// [`MoneyCell::Single`]; a TOML **inline table** `{ dollars_field, cents_field }` →
+/// [`MoneyCell::Pair`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum MoneyCell {
+    /// A single field holding the whole formatted amount.
+    Single(String),
+    /// A dollars-field + cents-field pair.
+    Pair(MoneyPair),
+}
+
+impl MoneyCell {
+    /// Every PDF field this cell targets (1 for a single, 2 for a pair) — for coverage guards.
+    pub fn fields(&self) -> Vec<&str> {
+        match self {
+            MoneyCell::Single(f) => vec![f.as_str()],
+            MoneyCell::Pair(p) => vec![p.dollars_field.as_str(), p.cents_field.as_str()],
+        }
+    }
+}
+
 /// A per-year default: the Digital-Asset question is present unless a year's map says otherwise.
 fn default_da_present() -> bool {
     true
 }
 
 /// The Form 1040 capital-gains field map for one tax year: the capital-gain amount cell (line 7a in
-/// 2025 / line 7 in 2024) + the Digital-Asset question.
+/// 2025 / line 7 in 2024 / **line 13** in 2017) + the Digital-Asset question (absent in 2017).
 #[derive(Debug, Clone, Deserialize)]
 pub struct Form1040Map {
     /// `"f1040"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
-    /// The capital-gain amount cell (line 7a for 2025, line 7 for 2024), amount column.
-    pub line7a: String,
+    /// The capital-gain amount cell (line 7a for 2025, line 7 for 2024, **line 13 for 2017**). A
+    /// single field on 2024/2025; a dollars+cents [`MoneyPair`] on the 2017 form.
+    pub line7a: MoneyCell,
     /// Whether this year's 1040 carries the Digital-Asset question — **per-year scaffolding**. When
-    /// `true` (2024/2025) the fill answers it "Yes" and runs the map-independent adjacency guard; a
-    /// future no-DA year (2017) sets it `false` (SP3b then makes `da_yes`/`da_no` optional).
+    /// `true` (2024/2025) the fill answers it "Yes" and runs the map-independent adjacency guard;
+    /// **2017 sets it `false`** (no DA question — the map omits `da_yes`/`da_no` and the fill produces
+    /// the 1040 iff there is reportable capital activity).
     #[serde(default = "default_da_present")]
     pub da_present: bool,
-    /// Digital-Asset question "Yes" (LEFT member of the adjacent pair, on-state `/1`).
-    pub da_yes: CheckChoice,
-    /// Digital-Asset question "No" (right member, on-state `/2`) — never checked by btctax.
-    pub da_no: CheckChoice,
+    /// Digital-Asset question "Yes" (LEFT member of the adjacent pair, on-state `/1`). `None` when the
+    /// year's 1040 has no DA question (2017).
+    #[serde(default)]
+    pub da_yes: Option<CheckChoice>,
+    /// Digital-Asset question "No" (right member, on-state `/2`) — never checked by btctax. `None`
+    /// when the year's 1040 has no DA question (2017).
+    #[serde(default)]
+    pub da_no: Option<CheckChoice>,
 }
 
 impl Form1040Map {
@@ -164,9 +223,15 @@ impl Form1040Map {
         Self::parse(F1040_MAP_2024).expect("bundled f1040 2024 map parses")
     }
 
+    /// The TY2017 map (capital gain on line 13; NO Digital-Asset question).
+    pub fn ty2017() -> Self {
+        Self::parse(F1040_MAP_2017).expect("bundled f1040 2017 map parses")
+    }
+
     /// The map for a supported tax year.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
         match year {
+            2017 => Ok(Self::ty2017()),
             2024 => Ok(Self::ty2024()),
             2025 => Ok(Self::ty2025()),
             _ => Err(FormsError::UnsupportedYear(year)),
@@ -187,10 +252,10 @@ pub struct Section8283ARow {
     pub date_acq: String,
     /// (f) How acquired by donor.
     pub how: String,
-    /// (g) Donor's cost or adjusted basis.
-    pub cost: String,
-    /// (h) Fair market value.
-    pub fmv: String,
+    /// (g) Donor's cost or adjusted basis (money — a [`MoneyPair`] on the 2017 Rev. 12-2014 form).
+    pub cost: MoneyCell,
+    /// (h) Fair market value (money — a [`MoneyPair`] on the 2017 form).
+    pub fmv: MoneyCell,
     /// (i) Method used to determine the FMV.
     pub method: String,
 }
@@ -207,36 +272,46 @@ pub struct Section8283A {
 pub struct Section8283BRow {
     /// (a) Description of donated property.
     pub desc: String,
-    /// (c) Appraised fair market value.
-    pub fmv: String,
+    /// (c) Appraised fair market value (money — a [`MoneyPair`] on the 2017 Rev. 12-2014 form).
+    pub fmv: MoneyCell,
     /// (d) Date acquired by donor (mo., yr.).
     pub date_acq: String,
     /// (e) How acquired by donor.
     pub how: String,
-    /// (f) Donor's cost or adjusted basis.
-    pub cost: String,
-    /// (i) Amount claimed as a deduction (carrier row only).
-    pub deduction: String,
+    /// (f) Donor's cost or adjusted basis (money — a [`MoneyPair`] on the 2017 form).
+    pub cost: MoneyCell,
+    /// (i)/(h) Amount claimed as a deduction (carrier row only; money — a [`MoneyPair`] on 2017).
+    pub deduction: MoneyCell,
 }
 
-/// Form 8283 Section B (page 1, Line 3 + page 2 identity) — up to 3 rows A–C.
+/// Form 8283 Section B (page 1/2, over-$5,000 property + page 2 identity) — up to 3 rows (2024/2025)
+/// or 4 rows (2017 Rev. 12-2014, `Line5A`–`Line5D`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct Section8283B {
-    /// Line 2 "k Digital assets" property-type checkbox (MUST be checked for BTC; on-state `/11`).
+    /// The property-type checkbox MUST be checked for BTC: **"k Digital assets"** (on-state `/11`) on
+    /// the Rev. 12-2023/2025 forms; the Rev. 12-2014 form has no digital-asset box, so 2017 uses
+    /// **"j Other"** (on-state `/9`) plus [`Self::btc_property_note`].
     pub k_digital_assets: CheckChoice,
-    /// Part IV appraiser name (page 2).
-    pub appraiser_name: String,
-    /// Part IV appraiser business address (page 2).
+    /// 2017 only: since "j Other" gives no category, the digital-asset nature is identified by a
+    /// printed note **prepended to the first row's (a) description** (e.g. "Other property: digital
+    /// asset (virtual currency)"). `None` on 2024/2025 ("k Digital assets" is self-describing).
+    #[serde(default)]
+    pub btc_property_note: Option<String>,
+    /// Part IV/III appraiser name (page 2). `None` when the revision has no printed-name field (the
+    /// Rev. 12-2014 form: the appraiser identity is the handwritten signature, left blank).
+    #[serde(default)]
+    pub appraiser_name: Option<String>,
+    /// Appraiser business address (page 2).
     pub appraiser_address: String,
-    /// Part IV appraiser identifying number (TIN/PTIN, page 2).
+    /// Appraiser identifying number (TIN/PTIN, page 2).
     pub appraiser_tin: String,
-    /// Part V donee organization name (page 2).
+    /// Donee organization name (page 2).
     pub donee_name: String,
-    /// Part V donee EIN (page 2).
+    /// Donee EIN (page 2).
     pub donee_ein: String,
-    /// Part V donee address (page 2).
+    /// Donee address (page 2).
     pub donee_address: String,
-    /// The 3 rows A–C.
+    /// The rows (3 on 2024/2025, 4 on 2017) — the row count also sets the per-copy overflow cap.
     pub rows: Vec<Section8283BRow>,
 }
 
@@ -269,16 +344,22 @@ impl Form8283Map {
         Self::parse(F8283_MAP_2024).expect("bundled f8283 2024 map parses")
     }
 
+    /// The TY2017 map (Form 8283 Rev. 12-2014 — "j Other", no DA box, 5/4 rows, ¢-pairs).
+    pub fn ty2017() -> Self {
+        Self::parse(F8283_MAP_2017).expect("bundled f8283 2017 map parses")
+    }
+
     /// The map for a supported tax year.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
         match year {
+            2017 => Ok(Self::ty2017()),
             2024 => Ok(Self::ty2024()),
             2025 => Ok(Self::ty2025()),
             _ => Err(FormsError::UnsupportedYear(year)),
         }
     }
 
-    /// Every field name the map targets (for the `map_2025_matches_bundled_pdf_fieldset` guard).
+    /// Every field name the map targets (for the `map_YYYY_matches_bundled_pdf_fieldset` guard).
     pub fn field_names(&self) -> Vec<&str> {
         let mut v = Vec::new();
         for r in &self.section_a.rows {
@@ -288,15 +369,17 @@ impl Form8283Map {
                 r.date_contrib.as_str(),
                 r.date_acq.as_str(),
                 r.how.as_str(),
-                r.cost.as_str(),
-                r.fmv.as_str(),
-                r.method.as_str(),
             ]);
+            v.extend(r.cost.fields());
+            v.extend(r.fmv.fields());
+            v.push(r.method.as_str());
         }
         let b = &self.section_b;
+        v.push(b.k_digital_assets.field.as_str());
+        if let Some(n) = &b.appraiser_name {
+            v.push(n.as_str());
+        }
         v.extend([
-            b.k_digital_assets.field.as_str(),
-            b.appraiser_name.as_str(),
             b.appraiser_address.as_str(),
             b.appraiser_tin.as_str(),
             b.donee_name.as_str(),
@@ -304,14 +387,10 @@ impl Form8283Map {
             b.donee_address.as_str(),
         ]);
         for r in &b.rows {
-            v.extend([
-                r.desc.as_str(),
-                r.fmv.as_str(),
-                r.date_acq.as_str(),
-                r.how.as_str(),
-                r.cost.as_str(),
-                r.deduction.as_str(),
-            ]);
+            v.extend([r.desc.as_str(), r.date_acq.as_str(), r.how.as_str()]);
+            v.extend(r.fmv.fields());
+            v.extend(r.cost.fields());
+            v.extend(r.deduction.fields());
         }
         v
     }
@@ -334,10 +413,22 @@ pub struct ScheduleDMap {
     pub line15_h: String,
     /// Line 16 — total (line 7 + line 15), column h, page 2.
     pub line16_h: String,
-    /// QOF question "Yes" choice.
-    pub qof_yes: CheckChoice,
-    /// QOF question "No" choice (SP1 answers No).
-    pub qof_no: CheckChoice,
+    /// The Part I amount-column subform token used to re-derive the geometry bands — **per-year map
+    /// config** (`Table_PartI` for 2024/2025, **`TablePartI`** (no underscore) for the 2017 form).
+    #[serde(default = "default_sched_d_token")]
+    pub table_token: String,
+    /// QOF question "Yes" choice. `None` on years whose Schedule D has no QOF question (2017 —
+    /// Qualified Opportunity Funds began in 2019).
+    #[serde(default)]
+    pub qof_yes: Option<CheckChoice>,
+    /// QOF question "No" choice (answered No when present). `None` on 2017 (no QOF question).
+    #[serde(default)]
+    pub qof_no: Option<CheckChoice>,
+}
+
+/// The default Schedule D Part I grid token (2024/2025); the 2017 map overrides it to `TablePartI`.
+fn default_sched_d_token() -> String {
+    "Table_PartI".to_string()
 }
 
 impl ScheduleDMap {
@@ -356,9 +447,15 @@ impl ScheduleDMap {
         Self::parse(SCHEDULE_D_MAP_2024).expect("bundled schedule_d 2024 map parses")
     }
 
+    /// The TY2017 map (grid token `TablePartI`; NO QOF question).
+    pub fn ty2017() -> Self {
+        Self::parse(SCHEDULE_D_MAP_2017).expect("bundled schedule_d 2017 map parses")
+    }
+
     /// The map for a supported tax year.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
         match year {
+            2017 => Ok(Self::ty2017()),
             2024 => Ok(Self::ty2024()),
             2025 => Ok(Self::ty2025()),
             _ => Err(FormsError::UnsupportedYear(year)),
@@ -374,29 +471,34 @@ pub struct ScheduleSeMap {
     /// Tax year.
     pub year: i32,
     /// Line 2 — net profit (net_se), amount column.
-    pub line2: String,
+    pub line2: MoneyCell,
     /// Line 3 — combine 1a/1b/2 (= line 2), amount column.
-    pub line3: String,
+    pub line3: MoneyCell,
     /// Line 4a — net SE earnings (base = net_se × 92.35%), amount column.
-    pub line4a: String,
+    pub line4a: MoneyCell,
     /// Line 4c — combine 4a/4b (= line 4a), amount column. The $400 STOP threshold.
-    pub line4c: String,
+    pub line4c: MoneyCell,
     /// Line 6 — add 4c/5b (= line 4c), amount column.
-    pub line6: String,
+    pub line6: MoneyCell,
     /// Line 8a — Form W-2 Social Security wages, **MID column**.
-    pub line8a: String,
+    pub line8a: MoneyCell,
     /// Line 8d — add 8a/8b/8c (= line 8a), amount column.
-    pub line8d: String,
+    pub line8d: MoneyCell,
     /// Line 9 — line 7 (`ss_wage_base` constant) − line 8d, amount column.
-    pub line9: String,
+    pub line9: MoneyCell,
     /// Line 10 — Social Security portion (`ss`), amount column.
-    pub line10: String,
+    pub line10: MoneyCell,
     /// Line 11 — regular Medicare portion (`medicare`), amount column.
-    pub line11: String,
+    pub line11: MoneyCell,
     /// Line 12 — SE tax = line 10 + line 11 (**SS + regular Medicare ONLY**), amount column.
-    pub line12: String,
+    pub line12: MoneyCell,
     /// Line 13 — one-half SE-tax deduction (= line 12 × 50% = `deductible_half`), **MID column**.
-    pub line13: String,
+    pub line13: MoneyCell,
+    /// Fields the BLANK form already carries a factory `/V` for (the 2017 §B long form pre-prints
+    /// line 7 = `127,200`/`00` and line 14 = `5,200`/`00`) — excluded from the `no_unmapped_filled`
+    /// guard so those constants don't read as stray writes. Empty on 2024/2025.
+    #[serde(default)]
+    pub prefilled_exempt: Vec<String>,
 }
 
 impl ScheduleSeMap {
@@ -415,18 +517,24 @@ impl ScheduleSeMap {
         Self::parse(SCHEDULE_SE_MAP_2024).expect("bundled schedule_se 2024 map parses")
     }
 
+    /// The TY2017 map (OLD §B long form: dollars+cents pairs; pre-filled line 7/14 exempt).
+    pub fn ty2017() -> Self {
+        Self::parse(SCHEDULE_SE_MAP_2017).expect("bundled schedule_se 2017 map parses")
+    }
+
     /// The map for a supported tax year.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
         match year {
+            2017 => Ok(Self::ty2017()),
             2024 => Ok(Self::ty2024()),
             2025 => Ok(Self::ty2025()),
             _ => Err(FormsError::UnsupportedYear(year)),
         }
     }
 
-    /// Every field name the map targets (for the `map_2025_matches_bundled_pdf_fieldset` guard).
-    pub fn field_names(&self) -> Vec<&str> {
-        vec![
+    /// The 12 filled line cells, in chain order.
+    pub fn lines(&self) -> [&MoneyCell; 12] {
+        [
             &self.line2,
             &self.line3,
             &self.line4a,
@@ -440,5 +548,11 @@ impl ScheduleSeMap {
             &self.line12,
             &self.line13,
         ]
+    }
+
+    /// Every field name the map targets (for the `map_YYYY_matches_bundled_pdf_fieldset` guard) —
+    /// both members of each dollars+cents pair on the 2017 form.
+    pub fn field_names(&self) -> Vec<&str> {
+        self.lines().iter().flat_map(|c| c.fields()).collect()
     }
 }

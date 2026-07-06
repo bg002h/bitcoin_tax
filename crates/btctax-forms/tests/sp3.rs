@@ -399,8 +399,7 @@ fn fault_injected_2024_se_cross_and_same_column_are_red() {
 #[test]
 fn fault_injected_2024_1040_da_swap_is_red() {
     let mut m = Form1040Map::ty2024();
-    std::mem::swap(&mut m.da_yes.field, &mut m.da_no.field);
-    std::mem::swap(&mut m.da_yes.on, &mut m.da_no.on);
+    std::mem::swap(&mut m.da_yes, &mut m.da_no);
     let err = fill_1040_with_map(
         &Form1040Inputs {
             da_yes: true,
@@ -415,10 +414,10 @@ fn fault_injected_2024_1040_da_swap_is_red() {
 
 #[test]
 fn fault_injected_2024_8283_cross_column_is_red() {
-    // Swap Section-B desc(a) ↔ fmv(c) for every row — a cross-column x-cluster mismatch.
+    // Swap Section-B fmv(c) ↔ cost(f) for every row — a cross-column x-cluster mismatch.
     let mut m = Form8283Map::ty2024();
     for r in &mut m.section_b.rows {
-        std::mem::swap(&mut r.desc, &mut r.fmv);
+        std::mem::swap(&mut r.fmv, &mut r.cost);
     }
     let rows = vec![b_row("1.00000000 BTC", dec!(20000), dec!(60000), true)];
     let err = fill_8283_with_map(&rows, &m).unwrap_err();
@@ -465,9 +464,12 @@ fn map_2024_matches_bundled_pdf_fieldset() {
         assert!(s.contains(n), "8283 map field absent: {n}");
     }
     let m = Form1040Map::ty2024();
-    let s = fieldset(F1040_PDF_2024);
-    for n in [&m.line7a, &m.da_yes.field, &m.da_no.field] {
-        assert!(s.contains(n), "1040 map field absent: {n}");
+    let fs = fieldset(F1040_PDF_2024);
+    let mut names: Vec<String> = m.line7a.fields().iter().map(|s| s.to_string()).collect();
+    names.push(m.da_yes.as_ref().unwrap().field.clone());
+    names.push(m.da_no.as_ref().unwrap().field.clone());
+    for n in &names {
+        assert!(fs.contains(n.as_str()), "1040 map field absent: {n}");
     }
 }
 
@@ -622,7 +624,7 @@ fn schedule_d_2024_field_names() -> Vec<String> {
     names.push(m.line7_h.clone());
     names.push(m.line15_h.clone());
     names.push(m.line16_h.clone());
-    names.push(m.qof_yes.field.clone());
-    names.push(m.qof_no.field.clone());
+    names.push(m.qof_yes.as_ref().unwrap().field.clone());
+    names.push(m.qof_no.as_ref().unwrap().field.clone());
     names
 }

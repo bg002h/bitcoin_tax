@@ -45,8 +45,8 @@ fn schedule_d_map_field_names() -> Vec<String> {
     names.push(m.line7_h.clone());
     names.push(m.line15_h.clone());
     names.push(m.line16_h.clone());
-    names.push(m.qof_yes.field.clone());
-    names.push(m.qof_no.field.clone());
+    names.push(m.qof_yes.as_ref().unwrap().field.clone());
+    names.push(m.qof_no.as_ref().unwrap().field.clone());
     names
 }
 
