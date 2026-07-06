@@ -19,7 +19,7 @@ use crate::error::FormsError;
 use crate::map::Form8283Map;
 use crate::verify::{verify_flat, FlatPlacement};
 use crate::{fmt_date, overflow, pdf};
-use btctax_core::{Form8283HowAcquired, Form8283Row, Form8283Section};
+use btctax_core::{DonationDetails, Form8283HowAcquired, Form8283Row, Form8283Section};
 use time::macros::format_description;
 
 /// Section A column x-clusters (hand-pinned), **per form revision**: donee(a), desc(c), date_contrib(d),
@@ -94,6 +94,20 @@ fn fmt_mo_yr(d: btctax_core::TaxDate) -> Result<String, FormsError> {
 }
 
 /// Fill Form 8283 from the projected donation rows. `Ok(None)` when there are no donation rows.
+///
+/// **Section A** (≤ $5,000) count-overflows the flat rows: it has a per-row donee COLUMN and no Part
+/// IV/V identity block, so each row already names its own donee — pagination is purely by count.
+///
+/// **Section B** (> $5,000) is "one donee's donation of similar property per form", so a year with
+/// donations to MULTIPLE distinct donees needs one official 8283 per donee. Donations are grouped by
+/// the donee + appraiser IDENTITY (the Part V donee AND the Part IV appraiser are both read from one
+/// `DonationDetails`, so a same-donee/different-appraiser pair splits), then count-overflowed WITHIN
+/// each group — and the group's `details` is passed EXPLICITLY into every physical copy, so a donee
+/// whose legs overflow carries its identity on every page.
+///
+/// **[byte-identity]** the single-physical-copy case (the common single-donee year) returns the lone
+/// `fill_one` result DIRECTLY; only ≥ 2 copies are routed through `merge_copies` (which re-loads/saves
+/// and would otherwise break the byte-golden for that common case).
 pub fn fill_form_8283(
     rows: &[Form8283Row],
     map: &Form8283Map,
@@ -114,19 +128,132 @@ pub fn fill_form_8283(
         Form8283Section::B => map.section_b.rows.len(),
     }
     .max(1);
-    let n_copies = rows.len().div_ceil(cap).max(1);
 
-    if n_copies == 1 {
-        let chunk: Vec<&Form8283Row> = rows.iter().collect();
-        return Ok(Some(fill_one(&chunk, section, map)?));
+    // Build the physical copies. Each copy is filled on ORIGINAL field names + geometry-verified
+    // (fails closed) inside `fill_one`; ≥ 2 copies are merged (per-copy root rename) afterwards.
+    let mut copies: Vec<Vec<u8>> = Vec::new();
+    match section {
+        // Section A: unchanged — count-overflow the flat rows. No identity block, so `details` is a
+        // no-op here (kept as the chunk's first carrier, mirroring today's behavior).
+        Form8283Section::A => {
+            let n_copies = rows.len().div_ceil(cap).max(1);
+            for k in 0..n_copies {
+                let chunk: Vec<&Form8283Row> = rows.iter().skip(k * cap).take(cap).collect();
+                let details = chunk.iter().find_map(|r| r.details.as_ref());
+                copies.push(fill_one(&chunk, section, map, details)?);
+            }
+        }
+        // Section B: group donations by donee + appraiser identity, then count-overflow each group.
+        Form8283Section::B => {
+            for group in group_section_b(rows) {
+                let n = group.rows.len().div_ceil(cap).max(1);
+                for k in 0..n {
+                    let chunk: Vec<&Form8283Row> =
+                        group.rows.iter().skip(k * cap).take(cap).copied().collect();
+                    copies.push(fill_one(&chunk, section, map, group.details)?);
+                }
+            }
+        }
     }
-    let mut copies = Vec::with_capacity(n_copies);
-    for k in 0..n_copies {
-        let chunk: Vec<&Form8283Row> = rows.iter().skip(k * cap).take(cap).collect();
-        // Each copy is filled on ORIGINAL names + geometry-verified here (fails closed), then merged.
-        copies.push(fill_one(&chunk, section, map)?);
+
+    // [byte-identity] a single physical copy is returned DIRECTLY (no re-load/save through
+    // `merge_copies`); only ≥ 2 copies are merged.
+    if copies.len() == 1 {
+        Ok(Some(copies.into_iter().next().expect("exactly one copy")))
+    } else {
+        Ok(Some(overflow::merge_copies(&copies)?))
     }
-    Ok(Some(overflow::merge_copies(&copies)?))
+}
+
+/// A Section-B donee/appraiser identity group: all donations sharing one Part V donee AND Part IV
+/// appraiser identity (first-seen order preserved), carrying the FIRST-SEEN carrier's `details`.
+struct SectionBGroup<'a> {
+    rows: Vec<&'a Form8283Row>,
+    details: Option<&'a DonationDetails>,
+}
+
+/// The identity a Section-B donation is grouped by. The Part V donee (name + EIN) AND the Part IV
+/// appraiser (name + TIN/PTIN) are both read from one `DonationDetails`, so grouping keys on both —
+/// same donee, different appraiser ⇒ separate forms (a shared form would print a wrong Part IV). A
+/// carrier with no captured `DonationDetails` keys on its donee LABEL only (a `None` return means an
+/// empty label ⇒ its own singleton, never merged with another anonymous donee).
+#[derive(PartialEq, Eq)]
+enum IdentityKey {
+    /// A carrier WITH `DonationDetails`: full donee + appraiser identity.
+    Detailed {
+        donee_name: String,
+        donee_ein: Option<String>,
+        appraiser_name: String,
+        appraiser_id: Option<String>,
+    },
+    /// A carrier with NO details but a non-empty donee label.
+    DoneeLabel(String),
+}
+
+/// The grouping key for a carrier, or `None` for an empty-key donation (no details + empty donee
+/// label) that must occupy its own singleton group (two anonymous donees can never be merged).
+fn identity_key(details: Option<&DonationDetails>, donee: &str) -> Option<IdentityKey> {
+    match details {
+        Some(d) => Some(IdentityKey::Detailed {
+            donee_name: d.donee_name.clone(),
+            donee_ein: d.donee_ein.clone(),
+            appraiser_name: d.appraiser_name.clone(),
+            appraiser_id: d.appraiser_tin.clone().or_else(|| d.appraiser_ptin.clone()),
+        }),
+        None if !donee.is_empty() => Some(IdentityKey::DoneeLabel(donee.to_string())),
+        None => None,
+    }
+}
+
+/// Partition Section-B `rows` into donations at carrier boundaries (`row.section.is_some()` — the
+/// canonical carrier signal, set unconditionally by `form_8283()`, NOT `details.is_some()`), then
+/// group the donations by donee + appraiser identity (first-seen order; split-on-difference; an
+/// anonymous no-details donee is its own singleton). Leg rows (`section: None`) attach to their
+/// carrier's group; any leading leg-rows before the first carrier (shouldn't occur — `form_8283()`
+/// emits the carrier first) seed the first group so nothing is dropped.
+fn group_section_b(rows: &[Form8283Row]) -> Vec<SectionBGroup<'_>> {
+    let mut groups: Vec<SectionBGroup<'_>> = Vec::new();
+    let mut keys: Vec<Option<IdentityKey>> = Vec::new();
+    let mut current: Option<usize> = None;
+    for row in rows {
+        if row.section.is_some() {
+            // A carrier begins a new donation; group it by donee + appraiser identity (an empty key
+            // never merges — `and_then` short-circuits to a fresh group).
+            let key = identity_key(row.details.as_ref(), &row.donee);
+            let existing = key
+                .as_ref()
+                .and_then(|k| keys.iter().position(|gk| gk.as_ref() == Some(k)));
+            current = Some(match existing {
+                Some(i) => {
+                    groups[i].rows.push(row);
+                    i
+                }
+                None => {
+                    groups.push(SectionBGroup {
+                        rows: vec![row],
+                        details: row.details.as_ref(),
+                    });
+                    keys.push(key);
+                    groups.len() - 1
+                }
+            });
+        } else {
+            // A leg row attaches to its carrier's group (or seeds the first group if it precedes any
+            // carrier — a degenerate input that `form_8283()` never emits).
+            match current {
+                Some(i) => groups[i].rows.push(row),
+                None => {
+                    groups.push(SectionBGroup {
+                        rows: vec![row],
+                        details: None,
+                    });
+                    keys.push(None);
+                    current = Some(0);
+                }
+            }
+        }
+    }
+    groups
 }
 
 /// A property-table text cell: written + authorized only when non-empty. `col` is both the x-cluster
@@ -170,11 +297,15 @@ fn push_free(
     ));
 }
 
-/// Fill one physical Form 8283 copy (a chunk of ≤ cap rows) and read it back geometrically.
+/// Fill one physical Form 8283 copy (a chunk of ≤ cap rows) and read it back geometrically. For
+/// Section B, `details` (the copy's donee/appraiser identity, passed in by the caller — NOT sniffed
+/// from a row in the chunk) fills the Part IV/V identity block, so every overflow page of a donee
+/// carries that donee's identity.
 fn fill_one(
     rows: &[&Form8283Row],
     section: Form8283Section,
     map: &Form8283Map,
+    details: Option<&DonationDetails>,
 ) -> Result<Vec<u8>, FormsError> {
     let mut w: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut p: Vec<FlatPlacement> = Vec::new();
@@ -261,8 +392,9 @@ fn fill_one(
                     push_money(&mut w, &mut p, &m.deduction, ded, 5, Some((5, ord)));
                 }
             }
-            // Part IV/III (appraiser) + Part V/IV (donee) IDENTITY — from the first carrier row.
-            if let Some(details) = rows.iter().find_map(|r| r.details.as_ref()) {
+            // Part IV/III (appraiser) + Part V/IV (donee) IDENTITY — the copy's group identity,
+            // passed in EXPLICITLY (so an overflow page carries it too; not sniffed from the chunk).
+            if let Some(details) = details {
                 // Appraiser printed-name field is absent on the Rev. 12-2014 form (identity = the
                 // handwritten signature, left blank), so this write is conditional on the map.
                 if let Some(name_field) = &b.appraiser_name {
