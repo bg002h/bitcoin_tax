@@ -1,8 +1,10 @@
 # SPEC — official IRS PDF form-fill, sub-project 2 (Form 8283 + Schedule SE + Form 1040 cap-gains, TY2025)
 
-**Source baseline:** `main` @ `99f26ca` (branch `feat/irs-form-fill-sp2`). **Review status: R0 round 2 folded
-(r1 4C/4I on Fable; r2 0C/1I/3M/2N on Opus — all r1 folds PDF-verified correct, the C3 oracle proven sound).
-Awaiting R0 round 3 (changed lines only).** Reviews: `reviews/R0-spec-irs-form-fill-sp2-round-{1,2}.md`. SP2 of task #45; builds on the shipped SP1 engine. **Every
+**Source baseline:** `main` @ `99f26ca` (branch `feat/irs-form-fill-sp2`). **Review status: R0-GREEN (3 rounds; 0C/0I).
+Cleared to implement.** Reviews: `reviews/R0-spec-irs-form-fill-sp2-round-{1,2,3}.md`. r1 4C/4I (Fable — caught the
+SE line-12/8959 split, the 1040 7a renumber, the non-reusable read-back, the perjury-risk DA-YES, the 8283
+digital-assets checkbox); r2 0C/1I (Opus — the I★1 inactive-Schedule-D 7a case; C3 oracle proven sound); r3
+0C/0I (Opus — folds verified, 4 doc-summary Minors/Nits synced in-place). SP2 of task #45; builds on the shipped SP1 engine. **Every
 load-bearing fact below was PDF-verified by the Fable R0 (fill-experiment per form).**
 
 ## Goal (SP2)
@@ -66,8 +68,8 @@ primitive, honestly (partial-scope, conditional, correct lines).
   4c(=4a), 6(=4c), **8a (W-2 SS wages — needs `session.tax_profile(y).w2_ss_wages`, NOT in `SeTaxResult` —
   thread it in via the fill signature)**, 8d(=8a), **9(= line 7 − 8d, where line 7 is the `ss_wage_base`
   $176,100 constant — [R0-M3] thread `ss_wage_base` in too, not just `w2_ss_wages`)**, 10(ss), 11(medicare),
-  12, 13(=12×50%, MID-column `f1_22`). Explicit BLANK set: A-checkbox, 1a/1b, 4b, 5a/5b, 8b/8c, Part II. If 8a≥$176,100, follow the form
-  ("skip 8b–10"; 9/10 blank, matching ss==0).
+  12, 13(=12×50%, MID-column `f1_22`). Explicit BLANK set: A-checkbox, 1a/1b, 4b, 5a/5b, 8b/8c, Part II. If 8a ≥ `ss_wage_base` ($176,100 for 2025 — the
+  threaded constant, not a literal), follow the form ("skip 8b–10"; 9/10 blank, matching ss==0).
 - **[★ R0-I2] $400 floor:** the form line 4c says "if less than $400, STOP; you don't owe SE tax", but
   `compute_se_tax` has no $400 threshold (se.rs:109 → None only when net_se==0). **SP2 skips Schedule SE when
   `base < $400`** + a printed note + KAT `schedule_se_skipped_below_400_floor`. FOLLOWUP: whether
@@ -110,7 +112,8 @@ applicable).
 
 ## Scope / SemVer / lockstep
 `btctax-forms` (+3 `fill_*` fns, +**the per-form Geo oracle + verify fns [C3]**, +3 maps, +3 bundled
-public-domain PDFs) + btctax-cli (`export-irs-pdf` extension; thread `w2_ss_wages` into the SE fill).
+public-domain PDFs) + btctax-cli (`export-irs-pdf` extension; ADD the SE computation + thread `w2_ss_wages` AND `ss_wage_base` into
+the SE fill).
 **No core tax-logic change** (reuse `form_8283()`/`compute_se_tax`/`schedule_d()`; SE line 12/13 split is a
 FILL-layer choice using the already-exposed `ss`/`medicare`/`deductible_half`). MINOR. Man page + README (full
 packet; 1040 partial-scope & 7a; conditional 8283/SE + $400 floor; the addl-Medicare/8959 advisory).
@@ -133,8 +136,9 @@ packet; 1040 partial-scope & 7a; conditional 8283/SE + $400 floor; the addl-Medi
 
 ## Gotchas
 - **[C1] SE line 12 = SS + Medicare only** (addl Medicare → Form 8959; advisory); line 13 = deductible_half.
-- **[C2] 1040 line 7a** (not 7); fill only on gain/zero; loss ⇒ blank + notice (§1211 line-21 cap is the filer's);
-  7b unchecked.
+- **[C2 + I★1] 1040 line 7a** (not 7); fill only when Schedule D is ACTIVE and line 16 ≥ 0 (active-zero → "-0-"
+  literal; inactive/income-only ⇒ BLANK even if DA=YES); loss ⇒ blank + notice (§1211 line-21 cap is the
+  filer's); 7b unchecked.
 - **[C3] the geometric read-back is NEW per-form engine work** — column-x + ordinal-y + same-y-pair + spacers;
   it does NOT free-reuse; `no_unmapped_filled` does.
 - **[C4] DA YES only with evidenced activity**; else blank BOTH + skip the 1040 (never fill No).
