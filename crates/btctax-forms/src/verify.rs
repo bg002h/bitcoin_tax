@@ -7,7 +7,7 @@
 //! distrust; the PDF's geometry is the oracle.**
 
 use crate::error::FormsError;
-use crate::pdf::{checkbox_on, text_value, Field};
+use crate::pdf::{button_on_states, checkbox_on, text_value, Field};
 use lopdf::Document;
 use std::collections::{HashMap, HashSet};
 
@@ -228,6 +228,16 @@ pub fn no_unmapped_filled(
     placements: &[Placement],
 ) -> Result<(), FormsError> {
     let allowed: HashSet<&str> = placements.iter().map(|p| p.fqn.as_str()).collect();
+    assert_only_filled(doc, fields, &allowed)
+}
+
+/// The form-agnostic core of the no-unmapped guard: every filled field must be in `allowed`. Shared by
+/// the SP1 [`no_unmapped_filled`] and the SP2 flat-form verifier.
+pub fn assert_only_filled(
+    doc: &Document,
+    fields: &[Field],
+    allowed: &HashSet<&str>,
+) -> Result<(), FormsError> {
     for f in fields {
         let filled = if f.is_button {
             checkbox_on(doc, f.id).is_some()
@@ -239,4 +249,207 @@ pub fn no_unmapped_filled(
         }
     }
     Ok(())
+}
+
+// ── [★ R0-C3] SP2 per-form geometric oracle for the FLAT (non-grid) forms ─────────────────────────
+//
+// Schedule SE / Form 8283 / Form 1040 have no `Row{n}` data-grid subform, so the SP1 grid oracle does
+// not fit. Instead this oracle asserts, map-INDEPENDENTLY, that each written value's widget landed:
+//   (1) in its logical column's hand-pinned x-cluster (measured from the blank PDF; catches a
+//       cross-column swap, e.g. SE line 12 (amount) ↔ line 13 (mid));
+//   (2) in strictly-descending center-y within a logically ordered sequence (catches a same-column
+//       swap, e.g. SE 10 ↔ 11) — asserted PER descent GROUP so 8283's two-table columns [R0-M1] each
+//       descend within their own field set;
+//   (3) for the 1040 Digital-Asset question, that the "Yes" value is the LEFT member of the top-most
+//       same-y `/Btn` pair whose on-states are exactly {`/1`,`/2`} (a [`topmost_yes_no_pair`] check);
+//   (4) on the expected page; 1-pt preprinted-constant spacer fields are never map targets.
+// The map is what we distrust — a mis-mapped cell lands in the wrong cluster / breaks monotonicity and
+// FAILS CLOSED. `assert_only_filled` still guards against any stray write.
+
+/// One authorized SP2 write. `col` indexes a hand-pinned column-x cluster (`None` = geometry-exempt,
+/// e.g. a wide free-text identity field); `descent` = `(group, ordinal)` for per-group strictly-
+/// descending-y ordering (`None` = not in any ordered sequence); `check` marks a checkbox (only in the
+/// no-unmapped scan + any same-y-pair predicate).
+#[derive(Debug, Clone)]
+pub struct FlatPlacement {
+    /// Fully-qualified field name that was written.
+    pub fqn: String,
+    /// 0-based page the write must land on.
+    pub page: usize,
+    /// Logical column index into the per-form hand-pinned x-cluster table (`None` = not column-checked).
+    pub col: Option<usize>,
+    /// `(descent_group, ordinal)` — within a group, center-y must strictly decrease as ordinal rises.
+    pub descent: Option<(u32, u32)>,
+    /// `true` iff this is a checkbox (geometry-exempt; still in the no-unmapped set).
+    pub check: bool,
+}
+
+impl FlatPlacement {
+    /// A column-checked, descent-participating money/text cell.
+    pub fn cell(fqn: impl Into<String>, page: usize, col: usize, grp: u32, ord: u32) -> Self {
+        Self {
+            fqn: fqn.into(),
+            page,
+            col: Some(col),
+            descent: Some((grp, ord)),
+            check: false,
+        }
+    }
+    /// A column-checked cell that does NOT participate in any descent sequence.
+    pub fn col_only(fqn: impl Into<String>, page: usize, col: usize) -> Self {
+        Self {
+            fqn: fqn.into(),
+            page,
+            col: Some(col),
+            descent: None,
+            check: false,
+        }
+    }
+    /// A geometry-exempt write (wide free-text identity field): page-checked + no-unmapped only.
+    pub fn free(fqn: impl Into<String>, page: usize) -> Self {
+        Self {
+            fqn: fqn.into(),
+            page,
+            col: None,
+            descent: None,
+            check: false,
+        }
+    }
+    /// A checkbox: no-unmapped only (+ any same-y-pair predicate the caller runs).
+    pub fn check(fqn: impl Into<String>, page: usize) -> Self {
+        Self {
+            fqn: fqn.into(),
+            page,
+            col: None,
+            descent: None,
+            check: true,
+        }
+    }
+}
+
+/// Verify a flat-form fill: page membership + hand-pinned column-x membership + per-group ordinal-y
+/// descent + the no-unmapped scan. `clusters` is the per-form hand-pinned logical-column → `(min_x0,
+/// max_x1)` table (measured from the blank PDF). Fails closed.
+pub fn verify_flat(
+    doc: &Document,
+    fields: &[Field],
+    placements: &[FlatPlacement],
+    clusters: &[(f32, f32)],
+) -> Result<(), FormsError> {
+    let index: HashMap<&str, &Field> = fields.iter().map(|f| (f.fqn.as_str(), f)).collect();
+
+    // (4)+(1) page membership + column-x membership.
+    for p in placements {
+        let field = index
+            .get(p.fqn.as_str())
+            .ok_or_else(|| FormsError::MapFieldMissing(p.fqn.clone()))?;
+        if page_of(&p.fqn) != p.page {
+            return Err(FormsError::Geometry(format!(
+                "{}: field is on page {} but placement expected page {}",
+                p.fqn,
+                page_of(&p.fqn),
+                p.page
+            )));
+        }
+        if let Some(col) = p.col {
+            let cx = field.cx().ok_or_else(|| miss_rect(&p.fqn))?;
+            let cluster = *clusters.get(col).ok_or_else(|| {
+                FormsError::Geometry(format!(
+                    "column {col} out of range (clusters={})",
+                    clusters.len()
+                ))
+            })?;
+            if !in_band(cx, cluster) {
+                return Err(FormsError::Geometry(format!(
+                    "{}: x-center {cx:.1} not in column {col} cluster {cluster:?} (mis-mapped column)",
+                    p.fqn
+                )));
+            }
+        }
+    }
+
+    // (2) ordinal-y descent, per group.
+    let mut groups: HashMap<u32, Vec<(u32, f32, &str)>> = HashMap::new();
+    for p in placements {
+        if let Some((grp, ord)) = p.descent {
+            let cy = index[p.fqn.as_str()]
+                .cy()
+                .ok_or_else(|| miss_rect(&p.fqn))?;
+            groups
+                .entry(grp)
+                .or_default()
+                .push((ord, cy, p.fqn.as_str()));
+        }
+    }
+    for seq in groups.values_mut() {
+        seq.sort_by_key(|(ord, _, _)| *ord);
+        for w in seq.windows(2) {
+            // Earlier ordinal must sit strictly ABOVE (higher center-y) the next.
+            if w[0].1 <= w[1].1 + EPS {
+                return Err(FormsError::Geometry(format!(
+                    "ordinal-y descent broken: {} (y {:.1}) is not strictly above {} (y {:.1}) — mis-mapped row/line",
+                    w[0].2, w[0].1, w[1].2, w[1].1
+                )));
+            }
+        }
+    }
+
+    // (3) no unmapped write.
+    let allowed: HashSet<&str> = placements.iter().map(|p| p.fqn.as_str()).collect();
+    assert_only_filled(doc, fields, &allowed)
+}
+
+/// Map-INDEPENDENT oracle for the 1040 Digital-Asset Yes/No question: the top-most page-`page` `/Btn`
+/// pair (exactly two widgets sharing a center-y) whose on-states are exactly {`/1`,`/2`}. Returns
+/// `(yes_fqn, no_fqn)` = (LEFT member, right member). Derived from the blank PDF's widget geometry +
+/// appearance states, never the map.
+pub fn topmost_yes_no_pair(
+    doc: &Document,
+    fields: &[Field],
+    page: usize,
+) -> Result<(String, String), FormsError> {
+    // Group page buttons (that carry a rect + on-states) by rounded center-y.
+    let mut by_y: HashMap<i32, Vec<(&Field, Vec<String>)>> = HashMap::new();
+    for f in fields {
+        if !f.is_button || page_of(&f.fqn) != page {
+            continue;
+        }
+        let Some(cy) = f.cy() else { continue };
+        let states = button_on_states(doc, f.id);
+        if states.is_empty() {
+            continue;
+        }
+        by_y.entry(cy.round() as i32).or_default().push((f, states));
+    }
+    // A qualifying row: EXACTLY two widgets whose combined on-states are exactly {"1","2"}.
+    let mut candidates: Vec<(f32, &Field, &Field)> = Vec::new();
+    for members in by_y.values() {
+        if members.len() != 2 {
+            continue;
+        }
+        let mut states: Vec<&str> = members
+            .iter()
+            .flat_map(|(_, s)| s.iter().map(|x| x.as_str()))
+            .collect();
+        states.sort_unstable();
+        if states != ["1", "2"] {
+            continue;
+        }
+        let (a, b) = (members[0].0, members[1].0);
+        let cy = a.cy().unwrap();
+        candidates.push((cy, a, b));
+    }
+    // Top-most (largest center-y).
+    candidates.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+    let (_, a, b) = candidates.first().ok_or_else(|| {
+        FormsError::Geometry(format!(
+            "no same-y {{/1,/2}} /Btn pair found on page {page}"
+        ))
+    })?;
+    // Left member = the Yes box.
+    if a.cx().unwrap() <= b.cx().unwrap() {
+        Ok((a.fqn.clone(), b.fqn.clone()))
+    } else {
+        Ok((b.fqn.clone(), a.fqn.clone()))
+    }
 }

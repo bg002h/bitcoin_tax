@@ -19,6 +19,8 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 # Money is exact Decimal (NFR5); dates render MM/DD/YYYY for the form boxes.
 rust_decimal = { version = "1.36", default-features = false, features = ["std"] }
+# `dec!` for the $400 Schedule SE floor const (const-context Decimal literal; mirrors btctax-core).
+rust_decimal_macros = "1.36"
 time = { version = "0.3", features = ["macros", "formatting"] }
 thiserror = "1"
 

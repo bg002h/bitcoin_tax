@@ -18,15 +18,20 @@
 
 mod error;
 mod fill8949;
+mod form1040;
+mod form8283;
 mod map;
 mod overflow;
 mod pdf;
 mod schedule_d;
+mod schedule_se;
 mod verify;
 mod watermark;
 
 pub use error::FormsError;
-pub use map::{Form8949Map, ScheduleDMap};
+pub use form1040::{Form1040Fill, Form1040Inputs};
+pub use map::{Form1040Map, Form8283Map, Form8949Map, ScheduleDMap, ScheduleSeMap};
+pub use schedule_se::SE_FLOOR;
 
 use btctax_core::conventions::{TaxDate, Usd};
 use btctax_core::{Form8949Row, ScheduleDTotals};
@@ -104,6 +109,52 @@ pub fn fill_schedule_d(totals: &ScheduleDTotals, year: i32) -> Result<Vec<u8>, F
     schedule_d::fill_schedule_d_totals(totals, &map)
 }
 
+/// Fill **Schedule SE** (Form 1040) for `year` from the computed §1401 `SeTaxResult`, the filer's
+/// Form W-2 Social Security wages (line 8a), and the year's Social Security wage base (line 7).
+/// Returns `Ok(None)` when net SE earnings are **below the $400 floor** (no SE tax owed — the form is
+/// not written). Line 12 = SS + regular Medicare only (the 0.9% Additional Medicare Tax is a Form 8959
+/// item, not on Schedule SE); when `se.addl > 0` the caller prints a Form 8959 advisory.
+pub fn fill_schedule_se(
+    se: &btctax_core::SeTaxResult,
+    w2_ss_wages: Usd,
+    ss_wage_base: Usd,
+    year: i32,
+) -> Result<Option<Vec<u8>>, FormsError> {
+    require_year(year)?;
+    let map = ScheduleSeMap::ty2025();
+    schedule_se::fill_schedule_se_with_map(se, w2_ss_wages, ss_wage_base, &map)
+}
+
+/// Fill **Form 8283** (Noncash Charitable Contributions, Rev. 12-2025) for `year` from the projected
+/// donation rows + `DonationDetails`. Returns `Ok(None)` when there are no donations in the year.
+/// Fills the donee/appraiser IDENTITY + per-row property data (and, for Section B, checks the "k
+/// Digital assets" property-type box); leaves BLANK every OTHER party's declaration/signature (a
+/// LOUD partial-scope notice is the caller's). More rows than a section holds (4 in Section A / 3 in
+/// Section B) overflow onto additional form copies via [`overflow::merge_copies`].
+pub fn fill_form_8283(
+    rows: &[btctax_core::Form8283Row],
+    year: i32,
+) -> Result<Option<Vec<u8>>, FormsError> {
+    require_year(year)?;
+    let map = Form8283Map::ty2025();
+    form8283::fill_form_8283(rows, &map)
+}
+
+/// Fill the capital-gains cells of **Form 1040** for `year`: line 7a (only when Schedule D is ACTIVE
+/// and line 16 ≥ 0; active-and-zero → "-0-") and the Digital-Asset Yes/No question (YES iff there is
+/// btctax-evidenced qualifying activity). Returns `Ok(None)` — **skip the whole 1040** — when there is
+/// no reportable activity (the DA answer would be blank and there is no 7a value). 7b checkboxes are
+/// left untouched; a NET LOSS leaves 7a blank (the §1211 line-21 cap is the filer's). A partial-scope
+/// notice enumerating exactly what was filled is the caller's.
+pub fn fill_form_1040_capgains(
+    inputs: &Form1040Inputs,
+    year: i32,
+) -> Result<Option<Form1040Fill>, FormsError> {
+    require_year(year)?;
+    let map = Form1040Map::ty2025();
+    form1040::fill_form_1040_capgains(inputs, &map)
+}
+
 /// **[I5]** How many rows might belong on a SEPARATE 1099-DA-reported Form 8949 (Box G/H/J/K) — i.e.
 /// disposals on an exchange that may have issued broker basis reporting. SP1 files EVERY Bitcoin row
 /// under Box I/L and says so; a non-zero count is a loud advisory, not a refusal.
@@ -115,11 +166,19 @@ pub fn rows_possibly_broker_reported(rows: &[Form8949Row]) -> usize {
 #[doc(hidden)]
 pub mod testonly {
     pub use crate::fill8949::{fill_8949_parts, part_data, pdf_has_xfa, split_parts, PartData};
-    pub use crate::map::{AmountCols, Form8949Map, PartMap, ScheduleDMap};
+    pub use crate::form1040::{fill_form_1040_capgains as fill_1040_with_map, Form1040Fill};
+    pub use crate::form8283::fill_form_8283 as fill_8283_with_map;
+    pub use crate::map::{
+        AmountCols, Form1040Map, Form8283Map, Form8949Map, PartMap, ScheduleDMap, ScheduleSeMap,
+    };
     pub use crate::pdf::{
-        checkbox_on, collect_fields, index, load, text_value, Field, F8949_PDF_2025,
-        SCHEDULE_D_PDF_2025,
+        button_on_states, checkbox_on, collect_fields, index, load, text_value, Field,
+        F1040_PDF_2025, F8283_PDF_2025, F8949_PDF_2025, SCHEDULE_D_PDF_2025, SCHEDULE_SE_PDF_2025,
     };
     pub use crate::schedule_d::fill_schedule_d_totals;
-    pub use crate::verify::{no_unmapped_filled, verify_8949, Geo, Placement};
+    pub use crate::schedule_se::fill_schedule_se_with_map;
+    pub use crate::verify::{
+        no_unmapped_filled, topmost_yes_no_pair, verify_8949, verify_flat, FlatPlacement, Geo,
+        Placement,
+    };
 }
