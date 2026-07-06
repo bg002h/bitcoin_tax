@@ -1,8 +1,13 @@
 # SPEC — official IRS PDF form-fill, sub-project 1 (engine + Form 8949 + Schedule D, TY2025)
 
-**Source baseline:** `main` @ `3117379` (branch `feat/irs-form-fill-sp1`). **Review status: R0 round 1 folded
-(2C/5I/4M/3N — merged IN-PLACE; surgical; R0 run on Fable). Awaiting R0 round 2.** Review:
-`reviews/R0-spec-irs-form-fill-sp1-round-1.md`. SP1 of task #45. Feasibility: [[irs-form-fill-feasibility]].
+**Source baseline:** `main` @ `3117379` (branch `feat/irs-form-fill-sp1`). **Review status: R0-GREEN (2 rounds; 0C/0I).
+Cleared to implement.** Reviews: `reviews/R0-spec-irs-form-fill-sp1-round-{1,2}.md`. Round 1 2C/5I (run on
+Fable — caught the XFA hybrid + the 1099-DA Box I/L), round 2 0C/0I/1M/2N (Opus, re-verified every fact against
+the PDFs). **Fold during impl:** [r2-M] the overflow must FILL each clone on its ORIGINAL field names, THEN
+rename (renaming the `topmostSubform[0]` prefix before fill would break the map's fully-qualified lookups); the
+geometric read-back catches any mis-fill regardless. [r2-N1] line 21 is inside the 17-22 scope-out ("applies on
+a net loss" is rationale, not a fill target). [r2-N2] the read-back column/row bands come authoritatively from
+the bundled PDF's widget `/Rect`s (re-derive the full set at impl), not the review samples. SP1 of task #45. Feasibility: [[irs-form-fill-feasibility]].
 **Full-set/3-year is the GOAL; SP1 proves the engine on Form 8949 + Schedule D for TY2025.**
 
 ## Goal (SP1)
