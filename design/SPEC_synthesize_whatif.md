@@ -1,7 +1,8 @@
 # SPEC — what-if / synthesize-transaction tax-planning tool (task #43)
 
-**Source baseline:** `main` @ `283238f`. **Review status: DRAFT — awaiting R0 (Fable — marginal + optimizer
-correctness).** Brainstorm: `design/BRAINSTORM_synthesize_whatif.md`. Optimizer algorithm (authoritative):
+**Source baseline:** `main` @ `283238f`. **Review status: R0 round 1 folded (0C/2I/5M/5N — Opus;
+algorithm rendered faithfully, no Fable re-consult; 2 report-signal Importants + minors merged IN-PLACE).
+Awaiting R0 round 2.** Review: `reviews/R0-spec-whatif-round-1.md`.** Brainstorm: `design/BRAINSTORM_synthesize_whatif.md`. Optimizer algorithm (authoritative):
 `design/agent-reports/fable-harvest-optimizer-advice.md`. Memory: [[future-synthesize-transaction-tax-planning]].
 Reuses the proven non-persisted synthetic-disposal seam (`synthetic_state` optimize.rs:1230 / `score_synthetic`
 :1274). Scope: **sell what-if + harvest optimizer**, **CLI + TUI overlay**, + the `optimize consult` marginal fix.
@@ -24,7 +25,11 @@ unchanged (regression KAT: all current tax KATs byte-identical).
 Two entry fns, both returning BOTH the baseline and with-scenario `TaxResult` so callers show every marginal
 field. Both build on a shared injector `synthetic_year(events, prices, config, year, profile, tables, dispose,
 picks: Option<…>) -> Result<(TaxResult /*baseline*/, TaxResult /*withhyp*/), WhatIfError>` = the `synthetic_state`
-push + two `compute_tax_year` calls (baseline on the unmodified timeline). **Marginal = `withhyp.total_federal_tax_
+push + two `compute_tax_year` calls (baseline on the unmodified timeline). **[R0-M2] `whatif` lives IN
+btctax-core**, giving it crate-internal access to the today-private `synthetic_state`/`fold_as_of`/`pool_key`/
+`method_order`/`hifo_cmp` (call directly, or lift to `pub(crate)` — no public API widening). **[R0-M1] proceeds
+scale with the candidate N** (unlike `ConsultRequest`'s fixed total): `--price` is per-BTC → each candidate's
+`proceeds = round_cents(price × N / 1e8)`; `price: None` (dataset date) → `fmv_of` prices each candidate N. **Marginal = `withhyp.total_federal_tax_
 attributable − baseline.total_…`** (exact Decimal; the shared no-crypto term cancels — the identity the
 `consult` bug violates).
 
@@ -35,10 +40,16 @@ Injects the synthetic `Op::Dispose` (HIFO default via the standing method, or ex
 - lots consumed: per-leg `(lot_id, sat, basis, acquired→sold, term ST/LT, gain)`;
 - `st_gain`, `lt_gain`; the with-scenario `pref_split` → **which §1(h) bracket (0/15/20)** + room remaining;
 - `marginal_tax` (exact), `effective_rate` (= marginal ÷ gain, guarded for gain≤0);
-- **[★ §1212] `carryforward_delta` = withhyp.carryforward_out − baseline.carryforward_out** (ST + LT) — a
-  loss sale shows "$3,000 offsets ordinary income this year, **$Y carried to next year**"; the current-year
-  marginal alone does NOT represent a loss sale's value;
-- `niit_applies` (incremental flag); `status`.
+- **[★ §1212, R0-I1] `carryforward_delta` = withhyp.carryforward_out − baseline.carryforward_out** (ST + LT).
+  The disclosure is DELTA-BASED, never a hard-coded "$3,000": the **this-year ordinary offset** =
+  `withhyp.loss_deduction − baseline.loss_deduction` (reuse `TaxResult.loss_deduction`, types.rs:104) — which
+  is **$0 when the baseline already consumes the §1211(b) cap** (pre-existing real losses or a carryforward-in).
+  Report "$<offset_delta> offsets ordinary income this year, **$<carryforward_delta> carried to next year**";
+  the current-year marginal alone does NOT represent a loss sale's value.
+- **[★ R0-I2] `niit_incremental`** = `withhyp.niit − baseline.niit` (reuse `TaxResult.niit`, types.rs:102) —
+  the DELTA, NOT the raw `MarginalRates.niit_applies` (which is crypto-vs-no-crypto and misreports "NIIT
+  applies" for a NIIT-REDUCING loss harvest on a year with real disposals). `niit_applies` in the report ≙
+  `niit_incremental != 0`; show the sign. `status`.
 
 ### `whatif::harvest(req: HarvestRequest) -> Result<HarvestReport, WhatIfError>`
 `HarvestRequest { wallet, at, price: Option<Usd/*per BTC*/>, target: HarvestTarget }`,
@@ -59,11 +70,12 @@ Injects the synthetic `Op::Dispose` (HIFO default via the standing method, or ex
   (require X≥0); `Tax(X)`⇒`marginal(N)≤X` (require X≥0).
 - **ST/LT: full feedback by construction** (predicate reads the engine's whole stacked position). NOT LT-only.
 - `HarvestReport { n_sat, n_btc, with_result: TaxResult, binding_constraint, marginal_tax, carryforward_delta,
-  niit_applies, plateau_note, status }`.
+  niit_incremental (= withhyp.niit − baseline.niit, per R0-I2 — NOT the raw flag), plateau_note, status }`.
 - **Status enum:** `Found | NotBinding | AlreadyBreached | NoLots | ProceedsRequired | PreTransitionYear |
   YearNotComputable(Blocker)`.
 - **Mandatory disclosures** in the report: carryforward-burn (`carryforward_out(N*)−(0)`); NIIT kink (a
-  bracket-target answer can still cost +3.8% — surface `niit_applies` + the approx crossing); the plateau note.
+  bracket-target answer can still cost +3.8% — surface `niit_incremental` [R0-I2 delta] + the approx crossing);
+  the plateau note.
 
 ## [★ consult fix — user-approved] Correct `optimize consult`'s marginal reporting
 `ConsultReport.total_federal_tax_attributable` (optimize.rs:1203) is the WHOLE-YEAR figure (real + hyp vs no
@@ -77,7 +89,9 @@ New read-only `Command::WhatIf(WhatIf)` with `Sell { sell, wallet, at, price, me
 at, price, target }` (mirrors the `Optimize::Consult` clap shape, cli.rs:294). **Ad-hoc profile:** flags
 `--filing-status`, `--income` (ordinary taxable), `--magi` (+ optional `--carryforward-in`) build a NON-persisted
 `TaxProfile` (mirrors `placeholder_tax_profile`, cmd/tax.rs:16) so a user can plan without `tax-profile set`;
-fall back to the stored `Session::tax_profile(year)` when present + no flags. `--price` required for a future
+fall back to the stored `Session::tax_profile(year)` when present + no flags. **[R0-M4] `--magi` defaults to
+`--income`** (a floor — NEVER $0, which would silently suppress every NIIT disclosure) with a printed caveat
+"MAGI assumed = ordinary income; NIIT may be understated if you have other MAGI". `--price` required for a future
 `at`. Renders via new `render::render_whatif_sell` / `render_whatif_harvest` (the `render_consult` template,
 render.rs:1740). Reuses `Session` load verbatim (read-only).
 
@@ -90,9 +104,14 @@ never mutates the vault. (Detailed TUI state/keybindings in the P3 spec-slice at
 - **★ non-persistence:** `whatif_never_persists` (vault byte-identical after any sell/harvest) — non-negotiable.
 - **★ marginal identity:** `whatif_marginal_equals_withhyp_minus_baseline` (exact) + `…_cancels_no_crypto_term`.
 - **★ consult fix:** `consult_marginal_subtracts_baseline` (year with real disposals).
-- **★ §1212:** `whatif_sell_loss_reports_carryforward_delta` ($3k used, excess carried, ST/LT preserved);
+- **★ §1212:** `whatif_sell_loss_reports_carryforward_delta` (offset-delta used, excess carried, ST/LT
+  preserved); **[R0-I1] `whatif_sell_offset_delta_is_zero_when_baseline_caps`** (baseline already consumes the
+  §1211(b) cap → the sell's this-year ordinary offset = `loss_deduction` delta = $0, ALL carried — NOT "$3,000");
   `carryforward_in_consumed_first`; `harvest_carryforward_burn_disclosed` (cf_long=$50k, all-gain pool →
   marginal $0 across absorption, report shows the burn).
+- **[R0-I2] `whatif_niit_incremental_not_raw_flag`** — a NIIT-REDUCING loss harvest on a year with real
+  disposals: `niit_incremental < 0`, and the raw `MarginalRates.niit_applies` (which would say "applies") is
+  NOT used.
 - **★ optimizer traps:** `harvest_dip` (loss-lot-first → marginal<0 then rising; naive bisection lands wrong);
   `harvest_fifo_non_contiguous` (true→false→true; prefix semantics returns the FIRST boundary);
   `harvest_3k_pin_flat`; `harvest_st_feedback_shrinks_zero_room`; `harvest_cross_net_expands_room`;
@@ -100,15 +119,19 @@ never mutates the vault. (Detailed TUI state/keybindings in the P3 spec-slice at
   `harvest_niit_kink`; `harvest_per_segment_monotone` (T1 within the cent band); `harvest_boundary_exactness`
   (predicate true at N*, false at N*+τ').
 - **status/refusal:** `harvest_all_loss_notbinding` + $3k disclosure; `harvest_no_lots`; `harvest_already_breached`;
-  `harvest_pending_basis_caps_n`; missing profile/table ⇒ refusal; MFS $1,500 variant; FIFO/LIFO election.
+  `harvest_pending_basis_caps_n`; missing profile/table ⇒ refusal; MFS $1,500 variant; FIFO/LIFO election;
+  **[R0-M5] Qss→Mfj status mapping** inherited (the breakpoint/threshold lookup).
 - **sell:** `sell_reports_correct_ltcg_bracket` (0/15/20 by stacking); `sell_niit_crossing`; `sell_effective_rate`.
 - **engine delta:** `taxresult_pref_split_matches_internal`; **all existing tax KATs byte-identical** (regression).
 
 ## Scope / SemVer / lockstep
-btctax-core (+`whatif` module, +`PrefSplit`/`bottom_with` on `TaxResult` — additive) + btctax-cli (`what-if`
-command + ad-hoc profile + render + the consult fix) + btctax-tui (P3 overlay). No persistence surface. MINOR
-(new read-only command + additive engine field). Man page + README (`what-if`, the ad-hoc profile, the
-disclosures). Network isolation unchanged (all pure compute). No new tax authority — cites the same tables.
+btctax-core (+`whatif` module, +`pref_split`/`bottom_with` on `TaxResult`) + btctax-cli (`what-if` command +
+ad-hoc profile + render + the consult fix) + btctax-tui (P3 overlay). No persistence surface. **[R0-M3 SemVer]
+adding pub fields to the re-exported, non-`#[non_exhaustive]` `TaxResult` is a BREAKING change** → either bump
+0.3.0→**0.4.0**, OR (preferred) add `#[non_exhaustive]` to `TaxResult` (and to the newly-exposed `PrefSplit`,
+which must also be `pub`-re-exported from btctax-core) NOW so this + all future field additions are non-breaking
+→ then MINOR. Recommend `#[non_exhaustive]`. Man page + README (`what-if`, the ad-hoc profile, the disclosures).
+Network isolation unchanged (all pure compute). No new tax authority — cites the same tables.
 
 ## Plan (TDD, phased; each slice: R0-cleared → tests-first → whole-diff)
 - **P0 (engine delta)** — `PrefSplit`/`bottom_with` on `TaxResult`; the surfacing + the regression KAT (all
