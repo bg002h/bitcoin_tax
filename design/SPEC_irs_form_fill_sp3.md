@@ -1,8 +1,11 @@
 # SPEC — official IRS PDF form-fill, sub-project 3 (2017 + 2024 full packet, per-year)
 
-**Source baseline:** `main` @ `55f5812` (branch `feat/irs-form-fill-sp3`). **Review status: R0 round 2 folded
-(r1 3C/5I on Fable; r2 0C/3I/5M/2N on Opus — 3 Criticals re-verified TRUE; 3 more 2017 engine gaps + a factual
-fix folded). Awaiting R0 round 3.** Reviews: `reviews/R0-spec-irs-form-fill-sp3-round-{1,2}.md`. SP3 (final) of task #45. **User-chosen scope (2026-07-06): the
+**Source baseline:** `main` @ `55f5812` (branch `feat/irs-form-fill-sp3`). **Review status: R0-GREEN (3 rounds; 0C/0I).
+Cleared to implement (two-stage: SP3a = T0+T1 engine+2024, then SP3b = T2/2017).** Reviews:
+`reviews/R0-spec-irs-form-fill-sp3-round-{1,2,3}.md`. r1 3C/5I (Fable — caught 2017 SE not computable, the 2024
+DA-pair fail-closed, the false 8283 recon); r2 0C/3I (Opus — 3 more 2017 engine gaps: 8283 ¢-pairs, the 2nd
+grid token, 1040 DA-optional); r3 0C/0I (Opus — 4 doc Minors/Nits synced: SEC_B_CAP, NIIT-not-in-table, docs to
+SP3a, 8283 26-¢-fields definitive). SP3 (final) of task #45. **User-chosen scope (2026-07-06): the
 FULL 2017 packet** — incl. a new TY2017 tax table + the engine changes 2017's old forms require. **Correction:
 SP3 DOES change the engine** (the DRAFT's "data-only" claim was false — R0-verified).
 
@@ -34,8 +37,10 @@ $168,600).
    treats the pair as one logical cell at the dollars-field geometry. **[R0-r2-M2] MoneyPair needs a REAL
    2-decimal/zero-pad formatter** (`fmt_money` is raw `Decimal::to_string` — no cents padding). **[R0-r2-I1]
    MoneyPair must survive `merge_copies` overflow** (the 2017 8283 overflows; the per-copy rename must rewrite
-   BOTH the dollars and cents field names as a unit) and **`SEC_A_CAP` becomes per-year (5 for 2017, not the
-   hardcoded 4)**. (All 2017-only; 2024/2025 stay single-field.)
+   BOTH the dollars and cents field names as a unit — R0-r3-confirmed this fits `overflow.rs:43` root-`/T`
+   rename) and **`SEC_A_CAP` becomes per-year (5 for 2017, not the hardcoded 4); [R0-r3-Ma] `SEC_B_CAP` too —
+   2017 Section B (the BTC >$5k appreciated-property donation path) holds 4 rows `Line5A-5D`, not the hardcoded
+   3**. (All 2017-only; 2024/2025 stay single-field — R0-r3-confirmed 26 cent fields on 2017 8283, 0 on 2024/2025.)
 3. **[R0-I: per-year QOF] 2017 Schedule D has NO QOF question** but `ScheduleDMap` requires one (always writes
    "No"). **Make QOF optional per-year** (the map declares whether the field exists; 2017 omits it).
 4. **[R0-I: per-year grid tokens — 8949 AND Schedule D] `F8949_TABLE_TOKEN="Table_Line1_Part"` matches neither
@@ -54,7 +59,8 @@ The DRAFT claimed "all 9 forms verified"; the 8283-2017/2024 URLs were IRS 404 H
 no year-editioned 8283 exists — use `irs-prior/f8283--{2014,2023}.pdf`:
 - **TY2017 → Rev. 12-2014:** XFA hybrid, **NO digital-asset property box** but **"j Other" EXISTS** → BTC
   donation uses "j Other" + a printed note (do NOT scope out); **OLD part numbering II/III/IV**; **5 Section-A
-  rows**; dollars+cents pairs likely (verify at extraction).
+  rows / 4 Section-B rows** (`Line1A-1E` / `Line5A-5D`); **26 dollars+cents-pair fields (R0-confirmed)** — needs
+  MoneyPair.
 - **TY2024 → Rev. 12-2023:** has **"k Digital assets"**; parts III/IV/V as 2025.
 - Bundle by revision string; a filing-year→revision map (2017→12-2014, 2024→12-2023, 2025→12-2025).
 
@@ -78,8 +84,9 @@ no year-editioned 8283 exists — use `irs-prior/f8283--{2014,2023}.pdf`:
 
 ## KATs (per year + engine)
 - **★ TY2017 tax table:** `ty2017_table_matches_rev_proc_2016_55` — **[R0-r2-M1] a FULL-SCHEDULE equality lock**
-  (every ordinary bracket edge + rate, every §1(h) LTCG breakpoint, the $127,200 wage base, the NIIT threshold),
-  not a few spot-pins — the tax-critical primary-source gate.
+  (every ordinary bracket edge + rate, every §1(h) LTCG breakpoint, the $127,200 wage base) — not a few
+  spot-pins — the tax-critical primary-source gate. **[R0-r3-Mb] NOT the NIIT threshold** — it is the
+  year-independent statutory `niit_threshold()` fn, NEVER a `TaxTable` field (do not add it).
 - **★ box:** `ty2017_and_2024_bitcoin_use_box_C_F` (`/3`, NOT I/L); `ty2025_still_I_L` (regression).
 - **★ DA oracle fix [C2]:** `da_pair_selected_by_adjacency_not_topmost` (the 2024 filing-status row is NOT
   chosen); `ty2025_da_still_correct` (no regression); `ty2024_1040_fills_da_and_line7`.
@@ -104,7 +111,9 @@ dispatch. Bundled PDFs public domain. MINOR (new years + new table). Man page + 
   config (box/rows/table-token/QOF-optional/pre-filled-exempt/logical-sequence), AND the **TY2017 `TaxTable`**
   (Rev. Proc. 2016-55 + $127,200) with its primary-source KAT. Unit-tested; 2025 + core suites stay green.
 - **T1 (2024 — closest to 2025)** — bundle 2024 PDFs; the 2024 maps (Box C/F, 14 rows, 1040 line 7 + DA-by-
-  adjacency, unified SE, 8283 Rev. 12-2023); the 2024 fill branches; 2024 KATs + fault-injects; 2025 regression.
+  adjacency, unified SE, 8283 Rev. 12-2023); the 2024 fill branches; 2024 KATs + fault-injects; 2025 regression;
+  **[R0-r3-Mc] man page + README updated for 2024** (SP3a ships 2024 as a supported year — must not be
+  undocumented; SP3b/T2 amends them again for 2017).
 - **T2 (2017 — the old forms)** — bundle 2017 PDFs (+ 8283 Rev. 12-2014); the TY2017 tax table + its
   full-schedule KAT; the 2017 maps incl. the old §B Schedule SE (¢-pairs, pre-filled-exempt), the no-DA
   line-13 1040 (¢-pairs), the no-QOF Schedule D, the "j Other" 8283 (¢-pairs, 5 rows, overflow); the 2017 fill
