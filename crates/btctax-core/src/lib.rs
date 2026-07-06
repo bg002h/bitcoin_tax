@@ -12,6 +12,7 @@ pub mod project;
 pub mod state;
 pub mod tax;
 pub mod void;
+pub mod whatif;
 
 pub use conventions::{Sat, TaxDate, Usd};
 pub use donation::DonationDetails;
@@ -41,6 +42,10 @@ pub use tax::{
     SE_NET_EARNINGS_FACTOR, SE_RATE_ADDL_MEDICARE, SE_RATE_MEDICARE, SE_RATE_SS,
 };
 pub use void::{is_revocable_payload, voidable_decisions};
+pub use whatif::{
+    CarryforwardDelta, ConsumedLot, LtcgBracket, SellMethod, SellReport, SellRequest, SellStatus,
+    WhatIfError,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {

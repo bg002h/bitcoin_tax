@@ -245,8 +245,9 @@ pub struct ConsumeResult {
 }
 
 /// Total-order ranking (NFR4): the indices of `lots` with `remaining_sat > 0`, in consumption order.
-/// FIFO = acquisition-date asc (tie `lot_id` asc); LIFO = desc; HIFO via `hifo_cmp`.
-fn method_order(lots: &[Lot], method: LotMethod) -> Vec<usize> {
+/// FIFO = acquisition-date asc (tie `lot_id` asc); LIFO = desc; HIFO via `hifo_cmp`. `pub(crate)` so
+/// `whatif` can build a specific-method selection over an as-of pool without re-implementing the order.
+pub(crate) fn method_order(lots: &[Lot], method: LotMethod) -> Vec<usize> {
     let mut idx: Vec<usize> = (0..lots.len())
         .filter(|&i| lots[i].remaining_sat > 0)
         .collect();
