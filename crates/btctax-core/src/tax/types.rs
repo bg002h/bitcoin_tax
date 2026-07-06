@@ -1,4 +1,5 @@
 use crate::conventions::Usd;
+use crate::tax::compute::PrefSplit;
 use serde::{Deserialize, Serialize};
 
 /// IRS filing status (§1(a)–(d), §2(b), §2(a)). Governs both the ordinary-bracket schedule and
@@ -87,7 +88,12 @@ pub struct MarginalRates {
 ///
 /// Delta fields (marked DELTA) = `with_crypto − without_crypto` (the incremental objective I5).
 /// Level fields (marked level) = the WITH-crypto absolute value (e.g. carryforward for next year).
+///
+/// `#[non_exhaustive]`: external crates read fields but must never construct or exhaustively match
+/// this struct — new fields (like `pref_split`/`bottom_with`, task #43) are added over time. Adding
+/// the attribute is itself a breaking change (0.4.0 cycle) and future-proofs all *later* additions.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TaxResult {
     /// §1222 within-character net short-term WITH crypto (signed: gain > 0, loss < 0).
     pub st_net: Usd,
@@ -109,6 +115,18 @@ pub struct TaxResult {
     /// (B.4 / I6 — hard blockers anywhere block this computation).
     pub total_federal_tax_attributable: Usd,
     pub marginal_rates: MarginalRates,
+    /// The §1(h) preferential-rate split (`at_0`/`at_15`/`at_20` dollars + `tax`) actually computed
+    /// for the WITH-crypto scenario — surfaced (previously discarded, compute.rs kept only `.tax`) so
+    /// planning callers can read which §1(h) rate zone the preferential dollars land in (the harvest
+    /// predicates need `at_15`/`at_20 == 0` exactly; `MarginalRates.ltcg` is NOT a substitute — it
+    /// reports a rate off `top` even with ZERO preferential dollars). Pure surfacing: every existing
+    /// tax number is unchanged.
+    pub pref_split: PrefSplit,
+    /// The WITH-crypto ordinary-stack bottom (`profile.ordinary_taxable_income + crypto_ord +
+    /// surviving net ST gain − §1211(b) loss deduction`) that the §1(h) preferential stack sits ON
+    /// TOP of. Surfaced so a caller can recompute the split against known breakpoints / measure the
+    /// room to the next §1(h) breakpoint. Level (WITH-crypto), never a delta.
+    pub bottom_with: Usd,
 }
 
 /// The outcome of a `compute_tax_year` call. `Computed` carries the full result; `NotComputable`

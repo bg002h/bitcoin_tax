@@ -39,7 +39,11 @@ pub fn ordinary_tax_on(schedule: &OrdinarySchedule, taxable: Usd) -> Usd {
 }
 
 /// The §1(h) preferential-rate split: how many preferential dollars land in each rate zone, plus the tax.
+///
+/// `#[non_exhaustive]`: surfaced on `TaxResult` (task #43); external crates read its fields but must
+/// never construct or exhaustively match it (future-proofs later additions; a 0.4.0 breaking cycle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PrefSplit {
     pub at_0: Usd,
     pub at_15: Usd,
@@ -338,8 +342,11 @@ pub fn compute_tax_year(
         profile.ordinary_taxable_income + without.ordinary_gain - without.loss_deduction;
     let ord_with = ordinary_tax_on(sched, bottom_with);
     let ord_without = ordinary_tax_on(sched, bottom_without);
-    // §1(h): QD shares the 0/15/20 preferential stack with surviving net capital gain.
-    let pref_with = preferential_tax(&bp, bottom_with, qd + with.preferential_gain).tax;
+    // §1(h): QD shares the 0/15/20 preferential stack with surviving net capital gain. Keep the FULL
+    // WITH-scenario split (not just `.tax`) so it can be surfaced on `TaxResult.pref_split` — the values
+    // used here are the ones a planner reads; nothing about the tax math changes.
+    let pref_with_split = preferential_tax(&bp, bottom_with, qd + with.preferential_gain);
+    let pref_with = pref_with_split.tax;
     let pref_without = preferential_tax(&bp, bottom_without, qd + without.preferential_gain).tax;
 
     // §1411 NIIT. NII = QD + surviving net capital gains (ST+LT) − the §1211(b)-allowed net capital loss
@@ -403,6 +410,8 @@ pub fn compute_tax_year(
         },
         total_federal_tax_attributable: total, // = (ord_with−ord_without) + ltcg_tax + niit
         marginal_rates,
+        pref_split: pref_with_split, // the WITH-scenario §1(h) split actually used above (surfaced)
+        bottom_with, // the WITH-scenario ordinary-stack bottom the pref stack sits on
     })
 }
 
