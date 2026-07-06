@@ -10,8 +10,8 @@ use btctax_core::{
     year_donation_deduction, BasisSource, Blocker, BlockerKind, ComplianceStatus,
     ConservationReport, DisposalCompliance, DisposalLeg, DisposeKind, EventId, EventPayload,
     Form8283HowAcquired, Form8283Section, Form8949Box, Form8949Part, GiftZone, IncomeKind,
-    LedgerEvent, LedgerState, LotMethod, RemovalKind, RemovalLeg, ScheduleDTotals, SeTaxResult,
-    Severity, TaxDate, Term, WalletId,
+    LedgerEvent, LedgerState, LotMethod, LtcgBracket, RemovalKind, RemovalLeg, ScheduleDTotals,
+    SeTaxResult, SellReport, SellStatus, Severity, TaxDate, Term, WalletId,
 };
 use btctax_store::fsperms;
 use csv::Writer;
@@ -1764,9 +1764,12 @@ pub fn render_consult(r: &btctax_core::ConsultReport) -> String {
         "  short-term gain: {}   long-term gain: {}",
         r.st_gain, r.lt_gain
     );
+    // [consult fix] Headline the sale's OWN marginal effect (withhyp − baseline); keep the whole-year
+    // figure clearly relabeled below it (on a year with real disposals the two DIFFER).
+    let _ = writeln!(s, "  marginal federal tax (this sale): {}", r.marginal_tax);
     let _ = writeln!(
         s,
-        "  federal tax attributable (estimated): {}",
+        "  whole-year federal tax attributable (with this sale): {}",
         r.total_federal_tax_attributable
     );
     if let Some(t) = &r.timing {
@@ -1777,6 +1780,129 @@ pub fn render_consult(r: &btctax_core::ConsultReport) -> String {
             t.st_sat_in_selection, t.latest_crossover, t.saving_if_waited
         );
     }
+    let _ = writeln!(
+        s,
+        "Tax decision-support only \u{2014} consequences of a contemplated sale; \
+         not investment advice (no buy/sell/hold recommendation)."
+    );
+    s
+}
+
+/// The §1(h) 0/15/20 rate zone label for the sale's preferential dollars.
+fn ltcg_bracket_label(b: LtcgBracket) -> &'static str {
+    match b {
+        LtcgBracket::Zero => "0%",
+        LtcgBracket::Fifteen => "15%",
+        LtcgBracket::Twenty => "20%",
+    }
+}
+
+/// Render a `what-if sell` `SellReport` (task #43). Headlines the MARGINAL federal tax (the sale's OWN
+/// effect — `withhyp − baseline`), then the §1(h) bracket + room, the effective rate (or n/a for a loss),
+/// the §1212 carryforward disclosure (delta-based — the this-year ordinary offset AND the amount carried,
+/// NEVER a hard-coded $3,000), and the §1411 NIIT delta with its sign. `magi_caveat` prints the
+/// ad-hoc-profile "MAGI assumed = ordinary income" note. Read-only; the vault is never touched.
+pub fn render_whatif_sell(r: &SellReport, magi_caveat: bool) -> String {
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "What-if (read-only): sell {} sat from {} on {}",
+        r.req.sell_sat,
+        wallet_label(&r.req.wallet),
+        r.req.at
+    );
+    if magi_caveat {
+        let _ = writeln!(
+            s,
+            "  \u{26a0} MAGI assumed = ordinary income; NIIT may be understated if you have other MAGI."
+        );
+    }
+    let _ = writeln!(s, "  proceeds: {}", r.proceeds);
+    let _ = writeln!(s, "  lots consumed:");
+    for leg in &r.lots {
+        let term = match leg.term {
+            Term::ShortTerm => "ST",
+            Term::LongTerm => "LT",
+        };
+        let _ = writeln!(
+            s,
+            "    {}#{}  {} sat  basis {}  {} \u{2192} {}  {}  gain {}",
+            leg.lot_id.origin_event_id.canonical(),
+            leg.lot_id.split_sequence,
+            leg.sat,
+            leg.basis,
+            leg.acquired_at,
+            leg.sold_at,
+            term,
+            leg.gain
+        );
+    }
+    let _ = writeln!(
+        s,
+        "  short-term gain: {}   long-term gain: {}",
+        r.st_gain, r.lt_gain
+    );
+    // §1(h) bracket + headroom to the next breakpoint.
+    match r.bracket_room {
+        Some(room) => {
+            let _ = writeln!(
+                s,
+                "  \u{00a7}1(h) LTCG bracket: {} (room {} before the next breakpoint)",
+                ltcg_bracket_label(r.bracket),
+                room
+            );
+        }
+        None => {
+            let _ = writeln!(
+                s,
+                "  \u{00a7}1(h) LTCG bracket: {} (top bracket \u{2014} no headroom)",
+                ltcg_bracket_label(r.bracket)
+            );
+        }
+    }
+    // The headline: the sale's OWN marginal federal tax.
+    let _ = writeln!(s, "  marginal federal tax (this sale): {}", r.marginal_tax);
+    match r.effective_rate {
+        Some(rate) => {
+            let _ = writeln!(s, "  effective rate: {rate}");
+        }
+        None => {
+            let _ = writeln!(
+                s,
+                "  effective rate: n/a (a loss/zero-gain sale \u{2014} its value is the carryforward, \
+                 not this-year tax)"
+            );
+        }
+    }
+    // §1212 disclosure — delta-based, NEVER a hard-coded $3,000. Shown whenever a loss is carried OR the
+    // sale unlocks a this-year ordinary offset.
+    let carried = r.carryforward_delta.short + r.carryforward_delta.long;
+    if carried != Usd::ZERO || r.ordinary_offset_delta != Usd::ZERO {
+        let _ = writeln!(
+            s,
+            "  \u{00a7}1212: {} offsets ordinary income this year, {} carried to next year \
+             (short {} / long {})",
+            r.ordinary_offset_delta, carried, r.carryforward_delta.short, r.carryforward_delta.long
+        );
+    }
+    // §1411 NIIT delta (with its sign) — only when the sale actually moved NIIT.
+    if r.niit_applies {
+        let dir = if r.niit_incremental < Usd::ZERO {
+            "decrease"
+        } else {
+            "increase"
+        };
+        let _ = writeln!(
+            s,
+            "  \u{00a7}1411 NIIT: {} ({dir}) attributable to this sale",
+            r.niit_incremental
+        );
+    }
+    let status = match r.status {
+        SellStatus::Gain => "net gain",
+        SellStatus::Loss => "net loss (the carryforward is the value \u{2014} not this-year tax)",
+    };
+    let _ = writeln!(s, "  status: {status}");
     let _ = writeln!(
         s,
         "Tax decision-support only \u{2014} consequences of a contemplated sale; \

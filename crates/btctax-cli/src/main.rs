@@ -3,7 +3,7 @@
 //! exit code (non-zero on FR9 hard blockers / on any CliError). NO business logic lives here.
 use btctax_cli::cli::{
     Cli, Command, FeeArg, MethodArg, Optimize, OutKindArg, Pseudo, PseudoKindArg, Reconcile,
-    SelfTransferActionArg,
+    SelfTransferActionArg, WhatIf,
 };
 use btctax_cli::{cmd, eventref, render, CliError};
 use btctax_core::{
@@ -206,6 +206,90 @@ fn run() -> Result<ExitCode, CliError> {
                     DisposeKind::Sell,
                 )?;
                 print!("{}", render::render_consult(&report));
+            }
+        },
+        Command::WhatIf(wi) => match wi {
+            WhatIf::Sell {
+                sell,
+                wallet,
+                at,
+                price,
+                method,
+                filing_status,
+                income,
+                magi,
+                carryforward_in,
+            } => {
+                let pp = passphrase(false)?;
+                let sell_sat = sell.trim().parse::<i64>().map_err(|e| {
+                    CliError::Usage(format!(
+                        "bad --sell {sell:?}: expected an integer sat amount: {e}"
+                    ))
+                })?;
+                // --wallet is semantically required: the per-wallet pool is mandatory post-2025.
+                let wallet_id = wallet
+                    .as_deref()
+                    .ok_or_else(|| {
+                        CliError::Usage(
+                            "--wallet is required for `what-if sell` (per-wallet pool is mandatory \
+                             post-2025; use e.g. self:cold or exchange:coinbase:default)"
+                                .into(),
+                        )
+                    })
+                    .and_then(eventref::parse_wallet_id)?;
+                // --at defaults to today UTC (CLI clock seam; core stays clock-free).
+                let at_date = at
+                    .as_deref()
+                    .map(eventref::parse_date_arg)
+                    .transpose()?
+                    .unwrap_or_else(|| btctax_core::conventions::tax_date(now, UtcOffset::UTC));
+                let price_usd = price.as_deref().map(eventref::parse_usd_arg).transpose()?;
+                let method_lm = method.map(LotMethod::from);
+
+                // Ad-hoc (non-persisted) profile: if ANY ad-hoc flag is present, --filing-status AND
+                // --income are required; --magi defaults to --income (R0-M4); else fall back to stored.
+                let adhoc = if filing_status.is_some()
+                    || income.is_some()
+                    || magi.is_some()
+                    || carryforward_in.is_some()
+                {
+                    let fs = filing_status.ok_or_else(|| {
+                        CliError::Usage(
+                            "--filing-status is required to build an ad-hoc profile (with --income)"
+                                .into(),
+                        )
+                    })?;
+                    let inc = income
+                        .as_deref()
+                        .ok_or_else(|| {
+                            CliError::Usage(
+                                "--income is required to build an ad-hoc profile".into(),
+                            )
+                        })
+                        .and_then(eventref::parse_usd_arg)?;
+                    let magi_usd = magi.as_deref().map(eventref::parse_usd_arg).transpose()?;
+                    let cf_long = carryforward_in
+                        .as_deref()
+                        .map(eventref::parse_usd_arg)
+                        .transpose()?
+                        .unwrap_or_default();
+                    Some(cmd::whatif::AdhocProfile {
+                        filing_status: FilingStatus::from(fs),
+                        income: inc,
+                        magi: magi_usd,
+                        cf_long,
+                    })
+                } else {
+                    None
+                };
+
+                let outcome = cmd::whatif::sell(
+                    vault, &pp, sell_sat, wallet_id, at_date, price_usd, method_lm, adhoc,
+                )?;
+                print!(
+                    "{}",
+                    render::render_whatif_sell(&outcome.report, outcome.magi_caveat)
+                );
             }
         },
         Command::Reconcile(r) => dispatch_reconcile(vault, r, now)?,

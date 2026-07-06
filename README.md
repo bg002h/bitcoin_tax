@@ -218,6 +218,44 @@ This writes a whole packet, each form only when it applies, populated from btcta
 
 ---
 
+## Plan a sale before you make it — `what-if`
+
+`what-if sell` posits a **hypothetical, non-persisted** sale and shows its **marginal** federal-tax
+effect on the current-year position — the *incremental* cost of that one sale, not the whole-year figure.
+It routes through the same audited tax engine as `report --tax-year`; it **writes nothing** (no event,
+no side-table, no vault change) and is tax decision-support, not buy/sell/hold advice.
+
+```sh
+btctax --vault ./vault.pgp what-if sell \
+  --sell 100000000 --wallet self:cold --at 2025-08-01 --price 95000
+```
+
+It reports the lots the sale would consume, the short-/long-term split, **which §1(h) LTCG bracket
+(0/15/20%)** it lands in and the room to the next breakpoint, the **marginal tax** (headline), the
+effective rate, the **§1212(b) carryforward** carried to next year plus this year's ordinary offset,
+and the **§1411 NIIT** delta (with its sign — a loss harvest can *reduce* NIIT).
+
+- **Price.** `--price` is USD **per whole BTC**; omit it to use the bundled daily-close FMV for `--at`
+  (a future/off-dataset date then requires `--price`).
+- **Method.** Omit `--method` to consume by your **standing method** (the account's in-force election),
+  exactly as a real disposal would; or force `--method fifo|lifo|hifo`.
+- **A loss sale** surfaces the carryforward disclosure: the current-year marginal alone does **not**
+  represent the sale's value — the loss carried to next year is. The this-year ordinary offset is the
+  *actual* §1211(b) delta — **$0** (not "$3,000") when you have already used the cap this year.
+
+**Plan without a stored profile.** Supply an ad-hoc, non-persisted profile inline:
+
+```sh
+btctax --vault ./vault.pgp what-if sell --sell 50000000 --wallet self:cold --at 2025-09-01 \
+  --price 95000 --filing-status single --income 120000 --magi 130000 --carryforward-in 20000
+```
+
+`--magi` **defaults to `--income`** when omitted (never $0 — a $0 MAGI would silently suppress the NIIT
+disclosure); a caveat notes the assumption. With no ad-hoc flags, the stored `tax-profile` for the sale
+year is used.
+
+---
+
 ## Pseudo-reconcile — a fast, honest starting point
 
 Reconciling a fresh import can mean resolving hundreds of blockers before anything computes. **Pseudo-reconcile

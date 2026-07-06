@@ -200,6 +200,12 @@ pub enum Command {
     /// Lot-specific-identification optimizer (§C — read-only proposal or gated persistence).
     #[command(subcommand)]
     Optimize(Optimize),
+    /// Read-only what-if tax planning (task #43): posit a HYPOTHETICAL, NON-persisted transaction and
+    /// see its MARGINAL federal-tax effect on the current-year position. Routes through the same audited
+    /// tax engine as `report --tax-year`; invents no tax authority. Writes NOTHING — no event, no
+    /// side-table row, no vault mutation. Tax decision-support (consequences), not buy/sell/hold advice.
+    #[command(subcommand)]
+    WhatIf(WhatIf),
     /// Set or show the per-tax-year tax profile (filing status, income, MAGI, etc.).
     TaxProfile {
         /// The tax year (e.g. 2025).
@@ -311,6 +317,61 @@ pub enum Optimize {
         /// exclusive with `--proceeds`.
         #[arg(long, conflicts_with = "proceeds")]
         fmv: bool,
+    },
+}
+
+/// `what-if` subcommand tree (task #43). READ-ONLY hypothetical-transaction tax planning: NOTHING is
+/// filed, appended, or persisted. Mirrors the `optimize consult` shape, plus an ad-hoc `TaxProfile`
+/// (so you can plan without `tax-profile set`).
+#[derive(Subcommand)]
+pub enum WhatIf {
+    /// Posit a hypothetical, NON-persisted SALE and see its MARGINAL federal tax: the lots it would
+    /// consume, the ST/LT split, which §1(h) LTCG bracket (0/15/20) it lands in + room to the next
+    /// breakpoint, the exact marginal tax (with-hypothetical minus baseline — the sale's OWN effect,
+    /// not the whole-year figure), the effective rate, the §1212(b) carryforward carried to next year,
+    /// this year's ordinary offset, and the §1411 NIIT delta. A net loss surfaces the carryforward
+    /// disclosure (its value is NOT this-year tax). Writes NOTHING.
+    Sell {
+        /// Hypothetical sale amount in satoshis (required).
+        #[arg(long)]
+        sell: String,
+        /// Wallet to sell from, e.g. `self:cold` or `exchange:coinbase:default` (required; the
+        /// per-wallet pool is mandatory post-2025).
+        #[arg(long)]
+        wallet: Option<String>,
+        /// Sale date for the what-if (YYYY-MM-DD; defaults to today UTC if omitted).
+        #[arg(long)]
+        at: Option<String>,
+        /// USD price per WHOLE BTC for the hypothetical sale (proceeds = price × sat / 1e8). Omit to
+        /// use the bundled daily-close FMV for `--at`; REQUIRED for a future/off-dataset `--at` with no
+        /// bundled price (else the what-if returns a ProceedsRequired error).
+        #[arg(long)]
+        price: Option<String>,
+        /// Lot-selection method for the hypothetical sale: fifo|lifo|hifo. Omit to consume by the
+        /// STANDING method (the account's in-force election / the default), exactly as a real disposal
+        /// on that date would.
+        #[arg(long, value_enum)]
+        method: Option<MethodLotArg>,
+        /// AD-HOC filing status (single|mfj|mfs|hoh|qss). Supplying this (with `--income`) builds a
+        /// NON-persisted profile for the plan instead of the stored `tax-profile`. Omit ALL ad-hoc
+        /// flags to use the stored profile for the sale year.
+        #[arg(long, value_enum)]
+        filing_status: Option<FilingStatusArg>,
+        /// AD-HOC ordinary taxable income EXCLUDING crypto (the base the crypto stacks on). Required
+        /// when building an ad-hoc profile.
+        #[arg(long)]
+        income: Option<String>,
+        /// AD-HOC modified AGI excluding crypto, for the §1411 NIIT threshold. DEFAULTS TO `--income`
+        /// when omitted (never $0 — a $0 MAGI would silently suppress every NIIT disclosure); a printed
+        /// caveat notes the assumption. Supply the true MAGI (incl. QD + non-crypto cap gains) to avoid
+        /// understating NIIT.
+        #[arg(long)]
+        magi: Option<String>,
+        /// AD-HOC §1212(b) LONG-TERM capital-loss carryforward INTO the sale year (optional; defaults
+        /// to $0). The dominant BTC case; short-term carryforward-in is out of scope for the ad-hoc
+        /// profile (set a stored `tax-profile` for that).
+        #[arg(long)]
+        carryforward_in: Option<String>,
     },
 }
 
