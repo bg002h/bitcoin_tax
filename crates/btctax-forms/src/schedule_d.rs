@@ -120,7 +120,7 @@ pub fn fill_schedule_d_totals(
         geo: Geo::Check,
     });
 
-    let mut doc = pdf::load(pdf::SCHEDULE_D_PDF_2025)?;
+    let mut doc = pdf::load(pdf::schedule_d_pdf(map.year)?)?;
     let index = pdf::index(&pdf::collect_fields(&doc)?);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;

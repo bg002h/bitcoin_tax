@@ -37,16 +37,10 @@ use btctax_core::conventions::{TaxDate, Usd};
 use btctax_core::{Form8949Row, ScheduleDTotals};
 use time::macros::format_description;
 
-/// The only tax year SP1 bundles forms + maps for.
-pub const SUPPORTED_YEAR: i32 = 2025;
-
-fn require_year(year: i32) -> Result<(), FormsError> {
-    if year == SUPPORTED_YEAR {
-        Ok(())
-    } else {
-        Err(FormsError::UnsupportedYear(year))
-    }
-}
+/// The tax years this build bundles forms + maps for. Each fill dispatches to the year's committed
+/// map + bundled PDF via the `Map::for_year` constructors; an unlisted year fails closed with
+/// [`FormsError::UnsupportedYear`].
+pub const SUPPORTED_YEARS: &[i32] = &[2024, 2025];
 
 /// Format a date as **MM/DD/YYYY** — Form 8949's native date format for columns (b)/(c).
 pub(crate) fn fmt_date(d: TaxDate) -> Result<String, FormsError> {
@@ -67,8 +61,7 @@ pub(crate) fn fmt_money(d: Usd) -> String {
 /// part, each with its own totals; the copies are merged with per-copy field renaming so no two share
 /// a value. Every copy is geometry-verified before merge.
 pub fn fill_form_8949(rows: &[Form8949Row], year: i32) -> Result<Vec<u8>, FormsError> {
-    require_year(year)?;
-    let map = Form8949Map::ty2025();
+    let map = Form8949Map::for_year(year)?;
     let cap = map.rows_per_page;
     let (st, lt) = fill8949::split_parts(rows);
     let n_pages = div_ceil(st.len(), cap).max(div_ceil(lt.len(), cap)).max(1);
@@ -104,8 +97,7 @@ pub fn stamp_draft_watermark(pdf_bytes: &[u8]) -> Result<Vec<u8>, FormsError> {
 
 /// Fill **Schedule D** for `year` from the part totals and return the PDF bytes.
 pub fn fill_schedule_d(totals: &ScheduleDTotals, year: i32) -> Result<Vec<u8>, FormsError> {
-    require_year(year)?;
-    let map = ScheduleDMap::ty2025();
+    let map = ScheduleDMap::for_year(year)?;
     schedule_d::fill_schedule_d_totals(totals, &map)
 }
 
@@ -120,8 +112,7 @@ pub fn fill_schedule_se(
     ss_wage_base: Usd,
     year: i32,
 ) -> Result<Option<Vec<u8>>, FormsError> {
-    require_year(year)?;
-    let map = ScheduleSeMap::ty2025();
+    let map = ScheduleSeMap::for_year(year)?;
     schedule_se::fill_schedule_se_with_map(se, w2_ss_wages, ss_wage_base, &map)
 }
 
@@ -135,8 +126,7 @@ pub fn fill_form_8283(
     rows: &[btctax_core::Form8283Row],
     year: i32,
 ) -> Result<Option<Vec<u8>>, FormsError> {
-    require_year(year)?;
-    let map = Form8283Map::ty2025();
+    let map = Form8283Map::for_year(year)?;
     form8283::fill_form_8283(rows, &map)
 }
 
@@ -150,8 +140,7 @@ pub fn fill_form_1040_capgains(
     inputs: &Form1040Inputs,
     year: i32,
 ) -> Result<Option<Form1040Fill>, FormsError> {
-    require_year(year)?;
-    let map = Form1040Map::ty2025();
+    let map = Form1040Map::for_year(year)?;
     form1040::fill_form_1040_capgains(inputs, &map)
 }
 
@@ -173,7 +162,9 @@ pub mod testonly {
     };
     pub use crate::pdf::{
         button_on_states, checkbox_on, collect_fields, index, load, text_value, Field,
-        F1040_PDF_2025, F8283_PDF_2025, F8949_PDF_2025, SCHEDULE_D_PDF_2025, SCHEDULE_SE_PDF_2025,
+        F1040_PDF_2024, F1040_PDF_2025, F8283_PDF_2024, F8283_PDF_2025, F8949_PDF_2024,
+        F8949_PDF_2025, SCHEDULE_D_PDF_2024, SCHEDULE_D_PDF_2025, SCHEDULE_SE_PDF_2024,
+        SCHEDULE_SE_PDF_2025,
     };
     pub use crate::schedule_d::fill_schedule_d_totals;
     pub use crate::schedule_se::fill_schedule_se_with_map;

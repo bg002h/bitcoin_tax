@@ -1,6 +1,8 @@
 form = "f8949"
 year = 2025
 rows_per_page = 11
+# Data-grid subform token (per-year): 2025's row fqns are Table_Line1_Part1/Part2[0].RowN[0]…
+table_token = "Table_Line1_Part"
 
 [[parts]]
 term = "short"

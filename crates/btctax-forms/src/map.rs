@@ -8,6 +8,7 @@
 //! column/row bands from the bundled PDF's own widget `/Rect`s and would flag any mis-labeled cell,
 //! and `map_2025_matches_bundled_pdf_fieldset` asserts every name here exists in the PDF.
 
+use crate::error::FormsError;
 use serde::Deserialize;
 
 /// The TY2025 Form 8949 map (embedded at compile time).
@@ -20,6 +21,17 @@ pub const SCHEDULE_SE_MAP_2025: &str = include_str!("../forms/2025/schedule_se.m
 pub const F8283_MAP_2025: &str = include_str!("../forms/2025/f8283.map.toml");
 /// The TY2025 Form 1040 map (embedded at compile time).
 pub const F1040_MAP_2025: &str = include_str!("../forms/2025/f1040.map.toml");
+
+/// The TY2024 Form 8949 map (embedded at compile time).
+pub const F8949_MAP_2024: &str = include_str!("../forms/2024/f8949.map.toml");
+/// The TY2024 Schedule D map (embedded at compile time).
+pub const SCHEDULE_D_MAP_2024: &str = include_str!("../forms/2024/schedule_d.map.toml");
+/// The TY2024 Schedule SE map (embedded at compile time).
+pub const SCHEDULE_SE_MAP_2024: &str = include_str!("../forms/2024/schedule_se.map.toml");
+/// The TY2024 Form 8283 map (Rev. 12-2023, embedded at compile time).
+pub const F8283_MAP_2024: &str = include_str!("../forms/2024/f8283.map.toml");
+/// The TY2024 Form 1040 map (embedded at compile time).
+pub const F1040_MAP_2024: &str = include_str!("../forms/2024/f1040.map.toml");
 
 /// The 4 monetary "amount" columns of a Form 8949 / Schedule D totals row: (d) proceeds, (e) cost,
 /// (g) adjustment, (h) gain. Column (f) — the code column — has no total (a spacer), so it is absent.
@@ -62,6 +74,9 @@ pub struct Form8949Map {
     /// Rows per part per page — **map data**, not a hard-coded constant (a new form revision that
     /// changes the grid is a data-only edit).
     pub rows_per_page: usize,
+    /// The data-grid subform token used to re-derive the geometry bands — **per-year map config**,
+    /// not a const (2024 = `Table_Line1`, 2025 = `Table_Line1_Part`; the row fqns differ by year).
+    pub table_token: String,
     /// Part I then Part II.
     pub parts: Vec<PartMap>,
 }
@@ -75,6 +90,20 @@ impl Form8949Map {
     /// The TY2025 map.
     pub fn ty2025() -> Self {
         Self::parse(F8949_MAP_2025).expect("bundled f8949 2025 map parses")
+    }
+
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(F8949_MAP_2024).expect("bundled f8949 2024 map parses")
+    }
+
+    /// The map for a supported tax year.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            2025 => Ok(Self::ty2025()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
     }
 
     /// The part with the given term, if present.
@@ -93,16 +122,27 @@ pub struct CheckChoice {
     pub on: String,
 }
 
-/// The Form 1040 capital-gains field map for one tax year (line 7a + the Digital-Asset question).
+/// A per-year default: the Digital-Asset question is present unless a year's map says otherwise.
+fn default_da_present() -> bool {
+    true
+}
+
+/// The Form 1040 capital-gains field map for one tax year: the capital-gain amount cell (line 7a in
+/// 2025 / line 7 in 2024) + the Digital-Asset question.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Form1040Map {
     /// `"f1040"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
-    /// Line 7a — capital gain/(loss), amount column.
+    /// The capital-gain amount cell (line 7a for 2025, line 7 for 2024), amount column.
     pub line7a: String,
-    /// Digital-Asset question "Yes" (LEFT member of the same-y pair, on-state `/1`).
+    /// Whether this year's 1040 carries the Digital-Asset question — **per-year scaffolding**. When
+    /// `true` (2024/2025) the fill answers it "Yes" and runs the map-independent adjacency guard; a
+    /// future no-DA year (2017) sets it `false` (SP3b then makes `da_yes`/`da_no` optional).
+    #[serde(default = "default_da_present")]
+    pub da_present: bool,
+    /// Digital-Asset question "Yes" (LEFT member of the adjacent pair, on-state `/1`).
     pub da_yes: CheckChoice,
     /// Digital-Asset question "No" (right member, on-state `/2`) — never checked by btctax.
     pub da_no: CheckChoice,
@@ -117,6 +157,20 @@ impl Form1040Map {
     /// The TY2025 map.
     pub fn ty2025() -> Self {
         Self::parse(F1040_MAP_2025).expect("bundled f1040 2025 map parses")
+    }
+
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(F1040_MAP_2024).expect("bundled f1040 2024 map parses")
+    }
+
+    /// The map for a supported tax year.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            2025 => Ok(Self::ty2025()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
     }
 }
 
@@ -210,6 +264,20 @@ impl Form8283Map {
         Self::parse(F8283_MAP_2025).expect("bundled f8283 2025 map parses")
     }
 
+    /// The TY2024 map (Form 8283 Rev. 12-2023).
+    pub fn ty2024() -> Self {
+        Self::parse(F8283_MAP_2024).expect("bundled f8283 2024 map parses")
+    }
+
+    /// The map for a supported tax year.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            2025 => Ok(Self::ty2025()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+
     /// Every field name the map targets (for the `map_2025_matches_bundled_pdf_fieldset` guard).
     pub fn field_names(&self) -> Vec<&str> {
         let mut v = Vec::new();
@@ -282,6 +350,20 @@ impl ScheduleDMap {
     pub fn ty2025() -> Self {
         Self::parse(SCHEDULE_D_MAP_2025).expect("bundled schedule_d 2025 map parses")
     }
+
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_D_MAP_2024).expect("bundled schedule_d 2024 map parses")
+    }
+
+    /// The map for a supported tax year.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            2025 => Ok(Self::ty2025()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
 }
 
 /// The Schedule SE (Form 1040) field map for one tax year — the filled §1401 line chain.
@@ -326,6 +408,20 @@ impl ScheduleSeMap {
     /// The TY2025 map.
     pub fn ty2025() -> Self {
         Self::parse(SCHEDULE_SE_MAP_2025).expect("bundled schedule_se 2025 map parses")
+    }
+
+    /// The TY2024 map (field-name-identical to 2025; only the wage base differs).
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_SE_MAP_2024).expect("bundled schedule_se 2024 map parses")
+    }
+
+    /// The map for a supported tax year.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            2025 => Ok(Self::ty2025()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
     }
 
     /// Every field name the map targets (for the `map_2025_matches_bundled_pdf_fieldset` guard).

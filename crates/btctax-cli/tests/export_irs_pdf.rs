@@ -265,12 +265,84 @@ fn sp2_forms_filter_selects_subset() {
 fn unsupported_year_is_refused() {
     let (_dir, vault) = make_vault(&real_events());
     let out = tempfile::tempdir().unwrap();
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None).unwrap_err();
+    // This build bundles TY2024 + TY2025; 2023 is refused.
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2023, &[], None).unwrap_err();
     assert!(
         matches!(
             err,
-            CliError::FormFill(btctax_forms::FormsError::UnsupportedYear(2024))
+            CliError::FormFill(btctax_forms::FormsError::UnsupportedYear(2023))
         ),
-        "SP1 bundles TY2025 only, got {err:?}"
+        "only 2024/2025 are bundled, got {err:?}"
+    );
+}
+
+/// A REAL short-term round-trip in 2024: buy 0.01 BTC @ $200, sell it @ $500 (gain $300).
+fn real_events_2024() -> Vec<LedgerEvent> {
+    vec![
+        ev(
+            "buy-1",
+            datetime!(2024-01-05 12:00 UTC),
+            EventPayload::Acquire(Acquire {
+                sat: 1_000_000,
+                usd_cost: dec!(200),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ExchangeProvided,
+            }),
+        ),
+        ev(
+            "sell-1",
+            datetime!(2024-06-15 12:00 UTC),
+            EventPayload::Dispose(Dispose {
+                sat: 1_000_000,
+                usd_proceeds: dec!(500),
+                fee_usd: dec!(0),
+                kind: DisposeKind::Sell,
+            }),
+        ),
+    ]
+}
+
+#[test]
+fn ty2024_real_ledger_fills_box_c_f_and_line7_and_da() {
+    // ★ End-to-end SP3a sanity: a 2024 export fills the OFFICIAL 2024 PDFs — clean (no watermark),
+    // XFA dropped, Box C checked (NOT Box I), 1040 line 7 = the gain, and the DA question found via
+    // the adjacency oracle (c1_5).
+    let (_dir, vault) = make_vault(&real_events_2024());
+    let out = tempfile::tempdir().unwrap();
+    let report = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("2024 real-ledger export must succeed");
+    assert!(!report.watermarked);
+
+    use btctax_forms::testonly::*;
+    // Form 8949: Box C (short-term) = c1_1[2] on /3; Box I (c1_1[5]) does not exist on 2024.
+    let f8949 = std::fs::read(out.path().join("f8949.pdf")).unwrap();
+    assert!(f8949.starts_with(b"%PDF"));
+    assert!(!contains(&f8949, b"ESTIMATE, NOT FOR FILING"));
+    let doc = load(&f8949).unwrap();
+    assert!(!pdf_has_xfa(&doc).unwrap(), "XFA must be dropped");
+    let idx = index(&collect_fields(&doc).unwrap());
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_1[2]"].id).as_deref(),
+        Some("3"),
+        "Box C checked for short-term BTC on the 2024 form"
+    );
+
+    // Form 1040: line 7 (Line4a-11 f1_52) = gain $300; DA question (c1_5[0]) = YES.
+    let f1040 = std::fs::read(out.path().join("form_1040_capgains.pdf")).unwrap();
+    let doc = load(&f1040).unwrap();
+    let idx = index(&collect_fields(&doc).unwrap());
+    assert_eq!(
+        text_value(
+            &doc,
+            idx["topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_52[0]"].id
+        )
+        .as_deref(),
+        Some("300"),
+        "1040 line 7 = Schedule D line 16"
+    );
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_5[0]"].id).as_deref(),
+        Some("1"),
+        "Digital-Asset question = YES (2024 c1_5, adjacency-selected)"
     );
 }

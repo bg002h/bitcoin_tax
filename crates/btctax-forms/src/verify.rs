@@ -49,9 +49,6 @@ fn page_of(fqn: &str) -> usize {
     }
 }
 
-/// The Form 8949 data-grid subform token.
-pub const F8949_TABLE_TOKEN: &str = "Table_Line1_Part";
-
 /// Extract the `Row{n}` number from a data-grid field's fqn.
 fn row_num(fqn: &str) -> Option<u32> {
     let i = fqn.find(".Row")? + 4;
@@ -140,11 +137,13 @@ pub fn column_x_bands(
 }
 
 /// Verify a Form 8949 fill: (1) every written value lands in the geometrically-expected column/row
-/// band, and (2) no unmapped field carries a value. Fails closed.
+/// band, and (2) no unmapped field carries a value. Fails closed. `table_token` is the per-year
+/// data-grid subform token (`Table_Line1` for 2024, `Table_Line1_Part` for 2025).
 pub fn verify_8949(
     doc: &Document,
     fields: &[Field],
     placements: &[Placement],
+    table_token: &str,
 ) -> Result<(), FormsError> {
     let index: HashMap<&str, &Field> = fields.iter().map(|f| (f.fqn.as_str(), f)).collect();
     // Independently derive the geometry oracle for every page a placement touches (0 = Part I,
@@ -158,7 +157,7 @@ pub fn verify_8949(
     pages.dedup();
     let mut bands: HashMap<usize, GridBands> = HashMap::new();
     for page in pages {
-        bands.insert(page, derive_bands(fields, page, F8949_TABLE_TOKEN)?);
+        bands.insert(page, derive_bands(fields, page, table_token)?);
     }
 
     for p in placements {
@@ -399,10 +398,22 @@ pub fn verify_flat(
     assert_only_filled(doc, fields, &allowed)
 }
 
-/// Map-INDEPENDENT oracle for the 1040 Digital-Asset Yes/No question: the top-most page-`page` `/Btn`
-/// pair (exactly two widgets sharing a center-y) whose on-states are exactly {`/1`,`/2`}. Returns
-/// `(yes_fqn, no_fqn)` = (LEFT member, right member). Derived from the blank PDF's widget geometry +
-/// appearance states, never the map.
+/// Maximum horizontal gap (widget-center to widget-center, PDF points) between the two boxes of the
+/// Digital-Asset Yes/No pair for them to count as **adjacent**. The real DA "Yes"/"No" boxes sit ~36pt
+/// apart on both the 2024 and 2025 1040; the 2024 **filing-status** `{/1,/2}` row (Single vs MFJ) is a
+/// same-y pair too but its boxes are ~266pt apart — the trap the top-most-y rule fell into. 80pt
+/// brackets the real gap with margin while excluding that non-adjacent row.
+const DA_PAIR_MAX_DX: f32 = 80.0;
+
+/// Map-INDEPENDENT oracle for the 1040 Digital-Asset Yes/No question: the **top-most horizontally
+/// ADJACENT** page-`page` `/Btn` pair (exactly two widgets sharing a center-y, boxes ≤ [`DA_PAIR_MAX_DX`]
+/// apart) whose on-states are exactly {`/1`,`/2`}. Returns `(yes_fqn, no_fqn)` = (LEFT member, right
+/// member). Derived from the blank PDF's widget geometry + appearance states, never the map.
+///
+/// **[R0-C2]** Selecting by adjacency (not merely top-most-y) is what keeps the 2024 fill off the
+/// FILING-STATUS `{/1,/2}` row (Single @ x≈107 vs MFJ @ x≈373, ~266pt apart) that sits ABOVE the DA
+/// pair; the DA "Yes"/"No" boxes are ~36pt apart. Re-verified against 2025 (its DA pair is the top-most
+/// `{/1,/2}` 2-widget row AND adjacent, so no regression).
 pub fn topmost_yes_no_pair(
     doc: &Document,
     fields: &[Field],
@@ -421,7 +432,8 @@ pub fn topmost_yes_no_pair(
         }
         by_y.entry(cy.round() as i32).or_default().push((f, states));
     }
-    // A qualifying row: EXACTLY two widgets whose combined on-states are exactly {"1","2"}.
+    // A qualifying row: EXACTLY two widgets whose combined on-states are exactly {"1","2"} AND whose
+    // boxes are horizontally ADJACENT (≤ DA_PAIR_MAX_DX apart).
     let mut candidates: Vec<(f32, &Field, &Field)> = Vec::new();
     for members in by_y.values() {
         if members.len() != 2 {
@@ -436,14 +448,17 @@ pub fn topmost_yes_no_pair(
             continue;
         }
         let (a, b) = (members[0].0, members[1].0);
+        if (a.cx().unwrap() - b.cx().unwrap()).abs() > DA_PAIR_MAX_DX {
+            continue; // non-adjacent (e.g. the 2024 filing-status row) — not the DA pair.
+        }
         let cy = a.cy().unwrap();
         candidates.push((cy, a, b));
     }
-    // Top-most (largest center-y).
+    // Top-most (largest center-y) AMONG the adjacent pairs.
     candidates.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
     let (_, a, b) = candidates.first().ok_or_else(|| {
         FormsError::Geometry(format!(
-            "no same-y {{/1,/2}} /Btn pair found on page {page}"
+            "no adjacent same-y {{/1,/2}} /Btn pair found on page {page}"
         ))
     })?;
     // Left member = the Yes box.

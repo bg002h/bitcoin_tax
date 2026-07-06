@@ -246,7 +246,7 @@ fn fill_one(
     let writes = w;
     let placements = p;
 
-    let mut doc = pdf::load(pdf::F8283_PDF_2025)?;
+    let mut doc = pdf::load(pdf::f8283_pdf(map.year)?)?;
     let index = pdf::index(&pdf::collect_fields(&doc)?);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;

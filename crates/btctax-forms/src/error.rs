@@ -7,8 +7,8 @@
 /// CLOSED (no PDF bytes are returned), so a mis-mapped form is never handed to a filer.
 #[derive(Debug, thiserror::Error)]
 pub enum FormsError {
-    /// The requested tax year has no bundled form set / map (SP1 ships TY2025 only).
-    #[error("unsupported tax year {0}: this build bundles IRS forms for 2025 only")]
+    /// The requested tax year has no bundled form set / map (this build ships TY2024 + TY2025).
+    #[error("unsupported tax year {0}: this build bundles IRS forms for 2024 and 2025 only")]
     UnsupportedYear(i32),
 
     /// A field named by the map does not exist in the bundled PDF's AcroForm.

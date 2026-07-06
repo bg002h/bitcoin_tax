@@ -102,7 +102,7 @@ pub fn fill_form_1040_capgains(
     }
     // else: Schedule D INACTIVE (income-only / donation-only year) → 7a BLANK even though DA = YES.
 
-    let mut doc = pdf::load(pdf::F1040_PDF_2025)?;
+    let mut doc = pdf::load(pdf::f1040_pdf(map.year)?)?;
     let index = pdf::index(&pdf::collect_fields(&doc)?);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
@@ -113,20 +113,23 @@ pub fn fill_form_1040_capgains(
     let check = pdf::load(&bytes)?;
     let fields = pdf::collect_fields(&check)?;
     verify_flat(&check, &fields, &placements, F1040_CLUSTERS)?;
-    // Map-independent DA-question guard: the map's Yes/No must BE the left/right members of the
-    // top-most same-y {/1,/2} pair — a Yes/No swap in the map fails closed here.
-    let (yes_fqn, no_fqn) = topmost_yes_no_pair(&check, &fields, 0)?;
-    if yes_fqn != map.da_yes.field {
-        return Err(FormsError::Geometry(format!(
-            "1040 DA 'Yes' map field {:?} is not the LEFT member of the top-most same-y {{/1,/2}} pair ({yes_fqn:?})",
-            map.da_yes.field
-        )));
-    }
-    if no_fqn != map.da_no.field {
-        return Err(FormsError::Geometry(format!(
-            "1040 DA 'No' map field {:?} is not the right member of the top-most same-y {{/1,/2}} pair ({no_fqn:?})",
-            map.da_no.field
-        )));
+    // Map-independent DA-question guard (only on years whose 1040 HAS the question): the map's Yes/No
+    // must BE the left/right members of the top-most horizontally-ADJACENT same-y {/1,/2} pair — a
+    // Yes/No swap in the map fails closed here. A future no-DA year (da_present = false) skips it.
+    if map.da_present {
+        let (yes_fqn, no_fqn) = topmost_yes_no_pair(&check, &fields, 0)?;
+        if yes_fqn != map.da_yes.field {
+            return Err(FormsError::Geometry(format!(
+                "1040 DA 'Yes' map field {:?} is not the LEFT member of the top-most adjacent {{/1,/2}} pair ({yes_fqn:?})",
+                map.da_yes.field
+            )));
+        }
+        if no_fqn != map.da_no.field {
+            return Err(FormsError::Geometry(format!(
+                "1040 DA 'No' map field {:?} is not the right member of the top-most adjacent {{/1,/2}} pair ({no_fqn:?})",
+                map.da_no.field
+            )));
+        }
     }
 
     Ok(Some(Form1040Fill {

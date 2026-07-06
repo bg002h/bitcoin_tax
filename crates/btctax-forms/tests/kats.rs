@@ -377,9 +377,10 @@ fn rows_possibly_broker_reported_counts_exchange_rows() {
 
 #[test]
 fn unsupported_year_is_rejected() {
-    let err = btctax_forms::fill_form_8949(&mixed_rows(), 2024).unwrap_err();
+    // 2023 is not bundled (this build ships 2024 + 2025).
+    let err = btctax_forms::fill_form_8949(&mixed_rows(), 2023).unwrap_err();
     assert!(
-        matches!(err, FormsError::UnsupportedYear(2024)),
+        matches!(err, FormsError::UnsupportedYear(2023)),
         "got {err:?}"
     );
 }

@@ -20,6 +20,62 @@ pub const F8283_PDF_2025: &[u8] = include_bytes!("../forms/2025/f8283.pdf");
 /// The bundled TY2025 Form 1040 (official IRS fillable PDF, US-gov public domain).
 pub const F1040_PDF_2025: &[u8] = include_bytes!("../forms/2025/f1040.pdf");
 
+/// The bundled TY2024 Form 8949 (official IRS fillable PDF, US-gov public domain).
+pub const F8949_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8949.pdf");
+/// The bundled TY2024 Schedule D (official IRS fillable PDF, US-gov public domain).
+pub const SCHEDULE_D_PDF_2024: &[u8] = include_bytes!("../forms/2024/schedule_d.pdf");
+/// The bundled TY2024 Schedule SE (official IRS fillable PDF, US-gov public domain).
+pub const SCHEDULE_SE_PDF_2024: &[u8] = include_bytes!("../forms/2024/schedule_se.pdf");
+/// The bundled Form 8283, Rev. 12-2023 (TY2024; official IRS fillable PDF, US-gov public domain).
+pub const F8283_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8283.pdf");
+/// The bundled TY2024 Form 1040 (official IRS fillable PDF, US-gov public domain).
+pub const F1040_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040.pdf");
+
+/// The bundled Form 8949 PDF bytes for a supported tax year (the asset bound to the year's map).
+pub fn f8949_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(F8949_PDF_2024),
+        2025 => Ok(F8949_PDF_2025),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Schedule D PDF bytes for a supported tax year.
+pub fn schedule_d_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(SCHEDULE_D_PDF_2024),
+        2025 => Ok(SCHEDULE_D_PDF_2025),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Schedule SE PDF bytes for a supported tax year.
+pub fn schedule_se_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(SCHEDULE_SE_PDF_2024),
+        2025 => Ok(SCHEDULE_SE_PDF_2025),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Form 8283 PDF bytes for a supported tax year (bound by filing-year → revision).
+pub fn f8283_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(F8283_PDF_2024),
+        2025 => Ok(F8283_PDF_2025),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Form 1040 PDF bytes for a supported tax year.
+pub fn f1040_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(F1040_PDF_2024),
+        2025 => Ok(F1040_PDF_2025),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
 /// One terminal (leaf) AcroForm field: its object id, fully-qualified name, widget rectangle, and
 /// whether it is a checkbox (`/FT /Btn`).
 #[derive(Debug, Clone)]
