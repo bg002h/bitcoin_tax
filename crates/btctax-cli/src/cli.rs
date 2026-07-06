@@ -122,6 +122,40 @@ pub enum Command {
         #[arg(long)]
         attest: Option<String>,
     },
+    /// Fill the OFFICIAL IRS fillable PDFs (Form 8949 + Schedule D) for a tax year.
+    ///
+    /// Writes f8949.pdf + schedule_d.pdf (owner-only) into --out, populated from btctax's
+    /// already-computed projection — no figure is recomputed. The forms are the 2025 (1099-DA)
+    /// revision, so Bitcoin is filed under Box I (short-term) / Box L (long-term) — the digital-asset
+    /// boxes — NOT Box C/F ("other than digital asset transactions"). More than 11 rows per part
+    /// paginate onto multiple form copies, each with its own totals; Schedule D carries the grand
+    /// totals. Every written value is read back GEOMETRICALLY against the blank PDF's own field
+    /// coordinates and the fill FAILS CLOSED on any mis-placement — a wrong tax form is never written.
+    ///
+    /// The engine drops the forms' XFA layer (else Acrobat opens them blank) and sets
+    /// NeedAppearances so a viewer regenerates the visible values. Schedule D lines 17-22
+    /// (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. the line-21 loss limit) are OUT OF
+    /// SCOPE — a notice is printed. Rows on an exchange that MAY carry 1099-DA broker reporting are
+    /// flagged on stderr (SP1 files them all under Box I/L and says so).
+    ///
+    /// PSEUDO-RECONCILED ledgers: the same attestation gate as export-snapshot applies, AND every
+    /// page is stamped with a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` watermark.
+    ExportIrsPdf {
+        /// Output DIRECTORY receiving the filled official PDFs (created owner-only): f8949.pdf +
+        /// schedule_d.pdf. These contain your unencrypted tax data — write --out OUTSIDE any git repo.
+        #[arg(long, verbatim_doc_comment)]
+        out: PathBuf,
+        /// The tax year to fill (SP1 bundles TY2025 only; other years are refused).
+        #[arg(long)]
+        tax_year: i32,
+        /// Attestation phrase required to export while the ledger is PSEUDO-RECONCILED (a synthetic
+        /// default contributes to the projection). Pass the exact phrase `I attest this is true`
+        /// (trimmed, case-sensitive) to fill the DRAFT-watermarked forms ON PURPOSE. Omit on a
+        /// fully-real ledger (never gated). Omit on an interactive terminal to be prompted; omit when
+        /// piped (non-TTY) while pseudo-active and the export is refused.
+        #[arg(long)]
+        attest: Option<String>,
+    },
     /// Export the passphrase-protected key.
     BackupKey {
         /// File to write the exported key to: an ASCII-armored, passphrase(S2K)-encrypted private

@@ -19,9 +19,11 @@
 mod error;
 mod fill8949;
 mod map;
+mod overflow;
 mod pdf;
 mod schedule_d;
 mod verify;
+mod watermark;
 
 pub use error::FormsError;
 pub use map::{Form8949Map, ScheduleDMap};
@@ -56,15 +58,43 @@ pub(crate) fn fmt_money(d: Usd) -> String {
 }
 
 /// Fill **Form 8949** (Part I + Part II) for `year` from the projection rows and return the PDF
-/// bytes. Bitcoin is filed under Box I/L. **> 11 rows per part are not yet paginated** (SP1-T1):
-/// this returns [`FormsError::Overflow`]; pagination lands in T2.
+/// bytes. Bitcoin is filed under Box I/L. Parts with > 11 rows paginate: ⌈rows/11⌉ page copies per
+/// part, each with its own totals; the copies are merged with per-copy field renaming so no two share
+/// a value. Every copy is geometry-verified before merge.
 pub fn fill_form_8949(rows: &[Form8949Row], year: i32) -> Result<Vec<u8>, FormsError> {
     require_year(year)?;
     let map = Form8949Map::ty2025();
+    let cap = map.rows_per_page;
     let (st, lt) = fill8949::split_parts(rows);
-    let short = fill8949::part_data(&st)?;
-    let long = fill8949::part_data(&lt)?;
-    fill8949::fill_8949_parts(&short, &long, &map)
+    let n_pages = div_ceil(st.len(), cap).max(div_ceil(lt.len(), cap)).max(1);
+
+    if n_pages == 1 {
+        let short = fill8949::part_data(&st)?;
+        let long = fill8949::part_data(&lt)?;
+        return fill8949::fill_8949_parts(&short, &long, &map);
+    }
+
+    let mut copies = Vec::with_capacity(n_pages);
+    for k in 0..n_pages {
+        let st_chunk: Vec<&Form8949Row> = st.iter().skip(k * cap).take(cap).copied().collect();
+        let lt_chunk: Vec<&Form8949Row> = lt.iter().skip(k * cap).take(cap).copied().collect();
+        let short = fill8949::part_data(&st_chunk)?;
+        let long = fill8949::part_data(&lt_chunk)?;
+        // Each copy is filled on ORIGINAL names and geometry-verified here (fails closed).
+        copies.push(fill8949::fill_8949_parts(&short, &long, &map)?);
+    }
+    overflow::merge_copies(&copies)
+}
+
+fn div_ceil(n: usize, d: usize) -> usize {
+    n.div_ceil(d)
+}
+
+/// Stamp a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` watermark on every page of a filled form.
+/// Applied by the CLI when the ledger is pseudo-reconciled (an estimate). The overlay carries its own
+/// embedded standard font resource, orthogonal to `/NeedAppearances`.
+pub fn stamp_draft_watermark(pdf_bytes: &[u8]) -> Result<Vec<u8>, FormsError> {
+    watermark::stamp_draft(pdf_bytes)
 }
 
 /// Fill **Schedule D** for `year` from the part totals and return the PDF bytes.

@@ -1,5 +1,6 @@
 //! Shared synthetic fixtures for the btctax-forms KATs. No real user file is ever read (NFR);
 //! everything is built inline from invented values.
+#![allow(dead_code)] // each integration-test crate uses a different subset of these helpers
 
 use btctax_core::{
     Form8949Box, Form8949Part, Form8949Row, ScheduleDPart, ScheduleDTotals, WalletId,

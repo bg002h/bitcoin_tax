@@ -320,6 +320,7 @@ version = "0.3.0"
 dependencies = [
  "btctax-adapters",
  "btctax-core",
+ "btctax-forms",
  "btctax-store",
  "clap",
  "csv",

@@ -5,7 +5,7 @@ use crate::render::write_csv_exports;
 use crate::{require_attestation, CliConfig, CliError, Session};
 use btctax_adapters::BundledTaxTables;
 use btctax_core::{compute_se_tax, FeeTreatment, LotMethod, Severity, TaxTables};
-use btctax_store::Passphrase;
+use btctax_store::{fsperms, Passphrase};
 use std::path::{Path, PathBuf};
 
 /// Outcome of the CLI `export_snapshot` wrapper: the written snapshot path plus the count of
@@ -128,6 +128,83 @@ pub fn export_snapshot(
 pub fn export_pseudo_active(vault_path: &Path, pp: &Passphrase) -> Result<bool, CliError> {
     let (state, _cfg) = Session::open(vault_path, pp)?.project()?;
     Ok(state.pseudo_active())
+}
+
+/// Outcome of `export_irs_pdf`: the two written PDF paths, the unresolved-Hard-blocker count (same
+/// INFORMATIONAL disclosure as `export-snapshot`), whether the fill was watermarked (pseudo-active),
+/// and the count of rows that MIGHT belong on a separate 1099-DA-reported 8949 (Box G/H/J/K — the
+/// [I5] advisory). SP1 files EVERY Bitcoin row under Box I/L and says so.
+#[derive(Debug, Clone)]
+pub struct IrsPdfReport {
+    pub f8949_path: PathBuf,
+    pub schedule_d_path: PathBuf,
+    pub tax_year: i32,
+    pub unresolved_hard: usize,
+    pub broker_reported_rows: usize,
+    pub watermarked: bool,
+}
+
+/// `export-irs-pdf`: fill the OFFICIAL IRS PDFs (Form 8949 + Schedule D) for `tax_year` and write them
+/// (owner-only) to `out_dir`. The form data is REUSED from the projection (`form_8949`/`schedule_d`) —
+/// nothing is recomputed. Same pseudo-active attestation gate as `export-snapshot`: checked FIRST, so
+/// a refused export leaves `out_dir` untouched; a pseudo fill is additionally DRAFT-watermarked.
+pub fn export_irs_pdf(
+    vault_path: &Path,
+    pp: &Passphrase,
+    out_dir: &Path,
+    tax_year: i32,
+    attest: Option<&str>,
+) -> Result<IrsPdfReport, CliError> {
+    let session = Session::open(vault_path, pp)?;
+    let (state, _cfg) = session.project()?;
+    // Attestation gate FIRST — no fictional tax form leaves the machine unguarded, and a refusal
+    // writes no bytes. (A fully-real ledger ignores `attest`.)
+    let watermarked = state.pseudo_active();
+    if watermarked {
+        require_attestation(attest)?;
+    }
+
+    // Reuse the projection's form data verbatim (no recompute).
+    let rows = btctax_core::form_8949(&state, tax_year);
+    let totals = btctax_core::schedule_d(&state, tax_year);
+
+    // Fill the official PDFs. The engine reads each output back geometrically and FAILS CLOSED on a
+    // mis-mapped cell (→ CliError::FormFill) — a wrong tax form is never written.
+    let mut f8949 = btctax_forms::fill_form_8949(&rows, tax_year)?;
+    let mut schedule_d = btctax_forms::fill_schedule_d(&totals, tax_year)?;
+    if watermarked {
+        f8949 = btctax_forms::stamp_draft_watermark(&f8949)?;
+        schedule_d = btctax_forms::stamp_draft_watermark(&schedule_d)?;
+    }
+
+    fsperms::mkdir_owner_only(out_dir)?;
+    let f8949_path = out_dir.join("f8949.pdf");
+    let schedule_d_path = out_dir.join("schedule_d.pdf");
+    write_bytes_owner_only(&f8949_path, &f8949)?;
+    write_bytes_owner_only(&schedule_d_path, &schedule_d)?;
+
+    let unresolved_hard = state
+        .blockers
+        .iter()
+        .filter(|b| b.kind.severity() == Severity::Hard)
+        .count();
+    Ok(IrsPdfReport {
+        f8949_path,
+        schedule_d_path,
+        tax_year,
+        unresolved_hard,
+        broker_reported_rows: btctax_forms::rows_possibly_broker_reported(&rows),
+        watermarked,
+    })
+}
+
+/// Write `bytes` to `path` with owner-only (0o600) permissions, matching the CSV export path.
+fn write_bytes_owner_only(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
+    use std::io::Write;
+    let mut f = fsperms::open_owner_only(path)?;
+    f.write_all(bytes)?;
+    f.flush()?;
+    Ok(())
 }
 
 /// §8: export the passphrase-protected key (escape hatch; HIGH-security write).

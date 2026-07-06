@@ -351,6 +351,76 @@ fn run() -> Result<ExitCode, CliError> {
                 }
             }
         }
+        Command::ExportIrsPdf {
+            out,
+            tax_year,
+            attest,
+        } => {
+            let pp = passphrase(false)?;
+            // Same attest resolution as export-snapshot: --attest verbatim if given, else PROMPT only
+            // on an interactive TTY and only when pseudo-active; piped + no --attest ⇒ None (the gate
+            // in export_irs_pdf refuses if pseudo-active). The gate lives in the library handler.
+            let attest = match attest {
+                Some(phrase) => Some(phrase),
+                None => {
+                    use std::io::IsTerminal;
+                    if std::io::stdin().is_terminal()
+                        && cmd::admin::export_pseudo_active(vault, &pp)?
+                    {
+                        print!(
+                            "The ledger is pseudo-reconciled (a fictional draft). To fill the \
+                             DRAFT-watermarked IRS forms ON PURPOSE, type the exact phrase\n  {}\n> ",
+                            btctax_cli::ATTEST_PHRASE
+                        );
+                        use std::io::Write;
+                        std::io::stdout().flush().ok();
+                        let mut line = String::new();
+                        std::io::stdin().read_line(&mut line)?;
+                        Some(line)
+                    } else {
+                        None
+                    }
+                }
+            };
+            let report = cmd::admin::export_irs_pdf(vault, &pp, &out, tax_year, attest.as_deref())?;
+            println!(
+                "Filled IRS forms for tax year {} → {} + {}{}",
+                report.tax_year,
+                report.f8949_path.display(),
+                report.schedule_d_path.display(),
+                if report.watermarked {
+                    "  (DRAFT — estimate, watermarked)"
+                } else {
+                    ""
+                }
+            );
+            // Always-printed scope note: Schedule D 17-22 is not filled.
+            eprintln!(
+                "note: Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. \
+                 the line-21 loss limit) are OUT OF SCOPE and left blank — complete them by hand if \
+                 they apply."
+            );
+            // [I5] loud advisory: rows that MAY belong on a separate 1099-DA-reported 8949 (Box G/H/J/K).
+            if report.broker_reported_rows > 0 {
+                eprintln!(
+                    "⚠ [I5] {} disposition(s) occurred on an exchange that MAY have issued 1099-DA \
+                     broker basis reporting — those would belong on a SEPARATE Form 8949 under Box \
+                     G/H/J/K. This export files EVERY Bitcoin row under Box I/L (not-reported default) \
+                     and says so; reclassify by hand if you received a 1099-DA.",
+                    report.broker_reported_rows
+                );
+            }
+            // Same INFORMATIONAL disclosure as export-snapshot: unresolved Hard blockers ⇒ the year is
+            // NOT COMPUTABLE and the forms are informational (still succeeds, exit 0).
+            if report.unresolved_hard > 0 {
+                eprintln!(
+                    "⚠ tax year {} is NOT COMPUTABLE — {} unresolved Hard blocker(s) remain; the \
+                     filled Form 8949 / Schedule D are INFORMATIONAL, not final. Run `btctax verify` \
+                     to resolve them.",
+                    report.tax_year, report.unresolved_hard
+                );
+            }
+        }
         Command::BackupKey { out } => {
             cmd::admin::backup_key(vault, &passphrase(false)?, &out)?;
             println!("Key backed up to {}", out.display());
