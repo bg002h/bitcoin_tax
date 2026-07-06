@@ -1,7 +1,10 @@
 # SPEC — cleaner reconciliation defaults: HIFO global default + long-term self-transfer-in acquisition
 
-**Source baseline:** `main` @ `b976621` (branch `feat/reconcile-defaults`). **Review status: R0 round 1 folded
-(2C/4I/3M/2N — merged IN-PLACE; surgical). Awaiting R0 round 2.** Review:
+**Source baseline:** `main` @ `b976621` (branch `feat/reconcile-defaults`). **Review status: R0-GREEN (2 rounds; 0C/0I).
+Cleared to implement.** Round 1 2C/4I (wrong Change-1 sites + serde-corruption risk), round 2 0C/0I/2M/2N.
+**Fold during T1:** [r2-M1] the leap KAT ALSO covers a Feb-29 RECEIPT (the `replace_year` failure mode differs
+from `days(366)`); [r2-M2] also fix the stale code comments at `fold.rs:1019` + `resolve.rs:974`; [r2-N1] REUSE
+`safe_harbor_method.rs:283` for the C2 immutability guard (don't add a duplicate KAT).** Review:
 `reviews/R0-spec-reconcile-defaults-round-1.md`. User-mandated tax-policy default change (2026-07-05), updating
 [[self-transfer-completion-policy]]. Two ~1-line changes, TAX-CRITICAL, LARGE test blast radius (42 tests).
 
