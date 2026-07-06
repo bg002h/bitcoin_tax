@@ -354,6 +354,7 @@ fn run() -> Result<ExitCode, CliError> {
         Command::ExportIrsPdf {
             out,
             tax_year,
+            forms,
             attest,
         } => {
             let pp = passphrase(false)?;
@@ -382,17 +383,28 @@ fn run() -> Result<ExitCode, CliError> {
                     }
                 }
             };
-            let report = cmd::admin::export_irs_pdf(vault, &pp, &out, tax_year, attest.as_deref())?;
+            let report =
+                cmd::admin::export_irs_pdf(vault, &pp, &out, tax_year, &forms, attest.as_deref())?;
+            let written: Vec<String> = [
+                report.f8949_path.as_ref(),
+                report.schedule_d_path.as_ref(),
+                report.schedule_se_path.as_ref(),
+                report.form_8283_path.as_ref(),
+                report.form_1040_path.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            .map(|p| p.display().to_string())
+            .collect();
             println!(
-                "Filled IRS forms for tax year {} → {} + {}{}",
+                "Filled IRS forms for tax year {}{} →\n  {}",
                 report.tax_year,
-                report.f8949_path.display(),
-                report.schedule_d_path.display(),
                 if report.watermarked {
                     "  (DRAFT — estimate, watermarked)"
                 } else {
                     ""
-                }
+                },
+                written.join("\n  ")
             );
             // Always-printed scope note: Schedule D 17-22 is not filled.
             eprintln!(
@@ -410,13 +422,80 @@ fn run() -> Result<ExitCode, CliError> {
                     report.broker_reported_rows
                 );
             }
+            // ── Form 1040 partial-scope + loss notices (only when the 1040 was written). ──
+            if report.form_1040_path.is_some() {
+                eprintln!(
+                    "note: Form 1040 — btctax filled ONLY the Digital-Asset question{} \
+                     from your btctax activity. Every OTHER 1040 line (income, deductions, tax) is \
+                     yours to complete.",
+                    if report.form_1040_filled_7a {
+                        " and line 7a (capital gain from Schedule D line 16)"
+                    } else {
+                        ""
+                    }
+                );
+                if report.form_1040_loss {
+                    eprintln!(
+                        "⚠ Form 1040 line 7a was left BLANK because Schedule D line 16 is a LOSS — the \
+                         §1211 $3,000/$1,500-MFS cap on Schedule D line 21 is yours to complete and \
+                         enter on 1040 line 7a."
+                    );
+                }
+            }
+            // ── Schedule SE advisories. ──
+            if report.se_below_floor {
+                eprintln!(
+                    "note: Schedule SE was NOT written — net self-employment earnings are below the \
+                     $400 floor, so no SE tax is owed (Schedule SE line 4c STOP)."
+                );
+            }
+            if let Some(addl) = report.se_addl_medicare {
+                eprintln!(
+                    "⚠ Additional Medicare Tax ${addl} is a Form 8959 item, NOT on Schedule SE — \
+                     Schedule SE line 12 is Social Security + regular Medicare only. Complete Form \
+                     8959 separately."
+                );
+            }
+            if report.se_income_without_profile {
+                eprintln!(
+                    "note: you have self-employment income for {} but no tax profile (filing status) \
+                     is stored for that year — Schedule SE was NOT computed. Run `btctax tax-profile \
+                     --year {} …` to enable it.",
+                    report.tax_year, report.tax_year
+                );
+            }
+            // ── Form 8283 partial-scope + review escalation (only when written). ──
+            if report.form_8283_path.is_some() {
+                eprintln!(
+                    "note: Form 8283 — btctax filled the donee/appraiser IDENTITY + per-donation \
+                     property rows{}. Every other-party declaration is left BLANK: the Part III \
+                     taxpayer signature, the Part IV appraiser signature/date, and the Part V donee \
+                     acknowledgment are NOT btctax's to fill.",
+                    if report.form_8283_section_b == Some(true) {
+                        " (Section B, with the \"k Digital assets\" box checked)"
+                    } else {
+                        " (Section A)"
+                    }
+                );
+                if report.form_8283_section_b == Some(true) {
+                    eprintln!(
+                        "⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV \
+                         (qualified-appraiser declaration) and Part V (donee acknowledgment)."
+                    );
+                }
+                if report.form_8283_needs_review {
+                    eprintln!(
+                        "⚠ at least one donation needs REVIEW — its appraiser/donee declaration is \
+                         incomplete. Run `btctax reconcile set-donation-details …` to complete it."
+                    );
+                }
+            }
             // Same INFORMATIONAL disclosure as export-snapshot: unresolved Hard blockers ⇒ the year is
             // NOT COMPUTABLE and the forms are informational (still succeeds, exit 0).
             if report.unresolved_hard > 0 {
                 eprintln!(
                     "⚠ tax year {} is NOT COMPUTABLE — {} unresolved Hard blocker(s) remain; the \
-                     filled Form 8949 / Schedule D are INFORMATIONAL, not final. Run `btctax verify` \
-                     to resolve them.",
+                     filled forms are INFORMATIONAL, not final. Run `btctax verify` to resolve them.",
                     report.tax_year, report.unresolved_hard
                 );
             }

@@ -148,6 +148,12 @@ pub enum Command {
         /// The tax year to fill (SP1 bundles TY2025 only; other years are refused).
         #[arg(long)]
         tax_year: i32,
+        /// Restrict the packet to specific forms (repeat or comma-separate). Default = every
+        /// applicable form (f8949 + schedule-d always; schedule-se when SE income ≥ the $400 floor;
+        /// form-8283 when there are donations; form-1040 when there is reportable digital-asset
+        /// activity). A named form is still skipped when it does not apply.
+        #[arg(long, value_enum, value_delimiter = ',')]
+        forms: Vec<FormArg>,
         /// Attestation phrase required to export while the ledger is PSEUDO-RECONCILED (a synthetic
         /// default contributes to the projection). Pass the exact phrase `I attest this is true`
         /// (trimmed, case-sensitive) to fill the DRAFT-watermarked forms ON PURPOSE. Omit on a
@@ -688,6 +694,21 @@ pub enum SelfTransferActionArg {
     Drop,
     /// Cross-wallet transfer → TransferLink (relocate the lots to the destination wallet).
     Relocate,
+}
+
+/// One official form in the `export-irs-pdf` packet (the `--forms` opt-in filter).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum FormArg {
+    /// Form 8949 (per-disposition capital-gains rows).
+    F8949,
+    /// Schedule D (aggregated capital-gains totals).
+    ScheduleD,
+    /// Schedule SE (self-employment tax).
+    ScheduleSe,
+    /// Form 8283 (noncash charitable contributions).
+    Form8283,
+    /// Form 1040 (capital-gains cells + the digital-asset question).
+    Form1040,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
