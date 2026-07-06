@@ -16,7 +16,7 @@ use btctax_core::event::*;
 use btctax_core::identity::*;
 use btctax_core::optimize::{optimize_year, score_assignment};
 use btctax_core::price::StaticPrices;
-use btctax_core::project::ProjectionConfig;
+use btctax_core::project::{LotMethod, ProjectionConfig};
 use btctax_core::tax::tables::{
     LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
 };
@@ -154,7 +154,22 @@ fn sell_event(
     )
 }
 fn cfg() -> ProjectionConfig {
-    ProjectionConfig::default() // FIFO default, TreatmentC
+    ProjectionConfig::default() // TreatmentC (post-2025 method resolved via elections/HIFO default)
+}
+/// [reconcile-defaults] A global FIFO standing order so the BASELINE stays FIFO (the app default is now
+/// HIFO); keeps "FIFO baseline picks the gain lot; optimizer freely picks the loss lot" meaningful.
+fn fifo_election() -> LedgerEvent {
+    LedgerEvent {
+        id: EventId::decision(1),
+        utc_timestamp: datetime!(2025-01-01 00:00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: None,
+        payload: EventPayload::MethodElection(MethodElection {
+            effective_from: time::macros::date!(2025 - 01 - 01),
+            method: LotMethod::Fifo,
+            wallet: None,
+        }),
+    }
 }
 fn no_attest() -> BTreeSet<EventId> {
     BTreeSet::new()
@@ -188,6 +203,7 @@ fn btreemap_assign(entries: &[(EventId, Vec<LotPick>)]) -> BTreeMap<EventId, Vec
 #[test]
 fn loss_lot_freely_selectable_no_wash_sale_bar() {
     let events = vec![
+        fifo_election(), // [reconcile-defaults] pin the FIFO baseline (default is now HIFO)
         // "GAIN" lot: long-term, low basis — FIFO baseline default (acquired first).
         buy(
             "GAIN",

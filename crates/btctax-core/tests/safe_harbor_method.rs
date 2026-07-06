@@ -337,6 +337,17 @@ fn path_b_seed_in_non_acq_order_consumes_oldest_first_under_fifo() {
             100_000,
             dec!(120.00),
         ), // post-2025 partial FIFO Dispose in cb()
+        // [reconcile-defaults] pin the post-2025 disposal to FIFO (default is now HIFO) so the acq-date
+        // FIFO consumes the OLDER seed lot as this KAT intends.
+        dec_ev(
+            9,
+            datetime!(2025-01-01 00:00:00 UTC),
+            EventPayload::MethodElection(MethodElection {
+                effective_from: date!(2025 - 01 - 01),
+                method: LotMethod::Fifo,
+                wallet: None,
+            }),
+        ),
     ];
     let st = project(&evs, &StaticPrices::default(), &cfg);
     assert!(!has(&st, BlockerKind::SafeHarborUnconservable));

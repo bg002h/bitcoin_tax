@@ -63,6 +63,12 @@ pub enum BlockerKind {
     /// supply the real cost. Fires on `None` only, never on an attested `Some(0)`.
     /// **Advisory** — never gates `compute_tax_year`.
     SelfTransferInboundZeroBasis,
+    /// [reconcile-defaults] An inbound self-transfer (`InboundClass::SelfTransferMine`) whose acquisition
+    /// date was DEFAULTED (`acquired_at == None`) to 1 year + 1 day before receipt → the holding period is
+    /// assumed LONG-TERM. A pure honesty prompt to supply the real `--acquired` date if the coins were held
+    /// ≤ 1 year. Fires INDEPENDENTLY of the basis default (so a supplied `--basis` with no `--acquired`
+    /// still discloses the backdating). **Advisory** — never gates `compute_tax_year`.
+    SelfTransferInboundDefaultedAcquired,
     /// Pseudo-reconcile mode (sub-project 2) is ON and at least one synthetic (non-persisted) default
     /// is CONTRIBUTING to this projection. A loud "this picture is a placeholder — correct it toward
     /// truth, and do NOT file it" banner (renders automatically via `{:?}` in `verify`). Drives the
@@ -92,6 +98,7 @@ impl BlockerKind {
             | Pre2025MethodNote
             | QualifiedAppraisalNote
             | SelfTransferInboundZeroBasis
+            | SelfTransferInboundDefaultedAcquired
             | PseudoReconcileActive => Severity::Advisory,
         }
     }

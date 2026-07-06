@@ -6,11 +6,14 @@
 //! Every test that invokes `cmd::optimize::run` asserts the vault (event log) is UNCHANGED
 //! afterwards — the command is read-only (Mode-1 proposes; it appends NOTHING).
 use btctax_cli::{cmd, render};
-use btctax_core::{persistence::load_all, Carryforward, FilingStatus, TaxProfile};
+use btctax_core::persistence::{append_decision, load_all};
+use btctax_core::{
+    Carryforward, EventPayload, FilingStatus, LotMethod, MethodElection, TaxProfile,
+};
 use btctax_store::Passphrase;
 use rust_decimal_macros::dec;
 use std::path::{Path, PathBuf};
-use time::{macros::datetime, OffsetDateTime};
+use time::{macros::datetime, OffsetDateTime, UtcOffset};
 
 fn pp() -> Passphrase {
     Passphrase::new("pw".into())
@@ -32,12 +35,31 @@ fn single_100k_profile() -> TaxProfile {
     }
 }
 
-/// Initialize vault + import one CSV; return `(tempdir, vault_path)`.
+/// Initialize vault + import one CSV, then pin a global FIFO standing order; return `(tempdir, vault)`.
+///
+/// [reconcile-defaults] These fixtures compare a FIFO baseline against the HIFO optimum; the app's
+/// no-election default is now HIFO (which would already be the optimum → nothing to propose), so pin an
+/// EXPLICIT global FIFO election (effective TRANSITION_DATE, made == effective → not backdated) to
+/// restore the FIFO baseline. Single-lot/heuristic fixtures are unaffected (no alternative pick).
 fn make_vault_with(csv: &Path) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let vault = dir.path().join("vault.pgp");
     cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
     cmd::import::run(&vault, &pp(), &[csv.to_path_buf()]).unwrap();
+    let mut s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+    append_decision(
+        s.conn(),
+        EventPayload::MethodElection(MethodElection {
+            effective_from: time::macros::date!(2025 - 01 - 01),
+            method: LotMethod::Fifo,
+            wallet: None,
+        }),
+        datetime!(2025-01-01 00:00:00 UTC),
+        UtcOffset::UTC,
+        None,
+    )
+    .unwrap();
+    s.save().unwrap();
     (dir, vault)
 }
 

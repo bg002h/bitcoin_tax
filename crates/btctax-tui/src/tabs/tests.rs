@@ -1135,10 +1135,10 @@ fn compliance_tab_shows_hard_advisory_partition_and_status() {
         buffer_has(&buf, "Pre2025MethodNote"),
         "Compliance tab must show Pre2025MethodNote advisory blocker"
     );
-    // Pre-2025 method (FIFO is the default from CliConfig::default)
+    // Pre-2025 method (HIFO is the default from CliConfig::default; [reconcile-defaults] was FIFO)
     assert!(
-        buffer_has(&buf, "FIFO"),
-        "Compliance tab must show pre-2025 method FIFO"
+        buffer_has(&buf, "HIFO"),
+        "Compliance tab must show pre-2025 method HIFO"
     );
     // Safe-harbor status must appear
     assert!(

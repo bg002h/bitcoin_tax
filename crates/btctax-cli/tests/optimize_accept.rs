@@ -14,16 +14,17 @@
 //! `~/Documents/BitcoinTax/ReadOnly` or any user file. Exact Decimal/i64 only (NFR5); deterministic
 //! `now` injected (NFR4).
 use btctax_cli::{cmd, render};
-use btctax_core::persistence::load_all;
+use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::{
-    Carryforward, ComplianceStatus, EventId, EventPayload, FilingStatus, LotPick, LtcgBreakpoints,
-    OrdinaryBracket, OrdinarySchedule, TaxProfile, TaxTable, TaxTables,
+    Carryforward, ComplianceStatus, EventId, EventPayload, FilingStatus, LotMethod, LotPick,
+    LtcgBreakpoints, MethodElection, OrdinaryBracket, OrdinarySchedule, TaxProfile, TaxTable,
+    TaxTables,
 };
 use btctax_store::Passphrase;
 use rust_decimal_macros::dec;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use time::{macros::datetime, OffsetDateTime};
+use time::{macros::datetime, OffsetDateTime, UtcOffset};
 
 fn pp() -> Passphrase {
     Passphrase::new("pw".into())
@@ -44,12 +45,34 @@ fn single_100k_profile() -> TaxProfile {
     }
 }
 
-/// Initialize vault + import one CSV; return `(tempdir, vault_path)`.
+/// Initialize vault + import one CSV, then pin a global FIFO standing order; return `(tempdir, vault)`.
+///
+/// [reconcile-defaults] These fixtures are defined relative to a FIFO baseline ("FIFO → Lot A gain;
+/// optimizer → Lot B"). The app's no-election default is now HIFO (which would already pick the dear
+/// lot, leaving nothing to propose), so we pin an EXPLICIT global FIFO election (effective TRANSITION_
+/// DATE, made-date == effective_from → not backdated) to restore the FIFO baseline. Consequence: a
+/// disposal that FOLLOWS the baseline is now `StandingOrder` (not `NonCompliant`) — the two affected
+/// assertions are updated accordingly; an APPLIED `LotSelection` still governs (Contemporaneous/
+/// AttestedRecording) and a 2027+ broker pick is still categorically `NonCompliant`.
 fn make_vault_with(csv: &Path) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let vault = dir.path().join("vault.pgp");
     cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
     cmd::import::run(&vault, &pp(), &[csv.to_path_buf()]).unwrap();
+    let mut s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+    append_decision(
+        s.conn(),
+        EventPayload::MethodElection(MethodElection {
+            effective_from: time::macros::date!(2025 - 01 - 01),
+            method: LotMethod::Fifo,
+            wallet: None,
+        }),
+        datetime!(2025-01-01 00:00:00 UTC),
+        UtcOffset::UTC,
+        None,
+    )
+    .unwrap();
+    s.save().unwrap();
     (dir, vault)
 }
 
@@ -391,6 +414,9 @@ fn accept_then_divergent_baseline_stays_noncompliant() {
         row.proposed_selection, row.current_selection,
         "proposed (P1) diverges from current (FIFO) → D ∉ unchanged"
     );
+    // The row is DIVERGENT, so its status reflects the PROPOSED (post-hoc) pick — NonCompliant. The
+    // lingering attestation does NOT launder it into AttestedRecording. (Unaffected by the pinned FIFO
+    // election, which only governs the followed baseline, not a divergent proposed pick.)
     assert_eq!(
         row.status,
         ComplianceStatus::NonCompliant,
@@ -728,10 +754,15 @@ fn void_clears_attestation_row_prevents_mislabel_as_attested_recording() {
         ComplianceStatus::AttestedRecording,
         "stale void must NOT produce AttestedRecording mislabel — FAILS without the fix"
     );
+    // [reconcile-defaults] The baseline is pinned to a global FIFO election, so with no applied
+    // LotSelection (voided) D is StandingOrder — the mislabel guard above (≠ AttestedRecording) is what
+    // this KAT protects.
     assert_eq!(
         row.status,
-        ComplianceStatus::NonCompliant,
-        "D has no in-force explicit selection and no method election → NonCompliant"
+        ComplianceStatus::StandingOrder {
+            effective_from: time::macros::date!(2025 - 01 - 01)
+        },
+        "D has an in-force FIFO standing order and no applied selection → StandingOrder"
     );
 }
 

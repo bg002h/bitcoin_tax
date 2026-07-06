@@ -172,6 +172,15 @@ fn status_of(dcs: &[DisposalCompliance], rf: &str) -> ComplianceStatus {
 fn per_wallet_method_governs_only_that_wallet() {
     let mut evs = three_post2025_on(&cb(), "cb");
     evs.extend(three_post2025_on(&gm(), "gm"));
+    // [reconcile-defaults] a GLOBAL FIFO election is the fall-through for the unelected wallet (default is
+    // now HIFO); scoped Coinbase HIFO still beats it (scoped ≻ global), so both goldens are preserved.
+    evs.push(election(
+        9,
+        datetime!(2025-01-01 00:00:00 UTC),
+        date!(2025 - 01 - 01),
+        LotMethod::Fifo,
+        None,
+    ));
     evs.push(election(
         1,
         datetime!(2025-01-02 00:00:00 UTC),
@@ -372,6 +381,15 @@ fn lot_selection_still_overrides_scoped_election() {
 #[test]
 fn scoped_election_backdating_blocks() {
     let mut evs = three_post2025_on(&cb(), "cb");
+    // [reconcile-defaults] global FIFO fall-through so the backdated-scoped rejection reads as FIFO -> A
+    // (default is now HIFO).
+    evs.push(election(
+        9,
+        datetime!(2025-01-01 00:00:00 UTC),
+        date!(2025 - 01 - 01),
+        LotMethod::Fifo,
+        None,
+    ));
     evs.push(election(
         1,
         datetime!(2025-05-01 00:00:00 UTC),
@@ -446,6 +464,14 @@ fn scoped_election_does_not_taint_compliance_of_other_wallets() {
 fn two_accounts_same_provider_independent() {
     let mut evs = three_post2025_on(&cb(), "cbm"); // coinbase:main
     evs.extend(three_post2025_on(&cb_b(), "cbb")); // coinbase:B
+                                                   // [reconcile-defaults] global FIFO fall-through for coinbase:B (default is now HIFO).
+    evs.push(election(
+        9,
+        datetime!(2025-01-01 00:00:00 UTC),
+        date!(2025 - 01 - 01),
+        LotMethod::Fifo,
+        None,
+    ));
     evs.push(election(
         1,
         datetime!(2025-01-02 00:00:00 UTC),
@@ -476,10 +502,19 @@ fn two_accounts_same_provider_independent() {
     );
 }
 
-/// A voided scoped election reverts the wallet to the fall-through (here: FIFO, no global present).
+/// A voided scoped election reverts the wallet to the fall-through (here: an in-force global FIFO election).
 #[test]
 fn voided_scoped_election_falls_back() {
     let mut evs = three_post2025_on(&cb(), "cb");
+    // [reconcile-defaults] global FIFO fall-through so voiding the scoped HIFO reverts to FIFO -> A
+    // (default is now HIFO; without this the voided-HIFO and HIFO-default picks would tie).
+    evs.push(election(
+        9,
+        datetime!(2025-01-01 00:00:00 UTC),
+        date!(2025 - 01 - 01),
+        LotMethod::Fifo,
+        None,
+    ));
     evs.push(election(
         1,
         datetime!(2025-01-02 00:00:00 UTC),

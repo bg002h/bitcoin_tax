@@ -360,7 +360,7 @@ pub enum ClassifyInboundStep {
         error: Option<String>,
     },
     /// Cycle A: inbound self-transfer ("my own coins"). Both fields optional — empty basis defaults to
-    /// $0 (conservative) and fires the honest advisory; empty acquired defaults to the receipt date.
+    /// $0 (conservative) and fires the honest advisory; empty acquired defaults to 1yr+1day before receipt (long-term).
     SelfTransferForm {
         item: InboundListItem,
         basis_buf: FieldBuffer,

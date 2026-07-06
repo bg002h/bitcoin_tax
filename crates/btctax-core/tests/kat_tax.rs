@@ -2,7 +2,9 @@ use btctax_core::conventions::Usd;
 use btctax_core::event::*;
 use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
-use btctax_core::project::{conservation_report, project, FeeTreatment, ProjectionConfig};
+use btctax_core::project::{
+    conservation_report, project, FeeTreatment, LotMethod, ProjectionConfig,
+};
 use btctax_core::state::*;
 use rust_decimal_macros::dec;
 use time::macros::{datetime, offset};
@@ -1286,6 +1288,19 @@ fn self_transfer_fee_c_cross_lot_normal_survivor_stays_non_dual() {
         }),
     );
 
+    // [reconcile-defaults] The relocation principal is consumed by the applicable (post-2025) method,
+    // which now defaults to HIFO. This fixture's "500 principal exhausts Lot A" comment assumes FIFO
+    // order, so pin FIFO with an explicit global election (keeps the pre-change lot ordering).
+    let elect_fifo = dec_ev(
+        5,
+        datetime!(2025-01-01 00:00:00 UTC),
+        EventPayload::MethodElection(MethodElection {
+            effective_from: time::macros::date!(2025 - 01 - 01),
+            method: LotMethod::Fifo,
+            wallet: None,
+        }),
+    );
+
     // Phase 1: check survivor lot state (no sale yet).
     let evs_no_sale = [
         buy.clone(),
@@ -1294,6 +1309,7 @@ fn self_transfer_fee_c_cross_lot_normal_survivor_stays_non_dual() {
         out.clone(),
         in_ev.clone(),
         link.clone(),
+        elect_fifo.clone(),
     ];
     let st = project(
         &evs_no_sale,
@@ -1331,7 +1347,16 @@ fn self_transfer_fee_c_cross_lot_normal_survivor_stays_non_dual() {
             kind: DisposeKind::Sell,
         }),
     };
-    let evs_with_sale = [buy, gift_in, classify_gift, out, in_ev, link, sale];
+    let evs_with_sale = [
+        buy,
+        gift_in,
+        classify_gift,
+        out,
+        in_ev,
+        link,
+        sale,
+        elect_fifo,
+    ];
     let st2 = project(
         &evs_with_sale,
         &StaticPrices::default(),
@@ -2837,8 +2862,8 @@ fn task1_removalleg_kat_b_gift_received_then_donated_acquired_at_equals_donor_da
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 // Cycle A — inbound self-transfer-in (SPEC_self_transfer_inbound). A TransferIn that is the
 // receiving side of an unmatched self-transfer, classified as "my own coins": a NON-taxable
-// receipt that CREATES a fresh origin lot (basis default $0 conservative, acquired_at default =
-// receipt date). Invariants 1–8 + serde/duplicate/void/pre-2025/wallet-missing corners.
+// receipt that CREATES a fresh origin lot (basis default $0 conservative; acquired_at default =
+// 1yr+1day before receipt → long-term). Invariants 1–8 + serde/duplicate/void/pre-2025/wallet-missing.
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 
 /// A raw `TransferIn` (self-transfer receiving side) — `wallet` overridable for the missing-wallet corner.
@@ -2966,11 +2991,12 @@ fn self_transfer_in_supplied_basis_has_no_advisory() {
     );
 }
 
-/// Invariant 3a — conservative holding period: `{acquired_at:None}` on receipt date D → lot
-/// `acquired_at == D`; a <1yr-later disposal is Short-Term (conservative until proven long).
+/// Invariant 3a [reconcile-defaults] — DEFAULT holding period is LONG-TERM. `{acquired_at:None}` on
+/// receipt date D → lot `acquired_at == 1yr+1day before D`; a disposal only ~2 months after receipt is
+/// LONG-TERM (most received BTC is a long-held cold-storage deposit). The defaulted-acquisition advisory
+/// fires. REPLACES the prior short-term default (`self_transfer_in_hp_defaults_to_receipt_date_short_term`).
 #[test]
-fn self_transfer_in_hp_defaults_to_receipt_date_short_term() {
-    let d = time::macros::date!(2025 - 04 - 01);
+fn self_transfer_in_defaults_to_long_term() {
     let in_ev = stx_in(
         "IN",
         datetime!(2025-04-01 00:00:00 UTC),
@@ -2978,15 +3004,158 @@ fn self_transfer_in_hp_defaults_to_receipt_date_short_term() {
         Some(wal()),
     );
     let cls = classify_self(1, datetime!(2026-01-01 00:00:00 UTC), "IN", None, None);
-    let sale = sell(datetime!(2025-06-01 00:00:00 UTC), dec!(100.00)); // ~2 months later
+    let sale = sell(datetime!(2025-06-01 00:00:00 UTC), dec!(100.00)); // ~2 months after receipt
     let st = project(
         &[in_ev, cls, sale],
         &StaticPrices::default(),
         &ProjectionConfig::default(),
     );
     let leg = &st.disposals[0].legs[0];
-    assert_eq!(leg.acquired_at, d); // gain_hp_start == lot's own acquired_at (no tacking)
-    assert_eq!(leg.term, Term::ShortTerm);
+    // Receipt 2025-04-01 → default acquisition = 1 year + 1 day earlier = 2024-03-31 (leap-safe helper).
+    assert_eq!(leg.acquired_at, time::macros::date!(2024 - 03 - 31));
+    assert_eq!(
+        leg.term,
+        Term::LongTerm,
+        "the defaulted acquisition (1yr+1day before receipt) makes any later sale long-term"
+    );
+    // [I2] the defaulted-acquisition advisory discloses the assumption.
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SelfTransferInboundDefaultedAcquired),
+        "a defaulted acquisition date must fire the long-term-assumption advisory"
+    );
+}
+
+/// [reconcile-defaults I1] Leap-safe long-term default — TWO leap failure modes a naive default would
+/// get wrong: (a) a leap-window RECEIPT (2020-03-01): a 366-day span lands `one_year_after` exactly ON
+/// the same-day sale (NOT long-term); the correct default 2019-02-28 is strictly long-term. (b) a Feb-29
+/// RECEIPT (2020-02-29): `replace_year(2019)` has no Feb-29 → must fall back to Feb-28, then −1 day =
+/// 2019-02-27, still strictly long-term for a same-day sale.
+#[test]
+fn self_transfer_long_term_leap_crossing() {
+    // (a) leap-window receipt 2020-03-01; a SAME-DAY sale is already long-term.
+    let in_a = stx_in(
+        "A",
+        datetime!(2020-03-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls_a = classify_self(1, datetime!(2020-03-01 06:00:00 UTC), "A", None, None);
+    let sale_a = sell(datetime!(2020-03-01 12:00:00 UTC), dec!(100.00));
+    let st_a = project(
+        &[in_a, cls_a, sale_a],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    let leg_a = &st_a.disposals[0].legs[0];
+    assert_eq!(leg_a.acquired_at, time::macros::date!(2019 - 02 - 28));
+    assert_eq!(
+        leg_a.term,
+        Term::LongTerm,
+        "leap-window receipt: a 366-day span would MISS long-term; 2019-02-28 does not"
+    );
+
+    // (b) Feb-29 receipt 2020-02-29; a SAME-DAY sale is already long-term.
+    let in_b = stx_in(
+        "B",
+        datetime!(2020-02-29 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls_b = classify_self(1, datetime!(2020-02-29 06:00:00 UTC), "B", None, None);
+    let sale_b = sell(datetime!(2020-02-29 12:00:00 UTC), dec!(100.00));
+    let st_b = project(
+        &[in_b, cls_b, sale_b],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    let leg_b = &st_b.disposals[0].legs[0];
+    assert_eq!(leg_b.acquired_at, time::macros::date!(2019 - 02 - 27));
+    assert_eq!(
+        leg_b.term,
+        Term::LongTerm,
+        "Feb-29 receipt: replace_year falls back to Feb-28, then −1 day = 2019-02-27"
+    );
+}
+
+/// [reconcile-defaults] An explicitly supplied `--acquired` SUPERSEDES the long-term default: a RECENT
+/// supplied date keeps the disposal SHORT-TERM, and NO defaulted-acquisition advisory fires.
+#[test]
+fn explicit_acquired_supersedes() {
+    let recent = time::macros::date!(2025 - 01 - 15);
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(
+        1,
+        datetime!(2025-05-01 00:00:00 UTC),
+        "IN",
+        None,
+        Some(recent),
+    );
+    let sale = sell(datetime!(2025-06-01 00:00:00 UTC), dec!(100.00)); // < 1yr after `recent`
+    let st = project(
+        &[in_ev, cls, sale],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    let leg = &st.disposals[0].legs[0];
+    assert_eq!(leg.acquired_at, recent);
+    assert_eq!(
+        leg.term,
+        Term::ShortTerm,
+        "a supplied recent acquisition date supersedes the long-term default"
+    );
+    assert!(
+        !st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SelfTransferInboundDefaultedAcquired),
+        "a supplied --acquired must NOT fire the defaulted-acquisition advisory"
+    );
+}
+
+/// [reconcile-defaults I2] Disclosure is INDEPENDENT of basis: supplying `--basis` but NOT `--acquired`
+/// still fires the defaulted-acquisition (long-term) advisory — and must NOT fire the zero-basis one.
+#[test]
+fn classify_with_basis_no_acquired_discloses_long_term() {
+    let in_ev = stx_in(
+        "IN",
+        datetime!(2025-04-01 00:00:00 UTC),
+        100_000,
+        Some(wal()),
+    );
+    let cls = classify_self(
+        1,
+        datetime!(2026-01-01 00:00:00 UTC),
+        "IN",
+        Some(dec!(500.00)),
+        None,
+    );
+    let st = project(
+        &[in_ev, cls],
+        &StaticPrices::default(),
+        &ProjectionConfig::default(),
+    );
+    assert_eq!(st.lots.len(), 1);
+    assert_eq!(st.lots[0].usd_basis, dec!(500.00));
+    // basis supplied, acquired defaulted → the lot is still backdated to long-term.
+    assert_eq!(st.lots[0].acquired_at, time::macros::date!(2024 - 03 - 31));
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SelfTransferInboundDefaultedAcquired),
+        "a supplied basis with no acquired date must STILL disclose the long-term assumption"
+    );
+    assert!(
+        !st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SelfTransferInboundZeroBasis),
+        "a supplied basis must not fire the zero-basis advisory"
+    );
 }
 
 /// Invariant 3b — pool/HP ORTHOGONALITY: a 2026 receipt with a real 2013 `acquired_at` lands in the
@@ -3392,7 +3561,7 @@ fn pre_2025_self_transfer_in_conserves_through_universal_pool() {
         Some(dec!(15.00)),
         None,
     );
-    // Lot-only: conserves; lot present with acquired_at == receipt (2024-06-01).
+    // Lot-only: conserves; lot present with acquired_at DEFAULTED to 1yr+1day before receipt (2023-05-31).
     let st_lot = project(
         &[in_ev.clone(), cls.clone()],
         &StaticPrices::default(),
@@ -3401,7 +3570,7 @@ fn pre_2025_self_transfer_in_conserves_through_universal_pool() {
     assert_eq!(st_lot.lots.len(), 1);
     assert_eq!(
         st_lot.lots[0].acquired_at,
-        time::macros::date!(2024 - 06 - 01)
+        time::macros::date!(2023 - 05 - 31)
     );
     let r0 = conservation_report(&st_lot);
     assert!(

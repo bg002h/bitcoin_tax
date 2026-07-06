@@ -23,7 +23,10 @@ impl Default for CliConfig {
         // DO NOT change: TP8 default is (c). Spec §2/TP8 + user memory forbid flipping it to (b).
         CliConfig {
             fee_treatment: FeeTreatment::TreatmentC,
-            pre2025_method: LotMethod::Fifo,
+            // Realistic no-election default: HIFO is the most commonly elected method and minimizes the
+            // estimated gain (§reconcile-defaults). Stays `attested: false` below so the user is still
+            // prompted to affirm HIFO per exchange (HIFO needs specific-ID/records).
+            pre2025_method: LotMethod::Hifo,
             pre2025_method_attested: false,
             pseudo_reconcile: false,
         }
@@ -214,13 +217,15 @@ mod tests {
     }
 
     #[test]
-    fn default_pre2025_method_is_fifo_unattested() {
+    fn default_pre2025_method_is_hifo_unattested() {
+        // [reconcile-defaults] The realistic no-election default is HIFO, still UNATTESTED (the user is
+        // prompted to affirm HIFO per exchange). Flipped from FIFO.
         let c = mem();
         let cfg = read_config(&c).unwrap();
-        assert!(!matches!(cfg.pre2025_method, LotMethod::Hifo));
-        assert_eq!(cfg.pre2025_method, LotMethod::Fifo);
+        assert!(!matches!(cfg.pre2025_method, LotMethod::Fifo));
+        assert_eq!(cfg.pre2025_method, LotMethod::Hifo);
         assert!(!cfg.pre2025_method_attested);
-        assert_eq!(cfg.to_projection().pre2025_method, LotMethod::Fifo);
+        assert_eq!(cfg.to_projection().pre2025_method, LotMethod::Hifo);
         // KAT (Task 1): to_projection carries attested=false (false→false)
         assert!(!cfg.to_projection().pre2025_method_attested);
     }

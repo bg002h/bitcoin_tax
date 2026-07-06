@@ -150,6 +150,41 @@ fn classify_inbound_self_transfer_with_basis_and_acquired_has_no_advisory() {
     );
 }
 
+/// [reconcile-defaults] The MANUAL `classify-inbound-self-transfer` with no `--acquired` also backdates
+/// to LONG-TERM: the created lot's acquisition date is 1yr+1day before receipt (leap-safe), and the
+/// defaulted-acquisition advisory fires.
+#[test]
+fn manual_classify_inbound_self_transfer_also_long_term() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, in_ref) = vault_with(dir.path(), coinbase_receive_csv(dir.path()), true);
+
+    let (code, stderr) = run_self_transfer(&vault, &[&in_ref]);
+    assert_eq!(code, 0, "defaults must exit 0; stderr: {stderr}");
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert_eq!(state.lots.len(), 1);
+    // Receipt 2025-03-01 → default acquisition = 1yr+1day earlier = 2024-02-29 (2024 is leap).
+    assert_eq!(
+        state.lots[0].acquired_at,
+        time::macros::date!(2024 - 02 - 29)
+    );
+    assert!(
+        btctax_core::conventions::is_long_term(
+            state.lots[0].acquired_at,
+            time::macros::date!(2025 - 03 - 01)
+        ),
+        "the manual default acquisition must be long-term relative to the receipt date"
+    );
+    assert!(
+        state
+            .blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SelfTransferInboundDefaultedAcquired),
+        "the manual default (no --acquired) must fire the long-term-assumption advisory"
+    );
+}
+
 /// Wrong target: pointing the subcommand at a NON-TransferIn event (an Acquire) surfaces the existing
 /// bad-target path — a `DecisionConflict` blocker (variant-agnostic; the CLI only appends).
 #[test]
