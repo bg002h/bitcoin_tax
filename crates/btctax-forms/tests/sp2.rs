@@ -732,6 +732,477 @@ fn form_8283_is_byte_deterministic() {
 }
 const GOLDEN_8283_SHA256: &str = "6832c7607ff2eb233bf9c95cdf36af5338c0636f86d2c053366a44325bd76e8d";
 
+// ── Form 8283 multi-donee: one official 8283 per donee/appraiser identity ───────────────────────────
+//
+// Section B is "one donee's donation of similar property per form" — a tax year with donations to
+// MULTIPLE distinct donees must fill one 8283 PER donee (the Part V donee acknowledgment names the
+// actual donee of that form's property). The fix groups Section-B donations by the donee AND appraiser
+// identity (split-on-difference), count-overflows WITHIN each group, and passes the group's `details`
+// EXPLICITLY into every physical copy (so an overflowing donee carries its identity on every page).
+
+/// Field-name SUFFIXES, relative to each copy's ROOT component (which `merge_copies` renames per
+/// copy: `Form8283[0]` for copy 0, `btctaxcopy{k}` for copy k). Stripping/matching these from the
+/// copy root isolates a single physical copy.
+const DONEE_NAME_SUFFIX: &str = "Page2[0].f2_19[0]";
+const DONEE_EIN_SUFFIX: &str = "Page2[0].f2_20[0]";
+const APPRAISER_NAME_SUFFIX: &str = "Page2[0].f2_13[0]";
+const ROW3A_DESC_SUFFIX: &str = "Page1[0].Table_Line3_ColsA-C[0].Row3A[0].f1_42[0]";
+const ROW3B_DESC_SUFFIX: &str = "Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_45[0]";
+
+fn details_named(donee: &str, ein: &str, appraiser: &str, tin: &str) -> DonationDetails {
+    DonationDetails {
+        donee_name: donee.into(),
+        donee_address: Some(format!("{donee} HQ")),
+        donee_ein: Some(ein.into()),
+        appraiser_name: appraiser.into(),
+        appraiser_address: Some(format!("{appraiser} office")),
+        appraiser_tin: Some(tin.into()),
+        appraiser_ptin: None,
+        appraiser_qualifications: Some("Certified bitcoin appraiser".into()),
+        appraisal_date: Some(date!(2025 - 06 - 01)),
+        fmv_method_override: None,
+    }
+}
+
+/// A Section-B carrier row (section set) carrying explicit `details`.
+fn b_carrier(desc: &str, details: DonationDetails) -> Form8283Row {
+    Form8283Row {
+        section: Some(Form8283Section::B),
+        description: desc.to_string(),
+        how_acquired: Form8283HowAcquired::Purchased,
+        date_acquired: date!(2023 - 01 - 05),
+        date_contributed: date!(2025 - 03 - 01),
+        cost_basis: dec!(20000),
+        fmv: dec!(60000),
+        claimed_deduction: Some(dec!(60000)),
+        fmv_method: "qualified appraisal".into(),
+        donee: details.donee_name.clone(),
+        appraiser: details.appraiser_name.clone(),
+        needs_review: false,
+        details: Some(details),
+    }
+}
+
+/// A Section-B carrier row with NO stored `DonationDetails` (only the section + donee label set) —
+/// the [R0-C1] carrier signal is `section.is_some()`, so this STILL starts its own donation.
+fn b_carrier_no_details(desc: &str, donee: &str) -> Form8283Row {
+    Form8283Row {
+        section: Some(Form8283Section::B),
+        description: desc.to_string(),
+        how_acquired: Form8283HowAcquired::Purchased,
+        date_acquired: date!(2023 - 01 - 05),
+        date_contributed: date!(2025 - 03 - 01),
+        cost_basis: dec!(20000),
+        fmv: dec!(60000),
+        claimed_deduction: Some(dec!(60000)),
+        fmv_method: String::new(),
+        donee: donee.to_string(),
+        appraiser: String::new(),
+        needs_review: true,
+        details: None,
+    }
+}
+
+/// All non-empty values for a page-2 identity suffix, across every merged copy.
+fn id_values(doc: &lopdf::Document, fields: &[Field], suffix: &str) -> Vec<String> {
+    fields
+        .iter()
+        .filter(|f| f.fqn.ends_with(suffix))
+        .filter_map(|f| text_value(doc, f.id))
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Every physical copy's per-copy FQN prefix (the merge root component, unique per copy) — derived by
+/// stripping a stable page-1 property-row suffix present on every copy.
+fn copy_prefixes(fields: &[Field]) -> Vec<String> {
+    let mut ps: Vec<String> = fields
+        .iter()
+        .filter_map(|f| f.fqn.strip_suffix(ROW3A_DESC_SUFFIX).map(str::to_string))
+        .collect();
+    ps.sort();
+    ps.dedup();
+    ps
+}
+
+/// The donee name + appraiser name printed on the copy identified by `prefix` (empty when blank).
+fn copy_identity(doc: &lopdf::Document, fields: &[Field], prefix: &str) -> (String, String) {
+    let read = |suffix: &str| {
+        let fqn = format!("{prefix}{suffix}");
+        fields
+            .iter()
+            .find(|f| f.fqn == fqn)
+            .and_then(|f| text_value(doc, f.id))
+            .unwrap_or_default()
+    };
+    (read(DONEE_NAME_SUFFIX), read(APPRAISER_NAME_SUFFIX))
+}
+
+#[test]
+fn form_8283_multi_donee_one_copy_per_donee() {
+    // ★ Core fix: 2 Section-B donations to donee A and donee B (each ≤ cap) ⇒ TWO 8283 copies, each
+    // with its OWN Part V donee identity (A on one copy, B on the other) — NOT one form naming A only.
+    let rows = vec![
+        b_carrier(
+            "1.00000000 BTC",
+            details_named(
+                "Charity Alpha",
+                "11-1111111",
+                "Appraiser One",
+                "111-11-1111",
+            ),
+        ),
+        b_carrier(
+            "2.00000000 BTC",
+            details_named("Charity Beta", "22-2222222", "Appraiser Two", "222-22-2222"),
+        ),
+    ];
+    let pdf = btctax_forms::fill_form_8283(&rows, 2025).unwrap().unwrap();
+    let (doc, fields) = fields_of(&pdf);
+    assert_eq!(
+        doc.get_pages().len(),
+        4,
+        "one 8283 copy (2 pages) per donee"
+    );
+    // Each copy names its OWN donee paired with its OWN appraiser (no cross-fill).
+    let mut pairs: Vec<(String, String)> = copy_prefixes(&fields)
+        .iter()
+        .map(|p| copy_identity(&doc, &fields, p))
+        .collect();
+    pairs.sort();
+    assert_eq!(
+        pairs,
+        vec![
+            ("Charity Alpha".to_string(), "Appraiser One".to_string()),
+            ("Charity Beta".to_string(), "Appraiser Two".to_string()),
+        ],
+        "each 8283 names its own donee AND its own appraiser"
+    );
+    // Both donee EINs present (one per copy).
+    let mut eins = id_values(&doc, &fields, DONEE_EIN_SUFFIX);
+    eins.sort();
+    assert_eq!(eins, vec!["11-1111111", "22-2222222"]);
+}
+
+#[test]
+fn form_8283_interleaved_same_donee_groups_globally() {
+    // ★ Donations ordered A, B, A (`form_8283()` sorts by date, so same-donee donations are
+    // NON-adjacent) ⇒ TWO copies: A's copy carries BOTH A donations; B's carries B's. Proves a GLOBAL
+    // group-by-identity, not an adjacency run.
+    let da = details_named(
+        "Charity Alpha",
+        "11-1111111",
+        "Appraiser One",
+        "111-11-1111",
+    );
+    let db = details_named("Charity Beta", "22-2222222", "Appraiser Two", "222-22-2222");
+    let rows = vec![
+        b_carrier("1.00000000 BTC", da.clone()),
+        b_carrier("2.00000000 BTC", db),
+        b_carrier("3.00000000 BTC", da),
+    ];
+    let pdf = btctax_forms::fill_form_8283(&rows, 2025).unwrap().unwrap();
+    let (doc, fields) = fields_of(&pdf);
+    assert_eq!(doc.get_pages().len(), 4, "two identity groups ⇒ two copies");
+    // Locate A's copy (donee = Charity Alpha) and prove BOTH A donations landed on it.
+    let a_prefix = copy_prefixes(&fields)
+        .into_iter()
+        .find(|p| copy_identity(&doc, &fields, p).0 == "Charity Alpha")
+        .expect("a copy names Charity Alpha");
+    let read = |suffix: &str| {
+        let fqn = format!("{a_prefix}{suffix}");
+        fields
+            .iter()
+            .find(|f| f.fqn == fqn)
+            .and_then(|f| text_value(&doc, f.id))
+    };
+    assert_eq!(read(ROW3A_DESC_SUFFIX).as_deref(), Some("1.00000000 BTC"));
+    assert_eq!(
+        read(ROW3B_DESC_SUFFIX).as_deref(),
+        Some("3.00000000 BTC"),
+        "A's second (non-adjacent) donation groups onto A's form"
+    );
+    // Exactly one copy each for A and B.
+    let mut donees = id_values(&doc, &fields, DONEE_NAME_SUFFIX);
+    donees.sort();
+    assert_eq!(donees, vec!["Charity Alpha", "Charity Beta"]);
+}
+
+#[test]
+fn form_8283_second_donee_without_details_still_separate() {
+    // ★ [R0-C1] Donee B's carrier has `details: None` (only `section` + a donee label). The carrier
+    // signal is `section.is_some()`, so B is NOT absorbed onto A's NAMED Part V form.
+    let rows = vec![
+        b_carrier(
+            "1.00000000 BTC",
+            details_named(
+                "Charity Alpha",
+                "11-1111111",
+                "Appraiser One",
+                "111-11-1111",
+            ),
+        ),
+        b_carrier_no_details("2.00000000 BTC", "Charity Beta"),
+    ];
+    let pdf = btctax_forms::fill_form_8283(&rows, 2025).unwrap().unwrap();
+    let (doc, fields) = fields_of(&pdf);
+    assert_eq!(doc.get_pages().len(), 4, "B stays a separate physical form");
+    // Only A is NAMED (B has no captured details ⇒ honest blank identity, never fabricated).
+    assert_eq!(
+        id_values(&doc, &fields, DONEE_NAME_SUFFIX),
+        vec!["Charity Alpha"],
+        "exactly one named donee; B is not fabricated"
+    );
+    // A's copy carries ONLY A's property row (B's 2 BTC is on the OTHER copy — not absorbed).
+    let a_prefix = copy_prefixes(&fields)
+        .into_iter()
+        .find(|p| copy_identity(&doc, &fields, p).0 == "Charity Alpha")
+        .expect("a copy names Charity Alpha");
+    let a_desc = fields
+        .iter()
+        .find(|f| f.fqn == format!("{a_prefix}{ROW3A_DESC_SUFFIX}"))
+        .and_then(|f| text_value(&doc, f.id));
+    let a_desc_b = fields
+        .iter()
+        .find(|f| f.fqn == format!("{a_prefix}{ROW3B_DESC_SUFFIX}"))
+        .and_then(|f| text_value(&doc, f.id));
+    assert_eq!(a_desc.as_deref(), Some("1.00000000 BTC"));
+    assert_eq!(
+        a_desc_b, None,
+        "B's property must NOT ride on A's named form"
+    );
+}
+
+#[test]
+fn form_8283_same_donee_different_appraiser_splits() {
+    // ★ [R0-I3] Same donee, DIFFERENT appraiser ⇒ split (a shared form would print a wrong Part IV).
+    let rows = vec![
+        b_carrier(
+            "1.00000000 BTC",
+            details_named(
+                "Charity Alpha",
+                "11-1111111",
+                "Appraiser One",
+                "111-11-1111",
+            ),
+        ),
+        b_carrier(
+            "2.00000000 BTC",
+            details_named(
+                "Charity Alpha",
+                "11-1111111",
+                "Appraiser Two",
+                "222-22-2222",
+            ),
+        ),
+    ];
+    let pdf = btctax_forms::fill_form_8283(&rows, 2025).unwrap().unwrap();
+    let (doc, fields) = fields_of(&pdf);
+    assert_eq!(
+        doc.get_pages().len(),
+        4,
+        "different appraiser ⇒ separate forms"
+    );
+    let mut pairs: Vec<(String, String)> = copy_prefixes(&fields)
+        .iter()
+        .map(|p| copy_identity(&doc, &fields, p))
+        .collect();
+    pairs.sort();
+    assert_eq!(
+        pairs,
+        vec![
+            ("Charity Alpha".to_string(), "Appraiser One".to_string()),
+            ("Charity Alpha".to_string(), "Appraiser Two".to_string()),
+        ],
+        "same donee, each form its own appraiser"
+    );
+}
+
+#[test]
+fn form_8283_single_donee_unchanged() {
+    // A single-donee MULTI-lot donation (carrier + 1 leg, ≤ cap) ⇒ ONE physical copy via the total-1
+    // DIRECT path (NOT routed through `merge_copies`). Byte-identical to the pre-fix golden — the
+    // common case must not change — and it carries NO per-copy `btctaxcopy` rename marker.
+    let rows = vec![
+        b_row("1.00000000 BTC", dec!(20000), dec!(60000), true),
+        b_row("2.00000000 BTC", dec!(10000), dec!(30000), false),
+    ];
+    let a = btctax_forms::fill_form_8283(&rows, 2025).unwrap().unwrap();
+    let b = btctax_forms::fill_form_8283(&rows, 2025).unwrap().unwrap();
+    assert_eq!(a, b, "single-donee output is byte-deterministic");
+    let doc = load(&a).unwrap();
+    assert_eq!(doc.get_pages().len(), 2, "one physical 8283 (no overflow)");
+    assert!(
+        !a.windows(b"btctaxcopy".len()).any(|w| w == b"btctaxcopy"),
+        "total-1 copy returns fill_one DIRECTLY — no merge_copies rename"
+    );
+    assert_eq!(
+        hex(&Sha256::digest(&a)),
+        GOLDEN_8283_SINGLE_DONEE_MULTILOT,
+        "single-donee multi-lot 8283 changed — the common case must be byte-identical"
+    );
+}
+const GOLDEN_8283_SINGLE_DONEE_MULTILOT: &str =
+    "27fb812d65ff29f8d8cedf225411d1cd4b16bbb35e9a1acaabddb19463a5aa6a";
+
+#[test]
+fn form_8283_one_donee_overflow_carries_identity_on_both_pages() {
+    // One donee, > cap rows (carrier + 3 legs ⇒ 2 copies) ⇒ the donee identity is on BOTH copies'
+    // page 2 (cures the R0-noted page-2-blank bug: the group's `details` is passed to EVERY copy).
+    let rows = vec![
+        b_carrier(
+            "1.00000000 BTC",
+            details_named(
+                "Charity Alpha",
+                "11-1111111",
+                "Appraiser One",
+                "111-11-1111",
+            ),
+        ),
+        b_row("2.00000000 BTC", dec!(10000), dec!(30000), false),
+        b_row("3.00000000 BTC", dec!(5000), dec!(15000), false),
+        b_row("4.00000000 BTC", dec!(1000), dec!(3000), false),
+    ];
+    let pdf = btctax_forms::fill_form_8283(&rows, 2025).unwrap().unwrap();
+    let (doc, fields) = fields_of(&pdf);
+    assert_eq!(doc.get_pages().len(), 4, "4 legs over cap 3 ⇒ 2 copies");
+    assert_eq!(
+        id_values(&doc, &fields, DONEE_NAME_SUFFIX),
+        vec!["Charity Alpha", "Charity Alpha"],
+        "the donee identity is on BOTH overflow copies, not just page 1"
+    );
+}
+
+#[test]
+fn form_8283_section_a_multi_donee_stays_one_form() {
+    // ★ [R0-I2] Section A (≤ $5k) with 2 DISTINCT donees ⇒ still ONE form — Section A has a per-row
+    // donee COLUMN (no Part IV/V identity block), so grouping is NOT applied; pagination is unchanged.
+    let a_row = |desc: &str, donee: &str| Form8283Row {
+        section: Some(Form8283Section::A),
+        description: desc.to_string(),
+        how_acquired: Form8283HowAcquired::Purchased,
+        date_acquired: date!(2024 - 07 - 15),
+        date_contributed: date!(2025 - 02 - 10),
+        cost_basis: dec!(1500),
+        fmv: dec!(2000),
+        claimed_deduction: Some(dec!(2000)),
+        fmv_method: String::new(),
+        donee: donee.to_string(),
+        appraiser: String::new(),
+        needs_review: false,
+        details: None,
+    };
+    let rows = vec![
+        a_row("0.01000000 BTC", "Food Bank"),
+        a_row("0.02000000 BTC", "Animal Shelter"),
+    ];
+    let pdf = btctax_forms::fill_form_8283(&rows, 2025).unwrap().unwrap();
+    let (doc, fields) = fields_of(&pdf);
+    assert_eq!(
+        doc.get_pages().len(),
+        2,
+        "Section A ⇒ ONE form, pagination unchanged"
+    );
+    assert!(
+        !pdf.windows(b"btctaxcopy".len()).any(|w| w == b"btctaxcopy"),
+        "Section A single form is the direct path (no merge)"
+    );
+    // Both donees land in their own per-row (a) column on the SAME form (Row1A + Row1B).
+    assert_eq!(
+        tv(
+            &doc,
+            &fields,
+            "Form8283[0].Page1[0].Table_Line1_ColsA-C[0].Row1A[0].f1_5[0]"
+        )
+        .as_deref(),
+        Some("Food Bank")
+    );
+    assert_eq!(
+        tv(
+            &doc,
+            &fields,
+            "Form8283[0].Page1[0].Table_Line1_ColsA-C[0].Row1B[0].f1_8[0]"
+        )
+        .as_deref(),
+        Some("Animal Shelter")
+    );
+}
+
+#[test]
+fn form_8283_multi_group_with_overflow_global_rename() {
+    // ★ [R0-r2-m2] Donee A overflows (carrier + 3 legs ⇒ 2 copies) + donee B (1 copy) ⇒ 3 copies with
+    // GLOBALLY-unique renamed fields (no shared `/V` across groups; the merge copy-index is global).
+    let rows = vec![
+        b_carrier(
+            "1.00000000 BTC",
+            details_named(
+                "Charity Alpha",
+                "11-1111111",
+                "Appraiser One",
+                "111-11-1111",
+            ),
+        ),
+        b_row("2.00000000 BTC", dec!(10000), dec!(30000), false),
+        b_row("3.00000000 BTC", dec!(5000), dec!(15000), false),
+        b_row("4.00000000 BTC", dec!(1000), dec!(3000), false),
+        b_carrier(
+            "5.00000000 BTC",
+            details_named("Charity Beta", "22-2222222", "Appraiser Two", "222-22-2222"),
+        ),
+    ];
+    let pdf = btctax_forms::fill_form_8283(&rows, 2025).unwrap().unwrap();
+    let (doc, fields) = fields_of(&pdf);
+    assert_eq!(
+        doc.get_pages().len(),
+        6,
+        "2 (A overflow) + 1 (B) = 3 copies"
+    );
+    // Every fully-qualified name is globally unique after per-copy renaming.
+    let mut fqns: Vec<&str> = fields.iter().map(|f| f.fqn.as_str()).collect();
+    let total = fqns.len();
+    fqns.sort_unstable();
+    fqns.dedup();
+    assert_eq!(
+        fqns.len(),
+        total,
+        "all field names globally unique (no shared /V)"
+    );
+    // A named on both its copies, B on its one copy.
+    let mut donees = id_values(&doc, &fields, DONEE_NAME_SUFFIX);
+    donees.sort();
+    assert_eq!(
+        donees,
+        vec!["Charity Alpha", "Charity Alpha", "Charity Beta"]
+    );
+}
+
+#[test]
+fn form_8283_multi_donee_per_copy_readback_fault_injected_is_red() {
+    // ★ The per-copy geometric read-back still fails closed under a swapped map — even in the
+    // multi-donee grouping path (each physical copy is verified independently before the merge).
+    let mut m = Form8283Map::ty2025();
+    for r in &mut m.section_b.rows {
+        std::mem::swap(&mut r.fmv, &mut r.cost);
+    }
+    let rows = vec![
+        b_carrier(
+            "1.00000000 BTC",
+            details_named(
+                "Charity Alpha",
+                "11-1111111",
+                "Appraiser One",
+                "111-11-1111",
+            ),
+        ),
+        b_carrier(
+            "2.00000000 BTC",
+            details_named("Charity Beta", "22-2222222", "Appraiser Two", "222-22-2222"),
+        ),
+    ];
+    let err = fill_8283_with_map(&rows, &m).unwrap_err();
+    assert!(matches!(err, FormsError::Geometry(_)), "got {err:?}");
+}
+
 // ── XFA drop + watermark + map↔PDF coverage (all three forms) ─────────────────────────────────────
 
 #[test]
