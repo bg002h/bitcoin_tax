@@ -255,9 +255,7 @@ btctax --vault ./vault.pgp reconcile pseudo off   # reverts instantly; approved 
 
 Income fair-market values and disposal proceeds (when you don't supply an explicit price) resolve against a
 **bundled daily-close BTC/USD dataset** — one row per calendar day, ~2010-07-17 through mid-2026, compiled
-into the binaries. It is derived from Quantoshi's `BitcoinPricesDaily.csv` and redistributed under the
-**BSD 2-Clause License with attribution** (see
-[`crates/btctax-adapters/data/BitcoinPricesDaily.NOTICE`](./crates/btctax-adapters/data/BitcoinPricesDaily.NOTICE)).
+into the binaries. These are public daily-close market facts, derived from public Binance / CoinGecko data.
 
 **Newer dates than the bundle** (or dates it doesn't cover) are handled by the optional
 `btctax-update-prices` tool, which fetches daily closes (Binance primary, CoinGecko fallback) into a **local
@@ -331,6 +329,6 @@ answer.
 
 Licensed under either of **MIT** or **The Unlicense** at your option.
 
-The bundled daily-close price dataset (`crates/btctax-adapters/data/btc_usd_daily_close.csv`) is a separate
-work redistributed under the **BSD 2-Clause License** with attribution — see
-[`crates/btctax-adapters/data/BitcoinPricesDaily.NOTICE`](./crates/btctax-adapters/data/BitcoinPricesDaily.NOTICE).
+The bundled daily-close price dataset (`crates/btctax-adapters/data/btc_usd_daily_close.csv`) is public
+market data (factual daily closes derived from public Binance / CoinGecko data) and carries no separate
+license or attribution.

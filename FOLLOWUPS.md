@@ -10,9 +10,11 @@ The bundled `btc_usd_daily_close.csv` was a 6-row STUB; the real-vault income ev
 therefore projected to Hard `FmvMissing` with no way to fill them offline. Three parts, per
 `design/SPEC_price_data_and_pseudo_fmv.md` (R0-GREEN, 3 rounds):
 
-- **A — real dataset.** Bundled Quantoshi's daily closes (5,801 rows, 2010-07-17 → 2026-06-03; ISO,
-  `Decimal` 2dp; sorted/deduped) + a separate **BSD-2** `data/BitcoinPricesDaily.NOTICE`. The stub-swap
-  broke ~50 assertions across 3 crates; migrated via a **Session-level injectable price provider**
+- **A — real dataset.** Bundled the real daily closes (5,801 rows, 2010-07-17 → 2026-06-03; ISO,
+  `Decimal` 2dp; sorted/deduped). NO attribution/NOTICE file — the prices are public market FACTS
+  (Binance/CoinGecko-sourced), not copyrightable (user correction 2026-07-05); a one-line provenance note
+  lives in the README. The stub-swap broke ~50 assertions across 3 crates; migrated via a **Session-level
+  injectable price provider**
   (`Session::set_prices`) — plan KATs inject the old stub (zero recompute), free-function KATs recompute
   to real / move unpriced sentinels beyond the dataset.
 - **B — pseudo income-FMV.** `IncomeRecord.pseudo` (set at both fold push sites) + a new
