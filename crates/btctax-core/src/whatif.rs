@@ -27,6 +27,8 @@ use crate::state::{Blocker, Lot, Term};
 use crate::tax::{compute_tax_year, TaxOutcome, TaxProfile, TaxResult, TaxTables};
 use rust_decimal::prelude::ToPrimitive;
 use std::collections::BTreeSet;
+use std::fmt;
+use std::str::FromStr;
 
 /// The lot-selection choice for a hypothetical sale.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -380,6 +382,71 @@ pub enum HarvestTarget {
     /// Max N whose MARGINAL federal tax (`total(N) − total(0)`) is ≤ X. `tax=$0` is the flagship harvest
     /// primitive ("sell as much as possible adding zero federal tax"). Requires X ≥ 0.
     Tax(Usd),
+}
+
+/// Parse failure for [`HarvestTarget`]'s [`FromStr`] — the single source of truth shared by the CLI
+/// `--target` parse and the TUI panel's target field. A PURE LEXER: it accepts/rejects exactly what the
+/// legacy `parse_harvest_target` did. Note it does NOT reject negatives — `gain=-1`/`tax=-1` parse to
+/// `Gain(-1)`/`Tax(-1)` and the ENGINE refuses them as `InvalidTarget` (a downstream refusal, not a
+/// parse error), preserving the historical error class/path/message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HarvestTargetParseError {
+    /// The trimmed, lowercased string matched no alias and no `gain=`/`tax=` prefix. Carries the
+    /// ORIGINAL (un-lowercased) input for the message.
+    UnrecognizedTarget(String),
+    /// A `gain=`/`tax=` amount that `Usd::from_str` rejected (e.g. `gain=abc`). Only `$` and `,` are
+    /// stripped before parsing; `_` is left intact but `rust_decimal` accepts it as a digit separator,
+    /// so `gain=1_000` is `Gain(1000)`, NOT a `BadAmount` — parity with the legacy lexer. Carries the
+    /// offending amount substring.
+    BadAmount(String),
+}
+
+impl fmt::Display for HarvestTargetParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HarvestTargetParseError::UnrecognizedTarget(s) => write!(
+                f,
+                "bad --target {s:?}: expected zero-ltcg | fifteen-ltcg | gain=$X | tax=$X"
+            ),
+            HarvestTargetParseError::BadAmount(v) => {
+                write!(f, "bad --target amount {v:?}: expected a USD number")
+            }
+        }
+    }
+}
+
+impl std::error::Error for HarvestTargetParseError {}
+
+impl FromStr for HarvestTarget {
+    type Err = HarvestTargetParseError;
+
+    /// Parse `--target`: `zero-ltcg` | `fifteen-ltcg` | `gain=$X` | `tax=$X` (`$`/commas optional,
+    /// case-insensitive). BYTE-FOR-BYTE the legacy `parse_harvest_target` lexer — NO new checks, in
+    /// particular no negative-rejection (see [`HarvestTargetParseError`]).
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let lower = s.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "zero-ltcg" | "zero_ltcg" | "zeroltcg" => return Ok(HarvestTarget::ZeroLtcg),
+            "fifteen-ltcg" | "fifteen_ltcg" | "fifteenltcg" => {
+                return Ok(HarvestTarget::FifteenLtcg)
+            }
+            _ => {}
+        }
+        if let Some(v) = lower.strip_prefix("gain=") {
+            return Ok(HarvestTarget::Gain(parse_target_amount(v)?));
+        }
+        if let Some(v) = lower.strip_prefix("tax=") {
+            return Ok(HarvestTarget::Tax(parse_target_amount(v)?));
+        }
+        Err(HarvestTargetParseError::UnrecognizedTarget(s.to_string()))
+    }
+}
+
+/// Parse a `gain=`/`tax=` amount: strip `$` and `,` (NOT `_`), then `Usd::from_str`. Negatives parse
+/// fine (the engine refuses them downstream — see [`HarvestTargetParseError`]).
+fn parse_target_amount(v: &str) -> Result<Usd, HarvestTargetParseError> {
+    let cleaned = v.trim().replace(['$', ','], "");
+    Usd::from_str(&cleaned).map_err(|_| HarvestTargetParseError::BadAmount(v.to_string()))
 }
 
 /// A hypothetical, NON-persisted harvest question.

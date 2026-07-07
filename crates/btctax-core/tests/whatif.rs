@@ -28,7 +28,9 @@ use btctax_core::tax::tables::{
     LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
 };
 use btctax_core::tax::types::{Carryforward, FilingStatus, TaxProfile};
-use btctax_core::whatif::{sell, LtcgBracket, SellRequest, SellStatus, WhatIfError};
+use btctax_core::whatif::{
+    sell, HarvestTarget, HarvestTargetParseError, LtcgBracket, SellRequest, SellStatus, WhatIfError,
+};
 use rust_decimal_macros::dec;
 use std::collections::BTreeMap;
 use time::macros::{date, datetime, offset};
@@ -787,4 +789,95 @@ fn sell_reports_lot_schedule_and_is_deterministic() {
     assert_eq!(leg.sold_at, date!(2025 - 08 - 01));
     assert_eq!(leg.acquired_at, date!(2024 - 06 - 01));
     assert_eq!(r, call(), "NFR4: identical inputs → identical report");
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// P1 — harvest-target `FromStr` dedup (task #48). The single source of truth shared by the CLI
+// `--target` parse and the TUI panel; a PURE LEXER — accepts/rejects EXACTLY what the legacy
+// `parse_harvest_target` did, adding no new checks (in particular it does NOT reject negatives).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// KAT: every accepted `--target` form parses to the same `HarvestTarget` the pre-refactor parsers
+/// produced — the three aliases each (incl. case-insensitive `GAIN=`), `$`/comma-optional amounts
+/// (`gain=$1,000` == `gain=1000`), `tax=$0`. Rejections are limited to unrecognized strings / empty /
+/// a `Usd`-invalid amount (`gain=abc`). Separator note: only `$`/`,` are stripped; `_` is left intact
+/// but `rust_decimal` accepts it as a digit separator, so `gain=1_000` → `Gain(1000)` (exactly what the
+/// legacy lexer produced — byte-for-byte parity; NOT a `BadAmount`, and a `_`-reject would be a NEW
+/// check that breaks parity).
+#[test]
+fn harvest_target_fromstr_matches_prior_parsers() {
+    use HarvestTarget::*;
+    // Bracket aliases, case-insensitive, all three spellings.
+    for s in [
+        "zero-ltcg",
+        "zero_ltcg",
+        "zeroltcg",
+        "ZERO-LTCG",
+        "  ZeroLtcg  ",
+    ] {
+        assert_eq!(s.parse::<HarvestTarget>(), Ok(ZeroLtcg), "{s:?}");
+    }
+    for s in [
+        "fifteen-ltcg",
+        "fifteen_ltcg",
+        "fifteenltcg",
+        "FIFTEEN-LTCG",
+    ] {
+        assert_eq!(s.parse::<HarvestTarget>(), Ok(FifteenLtcg), "{s:?}");
+    }
+    // gain=/tax= with the `$`/comma cleaning; case-insensitive prefix.
+    assert_eq!("gain=1000".parse::<HarvestTarget>(), Ok(Gain(dec!(1000))));
+    assert_eq!("gain=$1,000".parse::<HarvestTarget>(), Ok(Gain(dec!(1000))));
+    assert_eq!(
+        "gain=$1,000".parse::<HarvestTarget>(),
+        "gain=1000".parse::<HarvestTarget>(),
+        "$/comma are optional"
+    );
+    assert_eq!(
+        "GAIN=$25,000".parse::<HarvestTarget>(),
+        Ok(Gain(dec!(25000)))
+    );
+    assert_eq!("tax=$0".parse::<HarvestTarget>(), Ok(Tax(dec!(0))));
+    assert_eq!(
+        "tax=1500.50".parse::<HarvestTarget>(),
+        Ok(Tax(dec!(1500.50)))
+    );
+    // Rejections — unrecognized / empty → UnrecognizedTarget; bad amount → BadAmount.
+    assert!(matches!(
+        "nonsense".parse::<HarvestTarget>(),
+        Err(HarvestTargetParseError::UnrecognizedTarget(_))
+    ));
+    assert!(matches!(
+        "".parse::<HarvestTarget>(),
+        Err(HarvestTargetParseError::UnrecognizedTarget(_))
+    ));
+    assert!(matches!(
+        "gain=abc".parse::<HarvestTarget>(),
+        Err(HarvestTargetParseError::BadAmount(_))
+    ));
+    // Separator golden: `_` is NOT stripped (only `$`/`,`), but `rust_decimal` accepts `_` as a digit
+    // separator, so `gain=1_000` parses to `Gain(1000)` — byte-identical to the legacy lexer (which
+    // also only stripped `$`/`,`). Rejecting `_` here would be a NEW check that breaks parity.
+    assert_eq!("gain=1_000".parse::<HarvestTarget>(), Ok(Gain(dec!(1000))));
+}
+
+/// [★ C1] KAT: the lexer does NOT reject negatives. `gain=-1` → `Gain(-1)` (NOT a parse error); the
+/// ENGINE refuses it downstream as `InvalidTarget`. A parser-side reject would move the refusal
+/// (different class/path/message) and break parity — and is untested at the CLI, so it would ship
+/// silently. This pins the pure-lexer contract.
+#[test]
+fn harvest_target_gain_negative_parses_not_rejected() {
+    assert_eq!(
+        "gain=-1".parse::<HarvestTarget>(),
+        Ok(HarvestTarget::Gain(dec!(-1)))
+    );
+    assert_eq!(
+        "tax=-1".parse::<HarvestTarget>(),
+        Ok(HarvestTarget::Tax(dec!(-1)))
+    );
+    // With the `$`/comma cleaning too.
+    assert_eq!(
+        "gain=-$1,000".parse::<HarvestTarget>(),
+        Ok(HarvestTarget::Gain(dec!(-1000)))
+    );
 }

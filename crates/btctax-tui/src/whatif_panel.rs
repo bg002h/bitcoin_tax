@@ -433,29 +433,11 @@ pub fn parse_btc_to_sat(s: &str) -> Result<i64, String> {
 }
 
 /// Parse a harvest `--target`: `zero-ltcg | fifteen-ltcg | gain=$X | tax=$X` (X ≥ 0; `$`/commas
-/// optional). Mirrors `btctax-cli`'s `parse_harvest_target` — a UI parser, no tax logic.
+/// optional). Delegates to the single source of truth — [`HarvestTarget`]'s `FromStr` in
+/// `btctax_core` — so the panel and the CLI parse identically; the core error is rendered to the
+/// panel's UI string. (Calls `btctax_core`, never `cmd::`, so the KAT-E10 source-gate stays green.)
 fn parse_harvest_target(s: &str) -> Result<HarvestTarget, String> {
-    let lower = s.trim().to_ascii_lowercase();
-    match lower.as_str() {
-        "zero-ltcg" | "zero_ltcg" | "zeroltcg" => return Ok(HarvestTarget::ZeroLtcg),
-        "fifteen-ltcg" | "fifteen_ltcg" | "fifteenltcg" => return Ok(HarvestTarget::FifteenLtcg),
-        _ => {}
-    }
-    if let Some(v) = lower.strip_prefix("gain=") {
-        return Ok(HarvestTarget::Gain(parse_usd_amount(v)?));
-    }
-    if let Some(v) = lower.strip_prefix("tax=") {
-        return Ok(HarvestTarget::Tax(parse_usd_amount(v)?));
-    }
-    Err(format!(
-        "bad target {s:?}: expected zero-ltcg | fifteen-ltcg | gain=$X | tax=$X"
-    ))
-}
-
-fn parse_usd_amount(v: &str) -> Result<Usd, String> {
-    let cleaned = v.trim().replace(['$', ','], "");
-    Usd::from_str(&cleaned)
-        .map_err(|e| format!("bad target amount {v:?}: expected a USD number: {e}"))
+    HarvestTarget::from_str(s).map_err(|e| e.to_string())
 }
 
 /// Format a `WhatIfError` refusal verbatim for the panel (missing table/profile, pre-2025,
@@ -597,6 +579,27 @@ mod tests {
             Ok(HarvestTarget::Tax(Usd::ZERO))
         );
         assert!(parse_harvest_target("nonsense").is_err());
+    }
+
+    /// [task #48 dedup] The panel's target parse is a thin wrapper over the shared core
+    /// `HarvestTarget: FromStr` — the SAME parser the CLI `--target` uses — so the two never drift.
+    /// (The panel calls `btctax_core`, never `cmd::`; KAT-E10 stays green.)
+    #[test]
+    fn panel_target_parse_shares_fromstr() {
+        for s in [
+            "zero-ltcg",
+            "GAIN=$1,000",
+            "tax=$0",
+            "gain=-1",
+            "nonsense",
+            "gain=abc",
+        ] {
+            assert_eq!(
+                parse_harvest_target(s).ok(),
+                HarvestTarget::from_str(s).ok(),
+                "panel must delegate to the shared FromStr: {s:?}"
+            );
+        }
     }
 
     // ── Sell renders the report ([★] whatif_panel_sell_renders_report) ──────────────
