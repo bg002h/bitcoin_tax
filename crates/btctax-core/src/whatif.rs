@@ -449,6 +449,44 @@ fn parse_target_amount(v: &str) -> Result<Usd, HarvestTargetParseError> {
     Usd::from_str(&cleaned).map_err(|_| HarvestTargetParseError::BadAmount(v.to_string()))
 }
 
+/// Parse a BTC decimal amount (e.g. `0.05`) into satoshis. A bare `1` means **1 BTC** = 100,000,000
+/// sat — the TUI amount-field meaning. Strips `_`/`,` group separators (NOT `$` — a BTC amount carries
+/// no currency sign), parses an EXACT decimal (`× 100_000_000`), and REJECTS over-precision finer than
+/// 1 sat (`sat.fract() != 0`, no float) and negatives. The TUI amount field calls THIS directly, and it
+/// is the `.`-decimal branch of [`parse_sell_arg`]. (task #48 `whatif-sell-btc-input`.)
+pub fn parse_btc_amount(s: &str) -> Result<Sat, String> {
+    let cleaned = s.trim().replace(['_', ','], "");
+    if cleaned.is_empty() {
+        return Err("enter a BTC amount to sell".to_string());
+    }
+    let btc = Usd::from_str(&cleaned).map_err(|e| format!("bad BTC amount {s:?}: {e}"))?;
+    if btc < Usd::ZERO {
+        return Err(format!("BTC amount must be \u{2265} 0 (got {s:?})"));
+    }
+    let sats = btc * Usd::from(SATS_PER_BTC);
+    if sats.fract() != Usd::ZERO {
+        return Err(format!(
+            "BTC amount {s:?} is finer than 1 satoshi (max 8 decimal places)"
+        ));
+    }
+    sats.to_i64()
+        .ok_or_else(|| format!("BTC amount {s:?} is too large"))
+}
+
+/// Parse a `--sell` CLI argument — SMART (Option A). If the trimmed value contains a `.` it is a BTC
+/// decimal (via [`parse_btc_amount`]); otherwise it is a bare integer satoshi amount parsed EXACTLY as
+/// the legacy sat path (`i64::from_str`), sign PASSED THROUGH — `--sell -5` yields −5 sat (today's
+/// degenerate report), with NO sat-side sign check. Only the `.`-BTC path rejects negatives /
+/// over-precision (those are NEW inputs); the non-`.` path is byte-identical to the pre-0.5.0 parse.
+pub fn parse_sell_arg(s: &str) -> Result<Sat, String> {
+    let trimmed = s.trim();
+    if trimmed.contains('.') {
+        parse_btc_amount(s)
+    } else {
+        i64::from_str(trimmed).map_err(|e| format!("expected an integer sat amount: {e}"))
+    }
+}
+
 /// A hypothetical, NON-persisted harvest question.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HarvestRequest {

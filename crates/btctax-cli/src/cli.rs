@@ -298,7 +298,8 @@ pub enum Optimize {
     /// timing. NOTHING is written — no event, no side-table row. Tax decision-support only;
     /// not buy/sell/hold advice.
     Consult {
-        /// Hypothetical sale amount in satoshis (required).
+        /// Hypothetical sale amount (required). Accepts a satoshi integer OR a BTC decimal, e.g.
+        /// `0.05` or `5000000` (a value with a `.` is BTC; a bare integer is satoshis).
         #[arg(long)]
         sell: String,
         /// Wallet to sell from, e.g. `self:cold` or `exchange:coinbase:default` (required; per-wallet
@@ -332,7 +333,8 @@ pub enum WhatIf {
     /// this year's ordinary offset, and the §1411 NIIT delta. A net loss surfaces the carryforward
     /// disclosure (its value is NOT this-year tax). Writes NOTHING.
     Sell {
-        /// Hypothetical sale amount in satoshis (required).
+        /// Hypothetical sale amount (required). Accepts a satoshi integer OR a BTC decimal, e.g.
+        /// `0.05` or `5000000` (a value with a `.` is BTC; a bare integer is satoshis).
         #[arg(long)]
         sell: String,
         /// Wallet to sell from, e.g. `self:cold` or `exchange:coinbase:default` (required; the

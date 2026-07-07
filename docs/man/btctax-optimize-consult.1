@@ -10,7 +10,7 @@ Mode\-2 read\-only pre\-trade what\-if (§C.3): tax\-min lots + ST/LT split + fe
 .SH OPTIONS
 .TP
 \fB\-\-sell\fR \fI<SELL>\fR
-Hypothetical sale amount in satoshis (required)
+Hypothetical sale amount (required). Accepts a satoshi integer OR a BTC decimal, e.g. `0.05` or `5000000` (a value with a `.` is BTC; a bare integer is satoshis)
 .TP
 \fB\-\-wallet\fR \fI<WALLET>\fR
 Wallet to sell from, e.g. `self:cold` or `exchange:coinbase:default` (required; per\-wallet pool is mandatory post\-2025)
