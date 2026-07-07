@@ -1,6 +1,6 @@
 [package]
 name = "btctax-forms"
-version = "0.3.0"
+version = "0.4.0"
 edition.workspace = true
 license.workspace = true
 description = "Fill the official IRS fillable PDFs (Form 8949 + Schedule D) from btctax's computed tax data — offline, deterministic, geometry-verified (part of btctax)."
@@ -13,7 +13,7 @@ categories = ["finance"]
 # Pure-Rust PDF read/modify/write — NO network, NO TLS (the isolation gate forbids ureq/rustls).
 lopdf = { version = "0.36", default-features = false }
 # The tax data model (Form8949Row / ScheduleDTotals) + Usd/TaxDate conventions.
-btctax-core = { path = "../btctax-core", version = "0.3.0" }
+btctax-core = { path = "../btctax-core", version = "0.4.0" }
 # Committed per-year field maps (logical cell -> fully-qualified PDF field name).
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
