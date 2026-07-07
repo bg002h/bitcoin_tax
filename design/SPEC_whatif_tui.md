@@ -1,8 +1,9 @@
 # SPEC — what-if TUI overlay (task #43, phase P3)
 
-**Source baseline:** `main` @ `21f05ac` (branch `feat/whatif-tui`). **Review status: R0 round 1 folded (0C/3I/6M/2N — Opus;
-read-only invariant confirmed airtight; 3 Importants + minors merged IN-PLACE). Awaiting R0 round 2.** Review:
-`reviews/R0-spec-whatif-tui-round-1.md`.** Final slice of #43. Parent spec:
+**Source baseline:** `main` @ `21f05ac` (branch `feat/whatif-tui`). **Review status: R0-GREEN (2 rounds; 0C/0I). Cleared to
+implement.** Reviews: `reviews/R0-spec-whatif-tui-round-{1,2}.md`. r1 0C/3I (Opus — read-only airtight; prices
+mechanism/editor-sweep/at-date); r2 0C/0I/2M (Opus — folds verified vs source; `Snapshot.prices` == the
+session's own `default_prices()`, session.rs:350). Two doc-wording residuals synced.** Final slice of #43. Parent spec:
 `design/SPEC_synthesize_whatif.md`. Reuses `btctax-core::whatif::{sell,harvest}` (shipped P0-P2) UNCHANGED — NO
 new tax logic; tax correctness rides entirely on the already-verified core.
 
@@ -20,8 +21,8 @@ btctax_adapters::LayeredPrices`** (owned, `#[derive(Clone)]`, price.rs:69) and b
 **`LayeredPrices::load_with_cache(btctax_cli::price_cache::default_cache_path().as_deref())`** (both public +
 pure) — byte-identical to the session's own provider (so the panel's baseline matches the Tax tab). **MUST pass
 the real cache path — never `None`** (dropping the cache overlay would silently disagree with the viewer's tabs).
-The panel calls `whatif::sell(&snap.events, &snap.prices, &snap.cli_config.to_projection(), year, profile,
-&snap.tables, …)`. **[R0-I2] The new mandatory field breaks ~10 `Snapshot` construction sites in btctax-tui-edit
+The panel calls `whatif::sell(&snap.events, &snap.prices, &snap.cli_config.to_projection(), profile,
+&snap.tables, &req)` (NO `year` positional — the year is derived from `req.at`, whatif.rs:208). **[R0-I2] The new mandatory field breaks ~10 `Snapshot` construction sites in btctax-tui-edit
 (draw_edit.rs:5306; main.rs:9169/9217/9299/9421/9578/9919/13566/13591) + btctax-tui test builders — a REQUIRED
 P3 sweep to add `prices` at every site** (else the workspace won't build).
 
@@ -51,8 +52,8 @@ P3 sweep to add `prices` at every site** (else the workspace won't build).
 - **Output:** render the `SellReport`/`HarvestReport` live in the panel — lots consumed, ST/LT, the bracket +
   room, marginal tax + effective rate, the §1212 carryforward-delta line, NIIT, harvest status/binding
   constraint + disclosures. On `WhatIfError`, show the refusal reason (missing table/profile, pre-2025,
-  ProceedsRequired, NoLots, YearNotComputable) verbatim. Recompute on input change (debounced-by-keystroke is
-  fine — a fold is fast).
+  ProceedsRequired, NoLots, YearNotComputable) verbatim. Recompute ONLY on the explicit compute key
+  (Enter — NOT per-keystroke, since harvest is a multi-fold segment walk).
 - **Year:** the `[`/`]` year nav (already present) switches `selected_year`, which re-derives the profile and
   the `at`-date default; the `at` field remains editable independently.
 
