@@ -238,6 +238,10 @@ It reports the lots the sale would consume, the short-/long-term split, **which 
 effective rate, the **§1212(b) carryforward** carried to next year plus this year's ordinary offset,
 and the **§1411 NIIT** delta (with its sign — a loss harvest can *reduce* NIIT).
 
+- **Amount.** `--sell` accepts either a **satoshi integer** or a **BTC decimal** — e.g. `--sell 0.05`
+  and `--sell 5000000` are the same quantity (a value with a `.` is read as BTC; a bare integer is
+  satoshis). BTC amounts finer than 1 satoshi are rejected. The same `--sell` grammar applies to
+  `optimize consult`.
 - **Price.** `--price` is USD **per whole BTC**; omit it to use the bundled daily-close FMV for `--at`
   (a future/off-dataset date then requires `--price`).
 - **Method.** Omit `--method` to consume by your **standing method** (the account's in-force election),

@@ -167,12 +167,9 @@ fn run() -> Result<ExitCode, CliError> {
                 // enforces that --fmv and --proceeds are never both passed.
             } => {
                 let pp = passphrase(false)?;
-                // Parse sell amount (satoshis, i64).
-                let sell_sat = sell.trim().parse::<i64>().map_err(|e| {
-                    CliError::Usage(format!(
-                        "bad --sell {sell:?}: expected an integer sat amount: {e}"
-                    ))
-                })?;
+                // Parse --sell: SMART — a sat integer, or a BTC decimal (contains `.`).
+                let sell_sat = btctax_core::whatif::parse_sell_arg(&sell)
+                    .map_err(|e| CliError::Usage(format!("bad --sell {sell:?}: {e}")))?;
                 // --wallet is semantically required: the per-wallet pool is mandatory post-2025.
                 let wallet_id = wallet
                     .as_deref()
@@ -221,11 +218,9 @@ fn run() -> Result<ExitCode, CliError> {
                 carryforward_in,
             } => {
                 let pp = passphrase(false)?;
-                let sell_sat = sell.trim().parse::<i64>().map_err(|e| {
-                    CliError::Usage(format!(
-                        "bad --sell {sell:?}: expected an integer sat amount: {e}"
-                    ))
-                })?;
+                // Parse --sell: SMART — a sat integer, or a BTC decimal (contains `.`).
+                let sell_sat = btctax_core::whatif::parse_sell_arg(&sell)
+                    .map_err(|e| CliError::Usage(format!("bad --sell {sell:?}: {e}")))?;
                 // --wallet is semantically required: the per-wallet pool is mandatory post-2025.
                 let wallet_id = wallet
                     .as_deref()

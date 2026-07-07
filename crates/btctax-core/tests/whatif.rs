@@ -28,7 +28,10 @@ use btctax_core::tax::tables::{
     LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
 };
 use btctax_core::tax::types::{Carryforward, FilingStatus, TaxProfile};
-use btctax_core::whatif::{sell, LtcgBracket, SellRequest, SellStatus, WhatIfError};
+use btctax_core::whatif::{
+    parse_btc_amount, parse_sell_arg, sell, HarvestTarget, HarvestTargetParseError, LtcgBracket,
+    SellRequest, SellStatus, WhatIfError,
+};
 use rust_decimal_macros::dec;
 use std::collections::BTreeMap;
 use time::macros::{date, datetime, offset};
@@ -787,4 +790,173 @@ fn sell_reports_lot_schedule_and_is_deterministic() {
     assert_eq!(leg.sold_at, date!(2025 - 08 - 01));
     assert_eq!(leg.acquired_at, date!(2024 - 06 - 01));
     assert_eq!(r, call(), "NFR4: identical inputs → identical report");
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// P1 — harvest-target `FromStr` dedup (task #48). The single source of truth shared by the CLI
+// `--target` parse and the TUI panel; a PURE LEXER — accepts/rejects EXACTLY what the legacy
+// `parse_harvest_target` did, adding no new checks (in particular it does NOT reject negatives).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// KAT: every accepted `--target` form parses to the same `HarvestTarget` the pre-refactor parsers
+/// produced — the three aliases each (incl. case-insensitive `GAIN=`), `$`/comma-optional amounts
+/// (`gain=$1,000` == `gain=1000`), `tax=$0`. Rejections are limited to unrecognized strings / empty /
+/// a `Usd`-invalid amount (`gain=abc`). Separator note: only `$`/`,` are stripped; `_` is left intact
+/// but `rust_decimal` accepts it as a digit separator, so `gain=1_000` → `Gain(1000)` (exactly what the
+/// legacy lexer produced — byte-for-byte parity; NOT a `BadAmount`, and a `_`-reject would be a NEW
+/// check that breaks parity).
+#[test]
+fn harvest_target_fromstr_matches_prior_parsers() {
+    use HarvestTarget::*;
+    // Bracket aliases, case-insensitive, all three spellings.
+    for s in [
+        "zero-ltcg",
+        "zero_ltcg",
+        "zeroltcg",
+        "ZERO-LTCG",
+        "  ZeroLtcg  ",
+    ] {
+        assert_eq!(s.parse::<HarvestTarget>(), Ok(ZeroLtcg), "{s:?}");
+    }
+    for s in [
+        "fifteen-ltcg",
+        "fifteen_ltcg",
+        "fifteenltcg",
+        "FIFTEEN-LTCG",
+    ] {
+        assert_eq!(s.parse::<HarvestTarget>(), Ok(FifteenLtcg), "{s:?}");
+    }
+    // gain=/tax= with the `$`/comma cleaning; case-insensitive prefix.
+    assert_eq!("gain=1000".parse::<HarvestTarget>(), Ok(Gain(dec!(1000))));
+    assert_eq!("gain=$1,000".parse::<HarvestTarget>(), Ok(Gain(dec!(1000))));
+    assert_eq!(
+        "gain=$1,000".parse::<HarvestTarget>(),
+        "gain=1000".parse::<HarvestTarget>(),
+        "$/comma are optional"
+    );
+    assert_eq!(
+        "GAIN=$25,000".parse::<HarvestTarget>(),
+        Ok(Gain(dec!(25000)))
+    );
+    assert_eq!("tax=$0".parse::<HarvestTarget>(), Ok(Tax(dec!(0))));
+    assert_eq!(
+        "tax=1500.50".parse::<HarvestTarget>(),
+        Ok(Tax(dec!(1500.50)))
+    );
+    // Rejections — unrecognized / empty → UnrecognizedTarget; bad amount → BadAmount.
+    assert!(matches!(
+        "nonsense".parse::<HarvestTarget>(),
+        Err(HarvestTargetParseError::UnrecognizedTarget(_))
+    ));
+    assert!(matches!(
+        "".parse::<HarvestTarget>(),
+        Err(HarvestTargetParseError::UnrecognizedTarget(_))
+    ));
+    assert!(matches!(
+        "gain=abc".parse::<HarvestTarget>(),
+        Err(HarvestTargetParseError::BadAmount(_))
+    ));
+    // Separator golden: `_` is NOT stripped (only `$`/`,`), but `rust_decimal` accepts `_` as a digit
+    // separator, so `gain=1_000` parses to `Gain(1000)` — byte-identical to the legacy lexer (which
+    // also only stripped `$`/`,`). Rejecting `_` here would be a NEW check that breaks parity.
+    assert_eq!("gain=1_000".parse::<HarvestTarget>(), Ok(Gain(dec!(1000))));
+}
+
+/// [★ C1] KAT: the lexer does NOT reject negatives. `gain=-1` → `Gain(-1)` (NOT a parse error); the
+/// ENGINE refuses it downstream as `InvalidTarget`. A parser-side reject would move the refusal
+/// (different class/path/message) and break parity — and is untested at the CLI, so it would ship
+/// silently. This pins the pure-lexer contract.
+#[test]
+fn harvest_target_gain_negative_parses_not_rejected() {
+    assert_eq!(
+        "gain=-1".parse::<HarvestTarget>(),
+        Ok(HarvestTarget::Gain(dec!(-1)))
+    );
+    assert_eq!(
+        "tax=-1".parse::<HarvestTarget>(),
+        Ok(HarvestTarget::Tax(dec!(-1)))
+    );
+    // With the `$`/comma cleaning too.
+    assert_eq!(
+        "gain=-$1,000".parse::<HarvestTarget>(),
+        Ok(HarvestTarget::Gain(dec!(-1000)))
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// P2 — `--sell` accepts BTC (smart parse, task #48 `whatif-sell-btc-input`). `parse_btc_amount` is
+// BTC-only (the TUI amount field); `parse_sell_arg` is the SMART CLI parser (`.`→BTC else sat).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// [I1] KAT: a bare `1` on the BTC-only parser is 1 BTC = 100,000,000 sat (the TUI amount-field
+/// meaning). `0.05`→5,000,000, `0.00000001`→1 sat exactly; `_`/`,` group separators are stripped.
+#[test]
+fn parse_btc_amount_bare_one_is_one_btc() {
+    assert_eq!(parse_btc_amount("1"), Ok(100_000_000));
+    assert_eq!(parse_btc_amount("0.05"), Ok(5_000_000));
+    assert_eq!(parse_btc_amount("0.00000001"), Ok(1));
+    assert_eq!(parse_btc_amount("1_000"), Ok(100_000_000_000));
+    assert_eq!(parse_btc_amount("1,000"), Ok(100_000_000_000));
+}
+
+/// KAT: the SMART `--sell` parser routes a dotted value to BTC and a bare integer to sat — `0.05`
+/// (BTC) == 5,000,000 sat == `5000000` (bare sat). The two spellings of the same quantity agree.
+#[test]
+fn parse_sell_arg_dot_is_btc_int_is_sat() {
+    assert_eq!(parse_sell_arg("0.05"), Ok(5_000_000));
+    assert_eq!(parse_sell_arg("5000000"), Ok(5_000_000));
+    assert_eq!(
+        parse_sell_arg("0.05"),
+        parse_sell_arg("5000000"),
+        "`0.05` BTC and `5000000` sat are the same quantity"
+    );
+    // A whole-BTC dotted form.
+    assert_eq!(parse_sell_arg("1.0"), Ok(100_000_000));
+    assert_eq!(parse_sell_arg("100000000"), Ok(100_000_000));
+}
+
+/// [★ I3] KAT: the non-`.` (sat) path is BYTE-IDENTICAL to the pre-0.5.0 `i64::from_str` parse —
+/// including NEGATIVES. `--sell -5` yields −5 sat (today's degenerate report), NOT a parse error;
+/// there is NO sat-side sign check. Large sat integers pass through unchanged.
+#[test]
+fn sell_arg_sat_path_byte_identical_incl_negative() {
+    assert_eq!(parse_sell_arg("-5"), Ok(-5));
+    assert_eq!(parse_sell_arg("0"), Ok(0));
+    assert_eq!(
+        parse_sell_arg("2100000000000000"),
+        Ok(2_100_000_000_000_000)
+    ); // 21M BTC in sat
+       // The sat path matches raw i64::from_str exactly (byte-identical semantics).
+    for s in ["-5", "0", "42", "  7  ", "9999999999"] {
+        assert_eq!(
+            parse_sell_arg(s),
+            Ok(s.trim().parse::<i64>().unwrap()),
+            "{s:?}"
+        );
+    }
+    // A non-numeric bare token fails on the sat path (same class as today).
+    assert!(parse_sell_arg("abc").is_err());
+}
+
+/// KAT: the BTC path REJECTS over-precision finer than 1 sat — EXACTLY, no float truncation.
+/// `0.000000001` (9 dp) → error; the boundary `0.00000001` (8 dp) is accepted as 1 sat.
+#[test]
+fn sell_over_precision_rejected() {
+    assert!(parse_btc_amount("0.000000001").is_err());
+    assert!(parse_sell_arg("0.000000001").is_err());
+    assert!(parse_btc_amount("0.123456789").is_err());
+    // The 8-dp boundary is fine (exact 1 sat) — proves it's a precision check, not a blanket reject.
+    assert_eq!(parse_btc_amount("0.00000001"), Ok(1));
+}
+
+/// KAT: a negative on the BTC (`.`) path is rejected — this is a NEW input (not the legacy sat path),
+/// so the BTC branch guards it. `-0.05` errors; the bare-sat `-5` still passes through (see the
+/// sat-path KAT). This is the ONE asymmetry between the two `--sell` branches, and it is intentional.
+#[test]
+fn sell_btc_negative_rejected() {
+    assert!(parse_btc_amount("-0.05").is_err());
+    assert!(parse_sell_arg("-0.05").is_err());
+    assert!(parse_sell_arg("-1.0").is_err());
+    // Contrast: the bare-sat negative is NOT rejected (byte-identical legacy path).
+    assert_eq!(parse_sell_arg("-5"), Ok(-5));
 }

@@ -27,6 +27,8 @@ use crate::state::{Blocker, Lot, Term};
 use crate::tax::{compute_tax_year, TaxOutcome, TaxProfile, TaxResult, TaxTables};
 use rust_decimal::prelude::ToPrimitive;
 use std::collections::BTreeSet;
+use std::fmt;
+use std::str::FromStr;
 
 /// The lot-selection choice for a hypothetical sale.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -380,6 +382,109 @@ pub enum HarvestTarget {
     /// Max N whose MARGINAL federal tax (`total(N) − total(0)`) is ≤ X. `tax=$0` is the flagship harvest
     /// primitive ("sell as much as possible adding zero federal tax"). Requires X ≥ 0.
     Tax(Usd),
+}
+
+/// Parse failure for [`HarvestTarget`]'s [`FromStr`] — the single source of truth shared by the CLI
+/// `--target` parse and the TUI panel's target field. A PURE LEXER: it accepts/rejects exactly what the
+/// legacy `parse_harvest_target` did. Note it does NOT reject negatives — `gain=-1`/`tax=-1` parse to
+/// `Gain(-1)`/`Tax(-1)` and the ENGINE refuses them as `InvalidTarget` (a downstream refusal, not a
+/// parse error), preserving the historical error class/path/message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HarvestTargetParseError {
+    /// The trimmed, lowercased string matched no alias and no `gain=`/`tax=` prefix. Carries the
+    /// ORIGINAL (un-lowercased) input for the message.
+    UnrecognizedTarget(String),
+    /// A `gain=`/`tax=` amount that `Usd::from_str` rejected (e.g. `gain=abc`). Only `$` and `,` are
+    /// stripped before parsing; `_` is left intact but `rust_decimal` accepts it as a digit separator,
+    /// so `gain=1_000` is `Gain(1000)`, NOT a `BadAmount` — parity with the legacy lexer. Carries the
+    /// offending amount substring.
+    BadAmount(String),
+}
+
+impl fmt::Display for HarvestTargetParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HarvestTargetParseError::UnrecognizedTarget(s) => write!(
+                f,
+                "bad --target {s:?}: expected zero-ltcg | fifteen-ltcg | gain=$X | tax=$X"
+            ),
+            HarvestTargetParseError::BadAmount(v) => {
+                write!(f, "bad --target amount {v:?}: expected a USD number")
+            }
+        }
+    }
+}
+
+impl std::error::Error for HarvestTargetParseError {}
+
+impl FromStr for HarvestTarget {
+    type Err = HarvestTargetParseError;
+
+    /// Parse `--target`: `zero-ltcg` | `fifteen-ltcg` | `gain=$X` | `tax=$X` (`$`/commas optional,
+    /// case-insensitive). BYTE-FOR-BYTE the legacy `parse_harvest_target` lexer — NO new checks, in
+    /// particular no negative-rejection (see [`HarvestTargetParseError`]).
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let lower = s.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "zero-ltcg" | "zero_ltcg" | "zeroltcg" => return Ok(HarvestTarget::ZeroLtcg),
+            "fifteen-ltcg" | "fifteen_ltcg" | "fifteenltcg" => {
+                return Ok(HarvestTarget::FifteenLtcg)
+            }
+            _ => {}
+        }
+        if let Some(v) = lower.strip_prefix("gain=") {
+            return Ok(HarvestTarget::Gain(parse_target_amount(v)?));
+        }
+        if let Some(v) = lower.strip_prefix("tax=") {
+            return Ok(HarvestTarget::Tax(parse_target_amount(v)?));
+        }
+        Err(HarvestTargetParseError::UnrecognizedTarget(s.to_string()))
+    }
+}
+
+/// Parse a `gain=`/`tax=` amount: strip `$` and `,` (NOT `_`), then `Usd::from_str`. Negatives parse
+/// fine (the engine refuses them downstream — see [`HarvestTargetParseError`]).
+fn parse_target_amount(v: &str) -> Result<Usd, HarvestTargetParseError> {
+    let cleaned = v.trim().replace(['$', ','], "");
+    Usd::from_str(&cleaned).map_err(|_| HarvestTargetParseError::BadAmount(v.to_string()))
+}
+
+/// Parse a BTC decimal amount (e.g. `0.05`) into satoshis. A bare `1` means **1 BTC** = 100,000,000
+/// sat — the TUI amount-field meaning. Strips `_`/`,` group separators (NOT `$` — a BTC amount carries
+/// no currency sign), parses an EXACT decimal (`× 100_000_000`), and REJECTS over-precision finer than
+/// 1 sat (`sat.fract() != 0`, no float) and negatives. The TUI amount field calls THIS directly, and it
+/// is the `.`-decimal branch of [`parse_sell_arg`]. (task #48 `whatif-sell-btc-input`.)
+pub fn parse_btc_amount(s: &str) -> Result<Sat, String> {
+    let cleaned = s.trim().replace(['_', ','], "");
+    if cleaned.is_empty() {
+        return Err("enter a BTC amount to sell".to_string());
+    }
+    let btc = Usd::from_str(&cleaned).map_err(|e| format!("bad BTC amount {s:?}: {e}"))?;
+    if btc < Usd::ZERO {
+        return Err(format!("BTC amount must be \u{2265} 0 (got {s:?})"));
+    }
+    let sats = btc * Usd::from(SATS_PER_BTC);
+    if sats.fract() != Usd::ZERO {
+        return Err(format!(
+            "BTC amount {s:?} is finer than 1 satoshi (max 8 decimal places)"
+        ));
+    }
+    sats.to_i64()
+        .ok_or_else(|| format!("BTC amount {s:?} is too large"))
+}
+
+/// Parse a `--sell` CLI argument — SMART (Option A). If the trimmed value contains a `.` it is a BTC
+/// decimal (via [`parse_btc_amount`]); otherwise it is a bare integer satoshi amount parsed EXACTLY as
+/// the legacy sat path (`i64::from_str`), sign PASSED THROUGH — `--sell -5` yields −5 sat (today's
+/// degenerate report), with NO sat-side sign check. Only the `.`-BTC path rejects negatives /
+/// over-precision (those are NEW inputs); the non-`.` path is byte-identical to the pre-0.5.0 parse.
+pub fn parse_sell_arg(s: &str) -> Result<Sat, String> {
+    let trimmed = s.trim();
+    if trimmed.contains('.') {
+        parse_btc_amount(s)
+    } else {
+        i64::from_str(trimmed).map_err(|e| format!("expected an integer sat amount: {e}"))
+    }
 }
 
 /// A hypothetical, NON-persisted harvest question.

@@ -19,7 +19,6 @@ use btctax_core::{
 };
 use btctax_store::Passphrase;
 use std::path::Path;
-use std::str::FromStr;
 
 /// A validated ad-hoc (non-persisted) profile spec built from the `what-if sell` flags. `filing_status`
 /// + `income` are mandatory to enter ad-hoc mode; `magi` is optional (defaults to `income`).
@@ -108,30 +107,14 @@ pub struct HarvestOutcome {
 }
 
 /// Parse `--target`: `zero-ltcg` | `fifteen-ltcg` | `gain=$X` | `tax=$X` (X >= 0; `$`/commas optional).
+///
+/// A thin wrapper over the single source of truth, [`HarvestTarget`]'s `FromStr` in `btctax-core`
+/// (shared with the TUI panel). The `Display` of the core error reproduces the historical `--target`
+/// messages; we only re-wrap it in the same `CliError::Usage` variant this parser has always used, so
+/// CLI error output stays stable.
 pub fn parse_harvest_target(s: &str) -> Result<HarvestTarget, CliError> {
-    let lower = s.trim().to_ascii_lowercase();
-    match lower.as_str() {
-        "zero-ltcg" | "zero_ltcg" | "zeroltcg" => return Ok(HarvestTarget::ZeroLtcg),
-        "fifteen-ltcg" | "fifteen_ltcg" | "fifteenltcg" => return Ok(HarvestTarget::FifteenLtcg),
-        _ => {}
-    }
-    if let Some(v) = lower.strip_prefix("gain=") {
-        return Ok(HarvestTarget::Gain(parse_target_amount(v)?));
-    }
-    if let Some(v) = lower.strip_prefix("tax=") {
-        return Ok(HarvestTarget::Tax(parse_target_amount(v)?));
-    }
-    Err(CliError::Usage(format!(
-        "bad --target {s:?}: expected zero-ltcg | fifteen-ltcg | gain=$X | tax=$X"
-    )))
-}
-fn parse_target_amount(v: &str) -> Result<Usd, CliError> {
-    let cleaned = v.trim().replace(['$', ','], "");
-    Usd::from_str(&cleaned).map_err(|e| {
-        CliError::Usage(format!(
-            "bad --target amount {v:?}: expected a USD number: {e}"
-        ))
-    })
+    s.parse::<HarvestTarget>()
+        .map_err(|e| CliError::Usage(e.to_string()))
 }
 
 /// `what-if harvest` — READ-ONLY harvest optimizer. Resolves the profile (ad-hoc if supplied, else the
@@ -225,7 +208,9 @@ mod tests {
         assert_eq!(explicit.magi_excluding_crypto, dec!(130000));
     }
 
-    /// `--target` parses the four forms; `$`/commas are optional; a bad form / negative is rejected.
+    /// `--target` parses the four forms; `$`/commas are optional; an unrecognized form / bad amount is
+    /// rejected. (Negatives are NOT rejected here — the pure lexer passes `gain=-1` through and the
+    /// ENGINE refuses it as `InvalidTarget`; see `cmd_and_panel_share_fromstr` + the core KAT.)
     #[test]
     fn parse_harvest_target_forms() {
         assert_eq!(
@@ -250,6 +235,43 @@ mod tests {
         );
         assert!(parse_harvest_target("nonsense").is_err());
         assert!(parse_harvest_target("gain=abc").is_err());
+    }
+
+    /// The CLI `--target` parse is now a thin wrapper over the shared core `HarvestTarget: FromStr`
+    /// (the same parser the TUI panel calls — dedup, task #48). Prove the wrapper delegates: for every
+    /// representative form the cmd parse's Ok value matches `s.parse::<HarvestTarget>()` and they agree
+    /// on success/failure — including the negative the lexer passes through (NOT a parse error) and the
+    /// `gain=1_000` underscore case (`Gain(1000)`, parity with the legacy lexer). (The cmd re-wraps any
+    /// Err in `CliError::Usage`, which adds a `usage: ` prefix — so we compare the Ok VALUE + the
+    /// err-ness, not the CLI-decorated message.) The panel shares the identical `from_str` (see
+    /// `whatif_panel::parse_harvest_target`); KAT-E10 keeps the panel free of `cmd::` tokens.
+    #[test]
+    fn cmd_and_panel_share_fromstr() {
+        for s in [
+            "zero-ltcg",
+            "FIFTEEN-LTCG",
+            "gain=$25,000",
+            "gain=1000",
+            "tax=$0",
+            "tax=1500.50",
+            "gain=-1",    // the lexer passes negatives through; the engine refuses them
+            "gain=1_000", // `_` accepted by rust_decimal → Gain(1000), parity with the legacy lexer
+            "nonsense",
+            "gain=abc",
+        ] {
+            let via_cmd = parse_harvest_target(s);
+            let via_core = s.parse::<HarvestTarget>();
+            assert_eq!(
+                via_cmd.as_ref().ok(),
+                via_core.as_ref().ok(),
+                "cmd wrapper must yield FromStr's Ok value: {s:?}"
+            );
+            assert_eq!(
+                via_cmd.is_err(),
+                via_core.is_err(),
+                "cmd wrapper must agree with FromStr on failure: {s:?}"
+            );
+        }
     }
 
     /// The ad-hoc long-term carryforward-in flows into the profile (short stays $0).
