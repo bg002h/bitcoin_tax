@@ -113,12 +113,19 @@ pub struct Snapshot {
     /// stamp. The Disposals tab renders an `[est]` marker on flagged rows; the Compliance tab shows
     /// an advisory count. Loaded via `Session::bulk_estimated()` [R0-M1], never `conn()` directly.
     pub bulk_estimated: BTreeMap<EventId, String>,
+    /// [whatif P3] The active price provider (bundled daily-close dataset + local cache overlay),
+    /// OWNED so the read-only what-if panel (`w`) can call `btctax_core::whatif::{sell,harvest}`
+    /// without re-opening the vault. Built in `build_snapshot` via
+    /// `LayeredPrices::load_with_cache(price_cache::default_cache_path())` — BYTE-IDENTICAL to the
+    /// session's own `default_prices()` (session.rs), so the panel's baseline matches the Tax tab.
+    /// Read-only: a `PriceProvider` is a pure lookup; it never writes.
+    pub prices: btctax_adapters::LayeredPrices,
 }
 
 /// Top-level application state.
 ///
 /// `handle_key` mutates ONLY UI navigation fields (`screen`, `tab`, `should_quit`,
-/// `selected_year`, `unlock`, `export_modal`, `export_status`). It NEVER mutates ledger data.
+/// `selected_year`, `unlock`, `export_modal`, `export_status`, `whatif`). It NEVER mutates ledger data.
 ///
 /// Kept `pub(crate)` so the viewer's internal surface does not leak into the editor crate —
 /// the editor uses `btctax_tui::unlock::open_session` and `tabs::*::render` instead.
@@ -156,6 +163,11 @@ pub(crate) struct App {
     /// One-line export status shown in the footer after a completed export or error.
     /// Cleared on the next non-modal key press.
     pub export_status: Option<String>,
+    /// [whatif P3] The read-only what-if planner panel. `Some` while the panel is open; `None`
+    /// otherwise. Opened by the `w` keybinding (no-op with no snapshot); closed on `Esc`. The panel
+    /// calls ONLY the non-persisting `btctax_core::whatif::{sell,harvest}` (clone-fold-discard) and
+    /// reads `snapshot` — it NEVER touches the vault, `conn()`, or any writer.
+    pub whatif: Option<crate::whatif_panel::WhatIfPanel>,
 }
 
 impl App {
@@ -180,6 +192,7 @@ impl App {
             forms_state: TableState::default(),
             export_modal: None,
             export_status: None,
+            whatif: None,
         }
     }
 

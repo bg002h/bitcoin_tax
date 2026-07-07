@@ -23,6 +23,23 @@ requires typing the exact attestation phrase
 .B I attest this is true
 before it will write the fictional draft \(em a fully\-real ledger exports with a plain confirm.
 .PP
+Press
+.B w
+to open the READ\-ONLY what\-if planner: type a hypothetical sell amount (in BTC) for a live
+marginal\-tax report (the sale's own §1212 carryforward delta, §1(h) LTCG bracket + room,
+NIIT), or toggle to Harvest and pick a target
+.RB ( zero\-ltcg ,
+.BR fifteen\-ltcg ,
+.BR gain=$X ,
+.BR tax=$X )
+to solve for the maximum sellable amount under that constraint. The planner reuses the same
+audited tax engine as
+.BR btctax (1)
+.B what\-if
+and computes on
+.BR Enter ;
+it NEVER writes the vault.
+.PP
 The vault path is taken from
 .B \-\-vault
 .I PATH
@@ -85,6 +102,23 @@ Page up / down.
 .TP
 .B g / G
 Jump to top / bottom.
+.TP
+.B w
+Open the read\-only what\-if planner overlay (hypothetical sell / harvest tax report).
+.B Tab
+toggles Sell / Harvest
+.RB ( s
+Sell,
+.B h
+Harvest);
+.B Up / Down
+move between input fields;
+.B \(<- / \(->
+cycle the wallet picker;
+.B Enter
+computes;
+.B Esc
+closes. The planner never writes the vault.
 .TP
 .B e
 Export the decrypted snapshot + projection CSVs for the selected year (confirmation modal).

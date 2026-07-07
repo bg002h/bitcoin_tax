@@ -27,7 +27,7 @@ reproducible and auditable.
 | Binary | What it is |
 |---|---|
 | **`btctax`** | The CLI engine — init, import, reconcile, and compute. Everything scriptable lives here. |
-| **`btctax-tui`** | A read-only terminal viewer for your holdings, disposals, income, and forms. |
+| **`btctax-tui`** | A read-only terminal viewer for your holdings, disposals, income, and forms. Press **`w`** for the read-only what-if planner (hypothetical sell / harvest tax report). |
 | **`btctax-tui-edit`** | An interactive terminal editor for reconciling — guided flows over the full decision surface. Press **`?`** in-app for the keymap. |
 | **`btctax-update-prices`** | An **optional, online** helper that fetches newer daily BTC/USD closes into a local price cache. The **only** tool that touches the network; the three tax binaries above never do. See [Price data](#price-data). |
 
@@ -37,7 +37,10 @@ three binaries — see [Getting help](#getting-help).
 > **TUI keys (both viewer and editor):** the Holdings / Disposals / Income tables are now column-sortable.
 > `←`/`→` (or `h`/`l`) move the column cursor, `s` sorts the focused column (toggling ascending/descending),
 > and `[` / `]` change the tax year (previously `←`/`→`). In the editor, select-lots and link-transfer moved
-> to **`S`** and **`L`** (freeing `s`/`l` for sorting/cursor).
+> to **`S`** and **`L`** (freeing `s`/`l` for sorting/cursor). In the viewer, **`w`** opens the read-only
+> what-if planner — type a hypothetical BTC sell amount (or toggle to Harvest and pick a target) for a live
+> marginal-tax report; **`Tab`** toggles Sell/Harvest, **`Enter`** computes, **`Esc`** closes. It never
+> writes the vault (same engine as [`btctax what-if`](#plan-a-sale-before-you-make-it--what-if)).
 
 ---
 

@@ -5311,6 +5311,7 @@ mod tests {
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
+            prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
         };
 
         let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));

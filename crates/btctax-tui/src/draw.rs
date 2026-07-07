@@ -148,7 +148,7 @@ fn draw_viewer(frame: &mut Frame, app: &mut App) {
         status.to_string()
     } else {
         "Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   \
-         g/G: top/bottom   e: export   q/Esc: quit"
+         g/G: top/bottom   w: what-if   e: export   q/Esc: quit"
             .to_string()
     };
     let footer = Paragraph::new(footer_text).alignment(Alignment::Center);
@@ -158,6 +158,34 @@ fn draw_viewer(frame: &mut Frame, app: &mut App) {
     if let Some(modal) = app.export_modal.as_ref() {
         draw_export_modal(frame, area, modal);
     }
+
+    // ── What-if planner overlay [whatif P3] ────────────────────────────────────
+    if let Some(panel) = app.whatif.as_ref() {
+        draw_whatif_panel(frame, area, panel);
+    }
+}
+
+/// Render the read-only what-if planner overlay centered over `area` [whatif P3].
+///
+/// Clears the underlying tab content first, then draws the panel body (inputs + the last computed
+/// report/refusal) in a bordered box. Drawn AFTER the tab content so it appears on top. The body text
+/// comes from `WhatIfPanel::render_body`; this function performs NO computation and NO writes.
+fn draw_whatif_panel(frame: &mut Frame, area: Rect, panel: &crate::whatif_panel::WhatIfPanel) {
+    let body = panel.render_body();
+    // A large centered box (most of the screen) so the full report fits.
+    let width = 88u16.min(area.width);
+    let height = area.height.saturating_sub(2).max(12);
+    let rect = centered_rect(width, height, area);
+
+    frame.render_widget(Clear, rect);
+    let p = Paragraph::new(body)
+        .block(
+            Block::default()
+                .title(" What-if planner (read-only — the vault is never written) ")
+                .borders(Borders::ALL),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(p, rect);
 }
 
 /// Render the export confirmation modal centered over `area`.
