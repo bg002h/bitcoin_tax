@@ -1,10 +1,10 @@
 # SPEC — 0.5.0 what-if cleanup (harvest-target parser dedup + `--sell` BTC input) — task #48
 
-**Source baseline:** `main` @ `2e89911` (branch `feat/whatif-0.4.1`). **Review status: R0 round 1 folded
-(1C/4I/3M/2N — Opus; behavior-preservation traps + SemVer; merged IN-PLACE). Awaiting R0 round 2.** Review:
-`reviews/R0-spec-whatif-0.4.1-round-1.md`. **[R0-I2] SemVer corrected: MINOR → 0.5.0** (adding pub API —
+**Source baseline:** `main` @ `2e89911` (branch `feat/whatif-0.4.1`). **Review status: R0-GREEN (2 rounds; 0C/0I).
+Cleared to implement.** Reviews: `reviews/R0-spec-whatif-0.4.1-round-{1,2}.md`. r1 1C/4I (Opus — the parser must
+NOT reject negatives; two BTC/sat helpers; MINOR not PATCH); r2 0C/1I (Opus — swept the stale Plan/PATCH residue). **[R0-I2] SemVer corrected: MINOR → 0.5.0** (adding pub API —
 `FromStr`/`HarvestTargetParseError`/the parse helpers — to published btctax-core is additive-public, NOT PATCH). Brainstorm: `design/BRAINSTORM_whatif_0_4_1_cleanup.md`. Recon:
-`cycle-prep-recon-whatif-sell-btc-input-tui-parser-dedup.md`. Two FOLLOWUPS, one combined PATCH cycle. The
+`cycle-prep-recon-whatif-sell-btc-input-tui-parser-dedup.md`. Two FOLLOWUPS, one combined MINOR (0.5.0) cycle. The
 verified `whatif::{sell,harvest}` tax core is UNCHANGED.
 
 ## P1 — `whatif-tui-parser-dedup`: one harvest-target parser (`FromStr`)
@@ -29,7 +29,8 @@ the **KAT-E10 source-gate** (forbids `cmd::` tokens in btctax-tui/src) stays gre
   CliError::…(e.to_string()))` (keep the exact CliError variant it uses today so cli error messages are stable);
   the TUI panel's local parse → `s.parse::<HarvestTarget>()` mapping the Err to its UI string. **KAT-E10 stays
   green** — the panel already depends on `btctax_core`, so no `cmd::` token appears.
-- NO behavior/surface change (identical accepted strings + identical rejections). PATCH.
+- NO behavior/surface change (identical accepted strings + identical rejections) — the version bump is driven
+  by the new pub core API (P2/§Scope), not P1 behavior.
 
 ## P2 — `whatif-sell-btc-input`: `--sell` accepts BTC (smart parse, Option A)
 **[R0-M1 citation fix]** `WhatIf::Sell.sell` is ALREADY a `String` (cli.rs:337), manually parsed to sat at
@@ -52,7 +53,8 @@ main.rs:224 (NOT a bare `i64`); the smart parser replaces that manual parse. **[
 
 ## KATs
 - **P1:** `harvest_target_fromstr_matches_prior_parsers` — every accepted form (3 aliases each incl.
-  case-insensitive `GAIN=`, `gain=$1,000`==`gain=1000`, `tax=$0`) parses identically to the pre-refactor result;
+  case-insensitive `GAIN=`, `gain=$1,000`==`gain=1000`, `tax=$0`) parses identically to the pre-refactor result,
+  incl. the separator golden `gain=1_000` → BadAmount (`_` is NOT stripped, only `$`/`,`);
   **[★ C1] `harvest_target_gain_negative_parses_not_rejected`** (`gain=-1` → `Gain(dec!(-1))`, NOT a parser
   error — the engine refuses it downstream); rejections limited to `foo`/empty/`gain=abc`;
   `cmd_and_panel_share_fromstr`; **KAT-E10 still passes** (no `cmd::` in the panel).
@@ -70,15 +72,17 @@ btctax-core (+`FromStr`/`HarvestTargetParseError`, +`parse_btc_amount`/`parse_se
 calls `HarvestTarget::from_str` + keeps `parse_btc_amount` for the amount field). **[★ R0-I2] MINOR → 0.5.0**
 (NOT 0.4.1 — the new `pub` `FromStr`/`HarvestTargetParseError`/`parse_btc_amount`/`parse_sell_arg` are additive
 PUBLIC API on published btctax-core; behavior stays non-breaking, but the surface grows). (Branch name
-`feat/whatif-0.4.1` is now a misnomer — the release is 0.5.0.) **Lockstep:** regenerate
-`docs/man/btctax-what-if-sell.1` (+ `btctax-optimize-consult.1` if it shows `--sell`) from the cli.rs:335
-doc-comment via `xtask docs` ("accepts a sat integer OR a BTC decimal, e.g. `0.05` or `5000000`") + the README
-`what-if` note. No GUI/schema-mirror (this repo has none). Network isolation unchanged.
+`feat/whatif-0.4.1` is now a misnomer — the release is 0.5.0.) **Lockstep [R0-M2]:** update BOTH `--sell` doc-comments —
+the `what-if sell` one (cli.rs:335) AND the `optimize consult` one (cli.rs:301, currently "in satoshis") — to
+"accepts a sat integer OR a BTC decimal, e.g. `0.05` or `5000000`", then regenerate
+`docs/man/btctax-what-if-sell.1` + `docs/man/btctax-optimize-consult.1` via `xtask docs` + the README
+`what-if`/`optimize` notes. No GUI/schema-mirror (this repo has none). Network isolation unchanged.
 
 ## Plan (TDD)
 - **T1 (P1 dedup)** — `FromStr`/error in core; rewire cmd + panel; the P1 KATs; confirm KAT-E10 green.
-- **T2 (P2 BTC input)** — `parse_btc_or_sat` in core; the `--sell` smart parser (cli) + the TUI amount field
-  both call it; the P2 KATs; man page + README; whole-diff; ship 0.4.1.
+- **T2 (P2 BTC input)** — `parse_btc_amount` (BTC-only) + `parse_sell_arg` (smart) in core; wire `what-if sell
+  --sell` AND `optimize consult --sell` to `parse_sell_arg`; the TUI amount field keeps calling `parse_btc_amount`
+  (unchanged — bare `1` = 1 BTC); the P2 KATs; regenerate the man pages + README; whole-diff; **ship 0.5.0**.
 
 ## Gotchas
 - **[★ P1-C1 pure lexer]** the `FromStr` accepts/rejects EXACTLY what `parse_harvest_target` does today —
