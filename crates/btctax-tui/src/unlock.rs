@@ -177,6 +177,13 @@ pub fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
     let donation_details = session.donation_details()?;
     // [R0-M1] the `[est]` marker set — loaded via the typed accessor, NEVER `conn()` directly.
     let bulk_estimated = session.bulk_estimated()?;
+    // [whatif P3 / R0-I1] The owned price provider for the read-only what-if panel — built EXACTLY as
+    // the session's own `default_prices()` (session.rs): the bundled daily-close dataset with the LOCAL
+    // price cache layered over it. MUST pass the real cache path (never `None`) so the panel's prices are
+    // byte-identical to the viewer's tabs. `?` compiles: `From<AdapterError> for CliError` exists.
+    let prices = btctax_adapters::LayeredPrices::load_with_cache(
+        btctax_cli::price_cache::default_cache_path().as_deref(),
+    )?;
     let year = latest_year(&state);
     let snapshot = Snapshot {
         events,
@@ -186,6 +193,7 @@ pub fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
         tables,
         donation_details,
         bulk_estimated,
+        prices,
     };
     Ok((snapshot, year))
 }
@@ -585,6 +593,41 @@ mod tests {
             "[KAT-E3] vault file must be byte-identical after a full export cycle \
              (export writes only to the timestamped CSVs, never the vault)"
         );
+    }
+
+    // ── [R0-M4] build_snapshot prices parity ────────────────────────────────
+    //
+    // The snapshot's owned `LayeredPrices` (built in `build_snapshot`) must return the SAME FMV as the
+    // session's own price provider for a sample date — i.e. it is byte-identical to the session's
+    // `default_prices()`, not merely "is set". This is what makes the what-if panel's baseline agree
+    // with the viewer's Tax tab.
+
+    #[test]
+    fn build_snapshot_prices_parity() {
+        use btctax_core::PriceProvider;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key_backup = dir.path().join("key.asc");
+        let pp_str = "prices-parity-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key_backup).unwrap();
+
+        let session = btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into()))
+            .expect("open must succeed");
+        let (snapshot, _year) = build_snapshot(&session).expect("build_snapshot must succeed");
+
+        // Real bundled dates: the snapshot provider and the session provider must agree exactly.
+        for sample in [
+            time::macros::date!(2025 - 06 - 15),
+            time::macros::date!(2026 - 06 - 03),
+            time::macros::date!(2030 - 01 - 01), // uncovered → None on both
+        ] {
+            assert_eq!(
+                snapshot.prices.usd_per_btc(sample),
+                session.prices().usd_per_btc(sample),
+                "snapshot prices must match the session's own provider at {sample}"
+            );
+        }
     }
 
     // ── Wrapper-consistency KAT: attempt_open and open_session agree ─────────

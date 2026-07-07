@@ -41,6 +41,8 @@ pub mod sort;
 pub mod tabs;
 /// Vault-open logic and unlock screen state.
 pub mod unlock;
+/// The read-only what-if planner panel (`w`): reuses `btctax_core::whatif::{sell,harvest}`.
+pub mod whatif_panel;
 
 use app::{App, Screen, Tab};
 use crossterm::{
@@ -173,6 +175,14 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
         return; // Modal consumed the key — skip screen dispatch.
     }
 
+    // ── What-if panel dispatch — panel-first while open [whatif P3 / R0-M3] ───
+    // The read-only planner overlay takes focus + gets keys FIRST (like the export modal): printable
+    // chars edit its sub-fields, so 'q' never quits while it is open. Esc closes it. It NEVER writes.
+    if app.whatif.is_some() {
+        handle_whatif_key(app, key);
+        return; // Panel consumed the key — skip screen dispatch.
+    }
+
     // Screen dispatch FIRST — so Unlock never accidentally fires global quit/tab keys.
     match app.screen {
         Screen::Unlock => match key.code {
@@ -229,6 +239,15 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
                 KeyCode::Char(']') => {
                     app.selected_year += 1;
                     reset_selections(app);
+                }
+                // [whatif P3] Open the read-only what-if planner overlay. No-op with no snapshot
+                // [M5 whatif_panel_w_noop_before_snapshot] — the panel needs the read-only snapshot.
+                KeyCode::Char('w') => {
+                    if let Some(snap) = app.snapshot.as_ref() {
+                        let now = OffsetDateTime::now_utc();
+                        app.whatif =
+                            Some(whatif_panel::WhatIfPanel::new(snap, app.selected_year, now));
+                    }
                 }
                 // [D4] Export keybinding: open the confirmation modal.
                 // No-op when no snapshot is loaded [KAT-E8].
@@ -340,6 +359,82 @@ fn run_export(app: &mut App) {
                 app.export_status = Some(format!("Export error: {e}"));
             }
         }
+    }
+}
+
+// ── What-if panel dispatch ──────────────────────────────────────────────────────
+
+/// Dispatch a key while the read-only what-if planner overlay is open [whatif P3].
+///
+/// Panel-first: printable chars edit the focused sub-field (so `q` never quits while it is open).
+/// `Esc` closes it; `Tab`/`s`/`h` switch Sell⇄Harvest; `↑`/`↓` (+`BackTab`) move field focus;
+/// `←`/`→` cycle the wallet picker; `Enter` computes (EXPLICIT — never per-keystroke [R0-M2]).
+///
+/// The panel calls ONLY the non-persisting `btctax_core::whatif::{sell,harvest}` and reads `snapshot`;
+/// it NEVER writes the vault. `handle_key`'s read-only invariant is preserved: this touches only the
+/// `whatif` UI field (+ reads the read-only snapshot on Enter).
+fn handle_whatif_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Esc closes the panel — writes nothing, does NOT quit.
+        KeyCode::Esc => app.whatif = None,
+        // Sell ⇄ Harvest toggle + explicit selectors ('s' Sell / 'h' Harvest).
+        KeyCode::Tab => {
+            if let Some(p) = app.whatif.as_mut() {
+                p.toggle_mode();
+            }
+        }
+        KeyCode::Char('s') => {
+            if let Some(p) = app.whatif.as_mut() {
+                p.set_mode(whatif_panel::WhatIfMode::Sell);
+            }
+        }
+        KeyCode::Char('h') => {
+            if let Some(p) = app.whatif.as_mut() {
+                p.set_mode(whatif_panel::WhatIfMode::Harvest);
+            }
+        }
+        // Field focus: ↑/BackTab previous, ↓ next.
+        KeyCode::Up | KeyCode::BackTab => {
+            if let Some(p) = app.whatif.as_mut() {
+                p.focus_prev();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(p) = app.whatif.as_mut() {
+                p.focus_next();
+            }
+        }
+        // Wallet picker (only cycles when the Wallet field is focused).
+        KeyCode::Left => {
+            if let Some(p) = app.whatif.as_mut() {
+                p.wallet_prev();
+            }
+        }
+        KeyCode::Right => {
+            if let Some(p) = app.whatif.as_mut() {
+                p.wallet_next();
+            }
+        }
+        // EXPLICIT compute — needs the read-only snapshot + the selected year.
+        KeyCode::Enter => {
+            if let Some(snap) = app.snapshot.as_ref() {
+                if let Some(p) = app.whatif.as_mut() {
+                    p.compute(snap, app.selected_year);
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(p) = app.whatif.as_mut() {
+                p.backspace();
+            }
+        }
+        // All other printable chars edit the focused text field.
+        KeyCode::Char(c) => {
+            if let Some(p) = app.whatif.as_mut() {
+                p.push_char(c);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1066,6 +1161,7 @@ mod tests {
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
+            prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
         };
 
         let mut test_app = App::new(vault_path);
@@ -1174,6 +1270,7 @@ mod tests {
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
+            prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
         };
 
         let mut test_app = App::new(vault);
@@ -1268,6 +1365,7 @@ mod tests {
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
+            prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
         };
         let mut a = App::new(vault);
         a.screen = Screen::Viewer;
@@ -1410,6 +1508,143 @@ mod tests {
         assert!(
             out_dir.join("form8949.csv").exists(),
             "form8949.csv must be written on plain confirm"
+        );
+    }
+
+    // ── whatif P3 — the read-only what-if planner overlay ────────────────────
+
+    /// [M5] `w` on the Unlock screen (no snapshot) is a no-op: it does NOT open the panel (and, as a
+    /// printable char, it lands in the passphrase buffer). `w` on the Viewer with no snapshot is a
+    /// pure no-op. Neither path panics.
+    #[test]
+    fn whatif_panel_w_noop_before_snapshot() {
+        // Unlock screen: 'w' is a passphrase char, never opens the panel.
+        let mut app = new_app();
+        assert_eq!(app.screen, Screen::Unlock);
+        handle_key(&mut app, press(KeyCode::Char('w')));
+        assert!(
+            app.whatif.is_none(),
+            "'w' on Unlock must NOT open the what-if panel"
+        );
+        assert_eq!(
+            app.unlock.buffer.chars().count(),
+            1,
+            "'w' on Unlock goes to the passphrase buffer"
+        );
+
+        // Viewer screen with no snapshot: pure no-op.
+        let mut app2 = new_app();
+        app2.screen = Screen::Viewer;
+        assert!(app2.snapshot.is_none());
+        handle_key(&mut app2, press(KeyCode::Char('w')));
+        assert!(
+            app2.whatif.is_none(),
+            "'w' with no snapshot must not open the panel"
+        );
+    }
+
+    /// [★ whatif_panel_never_persists] The NON-NEGOTIABLE gate: open the panel, drive it through a
+    /// SELL and a HARVEST compute, then close it — and the vault file is BYTE-IDENTICAL afterward. The
+    /// panel calls only the clone-fold-discard `whatif::{sell,harvest}` + reads the snapshot; it never
+    /// writes. (An empty vault yields NoLots refusals — the compute paths still execute, still write
+    /// nothing.)
+    #[test]
+    fn whatif_panel_never_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp = "whatif-nopersist-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp.into()), &key).unwrap();
+
+        let bytes_before = std::fs::read(&vault).expect("vault readable before");
+
+        let outcome = crate::unlock::attempt_open(&vault, Passphrase::new(pp.into()));
+        let (snapshot, year) = match outcome {
+            crate::unlock::OpenOutcome::Success(s, y) => (s, y),
+            _ => panic!("open must succeed for the non-persistence KAT"),
+        };
+        let mut app = App::new(vault.clone());
+        app.screen = Screen::Viewer;
+        app.selected_year = year;
+        app.snapshot = Some(*snapshot);
+
+        // Open the panel with 'w'.
+        handle_key(&mut app, press(KeyCode::Char('w')));
+        assert!(app.whatif.is_some(), "'w' opens the what-if panel");
+
+        // Drive a SELL: focus the amount, type a BTC decimal, move to the price, type a price, compute.
+        handle_key(&mut app, press(KeyCode::Down)); // At -> Amount
+        for c in "0.5".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Down)); // Amount -> Wallet
+        handle_key(&mut app, press(KeyCode::Down)); // Wallet -> Price
+        for c in "30000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // EXPLICIT compute (NoLots on an empty vault)
+
+        // Toggle to HARVEST and compute the default target.
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert!(
+            matches!(
+                app.whatif.as_ref().unwrap().mode,
+                crate::whatif_panel::WhatIfMode::Harvest
+            ),
+            "Tab toggles to HARVEST"
+        );
+        handle_key(&mut app, press(KeyCode::Enter)); // compute harvest
+
+        // Close the panel.
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(app.whatif.is_none(), "Esc closes the panel");
+        assert!(!app.should_quit, "Esc on the panel must not quit the app");
+
+        drop(app);
+        let bytes_after = std::fs::read(&vault).expect("vault readable after");
+        assert_eq!(
+            bytes_before, bytes_after,
+            "[★] the vault file MUST be byte-identical after opening + driving the what-if panel"
+        );
+    }
+
+    /// `handle_key_still_only_mutates_ui` — the app.rs:120 read-only invariant, EXTENDED to the panel:
+    /// driving the panel through a full sell/harvest/toggle/close lifecycle mutates ONLY the `whatif`
+    /// UI field — never the read-only `snapshot` (events + projected state are unchanged).
+    #[test]
+    fn handle_key_still_only_mutates_ui() {
+        let (_dir, vault) = export_vault("whatif-ui-invariant-pass");
+        let mut app = viewer_app_with_state(vault, LedgerState::default());
+
+        let events_before = app.snapshot.as_ref().unwrap().events.clone();
+        let lots_before = app.snapshot.as_ref().unwrap().state.lots.len();
+
+        // Full panel lifecycle: open, type, compute, toggle both ways, close.
+        handle_key(&mut app, press(KeyCode::Char('w')));
+        handle_key(&mut app, press(KeyCode::Down)); // -> Amount
+        for c in "0.25".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // compute sell
+        handle_key(&mut app, press(KeyCode::Char('h'))); // -> Harvest
+        handle_key(&mut app, press(KeyCode::Enter)); // compute harvest
+        handle_key(&mut app, press(KeyCode::Char('s'))); // -> Sell
+        handle_key(&mut app, press(KeyCode::Esc)); // close
+
+        let snap = app.snapshot.as_ref().unwrap();
+        assert_eq!(
+            snap.events, events_before,
+            "handle_key must NOT mutate ledger events (read-only invariant)"
+        );
+        assert_eq!(
+            snap.state.lots.len(),
+            lots_before,
+            "handle_key must NOT mutate projected ledger state"
+        );
+        assert!(app.whatif.is_none(), "the panel is closed");
+        assert!(
+            !app.should_quit,
+            "panel keys (incl. 's'/'h') must not quit while planning"
         );
     }
 }
