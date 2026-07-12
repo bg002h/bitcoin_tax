@@ -270,6 +270,10 @@ pub enum Command {
         /// Show the stored profile for `--year` instead of setting it.
         #[arg(long, default_value_t = false)]
         show: bool,
+        /// Store the raw profile even when full-return inputs (`income import`) already exist for the year
+        /// (they take precedence, so the raw profile would otherwise be ignored — D-4 guard).
+        #[arg(long, default_value_t = false)]
+        force: bool,
     },
 }
 

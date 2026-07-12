@@ -12,13 +12,24 @@ use btctax_store::Passphrase;
 use std::path::Path;
 
 /// Persist `p` as the tax profile for `year` in the vault at `vault`, then save.
+///
+/// **D-4 guard (SPEC §4.12):** when full-return `ReturnInputs` already exist for the year, a raw
+/// `tax-profile` would be IGNORED (`resolve_profile` gives `ReturnInputs` precedence). Refuse rather than
+/// silently store an unused figure — the two-sources-of-truth cardinal sin — unless `force` is set.
 pub fn set_profile(
     vault: &Path,
     pp: &Passphrase,
     year: i32,
     p: TaxProfile,
+    force: bool,
 ) -> Result<(), CliError> {
     let mut s = Session::open(vault, pp)?;
+    if !force && return_inputs::exists(s.conn(), year)? {
+        return Err(CliError::Usage(format!(
+            "tax year {year} already has full-return inputs (`income import`); a raw tax-profile would be \
+             ignored (full-return inputs take precedence). Re-run with --force to store it anyway."
+        )));
+    }
     tax_profile::set(s.conn(), year, &p)?;
     s.save()
 }

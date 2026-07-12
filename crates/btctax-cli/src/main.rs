@@ -683,6 +683,7 @@ fn run() -> Result<ExitCode, CliError> {
             w2_medicare_wages,
             schedule_c_expenses,
             show,
+            force,
         } => {
             let pp = passphrase(false)?;
             if show {
@@ -800,7 +801,7 @@ fn run() -> Result<ExitCode, CliError> {
                     w2_medicare_wages: w2_medicare,
                     schedule_c_expenses: sce,
                 };
-                cmd::tax::set_profile(vault, &pp, year, profile)?;
+                cmd::tax::set_profile(vault, &pp, year, profile, force)?;
                 println!("Tax profile for {year} saved.");
             }
         }
