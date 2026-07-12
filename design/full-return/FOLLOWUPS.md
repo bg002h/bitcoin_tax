@@ -62,9 +62,22 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 - **p1-carryover-writeback-P3P4** (SCHEDULED → P3/P4) — charitable + capital-loss carryovers are read from
   `ReturnInputs` but not yet written back (next-year carryforward_out). The write-back lands with the
   Schedule A / Schedule D compute stages in P3/P4; P1 only stores the declared inputs.
-- **p1-task4-row-reclassification** (DEFERRED → task-4 follow-on) — reclassifying an imported inbound row
-  (e.g. income ↔ self-transfer) from inside the full-return flow is out of P1; the existing ledger
-  reclassification commands remain the path. Revisit when task-4 row editing is specced.
+- **p1-se-earners-and-business-interest-rows** (SCHEDULED → P2, MANDATORY) — plan P1 task 4
+  (`IMPLEMENTATION_PLAN_full_return.md`) listed the **≥2-SE-earners** and **business-flagged crypto
+  interest** refuse rows (both normative SPEC §4.10) among the P1 input-screenable set. The impl defensibly
+  reclassified both as **ledger-dependent** (they need the assembled income / ledger, not just
+  `ReturnInputs`) and moved them to P2/P3 — but this was documented only in the `return_refuse.rs` module
+  doc. P2 (income assembly) MUST implement both refuse rows, or a two-SE-earner household / business-flagged
+  crypto interest silently computes a wrong return. Same class as `p1-consumer-sweep-P2` (hard P2 task, not
+  opportunistic). Closes r1-I6.5 (review R2-I3).
+- **p1-task4-row-reclassification** (DEFERRED → task-4 follow-on) — reclassifying an imported inbound *ledger*
+  row (e.g. income ↔ self-transfer) from inside the full-return flow is out of P1; the existing reconcile
+  reclassification commands remain the path. Distinct from the refuse-row reclassification above. Revisit
+  when task-4 row editing is specced.
+- **p1-ssn-normalization-P6** (SCHEDULED → P6) — `income import` stores the SSN AS ENTERED; only *masking*
+  (the security-load-bearing half) ships in P1. Canonicalization to `NNN-NN-NNNN` (or digits-only) is
+  deferred to P6, where the PDF filler needs a single on-form format. Person's doc no longer claims
+  "normalized" (review R2-M3).
 - **p1-r1-m2-excess-aptc** (NOTE — already tracked) — the impl leaves Sch 2 L1a (excess-APTC) with no input,
   consistent with `fr-8962-taxonomy` above (unrepresentable / would-refuse-if-captured). No new action; this
   cross-links the two so the P3 Schedule-2 filler doesn't treat L1a as a live zero.

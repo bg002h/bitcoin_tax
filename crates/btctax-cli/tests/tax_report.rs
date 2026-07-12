@@ -526,6 +526,40 @@ fn report_tax_year_without_profile_says_not_computable() {
     );
 }
 
+/// [full-return P1 / review R2-M2] With `ReturnInputs` stored for the year, `report_tax_year` must not
+/// silently treat the year as profile-less — full-return computation (`derive_tax_profile`) is Phase 2,
+/// so the resolver reports derivation-pending and `report_tax_year` returns a `Usage` error whose text
+/// points at the real `income clear --year N` recovery path (the I3 dead-end fix). This is the executable
+/// test for the pending-derivation branch itself.
+#[test]
+fn report_tax_year_with_return_inputs_refuses_pending_with_income_clear_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    let toml = dir.path().join("inputs.toml");
+    std::fs::write(&toml, "filing_status = \"Single\"\n").unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml).unwrap();
+
+    let err = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap_err();
+    match err {
+        btctax_cli::CliError::Usage(msg) => {
+            assert!(msg.contains("full-return"), "message should explain why: {msg}");
+            assert!(
+                msg.contains("income clear --year 2025"),
+                "message must point at the working recovery command: {msg}"
+            );
+        }
+        other => panic!("expected a Usage error for pending derivation, got {other:?}"),
+    }
+
+    // Recovery works: after `income clear`, the same year is no longer pending (falls back to no-profile).
+    assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2025).unwrap());
+    let (outcome, ..) = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    // No profile, no events ⇒ TaxProfileMissing (NOT the pending Usage error).
+    assert!(matches!(outcome, btctax_core::TaxOutcome::NotComputable(_)));
+}
+
 /// Unresolved hard blocker (UnknownBasisInbound from unclassified Receive) →
 /// `NotComputable(TaxYearNotComputable)` rendered; no dollar amount.
 /// B.4 / I6: ANY hard blocker gates computation projection-wide.

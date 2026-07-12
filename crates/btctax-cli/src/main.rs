@@ -214,7 +214,7 @@ fn run() -> Result<ExitCode, CliError> {
             IncomeCmd::Show { year } => {
                 let pp = passphrase(false)?;
                 match cmd::tax::show_return_inputs(vault, &pp, year)? {
-                    Some(json) => print!("{json}"),
+                    Some(json) => println!("{json}"),
                     None => println!("No full-return inputs set for tax year {year}."),
                 }
             }

@@ -31,6 +31,14 @@ const ELECTIVE_DEFERRAL_CODES: &[&str] = &["D", "E", "F", "G", "S"];
 /// Why a full return is refused (fail-closed). One variant per SPEC §4.10 input-screenable row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefuseReason {
+    /// A captured money amount is negative. Every full-return input is a form-box MAGNITUDE (≥ 0); signs
+    /// are produced by the computation, never the input. A negative value is a corrupt import that could
+    /// otherwise *offset* an accumulated refusal threshold (e.g. §402(g), §904(j)) into passing (R2-I1).
+    NegativeAmount(String),
+    /// A `Owner::Spouse`-tagged item (W-2 / Schedule C) on a non-joint return — no spouse's income is on
+    /// a Single/HoH/MFS/QSS return, and trusting the tag would split one person's per-owner limits into
+    /// two buckets, evading the §402(g) cap (R2-I2).
+    SpouseOwnerWithoutJointReturn,
     /// `Some(true)` foreign trust → Form 3520 (out of scope, R2-I3).
     ForeignTrust,
     /// W-2 box-12 code outside the inert allowlist (audit I1).
@@ -79,9 +87,96 @@ fn ftc_ceiling_for(p: &FullReturnParams, status: FilingStatus) -> Usd {
     }
 }
 
+/// The label of the FIRST negative money amount in `ri`, or `None` if every captured amount is ≥ 0.
+/// Every full-return input is a form-box magnitude (≥ 0); a negative is a corrupt import. Kept exhaustive
+/// on purpose — a missed field is a silent hole that could offset a refusal accumulator (R2-I1). All
+/// `Usd`/`Decimal` fields reachable from `ReturnInputs` are covered.
+fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
+    let neg = |v: Usd| v < Usd::ZERO;
+    for w in &ri.w2s {
+        if neg(w.box1_wages) { return Some("W-2 box 1 wages"); }
+        if neg(w.box2_fed_withheld) { return Some("W-2 box 2 federal withholding"); }
+        if neg(w.box3_ss_wages) { return Some("W-2 box 3 Social Security wages"); }
+        if neg(w.box4_ss_withheld) { return Some("W-2 box 4 Social Security withholding"); }
+        if neg(w.box5_medicare_wages) { return Some("W-2 box 5 Medicare wages"); }
+        if neg(w.box6_medicare_withheld) { return Some("W-2 box 6 Medicare withholding"); }
+        if neg(w.box7_ss_tips) { return Some("W-2 box 7 Social Security tips"); }
+        if neg(w.box17_state_tax_withheld) { return Some("W-2 box 17 state tax withheld"); }
+        if neg(w.box19_local_tax) { return Some("W-2 box 19 local tax"); }
+        if neg(w.box8_allocated_tips) { return Some("W-2 box 8 allocated tips"); }
+        if neg(w.box10_dependent_care) { return Some("W-2 box 10 dependent-care benefits"); }
+        for e in &w.box12 {
+            if neg(e.amount) { return Some("W-2 box 12 amount"); }
+        }
+    }
+    for i in &ri.int_1099 {
+        if neg(i.box1_interest) { return Some("1099-INT box 1 interest"); }
+        if neg(i.box2_early_withdrawal_penalty) { return Some("1099-INT box 2 early-withdrawal penalty"); }
+        if neg(i.box3_treasury_interest) { return Some("1099-INT box 3 Treasury interest"); }
+        if neg(i.box4_fed_withheld) { return Some("1099-INT box 4 federal withholding"); }
+        if neg(i.box6_foreign_tax) { return Some("1099-INT box 6 foreign tax"); }
+        if neg(i.box8_tax_exempt_interest) { return Some("1099-INT box 8 tax-exempt interest"); }
+        if neg(i.box9_private_activity_bond_amt) { return Some("1099-INT box 9 private-activity-bond interest"); }
+    }
+    for d in &ri.div_1099 {
+        if neg(d.box1a_ordinary) { return Some("1099-DIV box 1a ordinary dividends"); }
+        if neg(d.box1b_qualified) { return Some("1099-DIV box 1b qualified dividends"); }
+        if neg(d.box2a_capgain_distr) { return Some("1099-DIV box 2a capital-gain distributions"); }
+        if neg(d.box2b_unrecap_1250) { return Some("1099-DIV box 2b unrecaptured §1250 gain"); }
+        if neg(d.box2c_section_1202) { return Some("1099-DIV box 2c §1202 gain"); }
+        if neg(d.box2d_collectibles_28) { return Some("1099-DIV box 2d collectibles (28%) gain"); }
+        if neg(d.box4_fed_withheld) { return Some("1099-DIV box 4 federal withholding"); }
+        if neg(d.box5_section_199a) { return Some("1099-DIV box 5 §199A dividends"); }
+        if neg(d.box7_foreign_tax) { return Some("1099-DIV box 7 foreign tax"); }
+        if neg(d.box12_exempt_interest_dividends) { return Some("1099-DIV box 12 exempt-interest dividends"); }
+        if neg(d.box13_private_activity_amt) { return Some("1099-DIV box 13 private-activity-bond dividends"); }
+    }
+    for g in &ri.g_1099 {
+        if neg(g.box1_unemployment) { return Some("1099-G box 1 unemployment compensation"); }
+        if neg(g.box4_fed_withheld) { return Some("1099-G box 4 federal withholding"); }
+    }
+    if let Some(c) = &ri.schedule_c {
+        if neg(c.expenses) { return Some("Schedule C expenses"); }
+    }
+    if let Some(a) = &ri.schedule_a {
+        if neg(a.medical) { return Some("Schedule A medical expenses"); }
+        if neg(a.salt_sales_tax_amount) { return Some("Schedule A sales-tax amount"); }
+        if neg(a.salt_state_estimated_payments) { return Some("Schedule A state estimated payments"); }
+        if neg(a.salt_prior_year_balance_paid) { return Some("Schedule A prior-year balance paid"); }
+        if neg(a.salt_real_estate) { return Some("Schedule A real-estate taxes"); }
+        if neg(a.salt_personal_property) { return Some("Schedule A personal-property taxes"); }
+        if neg(a.mortgage_interest_1098) { return Some("Schedule A mortgage interest"); }
+        for gift in &a.charitable {
+            if neg(gift.amount) { return Some("Schedule A charitable gift amount"); }
+        }
+    }
+    for item in &ri.charitable_carryover_in {
+        if neg(item.amount) { return Some("charitable carryover amount"); }
+    }
+    if neg(ri.sch1.state_refund_taxable) { return Some("Schedule 1 taxable state refund"); }
+    if neg(ri.sch1.student_loan_interest_paid) { return Some("Schedule 1 student-loan interest"); }
+    if neg(ri.sch1.ira_deduction_claimed) { return Some("Schedule 1 IRA deduction"); }
+    if neg(ri.payments.estimated_tax_payments) { return Some("estimated tax payments"); }
+    if neg(ri.payments.extension_payment) { return Some("extension payment"); }
+    if neg(ri.payments.other_withholding) { return Some("other withholding"); }
+    if neg(ri.qbi.reit_ptp_carryforward_in) { return Some("QBI REIT/PTP carryforward"); }
+    if neg(ri.capital_loss_carryforward_in.short) { return Some("short-term capital-loss carryforward"); }
+    if neg(ri.capital_loss_carryforward_in.long) { return Some("long-term capital-loss carryforward"); }
+    None
+}
+
 /// Screen the **input-screenable** refuse-guard rows (SPEC §4.10). Returns the FIRST [`Refusal`] found,
 /// or `None` if nothing input-screenable trips (the compute/ledger-dependent rows are checked later).
 pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) -> Option<Refusal> {
+    // Data integrity FIRST: any negative money is a corrupt import — refuse before any accumulation, so a
+    // negative can never offset a §402(g) / §904(j) threshold into passing (R2-I1 / M4, now one gate).
+    if let Some(field) = first_negative_amount(ri) {
+        return refuse(
+            RefuseReason::NegativeAmount(field.to_string()),
+            format!("{field} is negative — every full-return money amount is a form-box magnitude (≥ 0); fix the import"),
+        );
+    }
+
     // (c) foreign trust → Form 3520.
     if ri.foreign_trust == Some(true) {
         return refuse(
@@ -90,10 +185,28 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         );
     }
 
+    // A Spouse-owned item is only coherent on a joint (MFJ) return; on Single/HoH/MFS/QSS the spouse's
+    // income is not on this return. Refuse before the per-owner §402(g) accumulation so a mislabeled
+    // `owner` cannot split one person's deferrals into two under-limit buckets (R2-I2).
+    if ri.filing_status != FilingStatus::Mfj {
+        let spouse_w2 = ri.w2s.iter().any(|w| w.owner == Owner::Spouse);
+        let spouse_sc = ri
+            .schedule_c
+            .as_ref()
+            .is_some_and(|c| c.owner == Owner::Spouse);
+        if spouse_w2 || spouse_sc {
+            return refuse(
+                RefuseReason::SpouseOwnerWithoutJointReturn,
+                "a spouse-owned W-2/Schedule C is only valid on a joint (MFJ) return — check the `owner` tag or the filing status",
+            );
+        }
+    }
+
     // W-2 rows: box-12 allowlist + §402(g) deferral cap + box 8/10 + single-employer excess SS.
     let excess_ss_max = tbl.ss_wage_base * EMPLOYEE_OASDI_RATE; // §3101(a)/§6413(c)
     // §402(g)(1) limits an INDIVIDUAL's elective deferrals — accumulate PER OWNER (each spouse on a joint
-    // return gets its own limit; review I1), refusing iff any one person exceeds it.
+    // return gets its own limit; review I1), refusing iff any one person exceeds it. Amounts are already
+    // guaranteed ≥ 0 by the negative screen above, so no per-entry clamp is needed.
     let mut deferral_tp = Usd::ZERO; // taxpayer
     let mut deferral_sp = Usd::ZERO; // spouse
     for w2 in &ri.w2s {
@@ -124,10 +237,9 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
                 );
             }
             if ELECTIVE_DEFERRAL_CODES.contains(&code.as_str()) {
-                // Clamp at 0 so a negative box-12 amount cannot offset the §402(g) sum (M4).
                 match w2.owner {
-                    Owner::Taxpayer => deferral_tp += entry.amount.max(Usd::ZERO),
-                    Owner::Spouse => deferral_sp += entry.amount.max(Usd::ZERO),
+                    Owner::Taxpayer => deferral_tp += entry.amount,
+                    Owner::Spouse => deferral_sp += entry.amount,
                 }
             }
         }
@@ -347,6 +459,68 @@ mod tests {
         let mut qss = r.clone();
         qss.filing_status = FilingStatus::Qss;
         assert_eq!(reason(&qss), Some(RefuseReason::ForeignTaxOverCeiling));
+    }
+
+    #[test]
+    fn negative_amount_refuses_before_any_threshold_offset() {
+        // R2-I1 PoC-A: a +$500 foreign tax (over the $300 ceiling → must refuse) plus a −$250 sign typo
+        // must NOT net to $250 ≤ $300 and pass — the negative screen refuses FIRST.
+        let mut r = ri();
+        r.div_1099.push(Form1099Div { box7_foreign_tax: dec!(500), ..Default::default() });
+        r.int_1099.push(Form1099Int { box6_foreign_tax: dec!(-250), ..Default::default() });
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::NegativeAmount("1099-INT box 6 foreign tax".into()))
+        );
+        // Same shape for a negative elective deferral (the old M4 vector) and a plain negative wage.
+        let mut d = ri();
+        d.w2s.push(W2 {
+            box12: vec![
+                Box12Entry { code: "D".into(), amount: dec!(30000) },
+                Box12Entry { code: "D".into(), amount: dec!(-10000) },
+            ],
+            ..Default::default()
+        });
+        assert_eq!(
+            reason(&d),
+            Some(RefuseReason::NegativeAmount("W-2 box 12 amount".into()))
+        );
+        let mut w = ri();
+        w.w2s.push(W2 { box1_wages: dec!(-1), ..Default::default() });
+        assert_eq!(
+            reason(&w),
+            Some(RefuseReason::NegativeAmount("W-2 box 1 wages".into()))
+        );
+    }
+
+    #[test]
+    fn spouse_owned_item_on_non_joint_return_refuses() {
+        // R2-I2 PoC-B: Single filer, a second W-2 mislabeled owner="spouse" would split one person's
+        // $30k deferrals into two ≤$23k buckets. Refuse the mislabel before it can evade the §402(g) cap.
+        let mut single = ri(); // filing_status = Single
+        single.w2s.push(W2 {
+            owner: Owner::Taxpayer,
+            box12: vec![Box12Entry { code: "D".into(), amount: dec!(15000) }],
+            ..Default::default()
+        });
+        single.w2s.push(W2 {
+            owner: Owner::Spouse,
+            box12: vec![Box12Entry { code: "D".into(), amount: dec!(15000) }],
+            ..Default::default()
+        });
+        assert_eq!(reason(&single), Some(RefuseReason::SpouseOwnerWithoutJointReturn));
+        // A spouse-owned Schedule C on a non-joint return also refuses.
+        let mut hoh = ri();
+        hoh.filing_status = FilingStatus::HoH;
+        hoh.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
+            owner: Owner::Spouse,
+            ..Default::default()
+        });
+        assert_eq!(reason(&hoh), Some(RefuseReason::SpouseOwnerWithoutJointReturn));
+        // The SAME split on a joint return is legitimate (two earners) → no spouse-owner refusal.
+        let mut mfj = single.clone();
+        mfj.filing_status = FilingStatus::Mfj;
+        assert_eq!(reason(&mfj), None);
     }
 
     #[test]

@@ -7,8 +7,9 @@
 //!
 //! **P1 skeleton (plan re-review I2):** the `ReturnInputs` arm is STUBBED here — `derive_tax_profile` is
 //! Phase 2, so a year that has `ReturnInputs` resolves to [`Provenance::ReturnInputs`] with `profile: None`
-//! (derivation pending). Full precedence + the derive arm land in P2. No vault can hold `ReturnInputs`
-//! until the `income …` subcommands ship (same phase), and callers treat the pending state explicitly.
+//! (derivation pending). Full precedence + the derive arm land in P2. The `income` subcommands shipped in
+//! this phase, so a vault CAN hold `ReturnInputs`; the stub is fail-closed regardless, and callers treat
+//! the pending state explicitly (`report` refuses with an `income clear` recovery hint).
 use crate::{return_inputs, tax_profile, CliError};
 use btctax_core::{Carryforward, FilingStatus, TaxProfile, Usd};
 use rusqlite::Connection;

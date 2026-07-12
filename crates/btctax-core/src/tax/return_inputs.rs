@@ -118,7 +118,8 @@ pub struct Form1099G {
 }
 
 /// A person on the return (taxpayer or spouse). DOB drives §63(f) age-65 (F3); `blind` is an explicit
-/// input (not DOB-derivable, spec I5). SSN stored normalized, rendered masked (security-review item).
+/// input (not DOB-derivable, spec I5). SSN is stored AS ENTERED and rendered masked by `mask_pii` (the
+/// security-load-bearing half); canonicalization to NNN-NN-NNNN is deferred to P6 (see FOLLOWUPS).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Person {
     pub first_name: String,
@@ -172,9 +173,6 @@ pub struct HouseholdHeader {
     pub ip_pin: Option<String>,
 }
 
-/// Schedule C inputs (D-6): business/self-employment crypto income → Sch 1 L3 + Schedule SE. Gross is
-/// DERIVED from the ledger's SE-eligible business `crypto_ord` (not typed here). One Sch C in v1; ≥2 SE
-/// earners refuse (§4.4a). `net < 0` (loss) refuses (I2).
 /// Schedule C line F accounting method (SPEC §4.4a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -184,6 +182,9 @@ pub enum AccountingMethod {
     Accrual,
 }
 
+/// Schedule C inputs (D-6): business/self-employment crypto income → Sch 1 L3 + Schedule SE. Gross is
+/// DERIVED from the ledger's SE-eligible business `crypto_ord` (not typed here). One Sch C in v1; ≥2 SE
+/// earners refuse (§4.4a). `net < 0` (loss) refuses (I2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScheduleCInputs {
     pub owner: Owner,

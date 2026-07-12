@@ -306,10 +306,21 @@ mod tests {
         let mut ri = ReturnInputs::default();
         ri.header.taxpayer.ssn = "123-45-6789".into();
         ri.header.ip_pin = Some("999999".into());
+        ri.header.spouse = Some(btctax_core::tax::return_inputs::Person {
+            ssn: "987-65-4321".into(),
+            ..Default::default()
+        });
+        ri.header.dependents = vec![btctax_core::tax::return_inputs::Dependent {
+            ssn: "111-22-3333".into(),
+            ..Default::default()
+        }];
         let masked = mask_pii(&ri);
         assert_eq!(masked.header.taxpayer.ssn, "***-**-6789");
+        assert_eq!(masked.header.spouse.as_ref().unwrap().ssn, "***-**-4321");
+        assert_eq!(masked.header.dependents[0].ssn, "***-**-3333");
         assert_eq!(masked.header.ip_pin.as_deref(), Some("***"));
         assert_eq!(ri.header.taxpayer.ssn, "123-45-6789"); // original untouched
+        assert_eq!(ri.header.spouse.as_ref().unwrap().ssn, "987-65-4321"); // original untouched
     }
 
     /// Malformed TOML is a typed `Usage` error, never a panic.
