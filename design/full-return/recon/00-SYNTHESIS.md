@@ -180,6 +180,11 @@ Each phase is TDD + the §2 review-to-green loop per `STANDARD_WORKFLOW.md`.
   ("add GPL as an option") does NOT permit absorbing GPL code** — a combined work containing GPL code must
   ship GPL-only. Clean-room re-derivation from public-domain IRS instructions stays the primary path; tax
   **parameters are facts (not copyrightable)** and freely usable.
+  **CONFIRMED 2026-07-11:** keep the current plan — stay permissive **AND distributable**; reject the
+  private-use/GPL path. Principle: *"make truly free whatever innovation we provide the public"* (permissive,
+  not copyleft). **Spec implication:** because we ARE distributing a full-return tool, KEEP the full legal
+  apparatus (LIMITATIONS/supported-forms doc, not-tax-advice disclaimers, fail-closed blockers, DRAFT +
+  attestation gate) — do NOT drop it.
 - **Borrow (permissive / public-domain):** **PSLmodels/Tax-Calculator** `taxcalc/policy_current_law.json` is
   **CC0 1.0 / US public domain** (GitHub mislabels it "NOASSERTION") — year-indexed, filing-status-aware
   ordinary brackets, `STD`/`STD_Aged`, LTCG/QD breakpoints, `NIIT_thd`, `AMEDT_rt`. **Vendor a TY2024/25
