@@ -175,26 +175,38 @@ pub struct HouseholdHeader {
 /// Schedule C inputs (D-6): business/self-employment crypto income → Sch 1 L3 + Schedule SE. Gross is
 /// DERIVED from the ledger's SE-eligible business `crypto_ord` (not typed here). One Sch C in v1; ≥2 SE
 /// earners refuse (§4.4a). `net < 0` (loss) refuses (I2).
+/// Schedule C line F accounting method (SPEC §4.4a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountingMethod {
+    #[default]
+    Cash,
+    Accrual,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScheduleCInputs {
     pub owner: Owner,
     #[serde(default)]
     pub business_description: String,
     #[serde(default = "default_naics")]
-    pub naics_code: String,
+    pub naics_code: String, // line B (NAICS)
+    #[serde(default)]
+    pub accounting_method: AccountingMethod, // line F
     #[serde(default)]
     pub expenses: Usd,
 }
 fn default_naics() -> String {
     "999999".to_string()
 }
-// Manual `Default` so a fresh Schedule C matches the serde default (unclassified NAICS 999999).
+// Manual `Default` so a fresh Schedule C matches the serde default (unclassified NAICS 999999, Cash method).
 impl Default for ScheduleCInputs {
     fn default() -> Self {
         Self {
             owner: Owner::default(),
             business_description: String::new(),
             naics_code: default_naics(),
+            accounting_method: AccountingMethod::Cash,
             expenses: Usd::ZERO,
         }
     }

@@ -4,7 +4,7 @@
 .SH NAME
 tax\-profile \- Set or show the per\-tax\-year tax profile (filing status, income, MAGI, etc.)
 .SH SYNOPSIS
-\fBtax\-profile\fR <\fB\-\-year\fR> [\fB\-\-filing\-status\fR] [\fB\-\-ordinary\-taxable\-income\fR] [\fB\-\-magi\-excluding\-crypto\fR] [\fB\-\-qualified\-dividends\fR] [\fB\-\-other\-net\-capital\-gain\fR] [\fB\-\-carryforward\-short\fR] [\fB\-\-carryforward\-long\fR] [\fB\-\-w2\-ss\-wages\fR] [\fB\-\-w2\-medicare\-wages\fR] [\fB\-\-schedule\-c\-expenses\fR] [\fB\-\-show\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBtax\-profile\fR <\fB\-\-year\fR> [\fB\-\-filing\-status\fR] [\fB\-\-ordinary\-taxable\-income\fR] [\fB\-\-magi\-excluding\-crypto\fR] [\fB\-\-qualified\-dividends\fR] [\fB\-\-other\-net\-capital\-gain\fR] [\fB\-\-carryforward\-short\fR] [\fB\-\-carryforward\-long\fR] [\fB\-\-w2\-ss\-wages\fR] [\fB\-\-w2\-medicare\-wages\fR] [\fB\-\-schedule\-c\-expenses\fR] [\fB\-\-show\fR] [\fB\-\-force\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 Set or show the per\-tax\-year tax profile (filing status, income, MAGI, etc.)
 .SH OPTIONS
@@ -62,6 +62,9 @@ Schedule C deductible business expenses for the year — reduces net SE earnings
 .TP
 \fB\-\-show\fR
 Show the stored profile for `\-\-year` instead of setting it
+.TP
+\fB\-\-force\fR
+Store the raw profile even when full\-return inputs (`income import`) already exist for the year (they take precedence, so the raw profile would otherwise be ignored — D\-4 guard)
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help (see a summary with \*(Aq\-h\*(Aq)

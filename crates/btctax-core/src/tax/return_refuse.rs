@@ -12,7 +12,7 @@
 //! across the reconcile system) — additive, per SPEC §2. A `Refusal` maps to
 //! `TaxOutcome::NotComputable(..)` at the report boundary (Phase 4).
 use crate::conventions::Usd;
-use crate::tax::return_inputs::ReturnInputs;
+use crate::tax::return_inputs::{Owner, ReturnInputs};
 use crate::tax::tables::{FullReturnParams, TaxTable};
 use crate::tax::types::FilingStatus;
 use rust_decimal_macros::dec;
@@ -69,10 +69,12 @@ fn refuse(reason: RefuseReason, detail: impl Into<String>) -> Option<Refusal> {
     })
 }
 
-/// The §904(j) FTC ceiling for `status` (general $300; MFJ/QSS $600).
+/// The §904(j) FTC ceiling for `status` (general $300; doubled only for a **joint return**). §904(j)(3)(A)
+/// doubles "in the case of a joint return" — a QSS return uses MFJ rate schedules but is NOT a joint
+/// return, so its ceiling is $300 (spec §4.7a: "$300 ($600 MFJ)" — MFJ only, review I2).
 fn ftc_ceiling_for(p: &FullReturnParams, status: FilingStatus) -> Usd {
     match status {
-        FilingStatus::Mfj | FilingStatus::Qss => p.ftc_ceiling * dec!(2),
+        FilingStatus::Mfj => p.ftc_ceiling * dec!(2),
         _ => p.ftc_ceiling,
     }
 }
@@ -90,7 +92,10 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
 
     // W-2 rows: box-12 allowlist + §402(g) deferral cap + box 8/10 + single-employer excess SS.
     let excess_ss_max = tbl.ss_wage_base * EMPLOYEE_OASDI_RATE; // §3101(a)/§6413(c)
-    let mut deferral_sum = Usd::ZERO;
+    // §402(g)(1) limits an INDIVIDUAL's elective deferrals — accumulate PER OWNER (each spouse on a joint
+    // return gets its own limit; review I1), refusing iff any one person exceeds it.
+    let mut deferral_tp = Usd::ZERO; // taxpayer
+    let mut deferral_sp = Usd::ZERO; // spouse
     for w2 in &ri.w2s {
         if w2.box8_allocated_tips > Usd::ZERO {
             return refuse(
@@ -119,14 +124,18 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
                 );
             }
             if ELECTIVE_DEFERRAL_CODES.contains(&code.as_str()) {
-                deferral_sum += entry.amount;
+                // Clamp at 0 so a negative box-12 amount cannot offset the §402(g) sum (M4).
+                match w2.owner {
+                    Owner::Taxpayer => deferral_tp += entry.amount.max(Usd::ZERO),
+                    Owner::Spouse => deferral_sp += entry.amount.max(Usd::ZERO),
+                }
             }
         }
     }
-    if deferral_sum > p.elective_deferral_limit {
+    if deferral_tp > p.elective_deferral_limit || deferral_sp > p.elective_deferral_limit {
         return refuse(
             RefuseReason::ExcessElectiveDeferral,
-            "elective deferrals exceed the §402(g) limit — the taxable excess (1040 line 1h) is unmodeled in v1",
+            "one person's elective deferrals exceed the §402(g) limit — the taxable excess (1040 line 1h) is unmodeled in v1",
         );
     }
 
@@ -268,9 +277,9 @@ mod tests {
     }
 
     #[test]
-    fn excess_402g_deferral_refuses() {
+    fn excess_402g_deferral_is_per_person() {
+        // Same owner (both taxpayer): $15k + $10k = $25k > $23k → refuse.
         let mut r = ri();
-        // Two employers, code D each, summing over $23,000.
         r.w2s.push(W2 {
             box12: vec![Box12Entry { code: "D".into(), amount: dec!(15000) }],
             ..Default::default()
@@ -280,6 +289,20 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(reason(&r), Some(RefuseReason::ExcessElectiveDeferral));
+        // MFJ dual-earner: $15k taxpayer + $15k spouse — each under $23k → NO refuse (review I1).
+        let mut ok = ri();
+        ok.filing_status = FilingStatus::Mfj;
+        ok.w2s.push(W2 {
+            owner: Owner::Taxpayer,
+            box12: vec![Box12Entry { code: "D".into(), amount: dec!(15000) }],
+            ..Default::default()
+        });
+        ok.w2s.push(W2 {
+            owner: Owner::Spouse,
+            box12: vec![Box12Entry { code: "D".into(), amount: dec!(15000) }],
+            ..Default::default()
+        });
+        assert_eq!(reason(&ok), None);
     }
 
     #[test]
@@ -320,6 +343,10 @@ mod tests {
         let mut mfj = r.clone();
         mfj.filing_status = FilingStatus::Mfj;
         assert_eq!(reason(&mfj), None);
+        // QSS is NOT a joint return — ceiling stays $300, so $301 refuses (review I2).
+        let mut qss = r.clone();
+        qss.filing_status = FilingStatus::Qss;
+        assert_eq!(reason(&qss), Some(RefuseReason::ForeignTaxOverCeiling));
     }
 
     #[test]

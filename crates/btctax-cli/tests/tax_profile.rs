@@ -34,7 +34,7 @@ fn set_then_show_round_trips() {
     cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
 
     // set
-    cmd::tax::set_profile(&vault, &pp(), 2025, prof_2025()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, prof_2025(), false).unwrap();
 
     // show
     let got = cmd::tax::show_profile(&vault, &pp(), 2025).unwrap();
@@ -59,7 +59,7 @@ fn set_overwrites_previous_profile() {
     let vault = dir.path().join("vault.pgp");
     cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
 
-    cmd::tax::set_profile(&vault, &pp(), 2025, prof_2025()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, prof_2025(), false).unwrap();
 
     let updated = TaxProfile {
         filing_status: FilingStatus::Single,
@@ -75,7 +75,7 @@ fn set_overwrites_previous_profile() {
         w2_medicare_wages: dec!(0),
         schedule_c_expenses: dec!(0),
     };
-    cmd::tax::set_profile(&vault, &pp(), 2025, updated.clone()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, updated.clone(), false).unwrap();
 
     let got = cmd::tax::show_profile(&vault, &pp(), 2025).unwrap();
     assert_eq!(got, Some(updated));
@@ -99,8 +99,8 @@ fn multiple_years_are_independent() {
         w2_medicare_wages: dec!(0),
         schedule_c_expenses: dec!(0),
     };
-    cmd::tax::set_profile(&vault, &pp(), 2024, p24.clone()).unwrap();
-    cmd::tax::set_profile(&vault, &pp(), 2025, prof_2025()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2024, p24.clone(), false).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, prof_2025(), false).unwrap();
 
     assert_eq!(
         cmd::tax::show_profile(&vault, &pp(), 2024).unwrap(),
@@ -125,4 +125,78 @@ fn get_on_open_vault_without_prior_init_table_call_is_ok() {
     let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
     let result = tax_profile::get(s.conn(), 2025).unwrap();
     assert_eq!(result, None);
+}
+
+/// D-4 guard (SPEC §4.12): once full-return `ReturnInputs` exist for a year, a raw `tax-profile set`
+/// for that year is REFUSED (would be silently ignored by `resolve_profile`) — unless `--force`.
+/// `income clear` removes the inputs and re-opens the raw path. This is the two-sources-of-truth
+/// guard end to end (import → refuse → force → clear → allow).
+#[test]
+fn set_profile_is_refused_while_return_inputs_exist_unless_forced() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Seed full-return inputs for 2024 via the TOML import path.
+    let toml = dir.path().join("inputs.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"82000\"\nbox2_fed_withheld = \"9100\"\n",
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
+
+    // A raw tax-profile for the SAME year is refused (Usage), and nothing is stored.
+    let err = cmd::tax::set_profile(&vault, &pp(), 2024, prof_2025(), false).unwrap_err();
+    assert!(matches!(err, btctax_cli::CliError::Usage(_)));
+    assert_eq!(cmd::tax::show_profile(&vault, &pp(), 2024).unwrap(), None);
+
+    // A DIFFERENT year is unaffected (the guard is per-year).
+    cmd::tax::set_profile(&vault, &pp(), 2025, prof_2025(), false).unwrap();
+    assert_eq!(
+        cmd::tax::show_profile(&vault, &pp(), 2025).unwrap(),
+        Some(prof_2025())
+    );
+
+    // --force overrides the guard and stores the raw profile anyway.
+    cmd::tax::set_profile(&vault, &pp(), 2024, prof_2025(), true).unwrap();
+    assert_eq!(
+        cmd::tax::show_profile(&vault, &pp(), 2024).unwrap(),
+        Some(prof_2025())
+    );
+
+    // `income clear` removes the inputs; afterward the un-forced path is allowed again.
+    assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2024).unwrap());
+    assert!(!cmd::tax::clear_return_inputs(&vault, &pp(), 2024).unwrap()); // idempotent
+    cmd::tax::set_profile(&vault, &pp(), 2024, prof_2025(), false).unwrap();
+}
+
+/// Vault-level `income import` → `income show` round trip (review M6): imports a TOML with a cleartext
+/// SSN, then `income show` must return the stored inputs as JSON with the SSN REDACTED (I5) — cleartext
+/// PII must never reach stdout. `show` on an unset year is `None`.
+#[test]
+fn income_import_then_show_redacts_pii_at_the_vault_level() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    assert_eq!(cmd::tax::show_return_inputs(&vault, &pp(), 2024).unwrap(), None);
+
+    let toml = dir.path().join("inputs.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n\n[header.taxpayer]\nfirst_name = \"Pat\"\nlast_name = \"Doe\"\nssn = \"123-45-6789\"\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"82000\"\nbox2_fed_withheld = \"9100\"\n",
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
+
+    let shown = cmd::tax::show_return_inputs(&vault, &pp(), 2024)
+        .unwrap()
+        .expect("inputs were imported");
+    assert!(shown.contains("***-**-6789"), "SSN must be redacted: {shown}");
+    assert!(
+        !shown.contains("123-45-6789"),
+        "cleartext SSN must never appear: {shown}"
+    );
+    assert!(shown.contains("82000")); // non-PII figures are shown verbatim
 }

@@ -63,9 +63,48 @@ fn parse_return_inputs_toml(text: &str) -> Result<ReturnInputs, CliError> {
     toml::from_str(text).map_err(|e| CliError::Usage(format!("invalid ReturnInputs TOML: {e}")))
 }
 
-/// `income show` — the stored [`ReturnInputs`] for `year` as pretty JSON, or `None`. (JSON, not TOML:
-/// serde-toml requires scalar keys before nested tables, which the nested model violates; a TOML round-
-/// trip-out is a follow-on. Import accepts TOML.)
+/// Redact an SSN/ITIN to `***-**-NNNN` (last 4 digits), or empty/`***-**-****` when too short (review I5).
+fn mask_ssn(ssn: &str) -> String {
+    if ssn.is_empty() {
+        return String::new();
+    }
+    let digits: String = ssn.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.len() >= 4 {
+        format!("***-**-{}", &digits[digits.len() - 4..])
+    } else {
+        "***-**-****".to_string()
+    }
+}
+
+/// A DISPLAY copy of `ReturnInputs` with all SSNs and the IP-PIN redacted (the stored value is never
+/// mutated). Used by `income show` so cleartext PII never reaches stdout/scrollback/pipes (SPEC §4.2).
+fn mask_pii(ri: &ReturnInputs) -> ReturnInputs {
+    let mut m = ri.clone();
+    m.header.taxpayer.ssn = mask_ssn(&m.header.taxpayer.ssn);
+    if let Some(sp) = m.header.spouse.as_mut() {
+        sp.ssn = mask_ssn(&sp.ssn);
+    }
+    for d in &mut m.header.dependents {
+        d.ssn = mask_ssn(&d.ssn);
+    }
+    if m.header.ip_pin.is_some() {
+        m.header.ip_pin = Some("***".to_string());
+    }
+    m
+}
+
+/// `income clear` — remove the stored full-return inputs for `year` (recovery path so a year with
+/// `ReturnInputs` isn't a dead end while derivation is pending — review I3). Returns whether a row existed.
+pub fn clear_return_inputs(vault: &Path, pp: &Passphrase, year: i32) -> Result<bool, CliError> {
+    let mut s = Session::open(vault, pp)?;
+    let removed = return_inputs::delete(s.conn(), year)?;
+    s.save()?;
+    Ok(removed)
+}
+
+/// `income show` — the stored [`ReturnInputs`] for `year` as pretty JSON with PII redacted, or `None`.
+/// (JSON, not TOML: serde-toml requires scalar keys before nested tables, which the nested model violates;
+/// a TOML round-trip-out is a follow-on. Import accepts TOML.)
 pub fn show_return_inputs(
     vault: &Path,
     pp: &Passphrase,
@@ -73,11 +112,10 @@ pub fn show_return_inputs(
 ) -> Result<Option<String>, CliError> {
     let ri = return_inputs::get(Session::open(vault, pp)?.conn(), year)?;
     ri.map(|ri| {
-        serde_json::to_string_pretty(&ri)
-            .map_err(|e| CliError::BadConfigValue {
-                key: format!("return_inputs[{year}]"),
-                value: e.to_string(),
-            })
+        serde_json::to_string_pretty(&mask_pii(&ri)).map_err(|e| CliError::BadConfigValue {
+            key: format!("return_inputs[{year}]"),
+            value: e.to_string(),
+        })
     })
     .transpose()
 }
@@ -125,8 +163,8 @@ pub fn report_tax_year(
         // A full-return `ReturnInputs` exists but `derive_tax_profile` is Phase 2 — surface it explicitly;
         // never silently treat the year as profile-less (which would be a wrong number).
         return Err(CliError::Usage(format!(
-            "tax year {year} has full-return inputs, but full-return computation is not yet available; \
-             use `tax-profile set` for a raw profile in the meantime"
+            "tax year {year} has full-return inputs, but full-return computation is not yet available in \
+             this version; run `income clear --year {year}` to remove them and use a raw `tax-profile`"
         )));
     }
     let profile = resolved.profile;
@@ -256,6 +294,22 @@ mod tests {
         assert_eq!(a.charitable[0].class, CharitableClass::Cash60);
         assert_eq!(a.charitable[0].amount, dec!(2500));
         assert_eq!(ri.payments.estimated_tax_payments, dec!(6000));
+    }
+
+    /// `income show` redacts SSNs and the IP-PIN in a DISPLAY copy; the stored value is untouched (I5).
+    #[test]
+    fn mask_ssn_and_pii_redacts() {
+        assert_eq!(mask_ssn("123-45-6789"), "***-**-6789");
+        assert_eq!(mask_ssn("123456789"), "***-**-6789");
+        assert_eq!(mask_ssn(""), "");
+        assert_eq!(mask_ssn("12"), "***-**-****");
+        let mut ri = ReturnInputs::default();
+        ri.header.taxpayer.ssn = "123-45-6789".into();
+        ri.header.ip_pin = Some("999999".into());
+        let masked = mask_pii(&ri);
+        assert_eq!(masked.header.taxpayer.ssn, "***-**-6789");
+        assert_eq!(masked.header.ip_pin.as_deref(), Some("***"));
+        assert_eq!(ri.header.taxpayer.ssn, "123-45-6789"); // original untouched
     }
 
     /// Malformed TOML is a typed `Usage` error, never a panic.

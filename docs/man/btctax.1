@@ -78,6 +78,9 @@ Lot\-specific\-identification optimizer (§C — read\-only proposal or gated pe
 btctax\-what\-if(1)
 Read\-only what\-if tax planning (task #43): posit a HYPOTHETICAL, NON\-persisted transaction and see its MARGINAL federal\-tax effect on the current\-year position. Routes through the same audited tax engine as `report \-\-tax\-year`; invents no tax authority. Writes NOTHING — no event, no side\-table row, no vault mutation. Tax decision\-support (consequences), not buy/sell/hold advice
 .TP
+btctax\-income(1)
+Full\-return (v1) input surface: import, show, or clear the per\-year full\-return inputs (W\-2s, 1099s, deductions, household). Offline; stored in the encrypted vault
+.TP
 btctax\-tax\-profile(1)
 Set or show the per\-tax\-year tax profile (filing status, income, MAGI, etc.)
 .SH FILES

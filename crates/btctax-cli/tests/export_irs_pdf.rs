@@ -201,6 +201,7 @@ fn sp2_packet_writes_schedule_se_and_1040_capgains() {
             w2_medicare_wages: dec!(0),
             schedule_c_expenses: dec!(0),
         },
+        false,
     )
     .unwrap();
     let out = tempfile::tempdir().unwrap();

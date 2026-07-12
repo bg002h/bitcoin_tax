@@ -120,7 +120,7 @@ fn report_tax_year_renders_golden() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_lt_sell_2025(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
     let (outcome, advisory, sched_d, _gift, _se, _appraisal) =
         cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
@@ -192,7 +192,7 @@ fn report_tax_year_renders_schedule_se_for_business_mining() {
     )
     .unwrap();
 
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
     let (outcome, _advisory, _sched_d, _gift, se, _appraisal) =
         cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
@@ -301,7 +301,7 @@ fn chunk_a_asymmetric_w2_transposition_guard_cli_path() {
         w2_medicare_wages: dec!(0),
         schedule_c_expenses: dec!(0),
     };
-    cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, profile, false).unwrap();
 
     let (_outcome, _advisory, _sched_d, _gift, se, _appraisal) =
         cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
@@ -375,7 +375,7 @@ fn chunk_a_export_parity_asymmetric_w2() {
         w2_medicare_wages: dec!(0),
         schedule_c_expenses: dec!(0),
     };
-    cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, profile, false).unwrap();
 
     // Get report figures (cmd/tax.rs call site).
     let (_outcome, _advisory, _sched_d, _gift, se, _appraisal) =
@@ -416,7 +416,7 @@ fn report_tax_year_footer_discloses_1211_loss_and_interest_nii_included() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_lt_sell_2025(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
     let (outcome, advisory, _sched_d, _gift, _se, _appraisal) =
         cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
@@ -464,7 +464,7 @@ fn report_tax_year_components_reconcile_to_total() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_lt_sell_2025(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
     let (outcome, advisory, _sched_d, _gift, _se, _appraisal) =
         cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
@@ -538,7 +538,7 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
     let csv = write_buy_receive(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
     // Set a profile so the refusal is definitely from the hard blocker (not TaxProfileMissing).
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
     let (outcome, advisory, sched_d, _gift, _se, _appraisal) =
         cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
@@ -633,6 +633,7 @@ st-sell,2026-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
             w2_medicare_wages: dec!(0),
             schedule_c_expenses: dec!(0),
         },
+        false,
     )
     .unwrap();
 
@@ -652,6 +653,7 @@ st-sell,2026-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
             w2_medicare_wages: dec!(0),
             schedule_c_expenses: dec!(0),
         },
+        false,
     )
     .unwrap();
 
@@ -923,7 +925,7 @@ fn chunkb_expensed_profile_report_and_csv_parity() {
         w2_medicare_wages: dec!(0),
         schedule_c_expenses: dec!(20000),
     };
-    cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, profile, false).unwrap();
 
     // ── Report path ────────────────────────────────────────────────────────────────────────────
     let (_outcome, _advisory, _sched_d, _gift, se, _appraisal) =
@@ -1026,7 +1028,7 @@ fn chunkb_fully_expensed_integration_no_se_tax_no_csv() {
         w2_medicare_wages: dec!(0),
         schedule_c_expenses: dec!(15000),
     };
-    cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, profile, false).unwrap();
 
     // ── Report path: "fully expensed" line present; wage-base note absent ──────────────────────
     let (_outcome, _advisory, _sched_d, _gift, se, _appraisal) =

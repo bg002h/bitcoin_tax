@@ -218,6 +218,14 @@ fn run() -> Result<ExitCode, CliError> {
                     None => println!("No full-return inputs set for tax year {year}."),
                 }
             }
+            IncomeCmd::Clear { year } => {
+                let pp = passphrase(false)?;
+                if cmd::tax::clear_return_inputs(vault, &pp, year)? {
+                    println!("Cleared full-return inputs for tax year {year}.");
+                } else {
+                    println!("No full-return inputs set for tax year {year}.");
+                }
+            }
         },
         Command::WhatIf(wi) => match wi {
             WhatIf::Sell {

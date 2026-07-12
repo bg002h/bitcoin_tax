@@ -128,7 +128,7 @@ fn harvest_tax_zero_never_persists() {
             w2_medicare_wages: dec!(0),
             schedule_c_expenses: dec!(0),
         }
-    })
+    }, false)
     .unwrap();
 
     let bytes_before = std::fs::read(&vault).unwrap();

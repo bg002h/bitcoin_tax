@@ -1,0 +1,23 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-income 1  btctax "btctax manual"
+.SH NAME
+income \- Full\-return (v1) input surface: import, show, or clear the per\-year full\-return inputs (W\-2s, 1099s, deductions, household). Offline; stored in the encrypted vault
+.SH SYNOPSIS
+\fBincome\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Full\-return (v1) input surface: import, show, or clear the per\-year full\-return inputs (W\-2s, 1099s, deductions, household). Offline; stored in the encrypted vault
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+income\-import(1)
+Import full\-return inputs from an offline TOML file into the vault for a tax year
+.TP
+income\-show(1)
+Show the stored full\-return inputs for a tax year (JSON, PII redacted), or nothing if none set
+.TP
+income\-clear(1)
+Remove the stored full\-return inputs for a tax year (fall back to a raw `tax\-profile`)

@@ -54,8 +54,22 @@ pub fn set(conn: &Connection, year: i32, ri: &ReturnInputs) -> Result<(), CliErr
 }
 
 /// Whether a `ReturnInputs` exists for `year` (used by the `tax-profile set` guard — SPEC §4.12/D-4).
+/// A `SELECT 1` existence probe (does not deserialize the blob — review M5).
 pub fn exists(conn: &Connection, year: i32) -> Result<bool, CliError> {
-    Ok(get(conn, year)?.is_some())
+    init_table(conn)?;
+    let found: Option<i64> = conn
+        .query_row("SELECT 1 FROM return_inputs WHERE year=?1", [year], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    Ok(found.is_some())
+}
+
+/// Delete the stored `ReturnInputs` for `year` (used by `income clear`). Returns `true` if a row existed.
+pub fn delete(conn: &Connection, year: i32) -> Result<bool, CliError> {
+    init_table(conn)?;
+    let n = conn.execute("DELETE FROM return_inputs WHERE year=?1", [year])?;
+    Ok(n > 0)
 }
 
 /// Return all stored inputs, sorted by year ascending.
@@ -143,5 +157,15 @@ mod tests {
             all(&c).unwrap().keys().copied().collect::<Vec<_>>(),
             vec![2024, 2025]
         );
+    }
+
+    #[test]
+    fn delete_removes_the_row() {
+        let c = mem();
+        set(&c, 2024, &inputs()).unwrap();
+        assert!(exists(&c, 2024).unwrap());
+        assert!(delete(&c, 2024).unwrap()); // existed
+        assert!(!exists(&c, 2024).unwrap());
+        assert!(!delete(&c, 2024).unwrap()); // idempotent — nothing to remove
     }
 }

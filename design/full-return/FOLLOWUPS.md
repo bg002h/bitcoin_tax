@@ -45,6 +45,33 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   against the official 2024 worksheet), so the CC0 diff is an *additional independent layer*, not a P0
   correctness blocker. Vendor the TY2024 slice + the diff test in P7.
 
+## From Fable IMPL-P1 code review r1 (C1/I1–I5 + M1/M4/M5/M6 FOLDED into P1 r2; deferred items here)
+
+- **p1-per-field-subcommands** (DEFERRED → follow-on) — v1 ships only the TOML bulk-import (`income import`)
+  + `income show` (JSON) + `income clear`. Incremental per-field editors (`income add-w2`, `add-1099-div`,
+  …) are a usability follow-on, not a v1 gate — the offline TOML round-trip is the complete input surface.
+- **p1-show-as-json-not-toml** (DEFERRED → follow-on) — `income show` emits pretty JSON, not TOML, because
+  serde-toml requires scalar keys before nested tables and the nested `ReturnInputs` model violates that
+  ordering. A faithful TOML round-trip-out (custom serializer or field reorder) is a follow-on; import
+  accepts TOML today, which is the load-bearing direction.
+- **p1-consumer-sweep-P2** (SCHEDULED → P2, MANDATORY) — the `resolve_profile` single-source resolver + its
+  `Provenance` are wired into `report --tax-year` in P1, but `optimize` / `what-if` / `export` / the TUI still
+  read `tax_profile::get` directly. P2 MUST route every profile consumer through `resolve_profile` and print
+  the provenance, or a year with `ReturnInputs` silently gives those paths a stale/absent profile. Tracked as
+  a hard P2 task, not opportunistic.
+- **p1-carryover-writeback-P3P4** (SCHEDULED → P3/P4) — charitable + capital-loss carryovers are read from
+  `ReturnInputs` but not yet written back (next-year carryforward_out). The write-back lands with the
+  Schedule A / Schedule D compute stages in P3/P4; P1 only stores the declared inputs.
+- **p1-task4-row-reclassification** (DEFERRED → task-4 follow-on) — reclassifying an imported inbound row
+  (e.g. income ↔ self-transfer) from inside the full-return flow is out of P1; the existing ledger
+  reclassification commands remain the path. Revisit when task-4 row editing is specced.
+- **p1-r1-m2-excess-aptc** (NOTE — already tracked) — the impl leaves Sch 2 L1a (excess-APTC) with no input,
+  consistent with `fr-8962-taxonomy` above (unrepresentable / would-refuse-if-captured). No new action; this
+  cross-links the two so the P3 Schedule-2 filler doesn't treat L1a as a live zero.
+- **p1-r1-m3-dob-option-pin** (NOTE) — `Person.dob` is `Option<NaiveDate>`; the age-65/blind and kiddie-tax
+  paths must treat `None` as "not established" (fail-loud / no silent age-0), never as a birthdate. Pin this
+  contract in the P2 `derive_tax_profile` doc + a KAT when the age-dependent standard deduction lands.
+
 ## From the whole-design Fable audit (Minors — C1/I1/I2/I3 were FOLDED into spec r5/r6; these Minors remain)
 
 - **audit-minors** — the audit's Minors M2–M8, M10, M11 are recorded in
