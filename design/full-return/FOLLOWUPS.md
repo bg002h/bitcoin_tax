@@ -29,6 +29,14 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 - **pm-r2-m4** — P0 task 0 FROZEN pin: make explicit that what-if / pseudo-reconcile / existing-crypto-test
   files are "never alter" (would break loudly) but are not content-pinned (only the 3 delta-path files are).
 
+## From the whole-design Fable audit (Minors — C1/I1/I2/I3 were FOLDED into spec r5/r6; these Minors remain)
+
+- **audit-minors** — the audit's Minors M2–M8, M10, M11 are recorded in
+  `reviews/DESIGN-fable-audit-final.md` (the confirmation review noted they weren't transcribed here). Named
+  examples: derived-profile `pref>TI` clamp mirror in `derive_tax_profile`; a couple of taxonomy nits. All
+  ranked Minor by two independent Fable passes; fold opportunistically during the relevant phase. (spec §8
+  KAT-3 mod-25 + the Sch 2 L1a/L2 structure are now FOLDED into spec r6, not open.)
+
 ## Spec errata surfaced by the plan review (fix spec text; do not re-open the GREEN gate for these)
 
 - **spec-s8-kat3-mod25** — SPEC §8 / §10 KAT-3 says "no bracket edge < $100k inside a $50 bin". That's a

@@ -1,8 +1,14 @@
 # SPEC — Full Return (Common W-2 Household, TY2024) — v1
 
-**Status:** DRAFT r5 (was GREEN r4; folded the final **whole-design Fable audit** →
-`design/full-return/reviews/DESIGN-fable-audit-final.md`) → pending Fable confirmation re-review → user review.
-Reviews: `design/full-return/reviews/SPEC-fable-review-r{1,2,3,4}.md`.
+**Status:** DRAFT r6 (was GREEN r4; folded whole-design audit [r5] + its confirmation review [r6] →
+`design/full-return/reviews/DESIGN-{fable-audit-final,audit-fold-confirm}.md`) → pending Fable re-confirmation
+→ user review. Reviews: `design/full-return/reviews/SPEC-fable-review-r{1,2,3,4}.md`.
+
+**r6 changelog (confirmation-review fold):** **F1** REVERTED the r5 Sch 2 mis-fix — the correct 2024 structure
+is **L1a = excess-APTC → L1z, L2 = AMT, L3 = L1z+L2** (recon-01/deep-03 were right; the false erratum is
+retracted); **F2** kiddie-tax unearned income = **gross − earned** (incl. L8v/L7/L1), moved to compute-
+dependent P2; **F3** added the §402(g) excess-deferral refuse ($23,000 TY2024) — the box-12 allowlist is inert
+only below it.
 
 **r5 changelog (whole-design audit fold):** **C1** Form 8615 kiddie-tax refuse (dependent filer + unearned
 income > $2,600 §1(g)) + §8 threshold + KAT-19 — closes a silent-understatement hole; **I1** box-12 guard is
@@ -307,11 +313,12 @@ person; **per person** (never pooled); → Sch 3 L11 → 1040 L31. RRTA out of s
 |---|---|---|
 | ≥2 self-employment/business crypto earners | refuse | v1 supports one Schedule C (§4.4a) |
 | **business-flagged crypto `Interest` income** | refuse | R3-I3: excluded from SE (§1402(a)(2)) but not NIIT-sheltered — no clean v1 home |
-| **claimable-as-dependent filer + unearned income > $2,600** (TY2024, §1(g)) | refuse | **C1 — Form 8615 kiddie tax**: `qdcgt_line16` at the child's rate would UNDERSTATE (parent's-rate required) |
+| **claimable-as-dependent filer + unearned income > $2,600** (§1(g); F2: **unearned = gross income − earned income [wages + Sch C net]** → includes interest, dividends, capital gains, hobby-crypto L8v, unemployment L7, taxable refunds L1; **compute-dependent — screened in P2** after income assembly, not P1) | refuse | **C1 — Form 8615 kiddie tax**: `qdcgt_line16` at the child's rate would UNDERSTATE (parent's-rate required) |
 | **Schedule C net < 0** (loss) | refuse | **I2**: §465 at-risk + a negative Sch 1 L3 is unsubstantiated in v1 |
-| **excess-APTC / any marketplace Form 8962** | refuse | Sch 2 **L2** repayment (would understate) |
+| **excess-APTC / any marketplace Form 8962** | refuse | Sch 2 **L1a** repayment (would understate) |
 | QBI deduction asserted on Schedule C income | refuse | §199A-on-Sch-C is a follow-on (§4.5) |
 | W-2 box 12 code **not in the inert allowlist** `{D,E,F,G,H,S,AA,BB,EE,DD}` | refuse | **I1 (allowlist, not blocklist):** a blocklist leaks K (golden-parachute → Sch 2 L17k), R (8853), T (8839) etc.; allow only the clearly-inert elective-deferral / informational codes and refuse the rest — incl. **W** (→ 8889), **A/B/M/N** (→ L13), **Z** (→ L17h) |
+| **Σ box-12 elective deferrals (D/E/F/G/S) across employers > §402(g) $23,000** (TY2024) | refuse | **F3**: excess deferral is taxable on 1040 **1h** — the allowlist codes are inert only *up to* the §402(g) limit |
 | W-2 **box 8** allocated tips | refuse | Form 4137 |
 | W-2 **box 10** dependent-care | refuse | Form 2441 |
 | INT **box 9** / DIV **box 13** (PAB AMT pref) | refuse | AMT preference (§4.11) |
@@ -324,7 +331,7 @@ person; **per person** (never pooled); → Sch 3 L11 → 1040 L31. RRTA out of s
 
 ### 4.11 AMT screen (G13; M7)
 
-Sch 2 L1 = 0, **not silently**: implement the 2024 "Worksheet To See if You Should Fill in Form 6251" as a
+Sch 2 **L2 (AMT)** = 0, **not silently**: implement the 2024 "Worksheet To See if You Should Fill in Form 6251" as a
 **refuse-trigger**; plus refuse on visible AMT-preference inputs (INT box 9 / DIV box 13). KAT the screen.
 LIMITATIONS: "AMT computation out of scope; screened."
 
@@ -355,7 +362,7 @@ exists (D-4).
 4  L16 = method.rs::qdcgt_line16(TI=L15, qd=3a, ltcg=net_1222 preferential_gain):
      pref_ws = min(TI, qd+ltcg) ★F2 F-A; L22/L24 Table(<100k)/TCW(≥100k) each on its own amount;
      line16 = round_dollar(min(L23,L24)) ★min load-bearing (F2 F-B)
-5  Sch 2 Part I: **L1 = AMT** (screen=0, §4.11); **L2 = excess-APTC** (refuse if any, §4.10); L3 = L1+L2 → 1040 L17; L18=L16+L17
+5  Sch 2 Part I: **L1a = excess-APTC** (refuse if any, §4.10) → L1z; **L2 = AMT** (screen=0, §4.11); L3 = L1z + L2 → 1040 L17; L18=L16+L17
 6  Nonrefundable credits: FTC(§4.7a)→Sch 3 L1; Sch 3 L8→1040 L20; L19=0 CTC/ODC omitted-conservatively
      (+advisory, §3.4); L21=L19+L20; L22=max(0,L18−L21)
 7  Sch 2 Part II (other taxes) → L23:
@@ -447,7 +454,7 @@ Sch B >14 interest / >15 dividend overflow reuses the 8949 continuation pattern.
 Add **standard-deduction** basic + §63(f) aged/blind + dependent floor (TY2024 $14,600/$29,200/$21,900;
 $1,550/$1,950 per box; floor $1,300/+$450). SALT cap statutory-constant TY2024 ($10k/$5k). Excess-SS MAX =
 6.2%×`ss_wage_base`. FTC ceiling $300/$600. **§1(g) kiddie-tax unearned-income threshold $2,600 (TY2024,
-indexed — C1).** **No per-year Tax-Table data** (F2). Add a **per-year assertion** in `method.rs`: **every
+indexed — C1); §402(g) elective-deferral limit $23,000 (TY2024, indexed — F3).** **No per-year Tax-Table data** (F2). Add a **per-year assertion** in `method.rs`: **every
 bracket edge < $100k is a multiple of $25** (a $50-bin boundary or its exact midpoint; deep/01's stricter
 no-interior-edge form was TY2024-only — corrected per plan-review C1).
 
@@ -459,7 +466,7 @@ DRAFT watermark + attestation forced on every full return; mechanical (UPL); Pai
 LIMITATIONS doc** (versioned; man page + `--help` + shipped file): supported forms/lines/years, plus three
 lists aligned to §3.4's omission-vs-refuse split (R3-M8): **(i) favorable-only OMISSIONS** (advisory, overstate
 tax at worst) — CTC/ODC, EIC, education/dependent-care/saver's/energy/adoption credits, direct-deposit;
-**(ii) REFUSALS** (§4.10) — incl. AMT-screen trigger, excess-APTC/Form 8962 (Sch 2 L2), foreign trust (3520),
+**(ii) REFUSALS** (§4.10) — incl. AMT-screen trigger, excess-APTC/Form 8962 (Sch 2 L1a), foreign trust (3520),
 foreign tax > cap, the box-12/8/10 guards, business-flagged Interest, Sch 1 L13/L20-with-deduction;
 **(iii) unrepresentable / documented-out** (no input; would refuse if captured) — 1099-R/SSA/pension income,
 state returns, e-file, non-crypto Schedule C/E/F. Plus the **conservative simplification** (Form 8960 Part II
@@ -497,8 +504,9 @@ crypto hobby income; **crypto Schedule-C business income + SE** [= deep/02 Ex.2,
 caveat (M6):** IRS ATS Scenario 2 pulls in out-of-scope forms → **partial-line diff** or a v1-envelope
 synthetic golden.
 
-*(Erratum: recon-01 §2 shows Sch 2 L1/L2 swapped vs the 2024 form; the corrected spec uses **L1 = AMT,
-L2 = excess-APTC → Sch 2 L3** — §5 stage 5, §4.11.)*
+*(Sch 2 Part I on the 2024 form: **L1a = excess-APTC → L1z, L2 = AMT, L3 = L1z + L2** — as recon-01 §2 /
+deep/03 correctly read (verified against `f1040s2--2024.pdf`); the spec uses this. An earlier "erratum" that
+inverted it to L1=AMT was itself wrong and is retracted.)*
 
 ---
 

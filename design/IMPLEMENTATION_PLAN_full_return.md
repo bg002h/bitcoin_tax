@@ -1,10 +1,10 @@
 # IMPLEMENTATION PLAN — Full Return v1 (Common W-2 Household, TY2024)
 
-**Status:** DRAFT r3 (was GREEN r2; folded the whole-design Fable audit's plan-touching items →
-`design/full-return/reviews/DESIGN-fable-audit-final.md`) → pending Fable confirmation → user review. Reviews:
-`design/full-return/reviews/PLAN-fable-review-r{1,2}.md`.
-**r3 changelog (audit fold):** added KAT-19 (Form 8615 kiddie-tax refuse, P1) + KAT-20 (box-12 allowlist, P1)
-+ Schedule C net<0 refuse (P2); spec r5 dropped the orphan `qbi_override` (no plan task existed — closed).
+**Status:** DRAFT r4 (was GREEN r2; folded whole-design audit + its confirmation review) → pending Fable
+re-confirmation → user review. Reviews: `design/full-return/reviews/PLAN-fable-review-r{1,2}.md`.
+**r3/r4 changelog (audit + confirmation fold):** KAT-20 (box-12 allowlist, P1) + Schedule C net<0 refuse (P2);
+dropped orphan `qbi_override`; **r4: KAT-19 kiddie-tax moved P1→P2** (compute-dependent, unearned = gross−earned,
+F2) + **§402(g) excess-deferral refuse** input-screened in P1 (F3).
 **Implements:** `design/SPEC_full_return.md` (GREEN r4). **Governs:** `STANDARD_WORKFLOW.md`.
 **Open FOLLOWUPS to fold as encountered:** `design/full-return/FOLLOWUPS.md`.
 
@@ -90,12 +90,13 @@ the **mod-25** edge assertion passes for 2017/2024/2025/2026; CI param cross-che
    / pseudo / missing arms + provenance land now — **full precedence + the first-arm KAT move to P2.** Wire the
    single resolver into report/TUI/optimize/what-if/export; `tax-profile set` warn + `--force` when
    `ReturnInputs` exists (D-4).
-4. **Refuse-guard table (§4.10)** as `fn screen(&ReturnInputs, &TaxTable) -> Option<Blocker>` [Minor 1: needs
-   the year table for the excess-SS MAX + the §1(g) kiddie threshold]; **one KAT per input-screenable row**
-   (business-Interest R3-I3; foreign-trust; **box-12 inert-allowlist — KAT-20, code K present ⇒ refuse (audit
-   I1)**; box-8/10; foreign-tax>cap; ≥2 SE earners; single-employer-excess-SS; **Form 8615 kiddie-tax — KAT-19,
-   claimable dependent + unearned income (Σ int+div+capgain) > $2,600 (audit C1)**; excess-APTC/8962).
-   **Compute-dependent rows are owned downstream** (TI≤0 → P3; **Schedule C net<0 → P2, audit I2**).
+4. **Refuse-guard table (§4.10)** as `fn screen(&ReturnInputs, &TaxTable) -> Option<Blocker>` [needs the year
+   table for excess-SS MAX + §402(g) limit]; **one KAT per input-screenable row** (business-Interest R3-I3;
+   foreign-trust; **box-12 inert-allowlist — KAT-20, code K ⇒ refuse (I1)**; **Σ box-12 D/E/F/G/S > §402(g)
+   $23,000 ⇒ refuse (F3)**; box-8/10; foreign-tax>cap; ≥2 SE earners; single-employer-excess-SS;
+   excess-APTC/8962). **Compute-dependent rows owned downstream** (TI≤0 → P3; **Schedule C net<0 → P2 (I2)**;
+   **Form 8615 kiddie-tax → P2 (C1/F2): claimable dependent + unearned income [= gross − earned] > $2,600 needs
+   assembled income — KAT-19**).
 5. Carryover write-back plumbing (spec §4 R3-M6: **provenance** computed-vs-user; computed overwrites computed
    but **refuses user-entered without `--force`**) — storage only; the R3-M6 KAT lands in P3/P4. SSN `--stdin`
    entry + masked rendering (spec §4.2 security-review item).
@@ -112,7 +113,9 @@ every **input-screenable** refuse row has a red→green KAT; SSN masking verifie
    business `crypto_ord` − expenses; **refuse if net < 0 — Schedule C loss, audit I2**)**, L18 (Σ INT box2),
    L21 (student-loan worksheet, MFS=$0), L15 (½-SE from Sch C, wired in P4 but derivation stub here) → L10.
    **KAT-15: L8v-vs-L3 partition + cross-foot (L9 carries crypto_ord); KAT: business-income-without-Sch-C ⇒
-   fail-loud (R3-M10); KAT: Sch C net<0 ⇒ refuse.**
+   fail-loud (R3-M10); KAT: Sch C net<0 ⇒ refuse.** **Form 8615 kiddie-tax refuse (C1/F2):** after income
+   assembly compute unearned = gross − earned[wages + Sch C net]; claimable dependent + unearned > $2,600 ⇒
+   refuse — **KAT-19**.
 3. **Two distinct AGI notions [I4 — the frozen seam]:** (a) `return_1040` computes the **absolute, WITH-crypto**
    AGI (real 1040 L11 = L9−L10, crypto included) for the filed return; (b) `derive_tax_profile` populates the
    frozen `TaxProfile` scalars `magi_excluding_crypto` / `ordinary_taxable_income` from **NON-crypto line items
