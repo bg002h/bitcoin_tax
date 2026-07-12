@@ -74,6 +74,12 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   row (e.g. income ↔ self-transfer) from inside the full-return flow is out of P1; the existing reconcile
   reclassification commands remain the path. Distinct from the refuse-row reclassification above. Revisit
   when task-4 row editing is specced.
+- **p1-r3-m1-negscreen-exhaustive-destructure** (SCHEDULED → P2, EARLY — before any new `Usd` field) — the
+  `first_negative_amount` field list in `return_refuse.rs` is hand-maintained (r3 audited it exhaustive at
+  HEAD: all 51 money paths covered). A P2-added `Usd` field would silently bypass the negative screen — a
+  fail-open regression of the R2-I1 fix. Convert each struct match to **exhaustive destructuring (no `..`)**
+  so the compiler forces every new field to be classified. Do this as the FIRST P2 change to the module,
+  ahead of any field additions (review R3-M1, non-blocking).
 - **p1-ssn-normalization-P6** (SCHEDULED → P6) — `income import` stores the SSN AS ENTERED; only *masking*
   (the security-load-bearing half) ships in P1. Canonicalization to `NNN-NN-NNNN` (or digits-only) is
   deferred to P6, where the PDF filler needs a single on-form format. Person's doc no longer claims
