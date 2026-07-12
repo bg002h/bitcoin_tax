@@ -142,6 +142,32 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams) -> TaxPr
     }
 }
 
+/// Schedule B §6012 / Form 1040 Schedule B filing threshold ($1,500 for interest and for dividends).
+const SCHEDULE_B_THRESHOLD: Usd = dec!(1500);
+
+/// Whether Schedule B must be filed (SPEC §7.1, R3-I2 — the single normative site): **taxable interest >
+/// $1,500** OR **ordinary dividends > $1,500** OR `foreign_accounts == Some(true)` (Part III trigger (b)).
+/// Uses the NON-crypto 1040 2b / 3b figures (crypto lending interest lands on Sch 1 L8v, not 2b).
+/// `foreign_trust == Some(true)` refuses upstream (§4.10) and is never a Schedule-B path.
+pub fn schedule_b_files(ri: &ReturnInputs) -> bool {
+    let taxable_int: Usd = ri
+        .int_1099
+        .iter()
+        .map(|i| i.box1_interest + i.box3_treasury_interest)
+        .sum();
+    let ord_div: Usd = ri.div_1099.iter().map(|d| d.box1a_ordinary).sum();
+    taxable_int > SCHEDULE_B_THRESHOLD
+        || ord_div > SCHEDULE_B_THRESHOLD
+        || ri.foreign_accounts == Some(true)
+}
+
+/// When Schedule B files, Part III line 7a (foreign financial accounts) MUST be answered — a `None`
+/// tri-state is a fail-loud gap (SPEC §7.1 / I7), not a silent "no". `true` ⇒ Schedule B files but
+/// `foreign_accounts` is unanswered (the caller refuses rather than guess).
+pub fn schedule_b_part3_unanswered(ri: &ReturnInputs) -> bool {
+    schedule_b_files(ri) && ri.foreign_accounts.is_none()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,5 +483,64 @@ mod tests {
         assert_eq!(p.w2_ss_wages, dec!(40000)); // spouse's own box 3
         assert_eq!(p.w2_medicare_wages, dec!(140000)); // household Σ box 5
         assert_eq!(p.schedule_c_expenses, dec!(2500));
+    }
+
+    /// Schedule B filing trigger (SPEC §7.1): interest OR dividends > $1,500, or a foreign account.
+    #[test]
+    fn schedule_b_filing_trigger() {
+        let int = |amt: Usd| ReturnInputs {
+            filing_status: FilingStatus::Single,
+            int_1099: vec![Form1099Int {
+                box1_interest: amt,
+                ..Default::default()
+            }],
+            foreign_accounts: Some(false),
+            ..Default::default()
+        };
+        // $2,000 interest → files; exactly $1,500 → does NOT (strictly greater).
+        assert!(schedule_b_files(&int(dec!(2000))));
+        assert!(!schedule_b_files(&int(dec!(1500))));
+        // $2,000 ordinary dividends → files.
+        let div = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            div_1099: vec![Form1099Div {
+                box1a_ordinary: dec!(2000),
+                ..Default::default()
+            }],
+            foreign_accounts: Some(false),
+            ..Default::default()
+        };
+        assert!(schedule_b_files(&div));
+        // Below both thresholds but a foreign account is present → files via Part III trigger (b).
+        let mut fa = int(dec!(200));
+        fa.foreign_accounts = Some(true);
+        assert!(schedule_b_files(&fa));
+    }
+
+    /// Part III must be answered when Schedule B files — a `None` foreign-accounts tri-state fails loud.
+    #[test]
+    fn schedule_b_part3_none_is_fail_loud_only_when_filing() {
+        // Files ($2,000 interest) but foreign_accounts unanswered → fail-loud.
+        let unanswered = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            int_1099: vec![Form1099Int {
+                box1_interest: dec!(2000),
+                ..Default::default()
+            }],
+            foreign_accounts: None,
+            ..Default::default()
+        };
+        assert!(schedule_b_part3_unanswered(&unanswered));
+        // Not filing (small amounts) → a None is fine (Schedule B not required).
+        let not_filing = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            int_1099: vec![Form1099Int {
+                box1_interest: dec!(100),
+                ..Default::default()
+            }],
+            foreign_accounts: None,
+            ..Default::default()
+        };
+        assert!(!schedule_b_part3_unanswered(&not_filing));
     }
 }
