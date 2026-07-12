@@ -1,8 +1,9 @@
 # SPEC — Full Return (Common W-2 Household, TY2024) — v1
 
-**Status:** DRAFT r6 (was GREEN r4; folded whole-design audit [r5] + its confirmation review [r6] →
-`design/full-return/reviews/DESIGN-{fable-audit-final,audit-fold-confirm}.md`) → pending Fable re-confirmation
-→ user review. Reviews: `design/full-return/reviews/SPEC-fable-review-r{1,2,3,4}.md`.
+**Status:** ✅ SOUND-TO-BUILD r6 — Fable re-confirmation = **0 Critical / 0 Important / 7 Minor** (green
+through 4 spec rounds + a whole-design audit + 2 confirmation rounds; Minors → `FOLLOWUPS.md`). → implementation
+underway (Phase 0). Reviews: `design/full-return/reviews/{SPEC-fable-review-r1..4, DESIGN-fable-audit-final,
+DESIGN-audit-fold-confirm, DESIGN-audit-fold-confirm-r2}.md`.
 
 **r6 changelog (confirmation-review fold):** **F1** REVERTED the r5 Sch 2 mis-fix — the correct 2024 structure
 is **L1a = excess-APTC → L1z, L2 = AMT, L3 = L1z+L2** (recon-01/deep-03 were right; the false erratum is

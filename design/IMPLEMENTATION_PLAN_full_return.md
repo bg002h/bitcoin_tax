@@ -1,7 +1,8 @@
 # IMPLEMENTATION PLAN — Full Return v1 (Common W-2 Household, TY2024)
 
-**Status:** DRAFT r4 (was GREEN r2; folded whole-design audit + its confirmation review) → pending Fable
-re-confirmation → user review. Reviews: `design/full-return/reviews/PLAN-fable-review-r{1,2}.md`.
+**Status:** ✅ SOUND-TO-BUILD r4 — Fable re-confirmation = **0 Critical / 0 Important** (green through 2 plan
+rounds + whole-design audit + 2 confirmations). → implementation underway (Phase 0). Reviews:
+`design/full-return/reviews/{PLAN-fable-review-r1,2, DESIGN-audit-fold-confirm-r2}.md`.
 **r3/r4 changelog (audit + confirmation fold):** KAT-20 (box-12 allowlist, P1) + Schedule C net<0 refuse (P2);
 dropped orphan `qbi_override`; **r4: KAT-19 kiddie-tax moved P1→P2** (compute-dependent, unearned = gross−earned,
 F2) + **§402(g) excess-deferral refuse** input-screened in P1 (F3).
