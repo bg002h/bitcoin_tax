@@ -2,8 +2,9 @@
 //! `report_tax_year` (Task 9) provides the standalone "tax owed / what-if" calculator.
 //! `report_tax_year` also runs the M4 carryforward-consistency advisory (Task 10).
 use crate::{return_inputs, tax_profile, CliError, Session};
+use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
 use btctax_core::tax::return_inputs::ReturnInputs;
-use btctax_adapters::BundledTaxTables;
+use btctax_core::tax::tables::FullReturnTables;
 use btctax_core::{
     carryforward_consistency, compute_se_tax, compute_tax_year, schedule_d, se_net_income,
     ScheduleDTotals, TaxOutcome, TaxProfile, TaxTables, Usd,
@@ -157,18 +158,35 @@ pub fn report_tax_year(
     // proceed with zero setup. This clears `TaxProfileMissing` ONLY — it is injected AFTER the projection,
     // so it never touches `state.blockers` and thus can NEVER clear the Hard `TaxYearNotComputable` gate
     // (compute.rs checks Hard blockers BEFORE the profile branch). A real stored profile always wins.
-    // Single profile-source resolver (SPEC §4.12 / G4): ReturnInputs → stored TaxProfile → pseudo → missing.
-    let resolved = crate::resolve::resolve_profile(s.conn(), year, cfg.pseudo_reconcile)?;
-    if resolved.is_derivation_pending() {
-        // A full-return `ReturnInputs` exists but `derive_tax_profile` is Phase 2 — surface it explicitly;
-        // never silently treat the year as profile-less (which would be a wrong number).
-        return Err(CliError::Usage(format!(
-            "tax year {year} has full-return inputs, but full-return computation is not yet available in \
-             this version; run `income clear --year {year}` to remove them and use a raw `tax-profile`"
-        )));
+    // Single profile-source resolver (SPEC §4.12 / G4): ReturnInputs (derived) → stored TaxProfile → pseudo
+    // → missing. Full-return derivation is gated fail-closed by the refuse-guard inside `resolve_profile`.
+    let tables = BundledTaxTables::load();
+    let fr_tables = BundledFullReturnTables::load();
+    let resolved = crate::resolve::resolve_profile(
+        s.conn(),
+        year,
+        cfg.pseudo_reconcile,
+        fr_tables.full_return_for(year),
+        tables.table_for(year),
+    )?;
+    if resolved.is_return_inputs_uncomputable() {
+        // Full-return `ReturnInputs` exist but could not be derived — surface WHY; never silently treat the
+        // year as profile-less (a wrong number). A refusal carries its reason; otherwise the year is one v1
+        // has no full-return tables for (TY2024 only).
+        return Err(CliError::Usage(match resolved.refusal {
+            Some(r) => format!(
+                "tax year {year} cannot be computed from its full-return inputs: {}; run \
+                 `income clear --year {year}` to remove them and use a raw `tax-profile`",
+                r.detail
+            ),
+            None => format!(
+                "tax year {year} has full-return inputs, but full-return computation is not supported for \
+                 {year} in this version (v1 supports TY2024); run `income clear --year {year}` to remove \
+                 them and use a raw `tax-profile`"
+            ),
+        }));
     }
     let profile = resolved.profile;
-    let tables = BundledTaxTables::load();
     let outcome = compute_tax_year(&events, &state, year, profile.as_ref(), &tables);
     // P2-B: the RAW pre-netting Schedule D part totals for the same year, from the same projection.
     let sched_d = schedule_d(&state, year);

@@ -526,13 +526,11 @@ fn report_tax_year_without_profile_says_not_computable() {
     );
 }
 
-/// [full-return P1 / review R2-M2] With `ReturnInputs` stored for the year, `report_tax_year` must not
-/// silently treat the year as profile-less — full-return computation (`derive_tax_profile`) is Phase 2,
-/// so the resolver reports derivation-pending and `report_tax_year` returns a `Usage` error whose text
-/// points at the real `income clear --year N` recovery path (the I3 dead-end fix). This is the executable
-/// test for the pending-derivation branch itself.
+/// [full-return P2 / review R2-M2] `ReturnInputs` for a year v1 does NOT support (TY2025 — no bundled
+/// full-return tables) must not silently compute a profile-less number: `report_tax_year` returns a
+/// `Usage` error explaining the unsupported year and pointing at the real `income clear --year N` recovery.
 #[test]
-fn report_tax_year_with_return_inputs_refuses_pending_with_income_clear_hint() {
+fn report_tax_year_with_return_inputs_for_unsupported_year_refuses_with_income_clear_hint() {
     let dir = tempfile::tempdir().unwrap();
     let vault = dir.path().join("vault.pgp");
     cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
@@ -550,14 +548,42 @@ fn report_tax_year_with_return_inputs_refuses_pending_with_income_clear_hint() {
                 "message must point at the working recovery command: {msg}"
             );
         }
-        other => panic!("expected a Usage error for pending derivation, got {other:?}"),
+        other => panic!("expected a Usage error for the unsupported year, got {other:?}"),
     }
 
-    // Recovery works: after `income clear`, the same year is no longer pending (falls back to no-profile).
+    // Recovery works: after `income clear`, the same year is no longer blocked (falls back to no-profile).
     assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2025).unwrap());
     let (outcome, ..) = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
-    // No profile, no events ⇒ TaxProfileMissing (NOT the pending Usage error).
+    // No profile, no events ⇒ TaxProfileMissing (NOT the unsupported-year Usage error).
     assert!(matches!(outcome, btctax_core::TaxOutcome::NotComputable(_)));
+}
+
+/// [full-return P2 task 5] The headline: importing TY2024 `ReturnInputs` makes `report_tax_year` COMPUTE
+/// (via the derived frozen profile) instead of refusing — no `tax-profile set` needed. With a real crypto
+/// disposal in the ledger, the outcome is `Computed` and the derived Single profile drives the delta.
+#[test]
+fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path()); // a fully-real buy+sell (no blockers)
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // No `tax-profile set` — only full-return inputs. A modest wage household for TY2025 (the CSV year).
+    let toml = _dir.path().join("inputs.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
+    )
+    .unwrap();
+    // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
+    // the derive+compute happy path (the ledger has no 2024 disposals → a clean profile-only computation).
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
+
+    let (outcome, ..) = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
+    // Derived a real profile ⇒ Computed (NOT NotComputable(TaxProfileMissing), NOT a Usage refusal).
+    assert!(
+        matches!(outcome, btctax_core::TaxOutcome::Computed(_)),
+        "TY2024 ReturnInputs must derive+compute, got {outcome:?}"
+    );
 }
 
 /// Unresolved hard blocker (UnknownBasisInbound from unclassified Receive) →

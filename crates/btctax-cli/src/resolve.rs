@@ -1,23 +1,25 @@
-//! **Single profile-source resolver** (full-return v1, Phase 1 task 3 / SPEC §4.12 / G4).
+//! **Single profile-source resolver** (full-return v1, SPEC §4.12 / G4).
 //!
 //! Every consumer (`report`, TUI, `optimize`, `what-if` defaults, `export`) must resolve the tax profile
 //! through ONE function so the app never shows two different liabilities for one year (the cardinal sin).
 //! Precedence (SPEC §4.12): `ReturnInputs` (full return) → stored `TaxProfile` (raw override) →
 //! pseudo-reconcile placeholder → missing.
 //!
-//! **P1 skeleton (plan re-review I2):** the `ReturnInputs` arm is STUBBED here — `derive_tax_profile` is
-//! Phase 2, so a year that has `ReturnInputs` resolves to [`Provenance::ReturnInputs`] with `profile: None`
-//! (derivation pending). Full precedence + the derive arm land in P2. The `income` subcommands shipped in
-//! this phase, so a vault CAN hold `ReturnInputs`; the stub is fail-closed regardless, and callers treat
-//! the pending state explicitly (`report` refuses with an `income clear` recovery hint).
+//! **P2 (task 5):** the `ReturnInputs` arm now DERIVES the frozen [`TaxProfile`] via
+//! [`btctax_core::tax::derive_tax_profile`], gated **fail-closed** by the [`screen_inputs`] refuse-guard:
+//! an input-screenable refusal — or a year without full-return tables (v1 = TY2024) — yields
+//! `profile: None` rather than a wrong number, carrying the [`Refusal`] so the caller can surface it.
 use crate::{return_inputs, tax_profile, CliError};
-use btctax_core::{Carryforward, FilingStatus, TaxProfile, Usd};
+use btctax_core::tax::derive_tax_profile;
+use btctax_core::tax::return_refuse::{screen_inputs, Refusal};
+use btctax_core::tax::tables::FullReturnParams;
+use btctax_core::{Carryforward, FilingStatus, TaxProfile, TaxTable, Usd};
 use rusqlite::Connection;
 
 /// Which source produced the resolved profile (printed on every output so a reviewer can audit — G4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provenance {
-    /// A full-return `ReturnInputs` blob (derivation is Phase 2 — `profile` is `None` in P1).
+    /// A full-return `ReturnInputs` blob, derived to a `TaxProfile` (or `None` if refused/unsupported).
     ReturnInputs,
     /// A raw hand-entered `TaxProfile` (the escape hatch).
     StoredProfile,
@@ -27,18 +29,22 @@ pub enum Provenance {
     Missing,
 }
 
-/// The resolved profile + its provenance. `profile` is `None` for [`Provenance::Missing`] and (in P1)
-/// [`Provenance::ReturnInputs`] (derivation pending).
+/// The resolved profile + its provenance (+ any refusal). `profile` is `None` for [`Provenance::Missing`],
+/// and for [`Provenance::ReturnInputs`] when the inputs were refused by the fail-closed guard or the year
+/// lacks full-return tables — `refusal` distinguishes those two.
 #[derive(Debug, Clone)]
 pub struct Resolved {
     pub profile: Option<TaxProfile>,
     pub provenance: Provenance,
+    /// Set (with `profile: None`) when `ReturnInputs` were present but the refuse-guard refused them.
+    pub refusal: Option<Refusal>,
 }
 
 impl Resolved {
-    /// A `ReturnInputs` exists but its derivation is not yet implemented (Phase 2). Callers must surface
-    /// this rather than silently treating the year as profile-less (which would be a wrong number).
-    pub fn is_derivation_pending(&self) -> bool {
+    /// `ReturnInputs` were present but no profile could be produced — either the refuse-guard refused them
+    /// (`refusal` is `Some`) or the year has no full-return tables (v1 = TY2024; `refusal` is `None`).
+    /// Callers MUST surface this, never treat the year as profile-less (which would be a wrong number).
+    pub fn is_return_inputs_uncomputable(&self) -> bool {
         self.provenance == Provenance::ReturnInputs && self.profile.is_none()
     }
 }
@@ -61,17 +67,37 @@ pub fn placeholder_tax_profile() -> TaxProfile {
 }
 
 /// Resolve the tax profile for `year` in SPEC §4.12 precedence order. `pseudo_reconcile` is the config
-/// flag. The single entry point for every consumer.
+/// flag; `full_return` / `tax_table` are the year's tables (both `None` for a year v1 doesn't support,
+/// which fails the `ReturnInputs` arm closed). The single entry point for every consumer.
 pub fn resolve_profile(
     conn: &Connection,
     year: i32,
     pseudo_reconcile: bool,
+    full_return: Option<&FullReturnParams>,
+    tax_table: Option<&TaxTable>,
 ) -> Result<Resolved, CliError> {
-    // 1. Full return (highest precedence). P1: exists ⇒ pending (derivation is P2).
-    if return_inputs::exists(conn, year)? {
+    // 1. Full return (highest precedence): derive the frozen profile, gated fail-closed by the guard.
+    if let Some(ri) = return_inputs::get(conn, year)? {
+        // A year without full-return tables (v1 = TY2024) cannot be derived — fail closed, no refusal.
+        let (Some(params), Some(table)) = (full_return, tax_table) else {
+            return Ok(Resolved {
+                profile: None,
+                provenance: Provenance::ReturnInputs,
+                refusal: None,
+            });
+        };
+        // Fail-closed: an input-screenable refusal blocks derivation (never a silently-wrong number).
+        if let Some(refusal) = screen_inputs(&ri, table, params) {
+            return Ok(Resolved {
+                profile: None,
+                provenance: Provenance::ReturnInputs,
+                refusal: Some(refusal),
+            });
+        }
         return Ok(Resolved {
-            profile: None,
+            profile: Some(derive_tax_profile(&ri, params)),
             provenance: Provenance::ReturnInputs,
+            refusal: None,
         });
     }
     // 2. Raw hand-entered profile (the escape hatch).
@@ -79,6 +105,7 @@ pub fn resolve_profile(
         return Ok(Resolved {
             profile: Some(p),
             provenance: Provenance::StoredProfile,
+            refusal: None,
         });
     }
     // 3. Pseudo-reconcile placeholder (mode on).
@@ -86,19 +113,24 @@ pub fn resolve_profile(
         return Ok(Resolved {
             profile: Some(placeholder_tax_profile()),
             provenance: Provenance::PseudoPlaceholder,
+            refusal: None,
         });
     }
     // 4. Nothing.
     Ok(Resolved {
         profile: None,
         provenance: Provenance::Missing,
+        refusal: None,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use btctax_core::tax::return_inputs::ReturnInputs;
+    use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
+    use btctax_core::tax::return_inputs::{ReturnInputs, W2};
+    use btctax_core::tax::tables::FullReturnTables;
+    use btctax_core::TaxTables;
     use rust_decimal_macros::dec;
 
     fn mem() -> Connection {
@@ -113,11 +145,25 @@ mod tests {
         p.ordinary_taxable_income = dec!(120000);
         p
     }
+    // The bundled TY2024 full-return params + tax table (v1 supports TY2024 only).
+    fn ty2024() -> (BundledFullReturnTables, BundledTaxTables) {
+        (BundledFullReturnTables::load(), BundledTaxTables::load())
+    }
+    fn resolve(
+        c: &Connection,
+        year: i32,
+        pseudo: bool,
+        fr: &BundledFullReturnTables,
+        tt: &BundledTaxTables,
+    ) -> Resolved {
+        resolve_profile(c, year, pseudo, fr.full_return_for(year), tt.table_for(year)).unwrap()
+    }
 
     #[test]
     fn missing_when_nothing_stored_and_mode_off() {
         let c = mem();
-        let r = resolve_profile(&c, 2024, false).unwrap();
+        let (fr, tt) = ty2024();
+        let r = resolve(&c, 2024, false, &fr, &tt);
         assert_eq!(r.provenance, Provenance::Missing);
         assert!(r.profile.is_none());
     }
@@ -125,7 +171,8 @@ mod tests {
     #[test]
     fn pseudo_placeholder_when_mode_on_and_nothing_stored() {
         let c = mem();
-        let r = resolve_profile(&c, 2024, true).unwrap();
+        let (fr, tt) = ty2024();
+        let r = resolve(&c, 2024, true, &fr, &tt);
         assert_eq!(r.provenance, Provenance::PseudoPlaceholder);
         assert_eq!(r.profile.unwrap(), placeholder_tax_profile());
     }
@@ -133,20 +180,65 @@ mod tests {
     #[test]
     fn stored_profile_beats_pseudo() {
         let c = mem();
+        let (fr, tt) = ty2024();
         tax_profile::set(&c, 2024, &prof()).unwrap();
-        let r = resolve_profile(&c, 2024, true).unwrap(); // mode ON, but a stored profile wins
+        let r = resolve(&c, 2024, true, &fr, &tt); // mode ON, but a stored profile wins
         assert_eq!(r.provenance, Provenance::StoredProfile);
         assert_eq!(r.profile.unwrap(), prof());
     }
 
     #[test]
-    fn return_inputs_beats_stored_profile_but_is_pending_in_p1() {
+    fn return_inputs_beats_stored_profile_and_derives_a_profile() {
         let c = mem();
+        let (fr, tt) = ty2024();
         tax_profile::set(&c, 2024, &prof()).unwrap();
-        return_inputs::set(&c, 2024, &ReturnInputs::default()).unwrap();
-        let r = resolve_profile(&c, 2024, true).unwrap();
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![W2 {
+                box1_wages: dec!(100000),
+                box5_medicare_wages: dec!(100000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        return_inputs::set(&c, 2024, &ri).unwrap();
+        let r = resolve(&c, 2024, true, &fr, &tt);
         assert_eq!(r.provenance, Provenance::ReturnInputs); // highest precedence
-        assert!(r.is_derivation_pending()); // P1: derive is P2
+        assert!(!r.is_return_inputs_uncomputable());
+        // Derived (not the stored raw profile): Single, AGI = $100k − nothing.
+        let p = r.profile.unwrap();
+        assert_eq!(p.filing_status, FilingStatus::Single);
+        assert_eq!(p.magi_excluding_crypto, dec!(100000));
+        assert_ne!(p, prof());
+    }
+
+    #[test]
+    fn return_inputs_refused_by_guard_is_uncomputable_with_reason() {
+        let c = mem();
+        let (fr, tt) = ty2024();
+        // An HSA present ⇒ the refuse-guard refuses (Form 8889); derivation must NOT proceed.
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.sch1.hsa_present = true;
+        return_inputs::set(&c, 2024, &ri).unwrap();
+        let r = resolve(&c, 2024, false, &fr, &tt);
+        assert_eq!(r.provenance, Provenance::ReturnInputs);
+        assert!(r.is_return_inputs_uncomputable());
         assert!(r.profile.is_none());
+        assert!(r.refusal.is_some()); // carries WHY
+    }
+
+    #[test]
+    fn return_inputs_for_unsupported_year_is_uncomputable_without_refusal() {
+        let c = mem();
+        let (fr, tt) = ty2024();
+        return_inputs::set(&c, 2025, &ReturnInputs::default()).unwrap();
+        // 2025 has no bundled full-return tables (v1 = TY2024) → params/table are None → fail closed.
+        let r = resolve(&c, 2025, true, &fr, &tt);
+        assert_eq!(r.provenance, Provenance::ReturnInputs);
+        assert!(r.is_return_inputs_uncomputable());
+        assert!(r.refusal.is_none()); // not a refusal — an unsupported year
     }
 }
