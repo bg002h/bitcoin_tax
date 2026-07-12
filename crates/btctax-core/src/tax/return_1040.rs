@@ -154,7 +154,13 @@ pub fn screen_compute_dependent(
     };
 
     // §1(g) Form 8615 kiddie tax: a claimable-as-dependent filer with unearned income over the threshold.
-    // unearned = gross income − earned income (wages + Schedule C net) — SPEC F2.
+    // unearned = gross income − earned income (wages + Schedule C net) — SPEC F2. This component-sum OMITS
+    // the Sch-1 adjustments (early-withdrawal penalty, student-loan deduction) that Form 8615's true
+    // `AGI − earned` would net out, so `unearned` here can only be TOO HIGH ⇒ it can only OVER-refuse
+    // (conservative / fail-closed — review M4). Do NOT "fix" by subtracting the adjustments without
+    // preserving that direction: an under-count would let a real kiddie return slip through at the child's
+    // rate (an understatement). A capital LOSS correctly lowers unearned (`capital_gain_line7` is the
+    // §1211-limited L7, which the Form 8615 worksheet also uses) — that is not an under-refuse.
     if ri.header.can_be_claimed_as_dependent_taxpayer {
         let unearned = sum_taxable_interest(ri)
             + sum_ordinary_dividends(ri)
@@ -251,6 +257,12 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams) -> TaxPr
     let taxable_income = (agi - deduction).max(Usd::ZERO); // 1040 L15 (non-crypto)
     // Strip the preferential slice (qualified div + LT cap-gain distr) EXACTLY ONCE — the engine re-adds
     // it on top of the ordinary bottom via `other_net_capital_gain` + the QD channel (deep/02 §1.4).
+    // KNOWN APPROXIMATION (audit-M2 / review M1, → P3 FOLLOWUP): when `TI < qd + cap_gain_distr` (low
+    // ordinary income + large preferential income — e.g. a retiree), the `.max(0)` floors the ordinary
+    // base to 0 while the FULL pref slice still reaches the frozen engine (which stacks `qd + pref_gain`
+    // with no min-against-TI cap). The reconstructed TI is then ≥ the true TI, so the delta/planning
+    // number can only OVERSTATE, never understate (conservative). Exact handling (cap the pref slice at
+    // TI, reducing `other` first — the QDCGT worksheet's min) lands in P3 with the full deduction stack.
     let ordinary_taxable_income = (taxable_income - qual_div - cap_gain_distr).max(Usd::ZERO);
 
     // ── W-2 SE/Medicare channels (two DIFFERENT aggregations — deep/02 §3.4 / C4) ─────────────────
@@ -296,22 +308,18 @@ const SCHEDULE_B_THRESHOLD: Usd = dec!(1500);
 /// Uses the NON-crypto 1040 2b / 3b figures (crypto lending interest lands on Sch 1 L8v, not 2b).
 /// `foreign_trust == Some(true)` refuses upstream (§4.10) and is never a Schedule-B path.
 pub fn schedule_b_files(ri: &ReturnInputs) -> bool {
-    let taxable_int: Usd = ri
-        .int_1099
-        .iter()
-        .map(|i| i.box1_interest + i.box3_treasury_interest)
-        .sum();
-    let ord_div: Usd = ri.div_1099.iter().map(|d| d.box1a_ordinary).sum();
-    taxable_int > SCHEDULE_B_THRESHOLD
-        || ord_div > SCHEDULE_B_THRESHOLD
+    sum_taxable_interest(ri) > SCHEDULE_B_THRESHOLD
+        || sum_ordinary_dividends(ri) > SCHEDULE_B_THRESHOLD
         || ri.foreign_accounts == Some(true)
 }
 
-/// When Schedule B files, Part III line 7a (foreign financial accounts) MUST be answered — a `None`
-/// tri-state is a fail-loud gap (SPEC §7.1 / I7), not a silent "no". `true` ⇒ Schedule B files but
-/// `foreign_accounts` is unanswered (the caller refuses rather than guess).
+/// When Schedule B files, Part III lines **7a** (foreign financial accounts) AND **8** (foreign trust)
+/// MUST be answered — a `None` tri-state is a fail-loud gap (SPEC §7.1 / I7), never a silent "no".
+/// `true` ⇒ Schedule B files but `foreign_accounts` **or** `foreign_trust` is unanswered (the caller
+/// refuses rather than guess). (`foreign_trust == Some(true)` refuses earlier as `ForeignTrust`; this
+/// catches the unanswered `None`.) Wired into `screen_inputs` (input-screenable, review P2-I1).
 pub fn schedule_b_part3_unanswered(ri: &ReturnInputs) -> bool {
-    schedule_b_files(ri) && ri.foreign_accounts.is_none()
+    schedule_b_files(ri) && (ri.foreign_accounts.is_none() || ri.foreign_trust.is_none())
 }
 
 #[cfg(test)]
@@ -599,6 +607,16 @@ mod tests {
         // MFJ uses the higher $165k–$195k range: $170k is in-range.
         let d = student_loan_deduction(dec!(2500), dec!(170000), FilingStatus::Mfj, &params);
         assert!(d > Usd::ZERO && d < dec!(2500));
+        // QSS is NOT a joint return (§221 — review C2): it uses the $80k–$95k UNMARRIED range like Single,
+        // NOT MFJ's $165k+. At $120k MAGI a QSS filer is fully phased out ($0), not granted the full $2,500.
+        assert_eq!(
+            student_loan_deduction(dec!(2500), dec!(120000), FilingStatus::Qss, &params),
+            Usd::ZERO
+        );
+        assert_eq!(
+            student_loan_deduction(dec!(2500), dec!(60000), FilingStatus::Qss, &params),
+            dec!(2500)
+        );
     }
 
     /// The derivation flows the student-loan deduction into AGI (Single with $1,000 paid, below range).
@@ -689,6 +707,24 @@ mod tests {
             ..Default::default()
         };
         assert!(schedule_b_part3_unanswered(&unanswered));
+        // Files, foreign_accounts answered but foreign_trust (line 8) unanswered → still fail-loud.
+        let trust_unanswered = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            int_1099: vec![Form1099Int {
+                box1_interest: dec!(2000),
+                ..Default::default()
+            }],
+            foreign_accounts: Some(false),
+            foreign_trust: None,
+            ..Default::default()
+        };
+        assert!(schedule_b_part3_unanswered(&trust_unanswered));
+        // Files with BOTH answered → fine.
+        let answered = ReturnInputs {
+            foreign_trust: Some(false),
+            ..trust_unanswered.clone()
+        };
+        assert!(!schedule_b_part3_unanswered(&answered));
         // Not filing (small amounts) → a None is fine (Schedule B not required).
         let not_filing = ReturnInputs {
             filing_status: FilingStatus::Single,

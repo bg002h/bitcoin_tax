@@ -151,23 +151,33 @@ pub fn resolve_and_screen(
     full_return: Option<&FullReturnParams>,
     tax_table: Option<&TaxTable>,
 ) -> Result<ProfileOutcome, CliError> {
-    let resolved = resolve_profile(conn, year, pseudo_reconcile, full_return, tax_table)?;
-    // Input-screenable refusal / unsupported year (resolve_profile already screened those).
-    if resolved.is_return_inputs_uncomputable() {
-        return Ok(ProfileOutcome::Uncomputable {
-            detail: uncomputable_detail(year, resolved.refusal.as_ref()),
+    // ReturnInputs (highest precedence): fetch ONCE so the derive and BOTH refuse-guards see the same
+    // bytes (review M3 — no re-read between screening and deriving).
+    if let Some(ri) = return_inputs::get(conn, year)? {
+        // A year without full-return tables (v1 = TY2024) cannot be derived — fail closed, no refusal.
+        let (Some(params), Some(table)) = (full_return, tax_table) else {
+            return Ok(ProfileOutcome::Uncomputable {
+                detail: uncomputable_detail(year, None),
+            });
+        };
+        // Input-screenable then compute-dependent refuse rows — either ⇒ never a computed number.
+        if let Some(refusal) = screen_inputs(&ri, table, params) {
+            return Ok(ProfileOutcome::Uncomputable {
+                detail: uncomputable_detail(year, Some(&refusal)),
+            });
+        }
+        if let Some(refusal) = screen_compute_dependent(&ri, state, year, params) {
+            return Ok(ProfileOutcome::Uncomputable {
+                detail: uncomputable_detail(year, Some(&refusal)),
+            });
+        }
+        return Ok(ProfileOutcome::Ready {
+            profile: Some(derive_tax_profile(&ri, params)),
+            provenance: Provenance::ReturnInputs,
         });
     }
-    // Compute-dependent refuse rows (need `state`) — only a ReturnInputs-derived profile can trip them.
-    if resolved.provenance == Provenance::ReturnInputs {
-        if let (Some(ri), Some(params)) = (return_inputs::get(conn, year)?, full_return) {
-            if let Some(refusal) = screen_compute_dependent(&ri, state, year, params) {
-                return Ok(ProfileOutcome::Uncomputable {
-                    detail: uncomputable_detail(year, Some(&refusal)),
-                });
-            }
-        }
-    }
+    // Non-ReturnInputs precedence (stored TaxProfile → pseudo placeholder → missing) via the resolver.
+    let resolved = resolve_profile(conn, year, pseudo_reconcile, full_return, tax_table)?;
     Ok(ProfileOutcome::Ready {
         profile: resolved.profile,
         provenance: resolved.provenance,

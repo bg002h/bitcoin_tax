@@ -5308,6 +5308,7 @@ mod tests {
             state: btctax_core::state::LedgerState::default(),
             cli_config: CliConfig::default(),
             profiles: BTreeMap::new(),
+            refused: std::collections::BTreeMap::new(),
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),

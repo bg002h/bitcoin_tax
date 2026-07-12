@@ -53,6 +53,12 @@ pub(crate) fn draw(frame: &mut Frame, area: Rect, app: &App) {
 /// Calls `compute_tax_year` (pure, read-only) and formats the result.
 /// Returns a multi-line `String` ready for a `Paragraph` widget.
 pub(crate) fn render_tax_content(snap: &Snapshot, year: i32) -> String {
+    // [P2-C1] A full-return year that resolves refused/uncomputable renders its REASON, never a number —
+    // the same fail-closed answer `report --tax-year` gives. `snap.profiles` already holds the DERIVED
+    // profile for a ReturnInputs year (resolved in `build_snapshot`), so the compute below matches the CLI.
+    if let Some(reason) = snap.refused.get(&year) {
+        return format!("  NOT COMPUTABLE (full-return inputs): {reason}\n");
+    }
     let profile = snap.profiles.get(&year);
     let outcome = compute_tax_year(&snap.events, &snap.state, year, profile, &snap.tables);
 

@@ -12,6 +12,7 @@
 //! across the reconcile system) — additive, per SPEC §2. A `Refusal` maps to
 //! `TaxOutcome::NotComputable(..)` at the report boundary (Phase 4).
 use crate::conventions::Usd;
+use crate::tax::return_1040::schedule_b_part3_unanswered;
 use crate::tax::return_inputs::{
     Box12Entry, CharitableCarryItem, CharitableGift, Form1099Div, Form1099G, Form1099Int, Owner,
     Payments, QbiInputs, ReturnInputs, Schedule1Inputs, ScheduleAInputs, ScheduleCInputs, W2,
@@ -44,6 +45,9 @@ pub enum RefuseReason {
     SpouseOwnerWithoutJointReturn,
     /// `Some(true)` foreign trust → Form 3520 (out of scope, R2-I3).
     ForeignTrust,
+    /// Schedule B files but Part III line 7a (foreign accounts) or 8 (foreign trust) is unanswered
+    /// (`None`) — fail-loud rather than guess a disclosure answer (SPEC §7.1 / I7 / P2-I1).
+    ScheduleBPart3Unanswered,
     /// W-2 box-12 code outside the inert allowlist (audit I1).
     UnsupportedBox12Code(String),
     /// Σ box-12 D/E/F/G/S elective deferrals over the §402(g) limit → taxable excess on 1040 1h (F3).
@@ -295,6 +299,16 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         );
     }
 
+    // Schedule B Part III (7a/8) must be answered when Schedule B files — a `None` tri-state fails loud
+    // rather than guess a foreign-account/-trust disclosure (SPEC §7.1, plan P2 task 4 / P2-I1).
+    if schedule_b_part3_unanswered(ri) {
+        return refuse(
+            RefuseReason::ScheduleBPart3Unanswered,
+            "Schedule B is required (interest/dividends > $1,500 or a foreign account) but its Part III \
+             foreign-account/foreign-trust questions are unanswered — set `foreign_accounts`/`foreign_trust`",
+        );
+    }
+
     // A Spouse-owned item is only coherent on a joint (MFJ) return; on Single/HoH/MFS/QSS the spouse's
     // income is not on this return. Refuse before the per-owner §402(g) accumulation so a mislabeled
     // `owner` cannot split one person's deferrals into two under-limit buckets (R2-I2).
@@ -474,6 +488,9 @@ mod tests {
             box7_foreign_tax: dec!(120), // ≤ $300 → OK
             ..Default::default()
         });
+        // $3,000 dividends files Schedule B, so Part III (7a/8) must be answered to stay clean.
+        r.foreign_accounts = Some(false);
+        r.foreign_trust = Some(false);
         assert_eq!(reason(&r), None);
     }
 
@@ -633,6 +650,24 @@ mod tests {
         let mut mfj = single.clone();
         mfj.filing_status = FilingStatus::Mfj;
         assert_eq!(reason(&mfj), None);
+    }
+
+    #[test]
+    fn schedule_b_part3_unanswered_refuses() {
+        // Files ($2,000 interest > $1,500) but Part III foreign-account/-trust questions unanswered (None).
+        let mut r = ri();
+        r.int_1099.push(Form1099Int {
+            box1_interest: dec!(2000),
+            ..Default::default()
+        });
+        assert_eq!(reason(&r), Some(RefuseReason::ScheduleBPart3Unanswered));
+        // Answer BOTH 7a and 8 → no refusal.
+        r.foreign_accounts = Some(false);
+        r.foreign_trust = Some(false);
+        assert_eq!(reason(&r), None);
+        // Line 8 (foreign trust) left unanswered while filing → still fail-loud.
+        r.foreign_trust = None;
+        assert_eq!(reason(&r), Some(RefuseReason::ScheduleBPart3Unanswered));
     }
 
     #[test]

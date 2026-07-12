@@ -28,6 +28,17 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   open (the number is already correct + fail-closed); this is an audit-trail nicety. Print it as part of the
   P4 report render.
 
+## From Fable IMPL-P2 code review r1 (C1/C2/I1 + M2/M3/M4 FOLDED into P2 r2; deferred items here)
+
+- **p2-pref-over-ti-clamp** (SCHEDULED → P3, with the full deduction stack) — `derive_tax_profile`'s
+  `.max(0)` strip (return_1040.rs) floors the ordinary base to 0 when `TI < qd + cap_gain_distr` (low
+  ordinary income + large preferential income) while the FULL pref slice still reaches the frozen engine
+  (which stacks `qd + pref_gain` with no min-against-TI cap). The reconstructed TI is then ≥ the true TI ⇒
+  the delta/planning number can only OVERSTATE, never understate (conservative — audit-M2, review M1, both
+  ranked Minor). Exact fix = cap the pref slice at TI (reduce the LT `other` first, mirroring the QDCGT
+  worksheet's min), but it interacts with `other_net_capital_gain`'s §1222 netting, so it lands in P3 with
+  the full deduction stack (P4's dual report would surface any discrepancy). Documented at the strip site.
+
 ## From Fable spec review r4 (5 Minors — spec is GREEN 0C/0I with these open)
 
 - **fr-schedc-27a** — Schedule C fill: the single `expenses` scalar should land on **Part V line 48 → line

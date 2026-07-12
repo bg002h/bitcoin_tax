@@ -256,12 +256,18 @@ impl FullReturnParams {
     }
 
     /// §221 student-loan-interest MAGI phase-out `(start, end)` for `status`; `None` for **MFS**
-    /// (§221(e)(2): a separate filer gets no deduction). QSS maps to the married range (like `Qss → Mfj`).
+    /// (§221(e)(2): a separate filer gets no deduction). §221(b)(2)(B) doubles the floor **only "in the
+    /// case of a joint return"** — MFJ only. A **QSS is NOT a joint return** (Pub 970 ch. 4 / the Sch 1
+    /// worksheet group "single, HoH, or qualifying surviving spouse" at $80k–$95k), so it takes the
+    /// UNMARRIED range — same QSS-≠-joint distinction this crate makes for the §904(j) FTC ceiling. (This
+    /// differs from §63(c)(2) std deduction, where "surviving spouse" IS in the joint bucket — `Qss → Mfj`.)
     pub fn student_loan_phaseout(&self, status: FilingStatus) -> Option<(Usd, Usd)> {
         match status {
             FilingStatus::Mfs => None,
-            FilingStatus::Mfj | FilingStatus::Qss => Some(self.student_loan_phaseout_married),
-            FilingStatus::Single | FilingStatus::HoH => Some(self.student_loan_phaseout_unmarried),
+            FilingStatus::Mfj => Some(self.student_loan_phaseout_married),
+            FilingStatus::Single | FilingStatus::HoH | FilingStatus::Qss => {
+                Some(self.student_loan_phaseout_unmarried)
+            }
         }
     }
 }

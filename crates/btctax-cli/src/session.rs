@@ -5,8 +5,9 @@ use crate::bulk_estimated;
 use crate::config::{self, CliConfig};
 use crate::donation_details;
 use crate::optimize_attest;
-use crate::tax_profile;
+use crate::{return_inputs, tax_profile};
 use crate::CliError;
+use std::collections::{BTreeMap, BTreeSet};
 use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
 use btctax_core::conventions::{round_cents, tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{init_schema, load_all};
@@ -479,6 +480,24 @@ impl Session {
             crate::resolve::ProfileOutcome::Uncomputable { detail } => Err(CliError::Usage(detail)),
             crate::resolve::ProfileOutcome::Ready { profile, .. } => Ok(profile),
         }
+    }
+
+    /// Resolve + screen EVERY year that has a stored `TaxProfile` or full-return `ReturnInputs`, for the
+    /// read-only viewer (which holds a `Snapshot`, not a live `Session`, so it cannot resolve on demand).
+    /// Returns per-year [`crate::resolve::ProfileOutcome`] so the TUI can render a derived number OR a
+    /// refusal — never a stale/absent profile (SPEC §4.12: the TUI is a consumer; review P2-C1).
+    pub fn resolve_all_screened(
+        &self,
+        state: &LedgerState,
+        tables: &dyn TaxTables,
+    ) -> Result<BTreeMap<i32, crate::resolve::ProfileOutcome>, CliError> {
+        let mut years: BTreeSet<i32> = tax_profile::all(self.conn())?.into_keys().collect();
+        years.extend(return_inputs::all(self.conn())?.into_keys());
+        let mut out = BTreeMap::new();
+        for year in years {
+            out.insert(year, self.resolve_screened(state, year, tables)?);
+        }
+        Ok(out)
     }
 
     /// All stored `TaxProfile`s, sorted by year ascending.
