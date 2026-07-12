@@ -11,6 +11,7 @@ pub mod eventref;
 pub mod optimize_attest;
 pub mod price_cache;
 pub mod render;
+pub mod return_inputs;
 pub mod session;
 pub mod tax_profile;
 
