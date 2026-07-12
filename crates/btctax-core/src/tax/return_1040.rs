@@ -14,10 +14,165 @@
 //!
 //! Additive per SPEC §2: `compute.rs` / `types.rs` / `se.rs` stay byte-frozen; this file only reads them.
 use crate::conventions::{round_dollar, Usd};
+use crate::forms::schedule_d;
+use crate::state::LedgerState;
+use crate::tax::compute::net_1222;
 use crate::tax::return_inputs::{Owner, ReturnInputs};
-use crate::tax::tables::FullReturnParams;
+use crate::tax::return_refuse::{Refusal, RefuseReason};
+use crate::tax::se::se_net_income;
+use crate::tax::tables::{loss_limit, FullReturnParams};
 use crate::tax::types::{FilingStatus, TaxProfile};
+use crate::IncomeKind;
 use rust_decimal_macros::dec;
+
+// ── Non-crypto income-line sums (shared by the derivation, the refuse screen, and the absolute 1040) ──
+fn sum_wages(ri: &ReturnInputs) -> Usd {
+    ri.w2s.iter().map(|w| w.box1_wages).sum()
+}
+/// 1040 2b taxable interest = box 1 + box 3 (Treasury); box 3 is NOT a subset of box 1.
+fn sum_taxable_interest(ri: &ReturnInputs) -> Usd {
+    ri.int_1099
+        .iter()
+        .map(|i| i.box1_interest + i.box3_treasury_interest)
+        .sum()
+}
+/// 1040 3b ordinary dividends = Σ box 1a (ALREADY includes box 1b qualified — "strip once").
+fn sum_ordinary_dividends(ri: &ReturnInputs) -> Usd {
+    ri.div_1099.iter().map(|d| d.box1a_ordinary).sum()
+}
+/// 1040 3a qualified dividends = Σ box 1b (the preferential split ONLY — never added to income again).
+fn sum_qualified_dividends(ri: &ReturnInputs) -> Usd {
+    ri.div_1099.iter().map(|d| d.box1b_qualified).sum()
+}
+/// Σ box 2a capital-gain distributions (LT character; enters AGI once via Sch D → 1040 L7).
+fn sum_cap_gain_distr(ri: &ReturnInputs) -> Usd {
+    ri.div_1099.iter().map(|d| d.box2a_capgain_distr).sum()
+}
+/// Sch 1 L7 unemployment compensation = Σ 1099-G box 1.
+fn sum_unemployment(ri: &ReturnInputs) -> Usd {
+    ri.g_1099.iter().map(|g| g.box1_unemployment).sum()
+}
+
+/// The crypto income figures for `year` from the projected ledger (the WITH-crypto side of the return).
+struct CryptoIncome {
+    /// Σ business SE-eligible crypto income (kind ≠ Interest) → Schedule C gross (deep/02 / `se_net_income`).
+    business_se_gross: Usd,
+    /// Σ business-flagged crypto `Interest` → has no clean v1 home (refuses, R3-I3).
+    business_interest: Usd,
+    /// Σ non-business crypto ordinary income (any kind) → Sch 1 L8v (hobby rewards + lending interest).
+    nonbusiness_ordinary: Usd,
+}
+
+fn crypto_income(state: &LedgerState, year: i32) -> CryptoIncome {
+    let mut business_interest = Usd::ZERO;
+    let mut nonbusiness_ordinary = Usd::ZERO;
+    for i in state
+        .income_recognized
+        .iter()
+        .filter(|i| i.recognized_at.year() == year)
+    {
+        if i.business {
+            if i.kind == IncomeKind::Interest {
+                business_interest += i.usd_fmv;
+            }
+        } else {
+            nonbusiness_ordinary += i.usd_fmv;
+        }
+    }
+    CryptoIncome {
+        business_se_gross: se_net_income(state, year), // canonical business SE-eligible sum
+        business_interest,
+        nonbusiness_ordinary,
+    }
+}
+
+/// The amount reaching **1040 L7** (capital gain or loss) for `year`: crypto Schedule D nets + box-2a
+/// capital-gain distributions, run through §1222 within-character netting + the §1211 loss limit. In a
+/// gain year this is the full net gain; in a loss year it is the −$3,000/−$1,500-MFS limited loss.
+fn capital_gain_line7(ri: &ReturnInputs, state: &LedgerState, year: i32, status: FilingStatus) -> Usd {
+    let sd = schedule_d(state, year); // raw crypto ST/LT nets (traverses state.disposals)
+    let cf = ri.capital_loss_carryforward_in;
+    let net = net_1222(
+        sd.st.gain,
+        sd.lt.gain,
+        sum_cap_gain_distr(ri), // box 2a is LT-character "other" capital gain
+        cf.short,
+        cf.long,
+        loss_limit(status),
+    );
+    net.ordinary_gain + net.preferential_gain - net.loss_deduction
+}
+
+fn refusal(reason: RefuseReason, detail: &str) -> Option<Refusal> {
+    Some(Refusal {
+        reason,
+        detail: detail.to_string(),
+    })
+}
+
+/// Screen the **compute-dependent** refuse rows (SPEC §4.10) — those that need the assembled income /
+/// ledger, not just `ReturnInputs`. Returns the FIRST [`Refusal`], or `None`. Complements
+/// [`crate::tax::return_refuse::screen_inputs`] (the input-screenable rows); both must pass before a
+/// full-return year is computed (fail-closed).
+pub fn screen_compute_dependent(
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    year: i32,
+    params: &FullReturnParams,
+) -> Option<Refusal> {
+    let crypto = crypto_income(state, year);
+
+    // Business-flagged crypto Interest has no clean v1 home (excluded from SE, not NIIT-sheltered).
+    if crypto.business_interest > Usd::ZERO {
+        return refusal(
+            RefuseReason::BusinessInterestIncome,
+            "business-flagged crypto interest income is excluded from SE tax (§1402(a)(2)) but not from NIIT — unsupported in v1",
+        );
+    }
+
+    // Schedule C net = business SE gross − expenses. No Schedule C but business income ⇒ fail loud; loss ⇒ refuse.
+    let sch_c_net = match &ri.schedule_c {
+        None => {
+            if crypto.business_se_gross > Usd::ZERO {
+                return refusal(
+                    RefuseReason::BusinessIncomeWithoutScheduleC,
+                    "the ledger has SE-eligible business crypto income but no Schedule C was provided (`income import`); owner and description are required",
+                );
+            }
+            Usd::ZERO
+        }
+        Some(sc) => {
+            let net = crypto.business_se_gross - sc.expenses;
+            if net < Usd::ZERO {
+                return refusal(
+                    RefuseReason::ScheduleCLoss,
+                    "Schedule C net profit is negative (a loss) — §465 at-risk substantiation is out of scope for v1",
+                );
+            }
+            net
+        }
+    };
+
+    // §1(g) Form 8615 kiddie tax: a claimable-as-dependent filer with unearned income over the threshold.
+    // unearned = gross income − earned income (wages + Schedule C net) — SPEC F2.
+    if ri.header.can_be_claimed_as_dependent_taxpayer {
+        let unearned = sum_taxable_interest(ri)
+            + sum_ordinary_dividends(ri)
+            + capital_gain_line7(ri, state, year, ri.filing_status)
+            + ri.sch1.state_refund_taxable
+            + sum_unemployment(ri)
+            + crypto.nonbusiness_ordinary;
+        let _ = sch_c_net; // earned income (wages + sch_c_net) is excluded from `unearned` by construction
+        if unearned > params.kiddie_unearned_threshold {
+            return refusal(
+                RefuseReason::KiddieTax,
+                "a claimable-as-dependent filer with unearned income over the §1(g) threshold needs Form 8615 (parent's-rate tax) — out of scope for v1",
+            );
+        }
+    }
+
+    None
+}
 
 /// §221 student-loan-interest deduction (Sch 1 L21): `min(paid, $2,500)` phased out linearly over the
 /// filing status's MAGI range (**MFS ⇒ $0**, §221(e)(2)). `magi` is the AGI **before** this deduction.
@@ -63,24 +218,15 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams) -> TaxPr
     let status = ri.filing_status;
 
     // ── Income (non-crypto) ──────────────────────────────────────────────────────────────────────
-    let wages: Usd = ri.w2s.iter().map(|w| w.box1_wages).sum();
-    // 1040 2b taxable interest = box 1 + box 3 (Treasury); box 3 is NOT a subset of box 1.
-    let taxable_int: Usd = ri
-        .int_1099
-        .iter()
-        .map(|i| i.box1_interest + i.box3_treasury_interest)
-        .sum();
-    // 1040 3b ordinary dividends = Σ box 1a (which ALREADY includes box 1b qualified — "strip once").
-    let ord_div: Usd = ri.div_1099.iter().map(|d| d.box1a_ordinary).sum();
-    // 1040 3a qualified dividends = Σ box 1b (the preferential split ONLY — never added to income again).
-    let qual_div: Usd = ri.div_1099.iter().map(|d| d.box1b_qualified).sum();
-    // Sch D L13 → 1040 L7 (LT character): capital-gain distributions, box 2a. Enters AGI once, via L7.
-    let cap_gain_distr: Usd = ri.div_1099.iter().map(|d| d.box2a_capgain_distr).sum();
+    let wages = sum_wages(ri);
+    let taxable_int = sum_taxable_interest(ri);
+    let ord_div = sum_ordinary_dividends(ri);
+    let qual_div = sum_qualified_dividends(ri);
+    let cap_gain_distr = sum_cap_gain_distr(ri); // box 2a → Sch D L13 → 1040 L7 (LT character)
 
     // Sch 1 Part I additional income (non-crypto): L1 taxable state refund + L7 Σ unemployment.
     // (L3 Schedule C and L8v digital-asset income are CRYPTO → excluded from the frozen profile.)
-    let unemployment: Usd = ri.g_1099.iter().map(|g| g.box1_unemployment).sum();
-    let sch1_income = ri.sch1.state_refund_taxable + unemployment;
+    let sch1_income = ri.sch1.state_refund_taxable + sum_unemployment(ri);
 
     // Sch 1 Part II adjustments (non-crypto): L18 early-withdrawal penalty + L21 student-loan.
     // (L15 ½-SE is crypto-Schedule-C-driven → excluded here.)
@@ -218,16 +364,28 @@ mod tests {
         m.insert(2024, synthetic_table(2024));
         m
     }
-    fn mining(fmv: Usd) -> IncomeRecord {
+    fn income(kind: IncomeKind, business: bool, fmv: Usd) -> IncomeRecord {
         IncomeRecord {
             event: EventId::decision(1),
             recognized_at: date!(2024 - 06 - 01),
             sat: 100_000_000,
             usd_fmv: fmv,
-            kind: IncomeKind::Mining,
-            business: true,
+            kind,
+            business,
             pseudo: false,
         }
+    }
+    fn mining(fmv: Usd) -> IncomeRecord {
+        income(IncomeKind::Mining, true, fmv)
+    }
+    fn state_income(recs: Vec<IncomeRecord>) -> LedgerState {
+        LedgerState {
+            income_recognized: recs,
+            ..Default::default()
+        }
+    }
+    fn screened(ri: &ReturnInputs, st: &LedgerState) -> Option<RefuseReason> {
+        screen_compute_dependent(ri, st, 2024, &ty2024_params()).map(|r| r.reason)
     }
     /// A Single household the synthetic table can price (it only carries `Single` schedules). Tuned so
     /// the ordinary base (`ordinary_taxable_income`) sits just below the synthetic $100k bracket edge:
@@ -542,5 +700,97 @@ mod tests {
             ..Default::default()
         };
         assert!(!schedule_b_part3_unanswered(&not_filing));
+    }
+
+    // ── Compute-dependent refuse rows (task 2) ───────────────────────────────────────────────────
+    fn single() -> ReturnInputs {
+        ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        }
+    }
+
+    /// Business-flagged crypto Interest has no clean v1 home → refuse (R3-I3).
+    #[test]
+    fn business_interest_income_refuses() {
+        let st = state_income(vec![income(IncomeKind::Interest, true, dec!(5000))]);
+        assert_eq!(
+            screened(&single(), &st),
+            Some(RefuseReason::BusinessInterestIncome)
+        );
+        // The SAME interest as NON-business (hobby lending) does NOT refuse — it lands on Sch 1 L8v.
+        let hobby = state_income(vec![income(IncomeKind::Interest, false, dec!(5000))]);
+        assert_eq!(screened(&single(), &hobby), None);
+    }
+
+    /// SE-eligible business crypto income with no Schedule C ⇒ fail loud (owner/description unknowable).
+    #[test]
+    fn business_income_without_schedule_c_fails_loud() {
+        let st = state_income(vec![mining(dec!(50000))]);
+        assert_eq!(
+            screened(&single(), &st),
+            Some(RefuseReason::BusinessIncomeWithoutScheduleC)
+        );
+    }
+
+    /// Schedule C net < 0 (expenses exceed business gross) ⇒ refuse; a net profit does not.
+    #[test]
+    fn schedule_c_loss_refuses_but_profit_does_not() {
+        let with_sc = |expenses: Usd| ReturnInputs {
+            schedule_c: Some(ScheduleCInputs {
+                expenses,
+                ..Default::default()
+            }),
+            ..single()
+        };
+        let st = state_income(vec![mining(dec!(50000))]);
+        // $50k gross − $60k expenses = −$10k loss → refuse.
+        assert_eq!(
+            screened(&with_sc(dec!(60000)), &st),
+            Some(RefuseReason::ScheduleCLoss)
+        );
+        // $50k gross − $10k expenses = $40k profit → OK.
+        assert_eq!(screened(&with_sc(dec!(10000)), &st), None);
+    }
+
+    /// §1(g) kiddie tax: a claimable-as-dependent filer with unearned income (interest + hobby crypto)
+    /// over the $2,600 threshold ⇒ refuse; below threshold, or non-dependent, ⇒ no refusal.
+    #[test]
+    fn kiddie_tax_refuses_dependent_over_threshold() {
+        let dependent = |interest: Usd| {
+            let mut ri = single();
+            ri.header.can_be_claimed_as_dependent_taxpayer = true;
+            ri.int_1099 = vec![Form1099Int {
+                box1_interest: interest,
+                ..Default::default()
+            }];
+            ri
+        };
+        let empty = LedgerState::default();
+        // $3,000 interest > $2,600 → refuse.
+        assert_eq!(screened(&dependent(dec!(3000)), &empty), Some(RefuseReason::KiddieTax));
+        // $2,000 interest ≤ $2,600 → no refusal.
+        assert_eq!(screened(&dependent(dec!(2000)), &empty), None);
+        // Non-business (hobby) crypto reward counts as unearned too: $2,000 interest + $1,000 reward > $2,600.
+        let hobby = state_income(vec![income(IncomeKind::Reward, false, dec!(1000))]);
+        assert_eq!(screened(&dependent(dec!(2000)), &hobby), Some(RefuseReason::KiddieTax));
+        // NOT claimable as a dependent ⇒ never kiddie, even with high unearned income.
+        let mut not_dep = dependent(dec!(9000));
+        not_dep.header.can_be_claimed_as_dependent_taxpayer = false;
+        assert_eq!(screened(&not_dep, &empty), None);
+    }
+
+    /// Wages (earned) do NOT count toward the kiddie unearned threshold — a working dependent with big
+    /// wages but small investment income is not kiddie-refused.
+    #[test]
+    fn kiddie_excludes_earned_wages() {
+        let mut ri = single();
+        ri.header.can_be_claimed_as_dependent_taxpayer = true;
+        ri.w2s = vec![w2(Owner::Taxpayer, dec!(20000), dec!(20000), dec!(20000))]; // earned
+        ri.int_1099 = vec![Form1099Int {
+            box1_interest: dec!(500),
+            ..Default::default()
+        }]; // unearned $500 < $2,600
+        assert_eq!(screened(&ri, &LedgerState::default()), None);
     }
 }

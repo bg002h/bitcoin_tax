@@ -186,6 +186,24 @@ pub fn report_tax_year(
             ),
         }));
     }
+    // Compute-dependent refuse rows (SPEC §4.10) need the projected ledger, so they screen HERE (not in
+    // `resolve_profile`, which has no `state`). Only a ReturnInputs-derived profile can trip them; a raw
+    // stored / pseudo profile has no `ReturnInputs` to screen. Fail closed — never a wrong number.
+    if resolved.provenance == crate::resolve::Provenance::ReturnInputs {
+        if let (Some(ri), Some(params)) =
+            (return_inputs::get(s.conn(), year)?, fr_tables.full_return_for(year))
+        {
+            if let Some(refusal) =
+                btctax_core::tax::return_1040::screen_compute_dependent(&ri, &state, year, params)
+            {
+                return Err(CliError::Usage(format!(
+                    "tax year {year} cannot be computed from its full-return inputs: {}; run \
+                     `income clear --year {year}` to remove them and use a raw `tax-profile`",
+                    refusal.detail
+                )));
+            }
+        }
+    }
     let profile = resolved.profile;
     let outcome = compute_tax_year(&events, &state, year, profile.as_ref(), &tables);
     // P2-B: the RAW pre-netting Schedule D part totals for the same year, from the same projection.

@@ -78,6 +78,21 @@ hb-recv,2025-01-01 12:00:00 UTC,Receive,BTC,0.10000000,USD,44000.00,,,,,,\r\n",
     p
 }
 
+/// Like [`write_buy_receive`] but the Receive is in **2024** (a full-return-supported year).
+fn write_buy_receive_2024(dir: &Path) -> PathBuf {
+    let p = dir.join("coinbase_rcv24.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+hb-buy,2023-01-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,30000.00,30000.00,30000.00,0.00,,,\r\n\
+hb-recv,2024-01-01 12:00:00 UTC,Receive,BTC,0.10000000,USD,44000.00,,,,,,\r\n",
+    )
+    .unwrap();
+    p
+}
+
 /// Init vault + import one CSV file; return `(tempdir, vault_path)`.
 fn make_vault_with(csv: &Path) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
@@ -584,6 +599,54 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
         matches!(outcome, btctax_core::TaxOutcome::Computed(_)),
         "TY2024 ReturnInputs must derive+compute, got {outcome:?}"
     );
+}
+
+/// [full-return P2 task 2] The compute-dependent refuse rows gate `report_tax_year` fail-closed: a ledger
+/// with SE-eligible business crypto income but `ReturnInputs` carrying no Schedule C must REFUSE (owner /
+/// description unknowable) rather than compute a wrong number.
+#[test]
+fn report_tax_year_refuses_business_income_without_schedule_c() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_buy_receive_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // Classify the 2024 Receive as $100,000 BUSINESS mining income (SE-eligible).
+    let in_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+    cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &in_ref,
+        InboundClass::Income {
+            kind: IncomeKind::Mining,
+            fmv: Some(dec!(100000.00)),
+            business: true,
+        },
+        datetime!(2024-06-01 00:00:00 UTC),
+    )
+    .unwrap();
+
+    // Full-return inputs for 2024 with NO Schedule C.
+    let toml = _dir.path().join("inputs.toml");
+    std::fs::write(&toml, "filing_status = \"Single\"\n").unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
+
+    let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
+    match err {
+        btctax_cli::CliError::Usage(msg) => {
+            assert!(msg.contains("Schedule C"), "should name the missing Schedule C: {msg}");
+            assert!(msg.contains("income clear --year 2024"), "recovery hint: {msg}");
+        }
+        other => panic!("expected a Usage refusal for business-income-without-Schedule-C, got {other:?}"),
+    }
 }
 
 /// Unresolved hard blocker (UnknownBasisInbound from unclassified Receive) →

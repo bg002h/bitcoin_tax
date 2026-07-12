@@ -61,6 +61,18 @@ pub enum RefuseReason {
     HsaPresent,
     /// Schedule 1 line 20 IRA deduction claimed → active-participant phase-out unmodeled in v1.
     IraDeductionClaimed,
+    // ── Compute-dependent rows (SPEC §4.10; need the assembled income / ledger, screened in P2) ──
+    /// Business-flagged crypto `Interest` income (§1402(a)(2) excludes it from SE yet it is not
+    /// NIIT-sheltered → no clean v1 home, R3-I3).
+    BusinessInterestIncome,
+    /// The ledger has SE-eligible business crypto income but no `schedule_c` was provided — owner /
+    /// description are unknowable, so v1 fails loud rather than guess (§4.4a / R3-M10 / G15).
+    BusinessIncomeWithoutScheduleC,
+    /// Schedule C net profit < 0 (a loss): §465 at-risk + a negative Sch 1 L3 is unsubstantiated in v1 (I2).
+    ScheduleCLoss,
+    /// A claimable-as-dependent filer with unearned income over the §1(g) kiddie-tax threshold → Form 8615
+    /// (the child's-rate `qdcgt_line16` would understate; the parent's rate is required — C1/F2).
+    KiddieTax,
 }
 
 /// A fail-closed refusal: the reason + a human-readable detail (surfaced to the user).
