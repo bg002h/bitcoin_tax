@@ -243,12 +243,26 @@ pub struct FullReturnParams {
     pub elective_deferral_limit: Usd,
     /// §904(j) no-Form-1116 foreign-tax-credit ceiling (general; MFJ = double at the use site).
     pub ftc_ceiling: Usd,
+    /// §221(b)(2) student-loan-interest deduction MAGI phase-out `(start, end)` — unmarried (Single/HoH).
+    pub student_loan_phaseout_unmarried: (Usd, Usd),
+    /// §221(b)(2) phase-out `(start, end)` — MFJ/QSS. MFS gets **no** deduction (§221(e)(2)), so no range.
+    pub student_loan_phaseout_married: (Usd, Usd),
 }
 
 impl FullReturnParams {
     /// §63(c)(2) basic standard deduction for `status` (maps `Qss → Mfj`).
     pub fn std_deduction_for(&self, status: FilingStatus) -> Usd {
         self.std_deduction[&TaxTable::key(status)]
+    }
+
+    /// §221 student-loan-interest MAGI phase-out `(start, end)` for `status`; `None` for **MFS**
+    /// (§221(e)(2): a separate filer gets no deduction). QSS maps to the married range (like `Qss → Mfj`).
+    pub fn student_loan_phaseout(&self, status: FilingStatus) -> Option<(Usd, Usd)> {
+        match status {
+            FilingStatus::Mfs => None,
+            FilingStatus::Mfj | FilingStatus::Qss => Some(self.student_loan_phaseout_married),
+            FilingStatus::Single | FilingStatus::HoH => Some(self.student_loan_phaseout_unmarried),
+        }
     }
 }
 

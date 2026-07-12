@@ -331,6 +331,8 @@ mod tests {
             kiddie_unearned_threshold: dec!(2600),
             elective_deferral_limit: dec!(23000),
             ftc_ceiling: dec!(300),
+            student_loan_phaseout_unmarried: (dec!(80000), dec!(95000)),
+            student_loan_phaseout_married: (dec!(165000), dec!(195000)),
         }
     }
     fn tbl() -> TaxTable {

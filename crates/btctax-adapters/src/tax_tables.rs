@@ -129,6 +129,10 @@ fn ty2024_full_return() -> FullReturnParams {
         kiddie_unearned_threshold: dec!(2600),// §1(g)(4)
         elective_deferral_limit: dec!(23000), // §402(g)(1), Notice 2023-75
         ftc_ceiling: dec!(300),               // §904(j) (MFJ = $600 at the use site)
+        // §221(b)(2) student-loan-interest MAGI phase-out (Rev. Proc. 2023-34 §3.22): $80k–$95k
+        // single/HoH, $165k–$195k MFJ; MFS gets no deduction (handled in `student_loan_phaseout`).
+        student_loan_phaseout_unmarried: (dec!(80000), dec!(95000)),
+        student_loan_phaseout_married: (dec!(165000), dec!(195000)),
     }
 }
 
