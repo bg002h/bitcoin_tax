@@ -48,7 +48,8 @@
 //! Callers requesting a year with no bundled table receive `None` from [`TaxTables::table_for`],
 //! which the compute layer converts to `TaxOutcome::NotComputable(TaxTableMissing)` (B.4/I6).
 use btctax_core::tax::tables::{
-    LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
+    FullReturnParams, FullReturnTables, LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable,
+    TaxTables,
 };
 use btctax_core::{FilingStatus, Usd};
 use rust_decimal_macros::dec;
@@ -82,6 +83,52 @@ impl BundledTaxTables {
 impl TaxTables for BundledTaxTables {
     fn table_for(&self, year: i32) -> Option<&TaxTable> {
         self.by_year.get(&year)
+    }
+}
+
+/// Compiled-in **full-return** per-year parameters (standard deduction + the year-varying limits the
+/// absolute 1040 needs). NEW for the full-return build; separate from [`BundledTaxTables`] because a
+/// frozen file constructs `TaxTable` by struct literal (see `btctax_core::tax::tables::FullReturnParams`).
+/// **v1 bundles TY2024 only**; a year without params returns `None` → the caller fails closed.
+#[derive(Debug, Clone)]
+pub struct BundledFullReturnTables {
+    by_year: BTreeMap<i32, FullReturnParams>,
+}
+
+impl BundledFullReturnTables {
+    pub fn load() -> Self {
+        let mut by_year = BTreeMap::new();
+        by_year.insert(2024, ty2024_full_return());
+        Self { by_year }
+    }
+}
+
+impl FullReturnTables for BundledFullReturnTables {
+    fn full_return_for(&self, year: i32) -> Option<&FullReturnParams> {
+        self.by_year.get(&year)
+    }
+}
+
+/// TY2024 full-return parameters. Standard deduction + §63(f)/§63(c)(5) amounts from **Rev. Proc.
+/// 2023-34 §3.16**; the SALT cap (§164(b)(6) TCJA), §1(g)(4) kiddie threshold, §402(g)(1) deferral
+/// limit (Notice 2023-75), and §904(j) FTC ceiling are the TY2024 figures.
+fn ty2024_full_return() -> FullReturnParams {
+    let mut std_deduction = BTreeMap::new();
+    std_deduction.insert(FilingStatus::Single, dec!(14600));
+    std_deduction.insert(FilingStatus::Mfj, dec!(29200));
+    std_deduction.insert(FilingStatus::Mfs, dec!(14600));
+    std_deduction.insert(FilingStatus::HoH, dec!(21900));
+    FullReturnParams {
+        year: 2024,
+        std_deduction,
+        std_aged_blind_married: dec!(1550),   // §63(f), Rev. Proc. 2023-34 §3.16(3)
+        std_aged_blind_unmarried: dec!(1950),
+        dependent_std_floor: dec!(1300),      // §63(c)(5), Rev. Proc. 2023-34 §3.16(2)
+        dependent_std_earned_addon: dec!(450),
+        salt_cap: dec!(10000),                // §164(b)(6) (MFS = $5,000 at the use site)
+        kiddie_unearned_threshold: dec!(2600),// §1(g)(4)
+        elective_deferral_limit: dec!(23000), // §402(g)(1), Notice 2023-75
+        ftc_ceiling: dec!(300),               // §904(j) (MFJ = $600 at the use site)
     }
 }
 
@@ -629,6 +676,53 @@ mod tests {
     };
     use rust_decimal_macros::dec;
     use time::macros::date;
+
+    /// Full-return Phase 0 / plan-review C1 / KAT-3: every bundled year's ordinary schedule is
+    /// Tax-Table-binnable — every sub-$100k bracket edge is a multiple of $25 (a $50-bin boundary OR
+    /// its exact midpoint, which still reproduces the printed cell since the IRS taxes at the midpoint).
+    /// deep/01's stricter "no interior edge" was TY2024-only; TY2017 (9,325) and TY2025 (11,925 / 48,475)
+    /// have midpoint edges (≡ 25 mod 50) that this correctly permits.
+    #[test]
+    fn all_bundled_years_are_tax_table_binnable() {
+        use btctax_core::tax::method::first_unbinnable_edge;
+        let t = BundledTaxTables::load();
+        for year in [2017, 2024, 2025, 2026] {
+            let tbl = t.table_for(year).unwrap();
+            for status in [
+                FilingStatus::Single,
+                FilingStatus::Mfj,
+                FilingStatus::Mfs,
+                FilingStatus::HoH,
+            ] {
+                assert_eq!(
+                    first_unbinnable_edge(tbl.ordinary_for(status)),
+                    None,
+                    "year {year} {status:?}: a sub-$100k bracket edge is not a $25 multiple"
+                );
+            }
+        }
+    }
+
+    /// TY2024 full-return params are bundled with the correct Rev. Proc. 2023-34 / statutory figures;
+    /// v1 bundles only TY2024 (other years → None → the caller fails closed).
+    #[test]
+    fn ty2024_full_return_params_bundled() {
+        let t = BundledFullReturnTables::load();
+        let p = t.full_return_for(2024).unwrap();
+        assert_eq!(p.std_deduction_for(FilingStatus::Single), dec!(14600));
+        assert_eq!(p.std_deduction_for(FilingStatus::Mfj), dec!(29200));
+        assert_eq!(p.std_deduction_for(FilingStatus::HoH), dec!(21900));
+        assert_eq!(p.std_deduction_for(FilingStatus::Qss), dec!(29200)); // Qss→Mfj
+        assert_eq!(p.std_aged_blind_married, dec!(1550));
+        assert_eq!(p.std_aged_blind_unmarried, dec!(1950));
+        assert_eq!(p.dependent_std_floor, dec!(1300));
+        assert_eq!(p.salt_cap, dec!(10000));
+        assert_eq!(p.kiddie_unearned_threshold, dec!(2600));
+        assert_eq!(p.elective_deferral_limit, dec!(23000));
+        assert_eq!(p.ftc_ceiling, dec!(300));
+        assert!(t.full_return_for(2025).is_none()); // v1 = TY2024 only → fail closed elsewhere
+        assert!(t.full_return_for(2017).is_none());
+    }
 
     #[test]
     fn ty2025_single_ordinary_brackets_match_rev_proc_2024_40() {

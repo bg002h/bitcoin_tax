@@ -18,8 +18,9 @@ pub use compute::{
 };
 pub use se::{compute_se_tax, se_net_income, SeTaxResult};
 pub use tables::{
-    loss_limit, niit_threshold, se_addl_medicare_threshold, LtcgBreakpoints, OrdinaryBracket,
-    OrdinarySchedule, TaxTable, TaxTables, NIIT_RATE, QUALIFIED_APPRAISAL_THRESHOLD,
-    SE_NET_EARNINGS_FACTOR, SE_RATE_ADDL_MEDICARE, SE_RATE_MEDICARE, SE_RATE_SS,
+    loss_limit, niit_threshold, se_addl_medicare_threshold, FullReturnParams, FullReturnTables,
+    LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables, NIIT_RATE,
+    QUALIFIED_APPRAISAL_THRESHOLD, SE_NET_EARNINGS_FACTOR, SE_RATE_ADDL_MEDICARE, SE_RATE_MEDICARE,
+    SE_RATE_SS,
 };
 pub use types::{Carryforward, FilingStatus, MarginalRates, TaxOutcome, TaxProfile, TaxResult};

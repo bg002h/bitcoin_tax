@@ -208,6 +208,56 @@ pub fn loss_limit(status: FilingStatus) -> Usd {
     }
 }
 
+// ── Full-return per-year parameters (INDEXED; NEW) ──────────────────────────────────────────────
+
+/// Full-return v1 per-year parameters: the standard deduction and the year-varying limits the absolute
+/// 1040 needs. **NEW for the full-return build.** Kept OUT of [`TaxTable`] on purpose: a FROZEN file
+/// (`tax/se.rs`) constructs `TaxTable` by struct literal, so adding a field there is forbidden by the
+/// frozen-engine guard (SPEC §2 additive-only). These values are INDEXED — they move year-over-year
+/// (OBBBA moved the SALT cap; §1(g)/§402(g)/§63 amounts are inflation-adjusted) — so they belong in a
+/// per-year table, not as year-independent statutory constants. Bundled in `btctax-adapters` (TY2024 for v1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FullReturnParams {
+    pub year: i32,
+    /// §63(c)(2) basic standard deduction, keyed by filing status (Qss→Mfj via [`std_deduction_for`]).
+    pub std_deduction: BTreeMap<FilingStatus, Usd>,
+    /// §63(f) additional standard deduction per aged (65+) / blind box — married (MFJ/MFS/QSS).
+    pub std_aged_blind_married: Usd,
+    /// §63(f) additional standard deduction per aged/blind box — unmarried (Single/HoH).
+    pub std_aged_blind_unmarried: Usd,
+    /// §63(c)(5) dependent standard-deduction floor.
+    pub dependent_std_floor: Usd,
+    /// §63(c)(5) dependent earned-income add-on ($450).
+    pub dependent_std_earned_addon: Usd,
+    /// §164(b)(6) SALT deduction cap (general; MFS = half at the use site).
+    pub salt_cap: Usd,
+    /// §1(g)(4) kiddie-tax unearned-income threshold (Form 8615 refuse trigger, spec C1).
+    pub kiddie_unearned_threshold: Usd,
+    /// §402(g)(1) elective-deferral limit (excess-deferral refuse trigger, spec F3).
+    pub elective_deferral_limit: Usd,
+    /// §904(j) no-Form-1116 foreign-tax-credit ceiling (general; MFJ = double at the use site).
+    pub ftc_ceiling: Usd,
+}
+
+impl FullReturnParams {
+    /// §63(c)(2) basic standard deduction for `status` (maps `Qss → Mfj`).
+    pub fn std_deduction_for(&self, status: FilingStatus) -> Usd {
+        self.std_deduction[&TaxTable::key(status)]
+    }
+}
+
+/// Lookup for the per-year [`FullReturnParams`]. Bundled impl in `btctax-adapters` (TY2024 for v1);
+/// a year without full-return params returns `None` → the caller fails closed (`NotComputable`).
+pub trait FullReturnTables {
+    fn full_return_for(&self, year: i32) -> Option<&FullReturnParams>;
+}
+
+impl FullReturnTables for BTreeMap<i32, FullReturnParams> {
+    fn full_return_for(&self, year: i32) -> Option<&FullReturnParams> {
+        self.get(&year)
+    }
+}
+
 // ── Test support ──────────────────────────────────────────────────────────────────────────────
 
 /// A minimal synthetic `TaxTable` for use in Tasks 2–5 tests.  Numbers are hand-chosen to hit
