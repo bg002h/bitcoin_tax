@@ -2,6 +2,28 @@
 
 Non-blocking items deferred from the spec/plan review loop. Fold at plan time or later; none gates.
 
+## From Phase 2 implementation (open at the P2 review; deviations recorded for traceability)
+
+- **p2-absolute-assembly-deferred-to-P4** (DEVIATION — plan P2 task 1 → P4) — the absolute WITH-crypto 1040
+  income-assembly struct (L1a..L11 + the four Schedule-D routing paths + the `L11 = L9 − L10` cross-foot KAT)
+  is **deferred to P4**, where it is first *consumed* (the delta-vs-absolute dual report, SPEC §6) AND where
+  ½-SE (L15) is available (P2 would have to stub it → a knowingly-incomplete AGI). Building it in P2 would be
+  consumer-less, stubbed dead code that P4 rebuilds. **What P2 delivers instead:** the *derivation* side
+  (`derive_tax_profile`, the frozen-seam profile the delta engine consumes) + the reusable crypto-figure
+  helpers (`crypto_income`, `capital_gain_line7`) the absolute assembly will reuse. YAGNI + no-stub
+  justification; the cross-foot invariant is `L11 = L9 − L10` by construction and gets its KAT in P4.
+- **p2-consumer-sweep-remaining** (was `p1-consumer-sweep-P2`; PARTIAL) — `report_tax_year` is fully wired
+  (resolve_profile → derive + input-screen + compute-dependent screen, fail-closed) and prints nothing yet
+  re: provenance. STILL reading the raw stored profile via `s.tax_profile(year)` (bypassing the resolver):
+  **optimize** (`cmd/optimize.rs:43,110,178`), **what-if fallback** (`cmd/whatif.rs:81,139` — the ad-hoc-arg
+  path is intentionally NOT swept), **TUI optimize_proposal** (`session.rs:548`), **admin/export**
+  (`cmd/admin.rs:90,246`), and the **prior-year** M4 advisory (`cmd/tax.rs:256`). Route each through a shared
+  `Session::resolve_profile_for(year)` helper (loads bundled tables → resolve_profile) + run the
+  compute-dependent screen where `state` is available + PRINT provenance (§4.12). NOTE: the D-4 guard means a
+  ReturnInputs year normally has NO stored profile, so today those consumers get `None` (a capability gap, not
+  a wrong number) — the two-liabilities divergence only occurs after a `--force`d raw profile. Do before P2 is
+  declared green.
+
 ## From Fable spec review r4 (5 Minors — spec is GREEN 0C/0I with these open)
 
 - **fr-schedc-27a** — Schedule C fill: the single `expenses` scalar should land on **Part V line 48 → line
