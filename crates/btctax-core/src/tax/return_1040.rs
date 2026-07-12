@@ -145,9 +145,15 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams) -> TaxPr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tax::return_inputs::{Form1099Div, Form1099Int, Form1099G, ScheduleCInputs, W2};
-    use crate::tax::types::Carryforward;
+    use crate::event::IncomeKind;
+    use crate::identity::EventId;
+    use crate::state::{IncomeRecord, LedgerState};
+    use crate::tax::compute::compute_tax_year;
+    use crate::tax::return_inputs::{Form1099Div, Form1099G, Form1099Int, ScheduleCInputs, W2};
+    use crate::tax::tables::{synthetic_table, TaxTable};
+    use crate::tax::types::{Carryforward, TaxOutcome};
     use std::collections::BTreeMap;
+    use time::macros::date;
 
     fn ty2024_params() -> FullReturnParams {
         let mut std_deduction = BTreeMap::new();
@@ -179,6 +185,95 @@ mod tests {
             box5_medicare_wages: box5,
             ..Default::default()
         }
+    }
+
+    fn tables_2024() -> BTreeMap<i32, TaxTable> {
+        let mut m = BTreeMap::new();
+        m.insert(2024, synthetic_table(2024));
+        m
+    }
+    fn mining(fmv: Usd) -> IncomeRecord {
+        IncomeRecord {
+            event: EventId::decision(1),
+            recognized_at: date!(2024 - 06 - 01),
+            sat: 100_000_000,
+            usd_fmv: fmv,
+            kind: IncomeKind::Mining,
+            business: true,
+            pseudo: false,
+        }
+    }
+    /// A Single household the synthetic table can price (it only carries `Single` schedules). Tuned so
+    /// the ordinary base (`ordinary_taxable_income`) sits just below the synthetic $100k bracket edge:
+    /// wages 98,600 + int 4,000 + ord-div 10,000 + cap-gain-distr 3,000 = AGI 115,600; taxable 101,000;
+    /// ordinary base = 101,000 − 8,000 qd − 3,000 cap-gain = 90,000.
+    fn single_household() -> ReturnInputs {
+        ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(98600), dec!(98600), dec!(98600))],
+            int_1099: vec![Form1099Int {
+                box1_interest: dec!(4000),
+                ..Default::default()
+            }],
+            div_1099: vec![Form1099Div {
+                box1a_ordinary: dec!(10000),
+                box1b_qualified: dec!(8000),
+                box2a_capgain_distr: dec!(3000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// The frozen seam, end to end: the derived profile carries NO crypto, so with an empty ledger the
+    /// crypto DELTA is exactly zero; adding business-mining ordinary income makes the delta positive —
+    /// the engine stacks crypto ON TOP of the derived non-crypto base. (Task-3 exclusion-semantics KAT.)
+    #[test]
+    fn derived_profile_composes_with_the_frozen_crypto_engine() {
+        let p = derive_tax_profile(&single_household(), &ty2024_params());
+        let tables = tables_2024();
+
+        // No crypto in the ledger ⇒ zero crypto delta (derive injects no phantom crypto).
+        match compute_tax_year(&[], &LedgerState::default(), 2024, Some(&p), &tables) {
+            TaxOutcome::Computed(r) => assert_eq!(r.total_federal_tax_attributable, Usd::ZERO),
+            other => panic!("clean derived profile must compute, got {other:?}"),
+        }
+
+        // $60k business mining (ordinary crypto income) ⇒ positive delta, taxed on top of the base.
+        let st = LedgerState {
+            income_recognized: vec![mining(dec!(60000))],
+            ..Default::default()
+        };
+        match compute_tax_year(&[], &st, 2024, Some(&p), &tables) {
+            TaxOutcome::Computed(r) => assert!(r.total_federal_tax_attributable > Usd::ZERO),
+            other => panic!("crypto year must compute, got {other:?}"),
+        }
+    }
+
+    /// A WRONG derivation that forgot to strip the preferential slice (left qd+cap-gain in the ordinary
+    /// bottom) changes the crypto tax the engine computes — proving the strip is load-bearing through the
+    /// seam, not just a cosmetic profile field. Uses a crypto LTCG so the pref stacking is exercised.
+    #[test]
+    fn forgetting_to_strip_changes_the_engine_result() {
+        let good = derive_tax_profile(&single_household(), &ty2024_params());
+        // The strip-once bug: ordinary bottom left inflated by the preferential slice.
+        let mut bad = good.clone();
+        bad.ordinary_taxable_income += good.qualified_dividends_and_other_pref_income
+            + good.other_net_capital_gain; // 246,800 → 257,800
+        let tables = tables_2024();
+        let st = LedgerState {
+            income_recognized: vec![mining(dec!(40000))],
+            ..Default::default()
+        };
+        let g = match compute_tax_year(&[], &st, 2024, Some(&good), &tables) {
+            TaxOutcome::Computed(r) => r.total_federal_tax_attributable,
+            other => panic!("good profile must compute, got {other:?}"),
+        };
+        let b = match compute_tax_year(&[], &st, 2024, Some(&bad), &tables) {
+            TaxOutcome::Computed(r) => r.total_federal_tax_attributable,
+            other => panic!("bad profile must compute, got {other:?}"),
+        };
+        assert_ne!(g, b, "the strip must affect the engine's crypto tax");
     }
 
     /// deep/02 Worked Example 1 (MFJ, no crypto) — the derived `TaxProfile` cent-exact, every field.
