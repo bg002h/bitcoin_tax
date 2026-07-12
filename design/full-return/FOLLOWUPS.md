@@ -28,6 +28,15 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   open (the number is already correct + fail-closed); this is an audit-trail nicety. Print it as part of the
   P4 report render.
 
+## From Fable IMPL-P2 code review r4 (final — Phase 2 GREEN-certified at `0c73bc9`; 1 record-only Minor)
+
+- **p2-r4-m1-open-profile-form-error-arm-untested** (RECORD-ONLY, fold opportunistically with future tui-edit
+  work) — `open_profile_form`'s `Some(Err(e))` arm (surfaces a corrupt-`tax_profile`-blob read error to
+  `app.status`, review M-r3-2) has no dedicated KAT; both KAT-F1s exercise only the `Some(Ok)` arm. The
+  regression floor is the already-reviewed-Minor r3 "masked-as-empty" state, and the save path is
+  independently D-4-guarded + atomic — so this is not a new hazard. r4 explicitly ruled it does NOT warrant a
+  gate round; certification did not wait on it. Add a corrupt-blob → status-set KAT when tui-edit is next touched.
+
 ## From Fable IMPL-P2 code review r2 (N1/N2/N3 FOLDED into P2 r3; deferred item here)
 
 - **p2-r2-n4-pseudo-year-viewer-gap** (SCHEDULED → P4, with provenance rendering; PRE-EXISTING, non-fail-open)
@@ -102,11 +111,10 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   serde-toml requires scalar keys before nested tables and the nested `ReturnInputs` model violates that
   ordering. A faithful TOML round-trip-out (custom serializer or field reorder) is a follow-on; import
   accepts TOML today, which is the load-bearing direction.
-- **p1-consumer-sweep-P2** (SCHEDULED → P2, MANDATORY) — the `resolve_profile` single-source resolver + its
-  `Provenance` are wired into `report --tax-year` in P1, but `optimize` / `what-if` / `export` / the TUI still
-  read `tax_profile::get` directly. P2 MUST route every profile consumer through `resolve_profile` and print
-  the provenance, or a year with `ReturnInputs` silently gives those paths a stale/absent profile. Tracked as
-  a hard P2 task, not opportunistic.
+- **p1-consumer-sweep-P2** (SUPERSEDED → see `p2-consumer-sweep-remaining` at the top; **RESOLVED in P2**) —
+  the original P1 entry. The routing half (route optimize/what-if/export/TUI through the resolver) is DONE;
+  provenance PRINTING split out to `p2-provenance-printing` (→ P4). Kept as a stub so the id resolves; the
+  live status lives in the P2-section entry.
 - **p1-carryover-writeback-P3P4** (SCHEDULED → P3/P4) — charitable + capital-loss carryovers are read from
   `ReturnInputs` but not yet written back (next-year carryforward_out). The write-back lands with the
   Schedule A / Schedule D compute stages in P3/P4; P1 only stores the declared inputs.
