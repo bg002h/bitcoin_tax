@@ -21,6 +21,13 @@ CTC in v1**. Follow-ons: **TY2025 with FULL Schedule 1-A** (senior/tips/overtime
 for the deferred/uncertain items. **Do NOT redo settled findings from scratch** — cite the opus report,
 then confirm or correct it. Flag any correction to an opus claim loudly.
 
+**UPDATE 2026-07-11 — a round-2 opus deep-dive already locked four v1-gating areas** (`deep/01`–`deep/04`;
+see `00-SYNTHESIS.md` §8). Agents **F2 / F4 / F5 are now VERIFY-ONLY** over those results (adversarially
+confirm, don't redo) — F5 additionally does the TY2025 field extraction. **F1 (2025 finals), F3 (follow-on
+math: Sch 1-A / QBI / CTC), and F6 (completeness critic) remain the PRIMARY new work.** Also re-check the
+six round-2 corrections in §8 — especially the **50%-not-60%** short-term-crypto charitable ceiling, the
+**half-up** rounding, and the **NII-rebuild** (absolute NIIT ≠ the engine's `nii_with`).
+
 ---
 
 ## Orchestration instructions (for the executing assistant)
@@ -51,7 +58,11 @@ adds a 0.5%-AGI charitable floor, gambling-loss limit, and a §68-style itemized
 L12e, L13a, L13b) and **Schedule 1-A** part/line structure on the latest draft. Output: a per-figure
 "confirmed / corrected" table with citations, and a go/no-go on bundling TY2025 tables.
 
-## Agent F2 — QDCGT worksheet + Tax Table method (spec-grade math lock)
+## Agent F2 — QDCGT worksheet + Tax Table method  ·  NOW VERIFY-ONLY
+**Locked by round-2 opus in `deep/01-tax-table-qdcgt-method.md`.** Adversarially CONFIRM (don't redo):
+`line16 = round_dollar(min(L23,L24))`; IRS rounding is **half-up** (`round_dollar` ≠ the engine's
+half-even); **no per-year Tax-Table data** is needed; re-derive the 3 worked examples. Escalate only
+discrepancies. Original brief follows:
 Deep-verify the opus §4 claim that `preferential_tax`/`PrefSplit` maps EXACTLY onto QDCGT worksheet lines
 6–21 and that line 16 = `min(ordinary_tax_on(B)+PrefSplit.tax, ordinary_tax_on(TI))`, **including** the
 line-24 comparison and the `min(L23,L24)` — construct 2–3 worked numeric examples (straddling each
@@ -69,7 +80,12 @@ MAGI definition. (2) **QBI / §199A** — Form 8995 simplified path (20% of REIT
 ($2,000/child <17 → $2,200 for 2025; $500 ODC; MAGI phase-out; ACTC refundable portion). Citations to
 each form's instructions.
 
-## Agent F4 — Derivation correctness + absolute NIIT/Add'l-Medicare
+## Agent F4 — Derivation + absolute NIIT/Add'l-Medicare  ·  NOW VERIFY-ONLY
+**Locked by round-2 opus in `deep/02-derivation-and-absolute-niit-medicare.md`.** Adversarially CONFIRM
+(don't redo): `magi = AGI` proven exact + fail-closed on §911/CFC/PFIC; absolute NIIT must **rebuild NII
+from line-items** (engine `nii_with` ≠ absolute); the **`W2` owner-tag** (box-3 SS per-earner vs box-5
+Medicare household-wide); the **Sch 2 L4 = SS+Medicare-only** double-count fix; the **reduce-to-delta
+invariant**. Re-derive the 2 worked examples. Escalate only discrepancies. Original brief follows:
 Deep-verify the `derive_tax_profile()` logic (opus report 04 §5): the **1099-DIV box 1a ⊃ 1b** strip-once
 rule, the **box 2a → `other_net_capital_gain`** channel coupling with crypto Schedule D netting, and that
 **`magi_excluding_crypto` = AGI** is correct precisely because tax-exempt interest is NOT a §1411 add-back
@@ -78,7 +94,11 @@ rule, the **box 2a → `other_net_capital_gain`** channel coupling with crypto S
 (**W-2 box 5 Medicare wages, box 6 withheld**), the two-stage 8959 split (tax → Sch 2 L11; withholding →
 1040 L25c), and threshold coordination with SE income. Output: a worked MFJ example end-to-end.
 
-## Agent F5 — Per-(form, TY2024) field-map skeletons + root FQN capture
+## Agent F5 — Field-map skeletons + root FQN  ·  TY2024 DONE; do TY2025
+**Round-2 opus captured TY2024 in `deep/03-ty2024-field-maps.md`** (205 real field names, 6 root FQNs,
+filing-status quirks, Sch B 14/15 asymmetric rows, Sch 2 two-page split). So: (a) spot-verify a sample of
+the TY2024 names against the PDFs, and (b) do the **TY2025** extraction from scratch (roots flip; 1040
+page-2 renumbers; +58 fields) so both years are ready. Original TY2024 brief (reuse for the 2025 pass):
 Extend opus report 03: for **each** of Form 1040, Schedule 1, 2, 3, A, B for **TY2024**, download the
 official PDF and capture (a) the **exact root container FQN** (`topmostSubform[0]` vs `form1[0]` — it
 flips per form), and (b) a concrete **field-map skeleton** listing the money/checkbox leaf field names
