@@ -1,7 +1,8 @@
 //! `tax-profile` command helpers — set/show the per-year `TaxProfile` side-table entry.
 //! `report_tax_year` (Task 9) provides the standalone "tax owed / what-if" calculator.
 //! `report_tax_year` also runs the M4 carryforward-consistency advisory (Task 10).
-use crate::{tax_profile, CliError, Session};
+use crate::{return_inputs, tax_profile, CliError, Session};
+use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_adapters::BundledTaxTables;
 use btctax_core::{
     carryforward_consistency, compute_se_tax, compute_tax_year, schedule_d, se_net_income,
@@ -29,6 +30,45 @@ pub fn show_profile(
     year: i32,
 ) -> Result<Option<TaxProfile>, CliError> {
     tax_profile::get(Session::open(vault, pp)?.conn(), year)
+}
+
+/// `income import` — parse a full-return [`ReturnInputs`] from a TOML file (offline; key order in the file
+/// is irrelevant to deserialization) and persist it in the `return_inputs` side-table for `year`.
+pub fn import_return_inputs(
+    vault: &Path,
+    pp: &Passphrase,
+    year: i32,
+    file: &Path,
+) -> Result<(), CliError> {
+    let text = std::fs::read_to_string(file)?;
+    let ri = parse_return_inputs_toml(&text)?;
+    let mut s = Session::open(vault, pp)?;
+    return_inputs::set(s.conn(), year, &ri)?;
+    s.save()
+}
+
+/// Parse a `ReturnInputs` from TOML text (split out for testing).
+fn parse_return_inputs_toml(text: &str) -> Result<ReturnInputs, CliError> {
+    toml::from_str(text).map_err(|e| CliError::Usage(format!("invalid ReturnInputs TOML: {e}")))
+}
+
+/// `income show` — the stored [`ReturnInputs`] for `year` as pretty JSON, or `None`. (JSON, not TOML:
+/// serde-toml requires scalar keys before nested tables, which the nested model violates; a TOML round-
+/// trip-out is a follow-on. Import accepts TOML.)
+pub fn show_return_inputs(
+    vault: &Path,
+    pp: &Passphrase,
+    year: i32,
+) -> Result<Option<String>, CliError> {
+    let ri = return_inputs::get(Session::open(vault, pp)?.conn(), year)?;
+    ri.map(|ri| {
+        serde_json::to_string_pretty(&ri)
+            .map_err(|e| CliError::BadConfigValue {
+                key: format!("return_inputs[{year}]"),
+                value: e.to_string(),
+            })
+    })
+    .transpose()
 }
 
 /// The full `report --tax-year` bundle, in print order:
@@ -154,4 +194,65 @@ pub fn report_tax_year(
         schedule_se,
         donation_appraisal_advisory,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use btctax_core::tax::return_inputs::CharitableClass;
+    use btctax_core::FilingStatus;
+    use rust_decimal_macros::dec;
+
+    /// A representative `income import` TOML deserializes into `ReturnInputs` — exercises money-as-string
+    /// (serde-str), the FilingStatus/Owner/CharitableClass enum reprs, and nested `[[w2s]]` / charitable
+    /// arrays. This is the risky part of the import path (field-order in the file is irrelevant).
+    #[test]
+    fn return_inputs_toml_parses() {
+        let text = r#"
+            filing_status = "Mfj"
+
+            [[w2s]]
+            owner = "taxpayer"
+            employer = "ACME"
+            box1_wages = "82000"
+            box2_fed_withheld = "9100"
+            box5_medicare_wages = "82000"
+
+            [[div_1099]]
+            payer = "Vanguard"
+            box1a_ordinary = "3400"
+            box1b_qualified = "3100"
+
+            [schedule_a]
+            mortgage_interest_1098 = "11200"
+            salt_real_estate = "6800"
+
+            [[schedule_a.charitable]]
+            class = "cash60"
+            amount = "2500"
+
+            [payments]
+            estimated_tax_payments = "6000"
+        "#;
+        let ri = parse_return_inputs_toml(text).unwrap();
+        assert_eq!(ri.filing_status, FilingStatus::Mfj);
+        assert_eq!(ri.w2s.len(), 1);
+        assert_eq!(ri.w2s[0].box1_wages, dec!(82000));
+        assert_eq!(ri.w2s[0].box5_medicare_wages, dec!(82000));
+        assert_eq!(ri.div_1099[0].box1b_qualified, dec!(3100));
+        let a = ri.schedule_a.as_ref().unwrap();
+        assert_eq!(a.mortgage_interest_1098, dec!(11200));
+        assert_eq!(a.charitable[0].class, CharitableClass::Cash60);
+        assert_eq!(a.charitable[0].amount, dec!(2500));
+        assert_eq!(ri.payments.estimated_tax_payments, dec!(6000));
+    }
+
+    /// Malformed TOML is a typed `Usage` error, never a panic.
+    #[test]
+    fn bad_toml_is_typed_error() {
+        assert!(matches!(
+            parse_return_inputs_toml("not = = toml").unwrap_err(),
+            CliError::Usage(_)
+        ));
+    }
 }

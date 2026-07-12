@@ -2,7 +2,7 @@
 //! non-interactive use; otherwise a secure prompt), calls one library command, renders, and sets the
 //! exit code (non-zero on FR9 hard blockers / on any CliError). NO business logic lives here.
 use btctax_cli::cli::{
-    Cli, Command, FeeArg, MethodArg, Optimize, OutKindArg, Pseudo, PseudoKindArg, Reconcile,
+    Cli, Command, FeeArg, IncomeCmd, MethodArg, Optimize, OutKindArg, Pseudo, PseudoKindArg, Reconcile,
     SelfTransferActionArg, WhatIf,
 };
 use btctax_cli::{cmd, eventref, render, CliError};
@@ -203,6 +203,20 @@ fn run() -> Result<ExitCode, CliError> {
                     DisposeKind::Sell,
                 )?;
                 print!("{}", render::render_consult(&report));
+            }
+        },
+        Command::Income(income) => match income {
+            IncomeCmd::Import { year, file } => {
+                let pp = passphrase(false)?;
+                cmd::tax::import_return_inputs(vault, &pp, year, &file)?;
+                println!("Imported full-return inputs for tax year {year}.");
+            }
+            IncomeCmd::Show { year } => {
+                let pp = passphrase(false)?;
+                match cmd::tax::show_return_inputs(vault, &pp, year)? {
+                    Some(json) => print!("{json}"),
+                    None => println!("No full-return inputs set for tax year {year}."),
+                }
             }
         },
         Command::WhatIf(wi) => match wi {

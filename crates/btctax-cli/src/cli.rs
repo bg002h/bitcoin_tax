@@ -206,6 +206,10 @@ pub enum Command {
     /// side-table row, no vault mutation. Tax decision-support (consequences), not buy/sell/hold advice.
     #[command(subcommand)]
     WhatIf(WhatIf),
+    /// Full-return (v1) input surface: import or show the per-year full-return inputs (W-2s, 1099s,
+    /// deductions, household). Offline; stored in the encrypted vault.
+    #[command(subcommand)]
+    Income(IncomeCmd),
     /// Set or show the per-tax-year tax profile (filing status, income, MAGI, etc.).
     TaxProfile {
         /// The tax year (e.g. 2025).
@@ -324,6 +328,27 @@ pub enum Optimize {
 /// `what-if` subcommand tree (task #43). READ-ONLY hypothetical-transaction tax planning: NOTHING is
 /// filed, appended, or persisted. Mirrors the `optimize consult` shape, plus an ad-hoc `TaxProfile`
 /// (so you can plan without `tax-profile set`).
+/// Full-return (v1) input subcommands (SPEC §4 / recon-04 §6). v1 ships the TOML bulk-import path +
+/// a JSON show; incremental per-field subcommands (`add-w2`, …) are a follow-on.
+#[derive(Subcommand)]
+pub enum IncomeCmd {
+    /// Import full-return inputs from an offline TOML file into the vault for a tax year.
+    Import {
+        /// The tax year (e.g. 2024).
+        #[arg(long)]
+        year: i32,
+        /// Path to the TOML file describing the full-return inputs.
+        #[arg(long)]
+        file: std::path::PathBuf,
+    },
+    /// Show the stored full-return inputs for a tax year (as JSON), or nothing if none set.
+    Show {
+        /// The tax year (e.g. 2024).
+        #[arg(long)]
+        year: i32,
+    },
+}
+
 #[derive(Subcommand)]
 pub enum WhatIf {
     /// Posit a hypothetical, NON-persisted SALE and see its MARGINAL federal tax: the lots it would
