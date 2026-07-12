@@ -5,27 +5,10 @@ use crate::{tax_profile, CliError, Session};
 use btctax_adapters::BundledTaxTables;
 use btctax_core::{
     carryforward_consistency, compute_se_tax, compute_tax_year, schedule_d, se_net_income,
-    Carryforward, FilingStatus, ScheduleDTotals, TaxOutcome, TaxProfile, TaxTables, Usd,
+    ScheduleDTotals, TaxOutcome, TaxProfile, TaxTables, Usd,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
-
-/// Pseudo-reconcile (sub-project 2, [R0-M6]): the CLI-layer PLACEHOLDER tax profile — a single filer with
-/// $0 income / MAGI / qualified-dividends / carryforward. Injected (never persisted) at `report_tax_year`
-/// when the mode is on and the year has no stored profile, to clear `TaxProfileMissing` ONLY.
-fn placeholder_tax_profile() -> TaxProfile {
-    TaxProfile {
-        filing_status: FilingStatus::Single,
-        ordinary_taxable_income: Usd::ZERO,
-        magi_excluding_crypto: Usd::ZERO,
-        qualified_dividends_and_other_pref_income: Usd::ZERO,
-        other_net_capital_gain: Usd::ZERO,
-        capital_loss_carryforward_in: Carryforward::default(),
-        w2_ss_wages: Usd::ZERO,
-        w2_medicare_wages: Usd::ZERO,
-        schedule_c_expenses: Usd::ZERO,
-    }
-}
 
 /// Persist `p` as the tax profile for `year` in the vault at `vault`, then save.
 pub fn set_profile(
@@ -85,11 +68,17 @@ pub fn report_tax_year(
     // proceed with zero setup. This clears `TaxProfileMissing` ONLY — it is injected AFTER the projection,
     // so it never touches `state.blockers` and thus can NEVER clear the Hard `TaxYearNotComputable` gate
     // (compute.rs checks Hard blockers BEFORE the profile branch). A real stored profile always wins.
-    let profile = match s.tax_profile(year)? {
-        Some(p) => Some(p),
-        None if cfg.pseudo_reconcile => Some(placeholder_tax_profile()),
-        None => None,
-    };
+    // Single profile-source resolver (SPEC §4.12 / G4): ReturnInputs → stored TaxProfile → pseudo → missing.
+    let resolved = crate::resolve::resolve_profile(s.conn(), year, cfg.pseudo_reconcile)?;
+    if resolved.is_derivation_pending() {
+        // A full-return `ReturnInputs` exists but `derive_tax_profile` is Phase 2 — surface it explicitly;
+        // never silently treat the year as profile-less (which would be a wrong number).
+        return Err(CliError::Usage(format!(
+            "tax year {year} has full-return inputs, but full-return computation is not yet available; \
+             use `tax-profile set` for a raw profile in the meantime"
+        )));
+    }
+    let profile = resolved.profile;
     let tables = BundledTaxTables::load();
     let outcome = compute_tax_year(&events, &state, year, profile.as_ref(), &tables);
     // P2-B: the RAW pre-netting Schedule D part totals for the same year, from the same projection.
