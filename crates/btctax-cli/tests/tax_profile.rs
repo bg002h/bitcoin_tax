@@ -200,3 +200,52 @@ fn income_import_then_show_redacts_pii_at_the_vault_level() {
     );
     assert!(shown.contains("82000")); // non-PII figures are shown verbatim
 }
+
+/// [P2 review M-r3-4 / N3] `resolve_all_screened` maps a corrupt side-table row to a per-year refusal
+/// (Uncomputable), NOT a whole-vault brick — the read-only viewer must still open, with other years
+/// resolving normally. Pins the availability behavior N3 introduced.
+#[test]
+fn resolve_all_screened_maps_a_corrupt_year_to_a_refusal_not_a_brick() {
+    use btctax_cli::{resolve::ProfileOutcome, return_inputs, Session};
+    use btctax_core::tax::return_inputs::ReturnInputs;
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Valid full-return inputs for 2024 + a CORRUPT `return_inputs` blob for 2023 (one bad side-table row).
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        return_inputs::set(
+            s.conn(),
+            2024,
+            &ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        s.conn()
+            .execute(
+                "INSERT INTO return_inputs(year, inputs_json) VALUES (2023, 'not json')",
+                [],
+            )
+            .unwrap();
+        s.save().unwrap();
+    }
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _cfg) = s.project().unwrap();
+    let tables = btctax_adapters::BundledTaxTables::load();
+    let resolved = s.resolve_all_screened(&state, &tables).unwrap();
+
+    // 2023 (corrupt) → per-year Uncomputable; 2024 (valid) → Ready. The viewer is NOT bricked.
+    assert!(
+        matches!(resolved.get(&2023), Some(ProfileOutcome::Uncomputable { .. })),
+        "a corrupt 2023 blob must become a per-year refusal, not fail the whole enumeration"
+    );
+    assert!(
+        matches!(resolved.get(&2024), Some(ProfileOutcome::Ready { .. })),
+        "the valid 2024 year must still resolve"
+    );
+}

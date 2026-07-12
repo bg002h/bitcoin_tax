@@ -711,11 +711,16 @@ fn open_profile_form(app: &mut EditorApp) {
     let mut form = ProfileFormState::new(year);
 
     // The RAW stored profile (the escape hatch this form edits), read straight from the vault — never the
-    // resolved/derived `snapshot.profiles` map.
-    let stored = app
-        .session
-        .as_ref()
-        .and_then(|s| s.tax_profile(year).ok().flatten());
+    // resolved/derived `snapshot.profiles` map. A read ERROR (e.g. a corrupt `tax_profile` blob) is surfaced,
+    // not masked as "no profile" — the editor is a mutation surface, fail loud (review M-r3-2).
+    let stored = match app.session.as_ref().map(|s| s.tax_profile(year)) {
+        Some(Ok(p)) => p,
+        Some(Err(e)) => {
+            app.status = Some(format!("could not read the stored profile for {year}: {e}"));
+            None
+        }
+        None => None,
+    };
     if let Some(profile) = stored {
         form.filing_status = profile.filing_status;
         form.fields[0].set(&profile.ordinary_taxable_income.to_string());
@@ -9977,6 +9982,67 @@ mod tests {
         assert_eq!(
             form.fields[8].buf, "3000",
             "schedule_c must be pre-populated"
+        );
+    }
+
+    /// [M-r3-1] KAT-F1 for a BOTH-sources year: with a stored raw profile AND `ReturnInputs` for the same
+    /// year, the edit form must pre-populate from the STORED raw profile (the escape hatch it edits), NOT
+    /// the resolved/derived one. Pins that `open_profile_form` reads `session.tax_profile`, not the resolved
+    /// `snapshot.profiles` map — a distinguishing test (the raw MFJ/$999,999 differs from the derived Single).
+    #[test]
+    fn kat_f1_both_sources_form_shows_stored_not_derived() {
+        use btctax_core::{Carryforward, FilingStatus, TaxProfile};
+        use btctax_store::Passphrase;
+        use rust_decimal_macros::dec;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp = "kat-f1-both-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp.into()), &key).unwrap();
+
+        // A DISTINCTIVE raw stored profile for 2024, stored BEFORE the import (the D-4 guard fires only when
+        // ReturnInputs ALREADY exist — nothing guards the store-then-import order).
+        let raw = TaxProfile {
+            filing_status: FilingStatus::Mfj,
+            ordinary_taxable_income: dec!(999999),
+            magi_excluding_crypto: dec!(999999),
+            qualified_dividends_and_other_pref_income: dec!(0),
+            other_net_capital_gain: dec!(0),
+            capital_loss_carryforward_in: Carryforward::default(),
+            w2_ss_wages: dec!(0),
+            w2_medicare_wages: dec!(0),
+            schedule_c_expenses: dec!(0),
+        };
+        btctax_cli::cmd::tax::set_profile(&vault, &Passphrase::new(pp.into()), 2024, raw, false).unwrap();
+        // Full-return inputs for the SAME year would DERIVE a different (Single) profile.
+        let toml = dir.path().join("inputs.toml");
+        std::fs::write(
+            &toml,
+            "filing_status = \"Single\"\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"X\"\nbox1_wages = \"50000\"\nbox2_fed_withheld = \"5000\"\n",
+        )
+        .unwrap();
+        btctax_cli::cmd::tax::import_return_inputs(&vault, &Passphrase::new(pp.into()), 2024, &toml)
+            .unwrap();
+
+        let mut app = EditorApp::new(vault.clone());
+        for c in pp.chars() {
+            app.unlock.push_char(c);
+        }
+        app.do_unlock();
+        app.selected_year = 2024;
+        handle_key(&mut app, press(KeyCode::Char('p')));
+
+        let form = app.profile_form.as_ref().expect("form must open after 'p'");
+        // The STORED raw profile (MFJ / $999,999), NOT the derived Single one.
+        assert_eq!(
+            form.filing_status,
+            FilingStatus::Mfj,
+            "form must show the STORED filing status, not the derived Single"
+        );
+        assert_eq!(
+            form.fields[0].buf, "999999",
+            "form must show the STORED ordinary-taxable-income, not the derived value"
         );
     }
 

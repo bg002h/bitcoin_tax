@@ -187,12 +187,19 @@ pub fn resolve_and_screen(
     }
     // Compute-dependent refuse rows (need `state`) — on the SAME ReturnInputs `resolve_core` fetched.
     if resolved.provenance == Provenance::ReturnInputs {
-        if let (Some(ri), Some(params)) = (ri.as_ref(), full_return) {
-            if let Some(refusal) = screen_compute_dependent(ri, state, year, params) {
-                return Ok(ProfileOutcome::Uncomputable {
-                    detail: uncomputable_detail(year, Some(&refusal)),
-                });
-            }
+        // `provenance == ReturnInputs` ⇒ `resolve_core` returned the fetched `ri` (all three of its RI
+        // exits do) on a supported year (`params` is `Some`, else it would have been unsupported/uncomputable
+        // and returned above). If that invariant is ever broken by a refactor, fail CLOSED — never silently
+        // skip the compute-dependent screen and hand back a number (review M-r3-3).
+        let (Some(ri), Some(params)) = (ri.as_ref(), full_return) else {
+            return Ok(ProfileOutcome::Uncomputable {
+                detail: uncomputable_detail(year, None),
+            });
+        };
+        if let Some(refusal) = screen_compute_dependent(ri, state, year, params) {
+            return Ok(ProfileOutcome::Uncomputable {
+                detail: uncomputable_detail(year, Some(&refusal)),
+            });
         }
     }
     Ok(ProfileOutcome::Ready {
