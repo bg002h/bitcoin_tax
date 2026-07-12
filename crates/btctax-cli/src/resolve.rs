@@ -126,17 +126,6 @@ pub fn resolve_profile(
     })
 }
 
-/// A human-readable label for `provenance`, printed on every computing output so a reviewer can audit
-/// which source produced the tax figure (SPEC §4.12 / G4).
-pub fn provenance_label(provenance: Provenance) -> &'static str {
-    match provenance {
-        Provenance::ReturnInputs => "full-return inputs (derived)",
-        Provenance::StoredProfile => "stored tax-profile",
-        Provenance::PseudoPlaceholder => "pseudo-reconcile placeholder ($0)",
-        Provenance::Missing => "none",
-    }
-}
-
 /// The result of resolving AND screening a year's profile for a COMPUTING consumer (report / optimize /
 /// what-if / export). Unlike [`resolve_profile`] (which screens only the input-screenable rows), this also
 /// runs the **compute-dependent** refuse-guard ([`screen_compute_dependent`]) that needs the ledger `state`.

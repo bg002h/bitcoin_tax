@@ -18,9 +18,15 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   (run/consult/accept), **what-if** sell+harvest fallback (the ad-hoc-arg path stays ad-hoc), **TUI**
   `optimize_proposal`, and **admin/export** + the **prior-year** M4 advisory (both map an uncomputable
   outcome to "skip", never failing a data export / non-gating advisory). All existing consumer tests pass
-  unchanged (behavior-identical for non-pseudo, non-ReturnInputs years). **Still open (Minor, → P2 provenance
-  step):** `resolve_screened` exposes `Provenance`, but the consumers don't yet PRINT it (§4.12 "printed on
-  every output"). Non-fail-open; add a provenance line to report/optimize/what-if render before P2 green.
+  unchanged (behavior-identical for non-pseudo, non-ReturnInputs years).
+- **p2-provenance-printing** (SCHEDULED → P4, with the dual-report rendering) — the resolver **mechanism** is
+  done in P2: `resolve_screened` / `ProfileOutcome::Ready` carry the `Provenance`. PRINTING it + a
+  `provenance_label` formatter (§4.12 "provenance printed on every output") is owned by **P4**, where the
+  full-return-aware output format
+  (delta-vs-absolute dual report, §6) is built — P2 still emits the existing crypto-delta report, so a
+  provenance line has no finished output to live in yet and a stderr stopgap would be thrown away. Non-fail-
+  open (the number is already correct + fail-closed); this is an audit-trail nicety. Print it as part of the
+  P4 report render.
 
 ## From Fable spec review r4 (5 Minors — spec is GREEN 0C/0I with these open)
 
