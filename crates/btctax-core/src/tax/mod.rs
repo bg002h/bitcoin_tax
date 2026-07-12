@@ -2,6 +2,7 @@
 //! NFR4 determinism). No float anywhere — all rates are `Decimal` literals.
 //! Tables and compute modules are added in Tasks 2–5.
 pub mod compute;
+pub mod frozen_guard;
 pub mod method;
 pub mod se;
 pub mod tables;
