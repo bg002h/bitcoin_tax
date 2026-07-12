@@ -18,6 +18,26 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 - **fr-profile-diagram-nit** — SPEC §2 diagram labels `TaxProfile` "(2 scalars)"; it is the ~9-field struct
   (deep/02 §1.3). Pure diagram nit; the "2 scalars" is the load-bearing *objective*, not the field count.
 
+## From Fable PLAN review r2 (4 Minors — plan is GREEN 0C/0I with these open)
+
+- **pm-r2-m1** — plan KAT-ownership line mislabels the single-employer excess-SS refuse row as compute-
+  dependent; it is input-screenable (P1). One-word fix in the ownership block.
+- **pm-r2-m2** — the "KAT 9 → P0 (arithmetic + round-mode)" annotation re-blurs the P0 task-1 (mode) vs task-6
+  (cross-foot) split; drop "round-mode" from the KAT-9 label (mode is task 1's discriminating cells).
+- **pm-r2-m3** — P1 task-3's parenthetical "(no vault can hold ReturnInputs yet)" is false at phase end; the
+  stub is fail-closed regardless — reword to "stub is fail-closed."
+- **pm-r2-m4** — P0 task 0 FROZEN pin: make explicit that what-if / pseudo-reconcile / existing-crypto-test
+  files are "never alter" (would break loudly) but are not content-pinned (only the 3 delta-path files are).
+
+## Spec errata surfaced by the plan review (fix spec text; do not re-open the GREEN gate for these)
+
+- **spec-s8-kat3-mod25** — SPEC §8 / §10 KAT-3 says "no bracket edge < $100k inside a $50 bin". That's a
+  **TY2024-only** fact (deep/01:59). TY2017 (9,325) and TY2025 (11,925 / 48,475) have edges at bin **midpoints**
+  (≡ 25 mod 50), which are harmless (IRS taxes at the midpoint; TCW continuous). Correct the spec wording to
+  "every edge < $100k ≡ 0 (mod $25)". The **plan already implements the corrected assertion** (P0 task 4).
+- **spec-s48-l36** — SPEC §5 stage 9 carries "− L36 applied-to-2025" but §4.8 `Payments` has no L36 input. v1
+  pins L36 = 0/blank (plan P4 task 6); add the input in a follow-on or note L36-always-0 in §4.8.
+
 ## From earlier reviews (folded, recorded for traceability)
 
 - (r1–r3 findings were all folded into the spec; see `reviews/SPEC-fable-review-r{1,2,3}.md`.)
