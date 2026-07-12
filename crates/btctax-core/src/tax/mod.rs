@@ -2,9 +2,14 @@
 //! NFR4 determinism). No float anywhere — all rates are `Decimal` literals.
 //! Tables and compute modules are added in Tasks 2–5.
 pub mod compute;
+pub mod method;
 pub mod se;
 pub mod tables;
 pub mod types;
+
+pub use method::{
+    assert_edges_binnable, first_unbinnable_edge, qdcgt_line16, regular_tax, TAX_TABLE_CEILING,
+};
 
 pub use compute::{
     carryforward_consistency, compute_tax_year, net_1222, ordinary_tax_on, preferential_tax,
