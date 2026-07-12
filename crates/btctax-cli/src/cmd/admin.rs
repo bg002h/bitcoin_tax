@@ -87,7 +87,13 @@ pub fn export_snapshot(
     let se_result = match tax_year {
         Some(y) => {
             let tables = BundledTaxTables::load();
-            session.tax_profile(y)?.and_then(|p| {
+            // Resolve (ReturnInputs-derived → stored → …); an uncomputable/refused profile just omits the
+            // SE figure — the export (a data snapshot) still proceeds, never emitting a wrong number.
+            let profile = match session.resolve_screened(&state, y, &tables)? {
+                crate::resolve::ProfileOutcome::Ready { profile, .. } => profile,
+                crate::resolve::ProfileOutcome::Uncomputable { .. } => None,
+            };
+            profile.and_then(|p| {
                 tables.table_for(y).and_then(|t| {
                     compute_se_tax(
                         &state,
@@ -243,7 +249,11 @@ pub fn export_irs_pdf(
     // ── Schedule SE (self-employment tax). Compute the §1401 figure from the year's TaxProfile. ──
     let se_computed = {
         let tables = BundledTaxTables::load();
-        session.tax_profile(tax_year)?.and_then(|p| {
+        let profile = match session.resolve_screened(&state, tax_year, &tables)? {
+            crate::resolve::ProfileOutcome::Ready { profile, .. } => profile,
+            crate::resolve::ProfileOutcome::Uncomputable { .. } => None, // export proceeds; SE omitted
+        };
+        profile.and_then(|p| {
             tables.table_for(tax_year).and_then(|t| {
                 compute_se_tax(
                     &state,

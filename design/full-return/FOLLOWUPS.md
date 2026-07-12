@@ -12,17 +12,15 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   (`derive_tax_profile`, the frozen-seam profile the delta engine consumes) + the reusable crypto-figure
   helpers (`crypto_income`, `capital_gain_line7`) the absolute assembly will reuse. YAGNI + no-stub
   justification; the cross-foot invariant is `L11 = L9 − L10` by construction and gets its KAT in P4.
-- **p2-consumer-sweep-remaining** (was `p1-consumer-sweep-P2`; PARTIAL) — `report_tax_year` is fully wired
-  (resolve_profile → derive + input-screen + compute-dependent screen, fail-closed) and prints nothing yet
-  re: provenance. STILL reading the raw stored profile via `s.tax_profile(year)` (bypassing the resolver):
-  **optimize** (`cmd/optimize.rs:43,110,178`), **what-if fallback** (`cmd/whatif.rs:81,139` — the ad-hoc-arg
-  path is intentionally NOT swept), **TUI optimize_proposal** (`session.rs:548`), **admin/export**
-  (`cmd/admin.rs:90,246`), and the **prior-year** M4 advisory (`cmd/tax.rs:256`). Route each through a shared
-  `Session::resolve_profile_for(year)` helper (loads bundled tables → resolve_profile) + run the
-  compute-dependent screen where `state` is available + PRINT provenance (§4.12). NOTE: the D-4 guard means a
-  ReturnInputs year normally has NO stored profile, so today those consumers get `None` (a capability gap, not
-  a wrong number) — the two-liabilities divergence only occurs after a `--force`d raw profile. Do before P2 is
-  declared green.
+- **p2-consumer-sweep-remaining** (was `p1-consumer-sweep-P2`; RESOLVED in P2 — routing) — every computing
+  consumer now goes through the shared, fail-closed `Session::resolve_screened{,_profile}` (→
+  `resolve_and_screen`: resolve_profile + input-screen + compute-dependent screen): **report**, **optimize**
+  (run/consult/accept), **what-if** sell+harvest fallback (the ad-hoc-arg path stays ad-hoc), **TUI**
+  `optimize_proposal`, and **admin/export** + the **prior-year** M4 advisory (both map an uncomputable
+  outcome to "skip", never failing a data export / non-gating advisory). All existing consumer tests pass
+  unchanged (behavior-identical for non-pseudo, non-ReturnInputs years). **Still open (Minor, → P2 provenance
+  step):** `resolve_screened` exposes `Provenance`, but the consumers don't yet PRINT it (§4.12 "printed on
+  every output"). Non-fail-open; add a provenance line to report/optimize/what-if render before P2 green.
 
 ## From Fable spec review r4 (5 Minors — spec is GREEN 0C/0I with these open)
 
@@ -84,24 +82,19 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 - **p1-carryover-writeback-P3P4** (SCHEDULED → P3/P4) — charitable + capital-loss carryovers are read from
   `ReturnInputs` but not yet written back (next-year carryforward_out). The write-back lands with the
   Schedule A / Schedule D compute stages in P3/P4; P1 only stores the declared inputs.
-- **p1-se-earners-and-business-interest-rows** (SCHEDULED → P2, MANDATORY) — plan P1 task 4
-  (`IMPLEMENTATION_PLAN_full_return.md`) listed the **≥2-SE-earners** and **business-flagged crypto
-  interest** refuse rows (both normative SPEC §4.10) among the P1 input-screenable set. The impl defensibly
-  reclassified both as **ledger-dependent** (they need the assembled income / ledger, not just
-  `ReturnInputs`) and moved them to P2/P3 — but this was documented only in the `return_refuse.rs` module
-  doc. P2 (income assembly) MUST implement both refuse rows, or a two-SE-earner household / business-flagged
-  crypto interest silently computes a wrong return. Same class as `p1-consumer-sweep-P2` (hard P2 task, not
-  opportunistic). Closes r1-I6.5 (review R2-I3).
+- **p1-se-earners-and-business-interest-rows** (RESOLVED in P2) — **business-flagged crypto Interest** now
+  refuses in `screen_compute_dependent` (`RefuseReason::BusinessInterestIncome`, wired into `report_tax_year`
+  + the consumer sweep). **≥2-SE-earners** is *structurally impossible* to input in v1: `ReturnInputs` has a
+  single `schedule_c: Option<ScheduleCInputs>`, and the ledger's business income isn't per-earner-tagged, so
+  there is no representation of a second SE earner to refuse — the row is moot, not skipped. (If a future
+  multi-Schedule-C model lands, re-add the ≥2 refuse then.) Closes r1-I6.5 / R2-I3.
 - **p1-task4-row-reclassification** (DEFERRED → task-4 follow-on) — reclassifying an imported inbound *ledger*
   row (e.g. income ↔ self-transfer) from inside the full-return flow is out of P1; the existing reconcile
   reclassification commands remain the path. Distinct from the refuse-row reclassification above. Revisit
   when task-4 row editing is specced.
-- **p1-r3-m1-negscreen-exhaustive-destructure** (SCHEDULED → P2, EARLY — before any new `Usd` field) — the
-  `first_negative_amount` field list in `return_refuse.rs` is hand-maintained (r3 audited it exhaustive at
-  HEAD: all 51 money paths covered). A P2-added `Usd` field would silently bypass the negative screen — a
-  fail-open regression of the R2-I1 fix. Convert each struct match to **exhaustive destructuring (no `..`)**
-  so the compiler forces every new field to be classified. Do this as the FIRST P2 change to the module,
-  ahead of any field additions (review R3-M1, non-blocking).
+- **p1-r3-m1-negscreen-exhaustive-destructure** (RESOLVED in P2) — `first_negative_amount` now destructures
+  `ReturnInputs` + every money-bearing sub-struct with **no `..`**, so a newly-added `Usd` field is a compile
+  error until classified (money → checked, non-money → `_`). The hand-maintained-list fail-open risk is gone.
 - **p1-ssn-normalization-P6** (SCHEDULED → P6) — `income import` stores the SSN AS ENTERED; only *masking*
   (the security-load-bearing half) ships in P1. Canonicalization to `NNN-NN-NNNN` (or digits-only) is
   deferred to P6, where the PDF filler needs a single on-form format. Person's doc no longer claims

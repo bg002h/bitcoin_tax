@@ -10,7 +10,9 @@
 //! an input-screenable refusal — or a year without full-return tables (v1 = TY2024) — yields
 //! `profile: None` rather than a wrong number, carrying the [`Refusal`] so the caller can surface it.
 use crate::{return_inputs, tax_profile, CliError};
+use btctax_core::state::LedgerState;
 use btctax_core::tax::derive_tax_profile;
+use btctax_core::tax::return_1040::screen_compute_dependent;
 use btctax_core::tax::return_refuse::{screen_inputs, Refusal};
 use btctax_core::tax::tables::FullReturnParams;
 use btctax_core::{Carryforward, FilingStatus, TaxProfile, TaxTable, Usd};
@@ -122,6 +124,82 @@ pub fn resolve_profile(
         provenance: Provenance::Missing,
         refusal: None,
     })
+}
+
+/// A human-readable label for `provenance`, printed on every computing output so a reviewer can audit
+/// which source produced the tax figure (SPEC §4.12 / G4).
+pub fn provenance_label(provenance: Provenance) -> &'static str {
+    match provenance {
+        Provenance::ReturnInputs => "full-return inputs (derived)",
+        Provenance::StoredProfile => "stored tax-profile",
+        Provenance::PseudoPlaceholder => "pseudo-reconcile placeholder ($0)",
+        Provenance::Missing => "none",
+    }
+}
+
+/// The result of resolving AND screening a year's profile for a COMPUTING consumer (report / optimize /
+/// what-if / export). Unlike [`resolve_profile`] (which screens only the input-screenable rows), this also
+/// runs the **compute-dependent** refuse-guard ([`screen_compute_dependent`]) that needs the ledger `state`.
+pub enum ProfileOutcome {
+    /// Ready to compute with. `profile` is `None` only for a genuinely profile-less year (missing).
+    Ready {
+        profile: Option<TaxProfile>,
+        provenance: Provenance,
+    },
+    /// The year's full-return inputs cannot be computed — refused by a guard, or the year is unsupported.
+    /// The caller MUST surface `detail` and NOT compute (fail-closed). `detail` is user-facing.
+    Uncomputable { detail: String },
+}
+
+/// Resolve `year`'s profile through the single resolver AND apply BOTH refuse-guards (input-screenable +
+/// compute-dependent) fail-closed — the one entry point every computing consumer should use so the app
+/// never shows two different liabilities, or a wrong number, for one year (SPEC §4.12 / §4.10 / G4).
+pub fn resolve_and_screen(
+    conn: &Connection,
+    state: &LedgerState,
+    year: i32,
+    pseudo_reconcile: bool,
+    full_return: Option<&FullReturnParams>,
+    tax_table: Option<&TaxTable>,
+) -> Result<ProfileOutcome, CliError> {
+    let resolved = resolve_profile(conn, year, pseudo_reconcile, full_return, tax_table)?;
+    // Input-screenable refusal / unsupported year (resolve_profile already screened those).
+    if resolved.is_return_inputs_uncomputable() {
+        return Ok(ProfileOutcome::Uncomputable {
+            detail: uncomputable_detail(year, resolved.refusal.as_ref()),
+        });
+    }
+    // Compute-dependent refuse rows (need `state`) — only a ReturnInputs-derived profile can trip them.
+    if resolved.provenance == Provenance::ReturnInputs {
+        if let (Some(ri), Some(params)) = (return_inputs::get(conn, year)?, full_return) {
+            if let Some(refusal) = screen_compute_dependent(&ri, state, year, params) {
+                return Ok(ProfileOutcome::Uncomputable {
+                    detail: uncomputable_detail(year, Some(&refusal)),
+                });
+            }
+        }
+    }
+    Ok(ProfileOutcome::Ready {
+        profile: resolved.profile,
+        provenance: resolved.provenance,
+    })
+}
+
+/// The user-facing message for a `ReturnInputs` year that cannot be computed — a refusal (with its reason)
+/// or an unsupported year — both pointing at the `income clear` recovery.
+fn uncomputable_detail(year: i32, refusal: Option<&Refusal>) -> String {
+    match refusal {
+        Some(r) => format!(
+            "tax year {year} cannot be computed from its full-return inputs: {}; run \
+             `income clear --year {year}` to remove them and use a raw `tax-profile`",
+            r.detail
+        ),
+        None => format!(
+            "tax year {year} has full-return inputs, but full-return computation is not supported for \
+             {year} in this version (v1 supports TY2024); run `income clear --year {year}` to remove \
+             them and use a raw `tax-profile`"
+        ),
+    }
 }
 
 #[cfg(test)]

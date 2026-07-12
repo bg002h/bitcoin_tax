@@ -7,10 +7,11 @@ use crate::donation_details;
 use crate::optimize_attest;
 use crate::tax_profile;
 use crate::CliError;
-use btctax_adapters::BundledTaxTables;
+use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
 use btctax_core::conventions::{round_cents, tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{init_schema, load_all};
-use btctax_core::{project, LedgerEvent, LedgerState, PriceProvider, ProjectionConfig};
+use btctax_core::tax::tables::FullReturnTables;
+use btctax_core::{project, LedgerEvent, LedgerState, PriceProvider, ProjectionConfig, TaxTables};
 use btctax_core::{
     AllocLot, BlockerKind, DonationDetails, EventId, EventPayload, LotMethod, PendingTransfer, Sat,
     TaxDate, TaxProfile, Usd, WalletId,
@@ -444,6 +445,42 @@ impl Session {
         tax_profile::get(self.conn(), year)
     }
 
+    /// Resolve + FULLY screen `year`'s profile through the single resolver (SPEC §4.12 / §4.10 / G4) — the
+    /// shared entry point every computing consumer (report / optimize / what-if / export) should use so
+    /// the app never shows two liabilities, or a wrong number, for one year. `state`/`tables` come from
+    /// the caller's projection (`tables` is injectable so `accept` can pass a test table for a later year).
+    pub fn resolve_screened(
+        &self,
+        state: &LedgerState,
+        year: i32,
+        tables: &dyn TaxTables,
+    ) -> Result<crate::resolve::ProfileOutcome, CliError> {
+        let pseudo = self.config()?.to_projection().pseudo_reconcile;
+        let fr = BundledFullReturnTables::load();
+        crate::resolve::resolve_and_screen(
+            self.conn(),
+            state,
+            year,
+            pseudo,
+            fr.full_return_for(year),
+            tables.table_for(year),
+        )
+    }
+
+    /// [`resolve_screened`] flattened to just the profile: an uncomputable outcome becomes a `Usage` error.
+    /// The drop-in replacement for `tax_profile(year)?` at a computing consumer that needs one figure.
+    pub fn resolve_screened_profile(
+        &self,
+        state: &LedgerState,
+        year: i32,
+        tables: &dyn TaxTables,
+    ) -> Result<Option<TaxProfile>, CliError> {
+        match self.resolve_screened(state, year, tables)? {
+            crate::resolve::ProfileOutcome::Uncomputable { detail } => Err(CliError::Usage(detail)),
+            crate::resolve::ProfileOutcome::Ready { profile, .. } => Ok(profile),
+        }
+    }
+
     /// All stored `TaxProfile`s, sorted by year ascending.
     pub fn all_tax_profiles(
         &self,
@@ -544,10 +581,10 @@ impl Session {
         year: i32,
         now: time::OffsetDateTime,
     ) -> Result<btctax_core::OptimizeProposal, CliError> {
-        let (events, _state, cfg) = self.load_events_and_project()?;
-        let profile = self.tax_profile(year)?;
+        let (events, state, cfg) = self.load_events_and_project()?;
         let prices = self.prices();
         let tables = BundledTaxTables::load();
+        let profile = self.resolve_screened_profile(&state, year, &tables)?;
         let attested = self.optimize_attested_set()?;
         let proposal_made = tax_date(now, time::UtcOffset::UTC);
         btctax_core::optimize_year(

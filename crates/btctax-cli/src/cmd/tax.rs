@@ -158,53 +158,24 @@ pub fn report_tax_year(
     // proceed with zero setup. This clears `TaxProfileMissing` ONLY — it is injected AFTER the projection,
     // so it never touches `state.blockers` and thus can NEVER clear the Hard `TaxYearNotComputable` gate
     // (compute.rs checks Hard blockers BEFORE the profile branch). A real stored profile always wins.
-    // Single profile-source resolver (SPEC §4.12 / G4): ReturnInputs (derived) → stored TaxProfile → pseudo
-    // → missing. Full-return derivation is gated fail-closed by the refuse-guard inside `resolve_profile`.
+    // Single resolver + BOTH refuse-guards, fail-closed (SPEC §4.12 / §4.10 / G4): ReturnInputs (derived,
+    // input- AND compute-screened) → stored TaxProfile → pseudo → missing. `resolve_and_screen` is the one
+    // entry point every computing consumer shares so the app never shows two liabilities for one year.
     let tables = BundledTaxTables::load();
     let fr_tables = BundledFullReturnTables::load();
-    let resolved = crate::resolve::resolve_profile(
+    let profile = match crate::resolve::resolve_and_screen(
         s.conn(),
+        &state,
         year,
         cfg.pseudo_reconcile,
         fr_tables.full_return_for(year),
         tables.table_for(year),
-    )?;
-    if resolved.is_return_inputs_uncomputable() {
-        // Full-return `ReturnInputs` exist but could not be derived — surface WHY; never silently treat the
-        // year as profile-less (a wrong number). A refusal carries its reason; otherwise the year is one v1
-        // has no full-return tables for (TY2024 only).
-        return Err(CliError::Usage(match resolved.refusal {
-            Some(r) => format!(
-                "tax year {year} cannot be computed from its full-return inputs: {}; run \
-                 `income clear --year {year}` to remove them and use a raw `tax-profile`",
-                r.detail
-            ),
-            None => format!(
-                "tax year {year} has full-return inputs, but full-return computation is not supported for \
-                 {year} in this version (v1 supports TY2024); run `income clear --year {year}` to remove \
-                 them and use a raw `tax-profile`"
-            ),
-        }));
-    }
-    // Compute-dependent refuse rows (SPEC §4.10) need the projected ledger, so they screen HERE (not in
-    // `resolve_profile`, which has no `state`). Only a ReturnInputs-derived profile can trip them; a raw
-    // stored / pseudo profile has no `ReturnInputs` to screen. Fail closed — never a wrong number.
-    if resolved.provenance == crate::resolve::Provenance::ReturnInputs {
-        if let (Some(ri), Some(params)) =
-            (return_inputs::get(s.conn(), year)?, fr_tables.full_return_for(year))
-        {
-            if let Some(refusal) =
-                btctax_core::tax::return_1040::screen_compute_dependent(&ri, &state, year, params)
-            {
-                return Err(CliError::Usage(format!(
-                    "tax year {year} cannot be computed from its full-return inputs: {}; run \
-                     `income clear --year {year}` to remove them and use a raw `tax-profile`",
-                    refusal.detail
-                )));
-            }
+    )? {
+        crate::resolve::ProfileOutcome::Uncomputable { detail } => {
+            return Err(CliError::Usage(detail))
         }
-    }
-    let profile = resolved.profile;
+        crate::resolve::ProfileOutcome::Ready { profile, .. } => profile,
+    };
     let outcome = compute_tax_year(&events, &state, year, profile.as_ref(), &tables);
     // P2-B: the RAW pre-netting Schedule D part totals for the same year, from the same projection.
     let sched_d = schedule_d(&state, year);
@@ -253,7 +224,12 @@ pub fn report_tax_year(
     // M4 carryforward consistency advisory (Task 10): only when both this year's profile AND
     // the prior year's profile exist AND the prior year is Computed.  Never a hard blocker.
     let advisory: Option<String> = if let Some(p) = &profile {
-        let prior_profile = s.tax_profile(year - 1)?;
+        // Prior-year profile through the same resolver (ReturnInputs-derived too); the M4 advisory is
+        // non-gating, so an uncomputable/refused prior year just skips it rather than failing the report.
+        let prior_profile = match s.resolve_screened(&state, year - 1, &tables)? {
+            crate::resolve::ProfileOutcome::Ready { profile, .. } => profile,
+            crate::resolve::ProfileOutcome::Uncomputable { .. } => None,
+        };
         if let Some(prev_p) = prior_profile {
             let prior_out = compute_tax_year(&events, &state, year - 1, Some(&prev_p), &tables);
             if let TaxOutcome::Computed(prev) = prior_out {
