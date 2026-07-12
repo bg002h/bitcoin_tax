@@ -28,6 +28,17 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   open (the number is already correct + fail-closed); this is an audit-trail nicety. Print it as part of the
   P4 report render.
 
+## From Fable IMPL-P2 code review r2 (N1/N2/N3 FOLDED into P2 r3; deferred item here)
+
+- **p2-r2-n4-pseudo-year-viewer-gap** (SCHEDULED → P4, with provenance rendering; PRE-EXISTING, non-fail-open)
+  — in pseudo-reconcile mode the CLI `report` computes a $0 placeholder for ANY year, but the viewer's
+  `resolve_all_screened` enumerates only stored∪ReturnInputs years, so the Tax tab shows `TaxProfileMissing`
+  for a pseudo-only year the CLI computes. Pre-dates P2 (the pre-fold snapshot had the same gap) and no two
+  NUMBERS diverge (the what-if panel's own single/$0 placeholder matches the pseudo placeholder) — it is a
+  number-vs-refusal divergence between two consumers of the one resolver. Fold with the P4 provenance-render
+  work (which owns making every consumer's output audit-consistent), e.g. resolve the selected year on demand
+  in the viewer or extend the enumerated set under pseudo mode.
+
 ## From Fable IMPL-P2 code review r1 (C1/C2/I1 + M2/M3/M4 FOLDED into P2 r2; deferred items here)
 
 - **p2-pref-over-ti-clamp** (SCHEDULED → P3, with the full deduction stack) — `derive_tax_profile`'s

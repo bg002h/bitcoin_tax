@@ -692,12 +692,13 @@ impl EditorApp {
     }
 }
 
-/// Open the tax-profile form for `selected_year`, pre-populated from the snapshot.
+/// Open the tax-profile form for `selected_year`, pre-populated from the RAW STORED profile.
 ///
-/// Pre-population (the `--show` equivalent): if `snapshot.profiles.get(&year)` is
-/// `Some(p)`, every buffer is filled with the field's `Display` string and
-/// `filing_status` is set from `p`.  Otherwise: `filing_status = Single`, all
-/// buffers empty (required fields must be typed; optional empties → $0 at validation).
+/// Pre-population (the `tax-profile --show` equivalent): read the STORED `TaxProfile` via the live
+/// `Session` (`session.tax_profile(year)`) — NOT `snapshot.profiles`, which post-C1 holds the RESOLVED map
+/// (a ReturnInputs year would show machine-DERIVED values, and saving them would clobber the raw escape
+/// hatch — review N1). If a stored profile exists, fill every buffer from its `Display`; else
+/// `filing_status = Single`, all buffers empty.
 fn open_profile_form(app: &mut EditorApp) {
     if let Some(s) = app.residue_latch_status() {
         app.status = Some(s);
@@ -709,23 +710,27 @@ fn open_profile_form(app: &mut EditorApp) {
     let year = app.selected_year;
     let mut form = ProfileFormState::new(year);
 
-    if let Some(snap) = app.snapshot.as_ref() {
-        if let Some(profile) = snap.profiles.get(&year) {
-            form.filing_status = profile.filing_status;
-            form.fields[0].set(&profile.ordinary_taxable_income.to_string());
-            form.fields[1].set(&profile.magi_excluding_crypto.to_string());
-            form.fields[2].set(
-                &profile
-                    .qualified_dividends_and_other_pref_income
-                    .to_string(),
-            );
-            form.fields[3].set(&profile.other_net_capital_gain.to_string());
-            form.fields[4].set(&profile.capital_loss_carryforward_in.short.to_string());
-            form.fields[5].set(&profile.capital_loss_carryforward_in.long.to_string());
-            form.fields[6].set(&profile.w2_ss_wages.to_string());
-            form.fields[7].set(&profile.w2_medicare_wages.to_string());
-            form.fields[8].set(&profile.schedule_c_expenses.to_string());
-        }
+    // The RAW stored profile (the escape hatch this form edits), read straight from the vault — never the
+    // resolved/derived `snapshot.profiles` map.
+    let stored = app
+        .session
+        .as_ref()
+        .and_then(|s| s.tax_profile(year).ok().flatten());
+    if let Some(profile) = stored {
+        form.filing_status = profile.filing_status;
+        form.fields[0].set(&profile.ordinary_taxable_income.to_string());
+        form.fields[1].set(&profile.magi_excluding_crypto.to_string());
+        form.fields[2].set(
+            &profile
+                .qualified_dividends_and_other_pref_income
+                .to_string(),
+        );
+        form.fields[3].set(&profile.other_net_capital_gain.to_string());
+        form.fields[4].set(&profile.capital_loss_carryforward_in.short.to_string());
+        form.fields[5].set(&profile.capital_loss_carryforward_in.long.to_string());
+        form.fields[6].set(&profile.w2_ss_wages.to_string());
+        form.fields[7].set(&profile.w2_medicare_wages.to_string());
+        form.fields[8].set(&profile.schedule_c_expenses.to_string());
     }
 
     app.profile_form = Some(form);
@@ -9901,12 +9906,9 @@ mod tests {
 
     #[test]
     fn kat_f1_p_opens_form_prepopulated_from_existing_profile() {
-        use btctax_adapters::BundledTaxTables;
-        use btctax_cli::CliConfig;
         use btctax_core::{Carryforward, FilingStatus, TaxProfile};
-        use btctax_tui::app::Snapshot;
+        use btctax_store::Passphrase;
         use rust_decimal_macros::dec;
-        use std::collections::BTreeMap;
 
         let profile = TaxProfile {
             filing_status: FilingStatus::Mfj,
@@ -9923,27 +9925,29 @@ mod tests {
             schedule_c_expenses: dec!(3000),
         };
 
-        let mut profiles = BTreeMap::new();
-        profiles.insert(2025, profile.clone());
+        // [N1] The form pre-populates from the STORED profile (via the live Session), so store it in a real
+        // vault — snapshot.profiles is the RESOLVED map and is deliberately no longer the edit-form source.
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-f1-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+        btctax_cli::cmd::tax::set_profile(
+            &vault,
+            &Passphrase::new(pp_str.into()),
+            2025,
+            profile,
+            false,
+        )
+        .unwrap();
 
-        let snap = Snapshot {
-            events: vec![],
-            state: btctax_core::state::LedgerState::default(),
-            cli_config: CliConfig::default(),
-            profiles,
-            refused: std::collections::BTreeMap::new(),
-            tables: BundledTaxTables::load(),
-            donation_details: BTreeMap::new(),
-            bulk_estimated: BTreeMap::new(),
-            prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
-        };
-
-        let mut app = EditorApp::new(PathBuf::new());
-        app.screen = EditorScreen::Browse;
-        app.snapshot = Some(snap);
+        // Unlock the editor (populates app.session + app.snapshot), select 2025, press 'p'.
+        let mut app = EditorApp::new(vault.clone());
+        for c in pp_str.chars() {
+            app.unlock.push_char(c);
+        }
+        app.do_unlock();
         app.selected_year = 2025;
-
-        // Press 'p' to open the form
         handle_key(&mut app, press(KeyCode::Char('p')));
 
         let form = app

@@ -72,6 +72,15 @@ pub fn delete(conn: &Connection, year: i32) -> Result<bool, CliError> {
     Ok(n > 0)
 }
 
+/// The years that have stored inputs, ascending — WITHOUT deserializing any blob, so a single corrupt
+/// row cannot break enumeration (review N3: one bad blob must not brick the read-only viewer).
+pub fn years(conn: &Connection) -> Result<Vec<i32>, CliError> {
+    init_table(conn)?;
+    let mut stmt = conn.prepare("SELECT year FROM return_inputs ORDER BY year")?;
+    let rows = stmt.query_map([], |r| r.get::<_, i32>(0))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 /// Return all stored inputs, sorted by year ascending.
 pub fn all(conn: &Connection) -> Result<BTreeMap<i32, ReturnInputs>, CliError> {
     init_table(conn)?;

@@ -491,11 +491,30 @@ impl Session {
         state: &LedgerState,
         tables: &dyn TaxTables,
     ) -> Result<BTreeMap<i32, crate::resolve::ProfileOutcome>, CliError> {
-        let mut years: BTreeSet<i32> = tax_profile::all(self.conn())?.into_keys().collect();
-        years.extend(return_inputs::all(self.conn())?.into_keys());
+        // Enumerate keys WITHOUT deserializing every blob (N3: one corrupt row must not break enumeration),
+        // and hoist the config/full-return-table loads OUT of the per-year loop.
+        let pseudo = self.config()?.to_projection().pseudo_reconcile;
+        let fr = BundledFullReturnTables::load();
+        let mut years: BTreeSet<i32> = tax_profile::years(self.conn())?.into_iter().collect();
+        years.extend(return_inputs::years(self.conn())?);
         let mut out = BTreeMap::new();
         for year in years {
-            out.insert(year, self.resolve_screened(state, year, tables)?);
+            // A corrupt side-table blob for ONE year must surface as a per-year refusal, NOT a failure that
+            // bricks the whole read-only viewer (fail-closed availability — review N3).
+            let outcome = match crate::resolve::resolve_and_screen(
+                self.conn(),
+                state,
+                year,
+                pseudo,
+                fr.full_return_for(year),
+                tables.table_for(year),
+            ) {
+                Ok(o) => o,
+                Err(e) => crate::resolve::ProfileOutcome::Uncomputable {
+                    detail: format!("could not read the stored inputs for {year}: {e}"),
+                },
+            };
+            out.insert(year, outcome);
         }
         Ok(out)
     }

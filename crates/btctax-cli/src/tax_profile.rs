@@ -61,6 +61,14 @@ pub fn set(conn: &Connection, year: i32, p: &TaxProfile) -> Result<(), CliError>
     Ok(())
 }
 
+/// The years that have a stored profile, ascending — WITHOUT deserializing any blob (review N3).
+pub fn years(conn: &Connection) -> Result<Vec<i32>, CliError> {
+    init_table(conn)?;
+    let mut stmt = conn.prepare("SELECT year FROM tax_profile ORDER BY year")?;
+    let rows = stmt.query_map([], |r| r.get::<_, i32>(0))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 /// Return all stored profiles, sorted by year ascending.
 pub fn all(conn: &Connection) -> Result<BTreeMap<i32, TaxProfile>, CliError> {
     init_table(conn)?;

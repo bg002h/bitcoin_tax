@@ -13,6 +13,7 @@ use crate::{return_inputs, tax_profile, CliError};
 use btctax_core::state::LedgerState;
 use btctax_core::tax::derive_tax_profile;
 use btctax_core::tax::return_1040::screen_compute_dependent;
+use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::tax::return_refuse::{screen_inputs, Refusal};
 use btctax_core::tax::tables::FullReturnParams;
 use btctax_core::{Carryforward, FilingStatus, TaxProfile, TaxTable, Usd};
@@ -68,9 +69,77 @@ pub fn placeholder_tax_profile() -> TaxProfile {
     }
 }
 
-/// Resolve the tax profile for `year` in SPEC §4.12 precedence order. `pseudo_reconcile` is the config
-/// flag; `full_return` / `tax_table` are the year's tables (both `None` for a year v1 doesn't support,
-/// which fails the `ReturnInputs` arm closed). The single entry point for every consumer.
+/// The SINGLE SPEC §4.12 precedence ladder — `ReturnInputs` (input-screened + derived) → stored
+/// `TaxProfile` → pseudo placeholder → missing. Returns the [`Resolved`] **and the fetched
+/// `ReturnInputs`** so [`resolve_and_screen`] can run the compute-dependent screen on the SAME bytes (one
+/// fetch — M3) WITHOUT a second copy of the ladder: both public entry points share this, so the
+/// precedence invariant lives in exactly one place and its KAT pins the live code (review N2). Not public.
+fn resolve_core(
+    conn: &Connection,
+    year: i32,
+    pseudo_reconcile: bool,
+    full_return: Option<&FullReturnParams>,
+    tax_table: Option<&TaxTable>,
+) -> Result<(Resolved, Option<ReturnInputs>), CliError> {
+    // 1. Full return (highest precedence): derive the frozen profile, gated fail-closed by the guard.
+    if let Some(ri) = return_inputs::get(conn, year)? {
+        // A year without full-return tables (v1 = TY2024) cannot be derived — fail closed, no refusal.
+        let (Some(params), Some(table)) = (full_return, tax_table) else {
+            let r = Resolved {
+                profile: None,
+                provenance: Provenance::ReturnInputs,
+                refusal: None,
+            };
+            return Ok((r, Some(ri)));
+        };
+        // Fail-closed: an input-screenable refusal blocks derivation (never a silently-wrong number).
+        if let Some(refusal) = screen_inputs(&ri, table, params) {
+            let r = Resolved {
+                profile: None,
+                provenance: Provenance::ReturnInputs,
+                refusal: Some(refusal),
+            };
+            return Ok((r, Some(ri)));
+        }
+        let r = Resolved {
+            profile: Some(derive_tax_profile(&ri, params)),
+            provenance: Provenance::ReturnInputs,
+            refusal: None,
+        };
+        return Ok((r, Some(ri)));
+    }
+    // 2. Raw hand-entered profile (the escape hatch).
+    if let Some(p) = tax_profile::get(conn, year)? {
+        let r = Resolved {
+            profile: Some(p),
+            provenance: Provenance::StoredProfile,
+            refusal: None,
+        };
+        return Ok((r, None));
+    }
+    // 3. Pseudo-reconcile placeholder (mode on).
+    if pseudo_reconcile {
+        let r = Resolved {
+            profile: Some(placeholder_tax_profile()),
+            provenance: Provenance::PseudoPlaceholder,
+            refusal: None,
+        };
+        return Ok((r, None));
+    }
+    // 4. Nothing.
+    let r = Resolved {
+        profile: None,
+        provenance: Provenance::Missing,
+        refusal: None,
+    };
+    Ok((r, None))
+}
+
+/// Resolve the tax profile for `year` in SPEC §4.12 precedence order (ReturnInputs → stored → pseudo →
+/// missing), screening only the input-screenable refuse rows. A COMPUTING consumer that has the ledger
+/// `state` should use [`resolve_and_screen`] instead — it shares this exact ladder (`resolve_core`) and
+/// additionally runs the compute-dependent refuse-guard. `full_return`/`tax_table` are `None` for a year
+/// v1 doesn't support (fails the ReturnInputs arm closed).
 pub fn resolve_profile(
     conn: &Connection,
     year: i32,
@@ -78,52 +147,7 @@ pub fn resolve_profile(
     full_return: Option<&FullReturnParams>,
     tax_table: Option<&TaxTable>,
 ) -> Result<Resolved, CliError> {
-    // 1. Full return (highest precedence): derive the frozen profile, gated fail-closed by the guard.
-    if let Some(ri) = return_inputs::get(conn, year)? {
-        // A year without full-return tables (v1 = TY2024) cannot be derived — fail closed, no refusal.
-        let (Some(params), Some(table)) = (full_return, tax_table) else {
-            return Ok(Resolved {
-                profile: None,
-                provenance: Provenance::ReturnInputs,
-                refusal: None,
-            });
-        };
-        // Fail-closed: an input-screenable refusal blocks derivation (never a silently-wrong number).
-        if let Some(refusal) = screen_inputs(&ri, table, params) {
-            return Ok(Resolved {
-                profile: None,
-                provenance: Provenance::ReturnInputs,
-                refusal: Some(refusal),
-            });
-        }
-        return Ok(Resolved {
-            profile: Some(derive_tax_profile(&ri, params)),
-            provenance: Provenance::ReturnInputs,
-            refusal: None,
-        });
-    }
-    // 2. Raw hand-entered profile (the escape hatch).
-    if let Some(p) = tax_profile::get(conn, year)? {
-        return Ok(Resolved {
-            profile: Some(p),
-            provenance: Provenance::StoredProfile,
-            refusal: None,
-        });
-    }
-    // 3. Pseudo-reconcile placeholder (mode on).
-    if pseudo_reconcile {
-        return Ok(Resolved {
-            profile: Some(placeholder_tax_profile()),
-            provenance: Provenance::PseudoPlaceholder,
-            refusal: None,
-        });
-    }
-    // 4. Nothing.
-    Ok(Resolved {
-        profile: None,
-        provenance: Provenance::Missing,
-        refusal: None,
-    })
+    Ok(resolve_core(conn, year, pseudo_reconcile, full_return, tax_table)?.0)
 }
 
 /// The result of resolving AND screening a year's profile for a COMPUTING consumer (report / optimize /
@@ -151,33 +175,26 @@ pub fn resolve_and_screen(
     full_return: Option<&FullReturnParams>,
     tax_table: Option<&TaxTable>,
 ) -> Result<ProfileOutcome, CliError> {
-    // ReturnInputs (highest precedence): fetch ONCE so the derive and BOTH refuse-guards see the same
-    // bytes (review M3 — no re-read between screening and deriving).
-    if let Some(ri) = return_inputs::get(conn, year)? {
-        // A year without full-return tables (v1 = TY2024) cannot be derived — fail closed, no refusal.
-        let (Some(params), Some(table)) = (full_return, tax_table) else {
-            return Ok(ProfileOutcome::Uncomputable {
-                detail: uncomputable_detail(year, None),
-            });
-        };
-        // Input-screenable then compute-dependent refuse rows — either ⇒ never a computed number.
-        if let Some(refusal) = screen_inputs(&ri, table, params) {
-            return Ok(ProfileOutcome::Uncomputable {
-                detail: uncomputable_detail(year, Some(&refusal)),
-            });
-        }
-        if let Some(refusal) = screen_compute_dependent(&ri, state, year, params) {
-            return Ok(ProfileOutcome::Uncomputable {
-                detail: uncomputable_detail(year, Some(&refusal)),
-            });
-        }
-        return Ok(ProfileOutcome::Ready {
-            profile: Some(derive_tax_profile(&ri, params)),
-            provenance: Provenance::ReturnInputs,
+    // ONE precedence ladder (shared with `resolve_profile`): `resolve_core` fetches the ReturnInputs once
+    // and hands them back so the compute-dependent screen runs on the SAME bytes (M3), with no second copy
+    // of the precedence logic (N2).
+    let (resolved, ri) = resolve_core(conn, year, pseudo_reconcile, full_return, tax_table)?;
+    // Input-screenable refusal / unsupported year (resolve_core already screened those).
+    if resolved.is_return_inputs_uncomputable() {
+        return Ok(ProfileOutcome::Uncomputable {
+            detail: uncomputable_detail(year, resolved.refusal.as_ref()),
         });
     }
-    // Non-ReturnInputs precedence (stored TaxProfile → pseudo placeholder → missing) via the resolver.
-    let resolved = resolve_profile(conn, year, pseudo_reconcile, full_return, tax_table)?;
+    // Compute-dependent refuse rows (need `state`) — on the SAME ReturnInputs `resolve_core` fetched.
+    if resolved.provenance == Provenance::ReturnInputs {
+        if let (Some(ri), Some(params)) = (ri.as_ref(), full_return) {
+            if let Some(refusal) = screen_compute_dependent(ri, state, year, params) {
+                return Ok(ProfileOutcome::Uncomputable {
+                    detail: uncomputable_detail(year, Some(&refusal)),
+                });
+            }
+        }
+    }
     Ok(ProfileOutcome::Ready {
         profile: resolved.profile,
         provenance: resolved.provenance,
@@ -287,6 +304,42 @@ mod tests {
         assert_eq!(p.filing_status, FilingStatus::Single);
         assert_eq!(p.magi_excluding_crypto, dec!(100000));
         assert_ne!(p, prof());
+    }
+
+    /// [N2] The SPEC §4.12 precedence invariant on the LIVE path every consumer uses (`resolve_and_screen`),
+    /// not just `resolve_profile`: with BOTH a stored profile and `ReturnInputs` for one year, the DERIVED
+    /// profile wins — the two-liabilities cardinal sin (C1) must be impossible on the production ladder.
+    #[test]
+    fn resolve_and_screen_gives_return_inputs_precedence_over_stored() {
+        let c = mem();
+        let (fr, tt) = ty2024();
+        tax_profile::set(&c, 2024, &prof()).unwrap(); // a raw MFJ/$120k stored profile
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![W2 {
+                box1_wages: dec!(100000),
+                box5_medicare_wages: dec!(100000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        return_inputs::set(&c, 2024, &ri).unwrap();
+        let state = btctax_core::LedgerState::default();
+        match resolve_and_screen(&c, &state, 2024, true, fr.full_return_for(2024), tt.table_for(2024))
+            .unwrap()
+        {
+            ProfileOutcome::Ready {
+                profile,
+                provenance,
+            } => {
+                assert_eq!(provenance, Provenance::ReturnInputs); // RI beats the stored profile
+                let p = profile.unwrap();
+                assert_eq!(p.filing_status, FilingStatus::Single); // DERIVED, not the MFJ stored one
+                assert_eq!(p.magi_excluding_crypto, dec!(100000));
+                assert_ne!(p, prof());
+            }
+            ProfileOutcome::Uncomputable { detail } => panic!("expected Ready, got: {detail}"),
+        }
     }
 
     #[test]
