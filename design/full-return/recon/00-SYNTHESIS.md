@@ -170,8 +170,24 @@ Each phase is TDD + the §2 review-to-green loop per `STANDARD_WORKFLOW.md`.
   (higher stakes than one 8949). **Fail closed** on any unmodeled in-scope line. Stay **mechanical** (UPL):
   compute what the forms dictate from user inputs; never recommend positions or pick filing status. **Leave
   the Paid Preparer/PTIN block blank** (self-prepared). "Not tax advice."
-- **License:** OpenTaxSolver + HabuTax are **GPL-2.0** → architecture lessons only; **clean-room re-derive**
-  all math from the public-domain IRS instructions. Never copy their code/comments/tables.
+- **License & borrowable assets — DECISION: stay permissive (MIT OR Unlicense); do NOT relicense.** [deep/05]
+  (a) There is **no permissively-licensed US-1040 engine or worksheet code** worth taking — OTS/HabuTax/py1040
+  are GPL-2.0, ustaxlib GPL-3.0, UsTaxes/opentax/PolicyEngine/OpenFisca AGPL-3.0; all are C/Python (a Rust
+  port is a derivative work, still copyleft, for real labor). (b) Relicensing to GPL-**2.0** is impossible
+  for us anyway — our Apache-2.0-only deps (`ring`, `rpassword`, `rtoolbox`, `borsh-derive`, `zopfli`) are
+  GPL-2.0-incompatible, so only GPL-3.0 is even available, and only if the source is "v2-or-later." (c) The
+  one genuinely useful asset is **public-domain DATA, which needs no relicensing.** Note: **dual-licensing
+  ("add GPL as an option") does NOT permit absorbing GPL code** — a combined work containing GPL code must
+  ship GPL-only. Clean-room re-derivation from public-domain IRS instructions stays the primary path; tax
+  **parameters are facts (not copyrightable)** and freely usable.
+- **Borrow (permissive / public-domain):** **PSLmodels/Tax-Calculator** `taxcalc/policy_current_law.json` is
+  **CC0 1.0 / US public domain** (GitHub mislabels it "NOASSERTION") — year-indexed, filing-status-aware
+  ordinary brackets, `STD`/`STD_Aged`, LTCG/QD breakpoints, `NIIT_thd`, `AMEDT_rt`. **Vendor a TY2024/25
+  slice (with attribution) as the independent cross-check for `tax_tables.rs` in CI** (caveat: some out-year
+  values are inflation projections; it has no $50-bin Tax-Table structure and no PDF field maps). **Observe-
+  only oracles** (run as black boxes for end-to-end diffs; never copy their code): **tenforty** (pip —
+  MIT glue but it *vendors GPL OpenTaxSolver*, so code is NOT borrowable) and **PolicyEngine-US**. No mature
+  Rust 1040 crate exists → greenfield in Rust (fine). Never copy GPL/AGPL code/comments/tables.
 
 ---
 
