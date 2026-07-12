@@ -108,9 +108,11 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 - **p1-r1-m2-excess-aptc** (NOTE — already tracked) — the impl leaves Sch 2 L1a (excess-APTC) with no input,
   consistent with `fr-8962-taxonomy` above (unrepresentable / would-refuse-if-captured). No new action; this
   cross-links the two so the P3 Schedule-2 filler doesn't treat L1a as a live zero.
-- **p1-r1-m3-dob-option-pin** (NOTE) — `Person.dob` is `Option<NaiveDate>`; the age-65/blind and kiddie-tax
-  paths must treat `None` as "not established" (fail-loud / no silent age-0), never as a birthdate. Pin this
-  contract in the P2 `derive_tax_profile` doc + a KAT when the age-dependent standard deduction lands.
+- **p1-r1-m3-dob-option-pin** (SCHEDULED → P3, with the age-dependent standard deduction) — `Person.dob` is
+  `Option<Date>`; the §63(f) age-65 std-deduction path must treat `None` as "not established" (fail-loud / no
+  silent age-0), never as a birthdate. **Not a P2 item after all:** P2's `derive_tax_profile` uses BASIC std
+  only (no DOB), and the P2 kiddie-tax refuse keys on `can_be_claimed_as_dependent` (a bool, per SPEC §4.10),
+  not DOB — so nothing in P2 reads `dob`. Pin the contract + a KAT in P3 when age-dependent std lands.
 
 ## From the whole-design Fable audit (Minors — C1/I1/I2/I3 were FOLDED into spec r5/r6; these Minors remain)
 
