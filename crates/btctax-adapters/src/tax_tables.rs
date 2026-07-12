@@ -87,8 +87,8 @@ impl TaxTables for BundledTaxTables {
 }
 
 /// Compiled-in **full-return** per-year parameters (standard deduction + the year-varying limits the
-/// absolute 1040 needs). NEW for the full-return build; separate from [`BundledTaxTables`] because a
-/// frozen file constructs `TaxTable` by struct literal (see `btctax_core::tax::tables::FullReturnParams`).
+/// absolute 1040 needs). NEW for the full-return build; separate from [`BundledTaxTables`] by design —
+/// published-crate-API stability + v1-only fail-closed gating (see `btctax_core::tax::tables::FullReturnParams`).
 /// **v1 bundles TY2024 only**; a year without params returns `None` → the caller fails closed.
 #[derive(Debug, Clone)]
 pub struct BundledFullReturnTables {
@@ -110,7 +110,7 @@ impl FullReturnTables for BundledFullReturnTables {
 }
 
 /// TY2024 full-return parameters. Standard deduction + §63(f)/§63(c)(5) amounts from **Rev. Proc.
-/// 2023-34 §3.16**; the SALT cap (§164(b)(6) TCJA), §1(g)(4) kiddie threshold, §402(g)(1) deferral
+/// 2023-34 §3.15**; the SALT cap (§164(b)(6) TCJA), §1(g)(4) kiddie threshold, §402(g)(1) deferral
 /// limit (Notice 2023-75), and §904(j) FTC ceiling are the TY2024 figures.
 fn ty2024_full_return() -> FullReturnParams {
     let mut std_deduction = BTreeMap::new();
@@ -121,9 +121,9 @@ fn ty2024_full_return() -> FullReturnParams {
     FullReturnParams {
         year: 2024,
         std_deduction,
-        std_aged_blind_married: dec!(1550),   // §63(f), Rev. Proc. 2023-34 §3.16(3)
+        std_aged_blind_married: dec!(1550),   // §63(f), Rev. Proc. 2023-34 §3.15(3)
         std_aged_blind_unmarried: dec!(1950),
-        dependent_std_floor: dec!(1300),      // §63(c)(5), Rev. Proc. 2023-34 §3.16(2)
+        dependent_std_floor: dec!(1300),      // §63(c)(5), Rev. Proc. 2023-34 §3.15(2)
         dependent_std_earned_addon: dec!(450),
         salt_cap: dec!(10000),                // §164(b)(6) (MFS = $5,000 at the use site)
         kiddie_unearned_threshold: dec!(2600),// §1(g)(4)
@@ -686,8 +686,10 @@ mod tests {
     fn all_bundled_years_are_tax_table_binnable() {
         use btctax_core::tax::method::first_unbinnable_edge;
         let t = BundledTaxTables::load();
-        for year in [2017, 2024, 2025, 2026] {
-            let tbl = t.table_for(year).unwrap();
+        // Derive the covered years from what is actually bundled (don't hardcode the list).
+        let mut checked = 0;
+        for year in 2000..=2100 {
+            let Some(tbl) = t.table_for(year) else { continue };
             for status in [
                 FilingStatus::Single,
                 FilingStatus::Mfj,
@@ -700,7 +702,9 @@ mod tests {
                     "year {year} {status:?}: a sub-$100k bracket edge is not a $25 multiple"
                 );
             }
+            checked += 1;
         }
+        assert!(checked >= 4, "expected every bundled year swept; checked {checked}");
     }
 
     /// TY2024 full-return params are bundled with the correct Rev. Proc. 2023-34 / statutory figures;
@@ -716,6 +720,7 @@ mod tests {
         assert_eq!(p.std_aged_blind_married, dec!(1550));
         assert_eq!(p.std_aged_blind_unmarried, dec!(1950));
         assert_eq!(p.dependent_std_floor, dec!(1300));
+        assert_eq!(p.dependent_std_earned_addon, dec!(450));
         assert_eq!(p.salt_cap, dec!(10000));
         assert_eq!(p.kiddie_unearned_threshold, dec!(2600));
         assert_eq!(p.elective_deferral_limit, dec!(23000));

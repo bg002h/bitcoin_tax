@@ -211,11 +211,17 @@ pub fn loss_limit(status: FilingStatus) -> Usd {
 // ── Full-return per-year parameters (INDEXED; NEW) ──────────────────────────────────────────────
 
 /// Full-return v1 per-year parameters: the standard deduction and the year-varying limits the absolute
-/// 1040 needs. **NEW for the full-return build.** Kept OUT of [`TaxTable`] on purpose: a FROZEN file
-/// (`tax/se.rs`) constructs `TaxTable` by struct literal, so adding a field there is forbidden by the
-/// frozen-engine guard (SPEC §2 additive-only). These values are INDEXED — they move year-over-year
+/// 1040 needs. **NEW for the full-return build.** These values are INDEXED — they move year-over-year
 /// (OBBBA moved the SALT cap; §1(g)/§402(g)/§63 amounts are inflation-adjusted) — so they belong in a
 /// per-year table, not as year-independent statutory constants. Bundled in `btctax-adapters` (TY2024 for v1).
+///
+/// **Kept OUT of [`TaxTable`] as a deliberate design choice** (a documented deviation from SPEC §8, which
+/// suggested `TaxTable` — see `design/full-return/FOLLOWUPS.md`): (1) `TaxTable` is a **published-crate API**
+/// (btctax-core on crates.io) read by the crypto-**delta** path, which never needs these fields; a separate
+/// table keeps that surface stable and the full-return data isolated. (2) v1 bundles these for **TY2024
+/// only**, so a separate table with **fail-closed per-year gating** (`None` ⇒ `NotComputable`) has the
+/// smallest blast radius. This does NOT rely on any frozen-file constraint (`se.rs` only *calls* the
+/// unfrozen `synthetic_table`, so `TaxTable` could technically gain a field).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FullReturnParams {
     pub year: i32,

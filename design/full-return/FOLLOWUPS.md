@@ -29,6 +29,22 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 - **pm-r2-m4** — P0 task 0 FROZEN pin: make explicit that what-if / pseudo-reconcile / existing-crypto-test
   files are "never alter" (would break loudly) but are not content-pinned (only the 3 delta-path files are).
 
+## From Fable IMPL-P0 code review r1 (folded into P0 r2; 2 recorded/deferred here)
+
+- **p0-taxtable-deviation** (RECORDED — no action) — SPEC §8 / plan-task-5 said to add the standard
+  deduction to the per-year `TaxTable`; the impl instead put the full-return indexed params in a NEW
+  `FullReturnParams` / `BundledFullReturnTables`. Justified on true grounds: `TaxTable` is a published-crate
+  API read by the crypto-delta path (which never needs these fields), and v1 bundles TY2024 only, so a
+  separate fail-closed-gated table has the smallest blast radius. (The original code comment claiming a
+  frozen `se.rs` struct-literal blocked it was WRONG — `se.rs` only calls the unfrozen `synthetic_table` —
+  and has been corrected.) Recorded for traceability.
+- **p0-cc0-crosscheck** (DEFERRED → Phase 7) — the P0 acceptance "CI cross-check vs a vendored CC0 PSL
+  Tax-Calculator param slice" is not yet implemented. Deferred to P7 (where the independent oracles —
+  tenforty / PolicyEngine / IRS ATS — live). Justification: P0's numeric values are already
+  **primary-source-verified** (Fable re-fetched Rev. Proc. 2023-34; the 5 QDCGT fixtures are cent-exact
+  against the official 2024 worksheet), so the CC0 diff is an *additional independent layer*, not a P0
+  correctness blocker. Vendor the TY2024 slice + the diff test in P7.
+
 ## From the whole-design Fable audit (Minors — C1/I1/I2/I3 were FOLDED into spec r5/r6; these Minors remain)
 
 - **audit-minors** — the audit's Minors M2–M8, M10, M11 are recorded in

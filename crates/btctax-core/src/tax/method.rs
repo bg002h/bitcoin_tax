@@ -245,4 +245,14 @@ mod tests {
         // tax at the bin midpoint 11,925: 10%×11,925 = 1,192.50 → half-up 1,193 (well-defined).
         assert_eq!(worksheet_tax(&mid, dec!(11925)), dec!(1193));
     }
+
+    /// `regular_tax` (ordinary-only, no preferential income) = 1040 line 16 whole dollars, via the Tax
+    /// Table (<$100k) or the TCW (≥$100k, rounded half-up).
+    #[test]
+    fn regular_tax_table_and_tcw() {
+        let s = single_2024();
+        assert_eq!(regular_tax(&s, dec!(58000)), dec!(7819)); // Tax Table
+        assert_eq!(regular_tax(&s, dec!(120000)), dec!(21843)); // TCW 21,842.50 → half-up 21,843
+        assert_eq!(regular_tax(&s, dec!(0)), dec!(0));
+    }
 }

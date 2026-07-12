@@ -133,6 +133,19 @@ mod tests {
         assert_eq!(round_dollar(dec!(-2.50)), dec!(-3));
     }
 
+    /// KAT-9 (cross-foot): the round-all-amounts election rounds each PRINTED form line, then SUMS the
+    /// rounded lines — so 271.50 + 499.50 print as 272 + 500 = **772**, which DIFFERS from rounding the
+    /// cent sum (`round_dollar(771.00) = 771`). Proves printed-line rounding + cross-foot (SPEC §3.1 /
+    /// plan-review I5 / P0 task 6). The printed-line half is re-asserted on real 8959 lines at P4/P6.
+    #[test]
+    fn round_dollar_cross_foots_printed_lines() {
+        let a = round_dollar(dec!(271.50)); // printed line: 272
+        let b = round_dollar(dec!(499.50)); // printed line: 500
+        assert_eq!(a + b, dec!(772)); // cross-foot of rounded lines
+        assert_eq!(round_dollar(dec!(271.50) + dec!(499.50)), dec!(771)); // sum-then-round: 771 (differs)
+        assert_ne!(a + b, round_dollar(dec!(271.50) + dec!(499.50)));
+    }
+
     #[test]
     fn pro_rata_split_conserves_exactly() {
         // split 100.00 across takes that don't divide evenly: parts must sum to the whole.
