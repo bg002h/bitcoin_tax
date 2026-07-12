@@ -1,8 +1,16 @@
 # SPEC — Full Return (Common W-2 Household, TY2024) — v1
 
-**Status:** ✅ GREEN r4 (opus-authored; folded Fable reviews r1+r2+r3; user decisions D-3/D-5/D-6 of
-2026-07-12). **Fable re-review r4 = GREEN — 0 Critical / 0 Important / 5 Minor** (Minors → `FOLLOWUPS.md`).
-Reviews: `design/full-return/reviews/SPEC-fable-review-r{1,2,3,4}.md`. → pending user review; plan may proceed.
+**Status:** DRAFT r5 (was GREEN r4; folded the final **whole-design Fable audit** →
+`design/full-return/reviews/DESIGN-fable-audit-final.md`) → pending Fable confirmation re-review → user review.
+Reviews: `design/full-return/reviews/SPEC-fable-review-r{1,2,3,4}.md`.
+
+**r5 changelog (whole-design audit fold):** **C1** Form 8615 kiddie-tax refuse (dependent filer + unearned
+income > $2,600 §1(g)) + §8 threshold + KAT-19 — closes a silent-understatement hole; **I1** box-12 guard is
+now an **inert allowlist** `{D,E,F,G,H,S,AA,BB,EE,DD}` (blocklist leaked K/R/T) + KAT-20; **I2** Schedule C
+**loss** (net<0) → refuse; **I3** dropped the orphan `qbi_deduction_override` (§4.5/§7.1); Minors: Sch 2
+**L1=AMT / L2=excess-APTC** (was double-booked) + §10 erratum; TI≤0 refuse narrowed to "with capital-loss
+carryforward" (refund-only filers not refused); §8 KAT-3 assertion corrected to **mod-25** (closes the
+`spec-s8-kat3-mod25` erratum).
 **Governs:** `STANDARD_WORKFLOW.md` (spec → plan → implement, each review-to-green).
 **Grounded in:** `design/full-return/recon/` — opus `00`–`05`, `deep/01`–`05`, Fable `01`–`06` +
 `fable/00-SYNTHESIS-FABLE.md`. Verify citations against current source at plan time.
@@ -60,7 +68,9 @@ full legal apparatus — §9). TY2025 (+ full Schedule 1-A) and CTC/Schedule 881
 CTC/ODC, education, dependent-care, saver's, energy, adoption credits — **omitted conservatively** (advisory,
 not refused; §3.4). AMT computation (screen-only, §4.11); Schedule E/F rental/farm; retirement/IRA/pension/SS
 income (1040 4a–6b); foreign tax **> $300/$600 or non-passive** (refuse, D-3); foreign trust (Form 3520 —
-refuse, R2-I3); state returns; e-file; **TY2025** and Schedule 1-A; any line needing an unmodeled worksheet.
+refuse, R2-I3); **Form 8615 kiddie tax** (dependent filer + unearned income > $2,600 — refuse, C1);
+**Schedule C loss** (refuse, I2); **marketplace APTC / Form 8962** (refuse); state returns; e-file; **TY2025**
+and Schedule 1-A; any line needing an unmodeled worksheet.
 The fail-closed rule (§3.4) turns each refusal case into `NotComputable`, never a silent wrong number.
 
 ---
@@ -222,11 +232,11 @@ ordinary income → L8v.
 
 ### 4.5 QBI inputs
 
-`QbiInputs { reit_ptp_carryforward_in: Usd, qbi_deduction_override: Option<Usd> }`. §199A REIT dividends =
-Σ `div.box5`. Compute Form 8995 (F3 §2) when TI-before-QBI ≤ $191,950/$383,900 (TY2024); above, or if actual
-non-REIT QBI asserted, **refuse** (8995-A unbuilt). box5 ⊂ ordinary dividends → stays in ordinary stack.
-(Note: crypto Schedule C is *not* §199A QBI in v1 — refuse if the user asserts a QBI deduction on it; a
-follow-on can add the QBI-on-Sch-C path.) Carryforward-out persists per §4.
+`QbiInputs { reit_ptp_carryforward_in: Usd }`. §199A REIT dividends = Σ `div.box5`. Compute Form 8995 (F3 §2)
+when TI-before-QBI ≤ $191,950/$383,900 (TY2024); above → **refuse** (8995-A unbuilt). **No manual
+`qbi_deduction_override` in v1 (I3 — dropped: QBI is auto-computed from box5; the override had no fill story
+or plan task).** box5 ⊂ ordinary dividends → stays in ordinary stack. Crypto Schedule C is *not* §199A QBI in
+v1 (a follow-on adds the QBI-on-Sch-C path). Carryforward-out persists per §4.
 
 ### 4.6 Schedule A inputs — classified charitable + SALT either/or (G12; I4; R2-I1/R2-I4)
 
@@ -297,10 +307,11 @@ person; **per person** (never pooled); → Sch 3 L11 → 1040 L31. RRTA out of s
 |---|---|---|
 | ≥2 self-employment/business crypto earners | refuse | v1 supports one Schedule C (§4.4a) |
 | **business-flagged crypto `Interest` income** | refuse | R3-I3: excluded from SE (§1402(a)(2)) but not NIIT-sheltered — no clean v1 home |
+| **claimable-as-dependent filer + unearned income > $2,600** (TY2024, §1(g)) | refuse | **C1 — Form 8615 kiddie tax**: `qdcgt_line16` at the child's rate would UNDERSTATE (parent's-rate required) |
+| **Schedule C net < 0** (loss) | refuse | **I2**: §465 at-risk + a negative Sch 1 L3 is unsubstantiated in v1 |
+| **excess-APTC / any marketplace Form 8962** | refuse | Sch 2 **L2** repayment (would understate) |
 | QBI deduction asserted on Schedule C income | refuse | §199A-on-Sch-C is a follow-on (§4.5) |
-| W-2 box 12 **W** | refuse | Form 8889 mandatory |
-| W-2 box 12 **A/B/M/N** | refuse | Sch 2 L13 |
-| W-2 box 12 **Z** | refuse | Sch 2 L17h |
+| W-2 box 12 code **not in the inert allowlist** `{D,E,F,G,H,S,AA,BB,EE,DD}` | refuse | **I1 (allowlist, not blocklist):** a blocklist leaks K (golden-parachute → Sch 2 L17k), R (8853), T (8839) etc.; allow only the clearly-inert elective-deferral / informational codes and refuse the rest — incl. **W** (→ 8889), **A/B/M/N** (→ L13), **Z** (→ L17h) |
 | W-2 **box 8** allocated tips | refuse | Form 4137 |
 | W-2 **box 10** dependent-care | refuse | Form 2441 |
 | INT **box 9** / DIV **box 13** (PAB AMT pref) | refuse | AMT preference (§4.11) |
@@ -309,7 +320,7 @@ person; **per person** (never pooled); → Sch 3 L11 → 1040 L31. RRTA out of s
 | `foreign_trust == Some(true)` | refuse | Form 3520 (R2-I3) |
 | single-employer excess SS withholding | refuse | not creditable (§4.9) |
 | Sch 1 L13 / L20-with-deduction | refuse | unmodeled worksheet |
-| taxable income ≤ 0 | refuse | carryover-worksheet edge (G22) |
+| taxable income ≤ 0 **with a capital-loss carryforward** | refuse | G22 carryover-worksheet edge (a refund-only TI≤0 filer with no carryforward is NOT refused — tax=0, withholding refunded) |
 
 ### 4.11 AMT screen (G13; M7)
 
@@ -344,7 +355,7 @@ exists (D-4).
 4  L16 = method.rs::qdcgt_line16(TI=L15, qd=3a, ltcg=net_1222 preferential_gain):
      pref_ws = min(TI, qd+ltcg) ★F2 F-A; L22/L24 Table(<100k)/TCW(≥100k) each on its own amount;
      line16 = round_dollar(min(L23,L24)) ★min load-bearing (F2 F-B)
-5  Sch 2 Part I (L2 AMT screen=0) → Sch 2 L3 → 1040 L17; L18=L16+L17
+5  Sch 2 Part I: **L1 = AMT** (screen=0, §4.11); **L2 = excess-APTC** (refuse if any, §4.10); L3 = L1+L2 → 1040 L17; L18=L16+L17
 6  Nonrefundable credits: FTC(§4.7a)→Sch 3 L1; Sch 3 L8→1040 L20; L19=0 CTC/ODC omitted-conservatively
      (+advisory, §3.4); L21=L19+L20; L22=max(0,L18−L21)
 7  Sch 2 Part II (other taxes) → L23:
@@ -396,7 +407,7 @@ deduction as **approximate** and never reconciles the two to the dollar.
 
 Full **1040**, **Sch 1/2/3/A/B/C**, **Sch D** (extended §7.2), **SE, 8949, 8283** (existing), **8959, 8960,
 8995** (new); **Schedule C** (new). Every mandatory "Attach Form X" for an in-scope figure has its form; a
-non-DRAFT return never shows a line with no backing form. QBI: box5>0/override forces the 8995 map.
+non-DRAFT return never shows a line with no backing form. QBI: box5>0 forces the 8995 map.
 
 **Schedule B filing trigger (R3-I2 — normative, single site):** Schedule B files when **taxable interest >
 $1,500** *or* **ordinary dividends > $1,500** *or* `foreign_accounts == Some(true)` (Part III trigger (b))
@@ -435,8 +446,10 @@ Sch B >14 interest / >15 dividend overflow reuses the 8949 continuation pattern.
 
 Add **standard-deduction** basic + §63(f) aged/blind + dependent floor (TY2024 $14,600/$29,200/$21,900;
 $1,550/$1,950 per box; floor $1,300/+$450). SALT cap statutory-constant TY2024 ($10k/$5k). Excess-SS MAX =
-6.2%×`ss_wage_base`. FTC ceiling $300/$600. **No per-year Tax-Table data** (F2). Add a **per-year assertion**
-in `method.rs`: no bracket edge < $100k inside a $50 bin (< $3,000 inside a $25 bin).
+6.2%×`ss_wage_base`. FTC ceiling $300/$600. **§1(g) kiddie-tax unearned-income threshold $2,600 (TY2024,
+indexed — C1).** **No per-year Tax-Table data** (F2). Add a **per-year assertion** in `method.rs`: **every
+bracket edge < $100k is a multiple of $25** (a $50-bin boundary or its exact midpoint; deep/01's stricter
+no-interior-edge form was TY2024-only — corrected per plan-review C1).
 
 ---
 
@@ -477,14 +490,15 @@ trigger; 15) L8v hobby vs L3 Schedule-C business split + cross-foot; 16) **§904
 refuse; 17) **charitable 30%-cap-gain ceiling with same-year ST+LT crypto donations** (R2-I1: exercises the
 `50%·AGI − (cash + ordinary allowed)` term); **18) Schedule B filing trigger (R3-I2)** — a $2,000-dividends /
 $100-interest household files Schedule B Part II+III, and a ≤$1,500 household with `foreign_accounts=Some(true)`
-files Part III; one KAT per refuse-guard row (§4.10). Golden end-to-end: ≥1
+files Part III; **19) Form 8615 kiddie-tax refuse (C1** — claimable dependent + unearned income > $2,600 ⇒
+`NotComputable`); **20) box-12 allowlist (code K present ⇒ refuse, I1)**; one KAT per refuse-guard row (§4.10). Golden end-to-end: ≥1
 synthetic household per branch (single/MFJ; std/itemized; ±QD+LTCG; under/over $100k; multi-W-2; REIT box5;
 crypto hobby income; **crypto Schedule-C business income + SE** [= deep/02 Ex.2, $60k mining]). **Fixture
 caveat (M6):** IRS ATS Scenario 2 pulls in out-of-scope forms → **partial-line diff** or a v1-envelope
 synthetic golden.
 
-*(Erratum, no spec change: recon-01 §2 shows Sch 2 L1/L2 swapped vs the 2024 form; this spec's §5 stage 5
-uses the correct "L2 AMT → Sch 2 L3.")*
+*(Erratum: recon-01 §2 shows Sch 2 L1/L2 swapped vs the 2024 form; the corrected spec uses **L1 = AMT,
+L2 = excess-APTC → Sch 2 L3** — §5 stage 5, §4.11.)*
 
 ---
 

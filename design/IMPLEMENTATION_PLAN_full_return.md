@@ -1,8 +1,10 @@
 # IMPLEMENTATION PLAN — Full Return v1 (Common W-2 Household, TY2024)
 
-**Status:** ✅ GREEN r2 (opus-authored 2026-07-12; folded Fable plan review r1). **Fable re-review r2 = GREEN —
-0 Critical / 0 Important / 4 Minor** (Minors → `FOLLOWUPS.md`). Reviews:
-`design/full-return/reviews/PLAN-fable-review-r{1,2}.md`. → pending user review; implementation may proceed.
+**Status:** DRAFT r3 (was GREEN r2; folded the whole-design Fable audit's plan-touching items →
+`design/full-return/reviews/DESIGN-fable-audit-final.md`) → pending Fable confirmation → user review. Reviews:
+`design/full-return/reviews/PLAN-fable-review-r{1,2}.md`.
+**r3 changelog (audit fold):** added KAT-19 (Form 8615 kiddie-tax refuse, P1) + KAT-20 (box-12 allowlist, P1)
++ Schedule C net<0 refuse (P2); spec r5 dropped the orphan `qbi_override` (no plan task existed — closed).
 **Implements:** `design/SPEC_full_return.md` (GREEN r4). **Governs:** `STANDARD_WORKFLOW.md`.
 **Open FOLLOWUPS to fold as encountered:** `design/full-return/FOLLOWUPS.md`.
 
@@ -89,9 +91,11 @@ the **mod-25** edge assertion passes for 2017/2024/2025/2026; CI param cross-che
    single resolver into report/TUI/optimize/what-if/export; `tax-profile set` warn + `--force` when
    `ReturnInputs` exists (D-4).
 4. **Refuse-guard table (§4.10)** as `fn screen(&ReturnInputs, &TaxTable) -> Option<Blocker>` [Minor 1: needs
-   the year table for the excess-SS MAX]; **one KAT per input-screenable row** (business-Interest R3-I3;
-   foreign-trust; box-12/8/10; foreign-tax>cap; ≥2 SE earners; single-employer-excess-SS). **Compute-dependent
-   rows are owned downstream** (TI≤0 → P3) — not claimed complete here.
+   the year table for the excess-SS MAX + the §1(g) kiddie threshold]; **one KAT per input-screenable row**
+   (business-Interest R3-I3; foreign-trust; **box-12 inert-allowlist — KAT-20, code K present ⇒ refuse (audit
+   I1)**; box-8/10; foreign-tax>cap; ≥2 SE earners; single-employer-excess-SS; **Form 8615 kiddie-tax — KAT-19,
+   claimable dependent + unearned income (Σ int+div+capgain) > $2,600 (audit C1)**; excess-APTC/8962).
+   **Compute-dependent rows are owned downstream** (TI≤0 → P3; **Schedule C net<0 → P2, audit I2**).
 5. Carryover write-back plumbing (spec §4 R3-M6: **provenance** computed-vs-user; computed overwrites computed
    but **refuses user-entered without `--force`**) — storage only; the R3-M6 KAT lands in P3/P4. SSN `--stdin`
    entry + masked rendering (spec §4.2 security-review item).
@@ -105,9 +109,10 @@ every **input-screenable** refuse row has a red→green KAT; SSN masking verifie
 **Tasks (test-first):**
 1. Income lines 1a/2a/2b/3a/3b (KAT: 1a⊃… no double-count; box1a⊇1b strip-once) + Sch D L7 reuse.
 2. Sch 1: L1 (attest), L7 (Σ G), **L8v (Σ non-business `crypto_ord`)**, **L3 (Schedule C net = Σ SE-eligible
-   business `crypto_ord` − expenses)**, L18 (Σ INT box2), L21 (student-loan worksheet, MFS=$0), L15 (½-SE from
-   Sch C, wired in P4 but derivation stub here) → L10. **KAT-15: L8v-vs-L3 partition + cross-foot (L9 carries
-   crypto_ord); KAT: business-income-without-Sch-C ⇒ fail-loud (R3-M10).**
+   business `crypto_ord` − expenses; **refuse if net < 0 — Schedule C loss, audit I2**)**, L18 (Σ INT box2),
+   L21 (student-loan worksheet, MFS=$0), L15 (½-SE from Sch C, wired in P4 but derivation stub here) → L10.
+   **KAT-15: L8v-vs-L3 partition + cross-foot (L9 carries crypto_ord); KAT: business-income-without-Sch-C ⇒
+   fail-loud (R3-M10); KAT: Sch C net<0 ⇒ refuse.**
 3. **Two distinct AGI notions [I4 — the frozen seam]:** (a) `return_1040` computes the **absolute, WITH-crypto**
    AGI (real 1040 L11 = L9−L10, crypto included) for the filed return; (b) `derive_tax_profile` populates the
    frozen `TaxProfile` scalars `magi_excluding_crypto` / `ordinary_taxable_income` from **NON-crypto line items
