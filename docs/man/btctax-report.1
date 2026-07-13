@@ -4,7 +4,7 @@
 .SH NAME
 report \- Show holdings + realized disposals/removals/income. With \-\-tax\-year: standalone TaxResult
 .SH SYNOPSIS
-\fBreport\fR [\fB\-\-year\fR] [\fB\-\-tax\-year\fR] [\fB\-\-prior\-taxable\-gifts\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBreport\fR [\fB\-\-year\fR] [\fB\-\-tax\-year\fR] [\fB\-\-prior\-taxable\-gifts\fR] [\fB\-\-write\-carryover\fR] [\fB\-\-force\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 Show holdings + realized disposals/removals/income. With \-\-tax\-year: standalone TaxResult
 .SH OPTIONS
@@ -17,6 +17,12 @@ Compute the crypto\-attributable federal tax for the given tax year (B.5 / Task 
 .TP
 \fB\-\-prior\-taxable\-gifts\fR \fI<PRIOR_TAXABLE_GIFTS>\fR
 Cumulative prior\-year TAXABLE gifts (post\-annual\-exclusion Form 709 amounts), not gross gifts. Used for the §2505 lifetime\-exclusion consumption advisory. Defaults to $0 when omitted (the advisory discloses this assumption). Must not be negative
+.TP
+\fB\-\-write\-carryover\fR
+§4 R3\-M6: persist this year\*(Aqs computed charitable + QBI carryover\-OUT as next year\*(Aqs carryover\-IN (a full\-return `\-\-tax\-year` ReturnInputs year only). `report` is otherwise read\-only; this flag opts into the vault write
+.TP
+\fB\-\-force\fR
+With `\-\-write\-carryover`: overwrite a next\-year carryover\-in that was user\-entered (`income import`). Without it, a user\-entered value is left untouched and the write refuses
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help
