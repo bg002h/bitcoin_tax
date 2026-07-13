@@ -19,8 +19,8 @@ use crate::state::LedgerState;
 use crate::tax::compute::net_1222;
 use crate::tax::return_inputs::{Owner, Person, ReturnInputs};
 use crate::tax::return_refuse::{Refusal, RefuseReason};
-use crate::tax::se::se_net_income;
-use crate::tax::tables::{loss_limit, FullReturnParams};
+use crate::tax::se::{compute_se_tax, se_net_income, SeTaxResult};
+use crate::tax::tables::{loss_limit, FullReturnParams, TaxTable};
 use crate::tax::types::{FilingStatus, TaxProfile};
 use crate::IncomeKind;
 use rust_decimal_macros::dec;
@@ -457,6 +457,145 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
     }
 }
 
+// ── §6017 self-employment-tax filing floor: no SE tax (and no ½-SE deduction, no Schedule SE) unless net
+//    earnings from self-employment — the 92.35%-factored `base` — are $400 or more (R3-M3 / SPEC §5 stage 7).
+const SE_6017_FLOOR: Usd = dec!(400);
+
+/// The **absolute** (WITH-crypto) 1040 assembly — the filed-return counterpart to [`derive_tax_profile`]'s
+/// frozen non-crypto `TaxProfile`. Built incrementally across Phase 4; **this increment covers SPEC §5
+/// stages 1–2** (income L1a–L9, adjustments L10, AGI L11) plus the Schedule SE / §6017 block that L10's
+/// ½-SE and the later other-taxes stages consume. Later P4 increments add deductions (L12–L15), L16,
+/// credits, other taxes, payments, and the dual report.
+///
+/// Unlike the derivation, this reads the crypto ledger `state` directly (`capital_gain_line7`,
+/// `crypto_income`, `compute_se_tax`) and produces the with-crypto AGI (L11) — the §6 / Form 8960-MAGI /
+/// phase-out pivot. It assumes both refuse screens (`screen_inputs` + `screen_compute_dependent`) have
+/// already passed, so Schedule C net is non-negative and business-Interest / no-Schedule-C are excluded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AbsoluteReturn {
+    /// 1040 L1a — Σ W-2 box 1 wages.
+    pub wages: Usd,
+    /// 1040 L2b — taxable interest (Σ 1099-INT box 1 + box 3).
+    pub taxable_interest: Usd,
+    /// 1040 L3b — ordinary dividends (Σ 1099-DIV box 1a; INCLUDES the qualified subset).
+    pub ordinary_dividends: Usd,
+    /// 1040 L3a — qualified dividends (Σ 1099-DIV box 1b) — a preferential subset of L3b, kept for L16.
+    pub qualified_dividends: Usd,
+    /// 1040 L7 — capital gain/loss: crypto Schedule D nets + box-2a distributions, §1222-netted and
+    /// §1211-loss-limited (`capital_gain_line7`).
+    pub capital_gain: Usd,
+    /// 1040 L8 = Schedule 1 L10 — state refund + unemployment + Schedule C net (crypto business) + L8v
+    /// non-business crypto ordinary income.
+    pub schedule_1_income: Usd,
+    /// 1040 L9 — total income = L1a + L2b + L3b + L7 + L8.
+    pub total_income: Usd,
+    /// 1040 L10 = Schedule 1 L26 — adjustments: ½-SE (L15) + early-withdrawal penalty (L18) + student-loan
+    /// interest (L21).
+    pub adjustments: Usd,
+    /// Schedule 1 L15 — the §164(f) one-half-SE-tax deduction (0 when the §6017 floor is not met); a
+    /// component of `adjustments`.
+    pub half_se_deduction: Usd,
+    /// 1040 L11 — **with-crypto AGI** (the §6 dual-report / Form 8960-MAGI / phase-out pivot, G7).
+    pub agi: Usd,
+    /// The §6017-floored Schedule SE result (`None` when there is no SE-eligible business income, it is
+    /// fully expensed, or the `base` is below the $400 floor). Consumed by later stages (Sch 2 L4 =
+    /// `ss + medicare`; Form 8959 Part II reads `addl`).
+    pub se: Option<SeTaxResult>,
+}
+
+/// Assemble the absolute (WITH-crypto) 1040 income + AGI for `year` (SPEC §5 stages 1–2). See
+/// [`AbsoluteReturn`]. Assumes the refuse screens have passed (fail-closed upstream).
+pub fn assemble_absolute(
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    params: &FullReturnParams,
+    table: &TaxTable,
+    year: i32,
+) -> AbsoluteReturn {
+    let status = ri.filing_status;
+
+    // ── Schedule SE / §6017 block: reuse the FROZEN `compute_se_tax`, then drop it below the $400 floor.
+    //    The two W-2 channels differ (deep/02 C4): the §1402(b)(1) SS cap uses the SE-earner's OWN box 3 +
+    //    box 7 tips; Form 8959 uses HOUSEHOLD-total box 5 (identical to `derive_tax_profile`). ────────────
+    let se_owner = ri
+        .schedule_c
+        .as_ref()
+        .map(|c| c.owner)
+        .unwrap_or(Owner::Taxpayer);
+    let w2_ss_wages: Usd = ri
+        .w2s
+        .iter()
+        .filter(|w| w.owner == se_owner)
+        .map(|w| w.box3_ss_wages + w.box7_ss_tips)
+        .sum();
+    let w2_medicare_wages: Usd = ri.w2s.iter().map(|w| w.box5_medicare_wages).sum();
+    let schedule_c_expenses = ri
+        .schedule_c
+        .as_ref()
+        .map(|c| c.expenses)
+        .unwrap_or(Usd::ZERO);
+    let se = compute_se_tax(
+        state,
+        year,
+        status,
+        table,
+        w2_ss_wages,
+        w2_medicare_wages,
+        schedule_c_expenses,
+    )
+    .filter(|r| r.base >= SE_6017_FLOOR);
+    let half_se = se.as_ref().map_or(Usd::ZERO, |r| r.deductible_half);
+
+    // ── Income L1a..L9 (WITH crypto) ──────────────────────────────────────────────────────────────
+    let wages = sum_wages(ri);
+    let taxable_interest = sum_taxable_interest(ri);
+    let ordinary_dividends = sum_ordinary_dividends(ri);
+    let qualified_dividends = sum_qualified_dividends(ri);
+    let capital_gain = capital_gain_line7(ri, state, year, status); // crypto Sch D + Σ box 2a
+
+    // 1040 L8 = Sch 1 L10: state refund + Σ unemployment + Schedule C net (crypto business) + L8v
+    // non-business crypto ordinary. Screening guarantees `business_se_gross ≥ expenses` here (no loss).
+    let crypto = crypto_income(state, year);
+    let schedule_c_net = (crypto.business_se_gross - schedule_c_expenses).max(Usd::ZERO);
+    let schedule_1_income =
+        ri.sch1.state_refund_taxable + sum_unemployment(ri) + schedule_c_net + crypto.nonbusiness_ordinary;
+
+    let total_income =
+        wages + taxable_interest + ordinary_dividends + capital_gain + schedule_1_income; // L9
+
+    // ── Adjustments L10 (Sch 1 L26), AGI L11 ──────────────────────────────────────────────────────
+    // §221 MAGI for the student-loan phase-out is AGI computed WITHOUT the student-loan deduction but WITH
+    // ½-SE and the early-withdrawal penalty (Form 1040 / Sch 1 order).
+    let early_wd: Usd = ri
+        .int_1099
+        .iter()
+        .map(|i| i.box2_early_withdrawal_penalty)
+        .sum();
+    let agi_before_student_loan = total_income - early_wd - half_se;
+    let student_loan = student_loan_deduction(
+        ri.sch1.student_loan_interest_paid,
+        agi_before_student_loan,
+        status,
+        params,
+    );
+    let adjustments = early_wd + half_se + student_loan;
+    let agi = total_income - adjustments; // 1040 L11 (with-crypto AGI)
+
+    AbsoluteReturn {
+        wages,
+        taxable_interest,
+        ordinary_dividends,
+        qualified_dividends,
+        capital_gain,
+        schedule_1_income,
+        total_income,
+        adjustments,
+        half_se_deduction: half_se,
+        agi,
+        se,
+    }
+}
+
 /// Schedule B §6012 / Form 1040 Schedule B filing threshold ($1,500 for interest and for dividends).
 const SCHEDULE_B_THRESHOLD: Usd = dec!(1500);
 
@@ -625,6 +764,98 @@ mod tests {
             other => panic!("bad profile must compute, got {other:?}"),
         };
         assert_ne!(g, b, "the strip must affect the engine's crypto tax");
+    }
+
+    /// P4.0 — the absolute (WITH-crypto) income assembly cross-foots (L9 = Σ income lines; L11 = L9 − L10)
+    /// and the crypto figures (Schedule C mining + non-business reward + box-2a distribution) all land on
+    /// the return. ½-SE (Schedule 1 L15) is computed from the Schedule SE base and subtracted into AGI.
+    #[test]
+    fn absolute_income_assembly_crossfoots_with_crypto() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(50000), dec!(50000), dec!(50000))],
+            int_1099: vec![Form1099Int {
+                box1_interest: dec!(1000),
+                ..Default::default()
+            }],
+            div_1099: vec![Form1099Div {
+                box2a_capgain_distr: dec!(3000),
+                ..Default::default()
+            }],
+            schedule_c: Some(ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let st = state_income(vec![
+            mining(dec!(60000)),
+            income(IncomeKind::Reward, false, dec!(2000)),
+        ]);
+        let table = synthetic_table(2024);
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &table, 2024);
+
+        assert_eq!(ar.wages, dec!(50000)); // L1a
+        assert_eq!(ar.taxable_interest, dec!(1000)); // L2b
+        assert_eq!(ar.ordinary_dividends, Usd::ZERO);
+        assert_eq!(ar.capital_gain, dec!(3000)); // L7 — box-2a LT distribution
+        assert_eq!(ar.schedule_1_income, dec!(62000)); // L8 = Sch C net 60,000 + non-business reward 2,000
+        assert_eq!(ar.total_income, dec!(116000)); // L9 = 50,000 + 1,000 + 0 + 3,000 + 62,000
+        assert_eq!(
+            ar.total_income,
+            ar.wages
+                + ar.taxable_interest
+                + ar.ordinary_dividends
+                + ar.capital_gain
+                + ar.schedule_1_income
+        );
+        // Schedule SE base = round_cents(60,000 × 0.9235); ½-SE flows into adjustments.
+        let se = ar.se.as_ref().expect("SE tax present above the $400 floor");
+        assert_eq!(se.base, dec!(55410.00));
+        assert!(ar.half_se_deduction > Usd::ZERO);
+        assert_eq!(ar.half_se_deduction, se.deductible_half); // Sch 1 L15 = Sch SE L13 (excludes the 0.9%)
+        assert_eq!(ar.adjustments, ar.half_se_deduction); // no early-wd / student-loan here
+        // Cross-foot L11 = L9 − L10 (with-crypto AGI).
+        assert_eq!(ar.agi, ar.total_income - ar.adjustments);
+        assert_eq!(ar.agi, dec!(116000) - ar.half_se_deduction);
+    }
+
+    /// P4.0 / §6017 (R3-M3): net SE earnings (the 92.35%-factored base) below $400 ⇒ NO SE tax and NO ½-SE,
+    /// but the Schedule C net still counts as income. Above the floor, the SE result and ½-SE appear.
+    #[test]
+    fn absolute_se_respects_the_6017_400_floor() {
+        let table = synthetic_table(2024);
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            schedule_c: Some(ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        // Gross $400 → base = round_cents(400 × 0.9235) = 369.40 < 400 ⇒ floored: no SE tax, no ½-SE.
+        let below = assemble_absolute(
+            &ri,
+            &state_income(vec![mining(dec!(400))]),
+            &ty2024_params(),
+            &table,
+            2024,
+        );
+        assert!(below.se.is_none());
+        assert_eq!(below.half_se_deduction, Usd::ZERO);
+        assert_eq!(below.schedule_1_income, dec!(400)); // Schedule C net still counts as income
+        assert_eq!(below.agi, dec!(400)); // no ½-SE to subtract
+        // Gross $500 → base = 461.75 ≥ 400 ⇒ SE tax + ½-SE present.
+        let above = assemble_absolute(
+            &ri,
+            &state_income(vec![mining(dec!(500))]),
+            &ty2024_params(),
+            &table,
+            2024,
+        );
+        assert!(above.se.is_some());
+        assert!(above.half_se_deduction > Usd::ZERO);
+        assert_eq!(above.agi, dec!(500) - above.half_se_deduction);
     }
 
     /// deep/02 Worked Example 1 (MFJ, no crypto) — the derived `TaxProfile` cent-exact, every field.
