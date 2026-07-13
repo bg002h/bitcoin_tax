@@ -19,6 +19,7 @@ use crate::state::{LedgerState, RemovalKind, Term};
 use crate::tax::charitable::apply_170b;
 use crate::tax::compute::{net_1222, CapNet};
 use crate::tax::method::qdcgt_line16;
+use crate::tax::other_taxes::{form_8959, form_8960, sch2_line4_se, Form8959, Form8960};
 use crate::tax::qbi::{compute_8995, qbi_over_threshold};
 use crate::tax::return_inputs::{
     CharitableCarryItem, CharitableClass, CharitableGift, Owner, Person, ReturnInputs,
@@ -210,11 +211,16 @@ struct CryptoIncome {
     business_interest: Usd,
     /// Σ non-business crypto ordinary income (any kind) → Sch 1 L8v (hobby rewards + lending interest).
     nonbusiness_ordinary: Usd,
+    /// Σ non-business crypto **lending interest** (kind == Interest) — the §1411(c)(1)(A)(i) investment
+    /// interest subset of `nonbusiness_ordinary` that enters Form 8960 NII (as a line-7 modification, R3-M5;
+    /// it rides Sch 1 L8v, NOT 1040 2b). Hobby mining/staking/airdrop/reward stays OUT of NII.
+    nonbusiness_lending_interest: Usd,
 }
 
 fn crypto_income(state: &LedgerState, year: i32) -> CryptoIncome {
     let mut business_interest = Usd::ZERO;
     let mut nonbusiness_ordinary = Usd::ZERO;
+    let mut nonbusiness_lending_interest = Usd::ZERO;
     for i in state
         .income_recognized
         .iter()
@@ -226,12 +232,16 @@ fn crypto_income(state: &LedgerState, year: i32) -> CryptoIncome {
             }
         } else {
             nonbusiness_ordinary += i.usd_fmv;
+            if i.kind == IncomeKind::Interest {
+                nonbusiness_lending_interest += i.usd_fmv;
+            }
         }
     }
     CryptoIncome {
         business_se_gross: se_net_income(state, year), // canonical business SE-eligible sum
         business_interest,
         nonbusiness_ordinary,
+        nonbusiness_lending_interest,
     }
 }
 
@@ -514,10 +524,12 @@ const SE_6017_FLOOR: Usd = dec!(400);
 
 /// The **absolute** (WITH-crypto) 1040 assembly — the filed-return counterpart to [`derive_tax_profile`]'s
 /// frozen non-crypto `TaxProfile`. Built incrementally across Phase 4; **this increment covers SPEC §5
-/// stages 1–4** (income L1a–L9, adjustments L10, AGI L11, deductions L12–L15, regular tax L16) plus the
-/// Schedule SE / §6017 block. Later P4 increments add credits, other taxes, payments, and the dual
-/// report. The §4.10 compute-dependent refuses that need L12/L15 (QBI-above-threshold, TI≤0-with-
-/// carryforward) are screened by [`screen_absolute`] after this (infallible) assembly.
+/// stages 1–4** (income L1a–L9, adjustments L10, AGI L11, deductions L12–L15, regular tax L16), the
+/// Schedule SE / §6017 block, and the **stage-7 other-taxes forms** (Sch 2 L4 SE, Form 8959 Additional
+/// Medicare, absolute Form 8960 NIIT). Later P4 increments assemble the Sch 2 / Sch 3 totals, credits
+/// (FTC, CTC advisory), total tax L24, payments, and the dual report. The §4.10 compute-dependent refuses
+/// that need L12/L15 (QBI-above-threshold, TI≤0-with-carryforward) are screened by [`screen_absolute`]
+/// after this (infallible) assembly.
 ///
 /// Unlike the derivation, this reads the crypto ledger `state` directly (`capital_gain_line7`,
 /// `crypto_income`, `compute_se_tax`) and produces the with-crypto AGI (L11) — the §6 / Form 8960-MAGI /
@@ -583,6 +595,16 @@ pub struct AbsoluteReturn {
     /// all four Schedule-D routing paths (SPEC §7.2). The QDCGT `min(L1, qd+ltcg)` cap (the
     /// `p2-pref-over-ti-clamp` fix) is built into the worksheet, so the absolute L16 never overstates.
     pub regular_tax: Usd,
+    /// Schedule 2 **line 4** — self-employment tax = §1401(a) SS + §1401(b)(1) Medicare (the §1401(b)(2)
+    /// 0.9% is unbundled to `additional_medicare` Part II, deep/02 C5). 0 when there is no SE tax.
+    pub se_tax_sch2_l4: Usd,
+    /// Form 8959 — Additional Medicare Tax: Part I (wages) + Part II (SE `addl`) → Sch 2 L11; Part V
+    /// withholding → 1040 25c.
+    pub additional_medicare: Form8959,
+    /// Form 8960 — the ABSOLUTE Net Investment Income Tax (→ Sch 2 L12), NII rebuilt from line items
+    /// (full 3b dividends + 2b interest + §1211-limited L7 + crypto lending interest; MAGI = AGI). NOT the
+    /// frozen delta engine's `nii_with` — the §6 divergence.
+    pub niit: Form8960,
 }
 
 /// Assemble the absolute (WITH-crypto) 1040 income + AGI + deductions + taxable income + regular tax for
@@ -722,6 +744,24 @@ pub fn assemble_absolute(
         net_ltcg,
     );
 
+    // ── Sch 2 other taxes (SPEC §5 stage 7) ─────────────────────────────────────────────────────────
+    // SE tax → Sch 2 L4 = SS + Medicare (the 0.9% is unbundled to Form 8959 Part II). Form 8959 Part I
+    // reads the HOUSEHOLD Σ box5 (already computed above for the SE channel) and box6; Part II = se.addl.
+    let w2_medicare_withheld: Usd = ri.w2s.iter().map(|w| w.box6_medicare_withheld).sum();
+    let se_tax_sch2_l4 = sch2_line4_se(se.as_ref());
+    let additional_medicare = form_8959(status, w2_medicare_wages, w2_medicare_withheld, se.as_ref());
+    // Absolute Form 8960: NII rebuilt from line items — full 3b dividends (NOT just qualified), 2b interest,
+    // §1211-limited L7, and non-business crypto LENDING interest (hobby mining/staking rewards stay OUT of
+    // NII); MAGI = AGI (fail-closed). Schedule C business income is §1411(c)(6)-excluded (never in NII).
+    let niit = form_8960(
+        status,
+        taxable_interest,
+        ordinary_dividends,
+        capital_gain,
+        crypto.nonbusiness_lending_interest,
+        agi,
+    );
+
     AbsoluteReturn {
         wages,
         taxable_interest,
@@ -744,6 +784,9 @@ pub fn assemble_absolute(
         charitable_carryover_out: charitable.carryover_out,
         qbi_reit_ptp_carryforward_out: qbi.reit_ptp_carryforward_out,
         regular_tax,
+        se_tax_sch2_l4,
+        additional_medicare,
+        niit,
     }
 }
 
@@ -2012,5 +2055,76 @@ mod tests {
         assert_eq!(ar.taxable_income, dec!(35400)); // 50,000 − 14,600
         assert_eq!(ar.qualified_dividends, dec!(50000));
         assert_eq!(ar.regular_tax, Usd::ZERO); // capped → $0 (not $446)
+    }
+
+    // ── Sch 2 other taxes wired into the absolute assembly (Phase 4 task 3/5) ─────────────────────
+
+    /// Absolute Form 8960 NII uses the FULL 1040 3b dividends (not just qualified — the key absolute-vs-
+    /// delta distinction) + 2b interest + non-business crypto LENDING interest, while a hobby mining
+    /// REWARD is excluded from NII (it is Sch 1 L8v income, not investment income).
+    #[test]
+    fn absolute_niit_full_dividends_lending_in_reward_out() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(250000), dec!(168600), dec!(250000))],
+            div_1099: vec![Form1099Div {
+                box1a_ordinary: dec!(10000), // full 3b
+                box1b_qualified: dec!(4000),  // only part is qualified
+                ..Default::default()
+            }],
+            int_1099: vec![Form1099Int {
+                box1_interest: dec!(3000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let st = state_income(vec![
+            income(IncomeKind::Reward, false, dec!(5000)),   // hobby reward → NOT NII (Sch 1 L8v only)
+            income(IncomeKind::Interest, false, dec!(2000)), // non-business lending interest → NII
+        ]);
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_single_table(), 2024);
+        // NII = 2b 3,000 + 3b 10,000 (FULL box1a) + L7 0 + crypto lending 2,000 = 15,000 (reward excluded).
+        assert_eq!(ar.niit.nii, dec!(15000));
+        // AGI = 250,000 + 3,000 + 10,000 + (reward 5,000 + lending 2,000 on L8v) = 270,000 → over 70,000.
+        assert_eq!(ar.niit.magi, dec!(270000));
+        assert_eq!(ar.niit.tax, dec!(570.00)); // 3.8% × 15,000
+    }
+
+    /// Absolute SE tax unbundles into the assembly: Sch 2 L4 = SS + Medicare (NOT the total), and the
+    /// §1401(b)(2) 0.9% lands on Form 8959 Part II. A $300k mining fixture makes `addl` > 0 (discriminating).
+    #[test]
+    fn absolute_se_unbundles_to_sch2_l4_and_8959_part2() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            schedule_c: Some(ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let st = state_income(vec![mining(dec!(300000))]);
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_single_table(), 2024);
+        let se = ar.se.as_ref().expect("SE tax present");
+        assert!(se.addl > Usd::ZERO);
+        assert_eq!(ar.se_tax_sch2_l4, se.ss + se.medicare); // Sch 2 L4 excludes the 0.9%
+        assert_ne!(ar.se_tax_sch2_l4, se.total); // discriminating
+        assert_eq!(ar.additional_medicare.part2_se, se.addl); // 0.9% routed to Form 8959 Part II
+        assert_eq!(ar.additional_medicare.additional_medicare_tax, se.addl); // no wages → Part I 0
+    }
+
+    /// Form 8959 Part I reads the HOUSEHOLD Σ box5 (summed across W-2s), not a single employer's.
+    #[test]
+    fn absolute_8959_part1_sums_household_medicare_wages() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![
+                w2(Owner::Taxpayer, dec!(150000), dec!(150000), dec!(150000)),
+                w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000)),
+            ],
+            ..Default::default()
+        };
+        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_single_table(), 2024);
+        // Σ box5 = 250,000 > 200,000 Single threshold → Part I = 0.9% × 50,000 = $450.
+        assert_eq!(ar.additional_medicare.part1_wages, dec!(450.00));
     }
 }
