@@ -17,13 +17,87 @@ use crate::conventions::{round_dollar, Usd};
 use crate::forms::schedule_d;
 use crate::state::LedgerState;
 use crate::tax::compute::net_1222;
-use crate::tax::return_inputs::{Owner, ReturnInputs};
+use crate::tax::return_inputs::{Owner, Person, ReturnInputs};
 use crate::tax::return_refuse::{Refusal, RefuseReason};
 use crate::tax::se::se_net_income;
 use crate::tax::tables::{loss_limit, FullReturnParams};
 use crate::tax::types::{FilingStatus, TaxProfile};
 use crate::IncomeKind;
 use rust_decimal_macros::dec;
+use time::{Date, Month};
+
+// ── §63 standard deduction (Phase 3 task 1) ──────────────────────────────────────────────────────
+
+/// Whether `dob` makes a person **aged (65+)** for the §63(f) additional standard deduction in tax `year`.
+/// IRS rule (Pub 501): 65 if born **on or before January 1 of `year − 64`** (turned 65 by the Jan-1-after-
+/// year-end test). A `None` DOB is "not established" → NOT counted as aged: the conservative, fail-closed
+/// direction — never grant an unsubstantiated deduction, and never silently assume a birthdate
+/// (burns down the `dob-option-pin` follow-up; §4.2 / review r1-M3).
+fn is_aged(dob: Option<Date>, year: i32) -> bool {
+    let Some(d) = dob else {
+        return false;
+    };
+    Date::from_calendar_date(year - 64, Month::January, 1).is_ok_and(|cutoff| d <= cutoff)
+}
+
+/// The number of §63(f) aged/blind "boxes" a person contributes (0, 1, or 2): +1 if 65+ (by DOB), +1 if
+/// blind (an explicit flag — not DOB-derivable, §4.2).
+fn aged_blind_boxes(p: &Person, year: i32) -> u32 {
+    u32::from(is_aged(p.date_of_birth, year)) + u32::from(p.blind)
+}
+
+/// §63(f) additional-standard-deduction rate is the **married** amount for MFJ/MFS/QSS (a "surviving
+/// spouse" is in the joint bucket here, like `Qss → Mfj` for the basic deduction), **unmarried** for
+/// Single/HoH.
+fn uses_married_aged_blind_rate(status: FilingStatus) -> bool {
+    matches!(
+        status,
+        FilingStatus::Mfj | FilingStatus::Mfs | FilingStatus::Qss
+    )
+}
+
+/// §63(c) **standard deduction**: the basic amount (or the §63(c)(5) dependent floor when the filer can be
+/// claimed as a dependent) PLUS the §63(f) aged/blind additions.
+///
+/// `dependent_earned_income` matters ONLY for a can-be-claimed-as-dependent filer (§63(c)(5): the base is
+/// capped at the basic std, floored at `max($1,300, earned + $450)`). The **derivation** passes the
+/// NON-crypto earned income (wages); the absolute return passes with-crypto earned (wages + Sch C net −
+/// ½-SE) — a documented delta-vs-absolute divergence (§6) only in the rare dependent-filer case.
+///
+/// §63(f) boxes: the taxpayer always, plus the spouse **on a joint (MFJ) return**. (On MFS the rare
+/// no-income-spouse box is conservatively not counted — never over-granting.)
+pub fn standard_deduction(
+    ri: &ReturnInputs,
+    params: &FullReturnParams,
+    year: i32,
+    dependent_earned_income: Usd,
+) -> Usd {
+    let status = ri.filing_status;
+    let basic = params.std_deduction_for(status);
+    let base = if ri.header.can_be_claimed_as_dependent_taxpayer {
+        // §63(c)(5): min(basic, max($1,300, earned + $450)).
+        basic.min(
+            (dependent_earned_income + params.dependent_std_earned_addon)
+                .max(params.dependent_std_floor),
+        )
+    } else {
+        basic
+    };
+
+    let mut boxes = aged_blind_boxes(&ri.header.taxpayer, year);
+    if status == FilingStatus::Mfj {
+        if let Some(sp) = &ri.header.spouse {
+            boxes += aged_blind_boxes(sp, year);
+        }
+    }
+    let per_box = if uses_married_aged_blind_rate(status) {
+        params.std_aged_blind_married
+    } else {
+        params.std_aged_blind_unmarried
+    };
+
+    base + per_box * Usd::from(boxes)
+}
 
 // ── Non-crypto income-line sums (shared by the derivation, the refuse screen, and the absolute 1040) ──
 fn sum_wages(ri: &ReturnInputs) -> Usd {
@@ -218,9 +292,10 @@ pub fn student_loan_deduction(
 /// line items for `year`'s `params` (SPEC §5 stages 1–2, deep/02 §1 Worked Example 1).
 ///
 /// Crypto is **excluded structurally** — `ReturnInputs` carries none; the engine adds the crypto delta on
-/// top. P2 uses the **basic** standard deduction only; §63(f) aged/blind, the dependent floor, Schedule A,
-/// and QBI land in P3. `magi_excluding_crypto = AGI` exactly (no §911/CFC/PFIC in the model — deep/02 C1).
-pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams) -> TaxProfile {
+/// top. **P3:** the deduction is now the FULL §63 standard deduction (basic + §63(f) aged/blind + the
+/// dependent floor, with NON-crypto earned income = wages); Schedule A (the `max(std, itemized)`) and QBI
+/// land later in P3/P4. `magi_excluding_crypto = AGI` exactly (no §911/CFC/PFIC in the model — deep/02 C1).
+pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i32) -> TaxProfile {
     let status = ri.filing_status;
 
     // ── Income (non-crypto) ──────────────────────────────────────────────────────────────────────
@@ -251,9 +326,11 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams) -> TaxPr
     );
     let adjustments = early_wd + student_loan;
 
-    // ── AGI, deduction, taxable income (basic standard only in P2) ────────────────────────────────
+    // ── AGI, deduction, taxable income ────────────────────────────────────────────────────────────
     let agi = income_total - adjustments; // 1040 L11 (non-crypto)
-    let deduction = params.std_deduction_for(status); // basic std; P3 adds aged/blind/Sch A
+    // FULL §63 standard deduction (P3 task 1): basic + aged/blind + dependent floor. The dependent floor's
+    // earned income is the NON-crypto figure (wages); Schedule A / the max(std, itemized) lands in P3 task 3.
+    let deduction = standard_deduction(ri, params, year, wages);
     let taxable_income = (agi - deduction).max(Usd::ZERO); // 1040 L15 (non-crypto)
     // Strip the preferential slice (qualified div + LT cap-gain distr) EXACTLY ONCE — the engine re-adds
     // it on top of the ordinary bottom via `other_net_capital_gain` + the QD channel (deep/02 §1.4).
@@ -422,7 +499,7 @@ mod tests {
     /// the engine stacks crypto ON TOP of the derived non-crypto base. (Task-3 exclusion-semantics KAT.)
     #[test]
     fn derived_profile_composes_with_the_frozen_crypto_engine() {
-        let p = derive_tax_profile(&single_household(), &ty2024_params());
+        let p = derive_tax_profile(&single_household(), &ty2024_params(), 2024);
         let tables = tables_2024();
 
         // No crypto in the ledger ⇒ zero crypto delta (derive injects no phantom crypto).
@@ -447,7 +524,7 @@ mod tests {
     /// seam, not just a cosmetic profile field. Uses a crypto LTCG so the pref stacking is exercised.
     #[test]
     fn forgetting_to_strip_changes_the_engine_result() {
-        let good = derive_tax_profile(&single_household(), &ty2024_params());
+        let good = derive_tax_profile(&single_household(), &ty2024_params(), 2024);
         // The strip-once bug: ordinary bottom left inflated by the preferential slice.
         let mut bad = good.clone();
         bad.ordinary_taxable_income += good.qualified_dividends_and_other_pref_income
@@ -489,7 +566,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let p = derive_tax_profile(&ri, &ty2024_params());
+        let p = derive_tax_profile(&ri, &ty2024_params(), 2024);
         assert_eq!(p.filing_status, FilingStatus::Mfj);
         assert_eq!(p.ordinary_taxable_income, dec!(246800)); // 257,800 − 8,000 − 3,000
         assert_eq!(p.magi_excluding_crypto, dec!(287000)); // AGI
@@ -526,8 +603,8 @@ mod tests {
         };
         let mut more_qual = base.clone();
         more_qual.div_1099[0].box1b_qualified = dec!(9000); // more of the SAME $10k is qualified
-        let a = derive_tax_profile(&base, &ty2024_params());
-        let b = derive_tax_profile(&more_qual, &ty2024_params());
+        let a = derive_tax_profile(&base, &ty2024_params(), 2024);
+        let b = derive_tax_profile(&more_qual, &ty2024_params(), 2024);
         // AGI unchanged (box 1a is the income; box 1b is only a split) = 100,000 + 10,000.
         assert_eq!(a.magi_excluding_crypto, b.magi_excluding_crypto);
         assert_eq!(a.magi_excluding_crypto, dec!(110000));
@@ -549,7 +626,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let p = derive_tax_profile(&ri, &ty2024_params());
+        let p = derive_tax_profile(&ri, &ty2024_params(), 2024);
         assert_eq!(p.magi_excluding_crypto, dec!(3000)); // in AGI
         assert_eq!(p.other_net_capital_gain, dec!(3000)); // re-enters via preferential channel
         assert_eq!(p.ordinary_taxable_income, Usd::ZERO); // 3,000 − std 14,600 floored, then strip
@@ -575,7 +652,7 @@ mod tests {
         };
         let mut sch1 = ri.clone();
         sch1.sch1.state_refund_taxable = dec!(600);
-        let p = derive_tax_profile(&sch1, &ty2024_params());
+        let p = derive_tax_profile(&sch1, &ty2024_params(), 2024);
         // AGI = 100,000 + (5,000+2,000) int + 4,000 unemp + 600 refund − 1,000 early-wd = 110,600.
         assert_eq!(p.magi_excluding_crypto, dec!(110600));
     }
@@ -633,7 +710,7 @@ mod tests {
         };
         let mut with_loan = ri.clone();
         with_loan.sch1.student_loan_interest_paid = dec!(1000);
-        let p = derive_tax_profile(&with_loan, &ty2024_params());
+        let p = derive_tax_profile(&with_loan, &ty2024_params(), 2024);
         // AGI = 50,000 + 1,000 − 1,000 student-loan = 50,000.
         assert_eq!(p.magi_excluding_crypto, dec!(50000));
     }
@@ -655,7 +732,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let p = derive_tax_profile(&ri, &ty2024_params());
+        let p = derive_tax_profile(&ri, &ty2024_params(), 2024);
         assert_eq!(p.w2_ss_wages, dec!(40000)); // spouse's own box 3
         assert_eq!(p.w2_medicare_wages, dec!(140000)); // household Σ box 5
         assert_eq!(p.schedule_c_expenses, dec!(2500));
@@ -736,6 +813,82 @@ mod tests {
             ..Default::default()
         };
         assert!(!schedule_b_part3_unanswered(&not_filing));
+    }
+
+    // ── §63 standard deduction (Phase 3 task 1) ──────────────────────────────────────────────────
+    fn person(dob: Option<Date>, blind: bool) -> Person {
+        Person {
+            date_of_birth: dob,
+            blind,
+            ..Default::default()
+        }
+    }
+    fn filer(status: FilingStatus) -> ReturnInputs {
+        ReturnInputs {
+            filing_status: status,
+            ..Default::default()
+        }
+    }
+
+    /// Basic std deduction + §63(f) aged/blind boxes (unmarried $1,950, married $1,550).
+    #[test]
+    fn standard_deduction_basic_and_aged_blind() {
+        let p = ty2024_params();
+        // Single, nothing extra → basic $14,600.
+        assert_eq!(standard_deduction(&filer(FilingStatus::Single), &p, 2024, Usd::ZERO), dec!(14600));
+        // Single + blind → +$1,950.
+        let mut blind = filer(FilingStatus::Single);
+        blind.header.taxpayer.blind = true;
+        assert_eq!(standard_deduction(&blind, &p, 2024, Usd::ZERO), dec!(16550));
+        // MFJ, BOTH spouses 65+ → basic $29,200 + 2 × $1,550 = $32,300.
+        let mut mfj = filer(FilingStatus::Mfj);
+        mfj.header.taxpayer.date_of_birth = Some(date!(1955 - 06 - 01));
+        mfj.header.spouse = Some(person(Some(date!(1955 - 06 - 01)), false));
+        assert_eq!(standard_deduction(&mfj, &p, 2024, Usd::ZERO), dec!(32300));
+    }
+
+    /// The §63(f) age-65 boundary (born on/before Jan 1 of year−64) and the fail-closed `None` DOB.
+    #[test]
+    fn aged_boundary_and_none_dob() {
+        let p = ty2024_params();
+        let mk = |dob| {
+            let mut r = filer(FilingStatus::Single);
+            r.header.taxpayer.date_of_birth = dob;
+            r
+        };
+        // Born 1960-01-01 → 65 by Jan 1 2025 → aged for TY2024 (14,600 + 1,950).
+        assert_eq!(standard_deduction(&mk(Some(date!(1960 - 01 - 01))), &p, 2024, Usd::ZERO), dec!(16550));
+        // Born 1960-01-02 → NOT aged.
+        assert_eq!(standard_deduction(&mk(Some(date!(1960 - 01 - 02))), &p, 2024, Usd::ZERO), dec!(14600));
+        // None DOB → not established → NOT aged (conservative, fail-closed — dob-option-pin).
+        assert_eq!(standard_deduction(&mk(None), &p, 2024, Usd::ZERO), dec!(14600));
+    }
+
+    /// §63(c)(5) dependent floor: `min(basic, max($1,300, earned + $450))`, with aged/blind still added.
+    #[test]
+    fn dependent_floor() {
+        let p = ty2024_params();
+        let mut dep = filer(FilingStatus::Single);
+        dep.header.can_be_claimed_as_dependent_taxpayer = true;
+        // Earned $0 → max($1,300, $450) = $1,300.
+        assert_eq!(standard_deduction(&dep, &p, 2024, Usd::ZERO), dec!(1300));
+        // Earned $5,000 → max($1,300, $5,450) = $5,450 (< basic).
+        assert_eq!(standard_deduction(&dep, &p, 2024, dec!(5000)), dec!(5450));
+        // Earned $20,000 → $20,450 capped at basic $14,600.
+        assert_eq!(standard_deduction(&dep, &p, 2024, dec!(20000)), dec!(14600));
+        // Dependent + blind → floor base ($1,300) + $1,950 aged/blind.
+        let mut db = dep.clone();
+        db.header.taxpayer.blind = true;
+        assert_eq!(standard_deduction(&db, &p, 2024, Usd::ZERO), dec!(3250));
+    }
+
+    /// QSS uses the MFJ basic std ($29,200 via `Qss → Mfj`) AND the married ($1,550) aged/blind rate.
+    #[test]
+    fn qss_uses_married_basic_and_aged_blind_rate() {
+        let p = ty2024_params();
+        let mut qss = filer(FilingStatus::Qss);
+        qss.header.taxpayer.date_of_birth = Some(date!(1950 - 01 - 01)); // aged
+        assert_eq!(standard_deduction(&qss, &p, 2024, Usd::ZERO), dec!(30750)); // 29,200 + 1,550
     }
 
     // ── Compute-dependent refuse rows (task 2) ───────────────────────────────────────────────────

@@ -102,7 +102,7 @@ fn resolve_core(
             return Ok((r, Some(ri)));
         }
         let r = Resolved {
-            profile: Some(derive_tax_profile(&ri, params)),
+            profile: Some(derive_tax_profile(&ri, params, year)),
             provenance: Provenance::ReturnInputs,
             refusal: None,
         };
