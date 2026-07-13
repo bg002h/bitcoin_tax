@@ -1001,6 +1001,23 @@ mod tests {
         );
     }
 
+    /// Review M1 / r2 N1: a negative AGI is clamped to zero for the 7.5% medical floor, so the medical
+    /// deduction is the FULL expense (no floor reduction) but is NEVER inflated ABOVE it. Without the clamp
+    /// `medical − 7.5%·(−10,000) = medical + 750` would over-deduct.
+    #[test]
+    fn schedule_a_medical_floor_clamps_negative_agi() {
+        let mut r = filer(FilingStatus::Single);
+        r.schedule_a = Some(ScheduleAInputs {
+            medical: dec!(10000),
+            ..Default::default()
+        });
+        // agi.max(0) = 0 ⇒ floor = 0 ⇒ medical = $10,000 exactly (not $10,750).
+        assert_eq!(
+            schedule_a_deduction(&r, dec!(-10000), Usd::ZERO, &ty2024_params()),
+            Some(dec!(10000))
+        );
+    }
+
     /// §164(b)(5) either/or: election ON ⇒ 5a is the sales-tax amount ONLY (income withholding ignored);
     /// MFS SALT cap is $5,000. Charitable (line 14) adds straight in.
     #[test]

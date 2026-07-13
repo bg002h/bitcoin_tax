@@ -43,6 +43,11 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   `ri.schedule_a.as_ref().map_or(...)` guard** (return_1040.rs) so a filer with `charitable_carryover_in`
   but no Schedule A block still ages/expires carryover (G8, Reg. §1.170A-10(a)(2), review M2) — today a
   std-deduction year silently skips the engine. P4 then wires the absolute Sch A in + persists.
+  (iii) `apply_170b` is `pub` and enforces its "50%-org classes only" precondition NOWHERE itself — the
+  guarantee lives entirely in the upstream `screen_inputs` refuse (C1). When P4 adds the absolute-Sch-A
+  caller, it MUST also route through `screen_inputs` (or `apply_170b` must gain a `debug_assert!`/boundary
+  error rejecting any non-50%-org class), else a P4 caller that skips the screen would silently DROP a
+  non-50%-org gift → overstate tax (conservative, but a fail-open of the C1 guarantee). Review r2 N1 (Minor).
 - **p3-l16-absolute-P4** (DEVIATION — plan P3 task 4 → P4) — L16 (`method.rs::qdcgt_line16` on the WITH-crypto
   AGI) + the QBI 0-stub are ABSOLUTE-return lines; P3 ships the frozen-DELTA path (the derived `TaxProfile` →
   `compute_tax_year`, which already computes the delta tax via the frozen engine's own QDCGT). The absolute L16
@@ -61,10 +66,18 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   Pub. 526 Worksheet-2 cross-terms above (same shape as the shipped R2-I1 50%-org line), add KATs pinning both
   probe scenarios to the CORRECT law totals, then drop the refuse. KATs pinning the current refuse:
   `non50org_cash_gift_refuses`, `non50org_capgain_gift_refuses`, `non50org_carryover_in_refuses`.
-- **p3-crypto-donation-delta-integration** (OPEN DESIGN Q → decide at P3 review / P4 start) — the crypto-
-  donation §170 deduction is today an advisory-only "before §170(b)" figure in the report; how (or whether) it
-  enters the frozen DELTA tax vs only the absolute Schedule A is unresolved. The derived non-crypto deduction
-  correctly excludes it; the question is the absolute/delta treatment. Flag for the P3 reviewer / P4 design.
+- **p3-crypto-donation-delta-integration** (design Q — derive-side exclusion RULED CORRECT at P3 review r1 §3.3;
+  absolute/delta treatment → P4) — the crypto-donation §170 deduction is today an advisory-only "before §170(b)"
+  figure in the report; how (or whether) it enters the frozen DELTA tax vs only the absolute Schedule A. **P3
+  reviewer ruling (r1 §3.3):** the derive-side EXCLUSION is correct and must stand — (a) `apply_170b`'s allowed
+  total is monotone nondecreasing in gifts, so excluding crypto gifts can only OVERSTATE the reported tax
+  (conservative); (b) non-crypto AGI for the derived Sch A is architecturally FORCED by the frozen seam (a
+  with-crypto AGI would contaminate `tax(base)` so it no longer equals the no-crypto counterfactual — SPEC §6);
+  (c) the one residual anti-conservative channel is the **medical floor** (with-crypto AGI shrinks the true
+  7.5% floor; the derivation-fixed deduction cannot re-shrink) — known, documented (SPEC §6), not new in P3.
+  **P4 requirements carried from the ruling:** crypto donations MUST enter the ABSOLUTE Schedule A (ledger
+  §170(e) classes at with-crypto AGI, G7), and P4's `absolute_with − absolute_without ≠ delta` KAT (plan P4
+  task 8) MUST use a **medical-floor fixture** so the one anti-conservative direction is the one pinned.
 
 ## From Fable IMPL-P3 code review r1 (C1/I1/I2 + M1 FOLDED at the P3 gate; M2/M3 folded into entries above; deferrals here)
 
