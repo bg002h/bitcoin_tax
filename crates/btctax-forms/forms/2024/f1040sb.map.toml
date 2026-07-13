@@ -1,0 +1,147 @@
+# Schedule B (Interest and Ordinary Dividends), Form 1040, TY2024.
+#
+# Extracted with `xtask dump-fields` + correlated against the printed form. Root is `topmostSubform[0]`.
+#
+# ⚠️ THE AMOUNT COLUMN IS x ≈ [489.6, 576] — NOT the [504, 576] of Schedules 1/2/3/A, Schedule SE and
+# Forms 8959/8960/8995, and not Schedule C's [475, 576]. A shared amount-column constant would REJECT
+# EVERY Schedule B cell. No two forms in this crate agree; none may share one.
+#
+# ⚠️ SUFFIXES ARE ZERO-PADDED through f1_09 (`f1_03`, not `f1_3`) — unlike Schedule A / 8960 / 8995.
+#
+# ★ ROW 1 OF **BOTH** REPEATING TABLES HAS A DIFFERENT PARENT SUBFORM:
+#     Part I  row 1 payer: topmostSubform[0].Page1[0].Line1_ReadOrder[0].f1_03[0]
+#     Part II row 1 payer: topmostSubform[0].Page1[0].ReadOrderControl[0].f1_34[0]
+#   Their AMOUNT siblings (f1_04, f1_35) are NOT wrapped. Generating row names by string interpolation
+#   produces two wrong FQNs — which is why the rows are written out in full below.
+#   Part II's row-1 payer box also starts at x=201.6 (indented past the printed "5 List name of payer:"
+#   label) rather than 129.6; both centers fall inside the PAYER cluster, so it needs no extra column.
+#
+# ★ ROW COUNTS ARE ASYMMETRIC AND THAT IS REAL: Part I has **14** rows, Part II has **15**. Part I's
+#   label consumes three printed lines before its table starts; Part II's first row sits ON its label
+#   line. Do not "fix" this to match.
+#
+# ★ PART III YES/NO PAIRS all share the SAME on-states (Yes = "1", No = "2") and the same x geometry,
+#   so the on-state cannot disambiguate them — only the field name + y can:
+#     c1_1 (y≈133) = line 7a   (a financial interest in a foreign account)
+#     c1_2 (y≈97)  = the UNNUMBERED FBAR sub-question under 7a  — v1 leaves it BLANK
+#     c1_3 (y≈37)  = line 8    (a distribution from a foreign trust)
+#   NOTE line 7b is NOT a Yes/No pair — it is the FREE-TEXT foreign-country list (f1_65/f1_66).
+#
+# UNMAPPED ON PURPOSE:
+#   line 3 (f1_32)          Form 8815 excludable savings-bond interest — no v1 input
+#   c1_2 (the FBAR pair)    v1 never answers it. The FbarFinCen advisory tells the filer, in terms,
+#                           that they must decide it themselves. An incomplete Part III is the honest
+#                           output; a guessed one would not be.
+#   f1_65 / f1_66 (7b)      the foreign-country list — same reason
+#
+# ⚠️ TOML ORDERING: every ROOT scalar (form, year, line2, line4, line6) must appear BEFORE the first
+# [[part1_rows]] / [[part2_rows]] array-of-tables. After an array-of-tables opens, a bare `key = ...`
+# binds to the LAST table in that array, not to the root — so a `line2` placed after the row list
+# would silently become a field of Part I's 14th row, and the map would fail to parse.
+
+form = "f1040sb"
+year = 2024
+
+# ── Root totals (must precede the row tables — see the TOML note above) ─────────────────────
+line2 = "topmostSubform[0].Page1[0].f1_31[0]"   # "Add the amounts on line 1"
+line4 = "topmostSubform[0].Page1[0].f1_33[0]"   # "Subtract line 3 from line 2" → 1040 line 2b
+line6 = "topmostSubform[0].Page1[0].f1_64[0]"   # "Add the amounts on line 5" → 1040 line 3b
+
+# ── Part III — Foreign Accounts and Trusts (the filer's OWN answers, transcribed) ────────────
+[line7a]
+yes = { field = "topmostSubform[0].Page1[0].c1_1[0]", on = "1" }
+no  = { field = "topmostSubform[0].Page1[0].c1_1[1]", on = "2" }
+[line8]
+yes = { field = "topmostSubform[0].Page1[0].c1_3[0]", on = "1" }
+no  = { field = "topmostSubform[0].Page1[0].c1_3[1]", on = "2" }
+
+# ── Part I, line 1 — interest payers (14 rows) ───────────────────────────────────────────────
+[[part1_rows]]  # row 1
+payer  = "topmostSubform[0].Page1[0].Line1_ReadOrder[0].f1_03[0]"
+amount = "topmostSubform[0].Page1[0].f1_04[0]"
+[[part1_rows]]  # row 2
+payer  = "topmostSubform[0].Page1[0].f1_05[0]"
+amount = "topmostSubform[0].Page1[0].f1_06[0]"
+[[part1_rows]]  # row 3
+payer  = "topmostSubform[0].Page1[0].f1_07[0]"
+amount = "topmostSubform[0].Page1[0].f1_08[0]"
+[[part1_rows]]  # row 4
+payer  = "topmostSubform[0].Page1[0].f1_09[0]"
+amount = "topmostSubform[0].Page1[0].f1_10[0]"
+[[part1_rows]]  # row 5
+payer  = "topmostSubform[0].Page1[0].f1_11[0]"
+amount = "topmostSubform[0].Page1[0].f1_12[0]"
+[[part1_rows]]  # row 6
+payer  = "topmostSubform[0].Page1[0].f1_13[0]"
+amount = "topmostSubform[0].Page1[0].f1_14[0]"
+[[part1_rows]]  # row 7
+payer  = "topmostSubform[0].Page1[0].f1_15[0]"
+amount = "topmostSubform[0].Page1[0].f1_16[0]"
+[[part1_rows]]  # row 8
+payer  = "topmostSubform[0].Page1[0].f1_17[0]"
+amount = "topmostSubform[0].Page1[0].f1_18[0]"
+[[part1_rows]]  # row 9
+payer  = "topmostSubform[0].Page1[0].f1_19[0]"
+amount = "topmostSubform[0].Page1[0].f1_20[0]"
+[[part1_rows]]  # row 10
+payer  = "topmostSubform[0].Page1[0].f1_21[0]"
+amount = "topmostSubform[0].Page1[0].f1_22[0]"
+[[part1_rows]]  # row 11
+payer  = "topmostSubform[0].Page1[0].f1_23[0]"
+amount = "topmostSubform[0].Page1[0].f1_24[0]"
+[[part1_rows]]  # row 12
+payer  = "topmostSubform[0].Page1[0].f1_25[0]"
+amount = "topmostSubform[0].Page1[0].f1_26[0]"
+[[part1_rows]]  # row 13
+payer  = "topmostSubform[0].Page1[0].f1_27[0]"
+amount = "topmostSubform[0].Page1[0].f1_28[0]"
+[[part1_rows]]  # row 14
+payer  = "topmostSubform[0].Page1[0].f1_29[0]"
+amount = "topmostSubform[0].Page1[0].f1_30[0]"
+
+# ── Part II, line 5 — dividend payers (15 rows) ──────────────────────────────────────────────
+[[part2_rows]]  # row 1
+payer  = "topmostSubform[0].Page1[0].ReadOrderControl[0].f1_34[0]"
+amount = "topmostSubform[0].Page1[0].f1_35[0]"
+[[part2_rows]]  # row 2
+payer  = "topmostSubform[0].Page1[0].f1_36[0]"
+amount = "topmostSubform[0].Page1[0].f1_37[0]"
+[[part2_rows]]  # row 3
+payer  = "topmostSubform[0].Page1[0].f1_38[0]"
+amount = "topmostSubform[0].Page1[0].f1_39[0]"
+[[part2_rows]]  # row 4
+payer  = "topmostSubform[0].Page1[0].f1_40[0]"
+amount = "topmostSubform[0].Page1[0].f1_41[0]"
+[[part2_rows]]  # row 5
+payer  = "topmostSubform[0].Page1[0].f1_42[0]"
+amount = "topmostSubform[0].Page1[0].f1_43[0]"
+[[part2_rows]]  # row 6
+payer  = "topmostSubform[0].Page1[0].f1_44[0]"
+amount = "topmostSubform[0].Page1[0].f1_45[0]"
+[[part2_rows]]  # row 7
+payer  = "topmostSubform[0].Page1[0].f1_46[0]"
+amount = "topmostSubform[0].Page1[0].f1_47[0]"
+[[part2_rows]]  # row 8
+payer  = "topmostSubform[0].Page1[0].f1_48[0]"
+amount = "topmostSubform[0].Page1[0].f1_49[0]"
+[[part2_rows]]  # row 9
+payer  = "topmostSubform[0].Page1[0].f1_50[0]"
+amount = "topmostSubform[0].Page1[0].f1_51[0]"
+[[part2_rows]]  # row 10
+payer  = "topmostSubform[0].Page1[0].f1_52[0]"
+amount = "topmostSubform[0].Page1[0].f1_53[0]"
+[[part2_rows]]  # row 11
+payer  = "topmostSubform[0].Page1[0].f1_54[0]"
+amount = "topmostSubform[0].Page1[0].f1_55[0]"
+[[part2_rows]]  # row 12
+payer  = "topmostSubform[0].Page1[0].f1_56[0]"
+amount = "topmostSubform[0].Page1[0].f1_57[0]"
+[[part2_rows]]  # row 13
+payer  = "topmostSubform[0].Page1[0].f1_58[0]"
+amount = "topmostSubform[0].Page1[0].f1_59[0]"
+[[part2_rows]]  # row 14
+payer  = "topmostSubform[0].Page1[0].f1_60[0]"
+amount = "topmostSubform[0].Page1[0].f1_61[0]"
+[[part2_rows]]  # row 15
+payer  = "topmostSubform[0].Page1[0].f1_62[0]"
+amount = "topmostSubform[0].Page1[0].f1_63[0]"

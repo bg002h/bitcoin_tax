@@ -48,6 +48,8 @@ pub const SCHEDULE_A_MAP_2024: &str = include_str!("../forms/2024/f1040sa.map.to
 pub const SCHEDULE_1_MAP_2024: &str = include_str!("../forms/2024/f1040s1.map.toml");
 /// The TY2024 Schedule C (Profit or Loss From Business) map (embedded at compile time).
 pub const SCHEDULE_C_MAP_2024: &str = include_str!("../forms/2024/f1040sc.map.toml");
+/// The TY2024 Schedule B (Interest and Ordinary Dividends) map (embedded at compile time).
+pub const SCHEDULE_B_MAP_2024: &str = include_str!("../forms/2024/f1040sb.map.toml");
 
 /// The TY2017 Form 8949 map (embedded at compile time).
 pub const F8949_MAP_2017: &str = include_str!("../forms/2017/f8949.map.toml");
@@ -1039,6 +1041,74 @@ impl ScheduleCMap {
             &self.line29,
             &self.line31,
         ]
+    }
+}
+
+/// One listed-payer row on Schedule B: the payer-name text cell + the amount cell.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduleBRowMap {
+    /// The payer-name field (a wide text cell in the PAYER column).
+    pub payer: String,
+    /// The amount field.
+    pub amount: MoneyCell,
+}
+
+/// A Yes/No checkbox pair (Schedule B Part III). Both boxes share the same on-states (`"1"`/`"2"`) and
+/// the same x geometry across every pair on the form, so only the field NAME distinguishes them.
+#[derive(Debug, Clone, Deserialize)]
+pub struct YesNoPair {
+    /// The "Yes" box.
+    pub yes: CheckChoice,
+    /// The "No" box.
+    pub no: CheckChoice,
+}
+
+/// The Schedule B (Interest and Ordinary Dividends) field map for one tax year.
+///
+/// **Its amount column is x ≈ [489.6, 576]** — not the [504, 576] of Schedules 1/2/3/A and Forms
+/// 8959/8960/8995, nor Schedule C's [475, 576]. A shared constant would reject every cell.
+///
+/// **Row 1 of BOTH repeating tables has a different parent subform** (`Line1_ReadOrder` in Part I,
+/// `ReadOrderControl` in Part II) while its amount sibling does not — so the rows are written out in
+/// full in the TOML rather than interpolated. **Part I has 14 rows, Part II has 15**; the asymmetry
+/// is real.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduleBMap {
+    /// `"f1040sb"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// Part I line 1 — the 14 interest-payer rows.
+    pub part1_rows: Vec<ScheduleBRowMap>,
+    /// L2 — add the amounts on line 1.
+    pub line2: MoneyCell,
+    /// L4 — line 2 − line 3 → 1040 L2b.
+    pub line4: MoneyCell,
+    /// Part II line 5 — the 15 dividend-payer rows.
+    pub part2_rows: Vec<ScheduleBRowMap>,
+    /// L6 — add the amounts on line 5 → 1040 L3b.
+    pub line6: MoneyCell,
+    /// L7a — the foreign-account Yes/No pair.
+    pub line7a: YesNoPair,
+    /// L8 — the foreign-trust Yes/No pair.
+    pub line8: YesNoPair,
+}
+
+impl ScheduleBMap {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_B_MAP_2024).expect("bundled schedule B 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
     }
 }
 

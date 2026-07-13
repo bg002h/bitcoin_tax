@@ -10,7 +10,8 @@
 
 use btctax_core::tax::other_taxes::{form_8959_lines, form_8960_lines};
 use btctax_core::tax::printed::{
-    Schedule1Lines, Schedule2Lines, Schedule3Lines, ScheduleALines, ScheduleCLines,
+    Schedule1Lines, Schedule2Lines, Schedule3Lines, ScheduleALines, ScheduleBLines, ScheduleBRow,
+    ScheduleCLines,
 };
 use btctax_core::tax::qbi::form_8995_lines;
 use btctax_core::tax::se::SeTaxResult;
@@ -707,4 +708,182 @@ fn schedule_c_same_column_swap_fails_closed() {
     let err = fill_schedule_c_with_map(&lines, &map)
         .expect_err("a same-column swap must fail closed on the descent leg");
     assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
+}
+
+// ───────────────────────────────────── Schedule B ─────────────────────────────────────────────
+
+fn row(payer: &str, amount: Usd) -> ScheduleBRow {
+    ScheduleBRow {
+        payer: payer.to_string(),
+        amount,
+    }
+}
+
+fn sch_b(part1: Vec<ScheduleBRow>, part2: Vec<ScheduleBRow>, fa: bool, ft: bool) -> ScheduleBLines {
+    let line2: Usd = part1.iter().map(|r| r.amount).sum();
+    let line6: Usd = part2.iter().map(|r| r.amount).sum();
+    ScheduleBLines {
+        part1_rows: part1,
+        line2,
+        line4: line2,
+        part2_rows: part2,
+        line6,
+        foreign_accounts_7a: fa,
+        foreign_trust_8: ft,
+    }
+}
+
+/// Schedule B lists its payers by name and totals the PRINTED rows, so the form adds up against its
+/// own list. Row 1 of BOTH tables has a different parent subform than every other row, so this also
+/// pins that those two FQNs resolve.
+#[test]
+fn schedule_b_lists_payers_and_totals_the_printed_rows() {
+    let lines = sch_b(
+        vec![row("Ally Bank", dec!(1200)), row("US Treasury", dec!(800))],
+        vec![
+            row("Vanguard VTSAX", dec!(3400)),
+            row("Fidelity FXAIX", dec!(600)),
+        ],
+        false,
+        false,
+    );
+    let pdf = btctax_forms::fill_schedule_b(&lines, 2024).unwrap();
+    let g = |fqn: &str| tv(&pdf, fqn);
+
+    // ★ Part I row 1's payer lives under Line1_ReadOrder — a parent no other row has.
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].Line1_ReadOrder[0].f1_03[0]").as_deref(),
+        Some("Ally Bank")
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_04[0]").as_deref(),
+        Some("1200")
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_05[0]").as_deref(),
+        Some("US Treasury")
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_06[0]").as_deref(),
+        Some("800")
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_31[0]").as_deref(),
+        Some("2000")
+    ); // L2
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_33[0]").as_deref(),
+        Some("2000")
+    ); // L4 → 1040 2b
+
+    // ★ Part II row 1's payer lives under ReadOrderControl — a DIFFERENT wrapper again.
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].ReadOrderControl[0].f1_34[0]").as_deref(),
+        Some("Vanguard VTSAX")
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_35[0]").as_deref(),
+        Some("3400")
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_36[0]").as_deref(),
+        Some("Fidelity FXAIX")
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_64[0]").as_deref(),
+        Some("4000")
+    ); // L6 → 1040 3b
+
+    // Unused rows stay blank; line 3 (Form 8815) is unmodeled and stays blank.
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_07[0]"),
+        None,
+        "unused row stays blank"
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_32[0]"),
+        None,
+        "L3 (Form 8815) is unmodeled"
+    );
+}
+
+/// ★ Part III is TRANSCRIBED, never decided. Lines 7a and 8 carry the filer's OWN answers (the return
+/// is refused upstream if they were left unanswered). The unnumbered FBAR sub-question under 7a
+/// (`c1_2`) and line 7b's country list are left BLANK: v1 has no input for them, and the FbarFinCen
+/// advisory tells the filer in terms that they must decide it themselves. An incomplete Part III is
+/// the honest output; a guessed one would not be.
+#[test]
+fn schedule_b_part3_transcribes_the_filers_own_answers_and_never_guesses_the_fbar() {
+    let yes = btctax_forms::fill_schedule_b(&sch_b(vec![], vec![], true, false), 2024).unwrap();
+    let doc = load(&yes).unwrap();
+    let idx = index(&collect_fields(&doc).unwrap());
+
+    // 7a = YES (c1_1[0], on-state "1"); 8 = NO (c1_3[1], on-state "2").
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_1[0]"].id).as_deref(),
+        Some("1"),
+        "7a answered YES"
+    );
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_3[1]"].id).as_deref(),
+        Some("2"),
+        "8 answered NO"
+    );
+    // ★ The FBAR sub-question is NEVER answered — neither box is set.
+    for fbar in ["c1_2[0]", "c1_2[1]"] {
+        let fqn = format!("topmostSubform[0].Page1[0].{fbar}");
+        assert_eq!(
+            checkbox_on(&doc, idx[fqn.as_str()].id),
+            None,
+            "{fqn}: v1 never answers the FBAR sub-question"
+        );
+    }
+    // …nor line 7b's country list (free text, NOT a Yes/No pair).
+    assert_eq!(tv(&yes, "topmostSubform[0].Page1[0].f1_65[0]"), None);
+
+    // The opposite answers flip the boxes — the filer's declaration is what lands on the form.
+    let no = btctax_forms::fill_schedule_b(&sch_b(vec![], vec![], false, true), 2024).unwrap();
+    let doc2 = load(&no).unwrap();
+    let idx2 = index(&collect_fields(&doc2).unwrap());
+    assert_eq!(
+        checkbox_on(&doc2, idx2["topmostSubform[0].Page1[0].c1_1[1]"].id).as_deref(),
+        Some("2"),
+        "7a answered NO"
+    );
+    assert_eq!(
+        checkbox_on(&doc2, idx2["topmostSubform[0].Page1[0].c1_3[0]"].id).as_deref(),
+        Some("1"),
+        "8 answered YES"
+    );
+}
+
+/// ★ Overflow FAILS CLOSED. Part I holds 14 payers and Part II 15 (the asymmetry is real). Truncating
+/// a longer list would leave a form whose printed rows do not add up to its own line 2 — or, if the
+/// total were taken from the visible rows instead, a return that UNDERSTATES interest income.
+#[test]
+fn schedule_b_refuses_more_payers_than_the_form_has_rows() {
+    let fifteen: Vec<ScheduleBRow> = (0..15)
+        .map(|i| row(&format!("Bank {i}"), dec!(100)))
+        .collect();
+    let err = btctax_forms::fill_schedule_b(&sch_b(fifteen, vec![], false, false), 2024)
+        .expect_err("15 interest payers must not fit in 14 rows");
+    assert!(format!("{err}").contains("Part I holds 14"), "{err}");
+
+    // …but exactly 14 fits, and 15 dividend payers fit Part II (which genuinely has one more row).
+    let fourteen: Vec<ScheduleBRow> = (0..14)
+        .map(|i| row(&format!("Bank {i}"), dec!(100)))
+        .collect();
+    let fifteen_div: Vec<ScheduleBRow> = (0..15)
+        .map(|i| row(&format!("Fund {i}"), dec!(200)))
+        .collect();
+    let pdf = btctax_forms::fill_schedule_b(&sch_b(fourteen, fifteen_div, false, false), 2024)
+        .expect("14 interest + 15 dividend payers is exactly the form's capacity");
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_31[0]").as_deref(),
+        Some("1400")
+    ); // L2
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_64[0]").as_deref(),
+        Some("3000")
+    ); // L6
 }

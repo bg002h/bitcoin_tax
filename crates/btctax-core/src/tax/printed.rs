@@ -143,6 +143,97 @@ pub fn schedule_1_lines(ar: &AbsoluteReturn) -> Option<Schedule1Lines> {
     })
 }
 
+/// One listed payer row on Schedule B — the payer's name and the amount they paid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleBRow {
+    /// The payer's name, as entered (Schedule B is a *list*: the IRS wants to see who paid).
+    pub payer: String,
+    /// The amount, rounded at the line.
+    pub amount: Usd,
+}
+
+/// The printable **Schedule B (Interest and Ordinary Dividends)** line chain.
+///
+/// Schedule B is a **listing** schedule: Part I names every interest payer and Part II every dividend
+/// payer. The totals sum the PRINTED row amounts, so the form cross-foots against its own list.
+///
+/// **Part III is TRANSCRIBED, never decided.** Lines 7a (a financial interest in a foreign account)
+/// and 8 (a distribution from a foreign trust) carry the filer's OWN declared answers — `screen_inputs`
+/// REFUSES the return if they were left unanswered, precisely so that btctax never has to guess. The
+/// unnumbered FBAR sub-question under 7a, and line 7b's country list, are left BLANK: v1 has no input
+/// for them, and the `FbarFinCen` advisory tells the filer in terms that they must decide it
+/// themselves. An incomplete Part III is the honest output here; a guessed one would not be.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleBLines {
+    /// L1 — the listed interest payers (Part I).
+    pub part1_rows: Vec<ScheduleBRow>,
+    /// L2 — add the amounts on **printed** line 1.
+    pub line2: Usd,
+    /// L4 — line 2 − line 3 (Form 8815 excludable savings-bond interest, unmodeled ⇒ blank)
+    /// ⇒ `= line2` → 1040 **L2b**.
+    pub line4: Usd,
+    /// L5 — the listed dividend payers (Part II).
+    pub part2_rows: Vec<ScheduleBRow>,
+    /// L6 — add the amounts on **printed** line 5 → 1040 **L3b**.
+    pub line6: Usd,
+    /// L7a — "did you have a financial interest in… a foreign country?" — the filer's own answer.
+    pub foreign_accounts_7a: bool,
+    /// L8 — "did you receive a distribution from… a foreign trust?" — the filer's own answer.
+    pub foreign_trust_8: bool,
+}
+
+/// Derive the printed Schedule B chain from the filer's 1099s. Returns `None` when Schedule B is not
+/// required ([`crate::tax::return_1040::schedule_b_files`] — interest or dividends over $1,500, or a
+/// declared foreign account).
+///
+/// A payer with nothing to report is not listed: a zero row would name someone on a federal form for
+/// no reason.
+///
+/// # Panics
+/// Never. Part III's answers are `Option<bool>` on the inputs, but `screen_inputs` refuses the return
+/// when either is unanswered, so by the time a return is assembled they are both known; `unwrap_or`
+/// defaults defensively to `false` rather than panicking on a caller that skipped the screen.
+pub fn schedule_b_lines(ri: &crate::tax::return_inputs::ReturnInputs) -> Option<ScheduleBLines> {
+    if !crate::tax::return_1040::schedule_b_files(ri) {
+        return None;
+    }
+
+    // Part I — every 1099-INT that paid taxable interest (box 1 + box 3 treasury).
+    let part1_rows: Vec<ScheduleBRow> = ri
+        .int_1099
+        .iter()
+        .map(|i| ScheduleBRow {
+            payer: i.payer.clone(),
+            amount: round_dollar(i.box1_interest + i.box3_treasury_interest),
+        })
+        .filter(|r| r.amount > Usd::ZERO)
+        .collect();
+    let line2 = part1_rows.iter().map(|r| r.amount).sum(); // ★ sums the PRINTED rows
+    let line4 = line2; // − line 3 (Form 8815), unmodeled ⇒ blank
+
+    // Part II — every 1099-DIV that paid ordinary dividends (box 1a, which INCLUDES the qualified 1b).
+    let part2_rows: Vec<ScheduleBRow> = ri
+        .div_1099
+        .iter()
+        .map(|d| ScheduleBRow {
+            payer: d.payer.clone(),
+            amount: round_dollar(d.box1a_ordinary),
+        })
+        .filter(|r| r.amount > Usd::ZERO)
+        .collect();
+    let line6 = part2_rows.iter().map(|r| r.amount).sum(); // ★ sums the PRINTED rows
+
+    Some(ScheduleBLines {
+        part1_rows,
+        line2,
+        line4,
+        part2_rows,
+        line6,
+        foreign_accounts_7a: ri.foreign_accounts.unwrap_or(false),
+        foreign_trust_8: ri.foreign_trust.unwrap_or(false),
+    })
+}
+
 /// The printable **Schedule C (Profit or Loss From Business)** line chain — the crypto trade or
 /// business.
 ///
