@@ -11,7 +11,7 @@
 use btctax_core::tax::other_taxes::{form_8959_lines, form_8960_lines};
 use btctax_core::tax::printed::{
     Schedule1Lines, Schedule2Lines, Schedule3Lines, ScheduleALines, ScheduleBLines, ScheduleBRow,
-    ScheduleCLines,
+    ScheduleCLines, ScheduleDLines, ScheduleDRouting,
 };
 use btctax_core::tax::qbi::form_8995_lines;
 use btctax_core::tax::se::SeTaxResult;
@@ -886,4 +886,295 @@ fn schedule_b_refuses_more_payers_than_the_form_has_rows() {
         tv(&pdf, "topmostSubform[0].Page1[0].f1_64[0]").as_deref(),
         Some("3000")
     ); // L6
+}
+
+// ────────────────────────── Schedule D (the FULL-RETURN fill) ─────────────────────────────────
+
+fn sd(
+    st: Usd,
+    lt: Usd,
+    st_cf: Usd,
+    lt_cf: Usd,
+    distr: Usd,
+    routing: ScheduleDRouting,
+) -> ScheduleDLines {
+    ScheduleDLines {
+        line3_d: dec!(50000),
+        line3_e: dec!(45000),
+        line3_h: st + st_cf,
+        line6: st_cf,
+        line7: st,
+        line10_d: dec!(80000),
+        line10_e: dec!(70000),
+        line10_h: lt + lt_cf - distr,
+        line13: distr,
+        line14: lt_cf,
+        line15: lt,
+        line16: st + lt,
+        routing,
+    }
+}
+
+/// ★ The three lines the CRYPTO-SLICE Schedule D omits — 13 (1099-DIV box-2a capital-gain
+/// distributions) and 6/14 (capital-loss carryovers) — all appear on the full-return form. Their
+/// absence is exactly the defect the P5-C1 refusal covers, and this filler is what retires it.
+/// Lines 6 and 14 are PAREN boxes ⇒ positive magnitudes.
+#[test]
+fn schedule_d_full_fills_the_lines_the_crypto_slice_omits() {
+    let lines = sd(
+        dec!(1000),
+        dec!(15000),
+        dec!(2000), // line 6 — ST carryover
+        dec!(500),  // line 14 — LT carryover
+        dec!(3000), // line 13 — capital gain distributions
+        ScheduleDRouting::BothGains,
+    );
+    let pdf = btctax_forms::fill_schedule_d_full(&lines, 2024).unwrap();
+    let g = |fqn: &str| tv(&pdf, fqn);
+
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_21[0]").as_deref(),
+        Some("2000")
+    ); // L6  ★ PAREN
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_41[0]").as_deref(),
+        Some("3000")
+    ); // L13
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_42[0]").as_deref(),
+        Some("500")
+    ); // L14 ★ PAREN
+    assert_eq!(
+        g("topmostSubform[0].Page2[0].f2_01[0]").as_deref(),
+        Some("16000")
+    ); // L16
+
+    // Neither paren cell may carry a minus sign — the form supplies it.
+    for paren in ["f1_21[0]", "f1_42[0]"] {
+        let v = g(&format!("topmostSubform[0].Page1[0].{paren}")).unwrap();
+        assert!(
+            !v.starts_with('-'),
+            "{paren} renders inside ( ) — never a minus sign: {v}"
+        );
+    }
+}
+
+/// ★ SPEC §7.2 path 1 — BOTH GAINS: line 17 = Yes, lines 18/19 = 0, line 20 = Yes → QDCGT.
+/// Lines 21 and 22 are NOT completed, and the KAT asserts they are genuinely untouched.
+#[test]
+fn schedule_d_full_routing_both_gains() {
+    let pdf = btctax_forms::fill_schedule_d_full(
+        &sd(
+            dec!(5000),
+            dec!(20000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            ScheduleDRouting::BothGains,
+        ),
+        2024,
+    )
+    .unwrap();
+    let doc = load(&pdf).unwrap();
+    let idx = index(&collect_fields(&doc).unwrap());
+
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page2[0].c2_1[0]"].id).as_deref(),
+        Some("1"),
+        "L17 = Yes"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page2[0].f2_02[0]").as_deref(),
+        Some("0"),
+        "L18 = 0"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page2[0].f2_03[0]").as_deref(),
+        Some("0"),
+        "L19 = 0"
+    );
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page2[0].c2_2[0]"].id).as_deref(),
+        Some("1"),
+        "L20 = Yes → QDCGT"
+    );
+    // 21 and 22 are NOT completed on this branch.
+    assert_eq!(
+        tv(
+            &pdf,
+            "topmostSubform[0].Page2[0].TagCorrectingSubform[0].f2_04[0]"
+        ),
+        None,
+        "L21 untouched"
+    );
+    for c in ["c2_3[0]", "c2_3[1]"] {
+        let fqn = format!("topmostSubform[0].Page2[0].{c}");
+        assert_eq!(
+            checkbox_on(&doc, idx[fqn.as_str()].id),
+            None,
+            "L22 untouched"
+        );
+    }
+}
+
+/// ★ SPEC §7.2 path 2 — SHORT-TERM GAIN / LONG-TERM LOSS (the common crypto year): line 17 = No ⇒
+/// skip 18–21 ⇒ line 22, which routes to QDCGT iff there are qualified dividends.
+#[test]
+fn schedule_d_full_routing_short_gain_long_loss() {
+    let pdf = btctax_forms::fill_schedule_d_full(
+        &sd(
+            dec!(30000),
+            dec!(-4000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            ScheduleDRouting::ShortGainLongLoss { line22_yes: true },
+        ),
+        2024,
+    )
+    .unwrap();
+    let doc = load(&pdf).unwrap();
+    let idx = index(&collect_fields(&doc).unwrap());
+
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page2[0].c2_1[1]"].id).as_deref(),
+        Some("2"),
+        "L17 = No"
+    );
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page2[0].c2_3[0]"].id).as_deref(),
+        Some("1"),
+        "L22 = Yes"
+    );
+    // 18, 19, 20 and 21 are SKIPPED — writing a 0 into 18/19 here would answer a question the form
+    // told the filer to skip.
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page2[0].f2_02[0]"),
+        None,
+        "L18 skipped"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page2[0].f2_03[0]"),
+        None,
+        "L19 skipped"
+    );
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page2[0].c2_2[0]"].id),
+        None,
+        "L20 skipped"
+    );
+    assert_eq!(
+        tv(
+            &pdf,
+            "topmostSubform[0].Page2[0].TagCorrectingSubform[0].f2_04[0]"
+        ),
+        None,
+        "L21 skipped"
+    );
+}
+
+/// ★ SPEC §7.2 path 3 — NET LOSS: skip 17–20; line 21 carries the §1211(b) offset as a POSITIVE
+/// MAGNITUDE (the form pre-prints the parentheses); line 22 is still answered.
+#[test]
+fn schedule_d_full_routing_net_loss() {
+    let pdf = btctax_forms::fill_schedule_d_full(
+        &sd(
+            dec!(-10000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            ScheduleDRouting::NetLoss {
+                line21: dec!(3000),
+                line22_yes: false,
+            },
+        ),
+        2024,
+    )
+    .unwrap();
+    let doc = load(&pdf).unwrap();
+    let idx = index(&collect_fields(&doc).unwrap());
+
+    let l21 = tv(
+        &pdf,
+        "topmostSubform[0].Page2[0].TagCorrectingSubform[0].f2_04[0]",
+    )
+    .unwrap();
+    assert_eq!(l21, "3000", "the §1211(b) cap");
+    assert!(
+        !l21.starts_with('-'),
+        "★ L21 renders inside ( ) — a minus here would print a GAIN"
+    );
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page2[0].c2_3[1]"].id).as_deref(),
+        Some("2"),
+        "L22 = No"
+    );
+    // 17 through 20 are skipped.
+    for c in ["c2_1[0]", "c2_1[1]", "c2_2[0]", "c2_2[1]"] {
+        let fqn = format!("topmostSubform[0].Page2[0].{c}");
+        assert_eq!(
+            checkbox_on(&doc, idx[fqn.as_str()].id),
+            None,
+            "{fqn} skipped on a net loss"
+        );
+    }
+}
+
+/// ★ SPEC §7.2 path 4 — ZERO: 1040 line 7 is -0-; skip 17–21; line 22 is still answered. The branch
+/// easiest to forget, and the one that silently routes the whole tax computation if it is wrong.
+#[test]
+fn schedule_d_full_routing_zero() {
+    let pdf = btctax_forms::fill_schedule_d_full(
+        &sd(
+            dec!(4000),
+            dec!(-4000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            ScheduleDRouting::Zero { line22_yes: true },
+        ),
+        2024,
+    )
+    .unwrap();
+    let doc = load(&pdf).unwrap();
+    let idx = index(&collect_fields(&doc).unwrap());
+
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page2[0].f2_01[0]").as_deref(),
+        Some("0"),
+        "L16 = 0"
+    );
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page2[0].c2_3[0]"].id).as_deref(),
+        Some("1"),
+        "L22 = Yes"
+    );
+    for c in ["c2_1[0]", "c2_1[1]", "c2_2[0]", "c2_2[1]"] {
+        let fqn = format!("topmostSubform[0].Page2[0].{c}");
+        assert_eq!(
+            checkbox_on(&doc, idx[fqn.as_str()].id),
+            None,
+            "{fqn} skipped when L16 = 0"
+        );
+    }
+}
+
+/// The paren guard fails closed if a negative ever reaches line 6/14/21 — the thing standing between
+/// a future refactor ("a carryover is a loss, so it's negative") and a filed form that reads a capital
+/// LOSS carryover as a GAIN.
+#[test]
+fn schedule_d_full_refuses_a_negative_in_a_parenthesized_cell() {
+    let mut lines = sd(
+        dec!(1000),
+        dec!(15000),
+        dec!(2000),
+        dec!(500),
+        dec!(3000),
+        ScheduleDRouting::BothGains,
+    );
+    lines.line14 = dec!(-500);
+    let err = fill_schedule_d_full_with_map(&lines, &btctax_forms::ScheduleDMap::ty2024())
+        .expect_err("a negative in a paren box must fail closed");
+    assert!(format!("{err}").contains("line 14"), "{err}");
 }

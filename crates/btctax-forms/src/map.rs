@@ -431,6 +431,34 @@ pub struct ScheduleDMap {
     pub line15_h: String,
     /// Line 16 — total (line 7 + line 15), column h, page 2.
     pub line16_h: String,
+    /// L6 — short-term capital loss carryover. **PAREN box ⇒ positive magnitude.** Full-return only
+    /// (`None` on the 2017/2025 maps, which serve the crypto-slice fill).
+    #[serde(default)]
+    pub line6: Option<MoneyCell>,
+    /// L13 — capital gain distributions (Σ 1099-DIV box 2a). Full-return only.
+    #[serde(default)]
+    pub line13: Option<MoneyCell>,
+    /// L14 — long-term capital loss carryover. **PAREN box ⇒ positive magnitude.** Full-return only.
+    #[serde(default)]
+    pub line14: Option<MoneyCell>,
+    /// L18 — 28%-Rate Gain Worksheet (always 0; a nonzero amount is refused upstream). Full-return only.
+    #[serde(default)]
+    pub line18: Option<MoneyCell>,
+    /// L19 — Unrecaptured §1250 Gain Worksheet (always 0; refused upstream). Full-return only.
+    #[serde(default)]
+    pub line19: Option<MoneyCell>,
+    /// L21 — the §1211(b) allowed loss offset. **PAREN box ⇒ positive magnitude.** Full-return only.
+    #[serde(default)]
+    pub line21: Option<MoneyCell>,
+    /// L17 — "Are lines 15 and 16 both gains?" Full-return only.
+    #[serde(default)]
+    pub line17: Option<YesNoPair>,
+    /// L20 — "Are lines 18 and 19 both zero or blank…?" Full-return only.
+    #[serde(default)]
+    pub line20: Option<YesNoPair>,
+    /// L22 — "Do you have qualified dividends on Form 1040, line 3a?" Full-return only.
+    #[serde(default)]
+    pub line22: Option<YesNoPair>,
     /// The Part I amount-column subform token used to re-derive the geometry bands — **per-year map
     /// config** (`Table_PartI` for 2024/2025, **`TablePartI`** (no underscore) for the 2017 form).
     #[serde(default = "default_sched_d_token")]

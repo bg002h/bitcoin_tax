@@ -32,6 +32,7 @@ mod schedule_a;
 mod schedule_b;
 mod schedule_c;
 mod schedule_d;
+mod schedule_d_full;
 mod schedule_se;
 mod verify;
 mod watermark;
@@ -213,6 +214,24 @@ pub fn fill_schedule_a(
     schedule_a::fill_schedule_a_with_map(lines, &map)
 }
 
+/// Fill the **FULL-RETURN Schedule D** for `year` from the core-derived printed chain
+/// (`btctax_core::tax::printed::schedule_d_lines`), including Part III's SPEC §7.2 routing.
+///
+/// This is NOT [`fill_schedule_d`], which is the **crypto-slice** fill: that one writes only lines
+/// 3/7/10/15/16 from the ledger totals, with no line 13 (1099-DIV box-2a capital-gain distributions)
+/// and no lines 6/14 (capital-loss carryovers). For a crypto-only year that is complete and correct.
+/// For a full return it would be a complete-LOOKING form with income missing.
+///
+/// FAILS CLOSED if a parenthesized cell (line 6/14/21) carries a negative: the form pre-prints the
+/// parentheses, so a negative renders as a POSITIVE number — turning a capital loss into a gain.
+pub fn fill_schedule_d_full(
+    lines: &btctax_core::tax::printed::ScheduleDLines,
+    year: i32,
+) -> Result<Vec<u8>, FormsError> {
+    let map = ScheduleDMap::for_year(year)?;
+    schedule_d_full::fill_schedule_d_full_with_map(lines, &map)
+}
+
 /// Fill **Schedule B** (Interest and Ordinary Dividends) for `year` from the core-derived printed
 /// chain (`btctax_core::tax::printed::schedule_b_lines`, which returns `None` when Schedule B is not
 /// required — interest and dividends both at or under $1,500 and no declared foreign account).
@@ -302,6 +321,7 @@ pub mod testonly {
     pub use crate::schedule_b::fill_schedule_b_with_map;
     pub use crate::schedule_c::fill_schedule_c_with_map;
     pub use crate::schedule_d::fill_schedule_d_totals;
+    pub use crate::schedule_d_full::fill_schedule_d_full_with_map;
     pub use crate::schedule_se::fill_schedule_se_with_map;
     pub use crate::verify::{
         no_unmapped_filled, topmost_yes_no_pair, verify_8949, verify_flat, FlatPlacement, Geo,
