@@ -863,6 +863,10 @@ pub struct AbsoluteReturn {
     /// (MAX = 6.2% × the year's SS wage base), summed over taxpayer + spouse (never pooled). A single
     /// employer over-withholding refuses upstream (`SingleEmployerExcessSs`), so each box4 ≤ MAX here.
     pub excess_social_security: Usd,
+    /// 1040 **L25a** — federal income tax withheld from Form(s) W-2 (Σ box 2).
+    pub withholding_25a: Usd,
+    /// 1040 **L25b** — federal income tax withheld from Form(s) 1099 (Σ box 4, across INT/DIV/G).
+    pub withholding_25b: Usd,
     /// 1040 **L25** — total withholding = 25a (Σ W-2 box2) + 25b (Σ 1099 box4) + 25c (Form 8959 Part V +
     /// other withholding).
     pub total_withholding: Usd,
@@ -1156,6 +1160,8 @@ pub fn assemble_absolute(
         schedule_2_other_taxes,
         total_tax,
         excess_social_security,
+        withholding_25a: wh_25a,
+        withholding_25b: wh_25b,
         total_withholding,
         total_payments,
         overpayment_refund,

@@ -143,6 +143,220 @@ pub fn schedule_1_lines(ar: &AbsoluteReturn) -> Option<Schedule1Lines> {
     })
 }
 
+/// The printable **Form 1040** line chain — the return itself.
+///
+/// **★ Every line that comes from a schedule takes that schedule's PRINTED figure**, never a
+/// re-rounding of the exact-cents computation: line 2b is Schedule B's printed line 4, line 8 is
+/// Schedule 1's printed line 10, line 12 is Schedule A's printed line 17 (when itemizing), line 13 is
+/// Form 8995's printed line 15, line 20 is Schedule 3's printed line 8, line 23 is Schedule 2's
+/// printed line 21, line 25c is Form 8959's printed line 24. Take the exact figure instead and the
+/// 1040 disagrees with its own attachments by a dollar, and the filed return does not tie out. This
+/// is why the builder takes every upstream chain as an argument rather than reaching into
+/// `AbsoluteReturn` for the totals.
+///
+/// **Line 7 is the one signed cell**, and it is signed with a LEADING MINUS, not parentheses (SPEC
+/// §3.2) — unlike Schedule D's own lines 6/14/21, which are parenthesized boxes carrying magnitudes.
+/// On a net-loss year it carries `−(Schedule D line 21)`, the §1211(b)-limited amount, not the full
+/// loss.
+///
+/// **Conservative omissions print as absent, not zero, where the form allows** — but line 19 (the
+/// CTC/ODC) is a computed credit line the form expects, so it prints `0` with the `CtcOdcOmitted`
+/// advisory carrying the news that the filer may be owed more.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Form1040Lines {
+    /// L1a / L1z — wages (Σ W-2 box 1). v1 has no other line-1 component, so 1z = 1a.
+    pub line1z: Usd,
+    /// L2b — taxable interest: **Schedule B's printed line 4** when Schedule B files, else the sum.
+    pub line2b: Usd,
+    /// L3a — qualified dividends (Σ 1099-DIV box 1b; the preferential slice).
+    pub line3a: Usd,
+    /// L3b — ordinary dividends: **Schedule B's printed line 6** when Schedule B files, else the sum.
+    /// This is the FULL box-1a amount, which INCLUDES the qualified subset on 3a.
+    pub line3b: Usd,
+    /// L7 — capital gain or (loss): **Schedule D's printed line 16**, or on a net-loss year the
+    /// §1211(b)-limited `−(Schedule D line 21)`. Signed with a **leading minus**.
+    pub line7: Usd,
+    /// L8 — **Schedule 1's printed line 10** (additional income).
+    pub line8: Usd,
+    /// L9 — total income = add **printed** 1z, 2b, 3b, 7 and 8.
+    pub line9: Usd,
+    /// L10 — **Schedule 1's printed line 26** (adjustments).
+    pub line10: Usd,
+    /// L11 — **AGI** = printed 9 − printed 10.
+    pub line11: Usd,
+    /// L12 — the deduction actually claimed: **Schedule A's printed line 17** when itemizing, else the
+    /// §63 standard deduction.
+    pub line12: Usd,
+    /// L13 — **Form 8995's printed line 15** (the §199A QBI deduction).
+    pub line13: Usd,
+    /// L14 — add **printed** 12 and 13.
+    pub line14: Usd,
+    /// L15 — **taxable income** = printed 11 − printed 14, floored at 0.
+    pub line15: Usd,
+    /// L16 — the regular tax (Tax Table / TCW / QDCGT, per `method.rs`).
+    pub line16: Usd,
+    /// L17 — **Schedule 2's printed line 3** (Part I). Always 0 in v1 — see [`Schedule2Lines`].
+    pub line17: Usd,
+    /// L18 — add **printed** 16 and 17.
+    pub line18: Usd,
+    /// L19 — CTC / credit for other dependents. **Always 0** (a §3.4 conservative omission; the
+    /// `CtcOdcOmitted` advisory tells the filer their tax is overstated).
+    pub line19: Usd,
+    /// L20 — **Schedule 3's printed line 8** (nonrefundable credits: the FTC).
+    pub line20: Usd,
+    /// L21 — add **printed** 19 and 20.
+    pub line21: Usd,
+    /// L22 — printed 18 − printed 21, floored at 0.
+    pub line22: Usd,
+    /// L23 — **Schedule 2's printed line 21** (other taxes).
+    pub line23: Usd,
+    /// L24 — **TOTAL TAX** = add **printed** 22 and 23.
+    pub line24: Usd,
+    /// L25a — federal income tax withheld from Form(s) W-2 (Σ box 2).
+    pub line25a: Usd,
+    /// L25b — withheld from Form(s) 1099 (Σ box 4).
+    pub line25b: Usd,
+    /// L25c — withheld from other forms: **Form 8959's printed line 24** (the Additional-Medicare
+    /// over-withholding credit) plus any other declared withholding.
+    pub line25c: Usd,
+    /// L25d — add **printed** 25a, 25b and 25c.
+    pub line25d: Usd,
+    /// L26 — estimated tax payments.
+    pub line26: Usd,
+    /// L31 — **Schedule 3's printed line 15** (other payments: extension + excess Social Security).
+    pub line31: Usd,
+    /// L32 — total other payments and refundable credits ⇒ `= line31` (lines 27–30 are blank: the EIC
+    /// is a §3.4 conservative omission, and the rest are unrepresentable).
+    pub line32: Usd,
+    /// L33 — **TOTAL PAYMENTS** = add **printed** 25d, 26 and 32.
+    pub line33: Usd,
+    /// L34 / L35a — the overpayment refunded. Zero when the return owes. v1 never fills the
+    /// direct-deposit block (35b–35d), so a refund arrives as a paper check — the `RefundByPaperCheck`
+    /// advisory says so.
+    pub line34: Usd,
+    /// L37 — the amount owed. Zero when the return is due a refund.
+    pub line37: Usd,
+    /// The **Digital Asset question**. `true` for any crypto disposal, income, gift or donation.
+    /// btctax never answers "No" — a "No" it cannot vouch for is worse than leaving the question to
+    /// the filer, so this is `true` or the question is left for them.
+    pub digital_asset_yes: bool,
+}
+
+/// Derive the printed Form 1040 chain. Every schedule figure is taken from that schedule's **printed**
+/// chain, so the return ties out against its own attachments.
+///
+/// `standard_or_itemized` is the deduction actually claimed (line 12): Schedule A's printed line 17 if
+/// the return itemizes, else `round_dollar` of the §63 standard deduction.
+#[allow(clippy::too_many_arguments)]
+pub fn form_1040_lines(
+    ar: &AbsoluteReturn,
+    sch_b: Option<&ScheduleBLines>,
+    sch_1: Option<&Schedule1Lines>,
+    sch_a: Option<&ScheduleALines>,
+    sch_d: &ScheduleDLines,
+    sch_2: Option<&Schedule2Lines>,
+    sch_3: Option<&Schedule3Lines>,
+    f8959: &Form8959Lines,
+    f8995: Option<&crate::tax::qbi::Form8995Lines>,
+    other_withholding: Usd,
+    estimated_payments: Usd,
+    digital_asset_yes: bool,
+) -> Form1040Lines {
+    // ── Income ──────────────────────────────────────────────────────────────────────────────────
+    let line1z = round_dollar(ar.wages);
+    // Schedule B, when it files, IS the source of 2b and 3b — take its printed totals, not a
+    // re-rounding of the exact sums, or the 1040 and its own Schedule B differ by a dollar.
+    let line2b = sch_b.map_or_else(|| round_dollar(ar.taxable_interest), |b| b.line4);
+    let line3a = round_dollar(ar.qualified_dividends);
+    let line3b = sch_b.map_or_else(|| round_dollar(ar.ordinary_dividends), |b| b.line6);
+
+    // Line 7 — signed, with a LEADING MINUS (not parentheses; SPEC §3.2). On a net-loss year it is
+    // the §1211(b)-LIMITED amount from Schedule D line 21, not the full loss.
+    let line7 = match sch_d.routing {
+        ScheduleDRouting::NetLoss { line21, .. } => -line21,
+        _ => sch_d.line16,
+    };
+
+    let line8 = sch_1.map_or(Usd::ZERO, |s| s.line10);
+    let line9 = line1z + line2b + line3b + line7 + line8; // ★ sums the PRINTED lines
+
+    // ── Adjustments → AGI ───────────────────────────────────────────────────────────────────────
+    let line10 = sch_1.map_or(Usd::ZERO, |s| s.line26);
+    let line11 = line9 - line10;
+
+    // ── Deductions → taxable income ─────────────────────────────────────────────────────────────
+    let line12 = match sch_a {
+        Some(a) => a.line17, // itemizing — Schedule A's PRINTED total
+        None => round_dollar(ar.deduction),
+    };
+    let line13 = f8995.map_or(Usd::ZERO, |q| q.line15);
+    let line14 = line12 + line13;
+    let line15 = (line11 - line14).max(Usd::ZERO);
+
+    // ── Tax → total tax ─────────────────────────────────────────────────────────────────────────
+    let line16 = round_dollar(ar.regular_tax);
+    let line17 = Usd::ZERO; // Schedule 2 Part I is blank in v1 (see Schedule2Lines)
+    let line18 = line16 + line17;
+    let line19 = Usd::ZERO; // ★ CTC/ODC — a §3.4 conservative omission (advisory fires)
+    let line20 = sch_3.map_or(Usd::ZERO, |s| s.line8);
+    let line21 = line19 + line20;
+    let line22 = (line18 - line21).max(Usd::ZERO);
+    let line23 = sch_2.map_or(Usd::ZERO, |s| s.line21);
+    let line24 = line22 + line23; // ★ TOTAL TAX, from the PRINTED lines
+
+    // ── Payments ────────────────────────────────────────────────────────────────────────────────
+    let line25a = round_dollar(ar.withholding_25a);
+    let line25b = round_dollar(ar.withholding_25b);
+    // 25c carries Form 8959's PRINTED line 24 — the Additional-Medicare over-withholding credit.
+    let line25c = f8959.line24 + round_dollar(other_withholding);
+    let line25d = line25a + line25b + line25c;
+    let line26 = round_dollar(estimated_payments);
+    let line31 = sch_3.map_or(Usd::ZERO, |s| s.line15);
+    let line32 = line31; // 27-30 blank (EIC omitted conservatively; rest unrepresentable)
+    let line33 = line25d + line26 + line32; // ★ TOTAL PAYMENTS, from the PRINTED lines
+
+    // ── Refund or owed — from the PRINTED total tax and the PRINTED total payments, so the bottom
+    //    line of the filed form is the one a reader re-adding the column arrives at.
+    let line34 = (line33 - line24).max(Usd::ZERO);
+    let line37 = (line24 - line33).max(Usd::ZERO);
+
+    Form1040Lines {
+        line1z,
+        line2b,
+        line3a,
+        line3b,
+        line7,
+        line8,
+        line9,
+        line10,
+        line11,
+        line12,
+        line13,
+        line14,
+        line15,
+        line16,
+        line17,
+        line18,
+        line19,
+        line20,
+        line21,
+        line22,
+        line23,
+        line24,
+        line25a,
+        line25b,
+        line25c,
+        line25d,
+        line26,
+        line31,
+        line32,
+        line33,
+        line34,
+        line37,
+        digital_asset_yes,
+    }
+}
+
 /// The **Schedule D Part III routing** (SPEC §7.2) — which of lines 17–22 get answered, and how.
 ///
 /// The form's Part III is a decision tree, not a column of numbers, and the four branches are
@@ -666,6 +880,8 @@ mod tests {
             tax_after_credits: z,
             total_tax: z,
             excess_social_security: excess_ss,
+            withholding_25a: z,
+            withholding_25b: z,
             total_withholding: z,
             total_payments: z,
             overpayment_refund: z,
@@ -1142,5 +1358,211 @@ mod tests {
             assert!(paren >= Usd::ZERO, "paren cells are magnitudes: {paren}");
         }
         assert_eq!(l.line16, dec!(16000)); // 1,000 + 15,000, from the PRINTED lines
+    }
+
+    /// ★ **The composition rule, end to end.** Every 1040 line that comes from a schedule must carry
+    /// that schedule's PRINTED figure, not a re-rounding of the exact-cents computation. This uses the
+    /// KAT-9 fixture, where the two genuinely differ: Form 8959's printed line 18 is 775, while
+    /// `round_dollar` of the exact total is 774. Schedule 2 line 21 must carry 775, and 1040 line 23
+    /// must carry Schedule 2's 775 — so the dollar propagates correctly all the way to TOTAL TAX.
+    /// Take the exact figure anywhere in that chain and the filed 1040 disagrees with its own
+    /// attachments.
+    #[test]
+    fn form_1040_takes_the_printed_figures_from_its_schedules() {
+        let se = SeTaxResult {
+            net_se: dec!(60097.46),
+            base: dec!(55500.00),
+            ss: dec!(0.00),
+            medicare: dec!(1609.50),
+            addl: dec!(499.50),
+            total: dec!(2109.00),
+            deductible_half: dec!(804.75),
+        };
+        let mut ar = ar_with(Some(se), Usd::ZERO, Usd::ZERO);
+        ar.wages = dec!(280500);
+        ar.regular_tax = dec!(50000);
+        ar.deduction = dec!(29200);
+
+        let f8959 = form_8959_lines(FilingStatus::Mfj, dec!(280500), Usd::ZERO, Some(&se));
+        assert_eq!(f8959.line18, dec!(775), "the printed 8959 total");
+        assert_eq!(
+            round_dollar(dec!(274.50) + dec!(499.50)),
+            dec!(774),
+            "…the exact one differs"
+        );
+
+        let s2 = schedule_2_lines(&ar, &f8959, None).unwrap();
+        assert_eq!(
+            s2.line11,
+            dec!(775),
+            "Schedule 2 L11 = the 8959's PRINTED L18"
+        );
+
+        let sd = schedule_d_lines(&ar);
+        let l = form_1040_lines(
+            &ar,
+            None,
+            None,
+            None,
+            &sd,
+            Some(&s2),
+            None,
+            &f8959,
+            None,
+            Usd::ZERO,
+            Usd::ZERO,
+            false,
+        );
+        assert_eq!(l.line23, s2.line21, "1040 L23 = Schedule 2's PRINTED L21");
+        assert_eq!(
+            l.line24,
+            l.line22 + l.line23,
+            "TOTAL TAX sums the PRINTED lines"
+        );
+        // …and 25c carries the 8959's printed line 24 (the over-withholding credit), not a re-derivation.
+        assert_eq!(l.line25c, f8959.line24);
+    }
+
+    /// The printed 1040 cross-foots: every total re-derives from the OTHER printed lines, and every
+    /// cell is a whole dollar.
+    #[test]
+    fn form_1040_printed_lines_cross_foot() {
+        let mut ar = ar_with(None, dec!(287.40), dec!(1234.56));
+        ar.wages = dec!(120000.49);
+        ar.taxable_interest = dec!(2000.50);
+        ar.ordinary_dividends = dec!(4000.50);
+        ar.qualified_dividends = dec!(3000);
+        ar.regular_tax = dec!(18000.50);
+        ar.deduction = dec!(14600);
+        ar.withholding_25a = dec!(15000.49);
+        ar.withholding_25b = dec!(300.50);
+
+        let f8959 = form_8959_lines(FilingStatus::Single, dec!(120000), dec!(1800), None);
+        let s3 = schedule_3_lines(&ar).unwrap();
+        let sd = schedule_d_lines(&ar);
+        let l = form_1040_lines(
+            &ar,
+            None,
+            None,
+            None,
+            &sd,
+            None,
+            Some(&s3),
+            &f8959,
+            None,
+            Usd::ZERO,
+            dec!(500),
+            true,
+        );
+
+        assert_eq!(
+            l.line9,
+            l.line1z + l.line2b + l.line3b + l.line7 + l.line8,
+            "L9 = 1z+2b+3b+7+8"
+        );
+        assert_eq!(l.line11, l.line9 - l.line10, "AGI = 9 − 10");
+        assert_eq!(l.line14, l.line12 + l.line13, "L14 = 12 + 13");
+        assert_eq!(
+            l.line15,
+            (l.line11 - l.line14).max(Usd::ZERO),
+            "TI = 11 − 14, floored"
+        );
+        assert_eq!(l.line18, l.line16 + l.line17, "L18 = 16 + 17");
+        assert_eq!(l.line21, l.line19 + l.line20, "L21 = 19 + 20");
+        assert_eq!(
+            l.line22,
+            (l.line18 - l.line21).max(Usd::ZERO),
+            "L22 = 18 − 21, floored"
+        );
+        assert_eq!(l.line24, l.line22 + l.line23, "TOTAL TAX = 22 + 23");
+        assert_eq!(
+            l.line25d,
+            l.line25a + l.line25b + l.line25c,
+            "L25d = 25a+25b+25c"
+        );
+        assert_eq!(
+            l.line33,
+            l.line25d + l.line26 + l.line32,
+            "TOTAL PAYMENTS = 25d + 26 + 32"
+        );
+        // At most one of refund / owed is nonzero, and they come from the PRINTED totals.
+        assert_eq!(l.line34, (l.line33 - l.line24).max(Usd::ZERO));
+        assert_eq!(l.line37, (l.line24 - l.line33).max(Usd::ZERO));
+        assert!(
+            l.line34.is_zero() || l.line37.is_zero(),
+            "cannot both owe and be refunded"
+        );
+
+        // Schedule 3's printed L8/L15 land on 1040 L20/L31.
+        assert_eq!(l.line20, s3.line8);
+        assert_eq!(l.line31, s3.line15);
+        // L19 is the CTC/ODC conservative omission — pinned to 0 (the advisory carries the news).
+        assert_eq!(l.line19, Usd::ZERO);
+
+        for cell in [
+            l.line1z, l.line2b, l.line3a, l.line3b, l.line7, l.line8, l.line9, l.line10, l.line11,
+            l.line12, l.line13, l.line14, l.line15, l.line16, l.line18, l.line21, l.line22,
+            l.line24, l.line25a, l.line25b, l.line25c, l.line25d, l.line26, l.line33,
+        ] {
+            assert_eq!(
+                cell.fract(),
+                Usd::ZERO,
+                "printed cells are whole dollars: {cell}"
+            );
+        }
+    }
+
+    /// ★ **1040 line 7 on a net-loss year.** It carries the §1211(b)-LIMITED amount — `−(Schedule D
+    /// line 21)`, i.e. −3,000 — NOT the full $10,000 loss. And it is signed with a **leading minus**,
+    /// not parentheses (SPEC §3.2), unlike Schedule D's own lines 6/14/21 which are paren boxes
+    /// carrying magnitudes. Printing the full loss would overstate the deduction more than threefold.
+    #[test]
+    fn form_1040_line7_on_a_loss_year_is_the_limited_amount_with_a_leading_minus() {
+        let mut ar = ar_sched_d(
+            dec!(-10000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(3000), // the §1211(b) allowed offset
+            Usd::ZERO,
+        );
+        ar.wages = dec!(80000);
+        ar.deduction = dec!(14600);
+
+        let sd = schedule_d_lines(&ar);
+        assert_eq!(
+            sd.line16,
+            dec!(-10000),
+            "Schedule D's own line 16 is the FULL loss"
+        );
+        assert!(
+            matches!(sd.routing, ScheduleDRouting::NetLoss { line21, .. } if line21 == dec!(3000))
+        );
+
+        let f8959 = form_8959_lines(FilingStatus::Single, dec!(80000), Usd::ZERO, None);
+        let l = form_1040_lines(
+            &ar,
+            None,
+            None,
+            None,
+            &sd,
+            None,
+            None,
+            &f8959,
+            None,
+            Usd::ZERO,
+            Usd::ZERO,
+            true,
+        );
+        assert_eq!(
+            l.line7,
+            dec!(-3000),
+            "★ the §1211-LIMITED loss, not the full −10,000"
+        );
+        assert!(
+            l.line7 < Usd::ZERO,
+            "a leading minus — 1040 L7 is not a paren box"
+        );
     }
 }
