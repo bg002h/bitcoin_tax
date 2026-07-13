@@ -53,8 +53,48 @@ pub fn import_return_inputs(
     file: &Path,
 ) -> Result<(), CliError> {
     let text = std::fs::read_to_string(file)?;
-    let ri = parse_return_inputs_toml(&text)?;
+    let mut ri = parse_return_inputs_toml(&text)?;
     let mut s = Session::open(vault, pp)?;
+    // §4 R3-M6 (Fable P4.9 r1 I2): `income import` is a whole-blob upsert, so a re-import would SILENTLY
+    // DROP a carryover that `report --write-carryover` computed onto this row. For QBI that is a fail-OPEN
+    // (losing the REIT/PTP loss carryforward OVERSTATES the QBI deduction ⇒ understates tax). So a
+    // **Computed** carryover-in SURVIVES an import that does not itself supply one; a carryover the TOML
+    // *does* supply is the user's and wins (as `User`, which the next write-back then refuses to clobber).
+    if let Some(existing) = return_inputs::get(s.conn(), year)? {
+        use btctax_core::tax::return_inputs::CarryProvenance;
+        let mut preserved: Vec<String> = Vec::new();
+        if ri.charitable_carryover_in.is_empty() {
+            let computed: Vec<_> = existing
+                .charitable_carryover_in
+                .iter()
+                .filter(|c| c.provenance == CarryProvenance::Computed)
+                .cloned()
+                .collect();
+            if !computed.is_empty() {
+                preserved.push(format!("{} charitable carryover item(s)", computed.len()));
+                ri.charitable_carryover_in = computed;
+            }
+        }
+        if ri.qbi.reit_ptp_carryforward_in.is_zero()
+            && existing.qbi.reit_ptp_carryforward_in > rust_decimal::Decimal::ZERO
+            && existing.qbi.reit_ptp_carryforward_in_provenance == CarryProvenance::Computed
+        {
+            preserved.push(format!(
+                "QBI REIT/PTP carryforward ${:.2}",
+                existing.qbi.reit_ptp_carryforward_in
+            ));
+            ri.qbi = existing.qbi.clone();
+        }
+        if !preserved.is_empty() {
+            eprintln!(
+                "note: kept the computed carryover already on the {year} row ({}) — your TOML did not \
+                 supply one. To replace it, put the carryover in the TOML (it then counts as user-entered), \
+                 or re-run `report --tax-year {} --write-carryover`.",
+                preserved.join("; "),
+                year - 1
+            );
+        }
+    }
     return_inputs::set(s.conn(), year, &ri)?;
     s.save()
 }
@@ -197,8 +237,7 @@ pub fn report_tax_year(
             tables.table_for(year),
         ) {
             (Some(ri), Some(params), Some(table)) => {
-                let ar =
-                    btctax_core::assemble_absolute(&ri, &state, params, table, year);
+                let ar = btctax_core::assemble_absolute(&ri, &state, params, table, year);
                 match btctax_core::screen_absolute(&ri, &ar, params) {
                     Some(refusal) => Some(format!(
                         "\n═══ Absolute filed return (Form 1040) — tax year {year} ═══\n  \
@@ -320,7 +359,8 @@ pub fn write_back_carryover(
     let (_events, state, cfg) = s.load_events_and_project()?;
     let tables = BundledTaxTables::load();
     let fr_tables = BundledFullReturnTables::load();
-    let (Some(params), Some(table)) = (fr_tables.full_return_for(year), tables.table_for(year)) else {
+    let (Some(params), Some(table)) = (fr_tables.full_return_for(year), tables.table_for(year))
+    else {
         return Err(CliError::Usage(format!(
             "no full-return tables for {year} — carryover write-back needs a supported tax year (TY2024)"
         )));
@@ -334,7 +374,9 @@ pub fn write_back_carryover(
         Some(params),
         Some(table),
     )? {
-        crate::resolve::ProfileOutcome::Uncomputable { detail } => return Err(CliError::Usage(detail)),
+        crate::resolve::ProfileOutcome::Uncomputable { detail } => {
+            return Err(CliError::Usage(detail))
+        }
         crate::resolve::ProfileOutcome::Ready { provenance, .. } => provenance,
     };
     if provenance != crate::resolve::Provenance::ReturnInputs {
@@ -352,8 +394,22 @@ pub fn write_back_carryover(
             refusal.reason, refusal.detail
         )));
     }
-    let next = crate::return_inputs::get(s.conn(), year + 1)?.unwrap_or_default();
-    let updated = btctax_core::apply_carryover_writeback(&ar, next, force).map_err(CliError::Usage)?;
+    // SPEC §4 R3-M6 writes the carryover "as year (Y+1)'s `*_carryover_in` **on that row**" — the row must
+    // ALREADY exist. Fabricating one would put a `ReturnInputs` row at the TOP of the §4.12 precedence
+    // ladder for a year v1 has no full-return tables for (Y+1 is always 2025 in v1), which fails closed and
+    // would make that year uncomputable — shadowing a stored `TaxProfile` the user was planning with, and
+    // blocking `tax-profile --year Y+1` via the D-4 guard (Fable P4.9 r1 I1).
+    let next = crate::return_inputs::get(s.conn(), year + 1)?.ok_or_else(|| {
+        CliError::Usage(format!(
+            "year {next} has no full-return inputs yet — the carryover is written onto that row, so import \
+             it first (`income import --year {next} --file <toml>`) and then re-run `--write-carryover`. \
+             (Creating the row here would shadow any stored tax-profile for {next} and make it uncomputable \
+             in this version, which supports full returns for TY2024 only.)",
+            next = year + 1
+        ))
+    })?;
+    let updated =
+        btctax_core::apply_carryover_writeback(&ar, next, force).map_err(CliError::Usage)?;
     crate::return_inputs::set(s.conn(), year + 1, &updated)?;
     s.save()?;
     Ok(format!(

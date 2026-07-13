@@ -573,7 +573,10 @@ fn report_tax_year_with_return_inputs_for_unsupported_year_refuses_with_income_c
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap_err();
     match err {
         btctax_cli::CliError::Usage(msg) => {
-            assert!(msg.contains("full-return"), "message should explain why: {msg}");
+            assert!(
+                msg.contains("full-return"),
+                "message should explain why: {msg}"
+            );
             assert!(
                 msg.contains("income clear --year 2025"),
                 "message must point at the working recovery command: {msg}"
@@ -658,10 +661,18 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
     match err {
         btctax_cli::CliError::Usage(msg) => {
-            assert!(msg.contains("Schedule C"), "should name the missing Schedule C: {msg}");
-            assert!(msg.contains("income clear --year 2024"), "recovery hint: {msg}");
+            assert!(
+                msg.contains("Schedule C"),
+                "should name the missing Schedule C: {msg}"
+            );
+            assert!(
+                msg.contains("income clear --year 2024"),
+                "recovery hint: {msg}"
+            );
         }
-        other => panic!("expected a Usage refusal for business-income-without-Schedule-C, got {other:?}"),
+        other => {
+            panic!("expected a Usage refusal for business-income-without-Schedule-C, got {other:?}")
+        }
     }
 }
 
@@ -1444,14 +1455,26 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
         cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
     let dual = dual.expect("a ReturnInputs-provenance year must produce the §6 dual report");
     // Absolute filed-return lines.
-    assert!(dual.contains("Absolute filed return (Form 1040) — tax year 2024"), "{dual}");
+    assert!(
+        dual.contains("Absolute filed return (Form 1040) — tax year 2024"),
+        "{dual}"
+    );
     assert!(dual.contains("TOTAL TAX (L24)"), "{dual}");
-    assert!(dual.contains("90000.00"), "AGI = 80,000 wages + 10,000 LTCG:\n{dual}");
+    assert!(
+        dual.contains("90000.00"),
+        "AGI = 80,000 wages + 10,000 LTCG:\n{dual}"
+    );
     // §4.12 provenance printed.
     assert!(dual.contains("Profile source: ReturnInputs"), "{dual}");
     // §6 never-reconcile labels + both figures side-by-side.
-    assert!(dual.contains("DIFFERENT questions") && dual.contains("NOT reconciled"), "{dual}");
-    assert!(dual.contains("Absolute TOTAL TAX") && dual.contains("DELTA"), "{dual}");
+    assert!(
+        dual.contains("DIFFERENT questions") && dual.contains("NOT reconciled"),
+        "{dual}"
+    );
+    assert!(
+        dual.contains("Absolute TOTAL TAX") && dual.contains("DELTA"),
+        "{dual}"
+    );
 
     // A stored-profile (non-ReturnInputs) year produces NO dual report (the delta-only path).
     let csv_dir2 = tempfile::tempdir().unwrap();
@@ -1460,7 +1483,10 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
     cmd::tax::set_profile(&vault2, &pp(), 2025, single_40k_profile(), false).unwrap();
     let (_o, _a, _s, _g, _se2, _ap, dual2) =
         cmd::tax::report_tax_year(&vault2, &pp(), 2025, dec!(0)).unwrap();
-    assert!(dual2.is_none(), "a stored-profile year must not emit the dual report");
+    assert!(
+        dual2.is_none(),
+        "a stored-profile year must not emit the dual report"
+    );
 }
 
 /// §4 R3-M6 carryover write-back (P4.9): `report --tax-year Y --write-carryover` persists year Y's
@@ -1503,15 +1529,41 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
         .unwrap();
         s.save().unwrap();
     }
+    // I1: with NO 2025 row yet, the write-back must REFUSE (fabricating one would shadow a stored
+    // tax-profile for 2025 in the §4.12 ladder and make that year uncomputable in v1).
+    let err = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap_err();
+    assert!(
+        format!("{err:?}").contains("no full-return inputs yet"),
+        "must refuse to fabricate a 2025 row: {err:?}"
+    );
+    // Import 2025's inputs first (the required order), THEN write back.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2025,
+            &ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
     // Write-back → 2025 gets a computed charitable carryover-in.
     let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
     assert!(summary.contains("written back to 2025"), "{summary}");
     let next = {
         let s = Session::open(&vault, &pp()).unwrap();
-        btctax_cli::return_inputs::get(s.conn(), 2025).unwrap().expect("2025 row written")
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .expect("2025 row written")
     };
     assert!(!next.charitable_carryover_in.is_empty());
-    assert!(next.charitable_carryover_in.iter().all(|c| c.provenance == CarryProvenance::Computed));
+    assert!(next
+        .charitable_carryover_in
+        .iter()
+        .all(|c| c.provenance == CarryProvenance::Computed));
 
     // Now a USER-entered 2025 carryover must NOT be silently overwritten.
     {
@@ -1537,7 +1589,84 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
     assert!(cmd::tax::write_back_carryover(&vault, &pp(), 2024, true).is_ok());
     let forced = {
         let s = Session::open(&vault, &pp()).unwrap();
-        btctax_cli::return_inputs::get(s.conn(), 2025).unwrap().unwrap()
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap()
     };
-    assert!(forced.charitable_carryover_in.iter().all(|c| c.provenance == CarryProvenance::Computed));
+    assert!(forced
+        .charitable_carryover_in
+        .iter()
+        .all(|c| c.provenance == CarryProvenance::Computed));
+}
+
+/// I2 (Fable P4.9 r1): re-importing year Y+1 must NOT silently drop the `Computed` carryover that
+/// `--write-carryover` put there. For QBI that drop would be a FAIL-OPEN (losing the REIT/PTP loss
+/// carryforward overstates the QBI deduction ⇒ understates tax). A TOML that supplies no carryover keeps
+/// the computed one; a TOML that DOES supply one is the user's and wins (as `User`).
+#[test]
+fn import_preserves_a_computed_carryover() {
+    use btctax_core::tax::return_inputs::{
+        CarryProvenance, CharitableClass, CharitableGift, Owner, ReturnInputs, ScheduleAInputs, W2,
+    };
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        // 2024: wages + an over-ceiling charitable gift → a carryover-out.
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &ReturnInputs {
+                filing_status: FilingStatus::Single,
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    box1_wages: dec!(50000),
+                    box3_ss_wages: dec!(50000),
+                    box5_medicare_wages: dec!(50000),
+                    ..Default::default()
+                }],
+                schedule_a: Some(ScheduleAInputs {
+                    charitable: vec![CharitableGift {
+                        class: CharitableClass::Cash60,
+                        amount: dec!(40000),
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // 2025 row must exist before the write-back (I1).
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2025,
+            &ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+
+    // Re-import 2025 from a TOML that carries NO carryover — the computed one must SURVIVE.
+    let toml = csv_dir.path().join("2025.toml");
+    std::fs::write(&toml, "filing_status = \"Single\"\n").unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml).unwrap();
+    let after = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap()
+    };
+    assert!(
+        !after.charitable_carryover_in.is_empty(),
+        "a Computed carryover must survive an import that does not supply one"
+    );
+    assert!(after
+        .charitable_carryover_in
+        .iter()
+        .all(|c| c.provenance == CarryProvenance::Computed));
 }

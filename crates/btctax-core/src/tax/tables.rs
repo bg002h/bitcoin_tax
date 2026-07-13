@@ -442,7 +442,10 @@ mod tests {
         // asymmetry with §1411's $250,000 QSS above (Fable IMPL-P4 r1 C1).
         assert_eq!(se_addl_medicare_threshold(FilingStatus::Mfj), dec!(250000));
         assert_eq!(se_addl_medicare_threshold(FilingStatus::Qss), dec!(200000)); // ≠ niit_threshold(Qss)
-        assert_eq!(se_addl_medicare_threshold(FilingStatus::Single), dec!(200000));
+        assert_eq!(
+            se_addl_medicare_threshold(FilingStatus::Single),
+            dec!(200000)
+        );
         assert_eq!(se_addl_medicare_threshold(FilingStatus::HoH), dec!(200000));
         assert_eq!(se_addl_medicare_threshold(FilingStatus::Mfs), dec!(125000));
         // §170(f)(11)(C) statutory threshold — Task 1 KAT.

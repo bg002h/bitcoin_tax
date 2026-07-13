@@ -5,9 +5,8 @@ use crate::bulk_estimated;
 use crate::config::{self, CliConfig};
 use crate::donation_details;
 use crate::optimize_attest;
-use crate::{return_inputs, tax_profile};
 use crate::CliError;
-use std::collections::{BTreeMap, BTreeSet};
+use crate::{return_inputs, tax_profile};
 use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
 use btctax_core::conventions::{round_cents, tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{init_schema, load_all};
@@ -19,6 +18,7 @@ use btctax_core::{
 };
 use btctax_store::{Passphrase, Vault};
 use rusqlite::Connection;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 // ── Bulk link-transfer plan (bulk-link-transfer D1) ──────────────────────────

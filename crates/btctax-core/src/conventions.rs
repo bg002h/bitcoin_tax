@@ -126,8 +126,14 @@ mod tests {
         assert_eq!(round_dollar(dec!(302.50)), dec!(303));
         // Fault-inject: the frozen half-even mode gives the WRONG table value (1162 / 302) — the very
         // reason round_dollar must exist and must not reuse the crypto-delta path's rounding.
-        assert_eq!(dec!(1162.50).round_dp_with_strategy(0, MONEY_ROUNDING), dec!(1162));
-        assert_eq!(dec!(302.50).round_dp_with_strategy(0, MONEY_ROUNDING), dec!(302));
+        assert_eq!(
+            dec!(1162.50).round_dp_with_strategy(0, MONEY_ROUNDING),
+            dec!(1162)
+        );
+        assert_eq!(
+            dec!(302.50).round_dp_with_strategy(0, MONEY_ROUNDING),
+            dec!(302)
+        );
         // Away-from-zero is symmetric on negatives (loss-line magnitudes are handled by sign policy,
         // but the rounding itself must be symmetric): -2.50 → -3.
         assert_eq!(round_dollar(dec!(-2.50)), dec!(-3));

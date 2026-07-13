@@ -180,7 +180,10 @@ fn income_import_then_show_redacts_pii_at_the_vault_level() {
     let vault = dir.path().join("vault.pgp");
     cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
 
-    assert_eq!(cmd::tax::show_return_inputs(&vault, &pp(), 2024).unwrap(), None);
+    assert_eq!(
+        cmd::tax::show_return_inputs(&vault, &pp(), 2024).unwrap(),
+        None
+    );
 
     let toml = dir.path().join("inputs.toml");
     std::fs::write(
@@ -193,7 +196,10 @@ fn income_import_then_show_redacts_pii_at_the_vault_level() {
     let shown = cmd::tax::show_return_inputs(&vault, &pp(), 2024)
         .unwrap()
         .expect("inputs were imported");
-    assert!(shown.contains("***-**-6789"), "SSN must be redacted: {shown}");
+    assert!(
+        shown.contains("***-**-6789"),
+        "SSN must be redacted: {shown}"
+    );
     assert!(
         !shown.contains("123-45-6789"),
         "cleartext SSN must never appear: {shown}"
@@ -241,7 +247,10 @@ fn resolve_all_screened_maps_a_corrupt_year_to_a_refusal_not_a_brick() {
 
     // 2023 (corrupt) → per-year Uncomputable; 2024 (valid) → Ready. The viewer is NOT bricked.
     assert!(
-        matches!(resolved.get(&2023), Some(ProfileOutcome::Uncomputable { .. })),
+        matches!(
+            resolved.get(&2023),
+            Some(ProfileOutcome::Uncomputable { .. })
+        ),
         "a corrupt 2023 blob must become a per-year refusal, not fail the whole enumeration"
     );
     assert!(

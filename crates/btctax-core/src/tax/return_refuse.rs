@@ -181,20 +181,44 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             box8_allocated_tips,
             box10_dependent_care,
         } = w;
-        if neg(*box1_wages) { return Some("W-2 box 1 wages"); }
-        if neg(*box2_fed_withheld) { return Some("W-2 box 2 federal withholding"); }
-        if neg(*box3_ss_wages) { return Some("W-2 box 3 Social Security wages"); }
-        if neg(*box4_ss_withheld) { return Some("W-2 box 4 Social Security withholding"); }
-        if neg(*box5_medicare_wages) { return Some("W-2 box 5 Medicare wages"); }
-        if neg(*box6_medicare_withheld) { return Some("W-2 box 6 Medicare withholding"); }
-        if neg(*box7_ss_tips) { return Some("W-2 box 7 Social Security tips"); }
-        if neg(*box17_state_tax_withheld) { return Some("W-2 box 17 state tax withheld"); }
-        if neg(*box19_local_tax) { return Some("W-2 box 19 local tax"); }
-        if neg(*box8_allocated_tips) { return Some("W-2 box 8 allocated tips"); }
-        if neg(*box10_dependent_care) { return Some("W-2 box 10 dependent-care benefits"); }
+        if neg(*box1_wages) {
+            return Some("W-2 box 1 wages");
+        }
+        if neg(*box2_fed_withheld) {
+            return Some("W-2 box 2 federal withholding");
+        }
+        if neg(*box3_ss_wages) {
+            return Some("W-2 box 3 Social Security wages");
+        }
+        if neg(*box4_ss_withheld) {
+            return Some("W-2 box 4 Social Security withholding");
+        }
+        if neg(*box5_medicare_wages) {
+            return Some("W-2 box 5 Medicare wages");
+        }
+        if neg(*box6_medicare_withheld) {
+            return Some("W-2 box 6 Medicare withholding");
+        }
+        if neg(*box7_ss_tips) {
+            return Some("W-2 box 7 Social Security tips");
+        }
+        if neg(*box17_state_tax_withheld) {
+            return Some("W-2 box 17 state tax withheld");
+        }
+        if neg(*box19_local_tax) {
+            return Some("W-2 box 19 local tax");
+        }
+        if neg(*box8_allocated_tips) {
+            return Some("W-2 box 8 allocated tips");
+        }
+        if neg(*box10_dependent_care) {
+            return Some("W-2 box 10 dependent-care benefits");
+        }
         for e in box12 {
             let Box12Entry { code: _, amount } = e;
-            if neg(*amount) { return Some("W-2 box 12 amount"); }
+            if neg(*amount) {
+                return Some("W-2 box 12 amount");
+            }
         }
     }
     for i in int_1099 {
@@ -208,13 +232,27 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             box8_tax_exempt_interest,
             box9_private_activity_bond_amt,
         } = i;
-        if neg(*box1_interest) { return Some("1099-INT box 1 interest"); }
-        if neg(*box2_early_withdrawal_penalty) { return Some("1099-INT box 2 early-withdrawal penalty"); }
-        if neg(*box3_treasury_interest) { return Some("1099-INT box 3 Treasury interest"); }
-        if neg(*box4_fed_withheld) { return Some("1099-INT box 4 federal withholding"); }
-        if neg(*box6_foreign_tax) { return Some("1099-INT box 6 foreign tax"); }
-        if neg(*box8_tax_exempt_interest) { return Some("1099-INT box 8 tax-exempt interest"); }
-        if neg(*box9_private_activity_bond_amt) { return Some("1099-INT box 9 private-activity-bond interest"); }
+        if neg(*box1_interest) {
+            return Some("1099-INT box 1 interest");
+        }
+        if neg(*box2_early_withdrawal_penalty) {
+            return Some("1099-INT box 2 early-withdrawal penalty");
+        }
+        if neg(*box3_treasury_interest) {
+            return Some("1099-INT box 3 Treasury interest");
+        }
+        if neg(*box4_fed_withheld) {
+            return Some("1099-INT box 4 federal withholding");
+        }
+        if neg(*box6_foreign_tax) {
+            return Some("1099-INT box 6 foreign tax");
+        }
+        if neg(*box8_tax_exempt_interest) {
+            return Some("1099-INT box 8 tax-exempt interest");
+        }
+        if neg(*box9_private_activity_bond_amt) {
+            return Some("1099-INT box 9 private-activity-bond interest");
+        }
     }
     for d in div_1099 {
         let Form1099Div {
@@ -231,22 +269,52 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             box12_exempt_interest_dividends,
             box13_private_activity_amt,
         } = d;
-        if neg(*box1a_ordinary) { return Some("1099-DIV box 1a ordinary dividends"); }
-        if neg(*box1b_qualified) { return Some("1099-DIV box 1b qualified dividends"); }
-        if neg(*box2a_capgain_distr) { return Some("1099-DIV box 2a capital-gain distributions"); }
-        if neg(*box2b_unrecap_1250) { return Some("1099-DIV box 2b unrecaptured §1250 gain"); }
-        if neg(*box2c_section_1202) { return Some("1099-DIV box 2c §1202 gain"); }
-        if neg(*box2d_collectibles_28) { return Some("1099-DIV box 2d collectibles (28%) gain"); }
-        if neg(*box4_fed_withheld) { return Some("1099-DIV box 4 federal withholding"); }
-        if neg(*box5_section_199a) { return Some("1099-DIV box 5 §199A dividends"); }
-        if neg(*box7_foreign_tax) { return Some("1099-DIV box 7 foreign tax"); }
-        if neg(*box12_exempt_interest_dividends) { return Some("1099-DIV box 12 exempt-interest dividends"); }
-        if neg(*box13_private_activity_amt) { return Some("1099-DIV box 13 private-activity-bond dividends"); }
+        if neg(*box1a_ordinary) {
+            return Some("1099-DIV box 1a ordinary dividends");
+        }
+        if neg(*box1b_qualified) {
+            return Some("1099-DIV box 1b qualified dividends");
+        }
+        if neg(*box2a_capgain_distr) {
+            return Some("1099-DIV box 2a capital-gain distributions");
+        }
+        if neg(*box2b_unrecap_1250) {
+            return Some("1099-DIV box 2b unrecaptured §1250 gain");
+        }
+        if neg(*box2c_section_1202) {
+            return Some("1099-DIV box 2c §1202 gain");
+        }
+        if neg(*box2d_collectibles_28) {
+            return Some("1099-DIV box 2d collectibles (28%) gain");
+        }
+        if neg(*box4_fed_withheld) {
+            return Some("1099-DIV box 4 federal withholding");
+        }
+        if neg(*box5_section_199a) {
+            return Some("1099-DIV box 5 §199A dividends");
+        }
+        if neg(*box7_foreign_tax) {
+            return Some("1099-DIV box 7 foreign tax");
+        }
+        if neg(*box12_exempt_interest_dividends) {
+            return Some("1099-DIV box 12 exempt-interest dividends");
+        }
+        if neg(*box13_private_activity_amt) {
+            return Some("1099-DIV box 13 private-activity-bond dividends");
+        }
     }
     for g in g_1099 {
-        let Form1099G { payer: _, box1_unemployment, box4_fed_withheld } = g;
-        if neg(*box1_unemployment) { return Some("1099-G box 1 unemployment compensation"); }
-        if neg(*box4_fed_withheld) { return Some("1099-G box 4 federal withholding"); }
+        let Form1099G {
+            payer: _,
+            box1_unemployment,
+            box4_fed_withheld,
+        } = g;
+        if neg(*box1_unemployment) {
+            return Some("1099-G box 1 unemployment compensation");
+        }
+        if neg(*box4_fed_withheld) {
+            return Some("1099-G box 4 federal withholding");
+        }
     }
     if let Some(c) = schedule_c {
         let ScheduleCInputs {
@@ -256,7 +324,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             accounting_method: _,
             expenses,
         } = c;
-        if neg(*expenses) { return Some("Schedule C expenses"); }
+        if neg(*expenses) {
+            return Some("Schedule C expenses");
+        }
     }
     if let Some(a) = schedule_a {
         let ScheduleAInputs {
@@ -270,21 +340,44 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             mortgage_interest_1098,
             charitable,
         } = a;
-        if neg(*medical) { return Some("Schedule A medical expenses"); }
-        if neg(*salt_sales_tax_amount) { return Some("Schedule A sales-tax amount"); }
-        if neg(*salt_state_estimated_payments) { return Some("Schedule A state estimated payments"); }
-        if neg(*salt_prior_year_balance_paid) { return Some("Schedule A prior-year balance paid"); }
-        if neg(*salt_real_estate) { return Some("Schedule A real-estate taxes"); }
-        if neg(*salt_personal_property) { return Some("Schedule A personal-property taxes"); }
-        if neg(*mortgage_interest_1098) { return Some("Schedule A mortgage interest"); }
+        if neg(*medical) {
+            return Some("Schedule A medical expenses");
+        }
+        if neg(*salt_sales_tax_amount) {
+            return Some("Schedule A sales-tax amount");
+        }
+        if neg(*salt_state_estimated_payments) {
+            return Some("Schedule A state estimated payments");
+        }
+        if neg(*salt_prior_year_balance_paid) {
+            return Some("Schedule A prior-year balance paid");
+        }
+        if neg(*salt_real_estate) {
+            return Some("Schedule A real-estate taxes");
+        }
+        if neg(*salt_personal_property) {
+            return Some("Schedule A personal-property taxes");
+        }
+        if neg(*mortgage_interest_1098) {
+            return Some("Schedule A mortgage interest");
+        }
         for gift in charitable {
             let CharitableGift { class: _, amount } = gift;
-            if neg(*amount) { return Some("Schedule A charitable gift amount"); }
+            if neg(*amount) {
+                return Some("Schedule A charitable gift amount");
+            }
         }
     }
     for item in charitable_carryover_in {
-        let CharitableCarryItem { class: _, amount, origin_year: _, provenance: _ } = item;
-        if neg(*amount) { return Some("charitable carryover amount"); }
+        let CharitableCarryItem {
+            class: _,
+            amount,
+            origin_year: _,
+            provenance: _,
+        } = item;
+        if neg(*amount) {
+            return Some("charitable carryover amount");
+        }
     }
     let Schedule1Inputs {
         state_refund_taxable,
@@ -292,18 +385,43 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         ira_deduction_claimed,
         hsa_present: _,
     } = sch1;
-    if neg(*state_refund_taxable) { return Some("Schedule 1 taxable state refund"); }
-    if neg(*student_loan_interest_paid) { return Some("Schedule 1 student-loan interest"); }
-    if neg(*ira_deduction_claimed) { return Some("Schedule 1 IRA deduction"); }
-    let Payments { estimated_tax_payments, extension_payment, other_withholding } = payments;
-    if neg(*estimated_tax_payments) { return Some("estimated tax payments"); }
-    if neg(*extension_payment) { return Some("extension payment"); }
-    if neg(*other_withholding) { return Some("other withholding"); }
-    let QbiInputs { reit_ptp_carryforward_in, reit_ptp_carryforward_in_provenance: _ } = qbi;
-    if neg(*reit_ptp_carryforward_in) { return Some("QBI REIT/PTP carryforward"); }
+    if neg(*state_refund_taxable) {
+        return Some("Schedule 1 taxable state refund");
+    }
+    if neg(*student_loan_interest_paid) {
+        return Some("Schedule 1 student-loan interest");
+    }
+    if neg(*ira_deduction_claimed) {
+        return Some("Schedule 1 IRA deduction");
+    }
+    let Payments {
+        estimated_tax_payments,
+        extension_payment,
+        other_withholding,
+    } = payments;
+    if neg(*estimated_tax_payments) {
+        return Some("estimated tax payments");
+    }
+    if neg(*extension_payment) {
+        return Some("extension payment");
+    }
+    if neg(*other_withholding) {
+        return Some("other withholding");
+    }
+    let QbiInputs {
+        reit_ptp_carryforward_in,
+        reit_ptp_carryforward_in_provenance: _,
+    } = qbi;
+    if neg(*reit_ptp_carryforward_in) {
+        return Some("QBI REIT/PTP carryforward");
+    }
     let Carryforward { short, long } = capital_loss_carryforward_in;
-    if neg(*short) { return Some("short-term capital-loss carryforward"); }
-    if neg(*long) { return Some("long-term capital-loss carryforward"); }
+    if neg(*short) {
+        return Some("short-term capital-loss carryforward");
+    }
+    if neg(*long) {
+        return Some("long-term capital-loss carryforward");
+    }
     None
 }
 
@@ -365,14 +483,19 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     let is_non50org = |c: CharitableClass| {
         matches!(
             c,
-            CharitableClass::Cash30 | CharitableClass::OrdinaryProp30 | CharitableClass::CapGainProp20
+            CharitableClass::Cash30
+                | CharitableClass::OrdinaryProp30
+                | CharitableClass::CapGainProp20
         )
     };
     let non50_gift = ri
         .schedule_a
         .as_ref()
         .is_some_and(|a| a.charitable.iter().any(|g| is_non50org(g.class)));
-    let non50_carry = ri.charitable_carryover_in.iter().any(|c| is_non50org(c.class));
+    let non50_carry = ri
+        .charitable_carryover_in
+        .iter()
+        .any(|c| is_non50org(c.class));
     if non50_gift || non50_carry {
         return refuse(
             RefuseReason::NonPublicCharityContribution,
@@ -411,9 +534,9 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
 
     // W-2 rows: box-12 allowlist + §402(g) deferral cap + box 8/10 + single-employer excess SS.
     let excess_ss_max = tbl.ss_wage_base * EMPLOYEE_OASDI_RATE; // §3101(a)/§6413(c)
-    // §402(g)(1) limits an INDIVIDUAL's elective deferrals — accumulate PER OWNER (each spouse on a joint
-    // return gets its own limit; review I1), refusing iff any one person exceeds it. Amounts are already
-    // guaranteed ≥ 0 by the negative screen above, so no per-entry clamp is needed.
+                                                                // §402(g)(1) limits an INDIVIDUAL's elective deferrals — accumulate PER OWNER (each spouse on a joint
+                                                                // return gets its own limit; review I1), refusing iff any one person exceeds it. Amounts are already
+                                                                // guaranteed ≥ 0 by the negative screen above, so no per-entry clamp is needed.
     let mut deferral_tp = Usd::ZERO; // taxpayer
     let mut deferral_sp = Usd::ZERO; // spouse
     for w2 in &ri.w2s {
@@ -615,7 +738,10 @@ mod tests {
             }],
             ..Default::default()
         });
-        assert_eq!(reason(&r), Some(RefuseReason::UnsupportedBox12Code("K".into())));
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::UnsupportedBox12Code("K".into()))
+        );
         // A 401(k) household's code D is inert.
         let mut ok = ri();
         ok.w2s.push(W2 {
@@ -633,11 +759,17 @@ mod tests {
         // Same owner (both taxpayer): $15k + $10k = $25k > $23k → refuse.
         let mut r = ri();
         r.w2s.push(W2 {
-            box12: vec![Box12Entry { code: "D".into(), amount: dec!(15000) }],
+            box12: vec![Box12Entry {
+                code: "D".into(),
+                amount: dec!(15000),
+            }],
             ..Default::default()
         });
         r.w2s.push(W2 {
-            box12: vec![Box12Entry { code: "D".into(), amount: dec!(10000) }],
+            box12: vec![Box12Entry {
+                code: "D".into(),
+                amount: dec!(10000),
+            }],
             ..Default::default()
         });
         assert_eq!(reason(&r), Some(RefuseReason::ExcessElectiveDeferral));
@@ -646,12 +778,18 @@ mod tests {
         ok.filing_status = FilingStatus::Mfj;
         ok.w2s.push(W2 {
             owner: Owner::Taxpayer,
-            box12: vec![Box12Entry { code: "D".into(), amount: dec!(15000) }],
+            box12: vec![Box12Entry {
+                code: "D".into(),
+                amount: dec!(15000),
+            }],
             ..Default::default()
         });
         ok.w2s.push(W2 {
             owner: Owner::Spouse,
-            box12: vec![Box12Entry { code: "D".into(), amount: dec!(15000) }],
+            box12: vec![Box12Entry {
+                code: "D".into(),
+                amount: dec!(15000),
+            }],
             ..Default::default()
         });
         assert_eq!(reason(&ok), None);
@@ -660,10 +798,16 @@ mod tests {
     #[test]
     fn box8_box10_refuse() {
         let mut a = ri();
-        a.w2s.push(W2 { box8_allocated_tips: dec!(500), ..Default::default() });
+        a.w2s.push(W2 {
+            box8_allocated_tips: dec!(500),
+            ..Default::default()
+        });
         assert_eq!(reason(&a), Some(RefuseReason::AllocatedTips));
         let mut b = ri();
-        b.w2s.push(W2 { box10_dependent_care: dec!(5000), ..Default::default() });
+        b.w2s.push(W2 {
+            box10_dependent_care: dec!(5000),
+            ..Default::default()
+        });
         assert_eq!(reason(&b), Some(RefuseReason::DependentCareBenefit));
     }
 
@@ -671,18 +815,30 @@ mod tests {
     fn single_employer_excess_ss_refuses() {
         let mut r = ri();
         // One employer withheld more than 6.2% × 176,100 = 10,918.20.
-        r.w2s.push(W2 { box4_ss_withheld: dec!(11000), ..Default::default() });
+        r.w2s.push(W2 {
+            box4_ss_withheld: dec!(11000),
+            ..Default::default()
+        });
         assert_eq!(reason(&r), Some(RefuseReason::SingleEmployerExcessSs));
     }
 
     #[test]
     fn amt_preference_and_special_gains_refuse() {
         let mut a = ri();
-        a.int_1099.push(Form1099Int { box9_private_activity_bond_amt: dec!(10), ..Default::default() });
+        a.int_1099.push(Form1099Int {
+            box9_private_activity_bond_amt: dec!(10),
+            ..Default::default()
+        });
         assert_eq!(reason(&a), Some(RefuseReason::PrivateActivityBondAmt));
         let mut b = ri();
-        b.div_1099.push(Form1099Div { box2d_collectibles_28: dec!(50), ..Default::default() });
-        assert_eq!(reason(&b), Some(RefuseReason::UnrecapturedOrSpecialRateGain));
+        b.div_1099.push(Form1099Div {
+            box2d_collectibles_28: dec!(50),
+            ..Default::default()
+        });
+        assert_eq!(
+            reason(&b),
+            Some(RefuseReason::UnrecapturedOrSpecialRateGain)
+        );
     }
 
     #[test]
@@ -703,7 +859,9 @@ mod tests {
         });
         assert_eq!(
             reason(&a),
-            Some(RefuseReason::InconsistentDividendSubset("box 1b qualified dividends".into()))
+            Some(RefuseReason::InconsistentDividendSubset(
+                "box 1b qualified dividends".into()
+            ))
         );
         // box 5 (§199A) > box 1a ⇒ refuse (phantom QBI base).
         let mut b = answered();
@@ -714,7 +872,9 @@ mod tests {
         });
         assert_eq!(
             reason(&b),
-            Some(RefuseReason::InconsistentDividendSubset("box 5 §199A dividends".into()))
+            Some(RefuseReason::InconsistentDividendSubset(
+                "box 5 §199A dividends".into()
+            ))
         );
         // Fully-qualified and all-REIT (box 1b == box 5 == box 1a) is legitimate → no refusal.
         let mut ok = answered();
@@ -731,7 +891,10 @@ mod tests {
     fn foreign_tax_over_ceiling_refuses() {
         // Single: $301 > $300 ceiling.
         let mut r = ri();
-        r.div_1099.push(Form1099Div { box7_foreign_tax: dec!(301), ..Default::default() });
+        r.div_1099.push(Form1099Div {
+            box7_foreign_tax: dec!(301),
+            ..Default::default()
+        });
         assert_eq!(reason(&r), Some(RefuseReason::ForeignTaxOverCeiling));
         // MFJ ceiling is doubled ($600): $301 is fine.
         let mut mfj = r.clone();
@@ -748,18 +911,32 @@ mod tests {
         // R2-I1 PoC-A: a +$500 foreign tax (over the $300 ceiling → must refuse) plus a −$250 sign typo
         // must NOT net to $250 ≤ $300 and pass — the negative screen refuses FIRST.
         let mut r = ri();
-        r.div_1099.push(Form1099Div { box7_foreign_tax: dec!(500), ..Default::default() });
-        r.int_1099.push(Form1099Int { box6_foreign_tax: dec!(-250), ..Default::default() });
+        r.div_1099.push(Form1099Div {
+            box7_foreign_tax: dec!(500),
+            ..Default::default()
+        });
+        r.int_1099.push(Form1099Int {
+            box6_foreign_tax: dec!(-250),
+            ..Default::default()
+        });
         assert_eq!(
             reason(&r),
-            Some(RefuseReason::NegativeAmount("1099-INT box 6 foreign tax".into()))
+            Some(RefuseReason::NegativeAmount(
+                "1099-INT box 6 foreign tax".into()
+            ))
         );
         // Same shape for a negative elective deferral (the old M4 vector) and a plain negative wage.
         let mut d = ri();
         d.w2s.push(W2 {
             box12: vec![
-                Box12Entry { code: "D".into(), amount: dec!(30000) },
-                Box12Entry { code: "D".into(), amount: dec!(-10000) },
+                Box12Entry {
+                    code: "D".into(),
+                    amount: dec!(30000),
+                },
+                Box12Entry {
+                    code: "D".into(),
+                    amount: dec!(-10000),
+                },
             ],
             ..Default::default()
         });
@@ -768,7 +945,10 @@ mod tests {
             Some(RefuseReason::NegativeAmount("W-2 box 12 amount".into()))
         );
         let mut w = ri();
-        w.w2s.push(W2 { box1_wages: dec!(-1), ..Default::default() });
+        w.w2s.push(W2 {
+            box1_wages: dec!(-1),
+            ..Default::default()
+        });
         assert_eq!(
             reason(&w),
             Some(RefuseReason::NegativeAmount("W-2 box 1 wages".into()))
@@ -782,15 +962,24 @@ mod tests {
         let mut single = ri(); // filing_status = Single
         single.w2s.push(W2 {
             owner: Owner::Taxpayer,
-            box12: vec![Box12Entry { code: "D".into(), amount: dec!(15000) }],
+            box12: vec![Box12Entry {
+                code: "D".into(),
+                amount: dec!(15000),
+            }],
             ..Default::default()
         });
         single.w2s.push(W2 {
             owner: Owner::Spouse,
-            box12: vec![Box12Entry { code: "D".into(), amount: dec!(15000) }],
+            box12: vec![Box12Entry {
+                code: "D".into(),
+                amount: dec!(15000),
+            }],
             ..Default::default()
         });
-        assert_eq!(reason(&single), Some(RefuseReason::SpouseOwnerWithoutJointReturn));
+        assert_eq!(
+            reason(&single),
+            Some(RefuseReason::SpouseOwnerWithoutJointReturn)
+        );
         // A spouse-owned Schedule C on a non-joint return also refuses.
         let mut hoh = ri();
         hoh.filing_status = FilingStatus::HoH;
@@ -798,7 +987,10 @@ mod tests {
             owner: Owner::Spouse,
             ..Default::default()
         });
-        assert_eq!(reason(&hoh), Some(RefuseReason::SpouseOwnerWithoutJointReturn));
+        assert_eq!(
+            reason(&hoh),
+            Some(RefuseReason::SpouseOwnerWithoutJointReturn)
+        );
         // The SAME split on a joint return is legitimate (two earners) → no spouse-owner refusal.
         let mut mfj = single.clone();
         mfj.filing_status = FilingStatus::Mfj;
@@ -878,8 +1070,14 @@ mod tests {
         let mut r = ri();
         r.schedule_a = Some(ScheduleAInputs {
             charitable: vec![
-                CharitableGift { class: CharitableClass::Cash60, amount: dec!(50000) },
-                CharitableGift { class: CharitableClass::Cash30, amount: dec!(30000) },
+                CharitableGift {
+                    class: CharitableClass::Cash60,
+                    amount: dec!(50000),
+                },
+                CharitableGift {
+                    class: CharitableClass::Cash30,
+                    amount: dec!(30000),
+                },
             ],
             ..Default::default()
         });
@@ -896,8 +1094,14 @@ mod tests {
         let mut r = ri();
         r.schedule_a = Some(ScheduleAInputs {
             charitable: vec![
-                CharitableGift { class: CharitableClass::CapGainProp30, amount: dec!(30000) },
-                CharitableGift { class: CharitableClass::CapGainProp20, amount: dec!(20000) },
+                CharitableGift {
+                    class: CharitableClass::CapGainProp30,
+                    amount: dec!(30000),
+                },
+                CharitableGift {
+                    class: CharitableClass::CapGainProp20,
+                    amount: dec!(20000),
+                },
             ],
             ..Default::default()
         });

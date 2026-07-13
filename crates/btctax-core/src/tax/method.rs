@@ -83,7 +83,7 @@ pub fn qdcgt_line16(
     let pref_full = (qual_div.max(z)) + (net_ltcg.max(z)); // L4 = L2 + L3
     let bottom = (ti - pref_full).max(z); // L5 = max(0, L1 − L4)
     let pref = pref_full.min(ti); // L10 cap = min(L1, L4)  ★ Fable F-A
-    // Worksheet lines 6–21: the 0/15/20% split of `pref` stacked on `bottom` (`bottom + pref = L1`).
+                                  // Worksheet lines 6–21: the 0/15/20% split of `pref` stacked on `bottom` (`bottom + pref = L1`).
     let split = preferential_tax(bp, bottom, pref);
     let l23 = worksheet_tax(schedule, bottom) + split.tax; // L22 + (L18 + L21)
     let l24 = worksheet_tax(schedule, ti); // tax on all taxable income
@@ -120,34 +120,82 @@ mod tests {
     fn single_2024() -> OrdinarySchedule {
         OrdinarySchedule {
             brackets: vec![
-                OrdinaryBracket { lower: dec!(0), rate: dec!(0.10) },
-                OrdinaryBracket { lower: dec!(11600), rate: dec!(0.12) },
-                OrdinaryBracket { lower: dec!(47150), rate: dec!(0.22) },
-                OrdinaryBracket { lower: dec!(100525), rate: dec!(0.24) },
-                OrdinaryBracket { lower: dec!(191950), rate: dec!(0.32) },
-                OrdinaryBracket { lower: dec!(243725), rate: dec!(0.35) },
-                OrdinaryBracket { lower: dec!(609350), rate: dec!(0.37) },
+                OrdinaryBracket {
+                    lower: dec!(0),
+                    rate: dec!(0.10),
+                },
+                OrdinaryBracket {
+                    lower: dec!(11600),
+                    rate: dec!(0.12),
+                },
+                OrdinaryBracket {
+                    lower: dec!(47150),
+                    rate: dec!(0.22),
+                },
+                OrdinaryBracket {
+                    lower: dec!(100525),
+                    rate: dec!(0.24),
+                },
+                OrdinaryBracket {
+                    lower: dec!(191950),
+                    rate: dec!(0.32),
+                },
+                OrdinaryBracket {
+                    lower: dec!(243725),
+                    rate: dec!(0.35),
+                },
+                OrdinaryBracket {
+                    lower: dec!(609350),
+                    rate: dec!(0.37),
+                },
             ],
         }
     }
     fn mfj_2024() -> OrdinarySchedule {
         OrdinarySchedule {
             brackets: vec![
-                OrdinaryBracket { lower: dec!(0), rate: dec!(0.10) },
-                OrdinaryBracket { lower: dec!(23200), rate: dec!(0.12) },
-                OrdinaryBracket { lower: dec!(94300), rate: dec!(0.22) },
-                OrdinaryBracket { lower: dec!(201050), rate: dec!(0.24) },
-                OrdinaryBracket { lower: dec!(383900), rate: dec!(0.32) },
-                OrdinaryBracket { lower: dec!(487450), rate: dec!(0.35) },
-                OrdinaryBracket { lower: dec!(731200), rate: dec!(0.37) },
+                OrdinaryBracket {
+                    lower: dec!(0),
+                    rate: dec!(0.10),
+                },
+                OrdinaryBracket {
+                    lower: dec!(23200),
+                    rate: dec!(0.12),
+                },
+                OrdinaryBracket {
+                    lower: dec!(94300),
+                    rate: dec!(0.22),
+                },
+                OrdinaryBracket {
+                    lower: dec!(201050),
+                    rate: dec!(0.24),
+                },
+                OrdinaryBracket {
+                    lower: dec!(383900),
+                    rate: dec!(0.32),
+                },
+                OrdinaryBracket {
+                    lower: dec!(487450),
+                    rate: dec!(0.35),
+                },
+                OrdinaryBracket {
+                    lower: dec!(731200),
+                    rate: dec!(0.37),
+                },
             ],
         }
     }
     fn bp_single_2024() -> LtcgBreakpoints {
-        LtcgBreakpoints { max_zero: dec!(47025), max_fifteen: dec!(518900) }
+        LtcgBreakpoints {
+            max_zero: dec!(47025),
+            max_fifteen: dec!(518900),
+        }
     }
     fn bp_mfj_2024() -> LtcgBreakpoints {
-        LtcgBreakpoints { max_zero: dec!(94050), max_fifteen: dec!(583750) }
+        LtcgBreakpoints {
+            max_zero: dec!(94050),
+            max_fifteen: dec!(583750),
+        }
     }
 
     #[test]
@@ -184,21 +232,39 @@ mod tests {
     /// deep/01 worked example (a): MFJ TI 85,000, QD 6,000 → Tax-Table path, line 16 = 9,019.
     #[test]
     fn qdcgt_example_a_mfj_table() {
-        let l16 = qdcgt_line16(&mfj_2024(), &bp_mfj_2024(), dec!(85000), dec!(6000), dec!(0));
+        let l16 = qdcgt_line16(
+            &mfj_2024(),
+            &bp_mfj_2024(),
+            dec!(85000),
+            dec!(6000),
+            dec!(0),
+        );
         assert_eq!(l16, dec!(9019));
     }
 
     /// deep/01 worked example (b): Single TI 120,000, LTCG 20,000 → TCW path, line 16 = 20,053.
     #[test]
     fn qdcgt_example_b_single_tcw() {
-        let l16 = qdcgt_line16(&single_2024(), &bp_single_2024(), dec!(120000), dec!(0), dec!(20000));
+        let l16 = qdcgt_line16(
+            &single_2024(),
+            &bp_single_2024(),
+            dec!(120000),
+            dec!(0),
+            dec!(20000),
+        );
         assert_eq!(l16, dec!(20053));
     }
 
     /// deep/01 worked example (c): Single TI 60,000, QD 2,000, net-loss year (LTCG 0) → line 16 = 8,119.
     #[test]
     fn qdcgt_example_c_single_loss_year() {
-        let l16 = qdcgt_line16(&single_2024(), &bp_single_2024(), dec!(60000), dec!(2000), dec!(0));
+        let l16 = qdcgt_line16(
+            &single_2024(),
+            &bp_single_2024(),
+            dec!(60000),
+            dec!(2000),
+            dec!(0),
+        );
         assert_eq!(l16, dec!(8119));
     }
 
@@ -206,7 +272,13 @@ mod tests {
     /// Without the `min(L1, qd+ltcg)` cap the worksheet would produce $446.
     #[test]
     fn kat1_pref_cap_pref_exceeds_ti() {
-        let l16 = qdcgt_line16(&single_2024(), &bp_single_2024(), dec!(35400), dec!(50000), dec!(0));
+        let l16 = qdcgt_line16(
+            &single_2024(),
+            &bp_single_2024(),
+            dec!(35400),
+            dec!(50000),
+            dec!(0),
+        );
         assert_eq!(l16, dec!(0));
     }
 
@@ -214,7 +286,13 @@ mod tests {
     /// TI=58,010 (same bin) ⇒ line 16 = 7,819 (via L24), NOT 7,821 (L23 rounded).
     #[test]
     fn kat2_binding_min_same_bin() {
-        let l16 = qdcgt_line16(&single_2024(), &bp_single_2024(), dec!(58010), dec!(10), dec!(0));
+        let l16 = qdcgt_line16(
+            &single_2024(),
+            &bp_single_2024(),
+            dec!(58010),
+            dec!(10),
+            dec!(0),
+        );
         assert_eq!(l16, dec!(7819));
     }
 
@@ -228,8 +306,14 @@ mod tests {
         // An edge at 12,340 (≡ 15 mod 25) is unbinnable — the assertion must catch it.
         let bad = OrdinarySchedule {
             brackets: vec![
-                OrdinaryBracket { lower: dec!(0), rate: dec!(0.10) },
-                OrdinaryBracket { lower: dec!(12340), rate: dec!(0.12) },
+                OrdinaryBracket {
+                    lower: dec!(0),
+                    rate: dec!(0.10),
+                },
+                OrdinaryBracket {
+                    lower: dec!(12340),
+                    rate: dec!(0.12),
+                },
             ],
         };
         assert_eq!(first_unbinnable_edge(&bad), Some(dec!(12340)));
@@ -237,8 +321,14 @@ mod tests {
         // bin, ≡ 25 mod 50, binnable) still yields a well-defined printed cell.
         let mid = OrdinarySchedule {
             brackets: vec![
-                OrdinaryBracket { lower: dec!(0), rate: dec!(0.10) },
-                OrdinaryBracket { lower: dec!(11925), rate: dec!(0.12) },
+                OrdinaryBracket {
+                    lower: dec!(0),
+                    rate: dec!(0.10),
+                },
+                OrdinaryBracket {
+                    lower: dec!(11925),
+                    rate: dec!(0.12),
+                },
             ],
         };
         assert_eq!(first_unbinnable_edge(&mid), None);

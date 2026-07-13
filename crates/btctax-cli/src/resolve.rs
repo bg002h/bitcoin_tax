@@ -257,7 +257,14 @@ mod tests {
         fr: &BundledFullReturnTables,
         tt: &BundledTaxTables,
     ) -> Resolved {
-        resolve_profile(c, year, pseudo, fr.full_return_for(year), tt.table_for(year)).unwrap()
+        resolve_profile(
+            c,
+            year,
+            pseudo,
+            fr.full_return_for(year),
+            tt.table_for(year),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -332,8 +339,15 @@ mod tests {
         };
         return_inputs::set(&c, 2024, &ri).unwrap();
         let state = btctax_core::LedgerState::default();
-        match resolve_and_screen(&c, &state, 2024, true, fr.full_return_for(2024), tt.table_for(2024))
-            .unwrap()
+        match resolve_and_screen(
+            &c,
+            &state,
+            2024,
+            true,
+            fr.full_return_for(2024),
+            tt.table_for(2024),
+        )
+        .unwrap()
         {
             ProfileOutcome::Ready {
                 profile,

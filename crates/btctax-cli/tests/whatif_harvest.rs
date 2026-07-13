@@ -116,19 +116,25 @@ fn harvest_tax_zero_never_persists() {
     let csv = write_two_lots_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
     // Stored profile (Single, ord $0 → a positive zero-tax room).
-    cmd::tax::set_profile(&vault, &pp(), 2025, {
-        btctax_core::TaxProfile {
-            filing_status: FilingStatus::Single,
-            ordinary_taxable_income: dec!(0),
-            magi_excluding_crypto: dec!(0),
-            qualified_dividends_and_other_pref_income: dec!(0),
-            other_net_capital_gain: dec!(0),
-            capital_loss_carryforward_in: btctax_core::Carryforward::default(),
-            w2_ss_wages: dec!(0),
-            w2_medicare_wages: dec!(0),
-            schedule_c_expenses: dec!(0),
-        }
-    }, false)
+    cmd::tax::set_profile(
+        &vault,
+        &pp(),
+        2025,
+        {
+            btctax_core::TaxProfile {
+                filing_status: FilingStatus::Single,
+                ordinary_taxable_income: dec!(0),
+                magi_excluding_crypto: dec!(0),
+                qualified_dividends_and_other_pref_income: dec!(0),
+                other_net_capital_gain: dec!(0),
+                capital_loss_carryforward_in: btctax_core::Carryforward::default(),
+                w2_ss_wages: dec!(0),
+                w2_medicare_wages: dec!(0),
+                schedule_c_expenses: dec!(0),
+            }
+        },
+        false,
+    )
     .unwrap();
 
     let bytes_before = std::fs::read(&vault).unwrap();

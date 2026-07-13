@@ -48,8 +48,8 @@
 //! Callers requesting a year with no bundled table receive `None` from [`TaxTables::table_for`],
 //! which the compute layer converts to `TaxOutcome::NotComputable(TaxTableMissing)` (B.4/I6).
 use btctax_core::tax::tables::{
-    AmtParams, FullReturnParams, FullReturnTables, LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule,
-    TaxTable, TaxTables,
+    AmtParams, FullReturnParams, FullReturnTables, LtcgBreakpoints, OrdinaryBracket,
+    OrdinarySchedule, TaxTable, TaxTables,
 };
 use btctax_core::{FilingStatus, Usd};
 use rust_decimal_macros::dec;
@@ -121,14 +121,14 @@ fn ty2024_full_return() -> FullReturnParams {
     FullReturnParams {
         year: 2024,
         std_deduction,
-        std_aged_blind_married: dec!(1550),   // §63(f), Rev. Proc. 2023-34 §3.15(3)
+        std_aged_blind_married: dec!(1550), // §63(f), Rev. Proc. 2023-34 §3.15(3)
         std_aged_blind_unmarried: dec!(1950),
-        dependent_std_floor: dec!(1300),      // §63(c)(5), Rev. Proc. 2023-34 §3.15(2)
+        dependent_std_floor: dec!(1300), // §63(c)(5), Rev. Proc. 2023-34 §3.15(2)
         dependent_std_earned_addon: dec!(450),
-        salt_cap: dec!(10000),                // §164(b)(6) (MFS = $5,000 at the use site)
-        kiddie_unearned_threshold: dec!(2600),// §1(g)(4)
+        salt_cap: dec!(10000), // §164(b)(6) (MFS = $5,000 at the use site)
+        kiddie_unearned_threshold: dec!(2600), // §1(g)(4)
         elective_deferral_limit: dec!(23000), // §402(g)(1), Notice 2023-75
-        ftc_ceiling: dec!(300),               // §904(j) (MFJ = $600 at the use site)
+        ftc_ceiling: dec!(300), // §904(j) (MFJ = $600 at the use site)
         // §199A(e)(2) QBI TI-before-QBI threshold (Rev. Proc. 2023-34 §2.10): $191,950 base / $383,900 MFJ.
         qbi_ti_threshold_unmarried: dec!(191950),
         qbi_ti_threshold_married: dec!(383900),
@@ -707,7 +707,9 @@ mod tests {
         // Derive the covered years from what is actually bundled (don't hardcode the list).
         let mut checked = 0;
         for year in 2000..=2100 {
-            let Some(tbl) = t.table_for(year) else { continue };
+            let Some(tbl) = t.table_for(year) else {
+                continue;
+            };
             for status in [
                 FilingStatus::Single,
                 FilingStatus::Mfj,
@@ -722,7 +724,10 @@ mod tests {
             }
             checked += 1;
         }
-        assert!(checked >= 4, "expected every bundled year swept; checked {checked}");
+        assert!(
+            checked >= 4,
+            "expected every bundled year swept; checked {checked}"
+        );
     }
 
     /// TY2024 full-return params are bundled with the correct Rev. Proc. 2023-34 / statutory figures;
@@ -746,7 +751,7 @@ mod tests {
         assert_eq!(p.qbi_ti_threshold_unmarried, dec!(191950)); // §199A(e)(2), Rev. Proc. 2023-34 §2.10
         assert_eq!(p.qbi_ti_threshold_married, dec!(383900));
         assert_eq!(p.qbi_ti_threshold(FilingStatus::Qss), dec!(191950)); // QSS ≠ joint → unmarried base
-        // §55(d) AMT amounts (Rev. Proc. 2023-34 §2.11) — verified against the 2024 Form 6251 worksheet.
+                                                                         // §55(d) AMT amounts (Rev. Proc. 2023-34 §2.11) — verified against the 2024 Form 6251 worksheet.
         assert_eq!(p.amt.exemption(FilingStatus::Single), dec!(85700));
         assert_eq!(p.amt.exemption(FilingStatus::Mfj), dec!(133300));
         assert_eq!(p.amt.exemption(FilingStatus::Mfs), dec!(66650));

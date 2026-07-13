@@ -1699,14 +1699,19 @@ fn e7e_not_computable_year_with_profile_shows_se_section() {
 #[test]
 fn tax_tab_refused_full_return_year_renders_reason_not_a_number() {
     let mut snap = make_snapshot(LedgerState::default());
-    snap.refused
-        .insert(2024, "an HSA requires Form 8889 — out of scope for v1".to_string());
+    snap.refused.insert(
+        2024,
+        "an HSA requires Form 8889 — out of scope for v1".to_string(),
+    );
     let content = super::tax::render_tax_content(&snap, 2024);
     assert!(
         content.contains("NOT COMPUTABLE (full-return inputs)"),
         "refused year must render its reason header; content:\n{content}"
     );
-    assert!(content.contains("HSA"), "the refusal reason must appear; content:\n{content}");
+    assert!(
+        content.contains("HSA"),
+        "the refusal reason must appear; content:\n{content}"
+    );
     // No computed figures, and no SE section, leak for the refused year.
     assert!(
         !content.contains("TOTAL federal tax attributable") && !content.contains("Schedule SE"),

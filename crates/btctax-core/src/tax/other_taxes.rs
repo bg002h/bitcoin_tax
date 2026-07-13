@@ -134,7 +134,7 @@ mod tests {
         let f = form_8959(FilingStatus::Single, Usd::ZERO, Usd::ZERO, Some(&se));
         assert_eq!(f.part2_se, dec!(693.45)); // the unbundled 0.9% lands here
         assert_eq!(f.additional_medicare_tax, dec!(693.45)); // Part I 0 (no wages) + Part II
-        // No SE at all → line 4 is 0.
+                                                             // No SE at all → line 4 is 0.
         assert_eq!(sch2_line4_se(None), Usd::ZERO);
     }
 
@@ -155,7 +155,7 @@ mod tests {
         let over = form_8959(FilingStatus::Single, dec!(250000), Usd::ZERO, None);
         assert_eq!(over.part1_wages, dec!(450.00));
         assert_eq!(over.additional_medicare_tax, dec!(450.00)); // no SE
-        // At/below the threshold → Part I is 0.
+                                                                // At/below the threshold → Part I is 0.
         let under = form_8959(FilingStatus::Single, dec!(200000), Usd::ZERO, None);
         assert_eq!(under.part1_wages, Usd::ZERO);
         // MFJ uses $250,000; $260,000 → 0.9% × 10,000 = $90.
@@ -190,7 +190,14 @@ mod tests {
     fn form_8960_nii_binding() {
         // interest 5,000 + dividends 10,000 + L7 20,000 + crypto lending 2,000 = NII 37,000.
         // MAGI 300,000 > 200,000 → over 100,000; base = min(37,000, 100,000) = 37,000.
-        let f = form_8960(FilingStatus::Single, dec!(5000), dec!(10000), dec!(20000), dec!(2000), dec!(300000));
+        let f = form_8960(
+            FilingStatus::Single,
+            dec!(5000),
+            dec!(10000),
+            dec!(20000),
+            dec!(2000),
+            dec!(300000),
+        );
         assert_eq!(f.nii, dec!(37000));
         assert_eq!(f.tax, dec!(1406.00)); // 3.8% × 37,000
     }
@@ -199,14 +206,28 @@ mod tests {
     #[test]
     fn form_8960_magi_binding() {
         // NII 37,000 but MAGI 210,000 → over 10,000; base = min(37,000, 10,000) = 10,000.
-        let f = form_8960(FilingStatus::Single, dec!(5000), dec!(10000), dec!(20000), dec!(2000), dec!(210000));
+        let f = form_8960(
+            FilingStatus::Single,
+            dec!(5000),
+            dec!(10000),
+            dec!(20000),
+            dec!(2000),
+            dec!(210000),
+        );
         assert_eq!(f.tax, dec!(380.00)); // 3.8% × 10,000
     }
 
     /// Form 8960 — below the §1411(b) MAGI threshold ⇒ no NIIT even with large investment income.
     #[test]
     fn form_8960_below_threshold_is_zero() {
-        let f = form_8960(FilingStatus::Single, dec!(50000), dec!(50000), dec!(50000), Usd::ZERO, dec!(150000));
+        let f = form_8960(
+            FilingStatus::Single,
+            dec!(50000),
+            dec!(50000),
+            dec!(50000),
+            Usd::ZERO,
+            dec!(150000),
+        );
         assert_eq!(f.tax, Usd::ZERO);
     }
 
@@ -215,11 +236,25 @@ mod tests {
     #[test]
     fn form_8960_capital_loss_reduces_nii_and_floors_at_zero() {
         // interest 5,000, L7 −3,000 → NII 2,000; over 100,000; base 2,000 → tax 3.8% × 2,000 = $76.
-        let f = form_8960(FilingStatus::Single, dec!(5000), Usd::ZERO, dec!(-3000), Usd::ZERO, dec!(300000));
+        let f = form_8960(
+            FilingStatus::Single,
+            dec!(5000),
+            Usd::ZERO,
+            dec!(-3000),
+            Usd::ZERO,
+            dec!(300000),
+        );
         assert_eq!(f.nii, dec!(2000));
         assert_eq!(f.tax, dec!(76.00));
         // interest 5,000, L7 −10,000 → NII −5,000 → base max(0, −5,000) = 0 → no NIIT.
-        let neg = form_8960(FilingStatus::Single, dec!(5000), Usd::ZERO, dec!(-10000), Usd::ZERO, dec!(300000));
+        let neg = form_8960(
+            FilingStatus::Single,
+            dec!(5000),
+            Usd::ZERO,
+            dec!(-10000),
+            Usd::ZERO,
+            dec!(300000),
+        );
         assert_eq!(neg.nii, dec!(-5000));
         assert_eq!(neg.tax, Usd::ZERO);
     }

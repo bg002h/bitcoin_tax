@@ -2,8 +2,8 @@
 //! non-interactive use; otherwise a secure prompt), calls one library command, renders, and sets the
 //! exit code (non-zero on FR9 hard blockers / on any CliError). NO business logic lives here.
 use btctax_cli::cli::{
-    Cli, Command, FeeArg, IncomeCmd, MethodArg, Optimize, OutKindArg, Pseudo, PseudoKindArg, Reconcile,
-    SelfTransferActionArg, WhatIf,
+    Cli, Command, FeeArg, IncomeCmd, MethodArg, Optimize, OutKindArg, Pseudo, PseudoKindArg,
+    Reconcile, SelfTransferActionArg, WhatIf,
 };
 use btctax_cli::{cmd, eventref, render, CliError};
 use btctax_core::{
@@ -112,6 +112,8 @@ fn run() -> Result<ExitCode, CliError> {
                 ));
             }
             if let Some(y) = tax_year {
+                // Prompt/decrypt ONCE — `--write-carryover` reuses this passphrase (Fable P4.9 r1 M2).
+                let pp = passphrase(false)?;
                 let (
                     outcome,
                     advisory,
@@ -120,7 +122,7 @@ fn run() -> Result<ExitCode, CliError> {
                     schedule_se,
                     donation_appraisal,
                     dual_report,
-                ) = cmd::tax::report_tax_year(vault, &passphrase(false)?, y, ptg_raw)?;
+                ) = cmd::tax::report_tax_year(vault, &pp, y, ptg_raw)?;
                 print!(
                     "{}",
                     render::render_tax_outcome(y, &outcome, advisory.as_deref())
@@ -149,13 +151,13 @@ fn run() -> Result<ExitCode, CliError> {
                 // §4 R3-M6 carryover write-back (opt-in; `report` is otherwise read-only). Persists this
                 // year's computed charitable + QBI carryover-out as next year's carryover-in.
                 if write_carryover {
-                    let summary =
-                        cmd::tax::write_back_carryover(vault, &passphrase(false)?, y, force)?;
+                    let summary = cmd::tax::write_back_carryover(vault, &pp, y, force)?;
                     println!("{summary}");
                 }
             } else if write_carryover {
                 return Err(CliError::Usage(
-                    "--write-carryover requires --tax-year (it persists a full-return carryover)".into(),
+                    "--write-carryover requires --tax-year (it persists a full-return carryover)"
+                        .into(),
                 ));
             } else {
                 let state = cmd::inspect::report(vault, &passphrase(false)?, year)?;

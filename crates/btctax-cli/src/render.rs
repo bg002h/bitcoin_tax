@@ -1113,18 +1113,49 @@ pub fn render_dual_report(
     provenance: crate::resolve::Provenance,
 ) -> String {
     let mut s = String::new();
-    let _ = writeln!(s, "\n═══ Absolute filed return (Form 1040) — tax year {year} ═══");
+    let _ = writeln!(
+        s,
+        "\n═══ Absolute filed return (Form 1040) — tax year {year} ═══"
+    );
     let _ = writeln!(s, "  Profile source: {}", provenance_label(provenance));
-    let _ = writeln!(s, "  Total income (1040 L9):   {}", fmt_money(ar.total_income));
-    let _ = writeln!(s, "  Adjustments (L10):        {}", fmt_money(ar.adjustments));
+    let _ = writeln!(
+        s,
+        "  Total income (1040 L9):   {}",
+        fmt_money(ar.total_income)
+    );
+    let _ = writeln!(
+        s,
+        "  Adjustments (L10):        {}",
+        fmt_money(ar.adjustments)
+    );
     let _ = writeln!(s, "  AGI (L11):                {}", fmt_money(ar.agi));
-    let ded_kind = if ar.deduction_is_itemized { "itemized" } else { "standard" };
-    let _ = writeln!(s, "  Deduction (L12, {ded_kind}): {}", fmt_money(ar.deduction));
+    let ded_kind = if ar.deduction_is_itemized {
+        "itemized"
+    } else {
+        "standard"
+    };
+    let _ = writeln!(
+        s,
+        "  Deduction (L12, {ded_kind}): {}",
+        fmt_money(ar.deduction)
+    );
     if ar.qbi_deduction > Usd::ZERO {
-        let _ = writeln!(s, "  QBI deduction (L13):      {}", fmt_money(ar.qbi_deduction));
+        let _ = writeln!(
+            s,
+            "  QBI deduction (L13):      {}",
+            fmt_money(ar.qbi_deduction)
+        );
     }
-    let _ = writeln!(s, "  Taxable income (L15):     {}", fmt_money(ar.taxable_income));
-    let _ = writeln!(s, "  Tax (L16):                {}", fmt_money(ar.regular_tax));
+    let _ = writeln!(
+        s,
+        "  Taxable income (L15):     {}",
+        fmt_money(ar.taxable_income)
+    );
+    let _ = writeln!(
+        s,
+        "  Tax (L16):                {}",
+        fmt_money(ar.regular_tax)
+    );
     if ar.foreign_tax_credit > Usd::ZERO {
         let _ = writeln!(
             s,
@@ -1154,11 +1185,23 @@ pub fn render_dual_report(
         );
     }
     let _ = writeln!(s, "  TOTAL TAX (L24):          {}", fmt_money(ar.total_tax));
-    let _ = writeln!(s, "  Total payments (L33):     {}", fmt_money(ar.total_payments));
+    let _ = writeln!(
+        s,
+        "  Total payments (L33):     {}",
+        fmt_money(ar.total_payments)
+    );
     if ar.overpayment_refund > Usd::ZERO {
-        let _ = writeln!(s, "  → REFUND (L35a):          {}", fmt_money(ar.overpayment_refund));
+        let _ = writeln!(
+            s,
+            "  → REFUND (L35a):          {}",
+            fmt_money(ar.overpayment_refund)
+        );
     } else {
-        let _ = writeln!(s, "  → AMOUNT OWED (L37):      {}", fmt_money(ar.amount_owed));
+        let _ = writeln!(
+            s,
+            "  → AMOUNT OWED (L37):      {}",
+            fmt_money(ar.amount_owed)
+        );
     }
     // §6: the two figures answer different questions and are NEVER reconciled.
     let delta_str = match delta {

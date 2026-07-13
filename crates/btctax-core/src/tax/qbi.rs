@@ -168,7 +168,13 @@ mod tests {
         assert_eq!(r.deduction, Usd::ZERO);
         assert_eq!(r.reit_ptp_carryforward_out, Usd::ZERO);
         // Even far above the threshold, no QBI ⇒ no refuse.
-        assert!(!qbi_over_threshold(Usd::ZERO, Usd::ZERO, dec!(500000), FilingStatus::Single, &params()));
+        assert!(!qbi_over_threshold(
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(500000),
+            FilingStatus::Single,
+            &params()
+        ));
     }
 
     /// §199A(e)(2) refuse: with QBI present, TI-before-QBI ABOVE the threshold refuses (8995-A unmodeled);
@@ -177,15 +183,51 @@ mod tests {
     fn over_threshold_refuse_boundary() {
         let p = params();
         // Single: $191,951 > $191,950 → refuse; exactly $191,950 → OK.
-        assert!(qbi_over_threshold(dec!(1000), Usd::ZERO, dec!(191951), FilingStatus::Single, &p));
-        assert!(!qbi_over_threshold(dec!(1000), Usd::ZERO, dec!(191950), FilingStatus::Single, &p));
+        assert!(qbi_over_threshold(
+            dec!(1000),
+            Usd::ZERO,
+            dec!(191951),
+            FilingStatus::Single,
+            &p
+        ));
+        assert!(!qbi_over_threshold(
+            dec!(1000),
+            Usd::ZERO,
+            dec!(191950),
+            FilingStatus::Single,
+            &p
+        ));
         // MFJ threshold is $383,900: $300,000 OK, $400,000 refuses.
-        assert!(!qbi_over_threshold(dec!(1000), Usd::ZERO, dec!(300000), FilingStatus::Mfj, &p));
-        assert!(qbi_over_threshold(dec!(1000), Usd::ZERO, dec!(400000), FilingStatus::Mfj, &p));
+        assert!(!qbi_over_threshold(
+            dec!(1000),
+            Usd::ZERO,
+            dec!(300000),
+            FilingStatus::Mfj,
+            &p
+        ));
+        assert!(qbi_over_threshold(
+            dec!(1000),
+            Usd::ZERO,
+            dec!(400000),
+            FilingStatus::Mfj,
+            &p
+        ));
         // QSS is NOT a joint return → uses the $191,950 base (refuses at $300,000, unlike MFJ).
-        assert!(qbi_over_threshold(dec!(1000), Usd::ZERO, dec!(300000), FilingStatus::Qss, &p));
+        assert!(qbi_over_threshold(
+            dec!(1000),
+            Usd::ZERO,
+            dec!(300000),
+            FilingStatus::Qss,
+            &p
+        ));
         // A carryforward alone (no current REIT) is still QBI for the refuse trigger.
-        assert!(qbi_over_threshold(Usd::ZERO, dec!(5000), dec!(200000), FilingStatus::Single, &p));
+        assert!(qbi_over_threshold(
+            Usd::ZERO,
+            dec!(5000),
+            dec!(200000),
+            FilingStatus::Single,
+            &p
+        ));
     }
 
     /// Printed Form 8995 lines are `round_dollar` (half-up): a $2,502.50 REIT component rounds the 20%

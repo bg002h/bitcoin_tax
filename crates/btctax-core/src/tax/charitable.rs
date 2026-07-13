@@ -17,7 +17,9 @@
 //! The engine runs even in a standard-deduction year so the carryover ages / is reduced (Reg.
 //! §1.170A-10(a)(2), G8) — the caller uses `allowed` only when itemizing but always writes `carryover_out`.
 use crate::conventions::Usd;
-use crate::tax::return_inputs::{CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift};
+use crate::tax::return_inputs::{
+    CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift,
+};
 use rust_decimal_macros::dec;
 
 /// The result of applying the §170(b) ceilings for one year (Schedule A lines 11/12/13/14 + the carryover).
@@ -107,7 +109,7 @@ pub fn apply_170b(
     carryover_in: &[CharitableCarryItem],
     year: i32,
 ) -> CharitableResult {
-    use CharitableClass::{Cash60, CapGainProp30, OrdinaryProp50};
+    use CharitableClass::{CapGainProp30, Cash60, OrdinaryProp50};
 
     // Ceilings are a fraction of AGI; a negative AGI would make every ceiling negative and (after the
     // `nonneg` clamps) zero out all allowances, but we clamp explicitly so the intent is unmistakable and
@@ -136,7 +138,13 @@ pub fn apply_170b(
 
     // ── 50%-org classes in Worksheet-2 order; each ceiling uses the TOTAL (current + carryover) allowed
     //    of the earlier classes (R2-I1). ──────────────────────────────────────────────────────────────
-    let cash60 = allocate_class(Cash60, current(Cash60), &carry_for(Cash60), pct(dec!(0.60)), year);
+    let cash60 = allocate_class(
+        Cash60,
+        current(Cash60),
+        &carry_for(Cash60),
+        pct(dec!(0.60)),
+        year,
+    );
     let allowed_cash_tier = cash60.current_allowed + cash60.carryover_allowed;
     let ord50 = allocate_class(
         OrdinaryProp50,
@@ -146,8 +154,16 @@ pub fn apply_170b(
         year,
     );
     let allowed_ord_tier = ord50.current_allowed + ord50.carryover_allowed;
-    let cgp30_ceiling = pct(dec!(0.30)).min(nonneg(pct(dec!(0.50)) - allowed_cash_tier - allowed_ord_tier));
-    let cgp30 = allocate_class(CapGainProp30, current(CapGainProp30), &carry_for(CapGainProp30), cgp30_ceiling, year);
+    let cgp30_ceiling = pct(dec!(0.30)).min(nonneg(
+        pct(dec!(0.50)) - allowed_cash_tier - allowed_ord_tier,
+    ));
+    let cgp30 = allocate_class(
+        CapGainProp30,
+        current(CapGainProp30),
+        &carry_for(CapGainProp30),
+        cgp30_ceiling,
+        year,
+    );
 
     // Non-50%-organization classes (Cash30 / OrdinaryProp30 / CapGainProp20) are REFUSED upstream by
     // `screen_inputs` (review C1): their Pub. 526 "special 30% limit" ordering — which interleaves with the
@@ -249,7 +265,7 @@ mod tests {
         assert_eq!(r.allowed_cash, dec!(50000)); // line 11 (current)
         assert_eq!(r.allowed_carryover, dec!(10000)); // line 13 ($60k ceiling − $50k current)
         assert_eq!(r.allowed, dec!(60000)); // line 14
-        // The unused $10k of the 2022 carryover survives with its ORIGINAL vintage.
+                                            // The unused $10k of the 2022 carryover survives with its ORIGINAL vintage.
         assert_eq!(
             r.carryover_out,
             vec![carry(CharitableClass::Cash60, dec!(10000), 2022)]
@@ -277,7 +293,7 @@ mod tests {
         let cin = [carry(CharitableClass::Cash60, dec!(30000), 2022)];
         let r = apply_170b(dec!(40000), &[], &cin, 2024);
         assert_eq!(r.allowed_carryover, dec!(24000)); // used up to the ceiling
-        // The unused $6k carries with its 2022 vintage (usable through 2027, still within 5 years).
+                                                      // The unused $6k carries with its 2022 vintage (usable through 2027, still within 5 years).
         assert_eq!(
             r.carryover_out,
             vec![carry(CharitableClass::Cash60, dec!(6000), 2022)]

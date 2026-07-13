@@ -23,7 +23,8 @@ use crate::tax::method::qdcgt_line16;
 use crate::tax::other_taxes::{form_8959, form_8960, sch2_line4_se, Form8959, Form8960};
 use crate::tax::qbi::{compute_8995, qbi_over_threshold};
 use crate::tax::return_inputs::{
-    CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift, Owner, Person, ReturnInputs,
+    CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift, Owner, Person,
+    ReturnInputs,
 };
 use crate::tax::return_refuse::{Refusal, RefuseReason};
 use crate::tax::se::{compute_se_tax, se_net_income, SeTaxResult};
@@ -165,7 +166,8 @@ fn choose_deduction(ri: &ReturnInputs, standard: Usd, itemized: Option<Usd>) -> 
     let itemized = itemized.unwrap_or(Usd::ZERO);
     // §63(c)(6): an MFS filer whose spouse itemizes gets NO standard deduction (a `None` tri-state on MFS
     // is refused upstream — G15).
-    let standard = if ri.filing_status == FilingStatus::Mfs && ri.mfs_spouse_itemizes == Some(true) {
+    let standard = if ri.filing_status == FilingStatus::Mfs && ri.mfs_spouse_itemizes == Some(true)
+    {
         Usd::ZERO
     } else {
         standard
@@ -188,7 +190,8 @@ fn itemized_was_chosen(ri: &ReturnInputs, standard: Usd, itemized: Option<Usd>) 
     let Some(itemized) = itemized else {
         return false;
     };
-    let standard = if ri.filing_status == FilingStatus::Mfs && ri.mfs_spouse_itemizes == Some(true) {
+    let standard = if ri.filing_status == FilingStatus::Mfs && ri.mfs_spouse_itemizes == Some(true)
+    {
         Usd::ZERO
     } else {
         standard
@@ -286,7 +289,12 @@ fn capital_net(ri: &ReturnInputs, state: &LedgerState, year: i32, status: Filing
 /// The amount reaching **1040 L7** (capital gain or loss) for `year`: crypto Schedule D nets + box-2a
 /// capital-gain distributions, run through §1222 within-character netting + the §1211 loss limit. In a
 /// gain year this is the full net gain; in a loss year it is the −$3,000/−$1,500-MFS limited loss.
-fn capital_gain_line7(ri: &ReturnInputs, state: &LedgerState, year: i32, status: FilingStatus) -> Usd {
+fn capital_gain_line7(
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    year: i32,
+    status: FilingStatus,
+) -> Usd {
     let net = capital_net(ri, state, year, status);
     net.ordinary_gain + net.preferential_gain - net.loss_deduction
 }
@@ -498,28 +506,29 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
 
     // ── AGI, deduction, taxable income ────────────────────────────────────────────────────────────
     let agi = income_total - adjustments; // 1040 L11 (non-crypto)
-    // Deduction = max(full §63 standard, NON-crypto Schedule A) — P3 tasks 1–3. The derived Schedule A uses
-    // the NON-crypto charitable (user gifts + carryover, §170(b)-limited at non-crypto AGI); crypto donations
-    // belong to the absolute return, not the frozen delta (§6 divergence). The dependent-floor + charitable
-    // ceilings key off this non-crypto AGI.
+                                          // Deduction = max(full §63 standard, NON-crypto Schedule A) — P3 tasks 1–3. The derived Schedule A uses
+                                          // the NON-crypto charitable (user gifts + carryover, §170(b)-limited at non-crypto AGI); crypto donations
+                                          // belong to the absolute return, not the frozen delta (§6 divergence). The dependent-floor + charitable
+                                          // ceilings key off this non-crypto AGI.
     let full_std = standard_deduction(ri, params, year, wages);
     let charitable = ri.schedule_a.as_ref().map_or(Usd::ZERO, |a| {
-        crate::tax::charitable::apply_170b(agi, &a.charitable, &ri.charitable_carryover_in, year).allowed
+        crate::tax::charitable::apply_170b(agi, &a.charitable, &ri.charitable_carryover_in, year)
+            .allowed
     });
     let itemized = schedule_a_deduction(ri, agi, charitable, params);
     let deduction = choose_deduction(ri, full_std, itemized);
     let taxable_income = (agi - deduction).max(Usd::ZERO); // 1040 L15 (non-crypto)
-    // Strip the preferential slice (qualified div + LT cap-gain distr) EXACTLY ONCE — the engine re-adds
-    // it on top of the ordinary bottom via `other_net_capital_gain` + the QD channel (deep/02 §1.4).
-    // KNOWN APPROXIMATION (audit-M2 / review M1, → `p2-pref-over-ti-clamp` FOLLOWUP): when
-    // `TI < qd + cap_gain_distr` (low ordinary income + large preferential income — e.g. a retiree), the
-    // `.max(0)` floors the ordinary base to 0 while the FULL pref slice still reaches the frozen engine
-    // (which stacks `qd + pref_gain` with no min-against-TI cap). The reconstructed TI is then ≥ the true
-    // TI, so the delta/planning number can only OVERSTATE, never understate (conservative). Exact handling
-    // (cap the pref slice at TI, reducing `other` first — the QDCGT worksheet's min) RE-SCHEDULED to P4
-    // (review I2): the cap reduces the pref income that feeds the frozen engine, which is the same channel
-    // P4's absolute assembly and crypto-delta stacking rewire — doing it here would be undone there. The
-    // larger P3 Schedule A deductions make this region more reachable but never flip the conservative sign.
+                                                           // Strip the preferential slice (qualified div + LT cap-gain distr) EXACTLY ONCE — the engine re-adds
+                                                           // it on top of the ordinary bottom via `other_net_capital_gain` + the QD channel (deep/02 §1.4).
+                                                           // KNOWN APPROXIMATION (audit-M2 / review M1, → `p2-pref-over-ti-clamp` FOLLOWUP): when
+                                                           // `TI < qd + cap_gain_distr` (low ordinary income + large preferential income — e.g. a retiree), the
+                                                           // `.max(0)` floors the ordinary base to 0 while the FULL pref slice still reaches the frozen engine
+                                                           // (which stacks `qd + pref_gain` with no min-against-TI cap). The reconstructed TI is then ≥ the true
+                                                           // TI, so the delta/planning number can only OVERSTATE, never understate (conservative). Exact handling
+                                                           // (cap the pref slice at TI, reducing `other` first — the QDCGT worksheet's min) RE-SCHEDULED to P4
+                                                           // (review I2): the cap reduces the pref income that feeds the frozen engine, which is the same channel
+                                                           // P4's absolute assembly and crypto-delta stacking rewire — doing it here would be undone there. The
+                                                           // larger P3 Schedule A deductions make this region more reachable but never flip the conservative sign.
     let ordinary_taxable_income = (taxable_income - qual_div - cap_gain_distr).max(Usd::ZERO);
 
     // ── W-2 SE/Medicare channels (two DIFFERENT aggregations — deep/02 §3.4 / C4) ─────────────────
@@ -739,8 +748,10 @@ pub fn assemble_absolute(
     // non-business crypto ordinary. Screening guarantees `business_se_gross ≥ expenses` here (no loss).
     let crypto = crypto_income(state, year);
     let schedule_c_net = (crypto.business_se_gross - schedule_c_expenses).max(Usd::ZERO);
-    let schedule_1_income =
-        ri.sch1.state_refund_taxable + sum_unemployment(ri) + schedule_c_net + crypto.nonbusiness_ordinary;
+    let schedule_1_income = ri.sch1.state_refund_taxable
+        + sum_unemployment(ri)
+        + schedule_c_net
+        + crypto.nonbusiness_ordinary;
 
     let total_income =
         wages + taxable_interest + ordinary_dividends + capital_gain + schedule_1_income; // L9
@@ -822,7 +833,8 @@ pub fn assemble_absolute(
     // reads the HOUSEHOLD Σ box5 (already computed above for the SE channel) and box6; Part II = se.addl.
     let w2_medicare_withheld: Usd = ri.w2s.iter().map(|w| w.box6_medicare_withheld).sum();
     let se_tax_sch2_l4 = sch2_line4_se(se.as_ref());
-    let additional_medicare = form_8959(status, w2_medicare_wages, w2_medicare_withheld, se.as_ref());
+    let additional_medicare =
+        form_8959(status, w2_medicare_wages, w2_medicare_withheld, se.as_ref());
     // Absolute Form 8960: NII rebuilt from line items — full 3b dividends (NOT just qualified), 2b interest,
     // §1211-limited L7, and non-business crypto LENDING interest (hobby mining/staking rewards stay OUT of
     // NII); MAGI = AGI (fail-closed). Schedule C business income is §1411(c)(6)-excluded (never in NII).
@@ -851,7 +863,7 @@ pub fn assemble_absolute(
     let l18 = regular_tax; // L16 + Sch 2 L3 (= 0)
     let nonrefundable_credits = ctc_odc_credit + foreign_tax_credit; // L21 = L19 + L20 (v1: FTC only)
     let tax_after_credits = (l18 - nonrefundable_credits).max(Usd::ZERO); // L22
-    // Sch 2 Part II (L21) → 1040 L23 = SE (L4) + Additional Medicare (L11) + NIIT (L12).
+                                                                          // Sch 2 Part II (L21) → 1040 L23 = SE (L4) + Additional Medicare (L11) + NIIT (L12).
     let schedule_2_other_taxes =
         se_tax_sch2_l4 + additional_medicare.additional_medicare_tax + niit.tax;
     let total_tax = tax_after_credits + schedule_2_other_taxes; // L24
@@ -870,7 +882,7 @@ pub fn assemble_absolute(
         .sum();
     let wh_25c = additional_medicare.part5_withholding + ri.payments.other_withholding;
     let total_withholding = wh_25a + wh_25b + wh_25c; // L25
-    // L33 total payments = L25 + L26 estimated + Sch 3 L15 (L10 extension + L11 excess-SS).
+                                                      // L33 total payments = L25 + L26 estimated + Sch 3 L15 (L10 extension + L11 excess-SS).
     let total_payments = total_withholding
         + ri.payments.estimated_tax_payments
         + ri.payments.extension_payment
@@ -1188,8 +1200,8 @@ mod tests {
         let good = derive_tax_profile(&single_household(), &ty2024_params(), 2024);
         // The strip-once bug: ordinary bottom left inflated by the preferential slice.
         let mut bad = good.clone();
-        bad.ordinary_taxable_income += good.qualified_dividends_and_other_pref_income
-            + good.other_net_capital_gain; // 246,800 → 257,800
+        bad.ordinary_taxable_income +=
+            good.qualified_dividends_and_other_pref_income + good.other_net_capital_gain; // 246,800 → 257,800
         let tables = tables_2024();
         let st = LedgerState {
             income_recognized: vec![mining(dec!(40000))],
@@ -1255,7 +1267,7 @@ mod tests {
         assert!(ar.half_se_deduction > Usd::ZERO);
         assert_eq!(ar.half_se_deduction, se.deductible_half); // Sch 1 L15 = Sch SE L13 (excludes the 0.9%)
         assert_eq!(ar.adjustments, ar.half_se_deduction); // no early-wd / student-loan here
-        // Cross-foot L11 = L9 − L10 (with-crypto AGI).
+                                                          // Cross-foot L11 = L9 − L10 (with-crypto AGI).
         assert_eq!(ar.agi, ar.total_income - ar.adjustments);
         assert_eq!(ar.agi, dec!(116000) - ar.half_se_deduction);
     }
@@ -1285,7 +1297,7 @@ mod tests {
         assert_eq!(below.half_se_deduction, Usd::ZERO);
         assert_eq!(below.schedule_1_income, dec!(400)); // Schedule C net still counts as income
         assert_eq!(below.agi, dec!(400)); // no ½-SE to subtract
-        // Gross $500 → base = 461.75 ≥ 400 ⇒ SE tax + ½-SE present.
+                                          // Gross $500 → base = 461.75 ≥ 400 ⇒ SE tax + ½-SE present.
         let above = assemble_absolute(
             &ri,
             &state_income(vec![mining(dec!(500))]),
@@ -1346,7 +1358,12 @@ mod tests {
         // not floored to zero).
         let base = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(100000),
+                dec!(100000),
+                dec!(100000),
+            )],
             div_1099: vec![Form1099Div {
                 box1a_ordinary: dec!(10000),
                 box1b_qualified: dec!(2000),
@@ -1365,7 +1382,10 @@ mod tests {
         assert_eq!(b.qualified_dividends_and_other_pref_income, dec!(9000));
         assert!(b.ordinary_taxable_income < a.ordinary_taxable_income);
         // But the difference is exactly the moved slice ($7,000), not a double-count of AGI.
-        assert_eq!(a.ordinary_taxable_income - b.ordinary_taxable_income, dec!(7000));
+        assert_eq!(
+            a.ordinary_taxable_income - b.ordinary_taxable_income,
+            dec!(7000)
+        );
     }
 
     /// box 2a capital-gain distributions are IN AGI (via L7) AND stripped once — never double-removed.
@@ -1390,7 +1410,12 @@ mod tests {
     fn schedule_1_noncrypto_income_and_adjustments() {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(100000),
+                dec!(100000),
+                dec!(100000),
+            )],
             int_1099: vec![Form1099Int {
                 box1_interest: dec!(5000),
                 box2_early_withdrawal_penalty: dec!(1000),
@@ -1588,7 +1613,10 @@ mod tests {
     fn standard_deduction_basic_and_aged_blind() {
         let p = ty2024_params();
         // Single, nothing extra → basic $14,600.
-        assert_eq!(standard_deduction(&filer(FilingStatus::Single), &p, 2024, Usd::ZERO), dec!(14600));
+        assert_eq!(
+            standard_deduction(&filer(FilingStatus::Single), &p, 2024, Usd::ZERO),
+            dec!(14600)
+        );
         // Single + blind → +$1,950.
         let mut blind = filer(FilingStatus::Single);
         blind.header.taxpayer.blind = true;
@@ -1610,11 +1638,20 @@ mod tests {
             r
         };
         // Born 1960-01-01 → 65 by Jan 1 2025 → aged for TY2024 (14,600 + 1,950).
-        assert_eq!(standard_deduction(&mk(Some(date!(1960 - 01 - 01))), &p, 2024, Usd::ZERO), dec!(16550));
+        assert_eq!(
+            standard_deduction(&mk(Some(date!(1960 - 01 - 01))), &p, 2024, Usd::ZERO),
+            dec!(16550)
+        );
         // Born 1960-01-02 → NOT aged.
-        assert_eq!(standard_deduction(&mk(Some(date!(1960 - 01 - 02))), &p, 2024, Usd::ZERO), dec!(14600));
+        assert_eq!(
+            standard_deduction(&mk(Some(date!(1960 - 01 - 02))), &p, 2024, Usd::ZERO),
+            dec!(14600)
+        );
         // None DOB → not established → NOT aged (conservative, fail-closed — dob-option-pin).
-        assert_eq!(standard_deduction(&mk(None), &p, 2024, Usd::ZERO), dec!(14600));
+        assert_eq!(
+            standard_deduction(&mk(None), &p, 2024, Usd::ZERO),
+            dec!(14600)
+        );
     }
 
     /// §63(c)(5) dependent floor: `min(basic, max($1,300, earned + $450))`, with aged/blind still added.
@@ -1649,7 +1686,12 @@ mod tests {
     #[test]
     fn schedule_a_none_without_inputs() {
         assert_eq!(
-            schedule_a_deduction(&filer(FilingStatus::Single), dec!(100000), Usd::ZERO, &ty2024_params()),
+            schedule_a_deduction(
+                &filer(FilingStatus::Single),
+                dec!(100000),
+                Usd::ZERO,
+                &ty2024_params()
+            ),
             None
         );
     }
@@ -1659,9 +1701,9 @@ mod tests {
     fn schedule_a_medical_floor_salt_cap_mortgage() {
         let mut r = filer(FilingStatus::Single);
         r.schedule_a = Some(ScheduleAInputs {
-            medical: dec!(10000),                   // − 7.5%·100k = $2,500 allowed
+            medical: dec!(10000), // − 7.5%·100k = $2,500 allowed
             salt_state_estimated_payments: dec!(5000),
-            salt_real_estate: dec!(8000),           // 5d = 5,000 + 8,000 = 13,000 → capped $10,000
+            salt_real_estate: dec!(8000), // 5d = 5,000 + 8,000 = 13,000 → capped $10,000
             mortgage_interest_1098: dec!(12000),
             ..Default::default()
         });
@@ -1723,7 +1765,12 @@ mod tests {
     fn derive_uses_max_of_std_and_itemized() {
         let p = ty2024_params();
         let mut r = filer(FilingStatus::Single);
-        r.w2s = vec![w2(Owner::Taxpayer, dec!(200000), dec!(200000), dec!(200000))];
+        r.w2s = vec![w2(
+            Owner::Taxpayer,
+            dec!(200000),
+            dec!(200000),
+            dec!(200000),
+        )];
         r.schedule_a = Some(ScheduleAInputs {
             mortgage_interest_1098: dec!(30000),
             salt_real_estate: dec!(15000), // capped at $10k
@@ -1734,7 +1781,10 @@ mod tests {
             schedule_a_deduction(&r, dec!(200000), Usd::ZERO, &p).unwrap(),
             dec!(40000)
         );
-        assert_eq!(derive_tax_profile(&r, &p, 2024).ordinary_taxable_income, dec!(160000));
+        assert_eq!(
+            derive_tax_profile(&r, &p, 2024).ordinary_taxable_income,
+            dec!(160000)
+        );
     }
 
     /// §63(e) `ForceItemize` uses Schedule A even when it is smaller than the standard deduction.
@@ -1742,14 +1792,22 @@ mod tests {
     fn force_itemize_uses_schedule_a_even_when_smaller() {
         use crate::tax::return_inputs::ItemizeElection;
         let mut r = filer(FilingStatus::Single);
-        r.w2s = vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))];
+        r.w2s = vec![w2(
+            Owner::Taxpayer,
+            dec!(100000),
+            dec!(100000),
+            dec!(100000),
+        )];
         r.schedule_a = Some(ScheduleAInputs {
             mortgage_interest_1098: dec!(1000),
             ..Default::default()
         });
         r.itemize_election = ItemizeElection::ForceItemize;
         // Forced $1,000 (< std $14,600) → taxable = $100,000 − $1,000 = $99,000.
-        assert_eq!(derive_tax_profile(&r, &ty2024_params(), 2024).ordinary_taxable_income, dec!(99000));
+        assert_eq!(
+            derive_tax_profile(&r, &ty2024_params(), 2024).ordinary_taxable_income,
+            dec!(99000)
+        );
     }
 
     /// §63(c)(6): an MFS filer whose spouse itemizes gets NO standard deduction.
@@ -1759,10 +1817,16 @@ mod tests {
         let mut r = filer(FilingStatus::Mfs);
         r.w2s = vec![w2(Owner::Taxpayer, dec!(50000), dec!(50000), dec!(50000))];
         r.mfs_spouse_itemizes = Some(true); // spouse itemizes → std = 0, no Sch A → taxable = $50,000.
-        assert_eq!(derive_tax_profile(&r, &p, 2024).ordinary_taxable_income, dec!(50000));
+        assert_eq!(
+            derive_tax_profile(&r, &p, 2024).ordinary_taxable_income,
+            dec!(50000)
+        );
         // Spouse does NOT itemize → MFS std $14,600 → taxable = $35,400.
         r.mfs_spouse_itemizes = Some(false);
-        assert_eq!(derive_tax_profile(&r, &p, 2024).ordinary_taxable_income, dec!(35400));
+        assert_eq!(
+            derive_tax_profile(&r, &p, 2024).ordinary_taxable_income,
+            dec!(35400)
+        );
     }
 
     // ── Compute-dependent refuse rows (task 2) ───────────────────────────────────────────────────
@@ -1831,12 +1895,18 @@ mod tests {
         };
         let empty = LedgerState::default();
         // $3,000 interest > $2,600 → refuse.
-        assert_eq!(screened(&dependent(dec!(3000)), &empty), Some(RefuseReason::KiddieTax));
+        assert_eq!(
+            screened(&dependent(dec!(3000)), &empty),
+            Some(RefuseReason::KiddieTax)
+        );
         // $2,000 interest ≤ $2,600 → no refusal.
         assert_eq!(screened(&dependent(dec!(2000)), &empty), None);
         // Non-business (hobby) crypto reward counts as unearned too: $2,000 interest + $1,000 reward > $2,600.
         let hobby = state_income(vec![income(IncomeKind::Reward, false, dec!(1000))]);
-        assert_eq!(screened(&dependent(dec!(2000)), &hobby), Some(RefuseReason::KiddieTax));
+        assert_eq!(
+            screened(&dependent(dec!(2000)), &hobby),
+            Some(RefuseReason::KiddieTax)
+        );
         // NOT claimable as a dependent ⇒ never kiddie, even with high unearned income.
         let mut not_dep = dependent(dec!(9000));
         not_dep.header.can_be_claimed_as_dependent_taxpayer = false;
@@ -1915,7 +1985,12 @@ mod tests {
     fn absolute_schedule_a_includes_lt_crypto_donation_at_fmv() {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(200000), dec!(160000), dec!(200000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(200000),
+                dec!(160000),
+                dec!(200000),
+            )],
             schedule_a: Some(ScheduleAInputs {
                 mortgage_interest_1098: dec!(5000),
                 ..Default::default()
@@ -1941,7 +2016,12 @@ mod tests {
     fn absolute_schedule_a_short_term_crypto_donation_uses_basis() {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(200000), dec!(160000), dec!(200000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(200000),
+                dec!(160000),
+                dec!(200000),
+            )],
             schedule_a: Some(ScheduleAInputs {
                 mortgage_interest_1098: dec!(5000),
                 ..Default::default()
@@ -1963,7 +2043,12 @@ mod tests {
     fn crypto_donation_over_ceiling_carries_over_even_in_std_year() {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(100000),
+                dec!(100000),
+                dec!(100000),
+            )],
             // No Schedule A → std deduction wins, but the carryover must still age (G8).
             ..Default::default()
         };
@@ -2015,15 +2100,26 @@ mod tests {
     fn qbi_deduction_reduces_taxable_income() {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(100000),
+                dec!(100000),
+                dec!(100000),
+            )],
             div_1099: vec![Form1099Div {
-                box1a_ordinary: dec!(5000),   // includes the §199A subset (strip-once)
+                box1a_ordinary: dec!(5000),    // includes the §199A subset (strip-once)
                 box5_section_199a: dec!(5000), // REIT dividends
                 ..Default::default()
             }],
             ..Default::default()
         };
-        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &synthetic_table(2024), 2024);
+        let ar = assemble_absolute(
+            &ri,
+            &empty_ledger(),
+            &ty2024_params(),
+            &synthetic_table(2024),
+            2024,
+        );
         // AGI = 100,000 + 5,000 ord div = 105,000; std 14,600; TI-before-QBI = 90,400.
         // QBI: 20% × 5,000 = 1,000; income limit 20% × 90,400 = 18,080 → L13 = 1,000.
         assert_eq!(ar.qbi_deduction, dec!(1000));
@@ -2039,7 +2135,12 @@ mod tests {
         let table = synthetic_table(2024);
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(250000), dec!(168600), dec!(250000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(250000),
+                dec!(168600),
+                dec!(250000),
+            )],
             div_1099: vec![Form1099Div {
                 box1a_ordinary: dec!(1000),
                 box5_section_199a: dec!(1000),
@@ -2104,13 +2205,34 @@ mod tests {
             FilingStatus::Single,
             OrdinarySchedule {
                 brackets: vec![
-                    OrdinaryBracket { lower: dec!(0), rate: dec!(0.10) },
-                    OrdinaryBracket { lower: dec!(11600), rate: dec!(0.12) },
-                    OrdinaryBracket { lower: dec!(47150), rate: dec!(0.22) },
-                    OrdinaryBracket { lower: dec!(100525), rate: dec!(0.24) },
-                    OrdinaryBracket { lower: dec!(191950), rate: dec!(0.32) },
-                    OrdinaryBracket { lower: dec!(243725), rate: dec!(0.35) },
-                    OrdinaryBracket { lower: dec!(609350), rate: dec!(0.37) },
+                    OrdinaryBracket {
+                        lower: dec!(0),
+                        rate: dec!(0.10),
+                    },
+                    OrdinaryBracket {
+                        lower: dec!(11600),
+                        rate: dec!(0.12),
+                    },
+                    OrdinaryBracket {
+                        lower: dec!(47150),
+                        rate: dec!(0.22),
+                    },
+                    OrdinaryBracket {
+                        lower: dec!(100525),
+                        rate: dec!(0.24),
+                    },
+                    OrdinaryBracket {
+                        lower: dec!(191950),
+                        rate: dec!(0.32),
+                    },
+                    OrdinaryBracket {
+                        lower: dec!(243725),
+                        rate: dec!(0.35),
+                    },
+                    OrdinaryBracket {
+                        lower: dec!(609350),
+                        rate: dec!(0.37),
+                    },
                 ],
             },
         );
@@ -2118,24 +2240,51 @@ mod tests {
             FilingStatus::Mfj,
             OrdinarySchedule {
                 brackets: vec![
-                    OrdinaryBracket { lower: dec!(0), rate: dec!(0.10) },
-                    OrdinaryBracket { lower: dec!(23200), rate: dec!(0.12) },
-                    OrdinaryBracket { lower: dec!(94300), rate: dec!(0.22) },
-                    OrdinaryBracket { lower: dec!(201050), rate: dec!(0.24) },
-                    OrdinaryBracket { lower: dec!(383900), rate: dec!(0.32) },
-                    OrdinaryBracket { lower: dec!(487450), rate: dec!(0.35) },
-                    OrdinaryBracket { lower: dec!(731200), rate: dec!(0.37) },
+                    OrdinaryBracket {
+                        lower: dec!(0),
+                        rate: dec!(0.10),
+                    },
+                    OrdinaryBracket {
+                        lower: dec!(23200),
+                        rate: dec!(0.12),
+                    },
+                    OrdinaryBracket {
+                        lower: dec!(94300),
+                        rate: dec!(0.22),
+                    },
+                    OrdinaryBracket {
+                        lower: dec!(201050),
+                        rate: dec!(0.24),
+                    },
+                    OrdinaryBracket {
+                        lower: dec!(383900),
+                        rate: dec!(0.32),
+                    },
+                    OrdinaryBracket {
+                        lower: dec!(487450),
+                        rate: dec!(0.35),
+                    },
+                    OrdinaryBracket {
+                        lower: dec!(731200),
+                        rate: dec!(0.37),
+                    },
                 ],
             },
         );
         let mut ltcg = BTreeMap::new();
         ltcg.insert(
             FilingStatus::Single,
-            LtcgBreakpoints { max_zero: dec!(47025), max_fifteen: dec!(518900) },
+            LtcgBreakpoints {
+                max_zero: dec!(47025),
+                max_fifteen: dec!(518900),
+            },
         );
         ltcg.insert(
             FilingStatus::Mfj,
-            LtcgBreakpoints { max_zero: dec!(94050), max_fifteen: dec!(583750) },
+            LtcgBreakpoints {
+                max_zero: dec!(94050),
+                max_fifteen: dec!(583750),
+            },
         );
         TaxTable {
             year: 2024,
@@ -2149,7 +2298,10 @@ mod tests {
     }
     fn disp_leg(term: Term, proceeds: Usd, basis: Usd) -> DisposalLeg {
         DisposalLeg {
-            lot_id: LotId { origin_event_id: EventId::decision(1), split_sequence: 0 },
+            lot_id: LotId {
+                origin_event_id: EventId::decision(1),
+                split_sequence: 0,
+            },
             sat: 100_000_000,
             proceeds,
             basis,
@@ -2191,7 +2343,13 @@ mod tests {
             box2a_capgain_distr: dec!(20000), // LT-character → preferential net LTCG
             ..Default::default()
         }];
-        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_table(), 2024);
+        let ar = assemble_absolute(
+            &ri,
+            &empty_ledger(),
+            &ty2024_params(),
+            &real_2024_table(),
+            2024,
+        );
         assert_eq!(ar.taxable_income, dec!(120000)); // AGI 134,600 − std 14,600
         assert_eq!(ar.net_ltcg, dec!(20000));
         assert_eq!(ar.regular_tax, dec!(20053)); // QDCGT (deep/01 ex. b)
@@ -2207,7 +2365,13 @@ mod tests {
             box1b_qualified: dec!(2000),
             ..Default::default()
         }];
-        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_table(), 2024);
+        let ar = assemble_absolute(
+            &ri,
+            &empty_ledger(),
+            &ty2024_params(),
+            &real_2024_table(),
+            2024,
+        );
         assert_eq!(ar.taxable_income, dec!(60000)); // AGI 74,600 − std 14,600
         assert_eq!(ar.qualified_dividends, dec!(2000));
         assert_eq!(ar.net_ltcg, Usd::ZERO);
@@ -2224,7 +2388,10 @@ mod tests {
         assert_eq!(ar.qualified_dividends, Usd::ZERO);
         assert_eq!(ar.net_ltcg, Usd::ZERO);
         // Identical to the plain Tax Table on the same TI — no QDCGT preferential branch taken.
-        assert_eq!(ar.regular_tax, regular_tax(table.ordinary_for(FilingStatus::Single), dec!(45400)));
+        assert_eq!(
+            ar.regular_tax,
+            regular_tax(table.ordinary_for(FilingStatus::Single), dec!(45400))
+        );
     }
 
     /// §7.2 path — a net-loss year: the §1211-capped −$3,000 reaches L7, the preferential slice is 0, and
@@ -2232,13 +2399,19 @@ mod tests {
     #[test]
     fn l16_net_loss_capped_path() {
         let mut ri = wages_single(dec!(60000));
-        ri.capital_loss_carryforward_in = Carryforward { short: dec!(5000), long: Usd::ZERO };
+        ri.capital_loss_carryforward_in = Carryforward {
+            short: dec!(5000),
+            long: Usd::ZERO,
+        };
         let table = real_2024_table();
         let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &table, 2024);
         assert_eq!(ar.capital_gain, dec!(-3000)); // §1211 limit
         assert_eq!(ar.net_ltcg, Usd::ZERO);
         assert_eq!(ar.taxable_income, dec!(42400)); // (60,000 − 3,000) − 14,600
-        assert_eq!(ar.regular_tax, regular_tax(table.ordinary_for(FilingStatus::Single), dec!(42400)));
+        assert_eq!(
+            ar.regular_tax,
+            regular_tax(table.ordinary_for(FilingStatus::Single), dec!(42400))
+        );
     }
 
     /// §7.2 path — ST gain cross-netted against an LT loss (Schedule D line 16 netting): the surviving
@@ -2256,7 +2429,10 @@ mod tests {
         assert_eq!(ar.capital_gain, dec!(6000)); // 10,000 ST − 4,000 LT cross-net → ordinary
         assert_eq!(ar.net_ltcg, Usd::ZERO);
         assert_eq!(ar.taxable_income, dec!(41400)); // (50,000 + 6,000) − 14,600
-        assert_eq!(ar.regular_tax, regular_tax(table.ordinary_for(FilingStatus::Single), dec!(41400)));
+        assert_eq!(
+            ar.regular_tax,
+            regular_tax(table.ordinary_for(FilingStatus::Single), dec!(41400))
+        );
     }
 
     /// `p2-pref-over-ti-clamp` on the absolute side: preferential income exceeding taxable income is CAPPED
@@ -2271,7 +2447,13 @@ mod tests {
             box1b_qualified: dec!(50000),
             ..Default::default()
         }];
-        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_table(), 2024);
+        let ar = assemble_absolute(
+            &ri,
+            &empty_ledger(),
+            &ty2024_params(),
+            &real_2024_table(),
+            2024,
+        );
         assert_eq!(ar.taxable_income, dec!(35400)); // 50,000 − 14,600
         assert_eq!(ar.qualified_dividends, dec!(50000));
         assert_eq!(ar.regular_tax, Usd::ZERO); // capped → $0 (not $446)
@@ -2290,7 +2472,13 @@ mod tests {
         let ar = assemble_absolute(&force, &empty_ledger(), &params, &table, 2024);
         assert!(ar.deduction_is_itemized); // labeled itemized even though...
         assert_eq!(ar.deduction, Usd::ZERO); // ...§63(e) forced-itemize with nothing to itemize is $0
-        let ar2 = assemble_absolute(&wages_single(dec!(60000)), &empty_ledger(), &params, &table, 2024);
+        let ar2 = assemble_absolute(
+            &wages_single(dec!(60000)),
+            &empty_ledger(),
+            &params,
+            &table,
+            2024,
+        );
         assert!(!ar2.deduction_is_itemized); // Auto, no Schedule A → standard
         assert_eq!(ar2.deduction, dec!(14600));
     }
@@ -2304,10 +2492,15 @@ mod tests {
     fn absolute_niit_full_dividends_lending_in_reward_out() {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(250000), dec!(168600), dec!(250000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(250000),
+                dec!(168600),
+                dec!(250000),
+            )],
             div_1099: vec![Form1099Div {
                 box1a_ordinary: dec!(10000), // full 3b
-                box1b_qualified: dec!(4000),  // only part is qualified
+                box1b_qualified: dec!(4000), // only part is qualified
                 ..Default::default()
             }],
             int_1099: vec![Form1099Int {
@@ -2317,7 +2510,7 @@ mod tests {
             ..Default::default()
         };
         let st = state_income(vec![
-            income(IncomeKind::Reward, false, dec!(5000)),   // hobby reward → NOT NII (Sch 1 L8v only)
+            income(IncomeKind::Reward, false, dec!(5000)), // hobby reward → NOT NII (Sch 1 L8v only)
             income(IncomeKind::Interest, false, dec!(2000)), // non-business lending interest → NII
         ]);
         let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_table(), 2024);
@@ -2361,7 +2554,13 @@ mod tests {
             ],
             ..Default::default()
         };
-        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_table(), 2024);
+        let ar = assemble_absolute(
+            &ri,
+            &empty_ledger(),
+            &ty2024_params(),
+            &real_2024_table(),
+            2024,
+        );
         // Σ box5 = 250,000 > 200,000 Single threshold → Part I = 0.9% × 50,000 = $450.
         assert_eq!(ar.additional_medicare.part1_wages, dec!(450.00));
     }
@@ -2393,7 +2592,12 @@ mod tests {
     fn foreign_tax_credit_on_schedule_3_line_1() {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(100000),
+                dec!(100000),
+                dec!(100000),
+            )],
             int_1099: vec![Form1099Int {
                 box1_interest: dec!(5000),
                 box6_foreign_tax: dec!(120),
@@ -2406,7 +2610,13 @@ mod tests {
             }],
             ..Default::default()
         };
-        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_table(), 2024);
+        let ar = assemble_absolute(
+            &ri,
+            &empty_ledger(),
+            &ty2024_params(),
+            &real_2024_table(),
+            2024,
+        );
         assert_eq!(ar.foreign_tax_credit, dec!(200)); // 120 + 80 (≤ $300 ceiling, screened)
         assert_eq!(ar.tax_after_credits, ar.regular_tax - dec!(200)); // L22 = L16 − FTC (no other credits)
     }
@@ -2422,7 +2632,13 @@ mod tests {
             date_of_birth: Some(date!(2015 - 01 - 01)),
             ..Default::default()
         }];
-        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_table(), 2024);
+        let ar = assemble_absolute(
+            &ri,
+            &empty_ledger(),
+            &ty2024_params(),
+            &real_2024_table(),
+            2024,
+        );
         assert_eq!(ar.ctc_odc_credit, Usd::ZERO);
         assert_eq!(ar.tax_after_credits, ar.regular_tax); // no FTC, no CTC → L22 = L16
     }
@@ -2433,7 +2649,12 @@ mod tests {
     fn total_tax_l24_composition() {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(200000), dec!(168600), dec!(200000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(200000),
+                dec!(168600),
+                dec!(200000),
+            )],
             int_1099: vec![Form1099Int {
                 box1_interest: dec!(5000),
                 box6_foreign_tax: dec!(100),
@@ -2462,8 +2683,14 @@ mod tests {
             ar.schedule_2_other_taxes,
             ar.se_tax_sch2_l4 + ar.additional_medicare.additional_medicare_tax + ar.niit.tax
         );
-        assert_eq!(ar.tax_after_credits, (ar.regular_tax - ar.foreign_tax_credit).max(Usd::ZERO));
-        assert_eq!(ar.total_tax, ar.tax_after_credits + ar.schedule_2_other_taxes);
+        assert_eq!(
+            ar.tax_after_credits,
+            (ar.regular_tax - ar.foreign_tax_credit).max(Usd::ZERO)
+        );
+        assert_eq!(
+            ar.total_tax,
+            ar.tax_after_credits + ar.schedule_2_other_taxes
+        );
     }
 
     /// The FTC is NONREFUNDABLE: when it exceeds the income tax (L16), L22 floors at $0 and the excess is
@@ -2475,7 +2702,13 @@ mod tests {
             box6_foreign_tax: dec!(300), // ≤ $300 ceiling
             ..Default::default()
         }];
-        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_table(), 2024);
+        let ar = assemble_absolute(
+            &ri,
+            &empty_ledger(),
+            &ty2024_params(),
+            &real_2024_table(),
+            2024,
+        );
         assert_eq!(ar.foreign_tax_credit, dec!(300));
         assert!(ar.regular_tax < dec!(300)); // TI $2,400 → L16 ≈ $241
         assert_eq!(ar.tax_after_credits, Usd::ZERO); // capped by tax; excess FTC not refundable
@@ -2497,7 +2730,10 @@ mod tests {
         // Single, two employers each $6,000 → Σ $12,000 > MAX → excess $1,546.80.
         let two = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2_ss(Owner::Taxpayer, dec!(6000)), w2_ss(Owner::Taxpayer, dec!(6000))],
+            w2s: vec![
+                w2_ss(Owner::Taxpayer, dec!(6000)),
+                w2_ss(Owner::Taxpayer, dec!(6000)),
+            ],
             ..Default::default()
         };
         assert_eq!(excess_social_security(&two, &table), dec!(1546.80));
@@ -2548,7 +2784,13 @@ mod tests {
             },
             ..Default::default()
         };
-        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_table(), 2024);
+        let ar = assemble_absolute(
+            &ri,
+            &empty_ledger(),
+            &ty2024_params(),
+            &real_2024_table(),
+            2024,
+        );
         // 25a 15,000 + 25b 500 + 25c (8959 Part V 0 + other 300) = 15,800.
         assert_eq!(ar.total_withholding, dec!(15800));
         // + estimated 2,000 + extension 1,000 (+ excess-SS 0) = 18,800.
@@ -2623,11 +2865,11 @@ mod tests {
         assert_eq!(se.ss, dec!(0.00)); // SS cap consumed by the taxpayer's own 168,600 box3
         assert_eq!(se.medicare, dec!(1606.89)); // 2.9% × 55,410
         assert_eq!(ar.se_tax_sch2_l4, dec!(1606.89)); // Sch 2 L4 = ss + medicare (0.9% unbundled)
-        // Form 8959: Part I = 0.9% × (Σbox5 280,000 − MFJ 250,000) = 270.00; Part II = se.addl = 498.69.
+                                                      // Form 8959: Part I = 0.9% × (Σbox5 280,000 − MFJ 250,000) = 270.00; Part II = se.addl = 498.69.
         assert_eq!(ar.additional_medicare.part1_wages, dec!(270.00));
         assert_eq!(ar.additional_medicare.part2_se, dec!(498.69));
         assert_eq!(ar.additional_medicare.additional_medicare_tax, dec!(768.69)); // L18 → Sch 2 L11
-        // Part V: L22 = max(0, Σbox6 4,240 − 1.45% × 280,000 (=4,060)) = 180.00 → 1040 25c.
+                                                                                  // Part V: L22 = max(0, Σbox6 4,240 − 1.45% × 280,000 (=4,060)) = 180.00 → 1040 25c.
         assert_eq!(ar.additional_medicare.part5_withholding, dec!(180.00));
     }
 
@@ -2649,7 +2891,7 @@ mod tests {
         let ar = assemble_absolute(&ri, &st, &params, &table, 2024);
         assert_eq!(ar.niit.nii, dec!(10000)); // only the lending interest
         assert_eq!(ar.niit.tax, dec!(380.00)); // 3.8% × 10,000 (NII-binding)
-        // The frozen crypto-delta NIIT on the SAME ledger + a zeroed profile — collapses to the cent.
+                                               // The frozen crypto-delta NIIT on the SAME ledger + a zeroed profile — collapses to the cent.
         let profile = derive_tax_profile(&ri, &params, 2024);
         match compute_tax_year(&[], &st, 2024, Some(&profile), &tables_2024()) {
             TaxOutcome::Computed(r) => assert_eq!(r.niit, ar.niit.tax),
@@ -2665,7 +2907,12 @@ mod tests {
     fn medical_floor_uses_with_crypto_agi_shrinking_the_deduction() {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(100000),
+                dec!(100000),
+                dec!(100000),
+            )],
             schedule_a: Some(ScheduleAInputs {
                 medical: dec!(20000),
                 mortgage_interest_1098: dec!(30000),
@@ -2704,7 +2951,12 @@ mod tests {
     fn section6_medical_floor_delta_understates_and_does_not_reconcile() {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(100000),
+                dec!(100000),
+                dec!(100000),
+            )],
             schedule_a: Some(ScheduleAInputs {
                 medical: dec!(20000),
                 mortgage_interest_1098: dec!(30000),
@@ -2789,7 +3041,7 @@ mod tests {
             ..Default::default()
         };
         let st = state_income(vec![
-            mining(dec!(210000)),                             // business SE income (gross → engine crypto_ord)
+            mining(dec!(210000)), // business SE income (gross → engine crypto_ord)
             income(IncomeKind::Interest, false, dec!(10000)), // NII
         ]);
         let params = ty2024_params();
@@ -2799,7 +3051,7 @@ mod tests {
         // MAGI-binding: absolute NIIT is strictly below 3.8% × NII (the ½-SE deduction shrank the MAGI arm).
         assert!(ar.niit.tax < dec!(380.00));
         assert_eq!(ar.niit.tax, dec!(238.25)); // 3.8% × (206,269.74 − 200,000)
-        // The frozen delta uses the GROSS crypto AGI (no ½-SE) → its NII arm binds → strictly higher.
+                                               // The frozen delta uses the GROSS crypto AGI (no ½-SE) → its NII arm binds → strictly higher.
         let profile = derive_tax_profile(&ri, &params, 2024);
         match compute_tax_year(&[], &st, 2024, Some(&profile), &tables_2024()) {
             TaxOutcome::Computed(r) => {
@@ -2818,7 +3070,12 @@ mod tests {
     fn ar_with_carryovers() -> AbsoluteReturn {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(100000),
+                dec!(100000),
+                dec!(100000),
+            )],
             div_1099: vec![Form1099Div {
                 box1a_ordinary: dec!(4000),
                 box5_section_199a: dec!(4000), // REIT dividends < the prior loss carryforward
@@ -2846,30 +3103,47 @@ mod tests {
     fn writeback_into_fresh_next_year() {
         let ar = ar_with_carryovers();
         let next = apply_carryover_writeback(&ar, ReturnInputs::default(), false).unwrap();
-        assert_eq!(next.charitable_carryover_in.len(), ar.charitable_carryover_out.len());
-        assert_eq!(next.charitable_carryover_in[0].amount, ar.charitable_carryover_out[0].amount);
-        assert!(next.charitable_carryover_in.iter().all(|c| c.provenance == CarryProvenance::Computed));
+        assert_eq!(
+            next.charitable_carryover_in.len(),
+            ar.charitable_carryover_out.len()
+        );
+        assert_eq!(
+            next.charitable_carryover_in[0].amount,
+            ar.charitable_carryover_out[0].amount
+        );
+        assert!(next
+            .charitable_carryover_in
+            .iter()
+            .all(|c| c.provenance == CarryProvenance::Computed));
         assert_eq!(next.qbi.reit_ptp_carryforward_in, dec!(6000));
-        assert_eq!(next.qbi.reit_ptp_carryforward_in_provenance, CarryProvenance::Computed);
+        assert_eq!(
+            next.qbi.reit_ptp_carryforward_in_provenance,
+            CarryProvenance::Computed
+        );
     }
 
     /// R3-M6 precedence: a prior COMPUTED carryover-in is overwritten silently (no `--force`).
     #[test]
     fn writeback_overwrites_computed_silently() {
         let ar = ar_with_carryovers();
-        let mut prior = ReturnInputs::default();
-        prior.charitable_carryover_in = vec![CharitableCarryItem {
-            class: CharitableClass::Cash60,
-            amount: dec!(999),
-            origin_year: 2023,
-            provenance: CarryProvenance::Computed,
-        }];
-        prior.qbi = QbiInputs {
-            reit_ptp_carryforward_in: dec!(999),
-            reit_ptp_carryforward_in_provenance: CarryProvenance::Computed,
+        let prior = ReturnInputs {
+            charitable_carryover_in: vec![CharitableCarryItem {
+                class: CharitableClass::Cash60,
+                amount: dec!(999),
+                origin_year: 2023,
+                provenance: CarryProvenance::Computed,
+            }],
+            qbi: QbiInputs {
+                reit_ptp_carryforward_in: dec!(999),
+                reit_ptp_carryforward_in_provenance: CarryProvenance::Computed,
+            },
+            ..Default::default()
         };
         let next = apply_carryover_writeback(&ar, prior, false).unwrap();
-        assert_eq!(next.charitable_carryover_in[0].amount, ar.charitable_carryover_out[0].amount);
+        assert_eq!(
+            next.charitable_carryover_in[0].amount,
+            ar.charitable_carryover_out[0].amount
+        );
         assert_eq!(next.qbi.reit_ptp_carryforward_in, dec!(6000));
     }
 
@@ -2879,22 +3153,48 @@ mod tests {
     fn writeback_refuses_user_without_force() {
         let ar = ar_with_carryovers();
         // User charitable carryover present → refuse without force.
-        let mut user_charitable = ReturnInputs::default();
-        user_charitable.charitable_carryover_in = vec![CharitableCarryItem {
-            class: CharitableClass::Cash60,
-            amount: dec!(5000),
-            origin_year: 2023,
-            provenance: CarryProvenance::User,
-        }];
+        let user_charitable = ReturnInputs {
+            charitable_carryover_in: vec![CharitableCarryItem {
+                class: CharitableClass::Cash60,
+                amount: dec!(5000),
+                origin_year: 2023,
+                provenance: CarryProvenance::User,
+            }],
+            ..Default::default()
+        };
         assert!(apply_carryover_writeback(&ar, user_charitable.clone(), false).is_err());
         assert!(apply_carryover_writeback(&ar, user_charitable, true).is_ok()); // --force overwrites
-        // User QBI carryforward present → refuse without force (atomic: charitable not half-written).
-        let mut user_qbi = ReturnInputs::default();
-        user_qbi.qbi = QbiInputs {
-            reit_ptp_carryforward_in: dec!(3000),
-            reit_ptp_carryforward_in_provenance: CarryProvenance::User,
+                                                                                // User QBI carryforward present → refuse without force (atomic: charitable not half-written).
+        let user_qbi = ReturnInputs {
+            qbi: QbiInputs {
+                reit_ptp_carryforward_in: dec!(3000),
+                reit_ptp_carryforward_in_provenance: CarryProvenance::User,
+            },
+            ..Default::default()
         };
         assert!(apply_carryover_writeback(&ar, user_qbi.clone(), false).is_err());
         assert!(apply_carryover_writeback(&ar, user_qbi, true).is_ok());
+    }
+
+    /// M3 (Fable P4.9 r1): serde back-compat — a LEGACY blob with no `provenance` key loads as `User`, so a
+    /// pre-existing (imported) carryover is protected from a silent write-back overwrite.
+    #[test]
+    fn legacy_carryover_blob_without_provenance_loads_as_user() {
+        let json = r#"{"filing_status":"Single",
+            "charitable_carryover_in":[{"class":"cash60","amount":"5000","origin_year":2023}],
+            "qbi":{"reit_ptp_carryforward_in":"2000"}}"#;
+        let ri: ReturnInputs = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            ri.charitable_carryover_in[0].provenance,
+            CarryProvenance::User
+        );
+        assert_eq!(
+            ri.qbi.reit_ptp_carryforward_in_provenance,
+            CarryProvenance::User
+        );
+        // …and is therefore protected: the write-back refuses without --force.
+        let ar = ar_with_carryovers();
+        assert!(apply_carryover_writeback(&ar, ri.clone(), false).is_err());
+        assert!(apply_carryover_writeback(&ar, ri, true).is_ok());
     }
 }

@@ -106,7 +106,13 @@ mod tests {
     fn below_exemption_clears() {
         // line5 = 50,000 < 85,700 exemption → STOP.
         assert!(!amt_should_file_6251(
-            FilingStatus::Single, dec!(50000), Usd::ZERO, Usd::ZERO, dec!(5000), Usd::ZERO, &amt()
+            FilingStatus::Single,
+            dec!(50000),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(5000),
+            Usd::ZERO,
+            &amt()
         ));
     }
 
@@ -116,7 +122,13 @@ mod tests {
         // agi 900,000: line5 900,000; line7 814,300; phaseout → line9 290,650, line10 min(72,662.50, 85,700)
         // = 72,662.50; line11 886,962.50 > 232,600 → fill 6251.
         assert!(amt_should_file_6251(
-            FilingStatus::Single, dec!(900000), Usd::ZERO, Usd::ZERO, dec!(300000), Usd::ZERO, &amt()
+            FilingStatus::Single,
+            dec!(900000),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(300000),
+            Usd::ZERO,
+            &amt()
         ));
     }
 
@@ -128,11 +140,23 @@ mod tests {
         // agi 300,000 (< phase-out): line5 300,000; line7 214,300 ≤ 232,600 (no STOP); line12 = 26% ×
         // 214,300 = 55,718. L16 = 45,000 → 55,718 > 45,000 → fill 6251.
         assert!(amt_should_file_6251(
-            FilingStatus::Single, dec!(300000), Usd::ZERO, Usd::ZERO, dec!(45000), Usd::ZERO, &amt()
+            FilingStatus::Single,
+            dec!(300000),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(45000),
+            Usd::ZERO,
+            &amt()
         ));
         // Same AMTI but L16 = 60,000 → 55,718 ≤ 60,000 → cleared (no AMT).
         assert!(!amt_should_file_6251(
-            FilingStatus::Single, dec!(300000), Usd::ZERO, Usd::ZERO, dec!(60000), Usd::ZERO, &amt()
+            FilingStatus::Single,
+            dec!(300000),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(60000),
+            Usd::ZERO,
+            &amt()
         ));
     }
 
@@ -143,12 +167,24 @@ mod tests {
         // agi 90,000; without the refund line5 = 90,000 > 85,700 (would continue); a $6,000 refund →
         // line5 = 84,000 ≤ 85,700 → STOP (cleared).
         assert!(!amt_should_file_6251(
-            FilingStatus::Single, dec!(90000), Usd::ZERO, dec!(6000), dec!(9000), Usd::ZERO, &amt()
+            FilingStatus::Single,
+            dec!(90000),
+            Usd::ZERO,
+            dec!(6000),
+            dec!(9000),
+            Usd::ZERO,
+            &amt()
         ));
         // Without the refund, the same return continues past the exemption (and here clears on the Next
         // test only because L16 is high) — so the refund is genuinely load-bearing at the line-7 gate.
         assert!(!amt_should_file_6251(
-            FilingStatus::Single, dec!(90000), Usd::ZERO, Usd::ZERO, dec!(9000), Usd::ZERO, &amt()
+            FilingStatus::Single,
+            dec!(90000),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(9000),
+            Usd::ZERO,
+            &amt()
         ));
     }
 
@@ -158,12 +194,24 @@ mod tests {
     fn mfs_lower_thresholds() {
         // MFS, agi 200,000: line5 200,000; exemption 66,650 → line7 133,350 > 116,300 breakpoint → fill 6251.
         assert!(amt_should_file_6251(
-            FilingStatus::Mfs, dec!(200000), Usd::ZERO, Usd::ZERO, dec!(40000), Usd::ZERO, &amt()
+            FilingStatus::Mfs,
+            dec!(200000),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(40000),
+            Usd::ZERO,
+            &amt()
         ));
         // The identical dollars as Single: line7 = 200,000 − 85,700 = 114,300 ≤ 232,600 (no line-12 STOP);
         // line12 = 26% × 114,300 = 29,718 ≤ 40,000 L16 → cleared. (MFS is stricter.)
         assert!(!amt_should_file_6251(
-            FilingStatus::Single, dec!(200000), Usd::ZERO, Usd::ZERO, dec!(40000), Usd::ZERO, &amt()
+            FilingStatus::Single,
+            dec!(200000),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(40000),
+            Usd::ZERO,
+            &amt()
         ));
     }
 
@@ -174,7 +222,13 @@ mod tests {
         // agi 325,700 → line5 325,700 (< phase-out); line7 = line11 = 240,000 > 232,600 → STOP (fill 6251),
         // even though 26% × 240,000 = 62,400 < L16 70,000 (which alone would clear on the Next test).
         assert!(amt_should_file_6251(
-            FilingStatus::Single, dec!(325700), Usd::ZERO, Usd::ZERO, dec!(70000), Usd::ZERO, &amt()
+            FilingStatus::Single,
+            dec!(325700),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(70000),
+            Usd::ZERO,
+            &amt()
         ));
     }
 
@@ -190,8 +244,15 @@ mod tests {
         // 214,300 = 55,718. The Next test is `55,718 > L16`; subtracting any FTC f from both line 12 and
         // line 13 gives `(55,718 − f) > (L16 − f)` ⇔ `55,718 > L16` — unchanged.
         for l16 in [dec!(50000), dec!(55000), dec!(55718), dec!(56000)] {
-            let decision =
-                amt_should_file_6251(FilingStatus::Single, dec!(300000), Usd::ZERO, Usd::ZERO, l16, Usd::ZERO, &a);
+            let decision = amt_should_file_6251(
+                FilingStatus::Single,
+                dec!(300000),
+                Usd::ZERO,
+                Usd::ZERO,
+                l16,
+                Usd::ZERO,
+                &a,
+            );
             assert_eq!(decision, dec!(55718) > l16, "L16 = {l16}");
         }
     }
@@ -201,7 +262,13 @@ mod tests {
     fn qbi_reduces_line3() {
         // agi 90,000, QBI 10,000 → line5 = 80,000 ≤ 85,700 → cleared (would continue without the QBI).
         assert!(!amt_should_file_6251(
-            FilingStatus::Single, dec!(90000), dec!(10000), Usd::ZERO, dec!(9000), Usd::ZERO, &amt()
+            FilingStatus::Single,
+            dec!(90000),
+            dec!(10000),
+            Usd::ZERO,
+            dec!(9000),
+            Usd::ZERO,
+            &amt()
         ));
     }
 }

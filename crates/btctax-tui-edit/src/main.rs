@@ -10014,7 +10014,8 @@ mod tests {
             w2_medicare_wages: dec!(0),
             schedule_c_expenses: dec!(0),
         };
-        btctax_cli::cmd::tax::set_profile(&vault, &Passphrase::new(pp.into()), 2024, raw, false).unwrap();
+        btctax_cli::cmd::tax::set_profile(&vault, &Passphrase::new(pp.into()), 2024, raw, false)
+            .unwrap();
         // Full-return inputs for the SAME year would DERIVE a different (Single) profile.
         let toml = dir.path().join("inputs.toml");
         std::fs::write(
@@ -10022,8 +10023,13 @@ mod tests {
             "filing_status = \"Single\"\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"X\"\nbox1_wages = \"50000\"\nbox2_fed_withheld = \"5000\"\n",
         )
         .unwrap();
-        btctax_cli::cmd::tax::import_return_inputs(&vault, &Passphrase::new(pp.into()), 2024, &toml)
-            .unwrap();
+        btctax_cli::cmd::tax::import_return_inputs(
+            &vault,
+            &Passphrase::new(pp.into()),
+            2024,
+            &toml,
+        )
+        .unwrap();
 
         let mut app = EditorApp::new(vault.clone());
         for c in pp.chars() {

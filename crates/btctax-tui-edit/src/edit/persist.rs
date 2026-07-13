@@ -1111,8 +1111,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut session =
-            btctax_cli::Session::open(&vault, &Passphrase::new(pp.into())).unwrap();
+        let mut session = btctax_cli::Session::open(&vault, &Passphrase::new(pp.into())).unwrap();
         // A raw profile for the SAME year is refused (D-4) — nothing stored.
         let err = persist_tax_profile(&mut session, 2025, &fixture_profile()).unwrap_err();
         assert!(matches!(

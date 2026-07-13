@@ -36,8 +36,8 @@ pub struct Box12Entry {
 pub struct W2 {
     pub owner: Owner,
     pub employer: String,
-    pub box1_wages: Usd,           // → 1040 1a
-    pub box2_fed_withheld: Usd,    // → 1040 25a
+    pub box1_wages: Usd,        // → 1040 1a
+    pub box2_fed_withheld: Usd, // → 1040 25a
     #[serde(default)]
     pub box3_ss_wages: Usd, // per-earner SS cap + excess-SS (§4.9)
     #[serde(default)]
