@@ -23,7 +23,7 @@ use crate::tax::method::qdcgt_line16;
 use crate::tax::other_taxes::{form_8959, form_8960, sch2_line4_se, Form8959, Form8960};
 use crate::tax::qbi::{compute_8995, qbi_over_threshold};
 use crate::tax::return_inputs::{
-    CharitableCarryItem, CharitableClass, CharitableGift, Owner, Person, ReturnInputs,
+    CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift, Owner, Person, ReturnInputs,
 };
 use crate::tax::return_refuse::{Refusal, RefuseReason};
 use crate::tax::se::{compute_se_tax, se_net_income, SeTaxResult};
@@ -978,6 +978,51 @@ pub fn screen_absolute(
     }
 
     None
+}
+
+/// Apply the **§4 R3-M6 carryover write-back**: stamp the absolute return's computed charitable +
+/// QBI-REIT/PTP carryover-OUTs into `next_year`'s (year Y+1's) carryover-IN fields, provenance `Computed`.
+/// Returns the updated `next_year` to persist, or `Err(message)` when it would silently overwrite a
+/// **User**-provenance carryover (from `income import`) and `force` is false — never clobbers a user entry.
+/// Both conflicts are checked BEFORE either field is written (atomic — a QBI conflict doesn't leave a
+/// half-applied charitable write). A computed (or empty) existing carryover-in is overwritten silently.
+pub fn apply_carryover_writeback(
+    ar: &AbsoluteReturn,
+    mut next_year: ReturnInputs,
+    force: bool,
+) -> Result<ReturnInputs, String> {
+    if !force {
+        if next_year
+            .charitable_carryover_in
+            .iter()
+            .any(|c| c.provenance == CarryProvenance::User)
+        {
+            return Err(
+                "next year's charitable carryover was user-entered (`income import`) — pass `--force` to \
+                 overwrite it with the computed carryover"
+                    .to_string(),
+            );
+        }
+        if next_year.qbi.reit_ptp_carryforward_in > Usd::ZERO
+            && next_year.qbi.reit_ptp_carryforward_in_provenance == CarryProvenance::User
+        {
+            return Err(
+                "next year's QBI REIT/PTP carryforward was user-entered — pass `--force` to overwrite"
+                    .to_string(),
+            );
+        }
+    }
+    next_year.charitable_carryover_in = ar
+        .charitable_carryover_out
+        .iter()
+        .map(|c| CharitableCarryItem {
+            provenance: CarryProvenance::Computed,
+            ..c.clone()
+        })
+        .collect();
+    next_year.qbi.reit_ptp_carryforward_in = ar.qbi_reit_ptp_carryforward_out;
+    next_year.qbi.reit_ptp_carryforward_in_provenance = CarryProvenance::Computed;
+    Ok(next_year)
 }
 
 /// Schedule B §6012 / Form 1040 Schedule B filing threshold ($1,500 for interest and for dividends).
@@ -1937,6 +1982,7 @@ mod tests {
                 class: CharitableClass::CapGainProp30,
                 amount: dec!(40000),
                 origin_year: 2024,
+                provenance: crate::tax::return_inputs::CarryProvenance::default(),
             }]
         );
     }
@@ -2762,5 +2808,93 @@ mod tests {
             }
             other => panic!("must compute, got {other:?}"),
         }
+    }
+
+    // ── §4 R3-M6 carryover write-back (P4.9) ─────────────────────────────────────────────────────
+    use crate::tax::return_inputs::{CarryProvenance, QbiInputs};
+
+    /// A fixture whose absolute return has BOTH a nonzero charitable carryover-out (crypto donation over
+    /// the 30% ceiling) AND a QBI REIT/PTP loss carryforward-out (prior loss > this year's REIT income).
+    fn ar_with_carryovers() -> AbsoluteReturn {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            div_1099: vec![Form1099Div {
+                box1a_ordinary: dec!(4000),
+                box5_section_199a: dec!(4000), // REIT dividends < the prior loss carryforward
+                ..Default::default()
+            }],
+            qbi: QbiInputs {
+                reit_ptp_carryforward_in: dec!(10000),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let st = state_removals(vec![donation(
+            date!(2024 - 06 - 01),
+            vec![donation_leg(Term::LongTerm, dec!(20000), dec!(70000))],
+        )]);
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_table(), 2024);
+        assert!(!ar.charitable_carryover_out.is_empty()); // there IS a charitable carryover
+        assert_eq!(ar.qbi_reit_ptp_carryforward_out, dec!(6000)); // 10,000 prior − 4,000 REIT
+        ar
+    }
+
+    /// Write-back into a FRESH next year: the computed carryovers become next year's carryover-in, stamped
+    /// `Computed` (so a subsequent report can overwrite them silently).
+    #[test]
+    fn writeback_into_fresh_next_year() {
+        let ar = ar_with_carryovers();
+        let next = apply_carryover_writeback(&ar, ReturnInputs::default(), false).unwrap();
+        assert_eq!(next.charitable_carryover_in.len(), ar.charitable_carryover_out.len());
+        assert_eq!(next.charitable_carryover_in[0].amount, ar.charitable_carryover_out[0].amount);
+        assert!(next.charitable_carryover_in.iter().all(|c| c.provenance == CarryProvenance::Computed));
+        assert_eq!(next.qbi.reit_ptp_carryforward_in, dec!(6000));
+        assert_eq!(next.qbi.reit_ptp_carryforward_in_provenance, CarryProvenance::Computed);
+    }
+
+    /// R3-M6 precedence: a prior COMPUTED carryover-in is overwritten silently (no `--force`).
+    #[test]
+    fn writeback_overwrites_computed_silently() {
+        let ar = ar_with_carryovers();
+        let mut prior = ReturnInputs::default();
+        prior.charitable_carryover_in = vec![CharitableCarryItem {
+            class: CharitableClass::Cash60,
+            amount: dec!(999),
+            origin_year: 2023,
+            provenance: CarryProvenance::Computed,
+        }];
+        prior.qbi = QbiInputs {
+            reit_ptp_carryforward_in: dec!(999),
+            reit_ptp_carryforward_in_provenance: CarryProvenance::Computed,
+        };
+        let next = apply_carryover_writeback(&ar, prior, false).unwrap();
+        assert_eq!(next.charitable_carryover_in[0].amount, ar.charitable_carryover_out[0].amount);
+        assert_eq!(next.qbi.reit_ptp_carryforward_in, dec!(6000));
+    }
+
+    /// R3-M6 precedence: a USER-entered carryover-in refuses without `--force`; `--force` overwrites. Both
+    /// the charitable and the QBI conflicts are checked BEFORE either field is written (atomic).
+    #[test]
+    fn writeback_refuses_user_without_force() {
+        let ar = ar_with_carryovers();
+        // User charitable carryover present → refuse without force.
+        let mut user_charitable = ReturnInputs::default();
+        user_charitable.charitable_carryover_in = vec![CharitableCarryItem {
+            class: CharitableClass::Cash60,
+            amount: dec!(5000),
+            origin_year: 2023,
+            provenance: CarryProvenance::User,
+        }];
+        assert!(apply_carryover_writeback(&ar, user_charitable.clone(), false).is_err());
+        assert!(apply_carryover_writeback(&ar, user_charitable, true).is_ok()); // --force overwrites
+        // User QBI carryforward present → refuse without force (atomic: charitable not half-written).
+        let mut user_qbi = ReturnInputs::default();
+        user_qbi.qbi = QbiInputs {
+            reit_ptp_carryforward_in: dec!(3000),
+            reit_ptp_carryforward_in_provenance: CarryProvenance::User,
+        };
+        assert!(apply_carryover_writeback(&ar, user_qbi.clone(), false).is_err());
+        assert!(apply_carryover_writeback(&ar, user_qbi, true).is_ok());
     }
 }

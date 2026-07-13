@@ -1462,3 +1462,82 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
         cmd::tax::report_tax_year(&vault2, &pp(), 2025, dec!(0)).unwrap();
     assert!(dual2.is_none(), "a stored-profile year must not emit the dual report");
 }
+
+/// §4 R3-M6 carryover write-back (P4.9): `report --tax-year Y --write-carryover` persists year Y's
+/// computed charitable carryover-out as year (Y+1)'s carryover-in (stamped Computed), and refuses to
+/// overwrite a user-entered next-year carryover without `--force`.
+#[test]
+fn carryover_write_back_round_trips_and_respects_user_precedence() {
+    use btctax_core::tax::return_inputs::{
+        CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift, Owner, ReturnInputs,
+        ScheduleAInputs, W2,
+    };
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path()); // clean 2024 ledger (+$10k LTCG)
+    let (_dir, vault) = make_vault_with(&csv);
+    // 2024 ReturnInputs: $50k wages + a $40k cash charitable gift that overflows the 60%-of-AGI ceiling.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &ReturnInputs {
+                filing_status: FilingStatus::Single,
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    box1_wages: dec!(50000),
+                    box3_ss_wages: dec!(50000),
+                    box5_medicare_wages: dec!(50000),
+                    ..Default::default()
+                }],
+                schedule_a: Some(ScheduleAInputs {
+                    charitable: vec![CharitableGift {
+                        class: CharitableClass::Cash60,
+                        amount: dec!(40000),
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    // Write-back → 2025 gets a computed charitable carryover-in.
+    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    assert!(summary.contains("written back to 2025"), "{summary}");
+    let next = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025).unwrap().expect("2025 row written")
+    };
+    assert!(!next.charitable_carryover_in.is_empty());
+    assert!(next.charitable_carryover_in.iter().all(|c| c.provenance == CarryProvenance::Computed));
+
+    // Now a USER-entered 2025 carryover must NOT be silently overwritten.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut y2025 = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        y2025.charitable_carryover_in = vec![CharitableCarryItem {
+            class: CharitableClass::Cash60,
+            amount: dec!(5000),
+            origin_year: 2023,
+            provenance: CarryProvenance::User,
+        }];
+        btctax_cli::return_inputs::set(s.conn(), 2025, &y2025).unwrap();
+        s.save().unwrap();
+    }
+    assert!(
+        cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).is_err(),
+        "must refuse to overwrite a user-entered carryover without --force"
+    );
+    // --force overwrites it.
+    assert!(cmd::tax::write_back_carryover(&vault, &pp(), 2024, true).is_ok());
+    let forced = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025).unwrap().unwrap()
+    };
+    assert!(forced.charitable_carryover_in.iter().all(|c| c.provenance == CarryProvenance::Computed));
+}

@@ -239,12 +239,27 @@ pub struct CharitableGift {
     pub amount: Usd,
 }
 
-/// A §170(d)(1) charitable carryover item, tagged by class + vintage (5-year expiry; oldest-first).
+/// Whether a carryover-IN value was entered by the user (`income import`) or computed by a prior report's
+/// write-back (SPEC §4 R3-M6). A report write-back **overwrites a Computed** carryover-in silently but
+/// **refuses to silently overwrite a User** one (warn + `--force`). Defaults to `User` for back-compat:
+/// every pre-existing (imported) carryover is user-entered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CarryProvenance {
+    #[default]
+    User,
+    Computed,
+}
+
+/// A §170(d)(1) charitable carryover item, tagged by class + vintage (5-year expiry; oldest-first) +
+/// provenance (§4 R3-M6). `provenance` is `#[serde(default)]` so existing blobs load as `User`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CharitableCarryItem {
     pub class: CharitableClass,
     pub amount: Usd,
     pub origin_year: i32,
+    #[serde(default)]
+    pub provenance: CarryProvenance,
 }
 
 /// Schedule A inputs (SPEC §4.6). SALT honors the §164(b)(5) income-OR-sales either/or (R2-I4).
@@ -302,11 +317,14 @@ pub struct Payments {
     pub other_withholding: Usd, // → 1040 25c (warned)
 }
 
-/// QBI inputs (SPEC §4.5 / audit I3 — no manual override; auto from box5). REIT/PTP carryforward persists.
+/// QBI inputs (SPEC §4.5 / audit I3 — no manual override; auto from box5). REIT/PTP carryforward persists,
+/// with a provenance flag for the §4 R3-M6 write-back precedence (default `User`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct QbiInputs {
     #[serde(default)]
     pub reit_ptp_carryforward_in: Usd,
+    #[serde(default)]
+    pub reit_ptp_carryforward_in_provenance: CarryProvenance,
 }
 
 /// Standard-vs-itemized election (§63(e)).

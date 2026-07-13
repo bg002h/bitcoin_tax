@@ -17,7 +17,7 @@
 //! The engine runs even in a standard-deduction year so the carryover ages / is reduced (Reg.
 //! §1.170A-10(a)(2), G8) — the caller uses `allowed` only when itemizing but always writes `carryover_out`.
 use crate::conventions::Usd;
-use crate::tax::return_inputs::{CharitableCarryItem, CharitableClass, CharitableGift};
+use crate::tax::return_inputs::{CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift};
 use rust_decimal_macros::dec;
 
 /// The result of applying the §170(b) ceilings for one year (Schedule A lines 11/12/13/14 + the carryover).
@@ -69,6 +69,10 @@ fn allocate_class(
             class,
             amount: current_excess,
             origin_year: year,
+            // The provenance here is a don't-care: the CLI write-back (§4 R3-M6) stamps every persisted
+            // carryover-in `Computed`. Default to `User` so the engine's transient output matches an
+            // imported item's default and no charitable KAT assertion changes.
+            provenance: CarryProvenance::default(),
         });
     }
     for item in carryover {
@@ -81,6 +85,7 @@ fn allocate_class(
                 class,
                 amount: remaining,
                 origin_year: item.origin_year,
+                provenance: item.provenance, // a surviving carryover keeps its origin provenance
             });
         }
     }
@@ -178,6 +183,7 @@ mod tests {
             class,
             amount,
             origin_year,
+            provenance: CarryProvenance::default(),
         }
     }
 

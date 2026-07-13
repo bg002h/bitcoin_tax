@@ -94,6 +94,8 @@ fn run() -> Result<ExitCode, CliError> {
             year,
             tax_year,
             prior_taxable_gifts,
+            write_carryover,
+            force,
         } => {
             // [R0-M3] Parse --prior-taxable-gifts as exact Decimal (no float); reject negative
             // REGARDLESS of whether --tax-year is present. Validated once, before the branch.
@@ -144,6 +146,17 @@ fn run() -> Result<ExitCode, CliError> {
                 if let Some(msg) = donation_appraisal {
                     println!("{msg}");
                 }
+                // §4 R3-M6 carryover write-back (opt-in; `report` is otherwise read-only). Persists this
+                // year's computed charitable + QBI carryover-out as next year's carryover-in.
+                if write_carryover {
+                    let summary =
+                        cmd::tax::write_back_carryover(vault, &passphrase(false)?, y, force)?;
+                    println!("{summary}");
+                }
+            } else if write_carryover {
+                return Err(CliError::Usage(
+                    "--write-carryover requires --tax-year (it persists a full-return carryover)".into(),
+                ));
             } else {
                 let state = cmd::inspect::report(vault, &passphrase(false)?, year)?;
                 print!("{}", render::render_report(&state, year));

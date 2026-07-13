@@ -16,7 +16,7 @@ pub mod tables;
 pub mod types;
 
 pub use return_1040::{
-    assemble_absolute, derive_tax_profile, screen_absolute, AbsoluteReturn,
+    apply_carryover_writeback, assemble_absolute, derive_tax_profile, screen_absolute, AbsoluteReturn,
 };
 
 pub use method::{

@@ -53,9 +53,13 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   ST→`OrdinaryProp50` basis) at with-crypto AGI, so `AbsoluteReturn.charitable_carryover_out` ages even in
   a std-deduction year (KAT `crypto_donation_over_ceiling_carries_over_even_in_std_year`). Rider (iii)
   satisfied by routing (the assembly's contract requires the refuse screens; crypto classes are 50%-org by
-  construction). **STILL OPEN (→ P4 report wiring):** persistence of `carryover_out` as year Y+1's
-  `charitable_carryover_in` + the **R3-M6 precedence** (computed overwrites computed; refuses user-entered
-  w/o `--force`) — needs the CLI side-table, lands with the dual report.
+  construction). **RESOLVED (P4.9):** the persistence + R3-M6 precedence shipped — new `CarryProvenance`
+  (User/Computed, `#[serde(default)] User`) on `CharitableCarryItem` + `QbiInputs`; core
+  `apply_carryover_writeback(ar, next_year, force)` stamps the computed charitable + QBI carryover-out into
+  year (Y+1)'s carryover-in as `Computed`, overwriting a Computed value silently but **refusing a
+  User-entered one without `--force`** (atomic across both). CLI: `report --tax-year Y --write-carryover
+  [--force]` (opt-in — `report` stays read-only by default). KATs `writeback_*` (core, 3) +
+  `carryover_write_back_round_trips_and_respects_user_precedence` (CLI). See `p4-9-capital-loss-writeback`.
 - **p3-l16-absolute-P4** (DEVIATION — plan P3 task 4 → P4 — **RESOLVED in P4.1b**) — L16
   (`method.rs::qdcgt_line16` on the WITH-crypto AGI) + the QBI stub are ABSOLUTE-return lines; P3 shipped the
   frozen-DELTA path. **P4.1a** landed QBI (real Form 8995, not a 0-stub); **P4.1b** landed L16:
@@ -247,9 +251,18 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   the original P1 entry. The routing half (route optimize/what-if/export/TUI through the resolver) is DONE;
   provenance PRINTING split out to `p2-provenance-printing` (→ P4). Kept as a stub so the id resolves; the
   live status lives in the P2-section entry.
-- **p1-carryover-writeback-P3P4** (SCHEDULED → P3/P4) — charitable + capital-loss carryovers are read from
-  `ReturnInputs` but not yet written back (next-year carryforward_out). The write-back lands with the
-  Schedule A / Schedule D compute stages in P3/P4; P1 only stores the declared inputs.
+- **p1-carryover-writeback-P3P4** (PARTIALLY RESOLVED in P4.9) — charitable + QBI carryover write-back +
+  R3-M6 precedence shipped (see `p3-carryover-writeback-P4`). **Capital-loss carryforward write-back → see
+  `p4-9-capital-loss-writeback`** below (deferred; frozen-type constraint).
+- **p4-9-capital-loss-writeback** (DEFERRED — frozen-type constraint; non-fail-open) — the §1212
+  capital-loss carryforward-out (net_1222 `st_carry`/`lt_carry`) is NOT yet written back to next year's
+  `capital_loss_carryforward_in`. Unlike charitable/QBI, `Carryforward` is a **FROZEN type**
+  (`tax/types.rs`), so it cannot carry the `CarryProvenance` flag the R3-M6 precedence needs; a separate
+  provenance mechanism (e.g. a sibling field on `ReturnInputs`, not on `Carryforward`) is required. SPEC §4
+  R3-M6 itself lists only charitable + QBI for the write-back, so P4.9 is spec-complete; this is the
+  `p1-carryover-writeback-P3P4` residue. Non-fail-open: nothing persists a wrong capital-loss carryforward
+  today (the filer carries it forward manually, the P1–P3 behavior). `AbsoluteReturn` does not yet expose
+  the capital-loss carryover-out; add it + the sibling-provenance mechanism when this lands.
 - **p1-se-earners-and-business-interest-rows** (RESOLVED in P2) — **business-flagged crypto Interest** now
   refuses in `screen_compute_dependent` (`RefuseReason::BusinessInterestIncome`, wired into `report_tax_year`
   + the consumer sweep). **≥2-SE-earners** is *structurally impossible* to input in v1: `ReturnInputs` has a

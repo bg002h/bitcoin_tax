@@ -306,6 +306,64 @@ pub fn report_tax_year(
     ))
 }
 
+/// §4 R3-M6 carryover write-back — persist year `year`'s computed charitable + QBI-REIT/PTP carryover-OUT
+/// as year (`year+1`)'s carryover-IN in the side-table. Only for a `ReturnInputs`-provenance full-return
+/// year (else there is no absolute return). Errors if the absolute return refuses (`screen_absolute`) or if
+/// a user-entered next-year carryover would be overwritten without `force`. Returns a human summary.
+pub fn write_back_carryover(
+    vault: &Path,
+    pp: &Passphrase,
+    year: i32,
+    force: bool,
+) -> Result<String, CliError> {
+    let mut s = Session::open(vault, pp)?;
+    let (_events, state, cfg) = s.load_events_and_project()?;
+    let tables = BundledTaxTables::load();
+    let fr_tables = BundledFullReturnTables::load();
+    let (Some(params), Some(table)) = (fr_tables.full_return_for(year), tables.table_for(year)) else {
+        return Err(CliError::Usage(format!(
+            "no full-return tables for {year} — carryover write-back needs a supported tax year (TY2024)"
+        )));
+    };
+    // Must be a ReturnInputs-provenance year with both refuse screens passed (fail-closed).
+    let provenance = match crate::resolve::resolve_and_screen(
+        s.conn(),
+        &state,
+        year,
+        cfg.pseudo_reconcile,
+        Some(params),
+        Some(table),
+    )? {
+        crate::resolve::ProfileOutcome::Uncomputable { detail } => return Err(CliError::Usage(detail)),
+        crate::resolve::ProfileOutcome::Ready { provenance, .. } => provenance,
+    };
+    if provenance != crate::resolve::Provenance::ReturnInputs {
+        return Err(CliError::Usage(format!(
+            "carryover write-back needs full-return inputs for {year} (`income import`); the resolved \
+             profile source is {provenance:?}"
+        )));
+    }
+    let ri = crate::return_inputs::get(s.conn(), year)?
+        .ok_or_else(|| CliError::Usage(format!("no return_inputs stored for {year}")))?;
+    let ar = btctax_core::assemble_absolute(&ri, &state, params, table, year);
+    if let Some(refusal) = btctax_core::screen_absolute(&ri, &ar, params) {
+        return Err(CliError::Usage(format!(
+            "the {year} absolute return is not computable [{:?}]: {} — carryover not written",
+            refusal.reason, refusal.detail
+        )));
+    }
+    let next = crate::return_inputs::get(s.conn(), year + 1)?.unwrap_or_default();
+    let updated = btctax_core::apply_carryover_writeback(&ar, next, force).map_err(CliError::Usage)?;
+    crate::return_inputs::set(s.conn(), year + 1, &updated)?;
+    s.save()?;
+    Ok(format!(
+        "carryover written back to {}: {} charitable carryover item(s); QBI REIT/PTP carryforward ${:.2}",
+        year + 1,
+        updated.charitable_carryover_in.len(),
+        updated.qbi.reit_ptp_carryforward_in
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

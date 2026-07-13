@@ -283,7 +283,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         }
     }
     for item in charitable_carryover_in {
-        let CharitableCarryItem { class: _, amount, origin_year: _ } = item;
+        let CharitableCarryItem { class: _, amount, origin_year: _, provenance: _ } = item;
         if neg(*amount) { return Some("charitable carryover amount"); }
     }
     let Schedule1Inputs {
@@ -299,7 +299,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
     if neg(*estimated_tax_payments) { return Some("estimated tax payments"); }
     if neg(*extension_payment) { return Some("extension payment"); }
     if neg(*other_withholding) { return Some("other withholding"); }
-    let QbiInputs { reit_ptp_carryforward_in } = qbi;
+    let QbiInputs { reit_ptp_carryforward_in, reit_ptp_carryforward_in_provenance: _ } = qbi;
     if neg(*reit_ptp_carryforward_in) { return Some("QBI REIT/PTP carryforward"); }
     let Carryforward { short, long } = capital_loss_carryforward_in;
     if neg(*short) { return Some("short-term capital-loss carryforward"); }
@@ -912,6 +912,7 @@ mod tests {
             class: CharitableClass::OrdinaryProp30,
             amount: dec!(5000),
             origin_year: 2022,
+            provenance: crate::tax::return_inputs::CarryProvenance::default(),
         });
         assert_eq!(reason(&r), Some(RefuseReason::NonPublicCharityContribution));
         // A 50%-org carryover vintage is fine.
