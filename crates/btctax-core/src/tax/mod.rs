@@ -8,6 +8,7 @@ pub mod compute;
 pub mod frozen_guard;
 pub mod method;
 pub mod other_taxes;
+pub mod printed;
 pub mod qbi;
 pub mod return_1040;
 pub mod return_inputs;
