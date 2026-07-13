@@ -14,8 +14,9 @@
 use crate::conventions::Usd;
 use crate::tax::return_1040::schedule_b_part3_unanswered;
 use crate::tax::return_inputs::{
-    Box12Entry, CharitableCarryItem, CharitableGift, Form1099Div, Form1099G, Form1099Int, Owner,
-    Payments, QbiInputs, ReturnInputs, Schedule1Inputs, ScheduleAInputs, ScheduleCInputs, W2,
+    Box12Entry, CharitableCarryItem, CharitableClass, CharitableGift, Form1099Div, Form1099G,
+    Form1099Int, Owner, Payments, QbiInputs, ReturnInputs, Schedule1Inputs, ScheduleAInputs,
+    ScheduleCInputs, W2,
 };
 use crate::tax::tables::{FullReturnParams, TaxTable};
 use crate::tax::types::{Carryforward, FilingStatus};
@@ -54,6 +55,13 @@ pub enum RefuseReason {
     /// MFS return without `mfs_spouse_itemizes` answered — §63(c)(6) couples the spouses' std/itemize
     /// choice, so it's required (`None` ⇒ fail-loud, G15).
     MfsSpouseItemizeUnknown,
+    /// A charitable gift/carryover to a **non-50%-organization** (Cash30/OrdinaryProp30/CapGainProp20 —
+    /// private foundations etc.) needs the Pub. 526 "special 30% limit" ordering v1 doesn't implement;
+    /// refuse rather than mis-limit and understate tax (review C1). Never produced by the crypto ledger.
+    NonPublicCharityContribution,
+    /// A claimable-as-dependent **spouse** limits the joint standard deduction (1040 Std-Deduction
+    /// Worksheet), which v1 doesn't model — refuse rather than grant the full basic std (review I1).
+    DependentSpouseUnsupported,
     /// W-2 box-12 code outside the inert allowlist (audit I1).
     UnsupportedBox12Code(String),
     /// Σ box-12 D/E/F/G/S elective deferrals over the §402(g) limit → taxable excess on 1040 1h (F3).
@@ -334,6 +342,39 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
             RefuseReason::MfsSpouseItemizeUnknown,
             "a married-filing-separately return must state whether the spouse itemizes (§63(c)(6)) — set \
              `mfs_spouse_itemizes`",
+        );
+    }
+
+    // §170(b) non-50%-org charitable classes need the Pub. 526 "special 30% limit" ordering v1 doesn't
+    // implement — refuse rather than mis-limit / understate tax (review C1). Checks both current gifts and
+    // carryover-in; never produced by the crypto ledger (which supplies only 50%-org classes).
+    let is_non50org = |c: CharitableClass| {
+        matches!(
+            c,
+            CharitableClass::Cash30 | CharitableClass::OrdinaryProp30 | CharitableClass::CapGainProp20
+        )
+    };
+    let non50_gift = ri
+        .schedule_a
+        .as_ref()
+        .is_some_and(|a| a.charitable.iter().any(|g| is_non50org(g.class)));
+    let non50_carry = ri.charitable_carryover_in.iter().any(|c| is_non50org(c.class));
+    if non50_gift || non50_carry {
+        return refuse(
+            RefuseReason::NonPublicCharityContribution,
+            "a charitable contribution to a non-50%-organization (e.g. a private foundation) is out of scope \
+             for v1 — its §170(b) special-30%-limit ordering is unmodeled",
+        );
+    }
+
+    // A claimable-as-dependent SPOUSE limits the joint standard deduction (1040 Std-Deduction Worksheet),
+    // which v1 doesn't model (the spouse flag is otherwise unconsumed) — refuse rather than grant the full
+    // basic std and understate tax (review I1). Narrow/usually-invalid input (a claimable spouse generally
+    // can't file jointly).
+    if ri.header.can_be_claimed_as_dependent_spouse {
+        return refuse(
+            RefuseReason::DependentSpouseUnsupported,
+            "a claimable-as-dependent spouse is out of scope for v1 — it limits the joint standard deduction",
         );
     }
 
@@ -740,6 +781,68 @@ mod tests {
         assert_eq!(reason(&r), Some(RefuseReason::ForeignTrust));
         // Some(false) / None do not refuse.
         r.foreign_trust = Some(false);
+        assert_eq!(reason(&r), None);
+    }
+
+    // ── Review C1: a non-50%-org charitable class (gift OR carryover-in) is refused — its Pub. 526
+    //    special-30%-limit ordering is unmodeled in v1, and allocating it under an independent own-% room
+    //    silently OVERSTATES the deduction (the two probe scenarios below). 50%-org classes stay clean. ──
+    #[test]
+    fn non50org_cash_gift_refuses() {
+        use crate::tax::return_inputs::{CharitableGift, ScheduleAInputs};
+        // Probe 1: AGI $100k, $50k Cash60 + $30k Cash30 — the flat 30% room would allow $80k vs law's $50k.
+        let mut r = ri();
+        r.schedule_a = Some(ScheduleAInputs {
+            charitable: vec![
+                CharitableGift { class: CharitableClass::Cash60, amount: dec!(50000) },
+                CharitableGift { class: CharitableClass::Cash30, amount: dec!(30000) },
+            ],
+            ..Default::default()
+        });
+        assert_eq!(reason(&r), Some(RefuseReason::NonPublicCharityContribution));
+        // Drop the non-50%-org gift → the pure 50%-org gift is accepted.
+        r.schedule_a.as_mut().unwrap().charitable.pop();
+        assert_eq!(reason(&r), None);
+    }
+
+    #[test]
+    fn non50org_capgain_gift_refuses() {
+        use crate::tax::return_inputs::{CharitableGift, ScheduleAInputs};
+        // Probe 2: AGI $100k, $30k CapGainProp30 + $20k CapGainProp20 — own-% room would allow $50k vs $30k.
+        let mut r = ri();
+        r.schedule_a = Some(ScheduleAInputs {
+            charitable: vec![
+                CharitableGift { class: CharitableClass::CapGainProp30, amount: dec!(30000) },
+                CharitableGift { class: CharitableClass::CapGainProp20, amount: dec!(20000) },
+            ],
+            ..Default::default()
+        });
+        assert_eq!(reason(&r), Some(RefuseReason::NonPublicCharityContribution));
+    }
+
+    #[test]
+    fn non50org_carryover_in_refuses() {
+        // A non-50%-org class arriving as CARRYOVER-IN (no current gift) is refused too.
+        let mut r = ri();
+        r.charitable_carryover_in.push(CharitableCarryItem {
+            class: CharitableClass::OrdinaryProp30,
+            amount: dec!(5000),
+            origin_year: 2022,
+        });
+        assert_eq!(reason(&r), Some(RefuseReason::NonPublicCharityContribution));
+        // A 50%-org carryover vintage is fine.
+        r.charitable_carryover_in[0].class = CharitableClass::OrdinaryProp50;
+        assert_eq!(reason(&r), None);
+    }
+
+    // ── Review I1: a claimable-as-dependent SPOUSE limits the joint standard deduction (unmodeled in v1) —
+    //    refuse rather than grant the full basic std and understate tax. ──────────────────────────────────
+    #[test]
+    fn dependent_spouse_flag_refuses() {
+        let mut r = ri();
+        r.header.can_be_claimed_as_dependent_spouse = true;
+        assert_eq!(reason(&r), Some(RefuseReason::DependentSpouseUnsupported));
+        r.header.can_be_claimed_as_dependent_spouse = false;
         assert_eq!(reason(&r), None);
     }
 }

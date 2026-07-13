@@ -132,6 +132,9 @@ pub fn schedule_a_deduction(
     params: &FullReturnParams,
 ) -> Option<Usd> {
     let a = ri.schedule_a.as_ref()?;
+    // A negative AGI would shrink the 7.5% floor below zero and inflate the medical deduction; clamp it so the
+    // floor never helps the taxpayer (review M1). Mirrors the same clamp inside `apply_170b`.
+    let agi = agi.max(Usd::ZERO);
     // Line 4 — medical/dental over the 7.5%-of-AGI floor.
     let medical = (a.medical - dec!(0.075) * agi).max(Usd::ZERO);
     // Line 5e — SALT, §164(b)(5) either/or, capped at $10,000 ($5,000 MFS).
@@ -408,12 +411,15 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
     let taxable_income = (agi - deduction).max(Usd::ZERO); // 1040 L15 (non-crypto)
     // Strip the preferential slice (qualified div + LT cap-gain distr) EXACTLY ONCE — the engine re-adds
     // it on top of the ordinary bottom via `other_net_capital_gain` + the QD channel (deep/02 §1.4).
-    // KNOWN APPROXIMATION (audit-M2 / review M1, → P3 FOLLOWUP): when `TI < qd + cap_gain_distr` (low
-    // ordinary income + large preferential income — e.g. a retiree), the `.max(0)` floors the ordinary
-    // base to 0 while the FULL pref slice still reaches the frozen engine (which stacks `qd + pref_gain`
-    // with no min-against-TI cap). The reconstructed TI is then ≥ the true TI, so the delta/planning
-    // number can only OVERSTATE, never understate (conservative). Exact handling (cap the pref slice at
-    // TI, reducing `other` first — the QDCGT worksheet's min) lands in P3 with the full deduction stack.
+    // KNOWN APPROXIMATION (audit-M2 / review M1, → `p2-pref-over-ti-clamp` FOLLOWUP): when
+    // `TI < qd + cap_gain_distr` (low ordinary income + large preferential income — e.g. a retiree), the
+    // `.max(0)` floors the ordinary base to 0 while the FULL pref slice still reaches the frozen engine
+    // (which stacks `qd + pref_gain` with no min-against-TI cap). The reconstructed TI is then ≥ the true
+    // TI, so the delta/planning number can only OVERSTATE, never understate (conservative). Exact handling
+    // (cap the pref slice at TI, reducing `other` first — the QDCGT worksheet's min) RE-SCHEDULED to P4
+    // (review I2): the cap reduces the pref income that feeds the frozen engine, which is the same channel
+    // P4's absolute assembly and crypto-delta stacking rewire — doing it here would be undone there. The
+    // larger P3 Schedule A deductions make this region more reachable but never flip the conservative sign.
     let ordinary_taxable_income = (taxable_income - qual_div - cap_gain_distr).max(Usd::ZERO);
 
     // ── W-2 SE/Medicare channels (two DIFFERENT aggregations — deep/02 §3.4 / C4) ─────────────────

@@ -92,13 +92,22 @@ fn allocate_class(
 }
 
 /// Apply the §170(b) AGI ceilings for `year` to the current-year `gifts` + prior `carryover_in` at `agi`.
+///
+/// v1 scope: only the three 50%-organization classes (Cash60 / OrdinaryProp50 / CapGainProp30) are
+/// allocated; any non-50%-org gift or carryover-in is refused upstream by `screen_inputs`, so this function
+/// never sees one. A negative `agi` is clamped to zero before any ceiling is computed.
 pub fn apply_170b(
     agi: Usd,
     gifts: &[CharitableGift],
     carryover_in: &[CharitableCarryItem],
     year: i32,
 ) -> CharitableResult {
-    use CharitableClass::{Cash30, Cash60, CapGainProp20, CapGainProp30, OrdinaryProp30, OrdinaryProp50};
+    use CharitableClass::{Cash60, CapGainProp30, OrdinaryProp50};
+
+    // Ceilings are a fraction of AGI; a negative AGI would make every ceiling negative and (after the
+    // `nonneg` clamps) zero out all allowances, but we clamp explicitly so the intent is unmistakable and
+    // no downstream arithmetic ever multiplies a percentage by a negative base (review M1).
+    let agi = agi.max(Usd::ZERO);
 
     let pct = |p: Usd| p * agi;
     let nonneg = |v: Usd| v.max(Usd::ZERO);
@@ -135,36 +144,15 @@ pub fn apply_170b(
     let cgp30_ceiling = pct(dec!(0.30)).min(nonneg(pct(dec!(0.50)) - allowed_cash_tier - allowed_ord_tier));
     let cgp30 = allocate_class(CapGainProp30, current(CapGainProp30), &carry_for(CapGainProp30), cgp30_ceiling, year);
 
-    // ── non-50%-org classes (rare — spec "capture-only v1"): conservative own-% caps under a shared
-    //    30%-of-AGI room. The precise Pub. 526 "special 30% limit" interaction is a follow-on. ──────────
-    let cash30 = allocate_class(Cash30, current(Cash30), &carry_for(Cash30), pct(dec!(0.30)), year);
-    let allowed_30cash = cash30.current_allowed + cash30.carryover_allowed;
-    let ord30 = allocate_class(
-        OrdinaryProp30,
-        current(OrdinaryProp30),
-        &carry_for(OrdinaryProp30),
-        nonneg(pct(dec!(0.30)) - allowed_30cash),
-        year,
-    );
-    let allowed_30ord = ord30.current_allowed + ord30.carryover_allowed;
-    let cgp20 = allocate_class(
-        CapGainProp20,
-        current(CapGainProp20),
-        &carry_for(CapGainProp20),
-        pct(dec!(0.20)).min(nonneg(pct(dec!(0.30)) - allowed_30cash - allowed_30ord)),
-        year,
-    );
-
-    let allowed_cash = cash60.current_allowed + cash30.current_allowed;
-    let allowed_noncash =
-        ord50.current_allowed + cgp30.current_allowed + ord30.current_allowed + cgp20.current_allowed;
-    let allowed_carryover = cash60.carryover_allowed
-        + ord50.carryover_allowed
-        + cgp30.carryover_allowed
-        + cash30.carryover_allowed
-        + ord30.carryover_allowed
-        + cgp20.carryover_allowed;
-    let carryover_out = [cash60, ord50, cgp30, cash30, ord30, cgp20]
+    // Non-50%-organization classes (Cash30 / OrdinaryProp30 / CapGainProp20) are REFUSED upstream by
+    // `screen_inputs` (review C1): their Pub. 526 "special 30% limit" ordering — which interleaves with the
+    // 50%-org tiers rather than sitting under an independent 30% room — is unmodeled in v1, so only the three
+    // 50%-org classes ever reach here. Keep the `CharitableClass` capture-only variants; do not allocate them.
+    let allowed_cash = cash60.current_allowed;
+    let allowed_noncash = ord50.current_allowed + cgp30.current_allowed;
+    let allowed_carryover =
+        cash60.carryover_allowed + ord50.carryover_allowed + cgp30.carryover_allowed;
+    let carryover_out = [cash60, ord50, cgp30]
         .into_iter()
         .flat_map(|a| a.carry_out)
         .collect();
@@ -304,6 +292,23 @@ mod tests {
         assert_eq!(
             r.carryover_out,
             vec![carry(CharitableClass::Cash60, dec!(8000), 2023)]
+        );
+    }
+
+    /// Review M1: a negative AGI is clamped to zero, so every ceiling is zero — nothing is allowed and the
+    /// ENTIRE gift carries forward (no negative "allowed", no carryover inflated beyond the gift).
+    #[test]
+    fn negative_agi_clamped_to_zero_ceilings() {
+        let gifts = [gift(CharitableClass::Cash60, dec!(5000))];
+        let r = apply_170b(dec!(-10000), &gifts, &[], 2024);
+        assert_eq!(r.allowed_cash, Usd::ZERO);
+        assert_eq!(r.allowed_noncash, Usd::ZERO);
+        assert_eq!(r.allowed_carryover, Usd::ZERO);
+        assert_eq!(r.allowed, Usd::ZERO);
+        // The whole $5,000 gift carries forward — never more (the pre-fix bug inflated this past the gift).
+        assert_eq!(
+            r.carryover_out,
+            vec![carry(CharitableClass::Cash60, dec!(5000), 2024)]
         );
     }
 }

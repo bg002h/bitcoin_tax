@@ -35,20 +35,63 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   user-entered w/o `--force`) is deferred to P4. Reason: the REAL carryover includes crypto-donation excess,
   which needs the ABSOLUTE Schedule A (crypto donations from the ledger) — a P4 piece. The derive-side
   non-crypto `carryover_out` is intentionally discarded (it is not the filed carryover). No fail-open in P3:
-  nothing persists a wrong carryover. The §170(b) engine (`apply_170b`) already computes `carryover_out`
-  correctly; P4 wires the absolute Sch A into it + persists.
+  nothing persists a wrong carryover. **P4 riders before trusting `apply_170b`'s `carryover_out` (P3 review):**
+  (i) the non-50%-org classes are now REFUSED upstream (review C1 fold) and negative AGI is clamped to zero
+  (review M1 fold — `apply_170b` + `schedule_a_deduction`), so `carryover_out` is trustworthy for the
+  in-scope (50%-org, non-negative-AGI) input space; do NOT re-open non-50%-org allocation without the
+  `p3-non50org-charitable-special-limit` cross-terms. (ii) P4 must **hoist the `apply_170b` call out of the
+  `ri.schedule_a.as_ref().map_or(...)` guard** (return_1040.rs) so a filer with `charitable_carryover_in`
+  but no Schedule A block still ages/expires carryover (G8, Reg. §1.170A-10(a)(2), review M2) — today a
+  std-deduction year silently skips the engine. P4 then wires the absolute Sch A in + persists.
 - **p3-l16-absolute-P4** (DEVIATION — plan P3 task 4 → P4) — L16 (`method.rs::qdcgt_line16` on the WITH-crypto
   AGI) + the QBI 0-stub are ABSOLUTE-return lines; P3 ships the frozen-DELTA path (the derived `TaxProfile` →
   `compute_tax_year`, which already computes the delta tax via the frozen engine's own QDCGT). The absolute L16
   lands with P4's absolute assembly. No fail-open: `report` computes the crypto DELTA correctly today.
-- **p3-non50org-charitable-special-limit** (follow-on) — the non-50%-org charitable classes (Cash30,
-  OrdinaryProp30, CapGainProp20) use conservative own-% ceilings under a shared 30%-of-AGI room; the precise
-  Pub. 526 "special 30% limit" ordering interaction is a follow-on. These classes are never produced by the
-  crypto ledger and are "capture-only rare" per SPEC §4.6; a mis-limit is bounded + conservative.
+- **p3-non50org-charitable-special-limit** (follow-on — now GUARDED by a refuse) — the non-50%-org charitable
+  classes (Cash30, OrdinaryProp30, CapGainProp20) are **REFUSED upstream** by `screen_inputs`
+  (`RefuseReason::NonPublicCharityContribution`, review C1) whenever they appear as a current gift OR a
+  carryover-in. Rationale for the C1 fold: the original P3 impl gave them own-% ceilings under an *independent*
+  30%-of-AGI room, which OMITS the statutory cross-terms — §170(b)(1)(B)(ii) caps them at the LESSER of 30%·AGI
+  or (50%·AGI − the 50%-org tiers already allowed), and §170(b)(1)(D)(i)(II) caps CapGainProp20 by
+  (30%·AGI − the CapGainProp30 class), not by non-50%-org cash/ordinary usage. That let totals reach 90%·AGI
+  where the law caps at 60/50% → a SILENT tax UNDERSTATEMENT (the prior "conservative" claim here was FALSE;
+  probes: AGI $100k, $50k Cash60 + $30k Cash30 → law $50k / old engine $80k; $30k CGP30 + $20k CGP20 → law
+  $30k / old engine $50k). These classes are never produced by the crypto ledger and are "capture-only rare"
+  per SPEC §4.6, so refuse (fail-loud) is the correct v1 posture. **To SUPPORT them later:** implement the two
+  Pub. 526 Worksheet-2 cross-terms above (same shape as the shipped R2-I1 50%-org line), add KATs pinning both
+  probe scenarios to the CORRECT law totals, then drop the refuse. KATs pinning the current refuse:
+  `non50org_cash_gift_refuses`, `non50org_capgain_gift_refuses`, `non50org_carryover_in_refuses`.
 - **p3-crypto-donation-delta-integration** (OPEN DESIGN Q → decide at P3 review / P4 start) — the crypto-
   donation §170 deduction is today an advisory-only "before §170(b)" figure in the report; how (or whether) it
   enters the frozen DELTA tax vs only the absolute Schedule A is unresolved. The derived non-crypto deduction
   correctly excludes it; the question is the absolute/delta treatment. Flag for the P3 reviewer / P4 design.
+
+## From Fable IMPL-P3 code review r1 (C1/I1/I2 + M1 FOLDED at the P3 gate; M2/M3 folded into entries above; deferrals here)
+
+- **p3-i1-dependent-spouse-refuse** (FOLD C — refuse shipped) — `header.can_be_claimed_as_dependent_spouse`
+  was captured (`return_inputs.rs`) but had ZERO consumers, so an MFJ return with a claimable-as-dependent
+  spouse got the full basic std (understated tax by up to ~$27,900). Now REFUSED by `screen_inputs`
+  (`RefuseReason::DependentSpouseUnsupported`, KAT `dependent_spouse_flag_refuses`) rather than mis-computed:
+  the 1040 Std-Deduction-Worksheet-for-Dependents limit (spouse box → §63(c)(5) limited basic, household-Σ
+  earned income) is unmodeled in v1, and the legally-consistent input space is narrow (the joint-return test
+  usually makes a claimable spouse a refund-only filer). **To SUPPORT later:** extend the §63(c)(5) floor
+  trigger to taxpayer-OR-spouse on MFJ with MFJ earned income = household Σ, then drop the refuse.
+  **SPEC/RECON ERRATUM (record-only, do not re-open the gate):** deep/04 §1.2 lists the dependent-spouse
+  checkbox as a CONSUMED input, but §1.3's std-deduction pseudocode and SPEC §4.7 both silently drop it —
+  the source of the unconsumed-flag gap. Fix the spec/recon text when §170/§63 is next revised. See also the
+  spec-errata section below.
+- **p3-m3-dependent-floor-earned-income-G21** (DEVIATION → P4, with ½-SE) — the §63(c)(5) dependent-floor
+  earned income (SPEC §4.7/G21 = "Σ box1 + Schedule C net − ½SE") today passes **wages only**
+  (`standard_deduction(ri, params, year, wages)`, return_1040.rs). Direction is conservative: adding
+  non-crypto Sch C net WITHOUT the P4-deferred ½-SE would overstate earned → overstate the floor →
+  understate tax, so wages-only is the safe interim. P4 completes G21 (add Sch C net − ½SE) when ½-SE lands.
+  A dependent WITH a Schedule C currently gets a conservatively low floor; this entry is the recorded reason.
+- **p3-m4-none-dob-forfeited-63f-advisory** (→ P5 advisories) — a `None` DOB is treated as not-aged
+  (`is_aged`), which forfeits the §63(f) aged box ($1,550/$1,950) — correct + conservative (never grant an
+  unsubstantiated box; honors `p1-r1-m3-dob-option-pin`; the P6 header age checkbox from the same `None`
+  stays unchecked, so the filed return is internally consistent). P5's advisories work should SURFACE it:
+  "DOB not on file — if 65+, you are forfeiting $1,550/$1,950 per box" so the conservative default is visible
+  rather than silent. Non-blocking.
 
 ## From Fable IMPL-P2 code review r4 (final — Phase 2 GREEN-certified at `0c73bc9`; 1 record-only Minor)
 
@@ -72,14 +115,19 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 
 ## From Fable IMPL-P2 code review r1 (C1/C2/I1 + M2/M3/M4 FOLDED into P2 r2; deferred items here)
 
-- **p2-pref-over-ti-clamp** (SCHEDULED → P3, with the full deduction stack) — `derive_tax_profile`'s
+- **p2-pref-over-ti-clamp** (RE-SCHEDULED P3 → P4 at the P3 review, review I2) — `derive_tax_profile`'s
   `.max(0)` strip (return_1040.rs) floors the ordinary base to 0 when `TI < qd + cap_gain_distr` (low
   ordinary income + large preferential income) while the FULL pref slice still reaches the frozen engine
   (which stacks `qd + pref_gain` with no min-against-TI cap). The reconstructed TI is then ≥ the true TI ⇒
   the delta/planning number can only OVERSTATE, never understate (conservative — audit-M2, review M1, both
   ranked Minor). Exact fix = cap the pref slice at TI (reduce the LT `other` first, mirroring the QDCGT
-  worksheet's min), but it interacts with `other_net_capital_gain`'s §1222 netting, so it lands in P3 with
-  the full deduction stack (P4's dual report would surface any discrepancy). Documented at the strip site.
+  worksheet's min). **Why P4, not P3 (was "SCHEDULED → P3 with the full deduction stack"):** the fix reduces
+  the preferential income that FEEDS the frozen engine (the `other_net_capital_gain` + QD channel), which is
+  the very channel P4's absolute assembly and crypto-delta stacking rewire — capping it in the P3 derive
+  would be undone by P4. The P3 Schedule A deductions make the `TI < qd + cap_gain_distr` region *more*
+  reachable (larger deductions eat the ordinary base first) but never flip the conservative sign, so deferral
+  is not a fail-open. Code comment at the strip site updated to match this re-schedule. P4's dual report
+  (`absolute_with − absolute_without ≠ delta` KAT) is where the min-cap must land + be pinned.
 
 ## From Fable spec review r4 (5 Minors — spec is GREEN 0C/0I with these open)
 
@@ -182,6 +230,11 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   "every edge < $100k ≡ 0 (mod $25)". The **plan already implements the corrected assertion** (P0 task 4).
 - **spec-s48-l36** — SPEC §5 stage 9 carries "− L36 applied-to-2025" but §4.8 `Payments` has no L36 input. v1
   pins L36 = 0/blank (plan P4 task 6); add the input in a follow-on or note L36-always-0 in §4.8.
+- **spec-recon-dependent-spouse-checkbox** (surfaced by IMPL-P3 review I1) — deep/04 §1.2 lists the
+  claimable-as-dependent-SPOUSE checkbox as a consumed std-deduction input, but §1.3's pseudocode and SPEC
+  §4.7 both drop it, leaving the captured `can_be_claimed_as_dependent_spouse` flag with no consumer. v1
+  REFUSES the flag (`p3-i1-dependent-spouse-refuse`); fix the spec/recon text (re-add the spouse box to §1.3's
+  §63(c)(5) trigger + §4.7) if/when the dependent-spouse std-deduction limit is actually modeled.
 
 ## From earlier reviews (folded, recorded for traceability)
 
