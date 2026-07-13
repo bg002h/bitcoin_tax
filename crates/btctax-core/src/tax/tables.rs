@@ -162,19 +162,23 @@ pub const SE_RATE_ADDL_MEDICARE: Usd = dec!(0.009);
 /// income × this factor; the SE-tax rates above are applied to that product.
 pub const SE_NET_EARNINGS_FACTOR: Usd = dec!(0.9235);
 
-/// §1401(b)(2): the net-SE-earnings threshold above which the 0.9% Additional Medicare Tax applies.
-/// **STATUTORY** — 26 U.S.C. §1401(b)(2)(A)/(B).  The dollar amounts are fixed in the Code and do
-/// NOT move year-over-year.  Must never be placed in a `TaxTable`.
+/// §1401(b)(2): the net-SE-earnings threshold above which the 0.9% Additional Medicare Tax applies (also
+/// Form 8959 Part I/II). **STATUTORY** — 26 U.S.C. §1401(b)(2)(A)/§3101(b)(2).  The dollar amounts are
+/// fixed in the Code and do NOT move year-over-year.  Must never be placed in a `TaxTable`.
 ///
 /// Thresholds per filing status:
-/// - MFJ / QSS: $250,000  (§1401(b)(2)(A))
-/// - Single / HoH: $200,000  (§1401(b)(2)(A))
-/// - MFS: $125,000  (§1401(b)(2)(A))
+/// - MFJ: $250,000  (§1401(b)(2)(A)(i) — "in the case of a joint return")
+/// - MFS: $125,000  (§1401(b)(2)(A)(ii))
+/// - Single / HoH / **QSS**: $200,000  (§1401(b)(2)(A)(iii) — "in any other case"). A **qualifying
+///   surviving spouse is NOT a joint return**, so it takes the $200,000 amount, NOT MFJ's $250,000 — the
+///   2024 Form 8959 chart / Schedule 2 L11 instructions confirm "single, head of household, or QSS —
+///   $200,000" (Fable IMPL-P4 r1 C1). This DIFFERS from [`niit_threshold`], where §1411(b)(1) expressly
+///   *includes* "a surviving spouse" at $250,000 — the two statutes disagree on QSS, deliberately.
 pub fn se_addl_medicare_threshold(status: FilingStatus) -> Usd {
     match status {
-        FilingStatus::Mfj | FilingStatus::Qss => dec!(250000),
-        FilingStatus::Single | FilingStatus::HoH => dec!(200000),
+        FilingStatus::Mfj => dec!(250000),
         FilingStatus::Mfs => dec!(125000),
+        FilingStatus::Single | FilingStatus::HoH | FilingStatus::Qss => dec!(200000),
     }
 }
 
@@ -434,6 +438,13 @@ mod tests {
         assert_eq!(niit_threshold(FilingStatus::HoH), dec!(200000));
         assert_eq!(niit_threshold(FilingStatus::Mfs), dec!(125000));
         assert_eq!(NIIT_RATE, dec!(0.038));
+        // §1401(b)(2) Additional-Medicare threshold — QSS is $200,000 (NOT a joint return), the deliberate
+        // asymmetry with §1411's $250,000 QSS above (Fable IMPL-P4 r1 C1).
+        assert_eq!(se_addl_medicare_threshold(FilingStatus::Mfj), dec!(250000));
+        assert_eq!(se_addl_medicare_threshold(FilingStatus::Qss), dec!(200000)); // ≠ niit_threshold(Qss)
+        assert_eq!(se_addl_medicare_threshold(FilingStatus::Single), dec!(200000));
+        assert_eq!(se_addl_medicare_threshold(FilingStatus::HoH), dec!(200000));
+        assert_eq!(se_addl_medicare_threshold(FilingStatus::Mfs), dec!(125000));
         // §170(f)(11)(C) statutory threshold — Task 1 KAT.
         assert_eq!(QUALIFIED_APPRAISAL_THRESHOLD, dec!(5000));
         assert_eq!(loss_limit(FilingStatus::Mfs), dec!(1500));

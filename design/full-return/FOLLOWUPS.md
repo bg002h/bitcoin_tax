@@ -88,6 +88,31 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   **P4 requirements carried from the ruling:** crypto donations MUST enter the ABSOLUTE Schedule A (ledger
   §170(e) classes at with-crypto AGI, G7), and P4's `absolute_with − absolute_without ≠ delta` KAT (plan P4
   task 8) MUST use a **medical-floor fixture** so the one anti-conservative direction is the one pinned.
+  **RESOLVED:** crypto donations enter the absolute Sch A (P4.1a `crypto_charitable_gifts` +
+  `absolute_schedule_a_includes_lt_crypto_donation_at_fmv` KAT); the medical-floor divergence KAT
+  `section6_medical_floor_delta_understates_and_does_not_reconcile` (P4 review r1 I3 fold) computes BOTH
+  `absolute_with − absolute_without` AND the frozen delta on a $20k-medical fixture, asserting `delta <
+  absolute contribution` (the delta UNDERSTATES — the one anti-conservative channel) and non-reconciliation.
+
+## From Fable IMPL-P4 code review r1 (1C/4I FOLDED at the P4 gate → r2; M2 documented; deferrals here)
+
+- **p4-r1-c1-qss-se-addl-medicare** (FOLD C — CRITICAL, shipped) — `se_addl_medicare_threshold` gave QSS the
+  $250,000 joint threshold; §1401(b)(2)(A)(iii) + the 2024 Form 8959 chart put a **QSS at $200,000** (not a
+  joint return). Fixed in unfrozen `tables.rs` (QSS → $200k arm) + KATs `form_8959_qss_uses_200k_threshold_not_250k`
+  and the `statutory_values_are_constant_across_years` pins. **`niit_threshold` LEFT at $250,000 for QSS** —
+  §1411(b)(1) expressly includes "a surviving spouse", a deliberate statutory asymmetry (do not "unify" them).
+  Frozen `se.rs` only *calls* the fn → files byte-identical.
+- **p4-r1-i4-dividend-subset-screen** (FOLD I — shipped) — `screen_inputs` now refuses a 1099-DIV whose box 1b
+  (qualified) or box 5 (§199A) exceeds its box 1a (ordinary) — a corrupt import that gave preferential/QBI
+  treatment to income never in AGI (`RefuseReason::InconsistentDividendSubset`, KAT `dividend_subset_inconsistency_refuses`).
+- **p4-r1-m3-ctc-advisory-P5** (DEFERRED → **P5**, owner recorded per burndown) — plan P4 task 7's CTC/ODC
+  "loud advisory" half. The **compute** is done (L19 = 0, `ctc_odc_conservatively_omitted_l19_zero`); the
+  *advisory surfacing* ("you have N dependents; CTC/ODC omitted — Schedule 8812 filed separately") is a render
+  concern owned by **P5** ("wire the conservative-omission advisories into report/output", SPEC §9.2). Direction
+  is conservative (overstates tax only). P5's entry-sweep must pick this up; nothing understates in the interim.
+- **p4-r1-n1-taxyearreport-struct** (NIT → **P5**) — `cmd::tax::TaxYearReport` is now a 7-tuple of
+  `Option<String>`s; name it a struct (named fields) before P5 adds the advisory field, so an 8th positional
+  element can't silently transpose. Non-behavioral.
 
 ## From Fable IMPL-P3 code review r1 (C1/I1/I2 + M1 FOLDED at the P3 gate; M2/M3 folded into entries above; deferrals here)
 
@@ -154,10 +179,11 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   (`absolute_with − absolute_without ≠ delta` KAT) is where the min-cap must land + be pinned.
   **P4.1b progress:** the ABSOLUTE-side cap is now landed + pinned — `AbsoluteReturn.regular_tax` uses
   `qdcgt_line16`, whose built-in `min(L1, qd+ltcg)` cap (method.rs F-A) never overstates L16, verified by
-  KAT `l16_preferential_over_ti_is_capped` (TI 35,400 / QD 50,000 ⇒ L16 $0, not the uncapped $446). **STILL
-  OPEN (→ P4.8 dual report):** the frozen-DELTA path still lacks the cap (can't edit the engine), so the
-  `absolute_with − absolute_without ≠ delta` divergence KAT — pinning that the *absolute* side is right while
-  the delta is the documented approximation — lands with the dual report.
+  KAT `l16_preferential_over_ti_is_capped` (TI 35,400 / QD 50,000 ⇒ L16 $0, not the uncapped $446).
+  **RESOLVED (P4 review r1 I3 fold):** the divergence KAT `section6_pref_over_ti_delta_overstates_and_does_not_reconcile`
+  computes BOTH `absolute_with − absolute_without` (= $0, capped) AND the frozen delta (= $1,250, uncapped
+  stacking crosses the 0%→15% LTCG breakpoint), asserting `delta > absolute contribution` and non-reconciliation
+  — the absolute side is right; the delta overstates. Closed.
 
 ## From Fable spec review r4 (5 Minors — spec is GREEN 0C/0I with these open)
 

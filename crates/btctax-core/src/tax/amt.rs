@@ -8,10 +8,27 @@
 //! branch: itemizing, line 3 = taxable income (L15) + Schedule A line 7 (= L12) = (AGI − L12 − L13) + L12 =
 //! AGI − L13; not itemizing, line 3 = AGI − L13 directly. So no std-vs-itemized branch is needed here.
 //!
-//! **The worksheet's "Exception"** (preference items that force Form 6251 directly — §4952 investment
-//! interest, accelerated depreciation, PAB tax-exempt interest, ISO stock, §1202 exclusion, NOL, …) is
-//! covered: PAB interest is already refused (INT box 9 / DIV box 13, `screen_inputs`), and every other
-//! exception item is an out-of-scope input v1 never captures.
+//! **Caveat (Fable r1 M2): the closed form is exact except when L15 is floored to $0 for a Schedule-A
+//! filer** (itemized + QBI > AGI — huge mortgage/medical). There the verbatim worksheet line 3 =
+//! `0 + Schedule A line 7` > `AGI − QBI`, so the worksheet would refuse a hair sooner than this closed
+//! form. That is harmless: this closed form is still **conservative against the true Form 6251** (AGI − QBI
+//! ≥ true AMTI for every in-scope input, since the non-SALT Schedule-A lines — mortgage/charitable/medical
+//! — are all AMT-*allowed*, so adding them back over-states AMTI), so no AMT understatement is reachable in
+//! the floored case; only the (already very rare) refuse boundary shifts by the eaten-into-zero slice.
+//!
+//! **The worksheet's "Exception"** (2024 i1040gi p.97 — items that force Form 6251 directly: §4952
+//! investment interest, accelerated depreciation, PAB tax-exempt interest, ISO stock, §1202 exclusion,
+//! NOL, the **foreign tax credit**, the Form 8801 prior-year-minimum-tax credit, …). Coverage:
+//! - PAB interest is already refused (INT box 9 / DIV box 13, `screen_inputs`); ISO/§1202/§4952/deprec./
+//!   NOL/8801 are all out-of-scope inputs v1 never captures.
+//! - The **§904(j) foreign tax credit** (Sch 3 L1) IS a live v1 input, but it does not require a separate
+//!   refuse: the Exception exists because in general the AMT foreign tax credit (§59(a)) differs from the
+//!   regular FTC, but for the **≤ $300/$600 passive-1099 §904(j) credit** this crate screens for, the AMT
+//!   FTC equals the regular FTC, so it **cancels from both sides** of the AMT comparison —
+//!   `(TMT − AMTFTC) > (regular_tax − FTC)` ⇔ `TMT > regular_tax` when `AMTFTC = FTC` — which is exactly
+//!   the worksheet's line-12-vs-line-13 test (line 13 = L16, no FTC subtraction). The FTC therefore
+//!   changes neither line and cannot flip the screen. (§59 caveat: this equivalence holds only within the
+//!   ≤ $300/$600 passive scope; anything above refuses upstream as `ForeignTaxOverCeiling`.)
 use crate::conventions::Usd;
 use crate::tax::tables::AmtParams;
 use crate::tax::types::FilingStatus;
@@ -159,6 +176,24 @@ mod tests {
         assert!(amt_should_file_6251(
             FilingStatus::Single, dec!(325700), Usd::ZERO, Usd::ZERO, dec!(70000), Usd::ZERO, &amt()
         ));
+    }
+
+    /// I1 (Fable r1): the worksheet's "fill 6251 if you claimed the Foreign Tax Credit" Exception needs no
+    /// separate refuse — for the §904(j) ≤$300/$600 passive FTC, the AMT FTC equals the regular FTC, so it
+    /// cancels from both sides of the AMT comparison `(TMT − AMTFTC) vs (L16 − FTC)` → `TMT vs L16`, exactly
+    /// the screen's line-12-vs-line-13 test. This pins the Next-test threshold AND that subtracting any
+    /// common FTC `f` from both lines leaves the decision unchanged (the cancellation, §59-scoped).
+    #[test]
+    fn ftc_cancels_from_the_amt_decision() {
+        let a = amt();
+        // agi 300,000 (< phase-out) → line 11 = 214,300 ≤ 232,600 (no line-12 STOP); line 12 = 26% ×
+        // 214,300 = 55,718. The Next test is `55,718 > L16`; subtracting any FTC f from both line 12 and
+        // line 13 gives `(55,718 − f) > (L16 − f)` ⇔ `55,718 > L16` — unchanged.
+        for l16 in [dec!(50000), dec!(55000), dec!(55718), dec!(56000)] {
+            let decision =
+                amt_should_file_6251(FilingStatus::Single, dec!(300000), Usd::ZERO, Usd::ZERO, l16, Usd::ZERO, &a);
+            assert_eq!(decision, dec!(55718) > l16, "L16 = {l16}");
+        }
     }
 
     /// QBI is subtracted at line 3 (AGI − QBI): a large QBI deduction lowers line 5.

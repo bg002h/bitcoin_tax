@@ -1118,10 +1118,7 @@ pub fn render_dual_report(
     let _ = writeln!(s, "  Total income (1040 L9):   {}", fmt_money(ar.total_income));
     let _ = writeln!(s, "  Adjustments (L10):        {}", fmt_money(ar.adjustments));
     let _ = writeln!(s, "  AGI (L11):                {}", fmt_money(ar.agi));
-    let ded_kind = match ar.itemized_deduction {
-        Some(it) if it >= ar.standard_deduction => "itemized",
-        _ => "standard",
-    };
+    let ded_kind = if ar.deduction_is_itemized { "itemized" } else { "standard" };
     let _ = writeln!(s, "  Deduction (L12, {ded_kind}): {}", fmt_money(ar.deduction));
     if ar.qbi_deduction > Usd::ZERO {
         let _ = writeln!(s, "  QBI deduction (L13):      {}", fmt_money(ar.qbi_deduction));

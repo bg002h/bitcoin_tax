@@ -70,6 +70,11 @@ pub enum RefuseReason {
     PrivateActivityBondAmt,
     /// 1099-DIV box 2b/2c/2d (§1250 / §1202 / 28%-collectibles) → Schedule D Tax Worksheet (out of scope).
     UnrecapturedOrSpecialRateGain,
+    /// A 1099-DIV box 1b (qualified) or box 5 (§199A) EXCEEDS its box 1a (ordinary dividends) on the same
+    /// form — box 1b/box 5 are form-guaranteed SUBSETS of box 1a, so an excess is a corrupt import that
+    /// would give preferential/QBI treatment to income never entered in AGI (a silent understatement,
+    /// Fable IMPL-P4 r1 I4). Fail loud, like the other inconsistent-input guards (R3-M9, MFS tri-state).
+    InconsistentDividendSubset(String),
     /// Foreign tax > the §904(j) $300/$600 no-Form-1116 ceiling.
     ForeignTaxOverCeiling,
     /// A single employer over-withheld Social Security (not creditable — recover from the employer).
@@ -465,6 +470,23 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         foreign_tax += int.box6_foreign_tax;
     }
     for div in &ri.div_1099 {
+        // box 1b (qualified) and box 5 (§199A) are form-guaranteed SUBSETS of box 1a (ordinary). An excess
+        // is a corrupt import that would give preferential / QBI treatment to income never entered in AGI
+        // (a silent understatement) — fail loud, like the other inconsistent-input guards (I4).
+        if div.box1b_qualified > div.box1a_ordinary {
+            return refuse(
+                RefuseReason::InconsistentDividendSubset("box 1b qualified dividends".to_string()),
+                "a 1099-DIV box 1b (qualified dividends) exceeds its box 1a (ordinary dividends) — box 1b is \
+                 a subset of box 1a; fix the import",
+            );
+        }
+        if div.box5_section_199a > div.box1a_ordinary {
+            return refuse(
+                RefuseReason::InconsistentDividendSubset("box 5 §199A dividends".to_string()),
+                "a 1099-DIV box 5 (§199A dividends) exceeds its box 1a (ordinary dividends) — box 5 is a \
+                 subset of box 1a; fix the import",
+            );
+        }
         if div.box2b_unrecap_1250 > Usd::ZERO
             || div.box2c_section_1202 > Usd::ZERO
             || div.box2d_collectibles_28 > Usd::ZERO
@@ -661,6 +683,48 @@ mod tests {
         let mut b = ri();
         b.div_1099.push(Form1099Div { box2d_collectibles_28: dec!(50), ..Default::default() });
         assert_eq!(reason(&b), Some(RefuseReason::UnrecapturedOrSpecialRateGain));
+    }
+
+    #[test]
+    fn dividend_subset_inconsistency_refuses() {
+        // Part III answered so the Schedule-B trigger doesn't mask the subset check.
+        let answered = || ReturnInputs {
+            filing_status: FilingStatus::Single,
+            foreign_accounts: Some(false),
+            foreign_trust: Some(false),
+            ..Default::default()
+        };
+        // I4: box 1b (qualified) > box 1a (ordinary) on a form ⇒ refuse (phantom preferential income).
+        let mut a = answered();
+        a.div_1099.push(Form1099Div {
+            box1a_ordinary: dec!(10000),
+            box1b_qualified: dec!(15000),
+            ..Default::default()
+        });
+        assert_eq!(
+            reason(&a),
+            Some(RefuseReason::InconsistentDividendSubset("box 1b qualified dividends".into()))
+        );
+        // box 5 (§199A) > box 1a ⇒ refuse (phantom QBI base).
+        let mut b = answered();
+        b.div_1099.push(Form1099Div {
+            box1a_ordinary: dec!(5000),
+            box5_section_199a: dec!(8000),
+            ..Default::default()
+        });
+        assert_eq!(
+            reason(&b),
+            Some(RefuseReason::InconsistentDividendSubset("box 5 §199A dividends".into()))
+        );
+        // Fully-qualified and all-REIT (box 1b == box 5 == box 1a) is legitimate → no refusal.
+        let mut ok = answered();
+        ok.div_1099.push(Form1099Div {
+            box1a_ordinary: dec!(10000),
+            box1b_qualified: dec!(10000),
+            box5_section_199a: dec!(10000),
+            ..Default::default()
+        });
+        assert_eq!(reason(&ok), None);
     }
 
     #[test]

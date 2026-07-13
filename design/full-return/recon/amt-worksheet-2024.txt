@@ -1,11 +1,19 @@
 2024 "Worksheet To See if You Should Fill in Form 6251 — Schedule 2, Line 2"
 (verbatim from IRS 2024 Instructions for Form 1040, i1040gi--2024.pdf p.97-98)
 
-Before you begin: read the Exception in the Line-2 instructions (certain preference
-items force Form 6251 instead of this worksheet — 4952 investment interest, accelerated
+Before you begin: read the Exception in the Line-2 instructions (i1040gi--2024 p.97).
+Items that force Form 6251 instead of this worksheet: 4952 investment interest, accelerated
 depreciation, PAB tax-exempt interest, ISO stock, §1202 exclusion, NOL, estate/trust AMT
-adjustments, certain general-business/EV credits). All are out-of-scope inputs in v1
-(PAB already refused via INT box9 / DIV box13); none can appear.
+adjustments, certain general-business/EV credits, the FOREIGN TAX CREDIT, and the Form 8801
+prior-year-minimum-tax credit.
+  - Out-of-scope inputs v1 never captures: 4952, depreciation, ISO, §1202, NOL, 8801,
+    estate/trust, general-business/EV credits.
+  - PAB tax-exempt interest is already refused (INT box9 / DIV box13, screen_inputs).
+  - FOREIGN TAX CREDIT is a LIVE v1 input (§904(j) ≤$300/$600, Sch 3 L1) but needs no separate
+    refuse: for that de-minimis passive credit the §59(a) AMT FTC = the regular FTC, so it cancels
+    from both sides of the AMT comparison ((TMT−AMTFTC) vs (L16−FTC) → TMT vs L16) — exactly the
+    worksheet's line-12-vs-line-13 test (line 13 = L16, no FTC subtraction). See tax/amt.rs doc +
+    the `ftc_cancels_from_the_amt_decision` KAT. (Fable IMPL-P4 r1 I1.)
 
 1. Filing Schedule A?
    No  -> skip 1-2; line3 = 1040 L11 (AGI) - 1040 L13 (QBI); go to line 4.

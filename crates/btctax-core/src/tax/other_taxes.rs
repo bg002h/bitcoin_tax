@@ -138,6 +138,16 @@ mod tests {
         assert_eq!(sch2_line4_se(None), Usd::ZERO);
     }
 
+    /// C1 (Fable r1): a **Qualifying Surviving Spouse** uses the $200,000 Additional-Medicare threshold —
+    /// NOT the $250,000 joint amount. A QSS is not a joint return (§1401(b)(2)(C) "any other case"; the
+    /// 2024 Form 8959 chart lists "single, head of household, or qualifying surviving spouse — $200,000").
+    #[test]
+    fn form_8959_qss_uses_200k_threshold_not_250k() {
+        // Σ box5 $240,000 → 0.9% × (240,000 − 200,000) = $360 (would be $0 under the wrong $250k threshold).
+        let f = form_8959(FilingStatus::Qss, dec!(240000), Usd::ZERO, None);
+        assert_eq!(f.part1_wages, dec!(360.00));
+    }
+
     /// Form 8959 Part I — 0.9% on Medicare wages over the filing-status threshold; zero at/below it.
     #[test]
     fn form_8959_part1_wages_over_threshold() {

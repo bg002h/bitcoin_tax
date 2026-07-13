@@ -201,16 +201,26 @@ pub fn report_tax_year(
                     btctax_core::assemble_absolute(&ri, &state, params, table, year);
                 match btctax_core::screen_absolute(&ri, &ar, params) {
                     Some(refusal) => Some(format!(
-                        "\n═══ Absolute filed return — tax year {year} ═══\n  \
-                         NOT COMPUTABLE [{:?}]: {}\n",
-                        refusal.reason, refusal.detail
+                        "\n═══ Absolute filed return (Form 1040) — tax year {year} ═══\n  \
+                         Profile source: {}\n  NOT COMPUTABLE [{:?}]: {}\n",
+                        crate::render::provenance_label(provenance),
+                        refusal.reason,
+                        refusal.detail
                     )),
                     None => Some(crate::render::render_dual_report(
                         year, &ar, &outcome, provenance,
                     )),
                 }
             }
-            _ => None,
+            _ => {
+                // ReturnInputs provenance implies the inputs + TY2024 params/table are present (else the
+                // resolver returned Uncomputable) — fail loud in debug if that invariant ever breaks.
+                debug_assert!(
+                    false,
+                    "ReturnInputs provenance but missing inputs/params/table for year {year}"
+                );
+                None
+            }
         }
     } else {
         None
