@@ -92,11 +92,50 @@ lines 11/12/13/14 exactly — check for an existing struct before adding a new o
 core printed chain, its verified map, its geometric read-back, and fault-injection KATs. What remains
 is wiring them into a filable packet.
 
-### 1. The identity header (`p6-form-identity-header`) — DO THIS FIRST
+### ★ The order below is the ARCHITECT'S, and it supersedes the earlier identity-first sketch
+
+`reviews/ARCH-P6-fable-packet-assembly.md` (Fable, persisted verbatim at `6d40159`) re-ordered the
+phase and found a **gating defect we had missed**. Both SPEC amendments it called for have LANDED
+(`fdaa86b`). The live order — do them in this order, the numbering is load-bearing:
+
+| Step | Work |
+|---|---|
+| **P6.1** | **core** `PrintedReturn` + `assemble_printed_return` + `ReturnHeader` + `Ssn::canonical` + `screen_inputs` refuse + tie-out KATs · *hoist `Form8959Lines::must_file()` to core while here* |
+| **P6.2** | identity map fragments + shared writer; the 1040 header block **including the §63(f) aged/blind checkboxes** |
+| **P6.3** | `fill_full_return` (all-or-nothing) + dispatch in `export_irs_pdf` + report renders the PRINTED figures + `p5-n5` wrapping + LIMITATIONS |
+| **P6.5** | delete `CryptoSliceExportForFullReturnYear` + its KAT; replace with the two dispatch KATs |
+| **P6.6** | Fable P6 gate review → fold → re-review to 0C/0I |
+
+**There is no P6.4.** The always-on DRAFT/attest gate (`p5-i1`) is **CLOSED by the SPEC §9 amendment**,
+not by code: the user decided the full-return packet exports **clean and filable with no attestation**;
+DRAFT/attest stays pseudo-only. Do not build a gate. Likewise `p6-schedule-b-overflow-…` is closed —
+the fail-closed refusal is now SPEC'd behavior (§7.4 as amended), not a deviation to declare.
+
+**Start with core, NOT the identity fill** — the identity fill *consumes* `ReturnHeader`, so doing maps
+first means inventing the header's data shape twice.
+
+### ★★ GATING, found by the architect: the §63(f) aged/blind checkboxes
+
+Core folds the age-65/blind additions into printed 1040 **L12**, but `f1040.map.toml` has **NO
+age/blind checkboxes**. A filed 1040 claiming a nonstandard standard deduction with **zero** boxes
+checked fails the IRS's own arithmetic cross-check — the checkbox count is how the Service validates
+it. Same class as P5-C1: a form internally inconsistent with itself. **Same tier as name/SSN.**
+
+So the phase's exit condition is restated: the packet is filable **AND every figure on it is internally
+and mutually consistent** (cross-foots, ties to its attachments, checkbox-consistent with L12) — "every
+money line is right" was quietly narrower than "the return is right".
+
+### 1. The identity header (`p6-form-identity-header`) — P6.2, and it is bigger than name+SSN
 
 **No filler writes the taxpayer name or SSN.** The money lines are right, but the forms are **not
-filable**: an unnamed Schedule C is not a return. This blocks everything below — do NOT delete the
-P5-C1 refusal until it is done, or the export would emit unnamed forms, which is worse than refusing.
+filable**: an unnamed Schedule C is not a return. Do NOT delete the P5-C1 refusal until this is done,
+or the export would emit unnamed forms, which is worse than refusing.
+
+Beyond the nine schedules' two fields each, the 1040 header must also carry the **aged/blind
+checkboxes** (gating, above) and the **dependents rows** (data already in `Dependent`). Watch the
+semantics: "Name(s) shown on return" is the **joint** name line on MFJ for the schedules, but Schedule C
+wants the **proprietor only** with that person's SSN — a naive shared writer puts joint names on
+Schedule C. That is why `ReturnHeader` is derived ONCE in core (P6.1) and the fillers only transcribe.
 
 The nine schedules take two fields each (name, SSN); dump each with
 `cargo run -p xtask -- dump-fields <pdf>` — they are the first two text fields on page 1 (e.g. Form
@@ -118,7 +157,7 @@ Check the SSN cells for `/MaxLen` (11) and comb flags before writing — a forma
 exactly 11 characters. Use `FlatPlacement::free` (geometry-exempt, still in the no-unmapped set), as
 `form8283.rs` already does for its identity fields.
 
-### 2. Wire `export_irs_pdf` to emit the full packet
+### 2. Packet assembly is a CORE function (P6.1), and the CLI keeps only I/O
 
 Build every chain from one `AbsoluteReturn`, in dependency order — the upstream chains are arguments
 to the downstream ones, which is what makes the packet tie out:
@@ -135,23 +174,51 @@ f1040 = printed::form_1040_lines(&ar, sch_b, sch_1, sch_a, &sch_d, sch_2, sch_3,
 
 Each `*_lines` returns `Option` when its form is not required — emit only the `Some` ones.
 
-### 3. The always-on DRAFT/attest gate (`p5-i1`)
+**That wiring lives in `assemble_printed_return` in CORE, not in the CLI** — "Schedule 2 L11 = the
+printed 8959 L18" is tax semantics, exactly what `btctax-forms` is forbidden to know, and the CLI is
+the one place the composition KATs cannot reach. `btctax-forms` gets `fill_full_return(&PrintedReturn)`,
+which must be **all-or-nothing**: if any member filler refuses, ZERO bytes hit disk (a 1040 citing a
+Schedule B that is not attached is a wrong return — partial emission is a fail-OPEN).
 
-Today the watermark + attestation is pseudo-mode-only. SPEC §9 wants it always-on for full-return
-PDFs. `watermark.rs` / `stamp_draft_watermark` already exist.
+Three anti-drift mechanisms, all already in the house style: (1) re-point the existing composition KATs
+*through* `assemble_printed_return` so the tested wiring is the shipped wiring, plus tie-out KATs on
+`PrintedReturn` itself (`f1040.line23 == sch_2.line21`, `f1040.line8 == sch_1.line10`, …); (2)
+`fill_full_return` destructures `PrintedReturn` with **no `..`** (the `p1-r3-m1` precedent), so a form
+without a filler is a compile error; (3) a cross-PDF byte oracle — fill the packet, read the cell TEXT
+back, assert 1040 L23's text equals Schedule 2 L21's text.
 
-### 4. ★ DELETE THE P5-C1 REFUSAL — the phase's exit condition
+### 3. The report must print the PRINTED figures (P6.3)
+
+The clinching case is L37: "amount you owe" is an instruction to write a check, and a tool that says
+$12,345.67 in the terminal and $12,347 on the filed form has produced **two authoritative answers**.
+So the absolute block of the report renders whole-dollar printed-chain figures identical to the PDF,
+cell for cell; the crypto-DELTA block stays exact cents (it is not a filed figure). This collapses
+`p5-m1` + `p5-report-vs-pdf-may-differ-by-rounding` into one piece of work.
+
+### 4. ★ DELETE THE P5-C1 REFUSAL (P6.5) — the phase's exit condition
 
 Remove `CliError::CryptoSliceExportForFullReturnYear`, its guard in `cmd/admin.rs::export_irs_pdf`,
 and the KAT `export_refuses_for_a_full_return_year_p5_c1`. That refusal exists ONLY because the
 crypto-slice export would file an understated Schedule D (no line 13, no lines 6/14).
 `schedule_d_full.rs` now fills all three and all of Part III, so its reason is gone.
 
+⚠️ **What the deletion costs, per the architect:** today the refusal is a *hard* guarantee that the
+crypto slice can never run on a full-return year. Deleting it downgrades a type-level impossibility to
+an `if` in `export_irs_pdf`. So: put the dispatch in **one** function (has `ReturnInputs` → full packet,
+else → slice), pin it with KATs in **both** directions, and give the two packets **non-overlapping
+filenames** (the slice writes `form_1040_capgains.pdf`; keep the full packet as `f1040.pdf`,
+`f1040s1.pdf`, … + a manifest) so two runs' artifacts can never be collated into a chimera return.
+
+**Keep the two Schedule D fillers separate** (the architect confirmed this call): the slice prints
+exact CENTS and the full chain prints whole DOLLARS — they are under different rounding regimes, and a
+future "harmonization" must never happen. A crypto-only filer may legitimately file in cents.
+
 ### 5. LIMITATIONS.md + the report
 
-Say that the whole-dollar PDF can differ from the exact-cents report by a few dollars
-(`p5-report-vs-pdf-may-differ-by-rounding`) — the PDF is the filed document and ties out to itself.
-Update the "computed vs. filled" section: it currently says NO full-return PDF exists.
+Update the "computed vs. filled" section — it currently says NO full-return PDF exists. Per §3 above,
+choosing printed figures for the report means there is no user-visible rounding divergence left to
+disclose: only a one-line footnote ("whole-dollar figures per the rounding election; internal
+computation carries cents") plus the LIMITATIONS entry.
 
 ### 6. Fable P6 gate review → fold → re-review to 0C/0I
 
@@ -159,14 +226,24 @@ Update the "computed vs. filled" section: it currently says NO full-return PDF e
 is inert at the user surface, so the green covers it — **but P6's own gate must NOT treat `51020d8`
 as already reviewed.**
 
-Declare to the reviewer: `p6-schedule-b-overflow-refuses-instead-of-paginating` is a known deviation
-from SPEC §7.4 (which asks for the 8949 continuation pattern; I fail closed instead).
+Nothing left to *declare* as a deviation: both former deviations (Sch B overflow, the DRAFT gate) are
+now SPEC'd (`fdaa86b`), which is why the amendments landed BEFORE this review — the reviewer certifies
+a spec we intend to keep rather than a declared exception.
 
 Then **P7**: end-to-end golden returns (synthetic-household matrix, independent-oracle diff, IRS ATS
-Scenario 2 partial-line diff).
+Scenario 2 partial-line diff). **Build three of its pieces DURING P6, while the maps are fresh:** a
+line-keyed `extract_lines(bytes, &Map)` inverse transcriber (it is trivial today and it powers both the
+Q2 cross-PDF tie-out KAT and P7's partial-line diff), the kitchen-sink household fixture (P6's packet
+KAT needs one anyway — put it in core's `testonly`), and packet-level determinism + a manifest in IRS
+**Attachment Sequence No.** order (which also hands the filer their stapling order).
 
 ## Open follow-ups owned by P6
 
-See `FOLLOWUPS.md` — `p5-c1` (replace the refusal with the real export), `p5-i1` (always-on DRAFT
-gate), `p5-m1` (report's interior schedule lines), `p6-printed-line-chain`,
-`p5-report-vs-pdf-may-differ-by-rounding`, `p5-n5-advisory-line-wrapping`, `p1-ssn-normalization`.
+See `FOLLOWUPS.md` — `p5-c1` (replace the refusal with the real export), `p5-m1` (report's interior
+schedule lines), `p6-printed-line-chain`, `p5-report-vs-pdf-may-differ-by-rounding`,
+`p5-n5-advisory-line-wrapping`, `p1-ssn-normalization`, **`p6-aged-blind-checkboxes-missing` (GATING)**,
+`p6-form-identity-header`, `p6-schedule-b-capacity-error-variant` (nit → P6.3),
+`p6-form8959-must-file-belongs-in-core` (minor → P6.1).
+
+**CLOSED by amendment, not by code:** `p5-i1` (no always-on DRAFT gate — the packet exports clean) and
+`p6-schedule-b-overflow-refuses-instead-of-paginating` (the refusal IS the spec now).
