@@ -2476,4 +2476,67 @@ mod tests {
         assert_eq!(owed.amount_owed, owed.total_tax - dec!(1000));
         assert_eq!(owed.overpayment_refund, Usd::ZERO);
     }
+
+    // ── Reduce-to-delta: the absolute Form 8960 vs the frozen engine's crypto-delta NIIT (SPEC §5 tail) ──
+
+    /// KAT-5 — with all non-crypto inputs 0, the absolute Form 8960 collapses EXACTLY to the frozen
+    /// engine's crypto-delta NIIT in an **NII-binding** regime. Fixture: $250k hobby mining reward (raises
+    /// AGI/MAGI but is NOT investment income) + $10k non-business lending interest (the only NII). MAGI
+    /// $260k ≫ NII $10k → NII binds; absolute NIIT = 3.8% × 10,000 = $380 = the delta.
+    #[test]
+    fn kat5_absolute_niit_reduces_to_delta_nii_binding() {
+        let ri = single();
+        let st = state_income(vec![
+            income(IncomeKind::Reward, false, dec!(250000)), // hobby → AGI but not NII
+            income(IncomeKind::Interest, false, dec!(10000)), // non-business lending → NII
+        ]);
+        let params = ty2024_params();
+        let table = synthetic_table(2024);
+        let ar = assemble_absolute(&ri, &st, &params, &table, 2024);
+        assert_eq!(ar.niit.nii, dec!(10000)); // only the lending interest
+        assert_eq!(ar.niit.tax, dec!(380.00)); // 3.8% × 10,000 (NII-binding)
+        // The frozen crypto-delta NIIT on the SAME ledger + a zeroed profile — collapses to the cent.
+        let profile = derive_tax_profile(&ri, &params, 2024);
+        match compute_tax_year(&[], &st, 2024, Some(&profile), &tables_2024()) {
+            TaxOutcome::Computed(r) => assert_eq!(r.niit, ar.niit.tax),
+            other => panic!("must compute, got {other:?}"),
+        }
+    }
+
+    /// KAT-5b — the documented `absolute NIIT < delta` inequality in a **MAGI-binding SE** regime. Fixture:
+    /// $210k business mining (Schedule C → SE) + $10k lending. The absolute MAGI is NET of the ½-SE
+    /// deduction (which the frozen engine's gross `crypto_ord` cannot see), so the absolute MAGI arm binds
+    /// BELOW the frozen NII arm — the §6 divergence: the absolute Form 8960 is the correct filed figure;
+    /// the crypto delta is the (over-stated here) attribution. Neither is a bug.
+    #[test]
+    fn kat5b_absolute_niit_below_delta_magi_binding_se() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            schedule_c: Some(ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let st = state_income(vec![
+            mining(dec!(210000)),                             // business SE income (gross → engine crypto_ord)
+            income(IncomeKind::Interest, false, dec!(10000)), // NII
+        ]);
+        let params = ty2024_params();
+        let table = synthetic_table(2024);
+        let ar = assemble_absolute(&ri, &st, &params, &table, 2024);
+        assert_eq!(ar.niit.nii, dec!(10000));
+        // MAGI-binding: absolute NIIT is strictly below 3.8% × NII (the ½-SE deduction shrank the MAGI arm).
+        assert!(ar.niit.tax < dec!(380.00));
+        assert_eq!(ar.niit.tax, dec!(238.25)); // 3.8% × (206,269.74 − 200,000)
+        // The frozen delta uses the GROSS crypto AGI (no ½-SE) → its NII arm binds → strictly higher.
+        let profile = derive_tax_profile(&ri, &params, 2024);
+        match compute_tax_year(&[], &st, 2024, Some(&profile), &tables_2024()) {
+            TaxOutcome::Computed(r) => {
+                assert_eq!(r.niit, dec!(380.00));
+                assert!(ar.niit.tax < r.niit); // documented §6 divergence
+            }
+            other => panic!("must compute, got {other:?}"),
+        }
+    }
 }
