@@ -132,6 +132,12 @@ impl TaxTables for BTreeMap<i32, TaxTable> {
 /// Must never be placed in a `TaxTable`.
 pub const NIIT_RATE: Usd = dec!(0.038);
 
+/// §3101(a): the employee-share Social Security (OASDI) tax rate.
+/// **STATUTORY** — 26 U.S.C. §3101(a).  Fixed in the Code; NOT inflation-indexed.
+/// Value: 6.2% = 0.062 (exact Decimal; never a float, NFR5).  The §6413(c) excess-SS credit maximum
+/// per person is `EMPLOYEE_OASDI_RATE × ss_wage_base` (the year-indexed base lives in `TaxTable`).
+pub const EMPLOYEE_OASDI_RATE: Usd = dec!(0.062);
+
 /// §1401(a): the Social Security (OASDI) portion of the self-employment tax rate.
 /// **STATUTORY** — 26 U.S.C. §1401(a).  Fixed in the Code; NOT inflation-indexed.
 /// Value: 12.4% = 0.124 (exact Decimal; never a float, NFR5).  Applies to net SE earnings up to the

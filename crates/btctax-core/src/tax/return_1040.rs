@@ -27,7 +27,7 @@ use crate::tax::return_inputs::{
 };
 use crate::tax::return_refuse::{Refusal, RefuseReason};
 use crate::tax::se::{compute_se_tax, se_net_income, SeTaxResult};
-use crate::tax::tables::{loss_limit, FullReturnParams, TaxTable};
+use crate::tax::tables::{loss_limit, FullReturnParams, TaxTable, EMPLOYEE_OASDI_RATE};
 use crate::tax::types::{FilingStatus, TaxProfile};
 use crate::IncomeKind;
 use rust_decimal_macros::dec;
@@ -309,6 +309,24 @@ fn crypto_charitable_gifts(state: &LedgerState, year: i32) -> Vec<CharitableGift
     gifts
 }
 
+/// §6413(c) **excess Social Security** credit (Schedule 3 line 11): PER PERSON `max(0, Σ box4 − MAX)`,
+/// MAX = 6.2% × the year's SS wage base, summed over taxpayer + spouse — **never pooled** (§4.9). Each
+/// employer's box4 ≤ MAX (single-employer over-withholding refuses upstream via `SingleEmployerExcessSs`),
+/// and a single-employer person nets 0, so the "requires ≥ 2 employers" rule falls out naturally.
+fn excess_social_security(ri: &ReturnInputs, table: &TaxTable) -> Usd {
+    let max = table.ss_wage_base * EMPLOYEE_OASDI_RATE;
+    let per_person = |owner: Owner| -> Usd {
+        let withheld: Usd = ri
+            .w2s
+            .iter()
+            .filter(|w| w.owner == owner)
+            .map(|w| w.box4_ss_withheld)
+            .sum();
+        (withheld - max).max(Usd::ZERO)
+    };
+    per_person(Owner::Taxpayer) + per_person(Owner::Spouse)
+}
+
 fn refusal(reason: RefuseReason, detail: &str) -> Option<Refusal> {
     Some(Refusal {
         reason,
@@ -525,11 +543,12 @@ const SE_6017_FLOOR: Usd = dec!(400);
 
 /// The **absolute** (WITH-crypto) 1040 assembly — the filed-return counterpart to [`derive_tax_profile`]'s
 /// frozen non-crypto `TaxProfile`. Built incrementally across Phase 4; **this increment covers SPEC §5
-/// stages 1–7** — income L1a–L9, adjustments L10, AGI L11, deductions L12–L15, regular tax L16, the
+/// stages 1–9** — income L1a–L9, adjustments L10, AGI L11, deductions L12–L15, regular tax L16, the
 /// other-taxes forms (Sch 2 L4 SE, Form 8959, absolute Form 8960), the §904(j) FTC + conservative-omission
-/// CTC (L19 = 0), and **1040 total tax L24**. Later P4 increments add payments/refund (L25–L37) and the
-/// §6 dual report. The §4.10 compute-dependent refuses that need L12/L15/L16 (QBI-above-threshold, AMT
-/// screen, TI≤0-with-carryforward) are screened by [`screen_absolute`] after this (infallible) assembly.
+/// CTC (L19 = 0), **1040 total tax L24**, and **payments → refund/owed** (§6413(c) excess-SS, withholding
+/// L25, total payments L33, refund L35a / owed L37). The remaining P4 increment is the §6 dual report. The
+/// §4.10 compute-dependent refuses that need L12/L15/L16 (QBI-above-threshold, AMT screen, TI≤0-with-
+/// carryforward) are screened by [`screen_absolute`] after this (infallible) assembly.
 ///
 /// Unlike the derivation, this reads the crypto ledger `state` directly (`capital_gain_line7`,
 /// `crypto_income`, `compute_se_tax`) and produces the with-crypto AGI (L11) — the §6 / Form 8960-MAGI /
@@ -620,6 +639,21 @@ pub struct AbsoluteReturn {
     pub schedule_2_other_taxes: Usd,
     /// 1040 **L24** — TOTAL TAX = L22 + L23.
     pub total_tax: Usd,
+    /// §6413(c) **excess Social Security** credit → Schedule 3 line 11 — per person `max(0, Σ box4 − MAX)`
+    /// (MAX = 6.2% × the year's SS wage base), summed over taxpayer + spouse (never pooled). A single
+    /// employer over-withholding refuses upstream (`SingleEmployerExcessSs`), so each box4 ≤ MAX here.
+    pub excess_social_security: Usd,
+    /// 1040 **L25** — total withholding = 25a (Σ W-2 box2) + 25b (Σ 1099 box4) + 25c (Form 8959 Part V +
+    /// other withholding).
+    pub total_withholding: Usd,
+    /// 1040 **L33** — total payments = withholding (L25) + estimated (L26) + Schedule 3 L15 (extension L10
+    /// + excess-SS L11). L36 apply-to-next-year is pinned 0/blank in v1.
+    pub total_payments: Usd,
+    /// 1040 **L34 → L35a** — overpayment refunded (0 when the return owes). Exactly one of this and
+    /// `amount_owed` is nonzero.
+    pub overpayment_refund: Usd,
+    /// 1040 **L37** — amount owed (0 when the return is due a refund).
+    pub amount_owed: Usd,
 }
 
 /// Assemble the absolute (WITH-crypto) 1040 from income through **total tax L24** for `year` (SPEC §5
@@ -798,6 +832,29 @@ pub fn assemble_absolute(
         se_tax_sch2_l4 + additional_medicare.additional_medicare_tax + niit.tax;
     let total_tax = tax_after_credits + schedule_2_other_taxes; // L24
 
+    // ── Excess-SS + payments → refund/owed (SPEC §5 stages 8–9) ─────────────────────────────────────
+    let excess_social_security = excess_social_security(ri, table);
+
+    // 1040 L25 withholding: 25a Σ W-2 box2; 25b Σ 1099 box4 (INT/DIV/G); 25c Form 8959 Part V + other.
+    let wh_25a: Usd = ri.w2s.iter().map(|w| w.box2_fed_withheld).sum();
+    let wh_25b: Usd = ri
+        .int_1099
+        .iter()
+        .map(|i| i.box4_fed_withheld)
+        .chain(ri.div_1099.iter().map(|d| d.box4_fed_withheld))
+        .chain(ri.g_1099.iter().map(|g| g.box4_fed_withheld))
+        .sum();
+    let wh_25c = additional_medicare.part5_withholding + ri.payments.other_withholding;
+    let total_withholding = wh_25a + wh_25b + wh_25c; // L25
+    // L33 total payments = L25 + L26 estimated + Sch 3 L15 (L10 extension + L11 excess-SS).
+    let total_payments = total_withholding
+        + ri.payments.estimated_tax_payments
+        + ri.payments.extension_payment
+        + excess_social_security;
+    // L34→L35a refund vs L37 owed (L36 apply-to-next pinned 0/blank in v1).
+    let overpayment_refund = (total_payments - total_tax).max(Usd::ZERO);
+    let amount_owed = (total_tax - total_payments).max(Usd::ZERO);
+
     AbsoluteReturn {
         wages,
         taxable_interest,
@@ -828,6 +885,11 @@ pub fn assemble_absolute(
         tax_after_credits,
         schedule_2_other_taxes,
         total_tax,
+        excess_social_security,
+        total_withholding,
+        total_payments,
+        overpayment_refund,
+        amount_owed,
     }
 }
 
@@ -2310,5 +2372,108 @@ mod tests {
         assert_eq!(ar.foreign_tax_credit, dec!(300));
         assert!(ar.regular_tax < dec!(300)); // TI $2,400 → L16 ≈ $241
         assert_eq!(ar.tax_after_credits, Usd::ZERO); // capped by tax; excess FTC not refundable
+    }
+
+    // ── Excess-SS + payments → refund/owed (Phase 4 task 6) ──────────────────────────────────────
+
+    /// KAT-11 — §6413(c) excess Social Security is PER PERSON, never pooled. MAX = 6.2% × $168,600 =
+    /// $10,453.20 (TY2024). Two employers → the excess is creditable; one employer nets 0; on a joint
+    /// return each spouse's excess is computed separately (pooling would over-credit).
+    #[test]
+    fn excess_social_security_per_person_not_pooled() {
+        let table = real_2024_single_table(); // ss_wage_base $168,600 → MAX $10,453.20
+        let w2_ss = |owner: Owner, box4: Usd| W2 {
+            owner,
+            box4_ss_withheld: box4,
+            ..Default::default()
+        };
+        // Single, two employers each $6,000 → Σ $12,000 > MAX → excess $1,546.80.
+        let two = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2_ss(Owner::Taxpayer, dec!(6000)), w2_ss(Owner::Taxpayer, dec!(6000))],
+            ..Default::default()
+        };
+        assert_eq!(excess_social_security(&two, &table), dec!(1546.80));
+        // One employer $6,000 (< MAX) → no excess.
+        let one = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2_ss(Owner::Taxpayer, dec!(6000))],
+            ..Default::default()
+        };
+        assert_eq!(excess_social_security(&one, &table), Usd::ZERO);
+        // MFJ: taxpayer 2×$6,000 (excess $1,546.80) + spouse 1×$8,000 (< MAX → 0) → total $1,546.80,
+        // NOT the pooled max(0, 20,000 − 10,453.20) = $9,546.80.
+        let mfj = ReturnInputs {
+            filing_status: FilingStatus::Mfj,
+            w2s: vec![
+                w2_ss(Owner::Taxpayer, dec!(6000)),
+                w2_ss(Owner::Taxpayer, dec!(6000)),
+                w2_ss(Owner::Spouse, dec!(8000)),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(excess_social_security(&mfj, &table), dec!(1546.80));
+    }
+
+    /// Total payments L33 sums every source: 25a (W-2 box2) + 25b (1099 box4) + 25c (8959 Part V + other)
+    /// + estimated (L26) + extension + excess-SS (Sch 3).
+    #[test]
+    fn total_payments_sums_all_sources() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box1_wages: dec!(100000),
+                box2_fed_withheld: dec!(15000),
+                box3_ss_wages: dec!(100000),
+                box5_medicare_wages: dec!(100000),
+                ..Default::default()
+            }],
+            int_1099: vec![Form1099Int {
+                box1_interest: dec!(5000),
+                box4_fed_withheld: dec!(500),
+                ..Default::default()
+            }],
+            payments: crate::tax::return_inputs::Payments {
+                estimated_tax_payments: dec!(2000),
+                extension_payment: dec!(1000),
+                other_withholding: dec!(300),
+            },
+            ..Default::default()
+        };
+        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_single_table(), 2024);
+        // 25a 15,000 + 25b 500 + 25c (8959 Part V 0 + other 300) = 15,800.
+        assert_eq!(ar.total_withholding, dec!(15800));
+        // + estimated 2,000 + extension 1,000 (+ excess-SS 0) = 18,800.
+        assert_eq!(ar.total_payments, dec!(18800));
+    }
+
+    /// The return settles to a refund (payments > tax) or an amount owed (tax > payments) — exactly one is
+    /// nonzero. L36 apply-to-next-year is pinned 0 (not modeled).
+    #[test]
+    fn settle_refund_or_owed() {
+        let p = ty2024_params();
+        let table = real_2024_single_table();
+        let mk = |withheld: Usd| ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box1_wages: dec!(60000),
+                box2_fed_withheld: withheld,
+                box3_ss_wages: dec!(60000),
+                box5_medicare_wages: dec!(60000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // Over-withheld → refund (TI $45,400 → total tax ≈ $5,219 < $12,000).
+        let refund = assemble_absolute(&mk(dec!(12000)), &empty_ledger(), &p, &table, 2024);
+        assert_eq!(refund.total_payments, dec!(12000));
+        assert_eq!(refund.overpayment_refund, dec!(12000) - refund.total_tax);
+        assert_eq!(refund.amount_owed, Usd::ZERO);
+        // Under-withheld → owed.
+        let owed = assemble_absolute(&mk(dec!(1000)), &empty_ledger(), &p, &table, 2024);
+        assert_eq!(owed.amount_owed, owed.total_tax - dec!(1000));
+        assert_eq!(owed.overpayment_refund, Usd::ZERO);
     }
 }

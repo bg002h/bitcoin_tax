@@ -18,13 +18,9 @@ use crate::tax::return_inputs::{
     Form1099Int, Owner, Payments, QbiInputs, ReturnInputs, Schedule1Inputs, ScheduleAInputs,
     ScheduleCInputs, W2,
 };
-use crate::tax::tables::{FullReturnParams, TaxTable};
+use crate::tax::tables::{FullReturnParams, TaxTable, EMPLOYEE_OASDI_RATE};
 use crate::tax::types::{Carryforward, FilingStatus};
 use rust_decimal_macros::dec;
-
-/// §3101(a) employee OASDI (Social Security) tax rate — the excess-SS credit is computed against this
-/// (6.2%), NOT the 12.4% combined SE rate. Statutory.
-const EMPLOYEE_OASDI_RATE: Usd = dec!(0.062);
 
 /// The W-2 box-12 codes that are inert for a Common W-2 household return (elective deferrals + purely
 /// informational). Any OTHER code refuses (SPEC §4.10 / audit I1 — an allowlist, not a blocklist).
