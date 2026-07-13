@@ -34,6 +34,10 @@ pub const F8283_MAP_2024: &str = include_str!("../forms/2024/f8283.map.toml");
 pub const F1040_MAP_2024: &str = include_str!("../forms/2024/f1040.map.toml");
 /// The TY2024 Form 8959 (Additional Medicare Tax) map (embedded at compile time).
 pub const F8959_MAP_2024: &str = include_str!("../forms/2024/f8959.map.toml");
+/// The TY2024 Form 8960 (Net Investment Income Tax) map (embedded at compile time).
+pub const F8960_MAP_2024: &str = include_str!("../forms/2024/f8960.map.toml");
+/// The TY2024 Form 8995 (QBI deduction, simplified) map (embedded at compile time).
+pub const F8995_MAP_2024: &str = include_str!("../forms/2024/f8995.map.toml");
 
 /// The TY2017 Form 8949 map (embedded at compile time).
 pub const F8949_MAP_2017: &str = include_str!("../forms/2017/f8949.map.toml");
@@ -553,6 +557,167 @@ impl Form8959Map {
             &self.line21,
             &self.line22,
             &self.line24,
+        ]
+    }
+}
+
+/// The Form 8960 (Net Investment Income Tax) field map for one tax year.
+///
+/// Only the lines v1 FILLS are mapped. Annuities (3), Schedule E (4a–4c), CFC/PFIC (6), investment
+/// expenses (9a–9c, 10) and the whole estates-and-trusts branch (18a–21) are unmodeled and stay
+/// BLANK. The derived totals 9d and 11 ARE filled at zero — the form's arithmetic adds them.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form8960Map {
+    /// `"f8960"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// L1 — taxable interest, AMOUNT column.
+    pub line1: MoneyCell,
+    /// L2 — ordinary dividends, AMOUNT column.
+    pub line2: MoneyCell,
+    /// L5a — net gain/loss from disposition of property, MID column.
+    pub line5a: MoneyCell,
+    /// L5d — combine 5a–5c, AMOUNT column.
+    pub line5d: MoneyCell,
+    /// L7 — other modifications, AMOUNT column.
+    pub line7: MoneyCell,
+    /// L8 — total investment income, AMOUNT column.
+    pub line8: MoneyCell,
+    /// L9d — add 9a/9b/9c (zero in v1), AMOUNT column.
+    pub line9d: MoneyCell,
+    /// L11 — total deductions and modifications (zero in v1), AMOUNT column.
+    pub line11: MoneyCell,
+    /// L12 — net investment income, AMOUNT column.
+    pub line12: MoneyCell,
+    /// L13 — modified AGI, MID column.
+    pub line13: MoneyCell,
+    /// L14 — the §1411(b) threshold (fillable, NOT pre-printed), MID column.
+    pub line14: MoneyCell,
+    /// L15 — 13 − 14, floored, MID column.
+    pub line15: MoneyCell,
+    /// L16 — smaller of 12 or 15, AMOUNT column.
+    pub line16: MoneyCell,
+    /// L17 — 3.8% × 16 → Schedule 2 line 12, AMOUNT column.
+    pub line17: MoneyCell,
+}
+
+impl Form8960Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(F8960_MAP_2024).expect("bundled f8960 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 14 filled cells in printed reading order (strictly descending y on page 1).
+    pub fn lines(&self) -> [&MoneyCell; 14] {
+        [
+            &self.line1,
+            &self.line2,
+            &self.line5a,
+            &self.line5d,
+            &self.line7,
+            &self.line8,
+            &self.line9d,
+            &self.line11,
+            &self.line12,
+            &self.line13,
+            &self.line14,
+            &self.line15,
+            &self.line16,
+            &self.line17,
+        ]
+    }
+}
+
+/// The Form 8995 (QBI deduction, simplified) field map for one tax year.
+///
+/// The Part I trade/business table (rows 1i–1v) and line 3 are deliberately unmapped: v1's only QBI
+/// is §199A REIT dividends, so there is no business to list. Lines 2/4/5 ARE filled, at zero.
+///
+/// **Lines 7, 16 and 17 are PARENTHESIZED boxes — the form prints the minus sign, so the value must
+/// be a POSITIVE MAGNITUDE.** `qbi::Form8995Lines` guarantees that.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form8995Map {
+    /// `"f8995"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// L2 — total QBI from the (blank) table, MID column.
+    pub line2: MoneyCell,
+    /// L4 — combine 2 and 3, MID column.
+    pub line4: MoneyCell,
+    /// L5 — QBI component (20% × 4), AMOUNT column.
+    pub line5: MoneyCell,
+    /// L6 — qualified REIT dividends + PTP income, MID column.
+    pub line6: MoneyCell,
+    /// L7 — prior-year REIT/PTP loss carryforward, MID column. ★ positive magnitude (paren box).
+    pub line7: MoneyCell,
+    /// L8 — combine 6 and 7, MID column.
+    pub line8: MoneyCell,
+    /// L9 — REIT/PTP component (20% × 8), AMOUNT column.
+    pub line9: MoneyCell,
+    /// L10 — add 5 and 9, AMOUNT column.
+    pub line10: MoneyCell,
+    /// L11 — taxable income before the QBI deduction, MID column.
+    pub line11: MoneyCell,
+    /// L12 — net capital gain + qualified dividends, MID column.
+    pub line12: MoneyCell,
+    /// L13 — 11 − 12, floored, MID column.
+    pub line13: MoneyCell,
+    /// L14 — income limitation (20% × 13), AMOUNT column.
+    pub line14: MoneyCell,
+    /// L15 — the deduction: smaller of 10 or 14 → 1040 L13, AMOUNT column.
+    pub line15: MoneyCell,
+    /// L16 — total QB (loss) carryforward, AMOUNT column. ★ positive magnitude (paren box).
+    pub line16: MoneyCell,
+    /// L17 — total REIT/PTP (loss) carryforward, AMOUNT column. ★ positive magnitude (paren box).
+    pub line17: MoneyCell,
+}
+
+impl Form8995Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(F8995_MAP_2024).expect("bundled f8995 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 15 filled cells in printed reading order (strictly descending y on page 1).
+    pub fn lines(&self) -> [&MoneyCell; 15] {
+        [
+            &self.line2,
+            &self.line4,
+            &self.line5,
+            &self.line6,
+            &self.line7,
+            &self.line8,
+            &self.line9,
+            &self.line10,
+            &self.line11,
+            &self.line12,
+            &self.line13,
+            &self.line14,
+            &self.line15,
+            &self.line16,
+            &self.line17,
         ]
     }
 }

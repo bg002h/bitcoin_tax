@@ -228,6 +228,104 @@ pub fn form_8960(
     }
 }
 
+/// The printable **Form 8960 line chain** — whole dollars, cross-footing (SPEC §3.1). See
+/// [`Form8959Lines`] for why the chain is derived in core and merely transcribed by `btctax-forms`.
+///
+/// **Unmodeled lines are BLANK, not zero** (they have no field in this struct at all): line 3
+/// (annuities), lines 4a–4c (Schedule E — unrepresentable in v1), line 6 (CFC/PFIC adjustments —
+/// MAGI is fail-closed to AGI), lines 9a–9c and 10 (investment expenses and additional
+/// modifications — v1 models none), and Part III's estates-and-trusts branch (lines 18a–21), which
+/// must stay blank on an individual return.
+///
+/// The DERIVED totals are still printed, even at zero, because the form's arithmetic references
+/// them: line 9d (= 0), line 11 (= 0). A reader re-adding the column must find them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Form8960Lines {
+    /// L1 — taxable interest (1040 line 2b).
+    pub line1: Usd,
+    /// L2 — ordinary dividends (1040 line 3b — the FULL box-1a amount, not the qualified subset).
+    pub line2: Usd,
+    /// L5a — net gain or loss from disposition of property (1040 line 7; §1211-limited, may be a LOSS).
+    pub line5a: Usd,
+    /// L5d — combine 5a–5c (5b/5c unmodeled) ⇒ `= line5a`.
+    pub line5d: Usd,
+    /// L7 — other modifications to investment income: Σ non-business crypto lending `Interest`, which
+    /// is investment income but has no home on 1040 line 2b (R3-M5).
+    pub line7: Usd,
+    /// L8 — total investment income = 1 + 2 + 5d + 7 (3, 4c and 6 blank).
+    pub line8: Usd,
+    /// L9d — add 9a/9b/9c. v1 models no investment expenses ⇒ 0, but the form adds it, so it prints.
+    pub line9d: Usd,
+    /// L11 — total deductions and modifications = 9d + 10 ⇒ 0.
+    pub line11: Usd,
+    /// L12 — net investment income = line 8 − line 11.
+    pub line12: Usd,
+    /// L13 — modified AGI (= AGI; fail-closed, no §911/CFC/PFIC add-backs).
+    pub line13: Usd,
+    /// L14 — the §1411(b) threshold. **QSS is $250,000 here** — §1411(b)(1) expressly includes a
+    /// surviving spouse, unlike the §1401(b)(2) Additional-Medicare threshold where QSS is $200,000.
+    /// That asymmetry is statutory; it is not a bug and must not be "unified".
+    pub line14: Usd,
+    /// L15 — subtract 14 from 13, floored at 0.
+    pub line15: Usd,
+    /// L16 — the smaller of line 12 or line 15.
+    pub line16: Usd,
+    /// L17 — 3.8% × line 16 → Schedule 2 line 12.
+    pub line17: Usd,
+}
+
+/// Derive the printed Form 8960 chain. Arguments are exactly those of [`form_8960`] and must be the
+/// same values; `f` supplies nothing the chain re-derives, so it is not taken.
+///
+/// Returns `None` when there is **no NIIT** — line 17 is zero, so the form is not required and is not
+/// produced. (Below the MAGI threshold, or with no net investment income, §1411 imposes no tax.) That
+/// also keeps the chain in its well-behaved region: whenever line 17 > 0, both line 12 and line 15 are
+/// strictly positive, so line 16's `min` cannot pick up a negative NII from a capital-loss year.
+pub fn form_8960_lines(
+    status: FilingStatus,
+    taxable_interest: Usd,
+    ordinary_dividends: Usd,
+    net_capital_gain: Usd,
+    crypto_lending_interest: Usd,
+    agi: Usd,
+) -> Option<Form8960Lines> {
+    let line1 = round_dollar(taxable_interest);
+    let line2 = round_dollar(ordinary_dividends);
+    let line5a = round_dollar(net_capital_gain); // may be NEGATIVE (a §1211-limited loss)
+    let line5d = line5a; // 5b/5c unmodeled
+    let line7 = round_dollar(crypto_lending_interest);
+    let line8 = line1 + line2 + line5d + line7; // 3, 4c, 6 blank
+    let line9d = Usd::ZERO; // v1 models no investment expenses…
+    let line11 = line9d; // …so 9d + 10 is zero, but the form adds it
+    let line12 = line8 - line11;
+
+    let line13 = round_dollar(agi);
+    let line14 = niit_threshold(status);
+    let line15 = (line13 - line14).max(Usd::ZERO);
+    let line16 = line12.min(line15);
+    let line17 = round_dollar(NIIT_RATE * line16.max(Usd::ZERO));
+
+    if line17 <= Usd::ZERO {
+        return None; // no §1411 tax ⇒ no Form 8960
+    }
+    Some(Form8960Lines {
+        line1,
+        line2,
+        line5a,
+        line5d,
+        line7,
+        line8,
+        line9d,
+        line11,
+        line12,
+        line13,
+        line14,
+        line15,
+        line16,
+        line17,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -544,5 +642,182 @@ mod tests {
         );
         assert_eq!(neg.nii, dec!(-5000));
         assert_eq!(neg.tax, Usd::ZERO);
+    }
+
+    /// The printed Form 8960 chain, NII-binding (NII < MAGI − threshold): line 16 takes line 12.
+    #[test]
+    fn form_8960_printed_chain_nii_binding() {
+        // interest 5,000 + dividends 10,000 + L7 20,000 + crypto lending 2,000 = NII 37,000.
+        // MAGI 300,000 − 200,000 (Single) = 100,000 over ⇒ line 16 = min(37,000, 100,000) = 37,000.
+        let l = form_8960_lines(
+            FilingStatus::Single,
+            dec!(5000),
+            dec!(10000),
+            dec!(20000),
+            dec!(2000),
+            dec!(300000),
+        )
+        .unwrap();
+        assert_eq!(l.line1, dec!(5000));
+        assert_eq!(l.line2, dec!(10000));
+        assert_eq!(l.line5a, dec!(20000));
+        assert_eq!(l.line5d, dec!(20000));
+        assert_eq!(l.line7, dec!(2000));
+        assert_eq!(l.line8, dec!(37000));
+        assert_eq!(l.line9d, Usd::ZERO); // printed, not blank: the form adds it
+        assert_eq!(l.line11, Usd::ZERO);
+        assert_eq!(l.line12, dec!(37000));
+        assert_eq!(l.line13, dec!(300000));
+        assert_eq!(l.line14, dec!(200000));
+        assert_eq!(l.line15, dec!(100000));
+        assert_eq!(l.line16, dec!(37000)); // the NII arm binds
+        assert_eq!(l.line17, dec!(1406)); // 3.8% × 37,000 = 1,406.00
+    }
+
+    /// MAGI-binding: only the excess over the threshold is taxed, even though NII is larger.
+    #[test]
+    fn form_8960_printed_chain_magi_binding() {
+        // NII 50,000 but MAGI only 210,000 ⇒ over = 10,000 ⇒ line 16 = 10,000, not 50,000.
+        let l = form_8960_lines(
+            FilingStatus::Single,
+            dec!(50000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(210000),
+        )
+        .unwrap();
+        assert_eq!(l.line12, dec!(50000));
+        assert_eq!(l.line15, dec!(10000));
+        assert_eq!(l.line16, dec!(10000)); // the MAGI arm binds
+        assert_eq!(l.line17, dec!(380)); // 3.8% × 10,000
+    }
+
+    /// ★ **The §1411(b)(1) / §1401(b)(2) asymmetry, on the printed form.** A Qualifying Surviving
+    /// Spouse uses the **$250,000** NIIT threshold (line 14) — the JOINT amount — even though the same
+    /// filer uses the $200,000 Additional-Medicare threshold on Form 8959 line 5. §1411(b)(1)
+    /// expressly includes a surviving spouse; §1401(b)(2) does not. This is statutory, not a bug, and
+    /// the two must never be "unified".
+    #[test]
+    fn form_8960_qss_threshold_is_250k_unlike_form_8959() {
+        let l = form_8960_lines(
+            FilingStatus::Qss,
+            dec!(60000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(300000),
+        )
+        .unwrap();
+        assert_eq!(l.line14, dec!(250000), "NIIT: QSS gets the JOINT threshold");
+
+        // The very same filer, on Form 8959, gets $200,000 — the UNMARRIED amount.
+        let f = form_8959_lines(FilingStatus::Qss, dec!(300000), Usd::ZERO, None);
+        assert_eq!(
+            f.line5,
+            dec!(200000),
+            "Add'l Medicare: QSS gets the UNMARRIED threshold"
+        );
+        assert_ne!(l.line14, f.line5, "the asymmetry is real and deliberate");
+    }
+
+    /// No §1411 tax ⇒ no Form 8960 (below the threshold, or no net investment income).
+    #[test]
+    fn form_8960_absent_when_no_niit_is_owed() {
+        // Below the MAGI threshold.
+        assert!(form_8960_lines(
+            FilingStatus::Single,
+            dec!(50000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(150000)
+        )
+        .is_none());
+        // Over the threshold but NII is a net LOSS (a §1211-limited capital loss reduces NII).
+        assert!(form_8960_lines(
+            FilingStatus::Single,
+            dec!(1000),
+            Usd::ZERO,
+            dec!(-3000),
+            Usd::ZERO,
+            dec!(300000)
+        )
+        .is_none());
+    }
+
+    /// The printed chain cross-foots, and every cell is a whole dollar.
+    #[test]
+    fn form_8960_printed_lines_cross_foot() {
+        for (status, int_, div, ncg, lend, agi) in [
+            (
+                FilingStatus::Single,
+                dec!(5000),
+                dec!(10000),
+                dec!(20000),
+                dec!(2000),
+                dec!(300000),
+            ),
+            (
+                FilingStatus::Mfj,
+                dec!(50000),
+                Usd::ZERO,
+                Usd::ZERO,
+                Usd::ZERO,
+                dec!(300000),
+            ),
+            (
+                FilingStatus::Qss,
+                dec!(60000),
+                Usd::ZERO,
+                Usd::ZERO,
+                Usd::ZERO,
+                dec!(300000),
+            ),
+            // cents in, whole dollars out; a capital LOSS reducing (but not erasing) NII
+            (
+                FilingStatus::Single,
+                dec!(40000.49),
+                dec!(0.50),
+                dec!(-3000),
+                Usd::ZERO,
+                dec!(300000.51),
+            ),
+        ] {
+            let l = form_8960_lines(status, int_, div, ncg, lend, agi).unwrap();
+            assert_eq!(l.line5d, l.line5a, "L5d = 5a + 5b + 5c (5b/5c blank)");
+            assert_eq!(
+                l.line8,
+                l.line1 + l.line2 + l.line5d + l.line7,
+                "L8 = 1+2+5d+7"
+            );
+            assert_eq!(l.line11, l.line9d, "L11 = 9d + 10 (10 blank)");
+            assert_eq!(l.line12, l.line8 - l.line11, "L12 = 8 − 11");
+            assert_eq!(
+                l.line15,
+                (l.line13 - l.line14).max(Usd::ZERO),
+                "L15 = 13 − 14, floored"
+            );
+            assert_eq!(
+                l.line16,
+                l.line12.min(l.line15),
+                "L16 = smaller of 12 or 15"
+            );
+            assert_eq!(
+                l.line17,
+                round_dollar(NIIT_RATE * l.line16.max(Usd::ZERO)),
+                "L17 = 3.8% × 16"
+            );
+            for cell in [
+                l.line1, l.line2, l.line5a, l.line5d, l.line7, l.line8, l.line9d, l.line11,
+                l.line12, l.line13, l.line14, l.line15, l.line16, l.line17,
+            ] {
+                assert_eq!(
+                    cell.fract(),
+                    Usd::ZERO,
+                    "printed cells are whole dollars: {cell}"
+                );
+            }
+        }
     }
 }

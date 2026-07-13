@@ -32,6 +32,10 @@ pub const F8283_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8283.pdf");
 pub const F1040_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040.pdf");
 /// The bundled TY2024 Form 8959, Additional Medicare Tax (official IRS fillable PDF, public domain).
 pub const F8959_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8959.pdf");
+/// The bundled TY2024 Form 8960, Net Investment Income Tax (official IRS fillable PDF, public domain).
+pub const F8960_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8960.pdf");
+/// The bundled TY2024 Form 8995, QBI deduction — simplified (official IRS fillable PDF, public domain).
+pub const F8995_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8995.pdf");
 
 /// The bundled TY2017 Form 8949 (official IRS fillable PDF, US-gov public domain).
 pub const F8949_PDF_2017: &[u8] = include_bytes!("../forms/2017/f8949.pdf");
@@ -78,6 +82,22 @@ pub fn schedule_se_pdf(year: i32) -> Result<&'static [u8], FormsError> {
 pub fn f8959_pdf(year: i32) -> Result<&'static [u8], FormsError> {
     match year {
         2024 => Ok(F8959_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Form 8960 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
+pub fn f8960_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(F8960_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Form 8995 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
+pub fn f8995_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(F8995_PDF_2024),
         _ => Err(FormsError::UnsupportedYear(year)),
     }
 }

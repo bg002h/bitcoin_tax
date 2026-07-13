@@ -82,6 +82,118 @@ pub fn qbi_over_threshold(
         && ti_before_qbi > params.qbi_ti_threshold(status)
 }
 
+/// The printable **Form 8995 line chain** — whole dollars, cross-footing (SPEC §3.1). See
+/// `other_taxes::Form8959Lines` for why the chain is derived in core and only transcribed by
+/// `btctax-forms`.
+///
+/// **The Part I table (rows 1i–1v) is BLANK**: v1's only QBI is §199A REIT dividends, so there is no
+/// trade or business to list. Lines 2/4/5 are nevertheless PRINTED as zero — the form's arithmetic
+/// adds them (line 10 = line 5 + line 9), and a reader re-adding the column must find them. Line 3
+/// (a prior-year trade/business QBI loss carryforward) has no v1 input and stays blank.
+///
+/// **★ Lines 3, 7, 16 and 17 are PARENTHESIZED boxes on the printed form: the parentheses supply the
+/// minus sign, so the value written must be a POSITIVE MAGNITUDE.** Writing `-1234` renders as
+/// `(-1,234)` — a positive number. Every one of these fields is a loss/carryforward, and every one is
+/// stored here as a magnitude ≥ 0 for exactly that reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Form8995Lines {
+    /// L2 — total QBI from lines 1i–1v column (c). Always 0 in v1 (no trade/business QBI).
+    pub line2: Usd,
+    /// L4 — combine 2 and 3; if zero or less, `-0-`. Always 0 in v1.
+    pub line4: Usd,
+    /// L5 — QBI component = 20% × line 4. Always 0 in v1.
+    pub line5: Usd,
+    /// L6 — qualified REIT dividends + PTP income (Σ 1099-DIV box 5).
+    pub line6: Usd,
+    /// L7 — prior-year REIT/PTP **loss** carryforward. **Positive magnitude** (parenthesized box).
+    pub line7: Usd,
+    /// L8 — combine 6 and 7; if zero or less, `-0-`. (The line-7 loss REDUCES line 6.)
+    pub line8: Usd,
+    /// L9 — REIT/PTP component = 20% × line 8.
+    pub line9: Usd,
+    /// L10 — QBI deduction before the income limitation = line 5 + line 9.
+    pub line10: Usd,
+    /// L11 — taxable income before the QBI deduction (1040 AGI − L12).
+    pub line11: Usd,
+    /// L12 — net capital gain, increased by qualified dividends.
+    pub line12: Usd,
+    /// L13 — subtract 12 from 11; if zero or less, `-0-`.
+    pub line13: Usd,
+    /// L14 — income limitation = 20% × line 13.
+    pub line14: Usd,
+    /// L15 — the QBI deduction = the smaller of line 10 or line 14 → 1040 **L13**.
+    pub line15: Usd,
+    /// L16 — total qualified business (loss) carryforward = combine 2 and 3; if > 0, `-0-`. Always 0
+    /// in v1. **Positive magnitude** (parenthesized box).
+    pub line16: Usd,
+    /// L17 — total REIT/PTP (loss) carryforward = combine 6 and 7; if > 0, `-0-`. Carries to next
+    /// year. **Positive magnitude** (parenthesized box).
+    pub line17: Usd,
+}
+
+/// Derive the printed Form 8995 chain from the same inputs as [`compute_8995`].
+///
+/// Returns `None` when there is no QBI at all ([`has_qbi`] is false) — no REIT dividends and no
+/// prior-year carryforward means no Form 8995, no deduction, and nothing to carry forward.
+///
+/// The caller MUST already have refused when [`qbi_over_threshold`] (the 8995-A phase-in is
+/// unmodeled), exactly as for [`compute_8995`].
+///
+/// Note the printed line 15 is `min(printed line 10, printed line 14)` — each rounded at its own
+/// line — so it can differ by a dollar from `compute_8995`'s `deduction`, which rounds only the 20%
+/// products. That is the SPEC §3.1 round-all-amounts election, not a defect: the printed form
+/// cross-foots against itself, which is what gets filed.
+pub fn form_8995_lines(
+    reit_dividends: Usd,
+    reit_ptp_carryforward_in: Usd,
+    ti_before_qbi: Usd,
+    net_capital_gain: Usd,
+) -> Option<Form8995Lines> {
+    if !has_qbi(reit_dividends, reit_ptp_carryforward_in) {
+        return None;
+    }
+    // Part I — always zero in v1 (no trade or business QBI); line 3 is blank, not zero.
+    let line2 = Usd::ZERO;
+    let line4 = Usd::ZERO;
+    let line5 = Usd::ZERO;
+
+    // Part I (cont.) — the REIT/PTP component. Line 7 is a positive magnitude that REDUCES line 6.
+    let line6 = round_dollar(reit_dividends);
+    let line7 = round_dollar(reit_ptp_carryforward_in);
+    let line8 = (line6 - line7).max(Usd::ZERO);
+    let line9 = round_dollar(QBI_RATE * line8);
+    let line10 = line5 + line9;
+
+    // Part II — the taxable-income limitation.
+    let line11 = round_dollar(ti_before_qbi);
+    let line12 = round_dollar(net_capital_gain);
+    let line13 = (line11 - line12).max(Usd::ZERO);
+    let line14 = round_dollar(QBI_RATE * line13);
+    let line15 = line10.min(line14);
+
+    // Carryforwards out. Both are magnitudes: the form's parentheses supply the sign.
+    let line16 = Usd::ZERO; // combine 2 and 3 (= 0); "if greater than zero, enter -0-"
+    let line17 = (line7 - line6).max(Usd::ZERO); // the prior-year loss unused against this year's REIT
+
+    Some(Form8995Lines {
+        line2,
+        line4,
+        line5,
+        line6,
+        line7,
+        line8,
+        line9,
+        line10,
+        line11,
+        line12,
+        line13,
+        line14,
+        line15,
+        line16,
+        line17,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,5 +349,127 @@ mod tests {
         let r = compute_8995(dec!(2502.50), Usd::ZERO, dec!(100000), Usd::ZERO);
         // 20% × 2,502.50 = 500.50 → half-up 501 (income limit 20% × 100,000 = 20,000 does not bind).
         assert_eq!(r.deduction, dec!(501));
+    }
+
+    /// The printed Form 8995 chain for the ordinary v1 case: REIT dividends, no carryforward, income
+    /// limit not binding. Part I's table is blank and lines 2/4/5 print as zero.
+    #[test]
+    fn form_8995_printed_chain_reit_only() {
+        // $10,000 REIT dividends; TI-before-QBI $100,000; net capital gain $20,000.
+        // line 9 = 20% × 10,000 = 2,000. line 13 = 80,000 → line 14 = 16,000. line 15 = min = 2,000.
+        let l = form_8995_lines(dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
+        assert_eq!(l.line2, Usd::ZERO);
+        assert_eq!(l.line4, Usd::ZERO);
+        assert_eq!(l.line5, Usd::ZERO);
+        assert_eq!(l.line6, dec!(10000));
+        assert_eq!(l.line7, Usd::ZERO);
+        assert_eq!(l.line8, dec!(10000));
+        assert_eq!(l.line9, dec!(2000));
+        assert_eq!(l.line10, dec!(2000));
+        assert_eq!(l.line11, dec!(100000));
+        assert_eq!(l.line12, dec!(20000));
+        assert_eq!(l.line13, dec!(80000));
+        assert_eq!(l.line14, dec!(16000));
+        assert_eq!(l.line15, dec!(2000)); // the component binds, not the income limit
+        assert_eq!(l.line16, Usd::ZERO);
+        assert_eq!(l.line17, Usd::ZERO);
+    }
+
+    /// The income limitation binds: line 15 takes line 14, not line 10.
+    #[test]
+    fn form_8995_printed_chain_income_limit_binds() {
+        // TI-before-QBI 12,000 all of which is capital gain → line 13 = 0 → line 14 = 0 → no deduction.
+        let l = form_8995_lines(dec!(10000), Usd::ZERO, dec!(12000), dec!(12000)).unwrap();
+        assert_eq!(l.line10, dec!(2000)); // the component is there…
+        assert_eq!(l.line13, Usd::ZERO);
+        assert_eq!(l.line14, Usd::ZERO);
+        assert_eq!(l.line15, Usd::ZERO); // …but the income limit wipes it out
+    }
+
+    /// ★ **The parenthesized-box invariant.** Lines 3/7/16/17 are printed inside literal `(   )` on the
+    /// form — the parentheses supply the minus sign — so the value must be a POSITIVE MAGNITUDE. A
+    /// negative here renders as `(-1,234)`, i.e. a POSITIVE number on the filed form: a wrong return.
+    /// A prior-year loss carryforward larger than this year's REIT income must therefore surface as a
+    /// positive line 7 AND a positive line 17, never as a negative anything.
+    #[test]
+    fn form_8995_loss_carryforward_lines_are_positive_magnitudes() {
+        // Prior-year REIT/PTP loss carryforward $15,000 against only $10,000 of REIT dividends.
+        let l = form_8995_lines(dec!(10000), dec!(15000), dec!(100000), Usd::ZERO).unwrap();
+        assert_eq!(l.line6, dec!(10000));
+        assert_eq!(l.line7, dec!(15000)); // POSITIVE magnitude, not −15,000
+        assert_eq!(l.line8, Usd::ZERO); // 10,000 − 15,000, floored: no REIT income survives
+        assert_eq!(l.line9, Usd::ZERO);
+        assert_eq!(l.line15, Usd::ZERO); // no deduction this year
+        assert_eq!(l.line17, dec!(5000)); // POSITIVE magnitude: 15,000 − 10,000 carries forward
+
+        // Every parenthesized cell is non-negative, always. This is the invariant the filler relies on.
+        for cell in [l.line7, l.line16, l.line17] {
+            assert!(
+                cell >= Usd::ZERO,
+                "parenthesized cells are magnitudes: {cell}"
+            );
+        }
+    }
+
+    /// No REIT dividends and no carryforward ⇒ no Form 8995 at all.
+    #[test]
+    fn form_8995_absent_when_there_is_no_qbi() {
+        assert!(form_8995_lines(Usd::ZERO, Usd::ZERO, dec!(100000), Usd::ZERO).is_none());
+        // …but a bare carryforward, with no REIT income this year, DOES produce the form (it must
+        // carry the loss forward on line 17, or the carryforward is silently lost).
+        let l = form_8995_lines(Usd::ZERO, dec!(5000), dec!(100000), Usd::ZERO).unwrap();
+        assert_eq!(l.line17, dec!(5000));
+    }
+
+    /// The printed chain cross-foots: every derived line re-derives from the OTHER printed cells.
+    #[test]
+    fn form_8995_printed_lines_cross_foot() {
+        for (reit, cf_in, ti, ncg) in [
+            (dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)),
+            (dec!(10000), dec!(15000), dec!(100000), Usd::ZERO),
+            (dec!(2502.50), Usd::ZERO, dec!(80000.49), dec!(0.50)), // cents in, dollars out
+            (dec!(10000), Usd::ZERO, dec!(12000), dec!(12000)),     // income limit binds
+        ] {
+            let l = form_8995_lines(reit, cf_in, ti, ncg).unwrap();
+            assert_eq!(l.line4, l.line2, "L4 = 2 + 3 (3 blank)");
+            assert_eq!(l.line5, round_dollar(QBI_RATE * l.line4), "L5 = 20% × 4");
+            assert_eq!(
+                l.line8,
+                (l.line6 - l.line7).max(Usd::ZERO),
+                "L8 = 6 + 7(loss), floored"
+            );
+            assert_eq!(l.line9, round_dollar(QBI_RATE * l.line8), "L9 = 20% × 8");
+            assert_eq!(l.line10, l.line5 + l.line9, "L10 = 5 + 9");
+            assert_eq!(
+                l.line13,
+                (l.line11 - l.line12).max(Usd::ZERO),
+                "L13 = 11 − 12, floored"
+            );
+            assert_eq!(
+                l.line14,
+                round_dollar(QBI_RATE * l.line13),
+                "L14 = 20% × 13"
+            );
+            assert_eq!(
+                l.line15,
+                l.line10.min(l.line14),
+                "L15 = smaller of 10 or 14"
+            );
+            assert_eq!(
+                l.line17,
+                (l.line7 - l.line6).max(Usd::ZERO),
+                "L17 = 6 + 7, if > 0 then -0-"
+            );
+            for cell in [
+                l.line2, l.line4, l.line5, l.line6, l.line7, l.line8, l.line9, l.line10, l.line11,
+                l.line12, l.line13, l.line14, l.line15, l.line16, l.line17,
+            ] {
+                assert_eq!(
+                    cell.fract(),
+                    Usd::ZERO,
+                    "printed cells are whole dollars: {cell}"
+                );
+            }
+        }
     }
 }

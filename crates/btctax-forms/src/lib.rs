@@ -22,6 +22,8 @@ mod fill8949;
 mod form1040;
 mod form8283;
 mod form8959;
+mod form8960;
+mod form8995;
 mod map;
 mod overflow;
 mod pdf;
@@ -32,7 +34,10 @@ mod watermark;
 
 pub use error::FormsError;
 pub use form1040::{Form1040Fill, Form1040Inputs};
-pub use map::{Form1040Map, Form8283Map, Form8949Map, Form8959Map, ScheduleDMap, ScheduleSeMap};
+pub use map::{
+    Form1040Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map, ScheduleDMap,
+    ScheduleSeMap,
+};
 pub use schedule_se::SE_FLOOR;
 
 use btctax_core::conventions::{TaxDate, Usd};
@@ -134,6 +139,30 @@ pub fn fill_form_8959(
     form8959::fill_form_8959_with_map(lines, &map)
 }
 
+/// Fill **Form 8960** (Net Investment Income Tax, §1411) for `year` from the core-derived line chain
+/// (`btctax_core::tax::other_taxes::form_8960_lines`, which returns `None` when no NIIT is owed —
+/// there is then no form to file).
+pub fn fill_form_8960(
+    lines: &btctax_core::tax::other_taxes::Form8960Lines,
+    year: i32,
+) -> Result<Vec<u8>, FormsError> {
+    let map = Form8960Map::for_year(year)?;
+    form8960::fill_form_8960_with_map(lines, &map)
+}
+
+/// Fill **Form 8995** (QBI deduction, simplified) for `year` from the core-derived line chain
+/// (`btctax_core::tax::qbi::form_8995_lines`, which returns `None` when there is no QBI).
+///
+/// FAILS CLOSED if a parenthesized cell (line 7/16/17) carries a negative value: the form pre-prints
+/// the parentheses, so a negative would render as a POSITIVE number on the filed return.
+pub fn fill_form_8995(
+    lines: &btctax_core::tax::qbi::Form8995Lines,
+    year: i32,
+) -> Result<Vec<u8>, FormsError> {
+    let map = Form8995Map::for_year(year)?;
+    form8995::fill_form_8995_with_map(lines, &map)
+}
+
 /// Fill **Form 8283** (Noncash Charitable Contributions, Rev. 12-2025) for `year` from the projected
 /// donation rows + `DonationDetails`. Returns `Ok(None)` when there are no donations in the year.
 /// Fills the donee/appraiser IDENTITY + per-row property data (and, for Section B, checks the "k
@@ -177,9 +206,11 @@ pub mod testonly {
     pub use crate::form1040::{fill_form_1040_capgains as fill_1040_with_map, Form1040Fill};
     pub use crate::form8283::fill_form_8283 as fill_8283_with_map;
     pub use crate::form8959::fill_form_8959_with_map;
+    pub use crate::form8960::fill_form_8960_with_map;
+    pub use crate::form8995::fill_form_8995_with_map;
     pub use crate::map::{
-        AmountCols, Form1040Map, Form8283Map, Form8949Map, Form8959Map, MoneyCell, MoneyPair,
-        PartMap, ScheduleDMap, ScheduleSeMap,
+        AmountCols, Form1040Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map,
+        MoneyCell, MoneyPair, PartMap, ScheduleDMap, ScheduleSeMap,
     };
     pub use crate::pdf::{
         button_on_states, checkbox_on, collect_fields, index, load, text_value, Field,
