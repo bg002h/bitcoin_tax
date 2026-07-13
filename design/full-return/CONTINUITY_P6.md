@@ -86,26 +86,22 @@ lines 11/12/13/14 exactly — check for an existing struct before adding a new o
 
 ## Remaining P6 work, in the order I'd do it
 
-1. **Schedule C** — the next step, and the smallest of the remaining forms. Lines v1 needs: L1 gross
-   receipts (`crypto.business_se_gross`), L7 gross income (= L1; no returns/COGS), L28 total expenses,
-   L29 tentative profit (7 − 28), L31 net profit (= L29; no home office) → Schedule 1 L3 **and**
-   Schedule SE. A Schedule C LOSS is refused upstream (§465 at-risk out of scope), so L31 ≥ 0 always.
-   Needs a `ScheduleCParts` (gross + expenses) on `AbsoluteReturn` — `assemble_absolute` already
-   computes both locally (`crypto.business_se_gross`, `schedule_c_expenses`); they just are not kept.
-2. **Schedule B** — repeating payer tables (Part I = **14** rows, Part II = **15** — the asymmetry is
-   real). Row 1 of BOTH parts has a different parent subform (`Line1_ReadOrder` / `ReadOrderControl`),
-   so generating row FQNs by string interpolation produces two wrong names. Its amount column is
-   **[489.6, 576]**, NOT the [504, 576] every other form uses. Part III lines 7a/8 are Yes/No pairs
-   with identical on-states (`"1"`/`"2"`) — only y-geometry + name disambiguate; **7b is FREE TEXT,
-   not a Yes/No pair**.
-3. **Schedule D lines 17–22** — extend `schedule_d.rs` (all four §7.2 routing paths; KAT-10; the
-   negative-cell read-back the oracle has never verified).
-2. **The full 1040** — extend `form1040.rs` from the capital-gains cluster to every line.
+**All nine standalone forms are DONE.** What remains is extending the two fillers that already exist,
+then wiring the packet together.
+
+1. **Schedule D lines 17–22** — extend `schedule_d.rs` (all four §7.2 routing paths; KAT-10; the
+   negative-cell read-back the oracle has never verified). Today it fills only lines 3/7/10/15/16 from
+   the crypto totals — it has **no line 13** (1099-DIV box-2a capital-gain distributions) and **no
+   lines 6/14** (capital-loss carryovers), which is exactly the gap the P5-C1 refusal exists to cover.
+2. **The full 1040** — extend `form1040.rs` from the capital-gains cluster to every line. Its lines
+   must take the **PRINTED** figures from the schedules (L2b = Schedule B's printed L4, L8 = Sch 1's
+   printed L10, L12 = Sch A's printed L17, L20 = Sch 3's printed L8, L23 = Sch 2's printed L21, …), or
+   the 1040 will disagree with its own attachments by a dollar.
 3. **Wire it together**: `export_irs_pdf` emits the full packet; write the **taxpayer name + SSN
    header** every form carries — none of the nine fillers does yet, so the money lines are right but
-   the forms are not filable as-is (`p6-form-identity-header`, and it is cross-cutting: same two
-   fields, same `ReturnInputs.header` source, every form); add the always-on **DRAFT/attest
-   gate** for full-return PDFs (`p5-i1`); and **DELETE the P5-C1 refusal**
+   the forms are **not filable as-is** (`p6-form-identity-header`; cross-cutting — same two fields,
+   same `ReturnInputs.header` source, every form); add the always-on **DRAFT/attest gate** for
+   full-return PDFs (`p5-i1`); and **DELETE the P5-C1 refusal**
    (`CliError::CryptoSliceExportForFullReturnYear` + its guard in `cmd/admin.rs` + the KAT
    `export_refuses_for_a_full_return_year_p5_c1`) — that refusal exists ONLY because the crypto-slice
    export would file an understated Schedule D, which is precisely what this phase fixes.
