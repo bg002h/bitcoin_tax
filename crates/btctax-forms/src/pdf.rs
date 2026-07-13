@@ -194,6 +194,14 @@ pub struct Field {
     pub rect: Option<[f32; 4]>,
     /// `true` iff `/FT` is `/Btn` (a checkbox/radio).
     pub is_button: bool,
+    /// `/MaxLen` — the cell's character capacity, when the form declares one (inheritable, like `/FT`).
+    ///
+    /// The IRS forms set this on their **comb** cells (the SSN boxes are `/MaxLen 9`, comb-flagged), and
+    /// it is the PRIMARY SOURCE for how a value must be formatted: nine characters means nine bare
+    /// digits, not a hyphenated `123-45-6789`, which is eleven and would be silently truncated by the
+    /// viewer. [`crate::verify::verify_flat`] enforces it on read-back, so an over-long write fails
+    /// closed instead of being quietly mangled.
+    pub max_len: Option<usize>,
 }
 
 impl Field {
@@ -276,7 +284,7 @@ pub fn collect_fields(doc: &Document) -> Result<Vec<Field>, FormsError> {
         .map_err(|_| FormsError::Structure("AcroForm has no /Fields array".into()))?;
     for f in fields {
         if let Ok(id) = f.as_reference() {
-            walk(doc, id, "", None, &mut out)?;
+            walk(doc, id, "", None, None, &mut out)?;
         }
     }
     Ok(out)
@@ -308,6 +316,7 @@ fn walk(
     id: ObjectId,
     parent_fqn: &str,
     inherited_ft: Option<String>,
+    inherited_max_len: Option<usize>,
     out: &mut Vec<Field>,
 ) -> Result<(), FormsError> {
     let dict = match doc.get_dictionary(id) {
@@ -327,6 +336,14 @@ fn walk(
         .map(|b| String::from_utf8_lossy(b).into_owned())
         .or(inherited_ft);
 
+    // /MaxLen is inheritable down the field tree, exactly like /FT.
+    let max_len = dict
+        .get(b"MaxLen")
+        .ok()
+        .and_then(|o| o.as_i64().ok())
+        .and_then(|n| usize::try_from(n).ok())
+        .or(inherited_max_len);
+
     // A branch node carries /Kids of further named fields; a leaf is a terminal field.
     let kids: Option<Vec<ObjectId>> = dict
         .get(b"Kids")
@@ -336,7 +353,7 @@ fn walk(
     match kids {
         Some(kids) if !kids.is_empty() => {
             for k in kids {
-                walk(doc, k, &fqn, ft.clone(), out)?;
+                walk(doc, k, &fqn, ft.clone(), max_len, out)?;
             }
         }
         _ => {
@@ -345,6 +362,7 @@ fn walk(
                 fqn,
                 rect: rect_of(dict),
                 is_button: ft.as_deref() == Some("Btn"),
+                max_len,
             });
         }
     }

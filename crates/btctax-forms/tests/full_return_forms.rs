@@ -1381,3 +1381,34 @@ fn form_1040_full_same_column_swap_fails_closed() {
         .expect_err("a same-column swap must fail closed");
     assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
 }
+
+// ── /MaxLen: the comb-cell guard (P6.2) ─────────────────────────────────────────────────────────
+
+/// ★ The 1040's SSN cells are **9-character COMB cells** — the PDF says so itself (`/MaxLen 9`, comb
+/// flag set), and that answers the hyphens-or-digits question from the primary source rather than by
+/// guessing: a formatted `123-45-6789` is ELEVEN characters and would be silently truncated by a
+/// viewer (or splayed across the wrong comb teeth). We write the nine bare digits.
+///
+/// This KAT pins the fact, so a future year whose form changed its cell width cannot slip through.
+#[test]
+fn the_1040_ssn_cells_are_nine_character_comb_cells() {
+    let pdf = std::fs::read("forms/2024/f1040.pdf").unwrap();
+    let doc = load(&pdf).unwrap();
+    let fields = collect_fields(&doc).unwrap();
+    let by = |fqn: &str| {
+        fields
+            .iter()
+            .find(|f| f.fqn == fqn)
+            .unwrap_or_else(|| panic!("{fqn} exists"))
+            .max_len
+    };
+    // Taxpayer SSN, spouse SSN, and every dependent SSN: nine characters, no room for hyphens.
+    assert_eq!(by("topmostSubform[0].Page1[0].f1_06[0]"), Some(9));
+    assert_eq!(by("topmostSubform[0].Page1[0].f1_09[0]"), Some(9));
+    assert_eq!(
+        by("topmostSubform[0].Page1[0].Table_Dependents[0].Row1[0].f1_21[0]"),
+        Some(9)
+    );
+    // A name cell is NOT length-capped — only the combs are.
+    assert_eq!(by("topmostSubform[0].Page1[0].f1_04[0]"), None);
+}
