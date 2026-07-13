@@ -99,6 +99,54 @@ pub fn standard_deduction(
     base + per_box * Usd::from(boxes)
 }
 
+// ── Schedule A itemized deduction (Phase 3 task 2) ───────────────────────────────────────────────
+
+/// The §164(b)(5) SALT line 5a election: `true` (sales-tax path) → `salt_sales_tax_amount` ONLY; `false`
+/// (income-tax path) → W-2 state/local withholding + state estimated payments + prior-year balance paid.
+/// (A nonzero `salt_sales_tax_amount` with the election OFF is refused upstream — R3-M9.)
+fn salt_line_5a(ri: &ReturnInputs, a: &crate::tax::return_inputs::ScheduleAInputs) -> Usd {
+    if a.salt_use_sales_tax {
+        a.salt_sales_tax_amount
+    } else {
+        let w2_wh: Usd = ri
+            .w2s
+            .iter()
+            .map(|w| w.box17_state_tax_withheld + w.box19_local_tax)
+            .sum();
+        w2_wh + a.salt_state_estimated_payments + a.salt_prior_year_balance_paid
+    }
+}
+
+/// The **Schedule A itemized deduction total** (line 17) at `agi`, given the already-§170(b)-limited
+/// charitable total (line 14 from [`crate::tax::charitable::apply_170b`]). `None` when the filer has no
+/// Schedule A (takes the standard deduction). Medical floor 7.5%·AGI (line 4); SALT §164(b)(5) either/or
+/// capped at $10k ($5k MFS) (line 5e); mortgage interest (line 8a); charitable (line 14).
+///
+/// `agi` is the caller's AGI: the derivation passes NON-crypto AGI (and non-crypto charitable); the
+/// absolute return passes with-crypto AGI (+ crypto donations) — a documented delta-vs-absolute divergence
+/// (§6) whenever an AGI-sensitive line (medical floor, charitable ceiling) binds.
+pub fn schedule_a_deduction(
+    ri: &ReturnInputs,
+    agi: Usd,
+    charitable_allowed: Usd,
+    params: &FullReturnParams,
+) -> Option<Usd> {
+    let a = ri.schedule_a.as_ref()?;
+    // Line 4 — medical/dental over the 7.5%-of-AGI floor.
+    let medical = (a.medical - dec!(0.075) * agi).max(Usd::ZERO);
+    // Line 5e — SALT, §164(b)(5) either/or, capped at $10,000 ($5,000 MFS).
+    let salt_5d = salt_line_5a(ri, a) + a.salt_real_estate + a.salt_personal_property;
+    let salt_cap = if ri.filing_status == FilingStatus::Mfs {
+        params.salt_cap / dec!(2)
+    } else {
+        params.salt_cap
+    };
+    let salt_5e = salt_5d.min(salt_cap);
+    // Line 8a — home-mortgage interest (points/8b are refuse-or-advise in P6).
+    let mortgage = a.mortgage_interest_1098;
+    Some(medical + salt_5e + mortgage + charitable_allowed)
+}
+
 // ── Non-crypto income-line sums (shared by the derivation, the refuse screen, and the absolute 1040) ──
 fn sum_wages(ri: &ReturnInputs) -> Usd {
     ri.w2s.iter().map(|w| w.box1_wages).sum()
@@ -406,7 +454,9 @@ mod tests {
     use crate::identity::EventId;
     use crate::state::{IncomeRecord, LedgerState};
     use crate::tax::compute::compute_tax_year;
-    use crate::tax::return_inputs::{Form1099Div, Form1099G, Form1099Int, ScheduleCInputs, W2};
+    use crate::tax::return_inputs::{
+        Form1099Div, Form1099G, Form1099Int, ScheduleAInputs, ScheduleCInputs, W2,
+    };
     use crate::tax::tables::{synthetic_table, TaxTable};
     use crate::tax::types::{Carryforward, TaxOutcome};
     use std::collections::BTreeMap;
@@ -889,6 +939,63 @@ mod tests {
         let mut qss = filer(FilingStatus::Qss);
         qss.header.taxpayer.date_of_birth = Some(date!(1950 - 01 - 01)); // aged
         assert_eq!(standard_deduction(&qss, &p, 2024, Usd::ZERO), dec!(30750)); // 29,200 + 1,550
+    }
+
+    // ── Schedule A itemized deduction (Phase 3 task 2) ────────────────────────────────────────────
+    /// No Schedule A ⇒ `None` (the filer takes the standard deduction).
+    #[test]
+    fn schedule_a_none_without_inputs() {
+        assert_eq!(
+            schedule_a_deduction(&filer(FilingStatus::Single), dec!(100000), Usd::ZERO, &ty2024_params()),
+            None
+        );
+    }
+
+    /// Medical over the 7.5% floor + SALT (income path) capped at $10k + mortgage.
+    #[test]
+    fn schedule_a_medical_floor_salt_cap_mortgage() {
+        let mut r = filer(FilingStatus::Single);
+        r.schedule_a = Some(ScheduleAInputs {
+            medical: dec!(10000),                   // − 7.5%·100k = $2,500 allowed
+            salt_state_estimated_payments: dec!(5000),
+            salt_real_estate: dec!(8000),           // 5d = 5,000 + 8,000 = 13,000 → capped $10,000
+            mortgage_interest_1098: dec!(12000),
+            ..Default::default()
+        });
+        // $2,500 + $10,000 + $12,000 + $0 charitable = $24,500.
+        assert_eq!(
+            schedule_a_deduction(&r, dec!(100000), Usd::ZERO, &ty2024_params()),
+            Some(dec!(24500))
+        );
+    }
+
+    /// §164(b)(5) either/or: election ON ⇒ 5a is the sales-tax amount ONLY (income withholding ignored);
+    /// MFS SALT cap is $5,000. Charitable (line 14) adds straight in.
+    #[test]
+    fn schedule_a_salt_election_and_mfs_cap() {
+        let mut r = filer(FilingStatus::Single);
+        r.schedule_a = Some(ScheduleAInputs {
+            salt_use_sales_tax: true,
+            salt_sales_tax_amount: dec!(3000),
+            salt_state_estimated_payments: dec!(9999), // IGNORED under the sales-tax election
+            salt_real_estate: dec!(4000),
+            ..Default::default()
+        });
+        // 5d = 3,000 + 4,000 = 7,000 (< cap); + $1,000 charitable = $8,000.
+        assert_eq!(
+            schedule_a_deduction(&r, dec!(100000), dec!(1000), &ty2024_params()),
+            Some(dec!(8000))
+        );
+        // MFS: $20,000 real-estate tax caps at $5,000.
+        let mut mfs = filer(FilingStatus::Mfs);
+        mfs.schedule_a = Some(ScheduleAInputs {
+            salt_real_estate: dec!(20000),
+            ..Default::default()
+        });
+        assert_eq!(
+            schedule_a_deduction(&mfs, dec!(100000), Usd::ZERO, &ty2024_params()),
+            Some(dec!(5000))
+        );
     }
 
     // ── Compute-dependent refuse rows (task 2) ───────────────────────────────────────────────────

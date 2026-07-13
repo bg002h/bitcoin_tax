@@ -48,6 +48,9 @@ pub enum RefuseReason {
     /// Schedule B files but Part III line 7a (foreign accounts) or 8 (foreign trust) is unanswered
     /// (`None`) — fail-loud rather than guess a disclosure answer (SPEC §7.1 / I7 / P2-I1).
     ScheduleBPart3Unanswered,
+    /// A Schedule A `salt_sales_tax_amount` is set but the §164(b)(5) sales-tax election is OFF — a silent
+    /// drop of the amount would hide an input error, so fail loud (SPEC §4.6 / R3-M9).
+    SaltSalesTaxWithoutElection,
     /// W-2 box-12 code outside the inert allowlist (audit I1).
     UnsupportedBox12Code(String),
     /// Σ box-12 D/E/F/G/S elective deferrals over the §402(g) limit → taxable excess on 1040 1h (F3).
@@ -307,6 +310,18 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
             "Schedule B is required (interest/dividends > $1,500 or a foreign account) but its Part III \
              foreign-account/foreign-trust questions are unanswered — set `foreign_accounts`/`foreign_trust`",
         );
+    }
+
+    // Schedule A §164(b)(5) SALT: a sales-tax amount with the election OFF is an input error — fail loud
+    // rather than silently drop it (R3-M9).
+    if let Some(a) = &ri.schedule_a {
+        if a.salt_sales_tax_amount > Usd::ZERO && !a.salt_use_sales_tax {
+            return refuse(
+                RefuseReason::SaltSalesTaxWithoutElection,
+                "a Schedule A sales-tax amount is set but the §164(b)(5) sales-tax election is off — turn \
+                 the election on (5a = sales tax) or clear `salt_sales_tax_amount`",
+            );
+        }
     }
 
     // A Spouse-owned item is only coherent on a joint (MFJ) return; on Single/HoH/MFS/QSS the spouse's
@@ -668,6 +683,21 @@ mod tests {
         // Line 8 (foreign trust) left unanswered while filing → still fail-loud.
         r.foreign_trust = None;
         assert_eq!(reason(&r), Some(RefuseReason::ScheduleBPart3Unanswered));
+    }
+
+    #[test]
+    fn salt_sales_tax_without_election_refuses() {
+        use crate::tax::return_inputs::ScheduleAInputs;
+        let mut r = ri();
+        r.schedule_a = Some(ScheduleAInputs {
+            salt_sales_tax_amount: dec!(2000),
+            salt_use_sales_tax: false, // amount set but election OFF → input error
+            ..Default::default()
+        });
+        assert_eq!(reason(&r), Some(RefuseReason::SaltSalesTaxWithoutElection));
+        // Election ON → no refusal.
+        r.schedule_a.as_mut().unwrap().salt_use_sales_tax = true;
+        assert_eq!(reason(&r), None);
     }
 
     #[test]
