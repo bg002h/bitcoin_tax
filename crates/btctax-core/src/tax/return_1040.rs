@@ -147,6 +147,25 @@ pub fn schedule_a_deduction(
     Some(medical + salt_5e + mortgage + charitable_allowed)
 }
 
+/// §63(e)/(c)(6) deduction CHOICE: `max(standard, itemized)` by default; `ForceItemize` honors §63(e)
+/// (itemize even if smaller); **MFS with an itemizing spouse** forces this filer's standard deduction to
+/// $0 (§63(c)(6) — the spouses must agree). `itemized` is `None` when there is no Schedule A.
+fn choose_deduction(ri: &ReturnInputs, standard: Usd, itemized: Option<Usd>) -> Usd {
+    use crate::tax::return_inputs::ItemizeElection;
+    let itemized = itemized.unwrap_or(Usd::ZERO);
+    // §63(c)(6): an MFS filer whose spouse itemizes gets NO standard deduction (a `None` tri-state on MFS
+    // is refused upstream — G15).
+    let standard = if ri.filing_status == FilingStatus::Mfs && ri.mfs_spouse_itemizes == Some(true) {
+        Usd::ZERO
+    } else {
+        standard
+    };
+    match ri.itemize_election {
+        ItemizeElection::ForceItemize => itemized,
+        ItemizeElection::Auto => standard.max(itemized),
+    }
+}
+
 // ── Non-crypto income-line sums (shared by the derivation, the refuse screen, and the absolute 1040) ──
 fn sum_wages(ri: &ReturnInputs) -> Usd {
     ri.w2s.iter().map(|w| w.box1_wages).sum()
@@ -376,9 +395,16 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
 
     // ── AGI, deduction, taxable income ────────────────────────────────────────────────────────────
     let agi = income_total - adjustments; // 1040 L11 (non-crypto)
-    // FULL §63 standard deduction (P3 task 1): basic + aged/blind + dependent floor. The dependent floor's
-    // earned income is the NON-crypto figure (wages); Schedule A / the max(std, itemized) lands in P3 task 3.
-    let deduction = standard_deduction(ri, params, year, wages);
+    // Deduction = max(full §63 standard, NON-crypto Schedule A) — P3 tasks 1–3. The derived Schedule A uses
+    // the NON-crypto charitable (user gifts + carryover, §170(b)-limited at non-crypto AGI); crypto donations
+    // belong to the absolute return, not the frozen delta (§6 divergence). The dependent-floor + charitable
+    // ceilings key off this non-crypto AGI.
+    let full_std = standard_deduction(ri, params, year, wages);
+    let charitable = ri.schedule_a.as_ref().map_or(Usd::ZERO, |a| {
+        crate::tax::charitable::apply_170b(agi, &a.charitable, &ri.charitable_carryover_in, year).allowed
+    });
+    let itemized = schedule_a_deduction(ri, agi, charitable, params);
+    let deduction = choose_deduction(ri, full_std, itemized);
     let taxable_income = (agi - deduction).max(Usd::ZERO); // 1040 L15 (non-crypto)
     // Strip the preferential slice (qualified div + LT cap-gain distr) EXACTLY ONCE — the engine re-adds
     // it on top of the ordinary bottom via `other_net_capital_gain` + the QD channel (deep/02 §1.4).
@@ -996,6 +1022,53 @@ mod tests {
             schedule_a_deduction(&mfs, dec!(100000), Usd::ZERO, &ty2024_params()),
             Some(dec!(5000))
         );
+    }
+
+    /// `derive_tax_profile` takes max(standard, itemized): a big Schedule A beats the standard deduction.
+    #[test]
+    fn derive_uses_max_of_std_and_itemized() {
+        let p = ty2024_params();
+        let mut r = filer(FilingStatus::Single);
+        r.w2s = vec![w2(Owner::Taxpayer, dec!(200000), dec!(200000), dec!(200000))];
+        r.schedule_a = Some(ScheduleAInputs {
+            mortgage_interest_1098: dec!(30000),
+            salt_real_estate: dec!(15000), // capped at $10k
+            ..Default::default()
+        });
+        // Itemized $40,000 > std $14,600 → taxable = $200,000 − $40,000 = $160,000.
+        assert_eq!(
+            schedule_a_deduction(&r, dec!(200000), Usd::ZERO, &p).unwrap(),
+            dec!(40000)
+        );
+        assert_eq!(derive_tax_profile(&r, &p, 2024).ordinary_taxable_income, dec!(160000));
+    }
+
+    /// §63(e) `ForceItemize` uses Schedule A even when it is smaller than the standard deduction.
+    #[test]
+    fn force_itemize_uses_schedule_a_even_when_smaller() {
+        use crate::tax::return_inputs::ItemizeElection;
+        let mut r = filer(FilingStatus::Single);
+        r.w2s = vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))];
+        r.schedule_a = Some(ScheduleAInputs {
+            mortgage_interest_1098: dec!(1000),
+            ..Default::default()
+        });
+        r.itemize_election = ItemizeElection::ForceItemize;
+        // Forced $1,000 (< std $14,600) → taxable = $100,000 − $1,000 = $99,000.
+        assert_eq!(derive_tax_profile(&r, &ty2024_params(), 2024).ordinary_taxable_income, dec!(99000));
+    }
+
+    /// §63(c)(6): an MFS filer whose spouse itemizes gets NO standard deduction.
+    #[test]
+    fn mfs_spouse_itemizes_forces_zero_std() {
+        let p = ty2024_params();
+        let mut r = filer(FilingStatus::Mfs);
+        r.w2s = vec![w2(Owner::Taxpayer, dec!(50000), dec!(50000), dec!(50000))];
+        r.mfs_spouse_itemizes = Some(true); // spouse itemizes → std = 0, no Sch A → taxable = $50,000.
+        assert_eq!(derive_tax_profile(&r, &p, 2024).ordinary_taxable_income, dec!(50000));
+        // Spouse does NOT itemize → MFS std $14,600 → taxable = $35,400.
+        r.mfs_spouse_itemizes = Some(false);
+        assert_eq!(derive_tax_profile(&r, &p, 2024).ordinary_taxable_income, dec!(35400));
     }
 
     // ── Compute-dependent refuse rows (task 2) ───────────────────────────────────────────────────

@@ -51,6 +51,9 @@ pub enum RefuseReason {
     /// A Schedule A `salt_sales_tax_amount` is set but the §164(b)(5) sales-tax election is OFF — a silent
     /// drop of the amount would hide an input error, so fail loud (SPEC §4.6 / R3-M9).
     SaltSalesTaxWithoutElection,
+    /// MFS return without `mfs_spouse_itemizes` answered — §63(c)(6) couples the spouses' std/itemize
+    /// choice, so it's required (`None` ⇒ fail-loud, G15).
+    MfsSpouseItemizeUnknown,
     /// W-2 box-12 code outside the inert allowlist (audit I1).
     UnsupportedBox12Code(String),
     /// Σ box-12 D/E/F/G/S elective deferrals over the §402(g) limit → taxable excess on 1040 1h (F3).
@@ -322,6 +325,16 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
                  the election on (5a = sales tax) or clear `salt_sales_tax_amount`",
             );
         }
+    }
+
+    // §63(c)(6): an MFS return must state whether the spouse itemizes (it forces this filer's std/itemize
+    // choice); a `None` tri-state is fail-loud, never a silent assumption (G15).
+    if ri.filing_status == FilingStatus::Mfs && ri.mfs_spouse_itemizes.is_none() {
+        return refuse(
+            RefuseReason::MfsSpouseItemizeUnknown,
+            "a married-filing-separately return must state whether the spouse itemizes (§63(c)(6)) — set \
+             `mfs_spouse_itemizes`",
+        );
     }
 
     // A Spouse-owned item is only coherent on a joint (MFJ) return; on Single/HoH/MFS/QSS the spouse's
@@ -683,6 +696,16 @@ mod tests {
         // Line 8 (foreign trust) left unanswered while filing → still fail-loud.
         r.foreign_trust = None;
         assert_eq!(reason(&r), Some(RefuseReason::ScheduleBPart3Unanswered));
+    }
+
+    #[test]
+    fn mfs_without_spouse_itemize_answer_refuses() {
+        let mut r = ri();
+        r.filing_status = FilingStatus::Mfs; // mfs_spouse_itemizes defaults to None
+        assert_eq!(reason(&r), Some(RefuseReason::MfsSpouseItemizeUnknown));
+        // Answered → no refusal.
+        r.mfs_spouse_itemizes = Some(false);
+        assert_eq!(reason(&r), None);
     }
 
     #[test]
