@@ -1,4 +1,19 @@
-# CONTINUITY — Full-Return Expansion, Phase 4 (resume point)
+# CONTINUITY — Full-Return Expansion — **PHASE 4 IS CLOSED (CERTIFIED GREEN)**
+
+> **STATUS: Phase 4 COMPLETE + CERTIFIED at `6eeda51`.** Compute (SPEC §5 stages 1–9) + the §6 dual report
+> (Fable IMPL-P4 r1 1C/4I → fold → **r2 GREEN 0C/0I**) **and** P4.9 carryover write-back (Fable IMPL-P4.9 r1
+> 0C/3I → fold `6eeda51` → **r2 GREEN 0C/0I**). Reviews: `reviews/IMPL-P4-fable-review-r{1,2}.md` +
+> `reviews/IMPL-P4.9-fable-review-r{1,2}.md`. All three CI gates green (test/clippy `-D warnings`/fmt);
+> whole workspace 1554 tests pass; frozen files byte-identical.
+>
+> **NEXT: Phase 5** (LIMITATIONS doc + conservative-omission advisories), then P6 (PDF fillers), P7 (goldens).
+> P5 entry-gate sweep MUST pick up: `p4-r1-m3-ctc-advisory-P5`, `p4-r1-n1-taxyearreport-struct`, and the
+> **LIMITATIONS.md line-by-line pass** (drafted early at `6eeda51`; its "forms filled" line was corrected —
+> it must be re-checked at the P5 gate and again in P6 when the fillers land).
+
+---
+
+## (historical) Phase-4 resume notes
 
 **Written:** 2026-07-12 (updated after the P4 gate → GREEN). **Branch:** `full-return`. **HEAD:** past `018e199`.
 **Read alongside:** the `full-return-expansion-roadmap` auto-memory (loaded each session),

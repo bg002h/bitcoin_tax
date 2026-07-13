@@ -44,7 +44,14 @@ carryforward.
 **Other taxes:** **Form 8960** Net Investment Income Tax (rebuilt from your line items) · **Form 8959**
 Additional Medicare Tax, Parts I (wages), II (SE) and V (withholding).
 
-**Forms filled:** 1040 · Schedules 1, 2, 3, A, B, C, D, SE · Forms 8949, 8283, 8959, 8960, 8995.
+**Forms — computed vs. filled.** Two different things, and the difference matters:
+
+- **Computed** (every line, to the cent): 1040 · Schedules 1, 2, 3, A, B, C, D, SE · Forms 8949, 8283, 8959,
+  8960, 8995. These figures appear on the report.
+- **Filled as an official IRS PDF** (`export-irs-pdf`): **1040 · Schedule D · Schedule SE · Form 8949 · Form
+  8283**. The remaining schedules and forms (1, 2, 3, A, B, C, and Forms 8959, 8960, 8995) are **computed but
+  not yet PDF-filled** — their figures are on the report, and until the fillers ship you must transcribe them
+  onto the official forms yourself.
 
 **Carryovers:** charitable (per class + vintage) and the QBI REIT/PTP loss carryforward are computed and can
 be written forward to next year with `btctax report --tax-year Y --write-carryover`. A carryover you typed in
