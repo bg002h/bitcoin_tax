@@ -27,6 +27,7 @@ mod form8995;
 mod map;
 mod overflow;
 mod pdf;
+mod schedule23;
 mod schedule_d;
 mod schedule_se;
 mod verify;
@@ -35,8 +36,8 @@ mod watermark;
 pub use error::FormsError;
 pub use form1040::{Form1040Fill, Form1040Inputs};
 pub use map::{
-    Form1040Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map, ScheduleDMap,
-    ScheduleSeMap,
+    Form1040Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map, Schedule2Map,
+    Schedule3Map, ScheduleDMap, ScheduleSeMap,
 };
 pub use schedule_se::SE_FLOOR;
 
@@ -163,6 +164,28 @@ pub fn fill_form_8995(
     form8995::fill_form_8995_with_map(lines, &map)
 }
 
+/// Fill **Schedule 2** (Additional Taxes) for `year` from the core-derived printed chain
+/// (`btctax_core::tax::printed::schedule_2_lines`, which returns `None` when there are no other
+/// taxes to report — the schedule is then not filed).
+pub fn fill_schedule_2(
+    lines: &btctax_core::tax::printed::Schedule2Lines,
+    year: i32,
+) -> Result<Vec<u8>, FormsError> {
+    let map = Schedule2Map::for_year(year)?;
+    schedule23::fill_schedule_2_with_map(lines, &map)
+}
+
+/// Fill **Schedule 3** (Additional Credits and Payments) for `year` from the core-derived printed
+/// chain (`btctax_core::tax::printed::schedule_3_lines`, which returns `None` when there is neither a
+/// foreign tax credit nor an excess-Social-Security credit).
+pub fn fill_schedule_3(
+    lines: &btctax_core::tax::printed::Schedule3Lines,
+    year: i32,
+) -> Result<Vec<u8>, FormsError> {
+    let map = Schedule3Map::for_year(year)?;
+    schedule23::fill_schedule_3_with_map(lines, &map)
+}
+
 /// Fill **Form 8283** (Noncash Charitable Contributions, Rev. 12-2025) for `year` from the projected
 /// donation rows + `DonationDetails`. Returns `Ok(None)` when there are no donations in the year.
 /// Fills the donee/appraiser IDENTITY + per-row property data (and, for Section B, checks the "k
@@ -210,7 +233,7 @@ pub mod testonly {
     pub use crate::form8995::fill_form_8995_with_map;
     pub use crate::map::{
         AmountCols, Form1040Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map,
-        MoneyCell, MoneyPair, PartMap, ScheduleDMap, ScheduleSeMap,
+        MoneyCell, MoneyPair, PartMap, Schedule2Map, Schedule3Map, ScheduleDMap, ScheduleSeMap,
     };
     pub use crate::pdf::{
         button_on_states, checkbox_on, collect_fields, index, load, text_value, Field,
@@ -219,6 +242,7 @@ pub mod testonly {
         SCHEDULE_D_PDF_2017, SCHEDULE_D_PDF_2024, SCHEDULE_D_PDF_2025, SCHEDULE_SE_PDF_2017,
         SCHEDULE_SE_PDF_2024, SCHEDULE_SE_PDF_2025,
     };
+    pub use crate::schedule23::{fill_schedule_2_with_map, fill_schedule_3_with_map};
     pub use crate::schedule_d::fill_schedule_d_totals;
     pub use crate::schedule_se::fill_schedule_se_with_map;
     pub use crate::verify::{

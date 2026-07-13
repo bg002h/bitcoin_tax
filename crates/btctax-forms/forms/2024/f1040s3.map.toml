@@ -1,0 +1,32 @@
+# Schedule 3 (Additional Credits and Payments), Form 1040, TY2024 — logical line → PDF field name.
+#
+# Extracted with `xtask dump-fields` + correlated against the printed form (`pdftotext -layout`).
+#
+# ⚠️ ROOT SUBFORM IS `topmostSubform[0]` — NOT the `form1[0]` that Schedules 1 and 2 use. Schedule 3
+# is also a ONE-PAGE form, yet it contains a field named `f2_23` (the second write-in row of line 6z):
+# an IRS authoring slip, since the `f2_` prefix normally means page 2 and no `f1_23` exists anywhere in
+# the document. Any page heuristic keyed on the LEAF prefix will disagree with the `PageN[0]` subform
+# segment, which correctly says Page1. v1 does not fill 6z, but the trap is recorded for whoever does.
+#
+# Column x-clusters (code-side oracle in schedule3.rs): MID x ≈ [410,482], AMOUNT x ≈ [504,576].
+#
+# ⚠️ Line 6e (`f1_13`) is "Reserved for future use" — a LIVE, ReadOnly widget that CONSUMES a suffix
+# number (f1_12 = 6d, f1_13 = 6e reserved, f1_14 = 6f). Anything that walks suffixes and "skips
+# reserved lines" misaligns 6f–6m by one. Never write to it.
+#
+# UNMAPPED ON PURPOSE:
+#   lines 2, 3, 4, 5a, 5b, 6a-6z — education (8863), dependent-care (2441), saver's (8880),
+#     residential-energy (5695), adoption (8839) and the rest. Every one is a §3.4 CONSERVATIVE
+#     OMISSION: v1 does not compute them, which can only OVERSTATE tax, and the report fires the
+#     OtherCreditsOmitted advisory. They stay BLANK — never a misleading 0.
+#   lines 9, 10, 12, 13a-13z — net premium tax credit, extension payment, fuels credit, etc.
+form = "f1040s3"
+year = 2024
+
+# ── Part I — Nonrefundable Credits ──────────────────────────────────────────────────────────────
+line1  = "topmostSubform[0].Page1[0].f1_03[0]"   # "Foreign tax credit. Attach Form 1116 if required"
+line8  = "topmostSubform[0].Page1[0].f1_26[0]"   # "Add lines 1 through 4, 5a, 5b, and 7…" → 1040 line 20
+
+# ── Part II — Other Payments and Refundable Credits ─────────────────────────────────────────────
+line11 = "topmostSubform[0].Page1[0].f1_29[0]"   # "Excess social security and tier 1 RRTA tax withheld"
+line15 = "topmostSubform[0].Page1[0].f1_39[0]"   # "Add lines 9 through 12 and 14…" → 1040 line 31

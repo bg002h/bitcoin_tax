@@ -38,6 +38,10 @@ pub const F8959_MAP_2024: &str = include_str!("../forms/2024/f8959.map.toml");
 pub const F8960_MAP_2024: &str = include_str!("../forms/2024/f8960.map.toml");
 /// The TY2024 Form 8995 (QBI deduction, simplified) map (embedded at compile time).
 pub const F8995_MAP_2024: &str = include_str!("../forms/2024/f8995.map.toml");
+/// The TY2024 Schedule 2 (Additional Taxes) map (embedded at compile time).
+pub const SCHEDULE_2_MAP_2024: &str = include_str!("../forms/2024/f1040s2.map.toml");
+/// The TY2024 Schedule 3 (Additional Credits and Payments) map (embedded at compile time).
+pub const SCHEDULE_3_MAP_2024: &str = include_str!("../forms/2024/f1040s3.map.toml");
 
 /// The TY2017 Form 8949 map (embedded at compile time).
 pub const F8949_MAP_2017: &str = include_str!("../forms/2017/f8949.map.toml");
@@ -719,6 +723,92 @@ impl Form8995Map {
             &self.line16,
             &self.line17,
         ]
+    }
+}
+
+/// The Schedule 2 (Additional Taxes) field map for one tax year.
+///
+/// Part I is entirely absent: line 1a (excess APTC) has no input and would refuse if it did, and
+/// line 2 (AMT) is $0 by construction (the return is refused if the Form 6251 screen trips). Only
+/// the three Part II taxes v1 computes are mapped. **Line 21 is on PAGE 2.**
+#[derive(Debug, Clone, Deserialize)]
+pub struct Schedule2Map {
+    /// `"f1040s2"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// L4 — self-employment tax (SS + regular Medicare only), AMOUNT column, page 1.
+    pub line4: MoneyCell,
+    /// L11 — Additional Medicare Tax (Form 8959's printed L18), AMOUNT column, page 1.
+    pub line11: MoneyCell,
+    /// L12 — net investment income tax (Form 8960's printed L17), AMOUNT column, page 1.
+    pub line12: MoneyCell,
+    /// L21 — total other taxes → 1040 L23, AMOUNT column, **page 2**.
+    pub line21: MoneyCell,
+}
+
+impl Schedule2Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_2_MAP_2024).expect("bundled schedule 2 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 4 filled cells in printed reading order. **Descent is grouped by PAGE** — line 21 sits on
+    /// page 2, whose y-coordinates are not comparable with page 1's.
+    pub fn lines(&self) -> [&MoneyCell; 4] {
+        [&self.line4, &self.line11, &self.line12, &self.line21]
+    }
+}
+
+/// The Schedule 3 (Additional Credits and Payments) field map for one tax year.
+///
+/// Only the foreign tax credit (L1) and the §6413(c) excess-Social-Security credit (L11) are mapped.
+/// Every other Part I credit is a §3.4 conservative omission and stays BLANK.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Schedule3Map {
+    /// `"f1040s3"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// L1 — foreign tax credit, AMOUNT column.
+    pub line1: MoneyCell,
+    /// L8 — total nonrefundable credits → 1040 L20, AMOUNT column.
+    pub line8: MoneyCell,
+    /// L11 — excess Social Security / tier-1 RRTA withheld, AMOUNT column.
+    pub line11: MoneyCell,
+    /// L15 — total other payments → 1040 L31, AMOUNT column.
+    pub line15: MoneyCell,
+}
+
+impl Schedule3Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_3_MAP_2024).expect("bundled schedule 3 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 4 filled cells in printed reading order (strictly descending y on page 1).
+    pub fn lines(&self) -> [&MoneyCell; 4] {
+        [&self.line1, &self.line8, &self.line11, &self.line15]
     }
 }
 

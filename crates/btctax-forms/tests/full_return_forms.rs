@@ -9,12 +9,13 @@
 //! placement being right says nothing about the number being right.
 
 use btctax_core::tax::other_taxes::{form_8959_lines, form_8960_lines};
+use btctax_core::tax::printed::{Schedule2Lines, Schedule3Lines};
 use btctax_core::tax::qbi::form_8995_lines;
 use btctax_core::tax::se::SeTaxResult;
 use btctax_core::tax::types::FilingStatus;
 use btctax_core::Usd;
 use btctax_forms::testonly::*;
-use btctax_forms::{Form8959Map, Form8960Map, Form8995Map, FormsError};
+use btctax_forms::{Form8959Map, Form8960Map, Form8995Map, FormsError, Schedule3Map};
 use rust_decimal_macros::dec;
 use sha2::{Digest, Sha256};
 
@@ -352,4 +353,99 @@ fn full_return_forms_refuse_unsupported_years() {
             Err(FormsError::UnsupportedYear(_))
         ));
     }
+}
+
+// ────────────────────────────── Schedule 2 / Schedule 3 ───────────────────────────────────────
+
+/// Schedule 2 carries the three taxes v1 computes, and **Part I stays blank** — line 1a (excess
+/// APTC) has no input and would refuse if it did, and line 2 (AMT) is $0 by construction because the
+/// return is refused outright if the Form 6251 screen trips. A 0 printed there would be a lie.
+///
+/// Line 21 is on **page 2**, so this also exercises the per-page descent grouping.
+#[test]
+fn schedule_2_fills_part_ii_and_leaves_part_i_blank() {
+    let lines = Schedule2Lines {
+        line4: dec!(29871),
+        line11: dec!(693),
+        line12: dec!(1406),
+        line21: dec!(31970), // 29,871 + 693 + 1,406 — sums the PRINTED lines
+    };
+    let pdf = btctax_forms::fill_schedule_2(&lines, 2024).unwrap();
+
+    let g = |fqn: &str| tv(&pdf, fqn);
+    assert_eq!(g("form1[0].Page1[0].f1_14[0]").as_deref(), Some("29871")); // L4
+    assert_eq!(g("form1[0].Page1[0].f1_21[0]").as_deref(), Some("693")); // L11
+    assert_eq!(g("form1[0].Page1[0].f1_22[0]").as_deref(), Some("1406")); // L12
+    assert_eq!(g("form1[0].Page2[0].f2_25[0]").as_deref(), Some("31970")); // L21 — PAGE 2
+
+    // Part I must be BLANK — not zero.
+    for p1 in ["f1_03[0]", "f1_11[0]", "f1_12[0]", "f1_13[0]"] {
+        let fqn = format!("form1[0].Page1[0].{p1}");
+        assert_eq!(g(&fqn), None, "{fqn} (Schedule 2 Part I) must be blank");
+    }
+}
+
+/// Schedule 3 carries the FTC and the excess-SS credit. Every other Part I credit is a §3.4
+/// conservative omission and must be BLANK — a 0 would tell the filer we considered and rejected it.
+#[test]
+fn schedule_3_fills_ftc_and_excess_ss_and_leaves_omitted_credits_blank() {
+    let lines = Schedule3Lines {
+        line1: dec!(287),
+        line8: dec!(287),
+        line11: dec!(1235),
+        line15: dec!(1235),
+    };
+    let pdf = btctax_forms::fill_schedule_3(&lines, 2024).unwrap();
+
+    let g = |fqn: &str| tv(&pdf, fqn);
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_03[0]").as_deref(),
+        Some("287")
+    ); // L1 FTC
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_26[0]").as_deref(),
+        Some("287")
+    ); // L8 → 1040 L20
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_29[0]").as_deref(),
+        Some("1235")
+    ); // L11 excess SS
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_39[0]").as_deref(),
+        Some("1235")
+    ); // L15 → 1040 L31
+
+    // The conservatively-omitted credits: education (L3), dependent-care (L2), saver's (L4),
+    // residential-energy (L5a/5b), adoption (L6c). All BLANK.
+    for omitted in ["f1_04[0]", "f1_05[0]", "f1_06[0]", "f1_07[0]", "f1_08[0]"] {
+        let fqn = format!("topmostSubform[0].Page1[0].{omitted}");
+        assert_eq!(
+            g(&fqn),
+            None,
+            "{fqn} (conservatively omitted credit) must be blank"
+        );
+    }
+    // …and line 6e is the ReadOnly "Reserved for future use" widget — never written.
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_13[0]"),
+        None,
+        "L6e is reserved/ReadOnly"
+    );
+}
+
+/// Same-column swap on Schedule 3 (L1 and L15 are both AMOUNT, far apart in y) → the descent leg of
+/// the oracle catches it and the fill FAILS CLOSED.
+#[test]
+fn schedule_3_same_column_swap_fails_closed() {
+    let lines = Schedule3Lines {
+        line1: dec!(287),
+        line8: dec!(287),
+        line11: dec!(1235),
+        line15: dec!(1235),
+    };
+    let mut map = Schedule3Map::ty2024();
+    std::mem::swap(&mut map.line1, &mut map.line15);
+    let err =
+        fill_schedule_3_with_map(&lines, &map).expect_err("a same-column swap must fail closed");
+    assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
 }

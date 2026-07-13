@@ -1,0 +1,30 @@
+# Schedule 2 (Additional Taxes), Form 1040, TY2024 — logical line → PDF field name.
+#
+# Extracted with `xtask dump-fields` + correlated against the printed form (`pdftotext -layout`).
+#
+# ⚠️ ROOT SUBFORM IS `form1[0]` — Schedule 1 and Schedule 2 use `form1[0]`, but Schedule 3, the 1040,
+# Schedule SE and every other form in this crate use `topmostSubform[0]`. A shared prefix constant
+# would silently mis-resolve. Do not "unify" it.
+#
+# ⚠️ LINE 21 IS ON PAGE 2 (`f2_25`). The descent oracle therefore groups by PAGE, not one group for
+# the whole form — page 2's y-coordinates are not comparable with page 1's.
+#
+# Column x-clusters (code-side oracle in schedule2.rs): MID x ≈ [410,482], AMOUNT x ≈ [504,576].
+# Note lines 5, 6 and 20 are money lines that sit in the MID column (they feed a subtotal, or in
+# line 20's case are informational and NOT summed into line 21) — a "top-level numbered line ⇒ AMOUNT"
+# assumption is wrong on this form. v1 fills none of them.
+#
+# UNMAPPED ON PURPOSE — PART I IS ENTIRELY BLANK, and that is load-bearing:
+#   line 1a  excess advance premium tax credit — no input exists, and it would REFUSE if it did
+#            (repaying excess APTC INCREASES tax, so omitting it would understate the return)
+#   line 2   AMT — $0 by construction: the return is REFUSED outright if the official 2024
+#            "Worksheet To See if You Should Fill in Form 6251" trips, so there is no AMT to print
+#   lines 1b-1f, 1y, 1z, 3 — nothing to carry ⇒ 1040 line 17 is zero
+# Part II: lines 5-10, 13-16, 17a-17z, 18, 19, 20 are all unmodeled/unrepresentable in v1.
+form = "f1040s2"
+year = 2024
+
+line4  = "form1[0].Page1[0].f1_14[0]"   # "Self-employment tax. Attach Schedule SE"   (SS + regular Medicare ONLY)
+line11 = "form1[0].Page1[0].f1_21[0]"   # "Additional Medicare Tax. Attach Form 8959" (the form's PRINTED line 18)
+line12 = "form1[0].Page1[0].f1_22[0]"   # "Net investment income tax. Attach Form 8960" (the form's PRINTED line 17)
+line21 = "form1[0].Page2[0].f2_25[0]"   # "Add lines 4, 7 through 16, 18, and 19…" → 1040 line 23   ★ PAGE 2
