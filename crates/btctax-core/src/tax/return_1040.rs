@@ -525,12 +525,11 @@ const SE_6017_FLOOR: Usd = dec!(400);
 
 /// The **absolute** (WITH-crypto) 1040 assembly — the filed-return counterpart to [`derive_tax_profile`]'s
 /// frozen non-crypto `TaxProfile`. Built incrementally across Phase 4; **this increment covers SPEC §5
-/// stages 1–4** (income L1a–L9, adjustments L10, AGI L11, deductions L12–L15, regular tax L16), the
-/// Schedule SE / §6017 block, and the **stage-7 other-taxes forms** (Sch 2 L4 SE, Form 8959 Additional
-/// Medicare, absolute Form 8960 NIIT). Later P4 increments assemble the Sch 2 / Sch 3 totals, credits
-/// (FTC, CTC advisory), total tax L24, payments, and the dual report. The §4.10 compute-dependent refuses
-/// that need L12/L15 (QBI-above-threshold, TI≤0-with-carryforward) are screened by [`screen_absolute`]
-/// after this (infallible) assembly.
+/// stages 1–7** — income L1a–L9, adjustments L10, AGI L11, deductions L12–L15, regular tax L16, the
+/// other-taxes forms (Sch 2 L4 SE, Form 8959, absolute Form 8960), the §904(j) FTC + conservative-omission
+/// CTC (L19 = 0), and **1040 total tax L24**. Later P4 increments add payments/refund (L25–L37) and the
+/// §6 dual report. The §4.10 compute-dependent refuses that need L12/L15/L16 (QBI-above-threshold, AMT
+/// screen, TI≤0-with-carryforward) are screened by [`screen_absolute`] after this (infallible) assembly.
 ///
 /// Unlike the derivation, this reads the crypto ledger `state` directly (`capital_gain_line7`,
 /// `crypto_income`, `compute_se_tax`) and produces the with-crypto AGI (L11) — the §6 / Form 8960-MAGI /
@@ -606,10 +605,25 @@ pub struct AbsoluteReturn {
     /// (full 3b dividends + 2b interest + §1211-limited L7 + crypto lending interest; MAGI = AGI). NOT the
     /// frozen delta engine's `nii_with` — the §6 divergence.
     pub niit: Form8960,
+    /// §904(j) foreign-tax credit → Schedule 3 **line 1** = Σ (1099-INT box 6 + 1099-DIV box 7). The
+    /// ≤ $300/$600-passive-1099 eligibility is enforced by `screen_inputs` (over the ceiling refuses), so
+    /// this is the full amount. Nonrefundable — capped by the tax at L22.
+    pub foreign_tax_credit: Usd,
+    /// 1040 **L19** — CTC/ODC, a **conservative omission** (§3.4): always 0 in v1, with a loud advisory
+    /// (surfaced at render, P5). Never understates (omitting a favorable credit only overstates tax).
+    pub ctc_odc_credit: Usd,
+    /// 1040 **L22** — income tax after nonrefundable credits = `max(0, L18 − L21)` where L18 = L16 + Sch 2
+    /// L17 (AMT/APTC = 0 for a computed return) and L21 = L19 + L20 (nonrefundable credits, v1: FTC).
+    pub tax_after_credits: Usd,
+    /// Schedule 2 **line 21** → 1040 **L23** — total other taxes = SE (L4) + Additional Medicare (L11) +
+    /// NIIT (L12).
+    pub schedule_2_other_taxes: Usd,
+    /// 1040 **L24** — TOTAL TAX = L22 + L23.
+    pub total_tax: Usd,
 }
 
-/// Assemble the absolute (WITH-crypto) 1040 income + AGI + deductions + taxable income + regular tax for
-/// `year` (SPEC §5 stages 1–4). See [`AbsoluteReturn`]. Assumes `screen_inputs` + `screen_compute_dependent`
+/// Assemble the absolute (WITH-crypto) 1040 from income through **total tax L24** for `year` (SPEC §5
+/// stages 1–7). See [`AbsoluteReturn`]. Assumes `screen_inputs` + `screen_compute_dependent`
 /// have passed (so all charitable classes are 50%-org and Schedule C net ≥ 0); the L12/L15 compute-dependent
 /// refuses are checked afterward by [`screen_absolute`].
 pub fn assemble_absolute(
@@ -763,6 +777,27 @@ pub fn assemble_absolute(
         agi,
     );
 
+    // ── Credits + total tax (SPEC §5 stages 5–7 tail) ───────────────────────────────────────────────
+    // §904(j) foreign-tax credit → Sch 3 L1 (eligibility ≤ $300/$600 passive/1099 enforced by
+    // `screen_inputs`; over the ceiling refuses). Nonrefundable → capped by the tax at L22.
+    let foreign_tax_credit: Usd = ri
+        .int_1099
+        .iter()
+        .map(|i| i.box6_foreign_tax)
+        .chain(ri.div_1099.iter().map(|d| d.box7_foreign_tax))
+        .sum();
+    // CTC/ODC — conservative omission (§3.4): L19 = 0 (loud advisory surfaced at render, P5).
+    let ctc_odc_credit = Usd::ZERO;
+    // Sch 2 Part I: L1z (excess-APTC) = 0 (no input); L2 (AMT) = 0 for a computed return (a triggered AMT
+    // screen refuses via `screen_absolute`). So 1040 L17 = 0 and L18 = L16.
+    let l18 = regular_tax; // L16 + Sch 2 L3 (= 0)
+    let nonrefundable_credits = ctc_odc_credit + foreign_tax_credit; // L21 = L19 + L20 (v1: FTC only)
+    let tax_after_credits = (l18 - nonrefundable_credits).max(Usd::ZERO); // L22
+    // Sch 2 Part II (L21) → 1040 L23 = SE (L4) + Additional Medicare (L11) + NIIT (L12).
+    let schedule_2_other_taxes =
+        se_tax_sch2_l4 + additional_medicare.additional_medicare_tax + niit.tax;
+    let total_tax = tax_after_credits + schedule_2_other_taxes; // L24
+
     AbsoluteReturn {
         wages,
         taxable_interest,
@@ -788,6 +823,11 @@ pub fn assemble_absolute(
         se_tax_sch2_l4,
         additional_medicare,
         niit,
+        foreign_tax_credit,
+        ctc_odc_credit,
+        tax_after_credits,
+        schedule_2_other_taxes,
+        total_tax,
     }
 }
 
@@ -2174,5 +2214,101 @@ mod tests {
         let common = wages_single(dec!(150000));
         let ar_common = assemble_absolute(&common, &empty_ledger(), &p, &table, 2024);
         assert_eq!(screen_absolute(&common, &ar_common, &p), None);
+    }
+
+    // ── Credits + total tax L24 (Phase 4 task 2/6/7) ─────────────────────────────────────────────
+
+    /// KAT-16 — §904(j) foreign-tax credit = Σ(1099-INT box6 + 1099-DIV box7) → Schedule 3 line 1, and it
+    /// reduces the income tax after credits (L22).
+    #[test]
+    fn foreign_tax_credit_on_schedule_3_line_1() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            int_1099: vec![Form1099Int {
+                box1_interest: dec!(5000),
+                box6_foreign_tax: dec!(120),
+                ..Default::default()
+            }],
+            div_1099: vec![Form1099Div {
+                box1a_ordinary: dec!(3000),
+                box7_foreign_tax: dec!(80),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_single_table(), 2024);
+        assert_eq!(ar.foreign_tax_credit, dec!(200)); // 120 + 80 (≤ $300 ceiling, screened)
+        assert_eq!(ar.tax_after_credits, ar.regular_tax - dec!(200)); // L22 = L16 − FTC (no other credits)
+    }
+
+    /// CTC/ODC is a conservative omission (§3.4): 1040 L19 = 0 even with dependents (the loud advisory is
+    /// surfaced at render, P5). The tax is never reduced by a CTC → overstates at worst, never understates.
+    #[test]
+    fn ctc_odc_conservatively_omitted_l19_zero() {
+        let mut ri = wages_single(dec!(60000));
+        ri.header.dependents = vec![crate::tax::return_inputs::Dependent {
+            name: "Child".into(),
+            relationship: "son".into(),
+            date_of_birth: Some(date!(2015 - 01 - 01)),
+            ..Default::default()
+        }];
+        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_single_table(), 2024);
+        assert_eq!(ar.ctc_odc_credit, Usd::ZERO);
+        assert_eq!(ar.tax_after_credits, ar.regular_tax); // no FTC, no CTC → L22 = L16
+    }
+
+    /// Total tax L24 = L22 (income tax after credits) + L23 (Sch 2 Part II other taxes = SE + 8959 + 8960).
+    /// A fixture with SE income, NIIT, and an FTC exercises every summand at once.
+    #[test]
+    fn total_tax_l24_composition() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(200000), dec!(168600), dec!(200000))],
+            int_1099: vec![Form1099Int {
+                box1_interest: dec!(5000),
+                box6_foreign_tax: dec!(100),
+                ..Default::default()
+            }],
+            div_1099: vec![Form1099Div {
+                box1a_ordinary: dec!(3000),
+                box7_foreign_tax: dec!(50),
+                ..Default::default()
+            }],
+            schedule_c: Some(ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let st = state_income(vec![mining(dec!(60000))]);
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_single_table(), 2024);
+        // Every summand is live: FTC $150, SE tax > 0, NIIT on $8,000 investment income (MAGI well over
+        // $200k) = 3.8% × 8,000 = $304.
+        assert_eq!(ar.foreign_tax_credit, dec!(150));
+        assert!(ar.se.is_some() && ar.se_tax_sch2_l4 > Usd::ZERO);
+        assert_eq!(ar.niit.tax, dec!(304.00));
+        // Composition identities (L23, L22, L24).
+        assert_eq!(
+            ar.schedule_2_other_taxes,
+            ar.se_tax_sch2_l4 + ar.additional_medicare.additional_medicare_tax + ar.niit.tax
+        );
+        assert_eq!(ar.tax_after_credits, (ar.regular_tax - ar.foreign_tax_credit).max(Usd::ZERO));
+        assert_eq!(ar.total_tax, ar.tax_after_credits + ar.schedule_2_other_taxes);
+    }
+
+    /// The FTC is NONREFUNDABLE: when it exceeds the income tax (L16), L22 floors at $0 and the excess is
+    /// lost — never a refund of foreign tax.
+    #[test]
+    fn foreign_tax_credit_is_nonrefundable() {
+        let mut ri = wages_single(dec!(17000));
+        ri.int_1099 = vec![Form1099Int {
+            box6_foreign_tax: dec!(300), // ≤ $300 ceiling
+            ..Default::default()
+        }];
+        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_single_table(), 2024);
+        assert_eq!(ar.foreign_tax_credit, dec!(300));
+        assert!(ar.regular_tax < dec!(300)); // TI $2,400 → L16 ≈ $241
+        assert_eq!(ar.tax_after_credits, Usd::ZERO); // capped by tax; excess FTC not refundable
     }
 }
