@@ -176,11 +176,15 @@ fn choose_deduction(ri: &ReturnInputs, standard: Usd, itemized: Option<Usd>) -> 
     }
 }
 
-/// Whether [`choose_deduction`] took the ITEMIZED deduction (for the dual-report label — Fable r1 M1).
-/// Mirrors the election exactly: no Schedule A ⇒ standard; `ForceItemize` ⇒ itemized (even when smaller);
-/// `Auto` ⇒ itemized iff it exceeds the (MFS-§63(c)(6)-coerced) standard.
+/// Whether [`choose_deduction`] took the ITEMIZED deduction (for the dual-report label — Fable r1 M1/r2
+/// Nit). Mirrors the election exactly: `ForceItemize` ⇒ itemized always (§63(e), even with a `None`
+/// Schedule A that makes it $0 — `choose_deduction` still returns the itemized arm there); `Auto` ⇒
+/// itemized iff it exceeds the (MFS-§63(c)(6)-coerced) standard (equality → standard, matching `.max`).
 fn itemized_was_chosen(ri: &ReturnInputs, standard: Usd, itemized: Option<Usd>) -> bool {
     use crate::tax::return_inputs::ItemizeElection;
+    if ri.itemize_election == ItemizeElection::ForceItemize {
+        return true;
+    }
     let Some(itemized) = itemized else {
         return false;
     };
@@ -189,10 +193,7 @@ fn itemized_was_chosen(ri: &ReturnInputs, standard: Usd, itemized: Option<Usd>) 
     } else {
         standard
     };
-    match ri.itemize_election {
-        ItemizeElection::ForceItemize => true,
-        ItemizeElection::Auto => itemized > standard,
-    }
+    itemized > standard
 }
 
 // ── Non-crypto income-line sums (shared by the derivation, the refuse screen, and the absolute 1040) ──
@@ -2228,6 +2229,24 @@ mod tests {
         assert_eq!(ar.taxable_income, dec!(35400)); // 50,000 − 14,600
         assert_eq!(ar.qualified_dividends, dec!(50000));
         assert_eq!(ar.regular_tax, Usd::ZERO); // capped → $0 (not $446)
+    }
+
+    /// r2 Nit — the dual-report deduction label reflects the actual §63(e) election, not an amount
+    /// heuristic: `ForceItemize` is "itemized" even with no Schedule A ($0 deduction); `Auto` with no
+    /// Schedule A is "standard".
+    #[test]
+    fn deduction_is_itemized_reflects_the_election() {
+        use crate::tax::return_inputs::ItemizeElection;
+        let params = ty2024_params();
+        let table = real_2024_table();
+        let mut force = wages_single(dec!(60000));
+        force.itemize_election = ItemizeElection::ForceItemize;
+        let ar = assemble_absolute(&force, &empty_ledger(), &params, &table, 2024);
+        assert!(ar.deduction_is_itemized); // labeled itemized even though...
+        assert_eq!(ar.deduction, Usd::ZERO); // ...§63(e) forced-itemize with nothing to itemize is $0
+        let ar2 = assemble_absolute(&wages_single(dec!(60000)), &empty_ledger(), &params, &table, 2024);
+        assert!(!ar2.deduction_is_itemized); // Auto, no Schedule A → standard
+        assert_eq!(ar2.deduction, dec!(14600));
     }
 
     // ── Sch 2 other taxes wired into the absolute assembly (Phase 4 task 3/5) ─────────────────────

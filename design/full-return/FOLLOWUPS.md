@@ -94,7 +94,13 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   `absolute_with − absolute_without` AND the frozen delta on a $20k-medical fixture, asserting `delta <
   absolute contribution` (the delta UNDERSTATES — the one anti-conservative channel) and non-reconciliation.
 
-## From Fable IMPL-P4 code review r1 (1C/4I FOLDED at the P4 gate → r2; M2 documented; deferrals here)
+## From Fable IMPL-P4 code review r1 (1C/4I FOLDED → r2 GREEN 0C/0I; **Phase 4 CERTIFIED at `018e199`**)
+
+- **p4-r2-nit-forceitemize-noscheda-label** (FOLDED — r2 Nit) — `itemized_was_chosen` labeled a
+  `ForceItemize`-with-no-Schedule-A ($0) deduction "standard" in the dual report; now returns "itemized"
+  (matching `choose_deduction`'s §63(e) itemized arm), KAT `deduction_is_itemized_reflects_the_election`.
+  Label-only, reviewer-pre-approved fix direction → no r3 gate round (Nits don't gate; cf. P2 r4 precedent).
+
 
 - **p4-r1-c1-qss-se-addl-medicare** (FOLD C — CRITICAL, shipped) — `se_addl_medicare_threshold` gave QSS the
   $250,000 joint threshold; §1401(b)(2)(A)(iii) + the 2024 Form 8959 chart put a **QSS at $200,000** (not a

@@ -1,6 +1,6 @@
 # CONTINUITY — Full-Return Expansion, Phase 4 (resume point)
 
-**Written:** 2026-07-12 (updated after P4.8). **Branch:** `full-return`. **HEAD:** `dc744f1`.
+**Written:** 2026-07-12 (updated after the P4 gate → GREEN). **Branch:** `full-return`. **HEAD:** past `018e199`.
 **Read alongside:** the `full-return-expansion-roadmap` auto-memory (loaded each session),
 `design/SPEC_full_return.md`, `design/IMPLEMENTATION_PLAN_full_return.md`, `design/full-return/FOLLOWUPS.md`,
 `STANDARD_WORKFLOW.md`. This file is the fast on-ramp; those are authoritative.
@@ -9,11 +9,13 @@
 
 - **Design GREEN** (spec + plan). **Phases 0/1/2/3 COMPLETE + GREEN-CERTIFIED.**
 - **Phase 3 certified GREEN at `a64ff8f`** (Fable r1 1C/2I/4M → fold `695b1e6` → r2 GREEN 0C/0I).
-- **Phase 4 IN PROGRESS — the absolute-return COMPUTE is COMPLETE (SPEC §5 stages 1–9) and validated.**
-  Remaining: the §6 dual-report RENDER + carryover write-back persistence, then the P4 Fable gate. All
-  increments below are committed green (core lib 220/0; clippy clean; frozen files byte-identical; the
-  P4.3 state was whole-workspace-validated exit 0). Everything lives in
-  `crates/btctax-core/src/tax/return_1040.rs` + the new sibling modules.
+- **Phase 4 COMPUTE + §6 DUAL REPORT are CERTIFIED GREEN** at `018e199` (Fable IMPL-P4 r1 1C/4I/4M/3N →
+  fold `018e199` → **r2 GREEN 0C/0I**; reviews in `reviews/IMPL-P4-fable-review-r{1,2}.md`; r2 Nit folded
+  after, non-gating). SPEC §5 stages 1–9 + the §6 dual report. core lib 227/0; adapters 58/0; cli
+  tax_report 24/0; clippy clean; frozen files byte-identical; whole-workspace exit 0. **Remaining P4 work:
+  only P4.9 (carryover write-back) — see Next steps.** Everything lives in
+  `crates/btctax-core/src/tax/return_1040.rs` + the new sibling modules (`qbi`, `other_taxes`, `amt`) + the
+  CLI render/report wiring.
   - **P4.0 (`b61d595`):** income L1a–L11 + Schedule SE/§6017 block. `AbsoluteReturn` + `assemble_absolute`.
   - **P4.1a (`9788520`):** deductions L12–L15 + QBI (new `tax/qbi.rs`, Form 8995 REIT path; `qbi_ti_threshold`
     added to `FullReturnParams`). Absolute Sch A on with-crypto AGI incl. ledger §170(e) crypto donations
