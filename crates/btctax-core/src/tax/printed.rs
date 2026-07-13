@@ -143,6 +143,128 @@ pub fn schedule_1_lines(ar: &AbsoluteReturn) -> Option<Schedule1Lines> {
     })
 }
 
+/// The **Schedule D Part III routing** (SPEC §7.2) — which of lines 17–22 get answered, and how.
+///
+/// The form's Part III is a decision tree, not a column of numbers, and the four branches are
+/// mutually exclusive and exhaustive. Modelling it as an enum rather than a bag of `Option`s means an
+/// impossible combination (say, line 17 = "Yes" together with a line-21 loss) cannot be represented.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduleDRouting {
+    /// **L16 > 0 and L15 > 0** — gains in both characters. L17 = **Yes**; L18 = L19 = 0 (the 28%-rate
+    /// and unrecaptured-§1250 amounts, both refused upstream if they could ever be nonzero); L20 =
+    /// **Yes** → the Qualified Dividends and Capital Gain Tax Worksheet. Lines 21 and 22 are NOT
+    /// completed — the form says so in terms.
+    BothGains,
+    /// **L16 > 0 but L15 ≤ 0** — a short-term gain with a long-term loss. The common crypto year.
+    /// L17 = **No** → skip 18 through 21 → L22. Tax routes to QDCGT iff there are qualified dividends.
+    ShortGainLongLoss { line22_yes: bool },
+    /// **L16 < 0** — a net capital loss. Skip 17–20; L21 carries the §1211(b) allowed offset (a
+    /// POSITIVE MAGNITUDE — the form prints the parentheses); L22 is still answered.
+    NetLoss {
+        /// L21 — the allowed §1211(b) offset, ≤ $3,000 ($1,500 MFS). Positive magnitude.
+        line21: Usd,
+        line22_yes: bool,
+    },
+    /// **L16 = 0** — 1040 line 7 is `-0-`. Skip 17–21; L22 is still answered.
+    Zero { line22_yes: bool },
+}
+
+/// The printable **Schedule D (Capital Gains and Losses)** line chain — the FULL return's Schedule D.
+///
+/// This is not the crypto-slice Schedule D that `export-irs-pdf` has always produced. That one fills
+/// only lines 3/7/10/15/16 from the ledger totals — it has **no line 13** (1099-DIV box-2a
+/// capital-gain distributions) and **no lines 6/14** (capital-loss carryovers), which is exactly why
+/// the crypto-slice export REFUSES for a full-return year (P5-C1): those omissions make a
+/// complete-looking Schedule D that understates income.
+///
+/// **★ Lines 6, 14 and 21 are PARENTHESIZED boxes — positive magnitudes only.** The form pre-prints
+/// the parentheses, so they ARE the minus sign. A negative written there renders as a POSITIVE number
+/// on a filed return.
+///
+/// Column (g) (adjustments from Form 8949) is left blank throughout: v1 models no basis adjustment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScheduleDLines {
+    /// L3 (d) — short-term proceeds (Form 8949 Box C or **Box I**).
+    pub line3_d: Usd,
+    /// L3 (e) — short-term cost basis.
+    pub line3_e: Usd,
+    /// L3 (h) — short-term gain or loss (signed).
+    pub line3_h: Usd,
+    /// L6 — prior-year short-term capital loss carryover. **Positive magnitude** (paren box).
+    pub line6: Usd,
+    /// L7 — net short-term gain or loss (signed).
+    pub line7: Usd,
+    /// L10 (d) — long-term proceeds (Form 8949 Box F or **Box L**).
+    pub line10_d: Usd,
+    /// L10 (e) — long-term cost basis.
+    pub line10_e: Usd,
+    /// L10 (h) — long-term gain or loss (signed).
+    pub line10_h: Usd,
+    /// L13 — capital gain distributions (Σ 1099-DIV box 2a).
+    pub line13: Usd,
+    /// L14 — prior-year long-term capital loss carryover. **Positive magnitude** (paren box).
+    pub line14: Usd,
+    /// L15 — net long-term gain or loss (signed).
+    pub line15: Usd,
+    /// L16 — combine **printed** 7 and 15 (signed) → 1040 **L7** (as a signed figure; a loss is
+    /// limited to line 21's amount).
+    pub line16: Usd,
+    /// Part III's routing — which of lines 17–22 are answered (SPEC §7.2).
+    pub routing: ScheduleDRouting,
+}
+
+/// Derive the printed Schedule D chain, including SPEC §7.2's exhaustive Part III routing.
+pub fn schedule_d_lines(ar: &AbsoluteReturn) -> ScheduleDLines {
+    let p = &ar.schedule_d;
+
+    let line3_d = round_dollar(p.st_proceeds_3d);
+    let line3_e = round_dollar(p.st_cost_3e);
+    let line3_h = round_dollar(p.st_gain_3h);
+    let line6 = round_dollar(p.st_carryover_6); // magnitude (paren box)
+    let line7 = round_dollar(p.st_net_7);
+
+    let line10_d = round_dollar(p.lt_proceeds_10d);
+    let line10_e = round_dollar(p.lt_cost_10e);
+    let line10_h = round_dollar(p.lt_gain_10h);
+    let line13 = round_dollar(p.cap_gain_distr_13);
+    let line14 = round_dollar(p.lt_carryover_14); // magnitude (paren box)
+    let line15 = round_dollar(p.lt_net_15);
+
+    let line16 = line7 + line15; // ★ combines the PRINTED lines
+    let has_qd = round_dollar(p.qualified_dividends) > Usd::ZERO;
+
+    // ★ SPEC §7.2 — exhaustive, and the four branches are mutually exclusive by construction.
+    let routing = if line16 > Usd::ZERO && line15 > Usd::ZERO {
+        ScheduleDRouting::BothGains
+    } else if line16 > Usd::ZERO {
+        // …and line 15 ≤ 0: a short-term gain against a long-term loss.
+        ScheduleDRouting::ShortGainLongLoss { line22_yes: has_qd }
+    } else if line16 < Usd::ZERO {
+        ScheduleDRouting::NetLoss {
+            line21: round_dollar(p.loss_deduction_21), // magnitude (paren box)
+            line22_yes: has_qd,
+        }
+    } else {
+        ScheduleDRouting::Zero { line22_yes: has_qd }
+    };
+
+    ScheduleDLines {
+        line3_d,
+        line3_e,
+        line3_h,
+        line6,
+        line7,
+        line10_d,
+        line10_e,
+        line10_h,
+        line13,
+        line14,
+        line15,
+        line16,
+        routing,
+    }
+}
+
 /// One listed payer row on Schedule B — the payer's name and the amount they paid.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleBRow {
@@ -498,6 +620,22 @@ mod tests {
                 student_loan_21: z,
             },
             schedule_c: None,
+            schedule_d: crate::tax::return_1040::ScheduleDParts {
+                st_proceeds_3d: z,
+                st_cost_3e: z,
+                st_gain_3h: z,
+                st_carryover_6: z,
+                st_net_7: z,
+                lt_proceeds_10d: z,
+                lt_cost_10e: z,
+                lt_gain_10h: z,
+                cap_gain_distr_13: z,
+                lt_carryover_14: z,
+                lt_net_15: z,
+                total_16: z,
+                loss_deduction_21: z,
+                qualified_dividends: z,
+            },
             standard_deduction: z,
             itemized_deduction: None,
             schedule_a: None,
@@ -832,5 +970,177 @@ mod tests {
         );
         assert_eq!(neg.line3, Usd::ZERO);
         assert_eq!(neg.line4, dec!(10000));
+    }
+
+    /// Build an `AbsoluteReturn` whose Schedule D nets to the given (st, lt) with the given
+    /// carryovers, distributions, §1211 offset and qualified dividends.
+    #[allow(clippy::too_many_arguments)]
+    fn ar_sched_d(
+        st_net: Usd,
+        lt_net: Usd,
+        st_cf: Usd,
+        lt_cf: Usd,
+        distr: Usd,
+        loss_ded: Usd,
+        qd: Usd,
+    ) -> AbsoluteReturn {
+        use crate::tax::return_1040::ScheduleDParts;
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.schedule_d = ScheduleDParts {
+            st_proceeds_3d: Usd::ZERO,
+            st_cost_3e: Usd::ZERO,
+            st_gain_3h: st_net + st_cf, // the raw crypto gain, before the line-6 carryover
+            st_carryover_6: st_cf,
+            st_net_7: st_net,
+            lt_proceeds_10d: Usd::ZERO,
+            lt_cost_10e: Usd::ZERO,
+            lt_gain_10h: lt_net + lt_cf - distr,
+            cap_gain_distr_13: distr,
+            lt_carryover_14: lt_cf,
+            lt_net_15: lt_net,
+            total_16: st_net + lt_net,
+            loss_deduction_21: loss_ded,
+            qualified_dividends: qd,
+        };
+        ar
+    }
+
+    /// ★ **SPEC §7.2 path 1 — BOTH GAINS.** L16 > 0 and L15 > 0: line 17 = Yes, 18/19 = 0, line 20 =
+    /// Yes → QDCGT. Lines 21 and 22 are NOT completed; the form says so in terms.
+    #[test]
+    fn schedule_d_routing_both_gains() {
+        let l = schedule_d_lines(&ar_sched_d(
+            dec!(5000),
+            dec!(20000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(1200),
+        ));
+        assert_eq!(l.line7, dec!(5000));
+        assert_eq!(l.line15, dec!(20000));
+        assert_eq!(l.line16, dec!(25000));
+        assert_eq!(l.routing, ScheduleDRouting::BothGains);
+    }
+
+    /// ★ **SPEC §7.2 path 2 — SHORT-TERM GAIN / LONG-TERM LOSS.** The common crypto year. L16 > 0 but
+    /// L15 ≤ 0 ⇒ line 17 = No ⇒ skip 18–21 ⇒ line 22, which routes to QDCGT iff there are qualified
+    /// dividends.
+    #[test]
+    fn schedule_d_routing_short_gain_long_loss() {
+        // With qualified dividends → line 22 = Yes.
+        let l = schedule_d_lines(&ar_sched_d(
+            dec!(30000),
+            dec!(-4000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(1200),
+        ));
+        assert_eq!(l.line16, dec!(26000));
+        assert_eq!(
+            l.routing,
+            ScheduleDRouting::ShortGainLongLoss { line22_yes: true }
+        );
+
+        // …and WITHOUT them → line 22 = No (the Tax Table / TCW path, not QDCGT).
+        let l = schedule_d_lines(&ar_sched_d(
+            dec!(30000),
+            dec!(-4000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+        ));
+        assert_eq!(
+            l.routing,
+            ScheduleDRouting::ShortGainLongLoss { line22_yes: false }
+        );
+    }
+
+    /// ★ **SPEC §7.2 path 3 — NET LOSS.** L16 < 0: skip 17–20; line 21 carries the §1211(b) allowed
+    /// offset as a POSITIVE MAGNITUDE (the form pre-prints the parentheses, and a negative there would
+    /// render as a positive number on a filed return); line 22 is still answered.
+    #[test]
+    fn schedule_d_routing_net_loss_line21_is_a_positive_magnitude() {
+        // A $10,000 net loss, of which §1211(b) allows $3,000 this year.
+        let l = schedule_d_lines(&ar_sched_d(
+            dec!(-10000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(3000),
+            dec!(800),
+        ));
+        assert_eq!(l.line16, dec!(-10000));
+        match l.routing {
+            ScheduleDRouting::NetLoss { line21, line22_yes } => {
+                assert_eq!(line21, dec!(3000), "the §1211(b) cap");
+                assert!(
+                    line21 > Usd::ZERO,
+                    "★ line 21 is a MAGNITUDE — the form prints the ( )"
+                );
+                assert!(line22_yes);
+            }
+            other => panic!("expected NetLoss, got {other:?}"),
+        }
+    }
+
+    /// ★ **SPEC §7.2 path 4 — ZERO.** L16 = 0: 1040 line 7 is `-0-`; skip 17–21; line 22 is still
+    /// answered. The easiest branch to forget, and the one that silently routes the whole tax
+    /// computation if it is wrong.
+    #[test]
+    fn schedule_d_routing_zero() {
+        let l = schedule_d_lines(&ar_sched_d(
+            dec!(4000),
+            dec!(-4000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+        ));
+        assert_eq!(l.line16, Usd::ZERO);
+        assert_eq!(l.routing, ScheduleDRouting::Zero { line22_yes: false });
+    }
+
+    /// ★ The lines the CRYPTO-SLICE Schedule D omits — and which the P5-C1 refusal exists to cover.
+    /// Line 13 (1099-DIV box-2a capital-gain distributions) and lines 6/14 (capital-loss carryovers)
+    /// ARE part of the computed return, and the full-return Schedule D prints all three. Lines 6 and
+    /// 14 are PAREN boxes ⇒ positive magnitudes.
+    #[test]
+    fn schedule_d_prints_the_lines_the_crypto_slice_omits() {
+        let l = schedule_d_lines(&ar_sched_d(
+            dec!(1000),  // st_net (after the line-6 carryover)
+            dec!(15000), // lt_net (after line 13 and the line-14 carryover)
+            dec!(2000),  // line 6 — prior-year SHORT-term carryover
+            dec!(500),   // line 14 — prior-year LONG-term carryover
+            dec!(3000),  // line 13 — capital gain distributions
+            Usd::ZERO,
+            Usd::ZERO,
+        ));
+        assert_eq!(
+            l.line6,
+            dec!(2000),
+            "line 6 is filled — the crypto slice has no line 6"
+        );
+        assert_eq!(
+            l.line13,
+            dec!(3000),
+            "line 13 is filled — the crypto slice has no line 13"
+        );
+        assert_eq!(
+            l.line14,
+            dec!(500),
+            "line 14 is filled — the crypto slice has no line 14"
+        );
+        for paren in [l.line6, l.line14] {
+            assert!(paren >= Usd::ZERO, "paren cells are magnitudes: {paren}");
+        }
+        assert_eq!(l.line16, dec!(16000)); // 1,000 + 15,000, from the PRINTED lines
     }
 }

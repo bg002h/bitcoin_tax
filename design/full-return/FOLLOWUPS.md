@@ -341,6 +341,14 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   naturally into P6's render work, which already has to grow (see `p5-m1`). Surfaced by Fable IMPL-P5 r2
   (N-r2-1) after r1-N5's money-format half was fixed.
 
+- **p6-schedule-b-overflow-refuses-instead-of-paginating → P6.** SPEC §7.4 says "Sch B >14 interest /
+  >15 dividend overflow reuses the **8949 continuation pattern**" (i.e. paginate onto additional
+  copies via `overflow.rs` / `merge_copies`). I implemented a **fail-closed REFUSAL** instead
+  (`fill_schedule_b` errors when the payer count exceeds the row count). Refusing is safe — it can
+  never produce a wrong form — but it is NOT what the SPEC specifies, and it turns a filable return
+  into a hard stop for a household with 15+ interest payers. Declaring the deviation rather than
+  hiding it: either implement the continuation pattern, or amend SPEC §7.4. Owning phase: **P6**.
+
 - **p6-form-identity-header → P6 (packet assembly).** None of the new P6 fillers (8959, 8960, 8995,
   Sch 1/2/3/A/C) writes the **taxpayer name + SSN header** that every IRS form carries at the top. The
   money lines are right, but the forms are not filable as-is: an unnamed Schedule C is not a return.

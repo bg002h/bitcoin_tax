@@ -128,6 +128,50 @@ fn salt_line_5a(ri: &ReturnInputs, a: &crate::tax::return_inputs::ScheduleAInput
 /// The §213(a) medical-expense floor: 7.5% of AGI (Schedule A line 3).
 pub const MEDICAL_FLOOR_RATE: Usd = dec!(0.075);
 
+/// The **Schedule D components** — the §1222 netting, by the form's own lines.
+///
+/// The frozen `net_1222` engine IS Schedule D: its `st_net` is line 7 (crypto short-term plus the
+/// line-6 carryover), its `lt_net` is line 15 (crypto long-term plus the line-13 capital-gain
+/// distributions and the line-14 carryover), and its `loss_deduction` is the §1211(b) amount on
+/// line 21. Nothing here re-derives any of it.
+///
+/// **Lines 6, 14 and 21 are PARENTHESIZED boxes on the printed form** — the form supplies the minus
+/// sign — so all three are stored as POSITIVE MAGNITUDES. `st_carryover_6` and `lt_carryover_14` are
+/// the prior-year carryforward magnitudes as entered; `loss_deduction_21` is the allowed §1211(b)
+/// offset (≤ $3,000 / $1,500 MFS), also a magnitude.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScheduleDParts {
+    /// L3 (d) — short-term proceeds from Form 8949 (Box C or **Box I**, the digital-asset box).
+    pub st_proceeds_3d: Usd,
+    /// L3 (e) — short-term cost basis.
+    pub st_cost_3e: Usd,
+    /// L3 (h) — short-term gain or loss (signed).
+    pub st_gain_3h: Usd,
+    /// L6 — prior-year SHORT-term capital loss carryover. **Positive magnitude** (paren box).
+    pub st_carryover_6: Usd,
+    /// L7 — net short-term gain or loss (signed) = `CapNet::st_net`.
+    pub st_net_7: Usd,
+    /// L10 (d) — long-term proceeds from Form 8949 (Box F or **Box L**).
+    pub lt_proceeds_10d: Usd,
+    /// L10 (e) — long-term cost basis.
+    pub lt_cost_10e: Usd,
+    /// L10 (h) — long-term gain or loss (signed).
+    pub lt_gain_10h: Usd,
+    /// L13 — capital gain distributions (Σ 1099-DIV box 2a; long-term in character).
+    pub cap_gain_distr_13: Usd,
+    /// L14 — prior-year LONG-term capital loss carryover. **Positive magnitude** (paren box).
+    pub lt_carryover_14: Usd,
+    /// L15 — net long-term gain or loss (signed) = `CapNet::lt_net`.
+    pub lt_net_15: Usd,
+    /// L16 — combine 7 and 15 (signed).
+    pub total_16: Usd,
+    /// L21 — the §1211(b) allowed loss offset. **Positive magnitude** (paren box); zero unless L16 < 0.
+    pub loss_deduction_21: Usd,
+    /// 1040 line 3a — qualified dividends. Not a Schedule D line, but line 22 asks whether there are
+    /// any, and the answer routes the tax computation (QDCGT vs the Tax Table).
+    pub qualified_dividends: Usd,
+}
+
 /// The **Schedule C components** — the crypto trade-or-business profit-and-loss lines.
 ///
 /// v1 models exactly ONE Schedule C (the crypto trade or business). The filer supplies only a flat
@@ -756,6 +800,8 @@ pub struct AbsoluteReturn {
     pub schedule_1: Schedule1Parts,
     /// The Schedule C **components**, when there is a crypto trade or business — `None` otherwise.
     pub schedule_c: Option<ScheduleCParts>,
+    /// The Schedule D **components** — the §1222 netting by the form's own lines.
+    pub schedule_d: ScheduleDParts,
     /// The Schedule A **components** (lines 1–17), when the filer has a Schedule A — `None` otherwise.
     /// Present even when the STANDARD deduction wins: Schedule A is still computed (that is how the
     /// max() is taken), and the printed return needs the lines to know it was not the better choice.
@@ -885,6 +931,27 @@ pub fn assemble_absolute(
     let cap = capital_net(ri, state, year, status);
     let capital_gain = cap.ordinary_gain + cap.preferential_gain - cap.loss_deduction; // L7
     let net_ltcg = cap.preferential_gain; // §1(h) preferential net capital gain (≥ 0)
+
+    // Schedule D, by its own lines. `net_1222` IS Schedule D: st_net is line 7, lt_net is line 15,
+    // loss_deduction is line 21. Lines 6/14/21 are PAREN boxes ⇒ positive magnitudes.
+    let sd_raw = crate::forms::schedule_d(state, year);
+    let cf_in = ri.capital_loss_carryforward_in;
+    let schedule_d = ScheduleDParts {
+        st_proceeds_3d: sd_raw.st.proceeds,
+        st_cost_3e: sd_raw.st.cost_basis,
+        st_gain_3h: sd_raw.st.gain,
+        st_carryover_6: cf_in.short,
+        st_net_7: cap.st_net,
+        lt_proceeds_10d: sd_raw.lt.proceeds,
+        lt_cost_10e: sd_raw.lt.cost_basis,
+        lt_gain_10h: sd_raw.lt.gain,
+        cap_gain_distr_13: sum_cap_gain_distr(ri),
+        lt_carryover_14: cf_in.long,
+        lt_net_15: cap.lt_net,
+        total_16: cap.st_net + cap.lt_net,
+        loss_deduction_21: cap.loss_deduction,
+        qualified_dividends,
+    };
 
     // 1040 L8 = Sch 1 L10: state refund + Σ unemployment + Schedule C net (crypto business) + L8v
     // non-business crypto ordinary. Screening guarantees `business_se_gross ≥ expenses` here (no loss).
@@ -1068,6 +1135,7 @@ pub fn assemble_absolute(
         standard_deduction: standard,
         schedule_1,
         schedule_c,
+        schedule_d,
         itemized_deduction: itemized,
         schedule_a,
         deduction,
