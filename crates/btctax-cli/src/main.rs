@@ -610,6 +610,20 @@ fn run() -> Result<ExitCode, CliError> {
                 },
                 written.join("\n  ")
             );
+            // ★ NO-AUTHORISATION NOTICE. Printed on EVERY form export, unconditionally — this is
+            // the one moment the user is holding fillable IRS forms this tool produced, and it is
+            // where the disclaimer has to land. See NOTICE / `btctax limitations`. It disclaims
+            // authorisation, warranty and liability; it does NOT restrict the licence or forbid
+            // filing (the licence grant stays MIT OR Unlicense, unrestricted).
+            eprintln!(
+                "\n⚠ NOT AUTHORISED FOR FILING. btctax is a mechanical calculator. No right is \
+                 granted and no authorisation is given to use it, or anything it produces, to \
+                 prepare or file a tax return, and NO WARRANTY is given that any figure or form it \
+                 produces is accurate, complete, or fit to file. If you file any of this, you do so \
+                 entirely on your own responsibility: YOU are the preparer, you must check every \
+                 figure against the forms and instructions before you sign, and the authors accept \
+                 no liability for the consequences. This is not tax advice. See `btctax limitations`."
+            );
             // Always-printed scope note: Schedule D 17-22 is not filled.
             eprintln!(
                 "note: Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. \

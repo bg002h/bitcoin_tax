@@ -53,3 +53,45 @@ fn limitations_doc_has_its_three_lists() {
         );
     }
 }
+
+/// The **NOTICE** clauses are load-bearing legal text, not prose that may drift. They disclaim
+/// authorisation, warranty and liability for filing — deliberately WITHOUT restricting the MIT /
+/// Unlicense grant or purporting to forbid filing (which would be unenforceable, and would contradict
+/// the fact that btctax produces a filable packet). If someone softens or deletes one of these, the
+/// tool's legal posture changes silently. Pin the load-bearing sentences.
+#[test]
+fn limitations_carries_the_no_authorisation_notice() {
+    // Normalize whitespace: the clauses are legal SENTENCES, and a markdown reflow must not be able
+    // to break the check (nor to hide a deletion behind one).
+    let doc = shipped_doc()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for clause in [
+        // no authorisation
+        "No right is granted, and no authorisation is given",
+        "to prepare or file a tax return",
+        // no warranty of fitness for filing
+        "no representation and give no warranty",
+        "a refusal is a best effort, not a guarantee",
+        // you are the preparer
+        "entirely on your own responsibility",
+        "accept **no liability**",
+        "The signature on it is yours alone.",
+        // not tax advice
+        "is a substitute for a qualified professional",
+    ] {
+        assert!(
+            doc.contains(clause),
+            "the NOTICE clause {clause:?} has been weakened or removed from LIMITATIONS.md"
+        );
+    }
+
+    // …and the licence grant itself must remain UNRESTRICTED. The notice is a liability posture, not
+    // a use restriction: if someone converts it into one, the software stops being open source and
+    // `license = \"MIT OR Unlicense\"` in Cargo.toml becomes false.
+    assert!(
+        doc.contains("**MIT OR Unlicense**) — unchanged and unrestricted"),
+        "the licence grant must stay unrestricted — the NOTICE disclaims, it does not forbid"
+    );
+}

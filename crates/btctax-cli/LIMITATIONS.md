@@ -170,8 +170,52 @@ There is nowhere to enter these, and a return that needs them is out of scope:
 
 ## Legal
 
-Mechanical calculation only (no unauthorized practice of law/accountancy). Whatever `btctax` gives you is a
-**draft you are responsible for checking** — see the DRAFT/attestation note at the top for exactly which
-exports are watermarked and gated today (it is not yet all of them). Not tax advice. Licensed permissively (MIT OR Unlicense); clean-room implementation from
-primary sources (the Internal Revenue Code, IRS forms and instructions, and the applicable Revenue
-Procedures) — no GPL-derived tax logic.
+### No authorisation to file
+
+`btctax` is a **mechanical calculator**. It computes figures from the numbers you give it and the ledger you
+reconciled, and it can fill official IRS forms with those figures.
+
+**No right is granted, and no authorisation is given, to use this software — or anything it produces — to
+prepare or file a tax return.** Nothing in the MIT or Unlicense grant is, or may be read as, an
+authorisation, an endorsement, a certification, or a representation that this software or its output is fit,
+complete, or correct for filing with any tax authority. The permissive licence grants you broad rights over
+the *software*; it says nothing whatever about whether the *output* is fit to file. Those are different
+questions, and only the second one matters to the IRS.
+
+### No warranty of fitness for filing
+
+The authors and contributors make **no representation and give no warranty** — express, implied, statutory or
+otherwise — that any figure, form, schedule or PDF produced by this software is accurate, complete, current,
+compliant, or suitable for submission to the Internal Revenue Service or any other tax authority. This is in
+addition to, and does not limit, the general warranty disclaimer in the licence.
+
+The software may be wrong. It may be silently wrong. It refuses in many cases where it cannot be sure (every
+one of them is listed above), but **a refusal is a best effort, not a guarantee, and the absence of a refusal
+is not a certification.**
+
+### You are the preparer
+
+If you file a return, in whole or in part, on the basis of anything this software produced: you do so
+**entirely on your own responsibility**; **you** are the preparer of that return and are solely responsible
+for its accuracy, completeness and timeliness; you are responsible for reviewing every figure and every form
+against the Internal Revenue Code, the IRS forms and instructions, and your own facts, before you sign
+anything; and the authors and contributors accept **no liability** of any kind for any tax, interest,
+penalty, addition to tax, professional fee, loss or other consequence arising from that filing.
+
+No Paid Preparer is identified and no PTIN is filled, because there is none: this is a self-prepared return.
+The signature on it is yours alone.
+
+### Not tax advice
+
+Nothing produced by this software, and nothing in its documentation, is tax, legal or accounting advice, and
+none of it is a substitute for a qualified professional. This software does not interpret your facts. It does
+not know your circumstances. It does arithmetic on what you tell it. If your situation is not simple, or if
+you are unsure, consult a professional.
+
+### Licence
+
+Licensed permissively (**MIT OR Unlicense**) — unchanged and unrestricted. The clauses above are a NOTICE
+(see the `NOTICE` file); they disclaim authorisation, warranty and liability. They do **not** restrict the
+licence grant and do not purport to forbid anything. Clean-room implementation from primary sources (the
+Internal Revenue Code, IRS forms and instructions, and the applicable Revenue Procedures) — no GPL-derived
+tax logic.
