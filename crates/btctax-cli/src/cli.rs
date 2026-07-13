@@ -71,6 +71,10 @@ pub enum Command {
         #[arg(long, default_value_t = false)]
         force: bool,
     },
+    /// Print the LIMITATIONS & supported-forms document: what a v1 full return covers, the credits it
+    /// omits conservatively (your tax is overstated, never understated), what it refuses outright, and
+    /// what it cannot represent. Read this before you file.
+    Limitations,
     /// Emit a reconciliation decision event.
     #[command(subcommand)]
     Reconcile(Reconcile),

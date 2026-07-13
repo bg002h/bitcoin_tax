@@ -1090,6 +1090,26 @@ pub fn render_tax_outcome(
     s
 }
 
+/// Render the Phase-5 full-return **advisories** (SPEC §3.4 / §9.2) — the loud, non-gating notes that a
+/// favorable credit was omitted conservatively (your tax is OVERSTATED), or that a disclosure is yours to
+/// make. Never changes a number and never changes the exit code.
+pub fn render_advisories(advisories: &[btctax_core::tax::advisories::Advisory]) -> String {
+    let mut s = String::new();
+    if advisories.is_empty() {
+        return s;
+    }
+    let _ = writeln!(s, "\n  ── ADVISORIES ({}) ──", advisories.len());
+    for a in advisories {
+        // Wrap each message under a bullet; the message text is single-sourced in core.
+        let _ = writeln!(s, "  • {}", a.message());
+    }
+    let _ = writeln!(
+        s,
+        "  (Advisories never change a number and never fail the command. See `btctax limitations`.)"
+    );
+    s
+}
+
 /// The §4.12 provenance label for the resolved profile — printed on the full-return output so a
 /// reviewer can audit which source produced the figures (`p2-provenance-printing`).
 pub fn provenance_label(p: crate::resolve::Provenance) -> &'static str {

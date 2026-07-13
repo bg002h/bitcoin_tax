@@ -161,21 +161,26 @@ pub fn show_return_inputs(
     .transpose()
 }
 
-/// The full `report --tax-year` bundle, in print order:
-/// `(income-tax outcome, M4 carryforward advisory, raw Schedule D part totals, Form 709 gift
-/// advisory, Schedule SE §1401 section, §170(f)(11)(F) donation appraisal advisory)`. Named to
-/// satisfy `clippy::type_complexity`; callers still destructure it as a tuple.
-pub type TaxYearReport = (
-    TaxOutcome,
-    Option<String>,
-    ScheduleDTotals,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    // 7th field: the §6 dual-report block (absolute filed return + crypto-delta side-by-side, SPEC §6).
-    // `Some` only for a `ReturnInputs`-provenance year (a full 1040 exists); `None` for the delta-only path.
-    Option<String>,
-);
+/// The full `report --tax-year` bundle, in print order. A NAMED STRUCT (was a 7-tuple) so a new field can
+/// never silently transpose with an existing one at a call site (Fable IMPL-P4 r1 N1, `p4-r1-n1`).
+#[derive(Debug)]
+pub struct TaxYearReport {
+    /// The frozen crypto-DELTA engine's outcome for the year.
+    pub outcome: TaxOutcome,
+    /// M4 carryforward-consistency advisory (non-gating).
+    pub advisory: Option<String>,
+    /// RAW pre-netting Schedule D part totals.
+    pub schedule_d: ScheduleDTotals,
+    /// Standalone Form 709 gift advisory.
+    pub gift_advisory: Option<String>,
+    /// Standalone Schedule SE §1401 section.
+    pub schedule_se: Option<String>,
+    /// §170(f)(11)(F) year-aggregate donation appraisal advisory.
+    pub donation_appraisal: Option<String>,
+    /// The §6 dual-report block (absolute filed return + crypto delta + the P5 advisories). `Some` only
+    /// for a `ReturnInputs`-provenance year; `None` on the delta-only path.
+    pub dual_report: Option<String>,
+}
 
 /// Task 9 (B.5) + Task 10 (M4) + P2-D Task 2 + Chunk-1 D2 + Chunk-3a: load events + project once,
 /// read the year's `TaxProfile` + `BundledTaxTables`, call `compute_tax_year`, and assemble the
@@ -246,9 +251,18 @@ pub fn report_tax_year(
                         refusal.reason,
                         refusal.detail
                     )),
-                    None => Some(crate::render::render_dual_report(
-                        year, &ar, &outcome, provenance,
-                    )),
+                    None => {
+                        // P5: the full-return block carries the §3.4 conservative-omission advisories
+                        // (CTC/ODC, EIC, forfeited §63(f) aged box) + the FBAR / charitable-donee
+                        // disclosures. Non-gating: they never change a number or the exit code.
+                        let mut block =
+                            crate::render::render_dual_report(year, &ar, &outcome, provenance);
+                        let advs = btctax_core::tax::advisories::advisories_for(
+                            &ri, &state, &ar, params, year,
+                        );
+                        block.push_str(&crate::render::render_advisories(&advs));
+                        Some(block)
+                    }
                 }
             }
             _ => {
@@ -334,15 +348,15 @@ pub fn report_tax_year(
         None
     };
 
-    Ok((
+    Ok(TaxYearReport {
         outcome,
         advisory,
-        sched_d,
+        schedule_d: sched_d,
         gift_advisory,
         schedule_se,
-        donation_appraisal_advisory,
+        donation_appraisal: donation_appraisal_advisory,
         dual_report,
-    ))
+    })
 }
 
 /// §4 R3-M6 carryover write-back — persist year `year`'s computed charitable + QBI-REIT/PTP carryover-OUT

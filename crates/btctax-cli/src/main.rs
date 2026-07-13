@@ -114,15 +114,15 @@ fn run() -> Result<ExitCode, CliError> {
             if let Some(y) = tax_year {
                 // Prompt/decrypt ONCE — `--write-carryover` reuses this passphrase (Fable P4.9 r1 M2).
                 let pp = passphrase(false)?;
-                let (
+                let cmd::tax::TaxYearReport {
                     outcome,
                     advisory,
-                    sched_d,
+                    schedule_d: sched_d,
                     gift_advisory,
                     schedule_se,
                     donation_appraisal,
                     dual_report,
-                ) = cmd::tax::report_tax_year(vault, &pp, y, ptg_raw)?;
+                } = cmd::tax::report_tax_year(vault, &pp, y, ptg_raw)?;
                 print!(
                     "{}",
                     render::render_tax_outcome(y, &outcome, advisory.as_deref())
@@ -409,6 +409,9 @@ fn run() -> Result<ExitCode, CliError> {
                 );
             }
         },
+        // SPEC §9.2: the versioned LIMITATIONS doc, single-sourced from the shipped file so the man page,
+        // `--help` and this command can never drift from what actually ships.
+        Command::Limitations => print!("{}", include_str!("../../../LIMITATIONS.md")),
         Command::Reconcile(r) => dispatch_reconcile(vault, r, now)?,
         Command::Config {
             set_fee_treatment,

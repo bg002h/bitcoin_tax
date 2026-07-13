@@ -10,6 +10,7 @@
 //!   NIIT: magi_with = 60,000 + 20,000 = 80,000 < 200,000 (Single threshold) → 0.
 //!   ordinary_delta: OTI unchanged by LT gain → 0.
 //!   total = 0 + 1,747.50 + 0 = 1,747.50.
+use btctax_cli::cmd::tax::TaxYearReport;
 use btctax_cli::{cmd, eventref, render, Session};
 use btctax_core::persistence::load_all;
 use btctax_core::{
@@ -129,7 +130,9 @@ fn pseudo_mode_injects_placeholder_profile_clearing_tax_profile_missing() {
     let (_dir, vault) = make_vault_with(&csv);
 
     // Mode OFF + no profile ⇒ NotComputable(TaxProfileMissing).
-    let (out_off, ..) = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome: out_off, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     match out_off {
         TaxOutcome::NotComputable(b) => assert_eq!(b.kind, BlockerKind::TaxProfileMissing),
         other => panic!("mode-off, no profile: expected TaxProfileMissing, got {other:?}"),
@@ -137,7 +140,9 @@ fn pseudo_mode_injects_placeholder_profile_clearing_tax_profile_missing() {
 
     // Turn pseudo mode ON, still NO profile ⇒ the placeholder is injected ⇒ Computed.
     cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
-    let (out_on, ..) = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome: out_on, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     assert!(
         matches!(out_on, TaxOutcome::Computed(_)),
         "pseudo mode must inject a placeholder profile so the year computes: {out_on:?}"
@@ -153,8 +158,12 @@ fn report_tax_year_renders_golden() {
     let (_dir, vault) = make_vault_with(&csv);
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
-    let (outcome, advisory, sched_d, _gift, _se, _appraisal, _dual) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome,
+        advisory,
+        schedule_d: sched_d,
+        ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     assert!(
@@ -225,8 +234,11 @@ fn report_tax_year_renders_schedule_se_for_business_mining() {
 
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
-    let (outcome, _advisory, _sched_d, _gift, se, _appraisal, _dual) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome,
+        schedule_se: se,
+        ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let se = se.expect("Schedule SE section expected for a business-mining year");
 
     // Golden 1 components (Single, $100,000 business mining, W-2 = $0).
@@ -334,8 +346,9 @@ fn chunk_a_asymmetric_w2_transposition_guard_cli_path() {
     };
     cmd::tax::set_profile(&vault, &pp(), 2025, profile, false).unwrap();
 
-    let (_outcome, _advisory, _sched_d, _gift, se, _appraisal, _dual) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        schedule_se: se, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let se = se.expect("Schedule SE section expected");
 
     // ss must be $3,236.40 (reduced by w2_ss $150k) — NOT $11,451.40 (transposition).
@@ -409,8 +422,9 @@ fn chunk_a_export_parity_asymmetric_w2() {
     cmd::tax::set_profile(&vault, &pp(), 2025, profile, false).unwrap();
 
     // Get report figures (cmd/tax.rs call site).
-    let (_outcome, _advisory, _sched_d, _gift, se, _appraisal, _dual) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        schedule_se: se, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let se_text = se.expect("Schedule SE section expected");
     // Report shows reduced SS.
     assert!(
@@ -449,8 +463,9 @@ fn report_tax_year_footer_discloses_1211_loss_and_interest_nii_included() {
     let (_dir, vault) = make_vault_with(&csv);
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
-    let (outcome, advisory, _sched_d, _gift, _se, _appraisal, _dual) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome, advisory, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     // B-M1 negatives (wrong-direction language must be absent):
@@ -497,8 +512,9 @@ fn report_tax_year_components_reconcile_to_total() {
     let (_dir, vault) = make_vault_with(&csv);
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
-    let (outcome, advisory, _sched_d, _gift, _se, _appraisal, _dual) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome, advisory, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     // B-F1: all dollar figures are now fmt_money-formatted to exactly 2dp; assert the 2dp forms.
@@ -542,8 +558,9 @@ fn report_tax_year_without_profile_says_not_computable() {
     let (_dir, vault) = make_vault_with(&csv);
     // Deliberately do NOT set a tax profile for 2025.
 
-    let (outcome, advisory, _sched_d, _gift, _se, _appraisal, _dual) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome, advisory, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     assert!(
@@ -587,7 +604,8 @@ fn report_tax_year_with_return_inputs_for_unsupported_year_refuses_with_income_c
 
     // Recovery works: after `income clear`, the same year is no longer blocked (falls back to no-profile).
     assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2025).unwrap());
-    let (outcome, ..) = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport { outcome, .. } =
+        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     // No profile, no events ⇒ TaxProfileMissing (NOT the unsupported-year Usage error).
     assert!(matches!(outcome, btctax_core::TaxOutcome::NotComputable(_)));
 }
@@ -612,7 +630,8 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     // the derive+compute happy path (the ledger has no 2024 disposals → a clean profile-only computation).
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
 
-    let (outcome, ..) = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
+    let TaxYearReport { outcome, .. } =
+        cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
     // Derived a real profile ⇒ Computed (NOT NotComputable(TaxProfileMissing), NOT a Usage refusal).
     assert!(
         matches!(outcome, btctax_core::TaxOutcome::Computed(_)),
@@ -690,8 +709,12 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
     // Set a profile so the refusal is definitely from the hard blocker (not TaxProfileMissing).
     cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
-    let (outcome, advisory, sched_d, _gift, _se, _appraisal, _dual) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome,
+        advisory,
+        schedule_d: sched_d,
+        ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     assert!(
@@ -808,8 +831,9 @@ st-sell,2026-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
     .unwrap();
 
     // report --tax-year 2027: main outcome is NotComputable (no TY2027 table); advisory fires.
-    let (outcome, advisory, _sched_d, _gift, _se, _appraisal, _dual) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2027, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome, advisory, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2027, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2027, &outcome, advisory.as_deref());
 
     // Advisory must contain the mismatch message.
@@ -1078,8 +1102,9 @@ fn chunkb_expensed_profile_report_and_csv_parity() {
     cmd::tax::set_profile(&vault, &pp(), 2025, profile, false).unwrap();
 
     // ── Report path ────────────────────────────────────────────────────────────────────────────
-    let (_outcome, _advisory, _sched_d, _gift, se, _appraisal, _dual) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        schedule_se: se, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let se_text = se.expect("Schedule SE section expected with $20,000 expenses");
 
     // Breakout line: gross − expenses = net SE.
@@ -1181,8 +1206,9 @@ fn chunkb_fully_expensed_integration_no_se_tax_no_csv() {
     cmd::tax::set_profile(&vault, &pp(), 2025, profile, false).unwrap();
 
     // ── Report path: "fully expensed" line present; wage-base note absent ──────────────────────
-    let (_outcome, _advisory, _sched_d, _gift, se, _appraisal, _dual) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        schedule_se: se, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let se_text = se.expect("Schedule SE section expected (gross > 0) even when fully expensed");
 
     assert!(
@@ -1451,8 +1477,9 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
         .unwrap();
         s.save().unwrap();
     }
-    let (_outcome, _adv, _sd, _gift, _se, _appraisal, dual) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
+    let TaxYearReport {
+        dual_report: dual, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
     let dual = dual.expect("a ReturnInputs-provenance year must produce the §6 dual report");
     // Absolute filed-return lines.
     assert!(
@@ -1481,8 +1508,9 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
     let csv2 = write_lt_sell_2025(csv_dir2.path());
     let (_dir2, vault2) = make_vault_with(&csv2);
     cmd::tax::set_profile(&vault2, &pp(), 2025, single_40k_profile(), false).unwrap();
-    let (_o, _a, _s, _g, _se2, _ap, dual2) =
-        cmd::tax::report_tax_year(&vault2, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        dual_report: dual2, ..
+    } = cmd::tax::report_tax_year(&vault2, &pp(), 2025, dec!(0)).unwrap();
     assert!(
         dual2.is_none(),
         "a stored-profile year must not emit the dual report"
@@ -1669,4 +1697,46 @@ fn import_preserves_a_computed_carryover() {
         .charitable_carryover_in
         .iter()
         .all(|c| c.provenance == CarryProvenance::Computed));
+}
+
+/// P5: the full-return report surfaces the §3.4 conservative-omission advisories (CTC/ODC with dependents,
+/// the forfeited §63(f) aged box when no DOB is on file, the EIC) + the FBAR disclosure — loudly, and
+/// saying which direction the error runs (OVERSTATED). Non-gating: the report still computes.
+#[test]
+fn full_return_report_surfaces_conservative_omission_advisories() {
+    use btctax_core::tax::return_inputs::{Dependent, Owner, ReturnInputs, W2};
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box1_wages: dec!(40000),
+                box3_ss_wages: dec!(40000),
+                box5_medicare_wages: dec!(40000),
+                ..Default::default()
+            }],
+            foreign_accounts: Some(true), // → FBAR disclosure
+            foreign_trust: Some(false),
+            ..Default::default()
+        };
+        ri.header.dependents = vec![Dependent::default()]; // → CTC/ODC omission
+                                                           // taxpayer.date_of_birth stays None → the §63(f) aged box is forfeited
+        btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+    let r = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
+    let dual = r
+        .dual_report
+        .expect("full-return year must render the dual report");
+    assert!(dual.contains("ADVISORIES"), "{dual}");
+    assert!(dual.contains("CTC/ODC NOT COMPUTED"), "{dual}");
+    assert!(dual.contains("OVERSTATED"), "{dual}");
+    assert!(dual.contains("DATE OF BIRTH NOT ON FILE"), "{dual}");
+    assert!(dual.contains("FBAR"), "{dual}");
+    // AGI = 40k wages + 10k LTCG = 50k < the $60k EIC ceiling, with earned income → EIC advisory too.
+    assert!(dual.contains("EIC NOT COMPUTED"), "{dual}");
 }

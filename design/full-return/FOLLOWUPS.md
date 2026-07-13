@@ -115,12 +115,15 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 - **p4-r1-i4-dividend-subset-screen** (FOLD I — shipped) — `screen_inputs` now refuses a 1099-DIV whose box 1b
   (qualified) or box 5 (§199A) exceeds its box 1a (ordinary) — a corrupt import that gave preferential/QBI
   treatment to income never in AGI (`RefuseReason::InconsistentDividendSubset`, KAT `dividend_subset_inconsistency_refuses`).
-- **p4-r1-m3-ctc-advisory-P5** (DEFERRED → **P5**, owner recorded per burndown) — plan P4 task 7's CTC/ODC
+- **p4-r1-m3-ctc-advisory-P5** (**RESOLVED in P5**) — `Advisory::CtcOdcOmitted` fires whenever dependents
+  are captured, printed in the full-return block (KATs: core `advisories`, CLI
+  `full_return_report_surfaces_conservative_omission_advisories`). Original entry: — plan P4 task 7's CTC/ODC
   "loud advisory" half. The **compute** is done (L19 = 0, `ctc_odc_conservatively_omitted_l19_zero`); the
   *advisory surfacing* ("you have N dependents; CTC/ODC omitted — Schedule 8812 filed separately") is a render
   concern owned by **P5** ("wire the conservative-omission advisories into report/output", SPEC §9.2). Direction
   is conservative (overstates tax only). P5's entry-sweep must pick this up; nothing understates in the interim.
-- **p4-r1-n1-taxyearreport-struct** (NIT → **P5**) — `cmd::tax::TaxYearReport` is now a 7-tuple of
+- **p4-r1-n1-taxyearreport-struct** (**RESOLVED in P5**) — `cmd::tax::TaxYearReport` is now a NAMED STRUCT
+  (was a 7-tuple); every call site destructures by field, so a new field can't transpose. Original entry: — `cmd::tax::TaxYearReport` is now a 7-tuple of
   `Option<String>`s; name it a struct (named fields) before P5 adds the advisory field, so an 8th positional
   element can't silently transpose. Non-behavioral.
 
@@ -145,7 +148,9 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   `standard_deduction` (KAT `dependent_floor_uses_g21_with_crypto_earned_income`). The DERIVE side
   intentionally stays wages-only — its non-crypto profile has no Schedule C (crypto is excluded by the
   frozen seam), so wages-only is not just conservative but *exact* there. Closed.
-- **p3-m4-none-dob-forfeited-63f-advisory** (→ P5 advisories) — a `None` DOB is treated as not-aged
+- **p3-m4-none-dob-forfeited-63f-advisory** (**RESOLVED in P5**) — `Advisory::AgedBoxForfeitedNoDob` now
+  surfaces the forfeited §63(f) box (naming the $1,550/$1,950 per-box amount) whenever a DOB is absent.
+  Original entry: — a `None` DOB is treated as not-aged
   (`is_aged`), which forfeits the §63(f) aged box ($1,550/$1,950) — correct + conservative (never grant an
   unsubstantiated box; honors `p1-r1-m3-dob-option-pin`; the P6 header age checkbox from the same `None`
   stays unchecked, so the filed return is internally consistent). P5's advisories work should SURFACE it:
