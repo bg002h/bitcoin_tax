@@ -8,10 +8,10 @@
 |---|---|
 | P0–P4 | **CERTIFIED GREEN** (incl. P4.9 carryover write-back) |
 | P5 (LIMITATIONS + advisories) | **CERTIFIED GREEN** — Fable r2 `0C/0I` at `b40bdec` |
-| **P6 (PDF fillers)** | **IN PROGRESS — 5 of 9 forms fill** |
+| **P6 (PDF fillers)** | **IN PROGRESS — 7 of 9 forms fill** |
 | P7 (golden returns) | not started |
 
-Branch `full-return`. Gates at HEAD: **1599 passing / 0 failed**, clippy
+Branch `full-return`. Gates at HEAD: **1605 passing / 0 failed**, clippy
 (`--workspace --all-targets --locked -D warnings`) 0, fmt clean, xtask docs 5/5, FROZEN files 0 bytes.
 
 ## The operating contract (unchanged)
@@ -71,33 +71,31 @@ FAILS CLOSED. Fault-inject both legs (cross-column and same-column swap) in ever
 | Form 8995 | `qbi::form_8995_lines` | `f8995.map.toml` | `form8995.rs` | `683e83b` |
 | Schedule 2 | `printed::schedule_2_lines` | `f1040s2.map.toml` | `schedule23.rs` | `010af35` |
 | Schedule 3 | `printed::schedule_3_lines` | `f1040s3.map.toml` | `schedule23.rs` | `010af35` |
+| Schedule A | `printed::schedule_a_lines` | `f1040sa.map.toml` | `schedule_a.rs` | `7a8a184` |
+| Schedule 1 | `printed::schedule_1_lines` | `f1040s1.map.toml` | `schedule23.rs` | `50462bc` |
 
 All 9 official TY2024 IRS PDFs are already bundled in `crates/btctax-forms/forms/2024/`.
 
+**The components pattern** (use it for Schedule C): a schedule's printed chain needs its LINES, but
+`assemble_absolute` only kept totals. So each schedule gets a `*Parts` struct in `return_1040.rs`
+(exact cents) exposed on `AbsoluteReturn`, and `printed::*_lines` rounds it at the line. Done for
+`ScheduleAParts` and `Schedule1Parts`. Note `charitable::CharitableResult` already carried Schedule A
+lines 11/12/13/14 exactly — check for an existing struct before adding a new one.
+
 ## Remaining P6 work, in the order I'd do it
 
-1. **Schedule A** — the next step, and it needs a small refactor first:
-   `return_1040::schedule_a_deduction` returns only a TOTAL; the printed chain needs the lines.
-   The pieces already exist — `charitable::CharitableResult` **already carries Schedule A lines
-   11/12/13/14 exactly** (`allowed_cash` / `allowed_noncash` / `allowed_carryover` / `allowed`).
-   Plan: add a `ScheduleAParts` struct (medical L1, AGI L2, SALT 5a/5b/5c/5d/5e + the cap, mortgage
-   8a, the four charitable lines, total L17), expose it on `AbsoluteReturn`, have
-   `schedule_a_deduction` sum it. **This also closes `p5-m1`** (the report can then print interior
-   lines). Map hazards already dumped: line 8b is `f1_19`, **not** `f1_17` (the only non-sequential
-   suffix); line 2 (`f1_4`) sits in its OWN x-cluster at [331.2, 402.5] — neither MID nor AMOUNT, so
-   the oracle needs a third column; line 8d (`f1_21`) is a ReadOnly "Reserved" widget — never write it.
-2. **Schedule 1** — income (L1 state refund, L3 Schedule C, L8v crypto ordinary) + adjustments
-   (L15 half-SE, L18 early-withdrawal, L21 student-loan). Needs the same components-exposure treatment.
-   Map hazards: line 22 (`f2_14`) is a ReadOnly "Reserved" widget that CONSUMES a suffix number; lines
-   8a/8d/8s are `( )` boxes (positive magnitudes); `f1_06`/`f2_10`/`f2_11` are date/SSN-comb fields
-   sitting in the money x-band — writing money there prints garbage.
-3. **Schedule B** — repeating payer tables (Part I = **14** rows, Part II = **15** — the asymmetry is
+1. **Schedule C** — the next step, and the smallest of the remaining forms. Lines v1 needs: L1 gross
+   receipts (`crypto.business_se_gross`), L7 gross income (= L1; no returns/COGS), L28 total expenses,
+   L29 tentative profit (7 − 28), L31 net profit (= L29; no home office) → Schedule 1 L3 **and**
+   Schedule SE. A Schedule C LOSS is refused upstream (§465 at-risk out of scope), so L31 ≥ 0 always.
+   Needs a `ScheduleCParts` (gross + expenses) on `AbsoluteReturn` — `assemble_absolute` already
+   computes both locally (`crypto.business_se_gross`, `schedule_c_expenses`); they just are not kept.
+2. **Schedule B** — repeating payer tables (Part I = **14** rows, Part II = **15** — the asymmetry is
    real). Row 1 of BOTH parts has a different parent subform (`Line1_ReadOrder` / `ReadOrderControl`),
    so generating row FQNs by string interpolation produces two wrong names. Its amount column is
    **[489.6, 576]**, NOT the [504, 576] every other form uses. Part III lines 7a/8 are Yes/No pairs
    with identical on-states (`"1"`/`"2"`) — only y-geometry + name disambiguate; **7b is FREE TEXT,
    not a Yes/No pair**.
-4. **Schedule C** — crypto business income/expenses.
 5. **Schedule D lines 17–22** — extend `schedule_d.rs` (all four §7.2 routing paths; KAT-10; the
    negative-cell read-back the oracle has never verified).
 6. **The full 1040** — extend `form1040.rs` from the capital-gains cluster to every line.
