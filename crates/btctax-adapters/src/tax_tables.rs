@@ -48,8 +48,8 @@
 //! Callers requesting a year with no bundled table receive `None` from [`TaxTables::table_for`],
 //! which the compute layer converts to `TaxOutcome::NotComputable(TaxTableMissing)` (B.4/I6).
 use btctax_core::tax::tables::{
-    FullReturnParams, FullReturnTables, LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable,
-    TaxTables,
+    AmtParams, FullReturnParams, FullReturnTables, LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule,
+    TaxTable, TaxTables,
 };
 use btctax_core::{FilingStatus, Usd};
 use rust_decimal_macros::dec;
@@ -136,6 +136,17 @@ fn ty2024_full_return() -> FullReturnParams {
         // single/HoH, $165k–$195k MFJ; MFS gets no deduction (handled in `student_loan_phaseout`).
         student_loan_phaseout_unmarried: (dec!(80000), dec!(95000)),
         student_loan_phaseout_married: (dec!(165000), dec!(195000)),
+        // §55(d)/§55(b)(1) AMT amounts (Rev. Proc. 2023-34 §2.11): exemption $85,700 / $133,300 / $66,650;
+        // phase-out start $609,350 / $1,218,700; 26%/28% breakpoint $232,600 ($116,300 MFS).
+        amt: AmtParams {
+            exemption_single_hoh: dec!(85700),
+            exemption_mfj_qss: dec!(133300),
+            exemption_mfs: dec!(66650),
+            phaseout_start_single_hoh_mfs: dec!(609350),
+            phaseout_start_mfj_qss: dec!(1218700),
+            breakpoint_28pct: dec!(232600),
+            breakpoint_28pct_mfs: dec!(116300),
+        },
     }
 }
 
@@ -735,6 +746,14 @@ mod tests {
         assert_eq!(p.qbi_ti_threshold_unmarried, dec!(191950)); // §199A(e)(2), Rev. Proc. 2023-34 §2.10
         assert_eq!(p.qbi_ti_threshold_married, dec!(383900));
         assert_eq!(p.qbi_ti_threshold(FilingStatus::Qss), dec!(191950)); // QSS ≠ joint → unmarried base
+        // §55(d) AMT amounts (Rev. Proc. 2023-34 §2.11) — verified against the 2024 Form 6251 worksheet.
+        assert_eq!(p.amt.exemption(FilingStatus::Single), dec!(85700));
+        assert_eq!(p.amt.exemption(FilingStatus::Mfj), dec!(133300));
+        assert_eq!(p.amt.exemption(FilingStatus::Mfs), dec!(66650));
+        assert_eq!(p.amt.phaseout_start(FilingStatus::Single), dec!(609350));
+        assert_eq!(p.amt.phaseout_start(FilingStatus::Mfj), dec!(1218700));
+        assert_eq!(p.amt.breakpoint_28pct(FilingStatus::Single), dec!(232600));
+        assert_eq!(p.amt.breakpoint_28pct(FilingStatus::Mfs), dec!(116300));
         assert!(t.full_return_for(2025).is_none()); // v1 = TY2024 only → fail closed elsewhere
         assert!(t.full_return_for(2017).is_none());
     }

@@ -16,6 +16,7 @@
 use crate::conventions::{round_dollar, Usd};
 use crate::forms::schedule_d;
 use crate::state::{LedgerState, RemovalKind, Term};
+use crate::tax::amt::amt_should_file_6251;
 use crate::tax::charitable::apply_170b;
 use crate::tax::compute::{net_1222, CapNet};
 use crate::tax::method::qdcgt_line16;
@@ -796,9 +797,10 @@ pub fn assemble_absolute(
 /// (income/ledger-dependent). Returns the FIRST [`Refusal`], or `None`.
 ///
 /// Rows: (a) QBI present with taxable-income-before-QBI above the §199A(e)(2) threshold (the 8995-A
-/// phase-in is unmodeled, §4.5); (b) taxable income ≤ 0 WITH a capital-loss carryforward-in (the G22
-/// §1211/§1212 Capital Loss Carryover Worksheet edge). A refund-only TI≤0 filer with NO carryforward is
-/// NOT refused (tax = 0, withholding refunded — the r5-narrowed rule).
+/// phase-in is unmodeled, §4.5); (b) the 2024 AMT screening worksheet says Form 6251 must be filed
+/// (§4.11); (c) taxable income ≤ 0 WITH a capital-loss carryforward-in (the G22 §1211/§1212 Capital Loss
+/// Carryover Worksheet edge). A refund-only TI≤0 filer with NO carryforward is NOT refused (tax = 0,
+/// withholding refunded — the r5-narrowed rule).
 pub fn screen_absolute(
     ri: &ReturnInputs,
     ar: &AbsoluteReturn,
@@ -820,7 +822,25 @@ pub fn screen_absolute(
         );
     }
 
-    // (b) Taxable income ≤ 0 with a capital-loss carryforward-in (the §1211/§1212 carryover-worksheet edge).
+    // (b) AMT screen — the 2024 "Should I fill in Form 6251?" worksheet (§4.11). Sch 2 L1z = 0 (no
+    // excess-APTC input in v1); worksheet line 4 = Schedule 1 L1 taxable refund (no L8z input).
+    if amt_should_file_6251(
+        ri.filing_status,
+        ar.agi,
+        ar.qbi_deduction,
+        ri.sch1.state_refund_taxable,
+        ar.regular_tax,
+        Usd::ZERO, // Schedule 2 line 1z (excess-APTC total) — unrepresentable in v1
+        &params.amt,
+    ) {
+        return refusal(
+            RefuseReason::AmtScreenTriggered,
+            "the Form 6251 screening worksheet indicates you may owe alternative minimum tax — v1 does not \
+             compute Form 6251, so the return is refused rather than understate the tax",
+        );
+    }
+
+    // (c) Taxable income ≤ 0 with a capital-loss carryforward-in (the §1211/§1212 carryover-worksheet edge).
     let cf = ri.capital_loss_carryforward_in;
     if ar.taxable_income == Usd::ZERO && (cf.short > Usd::ZERO || cf.long > Usd::ZERO) {
         return refusal(
@@ -891,6 +911,15 @@ mod tests {
             qbi_ti_threshold_married: dec!(383900),
             student_loan_phaseout_unmarried: (dec!(80000), dec!(95000)),
             student_loan_phaseout_married: (dec!(165000), dec!(195000)),
+            amt: crate::tax::tables::AmtParams {
+                exemption_single_hoh: dec!(85700),
+                exemption_mfj_qss: dec!(133300),
+                exemption_mfs: dec!(66650),
+                phaseout_start_single_hoh_mfs: dec!(609350),
+                phaseout_start_mfj_qss: dec!(1218700),
+                breakpoint_28pct: dec!(232600),
+                breakpoint_28pct_mfs: dec!(116300),
+            },
         }
     }
 
@@ -2126,5 +2155,24 @@ mod tests {
         let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_single_table(), 2024);
         // Σ box5 = 250,000 > 200,000 Single threshold → Part I = 0.9% × 50,000 = $450.
         assert_eq!(ar.additional_medicare.part1_wages, dec!(450.00));
+    }
+
+    /// The AMT screen (§4.11) wired through `screen_absolute`: a very-high-income filer (worksheet line-12
+    /// STOP, AMTI − exemption > $232,600) is REFUSED; a common household clears (Sch 2 line 2 = 0).
+    #[test]
+    fn amt_screen_refuses_high_income_clears_common() {
+        let p = ty2024_params();
+        let table = real_2024_single_table();
+        // $900k wages → worksheet line 11 ≈ 887k > 232,600 → fill 6251 → refuse.
+        let high = wages_single(dec!(900000));
+        let ar_high = assemble_absolute(&high, &empty_ledger(), &p, &table, 2024);
+        assert_eq!(
+            screen_absolute(&high, &ar_high, &p).map(|r| r.reason),
+            Some(RefuseReason::AmtScreenTriggered)
+        );
+        // $150k wages → line 11 = 64,300 ≤ 232,600 and 26% × it < regular tax → cleared (no refuse).
+        let common = wages_single(dec!(150000));
+        let ar_common = assemble_absolute(&common, &empty_ledger(), &p, &table, 2024);
+        assert_eq!(screen_absolute(&common, &ar_common, &p), None);
     }
 }

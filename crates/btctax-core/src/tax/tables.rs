@@ -222,6 +222,52 @@ pub fn loss_limit(status: FilingStatus) -> Usd {
 /// only**, so a separate table with **fail-closed per-year gating** (`None` ⇒ `NotComputable`) has the
 /// smallest blast radius. This does NOT rely on any frozen-file constraint (`se.rs` only *calls* the
 /// unfrozen `synthetic_table`, so `TaxTable` could technically gain a field).
+/// §55(d)/§55(b)(1) AMT amounts for the 2024 "Worksheet To See if You Should Fill in Form 6251"
+/// (SPEC §4.11 refuse-trigger). All INDEXED (§55(d)(4) inflation adjustment). Grouped by the worksheet's
+/// (differing) filing-status bucketings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AmtParams {
+    /// §55(d)(1) exemption — Single / HoH (worksheet line 6).
+    pub exemption_single_hoh: Usd,
+    /// §55(d)(1) exemption — MFJ / QSS.
+    pub exemption_mfj_qss: Usd,
+    /// §55(d)(1) exemption — MFS.
+    pub exemption_mfs: Usd,
+    /// §55(d)(3) exemption phase-out start — Single / HoH / **MFS** (worksheet line 8 groups MFS here).
+    pub phaseout_start_single_hoh_mfs: Usd,
+    /// §55(d)(3) phase-out start — MFJ / QSS.
+    pub phaseout_start_mfj_qss: Usd,
+    /// §55(b)(1) 26%/28% breakpoint — general (worksheet line 12).
+    pub breakpoint_28pct: Usd,
+    /// §55(b)(1) 26%/28% breakpoint — MFS.
+    pub breakpoint_28pct_mfs: Usd,
+}
+
+impl AmtParams {
+    /// §55(d)(1) AMT exemption for `status` (worksheet line 6).
+    pub fn exemption(&self, status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj | FilingStatus::Qss => self.exemption_mfj_qss,
+            FilingStatus::Mfs => self.exemption_mfs,
+            FilingStatus::Single | FilingStatus::HoH => self.exemption_single_hoh,
+        }
+    }
+    /// §55(d)(3) exemption phase-out start for `status` (worksheet line 8; MFS groups with unmarried).
+    pub fn phaseout_start(&self, status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj | FilingStatus::Qss => self.phaseout_start_mfj_qss,
+            _ => self.phaseout_start_single_hoh_mfs,
+        }
+    }
+    /// §55(b)(1) 26%/28% breakpoint for `status` (worksheet line 12; MFS is halved).
+    pub fn breakpoint_28pct(&self, status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfs => self.breakpoint_28pct_mfs,
+            _ => self.breakpoint_28pct,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FullReturnParams {
     pub year: i32,
@@ -255,6 +301,8 @@ pub struct FullReturnParams {
     pub student_loan_phaseout_unmarried: (Usd, Usd),
     /// §221(b)(2) phase-out `(start, end)` — MFJ/QSS. MFS gets **no** deduction (§221(e)(2)), so no range.
     pub student_loan_phaseout_married: (Usd, Usd),
+    /// §55(d)/§55(b)(1) AMT amounts for the Form 6251 refuse-screen (SPEC §4.11).
+    pub amt: AmtParams,
 }
 
 impl FullReturnParams {

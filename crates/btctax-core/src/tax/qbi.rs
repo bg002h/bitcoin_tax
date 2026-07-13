@@ -112,6 +112,15 @@ mod tests {
             qbi_ti_threshold_married: dec!(383900),
             student_loan_phaseout_unmarried: (dec!(80000), dec!(95000)),
             student_loan_phaseout_married: (dec!(165000), dec!(195000)),
+            amt: crate::tax::tables::AmtParams {
+                exemption_single_hoh: dec!(85700),
+                exemption_mfj_qss: dec!(133300),
+                exemption_mfs: dec!(66650),
+                phaseout_start_single_hoh_mfs: dec!(609350),
+                phaseout_start_mfj_qss: dec!(1218700),
+                breakpoint_28pct: dec!(232600),
+                breakpoint_28pct_mfs: dec!(116300),
+            },
         }
     }
 

@@ -98,6 +98,10 @@ pub enum RefuseReason {
     /// the §199A(e)(2) threshold — the simplified Form 8995 no longer applies and the 8995-A phase-in is
     /// unmodeled in v1 (SPEC §4.5). Compute-dependent (needs L12 → TI-before-QBI).
     QbiAboveThreshold,
+    /// The 2024 "Worksheet To See if You Should Fill in Form 6251" concludes the taxpayer must file Form
+    /// 6251 — v1 does not compute the AMT, so it refuses rather than under-state (SPEC §4.11). Compute-
+    /// dependent (needs AGI, QBI, and L16). A cleared worksheet leaves Schedule 2 line 2 = 0 (no refuse).
+    AmtScreenTriggered,
     /// Taxable income ≤ 0 **with a capital-loss carryforward-in** — the §1211/§1212 Capital Loss Carryover
     /// Worksheet (G22 edge) decides how much loss survives when it can't reduce an already-zero tax; v1
     /// doesn't model it, so refuse rather than write a wrong next-year carryover. A refund-only TI≤0 filer
@@ -537,6 +541,15 @@ mod tests {
             qbi_ti_threshold_married: dec!(383900),
             student_loan_phaseout_unmarried: (dec!(80000), dec!(95000)),
             student_loan_phaseout_married: (dec!(165000), dec!(195000)),
+            amt: crate::tax::tables::AmtParams {
+                exemption_single_hoh: dec!(85700),
+                exemption_mfj_qss: dec!(133300),
+                exemption_mfs: dec!(66650),
+                phaseout_start_single_hoh_mfs: dec!(609350),
+                phaseout_start_mfj_qss: dec!(1218700),
+                breakpoint_28pct: dec!(232600),
+                breakpoint_28pct_mfs: dec!(116300),
+            },
         }
     }
     fn tbl() -> TaxTable {
