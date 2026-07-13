@@ -23,8 +23,7 @@ use crate::tax::method::qdcgt_line16;
 use crate::tax::other_taxes::{form_8959, form_8960, sch2_line4_se, Form8959, Form8960};
 use crate::tax::qbi::{compute_8995, qbi_over_threshold};
 use crate::tax::return_inputs::{
-    CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift, Owner, Person,
-    ReturnInputs,
+    CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift, Owner, ReturnInputs,
 };
 use crate::tax::return_refuse::{Refusal, RefuseReason};
 use crate::tax::se::{compute_se_tax, se_net_income, SeTaxResult};
@@ -41,17 +40,11 @@ use time::{Date, Month};
 /// year-end test). A `None` DOB is "not established" → NOT counted as aged: the conservative, fail-closed
 /// direction — never grant an unsubstantiated deduction, and never silently assume a birthdate
 /// (burns down the `dob-option-pin` follow-up; §4.2 / review r1-M3).
-fn is_aged(dob: Option<Date>, year: i32) -> bool {
+pub(crate) fn is_aged(dob: Option<Date>, year: i32) -> bool {
     let Some(d) = dob else {
         return false;
     };
     Date::from_calendar_date(year - 64, Month::January, 1).is_ok_and(|cutoff| d <= cutoff)
-}
-
-/// The number of §63(f) aged/blind "boxes" a person contributes (0, 1, or 2): +1 if 65+ (by DOB), +1 if
-/// blind (an explicit flag — not DOB-derivable, §4.2).
-fn aged_blind_boxes(p: &Person, year: i32) -> u32 {
-    u32::from(is_aged(p.date_of_birth, year)) + u32::from(p.blind)
 }
 
 /// §63(f) additional-standard-deduction rate is the **married** amount for MFJ/MFS/QSS (a "surviving
@@ -92,12 +85,11 @@ pub fn standard_deduction(
         basic
     };
 
-    let mut boxes = aged_blind_boxes(&ri.header.taxpayer, year);
-    if status == FilingStatus::Mfj {
-        if let Some(sp) = &ri.header.spouse {
-            boxes += aged_blind_boxes(sp, year);
-        }
-    }
+    // ★ The SAME box count the 1040's §63(f) checkboxes print (`AgedBlindBoxes::for_return`). The IRS
+    // validates a nonstandard standard deduction by COUNTING those boxes, so the count and the amount
+    // must come from one derivation — two would let a filed return claim an addition its own checkboxes
+    // do not support (`p6-aged-blind-checkboxes-missing`).
+    let boxes = crate::tax::packet::AgedBlindBoxes::for_return(ri, year).count();
     let per_box = if uses_married_aged_blind_rate(status) {
         params.std_aged_blind_married
     } else {
@@ -878,6 +870,41 @@ pub struct AbsoluteReturn {
     pub overpayment_refund: Usd,
     /// 1040 **L37** — amount owed (0 when the return is due a refund).
     pub amount_owed: Usd,
+    /// The inputs the P6 **printed chains** need that no other field carries — captured HERE, at the one
+    /// derivation, so `assemble_printed_return` never re-sums anything. See [`PrintedInputs`].
+    pub printed_inputs: PrintedInputs,
+}
+
+/// The Form 8959 / 8960 / 8995 inputs, captured at derivation.
+///
+/// These are not new facts — they are the *same* values `assemble_absolute` fed to the COMPUTED
+/// `Form8959` / `Form8960` / `compute_8995`. Carrying them means the printed chain and the computed tax
+/// see identical inputs by construction. The alternative (re-summing Σ box 5 inside the printed chain) is
+/// a second derivation, and a second derivation is exactly how a filed form comes to disagree with the
+/// tax the report computed from it (SPEC §3.1 — `btctax-forms` does no arithmetic, and neither should the
+/// packet).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PrintedInputs {
+    /// Form 8959 line 1 — Σ W-2 box 5 (household total Medicare wages).
+    pub medicare_wages: Usd,
+    /// Form 8959 Part V — Σ W-2 box 6 (Medicare tax withheld).
+    pub medicare_withheld: Usd,
+    /// Form 8960 line 7 — Σ non-business crypto **lending** interest (investment income with no home on
+    /// 1040 line 2b; hobby mining/staking rewards stay OUT of NII).
+    pub crypto_lending_interest: Usd,
+    /// Form 8995 line 6 — Σ 1099-DIV box 5 (§199A REIT dividends).
+    pub reit_dividends: Usd,
+    /// Form 8995 line 7 — the REIT/PTP loss carryforward IN.
+    pub reit_ptp_carryforward_in: Usd,
+    /// Form 8995 line 11 — taxable income BEFORE the QBI deduction (AGI − L12).
+    pub ti_before_qbi: Usd,
+    /// Form 8995 line 12 — net capital gain (qualified dividends + §1(h) preferential net LTCG).
+    pub qbi_net_capital_gain: Usd,
+    /// 1040 page 1 — the digital-asset question. `true` iff the ledger shows digital-asset activity in
+    /// the year (a disposal, recognized income, or a removal). btctax never answers **"No"**: a "No" it
+    /// cannot vouch for is worse than leaving the question to the filer, so `false` means *unchecked*,
+    /// not *answered in the negative*.
+    pub digital_asset_activity: bool,
 }
 
 /// Assemble the absolute (WITH-crypto) 1040 from income through **total tax L24** for `year` (SPEC §5
@@ -1166,7 +1193,33 @@ pub fn assemble_absolute(
         total_payments,
         overpayment_refund,
         amount_owed,
+        // The printed chains read THESE — the same values the computed 8959/8960/8995 above were fed.
+        printed_inputs: PrintedInputs {
+            medicare_wages: w2_medicare_wages,
+            medicare_withheld: w2_medicare_withheld,
+            crypto_lending_interest: crypto.nonbusiness_lending_interest,
+            reit_dividends,
+            reit_ptp_carryforward_in: ri.qbi.reit_ptp_carryforward_in,
+            ti_before_qbi: agi - deduction,
+            qbi_net_capital_gain: net_capital_gain,
+            digital_asset_activity: digital_asset_activity(state, year),
+        },
     }
+}
+
+/// The 1040's digital-asset question: did the taxpayer receive, sell, exchange, or otherwise dispose of
+/// a digital asset during the year? Answered from the LEDGER — a disposal, recognized income, or a
+/// removal (gift/donation) dated in `year`.
+///
+/// `false` means the box is left **unchecked**, NOT answered "No": btctax never answers "No" (§3.4 —
+/// a "No" it cannot vouch for is worse than leaving the question to the filer).
+fn digital_asset_activity(state: &LedgerState, year: i32) -> bool {
+    state.disposals.iter().any(|d| d.disposed_at.year() == year)
+        || state
+            .income_recognized
+            .iter()
+            .any(|i| i.recognized_at.year() == year)
+        || state.removals.iter().any(|r| r.removed_at.year() == year)
 }
 
 /// Screen the **assembled-return** refuse rows (SPEC §4.10) — those that need the computed deduction /
@@ -1301,6 +1354,9 @@ pub fn schedule_b_part3_unanswered(ri: &ReturnInputs) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `Person` is a TEST-only import now: the §63(f) box count moved to `packet::AgedBlindBoxes`, which
+    // is the single source L12 consumes (`p6-aged-blind-checkboxes-missing`).
+    use crate::tax::return_inputs::Person;
 
     /// A CharitableResult with nothing allowed — for Schedule A tests that isolate the medical/SALT/
     /// mortgage lines. (Schedule A now takes the whole result, since its `allowed_cash`/`_noncash`/

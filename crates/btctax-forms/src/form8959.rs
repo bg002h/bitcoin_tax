@@ -38,7 +38,9 @@ pub fn fill_form_8959_with_map(
     lines: &Form8959Lines,
     map: &Form8959Map,
 ) -> Result<Option<Vec<u8>>, FormsError> {
-    if lines.line18 == Usd::ZERO && lines.line24 == Usd::ZERO {
+    // The filing decision is a CORE fact (`p6-form8959-must-file-belongs-in-core`), so the packet's KATs
+    // can see it — the filler only obeys it.
+    if !lines.must_file() {
         return Ok(None);
     }
 

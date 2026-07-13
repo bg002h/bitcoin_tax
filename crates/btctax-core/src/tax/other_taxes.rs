@@ -132,6 +132,20 @@ pub struct Form8959Lines {
     pub line24: Usd,
 }
 
+impl Form8959Lines {
+    /// Whether Form 8959 must actually be FILED. Every other file-or-don't-file decision in the packet is
+    /// a core `Option`; this one is a predicate because Schedule 2 and the 1040 read the chain either way
+    /// (they carry `line18` / `line24`, which are simply zero when the form is not required).
+    ///
+    /// **Line 24 is not redundant with line 18.** An employer withholds the 0.9% on ITS OWN wages over
+    /// $200,000, with no knowledge of a spouse or a second job — so a taxpayer who owes NO Additional
+    /// Medicare Tax can still have had some withheld, and that excess is a credit on 1040 line 25c.
+    /// Deciding on line 18 alone would silently forfeit it.
+    pub fn must_file(&self) -> bool {
+        self.line18 != Usd::ZERO || self.line24 != Usd::ZERO
+    }
+}
+
 /// Derive the printed Form 8959 line chain (SPEC §3.1: `round_dollar` at each line; totals sum the
 /// already-rounded lines).
 ///

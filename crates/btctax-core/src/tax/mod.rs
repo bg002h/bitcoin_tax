@@ -8,6 +8,7 @@ pub mod compute;
 pub mod frozen_guard;
 pub mod method;
 pub mod other_taxes;
+pub mod packet;
 pub mod printed;
 pub mod qbi;
 pub mod return_1040;
@@ -15,6 +16,10 @@ pub mod return_inputs;
 pub mod return_refuse;
 pub mod se;
 pub mod tables;
+/// Test scaffolding (synthetic households + TY2024 fixtures) shared with `btctax-forms`' KATs and the
+/// P7 golden-return matrix. No tax logic — every figure is a fixture, not a fact.
+#[doc(hidden)]
+pub mod testonly;
 pub mod types;
 
 pub use return_1040::{

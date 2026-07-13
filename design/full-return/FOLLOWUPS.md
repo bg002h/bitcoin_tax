@@ -353,6 +353,32 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   into a hard stop for a household with 15+ interest payers. Declaring the deviation rather than
   hiding it: either implement the continuation pattern, or amend SPEC §7.4. Owning phase: **P6**.
 
+- **[✅ DONE in P6.1] p6-form8959-must-file-belongs-in-core.** `Form8959Lines::must_file()` now lives in
+  core (`other_taxes.rs`); `form8959.rs` only obeys it. Every file-or-don't-file decision in the packet is
+  now a core fact the packet KATs can see.
+
+- **[✅ DONE in P6.1] p1-ssn-normalization-P6** — `packet::Ssn::canonical` (strip formatting → require
+  exactly nine digits), `digits()` / `hyphenated()` renderers, and a **masked `Debug`** (an SSN in a log
+  or panic message is a PII incident). Wired into `screen_inputs` as `RefuseReason::SsnMalformed(who)` —
+  which names WHO, never the digits.
+
+  ⚠️ **DECLARED DEVIATION from the architect's guidance** (ARCH-P6 Q1), for the P6.6 reviewer. Fable said
+  a non-canonicalizable SSN should refuse at compute time. I split the case in two: a **malformed** SSN
+  (captured but not nine digits) refuses at compute time as instructed, but an **uncaptured** (empty) SSN
+  does NOT — it refuses at the packet boundary instead (`ReturnHeader::build` → `SsnError::Missing`), so
+  no PDF can ever be attempted without an identity. Reason: the tax math never reads an SSN, so refusing
+  the computation would block the very report a filer uses to decide whether to file at all, and would buy
+  no correctness — there is no number on the return an absent SSN could make wrong. Fail-closed is
+  preserved where it matters (the *filable artifact*), and the codebase's own fixtures are the evidence
+  the compute path never needed PII. KAT: `an_uncaptured_ssn_does_not_block_the_report`.
+
+- **[GATING — core half DONE in P6.1; the FILL remains → P6.2] p6-aged-blind-checkboxes-missing.** Core
+  now derives the four boxes ONCE (`packet::AgedBlindBoxes::for_return`) and **`standard_deduction` L12
+  consumes that same count**, so the checkbox count and the claimed deduction cannot drift apart by
+  construction. Pinned by `aged_blind_box_count_matches_the_standard_deduction_core_actually_computed`.
+  What remains is P6.2: `f1040.map.toml` still has no checkbox FQNs, so nothing is printed yet. Original
+  entry:
+
 - **[GATING] p6-aged-blind-checkboxes-missing → P6.** Core folds the §63(f) age-65/blind additions into
   the printed 1040 **line 12**, but `f1040.map.toml` has **no age/blind checkboxes**. A filed 1040 claiming
   a nonstandard standard deduction with ZERO boxes checked fails the IRS's own arithmetic cross-check — the
@@ -376,6 +402,13 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 - **p6-schedule-b-continuation-statement → post-v1.** The real >14-payer fix: one Schedule B whose line 1
   reads "see attached statement", plus a generated continuation statement (a synthetic page generator,
   outside the geometric oracle). SPEC §7.4 as amended.
+
+- **[core half DONE in P6.1; the FILL remains → P6.2] p6-form-identity-header.** `packet::ReturnHeader`
+  now derives the identity ONCE: the MFJ **joint** name line, the Schedule C **proprietor** (the business
+  OWNER — a spouse-owned Sch C files under the SPOUSE's name and SSN even on a joint return, which a naive
+  shared writer would get wrong), the address, the aged/blind boxes, and the dependents rows. Fillers can
+  only transcribe it. What remains is P6.2: the `[identity]` map fragments + the shared `push_identity`
+  writer + the 1040's full header block. Original entry:
 
 - **p6-form-identity-header → P6 (packet assembly).** None of the new P6 fillers (8959, 8960, 8995,
   Sch 1/2/3/A/C) writes the **taxpayer name + SSN header** that every IRS form carries at the top. The

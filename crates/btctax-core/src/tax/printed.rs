@@ -886,6 +886,9 @@ mod tests {
             total_payments: z,
             overpayment_refund: z,
             amount_owed: z,
+            // The Schedule 2/3 chains under test read none of these (they take the 8959/8960 chains as
+            // arguments); an all-zero `PrintedInputs` keeps this fixture to the fields it exercises.
+            printed_inputs: crate::tax::return_1040::PrintedInputs::default(),
         }
     }
 
