@@ -28,6 +28,28 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   open (the number is already correct + fail-closed); this is an audit-trail nicety. Print it as part of the
   P4 report render.
 
+## From Phase 3 implementation (open at the P3 review; deferrals recorded for traceability)
+
+- **p3-carryover-writeback-P4** (DEVIATION — plan P3 task 3d → P4) — the charitable-carryover WRITE-BACK
+  (persist the computed `carryover_out` + the R3-M6 precedence: computed overwrites computed, refuses
+  user-entered w/o `--force`) is deferred to P4. Reason: the REAL carryover includes crypto-donation excess,
+  which needs the ABSOLUTE Schedule A (crypto donations from the ledger) — a P4 piece. The derive-side
+  non-crypto `carryover_out` is intentionally discarded (it is not the filed carryover). No fail-open in P3:
+  nothing persists a wrong carryover. The §170(b) engine (`apply_170b`) already computes `carryover_out`
+  correctly; P4 wires the absolute Sch A into it + persists.
+- **p3-l16-absolute-P4** (DEVIATION — plan P3 task 4 → P4) — L16 (`method.rs::qdcgt_line16` on the WITH-crypto
+  AGI) + the QBI 0-stub are ABSOLUTE-return lines; P3 ships the frozen-DELTA path (the derived `TaxProfile` →
+  `compute_tax_year`, which already computes the delta tax via the frozen engine's own QDCGT). The absolute L16
+  lands with P4's absolute assembly. No fail-open: `report` computes the crypto DELTA correctly today.
+- **p3-non50org-charitable-special-limit** (follow-on) — the non-50%-org charitable classes (Cash30,
+  OrdinaryProp30, CapGainProp20) use conservative own-% ceilings under a shared 30%-of-AGI room; the precise
+  Pub. 526 "special 30% limit" ordering interaction is a follow-on. These classes are never produced by the
+  crypto ledger and are "capture-only rare" per SPEC §4.6; a mis-limit is bounded + conservative.
+- **p3-crypto-donation-delta-integration** (OPEN DESIGN Q → decide at P3 review / P4 start) — the crypto-
+  donation §170 deduction is today an advisory-only "before §170(b)" figure in the report; how (or whether) it
+  enters the frozen DELTA tax vs only the absolute Schedule A is unresolved. The derived non-crypto deduction
+  correctly excludes it; the question is the absolute/delta treatment. Flag for the P3 reviewer / P4 design.
+
 ## From Fable IMPL-P2 code review r4 (final — Phase 2 GREEN-certified at `0c73bc9`; 1 record-only Minor)
 
 - **p2-r4-m1-open-profile-form-error-arm-untested** (RECORD-ONLY, fold opportunistically with future tui-edit
