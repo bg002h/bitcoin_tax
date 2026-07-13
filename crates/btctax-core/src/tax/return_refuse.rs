@@ -94,6 +94,15 @@ pub enum RefuseReason {
     /// A claimable-as-dependent filer with unearned income over the §1(g) kiddie-tax threshold → Form 8615
     /// (the child's-rate `qdcgt_line16` would understate; the parent's rate is required — C1/F2).
     KiddieTax,
+    /// QBI present (REIT §199A dividends or a REIT/PTP carryforward) with taxable-income-before-QBI ABOVE
+    /// the §199A(e)(2) threshold — the simplified Form 8995 no longer applies and the 8995-A phase-in is
+    /// unmodeled in v1 (SPEC §4.5). Compute-dependent (needs L12 → TI-before-QBI).
+    QbiAboveThreshold,
+    /// Taxable income ≤ 0 **with a capital-loss carryforward-in** — the §1211/§1212 Capital Loss Carryover
+    /// Worksheet (G22 edge) decides how much loss survives when it can't reduce an already-zero tax; v1
+    /// doesn't model it, so refuse rather than write a wrong next-year carryover. A refund-only TI≤0 filer
+    /// with NO carryforward is NOT refused (tax = 0, withholding refunded). Compute-dependent (needs L15).
+    TaxableIncomeNonPositiveWithCarryforward,
 }
 
 /// A fail-closed refusal: the reason + a human-readable detail (surfaced to the user).
@@ -524,6 +533,8 @@ mod tests {
             kiddie_unearned_threshold: dec!(2600),
             elective_deferral_limit: dec!(23000),
             ftc_ceiling: dec!(300),
+            qbi_ti_threshold_unmarried: dec!(191950),
+            qbi_ti_threshold_married: dec!(383900),
             student_loan_phaseout_unmarried: (dec!(80000), dec!(95000)),
             student_loan_phaseout_married: (dec!(165000), dec!(195000)),
         }

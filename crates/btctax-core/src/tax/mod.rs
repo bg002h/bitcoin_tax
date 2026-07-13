@@ -5,6 +5,7 @@ pub mod charitable;
 pub mod compute;
 pub mod frozen_guard;
 pub mod method;
+pub mod qbi;
 pub mod return_1040;
 pub mod return_inputs;
 pub mod return_refuse;

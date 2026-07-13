@@ -15,9 +15,13 @@
 //! Additive per SPEC §2: `compute.rs` / `types.rs` / `se.rs` stay byte-frozen; this file only reads them.
 use crate::conventions::{round_dollar, Usd};
 use crate::forms::schedule_d;
-use crate::state::LedgerState;
-use crate::tax::compute::net_1222;
-use crate::tax::return_inputs::{Owner, Person, ReturnInputs};
+use crate::state::{LedgerState, RemovalKind, Term};
+use crate::tax::charitable::apply_170b;
+use crate::tax::compute::{net_1222, CapNet};
+use crate::tax::qbi::{compute_8995, qbi_over_threshold};
+use crate::tax::return_inputs::{
+    CharitableCarryItem, CharitableClass, CharitableGift, Owner, Person, ReturnInputs,
+};
 use crate::tax::return_refuse::{Refusal, RefuseReason};
 use crate::tax::se::{compute_se_tax, se_net_income, SeTaxResult};
 use crate::tax::tables::{loss_limit, FullReturnParams, TaxTable};
@@ -230,21 +234,67 @@ fn crypto_income(state: &LedgerState, year: i32) -> CryptoIncome {
     }
 }
 
-/// The amount reaching **1040 L7** (capital gain or loss) for `year`: crypto Schedule D nets + box-2a
-/// capital-gain distributions, run through §1222 within-character netting + the §1211 loss limit. In a
-/// gain year this is the full net gain; in a loss year it is the −$3,000/−$1,500-MFS limited loss.
-fn capital_gain_line7(ri: &ReturnInputs, state: &LedgerState, year: i32, status: FilingStatus) -> Usd {
+/// The §1222/§1211 capital netting for `year`: crypto Schedule D ST/LT nets + box-2a capital-gain
+/// distributions (LT character), with the §1212 carryforward-in applied. The single source for 1040 L7
+/// ([`capital_gain_line7`]), the QDCGT net-LTCG (`preferential_gain`, → L16), and the Form 8995
+/// net-capital-gain (`preferential_gain`, → line 12).
+fn capital_net(ri: &ReturnInputs, state: &LedgerState, year: i32, status: FilingStatus) -> CapNet {
     let sd = schedule_d(state, year); // raw crypto ST/LT nets (traverses state.disposals)
     let cf = ri.capital_loss_carryforward_in;
-    let net = net_1222(
+    net_1222(
         sd.st.gain,
         sd.lt.gain,
         sum_cap_gain_distr(ri), // box 2a is LT-character "other" capital gain
         cf.short,
         cf.long,
         loss_limit(status),
-    );
+    )
+}
+
+/// The amount reaching **1040 L7** (capital gain or loss) for `year`: crypto Schedule D nets + box-2a
+/// capital-gain distributions, run through §1222 within-character netting + the §1211 loss limit. In a
+/// gain year this is the full net gain; in a loss year it is the −$3,000/−$1,500-MFS limited loss.
+fn capital_gain_line7(ri: &ReturnInputs, state: &LedgerState, year: i32, status: FilingStatus) -> Usd {
+    let net = capital_net(ri, state, year, status);
     net.ordinary_gain + net.preferential_gain - net.loss_deduction
+}
+
+/// The WITH-crypto Schedule A charitable gifts from the ledger's §170(e)-reduced **donations** for
+/// `year` (SPEC §4.6; the `p3-crypto-donation-delta-integration` P4 requirement — the absolute Schedule
+/// A includes crypto donations, unlike the derive-side non-crypto profile). Per §170(e): a **long-term**
+/// donation leg deducts FMV → `CapGainProp30`; a **short-term** leg deducts §170(e) basis `min(FMV,
+/// basis)` → `OrdinaryProp50`. Both are 50%-org classes, so `apply_170b`'s "50%-org only" precondition
+/// holds by construction. The per-leg sums reconcile with `Removal.claimed_deduction`
+/// (`Σ(LT→fmv; ST→min(fmv,basis))`) — this partitions that total by holding-period class.
+fn crypto_charitable_gifts(state: &LedgerState, year: i32) -> Vec<CharitableGift> {
+    let mut long_fmv = Usd::ZERO; // LT capital-gain property → CapGainProp30 (FMV)
+    let mut short_basis = Usd::ZERO; // ST §170(e) ordinary/basis property → OrdinaryProp50
+    for r in state
+        .removals
+        .iter()
+        .filter(|r| r.kind == RemovalKind::Donation && r.removed_at.year() == year)
+    {
+        for leg in &r.legs {
+            match leg.term {
+                Term::LongTerm => long_fmv += leg.fmv_at_transfer,
+                Term::ShortTerm => short_basis += leg.fmv_at_transfer.min(leg.basis),
+            }
+        }
+    }
+    let mut gifts = Vec::new();
+    if long_fmv > Usd::ZERO {
+        gifts.push(CharitableGift {
+            class: CharitableClass::CapGainProp30,
+            amount: long_fmv,
+        });
+    }
+    if short_basis > Usd::ZERO {
+        gifts.push(CharitableGift {
+            class: CharitableClass::OrdinaryProp50,
+            amount: short_basis,
+        });
+    }
+    gifts
 }
 
 fn refusal(reason: RefuseReason, detail: &str) -> Option<Refusal> {
@@ -463,9 +513,10 @@ const SE_6017_FLOOR: Usd = dec!(400);
 
 /// The **absolute** (WITH-crypto) 1040 assembly — the filed-return counterpart to [`derive_tax_profile`]'s
 /// frozen non-crypto `TaxProfile`. Built incrementally across Phase 4; **this increment covers SPEC §5
-/// stages 1–2** (income L1a–L9, adjustments L10, AGI L11) plus the Schedule SE / §6017 block that L10's
-/// ½-SE and the later other-taxes stages consume. Later P4 increments add deductions (L12–L15), L16,
-/// credits, other taxes, payments, and the dual report.
+/// stages 1–3** (income L1a–L9, adjustments L10, AGI L11, deductions L12–L15) plus the Schedule SE /
+/// §6017 block. Later P4 increments add L16 (regular tax), credits, other taxes, payments, and the dual
+/// report. The §4.10 compute-dependent refuses that need L12/L15 (QBI-above-threshold, TI≤0-with-
+/// carryforward) are screened by [`screen_absolute`] after this (infallible) assembly.
 ///
 /// Unlike the derivation, this reads the crypto ledger `state` directly (`capital_gain_line7`,
 /// `crypto_income`, `compute_se_tax`) and produces the with-crypto AGI (L11) — the §6 / Form 8960-MAGI /
@@ -501,10 +552,36 @@ pub struct AbsoluteReturn {
     /// fully expensed, or the `base` is below the $400 floor). Consumed by later stages (Sch 2 L4 =
     /// `ss + medicare`; Form 8959 Part II reads `addl`).
     pub se: Option<SeTaxResult>,
+    /// The §63 **standard deduction** alternative — basic + §63(f) aged/blind + §63(c)(5) dependent floor
+    /// (with the G21 with-crypto earned income = wages + Schedule C net − ½-SE). One arm of L12's `max`.
+    pub standard_deduction: Usd,
+    /// Schedule A **line 17** itemized total (medical over the 7.5% floor + SALT + mortgage + §170(b)-
+    /// limited charitable INCLUDING the ledger's crypto donations, at with-crypto AGI G7). `None` when
+    /// the filer has no Schedule A. The other arm of L12's `max`.
+    pub itemized_deduction: Option<Usd>,
+    /// 1040 **L12** — the deduction taken = `choose_deduction(standard, itemized)` (max, or `ForceItemize`
+    /// / MFS-coupled §63(c)(6)).
+    pub deduction: Usd,
+    /// 1040 **L13** — the Form 8995 QBI deduction (REIT §199A dividends; 0 when there is no QBI).
+    pub qbi_deduction: Usd,
+    /// 1040 **L14** = L12 + L13 (deduction + QBI).
+    pub total_deductions: Usd,
+    /// 1040 **L15** — taxable income = `max(0, AGI − L14)` (with-crypto).
+    pub taxable_income: Usd,
+    /// The §1(h) preferential net capital gain (QDCGT net-LTCG / Form 8995 net-capital-gain), ≥ 0 — the
+    /// preferential slice of L7 (`CapNet::preferential_gain`), kept for L16 and the QBI income limit.
+    pub net_ltcg: Usd,
+    /// §170(d)(1) charitable carryover to next year (per class / vintage) from the WITH-crypto Schedule A —
+    /// the REAL filed carryover (ages even in a standard-deduction year, G8). For the P4 write-back.
+    pub charitable_carryover_out: Vec<CharitableCarryItem>,
+    /// Form 8995 **line 17** — the REIT/PTP loss carryforward to next year (magnitude). For the write-back.
+    pub qbi_reit_ptp_carryforward_out: Usd,
 }
 
-/// Assemble the absolute (WITH-crypto) 1040 income + AGI for `year` (SPEC §5 stages 1–2). See
-/// [`AbsoluteReturn`]. Assumes the refuse screens have passed (fail-closed upstream).
+/// Assemble the absolute (WITH-crypto) 1040 income + AGI + deductions/taxable-income for `year` (SPEC §5
+/// stages 1–3). See [`AbsoluteReturn`]. Assumes `screen_inputs` + `screen_compute_dependent` have passed
+/// (so all charitable classes are 50%-org and Schedule C net ≥ 0); the L12/L15 compute-dependent refuses
+/// are checked afterward by [`screen_absolute`].
 pub fn assemble_absolute(
     ri: &ReturnInputs,
     state: &LedgerState,
@@ -551,7 +628,11 @@ pub fn assemble_absolute(
     let taxable_interest = sum_taxable_interest(ri);
     let ordinary_dividends = sum_ordinary_dividends(ri);
     let qualified_dividends = sum_qualified_dividends(ri);
-    let capital_gain = capital_gain_line7(ri, state, year, status); // crypto Sch D + Σ box 2a
+    // §1222/§1211 capital netting computed ONCE: L7 (below) and the preferential slice (`net_ltcg`, → L16
+    // / the QBI income limit) share this single `CapNet` (crypto Sch D + Σ box 2a, carryforward applied).
+    let cap = capital_net(ri, state, year, status);
+    let capital_gain = cap.ordinary_gain + cap.preferential_gain - cap.loss_deduction; // L7
+    let net_ltcg = cap.preferential_gain; // §1(h) preferential net capital gain (≥ 0)
 
     // 1040 L8 = Sch 1 L10: state refund + Σ unemployment + Schedule C net (crypto business) + L8v
     // non-business crypto ordinary. Screening guarantees `business_se_gross ≥ expenses` here (no loss).
@@ -581,6 +662,44 @@ pub fn assemble_absolute(
     let adjustments = early_wd + half_se + student_loan;
     let agi = total_income - adjustments; // 1040 L11 (with-crypto AGI)
 
+    // ── Deductions L12–L15 (Schedule A on the WITH-crypto AGI, G7) ───────────────────────────────────
+    // §63(c)(5) dependent floor uses the G21 with-crypto earned income = wages + Schedule C net − ½-SE
+    // (now computable — completes `p3-m3-dependent-floor-earned-income-G21`; the derivation's non-crypto
+    // side has no Schedule C, so it correctly stays wages-only). Earned income is a magnitude (≥ 0).
+    let dependent_earned = (wages + schedule_c_net - half_se).max(Usd::ZERO);
+    let standard = standard_deduction(ri, params, year, dependent_earned);
+
+    // Absolute Schedule A charitable = user gifts + the ledger's §170(e) crypto donations, §170(b)-limited
+    // at the with-crypto AGI. `apply_170b` runs UNCONDITIONALLY (even in a std-deduction year) so the
+    // carryover ages (Reg. §1.170A-10(a)(2), G8) and `carryover_out` is the REAL filed carryover — the
+    // `p3-carryover-writeback-P4` rider (ii) hoist out of the `schedule_a`-guard. All classes are 50%-org
+    // (crypto → CapGainProp30/OrdinaryProp50; user gifts screened by `screen_inputs`), so `apply_170b`'s
+    // precondition holds by construction — the rider (iii) requirement (this caller routes through the
+    // refuse screens, per the function contract).
+    let mut gifts = ri
+        .schedule_a
+        .as_ref()
+        .map(|a| a.charitable.clone())
+        .unwrap_or_default();
+    gifts.extend(crypto_charitable_gifts(state, year));
+    let charitable = apply_170b(agi, &gifts, &ri.charitable_carryover_in, year);
+    let itemized = schedule_a_deduction(ri, agi, charitable.allowed, params);
+    let deduction = choose_deduction(ri, standard, itemized); // L12
+
+    // QBI / Form 8995 (L13): REIT §199A dividends only (crypto Schedule C is NOT §199A QBI in v1). The
+    // §199A(e)(2)-above-threshold refuse is compute-dependent → `screen_absolute` (this assembly is
+    // infallible best-effort; the screen gates the report before the number is used).
+    let reit_dividends: Usd = ri.div_1099.iter().map(|d| d.box5_section_199a).sum();
+    let net_capital_gain = qualified_dividends + net_ltcg; // Form 8995 line 12
+    let qbi = compute_8995(
+        reit_dividends,
+        ri.qbi.reit_ptp_carryforward_in,
+        agi - deduction, // Form 8995 line 11 = TI before the QBI deduction
+        net_capital_gain,
+    );
+    let total_deductions = deduction + qbi.deduction; // L14
+    let taxable_income = (agi - total_deductions).max(Usd::ZERO); // L15
+
     AbsoluteReturn {
         wages,
         taxable_interest,
@@ -593,7 +712,59 @@ pub fn assemble_absolute(
         half_se_deduction: half_se,
         agi,
         se,
+        standard_deduction: standard,
+        itemized_deduction: itemized,
+        deduction,
+        qbi_deduction: qbi.deduction,
+        total_deductions,
+        taxable_income,
+        net_ltcg,
+        charitable_carryover_out: charitable.carryover_out,
+        qbi_reit_ptp_carryforward_out: qbi.reit_ptp_carryforward_out,
     }
+}
+
+/// Screen the **assembled-return** refuse rows (SPEC §4.10) — those that need the computed deduction /
+/// taxable income, so they run AFTER [`assemble_absolute`] (which is infallible). Complements
+/// [`crate::tax::return_refuse::screen_inputs`] (input-screenable) and [`screen_compute_dependent`]
+/// (income/ledger-dependent). Returns the FIRST [`Refusal`], or `None`.
+///
+/// Rows: (a) QBI present with taxable-income-before-QBI above the §199A(e)(2) threshold (the 8995-A
+/// phase-in is unmodeled, §4.5); (b) taxable income ≤ 0 WITH a capital-loss carryforward-in (the G22
+/// §1211/§1212 Capital Loss Carryover Worksheet edge). A refund-only TI≤0 filer with NO carryforward is
+/// NOT refused (tax = 0, withholding refunded — the r5-narrowed rule).
+pub fn screen_absolute(
+    ri: &ReturnInputs,
+    ar: &AbsoluteReturn,
+    params: &FullReturnParams,
+) -> Option<Refusal> {
+    // (a) QBI above the §199A(e)(2) threshold → 8995-A phase-in unmodeled.
+    let reit_dividends: Usd = ri.div_1099.iter().map(|d| d.box5_section_199a).sum();
+    if qbi_over_threshold(
+        reit_dividends,
+        ri.qbi.reit_ptp_carryforward_in,
+        ar.agi - ar.deduction, // TI before QBI (Form 8995 line 11)
+        ri.filing_status,
+        params,
+    ) {
+        return refusal(
+            RefuseReason::QbiAboveThreshold,
+            "taxable income before the QBI deduction is above the §199A(e)(2) threshold — the Form 8995-A \
+             phase-in (SSTB / wage-and-UBIA limits) is out of scope for v1",
+        );
+    }
+
+    // (b) Taxable income ≤ 0 with a capital-loss carryforward-in (the §1211/§1212 carryover-worksheet edge).
+    let cf = ri.capital_loss_carryforward_in;
+    if ar.taxable_income == Usd::ZERO && (cf.short > Usd::ZERO || cf.long > Usd::ZERO) {
+        return refusal(
+            RefuseReason::TaxableIncomeNonPositiveWithCarryforward,
+            "taxable income is zero or negative with a capital-loss carryforward — the §1211/§1212 Capital \
+             Loss Carryover Worksheet (which decides how much loss survives) is unmodeled in v1",
+        );
+    }
+
+    None
 }
 
 /// Schedule B §6012 / Form 1040 Schedule B filing threshold ($1,500 for interest and for dividends).
@@ -650,6 +821,8 @@ mod tests {
             kiddie_unearned_threshold: dec!(2600),
             elective_deferral_limit: dec!(23000),
             ftc_ceiling: dec!(300),
+            qbi_ti_threshold_unmarried: dec!(191950),
+            qbi_ti_threshold_married: dec!(383900),
             student_loan_phaseout_unmarried: (dec!(80000), dec!(95000)),
             student_loan_phaseout_married: (dec!(165000), dec!(195000)),
         }
@@ -1415,5 +1588,237 @@ mod tests {
             ..Default::default()
         }]; // unearned $500 < $2,600
         assert_eq!(screened(&ri, &LedgerState::default()), None);
+    }
+
+    // ── Absolute deductions L12–L15 (Phase 4 task 1) ─────────────────────────────────────────────
+    use crate::event::BasisSource;
+    use crate::identity::LotId;
+    use crate::state::{Removal, RemovalLeg};
+
+    /// A single §170 Donation removal leg in `year`, with a chosen holding-period `term`.
+    fn donation_leg(term: Term, basis: Usd, fmv: Usd) -> RemovalLeg {
+        RemovalLeg {
+            lot_id: LotId {
+                origin_event_id: EventId::decision(1),
+                split_sequence: 0,
+            },
+            sat: 100_000_000,
+            basis,
+            fmv_at_transfer: fmv,
+            term,
+            basis_source: BasisSource::ExchangeProvided,
+            acquired_at: date!(2020 - 01 - 01),
+            pseudo: false,
+        }
+    }
+    fn donation(removed: Date, legs: Vec<RemovalLeg>) -> Removal {
+        // §170(e): LT leg deducts FMV; ST leg deducts min(FMV, basis).
+        let claimed: Usd = legs
+            .iter()
+            .map(|l| match l.term {
+                Term::LongTerm => l.fmv_at_transfer,
+                Term::ShortTerm => l.fmv_at_transfer.min(l.basis),
+            })
+            .sum();
+        Removal {
+            event: EventId::decision(1),
+            kind: RemovalKind::Donation,
+            removed_at: removed,
+            legs,
+            appraisal_required: false,
+            donor_acquired_at: None,
+            claimed_deduction: Some(claimed),
+            donee: None,
+        }
+    }
+    fn state_removals(removals: Vec<Removal>) -> LedgerState {
+        LedgerState {
+            removals,
+            ..Default::default()
+        }
+    }
+    fn empty_ledger() -> LedgerState {
+        LedgerState::default()
+    }
+
+    /// A LONG-term crypto donation from the ledger lands on the ABSOLUTE Schedule A at **FMV** (the
+    /// `CapGainProp30` class), under the with-crypto-AGI 30% ceiling — the `p3-crypto-donation-delta-
+    /// integration` P4 requirement (the derive-side profile excludes it; the absolute return includes it).
+    #[test]
+    fn absolute_schedule_a_includes_lt_crypto_donation_at_fmv() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(200000), dec!(160000), dec!(200000))],
+            schedule_a: Some(ScheduleAInputs {
+                mortgage_interest_1098: dec!(5000),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let st = state_removals(vec![donation(
+            date!(2024 - 06 - 01),
+            vec![donation_leg(Term::LongTerm, dec!(10000), dec!(40000))],
+        )]);
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &synthetic_table(2024), 2024);
+        // AGI = wages $200,000 (a donation recognizes no gain — no crypto income).
+        assert_eq!(ar.agi, dec!(200000));
+        // Sch A = mortgage $5,000 + LT crypto FMV $40,000 (≤ 30% ceiling min(60k,100k)=60k) = $45,000.
+        assert_eq!(ar.itemized_deduction, Some(dec!(45000)));
+        assert_eq!(ar.deduction, dec!(45000)); // > std $14,600
+        assert_eq!(ar.taxable_income, dec!(155000)); // 200,000 − 45,000
+    }
+
+    /// A SHORT-term crypto donation deducts the §170(e) **basis** `min(FMV, basis)` (the `OrdinaryProp50`
+    /// class) — NOT FMV. FMV $30,000 / basis $12,000 ⇒ $12,000 on Schedule A.
+    #[test]
+    fn absolute_schedule_a_short_term_crypto_donation_uses_basis() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(200000), dec!(160000), dec!(200000))],
+            schedule_a: Some(ScheduleAInputs {
+                mortgage_interest_1098: dec!(5000),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let st = state_removals(vec![donation(
+            date!(2024 - 06 - 01),
+            vec![donation_leg(Term::ShortTerm, dec!(12000), dec!(30000))],
+        )]);
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &synthetic_table(2024), 2024);
+        // Sch A = mortgage $5,000 + ST §170(e) basis $12,000 (OrdinaryProp50, 50% ceiling) = $17,000.
+        assert_eq!(ar.itemized_deduction, Some(dec!(17000)));
+    }
+
+    /// A crypto donation over the §170(b) 30% ceiling produces a `carryover_out` (the real filed
+    /// carryover), and `apply_170b` runs even though the std deduction wins — the aging hoist (rider ii).
+    #[test]
+    fn crypto_donation_over_ceiling_carries_over_even_in_std_year() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            // No Schedule A → std deduction wins, but the carryover must still age (G8).
+            ..Default::default()
+        };
+        let st = state_removals(vec![donation(
+            date!(2024 - 06 - 01),
+            vec![donation_leg(Term::LongTerm, dec!(20000), dec!(70000))],
+        )]);
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &synthetic_table(2024), 2024);
+        // No Schedule A ⇒ itemized None ⇒ std $14,600 taken.
+        assert_eq!(ar.itemized_deduction, None);
+        assert_eq!(ar.deduction, dec!(14600));
+        // 30% ceiling on $100k AGI = $30,000 allowed; the $40,000 excess carries (2024 vintage).
+        assert_eq!(
+            ar.charitable_carryover_out,
+            vec![CharitableCarryItem {
+                class: CharitableClass::CapGainProp30,
+                amount: dec!(40000),
+                origin_year: 2024,
+            }]
+        );
+    }
+
+    /// G21 (`p3-m3-dependent-floor-earned-income-G21`): the §63(c)(5) dependent std-deduction floor uses
+    /// the with-crypto earned income = wages + Schedule C net − ½-SE (now computable), not wages alone.
+    #[test]
+    fn dependent_floor_uses_g21_with_crypto_earned_income() {
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            schedule_c: Some(ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        ri.header.can_be_claimed_as_dependent_taxpayer = true;
+        let st = state_income(vec![mining(dec!(10000))]); // Sch C net $10,000, earned (not kiddie-unearned)
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &synthetic_table(2024), 2024);
+        let half = ar.half_se_deduction;
+        assert!(half > Usd::ZERO);
+        // floor = min(basic $14,600, max($1,300, earned + $450)) with earned = 0 + 10,000 − ½-SE.
+        assert_eq!(ar.standard_deduction, dec!(10450) - half);
+        assert_eq!(ar.itemized_deduction, None); // no Schedule A
+        assert_eq!(ar.deduction, dec!(10450) - half);
+    }
+
+    /// QBI/Form 8995 (L13): REIT §199A dividends reduce taxable income through L14 = L12 + L13.
+    #[test]
+    fn qbi_deduction_reduces_taxable_income() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            div_1099: vec![Form1099Div {
+                box1a_ordinary: dec!(5000),   // includes the §199A subset (strip-once)
+                box5_section_199a: dec!(5000), // REIT dividends
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &synthetic_table(2024), 2024);
+        // AGI = 100,000 + 5,000 ord div = 105,000; std 14,600; TI-before-QBI = 90,400.
+        // QBI: 20% × 5,000 = 1,000; income limit 20% × 90,400 = 18,080 → L13 = 1,000.
+        assert_eq!(ar.qbi_deduction, dec!(1000));
+        assert_eq!(ar.total_deductions, dec!(15600)); // 14,600 + 1,000
+        assert_eq!(ar.taxable_income, dec!(89400)); // 105,000 − 15,600
+    }
+
+    /// QBI above the §199A(e)(2) threshold (with QBI present) refuses via `screen_absolute` (8995-A
+    /// unmodeled); the same high income with NO REIT dividends is not refused.
+    #[test]
+    fn qbi_above_threshold_refuses() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(250000), dec!(168600), dec!(250000))],
+            div_1099: vec![Form1099Div {
+                box1a_ordinary: dec!(1000),
+                box5_section_199a: dec!(1000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        // TI-before-QBI = 251,000 − 14,600 = 236,400 > 191,950 → refuse.
+        assert_eq!(
+            screen_absolute(&ri, &ar, &p).map(|r| r.reason),
+            Some(RefuseReason::QbiAboveThreshold)
+        );
+        // Drop the REIT dividends → no QBI at all → no refuse even at the same high income.
+        let mut no_qbi = ri.clone();
+        no_qbi.div_1099[0].box5_section_199a = Usd::ZERO;
+        let ar2 = assemble_absolute(&no_qbi, &empty_ledger(), &p, &table, 2024);
+        assert_eq!(screen_absolute(&no_qbi, &ar2, &p), None);
+    }
+
+    /// TI ≤ 0 WITH a capital-loss carryforward-in refuses (the §1211/§1212 carryover-worksheet edge);
+    /// the SAME zero-TI return with NO carryforward is a refund-only filer — NOT refused (r5-narrowed).
+    #[test]
+    fn taxable_income_nonpositive_with_carryforward_refuses() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(5000), dec!(5000), dec!(5000))],
+            ..Default::default()
+        };
+        ri.capital_loss_carryforward_in = Carryforward {
+            short: dec!(2000),
+            long: Usd::ZERO,
+        };
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        // AGI = 5,000 wages + L7(−2,000 §1211-limited carryforward loss) = 3,000; std 14,600 → TI = 0.
+        assert_eq!(ar.taxable_income, Usd::ZERO);
+        assert_eq!(
+            screen_absolute(&ri, &ar, &p).map(|r| r.reason),
+            Some(RefuseReason::TaxableIncomeNonPositiveWithCarryforward)
+        );
+        // No carryforward → still TI = 0, but a refund-only filer is NOT refused.
+        let mut norf = ri.clone();
+        norf.capital_loss_carryforward_in = Carryforward::default();
+        let ar2 = assemble_absolute(&norf, &empty_ledger(), &p, &table, 2024);
+        assert_eq!(ar2.taxable_income, Usd::ZERO);
+        assert_eq!(screen_absolute(&norf, &ar2, &p), None);
     }
 }

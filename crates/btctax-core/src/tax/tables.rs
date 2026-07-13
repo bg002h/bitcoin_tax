@@ -243,6 +243,14 @@ pub struct FullReturnParams {
     pub elective_deferral_limit: Usd,
     /// §904(j) no-Form-1116 foreign-tax-credit ceiling (general; MFJ = double at the use site).
     pub ftc_ceiling: Usd,
+    /// §199A(e)(2) taxable-income-before-QBI threshold — **unmarried base** (Single/HoH/MFS/QSS). At or
+    /// below this the simplified Form 8995 path applies; above it the 8995-A phase-in (unmodeled in v1)
+    /// is required, so QBI **refuses** (SPEC §4.5). TY2024 = $191,950.
+    pub qbi_ti_threshold_unmarried: Usd,
+    /// §199A(e)(2) threshold — **MFJ** (200% of the base, §199A(e)(2)(B)). TY2024 = $383,900. A QSS is
+    /// NOT a joint return, so it uses the unmarried base (the lower threshold refuses sooner — the
+    /// fail-closed direction; mirrors the §904(j) FTC ceiling / §221 student-loan QSS treatment).
+    pub qbi_ti_threshold_married: Usd,
     /// §221(b)(2) student-loan-interest deduction MAGI phase-out `(start, end)` — unmarried (Single/HoH).
     pub student_loan_phaseout_unmarried: (Usd, Usd),
     /// §221(b)(2) phase-out `(start, end)` — MFJ/QSS. MFS gets **no** deduction (§221(e)(2)), so no range.
@@ -253,6 +261,16 @@ impl FullReturnParams {
     /// §63(c)(2) basic standard deduction for `status` (maps `Qss → Mfj`).
     pub fn std_deduction_for(&self, status: FilingStatus) -> Usd {
         self.std_deduction[&TaxTable::key(status)]
+    }
+
+    /// §199A(e)(2) taxable-income-before-QBI threshold for `status` (MFJ doubles; QSS uses the
+    /// unmarried base — QSS is not a joint return, and the lower threshold is the fail-closed direction
+    /// for the QBI refuse, matching this crate's §904(j)/§221 QSS-≠-joint convention).
+    pub fn qbi_ti_threshold(&self, status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj => self.qbi_ti_threshold_married,
+            _ => self.qbi_ti_threshold_unmarried,
+        }
     }
 
     /// §221 student-loan-interest MAGI phase-out `(start, end)` for `status`; `None` for **MFS**

@@ -48,6 +48,14 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   caller, it MUST also route through `screen_inputs` (or `apply_170b` must gain a `debug_assert!`/boundary
   error rejecting any non-50%-org class), else a P4 caller that skips the screen would silently DROP a
   non-50%-org gift → overstate tax (conservative, but a fail-open of the C1 guarantee). Review r2 N1 (Minor).
+  **P4.1 progress:** rider (ii) DONE — `assemble_absolute` calls `apply_170b` **unconditionally** on user
+  gifts + the ledger's §170(e) crypto donations (`crypto_charitable_gifts`: LT→`CapGainProp30` FMV,
+  ST→`OrdinaryProp50` basis) at with-crypto AGI, so `AbsoluteReturn.charitable_carryover_out` ages even in
+  a std-deduction year (KAT `crypto_donation_over_ceiling_carries_over_even_in_std_year`). Rider (iii)
+  satisfied by routing (the assembly's contract requires the refuse screens; crypto classes are 50%-org by
+  construction). **STILL OPEN (→ P4 report wiring):** persistence of `carryover_out` as year Y+1's
+  `charitable_carryover_in` + the **R3-M6 precedence** (computed overwrites computed; refuses user-entered
+  w/o `--force`) — needs the CLI side-table, lands with the dual report.
 - **p3-l16-absolute-P4** (DEVIATION — plan P3 task 4 → P4) — L16 (`method.rs::qdcgt_line16` on the WITH-crypto
   AGI) + the QBI 0-stub are ABSOLUTE-return lines; P3 ships the frozen-DELTA path (the derived `TaxProfile` →
   `compute_tax_year`, which already computes the delta tax via the frozen engine's own QDCGT). The absolute L16
@@ -93,12 +101,13 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   checkbox as a CONSUMED input, but §1.3's std-deduction pseudocode and SPEC §4.7 both silently drop it —
   the source of the unconsumed-flag gap. Fix the spec/recon text when §170/§63 is next revised. See also the
   spec-errata section below.
-- **p3-m3-dependent-floor-earned-income-G21** (DEVIATION → P4, with ½-SE) — the §63(c)(5) dependent-floor
-  earned income (SPEC §4.7/G21 = "Σ box1 + Schedule C net − ½SE") today passes **wages only**
-  (`standard_deduction(ri, params, year, wages)`, return_1040.rs). Direction is conservative: adding
-  non-crypto Sch C net WITHOUT the P4-deferred ½-SE would overstate earned → overstate the floor →
-  understate tax, so wages-only is the safe interim. P4 completes G21 (add Sch C net − ½SE) when ½-SE lands.
-  A dependent WITH a Schedule C currently gets a conservatively low floor; this entry is the recorded reason.
+- **p3-m3-dependent-floor-earned-income-G21** (DEVIATION → P4 — **RESOLVED in P4.1**) — the §63(c)(5)
+  dependent-floor earned income (SPEC §4.7/G21 = "Σ box1 + Schedule C net − ½SE") passed **wages only** in
+  P3 (the conservative interim, pending ½-SE). **P4.1 completes it on the ABSOLUTE side:**
+  `assemble_absolute` now passes `dependent_earned = max(0, wages + Schedule C net − ½-SE)` to
+  `standard_deduction` (KAT `dependent_floor_uses_g21_with_crypto_earned_income`). The DERIVE side
+  intentionally stays wages-only — its non-crypto profile has no Schedule C (crypto is excluded by the
+  frozen seam), so wages-only is not just conservative but *exact* there. Closed.
 - **p3-m4-none-dob-forfeited-63f-advisory** (→ P5 advisories) — a `None` DOB is treated as not-aged
   (`is_aged`), which forfeits the §63(f) aged box ($1,550/$1,950) — correct + conservative (never grant an
   unsubstantiated box; honors `p1-r1-m3-dob-option-pin`; the P6 header age checkbox from the same `None`

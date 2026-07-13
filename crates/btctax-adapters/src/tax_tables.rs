@@ -129,6 +129,9 @@ fn ty2024_full_return() -> FullReturnParams {
         kiddie_unearned_threshold: dec!(2600),// §1(g)(4)
         elective_deferral_limit: dec!(23000), // §402(g)(1), Notice 2023-75
         ftc_ceiling: dec!(300),               // §904(j) (MFJ = $600 at the use site)
+        // §199A(e)(2) QBI TI-before-QBI threshold (Rev. Proc. 2023-34 §2.10): $191,950 base / $383,900 MFJ.
+        qbi_ti_threshold_unmarried: dec!(191950),
+        qbi_ti_threshold_married: dec!(383900),
         // §221(b)(2) student-loan-interest MAGI phase-out (Rev. Proc. 2023-34 §3.22): $80k–$95k
         // single/HoH, $165k–$195k MFJ; MFS gets no deduction (handled in `student_loan_phaseout`).
         student_loan_phaseout_unmarried: (dec!(80000), dec!(95000)),
@@ -729,6 +732,9 @@ mod tests {
         assert_eq!(p.kiddie_unearned_threshold, dec!(2600));
         assert_eq!(p.elective_deferral_limit, dec!(23000));
         assert_eq!(p.ftc_ceiling, dec!(300));
+        assert_eq!(p.qbi_ti_threshold_unmarried, dec!(191950)); // §199A(e)(2), Rev. Proc. 2023-34 §2.10
+        assert_eq!(p.qbi_ti_threshold_married, dec!(383900));
+        assert_eq!(p.qbi_ti_threshold(FilingStatus::Qss), dec!(191950)); // QSS ≠ joint → unmarried base
         assert!(t.full_return_for(2025).is_none()); // v1 = TY2024 only → fail closed elsewhere
         assert!(t.full_return_for(2017).is_none());
     }
