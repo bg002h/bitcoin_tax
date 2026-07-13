@@ -72,6 +72,77 @@ pub fn schedule_2_lines(
     })
 }
 
+/// The printable **Schedule 1 (Additional Income and Adjustments to Income)** line chain.
+///
+/// **Unmodeled lines are BLANK, not zero**: line 2a/2b (alimony), 4 (Form 4797), 5 (Schedule E —
+/// unrepresentable in v1), 6 (Schedule F), most of the 8a–8z write-ins, and in Part II lines 11–14,
+/// 16, 17, 19, 20, 23 and all of 24a–24z. **Line 22 is the IRS's own "Reserved for future use"** —
+/// a live ReadOnly widget that must never be written.
+///
+/// v1's crypto ordinary income lands on **line 8v** ("Digital assets received as ordinary income not
+/// reported elsewhere") when it is NOT a trade or business; business crypto goes to line 3 via
+/// Schedule C instead. The two are mutually exclusive by construction, which is why both can be
+/// printed without double-counting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Schedule1Lines {
+    /// L1 — taxable state/local income-tax refund.
+    pub line1: Usd,
+    /// L3 — business income (the crypto Schedule C net).
+    pub line3: Usd,
+    /// L7 — unemployment compensation.
+    pub line7: Usd,
+    /// L8v — digital assets received as ordinary income (non-business).
+    pub line8v: Usd,
+    /// L9 — total other income = add **printed** 8a through 8z ⇒ `= line8v` here.
+    pub line9: Usd,
+    /// L10 — combine **printed** 1 through 7 and 9 → 1040 **L8**.
+    pub line10: Usd,
+    /// L15 — the §164(f) deductible part of self-employment tax.
+    pub line15: Usd,
+    /// L18 — penalty on early withdrawal of savings.
+    pub line18: Usd,
+    /// L21 — the §221 student-loan interest deduction (post-phase-out).
+    pub line21: Usd,
+    /// L26 — add **printed** 11 through 23 and 25 ⇒ `15 + 18 + 21` here → 1040 **L10**.
+    pub line26: Usd,
+}
+
+/// Derive the printed Schedule 1 chain. Returns `None` when there is neither additional income nor an
+/// adjustment — the schedule is then not filed, and 1040 lines 8 and 10 are zero.
+pub fn schedule_1_lines(ar: &AbsoluteReturn) -> Option<Schedule1Lines> {
+    let p = &ar.schedule_1;
+
+    // Part I — additional income.
+    let line1 = round_dollar(p.state_refund_1);
+    let line3 = round_dollar(p.schedule_c_net_3);
+    let line7 = round_dollar(p.unemployment_7);
+    let line8v = round_dollar(p.crypto_ordinary_8v);
+    let line9 = line8v; // 8a-8u and 8w-8z are blank
+    let line10 = line1 + line3 + line7 + line9; // ★ sums the PRINTED lines
+
+    // Part II — adjustments to income.
+    let line15 = round_dollar(p.half_se_15);
+    let line18 = round_dollar(p.early_withdrawal_18);
+    let line21 = round_dollar(p.student_loan_21);
+    let line26 = line15 + line18 + line21; // ★ sums the PRINTED lines
+
+    if line10 <= Usd::ZERO && line26 <= Usd::ZERO {
+        return None;
+    }
+    Some(Schedule1Lines {
+        line1,
+        line3,
+        line7,
+        line8v,
+        line9,
+        line10,
+        line15,
+        line18,
+        line21,
+        line26,
+    })
+}
+
 /// The printable **Schedule A (Itemized Deductions)** line chain.
 ///
 /// **Every derived line is computed from the PRINTED line above it**, not from the exact-cents
@@ -270,6 +341,15 @@ mod tests {
             half_se_deduction: z,
             agi: z,
             se,
+            schedule_1: crate::tax::return_1040::Schedule1Parts {
+                state_refund_1: z,
+                schedule_c_net_3: z,
+                unemployment_7: z,
+                crypto_ordinary_8v: z,
+                half_se_15: z,
+                early_withdrawal_18: z,
+                student_loan_21: z,
+            },
             standard_deduction: z,
             itemized_deduction: None,
             schedule_a: None,

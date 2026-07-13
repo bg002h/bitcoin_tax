@@ -42,6 +42,8 @@ pub const SCHEDULE_2_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040s2.pdf
 pub const SCHEDULE_3_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040s3.pdf");
 /// The bundled TY2024 Schedule A, Itemized Deductions (official IRS fillable PDF, public domain).
 pub const SCHEDULE_A_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040sa.pdf");
+/// The bundled TY2024 Schedule 1, Additional Income and Adjustments (official IRS fillable PDF, public domain).
+pub const SCHEDULE_1_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040s1.pdf");
 
 /// The bundled TY2017 Form 8949 (official IRS fillable PDF, US-gov public domain).
 pub const F8949_PDF_2017: &[u8] = include_bytes!("../forms/2017/f8949.pdf");
@@ -120,6 +122,14 @@ pub fn schedule_2_pdf(year: i32) -> Result<&'static [u8], FormsError> {
 pub fn schedule_3_pdf(year: i32) -> Result<&'static [u8], FormsError> {
     match year {
         2024 => Ok(SCHEDULE_3_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Schedule 1 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
+pub fn schedule_1_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(SCHEDULE_1_PDF_2024),
         _ => Err(FormsError::UnsupportedYear(year)),
     }
 }

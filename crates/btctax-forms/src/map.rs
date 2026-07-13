@@ -44,6 +44,8 @@ pub const SCHEDULE_2_MAP_2024: &str = include_str!("../forms/2024/f1040s2.map.to
 pub const SCHEDULE_3_MAP_2024: &str = include_str!("../forms/2024/f1040s3.map.toml");
 /// The TY2024 Schedule A (Itemized Deductions) map (embedded at compile time).
 pub const SCHEDULE_A_MAP_2024: &str = include_str!("../forms/2024/f1040sa.map.toml");
+/// The TY2024 Schedule 1 (Additional Income and Adjustments) map (embedded at compile time).
+pub const SCHEDULE_1_MAP_2024: &str = include_str!("../forms/2024/f1040s1.map.toml");
 
 /// The TY2017 Form 8949 map (embedded at compile time).
 pub const F8949_MAP_2017: &str = include_str!("../forms/2017/f8949.map.toml");
@@ -904,6 +906,75 @@ impl ScheduleAMap {
             &self.line13,
             &self.line14,
             &self.line17,
+        ]
+    }
+}
+
+/// The Schedule 1 (Additional Income and Adjustments to Income) field map for one tax year.
+///
+/// Root subform is `form1[0]` (as on Schedule 2), NOT `topmostSubform[0]`. **Two pages** — Part II is
+/// entirely on page 2, so descent is grouped by page.
+///
+/// **Line 22 is a ReadOnly "Reserved for future use" widget** that consumes a suffix number; never
+/// written. Non-money fields (a date on 2b, an SSN comb on 19b, a date on 19c) sit inside the money
+/// x-band — writing a dollar amount into one prints garbage.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Schedule1Map {
+    /// `"f1040s1"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// L1 — taxable state/local refund, AMOUNT column, page 1.
+    pub line1: MoneyCell,
+    /// L3 — business income (crypto Schedule C net), AMOUNT column, page 1.
+    pub line3: MoneyCell,
+    /// L7 — unemployment compensation, AMOUNT column, page 1.
+    pub line7: MoneyCell,
+    /// L8v — digital assets received as ordinary income, **MID column**, page 1.
+    pub line8v: MoneyCell,
+    /// L9 — total other income, AMOUNT column, page 1.
+    pub line9: MoneyCell,
+    /// L10 — combine 1–7 and 9 → 1040 L8, AMOUNT column, page 1.
+    pub line10: MoneyCell,
+    /// L15 — deductible part of SE tax, AMOUNT column, **page 2**.
+    pub line15: MoneyCell,
+    /// L18 — early-withdrawal penalty, AMOUNT column, page 2.
+    pub line18: MoneyCell,
+    /// L21 — student-loan interest deduction, AMOUNT column, page 2.
+    pub line21: MoneyCell,
+    /// L26 — total adjustments → 1040 L10, AMOUNT column, page 2.
+    pub line26: MoneyCell,
+}
+
+impl Schedule1Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_1_MAP_2024).expect("bundled schedule 1 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 10 filled cells in printed reading order. **Descent is grouped by PAGE.**
+    pub fn lines(&self) -> [&MoneyCell; 10] {
+        [
+            &self.line1,
+            &self.line3,
+            &self.line7,
+            &self.line8v,
+            &self.line9,
+            &self.line10,
+            &self.line15,
+            &self.line18,
+            &self.line21,
+            &self.line26,
         ]
     }
 }

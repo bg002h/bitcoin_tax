@@ -128,6 +128,31 @@ fn salt_line_5a(ri: &ReturnInputs, a: &crate::tax::return_inputs::ScheduleAInput
 /// The §213(a) medical-expense floor: 7.5% of AGI (Schedule A line 3).
 pub const MEDICAL_FLOOR_RATE: Usd = dec!(0.075);
 
+/// The **Schedule 1 components** — the income and adjustment lines that feed 1040 L8 and L10.
+///
+/// Exact cents (this is the computation; `printed::schedule_1_lines` rounds at the line and re-adds
+/// the ROUNDED lines so the filed form cross-foots — SPEC §3.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Schedule1Parts {
+    /// L1 — taxable refunds/credits/offsets of state and local income taxes (§111 tax-benefit rule).
+    pub state_refund_1: Usd,
+    /// L3 — business income: the crypto **Schedule C** net (gross SE income − expenses, floored at 0;
+    /// a Schedule C LOSS is refused upstream, §465 at-risk being out of scope).
+    pub schedule_c_net_3: Usd,
+    /// L7 — unemployment compensation.
+    pub unemployment_7: Usd,
+    /// L8v — "Digital assets received as ordinary income not reported elsewhere": the NON-business
+    /// crypto ordinary income (mining/staking/rewards that are not a trade or business).
+    pub crypto_ordinary_8v: Usd,
+    /// L15 — the §164(f) deductible part of self-employment tax (one-half of SS + regular Medicare;
+    /// the §1401(b)(2) Additional Medicare Tax is expressly excluded).
+    pub half_se_15: Usd,
+    /// L18 — penalty on early withdrawal of savings (Σ 1099-INT box 2).
+    pub early_withdrawal_18: Usd,
+    /// L21 — the §221 student-loan interest deduction, after its MAGI phase-out.
+    pub student_loan_21: Usd,
+}
+
 /// The **Schedule A components**, line by line — the itemized deduction is the SUM of these, and the
 /// P6 printed chain needs the individual lines, not just the total.
 ///
@@ -705,6 +730,8 @@ pub struct AbsoluteReturn {
     /// limited charitable INCLUDING the ledger's crypto donations, at with-crypto AGI G7). `None` when
     /// the filer has no Schedule A. The other arm of L12's `max`.
     pub itemized_deduction: Option<Usd>,
+    /// The Schedule 1 **components** (the income + adjustment lines behind 1040 L8 and L10).
+    pub schedule_1: Schedule1Parts,
     /// The Schedule A **components** (lines 1–17), when the filer has a Schedule A — `None` otherwise.
     /// Present even when the STANDARD deduction wins: Schedule A is still computed (that is how the
     /// max() is taken), and the printed return needs the lines to know it was not the better choice.
@@ -865,6 +892,16 @@ pub fn assemble_absolute(
     let adjustments = early_wd + half_se + student_loan;
     let agi = total_income - adjustments; // 1040 L11 (with-crypto AGI)
 
+    let schedule_1 = Schedule1Parts {
+        state_refund_1: ri.sch1.state_refund_taxable,
+        schedule_c_net_3: schedule_c_net,
+        unemployment_7: sum_unemployment(ri),
+        crypto_ordinary_8v: crypto.nonbusiness_ordinary,
+        half_se_15: half_se,
+        early_withdrawal_18: early_wd,
+        student_loan_21: student_loan,
+    };
+
     // ── Deductions L12–L15 (Schedule A on the WITH-crypto AGI, G7) ───────────────────────────────────
     // §63(c)(5) dependent floor uses the G21 with-crypto earned income = wages + Schedule C net − ½-SE
     // (now computable — completes `p3-m3-dependent-floor-earned-income-G21`; the derivation's non-crypto
@@ -996,6 +1033,7 @@ pub fn assemble_absolute(
         agi,
         se,
         standard_deduction: standard,
+        schedule_1,
         itemized_deduction: itemized,
         schedule_a,
         deduction,

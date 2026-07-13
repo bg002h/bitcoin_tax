@@ -9,7 +9,7 @@
 //! placement being right says nothing about the number being right.
 
 use btctax_core::tax::other_taxes::{form_8959_lines, form_8960_lines};
-use btctax_core::tax::printed::{Schedule2Lines, Schedule3Lines, ScheduleALines};
+use btctax_core::tax::printed::{Schedule1Lines, Schedule2Lines, Schedule3Lines, ScheduleALines};
 use btctax_core::tax::qbi::form_8995_lines;
 use btctax_core::tax::se::SeTaxResult;
 use btctax_core::tax::types::FilingStatus;
@@ -548,4 +548,66 @@ fn schedule_a_agi_inline_column_swap_fails_closed() {
     let err = fill_schedule_a_with_map(&sch_a_lines(), &map)
         .expect_err("swapping the AGI-inline cell with a MID cell must fail closed");
     assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
+}
+
+// ───────────────────────────────────── Schedule 1 ─────────────────────────────────────────────
+
+/// Schedule 1 carries the additional income (Part I, page 1) and the adjustments (Part II, page 2).
+/// This also exercises the per-page descent grouping across a real two-page form.
+#[test]
+fn schedule_1_fills_both_parts_across_two_pages() {
+    let lines = Schedule1Lines {
+        line1: dec!(1200),   // taxable state refund
+        line3: dec!(40000),  // crypto Schedule C net
+        line7: dec!(3000),   // unemployment
+        line8v: dec!(5000),  // non-business crypto ordinary income
+        line9: dec!(5000),   // total other income (8a-8z) = 8v
+        line10: dec!(49200), // 1,200 + 40,000 + 3,000 + 5,000 → 1040 L8
+        line15: dec!(2825),  // half of SE tax
+        line18: dec!(150),   // early-withdrawal penalty
+        line21: dec!(2500),  // student-loan interest
+        line26: dec!(5475),  // 2,825 + 150 + 2,500 → 1040 L10
+    };
+    let pdf = btctax_forms::fill_schedule_1(&lines, 2024).unwrap();
+    let g = |fqn: &str| tv(&pdf, fqn);
+
+    // Part I — page 1.
+    assert_eq!(g("form1[0].Page1[0].f1_04[0]").as_deref(), Some("1200")); // L1
+    assert_eq!(g("form1[0].Page1[0].f1_07[0]").as_deref(), Some("40000")); // L3
+    assert_eq!(g("form1[0].Page1[0].f1_11[0]").as_deref(), Some("3000")); // L7
+    assert_eq!(g("form1[0].Page1[0].f1_33[0]").as_deref(), Some("5000")); // L8v ★ digital assets
+    assert_eq!(g("form1[0].Page1[0].f1_38[0]").as_deref(), Some("49200")); // L10 → 1040 L8
+
+    // Part II — page 2.
+    assert_eq!(g("form1[0].Page2[0].f2_05[0]").as_deref(), Some("2825")); // L15
+    assert_eq!(g("form1[0].Page2[0].f2_08[0]").as_deref(), Some("150")); // L18
+    assert_eq!(g("form1[0].Page2[0].f2_13[0]").as_deref(), Some("2500")); // L21
+    assert_eq!(g("form1[0].Page2[0].f2_31[0]").as_deref(), Some("5475")); // L26 → 1040 L10
+
+    // ★ Line 22 (f2_14) is the IRS's ReadOnly "Reserved for future use" widget — never written.
+    // It sits BETWEEN line 21 and line 23, so a suffix-walker that skipped it would misalign
+    // everything below.
+    assert_eq!(
+        g("form1[0].Page2[0].f2_14[0]"),
+        None,
+        "L22 is reserved/ReadOnly"
+    );
+
+    // Unrepresentable income stays BLANK: line 5 is Schedule E, line 6 is Schedule F.
+    assert_eq!(
+        g("form1[0].Page1[0].f1_09[0]"),
+        None,
+        "L5 (Schedule E) must be blank"
+    );
+    assert_eq!(
+        g("form1[0].Page1[0].f1_10[0]"),
+        None,
+        "L6 (Schedule F) must be blank"
+    );
+    // …and the non-money fields in the money band are never touched (a date on 2b).
+    assert_eq!(
+        g("form1[0].Page1[0].f1_06[0]"),
+        None,
+        "L2b is a DATE field, not money"
+    );
 }

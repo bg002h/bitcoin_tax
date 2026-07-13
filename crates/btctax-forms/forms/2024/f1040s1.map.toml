@@ -1,0 +1,43 @@
+# Schedule 1 (Additional Income and Adjustments to Income), Form 1040, TY2024.
+#
+# Extracted with `xtask dump-fields` + correlated against the printed form (`pdftotext -layout`).
+#
+# ⚠️ ROOT SUBFORM IS `form1[0]` (as on Schedule 2) — NOT the `topmostSubform[0]` used by Schedule 3,
+# the 1040, Schedule A and everything else. Do not "unify" it.
+#
+# ⚠️ TWO PAGES — descent is grouped BY PAGE (Part II is entirely on page 2).
+#
+# Column x-clusters (code-side oracle in schedule1.rs): MID x ≈ [410,482], AMOUNT x ≈ [504,576].
+#
+# ★ LINE 22 (`f2_14`) IS A ReadOnly "Reserved for future use" WIDGET — live, and it CONSUMES a suffix
+#   number (f2_13 = line 21, f2_14 = line 22 reserved, f2_15 = line 23). Anything that walks suffixes
+#   and "skips reserved lines" misaligns line 23 onward by one. Never write it.
+#
+# ★ NON-MONEY FIELDS SIT IN THE MONEY x-BAND — writing a dollar amount into one prints garbage:
+#     f1_06                     line 2b — a DATE (divorce/separation agreement)
+#     Line19b_CombField.f2_10   line 19b — the recipient's SSN, a COMB field
+#     f2_11                     line 19c — a DATE
+#
+# ★ PARENTHESIZED `( )` BOXES (positive magnitudes only): lines 8a (f1_12), 8d (f1_15), 8s (f1_30).
+#   v1 fills none of them, but the sign convention is recorded — the parentheses ARE the minus sign.
+#
+# UNMAPPED ON PURPOSE — BLANK, never a misleading 0:
+#   Part I:  2a/2b (alimony), 4 (Form 4797), 5 (Schedule E — UNREPRESENTABLE in v1), 6 (Schedule F),
+#            8a-8u and 8w-8z (every other write-in)
+#   Part II: 11-14, 16, 17, 19a-19c, 20, 22 (reserved), 23, 24a-24z, 25
+form = "f1040s1"
+year = 2024
+
+# ── Part I — Additional Income (page 1) ─────────────────────────────────────────────────────────
+line1  = "form1[0].Page1[0].f1_04[0]"   # "Taxable refunds, credits, or offsets of state and local income taxes"  AMOUNT
+line3  = "form1[0].Page1[0].f1_07[0]"   # "Business income or (loss). Attach Schedule C"                          AMOUNT
+line7  = "form1[0].Page1[0].f1_11[0]"   # "Unemployment compensation"                                            AMOUNT
+line8v = "form1[0].Page1[0].f1_33[0]"   # "Digital assets received as ordinary income not reported elsewhere"    MID   ★ btctax
+line9  = "form1[0].Page1[0].f1_37[0]"   # "Total other income. Add lines 8a through 8z"                          AMOUNT
+line10 = "form1[0].Page1[0].f1_38[0]"   # "Combine lines 1 through 7 and 9…" → 1040 line 8                       AMOUNT
+
+# ── Part II — Adjustments to Income (page 2) ────────────────────────────────────────────────────
+line15 = "form1[0].Page2[0].f2_05[0]"   # "Deductible part of self-employment tax. Attach Schedule SE"           AMOUNT
+line18 = "form1[0].Page2[0].f2_08[0]"   # "Penalty on early withdrawal of savings"                               AMOUNT
+line21 = "form1[0].Page2[0].f2_13[0]"   # "Student loan interest deduction"                                      AMOUNT
+line26 = "form1[0].Page2[0].f2_31[0]"   # "Add lines 11 through 23 and 25…" → 1040 line 10                       AMOUNT
