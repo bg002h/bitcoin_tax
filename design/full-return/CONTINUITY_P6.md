@@ -8,10 +8,10 @@
 |---|---|
 | P0–P4 | **CERTIFIED GREEN** (incl. P4.9 carryover write-back) |
 | P5 (LIMITATIONS + advisories) | **CERTIFIED GREEN** — Fable r2 `0C/0I` at `b40bdec` |
-| **P6 (PDF fillers)** | **IN PROGRESS — 7 of 9 forms fill** |
+| **P6 (PDF fillers)** | **IN PROGRESS — ALL 9 forms fill; Sch D L17–22, the full 1040, and packet assembly remain** |
 | P7 (golden returns) | not started |
 
-Branch `full-return`. Gates at HEAD: **1605 passing / 0 failed**, clippy
+Branch `full-return`. Gates at HEAD: **1610 passing / 0 failed**, clippy
 (`--workspace --all-targets --locked -D warnings`) 0, fmt clean, xtask docs 5/5, FROZEN files 0 bytes.
 
 ## The operating contract (unchanged)
@@ -73,6 +73,8 @@ FAILS CLOSED. Fault-inject both legs (cross-column and same-column swap) in ever
 | Schedule 3 | `printed::schedule_3_lines` | `f1040s3.map.toml` | `schedule23.rs` | `010af35` |
 | Schedule A | `printed::schedule_a_lines` | `f1040sa.map.toml` | `schedule_a.rs` | `7a8a184` |
 | Schedule 1 | `printed::schedule_1_lines` | `f1040s1.map.toml` | `schedule23.rs` | `50462bc` |
+| Schedule C | `printed::schedule_c_lines` | `f1040sc.map.toml` | `schedule_c.rs` | `c099e5a` |
+| Schedule B | `printed::schedule_b_lines` | `f1040sb.map.toml` | `schedule_b.rs` | `23e5e22` |
 
 All 9 official TY2024 IRS PDFs are already bundled in `crates/btctax-forms/forms/2024/`.
 
@@ -98,13 +100,16 @@ lines 11/12/13/14 exactly — check for an existing struct before adding a new o
    not a Yes/No pair**.
 3. **Schedule D lines 17–22** — extend `schedule_d.rs` (all four §7.2 routing paths; KAT-10; the
    negative-cell read-back the oracle has never verified).
-4. **The full 1040** — extend `form1040.rs` from the capital-gains cluster to every line.
-5. **Wire it together**: `export_irs_pdf` emits the full packet; add the always-on **DRAFT/attest
+2. **The full 1040** — extend `form1040.rs` from the capital-gains cluster to every line.
+3. **Wire it together**: `export_irs_pdf` emits the full packet; write the **taxpayer name + SSN
+   header** every form carries — none of the nine fillers does yet, so the money lines are right but
+   the forms are not filable as-is (`p6-form-identity-header`, and it is cross-cutting: same two
+   fields, same `ReturnInputs.header` source, every form); add the always-on **DRAFT/attest
    gate** for full-return PDFs (`p5-i1`); and **DELETE the P5-C1 refusal**
    (`CliError::CryptoSliceExportForFullReturnYear` + its guard in `cmd/admin.rs` + the KAT
    `export_refuses_for_a_full_return_year_p5_c1`) — that refusal exists ONLY because the crypto-slice
    export would file an understated Schedule D, which is precisely what this phase fixes.
-6. **Fable P6 gate review → fold → re-review to 0C/0I.**
+4. **Fable P6 gate review → fold → re-review to 0C/0I.**
    ⚠️ The reviewer noted P5's green was measured at a HEAD that already contained the parked P6 commit
    `51020d8`. That code is inert at the user surface, so the green covers it — **but P6's own gate must
    NOT treat `51020d8` as already reviewed.**
