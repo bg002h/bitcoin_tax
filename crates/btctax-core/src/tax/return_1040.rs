@@ -2503,6 +2503,38 @@ mod tests {
         }
     }
 
+    /// The medical-floor channel (SPEC §6 / `p3-crypto-donation-delta-integration`): the ABSOLUTE
+    /// Schedule A applies the 7.5% medical floor on the **with-crypto AGI** (G7), so crypto income shrinks
+    /// the medical deduction — the one anti-conservative direction the §6 dual report documents (the derive
+    /// side fixes the floor at non-crypto AGI, so `absolute_with − absolute_without ≠ delta`).
+    #[test]
+    fn medical_floor_uses_with_crypto_agi_shrinking_the_deduction() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(100000), dec!(100000), dec!(100000))],
+            schedule_a: Some(ScheduleAInputs {
+                medical: dec!(20000),
+                mortgage_interest_1098: dec!(30000),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let params = ty2024_params();
+        let table = real_2024_single_table();
+        // No crypto: AGI 100,000 → floor 7,500 → medical 12,500; itemized 12,500 + 30,000 = 42,500.
+        let no_crypto = assemble_absolute(&ri, &empty_ledger(), &params, &table, 2024);
+        assert_eq!(no_crypto.itemized_deduction, Some(dec!(42500)));
+        // $50k hobby crypto → AGI 150,000 → floor 11,250 → medical 8,750; itemized 8,750 + 30,000 = 38,750.
+        let st = state_income(vec![income(IncomeKind::Reward, false, dec!(50000))]);
+        let with_crypto = assemble_absolute(&ri, &st, &params, &table, 2024);
+        assert_eq!(with_crypto.itemized_deduction, Some(dec!(38750)));
+        // The deduction shrank by exactly 7.5% × 50,000 = 3,750 (the with-crypto floor).
+        assert_eq!(
+            no_crypto.itemized_deduction.unwrap() - with_crypto.itemized_deduction.unwrap(),
+            dec!(3750)
+        );
+    }
+
     /// KAT-5b — the documented `absolute NIIT < delta` inequality in a **MAGI-binding SE** regime. Fixture:
     /// $210k business mining (Schedule C → SE) + $10k lending. The absolute MAGI is NET of the ½-SE
     /// deduction (which the frozen engine's gross `crypto_ord` cannot see), so the absolute MAGI arm binds
