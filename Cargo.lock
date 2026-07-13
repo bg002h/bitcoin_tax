@@ -3728,6 +3728,7 @@ name = "xtask"
 version = "0.5.0"
 dependencies = [
  "btctax-cli",
+ "btctax-forms",
  "btctax-update-prices",
  "clap",
  "clap_mangen",

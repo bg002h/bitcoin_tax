@@ -32,6 +32,8 @@ pub const SCHEDULE_SE_MAP_2024: &str = include_str!("../forms/2024/schedule_se.m
 pub const F8283_MAP_2024: &str = include_str!("../forms/2024/f8283.map.toml");
 /// The TY2024 Form 1040 map (embedded at compile time).
 pub const F1040_MAP_2024: &str = include_str!("../forms/2024/f1040.map.toml");
+/// The TY2024 Form 8959 (Additional Medicare Tax) map (embedded at compile time).
+pub const F8959_MAP_2024: &str = include_str!("../forms/2024/f8959.map.toml");
 
 /// The TY2017 Form 8949 map (embedded at compile time).
 pub const F8949_MAP_2017: &str = include_str!("../forms/2017/f8949.map.toml");
@@ -460,6 +462,98 @@ impl ScheduleDMap {
             2025 => Ok(Self::ty2025()),
             _ => Err(FormsError::UnsupportedYear(year)),
         }
+    }
+}
+
+/// The Form 8959 (Additional Medicare Tax) field map for one tax year.
+///
+/// Only the lines we FILL are mapped. Lines 2/3 (Form 4137 / Form 8919) and all of Part III plus
+/// line 23 (RRTA) are unmodeled and are deliberately absent — they stay blank on the filed form,
+/// which is why line 4 = line 1, line 18 = 7 + 13, and line 24 = line 22.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form8959Map {
+    /// `"f8959"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// L1 — Σ W-2 box 5 Medicare wages, MID column.
+    pub line1: MoneyCell,
+    /// L4 — add lines 1–3 (2/3 blank ⇒ = line 1), MID column.
+    pub line4: MoneyCell,
+    /// L5 — filing-status threshold, MID column.
+    pub line5: MoneyCell,
+    /// L6 — line 4 − line 5, floored at 0, AMOUNT column.
+    pub line6: MoneyCell,
+    /// L7 — 0.9% × line 6, AMOUNT column.
+    pub line7: MoneyCell,
+    /// L8 — Schedule SE Part I line 6 (net SE earnings), MID column.
+    pub line8: MoneyCell,
+    /// L9 — filing-status threshold (again), MID column.
+    pub line9: MoneyCell,
+    /// L10 — the amount from line 4, MID column.
+    pub line10: MoneyCell,
+    /// L11 — line 9 − line 10, floored at 0, MID column.
+    pub line11: MoneyCell,
+    /// L12 — line 8 − line 11, floored at 0, AMOUNT column.
+    pub line12: MoneyCell,
+    /// L13 — 0.9% × line 12, AMOUNT column.
+    pub line13: MoneyCell,
+    /// L18 — add 7, 13, 17 → Schedule 2 line 11, AMOUNT column.
+    pub line18: MoneyCell,
+    /// L19 — Σ W-2 box 6 Medicare tax withheld, MID column.
+    pub line19: MoneyCell,
+    /// L20 — the amount from line 1, MID column.
+    pub line20: MoneyCell,
+    /// L21 — 1.45% × line 20, MID column.
+    pub line21: MoneyCell,
+    /// L22 — line 19 − line 21, floored at 0, AMOUNT column.
+    pub line22: MoneyCell,
+    /// L24 — add 22 and 23 → 1040 line 25c, AMOUNT column.
+    pub line24: MoneyCell,
+}
+
+impl Form8959Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(F8959_MAP_2024).expect("bundled f8959 2024 map parses")
+    }
+
+    /// The map for a supported tax year. Full-return v1 is **TY2024-only**: Form 8959 is reachable
+    /// only from the absolute return, which itself has tables for 2024 alone.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+
+    /// The 17 filled cells, in **printed reading order** (strictly descending y on page 1) — the
+    /// order `fill_form_8959` walks and the ordinal the geometric verifier checks the descent of.
+    pub fn lines(&self) -> [&MoneyCell; 17] {
+        [
+            &self.line1,
+            &self.line4,
+            &self.line5,
+            &self.line6,
+            &self.line7,
+            &self.line8,
+            &self.line9,
+            &self.line10,
+            &self.line11,
+            &self.line12,
+            &self.line13,
+            &self.line18,
+            &self.line19,
+            &self.line20,
+            &self.line21,
+            &self.line22,
+            &self.line24,
+        ]
     }
 }
 
