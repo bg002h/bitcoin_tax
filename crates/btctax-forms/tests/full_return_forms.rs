@@ -9,13 +9,17 @@
 //! placement being right says nothing about the number being right.
 
 use btctax_core::tax::other_taxes::{form_8959_lines, form_8960_lines};
-use btctax_core::tax::printed::{Schedule1Lines, Schedule2Lines, Schedule3Lines, ScheduleALines};
+use btctax_core::tax::printed::{
+    Schedule1Lines, Schedule2Lines, Schedule3Lines, ScheduleALines, ScheduleCLines,
+};
 use btctax_core::tax::qbi::form_8995_lines;
 use btctax_core::tax::se::SeTaxResult;
 use btctax_core::tax::types::FilingStatus;
 use btctax_core::Usd;
 use btctax_forms::testonly::*;
-use btctax_forms::{Form8959Map, Form8960Map, Form8995Map, FormsError, Schedule3Map, ScheduleAMap};
+use btctax_forms::{
+    Form8959Map, Form8960Map, Form8995Map, FormsError, Schedule3Map, ScheduleAMap, ScheduleCMap,
+};
 use rust_decimal_macros::dec;
 use sha2::{Digest, Sha256};
 
@@ -610,4 +614,97 @@ fn schedule_1_fills_both_parts_across_two_pages() {
         None,
         "L2b is a DATE field, not money"
     );
+}
+
+// ───────────────────────────────────── Schedule C ─────────────────────────────────────────────
+
+#[test]
+fn schedule_c_fills_the_printed_chain_and_reads_back() {
+    // $60,000 of crypto mining gross, $8,000 of expenses ⇒ $52,000 net profit.
+    let lines = ScheduleCLines {
+        line1: dec!(60000),
+        line3: dec!(60000),
+        line5: dec!(60000),
+        line7: dec!(60000),
+        line28: dec!(8000),
+        line29: dec!(52000),
+        line31: dec!(52000),
+    };
+    let pdf = btctax_forms::fill_schedule_c(&lines, 2024).unwrap();
+    let g = |fqn: &str| tv(&pdf, fqn);
+
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_10[0]").as_deref(),
+        Some("60000")
+    ); // L1
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_12[0]").as_deref(),
+        Some("60000")
+    ); // L3
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_14[0]").as_deref(),
+        Some("60000")
+    ); // L5
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_16[0]").as_deref(),
+        Some("60000")
+    ); // L7
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_41[0]").as_deref(),
+        Some("8000")
+    ); // L28
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_42[0]").as_deref(),
+        Some("52000")
+    ); // L29
+
+    // ★ THE LINE-31 TRAP. Line 31's GUTTER label is at y≈144.5, but its AMOUNT BOX is at y≈120.5 —
+    // two printed rows lower, because the line carries two bullet rows of instructions. Correlating
+    // on the gutter label would map line 31 to the wrong widget, and line 31 is the figure that feeds
+    // BOTH Schedule 1 line 3 AND Schedule SE line 2: a mis-map there is wrong income and wrong SE tax.
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_46[0]").as_deref(),
+        Some("52000"),
+        "line 31 must land in the box at y=120 (f1_46), NOT the one near its gutter label"
+    );
+    // f1_45 is line 30 (business use of home) — out of scope, and it must stay BLANK. If line 31 had
+    // been mapped by its gutter label it would very plausibly have landed here instead.
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_45[0]"),
+        None,
+        "L30 (home office) is out of scope and must be blank"
+    );
+
+    // Unmodeled: returns (L2), cost of goods sold (L4), other income (L6) — BLANK, never 0.
+    for blank in ["f1_11[0]", "f1_13[0]", "f1_15[0]"] {
+        let fqn = format!("topmostSubform[0].Page1[0].{blank}");
+        assert_eq!(g(&fqn), None, "{fqn} (unmodeled) must be blank");
+    }
+    // Part II's individual expense lines stay BLANK — v1 has one flat total, and writing 0 into each
+    // of the twenty lines would assert we found no advertising, no insurance, no legal fees.
+    for expense in ["Lines18-27[0].f1_28[0]", "Lines18-27[0].f1_33[0]"] {
+        let fqn = format!("topmostSubform[0].Page1[0].{expense}");
+        assert_eq!(g(&fqn), None, "{fqn} (itemized expense line) must be blank");
+    }
+}
+
+/// Schedule C's money column is x ≈ [475, 576] — its own, shared with no other form. Its cells sit
+/// OUTSIDE the [504, 576] band every other schedule uses, so a filler that reused the common cluster
+/// constant would reject every Schedule C cell. This pins that the right cluster is in force.
+#[test]
+fn schedule_c_same_column_swap_fails_closed() {
+    let lines = ScheduleCLines {
+        line1: dec!(60000),
+        line3: dec!(60000),
+        line5: dec!(60000),
+        line7: dec!(60000),
+        line28: dec!(8000),
+        line29: dec!(52000),
+        line31: dec!(52000),
+    };
+    let mut map = ScheduleCMap::ty2024();
+    std::mem::swap(&mut map.line1, &mut map.line31); // same column, y-order inverted
+    let err = fill_schedule_c_with_map(&lines, &map)
+        .expect_err("a same-column swap must fail closed on the descent leg");
+    assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
 }

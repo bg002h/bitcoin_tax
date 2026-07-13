@@ -143,6 +143,62 @@ pub fn schedule_1_lines(ar: &AbsoluteReturn) -> Option<Schedule1Lines> {
     })
 }
 
+/// The printable **Schedule C (Profit or Loss From Business)** line chain — the crypto trade or
+/// business.
+///
+/// **Part II is NOT itemized.** The filer supplies a flat expense total, so the individual expense
+/// lines (8 through 27a) are BLANK and only the **line 28 total** is printed. Printing a 0 into each
+/// of those twenty lines would assert we considered and found no advertising, no insurance, no
+/// legal fees — which is a different claim from "the filer gave us one number".
+///
+/// Also blank, and deliberately: line 2 (returns and allowances), line 4 and Part III (cost of goods
+/// sold — mining and staking have no inventory), line 6 (other income), line 30 (the §280A home-office
+/// deduction, out of scope), and Part IV (vehicle information).
+///
+/// **A Schedule C LOSS is refused upstream** (§465 at-risk substantiation is out of scope), so line 31
+/// is always ≥ 0 and the at-risk checkboxes on lines 32a/32b are never needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScheduleCLines {
+    /// L1 — gross receipts or sales.
+    pub line1: Usd,
+    /// L3 — subtract line 2 (returns/allowances, blank) from line 1 ⇒ `= line1`.
+    pub line3: Usd,
+    /// L5 — gross profit = line 3 − line 4 (cost of goods sold, blank) ⇒ `= line3`.
+    pub line5: Usd,
+    /// L7 — gross income = line 5 + line 6 (other income, blank) ⇒ `= line5`.
+    pub line7: Usd,
+    /// L28 — total expenses (the flat total; Part II's individual lines are blank).
+    pub line28: Usd,
+    /// L29 — tentative profit = **printed** line 7 − **printed** line 28.
+    pub line29: Usd,
+    /// L31 — net profit = line 29 − line 30 (home office, blank) ⇒ `= line29`. Flows to **both**
+    /// Schedule 1 line 3 and Schedule SE — one figure, two destinations.
+    pub line31: Usd,
+}
+
+/// Derive the printed Schedule C chain. Returns `None` when the filer has no crypto trade or business.
+pub fn schedule_c_lines(ar: &AbsoluteReturn) -> Option<ScheduleCLines> {
+    let p = ar.schedule_c.as_ref()?;
+
+    let line1 = round_dollar(p.gross_receipts_1);
+    let line3 = line1; // − line 2 (returns and allowances), blank
+    let line5 = line3; // − line 4 (cost of goods sold), blank — no inventory
+    let line7 = line5; // + line 6 (other income), blank
+    let line28 = round_dollar(p.total_expenses_28);
+    let line29 = (line7 - line28).max(Usd::ZERO); // a loss refuses upstream
+    let line31 = line29; // − line 30 (home office), blank
+
+    Some(ScheduleCLines {
+        line1,
+        line3,
+        line5,
+        line7,
+        line28,
+        line29,
+        line31,
+    })
+}
+
 /// The printable **Schedule A (Itemized Deductions)** line chain.
 ///
 /// **Every derived line is computed from the PRINTED line above it**, not from the exact-cents
@@ -350,6 +406,7 @@ mod tests {
                 early_withdrawal_18: z,
                 student_loan_21: z,
             },
+            schedule_c: None,
             standard_deduction: z,
             itemized_deduction: None,
             schedule_a: None,

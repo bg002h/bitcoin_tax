@@ -128,6 +128,28 @@ fn salt_line_5a(ri: &ReturnInputs, a: &crate::tax::return_inputs::ScheduleAInput
 /// The §213(a) medical-expense floor: 7.5% of AGI (Schedule A line 3).
 pub const MEDICAL_FLOOR_RATE: Usd = dec!(0.075);
 
+/// The **Schedule C components** — the crypto trade-or-business profit-and-loss lines.
+///
+/// v1 models exactly ONE Schedule C (the crypto trade or business). The filer supplies only a flat
+/// expense total; v1 does not itemize Part II, so Schedule C's expense lines 8–27a are BLANK and only
+/// the **line 28 total** is printed. There is no cost of goods sold (Part III), no vehicle info
+/// (Part IV), and no home-office deduction (line 30) — mining/staking has no inventory, and the §280A
+/// home-office computation is out of scope.
+///
+/// **A Schedule C LOSS is REFUSED upstream** (§465 at-risk substantiation is out of scope), so the
+/// net profit is always ≥ 0 and line 31 never needs the loss checkboxes (32a/32b).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScheduleCParts {
+    /// L1 — gross receipts: Σ business SE-eligible crypto income (mining/staking/rewards flagged as a
+    /// trade or business). Business-flagged crypto `Interest` is NOT here — it refuses (R3-I3).
+    pub gross_receipts_1: Usd,
+    /// L28 — total expenses (the filer's flat total; Part II's individual lines are not itemized).
+    pub total_expenses_28: Usd,
+    /// L31 — net profit = line 7 − line 28, floored at 0 (a loss refuses upstream). Flows to BOTH
+    /// Schedule 1 line 3 AND Schedule SE line 2 — the same figure, two destinations.
+    pub net_profit_31: Usd,
+}
+
 /// The **Schedule 1 components** — the income and adjustment lines that feed 1040 L8 and L10.
 ///
 /// Exact cents (this is the computation; `printed::schedule_1_lines` rounds at the line and re-adds
@@ -732,6 +754,8 @@ pub struct AbsoluteReturn {
     pub itemized_deduction: Option<Usd>,
     /// The Schedule 1 **components** (the income + adjustment lines behind 1040 L8 and L10).
     pub schedule_1: Schedule1Parts,
+    /// The Schedule C **components**, when there is a crypto trade or business — `None` otherwise.
+    pub schedule_c: Option<ScheduleCParts>,
     /// The Schedule A **components** (lines 1–17), when the filer has a Schedule A — `None` otherwise.
     /// Present even when the STANDARD deduction wins: Schedule A is still computed (that is how the
     /// max() is taken), and the printed return needs the lines to know it was not the better choice.
@@ -892,6 +916,15 @@ pub fn assemble_absolute(
     let adjustments = early_wd + half_se + student_loan;
     let agi = total_income - adjustments; // 1040 L11 (with-crypto AGI)
 
+    // Schedule C exists only when the filer declared a crypto trade or business. Gross receipts are
+    // the SE-eligible business crypto income; the net (floored at 0 — a loss refuses upstream) is the
+    // SAME figure that feeds Schedule 1 line 3 and Schedule SE.
+    let schedule_c = ri.schedule_c.as_ref().map(|_| ScheduleCParts {
+        gross_receipts_1: crypto.business_se_gross,
+        total_expenses_28: schedule_c_expenses,
+        net_profit_31: schedule_c_net,
+    });
+
     let schedule_1 = Schedule1Parts {
         state_refund_1: ri.sch1.state_refund_taxable,
         schedule_c_net_3: schedule_c_net,
@@ -1034,6 +1067,7 @@ pub fn assemble_absolute(
         se,
         standard_deduction: standard,
         schedule_1,
+        schedule_c,
         itemized_deduction: itemized,
         schedule_a,
         deduction,

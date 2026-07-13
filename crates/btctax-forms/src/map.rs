@@ -46,6 +46,8 @@ pub const SCHEDULE_3_MAP_2024: &str = include_str!("../forms/2024/f1040s3.map.to
 pub const SCHEDULE_A_MAP_2024: &str = include_str!("../forms/2024/f1040sa.map.toml");
 /// The TY2024 Schedule 1 (Additional Income and Adjustments) map (embedded at compile time).
 pub const SCHEDULE_1_MAP_2024: &str = include_str!("../forms/2024/f1040s1.map.toml");
+/// The TY2024 Schedule C (Profit or Loss From Business) map (embedded at compile time).
+pub const SCHEDULE_C_MAP_2024: &str = include_str!("../forms/2024/f1040sc.map.toml");
 
 /// The TY2017 Form 8949 map (embedded at compile time).
 pub const F8949_MAP_2017: &str = include_str!("../forms/2017/f8949.map.toml");
@@ -975,6 +977,67 @@ impl Schedule1Map {
             &self.line18,
             &self.line21,
             &self.line26,
+        ]
+    }
+}
+
+/// The Schedule C (Profit or Loss From Business) field map — the crypto trade or business.
+///
+/// **Its money column is x ≈ [475, 576]** — not the [504, 576] of Schedules 1/2/3/A and Forms
+/// 8959/8960/8995, and not Schedule B's [489.6, 576]. No amount-column constant is shared between
+/// forms in this crate, and none may be.
+///
+/// Part II's individual expense lines (8–27b) are unmapped: v1 takes a FLAT expense total, so only
+/// line 28 is printed. Line 30 (home office) and the line-32 at-risk checkboxes are unmapped too — a
+/// Schedule C loss refuses upstream, so line 31 is always ≥ 0.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduleCMap {
+    /// `"f1040sc"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// L1 — gross receipts or sales.
+    pub line1: MoneyCell,
+    /// L3 — line 1 − line 2 (returns, blank).
+    pub line3: MoneyCell,
+    /// L5 — gross profit (line 3 − line 4, COGS blank).
+    pub line5: MoneyCell,
+    /// L7 — gross income (line 5 + line 6, other income blank).
+    pub line7: MoneyCell,
+    /// L28 — total expenses.
+    pub line28: MoneyCell,
+    /// L29 — tentative profit (line 7 − line 28).
+    pub line29: MoneyCell,
+    /// L31 — net profit → Schedule 1 L3 **and** Schedule SE L2.
+    pub line31: MoneyCell,
+}
+
+impl ScheduleCMap {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_C_MAP_2024).expect("bundled schedule C 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 7 filled cells in printed reading order (strictly descending y on page 1).
+    pub fn lines(&self) -> [&MoneyCell; 7] {
+        [
+            &self.line1,
+            &self.line3,
+            &self.line5,
+            &self.line7,
+            &self.line28,
+            &self.line29,
+            &self.line31,
         ]
     }
 }

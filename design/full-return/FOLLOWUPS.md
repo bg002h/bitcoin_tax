@@ -341,6 +341,14 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   naturally into P6's render work, which already has to grow (see `p5-m1`). Surfaced by Fable IMPL-P5 r2
   (N-r2-1) after r1-N5's money-format half was fixed.
 
+- **p6-form-identity-header → P6 (packet assembly).** None of the new P6 fillers (8959, 8960, 8995,
+  Sch 1/2/3/A/C) writes the **taxpayer name + SSN header** that every IRS form carries at the top. The
+  money lines are right, but the forms are not filable as-is: an unnamed Schedule C is not a return.
+  This is deliberately cross-cutting rather than per-form — every form has the same two fields, they
+  all come from the same `ReturnInputs.header`, and they belong with the packet-assembly step that
+  wires `export_irs_pdf` (item 5 in CONTINUITY_P6's remaining-work list). **Not deferrable past P6** —
+  the phase's exit condition is a filable packet.
+
 - **p1-ssn-normalization-P6** — (carried; unchanged).
 
 ## Spec errata surfaced by the plan review (fix spec text; do not re-open the GREEN gate for these)
