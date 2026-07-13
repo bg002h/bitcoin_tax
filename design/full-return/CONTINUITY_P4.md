@@ -1,6 +1,6 @@
 # CONTINUITY — Full-Return Expansion, Phase 4 (resume point)
 
-**Written:** 2026-07-12 (updated after P4.6). **Branch:** `full-return`. **HEAD:** `1ecd06d`.
+**Written:** 2026-07-12 (updated after P4.8). **Branch:** `full-return`. **HEAD:** `dc744f1`.
 **Read alongside:** the `full-return-expansion-roadmap` auto-memory (loaded each session),
 `design/SPEC_full_return.md`, `design/IMPLEMENTATION_PLAN_full_return.md`, `design/full-return/FOLLOWUPS.md`,
 `STANDARD_WORKFLOW.md`. This file is the fast on-ramp; those are authoritative.
@@ -34,6 +34,13 @@
     + KAT-5b (MAGI-binding SE: absolute $238.25 < delta $380, documented §6 divergence).
   - **medical-floor KAT (`1ecd06d`):** with-crypto AGI shrinks the absolute Sch A medical deduction (the one
     anti-conservative channel §6 documents).
+  - **P4.8 (`dc744f1`) — §6 dual report RENDER (read-only):** `report --tax-year` now renders the absolute
+    filed 1040 (income→total tax L24→refund/owed) side-by-side with the crypto delta, with the §6
+    never-reconcile labels + the §4.12 provenance line (`render_dual_report` / `provenance_label` in
+    `btctax-cli/src/render.rs`; wired into `report_tax_year` as a 7th `TaxYearReport` field, printed by
+    main.rs). Fetches `ReturnInputs` + runs `assemble_absolute` + `screen_absolute` (refuse → "NOT
+    COMPUTABLE" for the absolute side while the delta still shows). 1 integration KAT; all 23 report goldens
+    unchanged. Folds `p2-provenance-printing` (full-return-output half).
 
 ## Operating contract (do NOT drift)
 
@@ -54,33 +61,34 @@
 
 ## Next steps (Phase 4 remaining) — task list order
 
-Build-order items 1–5 (deductions L12–L15, L16, Sch 2 other taxes, credits, excess-SS+payments) + the
-reduce-to-delta / medical-floor KATs are **DONE + committed** (see "Where we are"). What remains:
+Everything through the **§6 dual-report RENDER is DONE + committed** (compute stages 1–9 + the dual report +
+provenance + reduce-to-delta / medical-floor KATs — see "Where we are"). **Two items remain:**
 
-1. **§6 dual report RENDER (P4.8) — the last implementation piece.** Wire the report path
-   (`crates/btctax-cli/src/{resolve.rs,session.rs}` + the report render) to run the fail-closed screen ladder
-   (`screen_inputs` → `screen_compute_dependent` → `assemble_absolute` → `screen_absolute`, all → `NotComputable`
-   on refuse) and render the **absolute-liability lines + the crypto delta side-by-side** with the §6 labels
-   ("different questions"); document the delta deduction as **approximate**; NEVER reconcile to the dollar.
-   - **KAT (render-level):** a **medical-floor fixture** where `absolute_with − absolute_without ≠ delta` —
-     the compute-level pin already exists (`medical_floor_uses_with_crypto_agi_shrinking_the_deduction`,
-     `1ecd06d`); the render KAT asserts both numbers print with the never-reconcile labels.
-   - Folds **`p2-provenance-printing`** (§4.12 — print `Provenance` + a `provenance_label` on every output) +
-     **`p2-r2-n4-pseudo-year-viewer-gap`**.
-   - **Carryover write-back PERSISTENCE + R3-M6 precedence** (still-open half of `p3-carryover-writeback-P4`
-     + the QBI REIT/PTP half): persist `AbsoluteReturn.charitable_carryover_out` +
-     `qbi_reit_ptp_carryforward_out` as year (Y+1)'s `charitable_carryover_in` / `qbi.reit_ptp_carryforward_in`
-     in the CLI side-table; computed overwrites computed, **refuses to overwrite a user-entered value w/o
-     `--force`**. Needs `crates/btctax-cli/src/return_inputs.rs` (the side-table get/set). The compute already
-     EXPOSES both carryover-outs on `AbsoluteReturn`.
-   - L36 apply-to-next stays pinned 0/blank (`spec-s48-l36`).
+1. **Carryover write-back PERSISTENCE (P4.9)** — still-open half of `p3-carryover-writeback-P4` +
+   `p1-carryover-writeback-P3P4` + the QBI REIT/PTP half + R3-M6 precedence. **Deliberately deferred from
+   P4.8** (P4.8 is read-only): persisting is a distinct increment with a **model change + a write-on-report
+   design decision**:
+   - Persist `AbsoluteReturn.charitable_carryover_out` (`Vec<CharitableCarryItem>`) +
+     `qbi_reit_ptp_carryforward_out` (`Usd`) as year **(Y+1)**'s `charitable_carryover_in` /
+     `qbi.reit_ptp_carryforward_in` via the CLI side-table (`btctax-cli/src/return_inputs.rs` `get`/`set`,
+     then `Session::save`). The compute already EXPOSES both on `AbsoluteReturn`.
+   - **R3-M6 precedence:** a computed carryover-in overwrites a prior **computed** value but **refuses to
+     overwrite a user-entered** one (warn + `--force`). Needs **carryover PROVENANCE** — `CharitableCarryItem`
+     (and the QBI carryforward) have no computed-vs-user flag today, so this is a `return_inputs.rs` MODEL
+     change (`#[serde(default)]` provenance, defaulting to User for back-compat).
+   - **Design decision to confirm:** `report` currently is read-only; R3-M6 says write-back "at report time".
+     Either add a `--write-carryover`/`--force` flag to `report`, or a dedicated `carryover apply` command.
+   - No fail-open in deferring: nothing persists a wrong carryover today (the filer carries forward manually,
+     the P1–P3 behavior). L36 apply-to-next stays pinned 0/blank (`spec-s48-l36`).
+   - `p2-r2-n4-pseudo-year-viewer-gap` (viewer/CLI output-consistency) also folds around here.
 2. **P4 whole-diff Fable review → GREEN** (fold to 0C/0I, re-review after every fold, persist verbatim). Fable
-   is pre-approved as reviewer for this project. The whole P4 diff = `b61d595..HEAD` on `full-return`.
+   is pre-approved as reviewer for this project. The whole P4 diff = `b61d595..HEAD` on `full-return`. (May be
+   run BEFORE P4.9 on the compute+render if desired — the write-back is an isolated additive follow-on.)
 
-**Compute entry points already built** (for the render to consume): `assemble_absolute(ri, state, params,
-table, year) -> AbsoluteReturn` (income→refund/owed, every line a field); `screen_absolute(ri, &ar, params)`
-(QBI-over-threshold / AMT / TI≤0-carryforward refuses); `screen_compute_dependent`; `screen_inputs`
-(return_refuse.rs). All refuses are `Refusal { reason: RefuseReason, detail }`.
+**Compute + render entry points built:** `assemble_absolute(ri, state, params, table, year) -> AbsoluteReturn`
+(income→refund/owed, every line a field); `screen_absolute(ri, &ar, params)` (QBI/AMT/TI≤0 refuses);
+`render::render_dual_report` / `render::provenance_label` (CLI). All refuses are
+`Refusal { reason: RefuseReason, detail }`.
 
 **Acceptance (plan §Phase 4):** deep/02 **Ex.2 ($60k mining)** end-to-end other-taxes block to the cent;
 **KAT-5/5b** reduce-to-delta (4 regimes; SE fixture NII-binding for 5, MAGI-binding documented `absolute<delta`
