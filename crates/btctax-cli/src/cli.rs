@@ -168,6 +168,15 @@ pub enum Command {
     /// worksheet, incl. the line-21 loss limit) are OUT OF SCOPE. Rows on an exchange that MAY carry
     /// 1099-DA broker reporting are flagged on stderr (btctax files them all under Box I/L and says so).
     ///
+    /// REFUSED for a tax year that has FULL-RETURN inputs (`income import`). These fillers are the
+    /// crypto-slice pipeline: Schedule D carries only the ledger's crypto totals — it has no line 13
+    /// (1099-DIV box-2a capital-gain distributions) and no lines 6/14 (capital-loss carryovers), both
+    /// of which the computed return DOES include in 1040 line 7 — and the 1040 fill covers only the
+    /// capital-gain cluster. For a crypto-only year those forms are complete and correct; for a full
+    /// return they would be complete-LOOKING forms with income missing, so v1 fails closed rather than
+    /// hand you a plausible wrong form. Transcribe the report's figures by hand until the full-return
+    /// fillers ship. See `btctax limitations`.
+    ///
     /// PSEUDO-RECONCILED ledgers: the same attestation gate as export-snapshot applies, AND every
     /// page is stamped with a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` watermark.
     ExportIrsPdf {

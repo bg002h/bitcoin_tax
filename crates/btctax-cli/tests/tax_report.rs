@@ -1737,6 +1737,6 @@ fn full_return_report_surfaces_conservative_omission_advisories() {
     assert!(dual.contains("OVERSTATED"), "{dual}");
     assert!(dual.contains("DATE OF BIRTH NOT ON FILE"), "{dual}");
     assert!(dual.contains("FBAR"), "{dual}");
-    // AGI = 40k wages + 10k LTCG = 50k < the $60k EIC ceiling, with earned income → EIC advisory too.
+    // AGI = 40k wages + 10k LTCG = 50k < the $70k EIC advisory ceiling, with earned income → EIC too.
     assert!(dual.contains("EIC NOT COMPUTED"), "{dual}");
 }

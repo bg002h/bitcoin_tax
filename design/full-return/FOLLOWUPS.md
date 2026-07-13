@@ -336,6 +336,11 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   printed-line figures alongside the exact ones, or state the difference) and LIMITATIONS.md must say it.
   Owning phase: **P6**.
 
+- **p5-n5-advisory-line-wrapping → P6 (render).** `render_advisories` (`crates/btctax-cli/src/render.rs`)
+  emits each advisory as ONE unwrapped 300–400-char line; the house style wraps everywhere else. Nit — folds
+  naturally into P6's render work, which already has to grow (see `p5-m1`). Surfaced by Fable IMPL-P5 r2
+  (N-r2-1) after r1-N5's money-format half was fixed.
+
 - **p1-ssn-normalization-P6** — (carried; unchanged).
 
 ## Spec errata surfaced by the plan review (fix spec text; do not re-open the GREEN gate for these)

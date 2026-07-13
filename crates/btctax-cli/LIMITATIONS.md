@@ -170,7 +170,8 @@ There is nowhere to enter these, and a return that needs them is out of scope:
 
 ## Legal
 
-Mechanical calculation only (no unauthorized practice of law/accountancy). Every full return is a **DRAFT**
-until you attest. Not tax advice. Licensed permissively (MIT OR Unlicense); clean-room implementation from
+Mechanical calculation only (no unauthorized practice of law/accountancy). Whatever `btctax` gives you is a
+**draft you are responsible for checking** — see the DRAFT/attestation note at the top for exactly which
+exports are watermarked and gated today (it is not yet all of them). Not tax advice. Licensed permissively (MIT OR Unlicense); clean-room implementation from
 primary sources (the Internal Revenue Code, IRS forms and instructions, and the applicable Revenue
 Procedures) — no GPL-derived tax logic.
