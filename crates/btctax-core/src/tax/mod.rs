@@ -15,7 +15,9 @@ pub mod se;
 pub mod tables;
 pub mod types;
 
-pub use return_1040::derive_tax_profile;
+pub use return_1040::{
+    assemble_absolute, derive_tax_profile, screen_absolute, AbsoluteReturn,
+};
 
 pub use method::{
     assert_edges_binnable, first_unbinnable_edge, qdcgt_line16, regular_tax, TAX_TABLE_CEILING,

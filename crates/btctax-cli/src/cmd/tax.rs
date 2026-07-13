@@ -132,6 +132,9 @@ pub type TaxYearReport = (
     Option<String>,
     Option<String>,
     Option<String>,
+    // 7th field: the §6 dual-report block (absolute filed return + crypto-delta side-by-side, SPEC §6).
+    // `Some` only for a `ReturnInputs`-provenance year (a full 1040 exists); `None` for the delta-only path.
+    Option<String>,
 );
 
 /// Task 9 (B.5) + Task 10 (M4) + P2-D Task 2 + Chunk-1 D2 + Chunk-3a: load events + project once,
@@ -163,7 +166,7 @@ pub fn report_tax_year(
     // entry point every computing consumer shares so the app never shows two liabilities for one year.
     let tables = BundledTaxTables::load();
     let fr_tables = BundledFullReturnTables::load();
-    let profile = match crate::resolve::resolve_and_screen(
+    let (profile, provenance) = match crate::resolve::resolve_and_screen(
         s.conn(),
         &state,
         year,
@@ -174,9 +177,44 @@ pub fn report_tax_year(
         crate::resolve::ProfileOutcome::Uncomputable { detail } => {
             return Err(CliError::Usage(detail))
         }
-        crate::resolve::ProfileOutcome::Ready { profile, .. } => profile,
+        crate::resolve::ProfileOutcome::Ready {
+            profile,
+            provenance,
+        } => (profile, provenance),
     };
     let outcome = compute_tax_year(&events, &state, year, profile.as_ref(), &tables);
+
+    // §6 DUAL REPORT (SPEC §6 / §5 stages 1–9): the absolute filed return, side-by-side with the crypto
+    // delta above. Only meaningful for a `ReturnInputs`-provenance year — the input-screen + compute-
+    // dependent screen have already passed inside the resolver (else we returned `Uncomputable`), and
+    // TY2024 is the only year with `FullReturnParams` (so both `Option`s are `Some` here). The absolute
+    // path adds `screen_absolute` (QBI-over-threshold / AMT / TI≤0-with-carryforward), which — unlike the
+    // delta path — can refuse the ABSOLUTE return while the delta still computes; render that as a note.
+    let dual_report: Option<String> = if provenance == crate::resolve::Provenance::ReturnInputs {
+        match (
+            crate::return_inputs::get(s.conn(), year)?,
+            fr_tables.full_return_for(year),
+            tables.table_for(year),
+        ) {
+            (Some(ri), Some(params), Some(table)) => {
+                let ar =
+                    btctax_core::assemble_absolute(&ri, &state, params, table, year);
+                match btctax_core::screen_absolute(&ri, &ar, params) {
+                    Some(refusal) => Some(format!(
+                        "\n═══ Absolute filed return — tax year {year} ═══\n  \
+                         NOT COMPUTABLE [{:?}]: {}\n",
+                        refusal.reason, refusal.detail
+                    )),
+                    None => Some(crate::render::render_dual_report(
+                        year, &ar, &outcome, provenance,
+                    )),
+                }
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
     // P2-B: the RAW pre-netting Schedule D part totals for the same year, from the same projection.
     let sched_d = schedule_d(&state, year);
     // P2-C Task 3 + Chunk-3a: standalone Form 709 gift advisory + §2505 lifetime-exclusion
@@ -254,6 +292,7 @@ pub fn report_tax_year(
         gift_advisory,
         schedule_se,
         donation_appraisal_advisory,
+        dual_report,
     ))
 }
 

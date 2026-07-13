@@ -110,13 +110,25 @@ fn run() -> Result<ExitCode, CliError> {
                 ));
             }
             if let Some(y) = tax_year {
-                let (outcome, advisory, sched_d, gift_advisory, schedule_se, donation_appraisal) =
-                    cmd::tax::report_tax_year(vault, &passphrase(false)?, y, ptg_raw)?;
+                let (
+                    outcome,
+                    advisory,
+                    sched_d,
+                    gift_advisory,
+                    schedule_se,
+                    donation_appraisal,
+                    dual_report,
+                ) = cmd::tax::report_tax_year(vault, &passphrase(false)?, y, ptg_raw)?;
                 print!(
                     "{}",
                     render::render_tax_outcome(y, &outcome, advisory.as_deref())
                 );
                 print!("{}", render::render_schedule_d(y, &sched_d, &outcome));
+                // §6 DUAL REPORT: the absolute filed 1040 return, side-by-side with the crypto delta above
+                // (present only for a ReturnInputs-provenance year — a full return exists).
+                if let Some(block) = dual_report {
+                    print!("{block}");
+                }
                 // P2-D Task 2: standalone Schedule SE §1401 SE-tax section (non-gating; STANDALONE —
                 // does NOT feed engine B's total_federal_tax_attributable).
                 if let Some(se) = schedule_se {

@@ -1090,6 +1090,106 @@ pub fn render_tax_outcome(
     s
 }
 
+/// The §4.12 provenance label for the resolved profile — printed on the full-return output so a
+/// reviewer can audit which source produced the figures (`p2-provenance-printing`).
+pub fn provenance_label(p: crate::resolve::Provenance) -> &'static str {
+    use crate::resolve::Provenance::*;
+    match p {
+        ReturnInputs => "ReturnInputs (derived from line items)",
+        StoredProfile => "stored TaxProfile (raw override)",
+        PseudoPlaceholder => "pseudo-reconcile placeholder ($0)",
+        Missing => "none (TaxProfileMissing)",
+    }
+}
+
+/// Render the **§6 dual report**: the absolute filed-return liability (Form 1040, WITH crypto) and the
+/// crypto-attribution DELTA are **different questions** — shown together, labeled, and NEVER reconciled to
+/// the dollar (SPEC §6). Only produced for a `ReturnInputs`-provenance year (a full 1040 exists). `delta`
+/// is the same `TaxOutcome` the crypto-delta block already showed above. Provenance is printed here (§4.12).
+pub fn render_dual_report(
+    year: i32,
+    ar: &btctax_core::AbsoluteReturn,
+    delta: &btctax_core::TaxOutcome,
+    provenance: crate::resolve::Provenance,
+) -> String {
+    let mut s = String::new();
+    let _ = writeln!(s, "\n═══ Absolute filed return (Form 1040) — tax year {year} ═══");
+    let _ = writeln!(s, "  Profile source: {}", provenance_label(provenance));
+    let _ = writeln!(s, "  Total income (1040 L9):   {}", fmt_money(ar.total_income));
+    let _ = writeln!(s, "  Adjustments (L10):        {}", fmt_money(ar.adjustments));
+    let _ = writeln!(s, "  AGI (L11):                {}", fmt_money(ar.agi));
+    let ded_kind = match ar.itemized_deduction {
+        Some(it) if it >= ar.standard_deduction => "itemized",
+        _ => "standard",
+    };
+    let _ = writeln!(s, "  Deduction (L12, {ded_kind}): {}", fmt_money(ar.deduction));
+    if ar.qbi_deduction > Usd::ZERO {
+        let _ = writeln!(s, "  QBI deduction (L13):      {}", fmt_money(ar.qbi_deduction));
+    }
+    let _ = writeln!(s, "  Taxable income (L15):     {}", fmt_money(ar.taxable_income));
+    let _ = writeln!(s, "  Tax (L16):                {}", fmt_money(ar.regular_tax));
+    if ar.foreign_tax_credit > Usd::ZERO {
+        let _ = writeln!(
+            s,
+            "  Foreign tax credit (Sch 3 L1): {}",
+            fmt_money(ar.foreign_tax_credit)
+        );
+    }
+    if ar.se_tax_sch2_l4 > Usd::ZERO {
+        let _ = writeln!(
+            s,
+            "  Self-employment tax (Sch 2 L4): {}",
+            fmt_money(ar.se_tax_sch2_l4)
+        );
+    }
+    if ar.additional_medicare.additional_medicare_tax > Usd::ZERO {
+        let _ = writeln!(
+            s,
+            "  Additional Medicare (Form 8959 → Sch 2 L11): {}",
+            fmt_money(ar.additional_medicare.additional_medicare_tax)
+        );
+    }
+    if ar.niit.tax > Usd::ZERO {
+        let _ = writeln!(
+            s,
+            "  Net Investment Income Tax (Form 8960 → Sch 2 L12): {}",
+            fmt_money(ar.niit.tax)
+        );
+    }
+    let _ = writeln!(s, "  TOTAL TAX (L24):          {}", fmt_money(ar.total_tax));
+    let _ = writeln!(s, "  Total payments (L33):     {}", fmt_money(ar.total_payments));
+    if ar.overpayment_refund > Usd::ZERO {
+        let _ = writeln!(s, "  → REFUND (L35a):          {}", fmt_money(ar.overpayment_refund));
+    } else {
+        let _ = writeln!(s, "  → AMOUNT OWED (L37):      {}", fmt_money(ar.amount_owed));
+    }
+    // §6: the two figures answer different questions and are NEVER reconciled.
+    let delta_str = match delta {
+        btctax_core::TaxOutcome::Computed(r) => fmt_money(r.total_federal_tax_attributable),
+        btctax_core::TaxOutcome::NotComputable(_) => "not computable".to_string(),
+    };
+    let _ = writeln!(
+        s,
+        "\n  ── Two DIFFERENT questions — NOT reconciled (SPEC §6) ──"
+    );
+    let _ = writeln!(
+        s,
+        "  • Absolute TOTAL TAX (this filed return, WITH crypto): {}",
+        fmt_money(ar.total_tax)
+    );
+    let _ = writeln!(
+        s,
+        "  • Crypto-attributable tax (DELTA, shown above):        {delta_str}"
+    );
+    let _ = writeln!(
+        s,
+        "  The delta's implied deduction is fixed at derivation time (non-crypto AGI), so it is \
+         APPROXIMATE where a\n  deduction is AGI-sensitive (e.g. the 7.5% medical floor); the two do NOT \
+         reconcile to the dollar."
+    );
+    s
+}
+
 /// P2-B Task 3: render the RAW pre-netting Schedule D part totals (Part I ST, Part II LT) for
 /// `year`, mirroring `render_tax_outcome`. These are the Form 8949/Schedule D part totals BEFORE
 /// §1222/§1211/§1212 netting + carryforward — that netting is applied in the tax computation
