@@ -56,10 +56,12 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   construction). **STILL OPEN (→ P4 report wiring):** persistence of `carryover_out` as year Y+1's
   `charitable_carryover_in` + the **R3-M6 precedence** (computed overwrites computed; refuses user-entered
   w/o `--force`) — needs the CLI side-table, lands with the dual report.
-- **p3-l16-absolute-P4** (DEVIATION — plan P3 task 4 → P4) — L16 (`method.rs::qdcgt_line16` on the WITH-crypto
-  AGI) + the QBI 0-stub are ABSOLUTE-return lines; P3 ships the frozen-DELTA path (the derived `TaxProfile` →
-  `compute_tax_year`, which already computes the delta tax via the frozen engine's own QDCGT). The absolute L16
-  lands with P4's absolute assembly. No fail-open: `report` computes the crypto DELTA correctly today.
+- **p3-l16-absolute-P4** (DEVIATION — plan P3 task 4 → P4 — **RESOLVED in P4.1b**) — L16
+  (`method.rs::qdcgt_line16` on the WITH-crypto AGI) + the QBI stub are ABSOLUTE-return lines; P3 shipped the
+  frozen-DELTA path. **P4.1a** landed QBI (real Form 8995, not a 0-stub); **P4.1b** landed L16:
+  `AbsoluteReturn.regular_tax = qdcgt_line16(ordinary_for(status), ltcg_for(status), L15, L3a, net_ltcg)` on
+  the WITH-crypto TI, covering all four §7.2 Schedule-D routing paths (KATs `l16_*`, cent-exact vs the
+  deep/01 examples). Closed.
 - **p3-non50org-charitable-special-limit** (follow-on — now GUARDED by a refuse) — the non-50%-org charitable
   classes (Cash30, OrdinaryProp30, CapGainProp20) are **REFUSED upstream** by `screen_inputs`
   (`RefuseReason::NonPublicCharityContribution`, review C1) whenever they appear as a current gift OR a
@@ -150,6 +152,12 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   reachable (larger deductions eat the ordinary base first) but never flip the conservative sign, so deferral
   is not a fail-open. Code comment at the strip site updated to match this re-schedule. P4's dual report
   (`absolute_with − absolute_without ≠ delta` KAT) is where the min-cap must land + be pinned.
+  **P4.1b progress:** the ABSOLUTE-side cap is now landed + pinned — `AbsoluteReturn.regular_tax` uses
+  `qdcgt_line16`, whose built-in `min(L1, qd+ltcg)` cap (method.rs F-A) never overstates L16, verified by
+  KAT `l16_preferential_over_ti_is_capped` (TI 35,400 / QD 50,000 ⇒ L16 $0, not the uncapped $446). **STILL
+  OPEN (→ P4.8 dual report):** the frozen-DELTA path still lacks the cap (can't edit the engine), so the
+  `absolute_with − absolute_without ≠ delta` divergence KAT — pinning that the *absolute* side is right while
+  the delta is the documented approximation — lands with the dual report.
 
 ## From Fable spec review r4 (5 Minors — spec is GREEN 0C/0I with these open)
 

@@ -18,6 +18,7 @@ use crate::forms::schedule_d;
 use crate::state::{LedgerState, RemovalKind, Term};
 use crate::tax::charitable::apply_170b;
 use crate::tax::compute::{net_1222, CapNet};
+use crate::tax::method::qdcgt_line16;
 use crate::tax::qbi::{compute_8995, qbi_over_threshold};
 use crate::tax::return_inputs::{
     CharitableCarryItem, CharitableClass, CharitableGift, Owner, Person, ReturnInputs,
@@ -513,8 +514,8 @@ const SE_6017_FLOOR: Usd = dec!(400);
 
 /// The **absolute** (WITH-crypto) 1040 assembly — the filed-return counterpart to [`derive_tax_profile`]'s
 /// frozen non-crypto `TaxProfile`. Built incrementally across Phase 4; **this increment covers SPEC §5
-/// stages 1–3** (income L1a–L9, adjustments L10, AGI L11, deductions L12–L15) plus the Schedule SE /
-/// §6017 block. Later P4 increments add L16 (regular tax), credits, other taxes, payments, and the dual
+/// stages 1–4** (income L1a–L9, adjustments L10, AGI L11, deductions L12–L15, regular tax L16) plus the
+/// Schedule SE / §6017 block. Later P4 increments add credits, other taxes, payments, and the dual
 /// report. The §4.10 compute-dependent refuses that need L12/L15 (QBI-above-threshold, TI≤0-with-
 /// carryforward) are screened by [`screen_absolute`] after this (infallible) assembly.
 ///
@@ -576,12 +577,18 @@ pub struct AbsoluteReturn {
     pub charitable_carryover_out: Vec<CharitableCarryItem>,
     /// Form 8995 **line 17** — the REIT/PTP loss carryforward to next year (magnitude). For the write-back.
     pub qbi_reit_ptp_carryforward_out: Usd,
+    /// 1040 **L16** — the regular tax on taxable income (whole dollars): the Qualified Dividends & Capital
+    /// Gain Tax Worksheet ([`qdcgt_line16`]) on the WITH-crypto L15 / L3a / preferential net LTCG. It
+    /// reduces to the plain Tax Table / TCW when there is no preferential income, so it is correct across
+    /// all four Schedule-D routing paths (SPEC §7.2). The QDCGT `min(L1, qd+ltcg)` cap (the
+    /// `p2-pref-over-ti-clamp` fix) is built into the worksheet, so the absolute L16 never overstates.
+    pub regular_tax: Usd,
 }
 
-/// Assemble the absolute (WITH-crypto) 1040 income + AGI + deductions/taxable-income for `year` (SPEC §5
-/// stages 1–3). See [`AbsoluteReturn`]. Assumes `screen_inputs` + `screen_compute_dependent` have passed
-/// (so all charitable classes are 50%-org and Schedule C net ≥ 0); the L12/L15 compute-dependent refuses
-/// are checked afterward by [`screen_absolute`].
+/// Assemble the absolute (WITH-crypto) 1040 income + AGI + deductions + taxable income + regular tax for
+/// `year` (SPEC §5 stages 1–4). See [`AbsoluteReturn`]. Assumes `screen_inputs` + `screen_compute_dependent`
+/// have passed (so all charitable classes are 50%-org and Schedule C net ≥ 0); the L12/L15 compute-dependent
+/// refuses are checked afterward by [`screen_absolute`].
 pub fn assemble_absolute(
     ri: &ReturnInputs,
     state: &LedgerState,
@@ -700,6 +707,21 @@ pub fn assemble_absolute(
     let total_deductions = deduction + qbi.deduction; // L14
     let taxable_income = (agi - total_deductions).max(Usd::ZERO); // L15
 
+    // ── L16 regular tax (SPEC §5 stage 4 / §7.2 Schedule-D routing) ──────────────────────────────────
+    // The Qualified Dividends & Capital Gain Tax Worksheet on the WITH-crypto TI (L15), qualified
+    // dividends (L3a), and the §1(h) preferential net capital gain (`net_ltcg`). `qdcgt_line16` reduces
+    // to the plain Tax Table / TCW when there is no preferential income, so it yields the correct L16 in
+    // every §7.2 path (gain-both / ST-gain·LT-loss / net-loss-capped / zero) — the routing that differs
+    // is *which worksheet the form shows* (a P6 fill concern), not the L16 value. The worksheet's
+    // `min(L1, qd+ltcg)` cap is the `p2-pref-over-ti-clamp` fix (folds `p3-l16-absolute-P4`).
+    let regular_tax = qdcgt_line16(
+        table.ordinary_for(status),
+        table.ltcg_for(status),
+        taxable_income,
+        qualified_dividends,
+        net_ltcg,
+    );
+
     AbsoluteReturn {
         wages,
         taxable_interest,
@@ -721,6 +743,7 @@ pub fn assemble_absolute(
         net_ltcg,
         charitable_carryover_out: charitable.carryover_out,
         qbi_reit_ptp_carryforward_out: qbi.reit_ptp_carryforward_out,
+        regular_tax,
     }
 }
 
@@ -1820,5 +1843,174 @@ mod tests {
         let ar2 = assemble_absolute(&norf, &empty_ledger(), &p, &table, 2024);
         assert_eq!(ar2.taxable_income, Usd::ZERO);
         assert_eq!(screen_absolute(&norf, &ar2, &p), None);
+    }
+
+    // ── L16 regular tax + §7.2 Schedule-D routing (Phase 4 task 2) ────────────────────────────────
+    use crate::state::{Disposal, DisposalLeg};
+    use crate::tax::method::regular_tax;
+    use crate::tax::tables::{LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule};
+
+    /// A TaxTable carrying the REAL TY2024 **Single** ordinary schedule + §1(h) LTCG breakpoints (Rev.
+    /// Proc. 2023-34) so L16 values are cent-exact against the `method.rs`-proven QDCGT kernel; the SS
+    /// wage base is the real TY2024 $168,600 (irrelevant here — no SE income in these fixtures).
+    fn real_2024_single_table() -> TaxTable {
+        let mut ordinary = BTreeMap::new();
+        ordinary.insert(
+            FilingStatus::Single,
+            OrdinarySchedule {
+                brackets: vec![
+                    OrdinaryBracket { lower: dec!(0), rate: dec!(0.10) },
+                    OrdinaryBracket { lower: dec!(11600), rate: dec!(0.12) },
+                    OrdinaryBracket { lower: dec!(47150), rate: dec!(0.22) },
+                    OrdinaryBracket { lower: dec!(100525), rate: dec!(0.24) },
+                    OrdinaryBracket { lower: dec!(191950), rate: dec!(0.32) },
+                    OrdinaryBracket { lower: dec!(243725), rate: dec!(0.35) },
+                    OrdinaryBracket { lower: dec!(609350), rate: dec!(0.37) },
+                ],
+            },
+        );
+        let mut ltcg = BTreeMap::new();
+        ltcg.insert(
+            FilingStatus::Single,
+            LtcgBreakpoints { max_zero: dec!(47025), max_fifteen: dec!(518900) },
+        );
+        TaxTable {
+            year: 2024,
+            source: "TEST-TY2024-Single",
+            ordinary,
+            ltcg,
+            gift_annual_exclusion: dec!(18000),
+            ss_wage_base: dec!(168600),
+            gift_lifetime_exclusion: dec!(13_610_000),
+        }
+    }
+    fn disp_leg(term: Term, proceeds: Usd, basis: Usd) -> DisposalLeg {
+        DisposalLeg {
+            lot_id: LotId { origin_event_id: EventId::decision(1), split_sequence: 0 },
+            sat: 100_000_000,
+            proceeds,
+            basis,
+            gain: proceeds - basis,
+            term,
+            basis_source: BasisSource::ExchangeProvided,
+            gift_zone: None,
+            acquired_at: date!(2020 - 01 - 01),
+            wallet: crate::identity::WalletId::SelfCustody { label: "w".into() },
+            pseudo: false,
+        }
+    }
+    fn state_disposals(legs: Vec<DisposalLeg>) -> LedgerState {
+        LedgerState {
+            disposals: vec![Disposal {
+                event: EventId::decision(1),
+                kind: crate::event::DisposeKind::Sell,
+                disposed_at: date!(2024 - 05 - 01),
+                legs,
+                fee_mini_disposition: false,
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// §7.2 path — a net LT gain (box-2a capital-gain distribution) → QDCGT. TI 120,000 / net-LTCG 20,000
+    /// ⇒ L16 = $20,053 (deep/01 example b, cent-exact through the assembly).
+    fn wages_single(wages: Usd) -> ReturnInputs {
+        ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, wages, wages, wages)],
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn l16_lt_gain_uses_qdcgt() {
+        let mut ri = wages_single(dec!(114600));
+        ri.div_1099 = vec![Form1099Div {
+            box2a_capgain_distr: dec!(20000), // LT-character → preferential net LTCG
+            ..Default::default()
+        }];
+        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_single_table(), 2024);
+        assert_eq!(ar.taxable_income, dec!(120000)); // AGI 134,600 − std 14,600
+        assert_eq!(ar.net_ltcg, dec!(20000));
+        assert_eq!(ar.regular_tax, dec!(20053)); // QDCGT (deep/01 ex. b)
+    }
+
+    /// §7.2 path — qualified dividends but no net LTCG (an ST-gain/LT-loss-style year) still routes to
+    /// QDCGT (preferential rate on the QD). TI 60,000 / QD 2,000 ⇒ L16 = $8,119 (deep/01 example c).
+    #[test]
+    fn l16_qualified_dividends_use_qdcgt() {
+        let mut ri = wages_single(dec!(72600));
+        ri.div_1099 = vec![Form1099Div {
+            box1a_ordinary: dec!(2000),
+            box1b_qualified: dec!(2000),
+            ..Default::default()
+        }];
+        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_single_table(), 2024);
+        assert_eq!(ar.taxable_income, dec!(60000)); // AGI 74,600 − std 14,600
+        assert_eq!(ar.qualified_dividends, dec!(2000));
+        assert_eq!(ar.net_ltcg, Usd::ZERO);
+        assert_eq!(ar.regular_tax, dec!(8119)); // QDCGT (deep/01 ex. c)
+    }
+
+    /// §7.2 path — NO preferential income → L16 collapses to the plain Tax Table (QDCGT ≡ `regular_tax`).
+    #[test]
+    fn l16_no_preferential_income_is_tax_table() {
+        let ri = wages_single(dec!(60000));
+        let table = real_2024_single_table();
+        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &table, 2024);
+        assert_eq!(ar.taxable_income, dec!(45400)); // 60,000 − 14,600
+        assert_eq!(ar.qualified_dividends, Usd::ZERO);
+        assert_eq!(ar.net_ltcg, Usd::ZERO);
+        // Identical to the plain Tax Table on the same TI — no QDCGT preferential branch taken.
+        assert_eq!(ar.regular_tax, regular_tax(table.ordinary_for(FilingStatus::Single), dec!(45400)));
+    }
+
+    /// §7.2 path — a net-loss year: the §1211-capped −$3,000 reaches L7, the preferential slice is 0, and
+    /// L16 is the Tax Table on the loss-reduced TI (deep/01 loss-year shape).
+    #[test]
+    fn l16_net_loss_capped_path() {
+        let mut ri = wages_single(dec!(60000));
+        ri.capital_loss_carryforward_in = Carryforward { short: dec!(5000), long: Usd::ZERO };
+        let table = real_2024_single_table();
+        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &table, 2024);
+        assert_eq!(ar.capital_gain, dec!(-3000)); // §1211 limit
+        assert_eq!(ar.net_ltcg, Usd::ZERO);
+        assert_eq!(ar.taxable_income, dec!(42400)); // (60,000 − 3,000) − 14,600
+        assert_eq!(ar.regular_tax, regular_tax(table.ordinary_for(FilingStatus::Single), dec!(42400)));
+    }
+
+    /// §7.2 path — ST gain cross-netted against an LT loss (Schedule D line 16 netting): the surviving
+    /// net is SHORT-term (ordinary), so L7 > 0 but the preferential slice is 0. ST $10,000 gain − LT
+    /// $4,000 loss ⇒ L7 = $6,000 ordinary, net-LTCG 0.
+    #[test]
+    fn l16_short_gain_long_loss_cross_nets_to_ordinary() {
+        let ri = wages_single(dec!(50000));
+        let st = state_disposals(vec![
+            disp_leg(Term::ShortTerm, dec!(30000), dec!(20000)), // +10,000 ST
+            disp_leg(Term::LongTerm, dec!(6000), dec!(10000)),   // −4,000 LT
+        ]);
+        let table = real_2024_single_table();
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &table, 2024);
+        assert_eq!(ar.capital_gain, dec!(6000)); // 10,000 ST − 4,000 LT cross-net → ordinary
+        assert_eq!(ar.net_ltcg, Usd::ZERO);
+        assert_eq!(ar.taxable_income, dec!(41400)); // (50,000 + 6,000) − 14,600
+        assert_eq!(ar.regular_tax, regular_tax(table.ordinary_for(FilingStatus::Single), dec!(41400)));
+    }
+
+    /// `p2-pref-over-ti-clamp` on the absolute side: preferential income exceeding taxable income is CAPPED
+    /// at TI (the QDCGT `min(L1, qd+ltcg)`), so L16 is not overstated. TI 35,400 / QD 50,000 ⇒ L16 = $0
+    /// (method.rs KAT-1 — the uncapped worksheet would wrongly produce $446).
+    #[test]
+    fn l16_preferential_over_ti_is_capped() {
+        let mut ri = wages_single(Usd::ZERO);
+        ri.w2s.clear(); // no wages
+        ri.div_1099 = vec![Form1099Div {
+            box1a_ordinary: dec!(50000),
+            box1b_qualified: dec!(50000),
+            ..Default::default()
+        }];
+        let ar = assemble_absolute(&ri, &empty_ledger(), &ty2024_params(), &real_2024_single_table(), 2024);
+        assert_eq!(ar.taxable_income, dec!(35400)); // 50,000 − 14,600
+        assert_eq!(ar.qualified_dividends, dec!(50000));
+        assert_eq!(ar.regular_tax, Usd::ZERO); // capped → $0 (not $446)
     }
 }
