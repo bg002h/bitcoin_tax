@@ -9,13 +9,13 @@
 //! placement being right says nothing about the number being right.
 
 use btctax_core::tax::other_taxes::{form_8959_lines, form_8960_lines};
-use btctax_core::tax::printed::{Schedule2Lines, Schedule3Lines};
+use btctax_core::tax::printed::{Schedule2Lines, Schedule3Lines, ScheduleALines};
 use btctax_core::tax::qbi::form_8995_lines;
 use btctax_core::tax::se::SeTaxResult;
 use btctax_core::tax::types::FilingStatus;
 use btctax_core::Usd;
 use btctax_forms::testonly::*;
-use btctax_forms::{Form8959Map, Form8960Map, Form8995Map, FormsError, Schedule3Map};
+use btctax_forms::{Form8959Map, Form8960Map, Form8995Map, FormsError, Schedule3Map, ScheduleAMap};
 use rust_decimal_macros::dec;
 use sha2::{Digest, Sha256};
 
@@ -447,5 +447,105 @@ fn schedule_3_same_column_swap_fails_closed() {
     std::mem::swap(&mut map.line1, &mut map.line15);
     let err =
         fill_schedule_3_with_map(&lines, &map).expect_err("a same-column swap must fail closed");
+    assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
+}
+
+// ───────────────────────────────────── Schedule A ─────────────────────────────────────────────
+
+fn sch_a_lines() -> ScheduleALines {
+    // AGI 100,000 ⇒ 7.5% floor 7,500; medical 10,000 ⇒ 2,500 allowed.
+    // SALT 8,000 + 4,000 + 500 = 12,500 ⇒ capped at 10,000. Mortgage 12,000.
+    // Charitable 1,000 cash + 2,000 noncash + 500 carryover = 3,500. Total 28,000.
+    ScheduleALines {
+        line1: dec!(10000),
+        line2: dec!(100000),
+        line3: dec!(7500),
+        line4: dec!(2500),
+        line5a: dec!(8000),
+        line5b: dec!(4000),
+        line5c: dec!(500),
+        line5d: dec!(12500),
+        line5e: dec!(10000),
+        line7: dec!(10000),
+        line8a: dec!(12000),
+        line8e: dec!(12000),
+        line10: dec!(12000),
+        line11: dec!(1000),
+        line12: dec!(2000),
+        line13: dec!(500),
+        line14: dec!(3500),
+        line17: dec!(28000),
+    }
+}
+
+#[test]
+fn schedule_a_fills_the_printed_chain_and_reads_back() {
+    let pdf = btctax_forms::fill_schedule_a(&sch_a_lines(), 2024).unwrap();
+    let g = |fqn: &str| tv(&pdf, fqn);
+
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_3[0]").as_deref(),
+        Some("10000")
+    ); // L1
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_4[0]").as_deref(),
+        Some("100000")
+    ); // L2 ★ AGI-inline
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_5[0]").as_deref(),
+        Some("7500")
+    ); // L3 floor
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_6[0]").as_deref(),
+        Some("2500")
+    ); // L4
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_10[0]").as_deref(),
+        Some("12500")
+    ); // L5d
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_11[0]").as_deref(),
+        Some("10000")
+    ); // L5e — capped
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_22[0]").as_deref(),
+        Some("12000")
+    ); // L8e
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_28[0]").as_deref(),
+        Some("3500")
+    ); // L14
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_34[0]").as_deref(),
+        Some("28000")
+    ); // L17 → 1040 L12
+
+    // ★ Line 8d (f1_21) is the IRS's own ReadOnly "Reserved for future use" widget — never written.
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_21[0]"),
+        None,
+        "L8d is reserved/ReadOnly"
+    );
+    // Unmodeled lines stay BLANK: 6 (other taxes), 8b/8c, 9 (investment interest), 15, 16.
+    for blank in [
+        "f1_14[0]", "f1_19[0]", "f1_20[0]", "f1_23[0]", "f1_29[0]", "f1_33[0]",
+    ] {
+        let fqn = format!("topmostSubform[0].Page1[0].{blank}");
+        assert_eq!(g(&fqn), None, "{fqn} (unmodeled) must be blank");
+    }
+}
+
+/// ★ The AGI-inline column. Line 2 (`f1_4`, x ≈ [331,403]) is in NEITHER the MID nor the AMOUNT
+/// cluster — its box sits inline with the printed sentence, 86pt left of MID, and it is the *same
+/// width* as a MID box, so neither a MID column check nor a width heuristic would catch a swap. Only
+/// its own tight cluster does. Swapping it with line 1 (a MID cell) must FAIL CLOSED — otherwise the
+/// AGI would print into the medical-expenses box and the 7.5% floor would be taken on the wrong
+/// number.
+#[test]
+fn schedule_a_agi_inline_column_swap_fails_closed() {
+    let mut map = ScheduleAMap::ty2024();
+    std::mem::swap(&mut map.line1, &mut map.line2);
+    let err = fill_schedule_a_with_map(&sch_a_lines(), &map)
+        .expect_err("swapping the AGI-inline cell with a MID cell must fail closed");
     assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
 }

@@ -125,37 +125,120 @@ fn salt_line_5a(ri: &ReturnInputs, a: &crate::tax::return_inputs::ScheduleAInput
     }
 }
 
-/// The **Schedule A itemized deduction total** (line 17) at `agi`, given the already-§170(b)-limited
-/// charitable total (line 14 from [`crate::tax::charitable::apply_170b`]). `None` when the filer has no
-/// Schedule A (takes the standard deduction). Medical floor 7.5%·AGI (line 4); SALT §164(b)(5) either/or
-/// capped at $10k ($5k MFS) (line 5e); mortgage interest (line 8a); charitable (line 14).
+/// The §213(a) medical-expense floor: 7.5% of AGI (Schedule A line 3).
+pub const MEDICAL_FLOOR_RATE: Usd = dec!(0.075);
+
+/// The **Schedule A components**, line by line — the itemized deduction is the SUM of these, and the
+/// P6 printed chain needs the individual lines, not just the total.
+///
+/// Exact cents throughout (this is the computation, not the printed form; `printed::schedule_a_lines`
+/// rounds each line half-up and re-adds the ROUNDED lines so the filed form cross-foots — SPEC §3.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScheduleAParts {
+    /// L1 — medical and dental expenses (as entered).
+    pub medical_expenses: Usd,
+    /// L2 — AGI (the floor's base). **Clamped at 0**: a negative AGI would shrink the 7.5% floor below
+    /// zero and INFLATE the medical deduction, so the floor can never help the taxpayer.
+    pub agi: Usd,
+    /// L3 — the §213(a) floor = 7.5% × line 2.
+    pub medical_floor: Usd,
+    /// L4 — medical allowed = max(0, line 1 − line 3).
+    pub medical_allowed: Usd,
+    /// L5a — state/local income taxes, OR (on the §164(b)(5) election) general sales taxes.
+    pub salt_5a: Usd,
+    /// L5b — state/local real-estate taxes.
+    pub salt_5b: Usd,
+    /// L5c — state/local personal-property taxes.
+    pub salt_5c: Usd,
+    /// L5d — add 5a through 5c.
+    pub salt_5d: Usd,
+    /// L5e — the §164(b) SALT cap applied: min(line 5d, [`ScheduleAParts::salt_cap`]).
+    pub salt_5e: Usd,
+    /// The §164(b) cap itself ($10,000; $5,000 MFS). Carried because the PRINTED line 5e must cap the
+    /// PRINTED line 5d — the printed chain cannot re-derive the cap without doing tax logic in the
+    /// forms crate, which is precisely what it must not do.
+    pub salt_cap: Usd,
+    /// L8a — home-mortgage interest reported on Form 1098.
+    pub mortgage_8a: Usd,
+    /// L11 — current-year CASH charitable contributions allowed (§170(b)-limited).
+    pub charitable_cash_11: Usd,
+    /// L12 — current-year NONCASH contributions allowed, including crypto donations.
+    pub charitable_noncash_12: Usd,
+    /// L13 — prior-year charitable CARRYOVER allowed this year.
+    pub charitable_carryover_13: Usd,
+    /// L14 — total charitable allowed = 11 + 12 + 13.
+    pub charitable_14: Usd,
+    /// L17 — total itemized deductions = 4 + 5e (+ 6, 7) + 8a (+ 9, 10) + 14 (+ 15, 16) → 1040 L12.
+    pub total_17: Usd,
+}
+
+/// The **Schedule A components** at `agi`, given the already-§170(b)-limited charitable result (its
+/// `allowed_cash`/`allowed_noncash`/`allowed_carryover` ARE Schedule A lines 11/12/13). `None` when the
+/// filer has no Schedule A (takes the standard deduction).
 ///
 /// `agi` is the caller's AGI: the derivation passes NON-crypto AGI (and non-crypto charitable); the
 /// absolute return passes with-crypto AGI (+ crypto donations) — a documented delta-vs-absolute divergence
 /// (§6) whenever an AGI-sensitive line (medical floor, charitable ceiling) binds.
-pub fn schedule_a_deduction(
+pub fn schedule_a_parts(
     ri: &ReturnInputs,
     agi: Usd,
-    charitable_allowed: Usd,
+    charitable: &crate::tax::charitable::CharitableResult,
     params: &FullReturnParams,
-) -> Option<Usd> {
+) -> Option<ScheduleAParts> {
     let a = ri.schedule_a.as_ref()?;
     // A negative AGI would shrink the 7.5% floor below zero and inflate the medical deduction; clamp it so the
     // floor never helps the taxpayer (review M1). Mirrors the same clamp inside `apply_170b`.
     let agi = agi.max(Usd::ZERO);
-    // Line 4 — medical/dental over the 7.5%-of-AGI floor.
-    let medical = (a.medical - dec!(0.075) * agi).max(Usd::ZERO);
-    // Line 5e — SALT, §164(b)(5) either/or, capped at $10,000 ($5,000 MFS).
-    let salt_5d = salt_line_5a(ri, a) + a.salt_real_estate + a.salt_personal_property;
+
+    // Lines 1-4 — medical/dental over the §213(a) 7.5%-of-AGI floor.
+    let medical_floor = MEDICAL_FLOOR_RATE * agi;
+    let medical_allowed = (a.medical - medical_floor).max(Usd::ZERO);
+
+    // Lines 5a-5e — SALT, §164(b)(5) either/or, capped at $10,000 ($5,000 MFS).
+    let salt_5a = salt_line_5a(ri, a);
+    let salt_5d = salt_5a + a.salt_real_estate + a.salt_personal_property;
     let salt_cap = if ri.filing_status == FilingStatus::Mfs {
         params.salt_cap / dec!(2)
     } else {
         params.salt_cap
     };
     let salt_5e = salt_5d.min(salt_cap);
-    // Line 8a — home-mortgage interest (points/8b are refuse-or-advise in P6).
-    let mortgage = a.mortgage_interest_1098;
-    Some(medical + salt_5e + mortgage + charitable_allowed)
+
+    // Line 8a — home-mortgage interest (points/8b are refuse-or-advise).
+    let mortgage_8a = a.mortgage_interest_1098;
+
+    Some(ScheduleAParts {
+        medical_expenses: a.medical,
+        agi,
+        medical_floor,
+        medical_allowed,
+        salt_5a,
+        salt_5b: a.salt_real_estate,
+        salt_5c: a.salt_personal_property,
+        salt_5d,
+        salt_5e,
+        salt_cap,
+        mortgage_8a,
+        charitable_cash_11: charitable.allowed_cash,
+        charitable_noncash_12: charitable.allowed_noncash,
+        charitable_carryover_13: charitable.allowed_carryover,
+        charitable_14: charitable.allowed,
+        total_17: medical_allowed + salt_5e + mortgage_8a + charitable.allowed,
+    })
+}
+
+/// The **Schedule A itemized deduction total** (line 17) — the sum of [`schedule_a_parts`].
+///
+/// Kept as a thin wrapper so there is exactly ONE derivation of the itemized deduction: a second one
+/// would be free to drift from the printed form's lines, which is the whole failure mode this phase
+/// exists to prevent.
+pub fn schedule_a_deduction(
+    ri: &ReturnInputs,
+    agi: Usd,
+    charitable: &crate::tax::charitable::CharitableResult,
+    params: &FullReturnParams,
+) -> Option<Usd> {
+    schedule_a_parts(ri, agi, charitable, params).map(|p| p.total_17)
 }
 
 /// §63(e)/(c)(6) deduction CHOICE: `max(standard, itemized)` by default; `ForceItemize` honors §63(e)
@@ -511,11 +594,13 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
                                           // belong to the absolute return, not the frozen delta (§6 divergence). The dependent-floor + charitable
                                           // ceilings key off this non-crypto AGI.
     let full_std = standard_deduction(ri, params, year, wages);
-    let charitable = ri.schedule_a.as_ref().map_or(Usd::ZERO, |a| {
-        crate::tax::charitable::apply_170b(agi, &a.charitable, &ri.charitable_carryover_in, year)
-            .allowed
-    });
-    let itemized = schedule_a_deduction(ri, agi, charitable, params);
+    let charitable = crate::tax::charitable::apply_170b(
+        agi,
+        ri.schedule_a.as_ref().map_or(&[][..], |a| &a.charitable),
+        &ri.charitable_carryover_in,
+        year,
+    );
+    let itemized = schedule_a_deduction(ri, agi, &charitable, params);
     let deduction = choose_deduction(ri, full_std, itemized);
     let taxable_income = (agi - deduction).max(Usd::ZERO); // 1040 L15 (non-crypto)
                                                            // Strip the preferential slice (qualified div + LT cap-gain distr) EXACTLY ONCE — the engine re-adds
@@ -620,6 +705,12 @@ pub struct AbsoluteReturn {
     /// limited charitable INCLUDING the ledger's crypto donations, at with-crypto AGI G7). `None` when
     /// the filer has no Schedule A. The other arm of L12's `max`.
     pub itemized_deduction: Option<Usd>,
+    /// The Schedule A **components** (lines 1–17), when the filer has a Schedule A — `None` otherwise.
+    /// Present even when the STANDARD deduction wins: Schedule A is still computed (that is how the
+    /// max() is taken), and the printed return needs the lines to know it was not the better choice.
+    /// The P6 printed chain (`printed::schedule_a_lines`) rounds these at the line and re-adds the
+    /// ROUNDED lines, so the filed form cross-foots (SPEC §3.1).
+    pub schedule_a: Option<ScheduleAParts>,
     /// 1040 **L12** — the deduction taken = `choose_deduction(standard, itemized)` (max, or `ForceItemize`
     /// / MFS-coupled §63(c)(6)).
     pub deduction: Usd,
@@ -795,7 +886,8 @@ pub fn assemble_absolute(
         .unwrap_or_default();
     gifts.extend(crypto_charitable_gifts(state, year));
     let charitable = apply_170b(agi, &gifts, &ri.charitable_carryover_in, year);
-    let itemized = schedule_a_deduction(ri, agi, charitable.allowed, params);
+    let schedule_a = schedule_a_parts(ri, agi, &charitable, params);
+    let itemized = schedule_a.map(|p| p.total_17);
     let deduction = choose_deduction(ri, standard, itemized); // L12
     let deduction_is_itemized = itemized_was_chosen(ri, standard, itemized);
 
@@ -905,6 +997,7 @@ pub fn assemble_absolute(
         se,
         standard_deduction: standard,
         itemized_deduction: itemized,
+        schedule_a,
         deduction,
         deduction_is_itemized,
         qbi_deduction: qbi.deduction,
@@ -1062,6 +1155,24 @@ pub fn schedule_b_part3_unanswered(ri: &ReturnInputs) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A CharitableResult with nothing allowed — for Schedule A tests that isolate the medical/SALT/
+    /// mortgage lines. (Schedule A now takes the whole result, since its `allowed_cash`/`_noncash`/
+    /// `_carryover` ARE the form's lines 11/12/13.)
+    fn no_charity() -> crate::tax::charitable::CharitableResult {
+        charity(Usd::ZERO)
+    }
+
+    /// A CharitableResult allowing `allowed`, all of it current-year CASH (Schedule A line 11).
+    fn charity(allowed: Usd) -> crate::tax::charitable::CharitableResult {
+        crate::tax::charitable::CharitableResult {
+            allowed_cash: allowed,
+            allowed_noncash: Usd::ZERO,
+            allowed_carryover: Usd::ZERO,
+            allowed,
+            carryover_out: Vec::new(),
+        }
+    }
     use crate::event::IncomeKind;
     use crate::identity::EventId;
     use crate::state::{IncomeRecord, LedgerState};
@@ -1689,7 +1800,7 @@ mod tests {
             schedule_a_deduction(
                 &filer(FilingStatus::Single),
                 dec!(100000),
-                Usd::ZERO,
+                &no_charity(),
                 &ty2024_params()
             ),
             None
@@ -1709,7 +1820,7 @@ mod tests {
         });
         // $2,500 + $10,000 + $12,000 + $0 charitable = $24,500.
         assert_eq!(
-            schedule_a_deduction(&r, dec!(100000), Usd::ZERO, &ty2024_params()),
+            schedule_a_deduction(&r, dec!(100000), &no_charity(), &ty2024_params()),
             Some(dec!(24500))
         );
     }
@@ -1726,7 +1837,7 @@ mod tests {
         });
         // agi.max(0) = 0 ⇒ floor = 0 ⇒ medical = $10,000 exactly (not $10,750).
         assert_eq!(
-            schedule_a_deduction(&r, dec!(-10000), Usd::ZERO, &ty2024_params()),
+            schedule_a_deduction(&r, dec!(-10000), &no_charity(), &ty2024_params()),
             Some(dec!(10000))
         );
     }
@@ -1745,7 +1856,7 @@ mod tests {
         });
         // 5d = 3,000 + 4,000 = 7,000 (< cap); + $1,000 charitable = $8,000.
         assert_eq!(
-            schedule_a_deduction(&r, dec!(100000), dec!(1000), &ty2024_params()),
+            schedule_a_deduction(&r, dec!(100000), &charity(dec!(1000)), &ty2024_params()),
             Some(dec!(8000))
         );
         // MFS: $20,000 real-estate tax caps at $5,000.
@@ -1755,7 +1866,7 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(
-            schedule_a_deduction(&mfs, dec!(100000), Usd::ZERO, &ty2024_params()),
+            schedule_a_deduction(&mfs, dec!(100000), &no_charity(), &ty2024_params()),
             Some(dec!(5000))
         );
     }
@@ -1778,7 +1889,7 @@ mod tests {
         });
         // Itemized $40,000 > std $14,600 → taxable = $200,000 − $40,000 = $160,000.
         assert_eq!(
-            schedule_a_deduction(&r, dec!(200000), Usd::ZERO, &p).unwrap(),
+            schedule_a_deduction(&r, dec!(200000), &no_charity(), &p).unwrap(),
             dec!(40000)
         );
         assert_eq!(

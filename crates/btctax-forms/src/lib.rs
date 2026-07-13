@@ -28,6 +28,7 @@ mod map;
 mod overflow;
 mod pdf;
 mod schedule23;
+mod schedule_a;
 mod schedule_d;
 mod schedule_se;
 mod verify;
@@ -37,7 +38,7 @@ pub use error::FormsError;
 pub use form1040::{Form1040Fill, Form1040Inputs};
 pub use map::{
     Form1040Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map, Schedule2Map,
-    Schedule3Map, ScheduleDMap, ScheduleSeMap,
+    Schedule3Map, ScheduleAMap, ScheduleDMap, ScheduleSeMap,
 };
 pub use schedule_se::SE_FLOOR;
 
@@ -186,6 +187,18 @@ pub fn fill_schedule_3(
     schedule23::fill_schedule_3_with_map(lines, &map)
 }
 
+/// Fill **Schedule A** (Itemized Deductions) for `year` from the core-derived printed chain
+/// (`btctax_core::tax::printed::schedule_a_lines`, which returns `None` unless the return actually
+/// itemizes — Schedule A is computed even when the standard deduction wins, but only FILED when it is
+/// the deduction claimed).
+pub fn fill_schedule_a(
+    lines: &btctax_core::tax::printed::ScheduleALines,
+    year: i32,
+) -> Result<Vec<u8>, FormsError> {
+    let map = ScheduleAMap::for_year(year)?;
+    schedule_a::fill_schedule_a_with_map(lines, &map)
+}
+
 /// Fill **Form 8283** (Noncash Charitable Contributions, Rev. 12-2025) for `year` from the projected
 /// donation rows + `DonationDetails`. Returns `Ok(None)` when there are no donations in the year.
 /// Fills the donee/appraiser IDENTITY + per-row property data (and, for Section B, checks the "k
@@ -233,7 +246,8 @@ pub mod testonly {
     pub use crate::form8995::fill_form_8995_with_map;
     pub use crate::map::{
         AmountCols, Form1040Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map,
-        MoneyCell, MoneyPair, PartMap, Schedule2Map, Schedule3Map, ScheduleDMap, ScheduleSeMap,
+        MoneyCell, MoneyPair, PartMap, Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleDMap,
+        ScheduleSeMap,
     };
     pub use crate::pdf::{
         button_on_states, checkbox_on, collect_fields, index, load, text_value, Field,
@@ -243,6 +257,7 @@ pub mod testonly {
         SCHEDULE_SE_PDF_2024, SCHEDULE_SE_PDF_2025,
     };
     pub use crate::schedule23::{fill_schedule_2_with_map, fill_schedule_3_with_map};
+    pub use crate::schedule_a::fill_schedule_a_with_map;
     pub use crate::schedule_d::fill_schedule_d_totals;
     pub use crate::schedule_se::fill_schedule_se_with_map;
     pub use crate::verify::{

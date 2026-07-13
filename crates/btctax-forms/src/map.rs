@@ -42,6 +42,8 @@ pub const F8995_MAP_2024: &str = include_str!("../forms/2024/f8995.map.toml");
 pub const SCHEDULE_2_MAP_2024: &str = include_str!("../forms/2024/f1040s2.map.toml");
 /// The TY2024 Schedule 3 (Additional Credits and Payments) map (embedded at compile time).
 pub const SCHEDULE_3_MAP_2024: &str = include_str!("../forms/2024/f1040s3.map.toml");
+/// The TY2024 Schedule A (Itemized Deductions) map (embedded at compile time).
+pub const SCHEDULE_A_MAP_2024: &str = include_str!("../forms/2024/f1040sa.map.toml");
 
 /// The TY2017 Form 8949 map (embedded at compile time).
 pub const F8949_MAP_2017: &str = include_str!("../forms/2017/f8949.map.toml");
@@ -809,6 +811,100 @@ impl Schedule3Map {
     /// The 4 filled cells in printed reading order (strictly descending y on page 1).
     pub fn lines(&self) -> [&MoneyCell; 4] {
         [&self.line1, &self.line8, &self.line11, &self.line15]
+    }
+}
+
+/// The Schedule A (Itemized Deductions) field map for one tax year.
+///
+/// **Three x-clusters** — Schedule A is the only form here that needs a third. Line 2 (the AGI the
+/// 7.5% medical floor is taken on) sits INLINE with the printed sentence at x ≈ [331,403], not in the
+/// MID column, and it is the same WIDTH as MID, so nothing but its x-position distinguishes it.
+///
+/// Unmapped on purpose: line 6 (other taxes), 8b/8c (mortgage not on a 1098; points), 9 (investment
+/// interest), 15 (casualty), 16 (other). **Line 8d is a ReadOnly "Reserved for future use" widget** —
+/// live, and it consumes a suffix number. Never write it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduleAMap {
+    /// `"f1040sa"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// L1 — medical and dental expenses, MID column.
+    pub line1: MoneyCell,
+    /// L2 — AGI. ★ **AGI-INLINE column**, not MID.
+    pub line2: MoneyCell,
+    /// L3 — the §213(a) 7.5% floor, MID column.
+    pub line3: MoneyCell,
+    /// L4 — medical allowed, AMOUNT column.
+    pub line4: MoneyCell,
+    /// L5a — state/local income or sales taxes, MID column.
+    pub line5a: MoneyCell,
+    /// L5b — real-estate taxes, MID column.
+    pub line5b: MoneyCell,
+    /// L5c — personal-property taxes, MID column.
+    pub line5c: MoneyCell,
+    /// L5d — add 5a-5c, MID column.
+    pub line5d: MoneyCell,
+    /// L5e — the §164(b) SALT cap, MID column.
+    pub line5e: MoneyCell,
+    /// L7 — add 5e and 6, AMOUNT column.
+    pub line7: MoneyCell,
+    /// L8a — mortgage interest on Form 1098, MID column.
+    pub line8a: MoneyCell,
+    /// L8e — add 8a-8c, MID column.
+    pub line8e: MoneyCell,
+    /// L10 — add 8e and 9, AMOUNT column.
+    pub line10: MoneyCell,
+    /// L11 — gifts by cash or check, MID column.
+    pub line11: MoneyCell,
+    /// L12 — gifts other than cash (incl. crypto), MID column.
+    pub line12: MoneyCell,
+    /// L13 — prior-year carryover, MID column.
+    pub line13: MoneyCell,
+    /// L14 — add 11-13, AMOUNT column.
+    pub line14: MoneyCell,
+    /// L17 — total itemized deductions → 1040 L12, AMOUNT column.
+    pub line17: MoneyCell,
+}
+
+impl ScheduleAMap {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_A_MAP_2024).expect("bundled schedule A 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 18 filled cells in printed reading order (strictly descending y on page 1).
+    pub fn lines(&self) -> [&MoneyCell; 18] {
+        [
+            &self.line1,
+            &self.line2,
+            &self.line3,
+            &self.line4,
+            &self.line5a,
+            &self.line5b,
+            &self.line5c,
+            &self.line5d,
+            &self.line5e,
+            &self.line7,
+            &self.line8a,
+            &self.line8e,
+            &self.line10,
+            &self.line11,
+            &self.line12,
+            &self.line13,
+            &self.line14,
+            &self.line17,
+        ]
     }
 }
 

@@ -20,7 +20,7 @@
 
 use crate::conventions::{round_dollar, Usd};
 use crate::tax::other_taxes::{sch2_line4_se, Form8959Lines, Form8960Lines};
-use crate::tax::return_1040::AbsoluteReturn;
+use crate::tax::return_1040::{AbsoluteReturn, MEDICAL_FLOOR_RATE};
 
 /// The printable **Schedule 2 (Additional Taxes)** line chain.
 ///
@@ -69,6 +69,122 @@ pub fn schedule_2_lines(
         line11,
         line12,
         line21,
+    })
+}
+
+/// The printable **Schedule A (Itemized Deductions)** line chain.
+///
+/// **Every derived line is computed from the PRINTED line above it**, not from the exact-cents
+/// components: line 3 is 7.5% of the *printed* line 2, line 4 subtracts the *printed* line 3, line 5e
+/// caps the *printed* line 5d, and line 17 sums the *printed* subtotals. That is what a human filling
+/// the paper form does, and it is why the form cross-foots.
+///
+/// **Unmodeled lines are BLANK, not zero** (no field here at all): line 6 (other taxes), line 8b
+/// (mortgage interest not on a Form 1098) and 8c (points), line 9 (investment interest), line 15
+/// (casualty and theft losses) and line 16 (other itemized deductions). Line 8d is the IRS's own
+/// "Reserved for future use" — a ReadOnly widget that must never be written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScheduleALines {
+    /// L1 — medical and dental expenses.
+    pub line1: Usd,
+    /// L2 — AGI (the floor's base).
+    pub line2: Usd,
+    /// L3 — the §213(a) floor: 7.5% × **printed** line 2.
+    pub line3: Usd,
+    /// L4 — medical allowed = max(0, printed 1 − printed 3).
+    pub line4: Usd,
+    /// L5a — state/local income taxes, or general sales taxes under the §164(b)(5) election.
+    pub line5a: Usd,
+    /// L5b — state/local real-estate taxes.
+    pub line5b: Usd,
+    /// L5c — state/local personal-property taxes.
+    pub line5c: Usd,
+    /// L5d — add **printed** 5a, 5b and 5c.
+    pub line5d: Usd,
+    /// L5e — the §164(b) cap: min(printed 5d, $10,000 / $5,000 MFS).
+    pub line5e: Usd,
+    /// L7 — add 5e and 6 (6 blank) ⇒ `= line5e`.
+    pub line7: Usd,
+    /// L8a — home-mortgage interest reported on Form 1098.
+    pub line8a: Usd,
+    /// L8e — add 8a through 8c (8b/8c blank) ⇒ `= line8a`.
+    pub line8e: Usd,
+    /// L10 — add 8e and 9 (9 blank) ⇒ `= line8e`.
+    pub line10: Usd,
+    /// L11 — gifts by cash or check.
+    pub line11: Usd,
+    /// L12 — gifts other than by cash or check (includes crypto donations; Form 8283 over $500).
+    pub line12: Usd,
+    /// L13 — carryover from a prior year.
+    pub line13: Usd,
+    /// L14 — add **printed** 11, 12 and 13.
+    pub line14: Usd,
+    /// L17 — total itemized deductions = printed 4 + 7 + 10 + 14 (15 and 16 blank) → 1040 **L12**.
+    pub line17: Usd,
+}
+
+/// Derive the printed Schedule A chain.
+///
+/// Returns `None` unless the return actually **itemizes** — Schedule A is computed even when the
+/// standard deduction wins (that is how the `max()` is taken), but it is only *filed* when it is the
+/// deduction actually claimed.
+///
+/// Note the printed line 17 can differ by a dollar from `round_dollar(itemized_deduction)`: it sums
+/// the printed subtotals, each already rounded at its own line. That is the SPEC §3.1 election, and
+/// the printed figure is the one that appears on 1040 line 12.
+pub fn schedule_a_lines(ar: &AbsoluteReturn) -> Option<ScheduleALines> {
+    if !ar.deduction_is_itemized {
+        return None;
+    }
+    let p = ar.schedule_a.as_ref()?;
+
+    // Medical — the floor is taken on the PRINTED AGI, and subtracted from the PRINTED expenses.
+    let line1 = round_dollar(p.medical_expenses);
+    let line2 = round_dollar(p.agi);
+    let line3 = round_dollar(MEDICAL_FLOOR_RATE * line2);
+    let line4 = (line1 - line3).max(Usd::ZERO);
+
+    // SALT — the cap binds the PRINTED 5d.
+    let line5a = round_dollar(p.salt_5a);
+    let line5b = round_dollar(p.salt_5b);
+    let line5c = round_dollar(p.salt_5c);
+    let line5d = line5a + line5b + line5c;
+    let line5e = line5d.min(p.salt_cap);
+    let line7 = line5e; // + line 6 (other taxes), unmodeled ⇒ blank
+
+    // Interest.
+    let line8a = round_dollar(p.mortgage_8a);
+    let line8e = line8a; // + 8b/8c, unmodeled ⇒ blank
+    let line10 = line8e; // + line 9 (investment interest), unmodeled ⇒ blank
+
+    // Charitable — the §170(b)-limited classes are already Schedule A's own lines 11/12/13.
+    let line11 = round_dollar(p.charitable_cash_11);
+    let line12 = round_dollar(p.charitable_noncash_12);
+    let line13 = round_dollar(p.charitable_carryover_13);
+    let line14 = line11 + line12 + line13;
+
+    // ★ The total sums the PRINTED subtotals (15 and 16 are blank).
+    let line17 = line4 + line7 + line10 + line14;
+
+    Some(ScheduleALines {
+        line1,
+        line2,
+        line3,
+        line4,
+        line5a,
+        line5b,
+        line5c,
+        line5d,
+        line5e,
+        line7,
+        line8a,
+        line8e,
+        line10,
+        line11,
+        line12,
+        line13,
+        line14,
+        line17,
     })
 }
 
@@ -156,6 +272,7 @@ mod tests {
             se,
             standard_deduction: z,
             itemized_deduction: None,
+            schedule_a: None,
             deduction: z,
             deduction_is_itemized: false,
             qbi_deduction: z,
@@ -268,5 +385,224 @@ mod tests {
         assert!(schedule_3_lines(&ar_with(None, Usd::ZERO, dec!(100))).is_some());
         // …but neither means no schedule.
         assert!(schedule_3_lines(&ar_with(None, Usd::ZERO, Usd::ZERO)).is_none());
+    }
+
+    /// A `ScheduleAParts` for the printed-chain tests.
+    #[allow(clippy::too_many_arguments)]
+    fn parts(
+        medical: Usd,
+        agi: Usd,
+        salt_5a: Usd,
+        salt_5b: Usd,
+        salt_5c: Usd,
+        salt_cap: Usd,
+        mortgage: Usd,
+        cash: Usd,
+        noncash: Usd,
+        carryover: Usd,
+    ) -> crate::tax::return_1040::ScheduleAParts {
+        use crate::tax::return_1040::{ScheduleAParts, MEDICAL_FLOOR_RATE};
+        let agi = agi.max(Usd::ZERO);
+        let floor = MEDICAL_FLOOR_RATE * agi;
+        let salt_5d = salt_5a + salt_5b + salt_5c;
+        let salt_5e = salt_5d.min(salt_cap);
+        let medical_allowed = (medical - floor).max(Usd::ZERO);
+        ScheduleAParts {
+            medical_expenses: medical,
+            agi,
+            medical_floor: floor,
+            medical_allowed,
+            salt_5a,
+            salt_5b,
+            salt_5c,
+            salt_5d,
+            salt_5e,
+            salt_cap,
+            mortgage_8a: mortgage,
+            charitable_cash_11: cash,
+            charitable_noncash_12: noncash,
+            charitable_carryover_13: carryover,
+            charitable_14: cash + noncash + carryover,
+            total_17: medical_allowed + salt_5e + mortgage + cash + noncash + carryover,
+        }
+    }
+
+    fn ar_itemizing(p: crate::tax::return_1040::ScheduleAParts) -> AbsoluteReturn {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.schedule_a = Some(p);
+        ar.deduction_is_itemized = true;
+        ar.itemized_deduction = Some(p.total_17);
+        ar
+    }
+
+    /// The printed Schedule A chain, end to end: the medical floor binds, the SALT cap binds, and the
+    /// total sums the PRINTED subtotals.
+    #[test]
+    fn schedule_a_printed_chain_medical_floor_and_salt_cap() {
+        // AGI 100,000 ⇒ 7.5% floor = 7,500. Medical 10,000 ⇒ 2,500 allowed.
+        // SALT 8,000 + 4,000 + 500 = 12,500 ⇒ capped at 10,000.
+        // Mortgage 12,000. Charitable: 1,000 cash + 2,000 noncash + 500 carryover = 3,500.
+        let ar = ar_itemizing(parts(
+            dec!(10000),
+            dec!(100000),
+            dec!(8000),
+            dec!(4000),
+            dec!(500),
+            dec!(10000),
+            dec!(12000),
+            dec!(1000),
+            dec!(2000),
+            dec!(500),
+        ));
+        let l = schedule_a_lines(&ar).unwrap();
+
+        assert_eq!(l.line1, dec!(10000));
+        assert_eq!(l.line2, dec!(100000));
+        assert_eq!(l.line3, dec!(7500)); // 7.5% of the PRINTED AGI
+        assert_eq!(l.line4, dec!(2500));
+        assert_eq!(l.line5d, dec!(12500));
+        assert_eq!(l.line5e, dec!(10000)); // ★ the §164(b) cap binds
+        assert_eq!(l.line7, dec!(10000));
+        assert_eq!(l.line8a, dec!(12000));
+        assert_eq!(l.line10, dec!(12000));
+        assert_eq!(l.line11, dec!(1000));
+        assert_eq!(l.line12, dec!(2000));
+        assert_eq!(l.line13, dec!(500));
+        assert_eq!(l.line14, dec!(3500));
+        assert_eq!(l.line17, dec!(28000)); // 2,500 + 10,000 + 12,000 + 3,500
+    }
+
+    /// ★ Schedule A is COMPUTED even when the standard deduction wins (that is how the max() is
+    /// taken) — but it is only FILED when it is the deduction actually claimed. Printing a Schedule A
+    /// the filer did not use would be a form asserting a deduction they never took.
+    #[test]
+    fn schedule_a_not_filed_when_the_standard_deduction_wins() {
+        let p = parts(
+            Usd::ZERO,
+            dec!(100000),
+            dec!(1000),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(10000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+        );
+        let mut ar = ar_itemizing(p);
+        ar.deduction_is_itemized = false; // the standard deduction was larger
+        assert!(
+            schedule_a_lines(&ar).is_none(),
+            "a Schedule A the filer did not use must not be filed"
+        );
+    }
+
+    /// The printed chain cross-foots, and every cell is a whole dollar — including when the inputs
+    /// carry cents and a negative AGI clamps the floor to zero (so the floor can never HELP the filer).
+    #[test]
+    fn schedule_a_printed_lines_cross_foot() {
+        for p in [
+            parts(
+                dec!(10000.49),
+                dec!(100000.51),
+                dec!(8000.50),
+                dec!(4000),
+                dec!(500),
+                dec!(10000),
+                dec!(12000),
+                dec!(1000),
+                dec!(2000),
+                dec!(500),
+            ),
+            // Negative AGI: the clamp means floor = 0, so the FULL medical expense is allowed.
+            parts(
+                dec!(10000),
+                dec!(-50000),
+                Usd::ZERO,
+                Usd::ZERO,
+                Usd::ZERO,
+                dec!(10000),
+                Usd::ZERO,
+                Usd::ZERO,
+                Usd::ZERO,
+                Usd::ZERO,
+            ),
+            // MFS: the cap is half.
+            parts(
+                Usd::ZERO,
+                dec!(80000),
+                dec!(9000),
+                dec!(1000),
+                Usd::ZERO,
+                dec!(5000),
+                Usd::ZERO,
+                Usd::ZERO,
+                Usd::ZERO,
+                Usd::ZERO,
+            ),
+        ] {
+            let l = schedule_a_lines(&ar_itemizing(p)).unwrap();
+            assert_eq!(
+                l.line3,
+                round_dollar(MEDICAL_FLOOR_RATE * l.line2),
+                "L3 = 7.5% × printed L2"
+            );
+            assert_eq!(
+                l.line4,
+                (l.line1 - l.line3).max(Usd::ZERO),
+                "L4 = 1 − 3, floored"
+            );
+            assert_eq!(
+                l.line5d,
+                l.line5a + l.line5b + l.line5c,
+                "L5d = 5a + 5b + 5c (printed)"
+            );
+            assert!(l.line5e <= l.line5d, "L5e never exceeds L5d");
+            assert_eq!(l.line7, l.line5e, "L7 = 5e + 6 (6 blank)");
+            assert_eq!(l.line10, l.line8a, "L10 = 8e + 9, 8e = 8a (rest blank)");
+            assert_eq!(
+                l.line14,
+                l.line11 + l.line12 + l.line13,
+                "L14 = 11 + 12 + 13 (printed)"
+            );
+            assert_eq!(
+                l.line17,
+                l.line4 + l.line7 + l.line10 + l.line14,
+                "L17 sums the PRINTED subtotals"
+            );
+            for cell in [
+                l.line1, l.line2, l.line3, l.line4, l.line5a, l.line5b, l.line5c, l.line5d,
+                l.line5e, l.line7, l.line8a, l.line8e, l.line10, l.line11, l.line12, l.line13,
+                l.line14, l.line17,
+            ] {
+                assert_eq!(
+                    cell.fract(),
+                    Usd::ZERO,
+                    "printed cells are whole dollars: {cell}"
+                );
+            }
+        }
+
+        // The negative-AGI case, specifically: floor = 0 ⇒ the whole $10,000 medical is allowed.
+        let neg = schedule_a_lines(&ar_itemizing(parts(
+            dec!(10000),
+            dec!(-50000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(10000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+        )))
+        .unwrap();
+        assert_eq!(
+            neg.line2,
+            Usd::ZERO,
+            "a negative AGI is clamped — the floor must never HELP"
+        );
+        assert_eq!(neg.line3, Usd::ZERO);
+        assert_eq!(neg.line4, dec!(10000));
     }
 }
