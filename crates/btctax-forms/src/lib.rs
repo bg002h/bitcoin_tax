@@ -20,6 +20,7 @@ mod cells;
 mod error;
 mod fill8949;
 mod form1040;
+mod form1040_full;
 mod form8283;
 mod form8959;
 mod form8960;
@@ -214,6 +215,21 @@ pub fn fill_schedule_a(
     schedule_a::fill_schedule_a_with_map(lines, &map)
 }
 
+/// Fill the **FULL-RETURN Form 1040** for `year` from the core-derived printed chain
+/// (`btctax_core::tax::printed::form_1040_lines`) — every line, not just the capital-gain cluster.
+///
+/// This is NOT [`fill_form_1040_capgains`], which writes only line 7 + the Digital-Asset question for
+/// the crypto-slice export. That one stays: for a year with no `ReturnInputs` it is what the filer
+/// wants.
+pub fn fill_form_1040_full(
+    lines: &btctax_core::tax::printed::Form1040Lines,
+    status: btctax_core::tax::types::FilingStatus,
+    year: i32,
+) -> Result<Vec<u8>, FormsError> {
+    let map = Form1040Map::for_year(year)?;
+    form1040_full::fill_form_1040_full_with_map(lines, status, &map)
+}
+
 /// Fill the **FULL-RETURN Schedule D** for `year` from the core-derived printed chain
 /// (`btctax_core::tax::printed::schedule_d_lines`), including Part III's SPEC §7.2 routing.
 ///
@@ -298,6 +314,7 @@ pub mod testonly {
     pub use crate::cells::fmt_money_pair;
     pub use crate::fill8949::{fill_8949_parts, part_data, pdf_has_xfa, split_parts, PartData};
     pub use crate::form1040::{fill_form_1040_capgains as fill_1040_with_map, Form1040Fill};
+    pub use crate::form1040_full::fill_form_1040_full_with_map;
     pub use crate::form8283::fill_form_8283 as fill_8283_with_map;
     pub use crate::form8959::fill_form_8959_with_map;
     pub use crate::form8960::fill_form_8960_with_map;

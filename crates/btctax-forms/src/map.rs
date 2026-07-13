@@ -223,6 +223,138 @@ pub struct Form1040Map {
     /// when the year's 1040 has no DA question (2017).
     #[serde(default)]
     pub da_no: Option<CheckChoice>,
+
+    // ── Full-return extension (P6). Absent from the 2017/2025 maps, hence optional. ───────────
+    /// L1z — wages. AMOUNT column.
+    #[serde(default)]
+    pub line1z: Option<MoneyCell>,
+    /// L2b — taxable interest. AMOUNT column.
+    #[serde(default)]
+    pub line2b: Option<MoneyCell>,
+    /// L3a — qualified dividends. **SUBLINE column** (x ≈ [252,324]), not MID or AMOUNT.
+    #[serde(default)]
+    pub line3a: Option<MoneyCell>,
+    /// L3b — ordinary dividends. AMOUNT column.
+    #[serde(default)]
+    pub line3b: Option<MoneyCell>,
+    /// L8 — Schedule 1's printed L10.
+    #[serde(default)]
+    pub line8: Option<MoneyCell>,
+    /// L9 — total income.
+    #[serde(default)]
+    pub line9: Option<MoneyCell>,
+    /// L10 — Schedule 1's printed L26.
+    #[serde(default)]
+    pub line10: Option<MoneyCell>,
+    /// L11 — AGI.
+    #[serde(default)]
+    pub line11: Option<MoneyCell>,
+    /// L12 — the deduction claimed. **★ `f1_57` on the 2024 form is L12; on the 2025 form the same
+    /// field name is L1z** (SPEC §7.4). Per-(form, year) maps exist for exactly this.
+    #[serde(default)]
+    pub line12: Option<MoneyCell>,
+    /// L13 — Form 8995's printed L15 (QBI).
+    #[serde(default)]
+    pub line13: Option<MoneyCell>,
+    /// L14 — 12 + 13.
+    #[serde(default)]
+    pub line14: Option<MoneyCell>,
+    /// L15 — taxable income.
+    #[serde(default)]
+    pub line15: Option<MoneyCell>,
+    /// L16 — tax.
+    #[serde(default)]
+    pub line16: Option<MoneyCell>,
+    /// L17 — Schedule 2's printed L3 (always 0 in v1).
+    #[serde(default)]
+    pub line17: Option<MoneyCell>,
+    /// L18 — 16 + 17.
+    #[serde(default)]
+    pub line18: Option<MoneyCell>,
+    /// L19 — CTC/ODC (always 0 — a §3.4 conservative omission).
+    #[serde(default)]
+    pub line19: Option<MoneyCell>,
+    /// L20 — Schedule 3's printed L8.
+    #[serde(default)]
+    pub line20: Option<MoneyCell>,
+    /// L21 — 19 + 20.
+    #[serde(default)]
+    pub line21: Option<MoneyCell>,
+    /// L22 — 18 − 21.
+    #[serde(default)]
+    pub line22: Option<MoneyCell>,
+    /// L23 — Schedule 2's printed L21.
+    #[serde(default)]
+    pub line23: Option<MoneyCell>,
+    /// L24 — TOTAL TAX.
+    #[serde(default)]
+    pub line24: Option<MoneyCell>,
+    /// L25a — W-2 withholding. MID column.
+    #[serde(default)]
+    pub line25a: Option<MoneyCell>,
+    /// L25b — 1099 withholding. MID column.
+    #[serde(default)]
+    pub line25b: Option<MoneyCell>,
+    /// L25c — other withholding (Form 8959's printed L24). MID column.
+    #[serde(default)]
+    pub line25c: Option<MoneyCell>,
+    /// L25d — 25a + 25b + 25c.
+    #[serde(default)]
+    pub line25d: Option<MoneyCell>,
+    /// L26 — estimated tax payments.
+    #[serde(default)]
+    pub line26: Option<MoneyCell>,
+    /// L31 — Schedule 3's printed L15. MID column.
+    #[serde(default)]
+    pub line31: Option<MoneyCell>,
+    /// L32 — total other payments.
+    #[serde(default)]
+    pub line32: Option<MoneyCell>,
+    /// L33 — TOTAL PAYMENTS.
+    #[serde(default)]
+    pub line33: Option<MoneyCell>,
+    /// L34 — overpayment.
+    #[serde(default)]
+    pub line34: Option<MoneyCell>,
+    /// L35a — refunded to you.
+    #[serde(default)]
+    pub line35a: Option<MoneyCell>,
+    /// L37 — amount you owe.
+    #[serde(default)]
+    pub line37: Option<MoneyCell>,
+    /// The 5-way filing-status checkbox group.
+    #[serde(default)]
+    pub filing_status: Option<FilingStatusBoxes>,
+}
+
+/// The 1040's **5-way filing-status checkbox group**.
+///
+/// **★ The leaf field names COLLIDE.** Two distinct fields are both called `c1_3[0]` and two are both
+/// called `c1_3[1]`, distinguished only by their parent subform:
+///
+/// | status | fully-qualified name | on-state |
+/// |---|---|---|
+/// | Single | `…FilingStatus_ReadOrder[0].c1_3[0]` | `1` |
+/// | HoH | `…Page1[0].c1_3[0]` (no wrapper!) | `2` |
+/// | MFJ | `…FilingStatus_ReadOrder[0].c1_3[1]` | `3` |
+/// | MFS | `…FilingStatus_ReadOrder[0].c1_3[2]` | `4` |
+/// | QSS | `…Page1[0].c1_3[1]` (no wrapper!) | `5` |
+///
+/// A map keyed on the leaf name would silently check the WRONG FILING STATUS — which changes the
+/// standard deduction, every bracket, and every threshold on the return. The on-states are distinct
+/// and independently corroborate the mapping, so the filler asserts both.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FilingStatusBoxes {
+    /// Single — on-state `1`.
+    pub single: CheckChoice,
+    /// Head of household — on-state `2`.
+    pub hoh: CheckChoice,
+    /// Married filing jointly — on-state `3`.
+    pub mfj: CheckChoice,
+    /// Married filing separately — on-state `4`.
+    pub mfs: CheckChoice,
+    /// Qualifying surviving spouse — on-state `5`.
+    pub qss: CheckChoice,
 }
 
 impl Form1040Map {

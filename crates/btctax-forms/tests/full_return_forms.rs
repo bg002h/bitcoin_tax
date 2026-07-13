@@ -10,8 +10,8 @@
 
 use btctax_core::tax::other_taxes::{form_8959_lines, form_8960_lines};
 use btctax_core::tax::printed::{
-    Schedule1Lines, Schedule2Lines, Schedule3Lines, ScheduleALines, ScheduleBLines, ScheduleBRow,
-    ScheduleCLines, ScheduleDLines, ScheduleDRouting,
+    Form1040Lines, Schedule1Lines, Schedule2Lines, Schedule3Lines, ScheduleALines, ScheduleBLines,
+    ScheduleBRow, ScheduleCLines, ScheduleDLines, ScheduleDRouting,
 };
 use btctax_core::tax::qbi::form_8995_lines;
 use btctax_core::tax::se::SeTaxResult;
@@ -1177,4 +1177,207 @@ fn schedule_d_full_refuses_a_negative_in_a_parenthesized_cell() {
     let err = fill_schedule_d_full_with_map(&lines, &btctax_forms::ScheduleDMap::ty2024())
         .expect_err("a negative in a paren box must fail closed");
     assert!(format!("{err}").contains("line 14"), "{err}");
+}
+
+// ─────────────────────────── Form 1040 (the FULL-RETURN fill) ─────────────────────────────────
+
+fn f1040() -> Form1040Lines {
+    Form1040Lines {
+        line1z: dec!(120000),
+        line2b: dec!(2000),
+        line3a: dec!(3000), // ★ SUBLINE column — the preferential slice
+        line3b: dec!(4000),
+        line7: dec!(25000),
+        line8: dec!(5000),
+        line9: dec!(156000),
+        line10: dec!(3000),
+        line11: dec!(153000),
+        line12: dec!(14600),
+        line13: dec!(800),
+        line14: dec!(15400),
+        line15: dec!(137600),
+        line16: dec!(26000),
+        line17: Usd::ZERO,
+        line18: dec!(26000),
+        line19: Usd::ZERO,
+        line20: dec!(287),
+        line21: dec!(287),
+        line22: dec!(25713),
+        line23: dec!(1406),
+        line24: dec!(27119),
+        line25a: dec!(24000),
+        line25b: dec!(300),
+        line25c: dec!(180),
+        line25d: dec!(24480),
+        line26: dec!(500),
+        line31: dec!(1235),
+        line32: dec!(1235),
+        line33: dec!(26215),
+        line34: Usd::ZERO,
+        line37: dec!(904),
+        digital_asset_yes: true,
+    }
+}
+
+#[test]
+fn form_1040_full_fills_every_line_and_reads_back() {
+    let pdf = btctax_forms::fill_form_1040_full(&f1040(), FilingStatus::Single, 2024).unwrap();
+    let g = |fqn: &str| tv(&pdf, fqn);
+
+    // Page 1 — income → taxable income.
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_41[0]").as_deref(),
+        Some("120000")
+    ); // L1z
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_43[0]").as_deref(),
+        Some("2000")
+    ); // L2b
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_44[0]").as_deref(),
+        Some("3000")
+    ); // L3a ★ SUBLINE
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_45[0]").as_deref(),
+        Some("4000")
+    ); // L3b
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_52[0]").as_deref(),
+        Some("25000")
+    ); // L7
+       // ★ f1_57 is LINE 12 on the 2024 form (it is line 1z on the 2025 one — SPEC §7.4).
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_57[0]").as_deref(),
+        Some("14600"),
+        "L12 = f1_57 on TY2024"
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_60[0]").as_deref(),
+        Some("137600")
+    ); // L15 taxable income
+
+    // Page 2 — tax → total tax → payments → owed.
+    assert_eq!(
+        g("topmostSubform[0].Page2[0].f2_10[0]").as_deref(),
+        Some("27119")
+    ); // L24 TOTAL TAX
+    assert_eq!(
+        g("topmostSubform[0].Page2[0].f2_13[0]").as_deref(),
+        Some("180")
+    ); // L25c (8959 L24)
+    assert_eq!(
+        g("topmostSubform[0].Page2[0].f2_22[0]").as_deref(),
+        Some("26215")
+    ); // L33 TOTAL PAYMENTS
+    assert_eq!(
+        g("topmostSubform[0].Page2[0].f2_28[0]").as_deref(),
+        Some("904")
+    ); // L37 AMOUNT OWED
+
+    // The direct-deposit block is NEVER filled — a refund arrives as a paper check, and the
+    // RefundByPaperCheck advisory says so.
+    assert_eq!(
+        g("topmostSubform[0].Page2[0].RoutingNo[0].f2_25[0]"),
+        None,
+        "35b routing untouched"
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page2[0].AccountNo[0].f2_26[0]"),
+        None,
+        "35c/d account untouched"
+    );
+    // Lines 27-30 (EIC, additional CTC, AOC) are §3.4 conservative omissions — BLANK, never 0.
+    for omitted in ["f2_16[0]", "f2_17[0]", "f2_18[0]", "f2_19[0]"] {
+        let fqn = format!("topmostSubform[0].Page2[0].{omitted}");
+        assert_eq!(g(&fqn), None, "{fqn} (conservative omission) must be blank");
+    }
+
+    // The Digital-Asset question is answered YES; "No" is never checked.
+    let doc = load(&pdf).unwrap();
+    let idx = index(&collect_fields(&doc).unwrap());
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_5[0]"].id).as_deref(),
+        Some("1")
+    );
+    assert_eq!(
+        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_5[1]"].id),
+        None,
+        "never 'No'"
+    );
+}
+
+/// ★★ **THE FILING-STATUS NAME COLLISION.** Two distinct fields are both called `c1_3[0]` (Single,
+/// and Head of household) and two are both called `c1_3[1]` (MFJ, and QSS) — distinguished ONLY by
+/// their parent subform. A map keyed on the leaf name would silently check the WRONG FILING STATUS,
+/// which changes the standard deduction, every bracket and every threshold on the return.
+///
+/// This drives all five statuses and asserts, for each, that the RIGHT fully-qualified field carries
+/// the RIGHT on-state and that no OTHER filing-status box is set. The distinct on-states
+/// (1=Single, 2=HoH, 3=MFJ, 4=MFS, 5=QSS) corroborate the mapping independently of the field names.
+#[test]
+fn form_1040_full_filing_status_boxes_do_not_collide() {
+    const SINGLE: &str = "topmostSubform[0].Page1[0].FilingStatus_ReadOrder[0].c1_3[0]";
+    const HOH: &str = "topmostSubform[0].Page1[0].c1_3[0]"; // ← same LEAF name as Single!
+    const MFJ: &str = "topmostSubform[0].Page1[0].FilingStatus_ReadOrder[0].c1_3[1]";
+    const MFS: &str = "topmostSubform[0].Page1[0].FilingStatus_ReadOrder[0].c1_3[2]";
+    const QSS: &str = "topmostSubform[0].Page1[0].c1_3[1]"; // ← same LEAF name as MFJ!
+    let all = [SINGLE, HOH, MFJ, MFS, QSS];
+
+    for (status, want_field, want_on) in [
+        (FilingStatus::Single, SINGLE, "1"),
+        (FilingStatus::HoH, HOH, "2"),
+        (FilingStatus::Mfj, MFJ, "3"),
+        (FilingStatus::Mfs, MFS, "4"),
+        (FilingStatus::Qss, QSS, "5"),
+    ] {
+        let pdf = btctax_forms::fill_form_1040_full(&f1040(), status, 2024).unwrap();
+        let doc = load(&pdf).unwrap();
+        let idx = index(&collect_fields(&doc).unwrap());
+
+        assert_eq!(
+            checkbox_on(&doc, idx[want_field].id).as_deref(),
+            Some(want_on),
+            "{status:?} must set {want_field} to on-state {want_on}"
+        );
+        for other in all {
+            if other != want_field {
+                assert_eq!(
+                    checkbox_on(&doc, idx[other].id),
+                    None,
+                    "{status:?} must NOT set {other} — exactly one filing-status box may be checked"
+                );
+            }
+        }
+    }
+}
+
+/// 1040 line 7 on a loss year carries a LEADING MINUS (SPEC §3.2) — unlike Schedule D's lines
+/// 6/14/21, which are parenthesized boxes carrying magnitudes. Two conventions, two forms that
+/// reference each other.
+#[test]
+fn form_1040_full_line7_loss_prints_a_leading_minus() {
+    let mut lines = f1040();
+    lines.line7 = dec!(-3000); // the §1211(b)-limited loss
+    let pdf = btctax_forms::fill_form_1040_full(&lines, FilingStatus::Single, 2024).unwrap();
+    let v = tv(
+        &pdf,
+        "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_52[0]",
+    )
+    .unwrap();
+    assert_eq!(v, "-3000");
+    assert!(
+        v.starts_with('-'),
+        "1040 L7 is signed with a LEADING MINUS, not parentheses"
+    );
+}
+
+/// Same-column swap on the 1040 (lines 9 and 15 are both AMOUNT, far apart in y) → the descent leg of
+/// the oracle catches it and the fill FAILS CLOSED.
+#[test]
+fn form_1040_full_same_column_swap_fails_closed() {
+    let mut map = btctax_forms::Form1040Map::ty2024();
+    std::mem::swap(&mut map.line9, &mut map.line15);
+    let err = fill_form_1040_full_with_map(&f1040(), FilingStatus::Single, &map)
+        .expect_err("a same-column swap must fail closed");
+    assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
 }

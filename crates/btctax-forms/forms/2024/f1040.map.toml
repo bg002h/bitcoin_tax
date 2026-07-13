@@ -16,3 +16,75 @@ line7a = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_52[0]"
 da_present = true
 da_yes = { field = "topmostSubform[0].Page1[0].c1_5[0]", on = "1" }
 da_no = { field = "topmostSubform[0].Page1[0].c1_5[1]", on = "2" }
+
+# ─────────────────────────── FULL-RETURN extension (P6) ────────────────────────────────────────
+# The crypto-slice fill above writes only line 7 + the Digital-Asset question. The full return needs
+# every line. These keys are absent from the 2017/2025 maps, hence optional.
+#
+# ★ THREE x-clusters on this form:
+#     SUBLINE x ≈ [252, 324]   the lettered "a" sub-lines (2a tax-exempt interest, 3a qualified div)
+#     MID     x ≈ [410, 482]   25a/25b/25c, 31
+#     AMOUNT  x ≈ [504, 576]   everything else
+#
+# ★ f1_57 IS LINE 12 ON THE 2024 FORM AND LINE 1z ON THE 2025 ONE (SPEC §7.4). The maps are
+#   per-(form, year) for exactly this reason. Never share a field-name constant across years.
+#
+# ★★ THE FILING-STATUS GROUP IS A NAME COLLISION. There are TWO distinct fields called `c1_3[0]` and
+#    TWO called `c1_3[1]`, distinguished ONLY by their parent subform:
+#        FilingStatus_ReadOrder[0].c1_3[0]  = Single   (on "1")
+#                          ...  .c1_3[0]  = HoH      (on "2")   ← same leaf name, no wrapper!
+#        FilingStatus_ReadOrder[0].c1_3[1]  = MFJ      (on "3")
+#                          ...  .c1_3[1]  = QSS      (on "5")   ← same leaf name, no wrapper!
+#        FilingStatus_ReadOrder[0].c1_3[2]  = MFS      (on "4")
+#    A map that used the leaf name would silently check the WRONG FILING STATUS. The on-states
+#    (1=Single, 2=HoH, 3=MFJ, 4=MFS, 5=QSS) are distinct and independently corroborate the mapping —
+#    which is why the filler asserts BOTH the fully-qualified name and the on-state.
+
+# ── Page 1: income → taxable income ────────────────────────────────────────────────────────────
+line1z = "topmostSubform[0].Page1[0].f1_41[0]"                              # wages (Σ W-2 box 1)   AMOUNT
+line2b = "topmostSubform[0].Page1[0].f1_43[0]"                             # taxable interest      AMOUNT
+line3a = "topmostSubform[0].Page1[0].f1_44[0]"                             # qualified dividends   SUBLINE ★
+line3b = "topmostSubform[0].Page1[0].f1_45[0]"                             # ordinary dividends    AMOUNT
+line8  = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_53[0]"      # Sch 1 L10             AMOUNT
+line9  = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_54[0]"      # total income          AMOUNT
+line10 = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_55[0]"      # Sch 1 L26             AMOUNT
+line11 = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_56[0]"      # AGI                   AMOUNT
+line12 = "topmostSubform[0].Page1[0].f1_57[0]"                             # deduction  ★ f1_57    AMOUNT
+line13 = "topmostSubform[0].Page1[0].f1_58[0]"                             # QBI (8995 L15)        AMOUNT
+line14 = "topmostSubform[0].Page1[0].f1_59[0]"                             # 12 + 13               AMOUNT
+line15 = "topmostSubform[0].Page1[0].f1_60[0]"                             # TAXABLE INCOME        AMOUNT
+
+# ── Page 2: tax → total tax → payments → refund/owed ───────────────────────────────────────────
+line16  = "topmostSubform[0].Page2[0].f2_02[0]"   # tax
+line17  = "topmostSubform[0].Page2[0].f2_03[0]"   # Sch 2 L3 (always 0 in v1)
+line18  = "topmostSubform[0].Page2[0].f2_04[0]"   # 16 + 17
+line19  = "topmostSubform[0].Page2[0].f2_05[0]"   # CTC/ODC — always 0 (conservative omission)
+line20  = "topmostSubform[0].Page2[0].f2_06[0]"   # Sch 3 L8
+line21  = "topmostSubform[0].Page2[0].f2_07[0]"   # 19 + 20
+line22  = "topmostSubform[0].Page2[0].f2_08[0]"   # 18 − 21
+line23  = "topmostSubform[0].Page2[0].f2_09[0]"   # Sch 2 L21
+line24  = "topmostSubform[0].Page2[0].f2_10[0]"   # TOTAL TAX
+line25a = "topmostSubform[0].Page2[0].f2_11[0]"   # W-2 withholding        MID
+line25b = "topmostSubform[0].Page2[0].f2_12[0]"   # 1099 withholding       MID
+line25c = "topmostSubform[0].Page2[0].f2_13[0]"   # other (8959 L24)       MID
+line25d = "topmostSubform[0].Page2[0].f2_14[0]"   # 25a + 25b + 25c
+line26  = "topmostSubform[0].Page2[0].f2_15[0]"   # estimated payments
+line31  = "topmostSubform[0].Page2[0].f2_20[0]"   # Sch 3 L15              MID
+line32  = "topmostSubform[0].Page2[0].f2_21[0]"   # 27-31 total
+line33  = "topmostSubform[0].Page2[0].f2_22[0]"   # TOTAL PAYMENTS
+line34  = "topmostSubform[0].Page2[0].f2_23[0]"   # overpayment
+line35a = "topmostSubform[0].Page2[0].f2_24[0]"   # refunded to you
+line37  = "topmostSubform[0].Page2[0].f2_28[0]"   # AMOUNT YOU OWE
+
+# UNMAPPED ON PURPOSE: the direct-deposit block (35b routing f2_25, 35c/d account f2_26) — v1 never
+# fills it, so a refund arrives as a paper check and the RefundByPaperCheck advisory says so. Line 36
+# (apply to next year) is pinned blank. Lines 27-30 (EIC, additional CTC, AOC) are §3.4 conservative
+# omissions and stay BLANK, never a misleading 0.
+
+# ── The 5-way filing-status group. Fully-qualified names ONLY — see the collision note above. ──
+[filing_status]
+single = { field = "topmostSubform[0].Page1[0].FilingStatus_ReadOrder[0].c1_3[0]", on = "1" }
+hoh    = { field = "topmostSubform[0].Page1[0].c1_3[0]",                            on = "2" }
+mfj    = { field = "topmostSubform[0].Page1[0].FilingStatus_ReadOrder[0].c1_3[1]", on = "3" }
+mfs    = { field = "topmostSubform[0].Page1[0].FilingStatus_ReadOrder[0].c1_3[2]", on = "4" }
+qss    = { field = "topmostSubform[0].Page1[0].c1_3[1]",                            on = "5" }
