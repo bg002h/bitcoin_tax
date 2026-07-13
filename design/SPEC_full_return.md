@@ -100,7 +100,7 @@ NEW  absolute-liability assembly (btctax-core/src/tax/return_1040.rs) ── reu
        absolute Form 8960 + 8959 (Part I/II/V) (NEW, tax/other_taxes.rs)      [deep/02]
        │
 NEW/EXTENDED btctax-forms fillers: full 1040 + Sch 1/2/3/A/B/C + Sch D(L17–22) + SE + 8959 + 8960 + 8995
-                                   (per-(form,year) TOML maps; geometric read-back; DRAFT/attest gate)
+                                   (per-(form,year) TOML maps; geometric read-back; pseudo-only DRAFT/attest gate — §9 as amended)
 ```
 
 **Frozen (unchanged):** `TaxProfile` (`types.rs`), `compute.rs`, the ~80 constructors, what-if,
@@ -446,7 +446,20 @@ geometric read-back). Bundle PDFs public-domain.
 Per-(form,year) maps mandatory: `f1_57` = L12(2024)/L1z(2025) collides; filing-status on-states re-assigned →
 maps carry `(FQN, on_state)` per status per year; roots flip in 2025. Extend the read-back oracle to the
 **5-way filing-status checkbox group** (`verify.rs` today only Yes/No pairs) and **negative cells** (§3.2).
-Sch B >14 interest / >15 dividend overflow reuses the 8949 continuation pattern.
+**[AMENDED — supersedes "Sch B >14 interest / >15 dividend overflow reuses the 8949 continuation
+pattern".]** Schedule B overflow **REFUSES, fail-closed** (v1). The 8949 continuation pattern does not
+transfer: it is sound because the IRS expressly defines it ("complete as many Forms 8949 as needed") *and*
+because Schedule D sits above the copies as their aggregator. Schedule B has neither property — no
+instruction defines multiple Schedule B copies, and **Schedule B IS the aggregator** (its line 4 flows
+straight to 1040 line 2b). Two Schedule Bs each cross-footing its own subset leave "which line 4 is 2b?"
+with no form-defined answer, and a copy whose line 4 carried the grand total while its rows summed to a
+subset would violate the §3.1 cross-foot invariant on its face. `overflow.rs::merge_copies` would produce
+precisely the artifact that is wrong here.
+
+The correct fix (post-v1, filed as a follow-up) is the professional practice: ONE Schedule B whose line 1
+reads "see attached statement", plus a generated continuation *statement* — a synthetic page generator,
+which is new machinery outside the geometric oracle, for a case (a common W-2 household with 15+ interest
+payers) at the far tail of v1's declared scope.
 
 ---
 
@@ -463,7 +476,19 @@ no-interior-edge form was TY2024-only — corrected per plan-review C1).
 
 ## 9. Legal / positioning (retained; we distribute)
 
-DRAFT watermark + attestation forced on every full return; mechanical (UPL); Paid Preparer/PTIN blank. **§9.2
+**[AMENDED 2026-07-13 — user decision; supersedes the original "DRAFT watermark + attestation forced on
+every full return".]** A full-return packet exports **CLEAN and filable, with no attestation step** — the
+same posture as today's real-ledger crypto-slice export. The **DRAFT watermark + attestation gate remains
+PSEUDO-RECONCILED-ONLY** (a synthetic, non-persisted default contributing to the projection): those figures
+are fictional and are never filable, attestation or not.
+
+Rationale for the amendment: the original text and Phase 6's exit condition (*a filable packet*) could not
+both hold — a page stamped `ESTIMATE, NOT FOR FILING` cannot be filed. That is a legal-positioning call
+(UPL posture; "we distribute"), not an architectural one, and the user resolved it toward the simplest
+option consistent with shipped behavior, accepting that the original's deliberate friction is dropped.
+There is to be **no always-on DRAFT gate** for full-return PDFs and **no second attestation phrase**.
+
+Mechanical (UPL); Paid Preparer/PTIN blank. **§9.2
 LIMITATIONS doc** (versioned; man page + `--help` + shipped file): supported forms/lines/years, plus three
 lists aligned to §3.4's omission-vs-refuse split (R3-M8): **(i) favorable-only OMISSIONS** (advisory, overstate
 tax at worst) — CTC/ODC, EIC, education/dependent-care/saver's/energy/adoption credits, direct-deposit;
@@ -527,7 +552,7 @@ Refuse-guard table (§4.10) lands in phase 1. Each phase = TDD + review-to-green
    and Schedule C net are computed in **phase 2**; phase 3 carries QBI as a **0-stub** completed here.)
 5. **LIMITATIONS doc** (§9.2) + conservative-omission advisories.
 6. **PDF fillers** — Sch D L17–22 (§7.2); Schedule C, 8959/8960/8995 maps (§7.3); full 1040 + Sch 1/2/3/A/B +
-   SE; per-year maps + on-state/negative read-back extensions (§7.4); DRAFT/attest gate; golden hashes.
+   SE; per-year maps + on-state/negative read-back extensions (§7.4); pseudo-only DRAFT/attest gate (§9 as amended); golden hashes.
 7. **End-to-end golden returns + ATS fixture** (§10 L2/L3).
 
 ## 12. Decisions (RESOLVED 2026-07-12)

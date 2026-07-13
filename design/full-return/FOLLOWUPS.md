@@ -313,6 +313,8 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   does. Owning phase: **P6** — this is not deferrable past it, since P6's whole purpose is to make the export
   correct.
 
+- **[CLOSED by SPEC §9 amendment, 2026-07-13] p5-i1-full-return-draft-attest-gate.** The user decided the full-return packet exports CLEAN with no attestation; the DRAFT/attest gate stays pseudo-only. There is no always-on gate to build. Original entry:
+
 - **p5-i1-full-return-draft-attest-gate → P6.** The DRAFT watermark + attestation gate is pseudo-mode-only
   today; LIMITATIONS.md now says so in present tense. SPEC §9 wants an **always-on DRAFT gate for full-return
   PDFs**. It lands with the P6 fillers (there is no full-return PDF to stamp before then). Owning phase: **P6**.
@@ -341,6 +343,8 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   naturally into P6's render work, which already has to grow (see `p5-m1`). Surfaced by Fable IMPL-P5 r2
   (N-r2-1) after r1-N5's money-format half was fixed.
 
+- **[CLOSED by SPEC §7.4 amendment] p6-schedule-b-overflow-refuses-instead-of-paginating.** The fail-closed refusal is now the SPEC'd behavior: the 8949 continuation pattern does not transfer, because Schedule B IS the aggregator (line 4 → 1040 2b), so two copies leave "which line 4 is 2b?" undefined. The real fix is filed post-v1. Original entry:
+
 - **p6-schedule-b-overflow-refuses-instead-of-paginating → P6.** SPEC §7.4 says "Sch B >14 interest /
   >15 dividend overflow reuses the **8949 continuation pattern**" (i.e. paginate onto additional
   copies via `overflow.rs` / `merge_copies`). I implemented a **fail-closed REFUSAL** instead
@@ -348,6 +352,30 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   never produce a wrong form — but it is NOT what the SPEC specifies, and it turns a filable return
   into a hard stop for a household with 15+ interest payers. Declaring the deviation rather than
   hiding it: either implement the continuation pattern, or amend SPEC §7.4. Owning phase: **P6**.
+
+- **[GATING] p6-aged-blind-checkboxes-missing → P6.** Core folds the §63(f) age-65/blind additions into
+  the printed 1040 **line 12**, but `f1040.map.toml` has **no age/blind checkboxes**. A filed 1040 claiming
+  a nonstandard standard deduction with ZERO boxes checked fails the IRS's own arithmetic cross-check — the
+  checkbox count is how the Service validates it. Same class as P5-C1: a form internally inconsistent with
+  itself. Found by the Fable architect pass. **Gating for the packet, same tier as name/SSN.** The exit
+  condition is restated: the packet must be filable AND every figure on it internally and mutually
+  consistent — not merely "every money line is right".
+
+- **p6-schedule-b-capacity-error-variant → P6 (nit).** The Schedule B overflow refusal is raised as
+  `FormsError::Geometry`, which mislabels it — it is a CAPACITY refusal, not a placement failure. Give it
+  its own variant so the CLI can render "file Schedule B by hand" actionably.
+
+- **p6-form8959-must-file-belongs-in-core → P6 (minor).** Every other file-or-don't-file decision is a core
+  `Option` return; Form 8959's ("L18 and L24 both zero") lives in the FILLER. Hoist it to
+  `Form8959Lines::must_file()` so every filing decision is a core fact the packet KATs can see.
+
+- **p6-writeback-persists-cents-not-filed-figures → post-P6 (minor).** `apply_carryover_writeback` persists
+  exact cents; strictly, next year's worksheets start from the *filed* whole-dollar figures. Sub-dollar and
+  re-rounded next year, so not a gate item — recorded as a decision, not an accident.
+
+- **p6-schedule-b-continuation-statement → post-v1.** The real >14-payer fix: one Schedule B whose line 1
+  reads "see attached statement", plus a generated continuation statement (a synthetic page generator,
+  outside the geometric oracle). SPEC §7.4 as amended.
 
 - **p6-form-identity-header → P6 (packet assembly).** None of the new P6 fillers (8959, 8960, 8995,
   Sch 1/2/3/A/C) writes the **taxpayer name + SSN header** that every IRS form carries at the top. The
