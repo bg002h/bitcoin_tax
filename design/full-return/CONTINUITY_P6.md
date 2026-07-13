@@ -96,15 +96,15 @@ lines 11/12/13/14 exactly — check for an existing struct before adding a new o
    **[489.6, 576]**, NOT the [504, 576] every other form uses. Part III lines 7a/8 are Yes/No pairs
    with identical on-states (`"1"`/`"2"`) — only y-geometry + name disambiguate; **7b is FREE TEXT,
    not a Yes/No pair**.
-5. **Schedule D lines 17–22** — extend `schedule_d.rs` (all four §7.2 routing paths; KAT-10; the
+3. **Schedule D lines 17–22** — extend `schedule_d.rs` (all four §7.2 routing paths; KAT-10; the
    negative-cell read-back the oracle has never verified).
-6. **The full 1040** — extend `form1040.rs` from the capital-gains cluster to every line.
-7. **Wire it together**: `export_irs_pdf` emits the full packet; add the always-on **DRAFT/attest
+4. **The full 1040** — extend `form1040.rs` from the capital-gains cluster to every line.
+5. **Wire it together**: `export_irs_pdf` emits the full packet; add the always-on **DRAFT/attest
    gate** for full-return PDFs (`p5-i1`); and **DELETE the P5-C1 refusal**
    (`CliError::CryptoSliceExportForFullReturnYear` + its guard in `cmd/admin.rs` + the KAT
    `export_refuses_for_a_full_return_year_p5_c1`) — that refusal exists ONLY because the crypto-slice
    export would file an understated Schedule D, which is precisely what this phase fixes.
-8. **Fable P6 gate review → fold → re-review to 0C/0I.**
+6. **Fable P6 gate review → fold → re-review to 0C/0I.**
    ⚠️ The reviewer noted P5's green was measured at a HEAD that already contained the parked P6 commit
    `51020d8`. That code is inert at the user surface, so the green covers it — **but P6's own gate must
    NOT treat `51020d8` as already reviewed.**
