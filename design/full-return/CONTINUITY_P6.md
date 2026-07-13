@@ -8,10 +8,10 @@
 |---|---|
 | P0–P4 | **CERTIFIED GREEN** (incl. P4.9 carryover write-back) |
 | P5 (LIMITATIONS + advisories) | **CERTIFIED GREEN** — Fable r2 `0C/0I` at `b40bdec` |
-| **P6 (PDF fillers)** | **IN PROGRESS — all 9 forms + Schedule D full fill; ALL core printed chains done. The 1040 FILLER and packet assembly remain** |
+| **P6 (PDF fillers)** | **IN PROGRESS — EVERY FORM FILLS (9 new + Schedule D full + the full 1040). Only PACKET ASSEMBLY remains** |
 | P7 (golden returns) | not started |
 
-Branch `full-return`. Gates at HEAD: **1624 passing / 0 failed**, clippy
+Branch `full-return`. Gates at HEAD: **1628 passing / 0 failed**, clippy
 (`--workspace --all-targets --locked -D warnings`) 0, fmt clean, xtask docs 5/5, FROZEN files 0 bytes.
 
 ## The operating contract (unchanged)
@@ -76,7 +76,7 @@ FAILS CLOSED. Fault-inject both legs (cross-column and same-column swap) in ever
 | Schedule C | `printed::schedule_c_lines` | `f1040sc.map.toml` | `schedule_c.rs` | `c099e5a` |
 | Schedule B | `printed::schedule_b_lines` | `f1040sb.map.toml` | `schedule_b.rs` | `23e5e22` |
 | Schedule D (full) | `printed::schedule_d_lines` | `schedule_d.map.toml` (extended) | `schedule_d_full.rs` | `778913e` |
-| **Form 1040** | `printed::form_1040_lines` | — | **NOT YET WRITTEN** | `a440811` (chain only) |
+| **Form 1040 (full)** | `printed::form_1040_lines` | `f1040.map.toml` (extended) | `form1040_full.rs` | `0eb3138` |
 
 All 9 official TY2024 IRS PDFs are already bundled in `crates/btctax-forms/forms/2024/`.
 
@@ -86,36 +86,81 @@ All 9 official TY2024 IRS PDFs are already bundled in `crates/btctax-forms/forms
 `ScheduleAParts` and `Schedule1Parts`. Note `charitable::CharitableResult` already carried Schedule A
 lines 11/12/13/14 exactly — check for an existing struct before adding a new one.
 
-## Remaining P6 work, in the order I'd do it
+## Remaining P6 work — PACKET ASSEMBLY ONLY
 
-**Every core printed chain is DONE** (`tax/printed.rs` + `other_taxes.rs` + `qbi.rs`). All nine
-standalone forms fill, and so does the full-return Schedule D. What remains is the 1040 filler and
-wiring the packet.
+**Every form fills.** All nine new forms, the full-return Schedule D, and the full 1040, each with its
+core printed chain, its verified map, its geometric read-back, and fault-injection KATs. What remains
+is wiring them into a filable packet.
 
-1. **The Form 1040 filler.** `printed::form_1040_lines` already exists and is KAT'd; only the PDF
-   fill is missing. `form1040.rs` today writes just the capital-gain cluster + the digital-asset
-   question, so this is an extension, not a rewrite. Three known hazards:
-   - the **5-way filing-status checkbox group** — SPEC §7.4 says `verify.rs`'s oracle handles only
-     Yes/No pairs today and must be extended for it;
-   - **per-year map collisions** — SPEC §7.4: `f1_57` is L12 on the 2024 form and L1z on the 2025 one,
-     and the filing-status on-states are re-assigned between years. The map is per-(form, year) for
-     exactly this reason; do not share a constant;
-   - **line 7 is signed with a LEADING MINUS** (SPEC §3.2), unlike Schedule D's paren boxes.
-2. **Packet assembly** (`export_irs_pdf`):
-   - write the **taxpayer name + SSN header** on every form — none of the nine fillers does yet, so
-     the money lines are right but the forms are **not filable as-is** (`p6-form-identity-header`);
-   - add the always-on **DRAFT/attest gate** for full-return PDFs (`p5-i1`);
-   - **DELETE the P5-C1 refusal** — `CliError::CryptoSliceExportForFullReturnYear`, its guard in
-     `cmd/admin.rs`, and the KAT `export_refuses_for_a_full_return_year_p5_c1`. That refusal exists
-     ONLY because the crypto-slice export would file an understated Schedule D. `schedule_d_full.rs`
-     now fills lines 6/13/14 and all of Part III, so the reason for it is gone. **This is the phase's
-     exit condition.**
-   - decide how the report surfaces the report-vs-PDF rounding difference
-     (`p5-report-vs-pdf-may-differ-by-rounding`) and say it in LIMITATIONS.md.
-3. **Fable P6 gate review → fold → re-review to 0C/0I.**
-   ⚠️ P5's green was measured at a HEAD that already contained the parked P6 commit `51020d8`. That
-   code is inert at the user surface, so the green covers it — **but P6's own gate must NOT treat
-   `51020d8` as already reviewed.**
+### 1. The identity header (`p6-form-identity-header`) — DO THIS FIRST
+
+**No filler writes the taxpayer name or SSN.** The money lines are right, but the forms are **not
+filable**: an unnamed Schedule C is not a return. This blocks everything below — do NOT delete the
+P5-C1 refusal until it is done, or the export would emit unnamed forms, which is worse than refusing.
+
+The nine schedules take two fields each (name, SSN); dump each with
+`cargo run -p xtask -- dump-fields <pdf>` — they are the first two text fields on page 1 (e.g. Form
+8959: `f1_1` / `f1_2`; Schedule B: `f1_01` / `f1_02` — note the zero-padding differs per form).
+
+**The 1040's header is a full identity block, not two fields** (dumped, TY2024):
+
+| field | FQN |
+|---|---|
+| taxpayer first name | `topmostSubform[0].Page1[0].f1_04[0]` |
+| taxpayer last name | `topmostSubform[0].Page1[0].f1_05[0]` |
+| taxpayer SSN | `topmostSubform[0].Page1[0].f1_06[0]` |
+| spouse first name | `topmostSubform[0].Page1[0].f1_07[0]` |
+| spouse last name | `topmostSubform[0].Page1[0].f1_08[0]` |
+| spouse SSN | `topmostSubform[0].Page1[0].f1_09[0]` |
+| address | `…Address_ReadOrder[0].f1_10[0]` … `f1_12[0]` |
+
+Check the SSN cells for `/MaxLen` (11) and comb flags before writing — a formatted `123-45-6789` is
+exactly 11 characters. Use `FlatPlacement::free` (geometry-exempt, still in the no-unmapped set), as
+`form8283.rs` already does for its identity fields.
+
+### 2. Wire `export_irs_pdf` to emit the full packet
+
+Build every chain from one `AbsoluteReturn`, in dependency order — the upstream chains are arguments
+to the downstream ones, which is what makes the packet tie out:
+
+```
+f8959 = other_taxes::form_8959_lines(...)     f8960 = other_taxes::form_8960_lines(...)
+f8995 = qbi::form_8995_lines(...)             sch_d = printed::schedule_d_lines(&ar)
+sch_a = printed::schedule_a_lines(&ar)        sch_b = printed::schedule_b_lines(&ri)
+sch_c = printed::schedule_c_lines(&ar)        sch_1 = printed::schedule_1_lines(&ar)
+sch_2 = printed::schedule_2_lines(&ar, &f8959, f8960.as_ref())
+sch_3 = printed::schedule_3_lines(&ar)
+f1040 = printed::form_1040_lines(&ar, sch_b, sch_1, sch_a, &sch_d, sch_2, sch_3, &f8959, f8995, ...)
+```
+
+Each `*_lines` returns `Option` when its form is not required — emit only the `Some` ones.
+
+### 3. The always-on DRAFT/attest gate (`p5-i1`)
+
+Today the watermark + attestation is pseudo-mode-only. SPEC §9 wants it always-on for full-return
+PDFs. `watermark.rs` / `stamp_draft_watermark` already exist.
+
+### 4. ★ DELETE THE P5-C1 REFUSAL — the phase's exit condition
+
+Remove `CliError::CryptoSliceExportForFullReturnYear`, its guard in `cmd/admin.rs::export_irs_pdf`,
+and the KAT `export_refuses_for_a_full_return_year_p5_c1`. That refusal exists ONLY because the
+crypto-slice export would file an understated Schedule D (no line 13, no lines 6/14).
+`schedule_d_full.rs` now fills all three and all of Part III, so its reason is gone.
+
+### 5. LIMITATIONS.md + the report
+
+Say that the whole-dollar PDF can differ from the exact-cents report by a few dollars
+(`p5-report-vs-pdf-may-differ-by-rounding`) — the PDF is the filed document and ties out to itself.
+Update the "computed vs. filled" section: it currently says NO full-return PDF exists.
+
+### 6. Fable P6 gate review → fold → re-review to 0C/0I
+
+⚠️ P5's green was measured at a HEAD that already contained the parked P6 commit `51020d8`. That code
+is inert at the user surface, so the green covers it — **but P6's own gate must NOT treat `51020d8`
+as already reviewed.**
+
+Declare to the reviewer: `p6-schedule-b-overflow-refuses-instead-of-paginating` is a known deviation
+from SPEC §7.4 (which asks for the 8949 continuation pattern; I fail closed instead).
 
 Then **P7**: end-to-end golden returns (synthetic-household matrix, independent-oracle diff, IRS ATS
 Scenario 2 partial-line diff).
