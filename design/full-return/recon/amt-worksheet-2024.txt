@@ -1,0 +1,35 @@
+2024 "Worksheet To See if You Should Fill in Form 6251 — Schedule 2, Line 2"
+(verbatim from IRS 2024 Instructions for Form 1040, i1040gi--2024.pdf p.97-98)
+
+Before you begin: read the Exception in the Line-2 instructions (certain preference
+items force Form 6251 instead of this worksheet — 4952 investment interest, accelerated
+depreciation, PAB tax-exempt interest, ISO stock, §1202 exclusion, NOL, estate/trust AMT
+adjustments, certain general-business/EV credits). All are out-of-scope inputs in v1
+(PAB already refused via INT box9 / DIV box13); none can appear.
+
+1. Filing Schedule A?
+   No  -> skip 1-2; line3 = 1040 L11 (AGI) - 1040 L13 (QBI); go to line 4.
+   Yes -> line1 = 1040 L15 (taxable income).
+2. line2 = Schedule A line 7 (total itemized deductions).
+3. line3 = line1 + line2.            [= AGI - QBI in BOTH branches: L15 + L12(itemized) = AGI - L13]
+4. line4 = tax refund from Sch 1 lines 1 and 8z.
+5. line5 = line3 - line4.
+6. line6 = exemption: Single/HoH 85,700; MFJ/QSS 133,300; MFS 66,650.
+7. Is line5 MORE THAN line6?
+   No  -> STOP. No AMT. Leave Sch 2 line 2 blank.
+   Yes -> line7 = line5 - line6.
+8. line8 = phase-out start: Single/HoH 609,350; MFJ/QSS 1,218,700; MFS 609,350.
+9. Is line5 MORE THAN line8?
+   No  -> enter 0; skip line10; line11 = line7; go to line12.
+   Yes -> line9 = line5 - line8.
+10. line10 = min(0.25 * line9, line6).
+11. line11 = line7 + line10.
+12. Is line11 MORE THAN 232,600 (116,300 MFS)?
+    Yes -> STOP. Fill in Form 6251.       [REFUSE in v1]
+    No  -> line12 = 0.26 * line11.
+13. line13 = 1040 L16 (minus any Form 4972 tax) + Schedule 2 line 1z.   [= L16 + 0 in v1]
+Next: Is line12 MORE THAN line13?
+    Yes -> Fill in Form 6251.              [REFUSE in v1]
+    No  -> No AMT. Leave Sch 2 line 2 blank.
+
+All comparisons are strict "more than" (>). 2024 amounts = Rev. Proc. 2023-34 §2.11 / §55(d).
