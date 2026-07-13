@@ -416,3 +416,61 @@ fn ty2017_real_ledger_fills_box_c_f_and_line13_no_da() {
     // No Digital-Asset {/1,/2} pair is ANSWERED on the 2017 1040 (the form has no such question).
     assert!(report.form_1040_filled_7a, "line 13 filled (active gain)");
 }
+
+/// ★ **P5-C1** — `export-irs-pdf` must REFUSE for a year that has full-return inputs.
+///
+/// These fillers are the crypto-slice pipeline: Schedule D carries only the crypto totals (lines
+/// 3/7/10/15/16 — no line 13 for 1099-DIV box-2a capital-gain distributions, no lines 6/14 for
+/// capital-loss carryovers) and the 1040 fill is only the capital-gain line. On a crypto-only year
+/// that is complete and correct. On a full-return year it is a complete-LOOKING Schedule D with
+/// income missing, which the filer would mail — an understated return. §3.4: a plausible wrong
+/// number is worse than a refusal.
+///
+/// The refusal is scoped to the year: the SAME vault still exports a crypto-only year fine, which is
+/// what makes this a guard and not a blanket kill-switch.
+#[test]
+fn export_refuses_for_a_full_return_year_p5_c1() {
+    use btctax_cli::{return_inputs, Session};
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    use btctax_core::tax::types::FilingStatus;
+
+    let (_dir, vault) = make_vault(&real_events());
+    let out = tempfile::tempdir().unwrap();
+
+    // The ledger's crypto activity is in 2025 (see `real_events`). Give 2025 full-return inputs.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        return_inputs::set(
+            s.conn(),
+            2025,
+            &ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None)
+        .expect_err("a full-return year must not get a crypto-slice PDF");
+    assert!(
+        matches!(
+            err,
+            CliError::CryptoSliceExportForFullReturnYear { year: 2025 }
+        ),
+        "got {err:?}"
+    );
+    // A refusal writes NO bytes — the filer never has a wrong form on disk to mail by accident.
+    assert!(
+        std::fs::read_dir(out.path())
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true),
+        "a refused export must leave out_dir empty"
+    );
+
+    // …and a year WITHOUT full-return inputs still exports (the guard is per-year, not global).
+    let out2 = tempfile::tempdir().unwrap();
+    cmd::admin::export_irs_pdf(&vault, &pp(), out2.path(), 2024, &[], None)
+        .expect("a crypto-only year must still export");
+}

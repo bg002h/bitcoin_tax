@@ -302,6 +302,42 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   ranked Minor by two independent Fable passes; fold opportunistically during the relevant phase. (spec §8
   KAT-3 mod-25 + the Sch 2 L1a/L2 structure are now FOLDED into spec r6, not open.)
 
+## Open — owned by P6 (the PDF fillers)
+
+- **p5-c1-crypto-slice-export-refusal → P6.** `export-irs-pdf` now REFUSES for a year with full-return inputs
+  (`CliError::CryptoSliceExportForFullReturnYear`), because its Schedule D fills only the crypto totals (no
+  line 13 for 1099-DIV box-2a capital-gain distributions, no lines 6/14 for capital-loss carryovers) and its
+  1040 fills only the capital-gain cluster — for a full return those are complete-LOOKING forms with income
+  missing (§3.4: fail closed). **P6 must REPLACE this refusal with the real full-return export**, and delete
+  the guard in `cmd/admin.rs::export_irs_pdf` + the KAT `export_refuses_for_a_full_return_year_p5_c1` when it
+  does. Owning phase: **P6** — this is not deferrable past it, since P6's whole purpose is to make the export
+  correct.
+
+- **p5-i1-full-return-draft-attest-gate → P6.** The DRAFT watermark + attestation gate is pseudo-mode-only
+  today; LIMITATIONS.md now says so in present tense. SPEC §9 wants an **always-on DRAFT gate for full-return
+  PDFs**. It lands with the P6 fillers (there is no full-return PDF to stamp before then). Owning phase: **P6**.
+
+- **p5-m1-report-lacks-interior-schedule-lines → P6.** The report prints the 1040-level summary, not the
+  interior per-line figures of Schedules 1/2/3/A/B/C and Forms 8959/8960/8995, so the "transcribe by hand"
+  instruction is not fully actionable from the report alone. Once P6's `*_lines` printed chains exist (see
+  `p6-printed-line-chain` below) the report can print them. Owning phase: **P6**.
+
+- **p6-printed-line-chain (architectural, surfaced building Form 8959).** SPEC §3.1's round-all-amounts
+  election means every printed form needs a **printed line chain**: each line `round_dollar`ed AT THE LINE,
+  and each printed total summing the ALREADY-ROUNDED lines so the filed form cross-foots. This is NOT
+  `round_dollar(exact_total)` — KAT-9 (`kat9_printed_lines_round_then_cross_foot`) pins the discriminating
+  case. `btctax-forms` must do ZERO tax arithmetic, so each chain is derived in **core** and the filler
+  transcribes it (`other_taxes::form_8959_lines` is the pattern). Every remaining P6 form (Sch 1/2/3/A/B/C,
+  8960, 8995, the full 1040, Sch D L17–22) needs its own. Owning phase: **P6**.
+
+- **p5-report-vs-pdf-may-differ-by-rounding → P6.** A direct consequence of the above: the exact-cents report
+  and the whole-dollar cross-footing PDF can differ by a few dollars. That is what the round-all-amounts
+  election means, and the PDF is the filed document. P6 must decide how the report surfaces this (print the
+  printed-line figures alongside the exact ones, or state the difference) and LIMITATIONS.md must say it.
+  Owning phase: **P6**.
+
+- **p1-ssn-normalization-P6** — (carried; unchanged).
+
 ## Spec errata surfaced by the plan review (fix spec text; do not re-open the GREEN gate for these)
 
 - **spec-s8-kat3-mod25** — SPEC §8 / §10 KAT-3 says "no bracket edge < $100k inside a $50 bin". That's a

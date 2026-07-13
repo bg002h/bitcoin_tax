@@ -206,7 +206,18 @@ pub fn export_irs_pdf(
 ) -> Result<IrsPdfReport, CliError> {
     let session = Session::open(vault_path, pp)?;
     let (state, _cfg) = session.project()?;
-    // Attestation gate FIRST — no fictional tax form leaves the machine unguarded, and a refusal
+
+    // [★ P5-C1] Full-return guard, BEFORE anything is computed or written. These fillers are the
+    // crypto-slice pipeline: Schedule D carries only the crypto totals (no line 13 for 1099-DIV
+    // box-2a capital-gain distributions, no lines 6/14 for capital-loss carryovers) and the 1040
+    // fill is only the capital-gain line. On a crypto-only year that is complete and correct; on a
+    // year with full-return inputs it is a complete-LOOKING form with income missing, which §3.4
+    // says to refuse rather than emit. Removed when the P6 full-return fillers land.
+    if crate::return_inputs::exists(session.conn(), tax_year)? {
+        return Err(CliError::CryptoSliceExportForFullReturnYear { year: tax_year });
+    }
+
+    // Attestation gate — no fictional tax form leaves the machine unguarded, and a refusal
     // writes no bytes. (A fully-real ledger ignores `attest`.)
     let watermarked = state.pseudo_active();
     if watermarked {

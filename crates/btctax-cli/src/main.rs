@@ -411,7 +411,7 @@ fn run() -> Result<ExitCode, CliError> {
         },
         // SPEC §9.2: the versioned LIMITATIONS doc, single-sourced from the shipped file so the man page,
         // `--help` and this command can never drift from what actually ships.
-        Command::Limitations => print!("{}", include_str!("../../../LIMITATIONS.md")),
+        Command::Limitations => print!("{}", include_str!("../LIMITATIONS.md")),
         Command::Reconcile(r) => dispatch_reconcile(vault, r, now)?,
         Command::Config {
             set_fee_treatment,

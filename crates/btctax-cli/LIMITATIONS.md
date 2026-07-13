@@ -4,8 +4,13 @@
 
 **This is not tax advice.** `btctax` is a mechanical calculator: it computes from the figures you give it and
 the ledger you reconciled. It does not interpret your facts, and it is not a substitute for a tax
-professional. Every full return it produces is a **DRAFT** (watermarked) and requires your attestation
-before export. No Paid Preparer / PTIN is filled — this is a self-prepared return.
+professional. No Paid Preparer / PTIN is filled — this is a self-prepared return.
+
+**On DRAFT watermarking and attestation, precisely.** Today the watermark + attestation gate applies when the
+ledger is **pseudo-reconciled** (a synthetic, non-persisted default is contributing to the projection): such an
+export is stamped `ESTIMATE, NOT FOR FILING` and refuses without the exact attestation phrase. An export from a
+fully-real ledger is **not** watermarked and needs no attestation. The always-on DRAFT gate for *full-return*
+PDFs lands with the full-return fillers; it does not exist yet, because no full-return PDF exists yet.
 
 ## The one rule that governs everything: fail closed
 
@@ -29,11 +34,18 @@ self-employment → **Schedule C** → Schedule 1 line 3.
 
 **Deductions:** standard (basic + §63(f) aged/blind + the §63(c)(5) dependent floor) vs **Schedule A**
 (medical over the 7.5% floor · SALT with the §164(b)(5) income-or-sales election, capped $10,000/$5,000 MFS ·
-home-mortgage interest, Form 1098 line 8a · charitable with the §170(b) class ceilings and 5-year
+home-mortgage interest reported on Form 1098, Schedule A line 8a · charitable with the §170(b) class ceilings and 5-year
 class/vintage carryover, including crypto donations at their §170(e) value).
 
 **Self-employment:** Schedule SE + §1401 SE tax on business crypto income · the §164(f) one-half-SE deduction ·
 the 0.9% Additional Medicare on SE income via **Form 8959 Part II** (the §6017 $400 floor is honored).
+
+**Adjustments to income (Schedule 1 Part II):** the §164(f) one-half-SE-tax deduction (line 15) · the
+**student-loan interest deduction** (line 21), including its §221(b)(2) MAGI phase-out · the **early-withdrawal
+penalty** from 1099-INT box 2 (line 18).
+
+**Other income (Schedule 1 Part I):** a **taxable state or local income-tax refund** (line 1, §111 tax-benefit
+rule) · crypto ordinary income with no other home (line 8v).
 
 **QBI:** the simplified **Form 8995** path for §199A REIT dividends (1099-DIV box 5), with the REIT/PTP loss
 carryforward.
@@ -47,11 +59,25 @@ Additional Medicare Tax, Parts I (wages), II (SE) and V (withholding).
 **Forms — computed vs. filled.** Two different things, and the difference matters:
 
 - **Computed** (every line, to the cent): 1040 · Schedules 1, 2, 3, A, B, C, D, SE · Forms 8949, 8283, 8959,
-  8960, 8995. These figures appear on the report.
-- **Filled as an official IRS PDF** (`export-irs-pdf`): **1040 · Schedule D · Schedule SE · Form 8949 · Form
-  8283**. The remaining schedules and forms (1, 2, 3, A, B, C, and Forms 8959, 8960, 8995) are **computed but
-  not yet PDF-filled** — their figures are on the report, and until the fillers ship you must transcribe them
-  onto the official forms yourself.
+  8960, 8995. The report prints the **1040-level summary** of these — income through AGI, the deduction, tax,
+  the Schedule 2 other-taxes lines, total tax, payments, and refund-or-owed. The *interior* per-line detail of
+  Schedules 1/2/3/A/B/C and Forms 8959/8960/8995 is computed but is **not** all printed today, so a hand
+  transcription of those forms still needs you to re-derive some intermediate lines yourself.
+- **Filled as an official IRS PDF** (`export-irs-pdf`): **the crypto slice only** — Form 8949 and Schedule D
+  *from the ledger's disposals*, Schedule SE, Form 8283, and on the 1040 only the capital-gain line and the
+  digital-asset question. **No full-return PDF exists yet.**
+
+> ⚠️ **`export-irs-pdf` REFUSES for a year that has full-return inputs, and that refusal is deliberate.** Its
+> Schedule D fills only lines 3/7/10/15/16 from crypto totals: it has **no line 13** (1099-DIV box-2a
+> capital-gain distributions) and **no lines 6/14** (capital-loss carryovers), both of which the computed
+> return *does* include in 1040 line 7. Its 1040 fill covers only the capital-gain cluster — not wages, AGI,
+> tax or withholding. For a crypto-only year those forms are complete and correct. For a full return they
+> would be **complete-looking forms with income missing**, and a filer could mail an understated Schedule D
+> without ever seeing a warning. Fail closed (see above): v1 refuses rather than hand you a plausible wrong
+> form.
+>
+> **Until the full-return fillers ship, every form of a full return must be transcribed by hand** from the
+> figures the report gives you onto the official IRS forms.
 
 **Carryovers:** charitable (per class + vintage) and the QBI REIT/PTP loss carryforward are computed and can
 be written forward to next year with `btctax report --tax-year Y --write-carryover`. A carryover you typed in
@@ -95,7 +121,7 @@ cannot model it correctly.
 - **W-2 box 8** (allocated tips → Form 4137) or **box 10** (dependent-care → Form 2441).
 - **1099-INT box 9 / 1099-DIV box 13** (private-activity-bond interest — an AMT preference).
 - **1099-DIV box 2b / 2c / 2d** (unrecaptured §1250, §1202, 28% collectibles → the Schedule D Tax Worksheet).
-- **Foreign tax above the §904(j) ceiling** ($300 / $600 MFJ) or non-passive → Form 1116.
+- **Foreign tax above the §904(j) ceiling** ($300 / $600 MFJ) → Form 1116.
 - **A single employer over-withholding Social Security** (not creditable — recover it from the employer).
 - **Schedule 1 line 13** (HSA → Form 8889) or **line 20 with an IRA deduction claimed** (the active-participant phase-out is unmodeled).
 
@@ -105,7 +131,7 @@ cannot model it correctly.
 - **SE-eligible business crypto income with no Schedule C** (owner and description are unknowable).
 - **A Schedule C loss** (net < 0) — §465 at-risk substantiation is out of scope.
 - **Form 8615 "kiddie tax"** — a claimable-as-dependent filer with unearned income over the §1(g) threshold ($2,600) must be taxed at the parent's rate.
-- **QBI above the §199A(e)(2) threshold** ($191,950 / $383,900 MFJ) — the Form 8995-A phase-in is unmodeled.
+- **Taxable income (before the QBI deduction) above the §199A(e)(2) threshold** ($191,950 / $383,900 MFJ) — the Form 8995-A phase-in is unmodeled. (It is the taxable-income figure that is tested, not the QBI itself.)
 - **The AMT screen trips.** v1 does **not compute the Alternative Minimum Tax**. It runs the official 2024 *"Worksheet To See if You Should Fill in Form 6251"*; if that worksheet says you may owe AMT, the return is **refused**. If the worksheet clears you, Schedule 2 line 2 is $0 — which is a sound conclusion, because the worksheet deliberately over-estimates.
 - **Taxable income ≤ $0 with a capital-loss carryforward** — the §1211/§1212 Capital Loss Carryover Worksheet edge is unmodeled. (A refund-only filer with *no* carryforward is fine: tax = $0, withholding refunded.)
 
@@ -118,6 +144,9 @@ There is nowhere to enter these, and a return that needs them is out of scope:
 - **Schedule E** (rental, royalty, partnership/S-corp K-1) and **Schedule F** (farm).
 - **A non-crypto Schedule C** (any self-employment other than the crypto trade/business).
 - **A second self-employed earner.** v1 models exactly one Schedule C; there is no way to represent a second SE earner's business.
+- **Non-passive foreign tax** (a Form 1116 category other than passive). The only foreign-tax inputs are
+  1099-INT box 6 and 1099-DIV box 7, which are passive by construction — so there is no way to *enter* a
+  non-passive foreign tax. If there were, it would refuse.
 - **State and local returns** — federal only.
 - **E-filing** — print and mail.
 - **Any tax year other than TY2024**, and the TY2025 Schedule 1-A.
