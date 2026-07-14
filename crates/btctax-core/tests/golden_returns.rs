@@ -282,9 +282,14 @@ fn every_golden_household_matches_the_independent_oracles() {
             let o2 = o2.map(|v| round_dollar(usd(v)));
 
             let matches_1 = ours == o1;
-            let matches_2 = o2.is_none_or(|v| ours == v);
-            if matches_1 && matches_2 {
-                continue; // both oracles agree with btctax
+            // ★ Fable P7 r3, Minor. `matches_2` must mean "the second oracle AGREES", not "there is no
+            // second oracle". TOTAL TAX is the one line taxcalc reports no comparable figure for, so
+            // `is_none_or` made it unconditionally true there — and the anti-"btctax against the world"
+            // guard below could never fire on it. A guard that cannot fail is decoration.
+            let matches_2 = o2.is_some_and(|v| ours == v);
+            let no_second_opinion = o2.is_none();
+            if matches_1 && (matches_2 || no_second_opinion) {
+                continue; // every oracle that has an opinion agrees with btctax
             }
 
             if let Some((idx, d)) = DECLARED_DIVERGENCES
@@ -298,7 +303,7 @@ fn every_golden_household_matches_the_independent_oracles() {
                     "{} {}: btctax's value MOVED — the declared divergence is stale.\nIt was: {}",
                     h.name, line, d.why
                 );
-                if !matches_1 && !matches_2 {
+                if !matches_1 && !matches_2 && !no_second_opinion {
                     // BOTH dissent (a declared stack) — pin both, so a change in either re-opens it.
                     assert_eq!(
                         o2,
@@ -330,6 +335,9 @@ fn every_golden_household_matches_the_independent_oracles() {
                 // and the difference reconciles.
                 assert!(
                     matches_1 || matches_2 || d.agrees_with.starts_with("neither"),
+                    // With only ONE oracle on this line, `matches_1` is the whole check — so a declared
+                    // divergence here MUST say "neither", and it is the only thing standing between
+                    // btctax and an unwitnessed disagreement.
                     "{} {}: btctax disagrees with BOTH oracles ({} vs OTS {} and taxcalc {:?}), and \
                      the declared divergence claims it agrees with {}. Either the claim is stale or \
                      btctax is alone against the world — re-derive from the statute.",

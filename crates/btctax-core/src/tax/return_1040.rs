@@ -1294,7 +1294,10 @@ pub fn assemble_absolute(
                 .schedule_c
                 .as_ref()
                 .map_or_else(ScheduleCHeader::default, |c| ScheduleCHeader {
-                    business_description: c.business_description.clone(),
+                    // Trimmed ONCE, here, so Schedule C line A and Form 8995 row 1i(a) carry the
+                    // same canonical string (Fable P7 r3, Minor). Core refuses an all-whitespace name,
+                    // so this only ever strips surrounding padding.
+                    business_description: c.business_description.trim().to_string(),
                     naics_code: c.naics_code.clone(),
                     accrual: c.accounting_method
                         == crate::tax::return_inputs::AccountingMethod::Accrual,

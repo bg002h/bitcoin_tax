@@ -26,7 +26,7 @@
 //! A second builder in this crate could drift, and a drifted round-trip would be filling forms for a
 //! different taxpayer than the one the oracle validated — while still passing. One fixture, one packet.
 
-use btctax_core::conventions::round_dollar;
+use btctax_core::conventions::{round_dollar, Usd};
 use btctax_core::tax::packet::assemble_printed_return;
 use btctax_core::tax::return_1040::assemble_absolute;
 use btctax_core::tax::testonly::{
@@ -56,7 +56,11 @@ fn form<'a>(pkt: &'a [NamedForm], name: &str) -> &'a NamedForm {
 
 /// A dollar figure as it is PRINTED — whole dollars, no separators (SPEC §3.1).
 fn printed(v: f64) -> String {
-    round_dollar(btctax_core::conventions::Usd::try_from(v).expect("finite")).to_string()
+    round_dollar(usd(v)).to_string()
+}
+
+fn usd(v: f64) -> Usd {
+    Usd::try_from(v).expect("the oracles emit finite figures")
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -73,32 +77,35 @@ fn every_golden_household_prints_the_oracles_figures_onto_the_1040() {
             .unwrap_or_else(|e| panic!("{}: the filled 1040 must transcribe — {e}", h.name));
 
         let e = &h.expected_ots;
+
+        // ★ TOTAL TAX is CROSS-FOOTED from the oracle's own component lines, not taken from its total.
+        //
+        // SPEC §3.1 elects round-at-each-line: the filed line 24 adds the PRINTED lines, so it is
+        // Σround, while OTS keeps cents and reports round(Σexact). The two differ by up to $1 (and
+        // btctax DEPARTS from the 1040 instructions in doing so — see `golden_returns.rs`'s declared
+        // divergence and the `spec-3.1-crossfoot-vs-round-the-total` follow-up).
+        //
+        // Earlier this was a hardcoded name+cell exception with the two figures written out by hand.
+        // That charged its cost twice — both constants had to be re-edited by hand the moment the
+        // household's inputs changed (Fable P7 r3, Nit). Applying §3.1's own printing rule to the
+        // ORACLE's components instead is not self-referential — these are OpenTaxSolver's numbers,
+        // rounded the way the form rounds them — and it needs no exception at all.
+        let oracle_line24 = round_dollar(usd(e.income_tax_before_credits))
+            + round_dollar(usd(e.se_tax))
+            + round_dollar(usd(e.niit))
+            + round_dollar(usd(e.additional_medicare_tax));
+
         // (the 1040's own line label, the cell as printed, what OpenTaxSolver computed)
-        let checks: [(&str, &str, f64); 4] = [
-            ("line11", "AGI", e.adjusted_gross_income),
-            ("line15", "taxable income", e.taxable_income),
-            ("line16", "tax", e.income_tax_before_credits),
-            ("line24", "TOTAL TAX", e.total_tax),
+        let checks: [(&str, &str, Usd); 4] = [
+            ("line11", "AGI", round_dollar(usd(e.adjusted_gross_income))),
+            ("line15", "taxable income", round_dollar(usd(e.taxable_income))),
+            ("line16", "tax", round_dollar(usd(e.income_tax_before_credits))),
+            ("line24", "TOTAL TAX (cross-footed)", oracle_line24),
         ];
 
         for (cell, label, oracle) in checks {
             let on_paper = got.get(cell).map(String::as_str).unwrap_or("<BLANK>");
-            let mut expected = printed(oracle);
-
-            // ★ The ONE declared cross-footing exception (mirrors `golden_returns.rs`, where the full
-            // reasoning lives). btctax DEPARTS from the 1040 instructions here, knowingly: they say
-            // "include cents when adding the amounts and round off only the total" (2024, p. 23), which
-            // gives OTS's 16,832. SPEC §3.1 elects round-at-each-line and cross-foots, giving 16,833 —
-            // the number that makes the filed form's own printed lines add up. Named explicitly rather
-            // than absorbed into a ±1 tolerance, which would quietly weaken every other cell on every
-            // other household. Whether the election is right is a SPEC question, filed as
-            // `spec-3.1-crossfoot-vs-round-the-total`.
-            if h.name == "single_miner_qbi_limited_by_net_capital_gain" && cell == "line24" {
-                assert_eq!(expected, "16832", "the cross-footing exception is pinned to OTS's figure; \
-                    if OTS moved, re-derive rather than re-pin");
-                expected = "16833".to_string();
-            }
-
+            let expected = oracle.to_string();
             if on_paper != expected {
                 wrong.push(format!(
                     "  {:<42} 1040 {cell:<8} ({label:<14}) paper {on_paper:>10}   OpenTaxSolver {expected:>10}",
@@ -549,4 +556,38 @@ fn a_household_with_no_business_files_no_form_8995_row() {
             h.name
         );
     }
+}
+
+/// ★ **Fable P7 r3 I1.** A filed Schedule C must NAME its business on line A.
+///
+/// The 8995's Part I row is not the only place a business must be named — Schedule C line A
+/// ("Principal business or profession") demands it too, and it is the case the 8995's own fail-closed
+/// CANNOT reach: a business whose net profit is at or below the §6017 $400 SE floor produces no QBI,
+/// hence no Form 8995 at all, so the filler's guard never runs. Only the core refusal stands between
+/// that filer and a Schedule C with a blank line A — and the refusal shipped untested.
+#[test]
+fn every_filed_schedule_c_names_its_business_on_line_a() {
+    let mut checked = 0;
+
+    for h in &golden_households() {
+        let pkt = packet(h);
+        let Some(f) = pkt.iter().find(|f| f.name == "f1040sc") else {
+            continue;
+        };
+        let got = extract_lines(&f.bytes, btctax_forms::testonly::SCHEDULE_C_MAP_2024).unwrap();
+
+        assert_eq!(
+            got.get("line_a_business").map(String::as_str),
+            Some("Bitcoin mining"),
+            "{}: Schedule C line A is the business's name. A blank line A files a business the return \
+             never identifies.",
+            h.name
+        );
+        checked += 1;
+    }
+
+    assert_eq!(
+        checked, 3,
+        "the matrix has exactly three Schedule C households; if that changed, this test went quiet"
+    );
 }

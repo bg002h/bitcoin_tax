@@ -18,7 +18,7 @@
 //! The row is written exactly when there IS a business — `Form8995Lines::business_name` is empty
 //! otherwise, and then line 2 is zero and the row stays blank.
 
-use crate::cells::{push_identity, push_literal, push_money};
+use crate::cells::{push_identity, push_literal, push_money, render_ssn};
 use crate::error::FormsError;
 use crate::map::Form8995Map;
 use crate::pdf;
@@ -89,10 +89,15 @@ fn assert_paren_magnitudes(lines: &Form8995Lines) -> Result<(), FormsError> {
 /// `row1_business` at row **1ii**'s name cell would pass every geometric check and print the business's
 /// name on a different row from its income (Fable P7 r2, Minor).
 ///
-/// Their y-CENTERS are not equal and must not be required to be: the (a) cell spans the full 24pt row
-/// height (center 564) while (b) and (c) are 12pt half-height cells sitting in its upper half (center
-/// 558). The invariant is CONTAINMENT — (b) and (c) must fall inside (a)'s y-extent, which *is* the
-/// row. Mis-map any one of the three to another row and the containment breaks.
+/// Their y-CENTERS are not equal and must not be required to be. Measured from the blank PDF: (a) spans
+/// y [551.97, 575.97] — the full 24pt row, center 564 — while (b) and (c) are 12pt cells at
+/// y [551.97, 563.97], center 558, sitting in its LOWER half. The invariant is CONTAINMENT: (b) and (c)
+/// must fall inside (a)'s y-extent, which *is* the row. Mis-map any ONE of the three and containment
+/// breaks — including (a) itself, since the band then moves to another row and leaves (b)/(c) outside.
+///
+/// It does NOT reject all three moved CONSISTENTLY to row 1ii — and it should not: line 2 reads "Combine
+/// lines 1i through **1v**", so a business listed on row 1ii is a validly filled form. This catches
+/// exactly the harmful case, which is a row whose name and income are on different lines.
 fn assert_row1_is_one_row(blank: &[pdf::Field], map: &Form8995Map) -> Result<(), FormsError> {
     let field = |cell: &crate::map::MoneyCell| -> Result<&pdf::Field, FormsError> {
         let fqn = match cell {
@@ -136,6 +141,12 @@ pub fn fill_form_8995_with_map(
 ) -> Result<Vec<u8>, FormsError> {
     assert_paren_magnitudes(lines)?;
 
+    // The blank PDF is loaded FIRST: row 1i's TIN rendering reads that cell's own /MaxLen, and the
+    // row-integrity check bands the row off the (a) cell's own /Rect. Both ask the PDF, not the map.
+    let mut doc = pdf::load(pdf::f8995_pdf(map.year)?)?;
+    let blank_fields = pdf::collect_fields(&doc)?;
+    assert_row1_is_one_row(&blank_fields, map)?;
+
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<FlatPlacement> = Vec::new();
 
@@ -177,12 +188,22 @@ pub fn fill_form_8995_with_map(
             &lines.business_name,
             F8995_COL_ROW1_BUSINESS,
         );
-        // The cell's /MaxLen is 11 ⇒ the HYPHENATED SSN.
+        // ★ Rendered through `render_ssn` against the cell's OWN /MaxLen, not hardcoded (Fable P7 r3,
+        // Minor). Every other SSN cell in this crate goes through that guard, and it fails closed on a
+        // cell too narrow to hold an SSN — "the map points at the wrong widget". TY2024's row 1i(b) has
+        // /MaxLen 11 (hyphenated), but hardcoding that would silently write 11 characters into a 9-char
+        // comb if a later revision narrows the cell, while every other SSN in the packet failed closed.
+        let tin_fqn = map.row1_tin.fields()[0];
+        let tin_max_len = blank_fields
+            .iter()
+            .find(|f| f.fqn == tin_fqn)
+            .ok_or_else(|| FormsError::MapFieldMissing(tin_fqn.to_string()))?
+            .max_len;
         push_literal(
             &mut writes,
             &mut placements,
             &map.row1_tin,
-            &proprietor.ssn.hyphenated(),
+            &render_ssn(&proprietor.ssn, tin_max_len)?,
             F8995_COL_ROW1_TIN,
         );
         // (c) this business's QBI. With one business the column total IS the row, so it is written from
@@ -227,11 +248,8 @@ pub fn fill_form_8995_with_map(
         );
     }
 
-    let mut doc = pdf::load(pdf::f8995_pdf(map.year)?)?;
     // Identity header (P6.2): `push_identity` reads the SSN cell's own /MaxLen to decide
     // hyphenated-vs-digits, so it needs the blank PDF's fields.
-    let blank_fields = pdf::collect_fields(&doc)?;
-    assert_row1_is_one_row(&blank_fields, map)?;
     push_identity(
         &mut writes,
         &mut placements,

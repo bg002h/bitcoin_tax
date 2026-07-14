@@ -780,6 +780,56 @@ mod tests {
         screen_inputs(ri, &tbl(), &params()).map(|r| r.reason)
     }
 
+    /// ★ **Fable P7 r3 I1.** A Schedule C the return does not NAME cannot be filed.
+    ///
+    /// This guard shipped in the r2 fold with ZERO tests: the reviewer deleted it and all 1708 tests
+    /// still passed. It is not decoration, and it is not merely belt-and-braces behind the Form 8995
+    /// filler's own fail-closed. It is the **only** guard on **Schedule C line A** — because a business
+    /// whose net profit is at or below the §6017 $400 SE floor produces no QBI, hence no Form 8995 at
+    /// all, so the filler's check never runs, and `schedule_c.rs` writes line A only when it is
+    /// non-empty. Without this, that filer files a Schedule C whose "Principal business or profession"
+    /// is BLANK.
+    ///
+    /// `business_description` is `#[serde(default)]`, so an imported TOML that simply omits the key
+    /// yields `""` — this is not a hypothetical.
+    #[test]
+    fn a_schedule_c_with_no_business_description_refuses() {
+        let mut r = ri();
+        r.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
+            owner: Owner::Taxpayer,
+            business_description: String::new(), // as an import omitting the key would give
+            ..Default::default()
+        });
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::ScheduleCNoBusinessDescription),
+            "a Schedule C with no name must refuse — line A and Form 8995 row 1i(a) both require it"
+        );
+
+        // Whitespace is not a name. This pins the `trim()`, which a naive `is_empty()` would miss.
+        let mut ws = ri();
+        ws.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
+            owner: Owner::Taxpayer,
+            business_description: "   ".into(),
+            ..Default::default()
+        });
+        assert_eq!(
+            reason(&ws),
+            Some(RefuseReason::ScheduleCNoBusinessDescription),
+            "three spaces are not the name of a trade or business"
+        );
+
+        // The negative leg: a real name does NOT refuse. Without this the test would pass on a screen
+        // that refuses every Schedule C ever.
+        let mut ok = ri();
+        ok.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
+            owner: Owner::Taxpayer,
+            business_description: "Bitcoin mining".into(),
+            ..Default::default()
+        });
+        assert_eq!(reason(&ok), None, "a NAMED business must file");
+    }
+
     /// A captured SSN that is not nine digits can never be printed on a form, so it fails HERE — at
     /// compute time, before any PDF is attempted (§3.4: an unprintable SSN is an uncomputable line).
     /// The refusal names WHO, never the digits: an SSN in an error string is a PII leak.
