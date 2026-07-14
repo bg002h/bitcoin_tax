@@ -7,13 +7,21 @@ use btctax_core::tax::return_inputs::ReturnInputs;
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::BTreeMap;
 
-/// The current row schema. Bump when a stored blob needs a read-time fixup, and add the arm to
-/// [`row_to_inputs`].
+/// The current row schema.
 ///
-/// - **0** — pre-D-8. `can_be_claimed_as_dependent_*` were bare `bool`s, so EVERY row carries `false`
-///   for them whether or not the filer was ever asked. Unanswered is indistinguishable from "No".
-/// - **1** — the flags are tri-state `Option<bool>`; a stored value means the filer ANSWERED.
-pub const SCHEMA_VERSION: i64 = 1;
+/// - **0** — pre-D-8. `can_be_claimed_as_dependent_*` were bare `bool`s (unanswered indistinguishable
+///   from "No").
+/// - **1** — those flags became tri-state `Option<bool>`.
+/// - **2** — P9: `Person.blind` and `ScheduleAInputs.salt_use_sales_tax` became tri-state; `hsa_present`
+///   was renamed `hsa_activity` (a *different* question); `dual_status_alien` and the mixed-use-mortgage
+///   box were added.
+///
+/// ★ **P9 §2.6 — there is no migration.** The owner confirmed no real tax data has ever been entered, so a
+/// row at any version other than the current one **REFUSES** (`row_to_inputs`) rather than being read or
+/// per-key unlaundered. A version check cannot forget a key; a hand-written unlaunder list can, and did
+/// (Fable r4 I-4). Retire this the moment real data exists — the first real return needs true migrations,
+/// and prior-year carryforwards are exactly what a filer cannot reconstruct (FOLLOWUPS, release gate).
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// Create the `return_inputs` side-table if it does not exist, and bring an OLDER vault's table up to the
 /// current schema. Idempotent — it runs on every `get`/`set`, so it must be safe to call repeatedly.
@@ -38,31 +46,27 @@ pub fn init_table(conn: &Connection) -> Result<(), CliError> {
 }
 
 /// ★ The ONE read boundary. Every path that turns a stored blob into a [`ReturnInputs`] goes through
-/// here — `get` AND `all` — so a migration cannot be applied on one path and forgotten on the other.
+/// here — `get` AND `all` — so the version gate cannot be applied on one path and forgotten on the other.
 ///
-/// **Version 0 → 1 (D-8).** The dependent flags were bare `bool`s: serde wrote `false` for a filer who
-/// was never asked, and `false` is also what an answered "No" looks like. The two are indistinguishable
-/// in the blob, so we must pick the SAFE reading — and `false` is the DANGEROUS one (it grants the full
-/// basic standard deduction, skips the §1(g) kiddie-tax refusal, and prints an unchecked box on a filed
-/// 1040). So a version-0 `false` becomes `None` ⇒ the year refuses until the filer answers.
-///
-/// A version-0 `true` is PRESERVED: nothing ever defaulted to `true`, so it can only have been typed.
+/// **P9 §2.6 — refuse-and-reimport, not migrate.** A row whose `version` is anything other than the
+/// current [`SCHEMA_VERSION`] REFUSES (`StaleReturnInputs`). This is fail-closed in both directions: an
+/// OLDER row would deserialize its now-`Option` fields' stored `false` as `Some(false)` — a never-asked
+/// default ratified as the filer's answer, the D-8 laundering — and a NEWER row would be half-read. The
+/// remedy (named in the error) is `income clear` → `income import` → `report --write-carryover`; `clear`
+/// discards the row's computed carryover, so the rebuild step is not optional. There is no per-key
+/// migration to forget a key (Fable r4 I-4), because there is no real data to migrate yet.
 fn row_to_inputs(year: i32, json: &str, version: i64) -> Result<ReturnInputs, CliError> {
-    let mut ri: ReturnInputs =
-        serde_json::from_str(json).map_err(|e| CliError::BadConfigValue {
-            key: format!("return_inputs[{year}]"),
-            value: format!("invalid JSON: {e}"),
-        })?;
-    if version < 1 {
-        let unlaunder = |v: &mut Option<bool>| {
-            if *v == Some(false) {
-                *v = None;
-            }
-        };
-        unlaunder(&mut ri.header.can_be_claimed_as_dependent_taxpayer);
-        unlaunder(&mut ri.header.can_be_claimed_as_dependent_spouse);
+    if version != SCHEMA_VERSION {
+        return Err(CliError::StaleReturnInputs {
+            year,
+            found: version,
+            expected: SCHEMA_VERSION,
+        });
     }
-    Ok(ri)
+    serde_json::from_str(json).map_err(|e| CliError::BadConfigValue {
+        key: format!("return_inputs[{year}]"),
+        value: format!("invalid JSON: {e}"),
+    })
 }
 
 /// Return the stored [`ReturnInputs`] for `year`, or `None` if none has been set.
@@ -193,9 +197,12 @@ mod tests {
     #[test]
     fn bad_json_is_a_typed_error_not_a_panic() {
         let c = mem();
+        // At the CURRENT schema version (so the stale-row gate passes and we reach the JSON parse): a
+        // malformed blob must be a typed error, not a panic. (A row omitting `schema_version` defaults to
+        // 0 and would refuse as stale — a different, correct path tested in `p9_stale_row_refuses`.)
         c.execute(
-            "INSERT INTO return_inputs(year,inputs_json) VALUES(2024,'not json')",
-            [],
+            "INSERT INTO return_inputs(year,inputs_json,schema_version) VALUES(2024,'not json',?1)",
+            [SCHEMA_VERSION],
         )
         .unwrap();
         assert!(matches!(
@@ -226,155 +233,96 @@ mod tests {
     }
 }
 
+
 #[cfg(test)]
-mod p8a_migration_tests {
+mod p9_stale_row_refuses {
+    //! ★ P9 §2.6 — there is NO migration. A stored row whose `schema_version` is not the current one
+    //! REFUSES (`StaleReturnInputs`) rather than being silently read or per-key unlaundered. The owner
+    //! confirmed no real data has ever been entered, so refuse-and-reimport is lawful — and a version check
+    //! cannot forget a key, unlike the hand-written unlaunder list this replaces (whose `blind ×2`
+    //! mutation-check went vacuous — Fable r4 I-4). This module replaces the old `p8a_migration_tests`,
+    //! which tested the now-deleted v0→v1 unlaunder.
     use super::*;
-    use btctax_core::tax::return_inputs::ReturnInputs;
     use rusqlite::Connection;
 
-    /// A PRE-P8a vault: the old 2-column schema, holding a blob written by the SHIPPED code.
-    ///
-    /// The blob is built by SERIALIZING a real `ReturnInputs` and rewriting the flag keys — because a bare
-    /// `bool` is always serialized, so every v0 row carries `false` for BOTH flags whether or not the filer
-    /// was ever asked. Hand-writing the JSON would drift from the struct (and did: my first version put the
-    /// flag at the top level instead of under `header`, so every assertion below passed VACUOUSLY against a
-    /// defaulted header).
-    ///
-    /// ★ It rewrites **both** flags, and asserts each rewrite lands. The first version rewrote only the
-    /// taxpayer key — so the SPOUSE half of the migration was held by no test at all, and deleting it left
-    /// the whole suite green (Fable P8a r1 I2). A fixture that silently covers half of what it claims to
-    /// cover is worse than no fixture: it reports success for the part it never touched.
-    fn v0_blob(taxpayer: bool, spouse: bool) -> String {
-        let j = serde_json::to_string(&ReturnInputs::default()).unwrap();
-        let mut out = j.clone();
-        for (key, v) in [
-            ("can_be_claimed_as_dependent_taxpayer", taxpayer),
-            ("can_be_claimed_as_dependent_spouse", spouse),
-        ] {
-            let before = out.clone();
-            out = out.replace(&format!("\"{key}\":null"), &format!("\"{key}\":{v}"));
-            assert_ne!(
-                out, before,
-                "the v0 rewrite must actually hit `{key}` — else the test that reads it is vacuous"
-            );
-        }
-        out
-    }
-
-    /// A v0 vault whose row answers both flags the way the shipped `bool` did: `false`, unasked.
-    fn old_schema_vault(year: i32, taxpayer: bool, spouse: bool) -> Connection {
+    /// A vault holding a row at an OLD schema version, in the current 3-column table.
+    fn vault_with_row_at_version(year: i32, version: i64) -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE return_inputs (year INTEGER PRIMARY KEY, inputs_json TEXT NOT NULL);",
-        )
-        .unwrap();
+        init_table(&conn).unwrap();
+        // A well-formed blob (valid JSON) — the point is the VERSION, not a parse failure.
+        let blob = serde_json::to_string(&ReturnInputs::default()).unwrap();
         conn.execute(
-            "INSERT INTO return_inputs(year,inputs_json) VALUES(?1,?2)",
-            rusqlite::params![year, v0_blob(taxpayer, spouse)],
+            "INSERT INTO return_inputs(year,inputs_json,schema_version) VALUES(?1,?2,?3)",
+            rusqlite::params![year, blob, version],
         )
         .unwrap();
         conn
     }
 
-    fn old_schema_vault_with_unanswered_row(year: i32) -> Connection {
-        old_schema_vault(year, false, false)
-    }
-
-    /// ★ The whole point. A pre-P8a row's `false` is INDISTINGUISHABLE from "never asked" — so it must
-    /// load as `None` (⇒ the year refuses UNANSWERED), NOT as `Some(false)` (⇒ an answered "No", which
-    /// would LAUNDER the guess into an answer and make it permanent).
+    /// ★ THE POINT. A pre-P9 row (v0, the pre-D-8 schema) must REFUSE — never be read. Its `blind`/`salt`
+    /// bools would deserialize to `Some(false)` (a never-asked default ratified as an answer), which is the
+    /// D-8 laundering; refusing is the fail-closed reading.
     #[test]
-    fn a_version_0_rows_unanswered_false_loads_as_none() {
-        let conn = old_schema_vault_with_unanswered_row(2024);
-        let ri = get(&conn, 2024).unwrap().expect("the row is there");
-        assert_eq!(
-            ri.header.can_be_claimed_as_dependent_taxpayer, None,
-            "a version-0 row's `false` was never answered — it must load as None, not Some(false)"
+    fn a_version_0_row_refuses_stale() {
+        let conn = vault_with_row_at_version(2024, 0);
+        assert!(
+            matches!(get(&conn, 2024), Err(CliError::StaleReturnInputs { year: 2024, found: 0, expected }) if expected == SCHEMA_VERSION),
+            "a v0 row must refuse as stale, naming the version"
         );
     }
 
-    /// A stored `true` can only have been TYPED — nothing defaults to true. Preserve it.
+    /// A v1 row (the post-D-8, pre-P9 schema) is equally stale — the `blind`/`salt` type flips landed in P9.
     #[test]
-    fn a_version_0_rows_true_is_preserved() {
-        let conn = old_schema_vault(2024, true, true);
-        let h = get(&conn, 2024).unwrap().unwrap().header;
-        assert_eq!(
-            h.can_be_claimed_as_dependent_taxpayer,
-            Some(true),
-            "nothing defaults to true — a stored true was typed, and must survive"
-        );
-        assert_eq!(
-            h.can_be_claimed_as_dependent_spouse,
-            Some(true),
-            "...and the same is true of the SPOUSE flag"
+    fn a_version_1_row_refuses_stale() {
+        let conn = vault_with_row_at_version(2024, 1);
+        assert!(
+            matches!(get(&conn, 2024), Err(CliError::StaleReturnInputs { found: 1, .. })),
+            "a v1 row must refuse as stale"
         );
     }
 
-    /// ★ **Fable P8a r1 I2.** The SPOUSE half of the migration had no test: deleting
-    /// `unlaunder(&mut ri.header.can_be_claimed_as_dependent_spouse)` left 1729/1729 passing, because the
-    /// fixture only ever rewrote the taxpayer key. Without this, every v0 MFJ/MFS row's spouse `false` is
-    /// ratified as an answered "No" — `DependentSpouseStatusUnanswered` never fires for exactly the
-    /// population that has the bug, and the 1040 prints the spouse box unchecked, unaffirmed.
+    /// ★ `all()` is the module's OTHER deserializer — it must refuse identically, or a reader (the TUI's
+    /// per-year resolution, `income show --all`) sees a laundered row `get` would have refused.
     #[test]
-    fn a_version_0_rows_unanswered_spouse_false_also_loads_as_none() {
-        let conn = old_schema_vault_with_unanswered_row(2024);
-        assert_eq!(
-            get(&conn, 2024)
-                .unwrap()
-                .unwrap()
-                .header
-                .can_be_claimed_as_dependent_spouse,
-            None,
-            "a v0 spouse `false` was never answered either — it must not be ratified as a No"
+    fn all_refuses_a_stale_row_identically_to_get() {
+        let conn = vault_with_row_at_version(2024, 1);
+        assert!(
+            matches!(all(&conn), Err(CliError::StaleReturnInputs { found: 1, .. })),
+            "`all()` must apply the same version gate as `get()`"
         );
     }
 
-    /// ★ THE ANSWER MUST STICK. The shipped upsert is `DO UPDATE SET inputs_json=excluded.inputs_json` —
-    /// it names ONE column. If `set` does not stamp `schema_version = 1` in the DO-UPDATE branch too, the
-    /// row stays version 0, the fixup RE-FIRES on the very next read, and the user's answer is silently
-    /// laundered back to `None`. The bug would reconstitute itself out of its own fix.
+    /// ★ FORWARD guard (r3 Nit-2): a row written by a NEWER build (version > current) is also stale — the
+    /// same `!=` covers it. P9 creates the first-ever version skew, and a half-read future row is exactly
+    /// the class this spec closes.
     #[test]
-    fn answering_false_on_a_version_0_row_sticks() {
-        let conn = old_schema_vault_with_unanswered_row(2024);
-        let mut ri = get(&conn, 2024).unwrap().unwrap();
-        assert_eq!(ri.header.can_be_claimed_as_dependent_taxpayer, None);
-
-        // The user answers: "no, nobody can claim me."
-        ri.header.can_be_claimed_as_dependent_taxpayer = Some(false);
-        set(&conn, 2024, &ri).unwrap();
-
-        assert_eq!(
-            get(&conn, 2024)
-                .unwrap()
-                .unwrap()
-                .header
-                .can_be_claimed_as_dependent_taxpayer,
-            Some(false),
-            "the user ANSWERED false — it must not be re-laundered to None on the next read"
+    fn a_future_version_row_refuses_too() {
+        let conn = vault_with_row_at_version(2024, SCHEMA_VERSION + 1);
+        assert!(
+            matches!(get(&conn, 2024), Err(CliError::StaleReturnInputs { .. })),
+            "a future-version row must refuse, not be half-read"
         );
     }
 
-    /// `all()` is the module's OTHER deserializer. It must migrate identically, or a reader sees the
-    /// laundered flag.
+    /// A row at the CURRENT version reads normally — the gate is exact, not a blanket refusal.
     #[test]
-    fn all_migrates_identically_to_get() {
-        let conn = old_schema_vault_with_unanswered_row(2024);
-        assert_eq!(
-            all(&conn).unwrap()[&2024]
-                .header
-                .can_be_claimed_as_dependent_taxpayer,
-            None,
-            "`all()` must apply the same migration as `get()`"
-        );
+    fn a_current_version_row_reads() {
+        let conn = vault_with_row_at_version(2024, SCHEMA_VERSION);
+        assert!(get(&conn, 2024).unwrap().is_some(), "a current-version row must read");
     }
 
-    /// The DDL must be idempotent on an OLD vault. SQLite has no `ADD COLUMN IF NOT EXISTS`, and
-    /// `init_table` runs on every command — so a bare ALTER errors `duplicate column name` on the second.
+    /// The stale-row refusal's message names all THREE remedy commands, in order (§2.6 / r6 I-1): `clear`
+    /// discards the computed carryover, so `import` alone is not a complete recovery. Mutation: drop the
+    /// rebuild clause from the `#[error(...)]` string ⇒ this fails.
     #[test]
-    fn an_old_schema_vault_opens_twice() {
-        let conn = old_schema_vault_with_unanswered_row(2024);
-        init_table(&conn).expect("first open migrates");
-        init_table(&conn).expect("second open must NOT error `duplicate column name`");
-        get(&conn, 2024).expect("and the row still reads");
+    fn the_stale_message_names_the_full_three_command_remedy() {
+        let msg = CliError::StaleReturnInputs { year: 2024, found: 1, expected: 2 }.to_string();
+        assert!(msg.contains("income clear 2024"), "names clear");
+        assert!(msg.contains("income import"), "names import");
+        assert!(
+            msg.contains("--write-carryover"),
+            "names the rebuild — disclosure is not restoration (r6 I-1)"
+        );
+        assert!(msg.contains("2023"), "the rebuild targets the PRIOR year (year-1)");
     }
 }

@@ -56,6 +56,20 @@ pub enum CliError {
     /// edit gone wrong). Returning an error is safer than silently misreading the stored intent.
     #[error("unrecognized stored config value: key={key:?} value={value:?}")]
     BadConfigValue { key: String, value: String },
+    /// P9 §2.6: a stored `return_inputs` row predates the form-question registry (or was written by a newer
+    /// build) and this build does not migrate it. There is no user data yet, so the policy is refuse-and-
+    /// reimport rather than a per-key migration (a version check cannot forget a key). The remedy names all
+    /// THREE commands, in order — `clear` DISCARDS any computed carryover this row's prior reports wrote onto
+    /// it, so the rebuild step is not optional. (Retire this the moment real data exists — FOLLOWUPS, release
+    /// gate.)
+    #[error(
+        "the stored inputs for {year} predate the form-question registry (schema v{found}; this build reads \
+         v{expected}). Run `btctax income clear {year}` — which DISCARDS any carryover this row's prior \
+         reports computed onto it — then `btctax income import` for {year}; then, if this row carried a \
+         computed carryover, `btctax report --tax-year {prior} --write-carryover` to rebuild it.",
+        prior = year - 1
+    )]
+    StaleReturnInputs { year: i32, found: i64, expected: i64 },
     /// Sub-project 3 attestation gate: an export was attempted while the ledger is pseudo-reconciled
     /// (a synthetic, non-persisted default contributes to the projection) and NO attestation phrase was
     /// supplied. Producing a form/data file from a fictional draft requires typing the exact phrase.
