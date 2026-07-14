@@ -1,6 +1,7 @@
 # SPEC — P9: the FORM QUESTION REGISTRY
 
-*Status: **r6**. Folds Fable spec review r5 (0C/3I/2M/3Nit — `reviews/P9-SPEC-fable-r5.md`), r4
+*Status: **r7**. Folds Fable spec review r6 (0C/1I/2M/5Nit — `reviews/P9-SPEC-fable-r6.md`), r5
+(`reviews/P9-SPEC-fable-r5.md`), r4
 (`reviews/P9-SPEC-fable-r4.md`), r3
 (`reviews/P9-SPEC-fable-r3.md`), r2 (`reviews/P9-SPEC-fable-r2.md`) and r1 (`reviews/P9-SPEC-fable-r1.md`).*
 *Two OWNER decisions (2026-07-14) are folded here and are not review findings: the **hard-refuse migration**
@@ -58,7 +59,11 @@ it told the filer to run `btctax income import`, and `income import` **reads the
 (`cmd/tax.rs:63`), so the named exit errors on every row it exists to cure (r5 I-1). *"A refusal with no exit
 is just a brick with better prose"* — **this document's own words, in the section that quotes them.**
 
-**Six revisions; six recurrences; each one authored by someone who had just finished writing that this
+And **r6 — which fixed the broken remedy — traced it exactly one command short of the data**: `clear` +
+`import` unbricks the refusal and then leaves year+1 without the `Computed` carryover it was redesigned to
+protect, with the rebuild command named nowhere (r6 I-1).
+
+**Seven revisions; seven recurrences; each one authored by someone who had just finished writing that this
 exact thing keeps happening.** The class does not respect the author's intentions, his attention, or his
 sincerity. **It is only closed by construction** — which is why §3.3's honest limit (r3 I-5) matters more
 than any prose in this document.
@@ -437,16 +442,36 @@ close. *We do not get to solve a refusal problem by making a different guard fai
 `income import`'s — and the **working** exit is the one command that never deserializes:
 
 > **`btctax income clear <year>`** *(→ `return_inputs::delete`, a bare `DELETE` — `return_inputs.rs:118-122`;
-> it cannot refuse)*, **then `btctax income import`.**
+> it cannot refuse)*, **then `btctax income import`** — **and if this row carried a computed carryover, then
+> `btctax report --tax-year <year−1> --write-carryover` to REBUILD it.**
 
 **And requiring `clear` first is a FEATURE, not a tax.** It makes discarding the stale row's computed
 carryovers an **explicit act by the filer** instead of a silent one by us — which is precisely what R3-M6
-demands. The refusal detail must therefore name **both** commands, in order, **and say what `clear` throws
+demands. The refusal detail must therefore name **all** commands, in order, **and say what `clear` throws
 away.**
+
+**★ BUT DISCLOSURE IS NOT RESTORATION — r5 I-1's shape, one square further (r6 I-1).** `clear` + `import`
+unbricks the refusal, and then leaves year+1's row **without** the `Computed` charitable carryover and QBI
+REIT/PTP carryforward a prior `report --write-carryover` had put there — *the exact fail-open understatement
+whose avoidance justified rejecting the reviewer's simpler fix.* The command that rebuilds it exists and works
+(`write_carryover` recomputes onto year+1's row from year N's inputs — `cmd/tax.rs:405-450`), **but r6 named it
+nowhere**, and the only shipped note that names `--write-carryover` (`cmd/tax.rs:88-95`) is **unreachable after
+a `clear`** — it fires only when a row existed to preserve from. *The remedy was traced for the refusal and
+not for the data it was redesigned to protect.* ⇒ **The rebuild step is named above, in step 11's LIMITATIONS
+entry, and in §4's bullet.**
+
+**★ The rebuild is ALWAYS possible while the policy's premise holds** — the carryforward chain is **depth 1**
+in v1 (`write_carryover` requires `full_return_for(year)`, TY2024 only, and writes onto year+1's existing row;
+both rows required — `cmd/tax.rs:426`), and every `Computed` carryover is a pure function of the prior year's
+inputs, **which survive in the TOML the owner premise guarantees.** *This is one more reason the §5 step 12(b)
+expiry follow-up is load-bearing: the first real return, whose filer may have deleted the TOML, breaks the
+rebuild — refuse-and-reimport must retire before then.*
 
 **Named tests:** `income import` over a stale row **refuses** (naming `income clear`); `income clear` then
 `income import` **succeeds** and the row is v2; **delete the `clear`-first requirement ⇒ a computed carryover
-is silently lost ⇒ a named test fails.**
+is silently lost ⇒ a named test fails**; **★ the full-chain restoration test** — seed year N, `write-carryover`
+onto N+1, mark **both** rows stale, run the whole remedy (`clear`+`import` ×2, then `write-carryover`), assert
+N+1's carryover **equals its pre-stale value** ⇒ **drop the rebuild step ⇒ this test fails.**
 
 **The guard is mutation-checked, and non-vacuously** — this is the shape r4 I-4 could not have: insert a row at
 `schema_version = 0` and at `= 1`, assert `get` **and** `all` both return `StaleReturnInputs`; **delete the
@@ -475,7 +500,7 @@ rule they must follow, and it cost two review rounds to establish.)*
 >
 > `hsa_present = true` said *"I hold an HSA."* `hsa_activity = Some(true)` asserts *"a Form 8889 trigger
 > fired."* Fable proposed migrating `true → Some(true)` to preserve the filer's typed answer; that would have
-> **permanently refused the dormant-HSA holder as unsupported** — re-arming the very Critical (r2 C-1) that
+> **refused the dormant-HSA holder as unsupported** — re-arming the very Critical (r2 C-1) that
 > forced this field to be re-scoped. A renamed or re-scoped field's old values must map to **`None` (re-ask)**,
 > never to a fabricated answer. *Software cannot supply belief on the filer's behalf* (§2) — and it cannot
 > supply it retroactively either.
@@ -517,7 +542,8 @@ allocation — so we claim **none of it**, and we **say so**:
 | answer | Schedule A line 8a | the box | advisory |
 |---|---|---|---|
 | `Some(true)` | full `mortgage_interest_1098` | **unchecked** — the filer affirmed it | — |
-| **`Some(false)`** | **`0`** | **CHECKED — truthfully, for the first time** | **`MixedUseMortgageNotAllocated` — MANDATORY (§3.4)** |
+| **`Some(false)`** ∧ `mortgage_interest_1098 > 0` | **`0`** | **CHECKED — truthfully, for the first time** | **`MixedUseMortgageNotAllocated` — MANDATORY (§3.4)** |
+| `Some(false)` ∧ `mortgage_interest_1098 == 0` | — (not printed) | — | **none (r6 Nit-3)** — the question is not live, and a $0-interest answer forgoes nothing; the box-check and the advisory are BOTH scoped to the live predicate, never to the bare field value |
 | `None` | — | — | **REFUSE** (`MixedUseMortgageUnanswered`) |
 
 **Why this is correct and not merely convenient:**
@@ -690,7 +716,7 @@ one). *(Fable verified the two kinds cannot double-report: `None` and `Some(true
 |---|---|---|
 | `ForeignTrust` *(existing variant, kept — r4 Nit-3: r4 invented the name `ForeignTrustUnsupported`; the shipped variant is `RefuseReason::ForeignTrust`, `return_refuse.rs:510`)* | `foreign_trust == Some(true)` | `screen_inputs` |
 | `DependentSpouseUnsupported` | `can_be_claimed_as_dependent_spouse == Some(true)` | `screen_inputs` |
-| `HsaActivityUnsupported` | `hsa_activity == Some(true)` | `screen_inputs` |
+| **`HsaActivityUnsupported`** *(★ r6 Nit-5: this is a **RENAME** of the shipped `RefuseReason::HsaPresent`, `return_refuse.rs:108/740` — step 1 carries it; do not invent a new variant beside the old)* | `hsa_activity == Some(true)` | `screen_inputs` |
 | `DualStatusAlienUnsupported` | `dual_status_alien == Some(true)` | `screen_inputs` |
 | `SalesTaxElectionWithoutAmount` | `salt_use_sales_tax == Some(true)` ∧ `salt_sales_tax_amount == 0` ∧ any income-tax SALT input > 0 (§2.2) | `screen_inputs` |
 | **`ScheduleBForeignCountryMissing`** (r1 I-6, **named at last** — r3 M-2) | `foreign_accounts == Some(true)` ∧ `foreign_country_names.trim().is_empty()` — Sch B **7a "Yes" with a blank 7b**. Detail names **`income import`** as the remedy: `answer` captures bools and dates, **never strings** | `screen_inputs` |
@@ -845,6 +871,14 @@ entry's `unanswered` reason no longer fires**; assert `income answer` **asks** i
 and the natural "fix" (weakening the assertion) would make **the anti-vacuity machinery itself vacuous**.
 Assert on the *specific reason*.
 
+⚠️ **The count is fixture-contingent, and the fixtures must be built so the intent holds (r6 M-2).** "Four" is
+the number of questions whose `Some(true)` **unconditionally** fires a value-refusal. But `ForeignAccounts`
+answered `y` on a *minimal* fixture ALSO refuses — `ScheduleBForeignCountryMissing` fires on a blank
+`foreign_country_names` (§3.2) — so a naive fixture makes it five. ⇒ **The `ForeignAccounts` fixture supplies a
+non-empty `foreign_country_names`**, so its `y` case exercises the intended path. The operative instruction
+(assert on the *specific* unanswered reason) is robust either way; the fixture discipline is what keeps the
+count honest.
+
 **★ FOUR, not five — and the mortgage question is the one that moved (r5 I-2).** r5 folded §2.7's dissolution
 into the design sections and **left this paragraph asserting the refusal it had just deleted** ("`n` refuses on
 the mortgage question (when itemizing)"), *complete with the compute-dependent trigger r4 I-2 proved
@@ -919,12 +953,16 @@ sites — and **it cannot prevent the next D-8**: a witness certifies the *exist
 - **★ Stale stored rows REFUSE** (§2.6): `schema_version != SCHEMA_VERSION` ⇒ `StaleReturnInputs`. **There is
   no unlaundering key-list to forget** — and therefore no vacuous-fixture failure mode (r4 I-4 dissolves). The
   **dead D-8 `version < 1` unlaunder is deleted.**
-- **★★ AND THE REMEDY WORKS — verified, not asserted (r5 I-1).** The refusal names **`btctax income clear
-  <year>` THEN `btctax income import`**, because `income import` **reads the stale row itself**
-  (`cmd/tax.rs:63`) and would otherwise fail on every row it exists to cure. *`income clear` never
-  deserializes, so it cannot refuse.* Requiring it is **deliberate**: it makes discarding the row's
-  **`Computed`** carryovers an explicit act by the filer, never a silent one by us (§4 R3-M6 — a dropped
-  REIT/PTP carryforward **understates tax**). **Named test: `clear` + `import` succeeds and the row is v2.**
+- **★★ AND THE REMEDY WORKS — INCLUDING CARRYOVER RESTORATION (r5 I-1, r6 I-1).** The refusal names, in
+  order: **`btctax income clear <year>`** (a bare `DELETE` — it cannot refuse), **`btctax income import`**
+  (which reads the stale row at `cmd/tax.rs:63` and would otherwise fail on every row it exists to cure), **and,
+  if the row carried a computed carryover, `btctax report --tax-year <year−1> --write-carryover`** to rebuild
+  what `clear` discarded. Requiring `clear` is **deliberate** — it makes discarding the `Computed` carryovers
+  an explicit, *reversible* act, never a silent loss (§4 R3-M6 — a dropped REIT/PTP carryforward **understates
+  tax**). **Named tests: `clear`+`import` succeeds and the row is v2; AND the full-chain restoration test —
+  seed N, write-carryover onto N+1, stale both, run the whole remedy, assert N+1's carryover equals its
+  pre-stale value.** *(The rebuild is possible only while the policy's premise holds — TOMLs still exist; the
+  §5 step 12(b) expiry is load-bearing.)*
 - **A new `bool` / `Option<bool>` / defaulted enum anywhere reachable from `ReturnInputs` does not compile until
   a human EDITS the classifier** — `#![deny(unused_variables)]` makes an ignoring named binding a hard error.
   *(★ r3 I-5: the guarantee is "a human must look", NOT "it is classified correctly." `_`-prefixed bindings and
@@ -974,7 +1012,10 @@ either consumer.*
    **every** return, so every computing fixture in four crates must answer them. **Default them in the
    `testonly` builders** — one line there, not two hundred call sites. *(r4 Nit-4: the TUI test at
    `tabs/tests.rs:1704` supplies its **own** literal refusal string to the snapshot and needs no edit — do not
-   go hunting for a dependency that isn't there.)*
+   go hunting for a dependency that isn't there.)* **★ And the mortgage question bricks fixtures too (r6 Nit-2):**
+   `testonly.rs:223/:526` and ~7 inline `return_1040.rs` fixtures carry nonzero `mortgage_interest_1098` under
+   a `schedule_a`. Default `mortgage_all_used_to_buy_build_improve = Some(true)` in the `testonly` Schedule-A
+   builder — the same one-line move.
 2. **★ `SCHEMA_VERSION = 2` + the stale-row refusal** (§2.6). Delete the dead D-8 `version < 1` unlaunder;
    rewrite the P8a migration tests to assert a v0/v1 row **refuses** on **both** `get` and `all`.
    Mutation: delete the version check ⇒ both fail.
@@ -1006,15 +1047,22 @@ either consumer.*
    would have COMPUTED*), **`SalesTaxElectionWithoutAmount`** (§2.2), and **`ScheduleBForeignCountryMissing`**
    (r1 I-6, named in §3.2). *(`HsaActivityUnsupported` needs no step: step 1's rename compile-forces it out of
    `return_refuse.rs:738` — the only one of the four with a forcing function.)*
-9. **The classifier** (§3.3): every reachable struct (incl. `Box12Entry`, `Carryforward`);
-   `#![deny(unused_variables)]`; the `_`-and-`_`-prefix rule; the exemption register with class + statutory
-   reason (incl. `itemize_election`, §2.8). Folds the open `header: _` follow-up.
-10. **DELETE the three dead fields** (§2.3) **AND add `serde_ignored` unknown-key rejection to `income
-    import`** — **together or not at all**; the rejection must name `hsa_present` too.
+9. **★ DELETE the three dead fields FIRST** (§2.3) **AND add `serde_ignored` unknown-key rejection to `income
+   import`** — **together or not at all**; the rejection must name `hsa_present` too. *(r6 M-1: this MUST
+   precede the classifier. Class (D)'s only lawful disposition is "consume or delete" — so if the classifier
+   is built while these three fields still exist, it cannot bind them without inventing a forbidden
+   "(D), pending deletion" exemption. Deleting first means the classifier never sees a field it may not
+   classify. Neither the deletion nor `serde_ignored` depends on the classifier, so the swap is free.)*
+10. **The classifier** (§3.3): every reachable struct (incl. `Box12Entry`, `Carryforward`);
+    `#![deny(unused_variables)]`; the `_`-and-`_`-prefix rule; the exemption register with class + statutory
+    reason (incl. `itemize_election`, §2.8). Folds the open `header: _` follow-up.
 11. `LIMITATIONS.md` — the new refusals; **the three advisories**; **the two SCOPE-entailed software-answered
     boxes (Schedule D QOF "No" and Form 8949 Box I/L)** and the **Schedule C G/H/I/J blank boxes** (§2.1 — none
-    was ever disclaimed); the **`income clear` → `income import` requirement** for pre-P9 vaults, **and that
-    `clear` DISCARDS any computed carryover on the stale row** (§2.6, r5 I-1); that Sch B /
+    was ever disclaimed); the **`income clear` → `income import` → (if a carryover existed)
+    `report --tax-year <year−1> --write-carryover` requirement** for pre-P9 vaults, **that `clear` DISCARDS any
+    computed carryover on the stale row** and how to rebuild it (§2.6, r5 I-1 / r6 I-1), **and that `income
+    show` also refuses a stale row** (r6 Nit-4 — the filer cannot inspect what `clear` will discard before
+    discarding it; acceptable only under the no-real-data premise, one more tooth for the step 12(b) expiry); that Sch B /
     MFS refusal texts now name `btctax income answer` (a deliberate **improvement**); that `income answer`
     cannot capture strings.
 12. **FOLLOWUPS.md** — file the two items this spec creates, each with its **owning phase**:
