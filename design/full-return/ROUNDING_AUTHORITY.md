@@ -35,7 +35,64 @@ The Form 1040 instructions ("Rounding Off to Whole Dollars", 2024, p. 23) appear
 
 ---
 
-## 1. The operative authority is a REGULATION, not the instruction
+## 0. ★ WHAT IS LAW, AND WHAT IS NOT — read this before anything below it
+
+**The single biggest error in the first three versions of this file was arguing from sources that are
+not law, and then letting one of them (the IRM) talk me *out* of a defensible position.**
+
+| source | what it is | force |
+|---|---|---|
+| **26 USC § 6102** | the STATUTE | **LAW** |
+| **26 CFR 301.6102-1** | Treasury regulation under it | **LAW** |
+| Form 1040 instructions | IRS publication | **not law** |
+| **Internal Revenue Manual (IRM)** | internal procedures for IRS employees | **NOT LAW** — confers no rights on taxpayers, binds no one |
+| MeF XML schema | a transmission format | **not law** |
+| IRS Direct File | the IRS's own software | **not law** |
+| Drake / TurboTax / OTS | industry practice | **not law** |
+
+Everything below the second row is **evidence of what the IRS DOES** — genuinely useful for predicting
+how a filed return will be treated — and **worthless as authority for what the law REQUIRES**. Courts
+have repeatedly held the IRM does not have the force of law and creates no taxpayer rights; the same
+goes for form instructions and publications.
+
+**This matters concretely.** Version 3 of this file weakened btctax's position because IRM 3.11.3.14.2.28
+says IRS clerks transcribe line 24 "as dollars and cents". That is a *keypunch procedure*. It says
+nothing about what a taxpayer is required to ENTER on the form, and it cannot make a lawful entry
+unlawful. An agency's internal practice is not a source of obligation — and an agency doing something
+does not make it right.
+
+## 1. The statute — and it does NOT cleanly resolve the question
+
+**26 U.S.C. § 6102** ([Cornell LII](https://www.law.cornell.edu/uscode/text/26/6102)), verified directly:
+
+> **(a) Elective use of whole-dollar amounts.** … any amount required to be shown on a form … shall be
+> entered at the nearest whole-dollar amount…
+>
+> **(b) Election not to use whole-dollar amounts.** [the filer may report full cents instead]
+>
+> **(c) Inapplicability to computation of amount.** "The provisions of subsections (a) and (b) shall not
+> be applicable to **items which must be taken into account in making the computations necessary to
+> determine the amount required to be shown on a form**, but shall be applicable **only to such final
+> amount**."
+
+★ **Be honest about what this does and does not settle.** Line 22 is **simultaneously**:
+- an *"amount required to be shown on a form"* — §6102(a) says enter it at the nearest whole dollar; and
+- an *"item taken into account in making the computations necessary to determine"* line 24 — §6102(c)
+  says the rounding rule does not apply to such items.
+
+**Both readings survive the statutory text.** The earlier claim in this file that "the ambiguity
+dissolves" was wrong. **Neither Reading A nor Reading B is unlawful** — and note §6102 is *elective* in
+the first place (a filer may decline to round at all under (b)).
+
+What tips it toward Reading A is the form's **own instruction for that line**: line 24 reads *"Add lines
+22 and 23"* — **the LINES**, which §6102(a) requires to be entered at whole dollars. It does not say "add
+the exact amounts underlying lines 22 and 23." Under the statute, the *items* the computation takes into
+account are the entered lines. The regulation's own example points the same way (each "item of receipt"
+— a receipt is not a line).
+
+That is a **good argument, not a compulsion.** State it that way.
+
+## 2. The regulation
 
 **26 CFR 301.6102-1** — [Cornell LII](https://www.law.cornell.edu/cfr/text/26/301.6102-1), verified
 directly:
@@ -66,7 +123,7 @@ election lean our way, but the text does not compel the result. The decisive evi
 
 btctax already does exactly this.
 
-## 2. Every e-filed 1040 is integer-only — cents cannot even be transmitted
+## 3. Every e-filed 1040 is integer-only — cents cannot even be transmitted (EVIDENCE, not law)
 
 The MeF schema types every 1040 money element as `USAmountType` / `USAmountNNType`, defined in
 `efileTypes.xsd` as:
@@ -94,7 +151,7 @@ GitHub mirrors, corroborated **byte-identical on these types across three indepe
 **2004-era eFile 3.1** library. It has `AmountType` (integer, 11 digits) and **no `USAmountType` at
 all**. Verify against a **tax-year-correct** mirror, or you will conclude the type was invented.
 
-## 3. The IRS's OWN software implements Reading A — with a comment saying so
+## 4. The IRS's OWN software implements Reading A — with a comment saying so (EVIDENCE, not law)
 
 IRS Direct File is open source ([IRS-Public/direct-file](https://github.com/IRS-Public/direct-file)).
 Its money type is `BigDecimal` at scale 2 with `HALF_UP` rounding, and **every reported line is wrapped
@@ -118,12 +175,19 @@ exact sum 9,808.14 → Reading B would print 9,808. The IRS's expected-output PD
 sum of the rounded rows. **Reading A, on the very fact pattern the "include cents" sentence supposedly
 governs.**
 
-## 4. The IRM: confirms the whole-dollar regime for lines 1–23 — and is ADVERSE on line 24
+## 5. The IRM — NOT LAW, and it should never have been allowed to move this argument
 
-★ **An earlier version of this file claimed the IRM "inverts the exposure" in btctax's favour — that a
-Reading-A return reproduces the IRS's recomputation of line 24 exactly and "cannot draw a math-error
-notice", while OTS is off by $1 "by construction". THAT WAS FALSE**, and it was false in the direction
-that flattered us. The reviewer caught it. What the IRM actually says:
+★ **Two errors here, and the second is the worse one.**
+**(i)** v3 claimed the IRM "inverts the exposure" in btctax's favour — that a Reading-A return reproduces
+the IRS's recomputation of line 24 exactly and "cannot draw a math-error notice". **False**, and false in
+the direction that flattered us.
+**(ii)** v4 then *weakened btctax's position* because IRM 3.11.3.14.2.28 is adverse on line 24. **That was
+a category error.** The IRM is **not law** (§0). It describes how IRS *employees key a form into their
+system*. It has no bearing on what a taxpayer is required to enter, and an internal procedure cannot make
+a lawful entry unlawful.
+
+The IRM is recorded here as **evidence of IRS behaviour** — useful for predicting how a return will be
+handled — and for **nothing else**. What it says:
 
 **It supports cross-footing for lines 1–23** — [IRM 3.11.3](https://www.irs.gov/irm/part3/irm_03-011-003r):
 
@@ -134,11 +198,12 @@ that flattered us. The reviewer caught it. What the IRM actually says:
 So when the IRS recomputes the **subtotals** — lines 9, 11, 15 — it is necessarily summing whole-dollar
 values. That is genuine (if inferential) support for §3.1 across most of the return.
 
-**But it does NOT support us on line 24, which is the line we kept building on:**
+**It does NOT support us on line 24:**
 
 > **IRM 3.11.3.14.2.28:** line 24 is edited **"as dollars and cents."**
 
-So the IRS transcribes line 24 *with cents*, and no inversion argument is available there.
+The IRS transcribes line 24 with cents. **This neither helps nor harms btctax** — it is a keypunch
+convention, not a rule of entry, and §6102 is what governs what the filer writes.
 
 **And it does not matter, because the exposure is not live in either direction:**
 
@@ -199,19 +264,29 @@ btctax's cross-footing election is **right**, and no SPEC amendment is needed. T
 But the case is **SUFFICIENT, not DECISIVE**, and it rests where the evidence actually is — in this
 order:
 
-1. **MeF (airtight).** Lines 22, 23 and 24 are all `xsd:integer`. Reading B is unrepresentable on the
-   IRS's own wire format; an e-filed return doing it would contradict its own transmitted components.
-2. **IRS Direct File (strong).** The IRS's own engine deliberately sums rounded values, says so in a
-   code comment, and ships a fixture whose expected output is **$7** off a true sum in order to keep the
-   printed form adding up.
-3. **26 CFR 301.6102-1 (supportive, not dispositive).** Structure and the paragraph-(b) election lean our
-   way; the text does not compel the result.
-4. **The IRM (partial).** Confirms dollar-only transcription for lines **1–23**. Is **adverse** on line
-   24, which it treats as a cents line — and forecloses the $1 exposure in **both** directions anyway
-   (follow the taxpayer's intent).
+**THE LAW (26 USC §6102 + 26 CFR 301.6102-1) is genuinely AMBIGUOUS, and BOTH readings are LAWFUL.**
+Rounding is *elective* to begin with. Nothing below the statute can change that — not the instructions,
+not the IRM, not the MeF schema, not the IRS's own software. Anyone who tells you this question is
+*settled* by an IRS publication has made the mistake this file has now made four times.
 
-The difference between "sufficient" and "decisive" is exactly what made this citation wrong three times.
-It is stated as sufficient.
+Given a lawful choice, btctax elects Reading A because:
+
+1. **§6102(a) + the form's own text.** Line 24 says "Add lines 22 and 23" — the LINES, which the statute
+   requires to be entered at whole dollars. The best reading of the statute, though not the only one.
+2. **The IRS cannot receive Reading B electronically.** MeF types lines 22, 23 and 24 all as
+   `xsd:integer`, so an e-filed return doing round-the-total would contradict its own transmitted
+   components. (Evidence, not law — but it means Reading A can never surprise the IRS.)
+3. **The IRS's own engine does Reading A**, deliberately, and says so in a code comment.
+4. **The filed form visibly adds up.** A human checking it with a calculator finds that it does. For a
+   document someone signs under penalty of perjury and mails, that is worth something.
+
+And the $1 is **not an exposure in either direction** (IRM 3.12.3.31.15.5: follow the taxpayer's intent;
+the math-error tolerance is redacted). We are right on the merits, not rescued by a penalty — and we were
+never at risk from being wrong.
+
+★ **This is a well-founded ELECTION under an ambiguous statute. It is not a compulsion, and it is not
+"what the law requires."** Four drafts of this file each over-claimed in one direction or another. Say
+what is true and stop there.
 
 ### The strongest argument against this conclusion, kept honest
 

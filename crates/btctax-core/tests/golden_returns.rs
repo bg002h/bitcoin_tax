@@ -142,41 +142,46 @@ const DECLARED_DIVERGENCES: &[Divergence] = &[
         outlier_alt: None,
         why: "Tax Table bin midpoint vs the exact rate schedule — see above.",
     },
-    // ── CROSS-FOOTING: Σround ≠ roundΣ. btctax is right; the case is SUFFICIENT, not decisive. ──
+    // ── CROSS-FOOTING: Σround ≠ roundΣ. A LAWFUL ELECTION under an ambiguous statute. ──
     //
-    //    ★ This `why` has been WRONG THREE TIMES, and each time an independent reviewer caught it:
-    //      v1 cited the 1040 instructions as ENDORSING us — they say the opposite.
-    //      v2 over-corrected into "we knowingly depart, and it might understate tax by $1".
-    //      v3 claimed the IRM INVERTED the exposure in our favour — false, and false in the direction
-    //         that flattered us: the IRM treats line 24 as a DOLLARS-AND-CENTS line (3.11.3.14.2.28).
-    //    The conclusion survived all three. The ARGUMENT kept being wrong. Full evidence, with the
-    //    counter-arguments kept honest: `design/full-return/ROUNDING_AUTHORITY.md`.
+    //    ★ This `why` has been wrong FOUR times, each caught by an independent reviewer, and the last
+    //    one is the instructive one:
+    //      v1  cited the 1040 instructions as ENDORSING us — they say the opposite.
+    //      v2  over-corrected into "we knowingly depart, and it might understate tax by $1".
+    //      v3  invented an IRM "inversion" in our own favour — false.
+    //      v4  then WEAKENED our position because the IRM is adverse on line 24 — a CATEGORY ERROR.
+    //    ★ The IRM is NOT LAW. Neither are the form instructions, the MeF schema, or the IRS's own
+    //    software. They are evidence of what the IRS DOES, never authority for what the law REQUIRES.
+    //    v1–v4 all argued from below the line. Full evidence + the authority hierarchy:
+    //    `design/full-return/ROUNDING_AUTHORITY.md`.
     Divergence {
         household: "single_miner_qbi_limited_by_net_capital_gain",
         line: "TOTAL TAX (L24)",
         btctax: dec!(16833),
-        agrees_with: "neither — but the IRS's own wire format and its own tax engine both round at the \
-                      line (taxcalc reports no comparable TOTAL)",
+        agrees_with: "neither — a LAWFUL ELECTION, and the one the IRS's own systems make (taxcalc \
+                      reports no comparable TOTAL)",
         outlier: dec!(16832),
         outlier_alt: None,
-        why: "★ THE DECISIVE POINT IS THE WIRE FORMAT, not the instructions. The IRS's MeF schema types \
-              1040 lines 22, 23 AND 24 all as `USAmountType` = xsd:integer ('Type for a U.S. integer \
-              amount field'). An e-filed return transmitting 8,355 and 8,478 and then reporting 16,832 \
-              would be INCONSISTENT WITH ITS OWN TRANSMITTED COMPONENTS — Reading B is not merely \
-              discouraged, it is UNREPRESENTABLE. Every e-filed 1040 therefore rounds at every line. \
-              Corroboration: IRS Direct File — their OWN open-source engine — wraps each reported line \
-              in Round() over already-rounded operands, with the comment 'We're intentionally summing \
-              rounded numbers because that is what Schedule B requires'; its own fixture is $7 off a \
-              true sum in order to keep the printed form adding up. And 26 CFR 301.6102-1(a) requires \
-              every amount REPORTED on a form at the nearest whole dollar, while (c) reserves the \
-              'include cents' rule for items NOT themselves reported (the W-2 box-2 figures behind line \
-              25a) — supportive, though not dispositive: the counter that line 22's exact value is \
-              'an item taken into account' in computing line 24 survives on the text. \
-              ★ AND THE $1 IS NOT AN EXPOSURE EITHER WAY. IRM 3.12.3.31.15.5: where a filer's rounding \
-              differs, 'follow the taxpayer's intent'. The math-error tolerance itself is REDACTED in \
-              the public IRM. So neither we nor OTS is at risk here; we are right on the merits, not \
-              rescued by a penalty. Every COMPONENT line agrees exactly, including the §199A deduction \
-              (8,232) this household exists to test.",
+        why: "★ THE LAW IS 26 USC §6102, AND IT IS GENUINELY AMBIGUOUS. BOTH READINGS ARE LAWFUL. \
+              §6102(a): any amount required to be SHOWN on a form 'shall be entered at the nearest \
+              whole-dollar amount'. §6102(c): that does not apply to 'items which must be taken into \
+              account in making the computations necessary to determine the amount required to be shown \
+              … but shall be applicable only to such final amount'. Line 22 is BOTH — an amount shown \
+              (round it) AND an item taken into account in computing line 24 (do not). The text does not \
+              resolve it, and §6102 is ELECTIVE anyway: a filer may decline to round at all under (b). \
+              btctax elects to round at the point of REPORTING, because (i) line 24's own text says 'Add \
+              lines 22 and 23' — the LINES, which §6102(a) requires at whole dollars, not the exact \
+              amounts beneath them; (ii) the IRS cannot even RECEIVE the alternative electronically — \
+              MeF types lines 22, 23 and 24 all as xsd:integer, so a round-the-total return would \
+              contradict its own transmitted components; (iii) the IRS's own Direct File engine sums \
+              rounded lines deliberately and says so in a code comment; and (iv) the filed form visibly \
+              ADDS UP, which matters for a document a human signs under penalty of perjury. \
+              ★ Points (ii)–(iv) are EVIDENCE OF IRS PRACTICE, NOT LAW. Neither is the IRM, which is \
+              adverse on line 24 (3.11.3.14.2.28) and which an earlier version of this entry wrongly \
+              let weaken our position — an internal keypunch procedure cannot make a lawful entry \
+              unlawful. There is no exposure either way: IRM 3.12.3.31.15.5 says follow the taxpayer's \
+              intent on rounding-sized deltas. Every COMPONENT line agrees exactly, including the §199A \
+              deduction (8,232) this household exists to test.",
     },
     Divergence {
         household: "single_crypto_business_se",

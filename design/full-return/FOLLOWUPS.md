@@ -314,11 +314,20 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   **btctax is RIGHT. OTS is the outlier.** Evidence, in full, at
   [`ROUNDING_AUTHORITY.md`](./ROUNDING_AUTHORITY.md):
 
-  - **26 CFR 301.6102-1(a):** "any amount required to be **reported** on such form shall be entered at
-    the nearest whole dollar amount." **(c):** those provisions "apply **only** to amounts required to
-    be reported … They do **not** apply to items which must be taken into account in making the
-    computations." Lines 22 and 23 ARE reported amounts. The instruction's "include cents" sentence
-    restates (c) and governs items appearing NOWHERE on the return — not lines summing other lines.
+  - **★ THE LAW IS 26 USC §6102, AND IT IS AMBIGUOUS. BOTH READINGS ARE LAWFUL.** §6102(a): an amount
+    required to be SHOWN on a form "shall be entered at the nearest whole-dollar amount." §6102(c): that
+    does not apply to "items which must be taken into account in making the computations necessary to
+    determine the amount required to be shown … but shall be applicable only to such final amount."
+    **Line 22 is BOTH** — an amount shown (round it) and an item taken into account in computing line 24
+    (do not). The text does not resolve it, and §6102 is **elective** anyway (a filer may report full
+    cents under (b)). btctax makes a well-founded ELECTION; it is not compelled, and neither is OTS wrong
+    as a matter of law.
+  - **★ AND NOTHING BELOW THE STATUTE IS LAW.** Not the form instructions. Not the **IRM** (an internal
+    procedures manual — confers no rights, binds no taxpayer). Not the MeF schema. Not IRS Direct File.
+    They are **evidence of what the IRS DOES**, never authority for what the law REQUIRES. Every earlier
+    version of this argument reasoned from below that line — and v4 actually *weakened* btctax's position
+    because an IRM keypunch procedure was adverse. **A category error. An agency's internal practice is
+    not a source of obligation, and an agency doing a thing does not make the thing right.**
   - **The MeF schema types every 1040 money element as `xsd:integer`.** A cents-carrying return is not
     expressible; every e-filed 1040 rounds at every line.
   - **IRS Direct File** (their own open-source engine) wraps every reported line in `Round()` over
