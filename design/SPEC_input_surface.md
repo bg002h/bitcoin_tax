@@ -88,7 +88,7 @@ user at `income clear`… which, after Cycle 2, destroys vault-only PII (D-7).
 
 ## 3.5 The three classes of refusal (a compiler-forced classification)
 
-Twenty-one input-screenable refusals, classified:
+The input-screenable refusals, classified. (`KiddieTax` is **not** among them — it is compute-dependent, D-4. D-8 adds a new UNANSWERED variant; `DependentSpouseUnsupported` stays SEPARATE, since one `RefuseReason` cannot carry two classes.)
 
 | class | meaning | examples | store? |
 |---|---|---|---|
@@ -159,11 +159,23 @@ fields it was built for. Visibility with a pre-filled answer is a guess wearing 
 | `mfs_spouse_itemizes` | §63(c)(6) couples the spouses' choice |
 | `can_be_claimed_as_dependent_{taxpayer,spouse}` | see D-8 — silently understates tax |
 | `date_of_birth` | a *recent* dummy suppresses the §63(f) forfeit advisory; an *old* dummy GRANTS the aged add-on (understatement). `Option<Date>` has no refusable-but-parseable placeholder. |
-| `ip_pin` | a crown jewel (D-6) — must not appear in a plaintext template at all |
+| `ip_pin` | a crown jewel (D-6). Ships as a **commented** `# ip_pin = "..."` doc line — never a live value. |
+
+★ **THE MEMBERSHIP CRITERION** — state the rule, not just the list, or the exemption merely relocates the
+problem (an implementer under a red build can always add a line to a list; a *criterion* is what a reviewer
+holds them to):
+
+> **A field may be exempt from KAT C's completeness check ONLY IF its absence either (a) FAILS LOUD, or
+> (b) is CONSERVATIVE *and* ADVISED.**
+
+Every other silently-defaulted field satisfies (b) and therefore ships visible: `presidential_fund_*`
+(unchecked *is* the true no-election state; no tax effect), `blind` / `itemize_election` /
+`salt_use_sales_tax` / `accounting_method` (all default in the **overstate** direction or are neutral).
 
 **Rules:**
-1. Ask-the-user fields ship **COMMENTED**, each with a "you must answer this / delete the line if it does
-   not apply" note. Absent ⇒ the engine's own fail-loud fires, which is the whole point.
+1. Ask-the-user fields ship **COMMENTED** — a `# key = <example>` line, which **is** the doc line (it
+   satisfies both "documented" and "never a live secret/answer in the file"). Absent ⇒ the engine's own
+   fail-loud fires, which is the whole point.
 2. **KAT C carries an EXPLICIT EXEMPTION LIST, asserted inside the KAT** — so the exemption set is itself
    tested and cannot silently grow. A separate raw-text grep KAT requires each exempted field's commented
    doc line to be present, so "commented" never becomes "missing".
@@ -218,21 +230,29 @@ Unrecoverable.
 2. **Field-level merge on the secret leaves** (SSNs, IP PIN): *absent or empty in the file* ⇒ **preserve
    the vault value**. *Non-empty in the file* ⇒ the file wins (the user chose TOML PII).
 3. An intentional clear goes through `set-pii` or `income clear` — **never** through an empty TOML string.
-4. ★ **STRUCTURE FOLLOWS THE FILE.** Leaf-preservation applies only *within* structure the file supplies.
-   A parent block absent from the file is **absent** — a removed `[header.spouse]` does not resurrect the
-   vault's spouse SSN.
-5. ★ **Collections merge by IDENTITY, never by INDEX.** `dependents` is a `Vec`, and every template
-   exemplar carries `ssn = ""` — so index-merging silently binds dependent A's vault SSN to dependent B
-   after a reorder or an inserted newborn: **a wrong SSN printed on a filed 1040**, which no screen can
-   detect. Merge dependents **by `name`**, and **refuse on ambiguity** (duplicate or renamed names ⇒ tell
-   the user to re-run `set-pii`).
+4. ★ **STRUCTURE FOLLOWS THE FILE — but dropping a SECRET-BEARING person must be CONFIRMED.**
+   Leaf-preservation applies only *within* structure the file supplies: a removed `[header.spouse]` does
+   not resurrect the vault's spouse SSN. **But r3 made that silent**, so deleting one block from the
+   *money* TOML would permanently destroy a vault-only SSN with no warning — cutting a new hole in the
+   very invariant D-7 states. ⇒ Import compares the merged header against the stored one; if the merge
+   **drops a person who carries a vault secret**, it **warns, names them, and requires confirmation**
+   (or `--force`).
+5. ★ **Collections merge by IDENTITY, never by INDEX.** Index-merging silently binds dependent A's vault
+   SSN to dependent B after a reorder or an inserted newborn: **a wrong SSN on a filed 1040**, which no
+   screen can detect. Merge dependents **by `name`**.
+   - **Within-file DUPLICATE names ⇒ refuse.** Genuinely ambiguous.
+   - ★ **An UNMATCHED file name is NOT ambiguous — it is a NEW or RENAMED person. Import SUCCEEDS**, that
+     dependent's SSN is empty, and the user is told *"no stored SSN for 'John' — run `income set-pii`."*
+     r3 refused here, which **trapped the user**: fix a name typo ⇒ no match ⇒ refuse ⇒ nothing stored ⇒
+     the vault keeps the typo ⇒ `set-pii` cannot edit names ⇒ the only exit destroys the SSNs. **No exit
+     is never an acceptable state.** An empty SSN is already safe: the screen skips it, the packet
+     fail-closes at export.
 
-**KATs:** no header · partial header with `ssn = ""` (the template-placeholder state) · non-empty file SSN
-wins · both orderings · **spouse block removed** · **dependents reordered / inserted / removed**.
+**KATs:** no header · partial header with `ssn = ""` · non-empty file SSN wins · both orderings ·
+**spouse block removed (⇒ confirm)** · **dependents reordered / inserted / removed / RENAMED (⇒ succeeds,
+empty SSN)** · **within-file duplicate names (⇒ refuse)**.
 
-**KATs (all four):** file supplies no header · file supplies a partial header with `ssn = ""` (the
-template-placeholder state — **this is the one r1 would have missed**) · a non-empty file SSN wins ·
-**both orderings**, `set-pii`→`import` and `import`→`set-pii`.
+
 
 ### D-6 — ★ NEW. The header is NOT pure PII. Split by SECRECY, not by struct.
 r1's identity/money dichotomy was **false and dangerous**, and it inherited the falsehood from the
@@ -309,12 +329,35 @@ signed return.
 **fails loud**: `foreign_accounts`, `foreign_trust`, `mfs_spouse_itemizes`. The 1040 asks this one of
 every filer.
 
-**Fix:** both claimed-flags become `Option<bool>`; `None` fires a new **UNANSWERED** refusal in
-`screen_inputs`. Back-compat is free — a stored blob serialized `false` deserializes to `Some(false)`.
-The template lists them in the ASK-THE-USER class (D-2), so they ship **commented**: an uncommented
-`= false` example would merely pre-answer the question in the same taxpayer-favourable direction.
+**Fix — three parts. The first one is the one I got wrong.**
 
-**Only then is §9's promise true.**
+**(1) ★ THE MIGRATION. "Back-compat is free" was the OPPOSITE of free — it LAUNDERS the bug.**
+The store serializes the whole struct (`cli/return_inputs.rs:44`) and there is **no `skip_serializing_if`
+anywhere**, so a bare `bool` is **always written**. **Every stored row already on disk carries
+`"can_be_claimed_as_dependent_taxpayer": false`** — even though the user was never asked. Migrating
+naively turns that into `Some(false)` = **an answered "No"**, so the new refusal **never fires for a
+single pre-existing row.** The fix would repair the *future* and **silently ratify the past — for exactly
+the population that has the bug.**
+
+⇒ Add `#[serde(default)] schema_version: u32` to `ReturnInputs` (absent ⇒ **0** = pre-P8). On load, a
+version-0 row's claimed-flags map to **`None`**, so the year refuses UNANSWERED: *"answer
+`can_be_claimed_as_dependent_taxpayer` and re-import."* This **takes previously-computing years down — in
+the SAFE direction only** — and one TOML line recovers. That is the same fail-loud doctrine D-8 invokes;
+anything less is the guess wearing an answer's clothes.
+
+**(2) SCOPE the spouse flag.** `None` on the **taxpayer** flag refuses unconditionally (the 1040 asks
+every filer). `None` on the **spouse** flag refuses **only when the return has a spouse** (MFJ, or
+`header.spouse.is_some()`); otherwise it is inert. r3 refused unconditionally — which, since D-2 ships the
+flag commented, would have made **the default journey refuse for every Single/HoH filer**, naming a key
+about a spouse who does not exist. The project's own precedent scopes exactly this
+(`MfsSpouseItemizeUnknown` fires only on MFS); r3 copied the tri-state without copying the scoping.
+
+**(3) FORBID the re-guess at the consumers.** `return_1040.rs:78` and `:618` must test `== Some(true)`,
+**never `unwrap_or(false)`** — which is the shipped idiom at `printed.rs:936` and is *the very shape of
+this defect*: a `None` silently becoming a taxpayer-favourable "No". `None` is unreachable past
+`screen_inputs`; say so, and do not re-guess it.
+
+**Only then is §9's promise true — for the users who already have the bug, not merely for new ones.**
 
 ## 6. The drift alarm — THREE assertions, because value-equality has a hole
 
@@ -330,8 +373,10 @@ And my proposed fix — compare key-sets by re-serializing the fixture to TOML �
 
 **Three assertions, and all three are needed:**
 
-- **KAT A — the example is correct.** The uncommented template parses via the *real*
-  `parse_return_inputs_toml` and `==` the typed fixture.
+- **KAT A — the example is correct.** Take the template, apply a **named, tested transformation** that
+  mechanically uncomments the ask-the-user lines to their example answers, parse it via the *real*
+  `parse_return_inputs_toml`, and assert `==` the typed fixture. *(r3 said "the uncommented template",
+  which was unsatisfiable: the ask-the-user fields are commented and `ip_pin` had no line at all.)*
 - **KAT B — the FIXTURE is complete (mechanical).** Walk `serde_json::to_value(&fixture)` and assert
   **no `null` and no empty array, recursively.** This forces every `Option` to `Some` and every `Vec` to
   carry an exemplar — and it catches a new `Option` field even on a nested struct built with
@@ -349,24 +394,33 @@ codegen, no third representation.**
 - **Enum-VARIANT drift is un-alarmed.** A new `CharitableClass`, or a new allowlisted box-12 code, moves no
   key-path — B and C see nothing. Field drift is caught; variant drift is not. Recorded, not solved.
 
-⚠️ **KAT C's exemption list (D-2) is part of this mechanism, not a hole in it.** The ask-the-user fields
-are exempt from key-path completeness *because they must ship commented* — and the exemption set is
-**asserted inside the KAT**, so it cannot silently grow.
+⚠️ **KAT B and KAT C share ONE asserted exemption literal**, and it is governed by D-2's **criterion**, not
+by taste. The ask-the-user fields are exempt from key-path completeness *because they must ship commented*.
+A **new** `Option` field is not in that set — so B still catches it as a `null`, and the alarm keeps its
+teeth. *(r3 left KAT B banning `null` while D-2 forbade `ip_pin` from the template entirely — the three
+assertions were mutually unsatisfiable and the spec could not have been implemented.)*
 
 ## 7. Build order (TDD; each step red → green)
 
 0. **`RefusalKind`** — `fn kind(&self) -> RefusalKind` on `RefuseReason`, an exhaustive `match` (§3.5).
-   A new variant cannot compile without a classification.
-1. **`#[serde(default)]` on `Person.{first_name,last_name,ssn}`** (D-5 rule 1) — a header block must be
-   able to omit the secret.
-2. **`income template`** + the three drift KATs (§6).
-3. **`screen_inputs` at import** — order: parse → carryover-merge → **header-merge (D-5)** → **screen the
-   blob AS IT WILL BE STORED** → store. Screening the raw parse would let stored bytes differ from
-   screened bytes. Class-aware messages + `--force` with its consequence stated.
-4. **`income set-pii`** — no-echo, validates at the prompt, screens the merged blob, **refuses on a year
-   with no row** (D-7). The four D-5 merge KATs, both orderings.
-5. **`income clear`** — confirm/`--keep-identity` when the header carries secrets (D-7).
-6. Man pages (`make docs`); `income show` disposition (§8).
+1. **★ D-8 — the shipped-code Critical.** `schema_version` on `ReturnInputs`; both claimed-flags →
+   `Option<bool>`; the new **UNANSWERED** refusal (taxpayer: unconditional; spouse: only when a spouse
+   exists); consumers test `== Some(true)`, never `unwrap_or(false)`. **Version-0 rows map the flags to
+   `None` and refuse** — down in the safe direction only. This is the largest change and the only one that
+   touches shipped compute; it goes first.
+2. **`#[serde(default)]` on `Person.{first_name,last_name,ssn}`** (D-5) — a header block must be able to
+   OMIT the secret.
+3. **`income template`** + the drift KATs (§6): A (uncomment-transform → parse → `== fixture`), B (no
+   `null`, no empty array in `serde_json::to_value(&fixture)`), C (key-paths vs the template, sharing B's
+   exemption literal), the grep KAT for the commented doc lines, and the `serde(skip` ban.
+4. **`screen_inputs` at import** — order: parse → carryover-merge → **header-merge (D-5)** → **screen the
+   blob AS IT WILL BE STORED** → store. Class-aware messages; `--force` states its consequence; the
+   drop-a-secret-bearing-person confirmation.
+5. **`income set-pii`** — no-echo, validates at the prompt, screens the merged blob, **refuses on a year
+   with no row** (D-7), `--clear-ip-pin`. All the D-5 merge KATs, both orderings.
+6. **`income clear`** — confirm when the header carries secrets; `--keep-identity` leaves the year
+   **fail-closed** (D-7).
+7. `export-irs-pdf`'s `SsnError::Missing` refusal names `income set-pii`. Man pages (`make docs`).
 
 ## 8. Follow-ups this phase OWNS (burn down here, per the in-phase rule)
 
@@ -386,6 +440,12 @@ are exempt from key-path completeness *because they must ship commented* — and
   should **import** canonicalize at capture? D-7 answers it — `set-pii` validates at the prompt, and every
   path screens before storing. Close it, and delete the stale duplicate at `FOLLOWUPS.md:718` so
   reconciliation-by-grep yields one answer.
+- **[NEW, pre-existing] `Dependent.relationship`** defaults `""` and **prints BLANK on the filed 1040**
+  (`form1040_full.rs:376`) with no screen — the same facial-incompleteness class as
+  `ScheduleCNoBusinessDescription`, which the code *does* refuse. Fix here or file it.
+- **[NIT, pre-existing] `ssn_valid_for_employment` is entirely unconsumed** (zero references outside its
+  definition). KAT C would force it into the template, asking the user a question that changes nothing.
+  Wire it or mark it reserved.
 - **[NEW, pre-existing]** `return_refuse.rs`'s `header: _, // PII only — no money` comment is **false**
   (DOB/blind/claimed-flags are tax-changing) and is what propagated the false dichotomy into r1. Fix the
   comment. And `ScheduleCNoBusinessDescription` sits under the enum's "Compute-dependent" banner but fires
