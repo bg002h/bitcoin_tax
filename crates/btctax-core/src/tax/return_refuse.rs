@@ -76,6 +76,16 @@ pub enum RefuseReason {
     /// "Someone can claim your spouse as a dependent" is unanswered on a return that HAS a spouse. Same
     /// reasoning as the taxpayer flag; only asked when a spouse is on the return (D-8).
     DependentSpouseStatusUnanswered,
+    /// P9 §2.4 — the §223 HSA-activity DECLARATION is `None` (never asked). Live on EVERY return, because
+    /// the answer is what decides whether Form 8889 files (so it cannot be scoped by whether 8889 files).
+    /// An unasked distribution omits gross income + a 20% additional tax (§223(f)) — fail loud.
+    HsaActivityUnanswered,
+    /// P9 §2.5 — the dual-status-alien DECLARATION (1040 header) is `None`. Live always: a single box whose
+    /// unchecked state we print today, and §63(c)(6)(B) zeroes an NRA's standard deduction. Fail loud.
+    DualStatusAlienUnanswered,
+    /// P9 §2.7 — the §163(h)(3)(F) mixed-use-mortgage DECLARATION is `None`, on a Schedule A carrying
+    /// mortgage interest. Fail loud rather than print line 8a with the box in an unaffirmed state.
+    MixedUseMortgageUnanswered,
     /// A charitable gift/carryover to a **non-50%-organization** (Cash30/OrdinaryProp30/CapGainProp20 —
     /// private foundations etc.) needs the Pub. 526 "special 30% limit" ordering v1 doesn't implement;
     /// refuse rather than mis-limit and understate tax (review C1). Never produced by the crypto ledger.

@@ -11,6 +11,7 @@ pub mod other_taxes;
 pub mod packet;
 pub mod printed;
 pub mod qbi;
+pub mod questions;
 pub mod return_1040;
 pub mod return_inputs;
 pub mod return_refuse;
