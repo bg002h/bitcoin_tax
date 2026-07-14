@@ -304,34 +304,37 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 
 ## Open — owned by P7 (golden returns)
 
-- **★ spec-3.1-crossfoot-vs-round-the-total → SPEC AMENDMENT (needs a user decision).**
-  **btctax knowingly departs from the 1040 instructions on how totals are rounded, and the departure can
-  understate tax by $1.** Surfaced by Fable P7 r2 I3, which caught the first draft of the divergence
-  entry citing the instruction *backwards*.
+- **[✅ RESOLVED — SPEC §3.1 is VINDICATED, no amendment] spec-3.1-crossfoot-vs-round-the-total.**
+  The question: btctax cross-foots printed totals (Σround) while the 1040 instructions appear to say
+  "include cents when adding the amounts and round off only the total" (round(Σexact)). Fable P7 r2
+  caught the original justification citing that instruction BACKWARDS; the r2 fold then over-corrected
+  into "we knowingly depart, and it might understate tax". **Both were reasoning from the instruction.
+  The instruction is not the authority.**
 
-  **What the instructions say** — Form 1040 instructions, *Rounding Off to Whole Dollars* (2024, p. 23),
-  verbatim: *"If you have to add two or more amounts to figure the amount to enter on a line, include
-  cents when adding the amounts and round off only the total."* Line 24 (= 22 + 23) is such a line. So
-  the instruction directs `round(Σexact)`.
+  **btctax is RIGHT. OTS is the outlier.** Evidence, in full, at
+  [`ROUNDING_AUTHORITY.md`](./ROUNDING_AUTHORITY.md):
 
-  **What btctax does** — SPEC §3.1 elects round-at-each-line and CROSS-FOOTS: printed totals sum the
-  already-rounded lines, `Σround`. On `single_miner_qbi_limited_by_net_capital_gain` that is 8,355 +
-  8,478 = **16,833**, where the instruction gives 8,354.59 + 8,477.73 = 16,832.32 → **16,832**. OTS
-  follows the instruction; btctax does not.
+  - **26 CFR 301.6102-1(a):** "any amount required to be **reported** on such form shall be entered at
+    the nearest whole dollar amount." **(c):** those provisions "apply **only** to amounts required to
+    be reported … They do **not** apply to items which must be taken into account in making the
+    computations." Lines 22 and 23 ARE reported amounts. The instruction's "include cents" sentence
+    restates (c) and governs items appearing NOWHERE on the return — not lines summing other lines.
+  - **The MeF schema types every 1040 money element as `xsd:integer`.** A cents-carrying return is not
+    expressible; every e-filed 1040 rounds at every line.
+  - **IRS Direct File** (their own open-source engine) wraps every reported line in `Round()` over
+    already-rounded operands, and comments: *"We're intentionally summing rounded numbers because that
+    is what Schedule B requires."* Its own fixture diverges from round-the-total by **$7**, and the IRS
+    prints the cross-footed figure.
+  - **★ The exposure INVERTS.** IRM 3.11.3.4.3 tells IRS clerks to "use only dollar amounts when
+    computing amounts on forms or schedules", and IRM 3.12.3.28.11.11 assigns **TPNC 282** for a "math
+    error adding Total Tax on line 24". The IRS recomputes **Σround** from the transcribed whole-dollar
+    lines — so btctax reproduces its arithmetic exactly and **cannot** draw that notice, while a
+    round-the-total return is off by $1 against it **by construction**.
 
-  **Why the election exists, and it is not nothing:** it is what makes the filed form's own printed
-  lines ADD UP. Under `round(Σexact)` a reader adding the printed lines 22 and 23 gets a different
-  number from the printed line 24 — the form does not cross-foot on its face.
-
-  **The exposure:** the error is bounded by ~$0.50 per addend but can fall EITHER WAY. Here it
-  overstates the tax by $1 (the filer overpays — btctax's usual conservative direction). A different
-  cents pattern understates it by $1, which is the direction btctax's whole posture refuses. Small, but
-  real, and it is not currently disclosed as a departure.
-
-  **Decision needed (SPEC, not P7):** keep the cross-footing election and disclose it in LIMITATIONS.md
-  as a deliberate departure, or switch printed totals to `round(Σexact)` and accept forms whose printed
-  lines do not visibly add up. Also check whether the same instruction bites on Schedule D vs the 8949
-  row totals, and on Schedule A / Schedules 1–3, where §3.1's rule applies identically.
+  Standing rule, now stated properly in SPEC §3.1's terms: **round at the point of REPORTING.** An
+  amount printed on a line is rounded; a line summing other printed lines sums the rounded values.
+  Amounts that appear nowhere on the return (the W-2 box-2 figures behind line 25a) are carried at exact
+  cents and rounded once, where they first surface. btctax already does exactly this.
 
 - **[✅ DONE — the answer is NO] p7-ats-scenario-2 — the IRS scenario is NOT a golden return.**
   The plan's P7 task said "ingest IRS ATS Scenario 2 with a partial-line diff". It cannot be done, and

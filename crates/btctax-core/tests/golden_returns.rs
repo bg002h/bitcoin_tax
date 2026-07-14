@@ -142,30 +142,43 @@ const DECLARED_DIVERGENCES: &[Divergence] = &[
         outlier_alt: None,
         why: "Tax Table bin midpoint vs the exact rate schedule — see above.",
     },
-    // ── CROSS-FOOTING: Σround ≠ roundΣ. A DELIBERATE DEPARTURE from the instructions, not a reading
-    //    of them. Read the `why` — the first draft of this entry cited the instruction backwards, and
-    //    the reviewer caught it. A divergence whose citation does not check out IS the escape hatch.
+    // ── CROSS-FOOTING: Σround ≠ roundΣ. btctax is RIGHT, and OTS is the outlier. ──
+    //
+    //    This `why` has been WRONG TWICE. v1 cited the 1040 instructions as endorsing us — they say the
+    //    opposite, and the reviewer caught it. v2 over-corrected into "we knowingly depart, and it might
+    //    understate tax". Both were reasoning from the instruction. The instruction is not the
+    //    authority. See `design/full-return/ROUNDING_AUTHORITY.md` for the full evidence.
     Divergence {
         household: "single_miner_qbi_limited_by_net_capital_gain",
         line: "TOTAL TAX (L24)",
         btctax: dec!(16833),
-        agrees_with: "neither — a declared departure (taxcalc reports no comparable TOTAL)",
+        agrees_with: "neither — but the REGULATION, the MeF schema, and the IRS's own software all say \
+                      btctax (taxcalc reports no comparable TOTAL)",
         outlier: dec!(16832),
         outlier_alt: None,
-        why: "★ btctax DEPARTS from the 1040 instructions here, knowingly, and OTS is the one following \
-              them. Form 1040 instructions, 'Rounding Off to Whole Dollars' (2024, p. 23), verbatim: \
-              'If you have to add two or more amounts to figure the amount to enter on a line, include \
-              cents when adding the amounts and round off only the total.' Line 24 IS such a line \
-              (22 + 23), so the instruction gives 8,354.59 + 8,477.73 = 16,832.32 → 16,832. That is \
-              OTS's figure. SPEC §3.1 instead elects round-at-each-line and CROSS-FOOTS the printed \
-              totals, so line 24 adds the printed 8,355 and 8,478 to 16,833 — which is what makes the \
-              filed form's own lines add up when a reader adds them. \
-              The cost is bounded by ~$0.50 per addend and it can fall EITHER WAY: here it overstates \
-              the tax by $1 (the filer overpays), but a different cents pattern would understate it by \
-              $1. That is a real, if tiny, exposure in the direction btctax otherwise refuses, and \
-              whether §3.1's election is right is a SPEC question, not a P7 one — filed as \
-              `spec-3.1-crossfoot-vs-round-the-total`. Every COMPONENT line agrees exactly, including \
-              the §199A deduction (8,232) this household exists to test.",
+        why: "★ 26 CFR 301.6102-1(a): 'any amount required to be REPORTED on such form shall be entered \
+              at the nearest whole dollar amount.' §301.6102-1(c): those provisions 'apply ONLY to \
+              amounts required to be reported … They do NOT apply to items which must be taken into \
+              account in making the computations necessary to determine such amounts.' Lines 22 and 23 \
+              ARE reported amounts — so they are entered at whole dollars (8,355 and 8,478), and line \
+              24 sums those, giving 16,833. The 1040 instructions' 'include cents when adding' sentence \
+              is a restatement of (c) and governs items that appear NOWHERE on the return (the several \
+              W-2 box-2 figures behind line 25a), not a line summing other printed lines. \
+              Three independent confirmations: (1) the MeF schema types every 1040 money element as \
+              xsd:integer, so a cents-carrying return is not even EXPRESSIBLE — every e-filed 1040 \
+              rounds at every line; (2) IRS Direct File (their own open-source engine) wraps every \
+              reported line in Round() over already-rounded operands, and its Schedule B code carries \
+              the comment 'We're intentionally summing rounded numbers because that is what Schedule B \
+              requires' — its own fixture diverges from round-the-total by $7 and the IRS prints the \
+              cross-footed figure; (3) IRM 3.11.3.4.3 tells IRS clerks to 'use only dollar amounts when \
+              computing amounts on forms or schedules', and IRM 3.12.3.28.11.11 assigns TPNC 282 for a \
+              'math error adding Total Tax on line 24'. \
+              ★ That last point INVERTS the exposure we feared: the IRS recomputes Σround from the \
+              transcribed whole-dollar lines, so btctax reproduces the IRS's own arithmetic EXACTLY and \
+              cannot draw TPNC 282 — while a round-the-total return is off by $1 against it by \
+              construction. OTS keeps cents and rounds once (16,832); it is the outlier, not us. Every \
+              COMPONENT line agrees exactly, including the §199A deduction (8,232) this household exists \
+              to test.",
     },
     Divergence {
         household: "single_crypto_business_se",

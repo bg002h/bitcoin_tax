@@ -80,10 +80,13 @@ fn every_golden_household_prints_the_oracles_figures_onto_the_1040() {
 
         // ★ TOTAL TAX is CROSS-FOOTED from the oracle's own component lines, not taken from its total.
         //
-        // SPEC §3.1 elects round-at-each-line: the filed line 24 adds the PRINTED lines, so it is
-        // Σround, while OTS keeps cents and reports round(Σexact). The two differ by up to $1 (and
-        // btctax DEPARTS from the 1040 instructions in doing so — see `golden_returns.rs`'s declared
-        // divergence and the `spec-3.1-crossfoot-vs-round-the-total` follow-up).
+        // SPEC §3.1 rounds at the point of REPORTING: the filed line 24 adds the PRINTED lines, so it
+        // is Σround, while OTS keeps cents and reports round(Σexact). btctax is RIGHT and OTS is the
+        // outlier — 26 CFR 301.6102-1(a) requires every REPORTED amount at whole dollars, the MeF
+        // schema types them as xsd:integer (so cents are not even transmissible), and the IRS's own
+        // Direct File sums rounded lines and says so in a comment. Crucially, the IRS RECOMPUTES paper
+        // returns in whole dollars (IRM 3.11.3.4.3), so this cross-foot reproduces the IRS's own
+        // arithmetic exactly. Full evidence: `design/full-return/ROUNDING_AUTHORITY.md`.
         //
         // Earlier this was a hardcoded name+cell exception with the two figures written out by hand.
         // That charged its cost twice — both constants had to be re-edited by hand the moment the
