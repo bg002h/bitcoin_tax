@@ -164,16 +164,28 @@ fields it was built for. Visibility with a pre-filled answer is a guess wearing 
 | `date_of_birth` | a *recent* dummy suppresses the §63(f) forfeit advisory; an *old* dummy GRANTS the aged add-on (understatement). `Option<Date>` has no refusable-but-parseable placeholder. |
 | `ip_pin` | a crown jewel (D-6). Ships as a **commented** `# ip_pin = "..."` doc line — never a live value. |
 
-★ **THE MEMBERSHIP CRITERION** — state the rule, not just the list, or the exemption merely relocates the
-problem (an implementer under a red build can always add a line to a list; a *criterion* is what a reviewer
-holds them to):
+★ **THE MEMBERSHIP CRITERION** — state the rule, not just the list. A *list* can always have a line added
+to it under a red build; a *criterion* is what a reviewer holds an implementer to.
 
-> **A field may be exempt from KAT C's completeness check ONLY IF its absence either (a) FAILS LOUD, or
-> (b) is CONSERVATIVE *and* ADVISED.**
+> **A field may be exempt from KAT C's completeness check ONLY IF it satisfies one of:**
+> **(a) its absence FAILS LOUD; or**
+> **(b) its absence is CONSERVATIVE *and* ADVISED; or**
+> **(c) it is a SECRET (D-6) — it must never appear as a live value in a plaintext file.**
 
-Every other silently-defaulted field satisfies (b) and therefore ships visible: `presidential_fund_*`
-(unchecked *is* the true no-election state; no tax effect), `blind` / `itemize_election` /
-`salt_use_sales_tax` / `accounting_method` (all default in the **overstate** direction or are neutral).
+**Leg (c) is why `ip_pin` is exempt.** Its absence neither fails loud nor is conservative-and-advised — it
+is simply *optional and secret*. Without (c) the criterion would be **false of one of its own members**.
+*(r5 reported this leg folded and it was NOT in the artifact — the edit's anchor never matched. Verify
+folds land.)*
+
+**Everything NOT exempt ships VISIBLE.** Checked: `presidential_fund_*` (unchecked *is* the true
+no-election state; no tax effect), `itemize_election` (= Auto, §63(e) larger-of), `salt_use_sales_tax`
+(= false deducts real withholding; forgoing a larger sales-tax deduction **overstates** tax),
+`accounting_method` (= Cash is *correct*, not merely conservative — the engine derives Schedule C gross
+from ledger income realized on receipt).
+
+⚠️ **`blind` would FAIL leg (b)** — there is no advisory anywhere for an unclaimed blind box (only the
+missing-DOB forfeit is advised). Harmless today because `blind` is **not** exempt. Recorded so nobody
+exempts it later on a false reading.
 
 **Rules:**
 1. Ask-the-user fields ship **COMMENTED** — a `# key = <example>` line, which **is** the doc line (it
@@ -284,7 +296,11 @@ created it.
   `set-pii`'s no-echo prompt is the *likeliest* place a malformed SSN is typed (the user cannot see the
   typo). `set-pii` validates **at the prompt** (`Ssn::canonical`, `IpPin::canonical`) *and* screens the
   **merged** blob before storing.
-- **`set-pii` on a year with no stored row REFUSES** (pointing at `income template` / `income import`).
+- ★ **ONLY `income import` may CREATE a row.** `set-pii`, **`answer`**, and `clear --keep-identity` all
+  **REFUSE** on a missing row (pointing at `income template` / `income import`). Stated as a PRINCIPLE, not
+  per-command — r5 wrote the rule for `set-pii` and then added a **new door** (`answer`) that reopened it:
+  an all-default row with the claimed-flags answered `Some(false)` is **screen-clean**, so it would land at
+  precedence 1 and compute the user's return **from ZEROS**, shadowing their stored `tax-profile`.
   Creating a default row would put an all-zero, screen-clean `ReturnInputs` at precedence 1 — silently
   flipping a user's report from their stored `tax-profile` to one derived from **zeros**. That is the
   "two liabilities, silently different number" sin `resolve.rs` documents itself against.
@@ -346,10 +362,25 @@ version ⇒ `serde(default)` ⇒ 0 ⇒ their explicitly-typed `false` would be m
 primary journey could never complete.** The distinguishing fact is **when the ROW was written** — a
 property of storage, not of the user's document.)*
 
-`ALTER TABLE return_inputs ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 0` (the crate's existing
-idempotent-DDL idiom). `set` writes `1`. The fixup runs **exactly once, in `return_inputs::get`**, on
-version-0 rows. `ReturnInputs` is untouched; the TOML path never sees a version; the template never shows
-one; idempotent by construction.
+**The DDL.** ⚠️ There is **no idiom to inherit** — grep finds **zero `ALTER TABLE` in the whole repo**, and
+SQLite has **no `ADD COLUMN IF NOT EXISTS`**. And `init_table` runs on **every** `get`/`set`/`exists`/… so
+a bare ALTER would error `duplicate column name` on **every command after the first**. ⇒ Put the column in
+the `CREATE TABLE IF NOT EXISTS` (fresh vaults) **and** guard the ALTER for old ones (`PRAGMA
+table_info(return_inputs)`). **KAT: open an old-schema vault twice.**
+
+**★ ONE read boundary, and it must cover BOTH deserializers.** `fn row_to_inputs(json, version) ->
+ReturnInputs` applies the fixup, and **every** read calls it — `get` **and `all()`**, which today does a
+raw `serde_json::from_str` and would return the **un-migrated `Some(false)`**. The migration's whole
+correctness rests on **no reader ever seeing the laundered flag**.
+
+**★ ONE write boundary, and it must stamp BOTH branches.** The existing upsert is `ON CONFLICT(year) DO
+UPDATE SET inputs_json=excluded.inputs_json` — **it names one column.** Stamp `schema_version = 1` in the
+**DO-UPDATE branch too.** Miss it and a user who answers `false` on a pre-existing row keeps version 0 ⇒
+the fixup **re-fires on the very next read** ⇒ **their answer is silently re-laundered to `None` and never
+sticks**, with **no error ever shown.** The bug would reconstitute itself out of its own fix.
+
+**KATs:** answer `false` on a version-0 row → reload → still `Some(false)`, row is version 1 ·
+`all()` migrates identically to `get()` · old-schema vault opens twice.
 
 ★ **Map only `false` ⇒ `None`. NEVER `true`.** A stored `false` is indistinguishable from "never asked" —
 that *is* the bug. A stored `true` is not: **nothing defaults to `true`**, so it can only have been typed.
@@ -376,9 +407,14 @@ plaintext-hygiene path), `income show` emits masked JSON and cannot regenerate i
 prompts for secrets only (D-6). So a TOML-less user would face a refusing year with **no in-app path to
 answer one boolean** — a wall, landing on people who did exactly what the spec told them to.
 
-⇒ **`btctax income answer --year N`** — a small interactive command covering precisely the ASK-THE-USER
-fields (D-2), which are exactly the fields a TOML-less user can otherwise never reach. It stores through
-the same screen-before-store gate (D-7).
+⇒ **`btctax income answer --year N`** — interactive, covering precisely the ASK-THE-USER fields (D-2),
+which are exactly the fields a TOML-less user can otherwise never reach. Stores through the
+screen-before-store gate (D-7), and **refuses on a year with no row** (only `import` creates).
+
+⚠️ **It must prompt the WHOLE class in ONE pass.** D-7 forbids storing a blob `screen_inputs` refuses — so
+a *partial* answer (`--taxpayer=no` while `foreign_accounts` is still `None` on a Schedule-B year) **cannot
+be stored**: the strictly-improving edit is rejected by the gate, and the user can never answer question 1
+until question 2 is answered. **A deadlock.** One pass, whole class.
 
 **Only then is §9's promise true — for the users who already have the bug, not merely for new ones.**
 
@@ -426,11 +462,15 @@ assertions were mutually unsatisfiable and the spec could not have been implemen
 ## 7. Build order (TDD; each step red → green)
 
 0. **`RefusalKind`** — `fn kind(&self) -> RefusalKind` on `RefuseReason`, an exhaustive `match` (§3.5).
-1. **★ D-8 — the shipped-code Critical.** `schema_version` on `ReturnInputs`; both claimed-flags →
-   `Option<bool>`; the new **UNANSWERED** refusal (taxpayer: unconditional; spouse: only when a spouse
-   exists); consumers test `== Some(true)`, never `unwrap_or(false)`. **Version-0 rows map the flags to
-   `None` and refuse** — down in the safe direction only. This is the largest change and the only one that
-   touches shipped compute; it goes first.
+1. **★ D-8 — the shipped-code Critical.** Largest change; the only one touching shipped compute; goes first.
+   a. **The STORE migration** (NOT on `ReturnInputs` — see D-8(1)): the `schema_version` column in
+      `CREATE TABLE IF NOT EXISTS` + a **guarded** ALTER for old vaults (`PRAGMA table_info`); one
+      `row_to_inputs(json, version)` read boundary called by **`get` AND `all`**; the write stamping
+      `schema_version = 1` in **both the INSERT and the DO-UPDATE branch**.
+   b. Both claimed-flags → `Option<bool>`; version-0 rows map **`false` ⇒ `None`** (`true` preserved).
+   c. The new **UNANSWERED** refusal — taxpayer unconditional; spouse **only when a spouse exists**.
+   d. Consumers test `== Some(true)`, **never `unwrap_or(false)`**.
+   e. **`income answer`** (whole ask-the-user class, one pass; refuses on a missing row).
 2. **`#[serde(default)]` on `Person.{first_name,last_name,ssn}`** (D-5) — a header block must be able to
    OMIT the secret.
 3. **`income template`** + the drift KATs (§6): A (uncomment-transform → parse → `== fixture`), B (no
@@ -447,8 +487,10 @@ assertions were mutually unsatisfiable and the spec could not have been implemen
 
 ## 8. Follow-ups this phase OWNS (burn down here, per the in-phase rule)
 
-- **`p1-per-field-subcommands`** — disposition. `income template` + `set-pii` IS the answer for v1; the
-  per-field editors and the TUI form are deferred with the sizing recorded.
+- **`p1-per-field-subcommands`** — **PARTLY DELIVERED, not merely deferred.** This cycle ships
+  `income answer` (a per-field editor for the ask-the-user class) and `set-pii` (for the secrets). What
+  remains deferred is a general per-field editor for the money surface, and the TUI form — with the sizing
+  recorded (no form engine; ~10 new flows).
 - **`p1-show-as-json-not-toml`** — **DECIDED, not punted.** `income show` keeps emitting masked JSON; a
   TOML round-trip is **deferred**. ⚠️ If it ever ships, its secrets must emit as **empty strings, not
   masks**: today's `***-**-6789` is *non-empty*, so D-5's "non-empty file value wins" would store the mask
