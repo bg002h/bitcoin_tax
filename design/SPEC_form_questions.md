@@ -1,6 +1,7 @@
 # SPEC — P9: the FORM QUESTION REGISTRY
 
-*Status: **r7**. Folds Fable spec review r6 (0C/1I/2M/5Nit — `reviews/P9-SPEC-fable-r6.md`), r5
+*Status: **r8**. Folds Fable spec review r7 (0C/2I/2M/2Nit — `reviews/P9-SPEC-fable-r7.md`), r6
+(`reviews/P9-SPEC-fable-r6.md`), r5
 (`reviews/P9-SPEC-fable-r5.md`), r4
 (`reviews/P9-SPEC-fable-r4.md`), r3
 (`reviews/P9-SPEC-fable-r3.md`), r2 (`reviews/P9-SPEC-fable-r2.md`) and r1 (`reviews/P9-SPEC-fable-r1.md`).*
@@ -63,8 +64,12 @@ And **r6 — which fixed the broken remedy — traced it exactly one command sho
 `import` unbricks the refusal and then leaves year+1 without the `Computed` carryover it was redesigned to
 protect, with the rebuild command named nowhere (r6 I-1).
 
-**Seven revisions; seven recurrences; each one authored by someone who had just finished writing that this
-exact thing keeps happening.** The class does not respect the author's intentions, his attention, or his
+And **r7 — which named the rebuild command everywhere but the one exemplar string an implementor copies** —
+left §2.6's literal refusal text ending at `income import`, six lines above the sentence that corrects it, with
+no red test to catch the gap (r7 I-1). *The fold reached the argument and not the artifact — r5 I-2's twin.*
+
+**Eight revisions; eight recurrences; each one authored by someone who had just finished writing that this
+exact thing keeps happening — the last of them a single un-updated string.** The class does not respect the author's intentions, his attention, or his
 sincerity. **It is only closed by construction** — which is why §3.3's honest limit (r3 I-5) matters more
 than any prose in this document.
 
@@ -172,14 +177,15 @@ otherwise machine-filled form. That is a real assumption, and the mitigation is 
 existing `DRAFT` watermark plus the packet's own instructions. Recorded, not waved.
 
 **The printed-checkbox sweep — COMPLETE.** *(r3 I-4: r2's sweep said "all seven supported forms"; the packet
-prints **fourteen** — `PrintedForms`, `packet.rs:361-389`. It omitted nine boxes and mislabeled the one box on
+prints **fourteen** — `PrintedForms`, `btctax-core/.../tax/packet.rs:361-389`. It omitted nine boxes and mislabeled the one box on
 the whole surface that software answers as "data-derived".)*
 
 | box | class | disposition |
 |---|---|---|
+| **1040 header: filing status ×5** (`form1040_full.rs:213-217`) | — | **filled from the ONE serde-REQUIRED input** (`filing_status`, `return_inputs.rs:364` — no `#[serde(default)]`, so a TOML without it refuses to parse). No default exists to launder. *(★ r7 M-1: missed by BOTH prior census passes — the box-nobody-looked-at, third occurrence, zero hazard.)* |
 | 1040 header: dependent ×2, MFS-itemize | (A) | covered (registry) |
 | **1040 header: dual-status alien** | **(A)** | **→ §2.5 (NEW question)** |
-| 1040 header: aged ×2, blind ×2 (`packet.rs:200-216`) | **(B)** | unchecked forgoes §63(f). `blind` → §2.2 (tri-state + advisory); aged → `AgedBoxForfeitedNoDob` ✅ *exists* |
+| 1040 header: aged ×2, blind ×2 (`btctax-core/.../tax/packet.rs:200-216`) | **(B)** | unchecked forgoes §63(f). `blind` → §2.2 (tri-state + advisory); aged → `AgedBoxForfeitedNoDob` ✅ *exists* |
 | 1040 dependents: CTC / ODC per row (`form1040_full.rs:377`) | (B) | deliberately unchecked, L19 = $0; `Advisory::CtcOdcOmitted` names the money ⇒ owner mandate satisfied |
 | 1040 `more_than_four_dependents` | — | >4 dependents **refuses** (`form1040_full.rs:366`) — the box is never needed |
 | 1040 presidential fund ×2 (`form1040_full.rs:331-338`) | (C) | filled from input; **no tax direction** (§6096 is a fund designation, not a liability) |
@@ -193,7 +199,7 @@ the whole surface that software answers as "data-derived".)*
 | Schedule C H (started/acquired business) | (C) | single box, **no tax direction** ⇒ **`LIMITATIONS.md` entry (step 11)** *(r3 I-4: r2 called it "disclaimed"; no such disclaimer existed)* |
 | **Schedule D QOF pair — "No" CHECKED unconditionally** (`schedule_d_full.rs:283-294`) | **exempt (rule 3)** | **★ the only box software answers in the NEGATIVE.** Entailed by **scope**: btctax supports returns whose dispositions all come from the bitcoin ledger, and a QOF disposition has no input and no ledger representation — a filer with one is outside the supported set (P6 r1 I4). **Requires the `LIMITATIONS.md` entry it never had (step 11).** *(r4 I-1: r4 called this "the only box software answers" — false; see 8949 below.)* |
 | Schedule D 17 / 20 / 22 pairs | — | genuinely data-derived from computed lines |
-| **★ Form 8949 Box I / Box L — CHECKED on every filed 8949 with rows** (`fill8949.rs:86-95`, via `packet.rs:129-134` → `fill_8949_parts_with_identity`) | **exempt (rule 3)** | **★ r4 I-1 — THE BOX NOBODY LOOKED AT.** r4's census row said this filler *"writes no checkboxes at all"*, **with the word "verified".** It writes one on every return with a disposal. Box I (ST) / Box L (LT) = *"not reported to you on Form 1099-B"* — **never Box C/F** (`fill8949.rs:4-6`). Entailed by **data + scope**: btctax has no 1099-B / 1099-DA input at all, so every ledger disposition is by construction un-reported. **Needs its `LIMITATIONS.md` entry (step 11).** |
+| **★ Form 8949 Box I / Box L — CHECKED on every filed 8949 with rows** (`fill8949.rs:86-95`, via `btctax-forms/src/packet.rs:129-134` → `fill_8949_parts_with_identity`) | **exempt (rule 3)** | **★ r4 I-1 — THE BOX NOBODY LOOKED AT.** r4's census row said this filler *"writes no checkboxes at all"*, **with the word "verified".** It writes one on every return with a disposal. Box I (ST) / Box L (LT) = *"not reported to you on Form 1099-B"* — **never Box C/F** (`fill8949.rs:4-6`). Entailed by **data + scope**: btctax has no 1099-B / 1099-DA input at all, so every ledger disposition is by construction un-reported. **Needs its `LIMITATIONS.md` entry (step 11).** |
 | Form 8283 line k (digital assets) | **exempt (rule 3)** | checked — entailed by data (the donation *is* crypto) |
 | Form 8283 donee acknowledgment / restricted use | (—) | deferred blank by the module's fill/blank table (`form8283.rs:1-10`) |
 | Form 8960 §6013(g)/(h) · §1.1411-10(g) | (C) | **opt-in elections** — lawful unchecked |
@@ -230,7 +236,7 @@ $1,550/$1,950 TY2024) **and they STACK** — a filer both 65+ and blind gets two
 filer they forfeited the box for want of a *birthday* and say nothing when they forfeit the *same box, same
 statute, same dollars* for want of a *checkbox*.
 
-**Both flips need the §2.6 migration** — a stored `false` was never asked (same rule, one discipline).
+**Both flips are covered by the §2.6 schema-version refusal** — a pre-P9 row refuses rather than laundering a stored `false` that was never asked (§2.6's title is now "there isn't one"; the noun "migration" is retired — r7 Nit-1).
 
 ⚠️ **The SALT prompt is a footgun and needs a guard (Fable r2 I-3).** `salt_line_5a`: **election on ⇒ 5a =
 `salt_sales_tax_amount` ONLY** — W-2 box 17/19 withholding and estimated payments drop out. A filer who
@@ -361,7 +367,7 @@ touches.** *Find every statute for **the field**. "I found A statute" is not "I 
 ### 2.5 The dual-status alien — a declaration we already print, with NO field behind it (Fable r1 I-5)
 
 The 1040's third header checkbox reads: *"Spouse itemizes on a separate return **or you were a dual-status
-alien**."* We print it from the MFS coupling alone (`packet.rs:325`). **The dual-status half is silently
+alien**."* We print it from the MFS coupling alone (`btctax-core/.../tax/packet.rs:325`). **The dual-status half is silently
 answered "No" on every non-MFS return we have ever printed** — no field, no question, no refusal, no
 `LIMITATIONS` entry.
 
@@ -407,8 +413,11 @@ fn row_to_inputs(year: i32, json: &str, version: i64) -> Result<ReturnInputs, Cl
         return Err(CliError::StaleReturnInputs { year, found: version, expected: SCHEMA_VERSION });
         //  "the stored inputs for {year} predate the form-question registry (schema v{found}; this
         //   build reads v{expected}). Run `btctax income clear {year}` — which DISCARDS any carryover
-        //   this row's prior reports computed onto it — then re-run `btctax income import`."
+        //   this row's prior reports computed onto it — then re-run `btctax income import`; then, if
+        //   this row carried a computed carryover, `btctax report --tax-year {year-1} --write-carryover`
+        //   to rebuild it."
         //  ★ NOT "just re-import": `income import` reads this row too (cmd/tax.rs:63). r5 I-1.
+        //  ★ AND name the rebuild: `clear` discards the Computed carryover; disclosure ≠ restoration. r6 I-1.
     }
     serde_json::from_str(json).map_err(...)
 }
@@ -841,7 +850,7 @@ this one fires on known.** Both are the mandate.
 
 **★ `persons` — whose blindness counts (r3 I-7).** r3 left this to the implementor, *which is how P8a I1
 happened.* The rule mirrors the code that already decides the identical §63(f) question for the **aged** box —
-`AgedBlindBoxes::for_return` counts the spouse's boxes **only on a joint return** (`packet.rs:200-216`), and
+`AgedBlindBoxes::for_return` counts the spouse's boxes **only on a joint return** (`btctax-core/.../tax/packet.rs:200-216`), and
 the aged advisory adds P5-M2's rule that **an absent spouse record on MFJ forfeits the box just as surely** as
 a missing birthday:
 
@@ -892,10 +901,27 @@ every fold, including the last.* ⇒ The mortgage question's answered-half asser
 **★ The hand-written per-question refusal tests are KEPT, not deleted.** r1 said the property test "replaces
 per-question tests forever" — which invited deleting exactly the tests that catch a dropped entry.
 
-**Mutation-checked (acceptance):** delete the registry loop → a named test fails; delete the `build` refusal →
-a named test fails; drop a `FORM_QUESTIONS` entry → a named test fails; drop **any** of the three advisories →
-a named test fails; **delete the `SCHEMA_VERSION` check → a named test fails** (§2.6); **delete the `clear`-first
-requirement → a computed carryover is silently lost → a named test fails** (§2.6, r5 I-1).
+**Mutation-checked (acceptance):** delete the registry loop → a named test fails; delete the `build` refusal
+loop → a named test fails; **delete the MFJ-with-no-spouse `build` refusal → a named test fails** (r3 M-6 / r7
+M-2 — it is a *distinct arm* from the `Unanswered(QuestionId)` loop and can be deleted independently: named
+test = MFJ ∧ `spouse: None` ⇒ `build` refuses); drop a `FORM_QUESTIONS` entry → a named test fails; drop
+**any** of the three advisories → a named test fails; **delete the `SCHEMA_VERSION` check → a named test fails**
+(§2.6); **delete the `clear`-first requirement → a computed carryover is silently lost → a named test fails**
+(§2.6, r5 I-1).
+
+**★ TWO MORE guards the acceptance claim covers — and r7 caught BOTH unheld (r7 I-1, I-2):**
+- **The stale-row refusal's TEXT** (not just its mechanism): a named test asserts the `StaleReturnInputs`
+  detail names **all three** commands — `income clear`, `income import`, **and** `report --write-carryover`.
+  *Mutation: drop the rebuild clause from the detail string ⇒ that test fails.* **★ r7 I-1: r6's fix reached
+  the prose and §4's bullet but NOT the one exemplar string an implementor copies — it still ended at `income
+  import`, and the only text-test pinned it to "naming `income clear`" alone. A fold that updates the argument
+  and leaves the artifact is how r5 I-2 happened; this is its twin.**
+- **The `serde_ignored` unknown-key rejection** (§2.3): a named test imports a TOML carrying
+  `hsa_present = false` **and** `box13_retirement_plan = true` and asserts the refusal **names both keys**.
+  *Mutation: replace `serde_ignored::deserialize` with plain `toml::from_str` ⇒ that test fails.* **★ r7 I-2:
+  this P9-added guard had a build step and a §4 bullet but no test and no mutation — the [[untested-guard-pattern]]
+  surviving inside the acceptance section that cites it. Reverting to bare deserialize (a plausible
+  "simplification") would silently restore the exact vanishing-`box13` hole §2.3 exists to close.**
 
 **★ AND EVERY VALUE-REFUSAL — the ones the property test CANNOT hold (r5 I-3).** §3.5's per-question test
 asserts only that *the unanswered reason* stops firing on `y`; **it passes with or without the
@@ -985,7 +1011,8 @@ sites — and **it cannot prevent the next D-8**: a witness certifies the *exist
   `income import` as the exit (`answer` cannot capture strings).
 - **★ The checkbox census is CLOSED BY ENUMERATION** (§2.1) — including the boxes btctax *never writes*, which
   are a **named category**, not silence. Every printed box across all **fourteen** forms is a registry question,
-  a class-(B) advisory, a pen-deferred pair, a **rule-3 exemption**, or structurally inapplicable.
+  a class-(B) advisory, a pen-deferred pair, a **rule-3 exemption**, **filled from an explicit input** (filing
+  status, Sch A 5a/18, Sch C line F), or structurally inapplicable.
   **Form 8949's Box I/L and Schedule D's QOF "No" — both software-answered, both scope-entailed — get the
   `LIMITATIONS.md` entries they never had.** *(r4 I-1: the census was published "COMPLETE" while 8949 was
   checking a box on every filed return. **A census is only as good as its worst row**, and this one is now
