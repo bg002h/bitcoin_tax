@@ -430,8 +430,16 @@ Full text: `reviews/IMPL-P6-fable-review-r1.md` and `reviews/IMPL-P6-fable-revie
   guard moved screens. The behavior is correct; the coverage regressed.
 - **p6-r2-nm6-cli-empty-header-and-untested-output → P6.7.** The full path prints an empty "Filled IRS forms →"
   header before the packet block, and the whole output block has no test coverage.
-- **p6-r1-n1-extract-lines → P7.** The line-keyed inverse transcriber (`testonly::extract_lines`) the architect
-  asked to be built while the maps are fresh. The cross-PDF oracle was hand-rolled with `tv()` instead.
+- **[✅ DONE] p6-r1-n1-extract-lines — BUILT, and it unlocked the packet round-trip.**
+  `btctax_forms::testonly::extract_lines(pdf, map_toml) -> BTreeMap<line, printed text>` walks the committed
+  map generically (so it transcribes any form in the packet without knowing which it holds), descends nested
+  groups (`identity.ssn`) and repeating tables (`part1_rows[0].payer`), and returns **only cells the fill
+  actually wrote** — an off checkbox and an unused row slot are ABSENT, because a blank line on a tax form is
+  a statement and "written empty" must not read the same as "never written". All 5 KATs fault-injected.
+
+  It is a read-back, **not** an oracle: it goes through the same map the fill used, so it cannot catch a
+  mis-mapped cell — that stays `verify.rs`'s job (geometry, map-independent). The two are complementary:
+  **geometry says the value landed in the right box; this says the right VALUE is in it.**
 - **p6-r1-n2-manifest-w2-copy-b → P6.7.** The manifest should carry the "attach your W-2 Copy B" line.
 - **p6-r1-n3-every-schedule-kat-tests-one-form → P6.7.** `every_schedule_carries_the_name_and_ssn_header`
   tests ONE form; the name promises all. Had it iterated the packet, the unnamed 8949 (r1 I3) would have been

@@ -24,228 +24,12 @@
 use std::collections::BTreeMap;
 
 use btctax_core::conventions::{round_dollar, Usd};
-use btctax_core::event::BasisSource;
-use btctax_core::event::{DisposeKind, IncomeKind};
-use btctax_core::identity::{EventId, LotId, WalletId};
-use btctax_core::state::{Disposal, DisposalLeg, IncomeRecord, LedgerState, Term};
 use btctax_core::tax::packet::assemble_printed_forms;
 use btctax_core::tax::return_1040::assemble_absolute;
-use btctax_core::tax::return_inputs::{
-    Form1099Div, Form1099Int, Owner, ReturnInputs, ScheduleAInputs, ScheduleCInputs, W2,
+use btctax_core::tax::testonly::{
+    build_golden_household, golden_households, golden_usd as usd, ty2024_params, ty2024_table,
 };
-use btctax_core::tax::testonly::{ty2024_params, ty2024_table};
-use btctax_core::tax::types::FilingStatus;
 use rust_decimal_macros::dec;
-use serde::Deserialize;
-use time::macros::date;
-
-#[derive(Debug, Deserialize)]
-struct Goldens {
-    households: Vec<Household>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Household {
-    name: String,
-    why: String,
-    inputs: Inputs,
-    /// Oracle 1 — **OpenTaxSolver 2024, its own binaries driven directly** (GPL, observe-only).
-    ///
-    /// Formerly this was `tenforty`, a Python wrapper around OTS. The wrapper turned out to drop two
-    /// inputs on the floor — Schedule SE line 8a and the §199A deduction on 1040 line 13 — each of which
-    /// OVERSTATES a self-employed filer's tax. Reported upstream (mmacpherson/tenforty#278, fix in #279).
-    /// **The engine was never at fault**: driven directly it reproduces btctax to the cent, and every
-    /// divergence the wrapper used to force into the list below is gone.
-    expected_ots: ExpectedOts,
-    /// Oracle 2 — PSL Tax-Calculator (CC0). A completely separate lineage.
-    expected_taxcalc: ExpectedTaxcalc,
-}
-
-/// Oracle 1's outputs. `total_tax` is OTS's 1040 line 24 plus the NIIT it computes on Form 8960 —
-/// directly comparable to btctax's line 24.
-#[derive(Debug, Deserialize)]
-struct ExpectedOts {
-    adjusted_gross_income: f64,
-    taxable_income: f64,
-    income_tax_before_credits: f64,
-    se_tax: f64,
-    niit: f64,
-    additional_medicare_tax: f64,
-    total_tax: f64,
-}
-
-/// The second oracle's outputs. Only the lines whose definitions are unambiguous across engines: we do
-/// NOT take its `combined`/`iitax` totals, which bundle payroll tax on W-2 wages that 1040 line 24 does
-/// not include.
-#[derive(Debug, Deserialize)]
-struct ExpectedTaxcalc {
-    adjusted_gross_income: f64,
-    taxable_income: f64,
-    income_tax_before_credits: f64,
-    se_tax: f64,
-    niit: f64,
-    additional_medicare_tax: f64,
-}
-
-#[derive(Debug, Deserialize)]
-struct Inputs {
-    filing_status: String,
-    #[serde(default)]
-    w2_income: f64,
-    #[serde(default)]
-    taxable_interest: f64,
-    #[serde(default)]
-    qualified_dividends: f64,
-    #[serde(default)]
-    ordinary_dividends: f64,
-    #[serde(default)]
-    short_term_capital_gains: f64,
-    #[serde(default)]
-    long_term_capital_gains: f64,
-    #[serde(default)]
-    self_employment_income: f64,
-    #[serde(default)]
-    itemized_deductions: f64,
-}
-
-fn usd(v: f64) -> Usd {
-    Usd::try_from(v).expect("the oracle emits finite figures")
-}
-
-/// Build the SAME household in btctax's own input model.
-///
-/// The mapping is deliberately literal: the oracle's `w2_income` is a W-2's box 1 (and its box 3 / box 5,
-/// which is what a real W-2 carries), its capital gains are crypto disposals on the ledger (which is how
-/// btctax gets to Schedule D at all), and its `self_employment_income` is business crypto — a Schedule C
-/// trade or business, which is the only way btctax produces SE tax.
-fn build(h: &Household) -> (ReturnInputs, LedgerState) {
-    let i = &h.inputs;
-    let status = match i.filing_status.as_str() {
-        "Single" => FilingStatus::Single,
-        "Married/Joint" => FilingStatus::Mfj,
-        other => panic!("unmapped filing status {other:?}"),
-    };
-
-    let mut ri = ReturnInputs {
-        filing_status: status,
-        ..Default::default()
-    };
-    ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
-        first_name: "Golden".into(),
-        last_name: "Household".into(),
-        ssn: "123456789".into(),
-        ..Default::default()
-    };
-    if status == FilingStatus::Mfj {
-        ri.header.spouse = Some(btctax_core::tax::return_inputs::Person {
-            first_name: "Golden".into(),
-            last_name: "Spouse".into(),
-            ssn: "987654321".into(),
-            ..Default::default()
-        });
-    }
-
-    if i.w2_income > 0.0 {
-        let w = usd(i.w2_income);
-        ri.w2s.push(W2 {
-            owner: Owner::Taxpayer,
-            employer: "ORACLE CO".into(),
-            box1_wages: w,
-            box3_ss_wages: w,       // the §1402(b)(1) SS-cap channel
-            box5_medicare_wages: w, // the Form 8959 Part I channel
-            ..Default::default()
-        });
-    }
-    if i.taxable_interest > 0.0 {
-        ri.int_1099.push(Form1099Int {
-            payer: "ORACLE BANK".into(),
-            box1_interest: usd(i.taxable_interest),
-            ..Default::default()
-        });
-    }
-    if i.ordinary_dividends > 0.0 || i.qualified_dividends > 0.0 {
-        ri.div_1099.push(Form1099Div {
-            payer: "ORACLE BROKER".into(),
-            box1a_ordinary: usd(i.ordinary_dividends), // INCLUDES the qualified subset
-            box1b_qualified: usd(i.qualified_dividends),
-            ..Default::default()
-        });
-    }
-    if i.itemized_deductions > 0.0 {
-        ri.schedule_a = Some(ScheduleAInputs {
-            mortgage_interest_1098: usd(i.itemized_deductions),
-            ..Default::default()
-        });
-    }
-    if i.self_employment_income > 0.0 {
-        ri.schedule_c = Some(ScheduleCInputs {
-            owner: Owner::Taxpayer,
-            business_description: "Bitcoin mining".into(),
-            ..Default::default()
-        });
-    }
-    // Schedule B Part III must be answered when Schedule B files.
-    ri.foreign_accounts = Some(false);
-    ri.foreign_trust = Some(false);
-
-    // ── The ledger: capital gains are DISPOSALS; SE income is business crypto. ──────────────────
-    let mut state = LedgerState::default();
-    let mut leg = |gain: f64, term: Term, ev: u64| {
-        // proceeds − basis = the gain; a loss is basis > proceeds.
-        let (proceeds, basis) = if gain >= 0.0 {
-            (usd(gain), Usd::ZERO)
-        } else {
-            (Usd::ZERO, usd(-gain))
-        };
-        state.disposals.push(Disposal {
-            event: EventId::decision(ev),
-            kind: DisposeKind::Sell,
-            disposed_at: date!(2024 - 05 - 01),
-            legs: vec![DisposalLeg {
-                lot_id: LotId {
-                    origin_event_id: EventId::decision(ev + 100),
-                    split_sequence: 0,
-                },
-                sat: 100_000_000,
-                proceeds,
-                basis,
-                gain: proceeds - basis,
-                term,
-                basis_source: BasisSource::ExchangeProvided,
-                gift_zone: None,
-                acquired_at: if term == Term::LongTerm {
-                    date!(2020 - 01 - 01)
-                } else {
-                    date!(2024 - 01 - 02)
-                },
-                wallet: WalletId::SelfCustody {
-                    label: "cold".into(),
-                },
-                pseudo: false,
-            }],
-            fee_mini_disposition: false,
-        });
-    };
-    if i.short_term_capital_gains != 0.0 {
-        leg(i.short_term_capital_gains, Term::ShortTerm, 1);
-    }
-    if i.long_term_capital_gains != 0.0 {
-        leg(i.long_term_capital_gains, Term::LongTerm, 2);
-    }
-    if i.self_employment_income > 0.0 {
-        state.income_recognized.push(IncomeRecord {
-            event: EventId::decision(3),
-            recognized_at: date!(2024 - 06 - 01),
-            sat: 100_000_000,
-            usd_fmv: usd(i.self_employment_income),
-            kind: IncomeKind::Mining,
-            business: true, // ⇒ Schedule C ⇒ Schedule SE
-            pseudo: false,
-        });
-    }
-
-    (ri, state)
-}
 
 /// A line where the two oracles DISAGREE with each other. btctax follows one of them, and this entry
 /// says which, and why.
@@ -389,10 +173,9 @@ const DECLARED_DIVERGENCES: &[Divergence] = &[
 ///   why. An undeclared difference — from either oracle — fails.
 #[test]
 fn every_golden_household_matches_the_independent_oracles() {
-    let raw = include_str!("goldens/full_return_goldens.json");
-    let goldens: Goldens = serde_json::from_str(raw).expect("the golden file parses");
+    let households = golden_households();
     assert!(
-        goldens.households.len() >= 10,
+        households.len() >= 10,
         "the matrix must cover the SPEC §10 branches"
     );
 
@@ -400,8 +183,8 @@ fn every_golden_household_matches_the_independent_oracles() {
     let table = ty2024_table();
     let mut diffs: Vec<String> = Vec::new();
 
-    for h in &goldens.households {
-        let (ri, state) = build(h);
+    for h in &households {
+        let (ri, state) = build_golden_household(h);
         let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
         // The FILED forms. No golden household makes a charitable donation, so there are no §170(e)
         // details to carry.

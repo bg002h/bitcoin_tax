@@ -38,6 +38,7 @@ mod schedule_d;
 mod schedule_d_full;
 mod schedule_se;
 mod schedule_se_full;
+mod transcribe;
 mod verify;
 mod watermark;
 
@@ -371,6 +372,14 @@ pub mod testonly {
     pub use crate::form8959::fill_form_8959_with_map;
     pub use crate::form8960::fill_form_8960_with_map;
     pub use crate::form8995::fill_form_8995_with_map;
+    // The committed map TOML, for the line-keyed inverse transcriber (`extract_lines`). Downstream
+    // read-back tests need the map itself, not just its parsed struct.
+    pub use crate::map::{
+        F1040_MAP_2024, F8283_MAP_2024, F8949_MAP_2024, F8959_MAP_2024, F8960_MAP_2024,
+        F8995_MAP_2024, SCHEDULE_1_MAP_2024, SCHEDULE_2_MAP_2024, SCHEDULE_3_MAP_2024,
+        SCHEDULE_A_MAP_2024, SCHEDULE_B_MAP_2024, SCHEDULE_C_MAP_2024, SCHEDULE_D_MAP_2024,
+        SCHEDULE_SE_MAP_2024,
+    };
     pub use crate::map::{
         AmountCols, Form1040Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map,
         MoneyCell, MoneyPair, PartMap, Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap,
@@ -393,6 +402,7 @@ pub mod testonly {
     pub use crate::schedule_d_full::fill_schedule_d_full_with_map;
     pub use crate::schedule_se::fill_schedule_se_with_map;
     pub use crate::schedule_se_full::fill_schedule_se_full_with_map;
+    pub use crate::transcribe::extract_lines;
     pub use crate::verify::{
         no_unmapped_filled, topmost_yes_no_pair, verify_8949, verify_flat, FlatPlacement, Geo,
         Placement,
