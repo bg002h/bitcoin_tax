@@ -26,11 +26,11 @@ pub struct Qbi8995 {
     pub reit_ptp_carryforward_out: Usd,
 }
 
-/// Whether the return has ANY qualified business income (v1: only §199A REIT dividends or a prior-year
-/// REIT/PTP loss carryforward). When false there is no Form 8995 — no deduction, and no above-threshold
-/// refuse (crypto Schedule C is not §199A QBI in v1, so it never triggers the 8995).
-pub fn has_qbi(reit_dividends: Usd, reit_ptp_carryforward_in: Usd) -> bool {
-    reit_dividends > Usd::ZERO || reit_ptp_carryforward_in > Usd::ZERO
+/// Whether the return has ANY qualified business income: a crypto **Schedule C trade or business**, §199A
+/// REIT dividends, or a prior-year REIT/PTP loss carryforward. When false there is no Form 8995 — no
+/// deduction, and no above-threshold refuse.
+pub fn has_qbi(business_qbi: Usd, reit_dividends: Usd, reit_ptp_carryforward_in: Usd) -> bool {
+    business_qbi > Usd::ZERO || reit_dividends > Usd::ZERO || reit_ptp_carryforward_in > Usd::ZERO
 }
 
 /// Compute the simplified **Form 8995** QBI deduction (→ 1040 L13) — REIT/PTP path.
@@ -45,15 +45,31 @@ pub fn has_qbi(reit_dividends: Usd, reit_ptp_carryforward_in: Usd) -> bool {
 /// present ([`qbi_over_threshold`]) — the 8995-A phase-in is unmodeled. Lines 1–5 (trade/business QBI)
 /// are 0 in v1, so the deduction is the REIT/PTP component (line 9) capped by the income limit (line 14).
 pub fn compute_8995(
+    business_qbi: Usd,
     reit_dividends: Usd,
     reit_ptp_carryforward_in: Usd,
     ti_before_qbi: Usd,
     net_capital_gain: Usd,
 ) -> Qbi8995 {
+    // ── Lines 1–5 — the QUALIFIED BUSINESS component (the crypto Schedule C trade or business).
+    //
+    // ★ `business_qbi` is Schedule C's net profit REDUCED by the §164(f) deductible half of SE tax. The
+    // Form 8995 instructions define QBI net of the deductible part of SE tax, self-employed health
+    // insurance and self-employed retirement contributions — of which v1 models only the first (the other
+    // two have no input). A crypto mining trade or business is a qualified trade or business (it is not an
+    // SSTB), so its owner is entitled to this deduction, and omitting it OVERSTATED their tax by ~20% of
+    // their business income. Found by the P7 independent-oracle cross-check.
+    //
+    // A Schedule C LOSS cannot reach here: it refuses upstream (`ScheduleCLoss`), so there is no negative
+    // QBI and no QBI loss carryforward in v1 (Form 8995 lines 3 and 16 stay blank).
+    let line5 = round_dollar(QBI_RATE * business_qbi.max(Usd::ZERO));
+
     // Line 8 — total qualified REIT dividends + PTP income (line 6 + line-7 loss, not below zero).
     let line8 = (reit_dividends - reit_ptp_carryforward_in).max(Usd::ZERO);
-    // Line 9 = line 10 (line 5 QBI component is 0 in v1) — REIT/PTP component = 20% of line 8.
-    let component = round_dollar(QBI_RATE * line8);
+    // Line 9 — the REIT/PTP component = 20% of line 8.
+    let line9 = round_dollar(QBI_RATE * line8);
+    // Line 10 — the QBI deduction BEFORE the income limitation = line 5 + line 9. The two components ADD.
+    let component = line5 + line9;
     // Line 13 — taxable income before QBI, less net capital gain (≥ 0).
     let line13 = (ti_before_qbi - net_capital_gain).max(Usd::ZERO);
     // Line 14 — income limit = 20% of line 13.
@@ -72,13 +88,18 @@ pub fn compute_8995(
 /// income before the QBI deduction exceeds the §199A(e)(2) threshold (at/below the threshold the
 /// simplified Form 8995 applies; above it the 8995-A phase-in is required — unmodeled in v1, SPEC §4.5).
 pub fn qbi_over_threshold(
+    business_qbi: Usd,
     reit_dividends: Usd,
     reit_ptp_carryforward_in: Usd,
     ti_before_qbi: Usd,
     status: FilingStatus,
     params: &FullReturnParams,
 ) -> bool {
-    has_qbi(reit_dividends, reit_ptp_carryforward_in)
+    // ★ Now that a Schedule C trade or business EARNS the deduction, it is also subject to the
+    // §199A(e)(2) threshold: above it the simplified Form 8995 no longer applies (the W-2-wage / UBIA
+    // limitations and the SSTB phase-in take over, which is Form 8995-A), and v1 REFUSES rather than
+    // compute a deduction it cannot bound.
+    has_qbi(business_qbi, reit_dividends, reit_ptp_carryforward_in)
         && ti_before_qbi > params.qbi_ti_threshold(status)
 }
 
@@ -144,18 +165,21 @@ pub struct Form8995Lines {
 /// products. That is the SPEC §3.1 round-all-amounts election, not a defect: the printed form
 /// cross-foots against itself, which is what gets filed.
 pub fn form_8995_lines(
+    business_qbi: Usd,
     reit_dividends: Usd,
     reit_ptp_carryforward_in: Usd,
     ti_before_qbi: Usd,
     net_capital_gain: Usd,
 ) -> Option<Form8995Lines> {
-    if !has_qbi(reit_dividends, reit_ptp_carryforward_in) {
+    if !has_qbi(business_qbi, reit_dividends, reit_ptp_carryforward_in) {
         return None;
     }
-    // Part I — always zero in v1 (no trade or business QBI); line 3 is blank, not zero.
-    let line2 = Usd::ZERO;
-    let line4 = Usd::ZERO;
-    let line5 = Usd::ZERO;
+    // Part I — the trade-or-business QBI (the crypto Schedule C), net of the §164(f) half-SE deduction.
+    // Line 3 (prior-year QBI loss carryforward) stays BLANK: a Schedule C loss refuses upstream, so v1
+    // never carries one.
+    let line2 = round_dollar(business_qbi.max(Usd::ZERO));
+    let line4 = line2;
+    let line5 = round_dollar(QBI_RATE * line4);
 
     // Part I (cont.) — the REIT/PTP component. Line 7 is a positive magnitude that REDUCES line 6.
     let line6 = round_dollar(reit_dividends);
@@ -196,6 +220,59 @@ pub fn form_8995_lines(
 
 #[cfg(test)]
 mod tests {
+
+    /// ★ **§199A on Schedule C — the deduction the P7 oracle proved we were giving away.**
+    ///
+    /// A crypto MINING trade or business is a qualified trade or business (not an SSTB), so its owner is
+    /// entitled to a §199A deduction of 20% of QBI. btctax v1 originally computed the deduction for REIT
+    /// dividends ONLY, silently overstating a miner's tax by ~20% of their business income. The PSL
+    /// Tax-Calculator applies it; the golden cross-check exposed the gap; the user's call is to follow the
+    /// law ("20% is way too much to give away for free").
+    ///
+    /// **QBI is the Schedule C net profit REDUCED by the §164(f) deductible half of SE tax** (Form 8995
+    /// instructions: QBI is net of the deductible part of SE tax, SE health insurance and SE retirement
+    /// contributions — of which v1 models only the first). The oracle independently confirms the rule:
+    /// $60,000 profit − $4,239 half-SE = $55,761 of QBI ⇒ a $11,152 deduction, to the dollar.
+    #[test]
+    fn schedule_c_business_income_earns_the_199a_deduction_net_of_the_half_se_deduction() {
+        // The deep/02 Ex.2 shape: $60k of mining, $40k of wages.
+        let qbi = dec!(60000) - dec!(4239); // Sch C net − the §164(f) half-SE deduction
+        let r = compute_8995(qbi, Usd::ZERO, Usd::ZERO, dec!(95761), Usd::ZERO);
+
+        assert_eq!(
+            r.deduction,
+            dec!(11152),
+            "20% × $55,761 of QBI — the figure the independent oracle computes"
+        );
+    }
+
+    /// The §199A(b)(3) INCOME LIMITATION still binds: the deduction is the LESSER of 20% of QBI and 20% of
+    /// (taxable income − net capital gain). A business owner whose taxable income is mostly preferential
+    /// gain cannot deduct against income taxed at capital-gain rates.
+    #[test]
+    fn the_199a_deduction_is_capped_by_the_income_limitation() {
+        // $50,000 of QBI (⇒ a $10,000 component), but only $12,000 of ordinary taxable income.
+        let r = compute_8995(dec!(50000), Usd::ZERO, Usd::ZERO, dec!(60000), dec!(48000));
+
+        // Line 13 = 60,000 − 48,000 = 12,000 ⇒ line 14 = 20% × 12,000 = 2,400 < the 10,000 component.
+        assert_eq!(
+            r.deduction,
+            dec!(2400),
+            "the income limitation binds — the deduction cannot exceed 20% of NON-preferential income"
+        );
+    }
+
+    /// Both components ADD: a filer with a business AND REIT dividends gets 20% of each (Form 8995 line
+    /// 10 = line 5 + line 9).
+    #[test]
+    fn the_business_and_reit_components_add() {
+        let r = compute_8995(dec!(50000), dec!(10000), Usd::ZERO, dec!(200000), Usd::ZERO);
+        assert_eq!(
+            r.deduction,
+            dec!(12000),
+            "20% × 50,000 (business) + 20% × 10,000 (REIT) = 10,000 + 2,000"
+        );
+    }
     use super::*;
     use std::collections::BTreeMap;
 
@@ -240,7 +317,13 @@ mod tests {
     /// line 9 = $2,000; income limit 20% × ($100,000 − $5,000 net cap gain) = $19,000 → L13 = $2,000.
     #[test]
     fn reit_component_when_income_limit_slack() {
-        let r = compute_8995(dec!(10000), Usd::ZERO, dec!(100000), dec!(5000));
+        let r = compute_8995(
+            Usd::ZERO, /* no business QBI */
+            dec!(10000),
+            Usd::ZERO,
+            dec!(100000),
+            dec!(5000),
+        );
         assert_eq!(r.deduction, dec!(2000));
         assert_eq!(r.reit_ptp_carryforward_out, Usd::ZERO);
     }
@@ -249,7 +332,13 @@ mod tests {
     /// $10,000 REIT → component $2,000; TI-before-QBI $6,000, no net cap gain → limit 20%×6,000 = $1,200.
     #[test]
     fn income_limit_binds_below_component() {
-        let r = compute_8995(dec!(10000), Usd::ZERO, dec!(6000), Usd::ZERO);
+        let r = compute_8995(
+            Usd::ZERO, /* no business QBI */
+            dec!(10000),
+            Usd::ZERO,
+            dec!(6000),
+            Usd::ZERO,
+        );
         assert_eq!(r.deduction, dec!(1200));
     }
 
@@ -258,7 +347,13 @@ mod tests {
     #[test]
     fn net_capital_gain_reduces_the_income_limit() {
         // TI-before-QBI $50,000 all of which is net capital gain → line 13 = 0 → limit 0 → L13 = 0.
-        let r = compute_8995(dec!(10000), Usd::ZERO, dec!(50000), dec!(50000));
+        let r = compute_8995(
+            Usd::ZERO, /* no business QBI */
+            dec!(10000),
+            Usd::ZERO,
+            dec!(50000),
+            dec!(50000),
+        );
         assert_eq!(r.deduction, Usd::ZERO);
     }
 
@@ -267,7 +362,13 @@ mod tests {
     #[test]
     fn loss_carryforward_in_reduces_income_and_carries_out() {
         // $4,000 REIT − $10,000 prior loss → line 8 = 0 → deduction 0; $6,000 loss carries out.
-        let r = compute_8995(dec!(4000), dec!(10000), dec!(100000), Usd::ZERO);
+        let r = compute_8995(
+            Usd::ZERO, /* no business QBI */
+            dec!(4000),
+            dec!(10000),
+            dec!(100000),
+            Usd::ZERO,
+        );
         assert_eq!(r.deduction, Usd::ZERO);
         assert_eq!(r.reit_ptp_carryforward_out, dec!(6000));
     }
@@ -275,12 +376,19 @@ mod tests {
     /// No REIT dividends and no carryforward ⇒ no QBI at all: no deduction, no carryforward, not "over".
     #[test]
     fn no_qbi_when_no_reit() {
-        assert!(!has_qbi(Usd::ZERO, Usd::ZERO));
-        let r = compute_8995(Usd::ZERO, Usd::ZERO, dec!(500000), Usd::ZERO);
+        assert!(!has_qbi(Usd::ZERO, Usd::ZERO, Usd::ZERO));
+        let r = compute_8995(
+            Usd::ZERO, /* no business QBI */
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(500000),
+            Usd::ZERO,
+        );
         assert_eq!(r.deduction, Usd::ZERO);
         assert_eq!(r.reit_ptp_carryforward_out, Usd::ZERO);
         // Even far above the threshold, no QBI ⇒ no refuse.
         assert!(!qbi_over_threshold(
+            Usd::ZERO,
             Usd::ZERO,
             Usd::ZERO,
             dec!(500000),
@@ -296,6 +404,7 @@ mod tests {
         let p = params();
         // Single: $191,951 > $191,950 → refuse; exactly $191,950 → OK.
         assert!(qbi_over_threshold(
+            Usd::ZERO,
             dec!(1000),
             Usd::ZERO,
             dec!(191951),
@@ -303,6 +412,7 @@ mod tests {
             &p
         ));
         assert!(!qbi_over_threshold(
+            Usd::ZERO,
             dec!(1000),
             Usd::ZERO,
             dec!(191950),
@@ -311,6 +421,7 @@ mod tests {
         ));
         // MFJ threshold is $383,900: $300,000 OK, $400,000 refuses.
         assert!(!qbi_over_threshold(
+            Usd::ZERO,
             dec!(1000),
             Usd::ZERO,
             dec!(300000),
@@ -318,6 +429,7 @@ mod tests {
             &p
         ));
         assert!(qbi_over_threshold(
+            Usd::ZERO,
             dec!(1000),
             Usd::ZERO,
             dec!(400000),
@@ -326,6 +438,7 @@ mod tests {
         ));
         // QSS is NOT a joint return → uses the $191,950 base (refuses at $300,000, unlike MFJ).
         assert!(qbi_over_threshold(
+            Usd::ZERO,
             dec!(1000),
             Usd::ZERO,
             dec!(300000),
@@ -334,6 +447,7 @@ mod tests {
         ));
         // A carryforward alone (no current REIT) is still QBI for the refuse trigger.
         assert!(qbi_over_threshold(
+            Usd::ZERO,
             Usd::ZERO,
             dec!(5000),
             dec!(200000),
@@ -346,7 +460,13 @@ mod tests {
     /// line to $501 (not the round-half-even $500) — the printed-line rounding policy (SPEC §3.1).
     #[test]
     fn component_line_rounds_half_up() {
-        let r = compute_8995(dec!(2502.50), Usd::ZERO, dec!(100000), Usd::ZERO);
+        let r = compute_8995(
+            Usd::ZERO, /* no business QBI */
+            dec!(2502.50),
+            Usd::ZERO,
+            dec!(100000),
+            Usd::ZERO,
+        );
         // 20% × 2,502.50 = 500.50 → half-up 501 (income limit 20% × 100,000 = 20,000 does not bind).
         assert_eq!(r.deduction, dec!(501));
     }
@@ -357,7 +477,8 @@ mod tests {
     fn form_8995_printed_chain_reit_only() {
         // $10,000 REIT dividends; TI-before-QBI $100,000; net capital gain $20,000.
         // line 9 = 20% × 10,000 = 2,000. line 13 = 80,000 → line 14 = 16,000. line 15 = min = 2,000.
-        let l = form_8995_lines(dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
+        let l =
+            form_8995_lines(Usd::ZERO, dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
         assert_eq!(l.line2, Usd::ZERO);
         assert_eq!(l.line4, Usd::ZERO);
         assert_eq!(l.line5, Usd::ZERO);
@@ -379,7 +500,8 @@ mod tests {
     #[test]
     fn form_8995_printed_chain_income_limit_binds() {
         // TI-before-QBI 12,000 all of which is capital gain → line 13 = 0 → line 14 = 0 → no deduction.
-        let l = form_8995_lines(dec!(10000), Usd::ZERO, dec!(12000), dec!(12000)).unwrap();
+        let l =
+            form_8995_lines(Usd::ZERO, dec!(10000), Usd::ZERO, dec!(12000), dec!(12000)).unwrap();
         assert_eq!(l.line10, dec!(2000)); // the component is there…
         assert_eq!(l.line13, Usd::ZERO);
         assert_eq!(l.line14, Usd::ZERO);
@@ -394,7 +516,8 @@ mod tests {
     #[test]
     fn form_8995_loss_carryforward_lines_are_positive_magnitudes() {
         // Prior-year REIT/PTP loss carryforward $15,000 against only $10,000 of REIT dividends.
-        let l = form_8995_lines(dec!(10000), dec!(15000), dec!(100000), Usd::ZERO).unwrap();
+        let l =
+            form_8995_lines(Usd::ZERO, dec!(10000), dec!(15000), dec!(100000), Usd::ZERO).unwrap();
         assert_eq!(l.line6, dec!(10000));
         assert_eq!(l.line7, dec!(15000)); // POSITIVE magnitude, not −15,000
         assert_eq!(l.line8, Usd::ZERO); // 10,000 − 15,000, floored: no REIT income survives
@@ -414,10 +537,12 @@ mod tests {
     /// No REIT dividends and no carryforward ⇒ no Form 8995 at all.
     #[test]
     fn form_8995_absent_when_there_is_no_qbi() {
-        assert!(form_8995_lines(Usd::ZERO, Usd::ZERO, dec!(100000), Usd::ZERO).is_none());
+        assert!(
+            form_8995_lines(Usd::ZERO, Usd::ZERO, Usd::ZERO, dec!(100000), Usd::ZERO).is_none()
+        );
         // …but a bare carryforward, with no REIT income this year, DOES produce the form (it must
         // carry the loss forward on line 17, or the carryforward is silently lost).
-        let l = form_8995_lines(Usd::ZERO, dec!(5000), dec!(100000), Usd::ZERO).unwrap();
+        let l = form_8995_lines(Usd::ZERO, Usd::ZERO, dec!(5000), dec!(100000), Usd::ZERO).unwrap();
         assert_eq!(l.line17, dec!(5000));
     }
 
@@ -430,7 +555,7 @@ mod tests {
             (dec!(2502.50), Usd::ZERO, dec!(80000.49), dec!(0.50)), // cents in, dollars out
             (dec!(10000), Usd::ZERO, dec!(12000), dec!(12000)),     // income limit binds
         ] {
-            let l = form_8995_lines(reit, cf_in, ti, ncg).unwrap();
+            let l = form_8995_lines(Usd::ZERO, reit, cf_in, ti, ncg).unwrap();
             assert_eq!(l.line4, l.line2, "L4 = 2 + 3 (3 blank)");
             assert_eq!(l.line5, round_dollar(QBI_RATE * l.line4), "L5 = 20% × 4");
             assert_eq!(

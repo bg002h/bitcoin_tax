@@ -84,6 +84,13 @@ many-row year can differ by a few dollars from rounding the exact total once. Th
 dollars *means* — it is exactly what a human rounding by hand produces — and it is the figure that makes
 Schedule D add up against the 8949 behind it.
 
+**The §199A deduction on your mining business IS computed.** If your crypto activity is a trade or business
+(Schedule C), you are entitled to a **qualified business income deduction of up to 20%** of that profit
+(Form 8995), and btctax computes it — the QBI base is your Schedule C net profit less the deductible half of
+your self-employment tax. Above the §199A(e)(2) income threshold ($191,950 single / $383,900 joint for
+TY2024) the simplified Form 8995 no longer applies and btctax **refuses** rather than guess at the
+wage-and-property limits that take over (that is Form 8995-A, which it does not fill).
+
 **What the packet still will not do for you:**
 - **Non-crypto NONCASH gifts over $500 REFUSE.** Form 8283 must list the property (description, how acquired,
   date, appraiser), and btctax holds none of those details for property that did not come from your ledger. It

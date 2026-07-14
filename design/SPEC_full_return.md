@@ -288,8 +288,29 @@ ordinary income → L8v.
 `QbiInputs { reit_ptp_carryforward_in: Usd }`. §199A REIT dividends = Σ `div.box5`. Compute Form 8995 (F3 §2)
 when TI-before-QBI ≤ $191,950/$383,900 (TY2024); above → **refuse** (8995-A unbuilt). **No manual
 `qbi_deduction_override` in v1 (I3 — dropped: QBI is auto-computed from box5; the override had no fill story
-or plan task).** box5 ⊂ ordinary dividends → stays in ordinary stack. Crypto Schedule C is *not* §199A QBI in
-v1 (a follow-on adds the QBI-on-Sch-C path). Carryforward-out persists per §4.
+or plan task).** box5 ⊂ ordinary dividends → stays in ordinary stack. Carryforward-out persists per §4.
+
+**[AMENDED 2026-07-14 — user decision, prompted by the P7 independent-oracle cross-check. Supersedes
+"Crypto Schedule C is *not* §199A QBI in v1 (a follow-on adds the QBI-on-Sch-C path)".]** A crypto
+**Schedule C trade or business NOW EARNS the §199A deduction**, and Form 8995 computes BOTH components
+(line 10 = line 5 + line 9).
+
+**Why this changed.** P7's golden cross-check ran btctax against two independent engines. The PSL
+Tax-Calculator granted a §199A deduction on the Schedule C profit and btctax did not — silently
+**OVERSTATING a miner's tax by ~20% of their business income** (≈ $2,500 on a $60k mining business, and it
+had no advisory, which §3.4 requires of any conservative omission). A crypto mining trade or business is a
+**qualified trade or business** (it is not an SSTB), so the deduction is genuinely owed. The user's call:
+*"we should follow taxcalc on 199A, 20% is way too much to give away for free."*
+
+**The rule, confirmed to the dollar by the oracle:** **QBI = Schedule C's net profit MINUS the §164(f)
+deductible half of SE tax** (Form 8995 instructions: QBI is net of the deductible part of SE tax,
+self-employed health insurance and self-employed retirement contributions — v1 models only the first,
+having no input for the others). $60,000 profit − $4,239 half-SE = $55,761 of QBI ⇒ an $11,152 deduction.
+The §199A(b)(3) income limitation (20% of taxable income less net capital gain) still binds, and the
+§199A(e)(2) threshold still **refuses** (above it the W-2-wage/UBIA limits and the SSTB phase-in require
+Form 8995-A, which is out of scope) — the refusal now covers Schedule C QBI too. A Schedule C **loss**
+cannot produce negative QBI: it refuses upstream (`ScheduleCLoss`), so Form 8995 lines 3 and 16 stay
+blank.
 
 ### 4.6 Schedule A inputs — classified charitable + SALT either/or (G12; I4; R2-I1/R2-I4)
 

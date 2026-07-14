@@ -2,8 +2,10 @@
   "_provenance": {
     "oracle": "tenforty (wraps Open Tax Solver) \u2014 an INDEPENDENT implementation",
     "oracle_version": "2025.10",
+    "oracle_2": "PSL Tax-Calculator (CC0) \u2014 a SECOND independent implementation, of a completely different lineage. Two oracles are worth far more than one: a single oracle can only tell you that you DISAGREE, never which of you is wrong. This one broke the tie on the SE-tax divergence, reproducing btctax's \u00a71402(b)(1) behaviour exactly.",
+    "oracle_2_version": "6.7.2",
     "tax_year": 2024,
-    "generated": "2026-07-13",
+    "generated": "2026-07-14",
     "generator": "scripts/oracle/gen_goldens.py",
     "licensing": "OTS is GPL-2.0 and INCOMPATIBLE with our MIT OR Unlicense. Used OBSERVE-ONLY: we run it and compare numbers. No source is read, copied, linked, vendored or distributed; only its computed FIGURES land here, and figures are facts, not copyrightable expression.",
     "why_baked": "btctax is offline-first with a network-free CI. Baking the oracle's answers keeps the suite hermetic; re-run the generator when the matrix changes.",
@@ -25,6 +27,14 @@
         "federal_niit": 0.0,
         "federal_additional_medicare_tax": 0.0,
         "federal_total_tax": 5487.0
+      },
+      "expected_taxcalc": {
+        "adjusted_gross_income": 62000.0,
+        "taxable_income": 47400.0,
+        "income_tax_before_credits": 5481.0,
+        "se_tax": 0.0,
+        "niit": 0.0,
+        "additional_medicare_tax": 0.0
       }
     },
     {
@@ -43,6 +53,14 @@
         "federal_niit": 0.0,
         "federal_additional_medicare_tax": 0.0,
         "federal_total_tax": 8487.0
+      },
+      "expected_taxcalc": {
+        "adjusted_gross_income": 82000.0,
+        "taxable_income": 67400.0,
+        "income_tax_before_credits": 8481.0,
+        "se_tax": 0.0,
+        "niit": 0.0,
+        "additional_medicare_tax": 0.0
       }
     },
     {
@@ -64,6 +82,14 @@
         "federal_niit": 0.0,
         "federal_additional_medicare_tax": 0.0,
         "federal_total_tax": 17477.0
+      },
+      "expected_taxcalc": {
+        "adjusted_gross_income": 127000.0,
+        "taxable_income": 112400.0,
+        "income_tax_before_credits": 17471.0,
+        "se_tax": 0.0,
+        "niit": 0.0,
+        "additional_medicare_tax": 0.0
       }
     },
     {
@@ -82,6 +108,14 @@
         "federal_niit": 0.0,
         "federal_additional_medicare_tax": 0.0,
         "federal_total_tax": 6587.0
+      },
+      "expected_taxcalc": {
+        "adjusted_gross_income": 67000.0,
+        "taxable_income": 52400.0,
+        "income_tax_before_credits": 6581.0,
+        "se_tax": 0.0,
+        "niit": 0.0,
+        "additional_medicare_tax": 0.0
       }
     },
     {
@@ -100,6 +134,14 @@
         "federal_niit": 0.0,
         "federal_additional_medicare_tax": 0.0,
         "federal_total_tax": 6587.0
+      },
+      "expected_taxcalc": {
+        "adjusted_gross_income": 67000.0,
+        "taxable_income": 52400.0,
+        "income_tax_before_credits": 6581.0,
+        "se_tax": 0.0,
+        "niit": 0.0,
+        "additional_medicare_tax": 0.0
       }
     },
     {
@@ -118,6 +160,14 @@
         "federal_niit": 0.0,
         "federal_additional_medicare_tax": 0.0,
         "federal_total_tax": 24646.0
+      },
+      "expected_taxcalc": {
+        "adjusted_gross_income": 186200.0,
+        "taxable_income": 157000.0,
+        "income_tax_before_credits": 24646.0,
+        "se_tax": 0.0,
+        "niit": 0.0,
+        "additional_medicare_tax": 0.0
       }
     },
     {
@@ -140,6 +190,14 @@
         "federal_niit": 988.0,
         "federal_additional_medicare_tax": 0.0,
         "federal_total_tax": 40344.0
+      },
+      "expected_taxcalc": {
+        "adjusted_gross_income": 276000.0,
+        "taxable_income": 235000.0,
+        "income_tax_before_credits": 39356.0,
+        "se_tax": 0.0,
+        "niit": 988.0,
+        "additional_medicare_tax": 0.0
       }
     },
     {
@@ -161,6 +219,14 @@
         "federal_niit": 2926.0,
         "federal_additional_medicare_tax": 450.0,
         "federal_total_tax": 66723.0
+      },
+      "expected_taxcalc": {
+        "adjusted_gross_income": 377000.0,
+        "taxable_income": 347800.0,
+        "income_tax_before_credits": 63347.0,
+        "se_tax": 0.0,
+        "niit": 2926.0,
+        "additional_medicare_tax": 449.99999999999994
       }
     },
     {
@@ -179,6 +245,14 @@
         "federal_niit": 0.0,
         "federal_additional_medicare_tax": 0.0,
         "federal_total_tax": 21389.73
+      },
+      "expected_taxcalc": {
+        "adjusted_gross_income": 95761.135,
+        "taxable_income": 70008.908,
+        "income_tax_before_credits": 10454.959759999998,
+        "se_tax": 8477.73,
+        "niit": 0.0,
+        "additional_medicare_tax": 0.0
       }
     },
     {
@@ -197,6 +271,14 @@
         "federal_niit": 0.0,
         "federal_additional_medicare_tax": 394.92,
         "federal_total_tax": 61419.12
+      },
+      "expected_taxcalc": {
+        "adjusted_gross_income": 298928.74,
+        "taxable_income": 253942.992,
+        "income_tax_before_credits": 47031.31808,
+        "se_tax": 2142.52,
+        "niit": 0.0,
+        "additional_medicare_tax": 394.91999999999996
       }
     }
   ]

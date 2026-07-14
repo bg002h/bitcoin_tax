@@ -1310,6 +1310,7 @@ mod tests {
                 medicare_wages: z,
                 medicare_withheld: z,
                 schedule_c_header: crate::tax::return_1040::ScheduleCHeader::default(),
+                business_qbi: z,
                 tax_exempt_interest: z,
                 crypto_lending_interest: z,
                 reit_dividends: z,

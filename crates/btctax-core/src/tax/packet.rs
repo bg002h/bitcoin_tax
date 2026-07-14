@@ -447,6 +447,7 @@ pub fn assemble_printed_forms(
         ar.agi,
     );
     let f8995 = form_8995_lines(
+        pi.business_qbi,
         pi.reit_dividends,
         pi.reit_ptp_carryforward_in,
         pi.ti_before_qbi,

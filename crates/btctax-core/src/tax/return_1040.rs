@@ -943,6 +943,10 @@ pub struct PrintedInputs {
     /// Form 8960 line 7 — Σ non-business crypto **lending** interest (investment income with no home on
     /// 1040 line 2b; hobby mining/staking rewards stay OUT of NII).
     pub crypto_lending_interest: Usd,
+    /// Form 8995 lines 1c/2 — the **trade-or-business QBI**: Schedule C's net profit less the §164(f)
+    /// deductible half of SE tax. A crypto mining business is a qualified trade or business, and this is
+    /// the base of the 20% §199A deduction it earns.
+    pub business_qbi: Usd,
     /// Form 8995 line 6 — Σ 1099-DIV box 5 (§199A REIT dividends).
     pub reit_dividends: Usd,
     /// Form 8995 line 7 — the REIT/PTP loss carryforward IN.
@@ -1130,12 +1134,24 @@ pub fn assemble_absolute(
     let deduction = choose_deduction(ri, standard, itemized); // L12
     let deduction_is_itemized = itemized_was_chosen(ri, standard, itemized);
 
-    // QBI / Form 8995 (L13): REIT §199A dividends only (crypto Schedule C is NOT §199A QBI in v1). The
-    // §199A(e)(2)-above-threshold refuse is compute-dependent → `screen_absolute` (this assembly is
-    // infallible best-effort; the screen gates the report before the number is used).
+    // QBI / Form 8995 (L13) — BOTH components: the crypto Schedule C trade or business AND §199A REIT
+    // dividends. The §199A(e)(2)-above-threshold refuse is compute-dependent → `screen_absolute` (this
+    // assembly is infallible best-effort; the screen gates the report before the number is used).
+    //
+    // ★ **QBI = Schedule C's net profit MINUS the §164(f) deductible half of SE tax.** The Form 8995
+    // instructions define QBI net of the deductible part of SE tax, self-employed health insurance and
+    // self-employed retirement contributions — v1 models only the first (the others have no input). A
+    // crypto MINING trade or business is a qualified trade or business (not an SSTB), so its owner is
+    // entitled to the deduction; v1 originally computed the REIT component only, which silently
+    // OVERSTATED a miner's tax by ~20% of their business income. The P7 independent-oracle cross-check
+    // found it (the PSL Tax-Calculator applies the deduction and btctax did not), and it confirms this
+    // exact rule to the dollar: $60,000 profit − $4,239 half-SE = $55,761 of QBI ⇒ an $11,152 deduction.
+    let business_qbi =
+        (schedule_c.as_ref().map_or(Usd::ZERO, |c| c.net_profit_31) - half_se).max(Usd::ZERO);
     let reit_dividends: Usd = ri.div_1099.iter().map(|d| d.box5_section_199a).sum();
     let net_capital_gain = qualified_dividends + net_ltcg; // Form 8995 line 12
     let qbi = compute_8995(
+        business_qbi,
         reit_dividends,
         ri.qbi.reit_ptp_carryforward_in,
         agi - deduction, // Form 8995 line 11 = TI before the QBI deduction
@@ -1269,6 +1285,7 @@ pub fn assemble_absolute(
             medicare_wages: w2_medicare_wages,
             medicare_withheld: w2_medicare_withheld,
             crypto_lending_interest: crypto.nonbusiness_lending_interest,
+            business_qbi,
             reit_dividends,
             reit_ptp_carryforward_in: ri.qbi.reit_ptp_carryforward_in,
             ti_before_qbi: agi - deduction,
@@ -1334,6 +1351,7 @@ pub fn screen_absolute(
     // (a) QBI above the §199A(e)(2) threshold → 8995-A phase-in unmodeled.
     let reit_dividends: Usd = ri.div_1099.iter().map(|d| d.box5_section_199a).sum();
     if qbi_over_threshold(
+        ar.printed_inputs.business_qbi, // the Schedule C trade or business now earns §199A too
         reit_dividends,
         ri.qbi.reit_ptp_carryforward_in,
         ar.agi - ar.deduction, // TI before QBI (Form 8995 line 11)

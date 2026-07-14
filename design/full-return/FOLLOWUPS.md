@@ -304,8 +304,32 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 
 ## Open — owned by P7 (golden returns)
 
-- **p7-se-divergence-tiebreaker → P7.** ★ **Break the tie on the SE-tax divergence with a SECOND
-  independent engine.**
+- **[✅ DONE] p7-se-divergence-tiebreaker — RUN, and it settled in btctax's favour.** The PSL
+  Tax-Calculator (CC0, a completely separate lineage from OTS) reproduces btctax's §1402(b)(1) behaviour
+  **to the dollar on every row of the sweep**, including the discriminating middle case ($100,000 of wages
+  ⇒ $10,649, where the band is partly but not fully consumed):
+
+  | W-2 wages | tenforty/OTS | PSL Tax-Calculator | btctax |
+  |---:|---:|---:|---:|
+  | 0 | 11,304 | 11,304 | 11,304 |
+  | 100,000 | 11,304 | **10,649** | **10,649** |
+  | 168,600 | 11,304 | **2,143** | **2,143** |
+  | 220,000 | 11,304 | **2,143** | **2,143** |
+  | 300,000 | 11,304 | **2,143** | **2,143** |
+
+  btctax is CONFIRMED correct; `tenforty`/OTS is the outlier. Both engines are now baked into the golden
+  cross-check, and the rule is: if the oracles AGREE, btctax must match them; if they DISAGREE, btctax must
+  match one and a `Divergence` entry must name which and why. **Still open (upstream curiosity, not ours):
+  whether the fault is in OTS itself or in the `tenforty` wrapper — driving OTS directly would answer it,
+  and if the wrapper is at fault it is worth reporting.** Filed as `p7-ots-vs-wrapper-localisation → post-v1`.
+
+- **p7-ots-vs-wrapper-localisation → post-v1 (nit).** Localise the flat-SE-tax fault: OTS itself, or the
+  `tenforty` wrapper failing to pass W-2 wages into OTS's Schedule SE inputs. Run OTS directly (observe-only;
+  never read its GPL source into btctax). If the wrapper is at fault, report it upstream. Does not affect
+  btctax — the tiebreaker already confirmed our figure.
+
+- **[SUPERSEDED — the original entry, for the record] p7-se-divergence-tiebreaker → P7.** ★ **Break the tie
+  on the SE-tax divergence with a SECOND independent engine.**
 
   P7.1's cross-check found that the oracle (`tenforty`, wrapping Open Tax Solver) computes a
   self-employment tax that is **invariant to W-2 wages** — flat at $11,304 on $80,000 of SE income

@@ -209,7 +209,8 @@ fn f8960_fills_the_printed_chain_and_reads_back() {
 #[test]
 fn f8995_fills_the_printed_chain_and_reads_back() {
     // $10,000 REIT dividends, no carryforward; TI-before-QBI 100,000; net capital gain 20,000.
-    let lines = form_8995_lines(dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
+    let lines =
+        form_8995_lines(Usd::ZERO, dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
     let pdf = btctax_forms::fill_form_8995(&lines, &kitchen_sink_header(), 2024).unwrap();
 
     let g = |fqn: &str| tv(&pdf, fqn);
@@ -254,7 +255,8 @@ fn f8995_fills_the_printed_chain_and_reads_back() {
 /// `(   )` supplies the minus sign. A negative would render as `(-5,000)`: a POSITIVE number.
 #[test]
 fn f8995_loss_carryforward_prints_positive_magnitudes() {
-    let lines = form_8995_lines(dec!(10000), dec!(15000), dec!(100000), Usd::ZERO).unwrap();
+    let lines =
+        form_8995_lines(Usd::ZERO, dec!(10000), dec!(15000), dec!(100000), Usd::ZERO).unwrap();
     let pdf = btctax_forms::fill_form_8995(&lines, &kitchen_sink_header(), 2024).unwrap();
 
     let g = |fqn: &str| tv(&pdf, fqn);
@@ -281,7 +283,8 @@ fn f8995_loss_carryforward_prints_positive_magnitudes() {
 /// silently sign-flipped return).
 #[test]
 fn f8995_refuses_a_negative_in_a_parenthesized_cell() {
-    let mut lines = form_8995_lines(dec!(10000), dec!(15000), dec!(100000), Usd::ZERO).unwrap();
+    let mut lines =
+        form_8995_lines(Usd::ZERO, dec!(10000), dec!(15000), dec!(100000), Usd::ZERO).unwrap();
     lines.line17 = dec!(-5000); // what a naive "carryforward is a loss ⇒ negative" refactor would do
     let err = fill_form_8995_with_map(&lines, &kitchen_sink_header(), &Form8995Map::ty2024())
         .expect_err("a negative in a paren box must fail closed");
@@ -344,7 +347,8 @@ fn full_return_form_fills_are_byte_deterministic() {
         dec!(300000),
     )
     .unwrap();
-    let l95 = form_8995_lines(dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
+    let l95 =
+        form_8995_lines(Usd::ZERO, dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
 
     for _ in 0..2 {
         let a = btctax_forms::fill_form_8959(&l59, &kitchen_sink_header(), 2024)
@@ -369,7 +373,8 @@ fn full_return_form_fills_are_byte_deterministic() {
 /// revision's field names.
 #[test]
 fn full_return_forms_refuse_unsupported_years() {
-    let l95 = form_8995_lines(dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
+    let l95 =
+        form_8995_lines(Usd::ZERO, dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
     for year in [2017, 2023, 2025] {
         assert!(matches!(
             btctax_forms::fill_form_8995(&l95, &kitchen_sink_header(), year),

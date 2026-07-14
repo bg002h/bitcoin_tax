@@ -45,7 +45,23 @@ struct Household {
     name: String,
     why: String,
     inputs: Inputs,
+    /// Oracle 1 — `tenforty` (wraps Open Tax Solver, GPL, observe-only).
     expected: Expected,
+    /// Oracle 2 — PSL Tax-Calculator (CC0). A completely separate lineage.
+    expected_taxcalc: ExpectedTaxcalc,
+}
+
+/// The second oracle's outputs. Only the lines whose definitions are unambiguous across engines: we do
+/// NOT take its `combined`/`iitax` totals, which bundle payroll tax on W-2 wages that 1040 line 24 does
+/// not include.
+#[derive(Debug, Deserialize)]
+struct ExpectedTaxcalc {
+    adjusted_gross_income: f64,
+    taxable_income: f64,
+    income_tax_before_credits: f64,
+    se_tax: f64,
+    niit: f64,
+    additional_medicare_tax: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -219,101 +235,225 @@ fn build(h: &Household) -> (ReturnInputs, LedgerState) {
     (ri, state)
 }
 
-/// A line where btctax and the oracle DISAGREE, and btctax is right.
+/// A line where the two oracles DISAGREE with each other. btctax follows one of them, and this entry
+/// says which, and why.
 ///
-/// Every entry must carry the statute or the form text that settles it. This list is the whole point of
-/// the cross-check: a divergence that can be waved away proves nothing, so each one is named, explained,
-/// and asserted in btctax's favour — and any UNdeclared difference fails the test.
+/// This is what a second oracle buys you. With one oracle a disagreement is a stand-off: it can tell you
+/// that you differ, never which of you is wrong — and "we disagree with the only oracle we have, but
+/// we're confident we're right" is not a position to file a tax return from. With two, a disagreement
+/// becomes evidence, and the outlier is identified.
 struct Divergence {
     household: &'static str,
     line: &'static str,
-    /// What btctax prints (and why it is right).
+    /// btctax's figure — and the oracle it agrees with.
     btctax: Usd,
-    /// What the oracle says.
-    oracle: Usd,
+    agrees_with: &'static str,
+    /// The dissenting oracle's figure — the one this entry reconciles against.
+    outlier: Usd,
+    /// When BOTH oracles dissent (two declared effects stacking), the second one's figure. Recorded so a
+    /// change in EITHER engine's answer re-opens the question instead of slipping past.
+    outlier_alt: Option<Usd>,
     why: &'static str,
 }
 
-/// ★ **The oracle's SE tax ignores W-2 wages entirely — MEASURED, not assumed.** This is the divergence
-/// the whole exercise was worth running for.
+/// ★ **`tenforty`/OTS computes a self-employment tax that ignores W-2 wages entirely.** btctax and the
+/// PSL Tax-Calculator agree with each other, and with the form; `tenforty` is the outlier.
 ///
-/// **What the law says.** Schedule SE states it on its face: **line 8a** = "Total social security wages
-/// and tips (total of boxes 3 and 7 on Form(s) W-2)"; **line 9** = "Subtract line 8d from line 7 [the
-/// wage base]. **If zero or less, enter -0- here and on line 10 and go to line 11**"; **line 10** =
-/// "Multiply the smaller of line 6 or line 9 by 12.4%". §1402(b)(1) is the statute: the 12.4% OASDI band
-/// is a per-person ANNUAL band, and W-2 wages fill it first. This household has $220,000 of W-2 Social
-/// Security wages against the 2024 base of $168,600 — the band is already full, so line 9 = 0, the SS
-/// portion is ZERO, and only the uncapped 2.9% Medicare portion remains.
+/// **The law.** Schedule SE, on its face: **line 8a** = "Total social security wages and tips (total of
+/// boxes 3 and 7 on Form(s) W-2)"; **line 9** = "Subtract line 8d from line 7 [the wage base]. **If zero
+/// or less, enter -0- here and on line 10 and go to line 11**"; **line 10** = "Multiply the **smaller**
+/// of line 6 or line 9 by 12.4%". §1402(b)(1): the 12.4% OASDI band is a per-person ANNUAL band, and W-2
+/// wages fill it first. This household has $220,000 of W-2 SS wages against the 2024 base of $168,600 —
+/// the band is full, line 9 = 0, and the SS portion of the SE tax is **zero**. Only the uncapped 2.9%
+/// Medicare portion remains: $2,143.
 ///
-/// **What the oracle does.** Holding SE income at $80,000 (MFJ) and sweeping the W-2 wages, its SE tax
-/// does not move at all:
+/// **The measurement** — SE income fixed at $80,000 (MFJ), sweeping the W-2 wages:
 ///
-/// | W-2 wages | oracle SE tax | SS band left | correct SE tax |
+/// | W-2 wages | tenforty/OTS | PSL Tax-Calculator | btctax |
 /// |---:|---:|---:|---:|
-/// | 0 | 11,304 | 168,600 | 11,304 ✓ |
-/// | 100,000 | 11,304 | 68,600 | 10,649 |
-/// | 168,600 | 11,304 | 0 | 2,143 |
-/// | 220,000 | 11,304 | 0 | 2,143 |
-/// | 300,000 | 11,304 | 0 | 2,143 |
+/// | 0 | 11,304 | 11,304 | 11,304 |
+/// | 100,000 | 11,304 | **10,649** | **10,649** |
+/// | 168,600 | 11,304 | **2,143** | **2,143** |
+/// | 220,000 | 11,304 | **2,143** | **2,143** |
+/// | 300,000 | 11,304 | **2,143** | **2,143** |
 ///
-/// It is FLAT. The oracle never consults Schedule SE line 8a, so it levies the full 12.4% on the SE
-/// earnings even when the wage base has already been consumed — inventing $9,161 of Social Security tax
-/// the law does not impose (and, through the §164(f) ½-SE deduction, a different AGI and bottom line).
-/// Whether that lives in the engine or in the Python wrapper we cannot say, and deliberately do not
+/// `tenforty`'s figure is FLAT — it never consults Schedule SE line 8a, so it levies the full 12.4% even
+/// when the wage base has already been consumed, inventing $9,161 of Social Security tax the law does not
+/// impose. The **PSL Tax-Calculator (CC0), an engine of a completely separate lineage, tracks btctax to
+/// the dollar** — including the discriminating middle case ($100,000 of wages, where the band is partly
+/// but not fully consumed and the answer is neither of the two extremes).
+///
+/// Whether the fault is in OTS or in the `tenforty` wrapper we do not know and deliberately did not
 /// investigate: the clean-room posture forbids reading their source, and the figure is wrong either way.
-///
-/// **Why it only bites here.** The oracle agrees with btctax on the OTHER SE household
-/// (`single_crypto_business_se`: $40,000 wages, $60,000 SE) because there the band is NOT binding —
-/// `min(base, room)` = base either way. The divergence appears exactly when the W-2 wages bind, which is
-/// the case btctax analysed in recon deep/02 C4 and modelled deliberately (`se.rs`:
-/// `ss = 12.4% × min(base, ss_wage_base − w2_ss_wages)`). The cross-check confirms that analysis was
-/// right and an independent implementation got it wrong.
+/// Filed as `p7-se-divergence-tiebreaker` (now discharged for correctness; the OTS-vs-wrapper question
+/// is an upstream curiosity, not ours).
 const DECLARED_DIVERGENCES: &[Divergence] = &[
     Divergence {
         household: "mfj_se_over_the_addl_medicare_threshold",
         line: "SE tax (Sch 2 L4)",
         btctax: dec!(2143),
-        oracle: dec!(11304),
-        why: "§1402(b)(1) / Sch SE L9: W-2 SS wages ($220,000) already exceed the $168,600 wage base, \
-              so the 12.4% SS portion is ZERO and only the 2.9% Medicare portion remains. The oracle \
-              charges the full 12.4% regardless.",
+        agrees_with: "PSL Tax-Calculator",
+        outlier: dec!(11304),
+        outlier_alt: None,
+        why: "§1402(b)(1) / Sch SE L9: $220,000 of W-2 SS wages already exceed the $168,600 wage base, \
+              so the 12.4% SS portion is ZERO and only the 2.9% Medicare portion remains. tenforty/OTS \
+              charges the full 12.4% regardless — its SE tax is invariant to W-2 wages.",
     },
     Divergence {
         household: "mfj_se_over_the_addl_medicare_threshold",
         line: "AGI (1040 L11)",
         btctax: dec!(298929),
-        oracle: dec!(294348),
-        why: "Consequence of the SE divergence above: a smaller SE tax means a smaller §164(f) ½-SE \
-              deduction, hence a HIGHER AGI. btctax's AGI is the one the law produces.",
+        agrees_with: "PSL Tax-Calculator",
+        outlier: dec!(294348),
+        outlier_alt: None,
+        why: "Consequence of the SE divergence: a smaller SE tax means a smaller §164(f) ½-SE deduction, \
+              hence a HIGHER AGI.",
     },
+    // After the §199A fix, btctax agrees with taxcalc on EVERY line of this household — AGI, taxable
+    // income, tax, SE tax. Only tenforty dissents, and only because of its SE bug.
     Divergence {
         household: "mfj_se_over_the_addl_medicare_threshold",
         line: "taxable income (L15)",
-        btctax: dec!(269729),
-        oracle: dec!(265148),
-        why: "Same root cause — the ½-SE deduction feeds AGI, which feeds taxable income.",
+        btctax: dec!(253943),
+        agrees_with: "PSL Tax-Calculator",
+        outlier: dec!(265148),
+        outlier_alt: None,
+        why: "Consequence of tenforty's SE bug: its (wrong) larger SE tax gives a larger ½-SE deduction \
+              and a lower AGI, hence a lower taxable income. btctax and taxcalc agree exactly.",
     },
     Divergence {
         household: "mfj_se_over_the_addl_medicare_threshold",
         line: "tax (L16)",
-        btctax: dec!(50820),
-        oracle: dec!(49721),
-        why: "Same root cause — the Tax Table is applied to the (correct, higher) taxable income.",
+        btctax: dec!(47031),
+        agrees_with: "PSL Tax-Calculator",
+        outlier: dec!(49721),
+        outlier_alt: None,
+        why: "Same root cause — the tax on the (correct) taxable income. btctax and taxcalc agree exactly.",
     },
     Divergence {
         household: "mfj_se_over_the_addl_medicare_threshold",
         line: "TOTAL TAX (L24)",
-        btctax: dec!(53357),
-        oracle: dec!(61419),
-        why: "Net of both effects: btctax's total is LOWER because it does not levy the $9,161 of \
-              Social Security tax the wage base has already absorbed, even though its income tax is \
-              slightly higher. The oracle over-taxes this household by $8,062.",
+        btctax: dec!(49568),
+        agrees_with: "PSL Tax-Calculator on every component (taxcalc reports no comparable TOTAL)",
+        outlier: dec!(61419),
+        outlier_alt: None,
+        why: "btctax does not levy the $9,161 of Social Security tax the wage base has already absorbed \
+              (tenforty does), and it DOES grant the §199A deduction the law allows. tenforty over-taxes \
+              this household by $11,851 all-in.",
     },
+
+    // ── The Tax TABLE vs the rate SCHEDULE (btctax + tenforty right; taxcalc models the schedule) ──
+    //
+    // Every Single household below $100,000 of taxable income shows the SAME $6: taxcalc computes the
+    // exact bracket formula, while btctax and tenforty use the **Tax Table**, whose $50 bins are taxed at
+    // the bin MIDPOINT. Below $100,000 the Table is not optional — the 1040 instructions require it — and
+    // the difference vanishes on every household above $100,000, which is exactly where the Table stops
+    // applying. An independent engine thereby confirms the bin semantics P6 spent a review round on.
+    Divergence {
+        household: "single_w2_only_standard",
+        line: "tax (L16)",
+        btctax: dec!(5487),
+        agrees_with: "tenforty (and the IRS Tax Table)",
+        outlier: dec!(5481),
+        outlier_alt: None,
+        why: "The TAX TABLE is mandatory below $100,000 of taxable income and taxes each $50 bin at its \
+              MIDPOINT; taxcalc computes the exact rate schedule instead. btctax files what the \
+              instructions require.",
+    },
+    Divergence {
+        household: "single_w2_plus_crypto_ltcg",
+        line: "tax (L16)",
+        btctax: dec!(8487),
+        agrees_with: "tenforty (and the IRS Tax Table)",
+        outlier: dec!(8481),
+        outlier_alt: None,
+        why: "Tax Table bin midpoint vs the exact rate schedule — see above.",
+    },
+    Divergence {
+        household: "single_qdcgt_both_slices",
+        line: "tax (L16)",
+        btctax: dec!(17477),
+        agrees_with: "tenforty (and the IRS Tax Table)",
+        outlier: dec!(17471),
+        outlier_alt: None,
+        why: "Tax Table bin midpoint vs the exact rate schedule — see above. (The QDCGT worksheet's \
+              ordinary remainder is itself looked up in the Table.)",
+    },
+    Divergence {
+        household: "single_short_term_crypto_gain",
+        line: "tax (L16)",
+        btctax: dec!(6587),
+        agrees_with: "tenforty (and the IRS Tax Table)",
+        outlier: dec!(6581),
+        outlier_alt: None,
+        why: "Tax Table bin midpoint vs the exact rate schedule — see above.",
+    },
+    Divergence {
+        household: "single_capital_loss_capped",
+        line: "tax (L16)",
+        btctax: dec!(6587),
+        agrees_with: "tenforty (and the IRS Tax Table)",
+        outlier: dec!(6581),
+        outlier_alt: None,
+        why: "Tax Table bin midpoint vs the exact rate schedule — see above.",
+    },
+
+    // ── single_crypto_business_se, after the §199A fix ─────────────────────────────────────────────
+    // btctax now matches taxcalc's taxable income TO THE DOLLAR (70,009) — the §199A deduction the oracle
+    // caught us omitting. tenforty still dissents because IT omits §199A. The $4 residue on the tax line
+    // is the Tax Table bin (this household's taxable income is under $100,000, where the Table is
+    // mandatory), which is the same effect declared for the Single households above.
+    Divergence {
+        household: "single_crypto_business_se",
+        line: "taxable income (L15)",
+        btctax: dec!(70009),
+        agrees_with: "PSL Tax-Calculator",
+        outlier: dec!(81161),
+        outlier_alt: None,
+        why: "btctax and taxcalc both apply the §199A QBI deduction (20% × (60,000 − 4,239 half-SE) = \
+              11,152); tenforty omits it. btctax = taxcalc exactly.",
+    },
+    Divergence {
+        household: "single_crypto_business_se",
+        line: "tax (L16)",
+        btctax: dec!(10459),
+        agrees_with: "neither — taxcalc to within the Tax-Table bin ($4); tenforty omits §199A entirely",
+        outlier: dec!(10455),          // taxcalc — the exact rate schedule
+        outlier_alt: Some(dec!(12912)), // tenforty — no §199A deduction at all
+        why: "Two explained effects, no residue: vs taxcalc, the $4 is the mandatory Tax TABLE bin \
+              midpoint (taxable income 70,009 < $100,000); vs tenforty, the $2,453 is the §199A deduction \
+              tenforty does not grant. btctax agrees with taxcalc on the DEDUCTION and with the IRS \
+              instructions on the TABLE.",
+    },
+    Divergence {
+        household: "single_crypto_business_se",
+        line: "TOTAL TAX (L24)",
+        btctax: dec!(18937),
+        agrees_with: "PSL Tax-Calculator on every component (taxcalc reports no comparable TOTAL)",
+        outlier: dec!(21390),
+        outlier_alt: None,
+        why: "tenforty omits the §199A deduction, so it over-taxes this miner by $2,453.",
+    },
+
+    // ── §199A QBI on Schedule C — RESOLVED, not declared. ──
+    //
+    // ★ The oracle found btctax silently OVERSTATING a miner's tax by omitting the §199A qualified-
+    // business-income deduction (20% of the Schedule C profit, net of the §164(f) half-SE deduction).
+    // taxcalc applied it; btctax did not; SPEC §4.5 called it a v1 scope decision. The user's call was to
+    // follow the law — "20% is way too much to give away for free" — so btctax now COMPUTES it, and the
+    // divergences that used to live here are gone: btctax matches taxcalc to the dollar on both SE
+    // households. That is the strongest possible outcome for a cross-check — it found a real defect in US,
+    // and the fix is confirmed by the engine that found it.
 ];
 
-/// ★ **The independent cross-check.** Every household, every line.
+/// ★ **The independent cross-check — against TWO engines.**
+///
+/// The rule that makes a second oracle worth having:
+/// - the oracles **agree** ⇒ btctax must match them. No escape hatch.
+/// - the oracles **disagree** ⇒ btctax must match one of them, and a [`Divergence`] must name which and
+///   why. An undeclared difference — from either oracle — fails.
 #[test]
-fn every_golden_household_matches_the_independent_oracle() {
+fn every_golden_household_matches_the_independent_oracles() {
     let raw = include_str!("goldens/full_return_goldens.json");
     let goldens: Goldens = serde_json::from_str(raw).expect("the golden file parses");
     assert!(
@@ -328,64 +468,136 @@ fn every_golden_household_matches_the_independent_oracle() {
     for h in &goldens.households {
         let (ri, state) = build(h);
         let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+        let e = &h.expected;
+        let t = &h.expected_taxcalc;
 
-        let mut check = |line: &str, ours: Usd, theirs: f64| {
-            // The return is FILED in whole dollars (SPEC §3.1); the oracle reports cents. Compare the
-            // figures as they would be filed.
+        // (line, btctax, oracle-1 (tenforty), oracle-2 (taxcalc) — `None` where taxcalc reports no
+        // comparable figure).
+        let lines: [(&str, Usd, f64, Option<f64>); 7] = [
+            (
+                "AGI (1040 L11)",
+                ar.agi,
+                e.federal_adjusted_gross_income,
+                Some(t.adjusted_gross_income),
+            ),
+            (
+                "taxable income (L15)",
+                ar.taxable_income,
+                e.federal_taxable_income,
+                Some(t.taxable_income),
+            ),
+            (
+                "tax (L16)",
+                ar.regular_tax,
+                e.federal_income_tax,
+                Some(t.income_tax_before_credits),
+            ),
+            (
+                "SE tax (Sch 2 L4)",
+                ar.se_tax_sch2_l4,
+                e.federal_se_tax,
+                Some(t.se_tax),
+            ),
+            (
+                "Additional Medicare",
+                ar.additional_medicare.additional_medicare_tax,
+                e.federal_additional_medicare_tax,
+                Some(t.additional_medicare_tax),
+            ),
+            (
+                "NIIT (Form 8960)",
+                ar.niit.tax,
+                e.federal_niit,
+                Some(t.niit),
+            ),
+            // taxcalc's totals bundle payroll tax on W-2 wages, which 1040 L24 does not — no comparison.
+            ("TOTAL TAX (L24)", ar.total_tax, e.federal_total_tax, None),
+        ];
+
+        for (line, ours, o1, o2) in lines {
+            // Filed in whole dollars (SPEC §3.1); the oracles report cents.
             let ours = round_dollar(ours);
-            let theirs = round_dollar(usd(theirs));
-            if ours == theirs {
-                return;
+            let o1 = round_dollar(usd(o1));
+            let o2 = o2.map(|v| round_dollar(usd(v)));
+
+            let matches_1 = ours == o1;
+            let matches_2 = o2.is_none_or(|v| ours == v);
+            if matches_1 && matches_2 {
+                continue; // both oracles agree with btctax
             }
-            // A DECLARED divergence: btctax is right, and the entry says why. Assert btctax's value
-            // (so a regression in OUR engine still fails) and the oracle's (so a change in the oracle's
-            // answer re-opens the question instead of silently passing).
+
             if let Some(d) = DECLARED_DIVERGENCES
                 .iter()
                 .find(|d| d.household == h.name && d.line == line)
             {
                 assert_eq!(
                     ours, d.btctax,
-                    "{} {}: btctax's value MOVED — the declared divergence is stale, re-examine it.\n\
-                     The divergence was: {}",
+                    "{} {}: btctax's value MOVED — the declared divergence is stale.\nIt was: {}",
                     h.name, line, d.why
                 );
-                assert_eq!(
-                    theirs, d.oracle,
-                    "{} {}: the ORACLE's value moved — re-examine the divergence",
-                    h.name, line
+                if !matches_1 && !matches_2 {
+                    // BOTH dissent (a declared stack) — pin both, so a change in either re-opens it.
+                    assert_eq!(
+                        o2,
+                        Some(d.outlier),
+                        "{} {}: taxcalc's value moved — re-examine.\nIt was: {}",
+                        h.name,
+                        line,
+                        d.why
+                    );
+                    assert_eq!(
+                        Some(o1),
+                        d.outlier_alt,
+                        "{} {}: tenforty's value moved — re-examine.\nIt was: {}",
+                        h.name,
+                        line,
+                        d.why
+                    );
+                } else {
+                    let outlier = if matches_1 { o2.unwrap_or(o1) } else { o1 };
+                    assert_eq!(
+                        outlier, d.outlier,
+                        "{} {}: the DISSENTING oracle's value moved — re-examine.\nIt was: {}",
+                        h.name, line, d.why
+                    );
+                }
+                // ★ btctax must agree with ONE of the oracles — unless the entry explicitly declares
+                // that two known effects STACK on this line. "btctax against the world" is exactly the
+                // shape of a confidently-wrong engine, so it is allowed only when it is named as such
+                // and the difference reconciles.
+                assert!(
+                    matches_1 || matches_2 || d.agrees_with.starts_with("neither"),
+                    "{} {}: btctax disagrees with BOTH oracles ({} vs tenforty {} and taxcalc {:?}), and \
+                     the declared divergence claims it agrees with {}. Either the claim is stale or \
+                     btctax is alone against the world — re-derive from the statute.",
+                    h.name,
+                    line,
+                    ours,
+                    o1,
+                    o2,
+                    d.agrees_with
                 );
-                return;
+                continue;
             }
-            diffs.push(format!(
-                "  {:<42} {:<22} btctax {:>12}  oracle {:>12}   ({})",
-                h.name, line, ours, theirs, h.why
-            ));
-        };
 
-        let e = &h.expected;
-        check("AGI (1040 L11)", ar.agi, e.federal_adjusted_gross_income);
-        check(
-            "taxable income (L15)",
-            ar.taxable_income,
-            e.federal_taxable_income,
-        );
-        check("tax (L16)", ar.regular_tax, e.federal_income_tax);
-        check("SE tax (Sch 2 L4)", ar.se_tax_sch2_l4, e.federal_se_tax);
-        check(
-            "Additional Medicare",
-            ar.additional_medicare.additional_medicare_tax,
-            e.federal_additional_medicare_tax,
-        );
-        check("NIIT (Form 8960)", ar.niit.tax, e.federal_niit);
-        check("TOTAL TAX (L24)", ar.total_tax, e.federal_total_tax);
+            diffs.push(format!(
+                "  {:<42} {:<22} btctax {:>10}  tenforty {:>10}  taxcalc {:>10}   ({})",
+                h.name,
+                line,
+                ours,
+                o1,
+                o2.map(|v| v.to_string()).unwrap_or_else(|| "—".into()),
+                h.why
+            ));
+        }
     }
 
     assert!(
         diffs.is_empty(),
-        "btctax disagrees with the INDEPENDENT oracle on {} line(s).\n\
-         Every difference must be EXPLAINED — either btctax is wrong, or the oracle is and the \
-         divergence is declared with its statute. Do not weaken this test to make it pass.\n\n{}",
+        "btctax disagrees with an INDEPENDENT oracle on {} line(s).\n\
+         Every difference must be EXPLAINED — either btctax is wrong, or an oracle is and the \
+         divergence is DECLARED with the statute that settles it. Do not weaken this test to make it \
+         pass.\n\n{}",
         diffs.len(),
         diffs.join("\n")
     );
