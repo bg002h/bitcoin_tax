@@ -415,8 +415,9 @@ fn schedule_3_fills_ftc_and_excess_ss_and_leaves_omitted_credits_blank() {
     let lines = Schedule3Lines {
         line1: dec!(287),
         line8: dec!(287),
+        line10: dec!(4000), // the extension payment — the line whose absence made the filer pay twice
         line11: dec!(1235),
-        line15: dec!(1235),
+        line15: dec!(5235), // "Add lines 9 through 12 and 14"
     };
     let pdf = btctax_forms::fill_schedule_3(&lines, &kitchen_sink_header(), 2024).unwrap();
 
@@ -430,13 +431,17 @@ fn schedule_3_fills_ftc_and_excess_ss_and_leaves_omitted_credits_blank() {
         Some("287")
     ); // L8 → 1040 L20
     assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_28[0]").as_deref(),
+        Some("4000")
+    ); // L10 extension payment
+    assert_eq!(
         g("topmostSubform[0].Page1[0].f1_29[0]").as_deref(),
         Some("1235")
     ); // L11 excess SS
     assert_eq!(
         g("topmostSubform[0].Page1[0].f1_39[0]").as_deref(),
-        Some("1235")
-    ); // L15 → 1040 L31
+        Some("5235")
+    ); // L15 = "Add lines 9 through 12 and 14" ⇒ 4000 + 1235 → 1040 L31
 
     // The conservatively-omitted credits: education (L3), dependent-care (L2), saver's (L4),
     // residential-energy (L5a/5b), adoption (L6c). All BLANK.
@@ -456,6 +461,33 @@ fn schedule_3_fills_ftc_and_excess_ss_and_leaves_omitted_credits_blank() {
     );
 }
 
+/// ★ The extension payment reaches the FILED PAGE (Fable ARCH-P6.3a D1). Schedule 3 line 10 is "Amount
+/// paid with request for extension to file", and it flows to 1040 L31 via line 15. Its absence from the
+/// printed chain meant a filer who had ALREADY paid $4,000 with their extension would be told on the
+/// filed return to pay it a second time.
+#[test]
+fn schedule_3_prints_the_extension_payment_on_line_10() {
+    let lines = Schedule3Lines {
+        line1: Usd::ZERO,
+        line8: Usd::ZERO,
+        line10: dec!(4000),
+        line11: Usd::ZERO,
+        line15: dec!(4000),
+    };
+    let pdf = btctax_forms::fill_schedule_3(&lines, &kitchen_sink_header(), 2024).unwrap();
+
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_28[0]").as_deref(),
+        Some("4000"),
+        "L10 — the payment the filer already made"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_39[0]").as_deref(),
+        Some("4000"),
+        "L15 carries it to 1040 L31"
+    );
+}
+
 /// Same-column swap on Schedule 3 (L1 and L15 are both AMOUNT, far apart in y) → the descent leg of
 /// the oracle catches it and the fill FAILS CLOSED.
 #[test]
@@ -463,8 +495,9 @@ fn schedule_3_same_column_swap_fails_closed() {
     let lines = Schedule3Lines {
         line1: dec!(287),
         line8: dec!(287),
+        line10: dec!(4000), // the extension payment — the line whose absence made the filer pay twice
         line11: dec!(1235),
-        line15: dec!(1235),
+        line15: dec!(5235), // "Add lines 9 through 12 and 14"
     };
     let mut map = Schedule3Map::ty2024();
     std::mem::swap(&mut map.line1, &mut map.line15);

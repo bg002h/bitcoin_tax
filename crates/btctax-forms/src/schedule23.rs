@@ -87,7 +87,14 @@ pub fn fill_schedule_3_with_map(
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<FlatPlacement> = Vec::new();
 
-    let plan: [Usd; 4] = [lines.line1, lines.line8, lines.line11, lines.line15];
+    // Printed reading order (strictly descending y): 1, 8, 10, 11, 15.
+    let plan: [Usd; 5] = [
+        lines.line1,
+        lines.line8,
+        lines.line10,
+        lines.line11,
+        lines.line15,
+    ];
     for (ord, (cell, value)) in map.lines().iter().zip(plan).enumerate() {
         push_money(
             &mut writes,

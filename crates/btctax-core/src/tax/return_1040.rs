@@ -900,6 +900,10 @@ pub struct PrintedInputs {
     pub ti_before_qbi: Usd,
     /// Form 8995 line 12 — net capital gain (qualified dividends + §1(h) preferential net LTCG).
     pub qbi_net_capital_gain: Usd,
+    /// Schedule 3 **line 10** — "Amount paid with request for extension to file". It is in the exact
+    /// `total_payments`, so a printed chain that drops it tells the filer, ON THE FILED RETURN, to pay it
+    /// a SECOND time (L31 falls ⇒ L37 "amount you owe" rises by the whole payment).
+    pub extension_payment: Usd,
     /// 1040 page 1 — the digital-asset question. `true` iff the ledger shows digital-asset activity in
     /// the year (a disposal, recognized income, or a removal). btctax never answers **"No"**: a "No" it
     /// cannot vouch for is worse than leaving the question to the filer, so `false` means *unchecked*,
@@ -1202,6 +1206,7 @@ pub fn assemble_absolute(
             reit_ptp_carryforward_in: ri.qbi.reit_ptp_carryforward_in,
             ti_before_qbi: agi - deduction,
             qbi_net_capital_gain: net_capital_gain,
+            extension_payment: ri.payments.extension_payment,
             digital_asset_activity: digital_asset_activity(state, year),
         },
     }

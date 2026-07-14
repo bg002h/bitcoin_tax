@@ -758,10 +758,15 @@ pub struct Schedule3Lines {
     pub line1: Usd,
     /// L8 — total nonrefundable credits = add 1 through 4, 5a, 5b and 7 ⇒ `= line1` → 1040 **L20**.
     pub line8: Usd,
+    /// L10 — "Amount paid with request for extension to file". ★ Dropping this line told a filer who had
+    /// ALREADY paid with their extension to pay it again (Fable ARCH-P6.3a D1): it is in the exact
+    /// `total_payments`, so omitting it from the printed chain lowers L31/L33 and RAISES L37 "amount you
+    /// owe" by exactly the amount already paid.
+    pub line10: Usd,
     /// L11 — §6413(c) excess Social Security and tier-1 RRTA tax withheld.
     pub line11: Usd,
-    /// L15 — total other payments and refundable credits = add 9 through 12 and 14 ⇒ `= line11`
-    /// → 1040 **L31**.
+    /// L15 — total other payments and refundable credits = "Add lines 9 **through 12** and 14" ⇒
+    /// `line10 + line11` here (9, 12 and 14 are blank) → 1040 **L31**. Sums the PRINTED lines (§3.1).
     pub line15: Usd,
 }
 
@@ -770,8 +775,9 @@ pub struct Schedule3Lines {
 pub fn schedule_3_lines(ar: &AbsoluteReturn) -> Option<Schedule3Lines> {
     let line1 = round_dollar(ar.foreign_tax_credit);
     let line8 = line1; // lines 2-4, 5a, 5b, 7 are all conservatively omitted (blank)
+    let line10 = round_dollar(ar.printed_inputs.extension_payment);
     let line11 = round_dollar(ar.excess_social_security);
-    let line15 = line11; // lines 9, 10, 12, 14 are blank
+    let line15 = line10 + line11; // "Add lines 9 through 12 and 14"; 9, 12 and 14 are blank
 
     if line8 <= Usd::ZERO && line15 <= Usd::ZERO {
         return None;
@@ -779,6 +785,7 @@ pub fn schedule_3_lines(ar: &AbsoluteReturn) -> Option<Schedule3Lines> {
     Some(Schedule3Lines {
         line1,
         line8,
+        line10,
         line11,
         line15,
     })
@@ -890,6 +897,45 @@ mod tests {
             // arguments); an all-zero `PrintedInputs` keeps this fixture to the fields it exercises.
             printed_inputs: crate::tax::return_1040::PrintedInputs::default(),
         }
+    }
+
+    /// ★ CRITICAL (`p6-extension-payment-dropped`, Fable ARCH-P6.3a D1). Schedule 3 line 10 is "Amount
+    /// paid with request for extension to file", and line 15 is "Add lines 9 THROUGH 12 and 14" — so an
+    /// extension payment belongs on the filed form. The exact arithmetic already credits it
+    /// (`return_1040.rs` `total_payments`), but the printed chain had no line 10 and summed only line 11.
+    ///
+    /// A filer who paid $4,000 with their extension would therefore be told, ON THE FILED RETURN, to pay
+    /// it a SECOND time: L31 drops the payment, so L33 falls and L37 "amount you owe" rises by exactly
+    /// the amount already paid. The report and the PDF would have disagreed by the whole payment.
+    #[test]
+    fn schedule_3_line10_carries_the_extension_payment_and_line15_adds_it() {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.printed_inputs.extension_payment = dec!(4000);
+
+        let s3 = schedule_3_lines(&ar).expect("an extension payment alone makes Schedule 3 file");
+        assert_eq!(
+            s3.line10,
+            dec!(4000),
+            "L10 — amount paid with the extension request"
+        );
+        assert_eq!(
+            s3.line15,
+            dec!(4000),
+            "L15 = add 9 through 12 and 14 ⇒ includes L10"
+        );
+    }
+
+    /// …and it sums with the excess-SS credit rather than replacing it (the old chain had `line15 =
+    /// line11`, which silently made the two mutually exclusive).
+    #[test]
+    fn schedule_3_line15_adds_the_extension_payment_to_the_excess_ss_credit() {
+        let mut ar = ar_with(None, Usd::ZERO, dec!(1200));
+        ar.printed_inputs.extension_payment = dec!(4000);
+
+        let s3 = schedule_3_lines(&ar).unwrap();
+        assert_eq!(s3.line10, dec!(4000));
+        assert_eq!(s3.line11, dec!(1200));
+        assert_eq!(s3.line15, dec!(5200), "L15 sums the PRINTED lines above it");
     }
 
     /// ★ Schedule 2 line 4 EXCLUDES the 0.9% Additional Medicare Tax — that is a Form 8959 item, and

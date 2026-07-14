@@ -1055,6 +1055,9 @@ pub struct Schedule3Map {
     pub line1: MoneyCell,
     /// L8 — total nonrefundable credits → 1040 L20, AMOUNT column.
     pub line8: MoneyCell,
+    /// L10 — "Amount paid with request for extension to file", AMOUNT column. ★ Its absence made the
+    /// filed return demand a payment the filer had ALREADY made (Fable ARCH-P6.3a D1).
+    pub line10: MoneyCell,
     /// L11 — excess Social Security / tier-1 RRTA withheld, AMOUNT column.
     pub line11: MoneyCell,
     /// L15 — total other payments → 1040 L31, AMOUNT column.
@@ -1078,8 +1081,14 @@ impl Schedule3Map {
         }
     }
     /// The 4 filled cells in printed reading order (strictly descending y on page 1).
-    pub fn lines(&self) -> [&MoneyCell; 4] {
-        [&self.line1, &self.line8, &self.line11, &self.line15]
+    pub fn lines(&self) -> [&MoneyCell; 5] {
+        [
+            &self.line1,
+            &self.line8,
+            &self.line10,
+            &self.line11,
+            &self.line15,
+        ]
     }
 }
 
