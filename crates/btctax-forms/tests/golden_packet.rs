@@ -3,12 +3,12 @@
 //! ★ What this closes.
 //!
 //! `btctax-core`'s `golden_returns.rs` proves the NUMBERS are right: it diffs btctax against two
-//! independent engines — OpenTaxSolver, driven directly, and the PSL Tax-Calculator — over eleven
+//! independent engines — OpenTaxSolver, driven directly, and the PSL Tax-Calculator — over twelve
 //! households. But an engine that computes a perfect return and then prints it into the wrong box, or
 //! drops a form, or leaves a cell blank, files a wrong return with a clean conscience. Every test
 //! between the tax and the paper was, until now, checking btctax against btctax.
 //!
-//! So this fills the **actual PDFs** for the **same eleven households the oracles blessed**, reads the
+//! So this fills the **actual PDFs** for the **same twelve households the oracles blessed**, reads the
 //! bytes back with the line-keyed inverse transcriber, and asserts that the figures on the paper are
 //! the figures the independent engines computed. Not btctax's figures — the ORACLE's. The assertion
 //! is literally: *the number OpenTaxSolver arrived at is the number in the box on the 1040.*
@@ -83,7 +83,20 @@ fn every_golden_household_prints_the_oracles_figures_onto_the_1040() {
 
         for (cell, label, oracle) in checks {
             let on_paper = got.get(cell).map(String::as_str).unwrap_or("<BLANK>");
-            let expected = printed(oracle);
+            let mut expected = printed(oracle);
+
+            // ★ The ONE declared cross-footing exception (mirrors `golden_returns.rs`). Under the
+            // round-all-amounts election the filed line 24 adds the PRINTED lines — 7,605 + 8,478 =
+            // 16,083 — while OTS keeps cents and rounds the total at the end (16,082.32 → 16,082).
+            // Neither is wrong about the tax; the IRS instructions put the rounding at the LINE, so
+            // 16,083 is what the filer writes. Named explicitly rather than absorbed into a ±1
+            // tolerance, which would quietly weaken every other cell on every other household.
+            if h.name == "single_miner_qbi_limited_by_net_capital_gain" && cell == "line24" {
+                assert_eq!(expected, "16082", "the cross-footing exception is pinned to OTS's figure; \
+                    if OTS moved, re-derive rather than re-pin");
+                expected = "16083".to_string();
+            }
+
             if on_paper != expected {
                 wrong.push(format!(
                     "  {:<42} 1040 {cell:<8} ({label:<14}) paper {on_paper:>10}   OpenTaxSolver {expected:>10}",
@@ -130,8 +143,8 @@ fn the_se_households_print_the_oracles_se_tax_onto_schedule_se() {
     }
 
     assert_eq!(
-        checked, 2,
-        "the matrix has exactly two self-employment households; if that changed, this test went quiet"
+        checked, 3,
+        "the matrix has exactly three self-employment households; if that changed, this test went quiet"
     );
 }
 
@@ -285,6 +298,12 @@ fn each_golden_packet_carries_exactly_the_forms_that_return_requires() {
         (
             "single_crypto_business_se",
             &["f1040", "f1040s1", "f1040s2", "f1040sc", "schedule_se", "f8995"][..],
+        ),
+        // A miner WITH a capital gain: Schedule D + 8949 join the Schedule C/SE/8995 set. This is the
+        // only household that carries both, and it is why Form 8995 line 12 is oracle-checked at all.
+        (
+            "single_miner_qbi_limited_by_net_capital_gain",
+            &["f1040", "f1040s1", "f1040s2", "f1040sc", "schedule_d", "f8949", "schedule_se", "f8995"][..],
         ),
         // Same, but $300k MFJ clears the $250k Additional-Medicare threshold ⇒ 8959.
         (
@@ -449,4 +468,82 @@ fn the_salt_cap_is_printed_onto_schedule_a() {
         "total itemized = the CAPPED $10,000 + $25,000 mortgage. It beats the $29,200 standard \
          deduction, so the cap actually changes this filer's tax."
     );
+}
+
+/// ★ **Fable P7 r1 I1.** Form 8995's Part I table must carry the business its line 2 totals.
+///
+/// Line 2's own text is "Total qualified business income or (loss). **Combine lines 1i through 1v,
+/// column (c)**". P7 gave the crypto Schedule C a §199A deduction, which made line 2 non-zero — and
+/// left the column EMPTY. The filed form totalled a column with no rows and named no business for the
+/// deduction it claimed: facially incomplete, the same class as P6's unnamed Form 8949.
+///
+/// With one trade or business the column total IS the row, so 1i(c) must equal line 2 exactly.
+#[test]
+fn the_se_households_name_their_business_in_form_8995s_part_i_table() {
+    let mut checked = 0;
+
+    for h in &golden_households() {
+        if h.inputs.self_employment_income <= 0.0 {
+            continue;
+        }
+        let pkt = packet(h);
+        let got = extract_lines(
+            &form(&pkt, "f8995").bytes,
+            btctax_forms::testonly::F8995_MAP_2024,
+        )
+        .unwrap();
+
+        let cell = |k: &str| got.get(k).map(String::as_str).unwrap_or("<BLANK>");
+
+        assert_eq!(
+            cell("row1_business"),
+            "Bitcoin mining",
+            "{}: 8995 row 1i(a) must NAME the trade or business the deduction is claimed for",
+            h.name
+        );
+        assert_eq!(
+            cell("row1_tin"),
+            "123-45-6789",
+            "{}: 8995 row 1i(b) is the business's TIN — a sole proprietor's own SSN, hyphenated \
+             (the cell's /MaxLen is 11)",
+            h.name
+        );
+        assert_eq!(
+            cell("row1_qbi"),
+            cell("line2"),
+            "{}: with ONE business, line 2 (\"combine lines 1i through 1v, column (c)\") IS row 1i(c). \
+             A line 2 that does not equal the column it totals is a form that does not add up.",
+            h.name
+        );
+        assert_ne!(
+            cell("line2"),
+            "<BLANK>",
+            "{}: the SE households have business QBI; line 2 must be printed",
+            h.name
+        );
+        checked += 1;
+    }
+
+    assert_eq!(
+        checked, 3,
+        "the matrix has exactly three self-employment households; if that changed, this test went quiet"
+    );
+}
+
+/// A REIT-only Form 8995 leaves Part I blank — there IS no trade or business, and inventing one would
+/// name a business the filer does not have. (No golden household has REIT dividends, so this is pinned
+/// by the unit KATs in `full_return_forms.rs`; asserted here only to state the contract.)
+#[test]
+fn a_household_with_no_business_files_no_form_8995_row() {
+    for h in &golden_households() {
+        if h.inputs.self_employment_income > 0.0 {
+            continue;
+        }
+        let pkt = packet(h);
+        assert!(
+            !pkt.iter().any(|f| f.name == "f8995"),
+            "{}: no QBI of any kind ⇒ no Form 8995 at all",
+            h.name
+        );
+    }
 }

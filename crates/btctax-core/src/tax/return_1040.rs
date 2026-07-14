@@ -2639,6 +2639,50 @@ mod tests {
         assert_eq!(screen_absolute(&no_qbi, &ar2, &p), None);
     }
 
+    /// ★ **Fable P7 r1 I2.** The same §199A(e)(2) refuse, driven by a **Schedule C trade or business**
+    /// with NO REIT dividends anywhere.
+    ///
+    /// The test above only ever exercised the REIT leg (`box5_section_199a`), so the `business_qbi`
+    /// argument to `qbi_over_threshold` was load-bearing and untested: the reviewer replaced it with
+    /// `Usd::ZERO` — deleting the refusal for every Schedule C filer — and all 1702 tests still passed.
+    ///
+    /// This is the guarantee `LIMITATIONS.md` and SPEC §4.5 advertise: above the threshold the law
+    /// requires Form 8995-A's W-2-wage and UBIA limits, which can make the deduction **SMALLER** than
+    /// the simplified computation. Handing an over-threshold miner the simplified deduction anyway
+    /// overstates it — and understates their tax. btctax must refuse, not guess.
+    #[test]
+    fn qbi_above_threshold_refuses_on_a_schedule_c_business_with_no_reit_dividends() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            schedule_c: Some(ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                business_description: "Bitcoin mining".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        // $260,000 of mined crypto: TI-before-QBI = 260,000 − ½SE − 14,600 std, comfortably over the
+        // $191,950 single threshold, and there is not a single REIT dividend on the return.
+        let st = state_income(vec![mining(dec!(260000))]);
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+
+        assert!(
+            ar.printed_inputs.business_qbi > Usd::ZERO,
+            "the fixture must actually produce business QBI, else this test is vacuous"
+        );
+        assert!(
+            ar.agi - ar.deduction > p.qbi_ti_threshold(FilingStatus::Single),
+            "TI-before-QBI must clear the §199A(e)(2) threshold, else this test is vacuous"
+        );
+        assert_eq!(
+            screen_absolute(&ri, &ar, &p).map(|r| r.reason),
+            Some(RefuseReason::QbiAboveThreshold),
+            "an over-threshold Schedule C business must REFUSE — 8995-A's wage/UBIA limits are unmodeled"
+        );
+    }
+
     /// TI ≤ 0 WITH a capital-loss carryforward-in refuses (the §1211/§1212 carryover-worksheet edge);
     /// the SAME zero-TI return with NO carryforward is a refund-only filer — NOT refused (r5-narrowed).
     #[test]

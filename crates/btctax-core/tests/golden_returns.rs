@@ -21,7 +21,7 @@
 //! recorded beside it. A cross-check whose disagreements can be waved away proves nothing; the whole
 //! value is that every difference must be explained.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use btctax_core::conventions::{round_dollar, Usd};
 use btctax_core::tax::packet::assemble_printed_forms;
@@ -71,7 +71,7 @@ struct Divergence {
 ///
 /// So oracle 1 is now **OTS itself**, and every divergence the wrapper forced into this list has vanished:
 /// on AGI, taxable income, SE tax, NIIT and Additional Medicare, **all three engines now agree exactly, on
-/// all eleven households**. A cross-check whose disagreements all turned out to be the harness is a
+/// all twelve households**. A cross-check whose disagreements all turned out to be the harness is a
 /// cross-check that was measuring the wrong thing.
 ///
 /// One nuance we got wrong in the first pass and should not repeat: tenforty's omission is **deliberate
@@ -142,6 +142,22 @@ const DECLARED_DIVERGENCES: &[Divergence] = &[
         outlier_alt: None,
         why: "Tax Table bin midpoint vs the exact rate schedule — see above.",
     },
+    // ── CROSS-FOOTING: Σround ≠ roundΣ. A different class from the Tax Table, and the only one here. ──
+    Divergence {
+        household: "single_miner_qbi_limited_by_net_capital_gain",
+        line: "TOTAL TAX (L24)",
+        btctax: dec!(16083),
+        agrees_with: "the 1040's own instructions (taxcalc reports no comparable TOTAL)",
+        outlier: dec!(16082),
+        outlier_alt: None,
+        why: "The round-all-amounts election (SPEC §3.1) is not a rounding convenience — it changes the \
+              FILED number. Line 24 says \"add lines 22 and 23\", and those lines PRINT 7,605 and 8,478, \
+              so line 24 is 16,083 and that is what the filer writes. OTS keeps cents internally and \
+              rounds the total at the end: 7,604.59 + 8,477.73 = 16,082.32 → 16,082. Neither is wrong \
+              about the TAX; they disagree about where rounding happens, and the IRS instructions put it \
+              at the line. Every component line agrees exactly — including the §199A deduction (8,232) \
+              that this household exists to test.",
+    },
     Divergence {
         household: "single_crypto_business_se",
         line: "tax (L16)",
@@ -182,6 +198,11 @@ fn every_golden_household_matches_the_independent_oracles() {
     let params = ty2024_params();
     let table = ty2024_table();
     let mut diffs: Vec<String> = Vec::new();
+    // ★ Fable P7 r1 M4 — divergence LIVENESS. An entry is consulted only when a mismatch occurs, so a
+    // divergence that stops happening (a taxcalc release adopts Tax-Table semantics; a household is
+    // renamed) would rot here forever, silently, still claiming to explain something. Track which
+    // entries actually fire and demand that every one of them does.
+    let mut fired: BTreeSet<usize> = BTreeSet::new();
 
     for h in &households {
         let (ri, state) = build_golden_household(h);
@@ -194,7 +215,13 @@ fn every_golden_household_matches_the_independent_oracles() {
 
         // (line, btctax, oracle-1 (OTS-direct), oracle-2 (taxcalc) — `None` where taxcalc reports no
         // comparable figure).
-        let lines: [(&str, Usd, f64, Option<f64>); 7] = [
+        let lines: [(&str, Usd, f64, Option<f64>); 8] = [
+            (
+                "QBI deduction (8995 L15)",
+                ar.qbi_deduction,
+                e.qbi_deduction,
+                Some(t.qbi_deduction),
+            ),
             (
                 "AGI (1040 L11)",
                 ar.agi,
@@ -251,10 +278,12 @@ fn every_golden_household_matches_the_independent_oracles() {
                 continue; // both oracles agree with btctax
             }
 
-            if let Some(d) = DECLARED_DIVERGENCES
+            if let Some((idx, d)) = DECLARED_DIVERGENCES
                 .iter()
-                .find(|d| d.household == h.name && d.line == line)
+                .enumerate()
+                .find(|(_, d)| d.household == h.name && d.line == line)
             {
+                fired.insert(idx);
                 assert_eq!(
                     ours, d.btctax,
                     "{} {}: btctax's value MOVED — the declared divergence is stale.\nIt was: {}",
@@ -316,6 +345,21 @@ fn every_golden_household_matches_the_independent_oracles() {
             ));
         }
     }
+
+    let dead: Vec<&str> = DECLARED_DIVERGENCES
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !fired.contains(i))
+        .map(|(_, d)| d.line)
+        .collect();
+    assert!(
+        dead.is_empty(),
+        "{} DECLARED_DIVERGENCES entr(ies) never fired — they explain a disagreement that no longer \
+         happens, and are now just an unread claim about the tax code: {:?}\n\
+         Delete them (the oracles agree now) or fix the household/line they name.",
+        dead.len(),
+        dead
+    );
 
     assert!(
         diffs.is_empty(),

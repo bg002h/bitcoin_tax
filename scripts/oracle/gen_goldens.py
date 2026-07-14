@@ -123,7 +123,8 @@ HOUSEHOLDS = [
     },
     {
         "name": "mfj_two_w2_standard",
-        "why": "MFJ, multi-W-2, standard deduction — the common household",
+        "why": "MFJ, standard deduction, a little interest BELOW the $1,500 Schedule B trigger — the "
+        "common household, and the discriminating case for whether Schedule B files at all",
         "filing_status": "Married/Joint",
         "w2_income": 185_000,
         "taxable_interest": 1_200,
@@ -171,6 +172,18 @@ HOUSEHOLDS = [
         "filing_status": "Single",
         "w2_income": 40_000,
         "self_employment_income": 60_000,
+    },
+    {
+        "name": "single_miner_qbi_limited_by_net_capital_gain",
+        "why": "★ Form 8995 line 12. The §199A deduction is capped at 20% of (taxable income − NET "
+        "CAPITAL GAIN), and here that limit BINDS *because of* the gain: 20% × QBI = 11,152, but "
+        "20% × (81,161 − 40,000) = 8,232, so the capital gain costs this miner $2,920 of deduction. "
+        "Drop the line-12 subtraction and the deduction silently grows to 11,152 — understating tax. "
+        "No other golden combines QBI with a capital gain, so nothing else holds line 12 against an "
+        "oracle.",
+        "filing_status": "Single",
+        "self_employment_income": 60_000,
+        "long_term_capital_gains": 40_000,
     },
     {
         "name": "mfj_se_over_the_addl_medicare_threshold",

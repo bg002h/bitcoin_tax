@@ -1,9 +1,10 @@
-//! Full-return v1 **Form 8995** — the simplified §199A qualified-business-income deduction, REIT
-//! (and PTP) dividend path only (Phase 4 task 1 / SPEC §4.5).
+//! Full-return v1 **Form 8995** — the simplified §199A qualified-business-income deduction (SPEC §4.5).
 //!
-//! v1's ONLY QBI source is §199A REIT dividends (1099-DIV box 5). Crypto Schedule C business income is
-//! **not** §199A QBI in v1 (a follow-on adds the QBI-on-Schedule-C path), so Form 8995 lines 1–5 (the
-//! trade/business QBI component) are always zero here and the deduction is the REIT/PTP component only.
+//! **Two QBI sources**, and the form adds their components:
+//!   * the crypto **Schedule C trade or business** (Part I rows 1i–1v → lines 2/4/5), net of the
+//!     §164(f) half-SE deduction. Added in P7, after the golden cross-check caught btctax handing a
+//!     miner's 20% deduction back to the Treasury for nothing.
+//!   * **§199A REIT/PTP dividends** (1099-DIV box 5 → lines 6/8/9).
 //!
 //! **Above the §199A(e)(2) threshold the simplified 8995 is unavailable** (the 8995-A phase-in is
 //! unmodeled) — the caller REFUSES (`qbi_over_threshold`) rather than under-deduct. The REIT/PTP loss
@@ -42,8 +43,7 @@ pub fn has_qbi(business_qbi: Usd, reit_dividends: Usd, reit_ptp_carryforward_in:
 /// - `net_capital_gain` = qualified dividends + net LTCG taxed at preferential rates (Form 8995 line 12).
 ///
 /// The caller MUST have already refused when `ti_before_qbi` is above the §199A(e)(2) threshold with QBI
-/// present ([`qbi_over_threshold`]) — the 8995-A phase-in is unmodeled. Lines 1–5 (trade/business QBI)
-/// are 0 in v1, so the deduction is the REIT/PTP component (line 9) capped by the income limit (line 14).
+/// present ([`qbi_over_threshold`]) — the 8995-A phase-in is unmodeled.
 pub fn compute_8995(
     business_qbi: Usd,
     reit_dividends: Usd,
@@ -107,22 +107,36 @@ pub fn qbi_over_threshold(
 /// `other_taxes::Form8959Lines` for why the chain is derived in core and only transcribed by
 /// `btctax-forms`.
 ///
-/// **The Part I table (rows 1i–1v) is BLANK**: v1's only QBI is §199A REIT dividends, so there is no
-/// trade or business to list. Lines 2/4/5 are nevertheless PRINTED as zero — the form's arithmetic
-/// adds them (line 10 = line 5 + line 9), and a reader re-adding the column must find them. Line 3
-/// (a prior-year trade/business QBI loss carryforward) has no v1 input and stays blank.
+/// **★ The Part I table (rows 1i–1v) carries the trade or business, and it MUST.** Line 2's own text is
+/// "Total qualified business income or (loss). **Combine lines 1i through 1v, column (c)**" — a filed
+/// form with a non-zero line 2 over an empty column totals nothing, and names no business for the
+/// deduction it claims. v1 has exactly one trade or business (the crypto Schedule C), so row **1i**
+/// carries it: (a) its description, (b) the filer's TIN (a sole proprietor's is their SSN — btctax has
+/// no EIN input), (c) its QBI, which for one business IS line 2. [`Form8995Lines::business_name`] is
+/// empty exactly when there is no Schedule C, and then the row stays blank and line 2 is zero.
+///
+/// Line 3 (a prior-year trade/business QBI loss carryforward) has no v1 input and stays blank: a
+/// Schedule C LOSS refuses upstream, so v1 never carries one forward.
 ///
 /// **★ Lines 3, 7, 16 and 17 are PARENTHESIZED boxes on the printed form: the parentheses supply the
 /// minus sign, so the value written must be a POSITIVE MAGNITUDE.** Writing `-1234` renders as
 /// `(-1,234)` — a positive number. Every one of these fields is a loss/carryforward, and every one is
 /// stored here as a magnitude ≥ 0 for exactly that reason.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Form8995Lines {
-    /// L2 — total QBI from lines 1i–1v column (c). Always 0 in v1 (no trade/business QBI).
+    /// Part I row **1i column (a)** — the trade or business the deduction is claimed for. Empty exactly
+    /// when there is no Schedule C, in which case the row stays blank and [`Self::line2`] is zero.
+    ///
+    /// Columns (b) and (c) of the row are NOT stored: (b) is the filer's SSN, which the form's identity
+    /// header already carries, and (c) is `line2` itself — v1 has one business, so the column total IS
+    /// the row. Storing them twice would let them disagree.
+    pub business_name: String,
+    /// L2 — total QBI from lines 1i–1v column (c) = the Schedule C profit net of the §164(f) half-SE
+    /// deduction. Zero when there is no trade or business.
     pub line2: Usd,
-    /// L4 — combine 2 and 3; if zero or less, `-0-`. Always 0 in v1.
+    /// L4 — combine 2 and 3; if zero or less, `-0-`.
     pub line4: Usd,
-    /// L5 — QBI component = 20% × line 4. Always 0 in v1.
+    /// L5 — QBI component = 20% × line 4.
     pub line5: Usd,
     /// L6 — qualified REIT dividends + PTP income (Σ 1099-DIV box 5).
     pub line6: Usd,
@@ -165,6 +179,7 @@ pub struct Form8995Lines {
 /// products. That is the SPEC §3.1 round-all-amounts election, not a defect: the printed form
 /// cross-foots against itself, which is what gets filed.
 pub fn form_8995_lines(
+    business_name: &str,
     business_qbi: Usd,
     reit_dividends: Usd,
     reit_ptp_carryforward_in: Usd,
@@ -200,6 +215,13 @@ pub fn form_8995_lines(
     let line17 = (line7 - line6).max(Usd::ZERO); // the prior-year loss unused against this year's REIT
 
     Some(Form8995Lines {
+        // Row 1i(a). Blank when there is no trade or business — line 2 is then zero and the
+        // form's column total has nothing to total.
+        business_name: if business_qbi > Usd::ZERO {
+            business_name.to_string()
+        } else {
+            String::new()
+        },
         line2,
         line4,
         line5,
@@ -478,7 +500,7 @@ mod tests {
         // $10,000 REIT dividends; TI-before-QBI $100,000; net capital gain $20,000.
         // line 9 = 20% × 10,000 = 2,000. line 13 = 80,000 → line 14 = 16,000. line 15 = min = 2,000.
         let l =
-            form_8995_lines(Usd::ZERO, dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
+            form_8995_lines("", Usd::ZERO, dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
         assert_eq!(l.line2, Usd::ZERO);
         assert_eq!(l.line4, Usd::ZERO);
         assert_eq!(l.line5, Usd::ZERO);
@@ -501,7 +523,7 @@ mod tests {
     fn form_8995_printed_chain_income_limit_binds() {
         // TI-before-QBI 12,000 all of which is capital gain → line 13 = 0 → line 14 = 0 → no deduction.
         let l =
-            form_8995_lines(Usd::ZERO, dec!(10000), Usd::ZERO, dec!(12000), dec!(12000)).unwrap();
+            form_8995_lines("", Usd::ZERO, dec!(10000), Usd::ZERO, dec!(12000), dec!(12000)).unwrap();
         assert_eq!(l.line10, dec!(2000)); // the component is there…
         assert_eq!(l.line13, Usd::ZERO);
         assert_eq!(l.line14, Usd::ZERO);
@@ -517,7 +539,7 @@ mod tests {
     fn form_8995_loss_carryforward_lines_are_positive_magnitudes() {
         // Prior-year REIT/PTP loss carryforward $15,000 against only $10,000 of REIT dividends.
         let l =
-            form_8995_lines(Usd::ZERO, dec!(10000), dec!(15000), dec!(100000), Usd::ZERO).unwrap();
+            form_8995_lines("", Usd::ZERO, dec!(10000), dec!(15000), dec!(100000), Usd::ZERO).unwrap();
         assert_eq!(l.line6, dec!(10000));
         assert_eq!(l.line7, dec!(15000)); // POSITIVE magnitude, not −15,000
         assert_eq!(l.line8, Usd::ZERO); // 10,000 − 15,000, floored: no REIT income survives
@@ -538,11 +560,11 @@ mod tests {
     #[test]
     fn form_8995_absent_when_there_is_no_qbi() {
         assert!(
-            form_8995_lines(Usd::ZERO, Usd::ZERO, Usd::ZERO, dec!(100000), Usd::ZERO).is_none()
+            form_8995_lines("", Usd::ZERO, Usd::ZERO, Usd::ZERO, dec!(100000), Usd::ZERO).is_none()
         );
         // …but a bare carryforward, with no REIT income this year, DOES produce the form (it must
         // carry the loss forward on line 17, or the carryforward is silently lost).
-        let l = form_8995_lines(Usd::ZERO, Usd::ZERO, dec!(5000), dec!(100000), Usd::ZERO).unwrap();
+        let l = form_8995_lines("", Usd::ZERO, Usd::ZERO, dec!(5000), dec!(100000), Usd::ZERO).unwrap();
         assert_eq!(l.line17, dec!(5000));
     }
 
@@ -555,7 +577,7 @@ mod tests {
             (dec!(2502.50), Usd::ZERO, dec!(80000.49), dec!(0.50)), // cents in, dollars out
             (dec!(10000), Usd::ZERO, dec!(12000), dec!(12000)),     // income limit binds
         ] {
-            let l = form_8995_lines(Usd::ZERO, reit, cf_in, ti, ncg).unwrap();
+            let l = form_8995_lines("", Usd::ZERO, reit, cf_in, ti, ncg).unwrap();
             assert_eq!(l.line4, l.line2, "L4 = 2 + 3 (3 blank)");
             assert_eq!(l.line5, round_dollar(QBI_RATE * l.line4), "L5 = 20% × 4");
             assert_eq!(

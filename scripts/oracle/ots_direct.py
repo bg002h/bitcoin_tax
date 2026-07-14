@@ -265,6 +265,18 @@ def evaluate(h: dict) -> dict[str, float]:
             # OTS's own Form 8995 resolves the taxable-income limitation by reading a 1040
             # OUTPUT file — which is exactly the mechanism a wrapper needs and tenforty lacks.
             # QBI is the Schedule C profit NET of the §164(f) half-SE deduction.
+            # ★ Line 12 — NET CAPITAL GAIN — must be supplied. §199A(a)(1)(B) caps the deduction at
+            # 20% of (taxable income − net capital gain), and OTS's 8995 models it (its template has an
+            # `L12` key) but cannot infer it: the 1040 output it reads carries a taxable income, not a
+            # §1(h) net capital gain. Leaving it blank silently DROPS the cap.
+            #
+            # It went unnoticed for a while because every other QBI household in the matrix has no
+            # capital gain, so line 12 was zero and OTS agreed by accident. §1222(11): the net capital
+            # gain is the long-term gain that survives cross-netting against short-term, floored at
+            # zero, plus qualified dividends.
+            net_capital_gain = h.get("qualified_dividends", 0) + max(
+                0.0, min(float(ltcg), float(ltcg) + float(stcg))
+            )
             f8995, _ = run_form(
                 "f8995",
                 "Form_8995",
@@ -273,6 +285,7 @@ def evaluate(h: dict) -> dict[str, float]:
                     "FileName1040": p1_out.name,
                     "L1_i_a:": "Crypto",
                     "L1_i_c": round(se_profit - half_se),
+                    "L12": round(net_capital_gain),
                 },
                 work,
             )

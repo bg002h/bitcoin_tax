@@ -338,7 +338,7 @@ mod tests {
             &ri,
             &LedgerState::default(),
             dec!(150000), // earned
-            dec!(150000), // Schedule C net profit
+            dec!(150000), // AGI (1040 L11)
             Usd::ZERO,
             &params(),
             2024,
@@ -360,7 +360,7 @@ mod tests {
             &ri,
             &LedgerState::default(),
             dec!(30000), // earned
-            dec!(30000), // Schedule C net profit
+            dec!(30000), // AGI (1040 L11)
             Usd::ZERO,
             &params(),
             2024,
@@ -393,7 +393,7 @@ mod tests {
             &ri,
             &LedgerState::default(),
             Usd::ZERO,
-            dec!(30000), /* Schedule C net profit */
+            dec!(30000), /* AGI (1040 L11) */
             Usd::ZERO,
             &p,
             2024
@@ -406,7 +406,7 @@ mod tests {
             &ri,
             &LedgerState::default(),
             dec!(70000),
-            dec!(70000), /* Schedule C net profit */
+            dec!(70000), /* AGI (1040 L11) */
             Usd::ZERO,
             &p,
             2024
@@ -417,7 +417,7 @@ mod tests {
             &ri,
             &LedgerState::default(),
             dec!(30000),
-            dec!(30000), /* Schedule C net profit */
+            dec!(30000), /* AGI (1040 L11) */
             Usd::ZERO,
             &p,
             2024
@@ -468,7 +468,7 @@ mod tests {
             &ri,
             &LedgerState::default(),
             dec!(63000), // earned
-            dec!(63000), // AGI — under the real MFJ 3-child limit of $66, 819
+            dec!(63000), // AGI — under the real MFJ 3-child limit of $66,819
             Usd::ZERO,
             &params(),
             2024,
@@ -499,7 +499,7 @@ mod tests {
             &ri,
             &LedgerState::default(),
             dec!(150000),
-            dec!(150000), /* Schedule C net profit */
+            dec!(150000), /* AGI (1040 L11) */
             Usd::ZERO,    // no refund
             &p,
             2024,
@@ -514,7 +514,7 @@ mod tests {
             &ri,
             &LedgerState::default(),
             dec!(150000),
-            dec!(150000), /* Schedule C net profit */
+            dec!(150000), /* AGI (1040 L11) */
             dec!(1234.56),
             &p,
             2024,

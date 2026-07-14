@@ -10,11 +10,15 @@
 //! that invariant is ever broken upstream. The invariant is invisible in the PDF's field data — it is
 //! only visible on the rendered page — so it gets an explicit guard rather than a comment.
 //!
-//! The Part I trade/business table (rows 1i–1v) is never touched: v1's only QBI is §199A REIT
-//! dividends, so there is no business to list. Lines 2/4/5 ARE written, at zero, because the form's
-//! own arithmetic adds them (line 10 = line 5 + line 9).
+//! **★ Part I row 1i carries the trade or business** (Fable P7 r1 I1). Line 2's own text is "Total
+//! qualified business income or (loss). **Combine lines 1i through 1v, column (c)**" — so a non-zero
+//! line 2 over an empty column is a filed form that totals nothing and names no business for the
+//! deduction it claims. Before P7 the table was legitimately blank (line 2 was always ZERO, a total of
+//! nothing over nothing); P7 gave the crypto Schedule C a §199A deduction and left the column empty.
+//! The row is written exactly when there IS a business — `Form8995Lines::business_name` is empty
+//! otherwise, and then line 2 is zero and the row stays blank.
 
-use crate::cells::{push_identity, push_money};
+use crate::cells::{push_identity, push_literal, push_money};
 use crate::error::FormsError;
 use crate::map::Form8995Map;
 use crate::pdf;
@@ -31,9 +35,23 @@ use btctax_core::Usd;
 /// So two clusters suffice, and no cell gets a weaker check than its neighbours.
 const F8995_COL_MID: usize = 0;
 const F8995_COL_AMOUNT: usize = 1;
+/// Part I row 1i's three cells. They share a y, so they cannot join the ordinal-y descent group — the
+/// column band is their check, and it is deliberately TIGHT: `row1_qbi`'s x-center is **529.2**, which
+/// sits INSIDE the ordinary AMOUNT cluster [504, 576] (center 540). A loose band would happily accept a
+/// cell mis-mapped between the two. `row1_qbi` is additionally pinned as descent ordinal 0, which
+/// asserts the row really does sit ABOVE line 2.
+const F8995_COL_ROW1_BUSINESS: usize = 2;
+const F8995_COL_ROW1_TIN: usize = 3;
+const F8995_COL_ROW1_QBI: usize = 4;
 
 /// Hand-pinned column-x clusters, measured from the blank TY2024 PDF. Code-side oracle; never the map.
-const F8995_CLUSTERS: &[(f32, f32)] = &[(410.0, 482.0), (504.0, 576.0)];
+const F8995_CLUSTERS: &[(f32, f32)] = &[
+    (410.0, 482.0), // MID
+    (504.0, 576.0), // AMOUNT
+    (226.0, 235.0), // row 1i (a) — center 230.5
+    (435.0, 443.0), // row 1i (b) — center 439.2
+    (525.0, 533.0), // row 1i (c) — center 529.2  (NOT 540: tight, or AMOUNT would swallow it)
+];
 
 /// Fail closed if any parenthesized cell carries a negative value. On the printed form the
 /// parentheses supply the minus sign, so a negative here would RENDER AS POSITIVE — silently
@@ -68,6 +86,39 @@ pub fn fill_form_8995_with_map(
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<FlatPlacement> = Vec::new();
 
+    // ── Part I row 1i — the trade or business, when there is one. ───────────────────────────────────
+    // Written BEFORE the lines so the descent group reads top-down: row 1i(c) is ordinal 0 and line 2
+    // must sit strictly below it.
+    if !lines.business_name.is_empty() {
+        push_literal(
+            &mut writes,
+            &mut placements,
+            &map.row1_business,
+            &lines.business_name,
+            F8995_COL_ROW1_BUSINESS,
+        );
+        // (b) the TIN. A sole proprietor's is their own SSN; btctax has no EIN input. The cell's
+        // /MaxLen is 11, i.e. the HYPHENATED form — `ssn_for_cell` reads the blank PDF's own /MaxLen
+        // rather than guessing, exactly as the identity header does.
+        push_literal(
+            &mut writes,
+            &mut placements,
+            &map.row1_tin,
+            &header.taxpayer.ssn.hyphenated(),
+            F8995_COL_ROW1_TIN,
+        );
+        // (c) this business's QBI. With one business the column total IS the row, so line 2 is written
+        // from the same figure — they cannot disagree.
+        push_money(
+            &mut writes,
+            &mut placements,
+            &map.row1_qbi,
+            lines.line2,
+            F8995_COL_ROW1_QBI,
+            Some((0, 0)),
+        );
+    }
+
     // Parallel to `map.lines()` — printed reading order, strictly descending y on page 1.
     let plan: [(Usd, usize); 15] = [
         (lines.line2, F8995_COL_MID),     // 2  total QBI (table blank ⇒ 0)
@@ -93,7 +144,8 @@ pub fn fill_form_8995_with_map(
             cell,
             value,
             col,
-            Some((0, ord as u32)),
+            // +1: row 1i(c) took ordinal 0, and it sits above line 2 on the page.
+            Some((0, ord as u32 + 1)),
         );
     }
 

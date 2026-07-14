@@ -13,10 +13,16 @@
 ## The win is mostly `[profile.dev] opt-level` (see Cargo.toml): the suite is dominated by
 ## integration tests that spawn the btctax binary, so it was bound by how fast the compiled code
 ## RAN, not by how fast it built. nextest (parallel across test binaries) and lld do the rest.
+##
+## ★ The exit status is PROPAGATED. A bare `wait` (no operands) always returns 0, so the obvious
+## way to write this reports SUCCESS on a failing suite — a gate that lies is worse than no gate.
+## Each job's PID is waited on individually and the statuses are OR-ed.
 check:
-	@cargo nextest run --workspace & \
-	 CARGO_TARGET_DIR=target-clippy cargo clippy --workspace --all-targets --all-features -- -D warnings & \
-	 wait
+	@cargo nextest run --workspace & t=$$!; \
+	 CARGO_TARGET_DIR=target-clippy cargo clippy --workspace --all-targets --all-features -- -D warnings & c=$$!; \
+	 st=0; wait $$t || st=1; wait $$c || st=1; \
+	 if [ $$st -ne 0 ]; then echo "make check: FAILED"; fi; \
+	 exit $$st
 
 ## test: the full suite on its own (nextest — parallel across test binaries, unlike `cargo test`)
 test:

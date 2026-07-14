@@ -371,6 +371,10 @@ pub struct GoldenHousehold {
 pub struct ExpectedOts {
     pub adjusted_gross_income: f64,
     pub taxable_income: f64,
+    /// Form 8995 line 15 — the §199A deduction. Committed by BOTH oracles and asserted: pinning only
+    /// AGI and taxable income constrains their SUM, so a deduction that is wrong by +X against a QBI
+    /// that is wrong by −X would slip through.
+    pub qbi_deduction: f64,
     pub income_tax_before_credits: f64,
     pub se_tax: f64,
     pub niit: f64,
@@ -385,6 +389,7 @@ pub struct ExpectedOts {
 pub struct ExpectedTaxcalc {
     pub adjusted_gross_income: f64,
     pub taxable_income: f64,
+    pub qbi_deduction: f64,
     pub income_tax_before_credits: f64,
     pub se_tax: f64,
     pub niit: f64,
@@ -459,6 +464,12 @@ pub fn build_golden_household(h: &GoldenHousehold) -> (ReturnInputs, LedgerState
         });
     }
 
+    // ★ ONE W-2 carrying the household's whole wage figure. `mfj_two_w2_standard`'s name is about the
+    // household, not the paperwork — and the MFJ-SE household's box 3 of $220,000 exceeds what any single
+    // employer could report (the $168,600 wage base). Both are fine here and neither affects a number:
+    // every engine is told the same thing, and all three read these as PER-PERSON totals — btctax off
+    // box 3, OTS off Schedule SE line 8a, Tax-Calculator off `e00200p`. Splitting them across two W-2
+    // records would change nothing but the fixture's realism.
     if i.w2_income > 0.0 {
         let w = golden_usd(i.w2_income);
         ri.w2s.push(W2 {

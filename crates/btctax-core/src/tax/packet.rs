@@ -447,6 +447,9 @@ pub fn assemble_printed_forms(
         ar.agi,
     );
     let f8995 = form_8995_lines(
+        // Row 1i(a): the trade or business the §199A deduction is claimed for. Line 2's own text says
+        // "Combine lines 1i through 1v, column (c)" — a total over an empty column names no business.
+        &pi.schedule_c_header.business_description,
         pi.business_qbi,
         pi.reit_dividends,
         pi.reit_ptp_carryforward_in,

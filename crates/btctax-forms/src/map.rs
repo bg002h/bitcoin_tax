@@ -946,7 +946,13 @@ pub struct Form8995Map {
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
-    /// L2 — total QBI from the (blank) table, MID column.
+    /// Part I row 1i(a) — the trade or business's description.
+    pub row1_business: MoneyCell,
+    /// Part I row 1i(b) — its TIN (the filer's SSN; `/MaxLen` 11 ⇒ hyphenated).
+    pub row1_tin: MoneyCell,
+    /// Part I row 1i(c) — its QBI. With one business this IS line 2, which the form totals from it.
+    pub row1_qbi: MoneyCell,
+    /// L2 — total QBI: "Combine lines 1i through 1v, column (c)". MID column.
     pub line2: MoneyCell,
     /// L4 — combine 2 and 3, MID column.
     pub line4: MoneyCell,

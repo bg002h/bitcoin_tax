@@ -14,11 +14,31 @@
 # `-1234` renders as `(-1,234)` — a positive number on a filed return. `qbi::Form8995Lines` stores
 # every one of these as a magnitude ≥ 0 for exactly that reason.
 #
+# ★ PART I ROW 1i — the trade or business (Fable P7 r1 I1).
+#   Line 2's own text is "Total qualified business income or (loss). Combine lines 1i through 1v,
+#   column (c)". Before P7 the table was left blank because v1's only QBI was REIT dividends and line 2
+#   was always ZERO — a total of nothing over nothing. P7 gave the crypto Schedule C a §199A deduction,
+#   which made line 2 NON-ZERO while the column stayed empty: a filed form totalling a column that has
+#   no rows, claiming a deduction for a business it never names. Row 1i now carries it.
+#
+#   The row is a horizontal triple at y≈[552,576], so its three cells share a y and CANNOT join the
+#   ordinal-y descent group. Their check is the column band instead, and the bands are TIGHT for a
+#   reason: row1_qbi's x-center is 529.2, which sits INSIDE the ordinary AMOUNT cluster [504,576]
+#   (center 540). A loose band would accept a cell mis-mapped between the two. row1_qbi is additionally
+#   pinned as descent ordinal 0, which asserts the row really does sit ABOVE line 2.
+#
+#   row1_tin has /MaxLen = 11 → the HYPHENATED SSN. A sole proprietor's TIN is their own SSN; btctax
+#   has no EIN input.
+row1_business = "topmostSubform[0].Page1[0].Table[0].Ln1A_Row1[0].f1_3[0]"  # (a) trade/business name
+row1_tin      = "topmostSubform[0].Page1[0].Table[0].Ln1A_Row1[0].f1_4[0]"  # (b) TIN  (maxlen 11)
+row1_qbi      = "topmostSubform[0].Page1[0].Table[0].Ln1A_Row1[0].f1_5[0]"  # (c) this business's QBI
+
 # UNMAPPED ON PURPOSE:
-#   line 1 rows i-v (Table[0].Ln1{A..E}_Row{1..5}[0].f1_3..f1_17) — the trade/business QBI table.
-#     v1's ONLY QBI is §199A REIT dividends (1099-DIV box 5); there is no trade or business to list,
-#     so the table stays BLANK. (Lines 2/4/5 are still printed, at zero — the form ADDS them.)
-#   line 3 (f1_19) — a prior-year trade/business QBI loss carryforward. No v1 input exists.
+#   line 1 rows ii-v (Ln1{B..E}_Row{2..5}) — v1 has exactly ONE trade or business (the crypto Schedule
+#     C), so only row 1i can ever be filled. A second business would need a second Schedule C, which the
+#     input model does not have.
+#   line 3 (f1_19) — a prior-year trade/business QBI loss carryforward. No v1 input exists: a Schedule C
+#     LOSS refuses upstream, so v1 never carries one forward.
 form = "f8995"
 year = 2024
 
