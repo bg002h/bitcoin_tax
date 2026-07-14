@@ -98,11 +98,18 @@ fn every_golden_household_prints_the_oracles_figures_onto_the_1040() {
         // fail pointing at the printed 1040 rather than at the formula, sending the next author to
         // debug the wrong thing.
         for (cell, what) in [("line17", "AMT / excess APTC"), ("line21", "credits")] {
-            let v = got.get(cell).map(String::as_str).unwrap_or("0");
+            // Asserted as PRESENT-and-zero, not defaulted-to-zero (Fable P7 r5, Nit). Defaulting an
+            // absent cell to "0" would silently make this guard vacuous if the 1040 filler ever stopped
+            // writing those lines — resting the guard's soundness on a property of a different module
+            // that nothing here pins. The filler writes every mapped line, including explicit zeros; if
+            // that ever changes, this should fail loudly rather than quietly stop checking.
             assert_eq!(
-                v, "0",
-                "{}: the cross-foot formula for line 24 assumes NO {what} (1040 {cell}), and this \
-                 household has some. Extend the formula — do not weaken the assertion.",
+                got.get(cell).map(String::as_str),
+                Some("0"),
+                "{}: the cross-foot formula for line 24 assumes NO {what} (1040 {cell}) and that the \
+                 line is PRINTED. Either this household has some — extend the formula, do not weaken \
+                 the assertion — or the 1040 filler stopped writing the line, which this guard depends \
+                 on.",
                 h.name
             );
         }
