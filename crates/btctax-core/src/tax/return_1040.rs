@@ -543,6 +543,37 @@ pub fn screen_compute_dependent(
     year: i32,
     params: &FullReturnParams,
 ) -> Option<Refusal> {
+    // ★ Non-crypto NONCASH gifts, keyed on the TOTAL noncash the return claims (Fable P6 r1 I6). The
+    // $500 trigger printed on Schedule A line 12 — and Form 8283's own "…if you claimed a total deduction
+    // of over $500 for ALL contributed property" — is an AGGREGATE over every noncash gift. Keying the
+    // refusal on the user-entered gifts alone let a MIXED year through: $300 of user noncash (under the
+    // threshold) + $400 of crypto donations from the ledger ⇒ L12 = $700, an 8283 IS required, and the one
+    // btctax attaches lists only the crypto rows — an incomplete required attachment, and the §170(f)(11)
+    // denial risk the guard exists to prevent. This needs the LEDGER, so it screens here, not in
+    // `screen_inputs`.
+    if let Some(a) = &ri.schedule_a {
+        let user_noncash: Usd = a
+            .charitable
+            .iter()
+            .filter(|g| !matches!(g.class, CharitableClass::Cash60 | CharitableClass::Cash30))
+            .map(|g| g.amount)
+            .sum();
+        let crypto_noncash = crate::forms::year_donation_deduction(state, year);
+        if user_noncash > Usd::ZERO
+            && user_noncash + crypto_noncash > crate::tax::printed::FORM_8283_THRESHOLD
+        {
+            return Some(Refusal {
+                reason: RefuseReason::NonCryptoNoncashGift,
+                detail:
+                    "a non-crypto NONCASH charitable gift pushes total noncash gifts over $500, which \
+                     requires a Form 8283 listing ALL of the contributed property — and btctax holds no \
+                     details for property that did not come from your ledger (description, acquisition \
+                     date, appraiser). Complete Form 8283 by hand, or remove the gift."
+                        .to_string(),
+            });
+        }
+    }
+
     let crypto = crypto_income(state, year);
 
     // Business-flagged crypto Interest has no clean v1 home (excluded from SE, not NIIT-sheltered).
@@ -1520,6 +1551,59 @@ mod tests {
     }
     fn screened(ri: &ReturnInputs, st: &LedgerState) -> Option<RefuseReason> {
         screen_compute_dependent(ri, st, 2024, &ty2024_params()).map(|r| r.reason)
+    }
+
+    /// ★ **Fable P6 r1 I6.** The Form 8283 trigger is an AGGREGATE — Schedule A line 12's "over $500" and
+    /// the 8283's own "a total deduction of over $500 for **all** contributed property". Keying the
+    /// refusal on the user-entered gifts alone let the MIXED case through: $300 of non-crypto noncash
+    /// (under the threshold on its own) plus $400 of crypto donations from the ledger ⇒ L12 = $700, so an
+    /// 8283 IS required — and the one btctax can build lists only the crypto rows, under-reporting its own
+    /// property list and putting the whole deduction at risk (§170(f)(11)).
+    #[test]
+    fn mixed_noncash_gifts_over_the_aggregate_8283_threshold_refuse() {
+        use crate::state::{Removal, RemovalKind, RemovalLeg};
+        use crate::tax::return_inputs::{CharitableClass, CharitableGift, ScheduleAInputs};
+
+        let donation = |claimed: Usd| Removal {
+            event: EventId::decision(9),
+            kind: RemovalKind::Donation,
+            removed_at: date!(2024 - 07 - 04),
+            legs: Vec::<RemovalLeg>::new(),
+            appraisal_required: false,
+            donor_acquired_at: None,
+            claimed_deduction: Some(claimed),
+            donee: Some("Habitat".into()),
+        };
+        let st = LedgerState {
+            removals: vec![donation(dec!(400))], // crypto donations from the LEDGER
+            ..Default::default()
+        };
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.schedule_a = Some(ScheduleAInputs {
+            charitable: vec![CharitableGift {
+                class: CharitableClass::CapGainProp30, // non-crypto NONCASH — no 8283 rows exist for it
+                amount: dec!(300),                     // under $500 ON ITS OWN…
+            }],
+            ..Default::default()
+        });
+
+        // …but $300 + $400 = $700 of noncash ⇒ Schedule A L12 > $500 ⇒ an 8283 is required.
+        assert_eq!(
+            screened(&ri, &st),
+            Some(RefuseReason::NonCryptoNoncashGift),
+            "the aggregate crosses the threshold, so the incomplete 8283 must not be attached"
+        );
+
+        // Crypto-only donations over the threshold are FINE — btctax has every row for those.
+        let mut crypto_only = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        crypto_only.schedule_a = Some(ScheduleAInputs::default());
+        assert_eq!(screened(&crypto_only, &st), None);
     }
     /// A Single household the synthetic table can price (it only carries `Single` schedules). Tuned so
     /// the ordinary base (`ordinary_taxable_income`) sits just below the synthetic $100k bracket edge:

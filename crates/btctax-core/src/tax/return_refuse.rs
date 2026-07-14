@@ -557,26 +557,6 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         );
     }
 
-    // Non-crypto NONCASH gifts over the $500 Form 8283 threshold: we cannot produce the 8283 rows for
-    // property we hold no details about, and an under-populated substantiation form risks the filer's
-    // whole deduction. Fail closed and tell them to complete the 8283 by hand (ARCH-P6.3a Q6).
-    if let Some(a) = &ri.schedule_a {
-        let noncash: Usd = a
-            .charitable
-            .iter()
-            .filter(|g| !matches!(g.class, CharitableClass::Cash60 | CharitableClass::Cash30))
-            .map(|g| g.amount)
-            .sum();
-        if noncash > crate::tax::printed::FORM_8283_THRESHOLD {
-            return refuse(
-                RefuseReason::NonCryptoNoncashGift,
-                "a non-crypto NONCASH charitable gift over $500 requires a Form 8283 listing the \
-                 property, and btctax holds no details for it (description, acquisition date, appraiser) \
-                 — complete Form 8283 for that property by hand, or remove the gift",
-            );
-        }
-    }
-
     // A claimable-as-dependent SPOUSE limits the joint standard deduction (1040 Std-Deduction Worksheet),
     // which v1 doesn't model (the spouse flag is otherwise unconsumed) — refuse rather than grant the full
     // basic std and understate tax (review I1). Narrow/usually-invalid input (a claimable spouse generally
@@ -823,54 +803,6 @@ mod tests {
         });
         assert_eq!(r.header.taxpayer.ssn, "", "the fixture captured no PII");
         assert_eq!(reason(&r), None, "…and the report still computes");
-    }
-
-    /// ★ ARCH-P6.3a Q6: a NON-CRYPTO noncash gift over the $500 Form 8283 threshold REFUSES.
-    ///
-    /// `ScheduleAInputs.charitable` accepts non-cash property classes, and those amounts reach Schedule A
-    /// line 12 — but btctax can produce no 8283 ROWS for them (it has no property details: no
-    /// description, no acquisition date, no appraiser). If such a gift pushes line 12 over $500, the
-    /// packet would attach a Form 8283 that UNDER-REPORTS its own Section A/B property list: an
-    /// incomplete required attachment, and a §170(f)(11) denial risk for the filer.
-    ///
-    /// The §3.4 conservative-omission carve-out does NOT apply, because the omission is not
-    /// taxpayer-favorable — it silently jeopardizes a deduction the filer is claiming.
-    #[test]
-    fn a_non_crypto_noncash_gift_over_the_8283_threshold_refuses() {
-        let mut r = ri();
-        r.schedule_a = Some(ScheduleAInputs {
-            charitable: vec![CharitableGift {
-                class: CharitableClass::CapGainProp30, // non-cash property — not from the ledger
-                amount: dec!(2000),
-            }],
-            ..Default::default()
-        });
-        assert_eq!(reason(&r), Some(RefuseReason::NonCryptoNoncashGift));
-
-        // …but a small one (≤ $500) needs no 8283 at all, and a CASH gift never does.
-        let mut small = ri();
-        small.schedule_a = Some(ScheduleAInputs {
-            charitable: vec![CharitableGift {
-                class: CharitableClass::CapGainProp30,
-                amount: dec!(400),
-            }],
-            ..Default::default()
-        });
-        assert_eq!(
-            reason(&small),
-            None,
-            "under the $500 threshold, no 8283 is required"
-        );
-
-        let mut cash = ri();
-        cash.schedule_a = Some(ScheduleAInputs {
-            charitable: vec![CharitableGift {
-                class: CharitableClass::Cash60,
-                amount: dec!(50000),
-            }],
-            ..Default::default()
-        });
-        assert_eq!(reason(&cash), None, "cash gifts never need a Form 8283");
     }
 
     #[test]

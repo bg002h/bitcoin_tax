@@ -1184,27 +1184,15 @@ pub fn render_dual_report(
         "\n═══ Absolute filed return (Form 1040) — tax year {year} ═══"
     );
     let _ = writeln!(s, "  Profile source: {}", provenance_label(provenance));
-    let _ = writeln!(
-        s,
-        "  Total income (1040 L9):   {}",
-        fmt_money(ar.total_income)
-    );
-    let _ = writeln!(
-        s,
-        "  Adjustments (L10):        {}",
-        fmt_money(ar.adjustments)
-    );
-    let _ = writeln!(s, "  AGI (L11):                {}", fmt_money(ar.agi));
+    let _ = writeln!(s, "  Total income (1040 L9):   {}", fmt_money(f.line9));
+    let _ = writeln!(s, "  Adjustments (L10):        {}", fmt_money(f.line10));
+    let _ = writeln!(s, "  AGI (L11):                {}", fmt_money(f.line11));
     let ded_kind = if ar.deduction_is_itemized {
         "itemized"
     } else {
         "standard"
     };
-    let _ = writeln!(
-        s,
-        "  Deduction (L12, {ded_kind}): {}",
-        fmt_money(ar.deduction)
-    );
+    let _ = writeln!(s, "  Deduction (L12, {ded_kind}): {}", fmt_money(f.line12));
     if ar.qbi_deduction > Usd::ZERO {
         let _ = writeln!(s, "  QBI deduction (L13):      {}", fmt_money(f.line13));
     }
@@ -1214,28 +1202,28 @@ pub fn render_dual_report(
         let _ = writeln!(
             s,
             "  Foreign tax credit (Sch 3 L1): {}",
-            fmt_money(ar.foreign_tax_credit)
+            fmt_money(printed.sch_3.map_or(Usd::ZERO, |s3| s3.line1))
         );
     }
     if ar.se_tax_sch2_l4 > Usd::ZERO {
         let _ = writeln!(
             s,
             "  Self-employment tax (Sch 2 L4): {}",
-            fmt_money(ar.se_tax_sch2_l4)
+            fmt_money(printed.sch_2.map_or(Usd::ZERO, |s2| s2.line4))
         );
     }
     if ar.additional_medicare.additional_medicare_tax > Usd::ZERO {
         let _ = writeln!(
             s,
             "  Additional Medicare (Form 8959 → Sch 2 L11): {}",
-            fmt_money(ar.additional_medicare.additional_medicare_tax)
+            fmt_money(printed.f8959.line18)
         );
     }
     if ar.niit.tax > Usd::ZERO {
         let _ = writeln!(
             s,
             "  Net Investment Income Tax (Form 8960 → Sch 2 L12): {}",
-            fmt_money(ar.niit.tax)
+            fmt_money(printed.f8960.map_or(Usd::ZERO, |f| f.line17))
         );
     }
     let _ = writeln!(s, "  TOTAL TAX (L24):          {}", fmt_money(f.line24));

@@ -142,6 +142,27 @@ pub fn fill_8949_parts(
     long: &PartData,
     map: &Form8949Map,
 ) -> Result<Vec<u8>, FormsError> {
+    fill_8949_parts_inner(short, long, map, None)
+}
+
+/// As [`fill_8949_parts`], with the FILER's identity written on **both pages** — the full-return path.
+/// An unnamed 8949 is not filable, and it is a TWO-page form: each page carries its own
+/// "Name(s) shown on return" + SSN header (Fable P6 r1 I3).
+pub fn fill_8949_parts_with_identity(
+    short: &PartData,
+    long: &PartData,
+    map: &Form8949Map,
+    header: &btctax_core::tax::packet::ReturnHeader,
+) -> Result<Vec<u8>, FormsError> {
+    fill_8949_parts_inner(short, long, map, Some(header))
+}
+
+fn fill_8949_parts_inner(
+    short: &PartData,
+    long: &PartData,
+    map: &Form8949Map,
+    filer: Option<&btctax_core::tax::packet::ReturnHeader>,
+) -> Result<Vec<u8>, FormsError> {
     if short.rows.len() > map.rows_per_page {
         return Err(FormsError::Overflow {
             part: "Part I",
@@ -167,7 +188,43 @@ pub fn fill_8949_parts(
     }
 
     let mut doc = pdf::load(pdf::f8949_pdf(map.year)?)?;
-    let index = pdf::index(&pdf::collect_fields(&doc)?);
+    let blank_fields = pdf::collect_fields(&doc)?;
+
+    // The filer's identity, on BOTH pages. `Geo::Check` = authorized + in the no-unmapped set, but
+    // excluded from the column-geometry oracle (an identity cell is in no data column).
+    if let Some(header) = filer {
+        for cells in [&map.identity_page1, &map.identity_page2] {
+            let cells = cells.as_ref().ok_or_else(|| {
+                FormsError::Geometry(format!(
+                    "the {} Form 8949 map has no [identity] block — a full return cannot file an \
+                     unnamed Form 8949",
+                    map.year
+                ))
+            })?;
+            let ssn = crate::cells::render_ssn(
+                &header.taxpayer.ssn,
+                blank_fields
+                    .iter()
+                    .find(|f| f.fqn == cells.ssn)
+                    .and_then(|f| f.max_len),
+            )?;
+            writes.push((
+                cells.name.clone(),
+                pdf::FieldValue::Text(header.name_line.clone()),
+            ));
+            placements.push(Placement {
+                fqn: cells.name.clone(),
+                geo: crate::verify::Geo::Check,
+            });
+            writes.push((cells.ssn.clone(), pdf::FieldValue::Text(ssn)));
+            placements.push(Placement {
+                fqn: cells.ssn.clone(),
+                geo: crate::verify::Geo::Check,
+            });
+        }
+    }
+
+    let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
     pdf::strip_nondeterminism(&mut doc);

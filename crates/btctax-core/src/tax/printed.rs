@@ -21,6 +21,7 @@
 use crate::conventions::{round_dollar, Usd};
 use crate::tax::other_taxes::{Form8959Lines, Form8960Lines};
 use crate::tax::return_1040::{AbsoluteReturn, MEDICAL_FLOOR_RATE};
+use crate::tax::types::FilingStatus;
 
 // ── Form 8949 — the printed rows (SPEC §3.1 / ARCH-P6.3a D2) ────────────────────────────────────
 
@@ -395,6 +396,10 @@ pub fn schedule_1_lines(ar: &AbsoluteReturn) -> Option<Schedule1Lines> {
 pub struct Form1040Lines {
     /// L1a / L1z — wages (Σ W-2 box 1). v1 has no other line-1 component, so 1z = 1a.
     pub line1z: Usd,
+    /// L1a — "Total amount from Form(s) W-2, box 1". ★ Its absence left the filed 1z sitting above an
+    /// EMPTY operand column: the form's own "Add lines 1a through 1h" sums blanks to 0 ≠ 1z, on the very
+    /// line the Service document-matches against your W-2s (Fable P6 r1 I1).
+    pub line1a: Usd,
     /// L2a — **tax-exempt interest** (Σ 1099-INT box 8 + 1099-DIV box 12). Changes no tax; the IRS
     /// document-matches it, and a return that omits it misstates itself (ARCH-P6.3a Q7 item 2).
     pub line2a: Usd,
@@ -474,6 +479,73 @@ pub struct Form1040Lines {
     pub digital_asset_yes: bool,
 }
 
+/// The 1040's **income block** (lines 1a–11), printed.
+///
+/// Extracted from [`form_1040_lines`] because **Schedule A line 2 cites it**: "Enter amount from Form
+/// 1040 or 1040-SR, **line 11**". Under the §3.1 citation-composition rule that is a SOURCE citation, so
+/// Schedule A must take the PRINTED L11 — not a re-rounding of the exact AGI, which can differ by
+/// dollars and, on a negative-AGI itemizer, prints 0 beside a negative 1040 L11 (Fable P6 r1 I5).
+///
+/// There is no cycle: L11 = L9 − L10 depends on Schedules B/1/D, never on Schedule A (which lands at
+/// L12). So the income block is derived first, Schedule A composes on its L11, and the rest of the 1040
+/// consumes both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Form1040Income {
+    pub line1a: Usd,
+    pub line1z: Usd,
+    pub line2a: Usd,
+    pub line2b: Usd,
+    pub line3a: Usd,
+    pub line3b: Usd,
+    pub line7: Usd,
+    pub line8: Usd,
+    pub line9: Usd,
+    pub line10: Usd,
+    pub line11: Usd,
+}
+
+/// Derive the 1040's printed income block (lines 1a–11).
+pub fn form_1040_income_lines(
+    ar: &AbsoluteReturn,
+    sch_b: Option<&ScheduleBLines>,
+    sch_1: Option<&Schedule1Lines>,
+    sch_d: &ScheduleDLines,
+) -> Form1040Income {
+    // L1a is the Σ of W-2 box 1, and L1z is "Add lines 1a through 1h" — v1 has no 1b–1h, so they are
+    // the same figure, and BOTH cells print. A filled 1z above a blank 1a does not add up.
+    let line1a = round_dollar(ar.wages);
+    let line1z = line1a;
+    let line2a = round_dollar(ar.printed_inputs.tax_exempt_interest);
+    let line2b = sch_b.map_or_else(|| round_dollar(ar.taxable_interest), |b| b.line4);
+    let line3a = round_dollar(ar.qualified_dividends);
+    let line3b = sch_b.map_or_else(|| round_dollar(ar.ordinary_dividends), |b| b.line6);
+
+    // L7 — signed, with a LEADING MINUS (not parentheses; SPEC §3.2). On a net-loss year it is the
+    // §1211(b)-LIMITED amount from Schedule D line 21, not the full loss.
+    let line7 = match sch_d.routing {
+        ScheduleDRouting::NetLoss { line21, .. } => -line21,
+        _ => sch_d.line16,
+    };
+    let line8 = sch_1.map_or(Usd::ZERO, |s| s.line10);
+    let line9 = line1z + line2b + line3b + line7 + line8; // ★ sums the PRINTED lines
+    let line10 = sch_1.map_or(Usd::ZERO, |s| s.line26);
+    let line11 = line9 - line10;
+
+    Form1040Income {
+        line1a,
+        line1z,
+        line2a,
+        line2b,
+        line3a,
+        line3b,
+        line7,
+        line8,
+        line9,
+        line10,
+        line11,
+    }
+}
+
 /// Derive the printed Form 1040 chain. Every schedule figure is taken from that schedule's **printed**
 /// chain, so the return ties out against its own attachments.
 ///
@@ -482,40 +554,32 @@ pub struct Form1040Lines {
 #[allow(clippy::too_many_arguments)]
 pub fn form_1040_lines(
     ar: &AbsoluteReturn,
-    sch_b: Option<&ScheduleBLines>,
-    sch_1: Option<&Schedule1Lines>,
+    income: &Form1040Income,
     sch_a: Option<&ScheduleALines>,
-    sch_d: &ScheduleDLines,
     sch_2: Option<&Schedule2Lines>,
     sch_3: Option<&Schedule3Lines>,
     f8959: &Form8959Lines,
     f8995: Option<&crate::tax::qbi::Form8995Lines>,
+    table: &crate::tax::tables::TaxTable,
+    status: FilingStatus,
     other_withholding: Usd,
     estimated_payments: Usd,
     digital_asset_yes: bool,
 ) -> Form1040Lines {
-    // ── Income ──────────────────────────────────────────────────────────────────────────────────
-    let line1z = round_dollar(ar.wages);
-    let line2a = round_dollar(ar.printed_inputs.tax_exempt_interest);
-    // Schedule B, when it files, IS the source of 2b and 3b — take its printed totals, not a
-    // re-rounding of the exact sums, or the 1040 and its own Schedule B differ by a dollar.
-    let line2b = sch_b.map_or_else(|| round_dollar(ar.taxable_interest), |b| b.line4);
-    let line3a = round_dollar(ar.qualified_dividends);
-    let line3b = sch_b.map_or_else(|| round_dollar(ar.ordinary_dividends), |b| b.line6);
-
-    // Line 7 — signed, with a LEADING MINUS (not parentheses; SPEC §3.2). On a net-loss year it is
-    // the §1211(b)-LIMITED amount from Schedule D line 21, not the full loss.
-    let line7 = match sch_d.routing {
-        ScheduleDRouting::NetLoss { line21, .. } => -line21,
-        _ => sch_d.line16,
-    };
-
-    let line8 = sch_1.map_or(Usd::ZERO, |s| s.line10);
-    let line9 = line1z + line2b + line3b + line7 + line8; // ★ sums the PRINTED lines
-
-    // ── Adjustments → AGI ───────────────────────────────────────────────────────────────────────
-    let line10 = sch_1.map_or(Usd::ZERO, |s| s.line26);
-    let line11 = line9 - line10;
+    // ── Income — from the printed block (Schedule A already composed on its L11). ───────────────
+    let Form1040Income {
+        line1a,
+        line1z,
+        line2a,
+        line2b,
+        line3a,
+        line3b,
+        line7,
+        line8,
+        line9,
+        line10,
+        line11,
+    } = *income;
 
     // ── Deductions → taxable income ─────────────────────────────────────────────────────────────
     let line12 = match sch_a {
@@ -527,7 +591,19 @@ pub fn form_1040_lines(
     let line15 = (line11 - line14).max(Usd::ZERO);
 
     // ── Tax → total tax ─────────────────────────────────────────────────────────────────────────
-    let line16 = round_dollar(ar.regular_tax);
+    // ★ L16 is the Tax Table / QDCGT worksheet applied to the PRINTED line 15 — NOT a re-rounding of the
+    // tax computed on the exact-cents taxable income (Fable P6 r1 I2). The Tax Table is a STEP function
+    // with $50 treads: when the exact TI and the printed L15 straddle a bin edge, the two differ by a
+    // whole bin step (up to ~$18.50 at the top rate), not by the $1 rounding residual §3.1 tolerates —
+    // and "L16 vs Table(L15)" is the single most-recomputed arithmetic on a transcribed return. The
+    // exact-cents `ar.regular_tax` remains the COMPUTED liability; only the FILED cell changes.
+    let line16 = crate::tax::method::qdcgt_line16(
+        table.ordinary_for(status),
+        table.ltcg_for(status),
+        line15,
+        line3a,
+        round_dollar(ar.net_ltcg),
+    );
     let line17 = Usd::ZERO; // Schedule 2 Part I is blank in v1 (see Schedule2Lines)
     let line18 = line16 + line17;
     let line19 = Usd::ZERO; // ★ CTC/ODC — a §3.4 conservative omission (advisory fires)
@@ -554,6 +630,7 @@ pub fn form_1040_lines(
     let line37 = (line24 - line33).max(Usd::ZERO);
 
     Form1040Lines {
+        line1a,
         line1z,
         line2a,
         line2b,
@@ -989,15 +1066,19 @@ pub struct ScheduleALines {
 /// Note the printed line 17 can differ by a dollar from `round_dollar(itemized_deduction)`: it sums
 /// the printed subtotals, each already rounded at its own line. That is the SPEC §3.1 election, and
 /// the printed figure is the one that appears on 1040 line 12.
-pub fn schedule_a_lines(ar: &AbsoluteReturn) -> Option<ScheduleALines> {
+pub fn schedule_a_lines(ar: &AbsoluteReturn, line11_1040: Usd) -> Option<ScheduleALines> {
     if !ar.deduction_is_itemized {
         return None;
     }
     let p = ar.schedule_a.as_ref()?;
 
-    // Medical — the floor is taken on the PRINTED AGI, and subtracted from the PRINTED expenses.
+    // ★ L2's own text is "Enter amount from Form 1040 or 1040-SR, **line 11**" — a SOURCE citation, so it
+    // takes the PRINTED L11 (SPEC §3.1's citation-composition rule). A re-rounding of the exact AGI can
+    // differ by dollars, and on a negative-AGI itemizer it printed 0 beside a NEGATIVE 1040 L11: two
+    // cells visibly disagreeing, with the divergence propagating into the 7.5% floor and on to L17 →
+    // 1040 L12 (Fable P6 r1 I5).
     let line1 = round_dollar(p.medical_expenses);
-    let line2 = round_dollar(p.agi);
+    let line2 = line11_1040;
     let line3 = round_dollar(MEDICAL_FLOOR_RATE * line2);
     let line4 = (line1 - line3).max(Usd::ZERO);
 
@@ -1225,6 +1306,11 @@ mod tests {
         }
     }
 
+    /// The TY2024 table the printed chain needs for line 16 (the Tax Table / QDCGT worksheet).
+    fn tt() -> crate::tax::tables::TaxTable {
+        crate::tax::testonly::ty2024_table()
+    }
+
     // ── The ARCH-P6.3a Q7 sweep: captured inputs that reached the ARITHMETIC but never the FORM ──
 
     /// A Schedule A whose SALT line 5a is the §164(b)(5) SALES-TAX election.
@@ -1260,16 +1346,17 @@ mod tests {
         let sd = schedule_d_lines(&ar, None);
         let f8959 = form_8959_lines(FilingStatus::Single, Usd::ZERO, Usd::ZERO, None);
 
+        let income = form_1040_income_lines(&ar, None, None, &sd);
         let l = form_1040_lines(
             &ar,
+            &income,
             None,
-            None,
-            None,
-            &sd,
             None,
             None,
             &f8959,
             None,
+            &tt(),
+            FilingStatus::Single,
             Usd::ZERO,
             Usd::ZERO,
             false,
@@ -1296,7 +1383,7 @@ mod tests {
         ar.itemized_deduction = Some(dec!(9000)); // SMALLER than the standard ⇒ §63(e) was elected
         ar.schedule_a = Some(sched_a_parts_sales_tax());
 
-        let a = schedule_a_lines(&ar).expect("the return itemizes");
+        let a = schedule_a_lines(&ar, round_dollar(ar.agi)).expect("the return itemizes");
         assert!(
             a.line5a_is_sales_tax,
             "the §164(b)(5) election must PRINT, not just compute"
@@ -1318,7 +1405,7 @@ mod tests {
         parts.salt_is_sales_tax = false;
         ar.schedule_a = Some(parts);
 
-        let a = schedule_a_lines(&ar).unwrap();
+        let a = schedule_a_lines(&ar, round_dollar(ar.agi)).unwrap();
         assert!(!a.line5a_is_sales_tax);
         assert!(!a.line18_elects_smaller);
     }
@@ -1427,6 +1514,112 @@ mod tests {
             line31: Usd::ZERO,
         };
         assert!(schedule_se_lines(&ar, &sch_c).is_none());
+    }
+
+    // ── Fable P6 gate review r1 — the folded findings ───────────────────────────────────────────
+
+    /// ★ **I2 (borders Critical).** The filed line 16 is the Tax Table applied to the **printed line 15**,
+    /// not a re-rounding of the tax computed on the exact-cents taxable income.
+    ///
+    /// The Tax Table is a STEP function with $50 treads. Fable's discriminating fixture: wages
+    /// $61,749.80, Single, standard deduction. The exact TI is 47,149.80 — bin [47,100–47,150). The
+    /// PRINTED L15 is 61,750 − 14,600 = **47,150**, which is the NEXT bin. A filer (or the Service)
+    /// recomputing Table(printed L15) lands a whole bin step away from Table(exact TI) — up to ~$18.50 at
+    /// the top rate, not the $1 residual §3.1 tolerates. "L16 vs Table(L15)" is the single most-recomputed
+    /// arithmetic on a transcribed return, and a mismatch is a math-error notice.
+    #[test]
+    fn form_1040_line16_is_the_tax_on_the_printed_line15_not_on_the_exact_taxable_income() {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.wages = dec!(61749.80);
+        ar.agi = dec!(61749.80);
+        ar.deduction = dec!(14600);
+        ar.total_deductions = dec!(14600);
+        ar.taxable_income = dec!(47149.80); // the EXACT TI — a different $50 bin from the printed L15
+        ar.regular_tax = crate::tax::method::qdcgt_line16(
+            tt().ordinary_for(FilingStatus::Single),
+            tt().ltcg_for(FilingStatus::Single),
+            dec!(47149.80),
+            Usd::ZERO,
+            Usd::ZERO,
+        );
+
+        let sd = schedule_d_lines(&ar, None);
+        let f8959 = form_8959_lines(FilingStatus::Single, Usd::ZERO, Usd::ZERO, None);
+        let income = form_1040_income_lines(&ar, None, None, &sd);
+        let l = form_1040_lines(
+            &ar,
+            &income,
+            None,
+            None,
+            None,
+            &f8959,
+            None,
+            &tt(),
+            FilingStatus::Single,
+            Usd::ZERO,
+            Usd::ZERO,
+            false,
+        );
+
+        assert_eq!(l.line15, dec!(47150), "the PRINTED L15 (61,750 − 14,600)");
+        let table_on_printed = crate::tax::method::qdcgt_line16(
+            tt().ordinary_for(FilingStatus::Single),
+            tt().ltcg_for(FilingStatus::Single),
+            dec!(47150),
+            Usd::ZERO,
+            Usd::ZERO,
+        );
+        assert_eq!(
+            l.line16, table_on_printed,
+            "★ the filed L16 must be what a human gets by looking up the FILED L15"
+        );
+        assert_ne!(
+            l.line16,
+            round_dollar(ar.regular_tax),
+            "…and it is NOT the tax on the exact-cents TI — the two bins differ"
+        );
+    }
+
+    /// **I1.** 1040 line 1a ("Total amount from Form(s) W-2, box 1") must print, or the filed 1z sits
+    /// above an EMPTY operand column and the form's own "Add lines 1a through 1h" sums blanks to 0 ≠ 1z.
+    #[test]
+    fn form_1040_line1a_carries_the_w2_wages_that_line1z_adds_up() {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.wages = dec!(82000.49);
+        let sd = schedule_d_lines(&ar, None);
+        let income = form_1040_income_lines(&ar, None, None, &sd);
+
+        assert_eq!(
+            income.line1a,
+            dec!(82000),
+            "Σ W-2 box 1, rounded at the line"
+        );
+        assert_eq!(
+            income.line1z, income.line1a,
+            "L1z = 'Add lines 1a through 1h' — with no 1b–1h, it IS 1a, and both cells print"
+        );
+    }
+
+    /// **I5.** Schedule A line 2's own text is "Enter amount from Form 1040 or 1040-SR, **line 11**" — a
+    /// SOURCE citation, so it takes the PRINTED L11. Re-rounding the exact AGI could differ by dollars,
+    /// and the divergence propagates into the 7.5% medical floor and on to L17 → 1040 L12.
+    #[test]
+    fn schedule_a_line2_is_the_printed_1040_line11() {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.deduction_is_itemized = true;
+        ar.itemized_deduction = Some(dec!(20000));
+        ar.standard_deduction = dec!(14600);
+        ar.schedule_a = Some(sched_a_parts_sales_tax());
+
+        // A printed L11 that deliberately differs from the parts' exact AGI.
+        let printed_l11 = dec!(50123);
+        let a = schedule_a_lines(&ar, printed_l11).unwrap();
+        assert_eq!(a.line2, printed_l11, "★ L2 IS the 1040's printed line 11");
+        assert_eq!(
+            a.line3,
+            round_dollar(MEDICAL_FLOOR_RATE * printed_l11),
+            "…and the 7.5% floor is taken on THAT figure, as the form says"
+        );
     }
 
     // ── Form 8949 printed rows (ARCH-P6.3a D2/D3) ───────────────────────────────────────────────
@@ -1746,7 +1939,8 @@ mod tests {
             dec!(2000),
             dec!(500),
         ));
-        let l = schedule_a_lines(&ar).unwrap();
+        // The printed 1040 L11 for this fixture (the parts carry the AGI; `ar.agi` is unset here).
+        let l = schedule_a_lines(&ar, round_dollar(ar.schedule_a.as_ref().unwrap().agi)).unwrap();
 
         assert_eq!(l.line1, dec!(10000));
         assert_eq!(l.line2, dec!(100000));
@@ -1784,7 +1978,7 @@ mod tests {
         let mut ar = ar_itemizing(p);
         ar.deduction_is_itemized = false; // the standard deduction was larger
         assert!(
-            schedule_a_lines(&ar).is_none(),
+            schedule_a_lines(&ar, round_dollar(ar.agi)).is_none(),
             "a Schedule A the filer did not use must not be filed"
         );
     }
@@ -1833,7 +2027,11 @@ mod tests {
                 Usd::ZERO,
             ),
         ] {
-            let l = schedule_a_lines(&ar_itemizing(p)).unwrap();
+            let l = {
+                let a = ar_itemizing(p);
+                schedule_a_lines(&a, round_dollar(a.schedule_a.as_ref().unwrap().agi))
+            }
+            .unwrap();
             assert_eq!(
                 l.line3,
                 round_dollar(MEDICAL_FLOOR_RATE * l.line2),
@@ -1876,18 +2074,21 @@ mod tests {
         }
 
         // The negative-AGI case, specifically: floor = 0 ⇒ the whole $10,000 medical is allowed.
-        let neg = schedule_a_lines(&ar_itemizing(parts(
-            dec!(10000),
-            dec!(-50000),
-            Usd::ZERO,
-            Usd::ZERO,
-            Usd::ZERO,
-            dec!(10000),
-            Usd::ZERO,
-            Usd::ZERO,
-            Usd::ZERO,
-            Usd::ZERO,
-        )))
+        let neg = {
+            let a = ar_itemizing(parts(
+                dec!(10000),
+                dec!(-50000),
+                Usd::ZERO,
+                Usd::ZERO,
+                Usd::ZERO,
+                dec!(10000),
+                Usd::ZERO,
+                Usd::ZERO,
+                Usd::ZERO,
+                Usd::ZERO,
+            ));
+            schedule_a_lines(&a, round_dollar(a.schedule_a.as_ref().unwrap().agi))
+        }
         .unwrap();
         assert_eq!(
             neg.line2,
@@ -2137,20 +2338,23 @@ mod tests {
         );
 
         let sd = schedule_d_lines(&ar, None);
-        let l = form_1040_lines(
-            &ar,
-            None,
-            None,
-            None,
-            &sd,
-            Some(&s2),
-            None,
-            &f8959,
-            None,
-            Usd::ZERO,
-            Usd::ZERO,
-            false,
-        );
+        let l = {
+            let income = form_1040_income_lines(&ar, None, None, &sd);
+            form_1040_lines(
+                &ar,
+                &income,
+                None,
+                Some(&s2),
+                None,
+                &f8959,
+                None,
+                &tt(),
+                FilingStatus::Single,
+                Usd::ZERO,
+                Usd::ZERO,
+                false,
+            )
+        };
         assert_eq!(l.line23, s2.line21, "1040 L23 = Schedule 2's PRINTED L21");
         assert_eq!(
             l.line24,
@@ -2178,20 +2382,23 @@ mod tests {
         let f8959 = form_8959_lines(FilingStatus::Single, dec!(120000), dec!(1800), None);
         let s3 = schedule_3_lines(&ar).unwrap();
         let sd = schedule_d_lines(&ar, None);
-        let l = form_1040_lines(
-            &ar,
-            None,
-            None,
-            None,
-            &sd,
-            None,
-            Some(&s3),
-            &f8959,
-            None,
-            Usd::ZERO,
-            dec!(500),
-            true,
-        );
+        let l = {
+            let income = form_1040_income_lines(&ar, None, None, &sd);
+            form_1040_lines(
+                &ar,
+                &income,
+                None,
+                None,
+                Some(&s3),
+                &f8959,
+                None,
+                &tt(),
+                FilingStatus::Single,
+                Usd::ZERO,
+                dec!(500),
+                true,
+            )
+        };
 
         assert_eq!(
             l.line9,
@@ -2280,20 +2487,23 @@ mod tests {
         );
 
         let f8959 = form_8959_lines(FilingStatus::Single, dec!(80000), Usd::ZERO, None);
-        let l = form_1040_lines(
-            &ar,
-            None,
-            None,
-            None,
-            &sd,
-            None,
-            None,
-            &f8959,
-            None,
-            Usd::ZERO,
-            Usd::ZERO,
-            true,
-        );
+        let l = {
+            let income = form_1040_income_lines(&ar, None, None, &sd);
+            form_1040_lines(
+                &ar,
+                &income,
+                None,
+                None,
+                None,
+                &f8959,
+                None,
+                &tt(),
+                FilingStatus::Single,
+                Usd::ZERO,
+                Usd::ZERO,
+                true,
+            )
+        };
         assert_eq!(
             l.line7,
             dec!(-3000),

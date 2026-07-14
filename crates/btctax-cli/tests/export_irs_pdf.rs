@@ -456,8 +456,8 @@ fn export_dispatches_a_full_return_year_to_the_full_packet() {
         .expect("a full-return year exports the full packet");
 
     assert!(
-        out.path().join("f1040.pdf").exists(),
-        "the full packet writes f1040.pdf"
+        out.path().join("00_f1040.pdf").exists(),
+        "the full packet writes sequence-prefixed files"
     );
     assert!(
         out.path().join("manifest.txt").exists(),
@@ -488,7 +488,7 @@ fn export_without_return_inputs_still_gets_the_crypto_slice() {
         "no full packet on this path"
     );
     assert!(
-        !out.path().join("f1040.pdf").exists(),
+        !out.path().join("00_f1040.pdf").exists(),
         "the full packet's 1040 must never appear on the slice path"
     );
     assert!(
@@ -536,4 +536,65 @@ fn a_full_return_without_an_ssn_refuses_and_writes_no_bytes() {
             .unwrap_or(true),
         "a refused export leaves out_dir EMPTY — never a half-written packet"
     );
+}
+
+/// ★ **I7 — the filename sets are DISJOINT, and this KAT is what makes that a guarantee rather than a
+/// claim.** It was the explicit condition on deleting the P5-C1 refusal: two runs into one directory
+/// (a 2024 full return + a 2025 crypto-only slice) must never interleave, because a CENTS Schedule SE
+/// sitting beside a WHOLE-DOLLAR 1040 is precisely the chimera return the dispatch mitigation exists to
+/// prevent. Before this fix three names collided (`f8949.pdf`, `schedule_d.pdf`, `schedule_se.pdf`);
+/// the packet now sequence-prefixes every file, which also gives the filer their stapling order.
+#[test]
+fn the_two_pipelines_write_disjoint_filename_sets() {
+    use btctax_cli::{return_inputs, Session};
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    use btctax_core::tax::types::FilingStatus;
+    use std::collections::BTreeSet;
+
+    let (_dir, vault) = make_vault(&real_events());
+    let out = tempfile::tempdir().unwrap();
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
+            first_name: "Pat".into(),
+            last_name: "Roe".into(),
+            ssn: "222-33-4444".into(),
+            ..Default::default()
+        };
+        return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+
+    // Both pipelines, into the SAME directory — the exact collision scenario.
+    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None).unwrap(); // full packet
+    let before: BTreeSet<String> = std::fs::read_dir(out.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+
+    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None).unwrap(); // crypto slice
+    let after: BTreeSet<String> = std::fs::read_dir(out.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+
+    // The slice ADDED files and OVERWROTE none of the packet's.
+    let slice_only: BTreeSet<_> = after.difference(&before).cloned().collect();
+    assert!(!slice_only.is_empty(), "the slice wrote something");
+    for name in &before {
+        assert!(
+            after.contains(name),
+            "the slice must not have removed the packet's {name}"
+        );
+    }
+    for name in &slice_only {
+        assert!(
+            !before.contains(name),
+            "★ {name} would OVERWRITE a packet file — the two name-spaces must be disjoint"
+        );
+    }
 }

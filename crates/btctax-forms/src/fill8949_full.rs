@@ -20,9 +20,10 @@
 //! CSV-identical shipped behavior, and a crypto-only filer may legitimately file in cents.
 
 use crate::error::FormsError;
-use crate::fill8949::{fill_8949_parts, PartData};
+use crate::fill8949::{fill_8949_parts_with_identity, PartData};
 use crate::map::Form8949Map;
 use btctax_core::conventions::TaxDate;
+use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::tax::printed::{Printed8949, Printed8949Row};
 use btctax_core::Usd;
 
@@ -73,9 +74,10 @@ fn printed_part_data(rows: &[Printed8949Row]) -> PartData {
 /// post-v1 item.
 pub fn fill_8949_full_with_map(
     printed: &Printed8949,
+    header: &ReturnHeader,
     map: &Form8949Map,
 ) -> Result<Vec<u8>, FormsError> {
     let short = printed_part_data(&printed.short_term);
     let long = printed_part_data(&printed.long_term);
-    fill_8949_parts(&short, &long, map)
+    fill_8949_parts_with_identity(&short, &long, map, header)
 }

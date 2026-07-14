@@ -624,12 +624,41 @@ fn run() -> Result<ExitCode, CliError> {
                  figure against the forms and instructions before you sign, and the authors accept \
                  no liability for the consequences. This is not tax advice. See `btctax limitations`."
             );
-            // Always-printed scope note: Schedule D 17-22 is not filled.
-            eprintln!(
-                "note: Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. \
-                 the line-21 loss limit) are OUT OF SCOPE and left blank — complete them by hand if \
-                 they apply."
-            );
+            // ★ The FULL-RETURN packet: list what was actually written, and DO NOT print the
+            // slice-only scope notes — on this path Schedule D Part III IS filled, and telling the
+            // filer to complete it by hand would have them hand-modify a correct filed form
+            // (Fable P6 r1 I8).
+            if !report.full_return_paths.is_empty() {
+                println!(
+                    "\nFull-return packet — {} form(s), in IRS Attachment Sequence order:",
+                    report.full_return_paths.len()
+                );
+                for p in &report.full_return_paths {
+                    println!("  {}", p.display());
+                }
+                if let Some(m) = &report.full_return_manifest {
+                    println!("  {}  ← your stapling order", m.display());
+                }
+                if report.form_8283_needs_review {
+                    eprintln!(
+                        "⚠ the packet's Form 8283 has row(s) needing manual review (donee / appraiser \
+                         declaration incomplete) — it is NOT filing-ready as written."
+                    );
+                }
+                if report.form_8283_section_b == Some(true) {
+                    eprintln!(
+                        "⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV \
+                         (appraiser) and Part V (donee acknowledgement) — obtain both before filing."
+                    );
+                }
+            } else {
+                // The crypto slice only: Schedule D 17-22 is genuinely not filled there.
+                eprintln!(
+                    "note: Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. \
+                     the line-21 loss limit) are OUT OF SCOPE and left blank — complete them by hand if \
+                     they apply."
+                );
+            }
             // [I5] loud advisory: rows that MAY belong on a separate 1099-DA-reported 8949 (Box G/H/J/K).
             if report.broker_reported_rows > 0 {
                 eprintln!(

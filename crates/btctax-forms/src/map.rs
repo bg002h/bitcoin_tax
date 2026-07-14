@@ -118,6 +118,14 @@ pub struct Form8949Map {
     pub form: String,
     /// Tax year (e.g. 2025).
     pub year: i32,
+    /// "Name(s) shown on return" + SSN — on **both pages** (the 8949 is a two-page detail attachment, and
+    /// each page carries the header). `Option`: the crypto slice never writes it, and the 2017/2025 maps
+    /// have no verified FQNs. The FULL-return filler refuses on `None` — an unnamed 8949 is not filable
+    /// (Fable P6 r1 I3).
+    #[serde(default)]
+    pub identity_page1: Option<IdentityCells>,
+    #[serde(default)]
+    pub identity_page2: Option<IdentityCells>,
     /// Rows per part per page — **map data**, not a hard-coded constant (a new form revision that
     /// changes the grid is a data-only edit).
     pub rows_per_page: usize,
@@ -314,6 +322,9 @@ pub struct Form1040Map {
     pub da_no: Option<CheckChoice>,
 
     // ── Full-return extension (P6). Absent from the 2017/2025 maps, hence optional. ───────────
+    /// L1a — Σ W-2 box 1. AMOUNT column. Full-return only.
+    #[serde(default)]
+    pub line1a: Option<MoneyCell>,
     /// L2a — tax-exempt interest. SUBLINE column. Full-return only (absent from the 2017/2025 maps).
     #[serde(default)]
     pub line2a: Option<MoneyCell>,

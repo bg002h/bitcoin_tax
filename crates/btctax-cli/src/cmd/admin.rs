@@ -471,13 +471,14 @@ fn export_full_return(
     }
 
     let details = session.donation_details()?;
-    let printed =
-        btctax_core::tax::packet::assemble_printed_return(&ri, state, &details, &ar, tax_year)
-            .map_err(|e| {
-                CliError::Usage(format!(
-                    "the {tax_year} return cannot be printed: {e} — fix the identity and re-run"
-                ))
-            })?;
+    let printed = btctax_core::tax::packet::assemble_printed_return(
+        &ri, state, &details, &ar, table, tax_year,
+    )
+    .map_err(|e| {
+        CliError::Usage(format!(
+            "the {tax_year} return cannot be printed: {e} — fix the identity and re-run"
+        ))
+    })?;
 
     // ★ ALL-OR-NOTHING: every form fills BEFORE anything is written.
     let packet = btctax_forms::fill_full_return(&printed, tax_year)?;
@@ -491,10 +492,24 @@ fn export_full_return(
         } else {
             form.bytes.clone()
         };
-        let path = out_dir.join(format!("{}.pdf", form.name));
+        // ★ The packet's filenames are SEQUENCE-PREFIXED (`00_f1040.pdf`, `12A_f8949.pdf`, …). Two
+        // reasons, and the first is a correctness guarantee: the crypto slice writes bare stems
+        // (`f8949.pdf`, `schedule_d.pdf`, `schedule_se.pdf`) and THREE of them collided with the
+        // packet's — so a full-return run and a slice run into one directory could silently interleave
+        // a cents Schedule SE with a whole-dollar 1040: the chimera return the dispatch mitigation
+        // exists to prevent (Fable P6 r1 I7). Second, the prefix IS the stapling order.
+        let path = out_dir.join(format!(
+            "{}_{}.pdf",
+            form.attachment_sequence.unwrap_or("00"),
+            form.name
+        ));
         write_bytes_owner_only(&path, &bytes)?;
         let seq = form.attachment_sequence.unwrap_or("—");
-        let _ = writeln!(manifest, "{seq:>4}  {}.pdf", form.name);
+        let _ = writeln!(
+            manifest,
+            "{seq:>4}  {}",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        );
         paths.push(path);
     }
     let manifest_path = out_dir.join("manifest.txt");
@@ -512,7 +527,10 @@ fn export_full_return(
         broker_reported_rows: 0,
         full_return_paths: paths,
         full_return_manifest: Some(manifest_path),
-        // The crypto-slice fields are all absent on this path — the two pipelines are disjoint.
+        // The crypto-slice PATHS are absent (the two pipelines are disjoint), but the 8283's loud
+        // escalations are NOT slice-specific: the packet can contain a Section-B 8283 whose appraiser
+        // declaration is unsigned, and silencing that guard on the one path that announces a "clean,
+        // filable" packet would be a fail-open (Fable P6 r1 I8b).
         f8949_path: None,
         schedule_d_path: None,
         schedule_se_path: None,
@@ -520,8 +538,16 @@ fn export_full_return(
         se_addl_medicare: None,
         se_income_without_profile: false,
         form_8283_path: None,
-        form_8283_needs_review: false,
-        form_8283_section_b: None,
+        form_8283_needs_review: printed
+            .forms
+            .f8283
+            .as_ref()
+            .is_some_and(|r| r.rows().iter().any(|row| row.needs_review)),
+        form_8283_section_b: printed.forms.f8283.as_ref().map(|r| {
+            r.rows()
+                .iter()
+                .any(|row| row.section == Some(btctax_core::Form8283Section::B))
+        }),
         form_1040_path: None,
         form_1040_filled_7a: false,
         form_1040_loss: false,

@@ -105,7 +105,10 @@ pub fn fill_form_1040_full_with_map(
     )?;
 
     // ── Page 1, AMOUNT column, top to bottom. Line 7 carries a LEADING MINUS on a loss year. ────
-    let p1: [(&MoneyCell, Usd); 12] = [
+    let p1: [(&MoneyCell, Usd); 13] = [
+        // ★ 1a must print BEFORE 1z — the form says "Add lines 1a through 1h", and a filled 1z above a
+        // blank 1a does not add up (Fable P6 r1 I1).
+        (need(&map.line1a, "line1a", y)?, lines.line1a),
         (need(&map.line1z, "line1z", y)?, lines.line1z),
         (need(&map.line2b, "line2b", y)?, lines.line2b),
         (need(&map.line3b, "line3b", y)?, lines.line3b),

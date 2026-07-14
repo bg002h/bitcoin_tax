@@ -127,7 +127,11 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<Vec<NamedForm>,
             crate::fill_schedule_d_full(sch_d, header, year)?,
         );
         if let Some(p) = f8949 {
-            push("f8949", Some("12A"), crate::fill_8949_full(p, year)?);
+            push(
+                "f8949",
+                Some("12A"),
+                crate::fill_8949_full(p, header, year)?,
+            );
         }
     }
     if let Some(l) = sch_se {

@@ -277,6 +277,22 @@ pub fn fill_schedule_d_full_with_map(
         &header.taxpayer.ssn,
         &blank_fields,
     )?;
+    // ★ The QOF question — "Did you dispose of any investment(s) in a qualified opportunity fund…?" The
+    // crypto slice has always answered No; the full path was leaving a MANDATORY header question blank on
+    // identical ledger knowledge (bitcoin-only, no QOF). Fable P6 r1 I4.
+    if let Some(qof_no) = &map.qof_no {
+        writes.push((
+            qof_no.field.clone(),
+            pdf::FieldValue::Check {
+                on: qof_no.on.clone(),
+            },
+        ));
+        placements.push(FlatPlacement::check(
+            qof_no.field.clone(),
+            crate::cells::page_of(&qof_no.field),
+        ));
+    }
+
     let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;

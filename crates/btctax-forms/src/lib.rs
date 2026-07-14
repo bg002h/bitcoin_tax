@@ -276,10 +276,11 @@ pub fn fill_form_8283_full(
 /// printed (d) − (e). Schedule D lines 3/10 ARE this form's printed column totals.
 pub fn fill_8949_full(
     printed: &btctax_core::tax::printed::Printed8949,
+    header: &btctax_core::tax::packet::ReturnHeader,
     year: i32,
 ) -> Result<Vec<u8>, FormsError> {
     let map = Form8949Map::for_year(year)?;
-    fill8949_full::fill_8949_full_with_map(printed, &map)
+    fill8949_full::fill_8949_full_with_map(printed, header, &map)
 }
 
 /// Fill the **full-return Schedule SE** for `year` from the core-derived printed chain

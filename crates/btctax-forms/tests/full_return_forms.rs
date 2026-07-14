@@ -1282,6 +1282,7 @@ fn schedule_d_full_refuses_a_negative_in_a_parenthesized_cell() {
 
 fn f1040() -> Form1040Lines {
     Form1040Lines {
+        line1a: dec!(120000),
         line2a: dec!(1234),
         line1z: dec!(120000),
         line2b: dec!(2000),
@@ -1944,7 +1945,7 @@ fn schedule_d_line3_cell_text_equals_the_8949s_printed_column_total() {
     );
 
     // Fill the 8949…
-    let pdf_8949 = btctax_forms::fill_8949_full(&printed, 2024).unwrap();
+    let pdf_8949 = btctax_forms::fill_8949_full(&printed, &kitchen_sink_header(), 2024).unwrap();
     let map_8949 = btctax_forms::Form8949Map::ty2024();
     let part1 = map_8949
         .parts
@@ -2052,8 +2053,15 @@ fn the_packet_is_all_or_nothing_when_a_member_filler_refuses() {
         .collect();
 
     let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-    let pr = assemble_printed_return(&ri, &state, &std::collections::BTreeMap::new(), &ar, 2024)
-        .unwrap();
+    let pr = assemble_printed_return(
+        &ri,
+        &state,
+        &std::collections::BTreeMap::new(),
+        &ar,
+        &ty2024_table(),
+        2024,
+    )
+    .unwrap();
 
     let err = btctax_forms::fill_full_return(&pr, 2024)
         .expect_err("an overflowing Schedule B must refuse the WHOLE packet");
@@ -2081,8 +2089,15 @@ fn the_packet_emits_every_required_form_in_attachment_sequence_order() {
 
     let (ri, state) = kitchen_sink_household();
     let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-    let pr = assemble_printed_return(&ri, &state, &std::collections::BTreeMap::new(), &ar, 2024)
-        .unwrap();
+    let pr = assemble_printed_return(
+        &ri,
+        &state,
+        &std::collections::BTreeMap::new(),
+        &ar,
+        &ty2024_table(),
+        2024,
+    )
+    .unwrap();
 
     let packet = btctax_forms::fill_full_return(&pr, 2024).unwrap();
     let names: Vec<&str> = packet.iter().map(|f| f.name.as_str()).collect();
@@ -2121,8 +2136,15 @@ fn a_w2_only_household_files_a_1040_and_nothing_else() {
 
     let (ri, state) = w2_only_household();
     let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-    let pr = assemble_printed_return(&ri, &state, &std::collections::BTreeMap::new(), &ar, 2024)
-        .unwrap();
+    let pr = assemble_printed_return(
+        &ri,
+        &state,
+        &std::collections::BTreeMap::new(),
+        &ar,
+        &ty2024_table(),
+        2024,
+    )
+    .unwrap();
 
     let packet = btctax_forms::fill_full_return(&pr, 2024).unwrap();
     let names: Vec<&str> = packet.iter().map(|f| f.name.as_str()).collect();
@@ -2143,8 +2165,14 @@ fn the_reports_amount_owed_is_the_figure_printed_on_the_filed_1040() {
 
     let (ri, state) = kitchen_sink_household();
     let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-    let printed =
-        assemble_printed_forms(&ri, &state, &std::collections::BTreeMap::new(), &ar, 2024);
+    let printed = assemble_printed_forms(
+        &ri,
+        &state,
+        &std::collections::BTreeMap::new(),
+        &ar,
+        &ty2024_table(),
+        2024,
+    );
 
     // The figure the report prints (it renders `printed.f1040`, not `ar`).
     let reported = printed.f1040.line37;
@@ -2173,5 +2201,106 @@ fn the_reports_amount_owed_is_the_figure_printed_on_the_filed_1040() {
     assert!(
         !cell.contains('.'),
         "the filed figure carries no cents: {cell:?}"
+    );
+}
+
+// ── Fable P6 gate review r1 — the folded findings, pinned ────────────────────────────────────────
+
+/// **I1.** 1040 line 1a prints. Without it the filed 1z sat above an EMPTY operand column, and the
+/// form's own "Add lines 1a through 1h" summed blanks to 0 ≠ 1z — on the line the Service
+/// document-matches against your W-2s.
+#[test]
+fn the_1040_prints_line_1a_under_the_1z_that_adds_it_up() {
+    let mut lines = f1040();
+    lines.line1a = dec!(120000);
+    lines.line1z = dec!(120000);
+    let pdf =
+        btctax_forms::fill_form_1040_full(&lines, &kitchen_sink_header(), FilingStatus::Mfj, 2024)
+            .unwrap();
+
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_32[0]").as_deref(),
+        Some("120000"),
+        "L1a — Σ W-2 box 1"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_41[0]").as_deref(),
+        Some("120000"),
+        "L1z — 'Add lines 1a through 1h', which now has an operand to add"
+    );
+}
+
+/// **I3.** The packet's Form 8949 is NAMED — on BOTH pages. It is a two-page detail attachment and each
+/// page carries its own "Name(s) shown on return" + SSN header. An unnamed 8949 is not filable.
+#[test]
+fn the_full_return_8949_is_named_on_both_pages() {
+    use btctax_core::forms::{Form8949Box, Form8949Part, Form8949Row};
+    use btctax_core::identity::WalletId;
+    use btctax_core::tax::printed::form_8949_printed;
+
+    let row = |part| Form8949Row {
+        part,
+        box_: if part == Form8949Part::ShortTerm {
+            Form8949Box::C
+        } else {
+            Form8949Box::F
+        },
+        box_needs_review: false,
+        description: "1.00000000 BTC".into(),
+        date_acquired: time::macros::date!(2020 - 01 - 02),
+        date_sold: time::macros::date!(2024 - 05 - 01),
+        proceeds: dec!(30000),
+        cost_basis: dec!(10000),
+        adjustment_code: String::new(),
+        adjustment_amount: Usd::ZERO,
+        gain: dec!(20000),
+        wallet: WalletId::SelfCustody { label: "w".into() },
+        disposition_kind: btctax_core::event::DisposeKind::Sell,
+    };
+    // Both parts, so both pages of the form are in play.
+    let printed =
+        form_8949_printed(&[row(Form8949Part::ShortTerm), row(Form8949Part::LongTerm)]).unwrap();
+    let pdf = btctax_forms::fill_8949_full(&printed, &kitchen_sink_header(), 2024).unwrap();
+
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_1[0]").as_deref(),
+        Some("John Doe & Jane Doe"),
+        "page 1 name"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_2[0]").as_deref(),
+        Some("123-45-6789"),
+        "page 1 SSN (/MaxLen 11 ⇒ hyphenated)"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page2[0].f2_1[0]").as_deref(),
+        Some("John Doe & Jane Doe"),
+        "★ page 2 carries its OWN header — this is the page that was missed"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page2[0].f2_2[0]").as_deref(),
+        Some("123-45-6789"),
+        "page 2 SSN"
+    );
+}
+
+/// **I4.** The full-return Schedule D answers the QOF question — "Did you dispose of any investment(s)
+/// in a qualified opportunity fund…?" — exactly as the crypto slice always has. A mandatory header
+/// question left blank on identical ledger knowledge (bitcoin-only, no QOF) is an incomplete form.
+#[test]
+fn the_full_return_schedule_d_answers_the_qof_question() {
+    let lines = sd(
+        dec!(5000),
+        dec!(20000),
+        Usd::ZERO,
+        Usd::ZERO,
+        Usd::ZERO,
+        ScheduleDRouting::BothGains,
+    );
+    let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024).unwrap();
+
+    assert!(
+        box_on(&pdf, "topmostSubform[0].Page1[0].c1_1[1]"),
+        "the QOF question is answered NO, as the slice answers it"
     );
 }

@@ -52,3 +52,13 @@ rows = [
   ["topmostSubform[0].Page2[0].Table_Line1[0].Row14[0].f2_107[0]", "topmostSubform[0].Page2[0].Table_Line1[0].Row14[0].f2_108[0]", "topmostSubform[0].Page2[0].Table_Line1[0].Row14[0].f2_109[0]", "topmostSubform[0].Page2[0].Table_Line1[0].Row14[0].f2_110[0]", "topmostSubform[0].Page2[0].Table_Line1[0].Row14[0].f2_111[0]", "topmostSubform[0].Page2[0].Table_Line1[0].Row14[0].f2_112[0]", "topmostSubform[0].Page2[0].Table_Line1[0].Row14[0].f2_113[0]", "topmostSubform[0].Page2[0].Table_Line1[0].Row14[0].f2_114[0]"],
 ]
 
+# ── Identity (P6 r1 I3). The 8949 is a TWO-PAGE detail attachment and each page has its own
+#    "Name(s) shown on return" + SSN header. Both /MaxLen 11 ⇒ hyphenated. The crypto slice writes
+#    neither; the full-return packet must write both, or it staples an unnamed form to the return.
+[identity_page1]
+name = "topmostSubform[0].Page1[0].f1_1[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
+
+[identity_page2]
+name = "topmostSubform[0].Page2[0].f2_1[0]"
+ssn  = "topmostSubform[0].Page2[0].f2_2[0]"

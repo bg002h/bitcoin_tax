@@ -41,7 +41,12 @@ da_no = { field = "topmostSubform[0].Page1[0].c1_5[1]", on = "2" }
 #    which is why the filler asserts BOTH the fully-qualified name and the on-state.
 
 # ── Page 1: income → taxable income ────────────────────────────────────────────────────────────
-line1z = "topmostSubform[0].Page1[0].f1_41[0]"                              # wages (Σ W-2 box 1)   AMOUNT
+# ★ L1a — "Total amount from Form(s) W-2, box 1". Correlated by counting the AMOUNT-column boxes down
+#   from 1a: f1_32=1a, f1_33=1b … f1_39=1h, f1_40=1i (the MID-column combat-pay election), f1_41=1z.
+#   Without it the filed 1z sat above an EMPTY operand column and "Add lines 1a through 1h" summed
+#   blanks to 0 ≠ 1z — on the line the Service document-matches against your W-2s (Fable P6 r1 I1).
+line1a = "topmostSubform[0].Page1[0].f1_32[0]"                              # Σ W-2 box 1           AMOUNT
+line1z = "topmostSubform[0].Page1[0].f1_41[0]"                              # add 1a–1h             AMOUNT
 # L2a — the SUBLINE column at the same printed row as 2b (f1_42 sits at x≈252-323, y=234-246; f1_43 is
 # the AMOUNT cell on that row). Anchored by the identical 3a/3b pair one row below (f1_44 / f1_45).
 line2a = "topmostSubform[0].Page1[0].f1_42[0]"                              # tax-exempt interest   SUBLINE

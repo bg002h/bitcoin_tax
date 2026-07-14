@@ -19,15 +19,16 @@ use crate::identity::EventId;
 use crate::state::LedgerState;
 use crate::tax::other_taxes::{form_8959_lines, form_8960_lines, Form8959Lines, Form8960Lines};
 use crate::tax::printed::{
-    form_1040_lines, form_8949_printed, schedule_1_lines, schedule_2_lines, schedule_3_lines,
-    schedule_a_lines, schedule_b_lines, schedule_c_lines, schedule_d_lines, schedule_se_lines,
-    Form1040Lines, Printed8949, Schedule1Lines, Schedule2Lines, Schedule3Lines, ScheduleALines,
-    ScheduleBLines, ScheduleCLines, ScheduleDLines, ScheduleSeLines,
+    form_1040_income_lines, form_1040_lines, form_8949_printed, schedule_1_lines, schedule_2_lines,
+    schedule_3_lines, schedule_a_lines, schedule_b_lines, schedule_c_lines, schedule_d_lines,
+    schedule_se_lines, Form1040Lines, Printed8949, Schedule1Lines, Schedule2Lines, Schedule3Lines,
+    ScheduleALines, ScheduleBLines, ScheduleCLines, ScheduleDLines, ScheduleSeLines,
 };
 use crate::tax::printed::{form_8283_printed, Printed8283Rows, FORM_8283_THRESHOLD};
 use crate::tax::qbi::{form_8995_lines, Form8995Lines};
 use crate::tax::return_1040::{is_aged, AbsoluteReturn};
 use crate::tax::return_inputs::{Owner, Person, ReturnInputs};
+use crate::tax::tables::TaxTable;
 use crate::tax::types::FilingStatus;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -399,12 +400,13 @@ pub fn assemble_printed_return(
     state: &LedgerState,
     donation_details: &BTreeMap<EventId, DonationDetails>,
     ar: &AbsoluteReturn,
+    table: &TaxTable,
     year: i32,
 ) -> Result<PrintedReturn, SsnError> {
     Ok(PrintedReturn {
         header: ReturnHeader::build(ri, year)?,
         filing_status: ri.filing_status,
-        forms: assemble_printed_forms(ri, state, donation_details, ar, year),
+        forms: assemble_printed_forms(ri, state, donation_details, ar, table, year),
     })
 }
 
@@ -419,6 +421,7 @@ pub fn assemble_printed_forms(
     state: &LedgerState,
     donation_details: &BTreeMap<EventId, DonationDetails>,
     ar: &AbsoluteReturn,
+    table: &TaxTable,
     year: i32,
 ) -> PrintedForms {
     let status = ri.filing_status;
@@ -450,11 +453,15 @@ pub fn assemble_printed_forms(
         pi.qbi_net_capital_gain,
     );
 
-    let sch_a = schedule_a_lines(ar);
     let sch_b = schedule_b_lines(ri);
     let sch_c = schedule_c_lines(ar);
     let sch_d = schedule_d_lines(ar, f8949.as_ref());
     let sch_1 = schedule_1_lines(ar);
+
+    // ★ The income block FIRST: Schedule A line 2 cites the 1040's printed line 11, so L11 must exist
+    // before Schedule A does. No cycle — L11 depends on Schedules B/1/D, never on Schedule A (L12).
+    let income = form_1040_income_lines(ar, sch_b.as_ref(), sch_1.as_ref(), &sch_d);
+    let sch_a = schedule_a_lines(ar, income.line11);
     // Schedule SE is upstream of Schedule 2: L4 IS its printed line 12.
     let sch_se = sch_c.as_ref().and_then(|c| schedule_se_lines(ar, c));
     let sch_2 = schedule_2_lines(sch_se.as_ref(), &f8959, f8960.as_ref());
@@ -469,14 +476,14 @@ pub fn assemble_printed_forms(
 
     let f1040 = form_1040_lines(
         ar,
-        sch_b.as_ref(),
-        sch_1.as_ref(),
+        &income,
         sch_a.as_ref(),
-        &sch_d,
         sch_2.as_ref(),
         sch_3.as_ref(),
         &f8959,
         f8995.as_ref(),
+        table,
+        status,
         ri.payments.other_withholding,
         ri.payments.estimated_tax_payments,
         pi.digital_asset_activity,
@@ -773,7 +780,8 @@ mod tests {
     fn the_assembled_packet_ties_the_1040_to_its_attachments() {
         let (ri, state) = kitchen_sink_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, 2024).unwrap();
+        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &ty2024_table(), 2024)
+            .unwrap();
 
         let sch_1 = pr
             .forms
@@ -884,7 +892,8 @@ mod tests {
     fn the_packet_omits_every_form_that_is_not_required() {
         let (ri, state) = w2_only_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, 2024).unwrap();
+        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &ty2024_table(), 2024)
+            .unwrap();
 
         assert!(
             pr.forms.sch_1.is_none(),
@@ -916,7 +925,8 @@ mod tests {
     fn the_printed_8959_reads_the_same_box5_sum_the_computed_8959_used() {
         let (ri, state) = kitchen_sink_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, 2024).unwrap();
+        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &ty2024_table(), 2024)
+            .unwrap();
 
         let box5_sum: crate::conventions::Usd = ri.w2s.iter().map(|w| w.box5_medicare_wages).sum();
         assert_eq!(ar.printed_inputs.medicare_wages, box5_sum);

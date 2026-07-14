@@ -66,8 +66,10 @@ Additional Medicare Tax, Parts I (wages), II (SE) and V (withholding).
 - **The packet is ALL-OR-NOTHING.** If any form cannot be filled correctly, **nothing is written** — you never
   find a half-packet on disk. A 1040 whose line 2b cites a Schedule B that is not attached is a wrong return.
 - **A year with no full-return inputs** still gets the **crypto slice** (Form 8949 + Schedule D from the
-  ledger's disposals, Schedule SE, Form 8283, and the 1040's capital-gain cluster). The two write different
-  filenames on purpose, so two runs' artifacts can never be shuffled together into a return that never existed.
+  ledger's disposals, Schedule SE, Form 8283, and the 1040's capital-gain cluster). The packet's files are
+  **sequence-prefixed** (`00_f1040.pdf`, `01_f1040s1.pdf`, … `12A_f8949.pdf`) and the slice's are not, so the
+  two name-spaces are disjoint: running both into one directory cannot shuffle a cents form from one into the
+  whole-dollar packet of the other. A KAT asserts the disjointness — it is a guarantee, not a claim.
 
 **Whole dollars, and why the report agrees with the PDF.** The filed packet takes the IRS's round-all-amounts
 election (2024 i1040 p. 23): every printed line is rounded at the line, and every printed total sums the

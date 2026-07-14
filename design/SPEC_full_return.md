@@ -137,7 +137,18 @@ pseudo-reconcile, existing crypto tests. Old hand-entered scalars remain the **r
   Sch SE's printed L12; Sch 1 L15 ← Sch SE's printed L13; 8959 L8 ← Sch SE's printed L6; Sch 2 L11 ← the
   8959's printed L18; Sch 2 L12 ← the 8960's printed L17; 1040 L2b/L3b ← Sch B's printed L4/L6; SE L2 ← Sch
   C's printed L31; 1040 L8/L10 ← Sch 1's printed L10/L26; 1040 L12 ← Sch A's printed L17; 1040 L13 ← the
-  8995's printed L15; 1040 L23 ← Sch 2's printed L21; 1040 L31 ← Sch 3's printed L15.
+  8995's printed L15; 1040 L23 ← Sch 2's printed L21; 1040 L31 ← Sch 3's printed L15;
+  **[ADDED 2026-07-13, Fable P6 r1 I5] Sch A L2 ← the 1040's printed L11** ("Enter amount from Form 1040 or
+  1040-SR, line 11" is a SOURCE citation on its face; the closed list had omitted it, and a re-rounded exact
+  AGI printed 0 beside a NEGATIVE 1040 L11 on a negative-AGI itemizer).
+
+- **[AMENDED 2026-07-13, Fable P6 r1 I2] 1040 L16 is the Tax Table / QDCGT worksheet applied to the PRINTED
+  L15** — not a re-rounding of the tax computed on the exact-cents taxable income. The rounding residual this
+  spec tolerates is the **$1 class** that a multiply- or add-line rounding produces (Sch SE L13, 8959 L7). The
+  Tax Table is a **STEP function with $50 treads**: when the exact TI and the printed L15 fall in different
+  bins, the filed L16 differs from `Table(filed L15)` by a whole bin step (up to ~$18.50 at the top rate).
+  "L16 vs Table(L15)" is the single most-recomputed arithmetic on a transcribed return, and a mismatch is a
+  math-error notice. The exact-cents figure remains the COMPUTED liability; only the filed cell is composed.
   A line that merely **REQUIRES an attachment** does NOT re-derive from it — Sch A L12 ("You must attach Form
   8283 if over $500") keeps its own value, because Form 8283 has no grand-total line and the §170(b) ceilings
   legitimately make L12 smaller than the sum of the 8283's rows. Per Fable ARCH-P6.3a D3/D6/Q6.
