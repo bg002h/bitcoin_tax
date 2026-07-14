@@ -1,0 +1,203 @@
+{
+  "_provenance": {
+    "oracle": "tenforty (wraps Open Tax Solver) \u2014 an INDEPENDENT implementation",
+    "oracle_version": "2025.10",
+    "tax_year": 2024,
+    "generated": "2026-07-13",
+    "generator": "scripts/oracle/gen_goldens.py",
+    "licensing": "OTS is GPL-2.0 and INCOMPATIBLE with our MIT OR Unlicense. Used OBSERVE-ONLY: we run it and compare numbers. No source is read, copied, linked, vendored or distributed; only its computed FIGURES land here, and figures are facts, not copyrightable expression.",
+    "why_baked": "btctax is offline-first with a network-free CI. Baking the oracle's answers keeps the suite hermetic; re-run the generator when the matrix changes.",
+    "not_covered": "The oracle models CTC/ODC and EIC; btctax conservatively OMITS both (\u00a73.4), so every household here has NO dependents and total_tax is directly comparable."
+  },
+  "households": [
+    {
+      "name": "single_w2_only_standard",
+      "why": "the floor case \u2014 one W-2, standard deduction, no crypto at all",
+      "inputs": {
+        "filing_status": "Single",
+        "w2_income": 62000
+      },
+      "expected": {
+        "federal_adjusted_gross_income": 62000.0,
+        "federal_taxable_income": 47400.0,
+        "federal_income_tax": 5487.0,
+        "federal_se_tax": 0.0,
+        "federal_niit": 0.0,
+        "federal_additional_medicare_tax": 0.0,
+        "federal_total_tax": 5487.0
+      }
+    },
+    {
+      "name": "single_w2_plus_crypto_ltcg",
+      "why": "the core btctax case: wages + a long-term crypto gain (Sch D \u2192 1040 L7)",
+      "inputs": {
+        "filing_status": "Single",
+        "w2_income": 62000,
+        "long_term_capital_gains": 20000
+      },
+      "expected": {
+        "federal_adjusted_gross_income": 82000.0,
+        "federal_taxable_income": 67400.0,
+        "federal_income_tax": 8487.0,
+        "federal_se_tax": 0.0,
+        "federal_niit": 0.0,
+        "federal_additional_medicare_tax": 0.0,
+        "federal_total_tax": 8487.0
+      }
+    },
+    {
+      "name": "single_qdcgt_both_slices",
+      "why": "the QDCGT worksheet with BOTH preferential slices \u2014 qualified dividends AND LTCG",
+      "inputs": {
+        "filing_status": "Single",
+        "w2_income": 90000,
+        "qualified_dividends": 8000,
+        "ordinary_dividends": 10000,
+        "taxable_interest": 2000,
+        "long_term_capital_gains": 25000
+      },
+      "expected": {
+        "federal_adjusted_gross_income": 127000.0,
+        "federal_taxable_income": 112400.0,
+        "federal_income_tax": 17477.0,
+        "federal_se_tax": 0.0,
+        "federal_niit": 0.0,
+        "federal_additional_medicare_tax": 0.0,
+        "federal_total_tax": 17477.0
+      }
+    },
+    {
+      "name": "single_short_term_crypto_gain",
+      "why": "a SHORT-term crypto gain \u2014 ordinary rates, no preferential slice",
+      "inputs": {
+        "filing_status": "Single",
+        "w2_income": 55000,
+        "short_term_capital_gains": 12000
+      },
+      "expected": {
+        "federal_adjusted_gross_income": 67000.0,
+        "federal_taxable_income": 52400.0,
+        "federal_income_tax": 6587.0,
+        "federal_se_tax": 0.0,
+        "federal_niit": 0.0,
+        "federal_additional_medicare_tax": 0.0,
+        "federal_total_tax": 6587.0
+      }
+    },
+    {
+      "name": "single_capital_loss_capped",
+      "why": "\u00a71211(b): a big net capital loss is capped at $3,000 against ordinary income",
+      "inputs": {
+        "filing_status": "Single",
+        "w2_income": 70000,
+        "short_term_capital_gains": -18000
+      },
+      "expected": {
+        "federal_adjusted_gross_income": 67000.0,
+        "federal_taxable_income": 52400.0,
+        "federal_income_tax": 6587.0,
+        "federal_se_tax": 0.0,
+        "federal_niit": 0.0,
+        "federal_additional_medicare_tax": 0.0,
+        "federal_total_tax": 6587.0
+      }
+    },
+    {
+      "name": "mfj_two_w2_standard",
+      "why": "MFJ, multi-W-2, standard deduction \u2014 the common household",
+      "inputs": {
+        "filing_status": "Married/Joint",
+        "w2_income": 185000,
+        "taxable_interest": 1200
+      },
+      "expected": {
+        "federal_adjusted_gross_income": 186200.0,
+        "federal_taxable_income": 157000.0,
+        "federal_income_tax": 24646.0,
+        "federal_se_tax": 0.0,
+        "federal_niit": 0.0,
+        "federal_additional_medicare_tax": 0.0,
+        "federal_total_tax": 24646.0
+      }
+    },
+    {
+      "name": "mfj_itemized_over_100k",
+      "why": "MFJ, ITEMIZED (over the $29,200 standard), over $100k \u2014 the Schedule A path",
+      "inputs": {
+        "filing_status": "Married/Joint",
+        "w2_income": 240000,
+        "qualified_dividends": 5000,
+        "ordinary_dividends": 6000,
+        "long_term_capital_gains": 30000,
+        "standard_or_itemized": "Itemized",
+        "itemized_deductions": 41000
+      },
+      "expected": {
+        "federal_adjusted_gross_income": 276000.0,
+        "federal_taxable_income": 235000.0,
+        "federal_income_tax": 39356.0,
+        "federal_se_tax": 0.0,
+        "federal_niit": 988.0,
+        "federal_additional_medicare_tax": 0.0,
+        "federal_total_tax": 40344.0
+      }
+    },
+    {
+      "name": "mfj_high_income_niit_and_addl_medicare",
+      "why": "over the $250k MFJ thresholds \u2014 Form 8960 NIIT *and* Form 8959 Additional Medicare",
+      "inputs": {
+        "filing_status": "Married/Joint",
+        "w2_income": 300000,
+        "taxable_interest": 5000,
+        "ordinary_dividends": 12000,
+        "qualified_dividends": 9000,
+        "long_term_capital_gains": 60000
+      },
+      "expected": {
+        "federal_adjusted_gross_income": 377000.0,
+        "federal_taxable_income": 347800.0,
+        "federal_income_tax": 63347.0,
+        "federal_se_tax": 0.0,
+        "federal_niit": 2926.0,
+        "federal_additional_medicare_tax": 450.0,
+        "federal_total_tax": 66723.0
+      }
+    },
+    {
+      "name": "single_crypto_business_se",
+      "why": "crypto MINING as a trade or business: Schedule C \u2192 Schedule SE (deep/02 Ex.2 shape)",
+      "inputs": {
+        "filing_status": "Single",
+        "w2_income": 40000,
+        "self_employment_income": 60000
+      },
+      "expected": {
+        "federal_adjusted_gross_income": 95761.14,
+        "federal_taxable_income": 81161.14,
+        "federal_income_tax": 12912.0,
+        "federal_se_tax": 8477.73,
+        "federal_niit": 0.0,
+        "federal_additional_medicare_tax": 0.0,
+        "federal_total_tax": 21389.73
+      }
+    },
+    {
+      "name": "mfj_se_over_the_addl_medicare_threshold",
+      "why": "SE income pushing the household over $250k \u2014 8959 Part II (the SE leg) engages",
+      "inputs": {
+        "filing_status": "Married/Joint",
+        "w2_income": 220000,
+        "self_employment_income": 80000
+      },
+      "expected": {
+        "federal_adjusted_gross_income": 294348.18,
+        "federal_taxable_income": 265148.18,
+        "federal_income_tax": 49720.560000000005,
+        "federal_se_tax": 11303.64,
+        "federal_niit": 0.0,
+        "federal_additional_medicare_tax": 394.92,
+        "federal_total_tax": 61419.12
+      }
+    }
+  ]
+}
