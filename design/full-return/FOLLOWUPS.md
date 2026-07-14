@@ -325,16 +325,25 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
     already-rounded operands, and comments: *"We're intentionally summing rounded numbers because that
     is what Schedule B requires."* Its own fixture diverges from round-the-total by **$7**, and the IRS
     prints the cross-footed figure.
-  - **★ The exposure INVERTS.** IRM 3.11.3.4.3 tells IRS clerks to "use only dollar amounts when
-    computing amounts on forms or schedules", and IRM 3.12.3.28.11.11 assigns **TPNC 282** for a "math
-    error adding Total Tax on line 24". The IRS recomputes **Σround** from the transcribed whole-dollar
-    lines — so btctax reproduces its arithmetic exactly and **cannot** draw that notice, while a
-    round-the-total return is off by $1 against it **by construction**.
+  - **The IRM — partial, and I got this WRONG at first.** It confirms the whole-dollar regime for lines
+    **1–23** ("All lines on Form 1040 are edited in dollars only except lines 24 through 38"), which
+    genuinely supports cross-footing across most of the return. But it is **adverse on line 24**, which
+    IRM 3.11.3.14.2.28 treats as a **dollars-and-cents** line. My first write-up claimed the IRM
+    "inverted the exposure" in btctax's favour — **false, and false in the direction that flattered us.**
+  - **★ And the $1 is not an exposure in EITHER direction.** IRM 3.12.3.31.15.5: where a filer's rounding
+    differs, "**follow the taxpayer's intent**". The math-error tolerance is redacted in the public IRM.
+    Neither btctax nor OTS is at risk. We are right on the merits, not rescued by a penalty.
 
   Standing rule, now stated properly in SPEC §3.1's terms: **round at the point of REPORTING.** An
   amount printed on a line is rounded; a line summing other printed lines sums the rounded values.
   Amounts that appear nowhere on the return (the W-2 box-2 figures behind line 25a) are carried at exact
   cents and rounded once, where they first surface. btctax already does exactly this.
+
+  ⚠️ **The case is SUFFICIENT, not DECISIVE, and the justification was wrong THREE TIMES** (instructions
+  cited backwards → over-corrected into "we depart" → a false IRM inversion in our own favour). Each was
+  caught by an independent reviewer. The evidence doc keeps the counter-arguments and the sourcing
+  caveats (the MeF XSD is from public mirrors — the IRS gates schema distribution). If you are tempted to
+  restate this argument more strongly than the doc does: don't.
 
 - **[✅ DONE — the answer is NO] p7-ats-scenario-2 — the IRS scenario is NOT a golden return.**
   The plan's P7 task said "ingest IRS ATS Scenario 2 with a partial-line diff". It cannot be done, and

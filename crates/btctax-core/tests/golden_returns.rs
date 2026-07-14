@@ -142,43 +142,41 @@ const DECLARED_DIVERGENCES: &[Divergence] = &[
         outlier_alt: None,
         why: "Tax Table bin midpoint vs the exact rate schedule — see above.",
     },
-    // ── CROSS-FOOTING: Σround ≠ roundΣ. btctax is RIGHT, and OTS is the outlier. ──
+    // ── CROSS-FOOTING: Σround ≠ roundΣ. btctax is right; the case is SUFFICIENT, not decisive. ──
     //
-    //    This `why` has been WRONG TWICE. v1 cited the 1040 instructions as endorsing us — they say the
-    //    opposite, and the reviewer caught it. v2 over-corrected into "we knowingly depart, and it might
-    //    understate tax". Both were reasoning from the instruction. The instruction is not the
-    //    authority. See `design/full-return/ROUNDING_AUTHORITY.md` for the full evidence.
+    //    ★ This `why` has been WRONG THREE TIMES, and each time an independent reviewer caught it:
+    //      v1 cited the 1040 instructions as ENDORSING us — they say the opposite.
+    //      v2 over-corrected into "we knowingly depart, and it might understate tax by $1".
+    //      v3 claimed the IRM INVERTED the exposure in our favour — false, and false in the direction
+    //         that flattered us: the IRM treats line 24 as a DOLLARS-AND-CENTS line (3.11.3.14.2.28).
+    //    The conclusion survived all three. The ARGUMENT kept being wrong. Full evidence, with the
+    //    counter-arguments kept honest: `design/full-return/ROUNDING_AUTHORITY.md`.
     Divergence {
         household: "single_miner_qbi_limited_by_net_capital_gain",
         line: "TOTAL TAX (L24)",
         btctax: dec!(16833),
-        agrees_with: "neither — but the REGULATION, the MeF schema, and the IRS's own software all say \
-                      btctax (taxcalc reports no comparable TOTAL)",
+        agrees_with: "neither — but the IRS's own wire format and its own tax engine both round at the \
+                      line (taxcalc reports no comparable TOTAL)",
         outlier: dec!(16832),
         outlier_alt: None,
-        why: "★ 26 CFR 301.6102-1(a): 'any amount required to be REPORTED on such form shall be entered \
-              at the nearest whole dollar amount.' §301.6102-1(c): those provisions 'apply ONLY to \
-              amounts required to be reported … They do NOT apply to items which must be taken into \
-              account in making the computations necessary to determine such amounts.' Lines 22 and 23 \
-              ARE reported amounts — so they are entered at whole dollars (8,355 and 8,478), and line \
-              24 sums those, giving 16,833. The 1040 instructions' 'include cents when adding' sentence \
-              is a restatement of (c) and governs items that appear NOWHERE on the return (the several \
-              W-2 box-2 figures behind line 25a), not a line summing other printed lines. \
-              Three independent confirmations: (1) the MeF schema types every 1040 money element as \
-              xsd:integer, so a cents-carrying return is not even EXPRESSIBLE — every e-filed 1040 \
-              rounds at every line; (2) IRS Direct File (their own open-source engine) wraps every \
-              reported line in Round() over already-rounded operands, and its Schedule B code carries \
-              the comment 'We're intentionally summing rounded numbers because that is what Schedule B \
-              requires' — its own fixture diverges from round-the-total by $7 and the IRS prints the \
-              cross-footed figure; (3) IRM 3.11.3.4.3 tells IRS clerks to 'use only dollar amounts when \
-              computing amounts on forms or schedules', and IRM 3.12.3.28.11.11 assigns TPNC 282 for a \
-              'math error adding Total Tax on line 24'. \
-              ★ That last point INVERTS the exposure we feared: the IRS recomputes Σround from the \
-              transcribed whole-dollar lines, so btctax reproduces the IRS's own arithmetic EXACTLY and \
-              cannot draw TPNC 282 — while a round-the-total return is off by $1 against it by \
-              construction. OTS keeps cents and rounds once (16,832); it is the outlier, not us. Every \
-              COMPONENT line agrees exactly, including the §199A deduction (8,232) this household exists \
-              to test.",
+        why: "★ THE DECISIVE POINT IS THE WIRE FORMAT, not the instructions. The IRS's MeF schema types \
+              1040 lines 22, 23 AND 24 all as `USAmountType` = xsd:integer ('Type for a U.S. integer \
+              amount field'). An e-filed return transmitting 8,355 and 8,478 and then reporting 16,832 \
+              would be INCONSISTENT WITH ITS OWN TRANSMITTED COMPONENTS — Reading B is not merely \
+              discouraged, it is UNREPRESENTABLE. Every e-filed 1040 therefore rounds at every line. \
+              Corroboration: IRS Direct File — their OWN open-source engine — wraps each reported line \
+              in Round() over already-rounded operands, with the comment 'We're intentionally summing \
+              rounded numbers because that is what Schedule B requires'; its own fixture is $7 off a \
+              true sum in order to keep the printed form adding up. And 26 CFR 301.6102-1(a) requires \
+              every amount REPORTED on a form at the nearest whole dollar, while (c) reserves the \
+              'include cents' rule for items NOT themselves reported (the W-2 box-2 figures behind line \
+              25a) — supportive, though not dispositive: the counter that line 22's exact value is \
+              'an item taken into account' in computing line 24 survives on the text. \
+              ★ AND THE $1 IS NOT AN EXPOSURE EITHER WAY. IRM 3.12.3.31.15.5: where a filer's rounding \
+              differs, 'follow the taxpayer's intent'. The math-error tolerance itself is REDACTED in \
+              the public IRM. So neither we nor OTS is at risk here; we are right on the merits, not \
+              rescued by a penalty. Every COMPONENT line agrees exactly, including the §199A deduction \
+              (8,232) this household exists to test.",
     },
     Divergence {
         household: "single_crypto_business_se",
