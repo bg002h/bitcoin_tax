@@ -139,12 +139,11 @@ cannot model it correctly.
 - **Schedule B filed but its Part III (foreign accounts / foreign trust) unanswered** — v1 will not guess a disclosure answer.
 - **"Someone can claim you as a dependent" unanswered** — required on **every** return. It selects the §63(c)(5) dependent standard-deduction floor over the basic standard deduction, gates the §1(g)/Form-8615 kiddie-tax refusal, and is a **checkbox printed on your 1040**. There is no safe default: guessing "no" *understates* your tax and files an unchecked box you never affirmed; guessing "yes" overstates it. Only you know. (Likewise for your spouse, on a return that has one.) **Answer it with `btctax income answer --year N`** — no TOML file needed.
 
-  ⚠️ **If you have a return stored from an earlier version, this question will newly refuse it.** That is
-  not a regression — it is the bug surfacing. Earlier versions stored this flag as a plain true/false with
-  a default of *false*, so a return you were never asked about was recorded as though you had answered
-  "no". We cannot tell those apart from a real "no", and the unsafe reading is the one that understates
-  your tax, so every such answer is treated as **unasked** and the year refuses until you answer it. A
-  "yes" you actually typed is preserved (nothing ever defaulted to "yes").
+  ⚠️ **A return stored by v0.2.0 will newly refuse on this question.** That is the bug surfacing, not a
+  regression: v0.2.0 stored the flag as a plain true/false defaulting to *false*, so a return nobody was
+  ever asked about was recorded as though the answer were "no". Those cannot be told apart from a real
+  "no", and "no" is the reading that understates tax — so a v0.2.0 answer is treated as **unasked**, and
+  the year refuses until it is answered. A stored "yes" is preserved (nothing ever defaulted to "yes").
 - **A Schedule A sales-tax amount with the §164(b)(5) sales-tax election OFF** (a silent drop would hide an input error).
 - **MFS without stating whether your spouse itemizes** (§63(c)(6) couples the choice).
 - **A charitable contribution to a non-50% organization** (private foundation etc. — the Pub. 526 "special 30% limit" ordering is unmodeled).
