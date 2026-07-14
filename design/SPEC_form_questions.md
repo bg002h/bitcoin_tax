@@ -1,6 +1,7 @@
 # SPEC — P9: the FORM QUESTION REGISTRY
 
-*Status: **r8**. Folds Fable spec review r7 (0C/2I/2M/2Nit — `reviews/P9-SPEC-fable-r7.md`), r6
+*Status: **r9 — GREEN**. r8 review returned **0C/0I** (`reviews/P9-SPEC-fable-r8.md`); r9 folds its
+non-blocking exactness residue (1M/3Nit) inline. Folds r7 (`reviews/P9-SPEC-fable-r7.md`), r6
 (`reviews/P9-SPEC-fable-r6.md`), r5
 (`reviews/P9-SPEC-fable-r5.md`), r4
 (`reviews/P9-SPEC-fable-r4.md`), r3
@@ -476,7 +477,8 @@ inputs, **which survive in the TOML the owner premise guarantees.** *This is one
 expiry follow-up is load-bearing: the first real return, whose filer may have deleted the TOML, breaks the
 rebuild — refuse-and-reimport must retire before then.*
 
-**Named tests:** `income import` over a stale row **refuses** (naming `income clear`); `income clear` then
+**Named tests:** `income import` over a stale row **refuses** (naming all **three** commands — the §3.5
+text-test); `income clear` then
 `income import` **succeeds** and the row is v2; **delete the `clear`-first requirement ⇒ a computed carryover
 is silently lost ⇒ a named test fails**; **★ the full-chain restoration test** — seed year N, `write-carryover`
 onto N+1, mark **both** rows stale, run the whole remedy (`clear`+`import` ×2, then `write-carryover`), assert
@@ -1012,7 +1014,8 @@ sites — and **it cannot prevent the next D-8**: a witness certifies the *exist
 - **★ The checkbox census is CLOSED BY ENUMERATION** (§2.1) — including the boxes btctax *never writes*, which
   are a **named category**, not silence. Every printed box across all **fourteen** forms is a registry question,
   a class-(B) advisory, a pen-deferred pair, a **rule-3 exemption**, **filled from an explicit input** (filing
-  status, Sch A 5a/18, Sch C line F), or structurally inapplicable.
+  status, Sch A 5a/18, Sch C line F), **a class-(C) lawful-blank box** (Sch C line H, the 8960 elections), or
+  structurally inapplicable.
   **Form 8949's Box I/L and Schedule D's QOF "No" — both software-answered, both scope-entailed — get the
   `LIMITATIONS.md` entries they never had.** *(r4 I-1: the census was published "COMPLETE" while 8949 was
   checking a box on every filed return. **A census is only as good as its worst row**, and this one is now
@@ -1075,7 +1078,7 @@ either consumer.*
    (r1 I-6, named in §3.2). *(`HsaActivityUnsupported` needs no step: step 1's rename compile-forces it out of
    `return_refuse.rs:738` — the only one of the four with a forcing function.)*
 9. **★ DELETE the three dead fields FIRST** (§2.3) **AND add `serde_ignored` unknown-key rejection to `income
-   import`** — **together or not at all**; the rejection must name `hsa_present` too. *(r6 M-1: this MUST
+   import`** — **together or not at all**; the rejection must name `hsa_present` too *(its named test + mutation: §3.5)*. *(r6 M-1: this MUST
    precede the classifier. Class (D)'s only lawful disposition is "consume or delete" — so if the classifier
    is built while these three fields still exist, it cannot bind them without inventing a forbidden
    "(D), pending deletion" exemption. Deleting first means the classifier never sees a field it may not
