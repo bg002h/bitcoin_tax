@@ -1160,12 +1160,24 @@ pub fn provenance_label(p: crate::resolve::Provenance) -> &'static str {
 /// crypto-attribution DELTA are **different questions** — shown together, labeled, and NEVER reconciled to
 /// the dollar (SPEC §6). Only produced for a `ReturnInputs`-provenance year (a full 1040 exists). `delta`
 /// is the same `TaxOutcome` the crypto-delta block already showed above. Provenance is printed here (§4.12).
+/// ★ The absolute block renders the **PRINTED** figures — the whole-dollar, cross-footing lines the filed
+/// PDF carries — not the exact-cents computation behind them (ARCH-P6 Q3).
+///
+/// The clinching case is line 37. "Amount you owe" is not an analytical figure; it is an instruction to
+/// write a check. A tool that says $12,345.67 in the terminal and prints $12,347 on the filed form has
+/// produced TWO authoritative answers to "what do I pay", and no LIMITATIONS paragraph repairs that. The
+/// moment a report line is labelled with a form-line citation, it has promised the FORM's figure.
+///
+/// The crypto-DELTA block below stays in exact cents: it is not a filed figure — it answers a different
+/// question (§6), and the frozen engine computes it in cents.
 pub fn render_dual_report(
     year: i32,
     ar: &btctax_core::AbsoluteReturn,
+    printed: &btctax_core::tax::packet::PrintedForms,
     delta: &btctax_core::TaxOutcome,
     provenance: crate::resolve::Provenance,
 ) -> String {
+    let f = &printed.f1040;
     let mut s = String::new();
     let _ = writeln!(
         s,
@@ -1194,22 +1206,10 @@ pub fn render_dual_report(
         fmt_money(ar.deduction)
     );
     if ar.qbi_deduction > Usd::ZERO {
-        let _ = writeln!(
-            s,
-            "  QBI deduction (L13):      {}",
-            fmt_money(ar.qbi_deduction)
-        );
+        let _ = writeln!(s, "  QBI deduction (L13):      {}", fmt_money(f.line13));
     }
-    let _ = writeln!(
-        s,
-        "  Taxable income (L15):     {}",
-        fmt_money(ar.taxable_income)
-    );
-    let _ = writeln!(
-        s,
-        "  Tax (L16):                {}",
-        fmt_money(ar.regular_tax)
-    );
+    let _ = writeln!(s, "  Taxable income (L15):     {}", fmt_money(f.line15));
+    let _ = writeln!(s, "  Tax (L16):                {}", fmt_money(f.line16));
     if ar.foreign_tax_credit > Usd::ZERO {
         let _ = writeln!(
             s,
@@ -1238,24 +1238,12 @@ pub fn render_dual_report(
             fmt_money(ar.niit.tax)
         );
     }
-    let _ = writeln!(s, "  TOTAL TAX (L24):          {}", fmt_money(ar.total_tax));
-    let _ = writeln!(
-        s,
-        "  Total payments (L33):     {}",
-        fmt_money(ar.total_payments)
-    );
-    if ar.overpayment_refund > Usd::ZERO {
-        let _ = writeln!(
-            s,
-            "  → REFUND (L35a):          {}",
-            fmt_money(ar.overpayment_refund)
-        );
+    let _ = writeln!(s, "  TOTAL TAX (L24):          {}", fmt_money(f.line24));
+    let _ = writeln!(s, "  Total payments (L33):     {}", fmt_money(f.line33));
+    if f.line34 > Usd::ZERO {
+        let _ = writeln!(s, "  → REFUND (L35a):          {}", fmt_money(f.line34));
     } else {
-        let _ = writeln!(
-            s,
-            "  → AMOUNT OWED (L37):      {}",
-            fmt_money(ar.amount_owed)
-        );
+        let _ = writeln!(s, "  → AMOUNT OWED (L37):      {}", fmt_money(f.line37));
     }
     // §6: the two figures answer different questions and are NEVER reconciled.
     let delta_str = match delta {
@@ -1269,7 +1257,7 @@ pub fn render_dual_report(
     let _ = writeln!(
         s,
         "  • Absolute TOTAL TAX (this filed return, WITH crypto): {}",
-        fmt_money(ar.total_tax)
+        fmt_money(f.line24)
     );
     let _ = writeln!(
         s,

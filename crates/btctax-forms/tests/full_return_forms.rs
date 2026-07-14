@@ -2128,3 +2128,50 @@ fn a_w2_only_household_files_a_1040_and_nothing_else() {
     let names: Vec<&str> = packet.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, vec!["f1040"]);
 }
+
+/// ★ The REPORT and the FILED PDF carry the same "amount you owe" (ARCH-P6 Q3).
+///
+/// Line 37 is not an analytical figure — it is an instruction to write a check. A tool that says
+/// $12,345.67 in the terminal and prints $12,347 on the filed form has produced TWO authoritative
+/// answers to "what do I pay". So the report renders the PRINTED chain, and this KAT reads the figure
+/// back out of the actual PDF to prove they are the same characters.
+#[test]
+fn the_reports_amount_owed_is_the_figure_printed_on_the_filed_1040() {
+    use btctax_core::tax::packet::assemble_printed_forms;
+    use btctax_core::tax::return_1040::assemble_absolute;
+    use btctax_core::tax::testonly::{kitchen_sink_household, ty2024_params, ty2024_table};
+
+    let (ri, state) = kitchen_sink_household();
+    let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+    let printed =
+        assemble_printed_forms(&ri, &state, &std::collections::BTreeMap::new(), &ar, 2024);
+
+    // The figure the report prints (it renders `printed.f1040`, not `ar`).
+    let reported = printed.f1040.line37;
+
+    // …and the figure on the filed page.
+    let pdf = btctax_forms::fill_form_1040_full(
+        &printed.f1040,
+        &kitchen_sink_header(),
+        FilingStatus::Mfj,
+        2024,
+    )
+    .unwrap();
+    let map = btctax_forms::Form1040Map::ty2024();
+    let fqn = match map.line37.as_ref().expect("line 37 is mapped") {
+        MoneyCell::Single(f) => f.clone(),
+        MoneyCell::Pair(p) => p.dollars_field.clone(),
+    };
+    let cell = tv(&pdf, &fqn).expect("line 37 is filled");
+
+    assert_eq!(
+        cell,
+        reported.to_string(),
+        "★ the terminal and the filed form must not give two different answers to 'what do I pay'"
+    );
+    // …and it is a whole dollar, per the §3.1 election.
+    assert!(
+        !cell.contains('.'),
+        "the filed figure carries no cents: {cell:?}"
+    );
+}

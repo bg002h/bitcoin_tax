@@ -34,24 +34,27 @@ pub struct NamedForm {
 /// long for its comb cell, a map missing its identity block) aborts the whole packet with zero bytes
 /// written, and the error names WHICH form refused.
 pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<Vec<NamedForm>, FormsError> {
-    // ★ NO `..` — adding a member to `PrintedReturn` without filling it here is a compile error.
+    // ★ NO `..` — adding a member to `PrintedForms` without filling it here is a compile error.
     let PrintedReturn {
         header,
         filing_status,
-        f1040,
-        sch_1,
-        sch_2,
-        sch_3,
-        sch_a,
-        sch_b,
-        sch_c,
-        sch_d,
-        f8949,
-        sch_se,
-        f8959,
-        f8960,
-        f8995,
-        f8283,
+        forms:
+            btctax_core::tax::packet::PrintedForms {
+                f1040,
+                sch_1,
+                sch_2,
+                sch_3,
+                sch_a,
+                sch_b,
+                sch_c,
+                sch_d,
+                f8949,
+                sch_se,
+                f8959,
+                f8960,
+                f8995,
+                f8283,
+            },
     } = pr;
 
     let mut out: Vec<NamedForm> = Vec::new();

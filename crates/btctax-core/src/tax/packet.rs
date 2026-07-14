@@ -346,6 +346,16 @@ impl ReturnHeader {
 pub struct PrintedReturn {
     pub header: ReturnHeader,
     pub filing_status: FilingStatus,
+    /// Every printed form of the return. Split from the identity on purpose: the FORM CHAINS are
+    /// infallible and PII-free, so the REPORT can render exactly what the PDF will print even for a
+    /// household that has entered no identity yet. Only the filable ARTIFACT needs a name and an SSN,
+    /// and only it fails closed without them.
+    pub forms: PrintedForms,
+}
+
+/// Every printed form of one return — the figures, with no identity attached.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrintedForms {
     pub f1040: Form1040Lines,
     pub sch_1: Option<Schedule1Lines>,
     pub sch_2: Option<Schedule2Lines>,
@@ -391,7 +401,26 @@ pub fn assemble_printed_return(
     ar: &AbsoluteReturn,
     year: i32,
 ) -> Result<PrintedReturn, SsnError> {
-    let header = ReturnHeader::build(ri, year)?;
+    Ok(PrintedReturn {
+        header: ReturnHeader::build(ri, year)?,
+        filing_status: ri.filing_status,
+        forms: assemble_printed_forms(ri, state, donation_details, ar, year),
+    })
+}
+
+/// The printed form chains, with **no identity** — infallible, and PII-free.
+///
+/// The report renders THESE, so the terminal shows exactly the figures the filed PDF will carry (SPEC
+/// §3.1: whole dollars, cross-footing). A report in exact cents beside a whole-dollar PDF would give the
+/// filer two authoritative answers to "what do I owe", and "amount you owe" is not an analytical figure —
+/// it is an instruction to write a check (ARCH-P6 Q3).
+pub fn assemble_printed_forms(
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    donation_details: &BTreeMap<EventId, DonationDetails>,
+    ar: &AbsoluteReturn,
+    year: i32,
+) -> PrintedForms {
     let status = ri.filing_status;
     let pi = &ar.printed_inputs;
 
@@ -453,9 +482,7 @@ pub fn assemble_printed_return(
         pi.digital_asset_activity,
     );
 
-    Ok(PrintedReturn {
-        header,
-        filing_status: status,
+    PrintedForms {
         f1040,
         sch_1,
         sch_2,
@@ -470,7 +497,7 @@ pub fn assemble_printed_return(
         f8960,
         f8995,
         f8283,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -748,38 +775,60 @@ mod tests {
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
         let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, 2024).unwrap();
 
-        let sch_1 = pr.sch_1.expect("the kitchen sink has Schedule 1 income");
-        let sch_2 = pr.sch_2.expect("…and SE tax ⇒ Schedule 2");
-        let sch_a = pr.sch_a.expect("…and itemized deductions");
-        let sch_b = pr.sch_b.expect("…and > $1,500 of interest ⇒ Schedule B");
-        let sch_c = pr.sch_c.expect("…and business mining ⇒ Schedule C");
-        let f8995 = pr.f8995.expect("…and REIT dividends ⇒ Form 8995");
+        let sch_1 = pr
+            .forms
+            .sch_1
+            .expect("the kitchen sink has Schedule 1 income");
+        let sch_2 = pr.forms.sch_2.expect("…and SE tax ⇒ Schedule 2");
+        let sch_a = pr.forms.sch_a.expect("…and itemized deductions");
+        let sch_b = pr
+            .forms
+            .sch_b
+            .expect("…and > $1,500 of interest ⇒ Schedule B");
+        let sch_c = pr.forms.sch_c.expect("…and business mining ⇒ Schedule C");
+        let f8995 = pr.forms.f8995.expect("…and REIT dividends ⇒ Form 8995");
 
-        assert_eq!(pr.f1040.line2b, sch_b.line4, "1040 2b ← Schedule B line 4");
-        assert_eq!(pr.f1040.line3b, sch_b.line6, "1040 3b ← Schedule B line 6");
-        assert_eq!(pr.f1040.line8, sch_1.line10, "1040 8 ← Schedule 1 line 10");
         assert_eq!(
-            pr.f1040.line10, sch_1.line26,
+            pr.forms.f1040.line2b, sch_b.line4,
+            "1040 2b ← Schedule B line 4"
+        );
+        assert_eq!(
+            pr.forms.f1040.line3b, sch_b.line6,
+            "1040 3b ← Schedule B line 6"
+        );
+        assert_eq!(
+            pr.forms.f1040.line8, sch_1.line10,
+            "1040 8 ← Schedule 1 line 10"
+        );
+        assert_eq!(
+            pr.forms.f1040.line10, sch_1.line26,
             "1040 10 ← Schedule 1 line 26"
         );
         assert_eq!(
-            pr.f1040.line12, sch_a.line17,
+            pr.forms.f1040.line12, sch_a.line17,
             "1040 12 ← Schedule A line 17"
         );
-        assert_eq!(pr.f1040.line13, f8995.line15, "1040 13 ← Form 8995 line 15");
         assert_eq!(
-            pr.f1040.line23, sch_2.line21,
+            pr.forms.f1040.line13, f8995.line15,
+            "1040 13 ← Form 8995 line 15"
+        );
+        assert_eq!(
+            pr.forms.f1040.line23, sch_2.line21,
             "1040 23 ← Schedule 2 line 21"
         );
         assert_eq!(
-            sch_2.line11, pr.f8959.line18,
+            sch_2.line11, pr.forms.f8959.line18,
             "Sch 2 11 ← Form 8959 line 18"
         );
 
         // ★ The ATTACHMENT tie-outs (ARCH-P6.3a). Every one of these is a citation printed on the form
         // itself, so a packet that fails any of them is a form disagreeing with the paper behind it.
-        let sch_se = pr.sch_se.expect("…and business mining ⇒ Schedule SE");
-        let f8949 = pr.f8949.as_ref().expect("…and a disposal ⇒ Form 8949");
+        let sch_se = pr.forms.sch_se.expect("…and business mining ⇒ Schedule SE");
+        let f8949 = pr
+            .forms
+            .f8949
+            .as_ref()
+            .expect("…and a disposal ⇒ Form 8949");
         assert_eq!(
             sch_2.line4, sch_se.line12,
             "Sch 2 L4 ← Schedule SE's printed L12"
@@ -789,7 +838,7 @@ mod tests {
             "Sch 1 L15 ← Schedule SE's printed L13"
         );
         assert_eq!(
-            pr.f8959.line8, sch_se.line6,
+            pr.forms.f8959.line8, sch_se.line6,
             "8959 L8 ← Schedule SE Part I L6"
         );
         assert_eq!(
@@ -797,12 +846,12 @@ mod tests {
             "SE L2 ← Schedule C's printed L31"
         );
         assert_eq!(
-            pr.sch_d.line10_d, f8949.lt_totals.proceeds_d,
+            pr.forms.sch_d.line10_d, f8949.lt_totals.proceeds_d,
             "Sch D L10(d) ← the 8949's printed long-term column total"
         );
         assert_eq!(
-            pr.sch_d.line10_h,
-            pr.sch_d.line10_d - pr.sch_d.line10_e,
+            pr.forms.sch_d.line10_h,
+            pr.forms.sch_d.line10_d - pr.forms.sch_d.line10_e,
             "…and Schedule D Part II cross-foots on its own printed cells"
         );
 
@@ -810,10 +859,11 @@ mod tests {
         // return would demand a payment the filer had ALREADY made: L31 falls ⇒ L37 "amount you owe"
         // rises by exactly that amount.
         let sch_3 = pr
+            .forms
             .sch_3
             .expect("…and an extension payment + FTC ⇒ Schedule 3");
         assert_eq!(
-            pr.f1040.line31, sch_3.line15,
+            pr.forms.f1040.line31, sch_3.line15,
             "1040 31 ← Schedule 3 line 15"
         );
         assert_eq!(
@@ -836,16 +886,25 @@ mod tests {
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
         let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, 2024).unwrap();
 
-        assert!(pr.sch_1.is_none(), "no additional income or adjustments");
-        assert!(pr.sch_2.is_none(), "no SE / Additional Medicare / NIIT");
-        assert!(pr.sch_3.is_none(), "no credits");
-        assert!(pr.sch_a.is_none(), "standard deduction");
-        assert!(pr.sch_b.is_none(), "interest under the $1,500 threshold");
-        assert!(pr.sch_c.is_none(), "no business");
-        assert!(pr.f8960.is_none(), "no NIIT");
-        assert!(pr.f8995.is_none(), "no QBI");
         assert!(
-            !pr.f8959.must_file(),
+            pr.forms.sch_1.is_none(),
+            "no additional income or adjustments"
+        );
+        assert!(
+            pr.forms.sch_2.is_none(),
+            "no SE / Additional Medicare / NIIT"
+        );
+        assert!(pr.forms.sch_3.is_none(), "no credits");
+        assert!(pr.forms.sch_a.is_none(), "standard deduction");
+        assert!(
+            pr.forms.sch_b.is_none(),
+            "interest under the $1,500 threshold"
+        );
+        assert!(pr.forms.sch_c.is_none(), "no business");
+        assert!(pr.forms.f8960.is_none(), "no NIIT");
+        assert!(pr.forms.f8995.is_none(), "no QBI");
+        assert!(
+            !pr.forms.f8959.must_file(),
             "no Additional Medicare Tax, none withheld"
         );
     }
@@ -861,6 +920,9 @@ mod tests {
 
         let box5_sum: crate::conventions::Usd = ri.w2s.iter().map(|w| w.box5_medicare_wages).sum();
         assert_eq!(ar.printed_inputs.medicare_wages, box5_sum);
-        assert_eq!(pr.f8959.line1, crate::conventions::round_dollar(box5_sum));
+        assert_eq!(
+            pr.forms.f8959.line1,
+            crate::conventions::round_dollar(box5_sum)
+        );
     }
 }

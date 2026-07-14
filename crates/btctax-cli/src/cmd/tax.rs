@@ -255,8 +255,18 @@ pub fn report_tax_year(
                         // P5: the full-return block carries the §3.4 conservative-omission advisories
                         // (CTC/ODC, EIC, forfeited §63(f) aged box) + the FBAR / charitable-donee
                         // disclosures. Non-gating: they never change a number or the exit code.
-                        let mut block =
-                            crate::render::render_dual_report(year, &ar, &outcome, provenance);
+                        //
+                        // ★ P6.3b: the block renders the PRINTED figures — exactly what the filed PDF
+                        // carries. `assemble_printed_forms` is infallible and PII-free, so a household
+                        // that has entered no identity yet still sees the real numbers (only the filable
+                        // ARTIFACT needs a name and an SSN).
+                        let details = s.donation_details()?;
+                        let printed = btctax_core::tax::packet::assemble_printed_forms(
+                            &ri, &state, &details, &ar, year,
+                        );
+                        let mut block = crate::render::render_dual_report(
+                            year, &ar, &printed, &outcome, provenance,
+                        );
                         let advs = btctax_core::tax::advisories::advisories_for(
                             &ri, &state, &ar, params, year,
                         );

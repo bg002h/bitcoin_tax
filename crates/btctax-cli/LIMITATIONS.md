@@ -6,11 +6,12 @@
 the ledger you reconciled. It does not interpret your facts, and it is not a substitute for a tax
 professional. No Paid Preparer / PTIN is filled — this is a self-prepared return.
 
-**On DRAFT watermarking and attestation, precisely.** Today the watermark + attestation gate applies when the
-ledger is **pseudo-reconciled** (a synthetic, non-persisted default is contributing to the projection): such an
-export is stamped `ESTIMATE, NOT FOR FILING` and refuses without the exact attestation phrase. An export from a
-fully-real ledger is **not** watermarked and needs no attestation. The always-on DRAFT gate for *full-return*
-PDFs lands with the full-return fillers; it does not exist yet, because no full-return PDF exists yet.
+**On DRAFT watermarking and attestation, precisely.** The watermark + attestation gate applies when the ledger
+is **pseudo-reconciled** (a synthetic, non-persisted default is contributing to the projection): such an export
+is stamped `ESTIMATE, NOT FOR FILING` and refuses without the exact attestation phrase. Pseudo figures are
+FICTIONAL and can never be filed, so that gate dominates everything else. An export from a fully-real ledger —
+including the **full-return packet** — is **not** watermarked and needs no attestation: it is a clean, filable
+document, and it is yours to review and sign.
 
 ## The one rule that governs everything: fail closed
 
@@ -58,26 +59,40 @@ Additional Medicare Tax, Parts I (wages), II (SE) and V (withholding).
 
 **Forms — computed vs. filled.** Two different things, and the difference matters:
 
-- **Computed** (every line, to the cent): 1040 · Schedules 1, 2, 3, A, B, C, D, SE · Forms 8949, 8283, 8959,
-  8960, 8995. The report prints the **1040-level summary** of these — income through AGI, the deduction, tax,
-  the Schedule 2 other-taxes lines, total tax, payments, and refund-or-owed. The *interior* per-line detail of
-  Schedules 1/2/3/A/B/C and Forms 8959/8960/8995 is computed but is **not** all printed today, so a hand
-  transcription of those forms still needs you to re-derive some intermediate lines yourself.
-- **Filled as an official IRS PDF** (`export-irs-pdf`): **the crypto slice only** — Form 8949 and Schedule D
-  *from the ledger's disposals*, Schedule SE, Form 8283, and on the 1040 only the capital-gain line and the
-  digital-asset question. **No full-return PDF exists yet.**
+- **Filled as an official IRS PDF** (`export-irs-pdf`), for a year with full-return inputs: **the whole
+  packet** — Form 1040 and Schedules 1, 2, 3, A, B, C, D, SE, plus Forms 8949, 8959, 8960, 8995 and (when
+  required) 8283. They come out in IRS **Attachment Sequence No.** order with a `manifest.txt`, which is your
+  stapling order.
+- **The packet is ALL-OR-NOTHING.** If any form cannot be filled correctly, **nothing is written** — you never
+  find a half-packet on disk. A 1040 whose line 2b cites a Schedule B that is not attached is a wrong return.
+- **A year with no full-return inputs** still gets the **crypto slice** (Form 8949 + Schedule D from the
+  ledger's disposals, Schedule SE, Form 8283, and the 1040's capital-gain cluster). The two write different
+  filenames on purpose, so two runs' artifacts can never be shuffled together into a return that never existed.
 
-> ⚠️ **`export-irs-pdf` REFUSES for a year that has full-return inputs, and that refusal is deliberate.** Its
-> Schedule D fills only lines 3/7/10/15/16 from crypto totals: it has **no line 13** (1099-DIV box-2a
-> capital-gain distributions) and **no lines 6/14** (capital-loss carryovers), both of which the computed
-> return *does* include in 1040 line 7. Its 1040 fill covers only the capital-gain cluster — not wages, AGI,
-> tax or withholding. For a crypto-only year those forms are complete and correct. For a full return they
-> would be **complete-looking forms with income missing**, and a filer could mail an understated Schedule D
-> without ever seeing a warning. Fail closed (see above): v1 refuses rather than hand you a plausible wrong
-> form.
->
-> **Until the full-return fillers ship, every form of a full return must be transcribed by hand** from the
-> figures the report gives you onto the official IRS forms.
+**Whole dollars, and why the report agrees with the PDF.** The filed packet takes the IRS's round-all-amounts
+election (2024 i1040 p. 23): every printed line is rounded at the line, and every printed total sums the
+already-rounded lines, so each form cross-foots and each form agrees with the ones it cites. The **report now
+prints those same whole-dollar figures**, so the "amount you owe" on your screen is the "amount you owe" on the
+form. Internally the engine still computes in exact cents; the difference between the two is at most a few
+dollars, and the **filed figure is the one the forms are built from**.
+
+One consequence worth knowing: because Form 8949's rows are each rounded to whole dollars, the total gain on a
+many-row year can differ by a few dollars from rounding the exact total once. That is what electing whole
+dollars *means* — it is exactly what a human rounding by hand produces — and it is the figure that makes
+Schedule D add up against the 8949 behind it.
+
+**What the packet still will not do for you:**
+- **Non-crypto NONCASH gifts over $500 REFUSE.** Form 8283 must list the property (description, how acquired,
+  date, appraiser), and btctax holds none of those details for property that did not come from your ledger. It
+  will not attach an 8283 that under-reports its own property list and put your deduction at risk — complete
+  that form by hand, or remove the gift.
+- **More than 14 interest payers / 15 dividend payers on Schedule B, or more than 4 dependents on the 1040,
+  REFUSE.** Those grids are full, and the IRS's remedy is a continuation statement this version cannot
+  generate. It will not silently print a subset of your payers or your children.
+- **The spouse's Identity Protection PIN is not captured** (yours is, and it prints). If your spouse has one,
+  write it on the form.
+- **A HoH/QSS qualifying person who is not one of your listed dependents** is not captured; that cell is left
+  blank for you to complete.
 
 **Carryovers:** charitable (per class + vintage) and the QBI REIT/PTP loss carryforward are computed and can
 be written forward to next year with `btctax report --tax-year Y --write-carryover`. A carryover you typed in
