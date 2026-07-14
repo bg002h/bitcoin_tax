@@ -124,6 +124,32 @@ against it by construction.**
   TY2024 Schedule B with cents).
 - **OpenTaxSolver** is Reading B. **It is the outlier, not the norm.**
 
+### A note on OTS's printed form — and why we are NOT reporting it
+
+Verified on OTS's own output for the `single_miner_qbi_limited_by_net_capital_gain` household. OTS's
+solver is correct internally (it carries cents); the defect is in the PRINT layer.
+`universal_pdf_file_modifier.c` is a **generic text rounder** — it applies `(int)(x + 0.5)` to every
+number it encounters and has **no knowledge of line relationships**, so it cannot know that line 24 is a
+total of two lines it just rounded. With the shipped default `Round_PDF_to_Whole_Dollars Y`, the printed
+1040 reads:
+
+```
+  line 22  tax          8,355     ← round(8,354.59)
+  line 23  other taxes  8,478     ← round(8,477.73)
+  line 24  TOTAL TAX   16,832     ← round(16,832.32), NOT 8,355 + 8,478
+```
+
+The line's own printed text says "Add lines 22 and 23". **The form does not add up**, and it is $1 away
+from the whole-dollar figure the IRS will recompute (IRM 3.11.3.4.3). For a paper-filing tool, the
+printed form *is* the product.
+
+**We are deliberately NOT reporting this** (user decision, 2026-07-14). OTS is on SourceForge, not
+GitHub; a project that has stayed there is making a choice about how it wants to be engaged with, and an
+unsolicited AI-authored report about a $1 print-layer artifact is a cost to that maintainer, not a gift.
+The contrast with `tenforty` is the point: there, the repo was modern and active, and the defects
+overcharged real filers by *thousands* (see [[tenforty-upstream-report]]). Magnitude and welcome both
+matter. **Do not re-open this without asking.**
+
 ---
 
 ## Conclusion — SPEC §3.1 stands, unchanged
