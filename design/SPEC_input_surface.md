@@ -300,9 +300,7 @@ created it.
   **REFUSE** on a missing row (pointing at `income template` / `income import`). Stated as a PRINCIPLE, not
   per-command — r5 wrote the rule for `set-pii` and then added a **new door** (`answer`) that reopened it:
   an all-default row with the claimed-flags answered `Some(false)` is **screen-clean**, so it would land at
-  precedence 1 and compute the user's return **from ZEROS**, shadowing their stored `tax-profile`.
-  Creating a default row would put an all-zero, screen-clean `ReturnInputs` at precedence 1 — silently
-  flipping a user's report from their stored `tax-profile` to one derived from **zeros**. That is the
+  precedence 1 and compute the user's return **from ZEROS**, shadowing their stored `tax-profile` — the
   "two liabilities, silently different number" sin `resolve.rs` documents itself against.
 - **`income clear` warns and requires confirmation when the header carries secrets.** It is the tool's own
   advertised recovery from an uncomputable year (`resolve.rs:216–224`) — and after Cycle 2 it destroys
@@ -365,8 +363,15 @@ property of storage, not of the user's document.)*
 **The DDL.** ⚠️ There is **no idiom to inherit** — grep finds **zero `ALTER TABLE` in the whole repo**, and
 SQLite has **no `ADD COLUMN IF NOT EXISTS`**. And `init_table` runs on **every** `get`/`set`/`exists`/… so
 a bare ALTER would error `duplicate column name` on **every command after the first**. ⇒ Put the column in
-the `CREATE TABLE IF NOT EXISTS` (fresh vaults) **and** guard the ALTER for old ones (`PRAGMA
-table_info(return_inputs)`). **KAT: open an old-schema vault twice.**
+the `CREATE TABLE IF NOT EXISTS` (fresh vaults), **and for old ones attempt the ALTER and tolerate EXACTLY
+the duplicate-column error.**
+
+*(Not `PRAGMA table_info` + a conditional. That is race-free here only because the vault takes a
+non-blocking **exclusive file lock** at open (`btctax-store/src/lock.rs`) — an **inherited** invariant, not
+an intrinsic one: relax the lock and it silently becomes a TOCTOU where both processes ALTER and one dies.
+Tolerating the exact error is race-free **on its own terms**, and drops a PRAGMA from every `get`/`set`.)*
+
+**KAT: open an old-schema vault twice.**
 
 **★ ONE read boundary, and it must cover BOTH deserializers.** `fn row_to_inputs(json, version) ->
 ReturnInputs` applies the fixup, and **every** read calls it — `get` **and `all()`**, which today does a
@@ -407,14 +412,35 @@ plaintext-hygiene path), `income show` emits masked JSON and cannot regenerate i
 prompts for secrets only (D-6). So a TOML-less user would face a refusing year with **no in-app path to
 answer one boolean** — a wall, landing on people who did exactly what the spec told them to.
 
-⇒ **`btctax income answer --year N`** — interactive, covering precisely the ASK-THE-USER fields (D-2),
-which are exactly the fields a TOML-less user can otherwise never reach. Stores through the
-screen-before-store gate (D-7), and **refuses on a year with no row** (only `import` creates).
+⇒ **`btctax income answer --year N`** — interactive; the only path a TOML-less user has to the fields they
+can otherwise never reach. Stores through the screen-before-store gate (D-7); **refuses on a year with no
+row** (only `import` creates).
 
-⚠️ **It must prompt the WHOLE class in ONE pass.** D-7 forbids storing a blob `screen_inputs` refuses — so
-a *partial* answer (`--taxpayer=no` while `foreign_accounts` is still `None` on a Schedule-B year) **cannot
-be stored**: the strictly-improving edit is rejected by the gate, and the user can never answer question 1
-until question 2 is answered. **A deadlock.** One pass, whole class.
+★ **DECOMPOSED BY THE CRITERION** (D-2), not by "the whole class":
+- **`answer` owns legs (a) + (b)** — the fail-loud tri-states, both claimed-flags, `date_of_birth`.
+- **`set-pii` owns leg (c) — the SECRETS (SSNs, IP PIN) — EXCLUSIVELY, and no-echo.**
+
+*(r6 said "the whole class in ONE pass". But the ask-the-user class and the secret class **overlap on
+`ip_pin`** — which is precisely why leg (c) had to exist. So that rule would have made `income answer`
+prompt an **IP PIN**, in a command the spec never required to be no-echo: an echoed crown jewel in terminal
+scrollback, the exact leak Cycle 2 exists to close, and the "small, sharp" secret surface D-6 designed
+would have become **two commands wide**. And the one-pass rationale never reached it: `ip_pin`'s absence
+**never refuses** — no screen reads it, the packet simply prints none — so it is in the class under leg
+(c), not the deadlock-driving leg (a). The rule swept in a field its own argument did not cover.)*
+
+⚠️ **The (a)+(b) fields must still be answered in ONE pass**, because D-7 forbids storing a blob
+`screen_inputs` refuses: a *partial* answer (`--taxpayer=no` while `foreign_accounts` is still `None` on a
+Schedule-B year) **cannot be stored** — the strictly-improving edit is rejected by the gate, and the user
+could never answer question 1 until question 2 is answered. **A deadlock.**
+
+⚠️ **Prompt only what is LIVE for this return.** Spouse questions only when a spouse exists; Schedule-B
+questions only when Schedule B files — scoped exactly as the refusals are (D-8(2)). Otherwise `answer`
+asks a Single filer about a spouse who does not exist: the prompt-level twin of the refusal-level bug
+D-8(2) already fixed.
+
+⚠️ **The DOB prompt must be SKIPPABLE — empty input leaves it `None`.** D-2 puts `date_of_birth` in the
+class *because* an **old** dummy GRANTS the aged add-on (an understatement). A *mandatory* prompt is a
+forcing function to invent a value. `None` is the safe, advised state; the prompt must permit it.
 
 **Only then is §9's promise true — for the users who already have the bug, not merely for new ones.**
 
