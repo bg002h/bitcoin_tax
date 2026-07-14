@@ -302,6 +302,41 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   ranked Minor by two independent Fable passes; fold opportunistically during the relevant phase. (spec §8
   KAT-3 mod-25 + the Sch 2 L1a/L2 structure are now FOLDED into spec r6, not open.)
 
+## Open — owned by P7 (golden returns)
+
+- **p7-se-divergence-tiebreaker → P7.** ★ **Break the tie on the SE-tax divergence with a SECOND
+  independent engine.**
+
+  P7.1's cross-check found that the oracle (`tenforty`, wrapping Open Tax Solver) computes a
+  self-employment tax that is **invariant to W-2 wages** — flat at $11,304 on $80,000 of SE income
+  whether the W-2 wages are $0 or $300,000 — where Schedule SE lines 8a/9/10 and §1402(b)(1) say the
+  12.4% OASDI portion must fall to ZERO once W-2 social-security wages have consumed the $168,600 band.
+  btctax says $2,143 (Medicare only) for that household; the oracle says $11,304, over-taxing it by
+  $8,062 all-in. The divergence is DECLARED in `crates/btctax-core/tests/golden_returns.rs` and asserted
+  in btctax's favour, on the strength of the form's own printed text.
+
+  **Two things that evidence does NOT settle:**
+  1. **Where the fault lives.** `tenforty` is a Python wrapper around OTS. The flat SE tax could be OTS
+     itself, or the wrapper failing to pass W-2 wages into OTS's Schedule SE inputs. We deliberately did
+     not investigate — the clean-room posture forbids reading their source (OTS is GPL-2.0, incompatible
+     with our `MIT OR Unlicense`; recon 05). **Running** it is fine; **reading** it is not.
+  2. **Whether btctax is right**, on the strength of a single dissenting implementation. The form text is
+     strong evidence and the arithmetic is unambiguous — but "we disagree with the only oracle we have,
+     and we are confident we are right" is precisely the posture that should be independently checked
+     before anyone files a return on it.
+
+  **The work:** run a SECOND, unrelated implementation over the same household — candidates: **OTS
+  directly** (drive its own input file, bypassing the `tenforty` wrapper, which alone answers question 1),
+  **PolicyEngine-US**, and/or the **PSL Tax-Calculator** (CC0 — the SPEC §9 CI cross-check candidate).
+  Observe-only in every case: run them, compare FIGURES, never read source into btctax.
+
+  **Acceptance:** the SE figure for `mfj_se_over_the_addl_medicare_threshold` ($220,000 W-2 wages +
+  $80,000 SE income, MFJ) is confirmed as **$2,143** by at least one further independent engine — or, if a
+  second engine agrees with `tenforty`, btctax's own SE model is re-opened and re-derived from §1402(b)
+  and the Schedule SE instructions before P7 can close. Record which of the two questions each engine
+  answers. If OTS-direct disagrees with `tenforty`, report the wrapper bug upstream.
+
+
 ## Open — filed from the P6 gate review (Fable r1 + r2). NONE is blocking; each has an owning phase.
 
 Recorded per the standing burndown rule (an item whose owning phase is closing must not silently carry).
