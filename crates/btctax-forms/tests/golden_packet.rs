@@ -54,13 +54,13 @@ fn form<'a>(pkt: &'a [NamedForm], name: &str) -> &'a NamedForm {
         .unwrap_or_else(|| panic!("the packet is missing {name}"))
 }
 
+fn usd(v: f64) -> Usd {
+    Usd::try_from(v).expect("the oracles emit finite figures")
+}
+
 /// A dollar figure as it is PRINTED — whole dollars, no separators (SPEC §3.1).
 fn printed(v: f64) -> String {
     round_dollar(usd(v)).to_string()
-}
-
-fn usd(v: f64) -> Usd {
-    Usd::try_from(v).expect("the oracles emit finite figures")
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -90,6 +90,22 @@ fn every_golden_household_prints_the_oracles_figures_onto_the_1040() {
         // household's inputs changed (Fable P7 r3, Nit). Applying §3.1's own printing rule to the
         // ORACLE's components instead is not self-referential — these are OpenTaxSolver's numbers,
         // rounded the way the form rounds them — and it needs no exception at all.
+        // ★ The formula encodes a PRECONDITION, so assert it rather than leave it implicit (Fable P7
+        // r4, Minor). Line 24 = 22 + 23, where 22 = 18 − 21 (CREDITS) and 18 = 16 + 17 (AMT / excess
+        // APTC). Dropping those terms is only valid because every golden household has zero credits and
+        // zero AMT — no dependents, no foreign tax credit, AMT screened out. A thirteenth household with
+        // a foreign tax credit would make this formula overstate line 24 by the credit, and it would
+        // fail pointing at the printed 1040 rather than at the formula, sending the next author to
+        // debug the wrong thing.
+        for (cell, what) in [("line17", "AMT / excess APTC"), ("line21", "credits")] {
+            let v = got.get(cell).map(String::as_str).unwrap_or("0");
+            assert_eq!(
+                v, "0",
+                "{}: the cross-foot formula for line 24 assumes NO {what} (1040 {cell}), and this \
+                 household has some. Extend the formula — do not weaken the assertion.",
+                h.name
+            );
+        }
         let oracle_line24 = round_dollar(usd(e.income_tax_before_credits))
             + round_dollar(usd(e.se_tax))
             + round_dollar(usd(e.niit))

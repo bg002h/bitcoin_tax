@@ -17,8 +17,13 @@
 ## ★ The exit status is PROPAGATED. A bare `wait` (no operands) always returns 0, so the obvious
 ## way to write this reports SUCCESS on a failing suite — a gate that lies is worse than no gate.
 ## Each job's PID is waited on individually and the statuses are OR-ed.
+##
+## ★ `--no-fail-fast`: on red, report EVERY failure, not just the first. nextest stops at the first by
+## default, which turns a fold into a serial rediscovery loop — fix one, re-run, find the next. The
+## suite is 7 seconds; there is no time to save by stopping early, and a gate that under-reports what
+## it caught is a gate you have to run repeatedly to trust.
 check:
-	@cargo nextest run --workspace & t=$$!; \
+	@cargo nextest run --workspace --no-fail-fast & t=$$!; \
 	 CARGO_TARGET_DIR=target-clippy cargo clippy --workspace --all-targets --all-features -- -D warnings & c=$$!; \
 	 st=0; wait $$t || st=1; wait $$c || st=1; \
 	 if [ $$st -ne 0 ]; then echo "make check: FAILED"; fi; \
@@ -26,7 +31,7 @@ check:
 
 ## test: the full suite on its own (nextest — parallel across test binaries, unlike `cargo test`)
 test:
-	cargo nextest run --workspace
+	cargo nextest run --workspace --no-fail-fast
 
 ## lint: clippy on its own, in its own target dir so it does not thrash the test cache
 lint:
