@@ -304,6 +304,32 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 
 ## Open — owned by P7 (golden returns)
 
+- **[✅ DONE — the answer is NO] p7-ats-scenario-2 — the IRS scenario is NOT a golden return.**
+  The plan's P7 task said "ingest IRS ATS Scenario 2 with a partial-line diff". It cannot be done, and
+  recon 05's premise was wrong. We fetched the PDF, rendered it and LOOKED at the pages:
+
+  - The **1040 is BLANK** — watermarked "DRAFT — DO NOT FILE", lines 1a–15 empty. Only identity,
+    filing status and dependents are filled.
+  - **Schedule A is only half-filled**: the IRS entered the INPUTS (5a 1,068 · 5b 10,509 · 8a 16,854 ·
+    11 250 · 12 735) and left every COMPUTED line blank — 5e (the SALT cap), 7, 8e, 10, 14, 17.
+  - **Zero AcroForm `/V` values** in the whole file, so recon's "parse the `/V` fields into an
+    expected-lines table" has nothing to parse.
+  - Recon's **form list is wrong** too: the scenario's cover page lists 1040, W-2 ×2, Sch 1, Sch A,
+    Sch C, Sch EIC, 8283, 8867 — not Sch D / 8812 / 8863 / 8995 / 4972.
+
+  **Why:** ATS validates a submitted **MeF XML**, so the PDF only ever had to state the FACTS. It is a
+  test-case *specification*, not an answer key. Same lesson as the tenforty mislocalisation, one level
+  up: **verify the artifact says what the note claims before building on the note.** Recon 05 is
+  corrected in place.
+
+  **What we did instead** — the plan's own stated alternative ("or a v1-envelope synthetic golden"),
+  which is stronger anyway because it covers the whole matrix rather than one taxpayer: eleven
+  households against **two** independent engines. And the scenario still earned its keep — its SALT
+  figures ($1,068 + $10,509 = $11,577, over the $10,000 cap) seeded `mfj_itemized_salt_over_the_cap`,
+  closing a real hole: **no golden exercised §164(b)(5) at all**, because the only other itemized
+  household carried one lump sum. Both oracles agree with btctax on it, and the cap is asserted on the
+  PAPER (Schedule A line 5e prints 10,000, not 11,577).
+
 - **[✅ DONE] p7-se-divergence-tiebreaker — RUN, and it settled in btctax's favour.** The PSL
   Tax-Calculator (CC0, a completely separate lineage from OTS) reproduces btctax's §1402(b)(1) behaviour
   **to the dollar on every row of the sweep**, including the discriminating middle case ($100,000 of wages

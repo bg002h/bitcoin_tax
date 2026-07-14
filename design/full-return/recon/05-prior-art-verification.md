@@ -211,7 +211,39 @@ Three candidate public-domain fixture sources, ranked by usefulness:
 1. **IRS worked examples in the 1040 / Pub instructions (BEST first fixtures).** The QDCGT worked
    example, Pub 17 examples, Schedule D examples, etc. Small, authoritative, come with the
    answer, public-domain. Use these to seed Layer 1 KATs.
-2. **IRS MeF ATS individual scenarios (VALUABLE, with caveats) — CONFIRMED usable.** These are
+2. > **★ CORRECTED AT P7 (2026-07-14) — THIS ENTRY IS WRONG. Read the correction before relying on it.**
+   >
+   > The ATS Scenario 2 PDF is **not a filled return and contains no answer key.** It is a test-case
+   > **specification**: the IRS validates your MeF *XML submission* against their system, so the PDF
+   > only has to state the FACTS. We fetched it, rendered it and looked at the pages:
+   >
+   > - The **1040 is BLANK** — watermarked "DRAFT — DO NOT FILE", with lines 1a–15 empty. Only the
+   >   identity, filing-status and dependents blocks are filled.
+   > - Even **Schedule A is only half-filled**: the IRS entered the INPUT lines (5a = 1,068,
+   >   5b = 10,509, 8a = 16,854, 11 = 250, 12 = 735) and left every COMPUTED line blank — 5e (the SALT
+   >   cap), 7, 8e, 10, 14 and 17 (total itemized).
+   > - There are **zero AcroForm `/V` values** in the file, so the "budget a small fixture-ingest step
+   >   to parse the `/V` fields" recommendation below has nothing to parse.
+   > - The **form list below is also wrong**. The scenario's own cover page lists 1040, W-2 ×2,
+   >   Schedule 1, Schedule A, Schedule C, Schedule EIC, Form 8283, Form 8867 — **not** Schedule D,
+   >   8812, 8863, 8995 or 4972.
+   >
+   > **Consequence:** ATS Scenario 2 cannot serve as a golden return, and the P7 plan task that
+   > depended on it ("ingest ATS Scenario 2 with a partial-line diff") is not achievable as written.
+   > The plan's own alternative — "or a v1-envelope synthetic golden" — is what P7 shipped: eleven
+   > households validated against **two** independent engines (OpenTaxSolver driven directly, and the
+   > PSL Tax-Calculator), which is a stronger check than one IRS scenario would have been anyway,
+   > because it covers the whole matrix rather than one taxpayer.
+   >
+   > What the scenario IS still good for, and what we took from it: a realistic, public-domain
+   > household SHAPE. Its Schedule A SALT figures ($1,068 state income tax + $10,509 real estate =
+   > $11,577, over the $10,000 cap) seeded the `mfj_itemized_salt_over_the_cap` golden, which closed a
+   > real hole — **no golden exercised §164(b)(5) at all** until then. See FOLLOWUPS `p7-ats-scenario-2`.
+   >
+   > *(Amusingly, even the IRS's own scenario would take the standard deduction: its Schedule A totals
+   > $28,289 against the $29,200 MFJ standard. ATS tests e-file schema, not whether itemizing wins.)*
+
+   **IRS MeF ATS individual scenarios (VALUABLE, with caveats) — CONFIRMED usable.** These are
    **complete, IRS-authored, filled 1040 test returns**, published as PDFs on the MeF ATS page
    and **in the public domain** (US government work)
    ([MeF ATS](https://www.irs.gov/e-file-providers/modernized-e-file-mef-assurance-testing-system-ats),

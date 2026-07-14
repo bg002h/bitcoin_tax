@@ -150,6 +150,22 @@ HOUSEHOLDS = [
         "long_term_capital_gains": 60_000,
     },
     {
+        "name": "mfj_itemized_salt_over_the_cap",
+        "why": "§164(b)(5): state income tax + real estate tax EXCEED the $10,000 SALT cap, and itemizing "
+        "still wins — so the cap BINDS and changes the tax. No other golden exercises it: the matrix's "
+        "other itemized household carries one lump sum. The SALT figures are IRS ATS Test Scenario 2's "
+        "($1,068 state income tax + $10,509 real estate = $11,577, capped to $10,000); the mortgage is "
+        "raised so the itemized total clears the $29,200 standard deduction, which Scenario 2's own "
+        "numbers do NOT (its Schedule A totals $28,289 — the IRS scenario tests e-file schema, not "
+        "whether itemizing wins).",
+        "filing_status": "Married/Joint",
+        "w2_income": 38_730,  # ATS Scenario 2's two W-2s: $29,513 + $9,217
+        "state_income_tax": 1_068,  # Sch A 5a
+        "real_estate_tax": 10_509,  # Sch A 5b  ⇒ 5d = 11,577 > the $10,000 cap
+        "mortgage_interest": 25_000,  # Sch A 8a
+        "standard_or_itemized": "Itemized",
+    },
+    {
         "name": "single_crypto_business_se",
         "why": "crypto MINING as a trade or business: Schedule C → Schedule SE (deep/02 Ex.2 shape)",
         "filing_status": "Single",
@@ -197,7 +213,12 @@ def taxcalc_run(households):
                 "e00900": i.get("self_employment_income", 0),    # Schedule C net profit
                 "e00900p": i.get("self_employment_income", 0),
                 "e00900s": 0,
-                "e19200": i.get("itemized_deductions", 0),       # interest paid ⇒ forces itemizing
+                # Schedule A, as separate components — the SALT cap can only be exercised if state
+                # income tax and real estate tax reach the engine as themselves, not as one lump.
+                "e18400": i.get("state_income_tax", 0),           # state & local income tax  (Sch A 5a)
+                "e18500": i.get("real_estate_tax", 0),            # real estate tax           (Sch A 5b)
+                "e19200": i.get("itemized_deductions", 0)         # interest paid             (Sch A 8a)
+                + i.get("mortgage_interest", 0),
                 "s006": 1.0,
             }
         )

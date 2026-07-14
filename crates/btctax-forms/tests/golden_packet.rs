@@ -3,12 +3,12 @@
 //! ★ What this closes.
 //!
 //! `btctax-core`'s `golden_returns.rs` proves the NUMBERS are right: it diffs btctax against two
-//! independent engines — OpenTaxSolver, driven directly, and the PSL Tax-Calculator — over ten
+//! independent engines — OpenTaxSolver, driven directly, and the PSL Tax-Calculator — over eleven
 //! households. But an engine that computes a perfect return and then prints it into the wrong box, or
 //! drops a form, or leaves a cell blank, files a wrong return with a clean conscience. Every test
 //! between the tax and the paper was, until now, checking btctax against btctax.
 //!
-//! So this fills the **actual PDFs** for the **same ten households the oracles blessed**, reads the
+//! So this fills the **actual PDFs** for the **same eleven households the oracles blessed**, reads the
 //! bytes back with the line-keyed inverse transcriber, and asserts that the figures on the paper are
 //! the figures the independent engines computed. Not btctax's figures — the ORACLE's. The assertion
 //! is literally: *the number OpenTaxSolver arrived at is the number in the box on the 1040.*
@@ -278,6 +278,8 @@ fn each_golden_packet_carries_exactly_the_forms_that_return_requires() {
             "mfj_high_income_niit_and_addl_medicare",
             &["f1040", "f1040s2", "f1040sb", "schedule_d", "f8949", "f8959", "f8960"][..],
         ),
+        // Wages and a Schedule A, nothing else — no interest, no crypto, no business.
+        ("mfj_itemized_salt_over_the_cap", &["f1040", "f1040sa"][..]),
         // Mining as a business: Schedule C ⇒ Schedule SE ⇒ Schedule 2, and §199A ⇒ 8995. No capital
         // gains, so no Schedule D. $100k total is under the $200k single 8959 threshold.
         (
@@ -398,4 +400,53 @@ fn the_whole_packet_is_byte_reproducible() {
 /// readable without threading lifetimes through it.
 fn leak(s: &str) -> &'static str {
     Box::leak(s.to_string().into_boxed_str())
+}
+
+/// ★ **The §164(b)(5) SALT cap is applied ON THE PAPER, not just in the engine.**
+///
+/// Schedule A line 5e is "the smaller of line 5d or $10,000". This household's state income tax
+/// ($1,068) and real estate tax ($10,509) add to **$11,577**, so the cap BINDS: line 5e must print
+/// $10,000 and the filer loses $1,577 of deduction. Both independent oracles agree on the resulting
+/// taxable income ($3,730), which is what makes this checkable at all.
+///
+/// The SALT figures are IRS ATS Test Scenario 2's — the only IRS-authored numbers in the matrix. (The
+/// scenario itself is NOT a golden return: its 1040 is blank and even Schedule A's computed totals are
+/// blank. It is a test-case specification, not an answer key. See FOLLOWUPS `p7-ats-scenario-2`.)
+///
+/// A cap that is computed but printed uncapped files a return claiming $1,577 of deduction the law
+/// does not allow, and every arithmetic test in the repo would still be green.
+#[test]
+fn the_salt_cap_is_printed_onto_schedule_a() {
+    let households = golden_households();
+    let h = households
+        .iter()
+        .find(|h| h.name == "mfj_itemized_salt_over_the_cap")
+        .expect("the SALT-cap household is in the matrix");
+
+    let pkt = packet(h);
+    let got = extract_lines(
+        &form(&pkt, "f1040sa").bytes,
+        btctax_forms::testonly::SCHEDULE_A_MAP_2024,
+    )
+    .unwrap();
+
+    let cell = |k: &str| got.get(k).map(String::as_str).unwrap_or("<BLANK>");
+
+    assert_eq!(cell("line5a"), "1068", "state & local income tax");
+    assert_eq!(cell("line5b"), "10509", "real estate tax");
+    assert_eq!(cell("line5d"), "11577", "5a + 5b — the UNCAPPED total");
+    assert_eq!(
+        cell("line5e"),
+        "10000",
+        "★ the §164(b)(5) cap: 5e is the SMALLER of 5d ($11,577) and $10,000. Printing $11,577 here \
+         would claim $1,577 of deduction the law does not allow — and every arithmetic test in this \
+         repo would still be green."
+    );
+    assert_eq!(cell("line8a"), "25000", "mortgage interest");
+    assert_eq!(
+        cell("line17"),
+        "35000",
+        "total itemized = the CAPPED $10,000 + $25,000 mortgage. It beats the $29,200 standard \
+         deduction, so the cap actually changes this filer's tax."
+    );
 }

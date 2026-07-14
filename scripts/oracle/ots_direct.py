@@ -244,7 +244,12 @@ def evaluate(h: dict) -> dict[str, float]:
             "S2_11": addl_medicare,
         }
         if h.get("standard_or_itemized") == "Itemized":
-            base["A16"] = h.get("itemized_deductions", 0)
+            # OTS applies the $10,000 §164(b)(5) cap itself, on Schedule A line 5e — so the components
+            # must go in as themselves. A lump sum in "other deductions" would sail past the cap.
+            base["A5a"] = h.get("state_income_tax", 0)   # state & local income tax
+            base["A5b"] = h.get("real_estate_tax", 0)    # real estate tax
+            base["A8a"] = h.get("mortgage_interest", 0)  # mortgage interest reported on a 1098
+            base["A16"] = h.get("itemized_deductions", 0)  # the lump-sum household's "other"
             base["A18"] = "Yes"
 
         gains = _capgains_rows(stcg, ltcg)

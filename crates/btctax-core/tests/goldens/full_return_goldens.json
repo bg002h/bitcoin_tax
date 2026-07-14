@@ -246,6 +246,37 @@
       }
     },
     {
+      "name": "mfj_itemized_salt_over_the_cap",
+      "why": "\u00a7164(b)(5): state income tax + real estate tax EXCEED the $10,000 SALT cap, and itemizing still wins \u2014 so the cap BINDS and changes the tax. No other golden exercises it: the matrix's other itemized household carries one lump sum. The SALT figures are IRS ATS Test Scenario 2's ($1,068 state income tax + $10,509 real estate = $11,577, capped to $10,000); the mortgage is raised so the itemized total clears the $29,200 standard deduction, which Scenario 2's own numbers do NOT (its Schedule A totals $28,289 \u2014 the IRS scenario tests e-file schema, not whether itemizing wins).",
+      "inputs": {
+        "filing_status": "Married/Joint",
+        "w2_income": 38730,
+        "state_income_tax": 1068,
+        "real_estate_tax": 10509,
+        "mortgage_interest": 25000,
+        "standard_or_itemized": "Itemized"
+      },
+      "expected_ots": {
+        "adjusted_gross_income": 38730.0,
+        "taxable_income": 3730.0,
+        "qbi_deduction": 0.0,
+        "income_tax_before_credits": 373.0,
+        "se_tax": 0.0,
+        "niit": 0.0,
+        "additional_medicare_tax": 0.0,
+        "total_tax": 373.0
+      },
+      "expected_taxcalc": {
+        "adjusted_gross_income": 38730.0,
+        "taxable_income": 3730.0,
+        "qbi_deduction": 0.0,
+        "income_tax_before_credits": 373.0,
+        "se_tax": 0.0,
+        "niit": 0.0,
+        "additional_medicare_tax": 0.0
+      }
+    },
+    {
       "name": "single_crypto_business_se",
       "why": "crypto MINING as a trade or business: Schedule C \u2192 Schedule SE (deep/02 Ex.2 shape)",
       "inputs": {

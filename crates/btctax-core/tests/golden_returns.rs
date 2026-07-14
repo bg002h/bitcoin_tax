@@ -71,7 +71,7 @@ struct Divergence {
 ///
 /// So oracle 1 is now **OTS itself**, and every divergence the wrapper forced into this list has vanished:
 /// on AGI, taxable income, SE tax, NIIT and Additional Medicare, **all three engines now agree exactly, on
-/// all ten households**. A cross-check whose disagreements all turned out to be the harness is a
+/// all eleven households**. A cross-check whose disagreements all turned out to be the harness is a
 /// cross-check that was measuring the wrong thing.
 ///
 /// One nuance we got wrong in the first pass and should not repeat: tenforty's omission is **deliberate

@@ -410,6 +410,16 @@ pub struct GoldenInputs {
     pub self_employment_income: f64,
     #[serde(default)]
     pub itemized_deductions: f64,
+    /// Schedule A line 5a — state & local INCOME tax. Separate from 5b so the §164(b)(5) SALT cap
+    /// can actually be exercised: a lump sum would sail straight past it.
+    #[serde(default)]
+    pub state_income_tax: f64,
+    /// Schedule A line 5b — real estate tax.
+    #[serde(default)]
+    pub real_estate_tax: f64,
+    /// Schedule A line 8a — mortgage interest reported on a Form 1098.
+    #[serde(default)]
+    pub mortgage_interest: f64,
 }
 
 pub fn golden_usd(v: f64) -> Usd {
@@ -475,9 +485,17 @@ pub fn build_golden_household(h: &GoldenHousehold) -> (ReturnInputs, LedgerState
             ..Default::default()
         });
     }
-    if i.itemized_deductions > 0.0 {
+    if i.itemized_deductions > 0.0
+        || i.state_income_tax > 0.0
+        || i.real_estate_tax > 0.0
+        || i.mortgage_interest > 0.0
+    {
         ri.schedule_a = Some(ScheduleAInputs {
-            mortgage_interest_1098: golden_usd(i.itemized_deductions),
+            // 5a, the income-tax path of §164(b)(5). The oracles get this as OTS's `A5a` /
+            // Tax-Calculator's `e18400`, so all three see the same figure on the same line.
+            salt_state_estimated_payments: golden_usd(i.state_income_tax),
+            salt_real_estate: golden_usd(i.real_estate_tax),
+            mortgage_interest_1098: golden_usd(i.itemized_deductions + i.mortgage_interest),
             ..Default::default()
         });
     }
