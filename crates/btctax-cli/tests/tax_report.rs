@@ -10,6 +10,7 @@
 //!   NIIT: magi_with = 60,000 + 20,000 = 80,000 < 200,000 (Single threshold) → 0.
 //!   ordinary_delta: OTI unchanged by LT gain → 0.
 //!   total = 0 + 1,747.50 + 0 = 1,747.50.
+use btctax_cli::cmd::tax::TaxYearReport;
 use btctax_cli::{cmd, eventref, render, Session};
 use btctax_core::persistence::load_all;
 use btctax_core::{
@@ -78,6 +79,37 @@ hb-recv,2025-01-01 12:00:00 UTC,Receive,BTC,0.10000000,USD,44000.00,,,,,,\r\n",
     p
 }
 
+/// Like [`write_buy_receive`] but the Receive is in **2024** (a full-return-supported year).
+fn write_buy_receive_2024(dir: &Path) -> PathBuf {
+    let p = dir.join("coinbase_rcv24.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+hb-buy,2023-01-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,30000.00,30000.00,30000.00,0.00,,,\r\n\
+hb-recv,2024-01-01 12:00:00 UTC,Receive,BTC,0.10000000,USD,44000.00,,,,,,\r\n",
+    )
+    .unwrap();
+    p
+}
+
+/// Synthetic Coinbase CSV: 2023 buy + **2024** LT sell → $10,000 LT gain (a full-return-supported year).
+/// Buy 1 BTC @ 30,000 (2023-01-01); sell 1 BTC @ 40,000 (2024-06-15) → LT gain 10,000.
+fn write_lt_sell_2024(dir: &Path) -> PathBuf {
+    let p = dir.join("coinbase_lt24.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+lt-buy,2023-01-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,30000.00,30000.00,30000.00,0.00,,,\r\n\
+lt-sell,2024-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.00,0.00,,,\r\n",
+    )
+    .unwrap();
+    p
+}
+
 /// Init vault + import one CSV file; return `(tempdir, vault_path)`.
 fn make_vault_with(csv: &Path) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
@@ -98,7 +130,9 @@ fn pseudo_mode_injects_placeholder_profile_clearing_tax_profile_missing() {
     let (_dir, vault) = make_vault_with(&csv);
 
     // Mode OFF + no profile ⇒ NotComputable(TaxProfileMissing).
-    let (out_off, ..) = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome: out_off, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     match out_off {
         TaxOutcome::NotComputable(b) => assert_eq!(b.kind, BlockerKind::TaxProfileMissing),
         other => panic!("mode-off, no profile: expected TaxProfileMissing, got {other:?}"),
@@ -106,7 +140,9 @@ fn pseudo_mode_injects_placeholder_profile_clearing_tax_profile_missing() {
 
     // Turn pseudo mode ON, still NO profile ⇒ the placeholder is injected ⇒ Computed.
     cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
-    let (out_on, ..) = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome: out_on, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     assert!(
         matches!(out_on, TaxOutcome::Computed(_)),
         "pseudo mode must inject a placeholder profile so the year computes: {out_on:?}"
@@ -120,10 +156,14 @@ fn report_tax_year_renders_golden() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_lt_sell_2025(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
-    let (outcome, advisory, sched_d, _gift, _se, _appraisal) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome,
+        advisory,
+        schedule_d: sched_d,
+        ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     assert!(
@@ -192,10 +232,13 @@ fn report_tax_year_renders_schedule_se_for_business_mining() {
     )
     .unwrap();
 
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
-    let (outcome, _advisory, _sched_d, _gift, se, _appraisal) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome,
+        schedule_se: se,
+        ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let se = se.expect("Schedule SE section expected for a business-mining year");
 
     // Golden 1 components (Single, $100,000 business mining, W-2 = $0).
@@ -301,10 +344,11 @@ fn chunk_a_asymmetric_w2_transposition_guard_cli_path() {
         w2_medicare_wages: dec!(0),
         schedule_c_expenses: dec!(0),
     };
-    cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, profile, false).unwrap();
 
-    let (_outcome, _advisory, _sched_d, _gift, se, _appraisal) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        schedule_se: se, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let se = se.expect("Schedule SE section expected");
 
     // ss must be $3,236.40 (reduced by w2_ss $150k) — NOT $11,451.40 (transposition).
@@ -375,11 +419,12 @@ fn chunk_a_export_parity_asymmetric_w2() {
         w2_medicare_wages: dec!(0),
         schedule_c_expenses: dec!(0),
     };
-    cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, profile, false).unwrap();
 
     // Get report figures (cmd/tax.rs call site).
-    let (_outcome, _advisory, _sched_d, _gift, se, _appraisal) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        schedule_se: se, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let se_text = se.expect("Schedule SE section expected");
     // Report shows reduced SS.
     assert!(
@@ -416,10 +461,11 @@ fn report_tax_year_footer_discloses_1211_loss_and_interest_nii_included() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_lt_sell_2025(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
-    let (outcome, advisory, _sched_d, _gift, _se, _appraisal) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome, advisory, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     // B-M1 negatives (wrong-direction language must be absent):
@@ -464,10 +510,11 @@ fn report_tax_year_components_reconcile_to_total() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_lt_sell_2025(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
-    let (outcome, advisory, _sched_d, _gift, _se, _appraisal) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome, advisory, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     // B-F1: all dollar figures are now fmt_money-formatted to exactly 2dp; assert the 2dp forms.
@@ -511,8 +558,9 @@ fn report_tax_year_without_profile_says_not_computable() {
     let (_dir, vault) = make_vault_with(&csv);
     // Deliberately do NOT set a tax profile for 2025.
 
-    let (outcome, advisory, _sched_d, _gift, _se, _appraisal) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome, advisory, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     assert!(
@@ -524,6 +572,127 @@ fn report_tax_year_without_profile_says_not_computable() {
         !rendered.contains("TOTAL federal tax attributable"),
         "must not print a computed total when profile is missing:\n{rendered}"
     );
+}
+
+/// [full-return P2 / review R2-M2] `ReturnInputs` for a year v1 does NOT support (TY2025 — no bundled
+/// full-return tables) must not silently compute a profile-less number: `report_tax_year` returns a
+/// `Usage` error explaining the unsupported year and pointing at the real `income clear --year N` recovery.
+#[test]
+fn report_tax_year_with_return_inputs_for_unsupported_year_refuses_with_income_clear_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    let toml = dir.path().join("inputs.toml");
+    std::fs::write(&toml, "filing_status = \"Single\"\n").unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml).unwrap();
+
+    let err = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap_err();
+    match err {
+        btctax_cli::CliError::Usage(msg) => {
+            assert!(
+                msg.contains("full-return"),
+                "message should explain why: {msg}"
+            );
+            assert!(
+                msg.contains("income clear --year 2025"),
+                "message must point at the working recovery command: {msg}"
+            );
+        }
+        other => panic!("expected a Usage error for the unsupported year, got {other:?}"),
+    }
+
+    // Recovery works: after `income clear`, the same year is no longer blocked (falls back to no-profile).
+    assert!(cmd::tax::clear_return_inputs(&vault, &pp(), 2025).unwrap());
+    let TaxYearReport { outcome, .. } =
+        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    // No profile, no events ⇒ TaxProfileMissing (NOT the unsupported-year Usage error).
+    assert!(matches!(outcome, btctax_core::TaxOutcome::NotComputable(_)));
+}
+
+/// [full-return P2 task 5] The headline: importing TY2024 `ReturnInputs` makes `report_tax_year` COMPUTE
+/// (via the derived frozen profile) instead of refusing — no `tax-profile set` needed. With a real crypto
+/// disposal in the ledger, the outcome is `Computed` and the derived Single profile drives the delta.
+#[test]
+fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path()); // a fully-real buy+sell (no blockers)
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // No `tax-profile set` — only full-return inputs. A modest wage household for TY2025 (the CSV year).
+    let toml = _dir.path().join("inputs.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
+    )
+    .unwrap();
+    // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
+    // the derive+compute happy path (the ledger has no 2024 disposals → a clean profile-only computation).
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
+
+    let TaxYearReport { outcome, .. } =
+        cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
+    // Derived a real profile ⇒ Computed (NOT NotComputable(TaxProfileMissing), NOT a Usage refusal).
+    assert!(
+        matches!(outcome, btctax_core::TaxOutcome::Computed(_)),
+        "TY2024 ReturnInputs must derive+compute, got {outcome:?}"
+    );
+}
+
+/// [full-return P2 task 2] The compute-dependent refuse rows gate `report_tax_year` fail-closed: a ledger
+/// with SE-eligible business crypto income but `ReturnInputs` carrying no Schedule C must REFUSE (owner /
+/// description unknowable) rather than compute a wrong number.
+#[test]
+fn report_tax_year_refuses_business_income_without_schedule_c() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_buy_receive_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // Classify the 2024 Receive as $100,000 BUSINESS mining income (SE-eligible).
+    let in_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+    cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &in_ref,
+        InboundClass::Income {
+            kind: IncomeKind::Mining,
+            fmv: Some(dec!(100000.00)),
+            business: true,
+        },
+        datetime!(2024-06-01 00:00:00 UTC),
+    )
+    .unwrap();
+
+    // Full-return inputs for 2024 with NO Schedule C.
+    let toml = _dir.path().join("inputs.toml");
+    std::fs::write(&toml, "filing_status = \"Single\"\n").unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
+
+    let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
+    match err {
+        btctax_cli::CliError::Usage(msg) => {
+            assert!(
+                msg.contains("Schedule C"),
+                "should name the missing Schedule C: {msg}"
+            );
+            assert!(
+                msg.contains("income clear --year 2024"),
+                "recovery hint: {msg}"
+            );
+        }
+        other => {
+            panic!("expected a Usage refusal for business-income-without-Schedule-C, got {other:?}")
+        }
+    }
 }
 
 /// Unresolved hard blocker (UnknownBasisInbound from unclassified Receive) →
@@ -538,10 +707,14 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
     let csv = write_buy_receive(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
     // Set a profile so the refusal is definitely from the hard blocker (not TaxProfileMissing).
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_40k_profile(), false).unwrap();
 
-    let (outcome, advisory, sched_d, _gift, _se, _appraisal) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome,
+        advisory,
+        schedule_d: sched_d,
+        ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
 
     assert!(
@@ -633,6 +806,7 @@ st-sell,2026-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
             w2_medicare_wages: dec!(0),
             schedule_c_expenses: dec!(0),
         },
+        false,
     )
     .unwrap();
 
@@ -652,12 +826,14 @@ st-sell,2026-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
             w2_medicare_wages: dec!(0),
             schedule_c_expenses: dec!(0),
         },
+        false,
     )
     .unwrap();
 
     // report --tax-year 2027: main outcome is NotComputable (no TY2027 table); advisory fires.
-    let (outcome, advisory, _sched_d, _gift, _se, _appraisal) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2027, dec!(0)).unwrap();
+    let TaxYearReport {
+        outcome, advisory, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2027, dec!(0)).unwrap();
     let rendered = render::render_tax_outcome(2027, &outcome, advisory.as_deref());
 
     // Advisory must contain the mismatch message.
@@ -923,11 +1099,12 @@ fn chunkb_expensed_profile_report_and_csv_parity() {
         w2_medicare_wages: dec!(0),
         schedule_c_expenses: dec!(20000),
     };
-    cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, profile, false).unwrap();
 
     // ── Report path ────────────────────────────────────────────────────────────────────────────
-    let (_outcome, _advisory, _sched_d, _gift, se, _appraisal) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        schedule_se: se, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let se_text = se.expect("Schedule SE section expected with $20,000 expenses");
 
     // Breakout line: gross − expenses = net SE.
@@ -1026,11 +1203,12 @@ fn chunkb_fully_expensed_integration_no_se_tax_no_csv() {
         w2_medicare_wages: dec!(0),
         schedule_c_expenses: dec!(15000),
     };
-    cmd::tax::set_profile(&vault, &pp(), 2025, profile).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, profile, false).unwrap();
 
     // ── Report path: "fully expensed" line present; wage-base note absent ──────────────────────
-    let (_outcome, _advisory, _sched_d, _gift, se, _appraisal) =
-        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    let TaxYearReport {
+        schedule_se: se, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     let se_text = se.expect("Schedule SE section expected (gross > 0) even when fully expensed");
 
     assert!(
@@ -1267,4 +1445,298 @@ fn tax_profile_negative_w2_medicare_wages_rejected() {
         "btctax tax-profile --w2-medicare-wages=-5 must exit non-zero; \
          if it exits 0 the negative-value guard has been removed"
     );
+}
+
+/// §6 DUAL REPORT: a `ReturnInputs`-provenance TY2024 year renders the absolute filed 1040 (income →
+/// total tax → refund/owed) side-by-side with the crypto delta, carrying the §6 "different questions /
+/// not reconciled" labels + the §4.12 provenance line. A non-ReturnInputs (stored-profile) year does not.
+#[test]
+fn dual_report_renders_absolute_return_with_section_6_labels() {
+    use btctax_core::tax::return_inputs::{Owner, ReturnInputs, W2};
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path()); // clean 2023 buy + 2024 LT sell (+$10,000 LTCG)
+    let (_dir, vault) = make_vault_with(&csv);
+    // ReturnInputs for 2024: Single, $80k wages, no Schedule A (standard deduction).
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &ReturnInputs {
+                filing_status: FilingStatus::Single,
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    box1_wages: dec!(80000),
+                    box3_ss_wages: dec!(80000),
+                    box5_medicare_wages: dec!(80000),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    let TaxYearReport {
+        dual_report: dual, ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
+    let dual = dual.expect("a ReturnInputs-provenance year must produce the §6 dual report");
+    // Absolute filed-return lines.
+    assert!(
+        dual.contains("Absolute filed return (Form 1040) — tax year 2024"),
+        "{dual}"
+    );
+    assert!(dual.contains("TOTAL TAX (L24)"), "{dual}");
+    assert!(
+        dual.contains("90000.00"),
+        "AGI = 80,000 wages + 10,000 LTCG:\n{dual}"
+    );
+    // §4.12 provenance printed.
+    assert!(dual.contains("Profile source: ReturnInputs"), "{dual}");
+    // §6 never-reconcile labels + both figures side-by-side.
+    assert!(
+        dual.contains("DIFFERENT questions") && dual.contains("NOT reconciled"),
+        "{dual}"
+    );
+    assert!(
+        dual.contains("Absolute TOTAL TAX") && dual.contains("DELTA"),
+        "{dual}"
+    );
+
+    // A stored-profile (non-ReturnInputs) year produces NO dual report (the delta-only path).
+    let csv_dir2 = tempfile::tempdir().unwrap();
+    let csv2 = write_lt_sell_2025(csv_dir2.path());
+    let (_dir2, vault2) = make_vault_with(&csv2);
+    cmd::tax::set_profile(&vault2, &pp(), 2025, single_40k_profile(), false).unwrap();
+    let TaxYearReport {
+        dual_report: dual2, ..
+    } = cmd::tax::report_tax_year(&vault2, &pp(), 2025, dec!(0)).unwrap();
+    assert!(
+        dual2.is_none(),
+        "a stored-profile year must not emit the dual report"
+    );
+}
+
+/// §4 R3-M6 carryover write-back (P4.9): `report --tax-year Y --write-carryover` persists year Y's
+/// computed charitable carryover-out as year (Y+1)'s carryover-in (stamped Computed), and refuses to
+/// overwrite a user-entered next-year carryover without `--force`.
+#[test]
+fn carryover_write_back_round_trips_and_respects_user_precedence() {
+    use btctax_core::tax::return_inputs::{
+        CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift, Owner, ReturnInputs,
+        ScheduleAInputs, W2,
+    };
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path()); // clean 2024 ledger (+$10k LTCG)
+    let (_dir, vault) = make_vault_with(&csv);
+    // 2024 ReturnInputs: $50k wages + a $40k cash charitable gift that overflows the 60%-of-AGI ceiling.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &ReturnInputs {
+                filing_status: FilingStatus::Single,
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    box1_wages: dec!(50000),
+                    box3_ss_wages: dec!(50000),
+                    box5_medicare_wages: dec!(50000),
+                    ..Default::default()
+                }],
+                schedule_a: Some(ScheduleAInputs {
+                    charitable: vec![CharitableGift {
+                        class: CharitableClass::Cash60,
+                        amount: dec!(40000),
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    // I1: with NO 2025 row yet, the write-back must REFUSE (fabricating one would shadow a stored
+    // tax-profile for 2025 in the §4.12 ladder and make that year uncomputable in v1).
+    let err = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap_err();
+    assert!(
+        format!("{err:?}").contains("no full-return inputs yet"),
+        "must refuse to fabricate a 2025 row: {err:?}"
+    );
+    // Import 2025's inputs first (the required order), THEN write back.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2025,
+            &ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    // Write-back → 2025 gets a computed charitable carryover-in.
+    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    assert!(summary.contains("written back to 2025"), "{summary}");
+    let next = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .expect("2025 row written")
+    };
+    assert!(!next.charitable_carryover_in.is_empty());
+    assert!(next
+        .charitable_carryover_in
+        .iter()
+        .all(|c| c.provenance == CarryProvenance::Computed));
+
+    // Now a USER-entered 2025 carryover must NOT be silently overwritten.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut y2025 = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        y2025.charitable_carryover_in = vec![CharitableCarryItem {
+            class: CharitableClass::Cash60,
+            amount: dec!(5000),
+            origin_year: 2023,
+            provenance: CarryProvenance::User,
+        }];
+        btctax_cli::return_inputs::set(s.conn(), 2025, &y2025).unwrap();
+        s.save().unwrap();
+    }
+    assert!(
+        cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).is_err(),
+        "must refuse to overwrite a user-entered carryover without --force"
+    );
+    // --force overwrites it.
+    assert!(cmd::tax::write_back_carryover(&vault, &pp(), 2024, true).is_ok());
+    let forced = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap()
+    };
+    assert!(forced
+        .charitable_carryover_in
+        .iter()
+        .all(|c| c.provenance == CarryProvenance::Computed));
+}
+
+/// I2 (Fable P4.9 r1): re-importing year Y+1 must NOT silently drop the `Computed` carryover that
+/// `--write-carryover` put there. For QBI that drop would be a FAIL-OPEN (losing the REIT/PTP loss
+/// carryforward overstates the QBI deduction ⇒ understates tax). A TOML that supplies no carryover keeps
+/// the computed one; a TOML that DOES supply one is the user's and wins (as `User`).
+#[test]
+fn import_preserves_a_computed_carryover() {
+    use btctax_core::tax::return_inputs::{
+        CarryProvenance, CharitableClass, CharitableGift, Owner, ReturnInputs, ScheduleAInputs, W2,
+    };
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        // 2024: wages + an over-ceiling charitable gift → a carryover-out.
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &ReturnInputs {
+                filing_status: FilingStatus::Single,
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    box1_wages: dec!(50000),
+                    box3_ss_wages: dec!(50000),
+                    box5_medicare_wages: dec!(50000),
+                    ..Default::default()
+                }],
+                schedule_a: Some(ScheduleAInputs {
+                    charitable: vec![CharitableGift {
+                        class: CharitableClass::Cash60,
+                        amount: dec!(40000),
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // 2025 row must exist before the write-back (I1).
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2025,
+            &ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+
+    // Re-import 2025 from a TOML that carries NO carryover — the computed one must SURVIVE.
+    let toml = csv_dir.path().join("2025.toml");
+    std::fs::write(&toml, "filing_status = \"Single\"\n").unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml).unwrap();
+    let after = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap()
+    };
+    assert!(
+        !after.charitable_carryover_in.is_empty(),
+        "a Computed carryover must survive an import that does not supply one"
+    );
+    assert!(after
+        .charitable_carryover_in
+        .iter()
+        .all(|c| c.provenance == CarryProvenance::Computed));
+}
+
+/// P5: the full-return report surfaces the §3.4 conservative-omission advisories (CTC/ODC with dependents,
+/// the forfeited §63(f) aged box when no DOB is on file, the EIC) + the FBAR disclosure — loudly, and
+/// saying which direction the error runs (OVERSTATED). Non-gating: the report still computes.
+#[test]
+fn full_return_report_surfaces_conservative_omission_advisories() {
+    use btctax_core::tax::return_inputs::{Dependent, Owner, ReturnInputs, W2};
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box1_wages: dec!(40000),
+                box3_ss_wages: dec!(40000),
+                box5_medicare_wages: dec!(40000),
+                ..Default::default()
+            }],
+            foreign_accounts: Some(true), // → FBAR disclosure
+            foreign_trust: Some(false),
+            ..Default::default()
+        };
+        ri.header.dependents = vec![Dependent::default()]; // → CTC/ODC omission
+                                                           // taxpayer.date_of_birth stays None → the §63(f) aged box is forfeited
+        btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+    let r = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
+    let dual = r
+        .dual_report
+        .expect("full-return year must render the dual report");
+    assert!(dual.contains("ADVISORIES"), "{dual}");
+    assert!(dual.contains("CTC/ODC NOT COMPUTED"), "{dual}");
+    assert!(dual.contains("OVERSTATED"), "{dual}");
+    assert!(dual.contains("DATE OF BIRTH NOT ON FILE"), "{dual}");
+    assert!(dual.contains("FBAR"), "{dual}");
+    // AGI = 40k wages + 10k LTCG = 50k < the $70k EIC advisory ceiling, with earned income → EIC too.
+    assert!(dual.contains("EIC NOT COMPUTED"), "{dual}");
 }

@@ -16,3 +16,153 @@ line7a = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_52[0]"
 da_present = true
 da_yes = { field = "topmostSubform[0].Page1[0].c1_5[0]", on = "1" }
 da_no = { field = "topmostSubform[0].Page1[0].c1_5[1]", on = "2" }
+
+# ─────────────────────────── FULL-RETURN extension (P6) ────────────────────────────────────────
+# The crypto-slice fill above writes only line 7 + the Digital-Asset question. The full return needs
+# every line. These keys are absent from the 2017/2025 maps, hence optional.
+#
+# ★ THREE x-clusters on this form:
+#     SUBLINE x ≈ [252, 324]   the lettered "a" sub-lines (2a tax-exempt interest, 3a qualified div)
+#     MID     x ≈ [410, 482]   25a/25b/25c, 31
+#     AMOUNT  x ≈ [504, 576]   everything else
+#
+# ★ f1_57 IS LINE 12 ON THE 2024 FORM AND LINE 1z ON THE 2025 ONE (SPEC §7.4). The maps are
+#   per-(form, year) for exactly this reason. Never share a field-name constant across years.
+#
+# ★★ THE FILING-STATUS GROUP IS A NAME COLLISION. There are TWO distinct fields called `c1_3[0]` and
+#    TWO called `c1_3[1]`, distinguished ONLY by their parent subform:
+#        FilingStatus_ReadOrder[0].c1_3[0]  = Single   (on "1")
+#                          ...  .c1_3[0]  = HoH      (on "2")   ← same leaf name, no wrapper!
+#        FilingStatus_ReadOrder[0].c1_3[1]  = MFJ      (on "3")
+#                          ...  .c1_3[1]  = QSS      (on "5")   ← same leaf name, no wrapper!
+#        FilingStatus_ReadOrder[0].c1_3[2]  = MFS      (on "4")
+#    A map that used the leaf name would silently check the WRONG FILING STATUS. The on-states
+#    (1=Single, 2=HoH, 3=MFJ, 4=MFS, 5=QSS) are distinct and independently corroborate the mapping —
+#    which is why the filler asserts BOTH the fully-qualified name and the on-state.
+
+# ── Page 1: income → taxable income ────────────────────────────────────────────────────────────
+# ★ L1a — "Total amount from Form(s) W-2, box 1". Correlated by counting the AMOUNT-column boxes down
+#   from 1a: f1_32=1a, f1_33=1b … f1_39=1h, f1_40=1i (the MID-column combat-pay election), f1_41=1z.
+#   Without it the filed 1z sat above an EMPTY operand column and "Add lines 1a through 1h" summed
+#   blanks to 0 ≠ 1z — on the line the Service document-matches against your W-2s (Fable P6 r1 I1).
+line1a = "topmostSubform[0].Page1[0].f1_32[0]"                              # Σ W-2 box 1           AMOUNT
+line1z = "topmostSubform[0].Page1[0].f1_41[0]"                              # add 1a–1h             AMOUNT
+# L2a — the SUBLINE column at the same printed row as 2b (f1_42 sits at x≈252-323, y=234-246; f1_43 is
+# the AMOUNT cell on that row). Anchored by the identical 3a/3b pair one row below (f1_44 / f1_45).
+line2a = "topmostSubform[0].Page1[0].f1_42[0]"                              # tax-exempt interest   SUBLINE
+line2b = "topmostSubform[0].Page1[0].f1_43[0]"                             # taxable interest      AMOUNT
+line3a = "topmostSubform[0].Page1[0].f1_44[0]"                             # qualified dividends   SUBLINE ★
+line3b = "topmostSubform[0].Page1[0].f1_45[0]"                             # ordinary dividends    AMOUNT
+line8  = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_53[0]"      # Sch 1 L10             AMOUNT
+line9  = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_54[0]"      # total income          AMOUNT
+line10 = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_55[0]"      # Sch 1 L26             AMOUNT
+line11 = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_56[0]"      # AGI                   AMOUNT
+line12 = "topmostSubform[0].Page1[0].f1_57[0]"                             # deduction  ★ f1_57    AMOUNT
+line13 = "topmostSubform[0].Page1[0].f1_58[0]"                             # QBI (8995 L15)        AMOUNT
+line14 = "topmostSubform[0].Page1[0].f1_59[0]"                             # 12 + 13               AMOUNT
+line15 = "topmostSubform[0].Page1[0].f1_60[0]"                             # TAXABLE INCOME        AMOUNT
+
+# ── Page 2: tax → total tax → payments → refund/owed ───────────────────────────────────────────
+line16  = "topmostSubform[0].Page2[0].f2_02[0]"   # tax
+line17  = "topmostSubform[0].Page2[0].f2_03[0]"   # Sch 2 L3 (always 0 in v1)
+line18  = "topmostSubform[0].Page2[0].f2_04[0]"   # 16 + 17
+line19  = "topmostSubform[0].Page2[0].f2_05[0]"   # CTC/ODC — always 0 (conservative omission)
+line20  = "topmostSubform[0].Page2[0].f2_06[0]"   # Sch 3 L8
+line21  = "topmostSubform[0].Page2[0].f2_07[0]"   # 19 + 20
+line22  = "topmostSubform[0].Page2[0].f2_08[0]"   # 18 − 21
+line23  = "topmostSubform[0].Page2[0].f2_09[0]"   # Sch 2 L21
+line24  = "topmostSubform[0].Page2[0].f2_10[0]"   # TOTAL TAX
+line25a = "topmostSubform[0].Page2[0].f2_11[0]"   # W-2 withholding        MID
+line25b = "topmostSubform[0].Page2[0].f2_12[0]"   # 1099 withholding       MID
+line25c = "topmostSubform[0].Page2[0].f2_13[0]"   # other (8959 L24)       MID
+line25d = "topmostSubform[0].Page2[0].f2_14[0]"   # 25a + 25b + 25c
+line26  = "topmostSubform[0].Page2[0].f2_15[0]"   # estimated payments
+line31  = "topmostSubform[0].Page2[0].f2_20[0]"   # Sch 3 L15              MID
+line32  = "topmostSubform[0].Page2[0].f2_21[0]"   # 27-31 total
+line33  = "topmostSubform[0].Page2[0].f2_22[0]"   # TOTAL PAYMENTS
+line34  = "topmostSubform[0].Page2[0].f2_23[0]"   # overpayment
+line35a = "topmostSubform[0].Page2[0].f2_24[0]"   # refunded to you
+line37  = "topmostSubform[0].Page2[0].f2_28[0]"   # AMOUNT YOU OWE
+
+# UNMAPPED ON PURPOSE: the direct-deposit block (35b routing f2_25, 35c/d account f2_26) — v1 never
+# fills it, so a refund arrives as a paper check and the RefundByPaperCheck advisory says so. Line 36
+# (apply to next year) is pinned blank. Lines 27-30 (EIC, additional CTC, AOC) are §3.4 conservative
+# omissions and stay BLANK, never a misleading 0.
+
+# ── The 5-way filing-status group. Fully-qualified names ONLY — see the collision note above. ──
+[filing_status]
+single = { field = "topmostSubform[0].Page1[0].FilingStatus_ReadOrder[0].c1_3[0]", on = "1" }
+hoh    = { field = "topmostSubform[0].Page1[0].c1_3[0]",                            on = "2" }
+mfj    = { field = "topmostSubform[0].Page1[0].FilingStatus_ReadOrder[0].c1_3[1]", on = "3" }
+mfs    = { field = "topmostSubform[0].Page1[0].FilingStatus_ReadOrder[0].c1_3[2]", on = "4" }
+qss    = { field = "topmostSubform[0].Page1[0].c1_3[1]",                            on = "5" }
+
+# ── Identity block (P6.2) ──────────────────────────────────────────────────────────────────────────
+# Dumped with `xtask dump-fields` and correlated line-by-line against `pdftotext -layout`. NOTHING here
+# is extrapolated from a sibling form: the 1040's SSN cells declare /MaxLen 9 (comb) and take the nine
+# BARE digits, while every schedule's SSN cell is /MaxLen 11 and takes the hyphenated form.
+#
+# The four Age/Blindness boxes sit on ONE printed row (y ≈ 440.5), left→right:
+#   c1_9  = "You: Were born before January 2, 1960"     c1_10 = "You: Are blind"
+#   c1_11 = "Spouse: Was born before January 2, 1960"   c1_12 = "Spouse: Is blind"
+# They are GATING: the IRS validates a nonstandard standard deduction by counting them against L12.
+[header]
+taxpayer_first  = "topmostSubform[0].Page1[0].f1_04[0]"
+taxpayer_last   = "topmostSubform[0].Page1[0].f1_05[0]"
+taxpayer_ssn    = "topmostSubform[0].Page1[0].f1_06[0]"
+spouse_first    = "topmostSubform[0].Page1[0].f1_07[0]"
+spouse_last     = "topmostSubform[0].Page1[0].f1_08[0]"
+spouse_ssn      = "topmostSubform[0].Page1[0].f1_09[0]"
+address_street  = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_10[0]"
+address_apt     = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_11[0]"
+address_city    = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_12[0]"
+address_state   = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_13[0]"
+address_zip     = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_14[0]"
+mfs_spouse_name = "topmostSubform[0].Page1[0].f1_18[0]"
+# The page-2 signature block: occupations and the taxpayer's IP PIN (a 6-character comb — the spouse's
+# IP PIN cell exists (f2_36) but ReturnInputs does not capture one, so it is left BLANK, never guessed).
+occupation_taxpayer = "topmostSubform[0].Page2[0].f2_33[0]"
+occupation_spouse   = "topmostSubform[0].Page2[0].f2_35[0]"
+ip_pin              = "topmostSubform[0].Page2[0].f2_34[0]"
+
+presidential_taxpayer      = { field = "topmostSubform[0].Page1[0].c1_1[0]",  on = "1" }
+presidential_spouse        = { field = "topmostSubform[0].Page1[0].c1_2[0]",  on = "1" }
+claimed_dependent_taxpayer = { field = "topmostSubform[0].Page1[0].c1_6[0]",  on = "1" }
+claimed_dependent_spouse   = { field = "topmostSubform[0].Page1[0].c1_7[0]",  on = "1" }
+mfs_spouse_itemizes        = { field = "topmostSubform[0].Page1[0].c1_8[0]",  on = "1" }
+taxpayer_aged              = { field = "topmostSubform[0].Page1[0].c1_9[0]",  on = "1" }
+taxpayer_blind             = { field = "topmostSubform[0].Page1[0].c1_10[0]", on = "1" }
+spouse_aged                = { field = "topmostSubform[0].Page1[0].c1_11[0]", on = "1" }
+spouse_blind               = { field = "topmostSubform[0].Page1[0].c1_12[0]", on = "1" }
+more_than_four_dependents  = { field = "topmostSubform[0].Page1[0].Dependents_ReadOrder[0].c1_13[0]", on = "1" }
+
+# The four dependents rows. `name` is ONE widget spanning the printed "(1) First name / Last name"
+# columns (93.6→265.6) — the form has a single cell there. The ctc/odc boxes are mapped but NEVER
+# checked: v1 omits CTC/ODC (L19 = 0), and a ticked credit box beside a zero credit contradicts itself.
+[[header.dependent_rows]]
+name         = "topmostSubform[0].Page1[0].Table_Dependents[0].Row1[0].f1_20[0]"
+ssn          = "topmostSubform[0].Page1[0].Table_Dependents[0].Row1[0].f1_21[0]"
+relationship = "topmostSubform[0].Page1[0].Table_Dependents[0].Row1[0].f1_22[0]"
+ctc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row1[0].c1_14[0]", on = "1" }
+odc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row1[0].c1_15[0]", on = "1" }
+
+[[header.dependent_rows]]
+name         = "topmostSubform[0].Page1[0].Table_Dependents[0].Row2[0].f1_23[0]"
+ssn          = "topmostSubform[0].Page1[0].Table_Dependents[0].Row2[0].f1_24[0]"
+relationship = "topmostSubform[0].Page1[0].Table_Dependents[0].Row2[0].f1_25[0]"
+ctc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row2[0].c1_16[0]", on = "1" }
+odc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row2[0].c1_17[0]", on = "1" }
+
+[[header.dependent_rows]]
+name         = "topmostSubform[0].Page1[0].Table_Dependents[0].Row3[0].f1_26[0]"
+ssn          = "topmostSubform[0].Page1[0].Table_Dependents[0].Row3[0].f1_27[0]"
+relationship = "topmostSubform[0].Page1[0].Table_Dependents[0].Row3[0].f1_28[0]"
+ctc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row3[0].c1_18[0]", on = "1" }
+odc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row3[0].c1_19[0]", on = "1" }
+
+[[header.dependent_rows]]
+name         = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0].f1_29[0]"
+ssn          = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0].f1_30[0]"
+relationship = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0].f1_31[0]"
+ctc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0].c1_20[0]", on = "1" }
+odc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0].c1_21[0]", on = "1" }

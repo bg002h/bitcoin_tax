@@ -1090,6 +1090,176 @@ pub fn render_tax_outcome(
     s
 }
 
+/// The house wrap width for advisory text (the widest line the tool prints anywhere).
+pub(crate) const ADVISORY_WRAP_COLS: usize = 92;
+
+/// Wrap `text` under a `  • ` bullet, with continuation lines hanging under the bullet's TEXT (a
+/// 4-space indent) rather than under the bullet glyph. Breaks on whitespace only; a word longer than
+/// the line (a URL, say) is left to overflow rather than being cut mid-token — a broken citation is
+/// worse than a long line.
+pub(crate) fn wrap_bulleted(text: &str) -> String {
+    const BULLET: &str = "  \u{2022} ";
+    const HANG: &str = "    ";
+    let mut out = String::new();
+    let mut line = String::from(BULLET);
+    let mut have_word = false;
+
+    for word in text.split_whitespace() {
+        let prospective = line.chars().count() + usize::from(have_word) + word.chars().count();
+        if have_word && prospective > ADVISORY_WRAP_COLS {
+            out.push_str(line.trim_end());
+            out.push('\n');
+            line = String::from(HANG);
+            have_word = false;
+        }
+        if have_word {
+            line.push(' ');
+        }
+        line.push_str(word);
+        have_word = true;
+    }
+    out.push_str(line.trim_end());
+    out
+}
+
+/// Render the Phase-5 full-return **advisories** (SPEC §3.4 / §9.2) — the loud, non-gating notes that a
+/// favorable credit was omitted conservatively (your tax is OVERSTATED), or that a disclosure is yours to
+/// make. Never changes a number and never changes the exit code.
+pub fn render_advisories(advisories: &[btctax_core::tax::advisories::Advisory]) -> String {
+    let mut s = String::new();
+    if advisories.is_empty() {
+        return s;
+    }
+    let _ = writeln!(s, "\n  ── ADVISORIES ({}) ──", advisories.len());
+    for a in advisories {
+        // Wrap each message under its bullet (`p5-n5`): an advisory is a 300–400-character sentence, and
+        // an unwrapped one is unreadable in an 80-column terminal. The message text itself is
+        // single-sourced in core — this only decides where the line breaks are.
+        let _ = writeln!(s, "{}", wrap_bulleted(&a.message()));
+    }
+    let _ = writeln!(
+        s,
+        "  (Advisories never change a number and never fail the command. See `btctax limitations`.)"
+    );
+    s
+}
+
+/// The §4.12 provenance label for the resolved profile — printed on the full-return output so a
+/// reviewer can audit which source produced the figures (`p2-provenance-printing`).
+pub fn provenance_label(p: crate::resolve::Provenance) -> &'static str {
+    use crate::resolve::Provenance::*;
+    match p {
+        ReturnInputs => "ReturnInputs (derived from line items)",
+        StoredProfile => "stored TaxProfile (raw override)",
+        PseudoPlaceholder => "pseudo-reconcile placeholder ($0)",
+        Missing => "none (TaxProfileMissing)",
+    }
+}
+
+/// Render the **§6 dual report**: the absolute filed-return liability (Form 1040, WITH crypto) and the
+/// crypto-attribution DELTA are **different questions** — shown together, labeled, and NEVER reconciled to
+/// the dollar (SPEC §6). Only produced for a `ReturnInputs`-provenance year (a full 1040 exists). `delta`
+/// is the same `TaxOutcome` the crypto-delta block already showed above. Provenance is printed here (§4.12).
+/// ★ The absolute block renders the **PRINTED** figures — the whole-dollar, cross-footing lines the filed
+/// PDF carries — not the exact-cents computation behind them (ARCH-P6 Q3).
+///
+/// The clinching case is line 37. "Amount you owe" is not an analytical figure; it is an instruction to
+/// write a check. A tool that says $12,345.67 in the terminal and prints $12,347 on the filed form has
+/// produced TWO authoritative answers to "what do I pay", and no LIMITATIONS paragraph repairs that. The
+/// moment a report line is labelled with a form-line citation, it has promised the FORM's figure.
+///
+/// The crypto-DELTA block below stays in exact cents: it is not a filed figure — it answers a different
+/// question (§6), and the frozen engine computes it in cents.
+pub fn render_dual_report(
+    year: i32,
+    ar: &btctax_core::AbsoluteReturn,
+    printed: &btctax_core::tax::packet::PrintedForms,
+    delta: &btctax_core::TaxOutcome,
+    provenance: crate::resolve::Provenance,
+) -> String {
+    let f = &printed.f1040;
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "\n═══ Absolute filed return (Form 1040) — tax year {year} ═══"
+    );
+    let _ = writeln!(s, "  Profile source: {}", provenance_label(provenance));
+    let _ = writeln!(s, "  Total income (1040 L9):   {}", fmt_money(f.line9));
+    let _ = writeln!(s, "  Adjustments (L10):        {}", fmt_money(f.line10));
+    let _ = writeln!(s, "  AGI (L11):                {}", fmt_money(f.line11));
+    let ded_kind = if ar.deduction_is_itemized {
+        "itemized"
+    } else {
+        "standard"
+    };
+    let _ = writeln!(s, "  Deduction (L12, {ded_kind}): {}", fmt_money(f.line12));
+    if ar.qbi_deduction > Usd::ZERO {
+        let _ = writeln!(s, "  QBI deduction (L13):      {}", fmt_money(f.line13));
+    }
+    let _ = writeln!(s, "  Taxable income (L15):     {}", fmt_money(f.line15));
+    let _ = writeln!(s, "  Tax (L16):                {}", fmt_money(f.line16));
+    if ar.foreign_tax_credit > Usd::ZERO {
+        let _ = writeln!(
+            s,
+            "  Foreign tax credit (Sch 3 L1): {}",
+            fmt_money(printed.sch_3.map_or(Usd::ZERO, |s3| s3.line1))
+        );
+    }
+    if ar.se_tax_sch2_l4 > Usd::ZERO {
+        let _ = writeln!(
+            s,
+            "  Self-employment tax (Sch 2 L4): {}",
+            fmt_money(printed.sch_2.map_or(Usd::ZERO, |s2| s2.line4))
+        );
+    }
+    if ar.additional_medicare.additional_medicare_tax > Usd::ZERO {
+        let _ = writeln!(
+            s,
+            "  Additional Medicare (Form 8959 → Sch 2 L11): {}",
+            fmt_money(printed.f8959.line18)
+        );
+    }
+    if ar.niit.tax > Usd::ZERO {
+        let _ = writeln!(
+            s,
+            "  Net Investment Income Tax (Form 8960 → Sch 2 L12): {}",
+            fmt_money(printed.f8960.map_or(Usd::ZERO, |f| f.line17))
+        );
+    }
+    let _ = writeln!(s, "  TOTAL TAX (L24):          {}", fmt_money(f.line24));
+    let _ = writeln!(s, "  Total payments (L33):     {}", fmt_money(f.line33));
+    if f.line34 > Usd::ZERO {
+        let _ = writeln!(s, "  → REFUND (L35a):          {}", fmt_money(f.line34));
+    } else {
+        let _ = writeln!(s, "  → AMOUNT OWED (L37):      {}", fmt_money(f.line37));
+    }
+    // §6: the two figures answer different questions and are NEVER reconciled.
+    let delta_str = match delta {
+        btctax_core::TaxOutcome::Computed(r) => fmt_money(r.total_federal_tax_attributable),
+        btctax_core::TaxOutcome::NotComputable(_) => "not computable".to_string(),
+    };
+    let _ = writeln!(
+        s,
+        "\n  ── Two DIFFERENT questions — NOT reconciled (SPEC §6) ──"
+    );
+    let _ = writeln!(
+        s,
+        "  • Absolute TOTAL TAX (this filed return, WITH crypto): {}",
+        fmt_money(f.line24)
+    );
+    let _ = writeln!(
+        s,
+        "  • Crypto-attributable tax (DELTA, shown above):        {delta_str}"
+    );
+    let _ = writeln!(
+        s,
+        "  The delta's implied deduction is fixed at derivation time (non-crypto AGI), so it is \
+         APPROXIMATE where a\n  deduction is AGI-sensitive (e.g. the 7.5% medical floor); the two do NOT \
+         reconcile to the dollar."
+    );
+    s
+}
+
 /// P2-B Task 3: render the RAW pre-netting Schedule D part totals (Part I ST, Part II LT) for
 /// `year`, mirroring `render_tax_outcome`. These are the Form 8949/Schedule D part totals BEFORE
 /// §1222/§1211/§1212 netting + carryforward — that netting is applied in the tax computation
@@ -3312,6 +3482,35 @@ mod form8283_csv_tests {
             &no_details_rec[idx("needs_review")],
             "true",
             "no-details carrier row: needs_review must be true"
+        );
+    }
+}
+
+#[cfg(test)]
+mod advisory_wrap_tests {
+    use super::*;
+
+    /// `p5-n5-advisory-line-wrapping`: an advisory is a 300–400-character sentence, and the house style
+    /// wraps everywhere else. An unwrapped one is unreadable in an 80-column terminal — and it is the ONE
+    /// place the tool explains a conservative omission, so it is the text most worth reading.
+    #[test]
+    fn advisories_wrap_to_the_house_width_with_a_hanging_indent() {
+        use btctax_core::tax::advisories::Advisory;
+        let out = render_advisories(&[Advisory::CtcOdcOmitted { dependents: 2 }]);
+
+        for line in out.lines() {
+            assert!(
+                line.chars().count() <= ADVISORY_WRAP_COLS,
+                "line is {} cols, over the {}-col house width: {line:?}",
+                line.chars().count(),
+                ADVISORY_WRAP_COLS
+            );
+        }
+        // Continuation lines hang under the bullet's TEXT, not under the bullet.
+        assert!(
+            out.lines()
+                .any(|l| l.starts_with("    ") && !l.trim().is_empty()),
+            "a 300-char advisory must wrap onto continuation lines, got:\n{out}"
         );
     }
 }

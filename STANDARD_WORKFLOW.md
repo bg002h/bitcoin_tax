@@ -190,6 +190,28 @@ Two persistence disciplines that repeatedly pay off:
   every commit. When a plan/spec cites source, re-check it against the *current*
   source as you write, and record the source revision for future readers.
 
+### Follow-up burndown is per-phase, by ownership
+
+A follow-up is a **scheduling** tool, never a way to move a gate. Every follow-up
+gets an **owning phase** the moment it is filed, and it is burned down on that
+phase's schedule — not "all at the end":
+
+- **Phase-owned or gating → burn down in/before that phase closes green.** A
+  follow-up that binds the current phase (its gate), or is scheduled *to* a phase
+  (`→ P4`, `→ P6`), is **not deferrable past its owning phase**. "It's a follow-up"
+  is not license to carry a phase-owned item across the gate — that is exactly the
+  rationalization the hard-gate rule (§0) exists to override.
+- **On entering a phase, reconcile first.** Sweep the open follow-up list: do the
+  ones this phase owns, and confirm the rest are correctly parked on a *later*
+  phase. A follow-up whose owning phase you've already passed is overdue, not
+  deferred.
+- **Only the ownerless residue batches to the end.** Genuinely cross-cutting
+  Minors/Nits with no owning phase (doc-consistency, opportunistic cleanups,
+  post-release UX sugar) are the *only* things "burn down at the end" refers to.
+
+Record the owning phase in each follow-up entry (alongside what/why/status), so a
+reconciliation pass is a grep, not a re-derivation.
+
 ---
 
 ## 5. Roles

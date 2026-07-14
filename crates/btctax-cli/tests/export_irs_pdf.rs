@@ -201,6 +201,7 @@ fn sp2_packet_writes_schedule_se_and_1040_capgains() {
             w2_medicare_wages: dec!(0),
             schedule_c_expenses: dec!(0),
         },
+        false,
     )
     .unwrap();
     let out = tempfile::tempdir().unwrap();
@@ -414,4 +415,205 @@ fn ty2017_real_ledger_fills_box_c_f_and_line13_no_da() {
     );
     // No Digital-Asset {/1,/2} pair is ANSWERED on the 2017 1040 (the form has no such question).
     assert!(report.form_1040_filled_7a, "line 13 filled (active gain)");
+}
+
+/// ★ THE DISPATCH, direction 1 (P6.5) — a year WITH full-return inputs gets the **full packet**, not the
+/// crypto slice. This replaces the P5-C1 refusal: that guard existed only because the slice's Schedule D
+/// carries the crypto totals alone (no line 13 for 1099-DIV box-2a distributions, no lines 6/14 for
+/// capital-loss carryovers), so on a full-return year it was a complete-LOOKING form with income missing.
+/// The full pipeline fills all of them, plus every attachment the forms cite.
+///
+/// The two paths write NON-OVERLAPPING filenames, so artifacts from two runs can never be collated into a
+/// chimera return — asserted in both directions.
+#[test]
+fn export_dispatches_a_full_return_year_to_the_full_packet() {
+    use btctax_cli::{return_inputs, Session};
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    use btctax_core::tax::types::FilingStatus;
+
+    let (_dir, vault) = make_vault(&real_events());
+    let out = tempfile::tempdir().unwrap();
+
+    // TY2024 is the full-return year (v1 has tables for it); give it inputs — WITH an identity, since
+    // an unnamed return is not filable (the packet refuses one; see the KAT below).
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
+            first_name: "Pat".into(),
+            last_name: "Roe".into(),
+            ssn: "222-33-4444".into(),
+            ..Default::default()
+        };
+        return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("a full-return year exports the full packet");
+
+    assert!(
+        out.path().join("00_f1040.pdf").exists(),
+        "the full packet writes sequence-prefixed files"
+    );
+    assert!(
+        out.path().join("manifest.txt").exists(),
+        "…and the filer's stapling order"
+    );
+    assert!(!rep.full_return_paths.is_empty());
+    // …and NOT the crypto slice's files: the two name-spaces are disjoint by construction.
+    assert!(
+        !out.path().join("form_1040_capgains.pdf").exists(),
+        "the slice's 1040 must never appear beside the full packet"
+    );
+    assert!(rep.form_1040_path.is_none());
+}
+
+/// ★ THE DISPATCH, direction 2 — a year with NO full-return inputs still gets the crypto slice,
+/// unchanged. Deleting the P5-C1 refusal downgraded a type-level impossibility to a branch, so the
+/// branch is pinned in BOTH directions.
+#[test]
+fn export_without_return_inputs_still_gets_the_crypto_slice() {
+    let (_dir, vault) = make_vault(&real_events());
+    let out = tempfile::tempdir().unwrap();
+
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None)
+        .expect("a crypto-only year exports the slice");
+
+    assert!(
+        rep.full_return_paths.is_empty(),
+        "no full packet on this path"
+    );
+    assert!(
+        !out.path().join("00_f1040.pdf").exists(),
+        "the full packet's 1040 must never appear on the slice path"
+    );
+    assert!(
+        rep.schedule_d_path.is_some() || rep.f8949_path.is_some(),
+        "the slice still produces its own forms"
+    );
+}
+
+/// ★ An UNNAMED return is not filable — the packet refuses, and writes ZERO bytes.
+///
+/// This is the compute-vs-packet split the SSN design turns on: the tax math never reads an SSN, so a
+/// household that has not entered its PII still gets a REPORT (it can decide whether to file at all).
+/// The filable ARTIFACT is what fails closed — no PDF can be produced without an identity.
+#[test]
+fn a_full_return_without_an_ssn_refuses_and_writes_no_bytes() {
+    use btctax_cli::{return_inputs, Session};
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    use btctax_core::tax::types::FilingStatus;
+
+    let (_dir, vault) = make_vault(&real_events());
+    let out = tempfile::tempdir().unwrap();
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        return_inputs::set(
+            s.conn(),
+            2024,
+            &ReturnInputs {
+                filing_status: FilingStatus::Single, // no header ⇒ no SSN
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect_err("an unnamed return must not produce a filable packet");
+    assert!(
+        format!("{err}").contains("no SSN"),
+        "the refusal says what is missing: {err}"
+    );
+    assert!(
+        std::fs::read_dir(out.path())
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true),
+        "a refused export leaves out_dir EMPTY — never a half-written packet"
+    );
+}
+
+/// ★ **I7 / r2 NEW-I3 — the two pipelines cannot clobber each other, and this KAT FAILS if they can.**
+///
+/// The r1 version of this test was VACUOUS: its key assertion (`for name in after − before { assert!(
+/// !before.contains(name)) }`) is a set-difference tautology, and a colliding write TRUNCATES IN PLACE,
+/// so the filename set is unchanged either way — it passed with the fix reverted. Fable caught it, and
+/// it is the same false-safety-claim class the finding itself was about.
+///
+/// This version snapshots every packet file's BYTES before the second pipeline runs and asserts they are
+/// untouched afterwards. This fixture's packet contains **Form 8949 and Schedule D** (an Acquire+Dispose
+/// ledger, so no SE income and no Schedule SE) — and those are exactly the names the slice also writes.
+/// Revert the sequence-prefix and the slice's CENTS `f8949.pdf` / `schedule_d.pdf` overwrite the packet's
+/// whole-dollar ones, and this test fails — which is the whole point. It was the explicit condition on
+/// deleting the P5-C1 refusal: a cents form inside a whole-dollar return is the chimera the dispatch
+/// mitigation exists to prevent. (Schedule SE collides too, on a ledger that has SE income.)
+#[test]
+fn the_two_pipelines_cannot_overwrite_each_others_files() {
+    use btctax_cli::{return_inputs, Session};
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    use btctax_core::tax::types::FilingStatus;
+    use std::collections::BTreeMap;
+
+    // ★ The ledger's crypto activity must be in 2024, so the PACKET actually contains the forms that
+    // collide (here: Schedule D + Form 8949). With a crypto-less 2024 the packet is a lone 1040 and the
+    // test cannot fail even with the fix reverted — which is precisely how the r1 version was vacuous.
+    let (_dir, vault) = make_vault(&real_events_2024());
+    let out = tempfile::tempdir().unwrap();
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
+            first_name: "Pat".into(),
+            last_name: "Roe".into(),
+            ssn: "222-33-4444".into(),
+            ..Default::default()
+        };
+        return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+
+    // 1) The full packet (2024 — it HAS a Schedule D and an 8949).
+    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None).unwrap();
+    let snapshot: BTreeMap<String, Vec<u8>> = std::fs::read_dir(out.path())
+        .unwrap()
+        .map(|e| {
+            let e = e.unwrap();
+            (
+                e.file_name().to_string_lossy().into_owned(),
+                std::fs::read(e.path()).unwrap(),
+            )
+        })
+        .collect();
+    assert!(
+        snapshot.len() > 1,
+        "the packet wrote several files: {:?}",
+        snapshot.keys().collect::<Vec<_>>()
+    );
+
+    assert!(
+        snapshot.keys().any(|k| k.contains("schedule_d")),
+        "the packet must contain the colliding forms, or this test proves nothing: {:?}",
+        snapshot.keys().collect::<Vec<_>>()
+    );
+
+    // 2) The crypto slice for ANOTHER year, into the SAME directory — the collision scenario.
+    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2017, &[], None).unwrap();
+
+    // ★ Every packet file must still be byte-for-byte what the packet wrote.
+    for (name, bytes) in &snapshot {
+        let now = std::fs::read(out.path().join(name))
+            .unwrap_or_else(|_| panic!("the slice DELETED the packet's {name}"));
+        assert_eq!(
+            &now, bytes,
+            "★ the slice OVERWROTE the packet's {name} — a cents form inside a whole-dollar return"
+        );
+    }
 }

@@ -238,7 +238,16 @@ impl WhatIfPanel {
             }
         };
 
-        // Profile: the stored one for `selected_year` ([M1] `.get`, NEVER `[year]`), else a clearly
+        // [P2-C1] A full-return year that resolves refused/uncomputable cannot be planned against — show
+        // the reason, never a placeholder-based (wrong) number. `snap.profiles` holds the DERIVED profile
+        // for a ReturnInputs year, so the plan below matches `report`.
+        if let Some(reason) = snap.refused.get(&selected_year) {
+            self.error = Some(format!(
+                "full-return inputs for {selected_year} are not computable: {reason}"
+            ));
+            return;
+        }
+        // Profile: the resolved one for `selected_year` ([M1] `.get`, NEVER `[year]`), else a clearly
         // labeled placeholder (single / $0) that clears `TaxProfileMissing` like the CLI ad-hoc path.
         let profile: Option<TaxProfile> = match snap.profiles.get(&selected_year) {
             Some(p) => Some(p.clone()),
@@ -508,6 +517,7 @@ mod tests {
             state,
             cli_config,
             profiles,
+            refused: BTreeMap::new(),
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
@@ -521,6 +531,7 @@ mod tests {
             state: btctax_core::state::LedgerState::default(),
             cli_config: CliConfig::default(),
             profiles: BTreeMap::new(),
+            refused: BTreeMap::new(),
             tables: BundledTaxTables::load(),
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),

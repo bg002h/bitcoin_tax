@@ -2,8 +2,8 @@
 //! non-interactive use; otherwise a secure prompt), calls one library command, renders, and sets the
 //! exit code (non-zero on FR9 hard blockers / on any CliError). NO business logic lives here.
 use btctax_cli::cli::{
-    Cli, Command, FeeArg, MethodArg, Optimize, OutKindArg, Pseudo, PseudoKindArg, Reconcile,
-    SelfTransferActionArg, WhatIf,
+    Cli, Command, FeeArg, IncomeCmd, MethodArg, Optimize, OutKindArg, Pseudo, PseudoKindArg,
+    Reconcile, SelfTransferActionArg, WhatIf,
 };
 use btctax_cli::{cmd, eventref, render, CliError};
 use btctax_core::{
@@ -94,6 +94,8 @@ fn run() -> Result<ExitCode, CliError> {
             year,
             tax_year,
             prior_taxable_gifts,
+            write_carryover,
+            force,
         } => {
             // [R0-M3] Parse --prior-taxable-gifts as exact Decimal (no float); reject negative
             // REGARDLESS of whether --tax-year is present. Validated once, before the branch.
@@ -110,13 +112,27 @@ fn run() -> Result<ExitCode, CliError> {
                 ));
             }
             if let Some(y) = tax_year {
-                let (outcome, advisory, sched_d, gift_advisory, schedule_se, donation_appraisal) =
-                    cmd::tax::report_tax_year(vault, &passphrase(false)?, y, ptg_raw)?;
+                // Prompt/decrypt ONCE — `--write-carryover` reuses this passphrase (Fable P4.9 r1 M2).
+                let pp = passphrase(false)?;
+                let cmd::tax::TaxYearReport {
+                    outcome,
+                    advisory,
+                    schedule_d: sched_d,
+                    gift_advisory,
+                    schedule_se,
+                    donation_appraisal,
+                    dual_report,
+                } = cmd::tax::report_tax_year(vault, &pp, y, ptg_raw)?;
                 print!(
                     "{}",
                     render::render_tax_outcome(y, &outcome, advisory.as_deref())
                 );
                 print!("{}", render::render_schedule_d(y, &sched_d, &outcome));
+                // §6 DUAL REPORT: the absolute filed 1040 return, side-by-side with the crypto delta above
+                // (present only for a ReturnInputs-provenance year — a full return exists).
+                if let Some(block) = dual_report {
+                    print!("{block}");
+                }
                 // P2-D Task 2: standalone Schedule SE §1401 SE-tax section (non-gating; STANDALONE —
                 // does NOT feed engine B's total_federal_tax_attributable).
                 if let Some(se) = schedule_se {
@@ -132,6 +148,17 @@ fn run() -> Result<ExitCode, CliError> {
                 if let Some(msg) = donation_appraisal {
                     println!("{msg}");
                 }
+                // §4 R3-M6 carryover write-back (opt-in; `report` is otherwise read-only). Persists this
+                // year's computed charitable + QBI carryover-out as next year's carryover-in.
+                if write_carryover {
+                    let summary = cmd::tax::write_back_carryover(vault, &pp, y, force)?;
+                    println!("{summary}");
+                }
+            } else if write_carryover {
+                return Err(CliError::Usage(
+                    "--write-carryover requires --tax-year (it persists a full-return carryover)"
+                        .into(),
+                ));
             } else {
                 let state = cmd::inspect::report(vault, &passphrase(false)?, year)?;
                 print!("{}", render::render_report(&state, year));
@@ -203,6 +230,28 @@ fn run() -> Result<ExitCode, CliError> {
                     DisposeKind::Sell,
                 )?;
                 print!("{}", render::render_consult(&report));
+            }
+        },
+        Command::Income(income) => match income {
+            IncomeCmd::Import { year, file } => {
+                let pp = passphrase(false)?;
+                cmd::tax::import_return_inputs(vault, &pp, year, &file)?;
+                println!("Imported full-return inputs for tax year {year}.");
+            }
+            IncomeCmd::Show { year } => {
+                let pp = passphrase(false)?;
+                match cmd::tax::show_return_inputs(vault, &pp, year)? {
+                    Some(json) => println!("{json}"),
+                    None => println!("No full-return inputs set for tax year {year}."),
+                }
+            }
+            IncomeCmd::Clear { year } => {
+                let pp = passphrase(false)?;
+                if cmd::tax::clear_return_inputs(vault, &pp, year)? {
+                    println!("Cleared full-return inputs for tax year {year}.");
+                } else {
+                    println!("No full-return inputs set for tax year {year}.");
+                }
             }
         },
         Command::WhatIf(wi) => match wi {
@@ -360,6 +409,9 @@ fn run() -> Result<ExitCode, CliError> {
                 );
             }
         },
+        // SPEC §9.2: the versioned LIMITATIONS doc, single-sourced from the shipped file so the man page,
+        // `--help` and this command can never drift from what actually ships.
+        Command::Limitations => print!("{}", include_str!("../LIMITATIONS.md")),
         Command::Reconcile(r) => dispatch_reconcile(vault, r, now)?,
         Command::Config {
             set_fee_treatment,
@@ -558,12 +610,55 @@ fn run() -> Result<ExitCode, CliError> {
                 },
                 written.join("\n  ")
             );
-            // Always-printed scope note: Schedule D 17-22 is not filled.
+            // ★ NO-AUTHORISATION NOTICE. Printed on EVERY form export, unconditionally — this is
+            // the one moment the user is holding fillable IRS forms this tool produced, and it is
+            // where the disclaimer has to land. See NOTICE / `btctax limitations`. It disclaims
+            // authorisation, warranty and liability; it does NOT restrict the licence or forbid
+            // filing (the licence grant stays MIT OR Unlicense, unrestricted).
             eprintln!(
-                "note: Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. \
-                 the line-21 loss limit) are OUT OF SCOPE and left blank — complete them by hand if \
-                 they apply."
+                "\n⚠ NOT AUTHORISED FOR FILING. btctax is a mechanical calculator. No right is \
+                 granted and no authorisation is given to use it, or anything it produces, to \
+                 prepare or file a tax return, and NO WARRANTY is given that any figure or form it \
+                 produces is accurate, complete, or fit to file. If you file any of this, you do so \
+                 entirely on your own responsibility: YOU are the preparer, you must check every \
+                 figure against the forms and instructions before you sign, and the authors accept \
+                 no liability for the consequences. This is not tax advice. See `btctax limitations`."
             );
+            // ★ The FULL-RETURN packet: list what was actually written, and DO NOT print the
+            // slice-only scope notes — on this path Schedule D Part III IS filled, and telling the
+            // filer to complete it by hand would have them hand-modify a correct filed form
+            // (Fable P6 r1 I8).
+            if !report.full_return_paths.is_empty() {
+                println!(
+                    "\nFull-return packet — {} form(s), in IRS Attachment Sequence order:",
+                    report.full_return_paths.len()
+                );
+                for p in &report.full_return_paths {
+                    println!("  {}", p.display());
+                }
+                if let Some(m) = &report.full_return_manifest {
+                    println!("  {}  ← your stapling order", m.display());
+                }
+                if report.form_8283_needs_review {
+                    eprintln!(
+                        "⚠ the packet's Form 8283 has row(s) needing manual review (donee / appraiser \
+                         declaration incomplete) — it is NOT filing-ready as written."
+                    );
+                }
+                if report.form_8283_section_b == Some(true) {
+                    eprintln!(
+                        "⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV \
+                         (appraiser) and Part V (donee acknowledgement) — obtain both before filing."
+                    );
+                }
+            } else {
+                // The crypto slice only: Schedule D 17-22 is genuinely not filled there.
+                eprintln!(
+                    "note: Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. \
+                     the line-21 loss limit) are OUT OF SCOPE and left blank — complete them by hand if \
+                     they apply."
+                );
+            }
             // [I5] loud advisory: rows that MAY belong on a separate 1099-DA-reported 8949 (Box G/H/J/K).
             if report.broker_reported_rows > 0 {
                 eprintln!(
@@ -669,6 +764,7 @@ fn run() -> Result<ExitCode, CliError> {
             w2_medicare_wages,
             schedule_c_expenses,
             show,
+            force,
         } => {
             let pp = passphrase(false)?;
             if show {
@@ -786,7 +882,7 @@ fn run() -> Result<ExitCode, CliError> {
                     w2_medicare_wages: w2_medicare,
                     schedule_c_expenses: sce,
                 };
-                cmd::tax::set_profile(vault, &pp, year, profile)?;
+                cmd::tax::set_profile(vault, &pp, year, profile, force)?;
                 println!("Tax profile for {year} saved.");
             }
         }

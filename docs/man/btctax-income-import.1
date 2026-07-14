@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-income-import 1  btctax "btctax manual"
+.SH NAME
+import \- Import full\-return inputs from an offline TOML file into the vault for a tax year
+.SH SYNOPSIS
+\fBimport\fR <\fB\-\-year\fR> <\fB\-\-file\fR> [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Import full\-return inputs from an offline TOML file into the vault for a tax year
+.SH OPTIONS
+.TP
+\fB\-\-year\fR \fI<YEAR>\fR
+The tax year (e.g. 2024)
+.TP
+\fB\-\-file\fR \fI<FILE>\fR
+Path to the TOML file describing the full\-return inputs
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

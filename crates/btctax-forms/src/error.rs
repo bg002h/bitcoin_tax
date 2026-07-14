@@ -35,6 +35,22 @@ pub enum FormsError {
     #[error("read-back FAILED: unmapped field {0:?} was filled")]
     UnmappedField(String),
 
+    /// A written value is longer than the cell's `/MaxLen` — the form declares a fixed-width (usually
+    /// **comb**) cell and the value does not fit. A PDF viewer would silently truncate it, or splay it
+    /// across the wrong comb teeth, so the fill fails closed instead: a truncated SSN on a filed return
+    /// is a wrong return.
+    #[error(
+        "read-back FAILED: {fqn:?} holds {len} characters but the cell's /MaxLen is {max_len}"
+    )]
+    CellOverflow {
+        /// The over-filled field.
+        fqn: String,
+        /// The cell's declared capacity.
+        max_len: usize,
+        /// The length actually written.
+        len: usize,
+    },
+
     /// The bundled PDF's structure was not what the engine expects (missing AcroForm, bad Rect, …).
     #[error("bundled PDF structure error: {0}")]
     Structure(String),

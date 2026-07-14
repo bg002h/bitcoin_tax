@@ -76,7 +76,7 @@ fn whatif_never_persists() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_two_lots_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let bytes_before = std::fs::read(&vault).unwrap();
     let events_before = event_count(&vault);

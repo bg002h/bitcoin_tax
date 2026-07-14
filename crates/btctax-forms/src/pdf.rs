@@ -30,6 +30,24 @@ pub const SCHEDULE_SE_PDF_2024: &[u8] = include_bytes!("../forms/2024/schedule_s
 pub const F8283_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8283.pdf");
 /// The bundled TY2024 Form 1040 (official IRS fillable PDF, US-gov public domain).
 pub const F1040_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040.pdf");
+/// The bundled TY2024 Form 8959, Additional Medicare Tax (official IRS fillable PDF, public domain).
+pub const F8959_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8959.pdf");
+/// The bundled TY2024 Form 8960, Net Investment Income Tax (official IRS fillable PDF, public domain).
+pub const F8960_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8960.pdf");
+/// The bundled TY2024 Form 8995, QBI deduction — simplified (official IRS fillable PDF, public domain).
+pub const F8995_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8995.pdf");
+/// The bundled TY2024 Schedule 2, Additional Taxes (official IRS fillable PDF, public domain).
+pub const SCHEDULE_2_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040s2.pdf");
+/// The bundled TY2024 Schedule 3, Additional Credits and Payments (official IRS fillable PDF, public domain).
+pub const SCHEDULE_3_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040s3.pdf");
+/// The bundled TY2024 Schedule A, Itemized Deductions (official IRS fillable PDF, public domain).
+pub const SCHEDULE_A_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040sa.pdf");
+/// The bundled TY2024 Schedule 1, Additional Income and Adjustments (official IRS fillable PDF, public domain).
+pub const SCHEDULE_1_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040s1.pdf");
+/// The bundled TY2024 Schedule C, Profit or Loss From Business (official IRS fillable PDF, public domain).
+pub const SCHEDULE_C_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040sc.pdf");
+/// The bundled TY2024 Schedule B, Interest and Ordinary Dividends (official IRS fillable PDF, public domain).
+pub const SCHEDULE_B_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040sb.pdf");
 
 /// The bundled TY2017 Form 8949 (official IRS fillable PDF, US-gov public domain).
 pub const F8949_PDF_2017: &[u8] = include_bytes!("../forms/2017/f8949.pdf");
@@ -72,6 +90,78 @@ pub fn schedule_se_pdf(year: i32) -> Result<&'static [u8], FormsError> {
     }
 }
 
+/// The bundled Form 8959 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
+pub fn f8959_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(F8959_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Form 8960 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
+pub fn f8960_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(F8960_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Form 8995 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
+pub fn f8995_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(F8995_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Schedule 2 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
+pub fn schedule_2_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(SCHEDULE_2_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Schedule 3 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
+pub fn schedule_3_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(SCHEDULE_3_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Schedule B PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
+pub fn schedule_b_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(SCHEDULE_B_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Schedule C PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
+pub fn schedule_c_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(SCHEDULE_C_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Schedule 1 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
+pub fn schedule_1_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(SCHEDULE_1_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Schedule A PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
+pub fn schedule_a_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(SCHEDULE_A_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
 /// The bundled Form 8283 PDF bytes for a supported tax year (bound by filing-year → revision).
 pub fn f8283_pdf(year: i32) -> Result<&'static [u8], FormsError> {
     match year {
@@ -104,6 +194,14 @@ pub struct Field {
     pub rect: Option<[f32; 4]>,
     /// `true` iff `/FT` is `/Btn` (a checkbox/radio).
     pub is_button: bool,
+    /// `/MaxLen` — the cell's character capacity, when the form declares one (inheritable, like `/FT`).
+    ///
+    /// The IRS forms set this on their **comb** cells (the SSN boxes are `/MaxLen 9`, comb-flagged), and
+    /// it is the PRIMARY SOURCE for how a value must be formatted: nine characters means nine bare
+    /// digits, not a hyphenated `123-45-6789`, which is eleven and would be silently truncated by the
+    /// viewer. [`crate::verify::verify_flat`] enforces it on read-back, so an over-long write fails
+    /// closed instead of being quietly mangled.
+    pub max_len: Option<usize>,
 }
 
 impl Field {
@@ -186,7 +284,7 @@ pub fn collect_fields(doc: &Document) -> Result<Vec<Field>, FormsError> {
         .map_err(|_| FormsError::Structure("AcroForm has no /Fields array".into()))?;
     for f in fields {
         if let Ok(id) = f.as_reference() {
-            walk(doc, id, "", None, &mut out)?;
+            walk(doc, id, "", None, None, &mut out)?;
         }
     }
     Ok(out)
@@ -218,6 +316,7 @@ fn walk(
     id: ObjectId,
     parent_fqn: &str,
     inherited_ft: Option<String>,
+    inherited_max_len: Option<usize>,
     out: &mut Vec<Field>,
 ) -> Result<(), FormsError> {
     let dict = match doc.get_dictionary(id) {
@@ -237,6 +336,14 @@ fn walk(
         .map(|b| String::from_utf8_lossy(b).into_owned())
         .or(inherited_ft);
 
+    // /MaxLen is inheritable down the field tree, exactly like /FT.
+    let max_len = dict
+        .get(b"MaxLen")
+        .ok()
+        .and_then(|o| o.as_i64().ok())
+        .and_then(|n| usize::try_from(n).ok())
+        .or(inherited_max_len);
+
     // A branch node carries /Kids of further named fields; a leaf is a terminal field.
     let kids: Option<Vec<ObjectId>> = dict
         .get(b"Kids")
@@ -246,7 +353,7 @@ fn walk(
     match kids {
         Some(kids) if !kids.is_empty() => {
             for k in kids {
-                walk(doc, k, &fqn, ft.clone(), out)?;
+                walk(doc, k, &fqn, ft.clone(), max_len, out)?;
             }
         }
         _ => {
@@ -255,6 +362,7 @@ fn walk(
                 fqn,
                 rect: rect_of(dict),
                 is_button: ft.as_deref() == Some("Btn"),
+                max_len,
             });
         }
     }

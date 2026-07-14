@@ -132,6 +132,12 @@ impl TaxTables for BTreeMap<i32, TaxTable> {
 /// Must never be placed in a `TaxTable`.
 pub const NIIT_RATE: Usd = dec!(0.038);
 
+/// §3101(a): the employee-share Social Security (OASDI) tax rate.
+/// **STATUTORY** — 26 U.S.C. §3101(a).  Fixed in the Code; NOT inflation-indexed.
+/// Value: 6.2% = 0.062 (exact Decimal; never a float, NFR5).  The §6413(c) excess-SS credit maximum
+/// per person is `EMPLOYEE_OASDI_RATE × ss_wage_base` (the year-indexed base lives in `TaxTable`).
+pub const EMPLOYEE_OASDI_RATE: Usd = dec!(0.062);
+
 /// §1401(a): the Social Security (OASDI) portion of the self-employment tax rate.
 /// **STATUTORY** — 26 U.S.C. §1401(a).  Fixed in the Code; NOT inflation-indexed.
 /// Value: 12.4% = 0.124 (exact Decimal; never a float, NFR5).  Applies to net SE earnings up to the
@@ -156,19 +162,23 @@ pub const SE_RATE_ADDL_MEDICARE: Usd = dec!(0.009);
 /// income × this factor; the SE-tax rates above are applied to that product.
 pub const SE_NET_EARNINGS_FACTOR: Usd = dec!(0.9235);
 
-/// §1401(b)(2): the net-SE-earnings threshold above which the 0.9% Additional Medicare Tax applies.
-/// **STATUTORY** — 26 U.S.C. §1401(b)(2)(A)/(B).  The dollar amounts are fixed in the Code and do
-/// NOT move year-over-year.  Must never be placed in a `TaxTable`.
+/// §1401(b)(2): the net-SE-earnings threshold above which the 0.9% Additional Medicare Tax applies (also
+/// Form 8959 Part I/II). **STATUTORY** — 26 U.S.C. §1401(b)(2)(A)/§3101(b)(2).  The dollar amounts are
+/// fixed in the Code and do NOT move year-over-year.  Must never be placed in a `TaxTable`.
 ///
 /// Thresholds per filing status:
-/// - MFJ / QSS: $250,000  (§1401(b)(2)(A))
-/// - Single / HoH: $200,000  (§1401(b)(2)(A))
-/// - MFS: $125,000  (§1401(b)(2)(A))
+/// - MFJ: $250,000  (§1401(b)(2)(A)(i) — "in the case of a joint return")
+/// - MFS: $125,000  (§1401(b)(2)(A)(ii))
+/// - Single / HoH / **QSS**: $200,000  (§1401(b)(2)(A)(iii) — "in any other case"). A **qualifying
+///   surviving spouse is NOT a joint return**, so it takes the $200,000 amount, NOT MFJ's $250,000 — the
+///   2024 Form 8959 chart / Schedule 2 L11 instructions confirm "single, head of household, or QSS —
+///   $200,000" (Fable IMPL-P4 r1 C1). This DIFFERS from [`niit_threshold`], where §1411(b)(1) expressly
+///   *includes* "a surviving spouse" at $250,000 — the two statutes disagree on QSS, deliberately.
 pub fn se_addl_medicare_threshold(status: FilingStatus) -> Usd {
     match status {
-        FilingStatus::Mfj | FilingStatus::Qss => dec!(250000),
-        FilingStatus::Single | FilingStatus::HoH => dec!(200000),
+        FilingStatus::Mfj => dec!(250000),
         FilingStatus::Mfs => dec!(125000),
+        FilingStatus::Single | FilingStatus::HoH | FilingStatus::Qss => dec!(200000),
     }
 }
 
@@ -205,6 +215,148 @@ pub fn loss_limit(status: FilingStatus) -> Usd {
     match status {
         FilingStatus::Mfs => dec!(1500),
         _ => dec!(3000),
+    }
+}
+
+// ── Full-return per-year parameters (INDEXED; NEW) ──────────────────────────────────────────────
+
+/// Full-return v1 per-year parameters: the standard deduction and the year-varying limits the absolute
+/// 1040 needs. **NEW for the full-return build.** These values are INDEXED — they move year-over-year
+/// (OBBBA moved the SALT cap; §1(g)/§402(g)/§63 amounts are inflation-adjusted) — so they belong in a
+/// per-year table, not as year-independent statutory constants. Bundled in `btctax-adapters` (TY2024 for v1).
+///
+/// **Kept OUT of [`TaxTable`] as a deliberate design choice** (a documented deviation from SPEC §8, which
+/// suggested `TaxTable` — see `design/full-return/FOLLOWUPS.md`): (1) `TaxTable` is a **published-crate API**
+/// (btctax-core on crates.io) read by the crypto-**delta** path, which never needs these fields; a separate
+/// table keeps that surface stable and the full-return data isolated. (2) v1 bundles these for **TY2024
+/// only**, so a separate table with **fail-closed per-year gating** (`None` ⇒ `NotComputable`) has the
+/// smallest blast radius. This does NOT rely on any frozen-file constraint (`se.rs` only *calls* the
+/// unfrozen `synthetic_table`, so `TaxTable` could technically gain a field).
+/// §55(d)/§55(b)(1) AMT amounts for the 2024 "Worksheet To See if You Should Fill in Form 6251"
+/// (SPEC §4.11 refuse-trigger). All INDEXED (§55(d)(4) inflation adjustment). Grouped by the worksheet's
+/// (differing) filing-status bucketings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AmtParams {
+    /// §55(d)(1) exemption — Single / HoH (worksheet line 6).
+    pub exemption_single_hoh: Usd,
+    /// §55(d)(1) exemption — MFJ / QSS.
+    pub exemption_mfj_qss: Usd,
+    /// §55(d)(1) exemption — MFS.
+    pub exemption_mfs: Usd,
+    /// §55(d)(3) exemption phase-out start — Single / HoH / **MFS** (worksheet line 8 groups MFS here).
+    pub phaseout_start_single_hoh_mfs: Usd,
+    /// §55(d)(3) phase-out start — MFJ / QSS.
+    pub phaseout_start_mfj_qss: Usd,
+    /// §55(b)(1) 26%/28% breakpoint — general (worksheet line 12).
+    pub breakpoint_28pct: Usd,
+    /// §55(b)(1) 26%/28% breakpoint — MFS.
+    pub breakpoint_28pct_mfs: Usd,
+}
+
+impl AmtParams {
+    /// §55(d)(1) AMT exemption for `status` (worksheet line 6).
+    pub fn exemption(&self, status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj | FilingStatus::Qss => self.exemption_mfj_qss,
+            FilingStatus::Mfs => self.exemption_mfs,
+            FilingStatus::Single | FilingStatus::HoH => self.exemption_single_hoh,
+        }
+    }
+    /// §55(d)(3) exemption phase-out start for `status` (worksheet line 8; MFS groups with unmarried).
+    pub fn phaseout_start(&self, status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj | FilingStatus::Qss => self.phaseout_start_mfj_qss,
+            _ => self.phaseout_start_single_hoh_mfs,
+        }
+    }
+    /// §55(b)(1) 26%/28% breakpoint for `status` (worksheet line 12; MFS is halved).
+    pub fn breakpoint_28pct(&self, status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfs => self.breakpoint_28pct_mfs,
+            _ => self.breakpoint_28pct,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FullReturnParams {
+    pub year: i32,
+    /// §63(c)(2) basic standard deduction, keyed by filing status (Qss→Mfj via [`std_deduction_for`]).
+    pub std_deduction: BTreeMap<FilingStatus, Usd>,
+    /// §63(f) additional standard deduction per aged (65+) / blind box — married (MFJ/MFS/QSS).
+    pub std_aged_blind_married: Usd,
+    /// §63(f) additional standard deduction per aged/blind box — unmarried (Single/HoH).
+    pub std_aged_blind_unmarried: Usd,
+    /// §63(c)(5) dependent standard-deduction floor.
+    pub dependent_std_floor: Usd,
+    /// §63(c)(5) dependent earned-income add-on ($450).
+    pub dependent_std_earned_addon: Usd,
+    /// §164(b)(6) SALT deduction cap (general; MFS = half at the use site).
+    pub salt_cap: Usd,
+    /// §1(g)(4) kiddie-tax unearned-income threshold (Form 8615 refuse trigger, spec C1).
+    pub kiddie_unearned_threshold: Usd,
+    /// §402(g)(1) elective-deferral limit (excess-deferral refuse trigger, spec F3).
+    pub elective_deferral_limit: Usd,
+    /// §904(j) no-Form-1116 foreign-tax-credit ceiling (general; MFJ = double at the use site).
+    pub ftc_ceiling: Usd,
+    /// §199A(e)(2) taxable-income-before-QBI threshold — **unmarried base** (Single/HoH/MFS/QSS). At or
+    /// below this the simplified Form 8995 path applies; above it the 8995-A phase-in (unmodeled in v1)
+    /// is required, so QBI **refuses** (SPEC §4.5). TY2024 = $191,950.
+    pub qbi_ti_threshold_unmarried: Usd,
+    /// §199A(e)(2) threshold — **MFJ** (200% of the base, §199A(e)(2)(B)). TY2024 = $383,900. A QSS is
+    /// NOT a joint return, so it uses the unmarried base (the lower threshold refuses sooner — the
+    /// fail-closed direction; mirrors the §904(j) FTC ceiling / §221 student-loan QSS treatment).
+    pub qbi_ti_threshold_married: Usd,
+    /// §221(b)(2) student-loan-interest deduction MAGI phase-out `(start, end)` — unmarried (Single/HoH).
+    pub student_loan_phaseout_unmarried: (Usd, Usd),
+    /// §221(b)(2) phase-out `(start, end)` — MFJ/QSS. MFS gets **no** deduction (§221(e)(2)), so no range.
+    pub student_loan_phaseout_married: (Usd, Usd),
+    /// §55(d)/§55(b)(1) AMT amounts for the Form 6251 refuse-screen (SPEC §4.11).
+    pub amt: AmtParams,
+}
+
+impl FullReturnParams {
+    /// §63(c)(2) basic standard deduction for `status` (maps `Qss → Mfj`).
+    pub fn std_deduction_for(&self, status: FilingStatus) -> Usd {
+        self.std_deduction[&TaxTable::key(status)]
+    }
+
+    /// §199A(e)(2) taxable-income-before-QBI threshold for `status` (MFJ doubles; QSS uses the
+    /// unmarried base — QSS is not a joint return, and the lower threshold is the fail-closed direction
+    /// for the QBI refuse, matching this crate's §904(j)/§221 QSS-≠-joint convention).
+    pub fn qbi_ti_threshold(&self, status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj => self.qbi_ti_threshold_married,
+            _ => self.qbi_ti_threshold_unmarried,
+        }
+    }
+
+    /// §221 student-loan-interest MAGI phase-out `(start, end)` for `status`; `None` for **MFS**
+    /// (§221(e)(2): a separate filer gets no deduction). §221(b)(2)(B) doubles the floor **only "in the
+    /// case of a joint return"** — MFJ only. A **QSS is NOT a joint return** (Pub 970 ch. 4 / the Sch 1
+    /// worksheet group "single, HoH, or qualifying surviving spouse" at $80k–$95k), so it takes the
+    /// UNMARRIED range — same QSS-≠-joint distinction this crate makes for the §904(j) FTC ceiling. (This
+    /// differs from §63(c)(2) std deduction, where "surviving spouse" IS in the joint bucket — `Qss → Mfj`.)
+    pub fn student_loan_phaseout(&self, status: FilingStatus) -> Option<(Usd, Usd)> {
+        match status {
+            FilingStatus::Mfs => None,
+            FilingStatus::Mfj => Some(self.student_loan_phaseout_married),
+            FilingStatus::Single | FilingStatus::HoH | FilingStatus::Qss => {
+                Some(self.student_loan_phaseout_unmarried)
+            }
+        }
+    }
+}
+
+/// Lookup for the per-year [`FullReturnParams`]. Bundled impl in `btctax-adapters` (TY2024 for v1);
+/// a year without full-return params returns `None` → the caller fails closed (`NotComputable`).
+pub trait FullReturnTables {
+    fn full_return_for(&self, year: i32) -> Option<&FullReturnParams>;
+}
+
+impl FullReturnTables for BTreeMap<i32, FullReturnParams> {
+    fn full_return_for(&self, year: i32) -> Option<&FullReturnParams> {
+        self.get(&year)
     }
 }
 
@@ -286,6 +438,16 @@ mod tests {
         assert_eq!(niit_threshold(FilingStatus::HoH), dec!(200000));
         assert_eq!(niit_threshold(FilingStatus::Mfs), dec!(125000));
         assert_eq!(NIIT_RATE, dec!(0.038));
+        // §1401(b)(2) Additional-Medicare threshold — QSS is $200,000 (NOT a joint return), the deliberate
+        // asymmetry with §1411's $250,000 QSS above (Fable IMPL-P4 r1 C1).
+        assert_eq!(se_addl_medicare_threshold(FilingStatus::Mfj), dec!(250000));
+        assert_eq!(se_addl_medicare_threshold(FilingStatus::Qss), dec!(200000)); // ≠ niit_threshold(Qss)
+        assert_eq!(
+            se_addl_medicare_threshold(FilingStatus::Single),
+            dec!(200000)
+        );
+        assert_eq!(se_addl_medicare_threshold(FilingStatus::HoH), dec!(200000));
+        assert_eq!(se_addl_medicare_threshold(FilingStatus::Mfs), dec!(125000));
         // §170(f)(11)(C) statutory threshold — Task 1 KAT.
         assert_eq!(QUALIFIED_APPRAISAL_THRESHOLD, dec!(5000));
         assert_eq!(loss_limit(FilingStatus::Mfs), dec!(1500));

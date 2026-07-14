@@ -105,7 +105,14 @@ pub struct Snapshot {
     pub events: Vec<LedgerEvent>,
     pub state: LedgerState,
     pub cli_config: CliConfig,
+    /// Per-year RESOLVED profiles (SPEC §4.12 / P2-C1): a full-return `ReturnInputs` year is the DERIVED
+    /// profile (fail-closed screened), a raw-profile year is the stored one — NOT the raw
+    /// `all_tax_profiles` map, so the viewer never shows a different liability than `report`. A year that
+    /// resolves refused/uncomputable is NOT here — it is in [`Self::refused`] instead.
     pub profiles: BTreeMap<i32, TaxProfile>,
+    /// Years whose full-return inputs resolve to a REFUSAL / uncomputable (→ the reason string). The Tax
+    /// tab / export render the reason instead of a (wrong) number — fail-closed, matching the CLI.
+    pub refused: BTreeMap<i32, String>,
     pub tables: BundledTaxTables,
     pub donation_details: BTreeMap<EventId, DonationDetails>,
     /// Disposals flagged as estimated-FMV proceeds by the bulk-reclassify-outflow path (Cycle 5),

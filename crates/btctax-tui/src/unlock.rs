@@ -15,8 +15,9 @@
 use crate::app::Snapshot;
 use btctax_adapters::BundledTaxTables;
 use btctax_cli::{CliError, Session};
-use btctax_core::LedgerState;
+use btctax_core::{LedgerState, TaxProfile};
 use btctax_store::{Passphrase, StoreError};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Maximum byte-length of the passphrase buffer.
@@ -171,9 +172,27 @@ pub fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
     // [R0-M2] CliConfig is loaded here (needed by build_verify in Compliance tab)
     // [R0-M3] optimize_attested_set is intentionally omitted
     let (events, state, _) = session.load_events_and_project()?;
-    let profiles = session.all_tax_profiles()?;
     let cli_config = session.config()?;
     let tables = BundledTaxTables::load();
+    // [P2-C1] Resolve+screen EVERY stored/ReturnInputs year through the SAME single resolver the CLI uses,
+    // so the viewer never shows a different liability (or a number for a refused year) than `report`.
+    // Split the per-year outcomes into displayable profiles vs refusals; a `Ready { None }` (missing) is
+    // simply absent (the tab shows TaxProfileMissing, as before).
+    let mut profiles: BTreeMap<i32, TaxProfile> = BTreeMap::new();
+    let mut refused: BTreeMap<i32, String> = BTreeMap::new();
+    for (year, outcome) in session.resolve_all_screened(&state, &tables)? {
+        match outcome {
+            btctax_cli::resolve::ProfileOutcome::Ready {
+                profile: Some(p), ..
+            } => {
+                profiles.insert(year, p);
+            }
+            btctax_cli::resolve::ProfileOutcome::Ready { profile: None, .. } => {}
+            btctax_cli::resolve::ProfileOutcome::Uncomputable { detail } => {
+                refused.insert(year, detail);
+            }
+        }
+    }
     let donation_details = session.donation_details()?;
     // [R0-M1] the `[est]` marker set — loaded via the typed accessor, NEVER `conn()` directly.
     let bulk_estimated = session.bulk_estimated()?;
@@ -190,6 +209,7 @@ pub fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
         state,
         cli_config,
         profiles,
+        refused,
         tables,
         donation_details,
         bulk_estimated,

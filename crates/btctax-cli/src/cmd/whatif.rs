@@ -72,17 +72,18 @@ pub fn sell(
     adhoc: Option<AdhocProfile>,
 ) -> Result<SellOutcome, CliError> {
     let s = Session::open(vault, pp)?;
-    let (events, _state, cfg) = s.load_events_and_project()?;
+    let (events, state, cfg) = s.load_events_and_project()?;
     let year = at.year();
-
-    // Profile: ad-hoc (non-persisted) when supplied; otherwise the stored profile for the year.
-    let (profile, magi_caveat) = match &adhoc {
-        Some(a) => (Some(adhoc_profile(a)), a.magi.is_none()),
-        None => (s.tax_profile(year)?, false),
-    };
-
     let prices = s.prices();
     let tables = BundledTaxTables::load();
+
+    // Profile: ad-hoc (non-persisted) when supplied; otherwise resolve (ReturnInputs-derived → stored → …),
+    // fail-closed screened — the same source `report`/`optimize` use, so plans match the filed number.
+    let (profile, magi_caveat) = match &adhoc {
+        Some(a) => (Some(adhoc_profile(a)), a.magi.is_none()),
+        None => (s.resolve_screened_profile(&state, year, &tables)?, false),
+    };
+
     let req = SellRequest {
         sell_sat,
         wallet,
@@ -131,16 +132,16 @@ pub fn harvest(
     adhoc: Option<AdhocProfile>,
 ) -> Result<HarvestOutcome, CliError> {
     let s = Session::open(vault, pp)?;
-    let (events, _state, cfg) = s.load_events_and_project()?;
+    let (events, state, cfg) = s.load_events_and_project()?;
     let year = at.year();
+    let prices = s.prices();
+    let tables = BundledTaxTables::load();
 
     let (profile, magi_caveat) = match &adhoc {
         Some(a) => (Some(adhoc_profile(a)), a.magi.is_none()),
-        None => (s.tax_profile(year)?, false),
+        None => (s.resolve_screened_profile(&state, year, &tables)?, false),
     };
 
-    let prices = s.prices();
-    let tables = BundledTaxTables::load();
     let req = HarvestRequest {
         wallet,
         at,

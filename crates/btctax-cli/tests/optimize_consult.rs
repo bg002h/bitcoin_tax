@@ -145,7 +145,7 @@ fn consult_what_if_picks_high_basis_lot_and_writes_nothing() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_two_lots_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let before = event_count(&vault);
 
@@ -225,7 +225,7 @@ fn consult_is_deterministic() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_two_lots_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let r1 = cmd::optimize::consult(
         &vault,
@@ -266,7 +266,7 @@ fn consult_timing_insight_present_for_soon_to_cross_st_lot() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_st_crossover_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let report = cmd::optimize::consult(
         &vault,
@@ -359,7 +359,7 @@ fn consult_timing_absent_for_purely_lt_lot() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_lt_only_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let report = cmd::optimize::consult(
         &vault,
@@ -418,7 +418,7 @@ fn consult_future_date_requires_proceeds() {
     let csv = write_two_lots_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
     // Need a 2026 profile (the consult year) for score_synthetic to work when proceeds are provided.
-    cmd::tax::set_profile(&vault, &pp(), 2026, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2026, single_100k_profile(), false).unwrap();
 
     // -- fmv (proceeds = None) at off-dataset date → ProceedsRequired.
     let err = cmd::optimize::consult(
@@ -488,7 +488,7 @@ fn consult_no_lots_is_usage_error() {
     let dir = tempfile::tempdir().unwrap();
     let vault = dir.path().join("vault.pgp");
     cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let err = cmd::optimize::consult(
         &vault,
@@ -533,7 +533,7 @@ fn consult_large_pool_sets_approximate_and_renders_note() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_thirteen_lots_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let report = cmd::optimize::consult(
         &vault,
@@ -576,7 +576,7 @@ fn consult_small_pool_approximate_false_no_note() {
     // The existing two_lots fixture has only 2 lots → complete enumeration.
     let csv = write_two_lots_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let report = cmd::optimize::consult(
         &vault,

@@ -1,0 +1,62 @@
+# Schedule C (Profit or Loss From Business), Form 1040, TY2024 — the crypto trade or business.
+#
+# Extracted with `xtask dump-fields` and correlated against the printed form's RIGHT-EDGE line markers
+# (the little number printed immediately left of each amount box), located with `pdftotext -bbox-layout`.
+# That distinction is load-bearing — see the line-31 trap below.
+#
+# ⚠️ THE MONEY COLUMN IS x ≈ [475, 576] — NOT the [504, 576] used by Schedules 1/2/3/A, Schedule SE,
+# and Forms 8959/8960/8995, and not Schedule B's [489.6, 576] either. Every form in this crate that
+# has an amount column puts it somewhere slightly different; none of them may share a constant.
+#
+# ★ THE LINE-31 TRAP. Line 31 ("Net profit or (loss)") spans THREE printed rows — the label, then two
+#   bullet rows ("If a profit, enter on both Schedule 1 line 3, and on Schedule SE, line 2…"). Its
+#   GUTTER label sits at y ≈ 144.5, but its AMOUNT BOX is at y ≈ 120.5, two rows lower. Correlating on
+#   the gutter label would map line 31 to the wrong widget — and line 31 is the figure that feeds BOTH
+#   Schedule 1 line 3 AND Schedule SE line 2, so a mis-map there is wrong income and wrong SE tax.
+#   Line 30 has the same shape (label y ≈ 202.5, box y ≈ 156.5). Correlate on the RIGHT-EDGE marker.
+#
+#   verified right-edge marker → field:
+#     line 1  y≈516.5 → f1_10      line 28 y≈228.5 → f1_41
+#     line 3  y≈492.5 → f1_12      line 29 y≈216.5 → f1_42
+#     line 5  y≈468.5 → f1_14      line 30 y≈156.5 → f1_45   (unmapped — see below)
+#     line 7  y≈444.5 → f1_16      line 31 y≈120.5 → f1_46
+#
+# UNMAPPED ON PURPOSE — BLANK, never a misleading 0:
+#   line 2  (f1_11)   returns and allowances
+#   line 4  (f1_13)   cost of goods sold + all of Part III — mining/staking has no inventory
+#   line 6  (f1_15)   other income
+#   lines 8-27b       Part II's individual expense lines. v1 takes a FLAT expense total from the
+#                     filer, so only the line-28 total is printed. Writing 0 into each of the twenty
+#                     expense lines would assert we found no advertising, no insurance, no legal
+#                     fees — a different claim from "the filer gave us one number".
+#   line 30 (f1_45)   the §280A business-use-of-home deduction — out of scope
+#   lines 32a/32b     the at-risk checkboxes: a Schedule C LOSS is REFUSED upstream (§465 at-risk
+#                     substantiation is out of scope), so line 31 is always ≥ 0 and they never apply.
+#   Part IV           vehicle information
+form = "f1040sc"
+year = 2024
+
+# ── Lines A / B / F (P6.3a Q7) — captured expressly for these cells and printed by no one until now.
+#    Line F's group is (1) Cash / (2) Accrual / (3) Other, left→right at y=601; v1 captures only the
+#    first two, so "Other" is never checked. Line B is a 6-character comb (/MaxLen 6).
+line_a_business = "topmostSubform[0].Page1[0].f1_3[0]"
+line_b_naics    = "topmostSubform[0].Page1[0].BComb[0].f1_4[0]"
+method_cash     = { field = "topmostSubform[0].Page1[0].c1_1[0]", on = "1" }
+method_accrual  = { field = "topmostSubform[0].Page1[0].c1_1[1]", on = "2" }
+
+line1  = "topmostSubform[0].Page1[0].f1_10[0]"   # "Gross receipts or sales"
+line3  = "topmostSubform[0].Page1[0].f1_12[0]"   # "Subtract line 2 from line 1"
+line5  = "topmostSubform[0].Page1[0].f1_14[0]"   # "Gross profit. Subtract line 4 from line 3"
+line7  = "topmostSubform[0].Page1[0].f1_16[0]"   # "Gross income. Add lines 5 and 6"
+line28 = "topmostSubform[0].Page1[0].f1_41[0]"   # "Total expenses… Add lines 8 through 27b"
+line29 = "topmostSubform[0].Page1[0].f1_42[0]"   # "Tentative profit or (loss). Subtract line 28 from line 7"
+line31 = "topmostSubform[0].Page1[0].f1_46[0]"   # "Net profit or (loss)…" → Schedule 1 L3 AND Schedule SE L2
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
+#    /MaxLen 11, so it takes the HYPHENATED form (the 1040's own SSN cells are /MaxLen 9 and take
+#    bare digits — the forms genuinely differ, so `push_identity` reads each cell's capacity).
+# Schedule C's header is "Name of PROPRIETOR" — the business OWNER, who on a joint return may be
+# the SPOUSE. Core decides that (packet::ReturnHeader.proprietor); the filler only transcribes.
+[identity]
+name = "topmostSubform[0].Page1[0].f1_1[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_2[0]"

@@ -5,18 +5,20 @@ use crate::bulk_estimated;
 use crate::config::{self, CliConfig};
 use crate::donation_details;
 use crate::optimize_attest;
-use crate::tax_profile;
 use crate::CliError;
-use btctax_adapters::BundledTaxTables;
+use crate::{return_inputs, tax_profile};
+use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
 use btctax_core::conventions::{round_cents, tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{init_schema, load_all};
-use btctax_core::{project, LedgerEvent, LedgerState, PriceProvider, ProjectionConfig};
+use btctax_core::tax::tables::FullReturnTables;
+use btctax_core::{project, LedgerEvent, LedgerState, PriceProvider, ProjectionConfig, TaxTables};
 use btctax_core::{
     AllocLot, BlockerKind, DonationDetails, EventId, EventPayload, LotMethod, PendingTransfer, Sat,
     TaxDate, TaxProfile, Usd, WalletId,
 };
 use btctax_store::{Passphrase, Vault};
 use rusqlite::Connection;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 // ── Bulk link-transfer plan (bulk-link-transfer D1) ──────────────────────────
@@ -444,6 +446,79 @@ impl Session {
         tax_profile::get(self.conn(), year)
     }
 
+    /// Resolve + FULLY screen `year`'s profile through the single resolver (SPEC §4.12 / §4.10 / G4) — the
+    /// shared entry point every computing consumer (report / optimize / what-if / export) should use so
+    /// the app never shows two liabilities, or a wrong number, for one year. `state`/`tables` come from
+    /// the caller's projection (`tables` is injectable so `accept` can pass a test table for a later year).
+    pub fn resolve_screened(
+        &self,
+        state: &LedgerState,
+        year: i32,
+        tables: &dyn TaxTables,
+    ) -> Result<crate::resolve::ProfileOutcome, CliError> {
+        let pseudo = self.config()?.to_projection().pseudo_reconcile;
+        let fr = BundledFullReturnTables::load();
+        crate::resolve::resolve_and_screen(
+            self.conn(),
+            state,
+            year,
+            pseudo,
+            fr.full_return_for(year),
+            tables.table_for(year),
+        )
+    }
+
+    /// [`resolve_screened`] flattened to just the profile: an uncomputable outcome becomes a `Usage` error.
+    /// The drop-in replacement for `tax_profile(year)?` at a computing consumer that needs one figure.
+    pub fn resolve_screened_profile(
+        &self,
+        state: &LedgerState,
+        year: i32,
+        tables: &dyn TaxTables,
+    ) -> Result<Option<TaxProfile>, CliError> {
+        match self.resolve_screened(state, year, tables)? {
+            crate::resolve::ProfileOutcome::Uncomputable { detail } => Err(CliError::Usage(detail)),
+            crate::resolve::ProfileOutcome::Ready { profile, .. } => Ok(profile),
+        }
+    }
+
+    /// Resolve + screen EVERY year that has a stored `TaxProfile` or full-return `ReturnInputs`, for the
+    /// read-only viewer (which holds a `Snapshot`, not a live `Session`, so it cannot resolve on demand).
+    /// Returns per-year [`crate::resolve::ProfileOutcome`] so the TUI can render a derived number OR a
+    /// refusal — never a stale/absent profile (SPEC §4.12: the TUI is a consumer; review P2-C1).
+    pub fn resolve_all_screened(
+        &self,
+        state: &LedgerState,
+        tables: &dyn TaxTables,
+    ) -> Result<BTreeMap<i32, crate::resolve::ProfileOutcome>, CliError> {
+        // Enumerate keys WITHOUT deserializing every blob (N3: one corrupt row must not break enumeration),
+        // and hoist the config/full-return-table loads OUT of the per-year loop.
+        let pseudo = self.config()?.to_projection().pseudo_reconcile;
+        let fr = BundledFullReturnTables::load();
+        let mut years: BTreeSet<i32> = tax_profile::years(self.conn())?.into_iter().collect();
+        years.extend(return_inputs::years(self.conn())?);
+        let mut out = BTreeMap::new();
+        for year in years {
+            // A corrupt side-table blob for ONE year must surface as a per-year refusal, NOT a failure that
+            // bricks the whole read-only viewer (fail-closed availability — review N3).
+            let outcome = match crate::resolve::resolve_and_screen(
+                self.conn(),
+                state,
+                year,
+                pseudo,
+                fr.full_return_for(year),
+                tables.table_for(year),
+            ) {
+                Ok(o) => o,
+                Err(e) => crate::resolve::ProfileOutcome::Uncomputable {
+                    detail: format!("could not read the stored inputs for {year}: {e}"),
+                },
+            };
+            out.insert(year, outcome);
+        }
+        Ok(out)
+    }
+
     /// All stored `TaxProfile`s, sorted by year ascending.
     pub fn all_tax_profiles(
         &self,
@@ -544,10 +619,10 @@ impl Session {
         year: i32,
         now: time::OffsetDateTime,
     ) -> Result<btctax_core::OptimizeProposal, CliError> {
-        let (events, _state, cfg) = self.load_events_and_project()?;
-        let profile = self.tax_profile(year)?;
+        let (events, state, cfg) = self.load_events_and_project()?;
         let prices = self.prices();
         let tables = BundledTaxTables::load();
+        let profile = self.resolve_screened_profile(&state, year, &tables)?;
         let attested = self.optimize_attested_set()?;
         let proposal_made = tax_date(now, time::UtcOffset::UTC);
         btctax_core::optimize_year(

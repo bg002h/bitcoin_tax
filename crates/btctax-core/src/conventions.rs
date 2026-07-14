@@ -23,6 +23,21 @@ pub fn round_cents(v: Usd) -> Usd {
     v.round_dp_with_strategy(2, MONEY_ROUNDING)
 }
 
+/// `ROUND_HALF_UP` (away-from-zero) to whole dollars — the IRS Form-1040 rounding convention
+/// ("drop under 50¢, round 50–99¢ up; **$2.50 becomes $3**", 2024 i1040 p.23).
+pub const DOLLAR_ROUNDING: RoundingStrategy = RoundingStrategy::MidpointAwayFromZero;
+
+/// Round a USD value to whole dollars, ties **away from zero** (IRS half-up).
+///
+/// DELIBERATELY DISTINCT from [`round_cents`] (ties-to-even): the full-return absolute-liability path
+/// (`tax/method.rs`) and every filed 1040/schedule form-line use this; the crypto-**delta** path keeps
+/// `round_cents`. Reusing the ties-to-even cent path mis-prints real IRS Tax-Table cells — a $50 bin
+/// whose midpoint tax ends in `.50` prints the away-from-zero value (e.g. MFJ [11,600,11,650) → $1,163,
+/// not $1,162). See SPEC_full_return §3.1 / recon deep/01 (spec §8 assertion).
+pub fn round_dollar(v: Usd) -> Usd {
+    v.round_dp_with_strategy(0, DOLLAR_ROUNDING)
+}
+
 /// Split `total` so the `part_sat`/`whole_sat` portion is rounded to cents (ties-to-even) and the
 /// remainder is `total - part`, conserving the sum EXACTLY (Σbasis invariant, §13/§6.3).
 /// `whole_sat` is assumed > 0 by callers (consumption guards remaining_sat > 0).
@@ -95,6 +110,46 @@ mod tests {
         assert_eq!(round_cents(dec!(1.015)), dec!(1.02)); // ties-to-even: 2 is even
         assert_eq!(round_cents(dec!(2.675)), dec!(2.68));
         assert_eq!(round_cents(dec!(1.234)), dec!(1.23)); // non-tie case
+    }
+
+    /// `round_dollar` is IRS half-up (away-from-zero) to whole dollars, and is DISTINCT from the
+    /// engine's half-even cents rounding on the real IRS Tax-Table discriminating cells (deep/01):
+    /// a $50 bin whose midpoint tax ends in `.50` must print the away-from-zero value.
+    /// (SPEC_full_return §3.1 / P0 task 1 KAT.)
+    #[test]
+    fn round_dollar_is_half_up_and_differs_from_half_even() {
+        // IRS convention: "$2.50 becomes $3" (2024 i1040 p.23); "$1.39 becomes $1".
+        assert_eq!(round_dollar(dec!(2.50)), dec!(3));
+        assert_eq!(round_dollar(dec!(1.39)), dec!(1));
+        // Discriminating printed Tax-Table cells: MFJ [11,600,11,650) → 1,163; Single [3,000,3,050) → 303.
+        assert_eq!(round_dollar(dec!(1162.50)), dec!(1163));
+        assert_eq!(round_dollar(dec!(302.50)), dec!(303));
+        // Fault-inject: the frozen half-even mode gives the WRONG table value (1162 / 302) — the very
+        // reason round_dollar must exist and must not reuse the crypto-delta path's rounding.
+        assert_eq!(
+            dec!(1162.50).round_dp_with_strategy(0, MONEY_ROUNDING),
+            dec!(1162)
+        );
+        assert_eq!(
+            dec!(302.50).round_dp_with_strategy(0, MONEY_ROUNDING),
+            dec!(302)
+        );
+        // Away-from-zero is symmetric on negatives (loss-line magnitudes are handled by sign policy,
+        // but the rounding itself must be symmetric): -2.50 → -3.
+        assert_eq!(round_dollar(dec!(-2.50)), dec!(-3));
+    }
+
+    /// KAT-9 (cross-foot): the round-all-amounts election rounds each PRINTED form line, then SUMS the
+    /// rounded lines — so 271.50 + 499.50 print as 272 + 500 = **772**, which DIFFERS from rounding the
+    /// cent sum (`round_dollar(771.00) = 771`). Proves printed-line rounding + cross-foot (SPEC §3.1 /
+    /// plan-review I5 / P0 task 6). The printed-line half is re-asserted on real 8959 lines at P4/P6.
+    #[test]
+    fn round_dollar_cross_foots_printed_lines() {
+        let a = round_dollar(dec!(271.50)); // printed line: 272
+        let b = round_dollar(dec!(499.50)); // printed line: 500
+        assert_eq!(a + b, dec!(772)); // cross-foot of rounded lines
+        assert_eq!(round_dollar(dec!(271.50) + dec!(499.50)), dec!(771)); // sum-then-round: 771 (differs)
+        assert_ne!(a + b, round_dollar(dec!(271.50) + dec!(499.50)));
     }
 
     #[test]

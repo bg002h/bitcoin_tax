@@ -39,10 +39,11 @@ pub fn run(
     now: OffsetDateTime,
 ) -> Result<OptimizeProposal, CliError> {
     let s = Session::open(vault, pp)?;
-    let (events, _state, cfg) = s.load_events_and_project()?;
-    let profile = s.tax_profile(year)?;
+    let (events, state, cfg) = s.load_events_and_project()?;
     let prices = s.prices();
     let tables = BundledTaxTables::load();
+    // Single resolver + fail-closed screening (SPEC §4.12): pick up a ReturnInputs-derived profile too.
+    let profile = s.resolve_screened_profile(&state, year, &tables)?;
     let attested = s.optimize_attested_set()?;
     let proposal_made = tax_date(now, UtcOffset::UTC); // R0-C2: real made-date threaded into core
     let p = optimize_year(
@@ -106,10 +107,10 @@ pub fn consult(
     kind: DisposeKind,
 ) -> Result<ConsultReport, CliError> {
     let s = Session::open(vault, pp)?;
-    let (events, _state, cfg) = s.load_events_and_project()?;
-    let profile = s.tax_profile(at.year())?;
+    let (events, state, cfg) = s.load_events_and_project()?;
     let prices = s.prices();
     let tables = BundledTaxTables::load();
+    let profile = s.resolve_screened_profile(&state, at.year(), &tables)?;
     let req = ConsultRequest {
         sell_sat,
         wallet,
@@ -174,8 +175,9 @@ pub fn accept_with_tables(
     tables: &dyn TaxTables,
 ) -> Result<AcceptOutcome, CliError> {
     let mut session = Session::open(vault, pp)?;
-    let (events, _state, cfg) = session.load_events_and_project()?;
-    let profile = session.tax_profile(year)?;
+    let (events, state, cfg) = session.load_events_and_project()?;
+    // `accept` injects `tables` (a test may pass a later-year table); screen against it.
+    let profile = session.resolve_screened_profile(&state, year, tables)?;
     let prices = session.prices();
     let attested = session.optimize_attested_set()?;
     let made = tax_date(now, UtcOffset::UTC); // the LotSelection's made-date (decisions are UTC)

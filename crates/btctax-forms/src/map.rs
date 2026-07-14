@@ -11,6 +11,24 @@
 use crate::error::FormsError;
 use serde::Deserialize;
 
+/// The two identity cells every IRS form carries at its top: the name line and the SSN.
+///
+/// **Required** on the nine full-return schedule maps (a map without it fails at DESERIALIZATION —
+/// fail-closed at load, and every map is loaded by a test), and `Option` on the two maps shared with
+/// the crypto slice (`ScheduleDMap`, `Form1040Map`), whose 2017/2025 editions have no verified identity
+/// FQNs and no `ReturnInputs` to source an identity from. The full-return fillers refuse on `None`.
+///
+/// The SSN's RENDERING is not fixed here: it is chosen per-cell from the PDF's own `/MaxLen` (11 ⇒
+/// hyphenated, 9 ⇒ bare digits — the schedules and the 1040 genuinely differ). See
+/// [`crate::cells::push_identity`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct IdentityCells {
+    /// "Name(s) shown on return" — or, on Schedule C, "Name of proprietor".
+    pub name: String,
+    /// The SSN cell.
+    pub ssn: String,
+}
+
 /// The TY2025 Form 8949 map (embedded at compile time).
 pub const F8949_MAP_2025: &str = include_str!("../forms/2025/f8949.map.toml");
 /// The TY2025 Schedule D map (embedded at compile time).
@@ -32,6 +50,24 @@ pub const SCHEDULE_SE_MAP_2024: &str = include_str!("../forms/2024/schedule_se.m
 pub const F8283_MAP_2024: &str = include_str!("../forms/2024/f8283.map.toml");
 /// The TY2024 Form 1040 map (embedded at compile time).
 pub const F1040_MAP_2024: &str = include_str!("../forms/2024/f1040.map.toml");
+/// The TY2024 Form 8959 (Additional Medicare Tax) map (embedded at compile time).
+pub const F8959_MAP_2024: &str = include_str!("../forms/2024/f8959.map.toml");
+/// The TY2024 Form 8960 (Net Investment Income Tax) map (embedded at compile time).
+pub const F8960_MAP_2024: &str = include_str!("../forms/2024/f8960.map.toml");
+/// The TY2024 Form 8995 (QBI deduction, simplified) map (embedded at compile time).
+pub const F8995_MAP_2024: &str = include_str!("../forms/2024/f8995.map.toml");
+/// The TY2024 Schedule 2 (Additional Taxes) map (embedded at compile time).
+pub const SCHEDULE_2_MAP_2024: &str = include_str!("../forms/2024/f1040s2.map.toml");
+/// The TY2024 Schedule 3 (Additional Credits and Payments) map (embedded at compile time).
+pub const SCHEDULE_3_MAP_2024: &str = include_str!("../forms/2024/f1040s3.map.toml");
+/// The TY2024 Schedule A (Itemized Deductions) map (embedded at compile time).
+pub const SCHEDULE_A_MAP_2024: &str = include_str!("../forms/2024/f1040sa.map.toml");
+/// The TY2024 Schedule 1 (Additional Income and Adjustments) map (embedded at compile time).
+pub const SCHEDULE_1_MAP_2024: &str = include_str!("../forms/2024/f1040s1.map.toml");
+/// The TY2024 Schedule C (Profit or Loss From Business) map (embedded at compile time).
+pub const SCHEDULE_C_MAP_2024: &str = include_str!("../forms/2024/f1040sc.map.toml");
+/// The TY2024 Schedule B (Interest and Ordinary Dividends) map (embedded at compile time).
+pub const SCHEDULE_B_MAP_2024: &str = include_str!("../forms/2024/f1040sb.map.toml");
 
 /// The TY2017 Form 8949 map (embedded at compile time).
 pub const F8949_MAP_2017: &str = include_str!("../forms/2017/f8949.map.toml");
@@ -82,6 +118,14 @@ pub struct Form8949Map {
     pub form: String,
     /// Tax year (e.g. 2025).
     pub year: i32,
+    /// "Name(s) shown on return" + SSN — on **both pages** (the 8949 is a two-page detail attachment, and
+    /// each page carries the header). `Option`: the crypto slice never writes it, and the 2017/2025 maps
+    /// have no verified FQNs. The FULL-return filler refuses on `None` — an unnamed 8949 is not filable
+    /// (Fable P6 r1 I3).
+    #[serde(default)]
+    pub identity_page1: Option<IdentityCells>,
+    #[serde(default)]
+    pub identity_page2: Option<IdentityCells>,
     /// Rows per part per page — **map data**, not a hard-coded constant (a new form revision that
     /// changes the grid is a data-only edit).
     pub rows_per_page: usize,
@@ -182,12 +226,83 @@ fn default_da_present() -> bool {
 
 /// The Form 1040 capital-gains field map for one tax year: the capital-gain amount cell (line 7a in
 /// 2025 / line 7 in 2024 / **line 13** in 2017) + the Digital-Asset question (absent in 2017).
+/// The Form 1040's identity block (P6.2) — dumped and correlated against the printed form, never
+/// extrapolated. The SSN cells here declare `/MaxLen 9` (comb), so they take the nine BARE digits,
+/// while every schedule's SSN cell is `/MaxLen 11` and takes the hyphenated form. `push_identity`
+/// reads each cell's capacity rather than assuming either.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form1040HeaderCells {
+    pub taxpayer_first: String,
+    pub taxpayer_last: String,
+    pub taxpayer_ssn: String,
+    pub spouse_first: String,
+    pub spouse_last: String,
+    pub spouse_ssn: String,
+    pub address_street: String,
+    pub address_apt: String,
+    pub address_city: String,
+    pub address_state: String,
+    pub address_zip: String,
+    /// "If you checked the MFS box, enter the name of your spouse" — written on MFS only.
+    pub mfs_spouse_name: String,
+    /// The signature block's occupation cells (page 2).
+    pub occupation_taxpayer: String,
+    pub occupation_spouse: String,
+    /// The taxpayer's Identity Protection PIN cell (page 2, a 6-character comb). A paper return that
+    /// omits an ISSUED IP PIN is rejected or delayed (ARCH-P6.3a Q7 item 5).
+    pub ip_pin: String,
+    /// The §6096 Presidential Election Campaign boxes.
+    pub presidential_taxpayer: CheckChoice,
+    pub presidential_spouse: CheckChoice,
+    /// "Someone can claim: You / Your spouse as a dependent" — the §63(c)(5) floor's own checkbox.
+    pub claimed_dependent_taxpayer: CheckChoice,
+    pub claimed_dependent_spouse: CheckChoice,
+    /// "Spouse itemizes on a separate return or you were a dual-status alien" — §63(c)(6).
+    pub mfs_spouse_itemizes: CheckChoice,
+    /// ★ The four §63(f) aged/blind boxes. The IRS validates a nonstandard standard deduction by
+    /// COUNTING these, so L12 and this checkbox count must agree or the return fails its own
+    /// arithmetic cross-check (`p6-aged-blind-checkboxes-missing`).
+    pub taxpayer_aged: CheckChoice,
+    pub taxpayer_blind: CheckChoice,
+    pub spouse_aged: CheckChoice,
+    pub spouse_blind: CheckChoice,
+    /// "If more than four dependents, see instructions and check here" — v1 REFUSES instead (the
+    /// continuation statement is a synthetic page generator we do not have; same posture as Schedule
+    /// B's >14-payer refusal, SPEC §7.4 as amended). Mapped so the refusal can name the cell it will
+    /// not fill.
+    pub more_than_four_dependents: CheckChoice,
+    /// The four dependents rows the form physically has.
+    pub dependent_rows: Vec<DependentRowCells>,
+}
+
+/// One row of the 1040's dependents table. The name is a SINGLE cell spanning the printed
+/// "(1) First name / Last name" columns — the form has one widget there, not two.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DependentRowCells {
+    pub name: String,
+    pub ssn: String,
+    pub relationship: String,
+    /// The Child-Tax-Credit box. NEVER checked: v1 omits CTC/ODC entirely (1040 L19 = 0, with the
+    /// `CtcOdcOmitted` advisory), and a checked credit box beside a zero credit is a form
+    /// contradicting itself. Mapped so the no-unmapped oracle knows the cell exists and is DELIBERATELY
+    /// left blank.
+    pub ctc: CheckChoice,
+    /// The Credit-for-Other-Dependents box. Never checked, same reason.
+    pub odc: CheckChoice,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Form1040Map {
     /// `"f1040"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The full-return identity BLOCK (P6.2). The 1040's header is not two cells like a schedule's: it
+    /// is names + SSNs + address + the §63(f) aged/blind checkboxes + the dependents table. `Option`
+    /// because this map is SHARED with the crypto slice, whose 2017/2025 editions have no verified
+    /// header FQNs; the FULL-return filler refuses on `None` rather than emit an unnamed 1040.
+    #[serde(default)]
+    pub header: Option<Form1040HeaderCells>,
     /// The capital-gain amount cell (line 7a for 2025, line 7 for 2024, **line 13 for 2017**). A
     /// single field on 2024/2025; a dollars+cents [`MoneyPair`] on the 2017 form.
     pub line7a: MoneyCell,
@@ -205,6 +320,144 @@ pub struct Form1040Map {
     /// when the year's 1040 has no DA question (2017).
     #[serde(default)]
     pub da_no: Option<CheckChoice>,
+
+    // ── Full-return extension (P6). Absent from the 2017/2025 maps, hence optional. ───────────
+    /// L1a — Σ W-2 box 1. AMOUNT column. Full-return only.
+    #[serde(default)]
+    pub line1a: Option<MoneyCell>,
+    /// L2a — tax-exempt interest. SUBLINE column. Full-return only (absent from the 2017/2025 maps).
+    #[serde(default)]
+    pub line2a: Option<MoneyCell>,
+    /// L1z — wages. AMOUNT column.
+    #[serde(default)]
+    pub line1z: Option<MoneyCell>,
+    /// L2b — taxable interest. AMOUNT column.
+    #[serde(default)]
+    pub line2b: Option<MoneyCell>,
+    /// L3a — qualified dividends. **SUBLINE column** (x ≈ [252,324]), not MID or AMOUNT.
+    #[serde(default)]
+    pub line3a: Option<MoneyCell>,
+    /// L3b — ordinary dividends. AMOUNT column.
+    #[serde(default)]
+    pub line3b: Option<MoneyCell>,
+    /// L8 — Schedule 1's printed L10.
+    #[serde(default)]
+    pub line8: Option<MoneyCell>,
+    /// L9 — total income.
+    #[serde(default)]
+    pub line9: Option<MoneyCell>,
+    /// L10 — Schedule 1's printed L26.
+    #[serde(default)]
+    pub line10: Option<MoneyCell>,
+    /// L11 — AGI.
+    #[serde(default)]
+    pub line11: Option<MoneyCell>,
+    /// L12 — the deduction claimed. **★ `f1_57` on the 2024 form is L12; on the 2025 form the same
+    /// field name is L1z** (SPEC §7.4). Per-(form, year) maps exist for exactly this.
+    #[serde(default)]
+    pub line12: Option<MoneyCell>,
+    /// L13 — Form 8995's printed L15 (QBI).
+    #[serde(default)]
+    pub line13: Option<MoneyCell>,
+    /// L14 — 12 + 13.
+    #[serde(default)]
+    pub line14: Option<MoneyCell>,
+    /// L15 — taxable income.
+    #[serde(default)]
+    pub line15: Option<MoneyCell>,
+    /// L16 — tax.
+    #[serde(default)]
+    pub line16: Option<MoneyCell>,
+    /// L17 — Schedule 2's printed L3 (always 0 in v1).
+    #[serde(default)]
+    pub line17: Option<MoneyCell>,
+    /// L18 — 16 + 17.
+    #[serde(default)]
+    pub line18: Option<MoneyCell>,
+    /// L19 — CTC/ODC (always 0 — a §3.4 conservative omission).
+    #[serde(default)]
+    pub line19: Option<MoneyCell>,
+    /// L20 — Schedule 3's printed L8.
+    #[serde(default)]
+    pub line20: Option<MoneyCell>,
+    /// L21 — 19 + 20.
+    #[serde(default)]
+    pub line21: Option<MoneyCell>,
+    /// L22 — 18 − 21.
+    #[serde(default)]
+    pub line22: Option<MoneyCell>,
+    /// L23 — Schedule 2's printed L21.
+    #[serde(default)]
+    pub line23: Option<MoneyCell>,
+    /// L24 — TOTAL TAX.
+    #[serde(default)]
+    pub line24: Option<MoneyCell>,
+    /// L25a — W-2 withholding. MID column.
+    #[serde(default)]
+    pub line25a: Option<MoneyCell>,
+    /// L25b — 1099 withholding. MID column.
+    #[serde(default)]
+    pub line25b: Option<MoneyCell>,
+    /// L25c — other withholding (Form 8959's printed L24). MID column.
+    #[serde(default)]
+    pub line25c: Option<MoneyCell>,
+    /// L25d — 25a + 25b + 25c.
+    #[serde(default)]
+    pub line25d: Option<MoneyCell>,
+    /// L26 — estimated tax payments.
+    #[serde(default)]
+    pub line26: Option<MoneyCell>,
+    /// L31 — Schedule 3's printed L15. MID column.
+    #[serde(default)]
+    pub line31: Option<MoneyCell>,
+    /// L32 — total other payments.
+    #[serde(default)]
+    pub line32: Option<MoneyCell>,
+    /// L33 — TOTAL PAYMENTS.
+    #[serde(default)]
+    pub line33: Option<MoneyCell>,
+    /// L34 — overpayment.
+    #[serde(default)]
+    pub line34: Option<MoneyCell>,
+    /// L35a — refunded to you.
+    #[serde(default)]
+    pub line35a: Option<MoneyCell>,
+    /// L37 — amount you owe.
+    #[serde(default)]
+    pub line37: Option<MoneyCell>,
+    /// The 5-way filing-status checkbox group.
+    #[serde(default)]
+    pub filing_status: Option<FilingStatusBoxes>,
+}
+
+/// The 1040's **5-way filing-status checkbox group**.
+///
+/// **★ The leaf field names COLLIDE.** Two distinct fields are both called `c1_3[0]` and two are both
+/// called `c1_3[1]`, distinguished only by their parent subform:
+///
+/// | status | fully-qualified name | on-state |
+/// |---|---|---|
+/// | Single | `…FilingStatus_ReadOrder[0].c1_3[0]` | `1` |
+/// | HoH | `…Page1[0].c1_3[0]` (no wrapper!) | `2` |
+/// | MFJ | `…FilingStatus_ReadOrder[0].c1_3[1]` | `3` |
+/// | MFS | `…FilingStatus_ReadOrder[0].c1_3[2]` | `4` |
+/// | QSS | `…Page1[0].c1_3[1]` (no wrapper!) | `5` |
+///
+/// A map keyed on the leaf name would silently check the WRONG FILING STATUS — which changes the
+/// standard deduction, every bracket, and every threshold on the return. The on-states are distinct
+/// and independently corroborate the mapping, so the filler asserts both.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FilingStatusBoxes {
+    /// Single — on-state `1`.
+    pub single: CheckChoice,
+    /// Head of household — on-state `2`.
+    pub hoh: CheckChoice,
+    /// Married filing jointly — on-state `3`.
+    pub mfj: CheckChoice,
+    /// Married filing separately — on-state `4`.
+    pub mfs: CheckChoice,
+    /// Qualifying surviving spouse — on-state `5`.
+    pub qss: CheckChoice,
 }
 
 impl Form1040Map {
@@ -322,6 +575,11 @@ pub struct Form8283Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The FILER's identity — "Name(s) shown on your income tax return" + identifying number. `Option`
+    /// because the crypto slice never writes it (its 8283 rides beside a return btctax did not produce)
+    /// and the 2017/2025 maps have no verified FQNs; the FULL-return filler refuses on `None`.
+    #[serde(default)]
+    pub identity: Option<IdentityCells>,
     /// Section A (≤ $5,000).
     pub section_a: Section8283A,
     /// Section B (> $5,000).
@@ -403,6 +661,11 @@ pub struct ScheduleDMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The name + SSN header cells (P6.2). `Option` because this map is SHARED with the crypto-slice
+    /// path, whose 2017/2025 editions have no verified identity FQNs and no `ReturnInputs` to source an
+    /// identity from. The FULL-return filler refuses on `None` — it may not emit an unnamed form.
+    #[serde(default)]
+    pub identity: Option<IdentityCells>,
     /// Line 3 — Part I total from Form 8949 (Box C **or Box I**): columns d,e,g,h.
     pub line3: AmountCols,
     /// Line 7 — net short-term gain/loss (column h).
@@ -413,6 +676,34 @@ pub struct ScheduleDMap {
     pub line15_h: String,
     /// Line 16 — total (line 7 + line 15), column h, page 2.
     pub line16_h: String,
+    /// L6 — short-term capital loss carryover. **PAREN box ⇒ positive magnitude.** Full-return only
+    /// (`None` on the 2017/2025 maps, which serve the crypto-slice fill).
+    #[serde(default)]
+    pub line6: Option<MoneyCell>,
+    /// L13 — capital gain distributions (Σ 1099-DIV box 2a). Full-return only.
+    #[serde(default)]
+    pub line13: Option<MoneyCell>,
+    /// L14 — long-term capital loss carryover. **PAREN box ⇒ positive magnitude.** Full-return only.
+    #[serde(default)]
+    pub line14: Option<MoneyCell>,
+    /// L18 — 28%-Rate Gain Worksheet (always 0; a nonzero amount is refused upstream). Full-return only.
+    #[serde(default)]
+    pub line18: Option<MoneyCell>,
+    /// L19 — Unrecaptured §1250 Gain Worksheet (always 0; refused upstream). Full-return only.
+    #[serde(default)]
+    pub line19: Option<MoneyCell>,
+    /// L21 — the §1211(b) allowed loss offset. **PAREN box ⇒ positive magnitude.** Full-return only.
+    #[serde(default)]
+    pub line21: Option<MoneyCell>,
+    /// L17 — "Are lines 15 and 16 both gains?" Full-return only.
+    #[serde(default)]
+    pub line17: Option<YesNoPair>,
+    /// L20 — "Are lines 18 and 19 both zero or blank…?" Full-return only.
+    #[serde(default)]
+    pub line20: Option<YesNoPair>,
+    /// L22 — "Do you have qualified dividends on Form 1040, line 3a?" Full-return only.
+    #[serde(default)]
+    pub line22: Option<YesNoPair>,
     /// The Part I amount-column subform token used to re-derive the geometry bands — **per-year map
     /// config** (`Table_PartI` for 2024/2025, **`TablePartI`** (no underscore) for the 2017 form).
     #[serde(default = "default_sched_d_token")]
@@ -463,6 +754,689 @@ impl ScheduleDMap {
     }
 }
 
+/// The Form 8959 (Additional Medicare Tax) field map for one tax year.
+///
+/// Only the lines we FILL are mapped. Lines 2/3 (Form 4137 / Form 8919) and all of Part III plus
+/// line 23 (RRTA) are unmodeled and are deliberately absent — they stay blank on the filed form,
+/// which is why line 4 = line 1, line 18 = 7 + 13, and line 24 = line 22.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form8959Map {
+    /// `"f8959"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
+    /// L1 — Σ W-2 box 5 Medicare wages, MID column.
+    pub line1: MoneyCell,
+    /// L4 — add lines 1–3 (2/3 blank ⇒ = line 1), MID column.
+    pub line4: MoneyCell,
+    /// L5 — filing-status threshold, MID column.
+    pub line5: MoneyCell,
+    /// L6 — line 4 − line 5, floored at 0, AMOUNT column.
+    pub line6: MoneyCell,
+    /// L7 — 0.9% × line 6, AMOUNT column.
+    pub line7: MoneyCell,
+    /// L8 — Schedule SE Part I line 6 (net SE earnings), MID column.
+    pub line8: MoneyCell,
+    /// L9 — filing-status threshold (again), MID column.
+    pub line9: MoneyCell,
+    /// L10 — the amount from line 4, MID column.
+    pub line10: MoneyCell,
+    /// L11 — line 9 − line 10, floored at 0, MID column.
+    pub line11: MoneyCell,
+    /// L12 — line 8 − line 11, floored at 0, AMOUNT column.
+    pub line12: MoneyCell,
+    /// L13 — 0.9% × line 12, AMOUNT column.
+    pub line13: MoneyCell,
+    /// L18 — add 7, 13, 17 → Schedule 2 line 11, AMOUNT column.
+    pub line18: MoneyCell,
+    /// L19 — Σ W-2 box 6 Medicare tax withheld, MID column.
+    pub line19: MoneyCell,
+    /// L20 — the amount from line 1, MID column.
+    pub line20: MoneyCell,
+    /// L21 — 1.45% × line 20, MID column.
+    pub line21: MoneyCell,
+    /// L22 — line 19 − line 21, floored at 0, AMOUNT column.
+    pub line22: MoneyCell,
+    /// L24 — add 22 and 23 → 1040 line 25c, AMOUNT column.
+    pub line24: MoneyCell,
+}
+
+impl Form8959Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(F8959_MAP_2024).expect("bundled f8959 2024 map parses")
+    }
+
+    /// The map for a supported tax year. Full-return v1 is **TY2024-only**: Form 8959 is reachable
+    /// only from the absolute return, which itself has tables for 2024 alone.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+
+    /// The 17 filled cells, in **printed reading order** (strictly descending y on page 1) — the
+    /// order `fill_form_8959` walks and the ordinal the geometric verifier checks the descent of.
+    pub fn lines(&self) -> [&MoneyCell; 17] {
+        [
+            &self.line1,
+            &self.line4,
+            &self.line5,
+            &self.line6,
+            &self.line7,
+            &self.line8,
+            &self.line9,
+            &self.line10,
+            &self.line11,
+            &self.line12,
+            &self.line13,
+            &self.line18,
+            &self.line19,
+            &self.line20,
+            &self.line21,
+            &self.line22,
+            &self.line24,
+        ]
+    }
+}
+
+/// The Form 8960 (Net Investment Income Tax) field map for one tax year.
+///
+/// Only the lines v1 FILLS are mapped. Annuities (3), Schedule E (4a–4c), CFC/PFIC (6), investment
+/// expenses (9a–9c, 10) and the whole estates-and-trusts branch (18a–21) are unmodeled and stay
+/// BLANK. The derived totals 9d and 11 ARE filled at zero — the form's arithmetic adds them.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form8960Map {
+    /// `"f8960"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
+    /// L1 — taxable interest, AMOUNT column.
+    pub line1: MoneyCell,
+    /// L2 — ordinary dividends, AMOUNT column.
+    pub line2: MoneyCell,
+    /// L5a — net gain/loss from disposition of property, MID column.
+    pub line5a: MoneyCell,
+    /// L5d — combine 5a–5c, AMOUNT column.
+    pub line5d: MoneyCell,
+    /// L7 — other modifications, AMOUNT column.
+    pub line7: MoneyCell,
+    /// L8 — total investment income, AMOUNT column.
+    pub line8: MoneyCell,
+    /// L9d — add 9a/9b/9c (zero in v1), AMOUNT column.
+    pub line9d: MoneyCell,
+    /// L11 — total deductions and modifications (zero in v1), AMOUNT column.
+    pub line11: MoneyCell,
+    /// L12 — net investment income, AMOUNT column.
+    pub line12: MoneyCell,
+    /// L13 — modified AGI, MID column.
+    pub line13: MoneyCell,
+    /// L14 — the §1411(b) threshold (fillable, NOT pre-printed), MID column.
+    pub line14: MoneyCell,
+    /// L15 — 13 − 14, floored, MID column.
+    pub line15: MoneyCell,
+    /// L16 — smaller of 12 or 15, AMOUNT column.
+    pub line16: MoneyCell,
+    /// L17 — 3.8% × 16 → Schedule 2 line 12, AMOUNT column.
+    pub line17: MoneyCell,
+}
+
+impl Form8960Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(F8960_MAP_2024).expect("bundled f8960 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 14 filled cells in printed reading order (strictly descending y on page 1).
+    pub fn lines(&self) -> [&MoneyCell; 14] {
+        [
+            &self.line1,
+            &self.line2,
+            &self.line5a,
+            &self.line5d,
+            &self.line7,
+            &self.line8,
+            &self.line9d,
+            &self.line11,
+            &self.line12,
+            &self.line13,
+            &self.line14,
+            &self.line15,
+            &self.line16,
+            &self.line17,
+        ]
+    }
+}
+
+/// The Form 8995 (QBI deduction, simplified) field map for one tax year.
+///
+/// The Part I trade/business table (rows 1i–1v) and line 3 are deliberately unmapped: v1's only QBI
+/// is §199A REIT dividends, so there is no business to list. Lines 2/4/5 ARE filled, at zero.
+///
+/// **Lines 7, 16 and 17 are PARENTHESIZED boxes — the form prints the minus sign, so the value must
+/// be a POSITIVE MAGNITUDE.** `qbi::Form8995Lines` guarantees that.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form8995Map {
+    /// `"f8995"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
+    /// L2 — total QBI from the (blank) table, MID column.
+    pub line2: MoneyCell,
+    /// L4 — combine 2 and 3, MID column.
+    pub line4: MoneyCell,
+    /// L5 — QBI component (20% × 4), AMOUNT column.
+    pub line5: MoneyCell,
+    /// L6 — qualified REIT dividends + PTP income, MID column.
+    pub line6: MoneyCell,
+    /// L7 — prior-year REIT/PTP loss carryforward, MID column. ★ positive magnitude (paren box).
+    pub line7: MoneyCell,
+    /// L8 — combine 6 and 7, MID column.
+    pub line8: MoneyCell,
+    /// L9 — REIT/PTP component (20% × 8), AMOUNT column.
+    pub line9: MoneyCell,
+    /// L10 — add 5 and 9, AMOUNT column.
+    pub line10: MoneyCell,
+    /// L11 — taxable income before the QBI deduction, MID column.
+    pub line11: MoneyCell,
+    /// L12 — net capital gain + qualified dividends, MID column.
+    pub line12: MoneyCell,
+    /// L13 — 11 − 12, floored, MID column.
+    pub line13: MoneyCell,
+    /// L14 — income limitation (20% × 13), AMOUNT column.
+    pub line14: MoneyCell,
+    /// L15 — the deduction: smaller of 10 or 14 → 1040 L13, AMOUNT column.
+    pub line15: MoneyCell,
+    /// L16 — total QB (loss) carryforward, AMOUNT column. ★ positive magnitude (paren box).
+    pub line16: MoneyCell,
+    /// L17 — total REIT/PTP (loss) carryforward, AMOUNT column. ★ positive magnitude (paren box).
+    pub line17: MoneyCell,
+}
+
+impl Form8995Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(F8995_MAP_2024).expect("bundled f8995 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 15 filled cells in printed reading order (strictly descending y on page 1).
+    pub fn lines(&self) -> [&MoneyCell; 15] {
+        [
+            &self.line2,
+            &self.line4,
+            &self.line5,
+            &self.line6,
+            &self.line7,
+            &self.line8,
+            &self.line9,
+            &self.line10,
+            &self.line11,
+            &self.line12,
+            &self.line13,
+            &self.line14,
+            &self.line15,
+            &self.line16,
+            &self.line17,
+        ]
+    }
+}
+
+/// The Schedule 2 (Additional Taxes) field map for one tax year.
+///
+/// Part I is entirely absent: line 1a (excess APTC) has no input and would refuse if it did, and
+/// line 2 (AMT) is $0 by construction (the return is refused if the Form 6251 screen trips). Only
+/// the three Part II taxes v1 computes are mapped. **Line 21 is on PAGE 2.**
+#[derive(Debug, Clone, Deserialize)]
+pub struct Schedule2Map {
+    /// `"f1040s2"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
+    /// L4 — self-employment tax (SS + regular Medicare only), AMOUNT column, page 1.
+    pub line4: MoneyCell,
+    /// L11 — Additional Medicare Tax (Form 8959's printed L18), AMOUNT column, page 1.
+    pub line11: MoneyCell,
+    /// L12 — net investment income tax (Form 8960's printed L17), AMOUNT column, page 1.
+    pub line12: MoneyCell,
+    /// L21 — total other taxes → 1040 L23, AMOUNT column, **page 2**.
+    pub line21: MoneyCell,
+}
+
+impl Schedule2Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_2_MAP_2024).expect("bundled schedule 2 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 4 filled cells in printed reading order. **Descent is grouped by PAGE** — line 21 sits on
+    /// page 2, whose y-coordinates are not comparable with page 1's.
+    pub fn lines(&self) -> [&MoneyCell; 4] {
+        [&self.line4, &self.line11, &self.line12, &self.line21]
+    }
+}
+
+/// The Schedule 3 (Additional Credits and Payments) field map for one tax year.
+///
+/// Only the foreign tax credit (L1) and the §6413(c) excess-Social-Security credit (L11) are mapped.
+/// Every other Part I credit is a §3.4 conservative omission and stays BLANK.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Schedule3Map {
+    /// `"f1040s3"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
+    /// L1 — foreign tax credit, AMOUNT column.
+    pub line1: MoneyCell,
+    /// L8 — total nonrefundable credits → 1040 L20, AMOUNT column.
+    pub line8: MoneyCell,
+    /// L10 — "Amount paid with request for extension to file", AMOUNT column. ★ Its absence made the
+    /// filed return demand a payment the filer had ALREADY made (Fable ARCH-P6.3a D1).
+    pub line10: MoneyCell,
+    /// L11 — excess Social Security / tier-1 RRTA withheld, AMOUNT column.
+    pub line11: MoneyCell,
+    /// L15 — total other payments → 1040 L31, AMOUNT column.
+    pub line15: MoneyCell,
+}
+
+impl Schedule3Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_3_MAP_2024).expect("bundled schedule 3 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 4 filled cells in printed reading order (strictly descending y on page 1).
+    pub fn lines(&self) -> [&MoneyCell; 5] {
+        [
+            &self.line1,
+            &self.line8,
+            &self.line10,
+            &self.line11,
+            &self.line15,
+        ]
+    }
+}
+
+/// The Schedule A (Itemized Deductions) field map for one tax year.
+///
+/// **Three x-clusters** — Schedule A is the only form here that needs a third. Line 2 (the AGI the
+/// 7.5% medical floor is taken on) sits INLINE with the printed sentence at x ≈ [331,403], not in the
+/// MID column, and it is the same WIDTH as MID, so nothing but its x-position distinguishes it.
+///
+/// Unmapped on purpose: line 6 (other taxes), 8b/8c (mortgage not on a 1098; points), 9 (investment
+/// interest), 15 (casualty), 16 (other). **Line 8d is a ReadOnly "Reserved for future use" widget** —
+/// live, and it consumes a suffix number. Never write it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduleAMap {
+    /// `"f1040sa"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// L5a's §164(b)(5) sales-tax election checkbox — the election core already honours in the
+    /// arithmetic, which the filed form never showed (ARCH-P6.3a Q7 item 3).
+    pub check_5a_sales_tax: CheckChoice,
+    /// L18's §63(e) "itemize even though less than the standard deduction" checkbox (Q7 item 4).
+    pub check_18_elects_smaller: CheckChoice,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
+    /// L1 — medical and dental expenses, MID column.
+    pub line1: MoneyCell,
+    /// L2 — AGI. ★ **AGI-INLINE column**, not MID.
+    pub line2: MoneyCell,
+    /// L3 — the §213(a) 7.5% floor, MID column.
+    pub line3: MoneyCell,
+    /// L4 — medical allowed, AMOUNT column.
+    pub line4: MoneyCell,
+    /// L5a — state/local income or sales taxes, MID column.
+    pub line5a: MoneyCell,
+    /// L5b — real-estate taxes, MID column.
+    pub line5b: MoneyCell,
+    /// L5c — personal-property taxes, MID column.
+    pub line5c: MoneyCell,
+    /// L5d — add 5a-5c, MID column.
+    pub line5d: MoneyCell,
+    /// L5e — the §164(b) SALT cap, MID column.
+    pub line5e: MoneyCell,
+    /// L7 — add 5e and 6, AMOUNT column.
+    pub line7: MoneyCell,
+    /// L8a — mortgage interest on Form 1098, MID column.
+    pub line8a: MoneyCell,
+    /// L8e — add 8a-8c, MID column.
+    pub line8e: MoneyCell,
+    /// L10 — add 8e and 9, AMOUNT column.
+    pub line10: MoneyCell,
+    /// L11 — gifts by cash or check, MID column.
+    pub line11: MoneyCell,
+    /// L12 — gifts other than cash (incl. crypto), MID column.
+    pub line12: MoneyCell,
+    /// L13 — prior-year carryover, MID column.
+    pub line13: MoneyCell,
+    /// L14 — add 11-13, AMOUNT column.
+    pub line14: MoneyCell,
+    /// L17 — total itemized deductions → 1040 L12, AMOUNT column.
+    pub line17: MoneyCell,
+}
+
+impl ScheduleAMap {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_A_MAP_2024).expect("bundled schedule A 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 18 filled cells in printed reading order (strictly descending y on page 1).
+    pub fn lines(&self) -> [&MoneyCell; 18] {
+        [
+            &self.line1,
+            &self.line2,
+            &self.line3,
+            &self.line4,
+            &self.line5a,
+            &self.line5b,
+            &self.line5c,
+            &self.line5d,
+            &self.line5e,
+            &self.line7,
+            &self.line8a,
+            &self.line8e,
+            &self.line10,
+            &self.line11,
+            &self.line12,
+            &self.line13,
+            &self.line14,
+            &self.line17,
+        ]
+    }
+}
+
+/// The Schedule 1 (Additional Income and Adjustments to Income) field map for one tax year.
+///
+/// Root subform is `form1[0]` (as on Schedule 2), NOT `topmostSubform[0]`. **Two pages** — Part II is
+/// entirely on page 2, so descent is grouped by page.
+///
+/// **Line 22 is a ReadOnly "Reserved for future use" widget** that consumes a suffix number; never
+/// written. Non-money fields (a date on 2b, an SSN comb on 19b, a date on 19c) sit inside the money
+/// x-band — writing a dollar amount into one prints garbage.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Schedule1Map {
+    /// `"f1040s1"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
+    /// L1 — taxable state/local refund, AMOUNT column, page 1.
+    pub line1: MoneyCell,
+    /// L3 — business income (crypto Schedule C net), AMOUNT column, page 1.
+    pub line3: MoneyCell,
+    /// L7 — unemployment compensation, AMOUNT column, page 1.
+    pub line7: MoneyCell,
+    /// L8v — digital assets received as ordinary income, **MID column**, page 1.
+    pub line8v: MoneyCell,
+    /// L9 — total other income, AMOUNT column, page 1.
+    pub line9: MoneyCell,
+    /// L10 — combine 1–7 and 9 → 1040 L8, AMOUNT column, page 1.
+    pub line10: MoneyCell,
+    /// L15 — deductible part of SE tax, AMOUNT column, **page 2**.
+    pub line15: MoneyCell,
+    /// L18 — early-withdrawal penalty, AMOUNT column, page 2.
+    pub line18: MoneyCell,
+    /// L21 — student-loan interest deduction, AMOUNT column, page 2.
+    pub line21: MoneyCell,
+    /// L26 — total adjustments → 1040 L10, AMOUNT column, page 2.
+    pub line26: MoneyCell,
+}
+
+impl Schedule1Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_1_MAP_2024).expect("bundled schedule 1 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 10 filled cells in printed reading order. **Descent is grouped by PAGE.**
+    pub fn lines(&self) -> [&MoneyCell; 10] {
+        [
+            &self.line1,
+            &self.line3,
+            &self.line7,
+            &self.line8v,
+            &self.line9,
+            &self.line10,
+            &self.line15,
+            &self.line18,
+            &self.line21,
+            &self.line26,
+        ]
+    }
+}
+
+/// The Schedule C (Profit or Loss From Business) field map — the crypto trade or business.
+///
+/// **Its money column is x ≈ [475, 576]** — not the [504, 576] of Schedules 1/2/3/A and Forms
+/// 8959/8960/8995, and not Schedule B's [489.6, 576]. No amount-column constant is shared between
+/// forms in this crate, and none may be.
+///
+/// Part II's individual expense lines (8–27b) are unmapped: v1 takes a FLAT expense total, so only
+/// line 28 is printed. Line 30 (home office) and the line-32 at-risk checkboxes are unmapped too — a
+/// Schedule C loss refuses upstream, so line 31 is always ≥ 0.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduleCMap {
+    /// `"f1040sc"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// Line A — "Principal business or profession".
+    pub line_a_business: String,
+    /// Line B — the NAICS code (a 6-character comb).
+    pub line_b_naics: String,
+    /// Line F — the accounting-method checkboxes. `(1) Cash` and `(2) Accrual`; `(3) Other` is never
+    /// checked (v1 captures only the two).
+    pub method_cash: CheckChoice,
+    pub method_accrual: CheckChoice,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
+    /// L1 — gross receipts or sales.
+    pub line1: MoneyCell,
+    /// L3 — line 1 − line 2 (returns, blank).
+    pub line3: MoneyCell,
+    /// L5 — gross profit (line 3 − line 4, COGS blank).
+    pub line5: MoneyCell,
+    /// L7 — gross income (line 5 + line 6, other income blank).
+    pub line7: MoneyCell,
+    /// L28 — total expenses.
+    pub line28: MoneyCell,
+    /// L29 — tentative profit (line 7 − line 28).
+    pub line29: MoneyCell,
+    /// L31 — net profit → Schedule 1 L3 **and** Schedule SE L2.
+    pub line31: MoneyCell,
+}
+
+impl ScheduleCMap {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_C_MAP_2024).expect("bundled schedule C 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+    /// The 7 filled cells in printed reading order (strictly descending y on page 1).
+    pub fn lines(&self) -> [&MoneyCell; 7] {
+        [
+            &self.line1,
+            &self.line3,
+            &self.line5,
+            &self.line7,
+            &self.line28,
+            &self.line29,
+            &self.line31,
+        ]
+    }
+}
+
+/// One listed-payer row on Schedule B: the payer-name text cell + the amount cell.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduleBRowMap {
+    /// The payer-name field (a wide text cell in the PAYER column).
+    pub payer: String,
+    /// The amount field.
+    pub amount: MoneyCell,
+}
+
+/// A Yes/No checkbox pair (Schedule B Part III). Both boxes share the same on-states (`"1"`/`"2"`) and
+/// the same x geometry across every pair on the form, so only the field NAME distinguishes them.
+#[derive(Debug, Clone, Deserialize)]
+pub struct YesNoPair {
+    /// The "Yes" box.
+    pub yes: CheckChoice,
+    /// The "No" box.
+    pub no: CheckChoice,
+}
+
+/// The Schedule B (Interest and Ordinary Dividends) field map for one tax year.
+///
+/// **Its amount column is x ≈ [489.6, 576]** — not the [504, 576] of Schedules 1/2/3/A and Forms
+/// 8959/8960/8995, nor Schedule C's [475, 576]. A shared constant would reject every cell.
+///
+/// **Row 1 of BOTH repeating tables has a different parent subform** (`Line1_ReadOrder` in Part I,
+/// `ReadOrderControl` in Part II) while its amount sibling does not — so the rows are written out in
+/// full in the TOML rather than interpolated. **Part I has 14 rows, Part II has 15**; the asymmetry
+/// is real.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduleBMap {
+    /// `"f1040sb"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// L7b — the foreign-country list. It IS a captured input; the claim that v1 had none was false
+    /// (ARCH-P6.3a Q7 item 7).
+    pub line7b_countries: String,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
+    /// Part I line 1 — the 14 interest-payer rows.
+    pub part1_rows: Vec<ScheduleBRowMap>,
+    /// L2 — add the amounts on line 1.
+    pub line2: MoneyCell,
+    /// L4 — line 2 − line 3 → 1040 L2b.
+    pub line4: MoneyCell,
+    /// Part II line 5 — the 15 dividend-payer rows.
+    pub part2_rows: Vec<ScheduleBRowMap>,
+    /// L6 — add the amounts on line 5 → 1040 L3b.
+    pub line6: MoneyCell,
+    /// L7a — the foreign-account Yes/No pair.
+    pub line7a: YesNoPair,
+    /// L8 — the foreign-trust Yes/No pair.
+    pub line8: YesNoPair,
+}
+
+impl ScheduleBMap {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+    /// The TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(SCHEDULE_B_MAP_2024).expect("bundled schedule B 2024 map parses")
+    }
+    /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+}
+
 /// The Schedule SE (Form 1040) field map for one tax year — the filled §1401 line chain.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScheduleSeMap {
@@ -470,6 +1444,12 @@ pub struct ScheduleSeMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The identity header — "Name of person **with self-employment income**" + THAT person's SSN, i.e.
+    /// the PROPRIETOR, not the return's joint name line. `Option` because this map is shared with the
+    /// crypto slice (whose 2017/2025 editions have no verified identity FQNs and write no identity at
+    /// all); the FULL-return filler refuses on `None`.
+    #[serde(default)]
+    pub identity: Option<IdentityCells>,
     /// Line 2 — net profit (net_se), amount column.
     pub line2: MoneyCell,
     /// Line 3 — combine 1a/1b/2 (= line 2), amount column.

@@ -99,6 +99,17 @@ pub fn persist_tax_profile(
     year: i32,
     p: &btctax_core::TaxProfile,
 ) -> Result<(), PersistError> {
+    // D-4 guard (SPEC §4.12; mirror `cmd/tax.rs` `set_profile`): when full-return `ReturnInputs` exist for
+    // the year, a raw tax-profile is IGNORED (`resolve_profile` gives ReturnInputs precedence). Refuse
+    // rather than silently store an unused/escape-hatch-clobbering value (review N1). The editor has no
+    // `--force`; the user must `income clear --year N` (or the CLI `tax-profile set --force`) first.
+    if btctax_cli::return_inputs::exists(session.conn(), year)? {
+        return Err(PersistError::NoChange(btctax_cli::CliError::Usage(format!(
+            "tax year {year} has full-return inputs (`income import`); a raw tax-profile would be ignored \
+             (full-return inputs take precedence). Run `income clear --year {year}`, or the CLI \
+             `tax-profile set --force`, first."
+        ))));
+    }
     let pre = session.snapshot()?;
     btctax_cli::tax_profile::set(session.conn(), year, p)?; // typed side-table upsert
     save_or_rollback(session, pre)?; // encrypt + atomic_write; revert on failure
@@ -1075,6 +1086,45 @@ mod tests {
         );
         let stored2 = session3.tax_profile(2025).unwrap().unwrap();
         assert_eq!(stored2, p2, "second upsert value is readable");
+    }
+
+    /// [P2-N1] D-4 guard in the editor save path: when full-return `ReturnInputs` exist for the year, the
+    /// editor REFUSES a raw tax-profile write (would be ignored + clobber the escape hatch) — matching the
+    /// CLI `tax-profile set`. Nothing is written; a different year (no ReturnInputs) still persists.
+    #[test]
+    fn persist_tax_profile_refuses_when_return_inputs_exist_d4() {
+        use btctax_store::Passphrase;
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp = "d4-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp.into()), &key).unwrap();
+
+        // Seed full-return inputs for 2025 via the CLI import path.
+        let toml = dir.path().join("inputs.toml");
+        std::fs::write(&toml, "filing_status = \"Single\"\n").unwrap();
+        btctax_cli::cmd::tax::import_return_inputs(
+            &vault,
+            &Passphrase::new(pp.into()),
+            2025,
+            &toml,
+        )
+        .unwrap();
+
+        let mut session = btctax_cli::Session::open(&vault, &Passphrase::new(pp.into())).unwrap();
+        // A raw profile for the SAME year is refused (D-4) — nothing stored.
+        let err = persist_tax_profile(&mut session, 2025, &fixture_profile()).unwrap_err();
+        assert!(matches!(
+            err,
+            PersistError::NoChange(btctax_cli::CliError::Usage(_))
+        ));
+        assert!(
+            session.tax_profile(2025).unwrap().is_none(),
+            "no raw profile may be stored for a ReturnInputs year"
+        );
+        // A DIFFERENT year (no ReturnInputs) persists normally.
+        persist_tax_profile(&mut session, 2024, &fixture_profile()).unwrap();
+        assert!(session.tax_profile(2024).unwrap().is_some());
     }
 
     // ── KAT-P2a — append-only strict prefix test (classify-inbound append form) ──

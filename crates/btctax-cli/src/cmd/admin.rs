@@ -87,7 +87,13 @@ pub fn export_snapshot(
     let se_result = match tax_year {
         Some(y) => {
             let tables = BundledTaxTables::load();
-            session.tax_profile(y)?.and_then(|p| {
+            // Resolve (ReturnInputs-derived → stored → …); an uncomputable/refused profile just omits the
+            // SE figure — the export (a data snapshot) still proceeds, never emitting a wrong number.
+            let profile = match session.resolve_screened(&state, y, &tables)? {
+                crate::resolve::ProfileOutcome::Ready { profile, .. } => profile,
+                crate::resolve::ProfileOutcome::Uncomputable { .. } => None,
+            };
+            profile.and_then(|p| {
                 tables.table_for(y).and_then(|t| {
                     compute_se_tax(
                         &state,
@@ -170,6 +176,11 @@ pub struct IrsPdfReport {
     pub form_1040_filled_7a: bool,
     /// The 1040 was skipped for a NET LOSS on line 7a (the §1211 line-21 cap is the filer's).
     pub form_1040_loss: bool,
+    /// ★ The FULL-RETURN packet's files, in Attachment Sequence order (empty on the crypto-slice path).
+    /// The two paths write NON-OVERLAPPING names, so no two runs can be collated into a chimera return.
+    pub full_return_paths: Vec<PathBuf>,
+    /// The full-return packet's manifest (the filer's stapling order).
+    pub full_return_manifest: Option<PathBuf>,
 }
 
 /// Whether a form is included: the packet is every applicable form unless `--forms` opts in to a subset.
@@ -200,7 +211,24 @@ pub fn export_irs_pdf(
 ) -> Result<IrsPdfReport, CliError> {
     let session = Session::open(vault_path, pp)?;
     let (state, _cfg) = session.project()?;
-    // Attestation gate FIRST — no fictional tax form leaves the machine unguarded, and a refusal
+
+    // ★ THE DISPATCH (P6.5). Exactly one function decides which pipeline runs, and the two write
+    // NON-OVERLAPPING filenames, so artifacts from two runs can never be collated into a chimera
+    // return: the full packet writes `f1040.pdf`, `f1040s1.pdf`, … + a manifest; the crypto slice
+    // writes `form_1040_capgains.pdf`, `schedule_d.pdf`, `f8949.pdf`, ….
+    //
+    // This REPLACES the P5-C1 refusal (`CryptoSliceExportForFullReturnYear`). That guard existed only
+    // because the slice's Schedule D carries the crypto totals alone — no line 13 for 1099-DIV box-2a
+    // capital-gain distributions, no lines 6/14 for capital-loss carryovers — so on a full-return year
+    // it was a complete-LOOKING form with income missing. The full pipeline fills all of them, plus
+    // every attachment the forms cite, so the reason for the refusal is gone. Deleting it downgrades a
+    // type-level impossibility to a branch, which is why the branch is HERE, alone, and pinned by KATs
+    // in BOTH directions.
+    if crate::return_inputs::exists(session.conn(), tax_year)? {
+        return export_full_return(&session, &state, out_dir, tax_year, attest);
+    }
+
+    // Attestation gate — no fictional tax form leaves the machine unguarded, and a refusal
     // writes no bytes. (A fully-real ledger ignores `attest`.)
     let watermarked = state.pseudo_active();
     if watermarked {
@@ -243,7 +271,11 @@ pub fn export_irs_pdf(
     // ── Schedule SE (self-employment tax). Compute the §1401 figure from the year's TaxProfile. ──
     let se_computed = {
         let tables = BundledTaxTables::load();
-        session.tax_profile(tax_year)?.and_then(|p| {
+        let profile = match session.resolve_screened(&state, tax_year, &tables)? {
+            crate::resolve::ProfileOutcome::Ready { profile, .. } => profile,
+            crate::resolve::ProfileOutcome::Uncomputable { .. } => None, // export proceeds; SE omitted
+        };
+        profile.and_then(|p| {
             tables.table_for(tax_year).and_then(|t| {
                 compute_se_tax(
                     &state,
@@ -337,6 +369,8 @@ pub fn export_irs_pdf(
         .filter(|b| b.kind.severity() == Severity::Hard)
         .count();
     Ok(IrsPdfReport {
+        full_return_paths: Vec::new(),
+        full_return_manifest: None,
         f8949_path,
         schedule_d_path,
         tax_year,
@@ -371,4 +405,151 @@ pub fn backup_key(vault_path: &Path, pp: &Passphrase, out_path: &Path) -> Result
         .vault()
         .backup_key(out_path)?;
     Ok(())
+}
+
+/// ★ **The full-return export** (P6.3b / P6.5) — the whole filable packet, not the crypto slice.
+///
+/// Runs the same fail-closed screens the report runs (a return the report will not compute is a return
+/// the exporter must not print), assembles the printed packet in CORE, and fills it ALL-OR-NOTHING: if
+/// any member form refuses, zero bytes reach the disk. A 1040 whose line 2b cites a Schedule B that is
+/// not attached is a wrong return, so partial emission would be a fail-open.
+///
+/// **The packet exports CLEAN** (no DRAFT watermark, no attestation) — the user's §9 decision, folded
+/// into the SPEC. The one exception is PSEUDO-reconciled figures, which are FICTIONAL and can never be
+/// filed: those are watermarked regardless, and that gate composes with (and dominates) everything else.
+fn export_full_return(
+    session: &Session,
+    state: &btctax_core::state::LedgerState,
+    out_dir: &Path,
+    tax_year: i32,
+    attest: Option<&str>,
+) -> Result<IrsPdfReport, CliError> {
+    use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
+    use btctax_core::tax::tables::{FullReturnTables, TaxTables};
+    use std::fmt::Write as _;
+
+    let tables = BundledTaxTables::load();
+    let fr_tables = BundledFullReturnTables::load();
+    let (Some(params), Some(table)) = (
+        fr_tables.full_return_for(tax_year),
+        tables.table_for(tax_year),
+    ) else {
+        return Err(CliError::Usage(format!(
+            "no full-return tables for {tax_year} — the full-return packet needs a supported tax year \
+             (TY2024)"
+        )));
+    };
+
+    let ri = crate::return_inputs::get(session.conn(), tax_year)?
+        .ok_or_else(|| CliError::Usage(format!("no return_inputs stored for {tax_year}")))?;
+
+    // Fail-closed screens, in the same order the report runs them. A refusal writes NO bytes.
+    let refuse = |r: btctax_core::tax::return_refuse::Refusal| {
+        CliError::Usage(format!(
+            "the {tax_year} return is not computable [{:?}]: {} — no forms were written",
+            r.reason, r.detail
+        ))
+    };
+    if let Some(r) = btctax_core::tax::return_refuse::screen_inputs(&ri, table, params) {
+        return Err(refuse(r));
+    }
+    if let Some(r) =
+        btctax_core::tax::return_1040::screen_compute_dependent(&ri, state, tax_year, params)
+    {
+        return Err(refuse(r));
+    }
+    let ar = btctax_core::tax::return_1040::assemble_absolute(&ri, state, params, table, tax_year);
+    if let Some(r) = btctax_core::tax::return_1040::screen_absolute(&ri, &ar, params) {
+        return Err(refuse(r));
+    }
+
+    // Pseudo figures are FICTIONAL: they are watermarked no matter what, and the attestation gate for
+    // them is unchanged. A clean (real-ledger) packet needs no attestation — SPEC §9 as amended.
+    let watermarked = state.pseudo_active();
+    if watermarked {
+        require_attestation(attest)?;
+    }
+
+    let details = session.donation_details()?;
+    let printed = btctax_core::tax::packet::assemble_printed_return(
+        &ri, state, &details, &ar, table, tax_year,
+    )
+    .map_err(|e| {
+        CliError::Usage(format!(
+            "the {tax_year} return cannot be printed: {e} — fix the identity and re-run"
+        ))
+    })?;
+
+    // ★ ALL-OR-NOTHING: every form fills BEFORE anything is written.
+    let packet = btctax_forms::fill_full_return(&printed, tax_year)?;
+
+    fsperms::mkdir_owner_only(out_dir)?;
+    let mut manifest = String::from("# btctax full-return packet — staple in this order\n");
+    let mut paths: Vec<PathBuf> = Vec::new();
+    for form in &packet {
+        let bytes = if watermarked {
+            btctax_forms::stamp_draft_watermark(&form.bytes)?
+        } else {
+            form.bytes.clone()
+        };
+        // ★ The packet's filenames are SEQUENCE-PREFIXED (`00_f1040.pdf`, `12A_f8949.pdf`, …). Two
+        // reasons, and the first is a correctness guarantee: the crypto slice writes bare stems
+        // (`f8949.pdf`, `schedule_d.pdf`, `schedule_se.pdf`) and THREE of them collided with the
+        // packet's — so a full-return run and a slice run into one directory could silently interleave
+        // a cents Schedule SE with a whole-dollar 1040: the chimera return the dispatch mitigation
+        // exists to prevent (Fable P6 r1 I7). Second, the prefix IS the stapling order.
+        let path = out_dir.join(format!(
+            "{}_{}.pdf",
+            form.attachment_sequence.unwrap_or("00"),
+            form.name
+        ));
+        write_bytes_owner_only(&path, &bytes)?;
+        let seq = form.attachment_sequence.unwrap_or("—");
+        let _ = writeln!(
+            manifest,
+            "{seq:>4}  {}",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        );
+        paths.push(path);
+    }
+    let manifest_path = out_dir.join("manifest.txt");
+    write_bytes_owner_only(&manifest_path, manifest.as_bytes())?;
+
+    let unresolved_hard = state
+        .blockers
+        .iter()
+        .filter(|b| b.kind.severity() == Severity::Hard)
+        .count();
+    Ok(IrsPdfReport {
+        watermarked,
+        tax_year,
+        unresolved_hard,
+        broker_reported_rows: 0,
+        full_return_paths: paths,
+        full_return_manifest: Some(manifest_path),
+        // The crypto-slice PATHS are absent (the two pipelines are disjoint), but the 8283's loud
+        // escalations are NOT slice-specific: the packet can contain a Section-B 8283 whose appraiser
+        // declaration is unsigned, and silencing that guard on the one path that announces a "clean,
+        // filable" packet would be a fail-open (Fable P6 r1 I8b).
+        f8949_path: None,
+        schedule_d_path: None,
+        schedule_se_path: None,
+        se_below_floor: false,
+        se_addl_medicare: None,
+        se_income_without_profile: false,
+        form_8283_path: None,
+        form_8283_needs_review: printed
+            .forms
+            .f8283
+            .as_ref()
+            .is_some_and(|r| r.rows().iter().any(|row| row.needs_review)),
+        form_8283_section_b: printed.forms.f8283.as_ref().map(|r| {
+            r.rows()
+                .iter()
+                .any(|row| row.section == Some(btctax_core::Form8283Section::B))
+        }),
+        form_1040_path: None,
+        form_1040_filled_7a: false,
+        form_1040_loss: false,
+    })
 }

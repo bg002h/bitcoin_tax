@@ -2,6 +2,18 @@
 
 **An offline, single-user US Bitcoin tax ledger.**
 
+> [!WARNING]
+> **NOT AUTHORISED FOR FILING.** `btctax` is a **mechanical calculator**. **No right is granted, and no
+> authorisation is given, to use this software — or anything it produces — to prepare or file a tax
+> return**, and **no warranty** is given that any figure, form or PDF it produces is accurate, complete,
+> or fit to file. If you file any of it you do so **entirely on your own responsibility**: **you** are the
+> preparer, you must check every figure against the IRS forms and instructions before you sign, and the
+> authors accept **no liability** for the consequences. This is **not tax advice** and is no substitute
+> for a qualified professional.
+>
+> The MIT/Unlicense grant covers the *software*. It says nothing about whether the *output* is fit to
+> file — see [`NOTICE`](./NOTICE) and `btctax limitations`.
+
 `btctax` computes your US federal tax picture for Bitcoin — per-lot cost basis, realized
 short-/long-term gains, income, gifts and donations, and the IRS forms (8949, Schedule D, 8283,
 Schedule SE) — from your exchange CSVs, entirely on your own machine. It is an **event-sourced ledger**:

@@ -398,6 +398,25 @@ pub fn verify_flat(
         }
     }
 
+    // (5) /MaxLen — a value the cell physically cannot hold. Checked on the READ-BACK (the serialized
+    // bytes), like every other leg of the oracle, and against the PDF's OWN declared capacity rather
+    // than anything the map asserts. A viewer would silently truncate an over-long value; we refuse.
+    for p in placements {
+        let field = index[p.fqn.as_str()];
+        let (Some(max_len), Some(v)) = (field.max_len, text_value(doc, field.id)) else {
+            continue;
+        };
+        // Count CHARACTERS, not bytes — /MaxLen is in characters, and a name can be non-ASCII.
+        let len = v.chars().count();
+        if len > max_len {
+            return Err(FormsError::CellOverflow {
+                fqn: p.fqn.clone(),
+                max_len,
+                len,
+            });
+        }
+    }
+
     // (3) no unmapped write.
     let allowed: HashSet<&str> = placements.iter().map(|p| p.fqn.as_str()).collect();
     assert_only_filled(doc, fields, &allowed)
@@ -471,5 +490,51 @@ pub fn topmost_yes_no_pair(
         Ok((a.fqn.clone(), b.fqn.clone()))
     } else {
         Ok((b.fqn.clone(), a.fqn.clone()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pdf;
+
+    /// ★ A value too long for its `/MaxLen` comb cell FAILS CLOSED. This is the guard that makes the
+    /// hyphens-vs-digits question un-losable: the 1040's SSN cells are 9-character combs, so a
+    /// formatted `123-45-6789` (ELEVEN characters) is not a formatting preference — it is a value the
+    /// cell cannot hold, which a PDF viewer would silently truncate or splay across the wrong teeth.
+    /// Silent truncation on a filed return is exactly the class of defect this crate refuses to ship.
+    #[test]
+    fn a_value_over_its_maxlen_comb_cell_fails_closed() {
+        const SSN_CELL: &str = "topmostSubform[0].Page1[0].f1_06[0]";
+        let fill = |value: &str| -> Result<(), FormsError> {
+            let mut doc = pdf::load(pdf::F1040_PDF_2024).unwrap();
+            let index = pdf::index(&pdf::collect_fields(&doc).unwrap());
+            pdf::apply_writes(
+                &mut doc,
+                &index,
+                &[(SSN_CELL.to_string(), pdf::FieldValue::Text(value.into()))],
+            )
+            .unwrap();
+            let bytes = pdf::save(&mut doc).unwrap();
+            let check = pdf::load(&bytes).unwrap();
+            let fields = pdf::collect_fields(&check).unwrap();
+            verify_flat(
+                &check,
+                &fields,
+                &[FlatPlacement::free(SSN_CELL, 0)],
+                &[(0.0, 612.0)],
+            )
+        };
+
+        // Nine bare digits fit exactly.
+        assert!(fill("123456789").is_ok());
+
+        // The hyphenated form is eleven characters — it does NOT fit, and must not be written.
+        let err = fill("123-45-6789").expect_err("an over-long value must fail closed");
+        assert!(
+            matches!(&err, FormsError::CellOverflow { fqn, max_len, len }
+                if fqn == SSN_CELL && *max_len == 9 && *len == 11),
+            "expected CellOverflow, got {err:?}"
+        );
     }
 }

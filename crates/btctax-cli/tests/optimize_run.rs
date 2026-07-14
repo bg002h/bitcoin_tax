@@ -169,7 +169,7 @@ fn optimize_run_saves_tax_and_writes_nothing() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_tax_saving_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let before = event_count(&vault);
 
@@ -223,7 +223,7 @@ fn optimize_run_approximate_banner_when_heuristic_pool() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_heuristic_pool_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let now: OffsetDateTime = datetime!(2026-01-01 12:00:00 UTC);
     let proposal = cmd::optimize::run(&vault, &pp(), 2025, now).unwrap();
@@ -269,7 +269,7 @@ fn optimize_run_no_banner_when_exact_result() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_tax_saving_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let now: OffsetDateTime = datetime!(2026-01-01 12:00:00 UTC);
     let proposal = cmd::optimize::run(&vault, &pp(), 2025, now).unwrap();
@@ -295,7 +295,7 @@ fn optimize_run_contemporaneous_when_now_before_sale() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_tax_saving_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     // Sale is 2025-06-01; now = 2025-01-01 (before) → ContemporaneousNow.
     let now: OffsetDateTime = datetime!(2025-01-01 12:00:00 UTC);
@@ -323,7 +323,7 @@ fn optimize_run_needs_attestation_when_now_after_sale() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_tax_saving_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     // Sale is 2025-06-01; now = 2026-01-01 (after) → NeedsAttestation.
     let now: OffsetDateTime = datetime!(2026-01-01 12:00:00 UTC);
@@ -351,7 +351,7 @@ fn optimize_run_no_change_row_shows_no_change_not_attest() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_single_lot_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     // now after the sale → would be NeedsAttestation IF the selection changed, but since it
     // doesn't, the persistability line must be suppressed entirely.
@@ -445,7 +445,7 @@ fn optimize_run_no_disposals_is_usage_error() {
     let csv = write_buy_only_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
     // Profile must be set so `compute_tax_year` returns Computed (not NotComputable).
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let now: OffsetDateTime = datetime!(2026-01-01 12:00:00 UTC);
     let err = cmd::optimize::run(&vault, &pp(), 2025, now).unwrap_err();

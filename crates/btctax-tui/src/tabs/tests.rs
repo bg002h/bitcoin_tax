@@ -46,6 +46,7 @@ fn make_snapshot(state: LedgerState) -> Snapshot {
         state,
         cli_config: btctax_cli::CliConfig::default(),
         profiles: BTreeMap::new(),
+        refused: BTreeMap::new(),
         tables: BundledTaxTables::load(),
         donation_details: BTreeMap::new(),
         bulk_estimated: BTreeMap::new(),
@@ -864,6 +865,7 @@ fn make_snapshot_with_profile(state: LedgerState) -> Snapshot {
         state,
         cli_config: btctax_cli::CliConfig::default(),
         profiles,
+        refused: BTreeMap::new(),
         tables: BundledTaxTables::load(),
         donation_details: BTreeMap::new(),
         bulk_estimated: BTreeMap::new(),
@@ -1484,6 +1486,7 @@ fn make_se_snapshot(
         state,
         cli_config: btctax_cli::CliConfig::default(),
         profiles,
+        refused: BTreeMap::new(),
         tables: BundledTaxTables::load(),
         donation_details: BTreeMap::new(),
         bulk_estimated: BTreeMap::new(),
@@ -1667,6 +1670,7 @@ fn e7e_not_computable_year_with_profile_shows_se_section() {
         state,
         cli_config: btctax_cli::CliConfig::default(),
         profiles,
+        refused: BTreeMap::new(),
         tables: BundledTaxTables::load(),
         donation_details: BTreeMap::new(),
         bulk_estimated: BTreeMap::new(),
@@ -1686,6 +1690,38 @@ fn e7e_not_computable_year_with_profile_shows_se_section() {
         content.contains("Schedule SE") || content.contains("§1401"),
         "SE section must appear even for NotComputable year when profile + business income present; \
          content:\n{content}"
+    );
+}
+
+/// [P2-C1] A full-return year that resolves refused/uncomputable renders its REASON in the Tax tab —
+/// never a computed number (and never the SE section). This is the same fail-closed answer the CLI gives;
+/// the viewer must not diverge from `report`.
+#[test]
+fn tax_tab_refused_full_return_year_renders_reason_not_a_number() {
+    let mut snap = make_snapshot(LedgerState::default());
+    snap.refused.insert(
+        2024,
+        "an HSA requires Form 8889 — out of scope for v1".to_string(),
+    );
+    let content = super::tax::render_tax_content(&snap, 2024);
+    assert!(
+        content.contains("NOT COMPUTABLE (full-return inputs)"),
+        "refused year must render its reason header; content:\n{content}"
+    );
+    assert!(
+        content.contains("HSA"),
+        "the refusal reason must appear; content:\n{content}"
+    );
+    // No computed figures, and no SE section, leak for the refused year.
+    assert!(
+        !content.contains("TOTAL federal tax attributable") && !content.contains("Schedule SE"),
+        "no number/SE for a refused year; content:\n{content}"
+    );
+    // A different (non-refused) year is unaffected — it renders normally (no full-return refusal banner).
+    let other = super::tax::render_tax_content(&snap, 2025);
+    assert!(
+        !other.contains("full-return inputs"),
+        "a non-refused year must not show the refusal banner; content:\n{other}"
     );
 }
 

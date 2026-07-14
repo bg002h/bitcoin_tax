@@ -61,7 +61,20 @@ pub enum Command {
         /// $0 when omitted (the advisory discloses this assumption). Must not be negative.
         #[arg(long)]
         prior_taxable_gifts: Option<String>,
+        /// §4 R3-M6: persist this year's computed charitable + QBI carryover-OUT as next year's
+        /// carryover-IN (a full-return `--tax-year` ReturnInputs year only). `report` is otherwise
+        /// read-only; this flag opts into the vault write.
+        #[arg(long, default_value_t = false)]
+        write_carryover: bool,
+        /// With `--write-carryover`: overwrite a next-year carryover-in that was user-entered
+        /// (`income import`). Without it, a user-entered value is left untouched and the write refuses.
+        #[arg(long, default_value_t = false)]
+        force: bool,
     },
+    /// Print the LIMITATIONS & supported-forms document: what a v1 full return covers, the credits it
+    /// omits conservatively (your tax is overstated, never understated), what it refuses outright, and
+    /// what it cannot represent. Read this before you file.
+    Limitations,
     /// Emit a reconciliation decision event.
     #[command(subcommand)]
     Reconcile(Reconcile),
@@ -155,6 +168,15 @@ pub enum Command {
     /// worksheet, incl. the line-21 loss limit) are OUT OF SCOPE. Rows on an exchange that MAY carry
     /// 1099-DA broker reporting are flagged on stderr (btctax files them all under Box I/L and says so).
     ///
+    /// REFUSED for a tax year that has FULL-RETURN inputs (`income import`). These fillers are the
+    /// crypto-slice pipeline: Schedule D carries only the ledger's crypto totals — it has no line 13
+    /// (1099-DIV box-2a capital-gain distributions) and no lines 6/14 (capital-loss carryovers), both
+    /// of which the computed return DOES include in 1040 line 7 — and the 1040 fill covers only the
+    /// capital-gain cluster. For a crypto-only year those forms are complete and correct; for a full
+    /// return they would be complete-LOOKING forms with income missing, so v1 fails closed rather than
+    /// hand you a plausible wrong form. Transcribe the report's figures by hand until the full-return
+    /// fillers ship. See `btctax limitations`.
+    ///
     /// PSEUDO-RECONCILED ledgers: the same attestation gate as export-snapshot applies, AND every
     /// page is stamped with a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` watermark.
     ExportIrsPdf {
@@ -206,6 +228,10 @@ pub enum Command {
     /// side-table row, no vault mutation. Tax decision-support (consequences), not buy/sell/hold advice.
     #[command(subcommand)]
     WhatIf(WhatIf),
+    /// Full-return (v1) input surface: import, show, or clear the per-year full-return inputs (W-2s,
+    /// 1099s, deductions, household). Offline; stored in the encrypted vault.
+    #[command(subcommand)]
+    Income(IncomeCmd),
     /// Set or show the per-tax-year tax profile (filing status, income, MAGI, etc.).
     TaxProfile {
         /// The tax year (e.g. 2025).
@@ -266,6 +292,10 @@ pub enum Command {
         /// Show the stored profile for `--year` instead of setting it.
         #[arg(long, default_value_t = false)]
         show: bool,
+        /// Store the raw profile even when full-return inputs (`income import`) already exist for the year
+        /// (they take precedence, so the raw profile would otherwise be ignored — D-4 guard).
+        #[arg(long, default_value_t = false)]
+        force: bool,
     },
 }
 
@@ -318,6 +348,33 @@ pub enum Optimize {
         /// exclusive with `--proceeds`.
         #[arg(long, conflicts_with = "proceeds")]
         fmv: bool,
+    },
+}
+
+/// Full-return (v1) input subcommands (SPEC §4 / recon-04 §6). v1 ships the TOML bulk-import path +
+/// a JSON show; incremental per-field subcommands (`add-w2`, …) are a follow-on.
+#[derive(Subcommand)]
+pub enum IncomeCmd {
+    /// Import full-return inputs from an offline TOML file into the vault for a tax year.
+    Import {
+        /// The tax year (e.g. 2024).
+        #[arg(long)]
+        year: i32,
+        /// Path to the TOML file describing the full-return inputs.
+        #[arg(long)]
+        file: std::path::PathBuf,
+    },
+    /// Show the stored full-return inputs for a tax year (JSON, PII redacted), or nothing if none set.
+    Show {
+        /// The tax year (e.g. 2024).
+        #[arg(long)]
+        year: i32,
+    },
+    /// Remove the stored full-return inputs for a tax year (fall back to a raw `tax-profile`).
+    Clear {
+        /// The tax year (e.g. 2024).
+        #[arg(long)]
+        year: i32,
     },
 }
 

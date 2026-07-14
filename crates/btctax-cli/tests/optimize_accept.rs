@@ -209,7 +209,7 @@ fn accept_persists_contemporaneous_without_attestation() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_tax_saving_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     // run (read-only) captures the displayed proposal for the determinism comparison.
     let proposal = cmd::optimize::run(&vault, &pp(), 2025, BEFORE_SALE).unwrap();
@@ -271,7 +271,7 @@ fn accept_refuses_already_executed_without_attestation() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_tax_saving_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let proposal = cmd::optimize::run(&vault, &pp(), 2025, AFTER_SALE).unwrap();
     let disposal = proposal.per_disposal[0].disposal.clone();
@@ -308,7 +308,7 @@ fn accept_attested_persists_and_upgrades_to_attested_recording() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_tax_saving_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let proposal = cmd::optimize::run(&vault, &pp(), 2025, AFTER_SALE).unwrap();
     let disposal = proposal.per_disposal[0].disposal.clone();
@@ -366,7 +366,7 @@ fn accept_then_divergent_baseline_stays_noncompliant() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_tax_saving_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     // Capture the FIFO baseline pick (Lot A) and the disposal id.
     let proposal = cmd::optimize::run(&vault, &pp(), 2025, AFTER_SALE).unwrap();
@@ -433,7 +433,7 @@ fn accept_refuses_2027_broker_held_even_with_attestation() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_broker_2027_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2027, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2027, single_100k_profile(), false).unwrap();
     let tables = synth_tables(2027);
     let now_post_hoc: OffsetDateTime = datetime!(2028-01-01 12:00:00 UTC);
 
@@ -496,7 +496,7 @@ fn accept_refuses_2027_broker_contemporaneous_divergent_no_write() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_broker_2027_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2027, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2027, single_100k_profile(), false).unwrap();
     let tables = synth_tables(2027);
     // `now` BEFORE the 2027-06-01 sale → made ≤ sale (contemporaneous TIMING) — the trigger for the
     // old ContemporaneousNow bug. The broker envelope must override it.
@@ -546,7 +546,7 @@ fn accept_blanket_attest_is_rejected_before_any_write() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_tax_saving_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let proposal = cmd::optimize::run(&vault, &pp(), 2025, BEFORE_SALE).unwrap();
     let disposal = proposal.per_disposal[0].disposal.clone();
@@ -577,7 +577,7 @@ fn void_revokes_a_persisted_selection() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_tax_saving_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     // Capture the FIFO baseline (Lot A) for the post-void comparison.
     let pre = cmd::optimize::run(&vault, &pp(), 2025, BEFORE_SALE).unwrap();
@@ -616,7 +616,7 @@ fn accept_recompute_is_deterministic_and_disposal_scoped() {
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_tax_saving_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let a = cmd::optimize::run(&vault, &pp(), 2025, AFTER_SALE).unwrap();
     let b = cmd::optimize::run(&vault, &pp(), 2025, AFTER_SALE).unwrap();
@@ -678,7 +678,7 @@ fn void_clears_attestation_row_prevents_mislabel_as_attested_recording() {
     let (_dir, vault) = make_vault_with(&csv);
 
     // Phase 1 — high-income profile: optimizer picks Lot B (HIFO) over Lot A (FIFO).
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
 
     let proposal = cmd::optimize::run(&vault, &pp(), 2025, AFTER_SALE).unwrap();
     let disposal = proposal.per_disposal[0].disposal.clone();
@@ -732,7 +732,7 @@ fn void_clears_attestation_row_prevents_mislabel_as_attested_recording() {
         w2_medicare_wages: dec!(0),
         schedule_c_expenses: dec!(0),
     };
-    cmd::tax::set_profile(&vault, &pp(), 2025, zero_income).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, zero_income, false).unwrap();
 
     // Re-run: both lots cost $0 federal tax → optimizer keeps FIFO baseline → proposed == current.
     let re = cmd::optimize::run(&vault, &pp(), 2025, AFTER_SALE).unwrap();
@@ -775,7 +775,7 @@ fn bulk_void_clears_attestation_for_lotselection() {
     let csv = write_tax_saving_csv(csv_dir.path());
     let (_dir, vault) = make_vault_with(&csv);
 
-    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile()).unwrap();
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
     let proposal = cmd::optimize::run(&vault, &pp(), 2025, AFTER_SALE).unwrap();
     let disposal = proposal.per_disposal[0].disposal.clone();
 

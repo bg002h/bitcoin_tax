@@ -1,0 +1,50 @@
+# Form 8959 (Additional Medicare Tax), tax year 2024 — logical line → fully-qualified PDF field name.
+#
+# Extracted with `cargo run -p xtask -- dump-fields crates/btctax-forms/forms/2024/f8959.pdf` and
+# correlated line-by-line against the printed form (`pdftotext -layout`). The blank carries exactly
+# 26 fields: f1_1 = name, f1_2 = SSN, then f1_N = line N-2 for every one of the 24 numbered lines,
+# with NO gaps — the offset was verified against each printed line label, not assumed.
+#
+# Column x-clusters (hand-pinned; the map-independent geometric oracle lives in form8959.rs, never
+# here): MID x ≈ [410,482] (lines 1, 4, 5, 8, 9, 10, 11, 19, 20, 21) and AMOUNT x ≈ [504,576]
+# (lines 6, 7, 12, 13, 18, 22, 24) — the same two clusters as the unified Schedule SE.
+#
+# UNMAPPED ON PURPOSE — these are left BLANK on the filed form because they are unmodeled, and a
+# map entry would invite a future filler to write a misleading 0 into them:
+#   line 2  (f1_4)  Form 4137 unreported tips        line 3  (f1_5)  Form 8919 wages
+#   lines 14-17 (f1_16..f1_19) Part III RRTA          line 23 (f1_25) RRTA withholding
+# Their absence is exactly why line 4 = line 1, line 18 = 7 + 13, and line 24 = line 22.
+form = "f8959"
+year = 2024
+
+# ── Part I — Additional Medicare Tax on Medicare Wages ──────────────────────────────────────────
+line1  = "topmostSubform[0].Page1[0].f1_3[0]"   # "Medicare wages and tips from Form W-2, box 5"
+line4  = "topmostSubform[0].Page1[0].f1_6[0]"   # "Add lines 1 through 3"
+line5  = "topmostSubform[0].Page1[0].f1_7[0]"   # "Enter the following amount for your filing status"
+line6  = "topmostSubform[0].Page1[0].f1_8[0]"   # "Subtract line 5 from line 4. If zero or less, enter -0-"
+line7  = "topmostSubform[0].Page1[0].f1_9[0]"   # "Multiply line 6 by 0.9% (0.009)"
+
+# ── Part II — Additional Medicare Tax on Self-Employment Income ─────────────────────────────────
+line8  = "topmostSubform[0].Page1[0].f1_10[0]"  # "Self-employment income from Schedule SE, Part I, line 6"
+line9  = "topmostSubform[0].Page1[0].f1_11[0]"  # "Enter the following amount for your filing status"
+line10 = "topmostSubform[0].Page1[0].f1_12[0]"  # "Enter the amount from line 4"
+line11 = "topmostSubform[0].Page1[0].f1_13[0]"  # "Subtract line 10 from line 9. If zero or less, enter -0-"
+line12 = "topmostSubform[0].Page1[0].f1_14[0]"  # "Subtract line 11 from line 8. If zero or less, enter -0-"
+line13 = "topmostSubform[0].Page1[0].f1_15[0]"  # "Multiply line 12 by 0.9% (0.009)"
+
+# ── Part IV — Total Additional Medicare Tax (→ Schedule 2, line 11) ─────────────────────────────
+line18 = "topmostSubform[0].Page1[0].f1_20[0]"  # "Add lines 7, 13, and 17"
+
+# ── Part V — Withholding Reconciliation (→ Form 1040, line 25c) ─────────────────────────────────
+line19 = "topmostSubform[0].Page1[0].f1_21[0]"  # "Medicare tax withheld from Form W-2, box 6"
+line20 = "topmostSubform[0].Page1[0].f1_22[0]"  # "Enter the amount from line 1"
+line21 = "topmostSubform[0].Page1[0].f1_23[0]"  # "Multiply line 20 by 1.45% (0.0145)"
+line22 = "topmostSubform[0].Page1[0].f1_24[0]"  # "Subtract line 21 from line 19. If zero or less, enter -0-"
+line24 = "topmostSubform[0].Page1[0].f1_26[0]"  # "Total ... Add lines 22 and 23"
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
+#    /MaxLen 11, so it takes the HYPHENATED form (the 1040's own SSN cells are /MaxLen 9 and take
+#    bare digits — the forms genuinely differ, so `push_identity` reads each cell's capacity).
+[identity]
+name = "topmostSubform[0].Page1[0].f1_1[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_2[0]"

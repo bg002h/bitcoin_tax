@@ -48,7 +48,8 @@
 //! Callers requesting a year with no bundled table receive `None` from [`TaxTables::table_for`],
 //! which the compute layer converts to `TaxOutcome::NotComputable(TaxTableMissing)` (B.4/I6).
 use btctax_core::tax::tables::{
-    LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
+    AmtParams, FullReturnParams, FullReturnTables, LtcgBreakpoints, OrdinaryBracket,
+    OrdinarySchedule, TaxTable, TaxTables,
 };
 use btctax_core::{FilingStatus, Usd};
 use rust_decimal_macros::dec;
@@ -82,6 +83,70 @@ impl BundledTaxTables {
 impl TaxTables for BundledTaxTables {
     fn table_for(&self, year: i32) -> Option<&TaxTable> {
         self.by_year.get(&year)
+    }
+}
+
+/// Compiled-in **full-return** per-year parameters (standard deduction + the year-varying limits the
+/// absolute 1040 needs). NEW for the full-return build; separate from [`BundledTaxTables`] by design —
+/// published-crate-API stability + v1-only fail-closed gating (see `btctax_core::tax::tables::FullReturnParams`).
+/// **v1 bundles TY2024 only**; a year without params returns `None` → the caller fails closed.
+#[derive(Debug, Clone)]
+pub struct BundledFullReturnTables {
+    by_year: BTreeMap<i32, FullReturnParams>,
+}
+
+impl BundledFullReturnTables {
+    pub fn load() -> Self {
+        let mut by_year = BTreeMap::new();
+        by_year.insert(2024, ty2024_full_return());
+        Self { by_year }
+    }
+}
+
+impl FullReturnTables for BundledFullReturnTables {
+    fn full_return_for(&self, year: i32) -> Option<&FullReturnParams> {
+        self.by_year.get(&year)
+    }
+}
+
+/// TY2024 full-return parameters. Standard deduction + §63(f)/§63(c)(5) amounts from **Rev. Proc.
+/// 2023-34 §3.15**; the SALT cap (§164(b)(6) TCJA), §1(g)(4) kiddie threshold, §402(g)(1) deferral
+/// limit (Notice 2023-75), and §904(j) FTC ceiling are the TY2024 figures.
+fn ty2024_full_return() -> FullReturnParams {
+    let mut std_deduction = BTreeMap::new();
+    std_deduction.insert(FilingStatus::Single, dec!(14600));
+    std_deduction.insert(FilingStatus::Mfj, dec!(29200));
+    std_deduction.insert(FilingStatus::Mfs, dec!(14600));
+    std_deduction.insert(FilingStatus::HoH, dec!(21900));
+    FullReturnParams {
+        year: 2024,
+        std_deduction,
+        std_aged_blind_married: dec!(1550), // §63(f), Rev. Proc. 2023-34 §3.15(3)
+        std_aged_blind_unmarried: dec!(1950),
+        dependent_std_floor: dec!(1300), // §63(c)(5), Rev. Proc. 2023-34 §3.15(2)
+        dependent_std_earned_addon: dec!(450),
+        salt_cap: dec!(10000), // §164(b)(6) (MFS = $5,000 at the use site)
+        kiddie_unearned_threshold: dec!(2600), // §1(g)(4)
+        elective_deferral_limit: dec!(23000), // §402(g)(1), Notice 2023-75
+        ftc_ceiling: dec!(300), // §904(j) (MFJ = $600 at the use site)
+        // §199A(e)(2) QBI TI-before-QBI threshold (Rev. Proc. 2023-34 §2.10): $191,950 base / $383,900 MFJ.
+        qbi_ti_threshold_unmarried: dec!(191950),
+        qbi_ti_threshold_married: dec!(383900),
+        // §221(b)(2) student-loan-interest MAGI phase-out (Rev. Proc. 2023-34 §3.22): $80k–$95k
+        // single/HoH, $165k–$195k MFJ; MFS gets no deduction (handled in `student_loan_phaseout`).
+        student_loan_phaseout_unmarried: (dec!(80000), dec!(95000)),
+        student_loan_phaseout_married: (dec!(165000), dec!(195000)),
+        // §55(d)/§55(b)(1) AMT amounts (Rev. Proc. 2023-34 §2.11): exemption $85,700 / $133,300 / $66,650;
+        // phase-out start $609,350 / $1,218,700; 26%/28% breakpoint $232,600 ($116,300 MFS).
+        amt: AmtParams {
+            exemption_single_hoh: dec!(85700),
+            exemption_mfj_qss: dec!(133300),
+            exemption_mfs: dec!(66650),
+            phaseout_start_single_hoh_mfs: dec!(609350),
+            phaseout_start_mfj_qss: dec!(1218700),
+            breakpoint_28pct: dec!(232600),
+            breakpoint_28pct_mfs: dec!(116300),
+        },
     }
 }
 
@@ -629,6 +694,74 @@ mod tests {
     };
     use rust_decimal_macros::dec;
     use time::macros::date;
+
+    /// Full-return Phase 0 / plan-review C1 / KAT-3: every bundled year's ordinary schedule is
+    /// Tax-Table-binnable — every sub-$100k bracket edge is a multiple of $25 (a $50-bin boundary OR
+    /// its exact midpoint, which still reproduces the printed cell since the IRS taxes at the midpoint).
+    /// deep/01's stricter "no interior edge" was TY2024-only; TY2017 (9,325) and TY2025 (11,925 / 48,475)
+    /// have midpoint edges (≡ 25 mod 50) that this correctly permits.
+    #[test]
+    fn all_bundled_years_are_tax_table_binnable() {
+        use btctax_core::tax::method::first_unbinnable_edge;
+        let t = BundledTaxTables::load();
+        // Derive the covered years from what is actually bundled (don't hardcode the list).
+        let mut checked = 0;
+        for year in 2000..=2100 {
+            let Some(tbl) = t.table_for(year) else {
+                continue;
+            };
+            for status in [
+                FilingStatus::Single,
+                FilingStatus::Mfj,
+                FilingStatus::Mfs,
+                FilingStatus::HoH,
+            ] {
+                assert_eq!(
+                    first_unbinnable_edge(tbl.ordinary_for(status)),
+                    None,
+                    "year {year} {status:?}: a sub-$100k bracket edge is not a $25 multiple"
+                );
+            }
+            checked += 1;
+        }
+        assert!(
+            checked >= 4,
+            "expected every bundled year swept; checked {checked}"
+        );
+    }
+
+    /// TY2024 full-return params are bundled with the correct Rev. Proc. 2023-34 / statutory figures;
+    /// v1 bundles only TY2024 (other years → None → the caller fails closed).
+    #[test]
+    fn ty2024_full_return_params_bundled() {
+        let t = BundledFullReturnTables::load();
+        let p = t.full_return_for(2024).unwrap();
+        assert_eq!(p.std_deduction_for(FilingStatus::Single), dec!(14600));
+        assert_eq!(p.std_deduction_for(FilingStatus::Mfj), dec!(29200));
+        assert_eq!(p.std_deduction_for(FilingStatus::HoH), dec!(21900));
+        assert_eq!(p.std_deduction_for(FilingStatus::Qss), dec!(29200)); // Qss→Mfj
+        assert_eq!(p.std_aged_blind_married, dec!(1550));
+        assert_eq!(p.std_aged_blind_unmarried, dec!(1950));
+        assert_eq!(p.dependent_std_floor, dec!(1300));
+        assert_eq!(p.dependent_std_earned_addon, dec!(450));
+        assert_eq!(p.salt_cap, dec!(10000));
+        assert_eq!(p.kiddie_unearned_threshold, dec!(2600));
+        assert_eq!(p.elective_deferral_limit, dec!(23000));
+        assert_eq!(p.ftc_ceiling, dec!(300));
+        assert_eq!(p.qbi_ti_threshold_unmarried, dec!(191950)); // §199A(e)(2), Rev. Proc. 2023-34 §2.10
+        assert_eq!(p.qbi_ti_threshold_married, dec!(383900));
+        assert_eq!(p.qbi_ti_threshold(FilingStatus::Qss), dec!(191950)); // QSS ≠ joint → unmarried base
+                                                                         // §55(d) AMT amounts (Rev. Proc. 2023-34 §2.11) — verified against the 2024 Form 6251 worksheet.
+        assert_eq!(p.amt.exemption(FilingStatus::Single), dec!(85700));
+        assert_eq!(p.amt.exemption(FilingStatus::Mfj), dec!(133300));
+        assert_eq!(p.amt.exemption(FilingStatus::Mfs), dec!(66650));
+        assert_eq!(p.amt.phaseout_start(FilingStatus::Single), dec!(609350));
+        assert_eq!(p.amt.phaseout_start(FilingStatus::Mfj), dec!(1218700));
+        assert_eq!(p.amt.breakpoint_28pct(FilingStatus::Single), dec!(232600));
+        assert_eq!(p.amt.breakpoint_28pct(FilingStatus::Mfs), dec!(116300));
+        assert!(t.full_return_for(2025).is_none()); // v1 = TY2024 only → fail closed elsewhere
+        assert!(t.full_return_for(2017).is_none());
+    }
 
     #[test]
     fn ty2025_single_ordinary_brackets_match_rev_proc_2024_40() {

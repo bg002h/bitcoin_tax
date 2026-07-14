@@ -3,9 +3,11 @@
 //! `cargo run -p xtask -- docs` regenerates the committed man pages under `docs/man/`.
 //! `cargo run -p xtask -- docs --pdf` additionally renders `docs/pdf/*.pdf` (requires `groff`).
 //! `cargo run -p xtask -- check-isolation` asserts no HTTP client in the tax crates (#41 Part C).
+//! `cargo run -p xtask -- dump-fields <pdf>` lists a PDF's AcroForm field names (map authoring).
 
 mod check_isolation;
 mod docs;
+mod dump_fields;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -28,8 +30,20 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("dump-fields") => {
+            let Some(path) = args.get(1) else {
+                eprintln!("usage: cargo run -p xtask -- dump-fields <pdf>");
+                std::process::exit(2);
+            };
+            if let Err(e) = dump_fields::run(path) {
+                eprintln!("xtask dump-fields: {e}");
+                std::process::exit(1);
+            }
+        }
         _ => {
-            eprintln!("usage: cargo run -p xtask -- <docs [--pdf] | check-isolation>");
+            eprintln!(
+                "usage: cargo run -p xtask -- <docs [--pdf] | check-isolation | dump-fields <pdf>>"
+            );
             std::process::exit(2);
         }
     }

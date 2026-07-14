@@ -333,6 +333,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "time",
+ "toml",
 ]
 
 [[package]]
@@ -3727,6 +3728,7 @@ name = "xtask"
 version = "0.5.0"
 dependencies = [
  "btctax-cli",
+ "btctax-forms",
  "btctax-update-prices",
  "clap",
  "clap_mangen",

@@ -13,3 +13,43 @@ line16_h = "topmostSubform[0].Page2[0].f2_01[0]"
 
 qof_yes = { field = "topmostSubform[0].Page1[0].c1_1[0]", on = "1" }
 qof_no = { field = "topmostSubform[0].Page1[0].c1_1[1]", on = "2" }
+
+# ── FULL-RETURN extension (P6). The crypto-slice fill above uses only lines 3/7/10/15/16; the
+# full return additionally needs the carryovers, the capital-gain distributions, and Part III's
+# lines 17-22. These keys are absent from the 2017/2025 maps, which is why they are optional.
+#
+# ★ PARENTHESIZED BOXES — the form pre-prints the minus sign, so these carry POSITIVE MAGNITUDES.
+#   A negative written here renders as a POSITIVE number on a filed return.
+#     line6  (f1_21, x=[507,573] inset)  short-term capital loss carryover
+#     line14 (f1_42, x=[507,573] inset)  long-term capital loss carryover
+#     line21 (f2_04, x=[492.6,573])      the §1211(b) allowed loss offset
+#
+# ★ THE AMOUNT COLUMN DIFFERS BETWEEN THE TWO PAGES OF THE SAME FORM: page 1's column (h) and its
+#   standalone cells are x=[504,576] (center 540); page 2's are x=[489.6,576] (center 532.8). One
+#   band covering both (489-576) holds each center, so the oracle needs no per-page cluster — but a
+#   band pinned to page 1 alone would REJECT every page-2 cell.
+line6  = "topmostSubform[0].Page1[0].f1_21[0]"   # "Short-term capital loss carryover…"   ★ PAREN
+line13 = "topmostSubform[0].Page1[0].f1_41[0]"   # "Capital gain distributions" (Σ 1099-DIV box 2a)
+line14 = "topmostSubform[0].Page1[0].f1_42[0]"   # "Long-term capital loss carryover…"    ★ PAREN
+line18 = "topmostSubform[0].Page2[0].f2_02[0]"   # 28% Rate Gain Worksheet (always 0 — refused upstream)
+line19 = "topmostSubform[0].Page2[0].f2_03[0]"   # Unrecaptured §1250 Worksheet (always 0 — refused)
+line21 = "topmostSubform[0].Page2[0].TagCorrectingSubform[0].f2_04[0]"  # §1211(b) offset  ★ PAREN
+
+# Part III's three Yes/No pairs. Every pair on this form shares the same on-states ("1"/"2"), so only
+# the field name distinguishes them.
+[line17]   # "Are lines 15 and 16 both gains?"
+yes = { field = "topmostSubform[0].Page2[0].c2_1[0]", on = "1" }
+no  = { field = "topmostSubform[0].Page2[0].c2_1[1]", on = "2" }
+[line20]   # "Are lines 18 and 19 both zero or blank and you are not filing Form 4952?"
+yes = { field = "topmostSubform[0].Page2[0].c2_2[0]", on = "1" }
+no  = { field = "topmostSubform[0].Page2[0].c2_2[1]", on = "2" }
+[line22]   # "Do you have qualified dividends on Form 1040…, line 3a?"
+yes = { field = "topmostSubform[0].Page2[0].c2_3[0]", on = "1" }
+no  = { field = "topmostSubform[0].Page2[0].c2_3[1]", on = "2" }
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
+#    /MaxLen 11, so it takes the HYPHENATED form (the 1040's own SSN cells are /MaxLen 9 and take
+#    bare digits — the forms genuinely differ, so `push_identity` reads each cell's capacity).
+[identity]
+name = "topmostSubform[0].Page1[0].f1_01[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
