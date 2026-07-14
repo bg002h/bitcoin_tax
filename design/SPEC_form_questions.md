@@ -1,7 +1,7 @@
 # SPEC — P9: the FORM QUESTION REGISTRY
 
-*Status: **r3**. Folds Fable spec review r2 (1C/6I/6M — `reviews/P9-SPEC-fable-r2.md`) and r1
-(`reviews/P9-SPEC-fable-r1.md`).*
+*Status: **r4**. Folds Fable spec review r3 (1C/7I/6M/4Nit — `reviews/P9-SPEC-fable-r3.md`), r2
+(`reviews/P9-SPEC-fable-r2.md`) and r1 (`reviews/P9-SPEC-fable-r1.md`).*
 *Origin: `design/full-return/reviews/ARCH-P9-fable-question-registry.md`.*
 *Subsumes the two open P8a findings, I1 and I3 (`reviews/P8a-fable-r1.md`), deliberately unpatched.*
 
@@ -34,12 +34,21 @@ printing an unaffirmed checkbox on a filed 1040); SPEC r1 I7, **day one of the p
 This class is **~21% of every blocking finding in the program** — the largest single class, and the only one
 that recurred at *every* stage with identical mechanics.
 
-**★ And it recurred INSIDE THIS SPEC, twice.** r2 flipped `hsa_present: bool → Option<bool>` **with no
-migration** — so serde would read every stored `false` as `Some(false)`, ratifying a never-asked default as
-the filer's answer: *verbatim the D-8 laundering, re-armed in the document written to abolish it* (r2 I-1).
-And r2's anti-vacuity property test **iterated the registry**, so dropping an entry would silently drop its
-own scenario (r1 I-4). The class does not respect the author's intentions. It is only closed by
-construction.
+**★ And it has now recurred INSIDE THIS SPEC in every single revision.** r2 flipped
+`hsa_present: bool → Option<bool>` **with no migration** — so serde would read every stored `false` as
+`Some(false)`, ratifying a never-asked default as the filer's answer: *verbatim the D-8 laundering, re-armed
+in the document written to abolish it* (r2 I-1). r2's anti-vacuity property test **iterated the registry**, so
+dropping an entry would silently drop its own scenario (r1 I-4). And **r3 — the revision that added the
+migration — wrote it against a key that does not exist** (`hsa_present` is *renamed*, so the unlaunder was
+dead code and its mandatory mutation-check was unsatisfiable: a fixture that passes vacuously, which is the
+**P8a I2 shape rebuilt inside the migration that cites P8a I2**), and **r3's re-scoped HSA question covered
+two of the form's four triggers**, so a testing-period filer answers "No" truthfully and understates (r3 C-1,
+r3 I-1).
+
+**Four revisions; four recurrences; each one authored by someone who had just finished writing that this
+exact thing keeps happening.** The class does not respect the author's intentions, his attention, or his
+sincerity. **It is only closed by construction** — which is why §3.3's honest limit (r3 I-5) matters more
+than any prose in this document.
 
 ### 1.1 What this spec does NOT claim
 
@@ -100,31 +109,57 @@ distinction but never wrote it down:
   (`return_1040.rs:986`). Schedule B's FBAR sub-question and Schedule C's G/I/J pairs do the same.
 - The **dependent checkbox** is a **single** box. Unchecked **reads as "No."**
 
-> ### The criterion
-> **A Yes/No PAIR can be visibly deferred to the filer's pen** — both-blank is *facially incomplete*, so the
-> form does not lie; the human completes it.
-> **A SINGLE checkbox cannot be deferred** — unchecked *is* the "No". There is no blank state. So a single
-> box that carries a factual assertion **must be a class-(A) question.**
+> ### The criterion (★ REFINED — r3 I-3: r2's version contradicted §2.2 on the spec's own flagship fields)
+>
+> 1. **A Yes/No PAIR may be left BOTH-BLANK and deferred to the filer's pen** — both-blank is *facially
+>    incomplete*, so the form does not lie; the human completes it.
+> 2. **A SINGLE checkbox has no blank state** — unchecked **is** the "No". So ask what the *unchecked* state
+>    does:
+>    - **Unchecked ASSERTS or CLAIMS** — it states a fact the filer never affirmed, or grants them a benefit
+>      that turns on that fact ⇒ **class (A)**: a registry question, refuse when unanswered.
+>      *(dependent ×2, MFS-itemize, dual-status, Schedule A line 8)*
+>    - **Unchecked merely FORGOES** — nothing false is stated; the filer simply does not claim
+>      (*New Colonial Ice*) ⇒ **class (B)**: lawful unchecked, **but only with §2.2's mandatory advisory.**
+>      *(aged, blind, CTC/ODC)*
+> 3. **★ A box SOFTWARE ANSWERS on the filer's behalf** — checked or unchecked by *our* reasoning rather than
+>    theirs — is permitted **only by a WRITTEN EXEMPTION** that names what makes the answer *entailed* (either
+>    positive data, or the scope of a supported return), **plus a `LIMITATIONS.md` entry.** Silence is not an
+>    exemption. *(1040 digital-asset "Yes" — entailed by ledger evidence; Schedule D QOF "No" — entailed by
+>    scope; Form 8283 line k — entailed by data.)*
 
-This is what makes §2.5 (dual-status) principled rather than ad hoc, and it is what identifies §2.7
-(Schedule A line 8). **Any new single checkbox that asserts a fact is a registry question, by rule.**
+Rule 2 is what makes §2.5 (dual-status) principled rather than ad hoc, and what identifies §2.7 (Schedule A
+line 8). Rule 3 is what stops the *other* evasion: an assertion is no less an assertion because **we** made it.
 
-**The printed-checkbox sweep** (Fable r2, verified across all seven supported forms):
+⚠️ **Rule 1's honest limit.** Deferring a pair to the pen assumes the filer *notices* the blank on an
+otherwise machine-filled form. That is a real assumption, and the mitigation is not in this spec: it is the
+existing `DRAFT` watermark plus the packet's own instructions. Recorded, not waved.
 
-| box | disposition |
-|---|---|
-| 1040 header: dependent ×2, MFS-itemize | covered (registry) |
-| **1040 header: dual-status alien** | **★ OPEN → §2.5** |
-| 1040 digital-asset pair | Yes/No pair — lawfully deferred, data-derived |
-| Schedule B 7a / 8 | covered (registry) |
-| Schedule B FBAR sub-question | pair — deferred, documented (`schedule_b.rs:22`) |
-| Schedule A 5a (sales tax), 18 (elects smaller) | filled |
-| **Schedule A line 8 (mixed-use mortgage)** | **★ OPEN → §2.7** |
-| Schedule C F (accounting method) | filled *(accrual is a separate open Important → P8)* |
-| Schedule C G / I / J | pairs — deferrable |
-| Schedule C H (started/acquired business) | single box, **no tax direction** ⇒ class (C), disclaimed |
-| Form 8960 §6013(g)/(h) · §1.1411-10(g) boxes | **opt-in elections** — lawful unchecked (class C) |
-| 8949 / Schedule D | data-derived |
+**The printed-checkbox sweep — COMPLETE.** *(r3 I-4: r2's sweep said "all seven supported forms"; the packet
+prints **fourteen** — `PrintedForms`, `packet.rs:361-389`. It omitted nine boxes and mislabeled the one box on
+the whole surface that software answers as "data-derived".)*
+
+| box | class | disposition |
+|---|---|---|
+| 1040 header: dependent ×2, MFS-itemize | (A) | covered (registry) |
+| **1040 header: dual-status alien** | **(A)** | **→ §2.5 (NEW question)** |
+| 1040 header: aged ×2, blind ×2 (`packet.rs:200-216`) | **(B)** | unchecked forgoes §63(f). `blind` → §2.2 (tri-state + advisory); aged → `AgedBoxForfeitedNoDob` ✅ *exists* |
+| 1040 dependents: CTC / ODC per row (`form1040_full.rs:377`) | (B) | deliberately unchecked, L19 = $0; `Advisory::CtcOdcOmitted` names the money ⇒ owner mandate satisfied |
+| 1040 `more_than_four_dependents` | — | >4 dependents **refuses** (`form1040_full.rs:366`) — the box is never needed |
+| 1040 presidential fund ×2 (`form1040_full.rs:331-338`) | (C) | filled from input; **no tax direction** (§6096 is a fund designation, not a liability) |
+| 1040 digital-asset pair | **exempt (rule 3)** | "Yes" **entailed by positive ledger evidence**; never auto-"No" (`return_1040.rs:986`) |
+| Schedule B 7a / 8 | (A) | covered (registry) |
+| Schedule B FBAR sub-question | (—) | pair — deferred to the pen, documented (`schedule_b.rs:22`) |
+| Schedule A 5a (sales tax), 18 (elects smaller) | — | filled from input |
+| **Schedule A line 8 (mixed-use mortgage)** | **(A)** | **→ §2.7 (NEW question)** |
+| Schedule C F (accounting method) | — | filled *(accrual is a separate open Important → P8)* |
+| Schedule C G / I / J | (—) | pairs — deferred to the pen ⇒ **`LIMITATIONS.md` entry (step 12)** |
+| Schedule C H (started/acquired business) | (C) | single box, **no tax direction** ⇒ **`LIMITATIONS.md` entry (step 12)** *(r3 I-4: r2 called it "disclaimed"; no such disclaimer existed)* |
+| **Schedule D QOF pair — "No" CHECKED unconditionally** (`schedule_d_full.rs:283-294`) | **exempt (rule 3)** | **★ the only box software answers.** Entailed by **scope**: btctax supports returns whose dispositions all come from the bitcoin ledger, and a QOF disposition has no input and no ledger representation — a filer with one is outside the supported set (P6 r1 I4). **Requires the `LIMITATIONS.md` entry it never had (step 12).** |
+| Schedule D 17 / 20 / 22 pairs | — | genuinely data-derived from computed lines |
+| Form 8283 line k (digital assets) | **exempt (rule 3)** | checked — entailed by data (the donation *is* crypto) |
+| Form 8283 donee acknowledgment / restricted use | (—) | deferred blank by the module's fill/blank table (`form8283.rs:1-10`) |
+| Form 8960 §6013(g)/(h) · §1.1411-10(g) | (C) | **opt-in elections** — lawful unchecked |
+| Schedules 1 / 2 / 3, SE, 8949, 8959, 8995 | — | **verified: these fillers write no checkboxes at all** |
 
 ### 2.2 ★ OWNER MANDATE — a forgone benefit must never be silent
 
@@ -148,7 +183,7 @@ known-young. That is the class-(B) shape, and it needs the tri-state as much as 
 | field | type | benefit | advisory fires when |
 |---|---|---|---|
 | `Person.blind` | **`Option<bool>`** ← was `bool` | §63(f) additional std deduction | **`None`** (never asked) — *not* on `Some(false)` |
-| `ScheduleAInputs.salt_use_sales_tax` | **`Option<bool>`** ← was `bool` | §164(b)(5) sales-tax deduction | **`None` ∧ the return ITEMIZES** (§3.4) |
+| `ScheduleAInputs.salt_use_sales_tax` | **`Option<bool>`** ← was `bool` | §164(b)(5) sales-tax deduction | **`None` ∧ `schedule_a.is_some()`** — *not* "∧ the return itemizes", which would go silent exactly when the unasked election is what would have **flipped** the return into itemizing (§3.4, r3 Nit-3) |
 | *`Person.date_of_birth`* (already `Option`) | — | §63(f) aged box | `is_none()` ✅ *exists — the model* |
 
 **Verified (§63(f)(1)/(2)):** the aged and blind additional amounts are **identical** ($600/$750 base;
@@ -196,9 +231,18 @@ it"* — would describe the **post**-deletion state *more* accurately than the p
 
 ⇒ **Deletion REQUIRES its companion: unknown-key rejection at the TOML import boundary.** *Design note:*
 `#[serde(deny_unknown_fields)]` on `ReturnInputs` itself would also bind the **stored-JSON** path and break
-that module's documented forward-compat discipline. So this is a **CLI-side** decision — parse to
-`toml::Value` first, walk it against the known-key set, and **refuse unknown keys** (naming them) — not an
-attribute tossed onto the core struct.
+that module's documented forward-compat discipline. So this must bind **only the CLI's TOML import**, not the
+core struct.
+
+**★ Mechanism — `serde_ignored`, NOT a hand-written key list (r3 M-3).** r3 said "walk it against the known-key
+set" — **a hand-maintained mirror of the struct is the exact hand-wiring pattern P9 exists to abolish**, and it
+drifts the first time someone adds a field. `serde_ignored::deserialize` reports every ignored path *during the
+same deserialization*, so the key set is **derived from the type**: no list to forget, and `[[w2]]` arrays,
+nested tables and comments all work for free. *(Verified available offline: `serde_ignored` v0.1.14.)*
+
+⇒ `income import` deserializes through `serde_ignored`, collects ignored paths, and **refuses, naming every
+one.** It must reject `hsa_present` (the §2.6 rename) and the three deleted fields — which is precisely the
+"faithfully transcribed W-2 box 13 silently vanishes" hole this section exists to close.
 
 ### 2.4 ★ `hsa_present` — RE-SCOPED. r2 would have BRICKED VALID RETURNS (Fable r2 C-1)
 
@@ -219,24 +263,49 @@ gross income** of such beneficiary"* — plus **an additional tax equal to 20 pe
 no Form 1099-SA at all** (verified: zero hits). So an unasked filer who took a non-qualified distribution
 gets a return that **omits the income AND the 20% penalty** — an **understatement**, not a paperwork lapse.
 
-⇒ **`sch1.hsa_present: bool` → `sch1.hsa_activity: Option<bool>`**, and the question is scoped to the **Form
-8889 triggers**:
+⇒ **`sch1.hsa_present: bool` → `sch1.hsa_activity: Option<bool>`**, and the question must cover **ALL FOUR**
+Form 8889 filing triggers.
 
-> *"In {year}, did you (or your employer) **contribute to**, or did you **take a distribution from**, a health
-> savings account?"*
+**★ r3 C-1 — r3's prompt covered TWO of the four, and the gap understated tax.** r3 asked *"did **you or your
+employer** contribute to, or did you take a distribution from…"* and let `Some(false)` **proceed**. The four
+triggers (Form 8889 "Who Must File" — *persuasive*; each resting on statute — *law*) are:
 
-- `None` ⇒ **REFUSE** (`HsaActivityUnanswered`) — an unasked distribution omits gross income (§223(f)).
-- `Some(true)` ⇒ refuse as unsupported (Form 8889 / 1099-SA out of scope for v1) — existing behaviour.
-- `Some(false)` ⇒ **proceed.** A dormant-HSA holder answers "no" **truthfully** and is **not** bricked.
+| # | trigger | statute | does r3's prompt catch it? |
+|---|---|---|---|
+| 1 | a contribution by **anyone on your behalf** — not just you or your employer | §223(a) | **NO** — a filer whose parent funded the HSA answers "no" truthfully |
+| 2 | you received a **distribution** | §223(f) | yes |
+| 3 | **testing-period failure** — you used the prior-year **last-month rule** (or an **IRA-to-HSA funding distribution**) and then ceased to be an eligible individual: you include the shortfall in gross income **plus a 10% additional tax** — ***in a year with NO contribution and NO distribution*** | §223(b)(8)(B), §408(d)(9)(D) | **NO — and this is the Critical.** The trigger fires on a year with *no HSA activity at all* in the ordinary sense |
+| 4 | you **acquired an interest by the death** of the account beneficiary (a non-spouse beneficiary includes the FMV in gross income) | §223(f)(8)(B) | **NO** — they "took" nothing |
+
+Trigger 3 is not exotic: *an employee with HDHP coverage who used the last-month rule and changed jobs in
+January.* They answer r3's prompt **"No" — truthfully — and btctax computes a return omitting both the income
+and the 10% additional tax.* **§2.4's own indictment of the *unasked* filer applies verbatim to the *mis-asked*
+one**, and this is the same field's **second** Critical (r2 C-1 was the mirror image: it bricked a valid
+return). *A question is a piece of tax law. Scoping it is not prose — it is the statute, and it gets the same
+citation discipline as a computation.*
+
+⇒ **The question, covering the trigger set:**
+
+> *"In {year}, did ANY of these happen with a health savings account? — (a) anyone (you, your employer, or
+> anyone else on your behalf) put money into one for you; (b) you took money out of one; (c) you inherited
+> one; or (d) you stopped being HSA-eligible after using the last-month rule or an IRA-to-HSA funding
+> distribution in a prior year."*
+
+- `None` ⇒ **REFUSE** (`HsaActivityUnanswered`).
+- `Some(true)` ⇒ refuse as unsupported (Form 8889 / 1099-SA out of scope for v1) — existing behaviour, and
+  correct for **every** trigger: each one requires the form we do not have.
+- `Some(false)` ⇒ **proceed.** A **dormant**-HSA holder answers "no" to all four clauses **truthfully** and is
+  **not** bricked (r2 C-1 stays cured — verify this in the same regression test).
 
 *Partial backstop, unchanged:* employer contributions surface as W-2 box 12 code **W**, outside
-`INERT_BOX12_CODES`, so they refuse by another path. That covers **contributions only** — it does **nothing**
-for **distributions**, the understating half.
+`INERT_BOX12_CODES`, so they refuse by another path. That covers **one clause of one trigger** — it does
+**nothing** for distributions, third-party contributions, inheritance, or the testing period.
 
-**★ The lesson, recorded:** I reached for §6065's "complete" because it was the statute already in my hand
-from the previous question, and it *sounded* right. The operative statute for this field is **§223(f)**, and
-it says something **stronger and different**. *Find the statute for **the field** — never reuse the statute
-from the last argument.*
+**★ The lesson, recorded twice now.** In r2 I reached for §6065's "complete" because it was the statute already
+in my hand from the previous question, and it *sounded* right. In r3 I reached for §223(f) — the right statute
+for the *distribution* half — and let it stand for the whole field. Both times the error was the same:
+**generalizing from the statute I had already found instead of enumerating the ones the field actually
+touches.** *Find every statute for **the field**. "I found A statute" is not "I found THE statutes."*
 
 ### 2.5 The dual-status alien — a declaration we already print, with NO field behind it (Fable r1 I-5)
 
@@ -260,23 +329,83 @@ silently answering a statement that, wrong, is a false declaration *and* an unde
 `Some(true)` ⇒ `DualStatusAlienUnsupported`. **New field ⇒ `None` on an existing row is honest ⇒ no
 migration** (contrast §2.4, whose *type changes* — §2.6).
 
-### 2.6 ★ THE MIGRATION — `SCHEMA_VERSION` 2 (Fable r2 I-1)
+### 2.6 ★ THE MIGRATION — `SCHEMA_VERSION` 2 (Fable r2 I-1, r3 I-1)
 
-**Three fields change type from `bool` → `Option<bool>`**: `sch1.hsa_activity` (§2.4), `Person.blind` and
-`ScheduleAInputs.salt_use_sales_tax` (§2.2). None carries `skip_serializing_if`, so **every stored blob
-already contains `false` for each** — and serde would read that as `Some(false)`: **a never-asked default
-ratified as the filer's answer. That is the D-8 laundering, re-armed inside the spec that abolishes it.**
+**Why a migration at all, given there are no users?** The owner has confirmed (2026-07-14) that back-compat is
+not a concern. **It is not a stranger's vault this protects — it is the owner's own.** Every vault touched
+during this program holds a blob whose `blind` and `salt_use_sales_tax` are bare `false`. The instant those
+become `Option<bool>`, serde reads that `false` as `Some(false)` — *"the filer answered No"* — when nobody was
+ever asked. **That is the D-8 laundering, re-armed inside the spec that abolishes it**, and it would land in a
+real return, silently forfeiting a §63(f) deduction.
 
-The consequence is not theoretical: the new `HsaActivityUnanswered` refusal would **never fire for exactly the
-population that has the bug**, and this time the direction is the bad one (an HSA distribution left untaxed).
+So "no back-compat" does not license *no migration*. **It licenses a DESTRUCTIVE one** — we may discard a
+stale value outright rather than translate it (see the HSA rule below). What it does *not* license is a hard
+**reject** of pre-P9 blobs: the docs tell the filer to delete their input TOML after import and `income show`
+masks PII, so refusing to load would **brick a real year with no recovery path** — *precisely the "bricks a
+valid return" failure this spec caught itself committing in §2.4.* Unlaundering re-asks through `income
+answer`, which is exactly why that command exists.
 
-⇒ **`SCHEMA_VERSION = 2`**, and `row_to_inputs` gains:
-`version < 2 ⇒ unlaunder(sch1.hsa_activity), unlaunder(taxpayer.blind), unlaunder(spouse.blind),
-unlaunder(schedule_a.salt_use_sales_tax)` — with **named v1-blob tests** per the P8a I2 pattern (the fixture
-must rewrite **every** key it claims to cover, and **assert each rewrite lands**).
+⇒ **`SCHEMA_VERSION = 2`.** Three fields change type, and they do **not** all migrate the same way — because
+**one of them also changes its NAME, and that changes everything** (r3 I-1).
+
+#### The three SAME-NAME keys — an in-memory unlaunder
+
+`Person.blind` (taxpayer **and** spouse) and `ScheduleAInputs.salt_use_sales_tax` keep their JSON keys. A
+stored `false` deserializes to `Some(false)`, so `row_to_inputs` must fix it in memory:
+
+`version < 2 ⇒ unlaunder(taxpayer.blind), unlaunder(spouse.blind), unlaunder(schedule_a.salt_use_sales_tax)`
+
+Each is **mutation-checked** (delete one ⇒ a NAMED test fails), with the fixture built the P8a I2 way: rewrite
+**every** key it claims to cover, and **assert each rewrite lands**.
+
+#### ★ The RENAMED key — `hsa_present` → `hsa_activity` — and why r3's `unlaunder` was DEAD CODE
+
+`row_to_inputs` **deserializes first, then fixes fields in memory** (`return_inputs.rs:50-66`). A v1 blob has
+`"hsa_present": false|true`; the new struct has no such field, and with no `deny_unknown_fields` **serde drops
+it on the floor** and defaults `hsa_activity` to `None`. So r3's `unlaunder(sch1.hsa_activity)` operated on a
+key **that does not exist in any v1 blob**: it was dead code, its mandatory mutation-check was
+**unsatisfiable** (deleting dead code fails no test), and the P8a fixture pattern **cannot even build the
+fixture** — it rewrites keys of the *current* struct, which no longer emits `hsa_present`.
+
+**★ THE FIX — and it is NOT the reviewer's.** Fable proposed reading `hsa_present` from the raw JSON and
+mapping `true → Some(true)`, to preserve the filer's typed answer. **That is wrong, and it re-arms r2's
+Critical.** `hsa_present` and `hsa_activity` **are not the same question**:
+
+- `hsa_present = true` said *"I hold an HSA."*
+- `hsa_activity = Some(true)` says *"a Form 8889 trigger fired"* — which the filer **never told us**.
+
+A **dormant**-HSA holder — the exact population §2.4 exists to un-brick — typed `hsa_present = true`
+truthfully. Under `true → Some(true)` they are **permanently refused as unsupported**, having never claimed
+any activity. *The migration would restore the brick that the field's re-scoping was written to remove.* An
+answer to a different question is **not** an answer; carrying it across is not preservation, it is
+**mistranslation**.
+
+⇒ **BOTH v1 values map to `None`: the filer is RE-ASKED.** Nothing is laundered (the year refuses as
+*unanswered* — it cannot silently compute), and `income answer` is the exit. This is the destructive migration
+the no-users mandate licenses, and it is the **conservative** direction.
+
+**★ And that means this key has NO unlaunder to mutate — so the guard has to be a different shape, and the
+spec must say so rather than claim a mutation-check it cannot perform.** Since serde's unknown-key drop already
+yields `None`, correctness here is held by an **absence**, not by code. The mutation that would break it is an
+**addition**:
+
+> **`#[serde(alias = "hsa_present")]` is FORBIDDEN on `hsa_activity`.** An alias would make serde read the v1
+> `false` as `Some(false)` — resurrecting the laundering — and read the v1 `true` as `Some(true)` —
+> resurrecting the brick. **One attribute re-arms both Criticals this field has already produced.**
+
+The named v1-blob test asserts a literal v1 JSON (`"hsa_present": false` **and** `: true`) loads as
+`hsa_activity == None`, **and its mutation is `add the alias` ⇒ the test fails.** The fixture must own the
+*old* key (build it by rewriting `"hsa_activity":null` → `"hsa_present":false`, asserting the rewrite lands) —
+it **cannot** be built by serializing the current struct, which is what r3's cited pattern would have done, and
+it would have passed vacuously.
 
 *(A TOML that **explicitly writes** `blind = false` is a **typed answer** and correctly loads `Some(false)`.
-Only the **stored-row** path launders. `dual_status_alien` needs no migration — it is a new field.)*
+Only the **stored-row** path launders. `dual_status_alien` and the mortgage flag need no migration — they are
+new fields, and `None` on an existing row is honest. `hsa_present` in a TOML becomes an **unknown key** and
+refuses under §2.3 — correct: it names a question we no longer ask.)*
+
+**Forward guard (r3 Nit-2):** `row_to_inputs` gains `version > SCHEMA_VERSION ⇒ typed error`. P9 creates the
+first-ever version skew; a v2 blob silently half-read by an older binary is exactly the class this spec closes.
 
 ### 2.7 ★ Schedule A line 8 — the mixed-use mortgage box (Fable r2 I-4)
 
@@ -288,16 +417,44 @@ Under **§163(h)(3)(F)** (2018–2025), interest on proceeds **not** used to buy
 deductible at all**. So an unchecked box beside a full 8a deduction is **an unaffirmed statement AND an
 understatement** — identical in shape to §2.5, and caught by the §2.1 criterion.
 
-⇒ **NEW `ScheduleAInputs.mortgage_all_used_to_buy_build_improve: Option<bool>`** — registry question, live
-when `schedule_a` files with mortgage interest > 0. `Some(false)` ⇒ **refuse**
-(`MixedUseMortgageUnsupported` — the Pub. 936 allocation is unmodeled). New field ⇒ no migration.
+⇒ **NEW `ScheduleAInputs.mortgage_all_used_to_buy_build_improve: Option<bool>`.** New field ⇒ no migration.
+
+**★ But the two obligations live at DIFFERENT LAYERS, and r3 collapsed them into one — bricking a truthful
+filer (r3 I-2).** Schedule A **prints only when the deduction is itemized** (`printed.rs:1082-1086`:
+`if !ar.deduction_is_itemized { return None }`). r3 made `Some(false)` refuse whenever `schedule_a` is present
+with mortgage interest — so a filer who supplies Schedule A inputs *to let `Auto` compare*, is genuinely
+mixed-use, **and whose STANDARD deduction wins**, is asked, answers **"No" truthfully**, and is **refused** —
+though their return prints no Schedule A, no line 8, no box, and **btctax computes it correctly today.** Their
+only exits are to delete legitimate inputs or lie. *Post-TCJA, standard-wins is the COMMON outcome for a
+mortgaged household exploring itemizing* — and §4 promises **"no valid return is bricked."*
+
+⇒ **Split by layer:**
+
+1. **The QUESTION is input-level** (registry): live on `schedule_a.is_some() ∧ mortgage_interest_1098 > 0`.
+   Unanswered ⇒ **refuse** (`MixedUseMortgageUnanswered`). This **over-asks** the standard-deduction filer —
+   recorded, and always answerable, so it can never brick.
+2. **The VALUE-refusal is compute-dependent**: `MixedUseMortgageUnsupported` fires in
+   `screen_compute_dependent` (`return_1040.rs:546`) — **only when the itemized path is actually selected**
+   (`Auto` picks Schedule A, or `ForceItemize`).
+
+**Why that split is exactly right, not merely convenient:** full-8a is an **upper bound** on the true itemized
+total (the correct mixed-use figure is *smaller*). So when even the upper bound **loses** to the standard
+deduction, the standard return is right regardless of the allocation, and we need not know it. When it
+**wins**, we cannot know the deduction without Pub. 936 — and must refuse. The refusal detail names the benign
+exit ("your standard deduction wins anyway — remove the Schedule A inputs, or answer as your allocation
+requires").
+
+⚠️ **Recorded — "files" is not one predicate.** For Schedule B, `schedule_b_files(ri)` is a pure *input*
+predicate. For Schedule A, "files" is **compute-dependent** (which deduction wins), which a
+`fn(&ReturnInputs) -> bool` liveness **cannot express**. That asymmetry is why the question's liveness is
+`schedule_a.is_some()`, not "Schedule A files."
 
 ### 2.8 The class boundary is wider than `bool` — defaulted ENUMS
 
 | field | default | status |
 |---|---|---|
 | `ScheduleCInputs.accounting_method` | `Cash` | `"accrual"` accepted, unmodeled, **unrefused**, and it **flips the printed Sch C line F** — *already filed → P8* |
-| `ReturnInputs.itemize_election` | `Auto` | interacts with §2.5/§2.7 |
+| `ReturnInputs.itemize_election` | `Auto` | **class (C) — exempt (r3 M-4).** *Reason:* `Auto` takes the **larger** of standard vs Schedule A — an **optimization**, not an assertion and not a forgone benefit (it cannot lose money by construction). The §63(e) `ForceItemize` election is opt-in. The assertion hazards near it are carried by the §2.5 and §2.7 questions, not by this field. *(r3 M-4: r2 left it "interacts with §2.5/§2.7" — which is not a classification, and the §3.3 classifier will demand one at step 10.)* |
 | `W2.owner` / `ScheduleCInputs.owner` | `#[default] Taxpayer` | **★ NOT a silent-default defect** — Fable r2 M-2 **corrects its own r1 aside, which r2 inherited**: neither carries `#[serde(default)]`, so **the TOML import REQUIRES the key**. The `#[default]` reaches only Rust-side fixture construction. Exemption reason: *"serde-required at import."* |
 | `QbiInputs.reit_ptp_carryforward_in_provenance`, `CharitableCarryItem.provenance` (`CarryProvenance`) | — | no print, no tax direction ⇒ class (C) |
 
@@ -353,7 +510,7 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[ /* 8 entries */ ];
 | `ForeignAccounts` / `ForeignTrust` | `schedule_b_files(ri)` |
 | `HsaActivity` | always |
 | `DualStatusAlien` | always |
-| `MortgageAllUsedToBuyBuildImprove` | `schedule_a` files ∧ `mortgage_interest_1098 > 0` |
+| `MortgageAllUsedToBuyBuildImprove` | **`schedule_a.is_some()` ∧ `mortgage_interest_1098 > 0`** — an *input* predicate, deliberately **not** "Schedule A files" (which is compute-dependent and would brick the standard-wins filer — §2.7, r3 I-2). A recorded over-ask. |
 
 **Recorded deliberate over-ask (r1 M-3, unfolded in r2):** `Mfj || spouse.is_some()` keeps the spouse-dependent
 question live on an **MFS/QSS return carrying a stale spouse `Person`**, though the 1040's box is joint-only.
@@ -377,9 +534,17 @@ for q in FORM_QUESTIONS {
 reason than today. Any test asserting a *specific* reason on a multi-defect fixture must be made single-defect.
 
 **Value-dependent refusals stay hand-written** (domain rules *about the answer*, not about whether there is
-one): `ForeignTrust == Some(true)`, `DependentSpouseUnsupported`, `HsaActivity == Some(true)`,
-`DualStatusAlienUnsupported`, `MixedUseMortgageUnsupported`, `SalesTaxElectionWithoutAmount`. *(Fable verified
-the two kinds cannot double-report: `None` and `Some(true)` are disjoint.)*
+one). *(Fable verified the two kinds cannot double-report: `None` and `Some(true)` are disjoint.)*
+
+| refusal | trigger | layer |
+|---|---|---|
+| `ForeignTrustUnsupported` | `foreign_trust == Some(true)` | `screen_inputs` |
+| `DependentSpouseUnsupported` | `can_be_claimed_as_dependent_spouse == Some(true)` | `screen_inputs` |
+| `HsaActivityUnsupported` | `hsa_activity == Some(true)` | `screen_inputs` |
+| `DualStatusAlienUnsupported` | `dual_status_alien == Some(true)` | `screen_inputs` |
+| `SalesTaxElectionWithoutAmount` | `salt_use_sales_tax == Some(true)` ∧ `salt_sales_tax_amount == 0` ∧ any income-tax SALT input > 0 (§2.2) | `screen_inputs` |
+| **`ScheduleBForeignCountryMissing`** (r1 I-6, **named at last** — r3 M-2) | `foreign_accounts == Some(true)` ∧ `foreign_country_names.trim().is_empty()` — Sch B **7a "Yes" with a blank 7b**. Detail names **`income import`** as the remedy: `answer` captures bools and dates, **never strings** | `screen_inputs` |
+| **`MixedUseMortgageUnsupported`** | `mortgage_all_used_to_buy_build_improve == Some(false)` | **★ `screen_compute_dependent`** — **only when the itemized path is selected** (§2.7, r3 I-2). *The one value-refusal that is NOT input-level, because Schedule A's filing is compute-dependent.* |
 
 **`income answer`.** `live_questions`/`current_bool`/`set_bool` become registry iteration. The `Question` enum
 **shrinks to the DOB residue** (r1 M-1) — it does not delete. The no-brick property (*everything the screen can
@@ -387,8 +552,17 @@ refuse for is askable*) becomes true **by identity**.
 
 It also gains the class-(B) **skippable** prompts (§2.2): `blind` (taxpayer + spouse) and `salt_use_sales_tax`
 (**only when `schedule_a` exists** — §2.2's footgun scope). Empty input ⇒ stays `None` ⇒ the advisory fires.
-**The spouse-DOB prompt stays gated on `header.spouse.is_some()`** even though the spouse *question* widens to
-MFJ, because `set_date` silently discards a spouse DOB when there is no spouse `Person`.
+
+**★ BOTH spouse prompts are gated on `header.spouse.is_some()` — DOB *and* blind (r3 I-7).** The spouse-DOB
+prompt already carries this gate because `set_date` **silently discards** a spouse DOB when there is no spouse
+`Person` (`answer.rs:147-151`). **A spouse-`blind` set discards identically** — so an ungated prompt would take
+the filer's typed answer, throw it away, and leave the on-`None` advisory nagging **forever**: the exact
+"fires forever" failure r2 I-2 was graded Important for. r3 specified the gate on one twin and omitted it on
+the other, *which is precisely the shape of P8a I1.* Both are gated, in one sentence, here.
+
+*(Note the deliberate asymmetry: the spouse **question**'s liveness widens to `Mfj || spouse.is_some()` (§3.1)
+because the 1040's box is joint-only and a missing spouse `Person` must not hide it; the spouse **prompts** are
+narrower because a prompt with nowhere to write is worse than no prompt. Different jobs, different scopes.)*
 
 ⚠️ **`answer` captures bools and dates only — it cannot capture STRINGS** (r2 M-5). So the §3.5 Schedule-B 7b
 refusal has **no `answer` exit**: its detail must name `income import` as the remedy, and `LIMITATIONS.md` must
@@ -419,21 +593,36 @@ classified as a registry question (A), or **exempted** on a named register carry
 reason** (B/C per §2).
 
 **★ It recurses over EVERY struct reachable from `ReturnInputs`** (r2 M-1 — r1's "as deep as
-`first_negative_amount`" was a **false floor**: `fna` waives the whole header with `header: _`, so it recurses
-into **neither `Person` nor `Dependent`**, which is where half the bools live). The reachable set includes
-`HouseholdHeader`, `Person`, `Dependent`, `W2`, `Form1099Int/Div/G`, `ScheduleAInputs`, `Schedule1Inputs`,
-`ScheduleCInputs`, `QbiInputs`, `Payments`, `CharitableGift`, `CharitableCarryItem`.
+`first_negative_amount`" was a **false floor**: `fna` waives the whole header with `header: _`
+(`return_refuse.rs:204`), so it recurses into **neither `Person` nor `Dependent`**, which is where half the
+bools live). The reachable set is `HouseholdHeader`, `Person`, `Dependent`, `W2`, **`Box12Entry`**,
+`Form1099Int/Div/G`, `ScheduleAInputs`, `Schedule1Inputs`, `ScheduleCInputs`, `QbiInputs`, `Payments`,
+`CharitableGift`, `CharitableCarryItem`, **`Carryforward`** — *(the last two added by r3 M-1: both are
+reachable (`W2.box12: Vec<Box12Entry>`, `capital_loss_carryforward_in: Carryforward`) and neither has a
+classifiable leaf **today**, which is exactly why their destructures must exist — the guarantee is about the
+bool added **tomorrow**. Destructuring the FROZEN `Carryforward` reads it; it modifies nothing.)*
 
-**★ The `_` rule, stated implementably (r2 M-6)** — "no `_` at all" is literally impossible (every
-`String`/`Usd`/`Date` leaf must bind *something*):
+**★ The `_` rule (r2 M-6)** — "no `_` at all" is impossible (every `String`/`Usd`/`Date` leaf must bind
+*something*):
 
-> **`_` is FORBIDDEN on structs and collections** (must recurse) **and on `bool` / `Option<bool>` /
-> defaulted-enum leaves** (must classify). **`_` is permitted on other scalar leaves** (`String`, `Usd`,
-> `Date`, …).
+> **`_` — and every `_`-prefixed binding — is FORBIDDEN** on structs and collections (must **recurse**) and on
+> `bool` / `Option<bool>` / defaulted-enum leaves (must **classify**).
+> **`_` is permitted on other scalar leaves** (`String`, `Usd`, `Date`, …).
 
-⚠️ **Honest limit:** the classifier's force is "compile-error-until-a-human-**decides**", not
-until-**correct**. `first_negative_amount` already shows the escape hatch (`header: _`). **Wildcard arms are
-the residual convention.** The open `header: _` follow-up is fixed here.
+**★ What actually holds it, and what does not (r3 I-5).** r3 claimed the classifier makes a new bool *"not
+compile until registered or exempted with its class and statutory reason."* **It does not, and Fable proved it
+by compiling the counterexample:** `w2s: _w2s` is not `_`, recurses into nothing, and builds clean. **One token
+defeats the rule as r3 stated it.**
+
+⇒ The teeth are a **lint**, and they must be named: the classifier module carries **`#![deny(unused_variables)]`**.
+Then a named binding that ignores its field (`w2s: whatever`) is a **hard compile error**, and the `_`-prefix —
+the one spelling that *suppresses* that lint — is forbidden by the rule above.
+
+⚠️ **The honest limit, and §4 must not overclaim past it.** Even so, the compiler holds
+**"a new field does not compile until a human EDITS the classifier"** — not *"until they classify it
+correctly."* The residual evasions (`_`-prefixed bindings, `let _ = x;`) are **grep-able review residue**, not
+compile errors. *That is the whole guarantee, and it is worth having: every recurrence of this class began with
+a field nobody looked at.* The open `header: _` follow-up is fixed here.
 
 ### 3.4 The advisories the owner mandate requires (§2.2)
 
@@ -442,16 +631,43 @@ the residual convention.** The open `header: _` follow-up is fixed here.
 /// Fires on None (NEVER ASKED) — never on Some(false). Same statute, worksheet line, and dollars as
 /// `AgedBoxForfeitedNoDob`, and the two STACK.
 BlindBoxForfeitedNotDeclared { per_box: Usd, persons: usize },
-/// §164(b)(5): the sales-tax election was never asked, so SALT used income tax. Fires ONLY when the return
-/// ITEMIZES (otherwise SALT is irrelevant and the advisory is pure noise) AND the election is None.
+/// §164(b)(5): the sales-tax election was never asked, so SALT used income tax. Fires when the election is
+/// None AND a Schedule A exists (see the scope note — NOT "only when the return itemizes").
 SalesTaxElectionNotAsked,
 ```
+
+**★ `persons` — whose blindness counts (r3 I-7).** r3 left this to the implementor, *which is how P8a I1
+happened.* The rule mirrors the code that already decides the identical §63(f) question for the **aged** box —
+`AgedBlindBoxes::for_return` counts the spouse's boxes **only on a joint return** (`packet.rs:200-216`), and
+the aged advisory adds P5-M2's rule that **an absent spouse record on MFJ forfeits the box just as surely** as
+a missing birthday:
+
+> **`persons` = `[taxpayer.blind.is_none()]` + `[filing_status == Mfj ∧ (spouse absent ∨ spouse.blind.is_none())]`**
+
+**MFS never counts the spouse box** (the spouse's blindness is not this taxpayer's checkbox), so an MFS filer
+is never nagged about a box that cannot exist. On MFJ, a **missing spouse `Person`** counts — there is no
+`blind` field to be `None`, and forfeiting for want of a *record* is still forfeiting. Advisory fires iff
+`persons > 0`.
+
+**★ SALT scope (r3 Nit-3).** r3 scoped this to *"only when the return ITEMIZES."* **That is wrong at exactly
+the boundary that matters:** an unasked sales-tax election can be the very thing that **flips** a near-standard
+return into itemizing — and under r3's scope the return takes the standard deduction, does not itemize, and so
+**stays silent about the election that would have changed the answer.** *The advisory would go quiet in the one
+case where it is worth money.* ⇒ Scope it to **`schedule_a.is_some()` ∧ election `is_none()`** — the filer has
+told us they have Schedule A items, so SALT is live for them whichever deduction currently wins.
 
 ### 3.5 The tests
 
 **Per-question property test** — for each `FormQuestion`: build a return where it is live; blank it ⇒ assert
-`screen_inputs` refuses **with that entry's `RefuseReason`**; answer it (`n` and `y`) ⇒ assert the refusal is
-gone; assert `income answer` **asks** it.
+`screen_inputs` refuses **with that entry's `RefuseReason`**; answer it (`n` **and** `y`) ⇒ assert **that
+entry's `unanswered` reason no longer fires**; assert `income answer` **asks** it.
+
+⚠️ **★ "…no longer fires" — NOT "the refusal is gone" (r3 M-5).** For five of the eight questions the *other*
+half of the answer space is a **value-refusal**: `y` refuses on `HsaActivity` / `DualStatusAlien` /
+`ForeignTrust` / `DependentSpouse`, and `n` refuses on the mortgage question (when itemizing). A naive
+`assert!(screen_inputs(..).is_none())` **fails on five of eight** — and the natural "fix" (weaken the assertion
+to `is_none() || whatever`) would make **the anti-vacuity machinery itself vacuous**. Assert on the *specific
+reason*. *This is the third revision in which a test written to hold this class was itself the hole.*
 
 **★ The completeness anchor (r1 I-4).** r1's property test *iterated the registry*, so dropping an entry would
 silently drop its scenario — **the anti-vacuity machinery was itself vacuous.** Anchor to the **enum**:
@@ -473,9 +689,17 @@ green and never be iterated.)*
 per-question tests forever" — which invited deleting exactly the tests that catch a dropped entry.
 
 **Mutation-checked (acceptance):** delete the registry loop → a named test fails; delete the `build` refusal →
-a named test fails; drop a `FORM_QUESTIONS` entry → a named test fails; **drop any `unlaunder` in the v1→v2
-migration → a named test fails** (the P8a I2 lesson: the fixture must rewrite **every** key and assert each
-rewrite lands); drop either advisory → a named test fails.
+a named test fails; drop a `FORM_QUESTIONS` entry → a named test fails; **drop any of the THREE same-name
+`unlaunder`s (`blind` ×2, `salt_use_sales_tax`) → a named test fails** (the P8a I2 lesson: the fixture must
+rewrite **every** key and **assert each rewrite lands**); drop either advisory → a named test fails.
+
+**★ The renamed HSA key is mutation-checked in the OTHER direction (§2.6, r3 I-1).** It has **no `unlaunder` to
+delete** — serde's unknown-key drop already yields `None`, so correctness is held by an *absence*. Its mutation
+is therefore an **addition**: **add `#[serde(alias = "hsa_present")]` ⇒ a named test fails.** The fixture is a
+**literal v1 JSON owning the OLD key** (built by rewriting `"hsa_activity":null` → `"hsa_present":false|true`,
+asserting the rewrite lands) — it **cannot** be built by serializing the current struct, which no longer emits
+that key and would pass **vacuously**. *Both v1 values must load as `None`.* Say the guard's shape out loud
+rather than claim a mutation-check that cannot be performed.
 
 ### 3.6 Explicitly NOT doing: the `ScreenedInputs` witness
 
@@ -491,47 +715,88 @@ sites — and **it cannot prevent the next D-8**: a witness certifies the *exist
   derive from the registry. **No liveness predicate is written twice.**
 - **P8a I1 dies structurally** (one `fn`, two consumers — they cannot disagree). **P8a I3 dies** (an unanswered
   live declaration cannot reach a printed form), and the `printed.rs` `unwrap_or(false)` site closes with it.
-- **★ No valid return is bricked.** A dormant-HSA holder answers "no" truthfully and their return computes
-  (§2.4). *This is a regression test, not a slogan.*
-- **★ The v1→v2 migration holds**: a stored `false` for `hsa_activity` / `blind` / `salt_use_sales_tax` loads as
-  `None`, not `Some(false)`. Mutation-checked per key.
-- **A new `bool` / `Option<bool>` / defaulted enum anywhere reachable from `ReturnInputs` does not compile**
-  until registered or exempted **with its class and statutory reason**.
+- **★ NO VALID RETURN IS BRICKED — the guarantee this spec has now violated TWICE (r2 C-1, r3 I-2).** Three
+  named regression tests, not a slogan:
+  1. a **dormant**-HSA holder answers "no" to all four §2.4 clauses truthfully ⇒ their return **computes**;
+  2. a **mixed-use-mortgage filer whose STANDARD deduction wins** answers "no" truthfully ⇒ their return
+     **computes** (the refusal is compute-dependent — §2.7);
+  3. a v1 blob carrying `hsa_present = true` (a **dormant** holder who typed it) loads as `None` and is
+     **re-asked** — it is **not** ratified into `Some(true)` and refused (§2.6).
+- **★ The HSA question covers ALL FOUR Form 8889 triggers** (§2.4) — contribution *by anyone*, distribution,
+  **testing-period failure with no activity at all**, and inheritance. *This bullet is the one r3 got wrong; it
+  is stated as a checkable claim precisely so the next reviewer can attack it.*
+- **★ The v1→v2 migration holds** (§2.6): a stored `false` for `blind` ×2 / `salt_use_sales_tax` loads as
+  `None`, not `Some(false)` — **mutation-checked per key**. The **renamed** `hsa_present` loads as `None` for
+  **both** `false` and `true` — held by a literal-v1-JSON test whose mutation is **adding the forbidden
+  `serde(alias)`**.
+- **A new `bool` / `Option<bool>` / defaulted enum anywhere reachable from `ReturnInputs` does not compile until
+  a human EDITS the classifier** — `#![deny(unused_variables)]` makes an ignoring named binding a hard error.
+  *(★ r3 I-5: the guarantee is "a human must look", NOT "it is classified correctly." The exemption register
+  carrying class + statutory reason is held by **review**, and `_`-prefixed bindings / `let _ = x;` are
+  **grep-able residue**. Stated at its true strength — the previous wording claimed a force the mechanism does
+  not have, and Fable defeated it in one token.)*
 - **The owner mandate holds: no benefit is forgone in silence.** `blind` and `salt_use_sales_tax` each fire a
-  mandatory advisory naming the money, **on `None` only** — never nagging a filer who answered.
+  mandatory advisory naming the money, **on `None` only** — never nagging a filer who answered. `persons`
+  follows the §3.4 formula (MFJ-only spouse box; an **absent** MFJ spouse still forfeits).
 - **The SALT prompt cannot silently zero line 5a** (`SalesTaxElectionWithoutAmount`).
 - **`dual_status_alien` and the Schedule A line 8 box exist, are asked, and refuse when unanswered.**
-- **The three DEAD fields are deleted, AND `income import` refuses unknown TOML keys** (else deletion makes the
-  lie worse, not better).
-- **Schedule B 7a "Yes" with a blank 7b refuses**, and its detail names `income import` as the exit (`answer`
-  cannot capture strings).
-- **MFJ with no spouse identity**: `ReturnHeader::build` refuses, or it is filed with an owning phase.
-- Every guard above is **mutation-checked**.
+- **The three DEAD fields are deleted, AND `income import` refuses unknown TOML keys** — via **`serde_ignored`**,
+  not a hand-written key list (§2.3). It must reject `hsa_present` and each deleted field, **naming them**.
+- **Schedule B 7a "Yes" with a blank 7b refuses** (`ScheduleBForeignCountryMissing`), and its detail names
+  `income import` as the exit (`answer` cannot capture strings).
+- **★ The checkbox census is CLOSED** (§2.1): every printed box on all **fourteen** forms is either a registry
+  question, a class-(B) advisory, a pen-deferred pair, or a **written rule-3 exemption with a `LIMITATIONS.md`
+  entry**. The Schedule D **QOF "No"** — the only box software answers on the filer's behalf — gets the
+  exemption and the entry it never had.
+- **MFJ with no spouse identity ⇒ `ReturnHeader::build` REFUSES** (r3 M-6 — *decided, not deferred*; it is
+  already inside step 7's blast radius). The `Mfj || spouse.is_some()` liveness makes the question live in that
+  case, so the print boundary must be able to say so.
+- Every guard above is **mutation-checked** — *including the ones whose mutation is an **addition** (§3.5).*
 - `make check` green; **0 Critical / 0 Important** from independent review.
 - FROZEN (`tax/{types,compute,se}.rs`) unchanged. `screen_inputs` keeps its signature; `resolve.rs` untouched.
 
 ## 5. Build order (TDD; each step red → green)
 
-*★ Reordered — r2's order did not compile (I-5): steps 1–3 referenced fields step 4 created.*
+*★ r2's order did not **compile** (r2 I-5): steps 1–3 referenced fields step 4 created — fixed in r3.*
+*★ r3's order did not stay **green** (r3 I-6): its step 4 ended **red**, because the property test cannot pass
+until step 5 rewires `screen_inputs`. **Merged below.** "Red → green" is a contract about each step's CLOSE,
+and a spec that ends a step red has planned a blocking finding into the schedule.*
 
-1. **Fields first.** `sch1.hsa_present: bool` → `hsa_activity: Option<bool>` (§2.4); `Person.blind` and
-   `ScheduleAInputs.salt_use_sales_tax` → `Option<bool>` (§2.2); **NEW** `ReturnInputs.dual_status_alien` and
+1. **Fields first.** `sch1.hsa_present: bool` → `hsa_activity: Option<bool>` (§2.4 — a **rename**, not just a
+   type flip: that is what makes step 2 subtle); `Person.blind` and `ScheduleAInputs.salt_use_sales_tax` →
+   `Option<bool>` (§2.2); **NEW** `ReturnInputs.dual_status_alien` and
    `ScheduleAInputs.mortgage_all_used_to_buy_build_improve` (§2.5, §2.7).
-2. **★ The migration — `SCHEMA_VERSION` 2** (§2.6), with per-key mutation-checked v1-blob tests. *Before any
-   consumer reads the new types, or the laundering ships.*
+   **⚠️ Churn warning (r3 Nit-4):** `HsaActivity` and `DualStatusAlien` are live on **every** return, so every
+   computing fixture in four crates must answer them. **Default them in the `testonly` builders** — one line
+   there instead of two hundred call sites. *(One TUI test asserts the HSA refusal text: `tabs/tests.rs:1704`.)*
+2. **★ The migration — `SCHEMA_VERSION` 2** (§2.6). Three in-memory unlaunders (`blind` ×2, `salt`), each
+   mutation-checked; the **renamed** HSA key held by a **literal-v1-JSON** test (both `false` **and** `true` ⇒
+   `None`) whose mutation is *adding* `serde(alias)`; plus the forward-version guard (Nit-2).
+   *(It lands here — before the phase's gate and before any new consumer trusts these fields — so the
+   laundering can never ship. r3's note said "before any consumer reads the new types", which was confusing:
+   step 1 already made every existing consumer read them.)*
 3. **`questions.rs`** — `QuestionId` (+`ALL`), `FormQuestion`, `FORM_QUESTIONS` (8 entries). Liveness lifted
    from the current refusals **except** `DependentSpouse`, corrected to `Mfj || spouse.is_some()` (**= P8a I1**).
-4. **The completeness anchor + the property test** (§3.5). *Step 5 is what turns the P8a-I1 case green.*
-5. **`screen_inputs`** derives from the registry; hand-written unanswered-blocks delete; value-dependent rules
-   stay and gain the new ones. Fix multi-defect fixtures that asserted a specific reason.
-6. **`cmd/answer.rs`** derives from the registry; enum shrinks to the DOB residue; adds the class-(B) skippable
-   prompts (SALT scoped to returns carrying a `schedule_a`).
-7. **`ReturnHeader::build`** → `HeaderError`; update `admin.rs` mapping and all fixtures.
-8. **The two advisories** (§3.4) — the owner mandate. Fire on `None` only.
-9. **`SalesTaxElectionWithoutAmount`** (§2.2) and the **Schedule B 7a-yes/7b-blank** refusal (r1 I-6).
-10. **The classifier** (§3.3), recursing over every reachable struct; the `_` rule as stated; the exemption
-    register with class + statutory reason. Folds the open `header: _` follow-up.
-11. **DELETE the three dead fields** (§2.3) **AND add unknown-key rejection to `income import`** — the two ship
-    together or not at all.
-12. `LIMITATIONS.md` — the new refusals; the two advisories; that Sch B / MFS refusal texts now name `btctax
-    income answer` (a deliberate **improvement**); that `income answer` cannot capture strings.
+4. **★ The anchor + the property test + `screen_inputs`, as ONE red→green step** (§3.5, §3.2 — r3 I-6). Write
+   the completeness anchor and the per-question property test **red**; derive `screen_inputs` from the registry;
+   delete the hand-written unanswered-blocks; add the new value-dependent refusals; **green.** Fix multi-defect
+   fixtures that asserted a specific reason (precedence is explicitly not contract). *This is the step that
+   turns the P8a-I1 case green — it cannot be split from the test that proves it.*
+5. **`cmd/answer.rs`** derives from the registry; the enum shrinks to the DOB residue; adds the class-(B)
+   skippable prompts (SALT scoped to `schedule_a.is_some()`; **both** spouse prompts — DOB *and* blind — gated
+   on `header.spouse.is_some()`, §3.2/r3 I-7).
+6. **`ReturnHeader::build`** → `HeaderError`; update `admin.rs` mapping and all fixtures; **MFJ-with-no-spouse
+   refuses** (§4, r3 M-6).
+7. **The two advisories** (§3.4) — the owner mandate. Fire on `None` only; `persons` per the §3.4 formula;
+   SALT scoped to `schedule_a.is_some()` (**not** "itemizes" — r3 Nit-3).
+8. **`SalesTaxElectionWithoutAmount`** (§2.2) and **`ScheduleBForeignCountryMissing`** (r1 I-6, named in §3.2).
+9. **`MixedUseMortgageUnsupported` in `screen_compute_dependent`** (§2.7, r3 I-2) — with the
+   **standard-deduction-wins regression test** that proves it does not brick.
+10. **The classifier** (§3.3): recursing over every reachable struct (incl. `Box12Entry`, `Carryforward`);
+    `#![deny(unused_variables)]`; the `_`-and-`_`-prefix rule; the exemption register with class + statutory
+    reason (incl. `itemize_election`, §2.8). Folds the open `header: _` follow-up.
+11. **DELETE the three dead fields** (§2.3) **AND add `serde_ignored` unknown-key rejection to `income
+    import`** — the two ship **together or not at all**; the rejection must name `hsa_present` too.
+12. `LIMITATIONS.md` — the new refusals; the two advisories; **the Schedule D QOF "No" exemption** and the
+    **Schedule C G/H/I/J blank boxes** (§2.1 — neither was ever disclaimed); that Sch B / MFS refusal texts now
+    name `btctax income answer` (a deliberate **improvement**); that `income answer` cannot capture strings.
