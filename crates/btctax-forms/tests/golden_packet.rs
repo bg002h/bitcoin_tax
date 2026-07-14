@@ -227,3 +227,175 @@ fn every_form_of_every_golden_packet_carries_the_filers_identity() {
         naked.join("\n")
     );
 }
+
+
+// ══════════════════════════ the packet as an ARTIFACT: what's in it, in what order, byte-for-byte ══
+
+/// ★ **Exactly the forms each return requires — no more, no fewer.**
+///
+/// A DROPPED form understates the return (the P6 review found Schedule 3 missing its line 10, and a
+/// filer billed twice for tax they had already paid). A SPURIOUS form makes an assertion the filer did
+/// not intend: an empty Schedule SE stapled to a W-2 filer's return tells the IRS they had
+/// self-employment income; an empty Schedule C tells them they ran a business.
+///
+/// Every set below is a claim about the LAW, not a transcript of current behaviour:
+///   * Schedule B files only above the **$1,500** interest/dividend trigger — so the MFJ household
+///     with $1,200 of interest gets none, and that is the discriminating case.
+///   * Schedule D + 8949 file when there are capital gains — so the two self-employment households,
+///     which have none, get neither.
+///   * Form 8959 files above the Additional-Medicare threshold — $200k single / $250k MFJ — so the
+///     Single miner at $100k gets none while the MFJ one at $300k does.
+///   * Form 8995 (§199A) files when there is qualified business income — i.e. exactly with Schedule C.
+#[test]
+fn each_golden_packet_carries_exactly_the_forms_that_return_requires() {
+    let expected: BTreeMap<&str, &[&str]> = BTreeMap::from([
+        // No crypto, no schedules at all — the floor case.
+        ("single_w2_only_standard", &["f1040"][..]),
+        // Interest $1,200 is BELOW the $1,500 Schedule B trigger.
+        ("mfj_two_w2_standard", &["f1040"][..]),
+        (
+            "single_w2_plus_crypto_ltcg",
+            &["f1040", "schedule_d", "f8949"][..],
+        ),
+        (
+            "single_short_term_crypto_gain",
+            &["f1040", "schedule_d", "f8949"][..],
+        ),
+        (
+            "single_capital_loss_capped",
+            &["f1040", "schedule_d", "f8949"][..],
+        ),
+        // $2,000 interest + $10,000 dividends clears the $1,500 trigger ⇒ Schedule B.
+        (
+            "single_qdcgt_both_slices",
+            &["f1040", "f1040sb", "schedule_d", "f8949"][..],
+        ),
+        (
+            "mfj_itemized_over_100k",
+            &["f1040", "f1040s2", "f1040sa", "f1040sb", "schedule_d", "f8949", "f8960"][..],
+        ),
+        (
+            "mfj_high_income_niit_and_addl_medicare",
+            &["f1040", "f1040s2", "f1040sb", "schedule_d", "f8949", "f8959", "f8960"][..],
+        ),
+        // Mining as a business: Schedule C ⇒ Schedule SE ⇒ Schedule 2, and §199A ⇒ 8995. No capital
+        // gains, so no Schedule D. $100k total is under the $200k single 8959 threshold.
+        (
+            "single_crypto_business_se",
+            &["f1040", "f1040s1", "f1040s2", "f1040sc", "schedule_se", "f8995"][..],
+        ),
+        // Same, but $300k MFJ clears the $250k Additional-Medicare threshold ⇒ 8959.
+        (
+            "mfj_se_over_the_addl_medicare_threshold",
+            &["f1040", "f1040s1", "f1040s2", "f1040sc", "schedule_se", "f8995", "f8959"][..],
+        ),
+    ]);
+
+    let mut wrong = Vec::new();
+    for h in &golden_households() {
+        let want: BTreeMap<&str, ()> = expected
+            .get(h.name.as_str())
+            .unwrap_or_else(|| panic!("{}: no expected form set — a household was added and its packet went unchecked", h.name))
+            .iter()
+            .map(|n| (*n, ()))
+            .collect();
+        let got: BTreeMap<&str, ()> = packet(h).iter().map(|f| (leak(&f.name), ())).collect();
+
+        let missing: Vec<_> = want.keys().filter(|k| !got.contains_key(*k)).collect();
+        let spurious: Vec<_> = got.keys().filter(|k| !want.contains_key(*k)).collect();
+        if !missing.is_empty() || !spurious.is_empty() {
+            wrong.push(format!(
+                "  {:<42} MISSING {missing:?}  SPURIOUS {spurious:?}",
+                h.name
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "the assembled packet is not the return the law requires:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// The packet is stapled in IRS **Attachment Sequence** order, with the 1040 first.
+///
+/// The sequence numbers are printed on the forms themselves ("Attachment Sequence No. 12"), and the
+/// IRS asks for them in order. This is the one property of the packet a filer can see at a glance and
+/// we cannot check by reading any single form.
+#[test]
+fn the_packet_is_stapled_in_irs_attachment_sequence_order() {
+    for h in &golden_households() {
+        let pkt = packet(h);
+
+        assert_eq!(
+            pkt[0].name, "f1040",
+            "{}: the 1040 sorts first — it has no attachment sequence of its own",
+            h.name
+        );
+        assert!(
+            pkt[0].attachment_sequence.is_none(),
+            "{}: the 1040 carries no Attachment Sequence number",
+            h.name
+        );
+
+        let seqs: Vec<&str> = pkt[1..]
+            .iter()
+            .map(|f| {
+                f.attachment_sequence
+                    .unwrap_or_else(|| panic!("{}: {} has no attachment sequence", h.name, f.name))
+            })
+            .collect();
+        let mut sorted = seqs.clone();
+        sorted.sort();
+        assert_eq!(
+            seqs, sorted,
+            "{}: the packet is out of Attachment Sequence order — got {seqs:?}",
+            h.name
+        );
+    }
+}
+
+/// ★ **The same return fills to the same bytes.** Twice, for every household.
+///
+/// Each individual filler already pins its own content hash, but nothing until now asserted the
+/// property of the PACKET: that `fill_full_return` — which walks a form set, assembles an order, and
+/// serializes a dozen documents — is reproducible end to end. Anything non-deterministic that leaked
+/// into the output (a hash-map iteration order reaching a page tree, a timestamp, a fresh object id)
+/// would show up here and nowhere else. A return you cannot reproduce is a return you cannot attest to.
+#[test]
+fn the_whole_packet_is_byte_reproducible() {
+    for h in &golden_households() {
+        let a = packet(h);
+        let b = packet(h);
+
+        assert_eq!(
+            a.len(),
+            b.len(),
+            "{}: the packet changed SIZE between two fills",
+            h.name
+        );
+        for (x, y) in a.iter().zip(b.iter()) {
+            assert_eq!(x.name, y.name, "{}: form order is not stable", h.name);
+            assert_eq!(
+                x.attachment_sequence, y.attachment_sequence,
+                "{}: {} attachment sequence is not stable",
+                h.name, x.name
+            );
+            assert_eq!(
+                x.bytes,
+                y.bytes,
+                "{}: {} does not fill to the same bytes twice ({} vs {} bytes)",
+                h.name,
+                x.name,
+                x.bytes.len(),
+                y.bytes.len()
+            );
+        }
+    }
+}
+
+/// `&'static str` from a `String` we own for the life of the test — keeps the set comparison above
+/// readable without threading lifetimes through it.
+fn leak(s: &str) -> &'static str {
+    Box::leak(s.to_string().into_boxed_str())
+}
