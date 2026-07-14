@@ -140,10 +140,11 @@ pub fn fill_schedule_se(
 /// Skipping the form on line 18 alone would silently forfeit it.
 pub fn fill_form_8959(
     lines: &btctax_core::tax::other_taxes::Form8959Lines,
+    header: &btctax_core::tax::packet::ReturnHeader,
     year: i32,
 ) -> Result<Option<Vec<u8>>, FormsError> {
     let map = Form8959Map::for_year(year)?;
-    form8959::fill_form_8959_with_map(lines, &map)
+    form8959::fill_form_8959_with_map(lines, header, &map)
 }
 
 /// Fill **Form 8960** (Net Investment Income Tax, §1411) for `year` from the core-derived line chain
@@ -151,10 +152,11 @@ pub fn fill_form_8959(
 /// there is then no form to file).
 pub fn fill_form_8960(
     lines: &btctax_core::tax::other_taxes::Form8960Lines,
+    header: &btctax_core::tax::packet::ReturnHeader,
     year: i32,
 ) -> Result<Vec<u8>, FormsError> {
     let map = Form8960Map::for_year(year)?;
-    form8960::fill_form_8960_with_map(lines, &map)
+    form8960::fill_form_8960_with_map(lines, header, &map)
 }
 
 /// Fill **Form 8995** (QBI deduction, simplified) for `year` from the core-derived line chain
@@ -164,10 +166,11 @@ pub fn fill_form_8960(
 /// the parentheses, so a negative would render as a POSITIVE number on the filed return.
 pub fn fill_form_8995(
     lines: &btctax_core::tax::qbi::Form8995Lines,
+    header: &btctax_core::tax::packet::ReturnHeader,
     year: i32,
 ) -> Result<Vec<u8>, FormsError> {
     let map = Form8995Map::for_year(year)?;
-    form8995::fill_form_8995_with_map(lines, &map)
+    form8995::fill_form_8995_with_map(lines, header, &map)
 }
 
 /// Fill **Schedule 1** (Additional Income and Adjustments to Income) for `year` from the core-derived
@@ -175,10 +178,11 @@ pub fn fill_form_8995(
 /// neither additional income nor an adjustment — the schedule is then not filed).
 pub fn fill_schedule_1(
     lines: &btctax_core::tax::printed::Schedule1Lines,
+    header: &btctax_core::tax::packet::ReturnHeader,
     year: i32,
 ) -> Result<Vec<u8>, FormsError> {
     let map = Schedule1Map::for_year(year)?;
-    schedule23::fill_schedule_1_with_map(lines, &map)
+    schedule23::fill_schedule_1_with_map(lines, header, &map)
 }
 
 /// Fill **Schedule 2** (Additional Taxes) for `year` from the core-derived printed chain
@@ -186,10 +190,11 @@ pub fn fill_schedule_1(
 /// taxes to report — the schedule is then not filed).
 pub fn fill_schedule_2(
     lines: &btctax_core::tax::printed::Schedule2Lines,
+    header: &btctax_core::tax::packet::ReturnHeader,
     year: i32,
 ) -> Result<Vec<u8>, FormsError> {
     let map = Schedule2Map::for_year(year)?;
-    schedule23::fill_schedule_2_with_map(lines, &map)
+    schedule23::fill_schedule_2_with_map(lines, header, &map)
 }
 
 /// Fill **Schedule 3** (Additional Credits and Payments) for `year` from the core-derived printed
@@ -197,10 +202,11 @@ pub fn fill_schedule_2(
 /// foreign tax credit nor an excess-Social-Security credit).
 pub fn fill_schedule_3(
     lines: &btctax_core::tax::printed::Schedule3Lines,
+    header: &btctax_core::tax::packet::ReturnHeader,
     year: i32,
 ) -> Result<Vec<u8>, FormsError> {
     let map = Schedule3Map::for_year(year)?;
-    schedule23::fill_schedule_3_with_map(lines, &map)
+    schedule23::fill_schedule_3_with_map(lines, header, &map)
 }
 
 /// Fill **Schedule A** (Itemized Deductions) for `year` from the core-derived printed chain
@@ -209,10 +215,11 @@ pub fn fill_schedule_3(
 /// the deduction claimed).
 pub fn fill_schedule_a(
     lines: &btctax_core::tax::printed::ScheduleALines,
+    header: &btctax_core::tax::packet::ReturnHeader,
     year: i32,
 ) -> Result<Vec<u8>, FormsError> {
     let map = ScheduleAMap::for_year(year)?;
-    schedule_a::fill_schedule_a_with_map(lines, &map)
+    schedule_a::fill_schedule_a_with_map(lines, header, &map)
 }
 
 /// Fill the **FULL-RETURN Form 1040** for `year` from the core-derived printed chain
@@ -223,11 +230,12 @@ pub fn fill_schedule_a(
 /// wants.
 pub fn fill_form_1040_full(
     lines: &btctax_core::tax::printed::Form1040Lines,
+    header: &btctax_core::tax::packet::ReturnHeader,
     status: btctax_core::tax::types::FilingStatus,
     year: i32,
 ) -> Result<Vec<u8>, FormsError> {
     let map = Form1040Map::for_year(year)?;
-    form1040_full::fill_form_1040_full_with_map(lines, status, &map)
+    form1040_full::fill_form_1040_full_with_map(lines, header, status, &map)
 }
 
 /// Fill the **FULL-RETURN Schedule D** for `year` from the core-derived printed chain
@@ -242,10 +250,11 @@ pub fn fill_form_1040_full(
 /// parentheses, so a negative renders as a POSITIVE number — turning a capital loss into a gain.
 pub fn fill_schedule_d_full(
     lines: &btctax_core::tax::printed::ScheduleDLines,
+    header: &btctax_core::tax::packet::ReturnHeader,
     year: i32,
 ) -> Result<Vec<u8>, FormsError> {
     let map = ScheduleDMap::for_year(year)?;
-    schedule_d_full::fill_schedule_d_full_with_map(lines, &map)
+    schedule_d_full::fill_schedule_d_full_with_map(lines, header, &map)
 }
 
 /// Fill **Schedule B** (Interest and Ordinary Dividends) for `year` from the core-derived printed
@@ -256,10 +265,11 @@ pub fn fill_schedule_d_full(
 /// the list would leave a form whose printed rows do not add up to its own total.
 pub fn fill_schedule_b(
     lines: &btctax_core::tax::printed::ScheduleBLines,
+    header: &btctax_core::tax::packet::ReturnHeader,
     year: i32,
 ) -> Result<Vec<u8>, FormsError> {
     let map = ScheduleBMap::for_year(year)?;
-    schedule_b::fill_schedule_b_with_map(lines, &map)
+    schedule_b::fill_schedule_b_with_map(lines, header, &map)
 }
 
 /// Fill **Schedule C** (Profit or Loss From Business) for `year` from the core-derived printed chain
@@ -267,10 +277,11 @@ pub fn fill_schedule_b(
 /// or business).
 pub fn fill_schedule_c(
     lines: &btctax_core::tax::printed::ScheduleCLines,
+    header: &btctax_core::tax::packet::ReturnHeader,
     year: i32,
 ) -> Result<Vec<u8>, FormsError> {
     let map = ScheduleCMap::for_year(year)?;
-    schedule_c::fill_schedule_c_with_map(lines, &map)
+    schedule_c::fill_schedule_c_with_map(lines, header, &map)
 }
 
 /// Fill **Form 8283** (Noncash Charitable Contributions, Rev. 12-2025) for `year` from the projected

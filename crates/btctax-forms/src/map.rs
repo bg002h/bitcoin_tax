@@ -11,6 +11,24 @@
 use crate::error::FormsError;
 use serde::Deserialize;
 
+/// The two identity cells every IRS form carries at its top: the name line and the SSN.
+///
+/// **Required** on the nine full-return schedule maps (a map without it fails at DESERIALIZATION —
+/// fail-closed at load, and every map is loaded by a test), and `Option` on the two maps shared with
+/// the crypto slice (`ScheduleDMap`, `Form1040Map`), whose 2017/2025 editions have no verified identity
+/// FQNs and no `ReturnInputs` to source an identity from. The full-return fillers refuse on `None`.
+///
+/// The SSN's RENDERING is not fixed here: it is chosen per-cell from the PDF's own `/MaxLen` (11 ⇒
+/// hyphenated, 9 ⇒ bare digits — the schedules and the 1040 genuinely differ). See
+/// [`crate::cells::push_identity`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct IdentityCells {
+    /// "Name(s) shown on return" — or, on Schedule C, "Name of proprietor".
+    pub name: String,
+    /// The SSN cell.
+    pub ssn: String,
+}
+
 /// The TY2025 Form 8949 map (embedded at compile time).
 pub const F8949_MAP_2025: &str = include_str!("../forms/2025/f8949.map.toml");
 /// The TY2025 Schedule D map (embedded at compile time).
@@ -200,12 +218,77 @@ fn default_da_present() -> bool {
 
 /// The Form 1040 capital-gains field map for one tax year: the capital-gain amount cell (line 7a in
 /// 2025 / line 7 in 2024 / **line 13** in 2017) + the Digital-Asset question (absent in 2017).
+/// The Form 1040's identity block (P6.2) — dumped and correlated against the printed form, never
+/// extrapolated. The SSN cells here declare `/MaxLen 9` (comb), so they take the nine BARE digits,
+/// while every schedule's SSN cell is `/MaxLen 11` and takes the hyphenated form. `push_identity`
+/// reads each cell's capacity rather than assuming either.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form1040HeaderCells {
+    pub taxpayer_first: String,
+    pub taxpayer_last: String,
+    pub taxpayer_ssn: String,
+    pub spouse_first: String,
+    pub spouse_last: String,
+    pub spouse_ssn: String,
+    pub address_street: String,
+    pub address_apt: String,
+    pub address_city: String,
+    pub address_state: String,
+    pub address_zip: String,
+    /// "If you checked the MFS box, enter the name of your spouse" — written on MFS only.
+    pub mfs_spouse_name: String,
+    /// The §6096 Presidential Election Campaign boxes.
+    pub presidential_taxpayer: CheckChoice,
+    pub presidential_spouse: CheckChoice,
+    /// "Someone can claim: You / Your spouse as a dependent" — the §63(c)(5) floor's own checkbox.
+    pub claimed_dependent_taxpayer: CheckChoice,
+    pub claimed_dependent_spouse: CheckChoice,
+    /// "Spouse itemizes on a separate return or you were a dual-status alien" — §63(c)(6).
+    pub mfs_spouse_itemizes: CheckChoice,
+    /// ★ The four §63(f) aged/blind boxes. The IRS validates a nonstandard standard deduction by
+    /// COUNTING these, so L12 and this checkbox count must agree or the return fails its own
+    /// arithmetic cross-check (`p6-aged-blind-checkboxes-missing`).
+    pub taxpayer_aged: CheckChoice,
+    pub taxpayer_blind: CheckChoice,
+    pub spouse_aged: CheckChoice,
+    pub spouse_blind: CheckChoice,
+    /// "If more than four dependents, see instructions and check here" — v1 REFUSES instead (the
+    /// continuation statement is a synthetic page generator we do not have; same posture as Schedule
+    /// B's >14-payer refusal, SPEC §7.4 as amended). Mapped so the refusal can name the cell it will
+    /// not fill.
+    pub more_than_four_dependents: CheckChoice,
+    /// The four dependents rows the form physically has.
+    pub dependent_rows: Vec<DependentRowCells>,
+}
+
+/// One row of the 1040's dependents table. The name is a SINGLE cell spanning the printed
+/// "(1) First name / Last name" columns — the form has one widget there, not two.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DependentRowCells {
+    pub name: String,
+    pub ssn: String,
+    pub relationship: String,
+    /// The Child-Tax-Credit box. NEVER checked: v1 omits CTC/ODC entirely (1040 L19 = 0, with the
+    /// `CtcOdcOmitted` advisory), and a checked credit box beside a zero credit is a form
+    /// contradicting itself. Mapped so the no-unmapped oracle knows the cell exists and is DELIBERATELY
+    /// left blank.
+    pub ctc: CheckChoice,
+    /// The Credit-for-Other-Dependents box. Never checked, same reason.
+    pub odc: CheckChoice,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Form1040Map {
     /// `"f1040"`.
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The full-return identity BLOCK (P6.2). The 1040's header is not two cells like a schedule's: it
+    /// is names + SSNs + address + the §63(f) aged/blind checkboxes + the dependents table. `Option`
+    /// because this map is SHARED with the crypto slice, whose 2017/2025 editions have no verified
+    /// header FQNs; the FULL-return filler refuses on `None` rather than emit an unnamed 1040.
+    #[serde(default)]
+    pub header: Option<Form1040HeaderCells>,
     /// The capital-gain amount cell (line 7a for 2025, line 7 for 2024, **line 13 for 2017**). A
     /// single field on 2024/2025; a dollars+cents [`MoneyPair`] on the 2017 form.
     pub line7a: MoneyCell,
@@ -553,6 +636,11 @@ pub struct ScheduleDMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The name + SSN header cells (P6.2). `Option` because this map is SHARED with the crypto-slice
+    /// path, whose 2017/2025 editions have no verified identity FQNs and no `ReturnInputs` to source an
+    /// identity from. The FULL-return filler refuses on `None` — it may not emit an unnamed form.
+    #[serde(default)]
+    pub identity: Option<IdentityCells>,
     /// Line 3 — Part I total from Form 8949 (Box C **or Box I**): columns d,e,g,h.
     pub line3: AmountCols,
     /// Line 7 — net short-term gain/loss (column h).
@@ -652,6 +740,9 @@ pub struct Form8959Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
     /// L1 — Σ W-2 box 5 Medicare wages, MID column.
     pub line1: MoneyCell,
     /// L4 — add lines 1–3 (2/3 blank ⇒ = line 1), MID column.
@@ -744,6 +835,9 @@ pub struct Form8960Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
     /// L1 — taxable interest, AMOUNT column.
     pub line1: MoneyCell,
     /// L2 — ordinary dividends, AMOUNT column.
@@ -824,6 +918,9 @@ pub struct Form8995Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
     /// L2 — total QBI from the (blank) table, MID column.
     pub line2: MoneyCell,
     /// L4 — combine 2 and 3, MID column.
@@ -905,6 +1002,9 @@ pub struct Schedule2Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
     /// L4 — self-employment tax (SS + regular Medicare only), AMOUNT column, page 1.
     pub line4: MoneyCell,
     /// L11 — Additional Medicare Tax (Form 8959's printed L18), AMOUNT column, page 1.
@@ -948,6 +1048,9 @@ pub struct Schedule3Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
     /// L1 — foreign tax credit, AMOUNT column.
     pub line1: MoneyCell,
     /// L8 — total nonrefundable credits → 1040 L20, AMOUNT column.
@@ -995,6 +1098,9 @@ pub struct ScheduleAMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
     /// L1 — medical and dental expenses, MID column.
     pub line1: MoneyCell,
     /// L2 — AGI. ★ **AGI-INLINE column**, not MID.
@@ -1088,6 +1194,9 @@ pub struct Schedule1Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
     /// L1 — taxable state/local refund, AMOUNT column, page 1.
     pub line1: MoneyCell,
     /// L3 — business income (crypto Schedule C net), AMOUNT column, page 1.
@@ -1158,6 +1267,9 @@ pub struct ScheduleCMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
     /// L1 — gross receipts or sales.
     pub line1: MoneyCell,
     /// L3 — line 1 − line 2 (returns, blank).
@@ -1238,6 +1350,9 @@ pub struct ScheduleBMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
+    /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
+    pub identity: IdentityCells,
     /// Part I line 1 — the 14 interest-payer rows.
     pub part1_rows: Vec<ScheduleBRowMap>,
     /// L2 — add the amounts on line 1.

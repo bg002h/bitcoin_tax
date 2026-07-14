@@ -53,7 +53,14 @@ pub fn run(path: &str) -> Result<(), String> {
             true => format!("  on={:?}", button_on_states(&doc, f.id)),
             false => String::new(),
         };
-        println!("p{:<3} {geo}  {kind}  {}{on}", page_of(f), f.fqn);
+        // /MaxLen is the cell's declared capacity — the PRIMARY SOURCE for how a value must be
+        // formatted (a `/MaxLen 9` SSN comb takes nine BARE digits; a hyphenated one is eleven and
+        // would be truncated). Printed here so a map author never has to guess it.
+        let cap = match f.max_len {
+            Some(n) => format!("  maxlen={n}"),
+            None => String::new(),
+        };
+        println!("p{:<3} {geo}  {kind}  {}{on}{cap}", page_of(f), f.fqn);
     }
     Ok(())
 }

@@ -372,6 +372,46 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   preserved where it matters (the *filable artifact*), and the codebase's own fixtures are the evidence
   the compute path never needed PII. KAT: `an_uncaptured_ssn_does_not_block_the_report`.
 
+- **[✅ CLOSED in P6.2] p6-aged-blind-checkboxes-missing (was GATING).** The four §63(f) boxes are now
+  mapped (`c1_9`/`c1_10`/`c1_11`/`c1_12` — dumped and correlated against the printed Age/Blindness row,
+  never extrapolated) and printed, and core derives the count ONCE (`AgedBlindBoxes`) with L12 consuming
+  that same count. KATs: `the_1040_prints_the_aged_blind_boxes_its_line_12_depends_on` (fill side) +
+  `aged_blind_box_count_matches_the_standard_deduction_core_actually_computed` (core side).
+
+- **[✅ CLOSED in P6.2] p6-form-identity-header.** All nine schedules + the full Schedule D + the 1040
+  now print their identity. See the two NEW findings below, both surfaced by doing it.
+
+- **[NEW → found in P6.2, FIXED in P6.2] p6-two-more-checkbox-consistency-gaps.** Dumping the 1040 header
+  turned up **two more checkboxes of the same class as aged/blind** — flags core's L12 already consumes
+  but the form would never have shown:
+  - `c1_6` "Someone can claim: **You** as a dependent" ↔ the §63(c)(5) dependent FLOOR that replaces the
+    basic standard deduction.
+  - `c1_8` "**Spouse itemizes** on a separate return" ↔ the §63(c)(6) MFS coupling.
+  A return that claims either arithmetic without ticking its box contradicts itself exactly as a
+  nonstandard standard deduction with zero aged/blind boxes does. `ReturnHeader` now carries all of them
+  (plus the §6096 presidential-fund election, which is captured input that would otherwise silently fail
+  to print), and the filler prints them. KAT:
+  `the_header_carries_the_dependent_claim_and_mfs_itemize_flags_that_l12_depends_on`.
+
+  **Lesson for the P6.6 reviewer:** the aged/blind defect was not a one-off. It is what happens when a
+  captured input reaches the ARITHMETIC without reaching the FORM. A sweep for any *other* input that
+  core consumes but no cell prints is worth doing — the three found so far were all in the same header.
+
+- **[NEW → P6.2] p6-dependents-over-four-refuses.** The 1040's dependents table has exactly FOUR rows.
+  More than four now **fails closed** (`FormsError::Overflow`) rather than printing the first four:
+  the IRS's own remedy is to tick `c1_13` and attach a continuation statement, which is the same
+  synthetic-page-generator machinery Schedule B's >14-payer case needs and v1 does not have (SPEC §7.4 as
+  amended). Printing four of five would silently file a return that misstates the household. The real fix
+  rides with `p6-schedule-b-continuation-statement` (post-v1). KAT:
+  `more_dependents_than_the_form_holds_fails_closed`.
+
+- **[NEW → P6.2] p6-maxlen-comb-guard (infrastructure).** `pdf::Field` now reads `/MaxLen`, and
+  `verify_flat` gained a fifth read-back leg: any value longer than its cell's declared capacity is
+  `FormsError::CellOverflow`. This applies to EVERY text write in the crate. It caught, before it could
+  ship, the assumption recorded in CONTINUITY_P6 that the 1040's SSN cells are `/MaxLen 11` — they are
+  **`/MaxLen 9`** (comb), so they take bare digits, while the schedules' are `/MaxLen 11` and take the
+  hyphenated form. The forms genuinely disagree; `render_ssn` reads each cell rather than assuming.
+
 - **[GATING — core half DONE in P6.1; the FILL remains → P6.2] p6-aged-blind-checkboxes-missing.** Core
   now derives the four boxes ONCE (`packet::AgedBlindBoxes::for_return`) and **`standard_deduction` L12
   consumes that same count**, so the checkbox count and the claimed deduction cannot drift apart by

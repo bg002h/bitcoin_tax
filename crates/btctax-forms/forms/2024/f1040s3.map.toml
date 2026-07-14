@@ -30,3 +30,10 @@ line8  = "topmostSubform[0].Page1[0].f1_26[0]"   # "Add lines 1 through 4, 5a, 5
 # ── Part II — Other Payments and Refundable Credits ─────────────────────────────────────────────
 line11 = "topmostSubform[0].Page1[0].f1_29[0]"   # "Excess social security and tier 1 RRTA tax withheld"
 line15 = "topmostSubform[0].Page1[0].f1_39[0]"   # "Add lines 9 through 12 and 14…" → 1040 line 31
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
+#    /MaxLen 11, so it takes the HYPHENATED form (the 1040's own SSN cells are /MaxLen 9 and take
+#    bare digits — the forms genuinely differ, so `push_identity` reads each cell's capacity).
+[identity]
+name = "topmostSubform[0].Page1[0].f1_01[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_02[0]"

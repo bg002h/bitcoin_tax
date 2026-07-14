@@ -13,12 +13,13 @@
 //! $200,000, with no knowledge of a spouse or a second job), and that excess is a *credit* on 1040
 //! line 25c. Skipping on line 18 alone would silently forfeit it.
 
-use crate::cells::push_money;
+use crate::cells::{push_identity, push_money};
 use crate::error::FormsError;
 use crate::map::Form8959Map;
 use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
 use btctax_core::tax::other_taxes::Form8959Lines;
+use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::Usd;
 
 /// Logical Form 8959 columns: col 0 = MID, col 1 = AMOUNT.
@@ -36,6 +37,7 @@ const F8959_CLUSTERS: &[(f32, f32)] = &[(410.0, 482.0), (504.0, 576.0)];
 /// (a mis-mapped cell FAILS CLOSED).
 pub fn fill_form_8959_with_map(
     lines: &Form8959Lines,
+    header: &ReturnHeader,
     map: &Form8959Map,
 ) -> Result<Option<Vec<u8>>, FormsError> {
     // The filing decision is a CORE fact (`p6-form8959-must-file-belongs-in-core`), so the packet's KATs
@@ -44,8 +46,21 @@ pub fn fill_form_8959_with_map(
         return Ok(None);
     }
 
+    // Load FIRST: `push_identity` reads each SSN cell's own /MaxLen to decide hyphenated-vs-digits.
+    let mut doc = pdf::load(pdf::f8959_pdf(map.year)?)?;
+    let blank_fields = pdf::collect_fields(&doc)?;
+
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<FlatPlacement> = Vec::new();
+
+    push_identity(
+        &mut writes,
+        &mut placements,
+        &map.identity,
+        &header.name_line,
+        &header.taxpayer.ssn,
+        &blank_fields,
+    )?;
 
     // Parallel to `map.lines()` — printed reading order, strictly descending y on page 1.
     let plan: [(Usd, usize); 17] = [
@@ -78,8 +93,7 @@ pub fn fill_form_8959_with_map(
         );
     }
 
-    let mut doc = pdf::load(pdf::f8959_pdf(map.year)?)?;
-    let index = pdf::index(&pdf::collect_fields(&doc)?);
+    let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
     pdf::strip_nondeterminism(&mut doc);

@@ -11,11 +11,12 @@
 //! mis-mapped into it; only its own cluster does. Getting this wrong would print the AGI into the
 //! medical-expenses box, and the floor would be computed against the wrong number.
 
-use crate::cells::push_money;
+use crate::cells::{push_identity, push_money};
 use crate::error::FormsError;
 use crate::map::ScheduleAMap;
 use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
+use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::tax::printed::ScheduleALines;
 use btctax_core::Usd;
 
@@ -33,6 +34,7 @@ const SCHEDULE_A_CLUSTERS: &[(f32, f32)] = &[(331.0, 403.0), (417.0, 489.0), (50
 /// the geometric verifier (a mis-mapped cell FAILS CLOSED).
 pub fn fill_schedule_a_with_map(
     lines: &ScheduleALines,
+    header: &ReturnHeader,
     map: &ScheduleAMap,
 ) -> Result<Vec<u8>, FormsError> {
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
@@ -71,7 +73,18 @@ pub fn fill_schedule_a_with_map(
     }
 
     let mut doc = pdf::load(pdf::schedule_a_pdf(map.year)?)?;
-    let index = pdf::index(&pdf::collect_fields(&doc)?);
+    // Identity header (P6.2): `push_identity` reads the SSN cell's own /MaxLen to decide
+    // hyphenated-vs-digits, so it needs the blank PDF's fields.
+    let blank_fields = pdf::collect_fields(&doc)?;
+    push_identity(
+        &mut writes,
+        &mut placements,
+        &map.identity,
+        &header.name_line,
+        &header.taxpayer.ssn,
+        &blank_fields,
+    )?;
+    let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
     pdf::strip_nondeterminism(&mut doc);

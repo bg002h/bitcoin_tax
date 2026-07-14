@@ -145,3 +145,10 @@ amount = "topmostSubform[0].Page1[0].f1_61[0]"
 [[part2_rows]]  # row 15
 payer  = "topmostSubform[0].Page1[0].f1_62[0]"
 amount = "topmostSubform[0].Page1[0].f1_63[0]"
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
+#    /MaxLen 11, so it takes the HYPHENATED form (the 1040's own SSN cells are /MaxLen 9 and take
+#    bare digits — the forms genuinely differ, so `push_identity` reads each cell's capacity).
+[identity]
+name = "topmostSubform[0].Page1[0].f1_01[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_02[0]"

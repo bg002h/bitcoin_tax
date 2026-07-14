@@ -42,3 +42,10 @@ line14 = "topmostSubform[0].Page1[0].f1_30[0]"   # "Income limitation. Multiply 
 line15 = "topmostSubform[0].Page1[0].f1_31[0]"   # "Qualified business income deduction. Enter the smaller of line 10 or line 14" → 1040 L13
 line16 = "topmostSubform[0].Page1[0].f1_32[0]"   # "Total qualified business (loss) carryforward…"      ★ PAREN — positive magnitude
 line17 = "topmostSubform[0].Page1[0].f1_33[0]"   # "Total qualified REIT dividends and PTP (loss) carryforward…"  ★ PAREN — positive magnitude
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
+#    /MaxLen 11, so it takes the HYPHENATED form (the 1040's own SSN cells are /MaxLen 9 and take
+#    bare digits — the forms genuinely differ, so `push_identity` reads each cell's capacity).
+[identity]
+name = "topmostSubform[0].Page1[0].f1_1[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_2[0]"

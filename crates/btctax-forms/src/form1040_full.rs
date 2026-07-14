@@ -25,11 +25,12 @@
 //!
 //! **Line 7 is signed with a LEADING MINUS** (SPEC §3.2), unlike Schedule D's parenthesized boxes.
 
-use crate::cells::push_money;
+use crate::cells::{page_of, push_money, render_ssn};
 use crate::error::FormsError;
-use crate::map::{CheckChoice, Form1040Map, MoneyCell};
+use crate::map::{CheckChoice, Form1040HeaderCells, Form1040Map, MoneyCell};
 use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
+use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::tax::printed::Form1040Lines;
 use btctax_core::tax::types::FilingStatus;
 use btctax_core::Usd;
@@ -78,12 +79,30 @@ fn filing_status_box(
 /// (a mis-mapped cell FAILS CLOSED).
 pub fn fill_form_1040_full_with_map(
     lines: &Form1040Lines,
+    header: &ReturnHeader,
     status: FilingStatus,
     map: &Form1040Map,
 ) -> Result<Vec<u8>, FormsError> {
     let y = map.year;
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<FlatPlacement> = Vec::new();
+
+    // ── The identity block. A 1040 with the right money and no NAME is not a return. ─────────────
+    let h = map.header.as_ref().ok_or_else(|| {
+        FormsError::Geometry(format!(
+            "the TY{y} 1040 map has no [header] block — a full return cannot file an unnamed 1040"
+        ))
+    })?;
+    let blank = pdf::load(pdf::f1040_pdf(y)?)?;
+    let blank_fields = pdf::collect_fields(&blank)?;
+    push_header_block(
+        &mut writes,
+        &mut placements,
+        h,
+        header,
+        status,
+        &blank_fields,
+    )?;
 
     // ── Page 1, AMOUNT column, top to bottom. Line 7 carries a LEADING MINUS on a loss year. ────
     let p1: [(&MoneyCell, Usd); 12] = [
@@ -208,4 +227,131 @@ pub fn fill_form_1040_full_with_map(
     let fields = pdf::collect_fields(&check)?;
     verify_flat(&check, &fields, &placements, F1040_CLUSTERS)?;
     Ok(bytes)
+}
+
+/// Write the 1040's identity block: names, SSNs, address, the checkbox row, and the dependents table.
+///
+/// Every cell is a [`FlatPlacement::free`] (or `check`) — geometry-exempt, since none of them sits in a
+/// money column, but still page-checked and inside the no-unmapped set. `free` catches STRAY writes,
+/// not MISSING ones, so the KATs assert each cell reads back non-empty: an unnamed return is the exact
+/// failure this block exists to prevent, and the geometric oracle cannot see it.
+#[allow(clippy::too_many_arguments)]
+fn push_header_block(
+    w: &mut Vec<(String, pdf::FieldValue)>,
+    p: &mut Vec<FlatPlacement>,
+    cells: &Form1040HeaderCells,
+    header: &ReturnHeader,
+    status: FilingStatus,
+    blank_fields: &[pdf::Field],
+) -> Result<(), FormsError> {
+    let max_len_of = |fqn: &str| -> Option<usize> {
+        blank_fields
+            .iter()
+            .find(|f| f.fqn == fqn)
+            .and_then(|f| f.max_len)
+    };
+    let text = |w: &mut Vec<(String, pdf::FieldValue)>,
+                p: &mut Vec<FlatPlacement>,
+                fqn: &str,
+                value: &str| {
+        if value.is_empty() {
+            return; // an empty cell is left BLANK, never written with ""
+        }
+        w.push((fqn.to_string(), pdf::FieldValue::Text(value.to_string())));
+        p.push(FlatPlacement::free(fqn.to_string(), page_of(fqn)));
+    };
+    let check = |w: &mut Vec<(String, pdf::FieldValue)>,
+                 p: &mut Vec<FlatPlacement>,
+                 c: &CheckChoice,
+                 on: bool| {
+        if !on {
+            return; // an unchecked box is simply not written
+        }
+        w.push((c.field.clone(), pdf::FieldValue::Check { on: c.on.clone() }));
+        p.push(FlatPlacement::check(c.field.clone(), page_of(&c.field)));
+    };
+
+    // Names + SSNs. The SSN rendering follows the CELL's own /MaxLen (9 here ⇒ bare digits).
+    let t = &header.taxpayer;
+    text(w, p, &cells.taxpayer_first, &t.first_name);
+    text(w, p, &cells.taxpayer_last, &t.last_name);
+    text(
+        w,
+        p,
+        &cells.taxpayer_ssn,
+        &render_ssn(&t.ssn, max_len_of(&cells.taxpayer_ssn))?,
+    );
+    if let Some(sp) = &header.spouse {
+        text(w, p, &cells.spouse_first, &sp.first_name);
+        text(w, p, &cells.spouse_last, &sp.last_name);
+        text(
+            w,
+            p,
+            &cells.spouse_ssn,
+            &render_ssn(&sp.ssn, max_len_of(&cells.spouse_ssn))?,
+        );
+        // "If you checked the MFS box, enter the name of your spouse" — MFS only. (On HoH/QSS that same
+        // cell wants the qualifying CHILD's name, which v1 does not capture, so it stays blank.)
+        if status == FilingStatus::Mfs {
+            text(w, p, &cells.mfs_spouse_name, &sp.full_name());
+        }
+    }
+
+    text(w, p, &cells.address_street, &header.address_street);
+    text(w, p, &cells.address_city, &header.address_city);
+    text(w, p, &cells.address_state, &header.address_state);
+    text(w, p, &cells.address_zip, &header.address_zip);
+
+    check(
+        w,
+        p,
+        &cells.presidential_taxpayer,
+        header.presidential_fund_taxpayer,
+    );
+    check(
+        w,
+        p,
+        &cells.presidential_spouse,
+        header.presidential_fund_spouse,
+    );
+    check(
+        w,
+        p,
+        &cells.claimed_dependent_taxpayer,
+        header.claimed_as_dependent_taxpayer,
+    );
+    check(
+        w,
+        p,
+        &cells.claimed_dependent_spouse,
+        header.claimed_as_dependent_spouse,
+    );
+    check(w, p, &cells.mfs_spouse_itemizes, header.mfs_spouse_itemizes);
+
+    // ★ The §63(f) boxes. These must agree with L12 or the return fails the IRS's own arithmetic
+    // cross-check; core derives the count ONCE (`AgedBlindBoxes`) and L12 consumes that same count.
+    let ab = header.aged_blind;
+    check(w, p, &cells.taxpayer_aged, ab.taxpayer_aged);
+    check(w, p, &cells.taxpayer_blind, ab.taxpayer_blind);
+    check(w, p, &cells.spouse_aged, ab.spouse_aged);
+    check(w, p, &cells.spouse_blind, ab.spouse_blind);
+
+    // Dependents. More than the form physically holds REFUSES: the IRS's own remedy is to check
+    // `more_than_four_dependents` and attach a continuation statement, which is a synthetic page
+    // generator v1 does not have (the same posture as Schedule B's >14-payer refusal, SPEC §7.4).
+    // Printing only the first four would file a return that misstates the household — silently.
+    if header.dependents.len() > cells.dependent_rows.len() {
+        return Err(FormsError::Overflow {
+            part: "the 1040 dependents table",
+            rows: header.dependents.len(),
+            capacity: cells.dependent_rows.len(),
+        });
+    }
+    for (d, row) in header.dependents.iter().zip(&cells.dependent_rows) {
+        text(w, p, &row.name, &d.name);
+        text(w, p, &row.ssn, &render_ssn(&d.ssn, max_len_of(&row.ssn))?);
+        text(w, p, &row.relationship, &d.relationship);
+        // row.ctc / row.odc are deliberately NOT checked — v1 omits the credit (L19 = 0).
+    }
+    Ok(())
 }

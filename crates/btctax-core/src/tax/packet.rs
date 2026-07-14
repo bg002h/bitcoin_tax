@@ -31,9 +31,12 @@ use std::fmt;
 /// A canonical U.S. Social Security Number: **exactly nine digits**, however the human typed it.
 ///
 /// The raw `Person.ssn` is stored AS ENTERED (`123-45-6789`, `123456789`, or with stray spaces). A form
-/// cell is not so forgiving: the 1040's SSN widgets are 11-character combs, and a value that does not
-/// fit is silently truncated by the viewer. So canonicalization happens ONCE, here, and fails loudly —
-/// §3.4: an SSN that cannot be printed is an uncomputable line, not a best-effort cell.
+/// cell is not so forgiving, and the forms do not even agree with each other: the **1040's** SSN widgets
+/// are 9-character combs (`/MaxLen 9` — bare digits), while every **schedule's** is `/MaxLen 11` (the
+/// hyphenated form). A value that does not fit is silently truncated by the viewer, so the rendering is
+/// chosen per-cell from the PDF's own declared capacity (`btctax_forms::cells::render_ssn`), never
+/// assumed. Canonicalization happens ONCE, here, and fails loudly — §3.4: an SSN that cannot be printed
+/// is an uncomputable line, not a best-effort cell.
 ///
 /// `Debug` is **masked**: an SSN that leaks into a log or a panic message is a PII incident, and the
 /// derived `Debug` on every struct that transitively holds one would do exactly that.
@@ -193,6 +196,24 @@ pub struct ReturnHeader {
     pub address_state: String,
     pub address_zip: String,
     pub aged_blind: AgedBlindBoxes,
+    /// 1040 "Someone can claim: **You** as a dependent". Load-bearing, not decorative: when this is set,
+    /// core's L12 uses the §63(c)(5) DEPENDENT FLOOR instead of the basic standard deduction. A return
+    /// that claims the smaller deduction without checking the box is a form contradicting its own
+    /// arithmetic — the same defect class as the aged/blind boxes.
+    pub claimed_as_dependent_taxpayer: bool,
+    /// 1040 "Someone can claim: **Your spouse** as a dependent". (A claimable spouse REFUSES upstream —
+    /// `DependentSpouseUnsupported` — so this is captured for completeness and never reaches a filed
+    /// return in v1.)
+    pub claimed_as_dependent_spouse: bool,
+    /// 1040 "**Spouse itemizes** on a separate return or you were a dual-status alien" — the §63(c)(6)
+    /// MFS coupling core already applies to L12. Same class again: the arithmetic is visible on the
+    /// form only if the box is checked.
+    pub mfs_spouse_itemizes: bool,
+    /// The §6096 Presidential Election Campaign boxes (you / spouse). Pure election — it changes neither
+    /// tax nor refund — but it is CAPTURED input, and a captured election that silently fails to print
+    /// is a return that does not say what the filer said.
+    pub presidential_fund_taxpayer: bool,
+    pub presidential_fund_spouse: bool,
     pub dependents: Vec<DependentRow>,
     /// Schedule C's header is "Name of **proprietor**", not the return's name line: a spouse-owned
     /// business files under the SPOUSE's name and SSN even on a joint return. `None` when there is no
@@ -248,6 +269,14 @@ impl ReturnHeader {
             address_state: ri.header.address_state.clone(),
             address_zip: ri.header.address_zip.clone(),
             aged_blind: AgedBlindBoxes::for_return(ri, year),
+            claimed_as_dependent_taxpayer: ri.header.can_be_claimed_as_dependent_taxpayer,
+            claimed_as_dependent_spouse: ri.header.can_be_claimed_as_dependent_spouse,
+            // Only meaningful on MFS (§63(c)(6)); `None` on MFS already refuses upstream
+            // (`MfsSpouseItemizeUnknown`), so an unanswered flag never reaches a filed return.
+            mfs_spouse_itemizes: ri.filing_status == FilingStatus::Mfs
+                && ri.mfs_spouse_itemizes == Some(true),
+            presidential_fund_taxpayer: ri.header.presidential_fund_taxpayer,
+            presidential_fund_spouse: ri.header.presidential_fund_spouse,
             dependents,
             proprietor,
         })
@@ -583,6 +612,45 @@ mod tests {
         assert!(ReturnHeader::build(&base("12345", good, good), 2024).is_err());
         assert!(ReturnHeader::build(&base(good, "nope", good), 2024).is_err());
         assert!(ReturnHeader::build(&base(good, good, "1234567890"), 2024).is_err());
+    }
+
+    /// ★ The OTHER two checkbox-consistency gaps, of the same class as the aged/blind boxes and found
+    /// the same way (dumping the 1040's fields and correlating them against the printed form).
+    ///
+    /// Core's L12 already CONSUMES both flags: `can_be_claimed_as_dependent_taxpayer` swaps the basic
+    /// standard deduction for the §63(c)(5) dependent floor, and on MFS `mfs_spouse_itemizes` couples
+    /// the spouses' §63(c)(6) election. Each has a 1040 checkbox — "Someone can claim: You as a
+    /// dependent" and "Spouse itemizes on a separate return" — and a return that claims the arithmetic
+    /// without checking the box is a form contradicting itself, exactly like a nonstandard standard
+    /// deduction with zero aged/blind boxes ticked. So the header carries them, and the filler prints
+    /// them.
+    #[test]
+    fn the_header_carries_the_dependent_claim_and_mfs_itemize_flags_that_l12_depends_on() {
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.header.taxpayer = person("John", "Doe", "123456789");
+        ri.header.can_be_claimed_as_dependent_taxpayer = true;
+
+        let h = ReturnHeader::build(&ri, 2024).unwrap();
+        assert!(
+            h.claimed_as_dependent_taxpayer,
+            "the §63(c)(5) floor is claimed ⇒ the box must print"
+        );
+        assert!(!h.mfs_spouse_itemizes);
+
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Mfs,
+            mfs_spouse_itemizes: Some(true),
+            ..Default::default()
+        };
+        ri.header.taxpayer = person("John", "Doe", "123456789");
+        let h = ReturnHeader::build(&ri, 2024).unwrap();
+        assert!(
+            h.mfs_spouse_itemizes,
+            "§63(c)(6) coupling is in force ⇒ the box must print"
+        );
     }
 
     // ── assemble_printed_return — the ONE composition site ───────────────────────────────────────────

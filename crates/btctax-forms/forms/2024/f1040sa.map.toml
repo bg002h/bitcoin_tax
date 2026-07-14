@@ -58,3 +58,10 @@ line14 = "topmostSubform[0].Page1[0].f1_28[0]"   # "Add lines 11 through 13"    
 
 # ── Total Itemized Deductions ───────────────────────────────────────────────────────────────────
 line17 = "topmostSubform[0].Page1[0].f1_34[0]"   # "Add the amounts in the far right column for lines 4 through 16" → 1040 L12
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
+#    /MaxLen 11, so it takes the HYPHENATED form (the 1040's own SSN cells are /MaxLen 9 and take
+#    bare digits — the forms genuinely differ, so `push_identity` reads each cell's capacity).
+[identity]
+name = "topmostSubform[0].Page1[0].f1_1[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_2[0]"

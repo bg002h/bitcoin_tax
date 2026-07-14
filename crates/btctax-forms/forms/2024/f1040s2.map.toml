@@ -28,3 +28,10 @@ line4  = "form1[0].Page1[0].f1_14[0]"   # "Self-employment tax. Attach Schedule 
 line11 = "form1[0].Page1[0].f1_21[0]"   # "Additional Medicare Tax. Attach Form 8959" (the form's PRINTED line 18)
 line12 = "form1[0].Page1[0].f1_22[0]"   # "Net investment income tax. Attach Form 8960" (the form's PRINTED line 17)
 line21 = "form1[0].Page2[0].f2_25[0]"   # "Add lines 4, 7 through 16, 18, and 19…" → 1040 line 23   ★ PAGE 2
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
+#    /MaxLen 11, so it takes the HYPHENATED form (the 1040's own SSN cells are /MaxLen 9 and take
+#    bare digits — the forms genuinely differ, so `push_identity` reads each cell's capacity).
+[identity]
+name = "form1[0].Page1[0].f1_01[0]"
+ssn  = "form1[0].Page1[0].f1_02[0]"

@@ -15,6 +15,7 @@ use btctax_core::tax::printed::{
 };
 use btctax_core::tax::qbi::form_8995_lines;
 use btctax_core::tax::se::SeTaxResult;
+use btctax_core::tax::testonly::kitchen_sink_header;
 use btctax_core::tax::types::FilingStatus;
 use btctax_core::Usd;
 use btctax_forms::testonly::*;
@@ -36,6 +37,17 @@ fn tv(pdf: &[u8], fqn: &str) -> Option<String> {
     text_value(&doc, f.id)
 }
 
+/// Is a checkbox ON in a filled PDF, by fully-qualified field name?
+fn box_on(pdf: &[u8], fqn: &str) -> bool {
+    let doc = load(pdf).unwrap();
+    let fields = collect_fields(&doc).unwrap();
+    fields
+        .iter()
+        .find(|f| f.fqn == fqn)
+        .and_then(|f| checkbox_on(&doc, f.id))
+        .is_some()
+}
+
 /// The deep/02 example-2 household: MFJ, $280,000 W-2 Medicare wages, $60,000 of mining.
 fn se_mining_60k_mfj() -> SeTaxResult {
     SeTaxResult {
@@ -55,7 +67,7 @@ fn se_mining_60k_mfj() -> SeTaxResult {
 fn f8959_fills_the_printed_chain_and_reads_back() {
     let se = se_mining_60k_mfj();
     let lines = form_8959_lines(FilingStatus::Mfj, dec!(280000), dec!(4240), Some(&se));
-    let pdf = btctax_forms::fill_form_8959(&lines, 2024)
+    let pdf = btctax_forms::fill_form_8959(&lines, &kitchen_sink_header(), 2024)
         .unwrap()
         .expect("this household owes Additional Medicare Tax");
 
@@ -112,7 +124,7 @@ fn f8959_is_produced_for_withholding_even_with_no_tax_owed() {
     );
     assert_eq!(lines.line24, dec!(325), "but $325 was over-withheld");
 
-    let pdf = btctax_forms::fill_form_8959(&lines, 2024)
+    let pdf = btctax_forms::fill_form_8959(&lines, &kitchen_sink_header(), 2024)
         .unwrap()
         .expect("the form must still be filed to claim the 25c credit");
     assert_eq!(
@@ -122,9 +134,11 @@ fn f8959_is_produced_for_withholding_even_with_no_tax_owed() {
 
     // …and with neither tax nor over-withholding, there is genuinely nothing to file.
     let nothing = form_8959_lines(FilingStatus::Single, dec!(150000), dec!(2175), None);
-    assert!(btctax_forms::fill_form_8959(&nothing, 2024)
-        .unwrap()
-        .is_none());
+    assert!(
+        btctax_forms::fill_form_8959(&nothing, &kitchen_sink_header(), 2024)
+            .unwrap()
+            .is_none()
+    );
 }
 
 // ─────────────────────────────────────── Form 8960 ────────────────────────────────────────────
@@ -142,7 +156,7 @@ fn f8960_fills_the_printed_chain_and_reads_back() {
         dec!(300000),
     )
     .expect("NIIT is owed");
-    let pdf = btctax_forms::fill_form_8960(&lines, 2024).unwrap();
+    let pdf = btctax_forms::fill_form_8960(&lines, &kitchen_sink_header(), 2024).unwrap();
 
     let g = |fqn: &str| tv(&pdf, fqn);
     assert_eq!(
@@ -196,7 +210,7 @@ fn f8960_fills_the_printed_chain_and_reads_back() {
 fn f8995_fills_the_printed_chain_and_reads_back() {
     // $10,000 REIT dividends, no carryforward; TI-before-QBI 100,000; net capital gain 20,000.
     let lines = form_8995_lines(dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
-    let pdf = btctax_forms::fill_form_8995(&lines, 2024).unwrap();
+    let pdf = btctax_forms::fill_form_8995(&lines, &kitchen_sink_header(), 2024).unwrap();
 
     let g = |fqn: &str| tv(&pdf, fqn);
     assert_eq!(
@@ -241,7 +255,7 @@ fn f8995_fills_the_printed_chain_and_reads_back() {
 #[test]
 fn f8995_loss_carryforward_prints_positive_magnitudes() {
     let lines = form_8995_lines(dec!(10000), dec!(15000), dec!(100000), Usd::ZERO).unwrap();
-    let pdf = btctax_forms::fill_form_8995(&lines, 2024).unwrap();
+    let pdf = btctax_forms::fill_form_8995(&lines, &kitchen_sink_header(), 2024).unwrap();
 
     let g = |fqn: &str| tv(&pdf, fqn);
     let l7 = g("topmostSubform[0].Page1[0].f1_23[0]").unwrap();
@@ -269,7 +283,7 @@ fn f8995_loss_carryforward_prints_positive_magnitudes() {
 fn f8995_refuses_a_negative_in_a_parenthesized_cell() {
     let mut lines = form_8995_lines(dec!(10000), dec!(15000), dec!(100000), Usd::ZERO).unwrap();
     lines.line17 = dec!(-5000); // what a naive "carryforward is a loss ⇒ negative" refactor would do
-    let err = fill_form_8995_with_map(&lines, &Form8995Map::ty2024())
+    let err = fill_form_8995_with_map(&lines, &kitchen_sink_header(), &Form8995Map::ty2024())
         .expect_err("a negative in a paren box must fail closed");
     assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
     assert!(format!("{err}").contains("line 17"));
@@ -286,8 +300,8 @@ fn f8959_cross_column_swap_fails_closed() {
 
     let mut map = Form8959Map::ty2024();
     std::mem::swap(&mut map.line7, &mut map.line8);
-    let err =
-        fill_form_8959_with_map(&lines, &map).expect_err("a cross-column swap must fail closed");
+    let err = fill_form_8959_with_map(&lines, &kitchen_sink_header(), &map)
+        .expect_err("a cross-column swap must fail closed");
     assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
 }
 
@@ -308,8 +322,8 @@ fn f8960_same_column_swap_fails_closed_on_descent() {
 
     let mut map = Form8960Map::ty2024();
     std::mem::swap(&mut map.line13, &mut map.line15); // both MID; y-order now inverted
-    let err =
-        fill_form_8960_with_map(&lines, &map).expect_err("a same-column swap must fail closed");
+    let err = fill_form_8960_with_map(&lines, &kitchen_sink_header(), &map)
+        .expect_err("a same-column swap must fail closed");
     assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
 }
 
@@ -333,16 +347,20 @@ fn full_return_form_fills_are_byte_deterministic() {
     let l95 = form_8995_lines(dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
 
     for _ in 0..2 {
-        let a = btctax_forms::fill_form_8959(&l59, 2024).unwrap().unwrap();
-        let b = btctax_forms::fill_form_8959(&l59, 2024).unwrap().unwrap();
+        let a = btctax_forms::fill_form_8959(&l59, &kitchen_sink_header(), 2024)
+            .unwrap()
+            .unwrap();
+        let b = btctax_forms::fill_form_8959(&l59, &kitchen_sink_header(), 2024)
+            .unwrap()
+            .unwrap();
         assert_eq!(hex(&Sha256::digest(&a)), hex(&Sha256::digest(&b)), "8959");
 
-        let a = btctax_forms::fill_form_8960(&l60, 2024).unwrap();
-        let b = btctax_forms::fill_form_8960(&l60, 2024).unwrap();
+        let a = btctax_forms::fill_form_8960(&l60, &kitchen_sink_header(), 2024).unwrap();
+        let b = btctax_forms::fill_form_8960(&l60, &kitchen_sink_header(), 2024).unwrap();
         assert_eq!(hex(&Sha256::digest(&a)), hex(&Sha256::digest(&b)), "8960");
 
-        let a = btctax_forms::fill_form_8995(&l95, 2024).unwrap();
-        let b = btctax_forms::fill_form_8995(&l95, 2024).unwrap();
+        let a = btctax_forms::fill_form_8995(&l95, &kitchen_sink_header(), 2024).unwrap();
+        let b = btctax_forms::fill_form_8995(&l95, &kitchen_sink_header(), 2024).unwrap();
         assert_eq!(hex(&Sha256::digest(&a)), hex(&Sha256::digest(&b)), "8995");
     }
 }
@@ -354,7 +372,7 @@ fn full_return_forms_refuse_unsupported_years() {
     let l95 = form_8995_lines(dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
     for year in [2017, 2023, 2025] {
         assert!(matches!(
-            btctax_forms::fill_form_8995(&l95, year),
+            btctax_forms::fill_form_8995(&l95, &kitchen_sink_header(), year),
             Err(FormsError::UnsupportedYear(_))
         ));
     }
@@ -375,7 +393,7 @@ fn schedule_2_fills_part_ii_and_leaves_part_i_blank() {
         line12: dec!(1406),
         line21: dec!(31970), // 29,871 + 693 + 1,406 — sums the PRINTED lines
     };
-    let pdf = btctax_forms::fill_schedule_2(&lines, 2024).unwrap();
+    let pdf = btctax_forms::fill_schedule_2(&lines, &kitchen_sink_header(), 2024).unwrap();
 
     let g = |fqn: &str| tv(&pdf, fqn);
     assert_eq!(g("form1[0].Page1[0].f1_14[0]").as_deref(), Some("29871")); // L4
@@ -400,7 +418,7 @@ fn schedule_3_fills_ftc_and_excess_ss_and_leaves_omitted_credits_blank() {
         line11: dec!(1235),
         line15: dec!(1235),
     };
-    let pdf = btctax_forms::fill_schedule_3(&lines, 2024).unwrap();
+    let pdf = btctax_forms::fill_schedule_3(&lines, &kitchen_sink_header(), 2024).unwrap();
 
     let g = |fqn: &str| tv(&pdf, fqn);
     assert_eq!(
@@ -450,8 +468,8 @@ fn schedule_3_same_column_swap_fails_closed() {
     };
     let mut map = Schedule3Map::ty2024();
     std::mem::swap(&mut map.line1, &mut map.line15);
-    let err =
-        fill_schedule_3_with_map(&lines, &map).expect_err("a same-column swap must fail closed");
+    let err = fill_schedule_3_with_map(&lines, &kitchen_sink_header(), &map)
+        .expect_err("a same-column swap must fail closed");
     assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
 }
 
@@ -485,7 +503,7 @@ fn sch_a_lines() -> ScheduleALines {
 
 #[test]
 fn schedule_a_fills_the_printed_chain_and_reads_back() {
-    let pdf = btctax_forms::fill_schedule_a(&sch_a_lines(), 2024).unwrap();
+    let pdf = btctax_forms::fill_schedule_a(&sch_a_lines(), &kitchen_sink_header(), 2024).unwrap();
     let g = |fqn: &str| tv(&pdf, fqn);
 
     assert_eq!(
@@ -550,7 +568,7 @@ fn schedule_a_fills_the_printed_chain_and_reads_back() {
 fn schedule_a_agi_inline_column_swap_fails_closed() {
     let mut map = ScheduleAMap::ty2024();
     std::mem::swap(&mut map.line1, &mut map.line2);
-    let err = fill_schedule_a_with_map(&sch_a_lines(), &map)
+    let err = fill_schedule_a_with_map(&sch_a_lines(), &kitchen_sink_header(), &map)
         .expect_err("swapping the AGI-inline cell with a MID cell must fail closed");
     assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
 }
@@ -573,7 +591,7 @@ fn schedule_1_fills_both_parts_across_two_pages() {
         line21: dec!(2500),  // student-loan interest
         line26: dec!(5475),  // 2,825 + 150 + 2,500 → 1040 L10
     };
-    let pdf = btctax_forms::fill_schedule_1(&lines, 2024).unwrap();
+    let pdf = btctax_forms::fill_schedule_1(&lines, &kitchen_sink_header(), 2024).unwrap();
     let g = |fqn: &str| tv(&pdf, fqn);
 
     // Part I — page 1.
@@ -631,7 +649,7 @@ fn schedule_c_fills_the_printed_chain_and_reads_back() {
         line29: dec!(52000),
         line31: dec!(52000),
     };
-    let pdf = btctax_forms::fill_schedule_c(&lines, 2024).unwrap();
+    let pdf = btctax_forms::fill_schedule_c(&lines, &kitchen_sink_header(), 2024).unwrap();
     let g = |fqn: &str| tv(&pdf, fqn);
 
     assert_eq!(
@@ -705,7 +723,7 @@ fn schedule_c_same_column_swap_fails_closed() {
     };
     let mut map = ScheduleCMap::ty2024();
     std::mem::swap(&mut map.line1, &mut map.line31); // same column, y-order inverted
-    let err = fill_schedule_c_with_map(&lines, &map)
+    let err = fill_schedule_c_with_map(&lines, &kitchen_sink_header(), &map)
         .expect_err("a same-column swap must fail closed on the descent leg");
     assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
 }
@@ -747,7 +765,7 @@ fn schedule_b_lists_payers_and_totals_the_printed_rows() {
         false,
         false,
     );
-    let pdf = btctax_forms::fill_schedule_b(&lines, 2024).unwrap();
+    let pdf = btctax_forms::fill_schedule_b(&lines, &kitchen_sink_header(), 2024).unwrap();
     let g = |fqn: &str| tv(&pdf, fqn);
 
     // ★ Part I row 1's payer lives under Line1_ReadOrder — a parent no other row has.
@@ -814,7 +832,12 @@ fn schedule_b_lists_payers_and_totals_the_printed_rows() {
 /// the honest output; a guessed one would not be.
 #[test]
 fn schedule_b_part3_transcribes_the_filers_own_answers_and_never_guesses_the_fbar() {
-    let yes = btctax_forms::fill_schedule_b(&sch_b(vec![], vec![], true, false), 2024).unwrap();
+    let yes = btctax_forms::fill_schedule_b(
+        &sch_b(vec![], vec![], true, false),
+        &kitchen_sink_header(),
+        2024,
+    )
+    .unwrap();
     let doc = load(&yes).unwrap();
     let idx = index(&collect_fields(&doc).unwrap());
 
@@ -842,7 +865,12 @@ fn schedule_b_part3_transcribes_the_filers_own_answers_and_never_guesses_the_fba
     assert_eq!(tv(&yes, "topmostSubform[0].Page1[0].f1_65[0]"), None);
 
     // The opposite answers flip the boxes — the filer's declaration is what lands on the form.
-    let no = btctax_forms::fill_schedule_b(&sch_b(vec![], vec![], false, true), 2024).unwrap();
+    let no = btctax_forms::fill_schedule_b(
+        &sch_b(vec![], vec![], false, true),
+        &kitchen_sink_header(),
+        2024,
+    )
+    .unwrap();
     let doc2 = load(&no).unwrap();
     let idx2 = index(&collect_fields(&doc2).unwrap());
     assert_eq!(
@@ -865,8 +893,12 @@ fn schedule_b_refuses_more_payers_than_the_form_has_rows() {
     let fifteen: Vec<ScheduleBRow> = (0..15)
         .map(|i| row(&format!("Bank {i}"), dec!(100)))
         .collect();
-    let err = btctax_forms::fill_schedule_b(&sch_b(fifteen, vec![], false, false), 2024)
-        .expect_err("15 interest payers must not fit in 14 rows");
+    let err = btctax_forms::fill_schedule_b(
+        &sch_b(fifteen, vec![], false, false),
+        &kitchen_sink_header(),
+        2024,
+    )
+    .expect_err("15 interest payers must not fit in 14 rows");
     assert!(format!("{err}").contains("Part I holds 14"), "{err}");
 
     // …but exactly 14 fits, and 15 dividend payers fit Part II (which genuinely has one more row).
@@ -876,8 +908,12 @@ fn schedule_b_refuses_more_payers_than_the_form_has_rows() {
     let fifteen_div: Vec<ScheduleBRow> = (0..15)
         .map(|i| row(&format!("Fund {i}"), dec!(200)))
         .collect();
-    let pdf = btctax_forms::fill_schedule_b(&sch_b(fourteen, fifteen_div, false, false), 2024)
-        .expect("14 interest + 15 dividend payers is exactly the form's capacity");
+    let pdf = btctax_forms::fill_schedule_b(
+        &sch_b(fourteen, fifteen_div, false, false),
+        &kitchen_sink_header(),
+        2024,
+    )
+    .expect("14 interest + 15 dividend payers is exactly the form's capacity");
     assert_eq!(
         tv(&pdf, "topmostSubform[0].Page1[0].f1_31[0]").as_deref(),
         Some("1400")
@@ -929,7 +965,7 @@ fn schedule_d_full_fills_the_lines_the_crypto_slice_omits() {
         dec!(3000), // line 13 — capital gain distributions
         ScheduleDRouting::BothGains,
     );
-    let pdf = btctax_forms::fill_schedule_d_full(&lines, 2024).unwrap();
+    let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024).unwrap();
     let g = |fqn: &str| tv(&pdf, fqn);
 
     assert_eq!(
@@ -972,6 +1008,7 @@ fn schedule_d_full_routing_both_gains() {
             Usd::ZERO,
             ScheduleDRouting::BothGains,
         ),
+        &kitchen_sink_header(),
         2024,
     )
     .unwrap();
@@ -1030,6 +1067,7 @@ fn schedule_d_full_routing_short_gain_long_loss() {
             Usd::ZERO,
             ScheduleDRouting::ShortGainLongLoss { line22_yes: true },
         ),
+        &kitchen_sink_header(),
         2024,
     )
     .unwrap();
@@ -1089,6 +1127,7 @@ fn schedule_d_full_routing_net_loss() {
                 line22_yes: false,
             },
         ),
+        &kitchen_sink_header(),
         2024,
     )
     .unwrap();
@@ -1134,6 +1173,7 @@ fn schedule_d_full_routing_zero() {
             Usd::ZERO,
             ScheduleDRouting::Zero { line22_yes: true },
         ),
+        &kitchen_sink_header(),
         2024,
     )
     .unwrap();
@@ -1174,8 +1214,12 @@ fn schedule_d_full_refuses_a_negative_in_a_parenthesized_cell() {
         ScheduleDRouting::BothGains,
     );
     lines.line14 = dec!(-500);
-    let err = fill_schedule_d_full_with_map(&lines, &btctax_forms::ScheduleDMap::ty2024())
-        .expect_err("a negative in a paren box must fail closed");
+    let err = fill_schedule_d_full_with_map(
+        &lines,
+        &kitchen_sink_header(),
+        &btctax_forms::ScheduleDMap::ty2024(),
+    )
+    .expect_err("a negative in a paren box must fail closed");
     assert!(format!("{err}").contains("line 14"), "{err}");
 }
 
@@ -1221,7 +1265,13 @@ fn f1040() -> Form1040Lines {
 
 #[test]
 fn form_1040_full_fills_every_line_and_reads_back() {
-    let pdf = btctax_forms::fill_form_1040_full(&f1040(), FilingStatus::Single, 2024).unwrap();
+    let pdf = btctax_forms::fill_form_1040_full(
+        &f1040(),
+        &kitchen_sink_header(),
+        FilingStatus::Single,
+        2024,
+    )
+    .unwrap();
     let g = |fqn: &str| tv(&pdf, fqn);
 
     // Page 1 — income → taxable income.
@@ -1330,7 +1380,8 @@ fn form_1040_full_filing_status_boxes_do_not_collide() {
         (FilingStatus::Mfs, MFS, "4"),
         (FilingStatus::Qss, QSS, "5"),
     ] {
-        let pdf = btctax_forms::fill_form_1040_full(&f1040(), status, 2024).unwrap();
+        let pdf = btctax_forms::fill_form_1040_full(&f1040(), &kitchen_sink_header(), status, 2024)
+            .unwrap();
         let doc = load(&pdf).unwrap();
         let idx = index(&collect_fields(&doc).unwrap());
 
@@ -1358,7 +1409,13 @@ fn form_1040_full_filing_status_boxes_do_not_collide() {
 fn form_1040_full_line7_loss_prints_a_leading_minus() {
     let mut lines = f1040();
     lines.line7 = dec!(-3000); // the §1211(b)-limited loss
-    let pdf = btctax_forms::fill_form_1040_full(&lines, FilingStatus::Single, 2024).unwrap();
+    let pdf = btctax_forms::fill_form_1040_full(
+        &lines,
+        &kitchen_sink_header(),
+        FilingStatus::Single,
+        2024,
+    )
+    .unwrap();
     let v = tv(
         &pdf,
         "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_52[0]",
@@ -1377,8 +1434,9 @@ fn form_1040_full_line7_loss_prints_a_leading_minus() {
 fn form_1040_full_same_column_swap_fails_closed() {
     let mut map = btctax_forms::Form1040Map::ty2024();
     std::mem::swap(&mut map.line9, &mut map.line15);
-    let err = fill_form_1040_full_with_map(&f1040(), FilingStatus::Single, &map)
-        .expect_err("a same-column swap must fail closed");
+    let err =
+        fill_form_1040_full_with_map(&f1040(), &kitchen_sink_header(), FilingStatus::Single, &map)
+            .expect_err("a same-column swap must fail closed");
     assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
 }
 
@@ -1411,4 +1469,183 @@ fn the_1040_ssn_cells_are_nine_character_comb_cells() {
     );
     // A name cell is NOT length-capped — only the combs are.
     assert_eq!(by("topmostSubform[0].Page1[0].f1_04[0]"), None);
+}
+
+// ── Identity headers (p6-form-identity-header, P6.2) ────────────────────────────────────────────
+
+/// ★ Every schedule carries the taxpayer's name and SSN. Without them the money lines are right and
+/// the form is still not FILABLE — an unnamed Schedule C is not a return.
+///
+/// The SSN is written **hyphenated** here because these cells declare `/MaxLen 11`, and it is written
+/// as bare digits on the 1040 because that form's cells declare `/MaxLen 9`. Same value, two
+/// renderings, each decided by the form itself — never extrapolated from a sibling form.
+#[test]
+fn every_schedule_carries_the_name_and_ssn_header() {
+    let h = kitchen_sink_header();
+    let f8959 = form_8959_lines(
+        FilingStatus::Mfj,
+        dec!(280000),
+        dec!(4240),
+        Some(&se_mining_60k_mfj()),
+    );
+    let pdf = fill_form_8959_with_map(&f8959, &h, &Form8959Map::ty2024())
+        .unwrap()
+        .expect("the form is required");
+
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_1[0]").as_deref(),
+        Some("John Doe & Jane Doe"),
+        "the joint name line"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_2[0]").as_deref(),
+        Some("123-45-6789"),
+        "hyphenated — this cell is /MaxLen 11"
+    );
+}
+
+/// ★ The GATING KAT (`p6-aged-blind-checkboxes-missing`). A nonstandard standard deduction is validated
+/// by the IRS by COUNTING the checked §63(f) boxes — so a 1040 whose L12 carries the aged/blind addition
+/// with ZERO boxes ticked fails the Service's own arithmetic cross-check. Here: taxpayer aged + blind,
+/// spouse blind ⇒ THREE boxes, and all three must be on the filed page.
+#[test]
+fn the_1040_prints_the_aged_blind_boxes_its_line_12_depends_on() {
+    use btctax_core::tax::packet::ReturnHeader;
+    use btctax_core::tax::return_inputs::{Person, ReturnInputs};
+
+    let mut ri = ReturnInputs {
+        filing_status: FilingStatus::Mfj,
+        ..Default::default()
+    };
+    ri.header.taxpayer = Person {
+        first_name: "John".into(),
+        last_name: "Doe".into(),
+        ssn: "123456789".into(),
+        date_of_birth: Some(time::macros::date!(1955 - 03 - 02)), // 65+
+        blind: true,
+        ..Default::default()
+    };
+    ri.header.spouse = Some(Person {
+        first_name: "Jane".into(),
+        last_name: "Doe".into(),
+        ssn: "987654321".into(),
+        blind: true,
+        ..Default::default()
+    });
+    let h = ReturnHeader::build(&ri, 2024).unwrap();
+    assert_eq!(h.aged_blind.count(), 3, "the fixture claims three boxes");
+
+    let pdf = btctax_forms::fill_form_1040_full(&f1040(), &h, FilingStatus::Mfj, 2024).unwrap();
+    let on = |fqn: &str| box_on(&pdf, fqn);
+
+    assert!(
+        on("topmostSubform[0].Page1[0].c1_9[0]"),
+        "taxpayer born before 1960"
+    );
+    assert!(on("topmostSubform[0].Page1[0].c1_10[0]"), "taxpayer blind");
+    assert!(
+        !on("topmostSubform[0].Page1[0].c1_11[0]"),
+        "spouse is NOT aged"
+    );
+    assert!(on("topmostSubform[0].Page1[0].c1_12[0]"), "spouse blind");
+}
+
+/// The 1040 carries the taxpayer's identity: names, SSN (BARE digits — these cells are /MaxLen 9 combs,
+/// unlike the schedules' /MaxLen 11), address, and the dependents rows.
+#[test]
+fn the_1040_prints_names_ssns_address_and_dependents() {
+    let h = kitchen_sink_header();
+    let pdf = btctax_forms::fill_form_1040_full(&f1040(), &h, FilingStatus::Mfj, 2024).unwrap();
+
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_04[0]").as_deref(),
+        Some("John")
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_05[0]").as_deref(),
+        Some("Doe")
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_06[0]").as_deref(),
+        Some("123456789"),
+        "bare digits — this cell is a 9-character comb"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_09[0]").as_deref(),
+        Some("987654321")
+    );
+    assert_eq!(
+        tv(
+            &pdf,
+            "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_10[0]"
+        )
+        .as_deref(),
+        Some("100 Main St")
+    );
+    // The dependent's row: name, SSN (digits), relationship — and NO credit box (v1 omits CTC/ODC).
+    assert_eq!(
+        tv(
+            &pdf,
+            "topmostSubform[0].Page1[0].Table_Dependents[0].Row1[0].f1_20[0]"
+        )
+        .as_deref(),
+        Some("Sam Doe")
+    );
+    assert_eq!(
+        tv(
+            &pdf,
+            "topmostSubform[0].Page1[0].Table_Dependents[0].Row1[0].f1_21[0]"
+        )
+        .as_deref(),
+        Some("111223333")
+    );
+    assert!(
+        !box_on(&pdf, "topmostSubform[0].Page1[0].Table_Dependents[0].Row1[0].c1_14[0]"),
+        "the CTC box stays UNCHECKED — v1's L19 is zero, and a ticked credit box beside a zero credit \
+         is a form contradicting itself"
+    );
+}
+
+/// More dependents than the form physically holds REFUSES rather than printing the first four. The
+/// IRS's own remedy is a continuation statement, which is a synthetic page generator v1 does not have
+/// (same posture as Schedule B's >14-payer refusal). Printing four of five would silently file a return
+/// that misstates the household.
+#[test]
+fn more_dependents_than_the_form_holds_fails_closed() {
+    use btctax_core::tax::packet::ReturnHeader;
+    use btctax_core::tax::return_inputs::{Dependent, Person, ReturnInputs};
+
+    let mut ri = ReturnInputs {
+        filing_status: FilingStatus::Single,
+        ..Default::default()
+    };
+    ri.header.taxpayer = Person {
+        first_name: "John".into(),
+        last_name: "Doe".into(),
+        ssn: "123456789".into(),
+        ..Default::default()
+    };
+    ri.header.dependents = (0..5)
+        .map(|i| Dependent {
+            name: format!("Kid {i}"),
+            ssn: format!("11122333{i}"),
+            relationship: "Child".into(),
+            ..Default::default()
+        })
+        .collect();
+    let h = ReturnHeader::build(&ri, 2024).unwrap();
+
+    let err = btctax_forms::fill_form_1040_full(&f1040(), &h, FilingStatus::Single, 2024)
+        .expect_err("five dependents must not silently become four");
+    assert!(
+        matches!(
+            err,
+            FormsError::Overflow {
+                rows: 5,
+                capacity: 4,
+                ..
+            }
+        ),
+        "expected a capacity refusal, got {err:?}"
+    );
 }

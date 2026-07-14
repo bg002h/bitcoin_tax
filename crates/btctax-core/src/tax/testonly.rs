@@ -278,6 +278,13 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
     (ri, state)
 }
 
+/// The kitchen sink's [`ReturnHeader`](crate::tax::packet::ReturnHeader) — for the forms crate's
+/// identity KATs, which need a header but not a whole return.
+pub fn kitchen_sink_header() -> crate::tax::packet::ReturnHeader {
+    let (ri, _) = kitchen_sink_household();
+    crate::tax::packet::ReturnHeader::build(&ri, 2024).expect("the fixture's SSNs are canonical")
+}
+
 /// The opposite pole: a plain Single W-2 household that files a **1040 and nothing else**. Every
 /// optional form must be absent — the packet's `None` arms are as load-bearing as its `Some` ones (an
 /// over-eager `Some` staples a blank schedule to the return).

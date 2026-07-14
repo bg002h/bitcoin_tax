@@ -22,11 +22,12 @@
 //! the `FbarFinCen` advisory tells the filer in terms that they must decide it themselves. An
 //! incomplete Part III is the honest output here; a guessed one would not be.
 
-use crate::cells::push_money;
+use crate::cells::{push_identity, push_money};
 use crate::error::FormsError;
 use crate::map::ScheduleBMap;
 use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
+use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::tax::printed::ScheduleBLines;
 
 /// Logical Schedule B columns.
@@ -49,6 +50,7 @@ const GRP_PAYERS: u32 = 1;
 /// is not an option.
 pub fn fill_schedule_b_with_map(
     lines: &ScheduleBLines,
+    header: &ReturnHeader,
     map: &ScheduleBMap,
 ) -> Result<Vec<u8>, FormsError> {
     if lines.part1_rows.len() > map.part1_rows.len() {
@@ -153,7 +155,18 @@ pub fn fill_schedule_b_with_map(
     }
 
     let mut doc = pdf::load(pdf::schedule_b_pdf(map.year)?)?;
-    let index = pdf::index(&pdf::collect_fields(&doc)?);
+    // Identity header (P6.2): `push_identity` reads the SSN cell's own /MaxLen to decide
+    // hyphenated-vs-digits, so it needs the blank PDF's fields.
+    let blank_fields = pdf::collect_fields(&doc)?;
+    push_identity(
+        &mut writes,
+        &mut placements,
+        &map.identity,
+        &header.name_line,
+        &header.taxpayer.ssn,
+        &blank_fields,
+    )?;
+    let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
     pdf::strip_nondeterminism(&mut doc);

@@ -41,3 +41,10 @@ line20 = "topmostSubform[0].Page1[0].f1_22[0]"  # "Enter the amount from line 1"
 line21 = "topmostSubform[0].Page1[0].f1_23[0]"  # "Multiply line 20 by 1.45% (0.0145)"
 line22 = "topmostSubform[0].Page1[0].f1_24[0]"  # "Subtract line 21 from line 19. If zero or less, enter -0-"
 line24 = "topmostSubform[0].Page1[0].f1_26[0]"  # "Total ... Add lines 22 and 23"
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
+#    /MaxLen 11, so it takes the HYPHENATED form (the 1040's own SSN cells are /MaxLen 9 and take
+#    bare digits — the forms genuinely differ, so `push_identity` reads each cell's capacity).
+[identity]
+name = "topmostSubform[0].Page1[0].f1_1[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_2[0]"

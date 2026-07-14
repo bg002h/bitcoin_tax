@@ -14,11 +14,12 @@
 //! dividends, so there is no business to list. Lines 2/4/5 ARE written, at zero, because the form's
 //! own arithmetic adds them (line 10 = line 5 + line 9).
 
-use crate::cells::push_money;
+use crate::cells::{push_identity, push_money};
 use crate::error::FormsError;
 use crate::map::Form8995Map;
 use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
+use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::tax::qbi::Form8995Lines;
 use btctax_core::Usd;
 
@@ -59,6 +60,7 @@ fn assert_paren_magnitudes(lines: &Form8995Lines) -> Result<(), FormsError> {
 /// geometric verifier (a mis-mapped cell FAILS CLOSED).
 pub fn fill_form_8995_with_map(
     lines: &Form8995Lines,
+    header: &ReturnHeader,
     map: &Form8995Map,
 ) -> Result<Vec<u8>, FormsError> {
     assert_paren_magnitudes(lines)?;
@@ -96,7 +98,18 @@ pub fn fill_form_8995_with_map(
     }
 
     let mut doc = pdf::load(pdf::f8995_pdf(map.year)?)?;
-    let index = pdf::index(&pdf::collect_fields(&doc)?);
+    // Identity header (P6.2): `push_identity` reads the SSN cell's own /MaxLen to decide
+    // hyphenated-vs-digits, so it needs the blank PDF's fields.
+    let blank_fields = pdf::collect_fields(&doc)?;
+    push_identity(
+        &mut writes,
+        &mut placements,
+        &map.identity,
+        &header.name_line,
+        &header.taxpayer.ssn,
+        &blank_fields,
+    )?;
+    let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
     pdf::strip_nondeterminism(&mut doc);

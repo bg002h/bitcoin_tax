@@ -10,11 +10,12 @@
 //! them and either reject a correct map or, worse, accept a wrong one. `push_money`'s descent key is
 //! `(group, ordinal)`, so the page index is the group.
 
-use crate::cells::{page_of, push_money};
+use crate::cells::{page_of, push_identity, push_money};
 use crate::error::FormsError;
 use crate::map::{Schedule1Map, Schedule2Map, Schedule3Map};
 use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
+use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::tax::printed::{Schedule1Lines, Schedule2Lines, Schedule3Lines};
 use btctax_core::Usd;
 
@@ -30,6 +31,7 @@ const COL_AMOUNT: usize = 1;
 /// the geometric verifier (a mis-mapped cell FAILS CLOSED).
 pub fn fill_schedule_2_with_map(
     lines: &Schedule2Lines,
+    header: &ReturnHeader,
     map: &Schedule2Map,
 ) -> Result<Vec<u8>, FormsError> {
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
@@ -54,7 +56,17 @@ pub fn fill_schedule_2_with_map(
     }
 
     let mut doc = pdf::load(pdf::schedule_2_pdf(map.year)?)?;
-    let index = pdf::index(&pdf::collect_fields(&doc)?);
+    // Identity header (P6.2) — the SSN rendering follows the cell's own /MaxLen.
+    let blank_fields = pdf::collect_fields(&doc)?;
+    push_identity(
+        &mut writes,
+        &mut placements,
+        &map.identity,
+        &header.name_line,
+        &header.taxpayer.ssn,
+        &blank_fields,
+    )?;
+    let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
     pdf::strip_nondeterminism(&mut doc);
@@ -69,6 +81,7 @@ pub fn fill_schedule_2_with_map(
 /// Fill Schedule 3 from the core-derived printed chain. Single page, so one descent group.
 pub fn fill_schedule_3_with_map(
     lines: &Schedule3Lines,
+    header: &ReturnHeader,
     map: &Schedule3Map,
 ) -> Result<Vec<u8>, FormsError> {
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
@@ -87,7 +100,17 @@ pub fn fill_schedule_3_with_map(
     }
 
     let mut doc = pdf::load(pdf::schedule_3_pdf(map.year)?)?;
-    let index = pdf::index(&pdf::collect_fields(&doc)?);
+    // Identity header (P6.2) — the SSN rendering follows the cell's own /MaxLen.
+    let blank_fields = pdf::collect_fields(&doc)?;
+    push_identity(
+        &mut writes,
+        &mut placements,
+        &map.identity,
+        &header.name_line,
+        &header.taxpayer.ssn,
+        &blank_fields,
+    )?;
+    let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
     pdf::strip_nondeterminism(&mut doc);
@@ -105,6 +128,7 @@ pub fn fill_schedule_3_with_map(
 /// exactly as on Schedule 2. Line 8v is the only cell in the MID column; the rest are AMOUNT.
 pub fn fill_schedule_1_with_map(
     lines: &Schedule1Lines,
+    header: &ReturnHeader,
     map: &Schedule1Map,
 ) -> Result<Vec<u8>, FormsError> {
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
@@ -139,7 +163,17 @@ pub fn fill_schedule_1_with_map(
     }
 
     let mut doc = pdf::load(pdf::schedule_1_pdf(map.year)?)?;
-    let index = pdf::index(&pdf::collect_fields(&doc)?);
+    // Identity header (P6.2) — the SSN rendering follows the cell's own /MaxLen.
+    let blank_fields = pdf::collect_fields(&doc)?;
+    push_identity(
+        &mut writes,
+        &mut placements,
+        &map.identity,
+        &header.name_line,
+        &header.taxpayer.ssn,
+        &blank_fields,
+    )?;
+    let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
     pdf::strip_nondeterminism(&mut doc);

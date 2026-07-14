@@ -24,11 +24,12 @@
 //! ([`ScheduleDRouting`]) — this module only transcribes the branch it is given, so an impossible
 //! combination cannot be filled.
 
-use crate::cells::push_money;
+use crate::cells::{push_identity, push_money};
 use crate::error::FormsError;
 use crate::map::{MoneyCell, ScheduleDMap};
 use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
+use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::tax::printed::{ScheduleDLines, ScheduleDRouting};
 use btctax_core::Usd;
 
@@ -82,6 +83,7 @@ fn need<'a, T>(cell: &'a Option<T>, what: &str, year: i32) -> Result<&'a T, Form
 /// The serialized bytes are read back through the geometric verifier (a mis-mapped cell FAILS CLOSED).
 pub fn fill_schedule_d_full_with_map(
     lines: &ScheduleDLines,
+    header: &ReturnHeader,
     map: &ScheduleDMap,
 ) -> Result<Vec<u8>, FormsError> {
     assert_paren_magnitudes(lines)?;
@@ -257,7 +259,25 @@ pub fn fill_schedule_d_full_with_map(
     }
 
     let mut doc = pdf::load(pdf::schedule_d_pdf(map.year)?)?;
-    let index = pdf::index(&pdf::collect_fields(&doc)?);
+    let blank_fields = pdf::collect_fields(&doc)?;
+    // The Schedule D map is SHARED with the crypto slice, whose 2017/2025 editions carry no verified
+    // identity FQNs — hence `Option`. The FULL return may not emit an unnamed Schedule D, so a map
+    // without an [identity] block fails closed here rather than producing one.
+    let identity = map.identity.as_ref().ok_or_else(|| {
+        FormsError::Geometry(format!(
+            "the {} Schedule D map has no [identity] block — a full return cannot file an unnamed schedule",
+            map.year
+        ))
+    })?;
+    push_identity(
+        &mut writes,
+        &mut placements,
+        identity,
+        &header.name_line,
+        &header.taxpayer.ssn,
+        &blank_fields,
+    )?;
+    let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
     pdf::strip_nondeterminism(&mut doc);

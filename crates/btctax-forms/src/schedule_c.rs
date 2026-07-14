@@ -14,11 +14,12 @@
 //! each amount box), not the gutter labels. Line 31 is the figure that feeds both Schedule 1 line 3
 //! and Schedule SE line 2, so a mis-map there is wrong income AND wrong self-employment tax.
 
-use crate::cells::push_money;
+use crate::cells::{push_identity, push_money};
 use crate::error::FormsError;
 use crate::map::ScheduleCMap;
 use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
+use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::tax::printed::ScheduleCLines;
 use btctax_core::Usd;
 
@@ -30,6 +31,7 @@ const COL_AMOUNT: usize = 0;
 /// the geometric verifier (a mis-mapped cell FAILS CLOSED).
 pub fn fill_schedule_c_with_map(
     lines: &ScheduleCLines,
+    header: &ReturnHeader,
     map: &ScheduleCMap,
 ) -> Result<Vec<u8>, FormsError> {
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
@@ -56,7 +58,26 @@ pub fn fill_schedule_c_with_map(
     }
 
     let mut doc = pdf::load(pdf::schedule_c_pdf(map.year)?)?;
-    let index = pdf::index(&pdf::collect_fields(&doc)?);
+    let blank_fields = pdf::collect_fields(&doc)?;
+    // ★ Schedule C's header is "Name of PROPRIETOR" — the business OWNER, with THAT person's SSN. On a
+    // joint return with a spouse-owned business this is the SPOUSE, not the joint name line. Core
+    // decides who it is (`ReturnHeader::proprietor`); the filler only transcribes. A Schedule C with no
+    // proprietor is unfilable, so it fails closed rather than borrow the taxpayer's name.
+    let proprietor = header.proprietor.as_ref().ok_or_else(|| {
+        FormsError::Geometry(
+            "Schedule C has no proprietor — the return names no one to file the business under"
+                .into(),
+        )
+    })?;
+    push_identity(
+        &mut writes,
+        &mut placements,
+        &map.identity,
+        &proprietor.full_name(),
+        &proprietor.ssn,
+        &blank_fields,
+    )?;
+    let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;
     pdf::strip_nondeterminism(&mut doc);

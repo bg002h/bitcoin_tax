@@ -44,3 +44,10 @@ line14 = "topmostSubform[0].Page1[0].f1_24[0]"   # "Threshold based on filing st
 line15 = "topmostSubform[0].Page1[0].f1_25[0]"   # "Subtract line 14 from line 13. If zero or less, enter -0-"
 line16 = "topmostSubform[0].Page1[0].f1_26[0]"   # "Enter the smaller of line 12 or line 15"
 line17 = "topmostSubform[0].Page1[0].f1_27[0]"   # "Multiply line 16 by 3.8% (0.038)" → Schedule 2 line 12
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
+#    /MaxLen 11, so it takes the HYPHENATED form (the 1040's own SSN cells are /MaxLen 9 and take
+#    bare digits — the forms genuinely differ, so `push_identity` reads each cell's capacity).
+[identity]
+name = "topmostSubform[0].Page1[0].f1_1[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
