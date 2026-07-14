@@ -94,7 +94,13 @@ Twenty-one input-screenable refusals, classified:
 |---|---|---|---|
 | **INVALID** | the data cannot be true | `SsnMalformed` (non-empty only) · `NegativeAmount` · `SpouseOwnerWithoutJointReturn` · `InconsistentDividendSubset` · `SaltSalesTaxWithoutElection` | **never** |
 | **UNANSWERED** | a required question is `None` | `ScheduleBPart3Unanswered` · `MfsSpouseItemizeUnknown` · `ScheduleCNoBusinessDescription` | never (§3.2) |
-| **UNSUPPORTED** | the data is **TRUE**; btctax's scope is short | `HsaPresent` · `IraDeductionClaimed` · `AllocatedTips` · `ForeignTrust` · `ExcessElectiveDeferral` · `KiddieTax`… | never (§3.2) |
+| **UNSUPPORTED** | the data is **TRUE**; btctax's scope is short | `HsaPresent` · `IraDeductionClaimed` · `AllocatedTips` · `ForeignTrust` · `ExcessElectiveDeferral` · `NonPublicCharityContribution`… | never (§3.2) |
+
+*(`KiddieTax` is NOT here — it fires in `screen_compute_dependent`, not `screen_inputs`; r2's table
+misplaced it. `kind()` spans the whole enum, but import can only ever see the input-screenable variants,
+so its "nothing was stored" phrasing must never leak into report-time text. `SingleEmployerExcessSs`
+straddles INVALID/UNSUPPORTED and is filed as **UNSUPPORTED** — usually a typo, occasionally a true
+employer error whose remedy is off-return; either way uncomputable.)*
 
 **All three refuse to store** — because of §3.2, not because the data is bad. For UNSUPPORTED, the user's
 data is *correct* and refusing to store is the **kind** option: storing a truthful HSA would silently
@@ -133,15 +139,41 @@ cheap via `schemars`. Filed as an optional follow-on. Editor sugar, not architec
 Prints to **stdout**. No `--out`, no vault access. `btctax income template > inputs.toml` is the idiom,
 and piping keeps the command trivially safe: it cannot clobber a file or touch the encrypted store.
 
-### D-2 — The template carries EXAMPLE VALUES, and its PII placeholders must be values the packet REFUSES
-Every field present. Money demonstrated as a quoted string. Enum variants spelled inline at the field
-(note the trap: `filing_status` is CamelCase `"Mfj"`, `owner` is snake_case `"taxpayer"`). Refusal
-footguns annotated **at the field that trips them**.
+### D-2 — ★ The ASK-THE-USER field class. (r2's "every field present" created a CRITICAL.)
 
-⚠️ **No plausible dummy PII.** A syntactically valid example SSN (`"123-45-6789"`) canonicalizes, passes
-the screen, and **prints on the filed 1040** if a bulk-uncommenting user never runs `set-pii`. Placeholders
-must be values the packet **refuses** — empty strings (`SsnError::Missing` ⇒ fail-closed). A template that
-can produce a filed return bearing a fake SSN is a defect, not a convenience.
+r2 said "every field present" and §6's KAT C enforces completeness by parsing the template as
+`toml::Value` — **where comments are invisible.** Those two together **force the fail-loud tri-states to
+ship uncommented, with values.** A user who skims imports `foreign_accounts = false`, the
+`ScheduleBPart3Unanswered` guard **never fires**, and the filed Schedule B Part III prints **"No"**
+(`printed.rs:936` — `unwrap_or(false)`): **a foreign-account disclosure answer the user never gave**, with
+FBAR-grade stakes.
+
+★ **My completeness machinery structurally revoked the codebase's fail-loud guarantee, for exactly the
+fields it was built for. Visibility with a pre-filled answer is a guess wearing documentation's clothes.**
+
+**The ASK-THE-USER class** — fields where btctax must never supply the answer:
+
+| field | why it must not be pre-filled |
+|---|---|
+| `foreign_accounts`, `foreign_trust` | Schedule B Part III — a disclosure. `unwrap_or(false)` PRINTS the answer. |
+| `mfs_spouse_itemizes` | §63(c)(6) couples the spouses' choice |
+| `can_be_claimed_as_dependent_{taxpayer,spouse}` | see D-8 — silently understates tax |
+| `date_of_birth` | a *recent* dummy suppresses the §63(f) forfeit advisory; an *old* dummy GRANTS the aged add-on (understatement). `Option<Date>` has no refusable-but-parseable placeholder. |
+| `ip_pin` | a crown jewel (D-6) — must not appear in a plaintext template at all |
+
+**Rules:**
+1. Ask-the-user fields ship **COMMENTED**, each with a "you must answer this / delete the line if it does
+   not apply" note. Absent ⇒ the engine's own fail-loud fires, which is the whole point.
+2. **KAT C carries an EXPLICIT EXEMPTION LIST, asserted inside the KAT** — so the exemption set is itself
+   tested and cannot silently grow. A separate raw-text grep KAT requires each exempted field's commented
+   doc line to be present, so "commented" never becomes "missing".
+3. **Every MONEY placeholder is `"0"`.** KAT B forces each `Vec` to carry an exemplar row, so the template
+   ships a W-2, a gift, a carryover. A non-zero example (`amount = "2500"`) left unedited by the same
+   skimming user imports as a **phantom deduction** — an understatement no screen can see. `"0"` is inert
+   and still demonstrates the quoted-string format. Block headers instruct deleting inapplicable
+   `[[…]]` blocks.
+4. **No plausible dummy PII.** A valid-looking SSN canonicalizes, screens clean, and **prints on the filed
+   1040**. Placeholders must be values the packet **refuses** (empty ⇒ `SsnError::Missing`).
 
 ### D-3 — ★ Import REFUSES on a screen failure. SETTLED. (`--force` stores anyway.)
 **Settled by §3.2, not by whose data is "wrong":** a stored-but-refused row **takes the whole year down**,
@@ -186,6 +218,17 @@ Unrecoverable.
 2. **Field-level merge on the secret leaves** (SSNs, IP PIN): *absent or empty in the file* ⇒ **preserve
    the vault value**. *Non-empty in the file* ⇒ the file wins (the user chose TOML PII).
 3. An intentional clear goes through `set-pii` or `income clear` — **never** through an empty TOML string.
+4. ★ **STRUCTURE FOLLOWS THE FILE.** Leaf-preservation applies only *within* structure the file supplies.
+   A parent block absent from the file is **absent** — a removed `[header.spouse]` does not resurrect the
+   vault's spouse SSN.
+5. ★ **Collections merge by IDENTITY, never by INDEX.** `dependents` is a `Vec`, and every template
+   exemplar carries `ssn = ""` — so index-merging silently binds dependent A's vault SSN to dependent B
+   after a reorder or an inserted newborn: **a wrong SSN printed on a filed 1040**, which no screen can
+   detect. Merge dependents **by `name`**, and **refuse on ambiguity** (duplicate or renamed names ⇒ tell
+   the user to re-run `set-pii`).
+
+**KATs:** no header · partial header with `ssn = ""` (the template-placeholder state) · non-empty file SSN
+wins · both orderings · **spouse block removed** · **dependents reordered / inserted / removed**.
 
 **KATs (all four):** file supplies no header · file supplies a partial header with `ssn = ""` (the
 template-placeholder state — **this is the one r1 would have missed**) · a non-empty file SSN wins ·
@@ -226,7 +269,52 @@ created it.
   "two liabilities, silently different number" sin `resolve.rs` documents itself against.
 - **`income clear` warns and requires confirmation when the header carries secrets.** It is the tool's own
   advertised recovery from an uncomputable year (`resolve.rs:216–224`) — and after Cycle 2 it destroys
-  SSNs that exist nowhere else. A `--keep-identity` variant clears the money and preserves the header.
+  SSNs that exist nowhere else.
+- ★ **`--keep-identity` must leave the year FAIL-CLOSED.** r2 said it "clears the money and preserves the
+  header" — which leaves a **screen-clean, all-zero row at precedence 1**, so the year silently computes
+  from **zeros**, shadowing the stored `tax-profile` beneath it. That is verbatim the "two liabilities,
+  silently different number" sin this very decision refuses for `set-pii`, **reintroduced in the same
+  breath**. The kept row is therefore marked **incomplete** and REFUSES at resolve —
+  *"re-import your money TOML (`income template`)"* — until a real import replaces it.
+  **Silently-wrong is worse than down.**
+
+### D-8 — ★★ CRITICAL, IN SHIPPED CODE. The claimed-as-dependent flags must become `Option<bool>`.
+
+**This is not a spec defect. It is a live understatement of tax in released software**, surfaced by the
+input-surface work and therefore owned here.
+
+`can_be_claimed_as_dependent_taxpayer` is a bare `bool` with `#[serde(default)]`
+(`return_inputs.rs:164`). **It silently guesses `false` — "not claimable" — the taxpayer-favourable
+direction.** And it gates **two** understatement guards:
+
+1. **§63(c)(5)** — the dependent standard-deduction FLOOR (`return_1040.rs:78`). Guessed `false` ⇒ the
+   filer receives the **full** $14,600 basic standard deduction instead of `max($1,300, earned + $450)`.
+2. **§1(g) / Form 8615** — the KIDDIE-TAX refusal (`return_1040.rs:618`) is keyed on the **same flag**.
+   Guessed `false` ⇒ **the entire screen is disarmed** and the return files at the child's rate.
+
+★ The irony is exact, and it is the tell. The comment guarding the kiddie block reasons with great care
+about staying conservative — *"an under-count would let a real kiddie return slip through at the child's
+rate (an understatement)"* — **inside an `if` gated on a flag that is silently guessed.** A meticulously
+fail-closed guard, wrapped in a guess.
+
+**Who this hits:** a student or young adult with crypto gains, claimed on a parent's return. That is close
+to the *archetypal* btctax user. They get the full standard deduction **and** child-rate tax, and their
+1040 prints **"Someone can claim: ☐ You as a dependent" UNCHECKED** — an affirmative false statement on a
+signed return.
+
+**Nothing backstops it.** No advisory (zero hits in `advisories.rs`). No refusal. The user is never asked.
+
+**And it contradicts the project's own doctrine and its own idiom.** SPEC §3.4: conservative omissions
+*"only ever OVERSTATE tax, never understate."* Every other unguessable question is an `Option<bool>` that
+**fails loud**: `foreign_accounts`, `foreign_trust`, `mfs_spouse_itemizes`. The 1040 asks this one of
+every filer.
+
+**Fix:** both claimed-flags become `Option<bool>`; `None` fires a new **UNANSWERED** refusal in
+`screen_inputs`. Back-compat is free — a stored blob serialized `false` deserializes to `Some(false)`.
+The template lists them in the ASK-THE-USER class (D-2), so they ship **commented**: an uncommented
+`= false` example would merely pre-answer the question in the same taxpayer-favourable direction.
+
+**Only then is §9's promise true.**
 
 ## 6. The drift alarm — THREE assertions, because value-equality has a hole
 
@@ -255,8 +343,15 @@ And my proposed fix — compare key-sets by re-serializing the fixture to TOML �
 Add a field to `ReturnInputs` ⇒ B or C goes red until the template documents it. **No schema file, no
 codegen, no third representation.**
 
-⚠️ **Residual risk, recorded:** a future `#[serde(skip_serializing_if)]` on an input struct would evade B
-and C. None exists in `return_inputs.rs` today. Banned there by convention, with a one-line grep KAT.
+⚠️ **Residual risks, recorded:**
+- A future `serde(skip…)` on an input struct would evade B and C. None exists in `return_inputs.rs` today.
+  Banned by convention; the grep KAT matches **`serde(skip`** generally, not just `skip_serializing_if`.
+- **Enum-VARIANT drift is un-alarmed.** A new `CharitableClass`, or a new allowlisted box-12 code, moves no
+  key-path — B and C see nothing. Field drift is caught; variant drift is not. Recorded, not solved.
+
+⚠️ **KAT C's exemption list (D-2) is part of this mechanism, not a hole in it.** The ask-the-user fields
+are exempt from key-path completeness *because they must ship commented* — and the exemption set is
+**asserted inside the KAT**, so it cannot silently grow.
 
 ## 7. Build order (TDD; each step red → green)
 
@@ -277,9 +372,15 @@ and C. None exists in `return_inputs.rs` today. Banned there by convention, with
 
 - **`p1-per-field-subcommands`** — disposition. `income template` + `set-pii` IS the answer for v1; the
   per-field editors and the TUI form are deferred with the sizing recorded.
-- **`p1-show-as-json-not-toml`** — `income show` emits JSON, so it does not round-trip. With a template
-  in hand, **copy-forward is the primary year-over-year workflow**, and it needs `show` to emit TOML.
-  Resolve or re-defer with a reason.
+- **`p1-show-as-json-not-toml`** — **DECIDED, not punted.** `income show` keeps emitting masked JSON; a
+  TOML round-trip is **deferred**. ⚠️ If it ever ships, its secrets must emit as **empty strings, not
+  masks**: today's `***-**-6789` is *non-empty*, so D-5's "non-empty file value wins" would store the mask
+  and `SsnMalformed` would refuse every re-import — copy-forward would poison the year it exists to serve.
+- **`export-irs-pdf`'s `SsnError::Missing` refusal must name `income set-pii`.** It is the last wall on the
+  default path, and the first place a user learns identity is needed.
+- **`income set-pii --clear-ip-pin`** — an IP PIN entered in error is otherwise inescapable: `set-pii`
+  validates every prompt (`IpPin::canonical`: empty ⇒ `Missing`), so re-prompting cannot clear it, and the
+  only exits destroy or keep it.
 - **`p1-ssn-normalization-P6`** — **NOT overdue** (r1 said it was; the ledger records it ✅ DONE in P6.1,
   with the empty-vs-malformed split an accepted declared deviation). The live residue is new P8 scope:
   should **import** canonicalize at capture? D-7 answers it — `set-pii` validates at the prompt, and every
