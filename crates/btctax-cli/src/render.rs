@@ -1090,6 +1090,38 @@ pub fn render_tax_outcome(
     s
 }
 
+/// The house wrap width for advisory text (the widest line the tool prints anywhere).
+pub(crate) const ADVISORY_WRAP_COLS: usize = 92;
+
+/// Wrap `text` under a `  • ` bullet, with continuation lines hanging under the bullet's TEXT (a
+/// 4-space indent) rather than under the bullet glyph. Breaks on whitespace only; a word longer than
+/// the line (a URL, say) is left to overflow rather than being cut mid-token — a broken citation is
+/// worse than a long line.
+pub(crate) fn wrap_bulleted(text: &str) -> String {
+    const BULLET: &str = "  \u{2022} ";
+    const HANG: &str = "    ";
+    let mut out = String::new();
+    let mut line = String::from(BULLET);
+    let mut have_word = false;
+
+    for word in text.split_whitespace() {
+        let prospective = line.chars().count() + usize::from(have_word) + word.chars().count();
+        if have_word && prospective > ADVISORY_WRAP_COLS {
+            out.push_str(line.trim_end());
+            out.push('\n');
+            line = String::from(HANG);
+            have_word = false;
+        }
+        if have_word {
+            line.push(' ');
+        }
+        line.push_str(word);
+        have_word = true;
+    }
+    out.push_str(line.trim_end());
+    out
+}
+
 /// Render the Phase-5 full-return **advisories** (SPEC §3.4 / §9.2) — the loud, non-gating notes that a
 /// favorable credit was omitted conservatively (your tax is OVERSTATED), or that a disclosure is yours to
 /// make. Never changes a number and never changes the exit code.
@@ -1100,8 +1132,10 @@ pub fn render_advisories(advisories: &[btctax_core::tax::advisories::Advisory]) 
     }
     let _ = writeln!(s, "\n  ── ADVISORIES ({}) ──", advisories.len());
     for a in advisories {
-        // Wrap each message under a bullet; the message text is single-sourced in core.
-        let _ = writeln!(s, "  • {}", a.message());
+        // Wrap each message under its bullet (`p5-n5`): an advisory is a 300–400-character sentence, and
+        // an unwrapped one is unreadable in an 80-column terminal. The message text itself is
+        // single-sourced in core — this only decides where the line breaks are.
+        let _ = writeln!(s, "{}", wrap_bulleted(&a.message()));
     }
     let _ = writeln!(
         s,
@@ -3472,6 +3506,35 @@ mod form8283_csv_tests {
             &no_details_rec[idx("needs_review")],
             "true",
             "no-details carrier row: needs_review must be true"
+        );
+    }
+}
+
+#[cfg(test)]
+mod advisory_wrap_tests {
+    use super::*;
+
+    /// `p5-n5-advisory-line-wrapping`: an advisory is a 300–400-character sentence, and the house style
+    /// wraps everywhere else. An unwrapped one is unreadable in an 80-column terminal — and it is the ONE
+    /// place the tool explains a conservative omission, so it is the text most worth reading.
+    #[test]
+    fn advisories_wrap_to_the_house_width_with_a_hanging_indent() {
+        use btctax_core::tax::advisories::Advisory;
+        let out = render_advisories(&[Advisory::CtcOdcOmitted { dependents: 2 }]);
+
+        for line in out.lines() {
+            assert!(
+                line.chars().count() <= ADVISORY_WRAP_COLS,
+                "line is {} cols, over the {}-col house width: {line:?}",
+                line.chars().count(),
+                ADVISORY_WRAP_COLS
+            );
+        }
+        // Continuation lines hang under the bullet's TEXT, not under the bullet.
+        assert!(
+            out.lines()
+                .any(|l| l.starts_with("    ") && !l.trim().is_empty()),
+            "a 300-char advisory must wrap onto continuation lines, got:\n{out}"
         );
     }
 }

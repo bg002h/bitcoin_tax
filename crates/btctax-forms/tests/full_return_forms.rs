@@ -899,7 +899,20 @@ fn schedule_b_refuses_more_payers_than_the_form_has_rows() {
         2024,
     )
     .expect_err("15 interest payers must not fit in 14 rows");
-    assert!(format!("{err}").contains("Part I holds 14"), "{err}");
+    // A CAPACITY refusal, not a placement failure (`p6-schedule-b-capacity-error-variant`): the cells
+    // are mapped correctly, there are simply more payers than rows. Typing it as `Overflow` lets the
+    // CLI say "file Schedule B by hand" and lets the all-or-nothing packet name what refused.
+    assert!(
+        matches!(
+            err,
+            FormsError::Overflow {
+                part: "Schedule B Part I",
+                rows: 15,
+                capacity: 14
+            }
+        ),
+        "expected a capacity refusal, got {err:?}"
+    );
 
     // …but exactly 14 fits, and 15 dividend payers fit Part II (which genuinely has one more row).
     let fourteen: Vec<ScheduleBRow> = (0..14)

@@ -53,21 +53,24 @@ pub fn fill_schedule_b_with_map(
     header: &ReturnHeader,
     map: &ScheduleBMap,
 ) -> Result<Vec<u8>, FormsError> {
+    // A CAPACITY refusal, not a placement failure (`p6-schedule-b-capacity-error-variant`): every cell is
+    // mapped correctly — there are simply more payers than the form has rows. Typing it as `Overflow`
+    // lets the CLI render "file Schedule B by hand" actionably, and lets the all-or-nothing packet say
+    // WHICH form refused. (Truncating is not an option: the printed rows would not add up to the form's
+    // own line 2, or the total would be taken from the visible rows and UNDERSTATE interest income.)
     if lines.part1_rows.len() > map.part1_rows.len() {
-        return Err(FormsError::Geometry(format!(
-            "Schedule B Part I holds {} interest payers, but the return lists {}. Truncating the list \
-             would leave a form whose printed rows do not add up to its own line 2. Refusing.",
-            map.part1_rows.len(),
-            lines.part1_rows.len()
-        )));
+        return Err(FormsError::Overflow {
+            part: "Schedule B Part I",
+            rows: lines.part1_rows.len(),
+            capacity: map.part1_rows.len(),
+        });
     }
     if lines.part2_rows.len() > map.part2_rows.len() {
-        return Err(FormsError::Geometry(format!(
-            "Schedule B Part II holds {} dividend payers, but the return lists {}. Truncating the list \
-             would leave a form whose printed rows do not add up to its own line 6. Refusing.",
-            map.part2_rows.len(),
-            lines.part2_rows.len()
-        )));
+        return Err(FormsError::Overflow {
+            part: "Schedule B Part II",
+            rows: lines.part2_rows.len(),
+            capacity: map.part2_rows.len(),
+        });
     }
 
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
