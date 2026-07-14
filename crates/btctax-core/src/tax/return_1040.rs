@@ -883,7 +883,11 @@ pub struct AbsoluteReturn {
 /// a second derivation, and a second derivation is exactly how a filed form comes to disagree with the
 /// tax the report computed from it (SPEC §3.1 — `btctax-forms` does no arithmetic, and neither should the
 /// packet).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// **No `Default`** — deliberately, and for the same reason `AbsoluteReturn` has none: a silently-zeroed
+/// field here is a wrong number on a filed return. A defaulted `capital_loss_limit` of $0 would zero the
+/// §1211(b) capital-loss deduction; a defaulted `extension_payment` would re-bill a payment already made.
+/// Every field is spelled out at the one construction site (and in the fixtures).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrintedInputs {
     /// Form 8959 line 1 — Σ W-2 box 5 (household total Medicare wages).
     pub medicare_wages: Usd,
@@ -900,6 +904,16 @@ pub struct PrintedInputs {
     pub ti_before_qbi: Usd,
     /// Form 8995 line 12 — net capital gain (qualified dividends + §1(h) preferential net LTCG).
     pub qbi_net_capital_gain: Usd,
+    /// Schedule SE **line 8a** — the SE earner's OWN W-2 Social Security wages (box 3 + box 7 tips). The
+    /// §1402(b)(1) cap is PER-INDIVIDUAL, so this is the owner's own wages, never the household total.
+    pub se_w2_ss_wages: Usd,
+    /// Schedule SE **line 7** — the year's Social Security wage base (pre-printed on the form; line 9 is
+    /// "subtract line 8d from line 7").
+    pub ss_wage_base: Usd,
+    /// Schedule D **line 21** — the §1211(b) capital-loss deduction CEILING ($3,000; $1,500 MFS). The
+    /// printed line 21 caps the PRINTED line 16 against this, rather than re-rounding the exact
+    /// deduction, so the filed Schedule D's own arithmetic holds.
+    pub capital_loss_limit: Usd,
     /// Schedule 3 **line 10** — "Amount paid with request for extension to file". It is in the exact
     /// `total_payments`, so a printed chain that drops it tells the filer, ON THE FILED RETURN, to pay it
     /// a SECOND time (L31 falls ⇒ L37 "amount you owe" rises by the whole payment).
@@ -1206,6 +1220,9 @@ pub fn assemble_absolute(
             reit_ptp_carryforward_in: ri.qbi.reit_ptp_carryforward_in,
             ti_before_qbi: agi - deduction,
             qbi_net_capital_gain: net_capital_gain,
+            se_w2_ss_wages: w2_ss_wages,
+            ss_wage_base: table.ss_wage_base,
+            capital_loss_limit: loss_limit(status),
             extension_payment: ri.payments.extension_payment,
             digital_asset_activity: digital_asset_activity(state, year),
         },

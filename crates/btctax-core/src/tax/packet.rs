@@ -14,11 +14,13 @@
 //! the one place core's composition KATs cannot reach). `assemble_printed_return` is the single
 //! composition site; the KATs below go *through* it, so the tested wiring is the shipped wiring.
 
+use crate::state::LedgerState;
 use crate::tax::other_taxes::{form_8959_lines, form_8960_lines, Form8959Lines, Form8960Lines};
 use crate::tax::printed::{
-    form_1040_lines, schedule_1_lines, schedule_2_lines, schedule_3_lines, schedule_a_lines,
-    schedule_b_lines, schedule_c_lines, schedule_d_lines, Form1040Lines, Schedule1Lines,
-    Schedule2Lines, Schedule3Lines, ScheduleALines, ScheduleBLines, ScheduleCLines, ScheduleDLines,
+    form_1040_lines, form_8949_printed, schedule_1_lines, schedule_2_lines, schedule_3_lines,
+    schedule_a_lines, schedule_b_lines, schedule_c_lines, schedule_d_lines, schedule_se_lines,
+    Form1040Lines, Printed8949, Schedule1Lines, Schedule2Lines, Schedule3Lines, ScheduleALines,
+    ScheduleBLines, ScheduleCLines, ScheduleDLines, ScheduleSeLines,
 };
 use crate::tax::qbi::{form_8995_lines, Form8995Lines};
 use crate::tax::return_1040::{is_aged, AbsoluteReturn};
@@ -303,6 +305,13 @@ pub struct PrintedReturn {
     pub sch_c: Option<ScheduleCLines>,
     /// Schedule D always files on a full return (the crypto engine's whole point), so it is not optional.
     pub sch_d: ScheduleDLines,
+    /// Form 8949 — the transaction detail Schedule D lines 3 and 10 CITE as their source ("Totals for
+    /// all transactions reported on Form(s) 8949 with Box C/F checked"). `None` when the year has no
+    /// disposals: a carryover/distribution-only Schedule D files with lines 3/10 blank and no 8949.
+    pub f8949: Option<Printed8949>,
+    /// Schedule SE — the form Schedule 2 line 4 CITES ("Self-employment tax. **Attach Schedule SE**").
+    /// `None` below the §6017 $400 floor, where no SE tax is owed and none is filed.
+    pub sch_se: Option<ScheduleSeLines>,
     /// Always BUILT (Schedule 2 and the 1040 read its printed lines), but filed only when
     /// [`Form8959Lines::must_file`] — the chain and the filing decision are different questions.
     pub f8959: Form8959Lines,
@@ -320,12 +329,17 @@ pub struct PrintedReturn {
 /// form comes to disagree with the tax the report computed from it.
 pub fn assemble_printed_return(
     ri: &ReturnInputs,
+    state: &LedgerState,
     ar: &AbsoluteReturn,
     year: i32,
 ) -> Result<PrintedReturn, SsnError> {
     let header = ReturnHeader::build(ri, year)?;
     let status = ri.filing_status;
     let pi = &ar.printed_inputs;
+
+    // The 8949 is built FIRST: Schedule D's lines 3 and 10 are its printed column totals, so the
+    // detail form is upstream of the schedule that summarizes it.
+    let f8949 = form_8949_printed(&crate::forms::form_8949(state, year));
 
     // Attachments first — each downstream chain takes the printed lines of the ones above it.
     let f8959 = form_8959_lines(
@@ -352,9 +366,11 @@ pub fn assemble_printed_return(
     let sch_a = schedule_a_lines(ar);
     let sch_b = schedule_b_lines(ri);
     let sch_c = schedule_c_lines(ar);
-    let sch_d = schedule_d_lines(ar);
+    let sch_d = schedule_d_lines(ar, f8949.as_ref());
     let sch_1 = schedule_1_lines(ar);
-    let sch_2 = schedule_2_lines(ar, &f8959, f8960.as_ref());
+    // Schedule SE is upstream of Schedule 2: L4 IS its printed line 12.
+    let sch_se = sch_c.as_ref().and_then(|c| schedule_se_lines(ar, c));
+    let sch_2 = schedule_2_lines(sch_se.as_ref(), &f8959, f8960.as_ref());
     let sch_3 = schedule_3_lines(ar);
 
     let f1040 = form_1040_lines(
@@ -383,6 +399,8 @@ pub fn assemble_printed_return(
         sch_b,
         sch_c,
         sch_d,
+        f8949,
+        sch_se,
         f8959,
         f8960,
         f8995,
@@ -662,12 +680,13 @@ mod tests {
     fn the_assembled_packet_ties_the_1040_to_its_attachments() {
         let (ri, state) = kitchen_sink_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &ar, 2024).unwrap();
+        let pr = assemble_printed_return(&ri, &state, &ar, 2024).unwrap();
 
         let sch_1 = pr.sch_1.expect("the kitchen sink has Schedule 1 income");
         let sch_2 = pr.sch_2.expect("…and SE tax ⇒ Schedule 2");
         let sch_a = pr.sch_a.expect("…and itemized deductions");
         let sch_b = pr.sch_b.expect("…and > $1,500 of interest ⇒ Schedule B");
+        let sch_c = pr.sch_c.expect("…and business mining ⇒ Schedule C");
         let f8995 = pr.f8995.expect("…and REIT dividends ⇒ Form 8995");
 
         assert_eq!(pr.f1040.line2b, sch_b.line4, "1040 2b ← Schedule B line 4");
@@ -690,6 +709,56 @@ mod tests {
             sch_2.line11, pr.f8959.line18,
             "Sch 2 11 ← Form 8959 line 18"
         );
+
+        // ★ The ATTACHMENT tie-outs (ARCH-P6.3a). Every one of these is a citation printed on the form
+        // itself, so a packet that fails any of them is a form disagreeing with the paper behind it.
+        let sch_se = pr.sch_se.expect("…and business mining ⇒ Schedule SE");
+        let f8949 = pr.f8949.as_ref().expect("…and a disposal ⇒ Form 8949");
+        assert_eq!(
+            sch_2.line4, sch_se.line12,
+            "Sch 2 L4 ← Schedule SE's printed L12"
+        );
+        assert_eq!(
+            sch_1.line15, sch_se.line13,
+            "Sch 1 L15 ← Schedule SE's printed L13"
+        );
+        assert_eq!(
+            pr.f8959.line8, sch_se.line6,
+            "8959 L8 ← Schedule SE Part I L6"
+        );
+        assert_eq!(
+            sch_se.line2, sch_c.line31,
+            "SE L2 ← Schedule C's printed L31"
+        );
+        assert_eq!(
+            pr.sch_d.line10_d, f8949.lt_totals.proceeds_d,
+            "Sch D L10(d) ← the 8949's printed long-term column total"
+        );
+        assert_eq!(
+            pr.sch_d.line10_h,
+            pr.sch_d.line10_d - pr.sch_d.line10_e,
+            "…and Schedule D Part II cross-foots on its own printed cells"
+        );
+
+        // ★ The extension payment reaches the filed page (ARCH-P6.3a D1). Without Schedule 3 line 10 the
+        // return would demand a payment the filer had ALREADY made: L31 falls ⇒ L37 "amount you owe"
+        // rises by exactly that amount.
+        let sch_3 = pr
+            .sch_3
+            .expect("…and an extension payment + FTC ⇒ Schedule 3");
+        assert_eq!(
+            pr.f1040.line31, sch_3.line15,
+            "1040 31 ← Schedule 3 line 15"
+        );
+        assert_eq!(
+            sch_3.line10,
+            dec!(500),
+            "the kitchen sink paid $500 with its extension"
+        );
+        assert!(
+            sch_3.line15 >= sch_3.line10,
+            "L15 = 'add 9 through 12 and 14' — it can never DROP the extension payment"
+        );
     }
 
     /// A form that is not required is not in the packet — a plain W-2 household files a 1040 and nothing
@@ -699,7 +768,7 @@ mod tests {
     fn the_packet_omits_every_form_that_is_not_required() {
         let (ri, state) = w2_only_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &ar, 2024).unwrap();
+        let pr = assemble_printed_return(&ri, &state, &ar, 2024).unwrap();
 
         assert!(pr.sch_1.is_none(), "no additional income or adjustments");
         assert!(pr.sch_2.is_none(), "no SE / Additional Medicare / NIIT");
@@ -722,7 +791,7 @@ mod tests {
     fn the_printed_8959_reads_the_same_box5_sum_the_computed_8959_used() {
         let (ri, state) = kitchen_sink_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &ar, 2024).unwrap();
+        let pr = assemble_printed_return(&ri, &state, &ar, 2024).unwrap();
 
         let box5_sum: crate::conventions::Usd = ri.w2s.iter().map(|w| w.box5_medicare_wages).sum();
         assert_eq!(ar.printed_inputs.medicare_wages, box5_sum);

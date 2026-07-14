@@ -19,8 +19,175 @@
 //! reports, and no core KAT would catch it.
 
 use crate::conventions::{round_dollar, Usd};
-use crate::tax::other_taxes::{sch2_line4_se, Form8959Lines, Form8960Lines};
+use crate::tax::other_taxes::{Form8959Lines, Form8960Lines};
 use crate::tax::return_1040::{AbsoluteReturn, MEDICAL_FLOOR_RATE};
+
+// ── Form 8949 — the printed rows (SPEC §3.1 / ARCH-P6.3a D2) ────────────────────────────────────
+
+/// One PRINTED Form 8949 row: columns (d), (e) and (h) as they appear on the filed page.
+///
+/// ★ **Column (h) is DERIVED, never independently rounded.** The form's own column-(h) header says
+/// "Subtract column (e) from column (d) and combine the result with column (g)" — an instruction about
+/// the PRINTED cells. Rounding the exact gain independently produces rows that visibly contradict their
+/// own subtraction (proceeds 100.49 → 100, basis 0.50 → 1, exact gain 99.99 → 100, but 100 − 1 = 99),
+/// and it drifts Σh away from Σd − Σe, which would then break Schedule D's Part I, whose columns carry
+/// the same subtract-and-combine header. Deriving h makes both identities hold exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Printed8949Row {
+    /// (d) proceeds — `round_dollar` at the cell.
+    pub proceeds_d: Usd,
+    /// (e) cost basis — `round_dollar` at the cell.
+    pub cost_e: Usd,
+    /// (h) gain/loss = **printed (d) − printed (e)** (column (g) is always blank in v1).
+    pub gain_h: Usd,
+}
+
+/// A part's totals row — the sum of the PRINTED rows above it (never a re-rounding of the exact sum).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Printed8949Totals {
+    pub proceeds_d: Usd,
+    pub cost_e: Usd,
+    pub gain_h: Usd,
+}
+
+/// The printed Form 8949: Part I (short-term, Box C) and Part II (long-term, Box F), each with its rows
+/// and its totals row. These totals ARE Schedule D lines 3 and 10 — the schedule's own text defines them
+/// as "Totals for all transactions reported on Form(s) 8949 with Box C/F checked".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Printed8949 {
+    pub short_term: Vec<Printed8949Row>,
+    pub long_term: Vec<Printed8949Row>,
+    pub st_totals: Printed8949Totals,
+    pub lt_totals: Printed8949Totals,
+}
+
+/// Derive the printed Form 8949 from the ledger's rows. `None` when the year has no disposals — a
+/// carryover/distribution-only Schedule D files with lines 3/10 blank and NO 8949 attached.
+pub fn form_8949_printed(rows: &[crate::forms::Form8949Row]) -> Option<Printed8949> {
+    use crate::forms::Form8949Part;
+    if rows.is_empty() {
+        return None;
+    }
+    let printed = |r: &crate::forms::Form8949Row| {
+        let proceeds_d = round_dollar(r.proceeds);
+        let cost_e = round_dollar(r.cost_basis);
+        Printed8949Row {
+            proceeds_d,
+            cost_e,
+            // ★ derived from the PRINTED cells, not from `r.gain`
+            gain_h: proceeds_d - cost_e,
+        }
+    };
+    let total = |rs: &[Printed8949Row]| Printed8949Totals {
+        proceeds_d: rs.iter().map(|r| r.proceeds_d).sum(),
+        cost_e: rs.iter().map(|r| r.cost_e).sum(),
+        gain_h: rs.iter().map(|r| r.gain_h).sum(),
+    };
+
+    let short_term: Vec<_> = rows
+        .iter()
+        .filter(|r| r.part == Form8949Part::ShortTerm)
+        .map(printed)
+        .collect();
+    let long_term: Vec<_> = rows
+        .iter()
+        .filter(|r| r.part == Form8949Part::LongTerm)
+        .map(printed)
+        .collect();
+
+    Some(Printed8949 {
+        st_totals: total(&short_term),
+        lt_totals: total(&long_term),
+        short_term,
+        long_term,
+    })
+}
+
+// ── Schedule SE — the printed chain (ARCH-P6.3a D5) ─────────────────────────────────────────────
+
+/// The printable **Schedule SE** line chain.
+///
+/// ★ Schedule SE is a **filed form**, not a worksheet. The SE *engine* (`se.rs`) stays a FROZEN
+/// exact-cents worksheet; this chain rounds its values AT THE LINE and derives the additions from the
+/// printed operands, exactly like every other filed form under the §3.1 election. (SPEC §3.1 listed "SE"
+/// among the unprinted worksheets — a contradiction with §7.1's fill set, amended alongside this work.)
+///
+/// The citations bind it to its neighbours, and the form states each one:
+/// - **line 2** ← Schedule C's printed **line 31** ("Net profit or (loss) from Schedule C, line 31")
+/// - **line 12** → Schedule 2 **line 4** ("Enter here and on Schedule 2 (Form 1040), line 4")
+/// - **line 13** → Schedule 1 **line 15** ("Enter here and on Schedule 1 (Form 1040), line 15")
+/// - **line 6** ← cited BY Form 8959 line 8 ("from Schedule SE, Part I, line 6")
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScheduleSeLines {
+    /// L2 — net profit from Schedule C line 31.
+    pub line2: Usd,
+    /// L3 — combine 1a, 1b and 2 (1a/1b blank) ⇒ `= line2`.
+    pub line3: Usd,
+    /// L4a — line 3 × 92.35% (the §1402(a) base).
+    pub line4a: Usd,
+    /// L4c — add 4a and 4b (4b blank) ⇒ `= line4a`.
+    pub line4c: Usd,
+    /// L6 — add 4c and 5b (5b blank) ⇒ `= line4c`. **Form 8959 line 8 cites THIS line.**
+    pub line6: Usd,
+    /// L8a — the earner's own W-2 Social Security wages (boxes 3 + 7).
+    pub line8a: Usd,
+    /// L8d — add 8a, 8b, 8c (8b/8c blank) ⇒ `= line8a`.
+    pub line8d: Usd,
+    /// L9 — subtract PRINTED 8d from line 7 (the wage base), floored at 0.
+    pub line9: Usd,
+    /// L10 — 12.4% × the smaller of line 6 or line 9 (the §1402(b)(1) cap).
+    pub line10: Usd,
+    /// L11 — 2.9% × line 6.
+    pub line11: Usd,
+    /// L12 — **self-employment tax = add the PRINTED 10 and 11** → Schedule 2 line 4.
+    pub line12: Usd,
+    /// L13 — the §164(f) one-half deduction → Schedule 1 line 15.
+    pub line13: Usd,
+}
+
+/// Derive the printed Schedule SE chain. `None` when there is no SE tax — the §6017 $400 floor already
+/// dropped `ar.se` to `None` upstream, so no Schedule SE is filed and Schedule 2 line 4 is zero.
+///
+/// `line13` takes the ENGINE's `deductible_half` rounded at the line, rather than recomputing 50% of the
+/// printed line 12. The two can differ by a dollar (ss = 10.50, medicare = 11.50 ⇒ printed L12 = 23,
+/// half = 12, but `round_dollar(11.00)` = 11); taking the engine value keeps §164(f) faithful to the
+/// statute and makes the Schedule 1 line-15 tie-out hold by construction. A human recomputing "50% of
+/// line 12" by hand may therefore land a dollar away — the same accepted residual class as Form 8959's
+/// shipped line 7 (ARCH-P6.3a D5, decision recorded with its alternative).
+pub fn schedule_se_lines(ar: &AbsoluteReturn, sch_c: &ScheduleCLines) -> Option<ScheduleSeLines> {
+    let se = ar.se.as_ref()?;
+    let pi = &ar.printed_inputs;
+
+    let line2 = sch_c.line31; // ★ the PRINTED Schedule C line 31 — one figure, two destinations
+    let line3 = line2;
+    let line4a = round_dollar(se.base);
+    let line4c = line4a;
+    let line6 = line4c;
+
+    let line8a = round_dollar(pi.se_w2_ss_wages);
+    let line8d = line8a;
+    let line9 = (round_dollar(pi.ss_wage_base) - line8d).max(Usd::ZERO);
+
+    let line10 = round_dollar(se.ss);
+    let line11 = round_dollar(se.medicare);
+    let line12 = line10 + line11; // ★ "Add lines 10 and 11" — over the PRINTED lines
+    let line13 = round_dollar(se.deductible_half);
+
+    Some(ScheduleSeLines {
+        line2,
+        line3,
+        line4a,
+        line4c,
+        line6,
+        line8a,
+        line8d,
+        line9,
+        line10,
+        line11,
+        line12,
+        line13,
+    })
+}
 
 /// The printable **Schedule 2 (Additional Taxes)** line chain.
 ///
@@ -52,11 +219,14 @@ pub struct Schedule2Lines {
 /// Returns `None` when there is nothing to report — no SE tax, no Additional Medicare Tax, no NIIT —
 /// in which case Schedule 2 is not filed at all and 1040 line 23 is zero.
 pub fn schedule_2_lines(
-    ar: &AbsoluteReturn,
+    sch_se: Option<&ScheduleSeLines>,
     f8959: &Form8959Lines,
     f8960: Option<&Form8960Lines>,
 ) -> Option<Schedule2Lines> {
-    let line4 = round_dollar(sch2_line4_se(ar.se.as_ref()));
+    // ★ L4 IS Schedule SE's PRINTED line 12 — the form says so ("Enter here and on Schedule 2, line 4").
+    // A re-rounding of the exact SE tax would put this schedule a dollar away from the Schedule SE
+    // attached to it, which is the same defect the L11 ← 8959 rule already forbids (ARCH-P6.3a D3).
+    let line4 = sch_se.map_or(Usd::ZERO, |s| s.line12);
     let line11 = f8959.line18; // already a printed whole dollar
     let line12 = f8960.map_or(Usd::ZERO, |f| f.line17); // ditto
     let line21 = line4 + line11 + line12; // ★ sums the PRINTED lines
@@ -428,21 +598,31 @@ pub struct ScheduleDLines {
 }
 
 /// Derive the printed Schedule D chain, including SPEC §7.2's exhaustive Part III routing.
-pub fn schedule_d_lines(ar: &AbsoluteReturn) -> ScheduleDLines {
+pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> ScheduleDLines {
     let p = &ar.schedule_d;
 
-    let line3_d = round_dollar(p.st_proceeds_3d);
-    let line3_e = round_dollar(p.st_cost_3e);
-    let line3_h = round_dollar(p.st_gain_3h);
-    let line6 = round_dollar(p.st_carryover_6); // magnitude (paren box)
-    let line7 = round_dollar(p.st_net_7);
+    // ★ Lines 3 and 10 ARE the attached Form 8949's printed column totals — the schedule's own text
+    // defines them as "Totals for all transactions reported on Form(s) 8949 with Box C / Box F checked"
+    // (ARCH-P6.3a D3). Re-rounding the exact aggregate here would put Schedule D a dollar away from the
+    // 8949 stapled behind it: Σ round(row) ≠ round(Σ row). Zero when no 8949 is attached (a
+    // carryover/distribution-only Schedule D has no transactions to total).
+    let st = f8949.map(|f| f.st_totals).unwrap_or_default();
+    let lt = f8949.map(|f| f.lt_totals).unwrap_or_default();
 
-    let line10_d = round_dollar(p.lt_proceeds_10d);
-    let line10_e = round_dollar(p.lt_cost_10e);
-    let line10_h = round_dollar(p.lt_gain_10h);
+    let line3_d = st.proceeds_d;
+    let line3_e = st.cost_e;
+    let line3_h = st.gain_h;
+    let line6 = round_dollar(p.st_carryover_6); // magnitude (paren box)
+                                                // ★ "Combine lines 1a through 6 in column (h)" — an addition chain over the PRINTED cells.
+    let line7 = line3_h - line6;
+
+    let line10_d = lt.proceeds_d;
+    let line10_e = lt.cost_e;
+    let line10_h = lt.gain_h;
     let line13 = round_dollar(p.cap_gain_distr_13);
     let line14 = round_dollar(p.lt_carryover_14); // magnitude (paren box)
-    let line15 = round_dollar(p.lt_net_15);
+                                                  // ★ "Combine lines 8a through 14 in column (h)" — again over the PRINTED cells.
+    let line15 = line10_h + line13 - line14;
 
     let line16 = line7 + line15; // ★ combines the PRINTED lines
     let has_qd = round_dollar(p.qualified_dividends) > Usd::ZERO;
@@ -455,7 +635,9 @@ pub fn schedule_d_lines(ar: &AbsoluteReturn) -> ScheduleDLines {
         ScheduleDRouting::ShortGainLongLoss { line22_yes: has_qd }
     } else if line16 < Usd::ZERO {
         ScheduleDRouting::NetLoss {
-            line21: round_dollar(p.loss_deduction_21), // magnitude (paren box)
+            // §1211(b): the smaller of the loss and the ceiling — on the PRINTED line 16 (magnitude,
+            // paren box), so the filed form's own "smaller of" holds.
+            line21: line16.abs().min(ar.printed_inputs.capital_loss_limit),
             line22_yes: has_qd,
         }
     } else {
@@ -794,10 +976,12 @@ pub fn schedule_3_lines(ar: &AbsoluteReturn) -> Option<Schedule3Lines> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::forms::{Form8949Box, Form8949Part, Form8949Row};
     use crate::tax::other_taxes::form_8959_lines;
     use crate::tax::se::SeTaxResult;
     use crate::tax::types::FilingStatus;
     use rust_decimal_macros::dec;
+    use time::macros::date;
 
     fn se_300k_single() -> SeTaxResult {
         SeTaxResult {
@@ -893,10 +1077,240 @@ mod tests {
             total_payments: z,
             overpayment_refund: z,
             amount_owed: z,
-            // The Schedule 2/3 chains under test read none of these (they take the 8959/8960 chains as
-            // arguments); an all-zero `PrintedInputs` keeps this fixture to the fields it exercises.
-            printed_inputs: crate::tax::return_1040::PrintedInputs::default(),
+            // Spelled out in full — `PrintedInputs` has no `Default` on purpose (a zeroed
+            // `capital_loss_limit` would silently disable the §1211(b) deduction).
+            printed_inputs: crate::tax::return_1040::PrintedInputs {
+                medicare_wages: z,
+                medicare_withheld: z,
+                crypto_lending_interest: z,
+                reit_dividends: z,
+                reit_ptp_carryforward_in: z,
+                ti_before_qbi: z,
+                qbi_net_capital_gain: z,
+                se_w2_ss_wages: z,
+                ss_wage_base: dec!(168600),     // TY2024 §230 wage base
+                capital_loss_limit: dec!(3000), // §1211(b) — the non-MFS ceiling
+                extension_payment: z,
+                digital_asset_activity: false,
+            },
         }
+    }
+
+    // ── Schedule SE printed chain (ARCH-P6.3a D5) ───────────────────────────────────────────────
+
+    fn se_result(ss: Usd, medicare: Usd, base: Usd, half: Usd) -> SeTaxResult {
+        SeTaxResult {
+            net_se: base,
+            base,
+            ss,
+            medicare,
+            addl: Usd::ZERO,
+            total: ss + medicare,
+            deductible_half: half,
+        }
+    }
+
+    /// ★ Schedule SE line 12 is "Add lines 10 and 11" — it sums the PRINTED lines, so it can differ by a
+    /// dollar from a re-rounding of the exact SE tax (KAT-9 class). And Schedule 2 line 4 IS that printed
+    /// line 12: the form says so in terms ("Enter here and on Schedule 2 (Form 1040), line 4"), so a
+    /// re-rounded Sch 2 L4 would disagree with the Schedule SE stapled behind it (ARCH-P6.3a D3).
+    #[test]
+    fn schedule_2_line4_takes_the_printed_se_line_12_not_the_rounded_total() {
+        // ss = 10.50, medicare = 11.50 ⇒ printed 11 + 12 = 23, but round(exact 22.00) = 22.
+        let se = se_result(dec!(10.50), dec!(11.50), dec!(1000), dec!(11.00));
+        let mut ar = ar_with(Some(se), Usd::ZERO, Usd::ZERO);
+        ar.schedule_c = Some(crate::tax::return_1040::ScheduleCParts {
+            gross_receipts_1: dec!(1000),
+            total_expenses_28: Usd::ZERO,
+            net_profit_31: dec!(1000),
+        });
+
+        let sch_c = schedule_c_lines(&ar).expect("there is a business");
+        let sse = schedule_se_lines(&ar, &sch_c).expect("there is SE tax");
+
+        assert_eq!(sse.line10, dec!(11), "ss rounds at the line");
+        assert_eq!(sse.line11, dec!(12), "medicare rounds at the line");
+        assert_eq!(sse.line12, dec!(23), "L12 = add the PRINTED 10 and 11");
+        assert_ne!(
+            sse.line12,
+            round_dollar(dec!(22.00)),
+            "…and is deliberately NOT a re-rounding of the exact SE tax"
+        );
+
+        let f8959 = form_8959_lines(FilingStatus::Single, Usd::ZERO, Usd::ZERO, Some(&se));
+        let s2 = schedule_2_lines(Some(&sse), &f8959, None).expect("SE tax ⇒ Schedule 2 files");
+        assert_eq!(
+            s2.line4, sse.line12,
+            "★ Schedule 2 L4 IS Schedule SE's printed L12"
+        );
+    }
+
+    /// The citation chain into and out of Schedule SE: its line 2 is Schedule C's printed line 31 ("Net
+    /// profit or (loss) from Schedule C, line 31"), and its line 13 lands on Schedule 1 line 15
+    /// ("Enter here and on Schedule 1 (Form 1040), line 15"). Form 8959 line 8 cites SE line 6.
+    #[test]
+    fn schedule_se_composes_with_schedule_c_schedule_1_and_form_8959() {
+        let se = se_result(dec!(1240), dec!(290), dec!(9235), dec!(765));
+        let mut ar = ar_with(Some(se), Usd::ZERO, Usd::ZERO);
+        ar.schedule_c = Some(crate::tax::return_1040::ScheduleCParts {
+            gross_receipts_1: dec!(11000),
+            total_expenses_28: dec!(1000),
+            net_profit_31: dec!(10000),
+        });
+        ar.half_se_deduction = dec!(765);
+        ar.schedule_1.half_se_15 = dec!(765);
+
+        let sch_c = schedule_c_lines(&ar).unwrap();
+        let sse = schedule_se_lines(&ar, &sch_c).unwrap();
+        assert_eq!(sse.line2, sch_c.line31, "SE L2 ← Schedule C's PRINTED L31");
+        assert_eq!(sse.line3, sse.line2);
+        assert_eq!(
+            sse.line6,
+            dec!(9235),
+            "L6 = the §1402(a) base, rounded at the line"
+        );
+
+        let f8959 = form_8959_lines(FilingStatus::Single, Usd::ZERO, Usd::ZERO, Some(&se));
+        assert_eq!(
+            f8959.line8, sse.line6,
+            "Form 8959 L8 cites Schedule SE Part I line 6"
+        );
+
+        let sch_1 = schedule_1_lines(&ar).unwrap();
+        assert_eq!(
+            sch_1.line15, sse.line13,
+            "Sch 1 L15 ← Schedule SE's printed L13"
+        );
+    }
+
+    /// §6017: no SE tax ⇒ NO Schedule SE is filed (and Schedule 2 line 4 is zero).
+    #[test]
+    fn no_se_tax_files_no_schedule_se() {
+        let ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        let sch_c = ScheduleCLines {
+            line1: Usd::ZERO,
+            line3: Usd::ZERO,
+            line5: Usd::ZERO,
+            line7: Usd::ZERO,
+            line28: Usd::ZERO,
+            line29: Usd::ZERO,
+            line31: Usd::ZERO,
+        };
+        assert!(schedule_se_lines(&ar, &sch_c).is_none());
+    }
+
+    // ── Form 8949 printed rows (ARCH-P6.3a D2/D3) ───────────────────────────────────────────────
+
+    fn row8949(part: Form8949Part, proceeds: Usd, basis: Usd) -> Form8949Row {
+        Form8949Row {
+            part,
+            box_: Form8949Box::C,
+            box_needs_review: false,
+            description: "1.00000000 BTC".into(),
+            date_acquired: date!(2020 - 01 - 01),
+            date_sold: date!(2024 - 05 - 01),
+            proceeds,
+            cost_basis: basis,
+            adjustment_code: String::new(),
+            adjustment_amount: Usd::ZERO,
+            gain: proceeds - basis,
+            wallet: crate::identity::WalletId::SelfCustody { label: "w".into() },
+            disposition_kind: crate::event::DisposeKind::Sell,
+        }
+    }
+
+    /// ★ Column (h) is DERIVED from the PRINTED cells — `h = d − e` — never rounded independently from
+    /// the exact gain (ARCH-P6.3a D2). The discriminating row: proceeds $100.49, basis $0.50, exact gain
+    /// $99.99. Independent rounding gives h = 100 while the printed d − e = 101 − 1 … no: d rounds to
+    /// 100, e rounds to 1, so printed d − e = 99, and an independently-rounded h of 100 would VISIBLY
+    /// violate the form's own column-(h) instruction ("Subtract column (e) from column (d)") by $1.
+    #[test]
+    fn form_8949_column_h_is_derived_from_the_printed_d_and_e_not_rounded_independently() {
+        let rows = vec![row8949(Form8949Part::ShortTerm, dec!(100.49), dec!(0.50))];
+        let p = form_8949_printed(&rows).expect("there are rows");
+
+        let r = &p.short_term[0];
+        assert_eq!(r.proceeds_d, dec!(100), "d rounds at the cell");
+        assert_eq!(r.cost_e, dec!(1), "e rounds at the cell");
+        assert_eq!(
+            r.gain_h,
+            dec!(99),
+            "h = d − e on the PRINTED cells; an independently-rounded h would print 100 and the row \
+             would contradict its own subtraction"
+        );
+        assert_eq!(r.gain_h, r.proceeds_d - r.cost_e, "the row self-checks");
+        assert_ne!(
+            r.gain_h,
+            round_dollar(dec!(99.99)),
+            "…and it is NOT round(exact gain)"
+        );
+    }
+
+    /// The part totals sum the PRINTED rows, and Σh ≡ Σd − Σe by construction (an integer identity) —
+    /// which is exactly what lets Schedule D's Part I satisfy its own "subtract (e) from (d)" header.
+    #[test]
+    fn form_8949_part_totals_sum_the_printed_rows_and_cross_foot() {
+        let rows = vec![
+            row8949(Form8949Part::ShortTerm, dec!(100.50), Usd::ZERO),
+            row8949(Form8949Part::ShortTerm, dec!(200.50), Usd::ZERO),
+            row8949(Form8949Part::LongTerm, dec!(50.49), dec!(10.50)),
+        ];
+        let p = form_8949_printed(&rows).unwrap();
+
+        // ★ KAT-9, one level deeper: Σ round(row) = 101 + 201 = 302, while round(Σ) = round(301.00) = 301.
+        assert_eq!(
+            p.st_totals.proceeds_d,
+            dec!(302),
+            "the total sums the PRINTED rows"
+        );
+        assert_ne!(
+            p.st_totals.proceeds_d,
+            round_dollar(dec!(301.00)),
+            "…and is deliberately NOT a re-rounding of the exact aggregate"
+        );
+        assert_eq!(
+            p.st_totals.gain_h,
+            p.st_totals.proceeds_d - p.st_totals.cost_e,
+            "Σh ≡ Σd − Σe"
+        );
+        assert_eq!(
+            p.lt_totals.gain_h,
+            p.lt_totals.proceeds_d - p.lt_totals.cost_e
+        );
+    }
+
+    /// ★ Schedule D lines 3(d)/(e)/(h) ARE the 8949's printed column totals — the form's own text says
+    /// "Totals for all transactions reported on Form(s) 8949 with Box C checked". Re-rounding the exact
+    /// aggregate instead would put Schedule D a dollar away from the 8949 stapled behind it.
+    #[test]
+    fn schedule_d_line3_takes_the_printed_8949_totals_not_a_re_rounded_aggregate() {
+        let rows = vec![
+            row8949(Form8949Part::ShortTerm, dec!(100.50), Usd::ZERO),
+            row8949(Form8949Part::ShortTerm, dec!(200.50), Usd::ZERO),
+        ];
+        let f8949 = form_8949_printed(&rows).unwrap();
+
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.schedule_d.st_proceeds_3d = dec!(301.00); // the EXACT aggregate
+        ar.schedule_d.st_cost_3e = Usd::ZERO;
+        ar.schedule_d.st_gain_3h = dec!(301.00);
+
+        let sd = schedule_d_lines(&ar, Some(&f8949));
+        assert_eq!(
+            sd.line3_d,
+            dec!(302),
+            "= the 8949's printed column-(d) total"
+        );
+        assert_ne!(
+            sd.line3_d,
+            round_dollar(dec!(301.00)),
+            "≠ round(exact aggregate)"
+        );
+        assert_eq!(
+            sd.line3_h,
+            sd.line3_d - sd.line3_e,
+            "Schedule D Part I cross-foots too"
+        );
     }
 
     /// ★ CRITICAL (`p6-extension-payment-dropped`, Fable ARCH-P6.3a D1). Schedule 3 line 10 is "Amount
@@ -943,12 +1357,30 @@ mod tests {
     #[test]
     fn schedule_2_line4_excludes_the_addl_medicare_which_lands_on_line_11() {
         let se = se_300k_single();
-        let ar = ar_with(Some(se), Usd::ZERO, Usd::ZERO);
+        let mut ar = ar_with(Some(se), Usd::ZERO, Usd::ZERO);
+        ar.schedule_c = Some(crate::tax::return_1040::ScheduleCParts {
+            gross_receipts_1: dec!(300000),
+            total_expenses_28: Usd::ZERO,
+            net_profit_31: dec!(300000),
+        });
+        let sch_c = schedule_c_lines(&ar).unwrap();
+        let sse = schedule_se_lines(&ar, &sch_c).unwrap();
         let f8959 = form_8959_lines(FilingStatus::Single, Usd::ZERO, Usd::ZERO, Some(&se));
-        let s2 = schedule_2_lines(&ar, &f8959, None).unwrap();
+        let s2 = schedule_2_lines(Some(&sse), &f8959, None).unwrap();
 
-        // line 4 = ss + regular Medicare = 21,836.40 + 8,034.45 = 29,870.85 → 29,871.
-        assert_eq!(s2.line4, dec!(29871));
+        // ★ L4 IS Schedule SE's printed L12 = printed L10 + printed L11 = round(21,836.40) +
+        // round(8,034.45) = 21,836 + 8,034 = 29,870 — and NOT round_dollar(29,870.85) = 29,871.
+        // The dollar is the point: the filed Schedule 2 must agree with the Schedule SE behind it.
+        assert_eq!(s2.line4, dec!(29870));
+        assert_eq!(
+            s2.line4, sse.line12,
+            "★ Sch 2 L4 IS Schedule SE's printed line 12"
+        );
+        assert_ne!(
+            s2.line4,
+            round_dollar(dec!(29870.85)),
+            "NOT a re-rounding of the exact ss + medicare — that would disagree with Schedule SE"
+        );
         assert_ne!(
             s2.line4,
             round_dollar(se.total),
@@ -957,7 +1389,7 @@ mod tests {
         // the 0.9% shows up HERE instead…
         assert_eq!(s2.line11, dec!(693)); // 8959 printed line 18
         assert_eq!(s2.line12, Usd::ZERO); // no NIIT
-        assert_eq!(s2.line21, dec!(30564)); // 29,871 + 693
+        assert_eq!(s2.line21, dec!(30563)); // 29,870 + 693 — the PRINTED lines
     }
 
     /// ★ **The chains COMPOSE on the PRINTED lines.** Schedule 2 line 11 must be Form 8959's printed
@@ -976,14 +1408,13 @@ mod tests {
             total: dec!(2109.00),
             deductible_half: dec!(804.75),
         };
-        let ar = ar_with(Some(se), Usd::ZERO, Usd::ZERO);
         let f8959 = form_8959_lines(FilingStatus::Mfj, dec!(280500), Usd::ZERO, Some(&se));
 
         assert_eq!(f8959.line18, dec!(775)); // the printed, cross-footing 8959 total
         let exact_total = dec!(274.50) + dec!(499.50); // what the engine carries, in cents
         assert_eq!(round_dollar(exact_total), dec!(774)); // …which rounds to something ELSE
 
-        let s2 = schedule_2_lines(&ar, &f8959, None).unwrap();
+        let s2 = schedule_2_lines(None, &f8959, None).unwrap();
         assert_eq!(
             s2.line11,
             dec!(775),
@@ -995,10 +1426,9 @@ mod tests {
     /// Nothing to report ⇒ no Schedule 2 at all (1040 line 23 is zero).
     #[test]
     fn schedule_2_absent_when_no_other_taxes() {
-        let ar = ar_with(None, Usd::ZERO, Usd::ZERO);
         let f8959 = form_8959_lines(FilingStatus::Single, dec!(50000), Usd::ZERO, None);
         assert_eq!(f8959.line18, Usd::ZERO);
-        assert!(schedule_2_lines(&ar, &f8959, None).is_none());
+        assert!(schedule_2_lines(None, &f8959, None).is_none());
     }
 
     /// Schedule 3 carries the FTC and the excess-SS credit, and cross-foots to 1040 L20 / L31.
@@ -1240,6 +1670,34 @@ mod tests {
     /// Build an `AbsoluteReturn` whose Schedule D nets to the given (st, lt) with the given
     /// carryovers, distributions, §1211 offset and qualified dividends.
     #[allow(clippy::too_many_arguments)]
+    /// The printed Form 8949 whose column totals ARE this fixture's Schedule D lines 3 and 10 — the
+    /// composition the filed return requires (ARCH-P6.3a D3). The routing fixtures set the Schedule D
+    /// parts directly; in production those cells come from the attached 8949, so the fixtures must
+    /// supply one that agrees, exactly as a real return does.
+    fn f8949_for(ar: &AbsoluteReturn) -> Printed8949 {
+        let p = &ar.schedule_d;
+        Printed8949 {
+            short_term: Vec::new(),
+            long_term: Vec::new(),
+            st_totals: Printed8949Totals {
+                proceeds_d: round_dollar(p.st_proceeds_3d),
+                cost_e: round_dollar(p.st_cost_3e),
+                gain_h: round_dollar(p.st_gain_3h),
+            },
+            lt_totals: Printed8949Totals {
+                proceeds_d: round_dollar(p.lt_proceeds_10d),
+                cost_e: round_dollar(p.lt_cost_10e),
+                gain_h: round_dollar(p.lt_gain_10h),
+            },
+        }
+    }
+
+    /// `schedule_d_lines` with the fixture's own matching 8949 attached.
+    fn sd_lines(ar: &AbsoluteReturn) -> ScheduleDLines {
+        let f = f8949_for(ar);
+        schedule_d_lines(ar, Some(&f))
+    }
+
     fn ar_sched_d(
         st_net: Usd,
         lt_net: Usd,
@@ -1274,7 +1732,7 @@ mod tests {
     /// Yes → QDCGT. Lines 21 and 22 are NOT completed; the form says so in terms.
     #[test]
     fn schedule_d_routing_both_gains() {
-        let l = schedule_d_lines(&ar_sched_d(
+        let l = sd_lines(&ar_sched_d(
             dec!(5000),
             dec!(20000),
             Usd::ZERO,
@@ -1295,7 +1753,7 @@ mod tests {
     #[test]
     fn schedule_d_routing_short_gain_long_loss() {
         // With qualified dividends → line 22 = Yes.
-        let l = schedule_d_lines(&ar_sched_d(
+        let l = sd_lines(&ar_sched_d(
             dec!(30000),
             dec!(-4000),
             Usd::ZERO,
@@ -1311,7 +1769,7 @@ mod tests {
         );
 
         // …and WITHOUT them → line 22 = No (the Tax Table / TCW path, not QDCGT).
-        let l = schedule_d_lines(&ar_sched_d(
+        let l = sd_lines(&ar_sched_d(
             dec!(30000),
             dec!(-4000),
             Usd::ZERO,
@@ -1332,7 +1790,7 @@ mod tests {
     #[test]
     fn schedule_d_routing_net_loss_line21_is_a_positive_magnitude() {
         // A $10,000 net loss, of which §1211(b) allows $3,000 this year.
-        let l = schedule_d_lines(&ar_sched_d(
+        let l = sd_lines(&ar_sched_d(
             dec!(-10000),
             Usd::ZERO,
             Usd::ZERO,
@@ -1360,7 +1818,7 @@ mod tests {
     /// computation if it is wrong.
     #[test]
     fn schedule_d_routing_zero() {
-        let l = schedule_d_lines(&ar_sched_d(
+        let l = sd_lines(&ar_sched_d(
             dec!(4000),
             dec!(-4000),
             Usd::ZERO,
@@ -1379,7 +1837,7 @@ mod tests {
     /// 14 are PAREN boxes ⇒ positive magnitudes.
     #[test]
     fn schedule_d_prints_the_lines_the_crypto_slice_omits() {
-        let l = schedule_d_lines(&ar_sched_d(
+        let l = sd_lines(&ar_sched_d(
             dec!(1000),  // st_net (after the line-6 carryover)
             dec!(15000), // lt_net (after line 13 and the line-14 carryover)
             dec!(2000),  // line 6 — prior-year SHORT-term carryover
@@ -1440,14 +1898,14 @@ mod tests {
             "…the exact one differs"
         );
 
-        let s2 = schedule_2_lines(&ar, &f8959, None).unwrap();
+        let s2 = schedule_2_lines(None, &f8959, None).unwrap();
         assert_eq!(
             s2.line11,
             dec!(775),
             "Schedule 2 L11 = the 8959's PRINTED L18"
         );
 
-        let sd = schedule_d_lines(&ar);
+        let sd = schedule_d_lines(&ar, None);
         let l = form_1040_lines(
             &ar,
             None,
@@ -1488,7 +1946,7 @@ mod tests {
 
         let f8959 = form_8959_lines(FilingStatus::Single, dec!(120000), dec!(1800), None);
         let s3 = schedule_3_lines(&ar).unwrap();
-        let sd = schedule_d_lines(&ar);
+        let sd = schedule_d_lines(&ar, None);
         let l = form_1040_lines(
             &ar,
             None,
@@ -1579,7 +2037,8 @@ mod tests {
         ar.wages = dec!(80000);
         ar.deduction = dec!(14600);
 
-        let sd = schedule_d_lines(&ar);
+        // A loss means there were disposals, so a real return has an 8949 behind Schedule D.
+        let sd = sd_lines(&ar);
         assert_eq!(
             sd.line16,
             dec!(-10000),
