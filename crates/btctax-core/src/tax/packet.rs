@@ -14,6 +14,8 @@
 //! the one place core's composition KATs cannot reach). `assemble_printed_return` is the single
 //! composition site; the KATs below go *through* it, so the tested wiring is the shipped wiring.
 
+use crate::donation::DonationDetails;
+use crate::identity::EventId;
 use crate::state::LedgerState;
 use crate::tax::other_taxes::{form_8959_lines, form_8960_lines, Form8959Lines, Form8960Lines};
 use crate::tax::printed::{
@@ -22,10 +24,12 @@ use crate::tax::printed::{
     Form1040Lines, Printed8949, Schedule1Lines, Schedule2Lines, Schedule3Lines, ScheduleALines,
     ScheduleBLines, ScheduleCLines, ScheduleDLines, ScheduleSeLines,
 };
+use crate::tax::printed::{form_8283_printed, Printed8283Rows, FORM_8283_THRESHOLD};
 use crate::tax::qbi::{form_8995_lines, Form8995Lines};
 use crate::tax::return_1040::{is_aged, AbsoluteReturn};
 use crate::tax::return_inputs::{Owner, Person, ReturnInputs};
 use crate::tax::types::FilingStatus;
+use std::collections::BTreeMap;
 use std::fmt;
 
 // ── Identity ────────────────────────────────────────────────────────────────────────────────────
@@ -363,6 +367,13 @@ pub struct PrintedReturn {
     pub f8959: Form8959Lines,
     pub f8960: Option<Form8960Lines>,
     pub f8995: Option<Form8995Lines>,
+    /// Form 8283 — REQUIRED when the return itemizes and its printed noncash gifts exceed $500 (the
+    /// threshold is printed on Schedule A line 12 itself: "You must attach Form 8283 if over $500").
+    ///
+    /// Unlike Schedule D ← 8949, Schedule A L12 does NOT re-derive from these rows: L12 merely REQUIRES
+    /// the attachment, and the §170(b) ceilings legitimately make it smaller than the sum of the 8283's
+    /// per-donation amounts (SPEC §3.1, the citation-composition rule).
+    pub f8283: Option<Printed8283Rows>,
 }
 
 /// ★ **The single composition site.** Build every printed chain from one `AbsoluteReturn`, in dependency
@@ -376,6 +387,7 @@ pub struct PrintedReturn {
 pub fn assemble_printed_return(
     ri: &ReturnInputs,
     state: &LedgerState,
+    donation_details: &BTreeMap<EventId, DonationDetails>,
     ar: &AbsoluteReturn,
     year: i32,
 ) -> Result<PrintedReturn, SsnError> {
@@ -419,6 +431,13 @@ pub fn assemble_printed_return(
     let sch_2 = schedule_2_lines(sch_se.as_ref(), &f8959, f8960.as_ref());
     let sch_3 = schedule_3_lines(ar);
 
+    // Form 8283 files only when the return ITEMIZES and its printed noncash gifts clear the $500
+    // threshold printed on Schedule A line 12 — a standard-deduction year with donations files none.
+    let f8283 = sch_a
+        .as_ref()
+        .filter(|a| a.line12 > FORM_8283_THRESHOLD)
+        .and_then(|_| form_8283_printed(&crate::forms::form_8283(state, year, donation_details)));
+
     let f1040 = form_1040_lines(
         ar,
         sch_b.as_ref(),
@@ -450,6 +469,7 @@ pub fn assemble_printed_return(
         f8959,
         f8960,
         f8995,
+        f8283,
     })
 }
 
@@ -726,7 +746,7 @@ mod tests {
     fn the_assembled_packet_ties_the_1040_to_its_attachments() {
         let (ri, state) = kitchen_sink_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &state, &ar, 2024).unwrap();
+        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, 2024).unwrap();
 
         let sch_1 = pr.sch_1.expect("the kitchen sink has Schedule 1 income");
         let sch_2 = pr.sch_2.expect("…and SE tax ⇒ Schedule 2");
@@ -814,7 +834,7 @@ mod tests {
     fn the_packet_omits_every_form_that_is_not_required() {
         let (ri, state) = w2_only_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &state, &ar, 2024).unwrap();
+        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, 2024).unwrap();
 
         assert!(pr.sch_1.is_none(), "no additional income or adjustments");
         assert!(pr.sch_2.is_none(), "no SE / Additional Medicare / NIIT");
@@ -837,7 +857,7 @@ mod tests {
     fn the_printed_8959_reads_the_same_box5_sum_the_computed_8959_used() {
         let (ri, state) = kitchen_sink_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &state, &ar, 2024).unwrap();
+        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, 2024).unwrap();
 
         let box5_sum: crate::conventions::Usd = ri.w2s.iter().map(|w| w.box5_medicare_wages).sum();
         assert_eq!(ar.printed_inputs.medicare_wages, box5_sum);

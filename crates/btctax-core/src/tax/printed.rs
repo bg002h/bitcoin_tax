@@ -661,6 +661,32 @@ pub struct ScheduleDLines {
     pub routing: ScheduleDRouting,
 }
 
+impl ScheduleDLines {
+    /// Whether Schedule D must actually be FILED.
+    ///
+    /// The 1040's line 7 reads this chain either way (it is simply zero when there is no capital
+    /// activity), but a return with **no** disposals, **no** capital-gain distributions and **no**
+    /// carryover has no Schedule D to attach — and a blank one stapled to a W-2-only return is a form
+    /// the filer did not need. Like `Form8959Lines::must_file`, the decision is a CORE fact, so the
+    /// packet's KATs can see it (ARCH-P6 Q2).
+    pub fn must_file(&self) -> bool {
+        [
+            self.line3_d,
+            self.line3_e,
+            self.line3_h,
+            self.line6,
+            self.line10_d,
+            self.line10_e,
+            self.line10_h,
+            self.line13,
+            self.line14,
+            self.line16,
+        ]
+        .iter()
+        .any(|v| *v != Usd::ZERO)
+    }
+}
+
 /// Derive the printed Schedule D chain, including SPEC §7.2's exhaustive Part III routing.
 pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> ScheduleDLines {
     let p = &ar.schedule_d;

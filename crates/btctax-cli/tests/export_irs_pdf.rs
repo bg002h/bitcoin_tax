@@ -417,19 +417,16 @@ fn ty2017_real_ledger_fills_box_c_f_and_line13_no_da() {
     assert!(report.form_1040_filled_7a, "line 13 filled (active gain)");
 }
 
-/// ★ **P5-C1** — `export-irs-pdf` must REFUSE for a year that has full-return inputs.
+/// ★ THE DISPATCH, direction 1 (P6.5) — a year WITH full-return inputs gets the **full packet**, not the
+/// crypto slice. This replaces the P5-C1 refusal: that guard existed only because the slice's Schedule D
+/// carries the crypto totals alone (no line 13 for 1099-DIV box-2a distributions, no lines 6/14 for
+/// capital-loss carryovers), so on a full-return year it was a complete-LOOKING form with income missing.
+/// The full pipeline fills all of them, plus every attachment the forms cite.
 ///
-/// These fillers are the crypto-slice pipeline: Schedule D carries only the crypto totals (lines
-/// 3/7/10/15/16 — no line 13 for 1099-DIV box-2a capital-gain distributions, no lines 6/14 for
-/// capital-loss carryovers) and the 1040 fill is only the capital-gain line. On a crypto-only year
-/// that is complete and correct. On a full-return year it is a complete-LOOKING Schedule D with
-/// income missing, which the filer would mail — an understated return. §3.4: a plausible wrong
-/// number is worse than a refusal.
-///
-/// The refusal is scoped to the year: the SAME vault still exports a crypto-only year fine, which is
-/// what makes this a guard and not a blanket kill-switch.
+/// The two paths write NON-OVERLAPPING filenames, so artifacts from two runs can never be collated into a
+/// chimera return — asserted in both directions.
 #[test]
-fn export_refuses_for_a_full_return_year_p5_c1() {
+fn export_dispatches_a_full_return_year_to_the_full_packet() {
     use btctax_cli::{return_inputs, Session};
     use btctax_core::tax::return_inputs::ReturnInputs;
     use btctax_core::tax::types::FilingStatus;
@@ -437,14 +434,89 @@ fn export_refuses_for_a_full_return_year_p5_c1() {
     let (_dir, vault) = make_vault(&real_events());
     let out = tempfile::tempdir().unwrap();
 
-    // The ledger's crypto activity is in 2025 (see `real_events`). Give 2025 full-return inputs.
+    // TY2024 is the full-return year (v1 has tables for it); give it inputs — WITH an identity, since
+    // an unnamed return is not filable (the packet refuses one; see the KAT below).
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
+            first_name: "Pat".into(),
+            last_name: "Roe".into(),
+            ssn: "222-33-4444".into(),
+            ..Default::default()
+        };
+        return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("a full-return year exports the full packet");
+
+    assert!(
+        out.path().join("f1040.pdf").exists(),
+        "the full packet writes f1040.pdf"
+    );
+    assert!(
+        out.path().join("manifest.txt").exists(),
+        "…and the filer's stapling order"
+    );
+    assert!(!rep.full_return_paths.is_empty());
+    // …and NOT the crypto slice's files: the two name-spaces are disjoint by construction.
+    assert!(
+        !out.path().join("form_1040_capgains.pdf").exists(),
+        "the slice's 1040 must never appear beside the full packet"
+    );
+    assert!(rep.form_1040_path.is_none());
+}
+
+/// ★ THE DISPATCH, direction 2 — a year with NO full-return inputs still gets the crypto slice,
+/// unchanged. Deleting the P5-C1 refusal downgraded a type-level impossibility to a branch, so the
+/// branch is pinned in BOTH directions.
+#[test]
+fn export_without_return_inputs_still_gets_the_crypto_slice() {
+    let (_dir, vault) = make_vault(&real_events());
+    let out = tempfile::tempdir().unwrap();
+
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None)
+        .expect("a crypto-only year exports the slice");
+
+    assert!(
+        rep.full_return_paths.is_empty(),
+        "no full packet on this path"
+    );
+    assert!(
+        !out.path().join("f1040.pdf").exists(),
+        "the full packet's 1040 must never appear on the slice path"
+    );
+    assert!(
+        rep.schedule_d_path.is_some() || rep.f8949_path.is_some(),
+        "the slice still produces its own forms"
+    );
+}
+
+/// ★ An UNNAMED return is not filable — the packet refuses, and writes ZERO bytes.
+///
+/// This is the compute-vs-packet split the SSN design turns on: the tax math never reads an SSN, so a
+/// household that has not entered its PII still gets a REPORT (it can decide whether to file at all).
+/// The filable ARTIFACT is what fails closed — no PDF can be produced without an identity.
+#[test]
+fn a_full_return_without_an_ssn_refuses_and_writes_no_bytes() {
+    use btctax_cli::{return_inputs, Session};
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    use btctax_core::tax::types::FilingStatus;
+
+    let (_dir, vault) = make_vault(&real_events());
+    let out = tempfile::tempdir().unwrap();
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
         return_inputs::set(
             s.conn(),
-            2025,
+            2024,
             &ReturnInputs {
-                filing_status: FilingStatus::Single,
+                filing_status: FilingStatus::Single, // no header ⇒ no SSN
                 ..Default::default()
             },
         )
@@ -452,25 +524,16 @@ fn export_refuses_for_a_full_return_year_p5_c1() {
         s.save().unwrap();
     }
 
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None)
-        .expect_err("a full-return year must not get a crypto-slice PDF");
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect_err("an unnamed return must not produce a filable packet");
     assert!(
-        matches!(
-            err,
-            CliError::CryptoSliceExportForFullReturnYear { year: 2025 }
-        ),
-        "got {err:?}"
+        format!("{err}").contains("no SSN"),
+        "the refusal says what is missing: {err}"
     );
-    // A refusal writes NO bytes — the filer never has a wrong form on disk to mail by accident.
     assert!(
         std::fs::read_dir(out.path())
             .map(|mut d| d.next().is_none())
             .unwrap_or(true),
-        "a refused export must leave out_dir empty"
+        "a refused export leaves out_dir EMPTY — never a half-written packet"
     );
-
-    // …and a year WITHOUT full-return inputs still exports (the guard is per-year, not global).
-    let out2 = tempfile::tempdir().unwrap();
-    cmd::admin::export_irs_pdf(&vault, &pp(), out2.path(), 2024, &[], None)
-        .expect("a crypto-only year must still export");
 }

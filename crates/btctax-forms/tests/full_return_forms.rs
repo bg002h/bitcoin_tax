@@ -2027,3 +2027,104 @@ fn the_full_return_8283_names_the_filer_and_prints_whole_dollars() {
         "30,000.50 rounds at the cell"
     );
 }
+
+// ── fill_full_return — the assembled packet (P6.3b) ─────────────────────────────────────────────
+
+/// ★ The packet is ALL-OR-NOTHING. If any member filler refuses, ZERO bytes come back: a 1040 whose
+/// line 2b cites a Schedule B that is not attached is a wrong return, so partial emission is a
+/// fail-OPEN. Here Schedule B overflows (15 payers, 14 rows) and the WHOLE packet refuses — not just
+/// Schedule B.
+#[test]
+fn the_packet_is_all_or_nothing_when_a_member_filler_refuses() {
+    use btctax_core::tax::packet::assemble_printed_return;
+    use btctax_core::tax::return_1040::assemble_absolute;
+    use btctax_core::tax::return_inputs::Form1099Int;
+    use btctax_core::tax::testonly::{kitchen_sink_household, ty2024_params, ty2024_table};
+
+    let (mut ri, state) = kitchen_sink_household();
+    // 15 interest payers — one more than Schedule B Part I can hold.
+    ri.int_1099 = (0..15)
+        .map(|i| Form1099Int {
+            payer: format!("Bank {i}"),
+            box1_interest: dec!(200),
+            ..Default::default()
+        })
+        .collect();
+
+    let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+    let pr = assemble_printed_return(&ri, &state, &std::collections::BTreeMap::new(), &ar, 2024)
+        .unwrap();
+
+    let err = btctax_forms::fill_full_return(&pr, 2024)
+        .expect_err("an overflowing Schedule B must refuse the WHOLE packet");
+    assert!(
+        matches!(
+            err,
+            FormsError::Overflow {
+                part: "Schedule B Part I",
+                ..
+            }
+        ),
+        "the packet names WHICH form refused: {err:?}"
+    );
+}
+
+/// The kitchen-sink household files EVERY form, and the packet comes back in IRS **Attachment Sequence
+/// No.** order — the filer's stapling order, printed on the forms themselves (Sch 1 = 01, Sch 2 = 02,
+/// Sch 3 = 03, Sch A = 07, Sch B = 08, Sch C = 09, Sch D = 12, 8949 = 12A, Sch SE = 17, 8995 = 55,
+/// 8959 = 71, 8960 = 72, 8283 = 155), with the 1040 itself first.
+#[test]
+fn the_packet_emits_every_required_form_in_attachment_sequence_order() {
+    use btctax_core::tax::packet::assemble_printed_return;
+    use btctax_core::tax::return_1040::assemble_absolute;
+    use btctax_core::tax::testonly::{kitchen_sink_household, ty2024_params, ty2024_table};
+
+    let (ri, state) = kitchen_sink_household();
+    let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+    let pr = assemble_printed_return(&ri, &state, &std::collections::BTreeMap::new(), &ar, 2024)
+        .unwrap();
+
+    let packet = btctax_forms::fill_full_return(&pr, 2024).unwrap();
+    let names: Vec<&str> = packet.iter().map(|f| f.name.as_str()).collect();
+
+    assert_eq!(
+        names,
+        vec![
+            "f1040",
+            "f1040s1",
+            "f1040s2",
+            "f1040s3",
+            "f1040sa",
+            "f1040sb",
+            "f1040sc",
+            "schedule_d",
+            "f8949",
+            "schedule_se",
+            "f8995",
+            "f8959",
+            "f8960",
+        ],
+        "the 1040 first, then ascending Attachment Sequence No."
+    );
+    for form in &packet {
+        assert!(!form.bytes.is_empty(), "{} produced no bytes", form.name);
+    }
+}
+
+/// A plain W-2 household files a 1040 and NOTHING else — the packet's `None` arms are as load-bearing
+/// as its `Some` ones (a blank Schedule C stapled to a return with no business is a wrong return).
+#[test]
+fn a_w2_only_household_files_a_1040_and_nothing_else() {
+    use btctax_core::tax::packet::assemble_printed_return;
+    use btctax_core::tax::return_1040::assemble_absolute;
+    use btctax_core::tax::testonly::{ty2024_params, ty2024_table, w2_only_household};
+
+    let (ri, state) = w2_only_household();
+    let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+    let pr = assemble_printed_return(&ri, &state, &std::collections::BTreeMap::new(), &ar, 2024)
+        .unwrap();
+
+    let packet = btctax_forms::fill_full_return(&pr, 2024).unwrap();
+    let names: Vec<&str> = packet.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, vec!["f1040"]);
+}

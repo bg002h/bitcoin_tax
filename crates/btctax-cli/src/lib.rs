@@ -76,24 +76,6 @@ pub enum CliError {
         ATTEST_PHRASE
     )]
     AttestationFailed,
-    /// [★ P5-C1] `export-irs-pdf` was run for a year that has **full-return inputs**, but the forms it
-    /// fills are the CRYPTO-SLICE pipeline: Schedule D carries only the crypto totals (lines 3/7/10/15/16
-    /// — there is no line 13 for 1099-DIV box-2a capital-gain distributions and no lines 6/14 for
-    /// capital-loss carryovers), and the 1040 fill is only the capital-gain line + the digital-asset
-    /// question. For a crypto-only year those forms are complete and correct. For a full-return year they
-    /// are a **complete-looking form with income missing** — the filer mails an understated Schedule D.
-    ///
-    /// §3.4 is explicit that this is the case to fail closed on: a plausible wrong number is worse than a
-    /// refusal. The full-return fillers (P6) replace this refusal with a real export.
-    #[error(
-        "export refused: tax year {year} has full-return inputs, and `export-irs-pdf` today fills only the \
-         CRYPTO SLICE. Its Schedule D omits 1099-DIV box-2a capital-gain distributions (line 13) and \
-         capital-loss carryovers (lines 6/14), and its 1040 fills only the capital-gain line — so the PDFs \
-         would look complete while CONTRADICTING the return `btctax report --tax-year {year}` computes. \
-         Until the full-return PDF fillers ship, transcribe the figures from the report onto the official \
-         forms by hand. (`btctax limitations` explains exactly what is and is not filled.)"
-    )]
-    CryptoSliceExportForFullReturnYear { year: i32 },
 }
 
 /// The exact phrase a user must affirm to export a form/data file while the ledger is pseudo-reconciled

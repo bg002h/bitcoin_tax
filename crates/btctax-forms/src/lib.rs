@@ -28,6 +28,7 @@ mod form8960;
 mod form8995;
 mod map;
 mod overflow;
+mod packet;
 mod pdf;
 mod schedule23;
 mod schedule_a;
@@ -357,6 +358,8 @@ pub fn rows_possibly_broker_reported(rows: &[Form8949Row]) -> usize {
 
 // ── Internals exposed for the KATs (fault injection needs a corruptible map + the verifier). ──────
 #[doc(hidden)]
+pub use packet::{fill_full_return, NamedForm};
+
 pub mod testonly {
     pub use crate::cells::fmt_money_pair;
     pub use crate::fill8949::{fill_8949_parts, part_data, pdf_has_xfa, split_parts, PartData};
