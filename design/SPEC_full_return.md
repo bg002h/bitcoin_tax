@@ -119,10 +119,36 @@ pseudo-reconcile, existing crypto tests. Old hand-entered scalars remain the **r
 - **New `round_dollar` (`MidpointAwayFromZero` / half-up)** in `conventions.rs`, distinct from `round_cents`
   (`MidpointNearestEven`). IRS "$2.50 → $3" (2024 i1040 **p. 23**; F2 §1 proven mandatory).
 - **Global election = round-all-amounts, with cross-footing:** unprinted worksheets (QDCGT, IRA/student-loan,
-  §170(b) ceiling, excess-SS, SE) **carry cents**, round once at the value landing on a form line; **printed
+  §170(b) ceiling, excess-SS) **carry cents**, round once at the value landing on a form line; **printed
   form lines** are `round_dollar`ed at the line and **printed totals sum the already-rounded printed lines**
   (every filed form cross-foots — FFFF/commercial reading). Inputs accepted in cents, rounded at first
   form-line use. KAT-9 uses a **discriminating** fixture (two `.50` components; see §10).
+
+- **[AMENDED 2026-07-13 — "SE" struck from the worksheet list above.]** The SE **engine** (`se.rs`) remains a
+  FROZEN, unprinted, exact-cents worksheet. But **Schedule SE is a FILED FORM**, not a worksheet, and §7.1
+  has always listed it in the fill set — a form that is filed cannot also be an "unprinted worksheet" whose
+  cents never reach a page. It therefore has a printed chain (`printed::schedule_se_lines`) that rounds the
+  engine's values AT THE LINE, exactly like every other filed form. The contradiction was live in the text,
+  and it hid a real defect (see the composition rule below). Per Fable ARCH-P6.3a D5.
+
+- **[AMENDED 2026-07-13] The CITATION-COMPOSITION rule (normative, one sentence):** a line whose printed form
+  text **cites another form as its SOURCE** takes that form's **printed** line, never a re-rounding of the
+  exact figure behind it. The closed list for v1: Sch D L3/L10 ← the 8949's printed column totals; Sch 2 L4 ←
+  Sch SE's printed L12; Sch 1 L15 ← Sch SE's printed L13; 8959 L8 ← Sch SE's printed L6; Sch 2 L11 ← the
+  8959's printed L18; Sch 2 L12 ← the 8960's printed L17; 1040 L2b/L3b ← Sch B's printed L4/L6; SE L2 ← Sch
+  C's printed L31; 1040 L8/L10 ← Sch 1's printed L10/L26; 1040 L12 ← Sch A's printed L17; 1040 L13 ← the
+  8995's printed L15; 1040 L23 ← Sch 2's printed L21; 1040 L31 ← Sch 3's printed L15.
+  A line that merely **REQUIRES an attachment** does NOT re-derive from it — Sch A L12 ("You must attach Form
+  8283 if over $500") keeps its own value, because Form 8283 has no grand-total line and the §170(b) ceilings
+  legitimately make L12 smaller than the sum of the 8283's rows. Per Fable ARCH-P6.3a D3/D6/Q6.
+
+- **[AMENDED 2026-07-13] The Form 8949 ROW rule:** columns (d) and (e) are `round_dollar`ed at the cell, and
+  column **(h) is DERIVED from the printed cells — `h = d − e`** — never rounded independently from the exact
+  gain. The form's own column-(h) header says "Subtract column (e) from column (d)…", so an independently
+  rounded (h) makes the row contradict its own printed subtraction (proceeds 100.49 → 100, basis 0.50 → 1,
+  exact gain 99.99 → 100, but 100 − 1 = 99). Deriving (h) also makes Σh ≡ Σd − Σe an integer identity, which
+  is what lets Schedule D's Part I — whose columns carry the same header — cross-foot against these totals.
+  Per Fable ARCH-P6.3a D2.
 
 ### 3.2 Negative-sign formatting (resolves the other half of G3)
 
@@ -317,6 +343,7 @@ person; **per person** (never pooled); → Sch 3 L11 → 1040 L31. RRTA out of s
 | **claimable-as-dependent filer + unearned income > $2,600** (§1(g); F2: **unearned = gross income − earned income [wages + Sch C net]** → includes interest, dividends, capital gains, hobby-crypto L8v, unemployment L7, taxable refunds L1; **compute-dependent — screened in P2** after income assembly, not P1) | refuse | **C1 — Form 8615 kiddie tax**: `qdcgt_line16` at the child's rate would UNDERSTATE (parent's-rate required) |
 | **Schedule C net < 0** (loss) | refuse | **I2**: §465 at-risk + a negative Sch 1 L3 is unsubstantiated in v1 |
 | **excess-APTC / any marketplace Form 8962** | refuse | Sch 2 **L1a** repayment (would understate) |
+| **[AMENDED 2026-07-13] non-crypto NONCASH charitable gift with Σ > $500** | refuse | **ARCH-P6.3a Q6:** those amounts reach Sch A **L12**, but btctax holds no property details for them (description, acquisition date, appraiser) so it can emit no Form 8283 ROWS. Over the $500 threshold printed on L12 itself, the packet would attach an 8283 that **under-reports its own property list** — an incomplete required attachment and a §170(f)(11) denial risk. §3.4's conservative-omission carve-out does NOT apply: the omission is not taxpayer-favorable, it jeopardizes a deduction the filer is CLAIMING. Message: complete Form 8283 for that property by hand. |
 | QBI deduction asserted on Schedule C income | refuse | §199A-on-Sch-C is a follow-on (§4.5) |
 | W-2 box 12 code **not in the inert allowlist** `{D,E,F,G,H,S,AA,BB,EE,DD}` | refuse | **I1 (allowlist, not blocklist):** a blocklist leaks K (golden-parachute → Sch 2 L17k), R (8853), T (8839) etc.; allow only the clearly-inert elective-deferral / informational codes and refuse the rest — incl. **W** (→ 8889), **A/B/M/N** (→ L13), **Z** (→ L17h) |
 | **Σ box-12 elective deferrals (D/E/F/G/S) across employers > §402(g) $23,000** (TY2024) | refuse | **F3**: excess deferral is taxable on 1040 **1h** — the allowlist codes are inert only *up to* the §402(g) limit |
@@ -416,6 +443,17 @@ deduction as **approximate** and never reconciles the two to the dollar.
 Full **1040**, **Sch 1/2/3/A/B/C**, **Sch D** (extended §7.2), **SE, 8949, 8283** (existing), **8959, 8960,
 8995** (new); **Schedule C** (new). Every mandatory "Attach Form X" for an in-scope figure has its form; a
 non-DRAFT return never shows a line with no backing form. QBI: box5>0 forces the 8995 map.
+
+**[AMENDED 2026-07-13 — what "(existing)" means.]** It means the existing **geometry**, NOT the existing
+fillers. The crypto-slice fillers for SE / 8949 / 8283 print exact **CENTS** (deliberately CSV-identical, and
+a crypto-only filer may legitimately file in cents). The full-return packet has elected round-all-amounts
+(§3.1), and the election is all-or-nothing across the return **and its schedules** — so the packet's copies of
+those three forms print **WHOLE DOLLARS**, from their own core printed chains, through their own fillers
+(`fill8949_full`, `schedule_se_full`, `fill_form_8283_full`). The two paths stay separate **permanently**: a
+unified filler, or a "rounding mode" flag, is one refactor away from harmonizing regimes that must never be
+harmonized. Reusing the slice fillers here would have produced a packet whose Schedule D disagreed with the
+8949 it CITES as its source, and whose Schedule 2 L4 disagreed with the Schedule SE it says to attach — the
+same defect class as P5-C1. Per Fable ARCH-P6.3a D4/D6.
 
 **Schedule B filing trigger (R3-I2 — normative, single site):** Schedule B files when **taxable interest >
 $1,500** *or* **ordinary dividends > $1,500** *or* `foreign_accounts == Some(true)` (Part III trigger (b))
