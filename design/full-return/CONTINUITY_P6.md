@@ -8,10 +8,10 @@
 |---|---|
 | P0–P4 | **CERTIFIED GREEN** (incl. P4.9 carryover write-back) |
 | P5 (LIMITATIONS + advisories) | **CERTIFIED GREEN** — Fable r2 `0C/0I` at `b40bdec` |
-| **P6 (PDF fillers)** | **IN PROGRESS — EVERY FORM FILLS (9 new + Schedule D full + the full 1040). Only PACKET ASSEMBLY remains** |
+| **P6 (PDF fillers)** | **P6.1–P6.5 DONE — the PACKET FILES. `export-irs-pdf` emits a complete, filable full-return packet; the P5-C1 refusal is DELETED. Only the P6.6 GATE REVIEW remains (Fable, to 0C/0I).** |
 | P7 (golden returns) | not started |
 
-Branch `full-return`. Gates at HEAD: **1628 passing / 0 failed**, clippy
+Branch `full-return`. Gates at HEAD: **1676 passing / 0 failed**, clippy
 (`--workspace --all-targets --locked -D warnings`) 0, fmt clean, xtask docs 5/5, FROZEN files 0 bytes.
 
 ## The operating contract (unchanged)
