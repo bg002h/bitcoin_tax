@@ -69,7 +69,8 @@ Additional Medicare Tax, Parts I (wages), II (SE) and V (withholding).
   ledger's disposals, Schedule SE, Form 8283, and the 1040's capital-gain cluster). The packet's files are
   **sequence-prefixed** (`00_f1040.pdf`, `01_f1040s1.pdf`, … `12A_f8949.pdf`) and the slice's are not, so the
   two name-spaces are disjoint: running both into one directory cannot shuffle a cents form from one into the
-  whole-dollar packet of the other. A KAT asserts the disjointness — it is a guarantee, not a claim.
+  whole-dollar packet of the other. A test runs both pipelines into one directory and asserts every packet
+  file is still **byte-for-byte** what the packet wrote — and it fails if the guarantee is removed.
 
 **Whole dollars, and why the report agrees with the PDF.** The filed packet takes the IRS's round-all-amounts
 election (2024 i1040 p. 23): every printed line is rounded at the line, and every printed total sums the

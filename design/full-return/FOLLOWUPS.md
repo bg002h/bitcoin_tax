@@ -302,6 +302,58 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   ranked Minor by two independent Fable passes; fold opportunistically during the relevant phase. (spec §8
   KAT-3 mod-25 + the Sch 2 L1a/L2 structure are now FOLDED into spec r6, not open.)
 
+## Open — filed from the P6 gate review (Fable r1 + r2). NONE is blocking; each has an owning phase.
+
+Recorded per the standing burndown rule (an item whose owning phase is closing must not silently carry).
+Full text: `reviews/IMPL-P6-fable-review-r1.md` and `reviews/IMPL-P6-fable-review-r2.md`.
+
+- **p6-r1-m1-ippin-error-noun → P6.7 (cleanup).** `IpPin::canonical` reuses `SsnError`, so a 5-digit PIN
+  refuses with "has 5 digits — an SSN has exactly 9". Wrong noun, wrong count. Give the PIN its own error.
+- **p6-r1-m2-mfs-without-spouse → P6.7.** An MFS return with no `spouse` captured files with the spouse-SSN
+  and spouse-name cells BLANK; the 1040 requires them on MFS. Refuse at screen time, or LIMITATIONS-note it.
+- **p6-r1-m3-schedule-c-face-lines → P6.7.** Sch C lines E (address), G (material participation), H, I/J
+  (1099 questions) are blank and undocumented. G especially: a mining/staking trade-or-business with SE tax
+  is materially participated by construction — answer it on the same authority as the Schedule D QOF "No".
+- **p6-r1-m4-forms-filter-ignored → P6.7.** The full path silently ignores `--forms` (the dispatch precedes
+  the filter). Reject the flag on a full-return year, or document that the packet is indivisible.
+- **p6-r1-m5-must-file-skips-8949 → P6.7.** `sch_d.must_file()` gates the 8949 branch too, so a real disposal
+  whose printed cells all round to $0 files neither form while the DA question answers Yes. A disposal is
+  reportable regardless of amount: file Schedule D whenever `f8949.is_some()`. (Intersects r2 NEW-I1's
+  operand question — fix together.)
+- **p6-r1-m6-instruction-level-citations → post-v1.** Form 8960 L1/L2/L5a/L13 and Form 8995 L11/L12 are cited
+  from 1040 lines by the INSTRUCTIONS (not on-face text), and print rounded exact values that can sit $1 from
+  the printed 1040 cells the Service cross-matches. Spec-conformant under the on-face criterion; consider
+  extending §3.1's closed list to instruction-level citations.
+- **p6-r1-m8-refusal-names-who / line-2a-blank-when-zero → P6.7.** `SsnError::Missing` surfaces at the packet
+  boundary without saying WHICH of four people; and `push_money` writes "0" where the ARCH note asked for a
+  BLANK cell when the value is zero.
+- **p6-r2-nm1-qof-silent-skip → P6.7.** The full Schedule D's QOF write is `if let Some(qof_no)` (silent blank
+  on a map without the cell) where every other mandatory full-path cell uses fail-closed `need()`.
+  Unreachable for TY2024; align the convention.
+- **p6-r2-nm2-prefix-is-not-lexicographic-order → P6.7.** "the prefix IS the stapling order" is false under a
+  lexicographic directory sort (`12A_` sorts before `12_`; `155_` between `12A_` and `17_`). The MANIFEST is
+  correct and labelled; zero-pad the prefixes or fix the comment.
+- **p6-r2-nm3-no-packet-tie-out-for-sch-a-l2 → P6.7.** No packet-level KAT pins `sch_a.line2 == f1040.line11`;
+  the unit KAT cannot see an assembly-wiring revert.
+- **p6-r2-nm5-user-only-8283-refusal-unpinned → P6.7.** The user-only >$500 refusal lost its test pin when the
+  guard moved screens. The behavior is correct; the coverage regressed.
+- **p6-r2-nm6-cli-empty-header-and-untested-output → P6.7.** The full path prints an empty "Filled IRS forms →"
+  header before the packet block, and the whole output block has no test coverage.
+- **p6-r1-n1-extract-lines → P7.** The line-keyed inverse transcriber (`testonly::extract_lines`) the architect
+  asked to be built while the maps are fresh. The cross-PDF oracle was hand-rolled with `tv()` instead.
+- **p6-r1-n2-manifest-w2-copy-b → P6.7.** The manifest should carry the "attach your W-2 Copy B" line.
+- **p6-r1-n3-every-schedule-kat-tests-one-form → P6.7.** `every_schedule_carries_the_name_and_ssn_header`
+  tests ONE form; the name promises all. Had it iterated the packet, the unnamed 8949 (r1 I3) would have been
+  caught mechanically. Also the 1040 L23 ↔ Sch 2 L21 CELL-TEXT leg of the cross-PDF oracle is still missing.
+- **p6-r1-n4-zero-idiom → P6.7.** 1040 line 7 prints "0" where the form's idiom is "-0-".
+- **p6-r1-n5-foreign-address-row → P6.7.** The 1040's foreign-address row (f1_15–f1_17) is unmapped and
+  undocumented.
+- **p6-r1-obs-partial-packet-on-io-error → P6.7 (observation).** All-or-nothing holds against filler refusals
+  (every form fills before any byte is written), but an I/O error mid-write-loop can still leave a partial
+  packet on disk. LIMITATIONS' "you never find a half-packet" is scoped to fill failures. Write to a temp dir
+  and rename, or scope the claim.
+
+
 ## Open — owned by P6 (the PDF fillers)
 
 - **p5-c1-crypto-slice-export-refusal → P6.** `export-irs-pdf` now REFUSES for a year with full-return inputs

@@ -491,6 +491,16 @@ pub struct Form1040Lines {
 /// consumes both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Form1040Income {
+    /// The QDCGT worksheet's **line 3** operand: `min(printed Sch D L15, printed Sch D L16)`, floored at
+    /// 0 — the §1(h) preferential net capital gain **as a human reads it off the FILED Schedule D**
+    /// (`qdcgt_line16`'s own doc: "`net_ltcg` = `min(Sch D 15,16)`, ≥0; L3").
+    ///
+    /// ★ It is NOT `round_dollar(exact net_ltcg)` (Fable P6 r2 NEW-I1). The printed Sch D L15/L16 are sums
+    /// of printed operands and drift from the exact figure — that is what the 302≠301 8949 KAT is about.
+    /// A $1 drift here shifts the worksheet's ordinary remainder by $1, and THAT feeds the same $50-tread
+    /// Tax Table step function line 16 was already gated on: across a bin edge the filed L16 disagrees
+    /// with the worksheet a filer (or the Service) computes from the filed Schedule D, by a whole bin.
+    pub qdcgt_net_capital_gain: Usd,
     pub line1a: Usd,
     pub line1z: Usd,
     pub line2a: Usd,
@@ -532,6 +542,8 @@ pub fn form_1040_income_lines(
     let line11 = line9 - line10;
 
     Form1040Income {
+        // The worksheet reads these OFF THE FILED SCHEDULE D — printed lines 15 and 16, smaller of, ≥ 0.
+        qdcgt_net_capital_gain: sch_d.line15.min(sch_d.line16).max(Usd::ZERO),
         line1a,
         line1z,
         line2a,
@@ -568,6 +580,7 @@ pub fn form_1040_lines(
 ) -> Form1040Lines {
     // ── Income — from the printed block (Schedule A already composed on its L11). ───────────────
     let Form1040Income {
+        qdcgt_net_capital_gain,
         line1a,
         line1z,
         line2a,
@@ -602,7 +615,7 @@ pub fn form_1040_lines(
         table.ltcg_for(status),
         line15,
         line3a,
-        round_dollar(ar.net_ltcg),
+        qdcgt_net_capital_gain, // ★ the PRINTED Schedule D figure, not round(exact) — r2 NEW-I1
     );
     let line17 = Usd::ZERO; // Schedule 2 Part I is blank in v1 (see Schedule2Lines)
     let line18 = line16 + line17;
@@ -1079,7 +1092,13 @@ pub fn schedule_a_lines(ar: &AbsoluteReturn, line11_1040: Usd) -> Option<Schedul
     // 1040 L12 (Fable P6 r1 I5).
     let line1 = round_dollar(p.medical_expenses);
     let line2 = line11_1040;
-    let line3 = round_dollar(MEDICAL_FLOOR_RATE * line2);
+    // ★ The floor is CLAMPED at zero (Fable P6 r2 NEW-I2). L2 carries the true printed 1040 L11 — which
+    // can be NEGATIVE — but a negative 7.5% floor would INFLATE the deduction: line 4 would print
+    // $13,750 of allowed medical on $10,000 actually paid. §213(a) allows the expenses "to the extent
+    // that [they] exceed 7.5 percent" of AGI — the deduction can never exceed the expense. The exact
+    // engine has always clamped here (`schedule_a_parts`: "so the floor never helps the taxpayer"); the
+    // printed chain must too, or the FILED form claims more than the return computed.
+    let line3 = round_dollar(MEDICAL_FLOOR_RATE * line2).max(Usd::ZERO);
     let line4 = (line1 - line3).max(Usd::ZERO);
 
     // SALT — the cap binds the PRINTED 5d.
@@ -1577,6 +1596,84 @@ mod tests {
             l.line16,
             round_dollar(ar.regular_tax),
             "…and it is NOT the tax on the exact-cents TI — the two bins differ"
+        );
+    }
+
+    /// ★ **r2 NEW-I2 (a REGRESSION the r1 fold introduced).** Schedule A line 2 carries the true printed
+    /// 1040 L11 — which can be NEGATIVE — but the 7.5% floor must still be clamped at zero.
+    ///
+    /// Unclamped, a negative AGI makes the floor negative and the deduction goes UP: line 4 would print
+    /// $13,750 of allowed medical on $10,000 actually paid. §213(a) allows the expenses "to the extent
+    /// that [they] exceed 7.5 percent" of AGI — the deduction can never exceed the expense. The exact
+    /// engine has always clamped; the FILED form must agree with it.
+    ///
+    /// The r1 KAT missed this because it passed the FIXTURE's already-clamped AGI, not the production
+    /// operand. This one passes a negative printed L11, exactly as `assemble_printed_forms` does.
+    #[test]
+    fn schedule_a_medical_floor_never_goes_negative_on_a_negative_agi() {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.deduction_is_itemized = true;
+        ar.itemized_deduction = Some(dec!(20000));
+        ar.standard_deduction = dec!(14600);
+        let mut parts = sched_a_parts_sales_tax();
+        parts.medical_expenses = dec!(10000);
+        ar.schedule_a = Some(parts);
+
+        // The PRODUCTION operand: a negative printed 1040 line 11.
+        let a = schedule_a_lines(&ar, dec!(-50000)).unwrap();
+
+        assert_eq!(
+            a.line2,
+            dec!(-50000),
+            "L2 still carries the true printed L11"
+        );
+        assert_eq!(
+            a.line3,
+            Usd::ZERO,
+            "★ the 7.5% floor is CLAMPED — never negative"
+        );
+        assert_eq!(
+            a.line4,
+            dec!(10000),
+            "…so the allowed medical is the expense PAID, never more"
+        );
+        assert!(
+            a.line4 <= a.line1,
+            "§213(a): the deduction can never exceed the expense"
+        );
+    }
+
+    /// ★ **r2 NEW-I1.** The QDCGT worksheet's line-3 operand is the figure a human reads off the FILED
+    /// Schedule D — `min(printed L15, printed L16)`, ≥ 0 — not a re-rounding of the exact preferential
+    /// gain. The printed Schedule D lines are sums of printed operands and drift from the exact figure
+    /// (that is what the 302≠301 8949 KAT is about); a $1 drift here shifts the worksheet's ordinary
+    /// remainder by $1, which lands in a different $50 Tax-Table bin and moves the filed L16 by a whole
+    /// bin step.
+    #[test]
+    fn form_1040_line16_takes_the_qdcgt_operand_off_the_printed_schedule_d() {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.wages = dec!(60000);
+        ar.agi = dec!(65000);
+        ar.deduction = dec!(5000);
+        ar.taxable_income = dec!(60000);
+        ar.net_ltcg = dec!(5000); // the EXACT preferential gain…
+
+        // …but the PRINTED Schedule D says 5,003 (its lines are sums of printed 8949 rows).
+        let mut sd = schedule_d_lines(&ar, None);
+        sd.line15 = dec!(5003);
+        sd.line16 = dec!(5003);
+        sd.routing = ScheduleDRouting::BothGains;
+
+        let income = form_1040_income_lines(&ar, None, None, &sd);
+        assert_eq!(
+            income.qdcgt_net_capital_gain,
+            dec!(5003),
+            "★ the operand is min(printed Sch D L15, L16) — what the filer copies off the filed form"
+        );
+        assert_ne!(
+            income.qdcgt_net_capital_gain,
+            round_dollar(ar.net_ltcg),
+            "…and NOT a re-rounding of the exact preferential gain"
         );
     }
 

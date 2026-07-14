@@ -149,6 +149,15 @@ pseudo-reconcile, existing crypto tests. Old hand-entered scalars remain the **r
   bins, the filed L16 differs from `Table(filed L15)` by a whole bin step (up to ~$18.50 at the top rate).
   "L16 vs Table(L15)" is the single most-recomputed arithmetic on a transcribed return, and a mismatch is a
   math-error notice. The exact-cents figure remains the COMPUTED liability; only the filed cell is composed.
+
+  **[EXTENDED 2026-07-13, Fable P6 r2 NEW-I1] The worksheet runs on PRINTED operands THROUGHOUT** — all
+  three of them, not just the taxable income: **L1 = the printed 1040 L15**, **L2 = the printed 1040 L3a**,
+  **L3 = min(printed Sch D L15, printed Sch D L16), floored at 0**. The Schedule D lines are themselves
+  sums of printed operands (their 8949 column totals are `Σ round(row)`, not `round(Σ)` — see the 8949 row
+  rule), so `round_dollar(exact preferential gain)` can differ from them by dollars. A $1 difference in the
+  worksheet's L3 shifts its ordinary remainder by $1, which lands in a different $50 Tax-Table bin and moves
+  the filed L16 by a whole bin step — the same defect as above, reached through the worksheet instead of
+  directly. The operands must be the figures a filer copies OFF THE FILED FORMS.
   A line that merely **REQUIRES an attachment** does NOT re-derive from it — Sch A L12 ("You must attach Form
   8283 if over $500") keeps its own value, because Form 8283 has no grand-total line and the §170(b) ceilings
   legitimately make L12 smaller than the sum of the 8283's rows. Per Fable ARCH-P6.3a D3/D6/Q6.

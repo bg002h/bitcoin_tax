@@ -538,20 +538,29 @@ fn a_full_return_without_an_ssn_refuses_and_writes_no_bytes() {
     );
 }
 
-/// ★ **I7 — the filename sets are DISJOINT, and this KAT is what makes that a guarantee rather than a
-/// claim.** It was the explicit condition on deleting the P5-C1 refusal: two runs into one directory
-/// (a 2024 full return + a 2025 crypto-only slice) must never interleave, because a CENTS Schedule SE
-/// sitting beside a WHOLE-DOLLAR 1040 is precisely the chimera return the dispatch mitigation exists to
-/// prevent. Before this fix three names collided (`f8949.pdf`, `schedule_d.pdf`, `schedule_se.pdf`);
-/// the packet now sequence-prefixes every file, which also gives the filer their stapling order.
+/// ★ **I7 / r2 NEW-I3 — the two pipelines cannot clobber each other, and this KAT FAILS if they can.**
+///
+/// The r1 version of this test was VACUOUS: its key assertion (`for name in after − before { assert!(
+/// !before.contains(name)) }`) is a set-difference tautology, and a colliding write TRUNCATES IN PLACE,
+/// so the filename set is unchanged either way — it passed with the fix reverted. Fable caught it, and
+/// it is the same false-safety-claim class the finding itself was about.
+///
+/// This version hashes every packet file's BYTES before the second pipeline runs and asserts they are
+/// untouched afterwards. Revert the sequence-prefix and `f8949.pdf` / `schedule_d.pdf` /
+/// `schedule_se.pdf` get overwritten by the slice's cents versions — and this test fails, which is the
+/// whole point: it was the explicit condition on deleting the P5-C1 refusal, because a cents Schedule SE
+/// beside a whole-dollar 1040 is the chimera return the dispatch mitigation exists to prevent.
 #[test]
-fn the_two_pipelines_write_disjoint_filename_sets() {
+fn the_two_pipelines_cannot_overwrite_each_others_files() {
     use btctax_cli::{return_inputs, Session};
     use btctax_core::tax::return_inputs::ReturnInputs;
     use btctax_core::tax::types::FilingStatus;
-    use std::collections::BTreeSet;
+    use std::collections::BTreeMap;
 
-    let (_dir, vault) = make_vault(&real_events());
+    // ★ The ledger's crypto activity must be in 2024, so the PACKET actually contains the forms that
+    // collide (Schedule D, 8949, Schedule SE). With a crypto-less 2024 the packet is a lone 1040 and the
+    // test cannot fail even with the fix reverted — which is precisely how the r1 version was vacuous.
+    let (_dir, vault) = make_vault(&real_events_2024());
     let out = tempfile::tempdir().unwrap();
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
@@ -569,32 +578,40 @@ fn the_two_pipelines_write_disjoint_filename_sets() {
         s.save().unwrap();
     }
 
-    // Both pipelines, into the SAME directory — the exact collision scenario.
-    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None).unwrap(); // full packet
-    let before: BTreeSet<String> = std::fs::read_dir(out.path())
+    // 1) The full packet (2024 — it HAS a Schedule D and an 8949).
+    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None).unwrap();
+    let snapshot: BTreeMap<String, Vec<u8>> = std::fs::read_dir(out.path())
         .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .map(|e| {
+            let e = e.unwrap();
+            (
+                e.file_name().to_string_lossy().into_owned(),
+                std::fs::read(e.path()).unwrap(),
+            )
+        })
         .collect();
+    assert!(
+        snapshot.len() > 1,
+        "the packet wrote several files: {:?}",
+        snapshot.keys().collect::<Vec<_>>()
+    );
 
-    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None).unwrap(); // crypto slice
-    let after: BTreeSet<String> = std::fs::read_dir(out.path())
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
+    assert!(
+        snapshot.keys().any(|k| k.contains("schedule_d")),
+        "the packet must contain the colliding forms, or this test proves nothing: {:?}",
+        snapshot.keys().collect::<Vec<_>>()
+    );
 
-    // The slice ADDED files and OVERWROTE none of the packet's.
-    let slice_only: BTreeSet<_> = after.difference(&before).cloned().collect();
-    assert!(!slice_only.is_empty(), "the slice wrote something");
-    for name in &before {
-        assert!(
-            after.contains(name),
-            "the slice must not have removed the packet's {name}"
-        );
-    }
-    for name in &slice_only {
-        assert!(
-            !before.contains(name),
-            "★ {name} would OVERWRITE a packet file — the two name-spaces must be disjoint"
+    // 2) The crypto slice for ANOTHER year, into the SAME directory — the collision scenario.
+    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2017, &[], None).unwrap();
+
+    // ★ Every packet file must still be byte-for-byte what the packet wrote.
+    for (name, bytes) in &snapshot {
+        let now = std::fs::read(out.path().join(name))
+            .unwrap_or_else(|_| panic!("the slice DELETED the packet's {name}"));
+        assert_eq!(
+            &now, bytes,
+            "★ the slice OVERWROTE the packet's {name} — a cents form inside a whole-dollar return"
         );
     }
 }
