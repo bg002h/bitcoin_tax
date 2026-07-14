@@ -734,3 +734,42 @@ Full text: `reviews/IMPL-P6-fable-review-r1.md` and `reviews/IMPL-P6-fable-revie
 ## From earlier reviews (folded, recorded for traceability)
 
 - (r1–r3 findings were all folded into the spec; see `reviews/SPEC-fable-review-r{1,2,3}.md`.)
+
+## Open — owned by P8 (the input surface) / filed during P8a
+
+Filed while building P8a (D-8, the dependent flag). Each has an **owning phase**; per the in-phase
+burndown rule, an item scheduled *to* a phase is not deferrable past it.
+
+- **`accounting_method = "accrual"` is accepted, unmodeled, and unrefused → P8.** `ScheduleCInputs`
+  carries an accounting method, and the engine is cash-basis throughout; an `"accrual"` value is neither
+  honored nor refused, and it *does* flip the printed Schedule C line F on a return computed on the cash
+  basis. So the printed form asserts an accounting method the numbers behind it do not use. **Refuse it**
+  (it is out of scope for v1), rather than print a contradiction. *Severity: Important — a false statement
+  on a filed form, though it does not move a number.*
+
+- **`Dependent.relationship` prints blank → P8.** The field is captured and the 1040's dependent table has
+  a "Relationship to you" column, but nothing writes it. A dependent row that names a person and leaves
+  their relationship blank is an incomplete form. Either write it or refuse an empty one. *Minor.*
+
+- **`Person.ssn_valid_for_employment` is captured and never consumed → P8.** Dead input. It exists to
+  gate the §32 EITC (a "not valid for employment" SSN disqualifies), and v1 has no EITC — so it is
+  currently harmless. But a captured-and-ignored field is a lie about what the app honors. Consume it or
+  delete it. *Minor.*
+
+- **★ `first_negative_amount`'s "compiler-enforced exhaustiveness" has a hole at `header` → P8.**
+  `return_refuse.rs:204` destructures `ReturnInputs` with no `..` — deliberately, so a newly-added field
+  breaks the build until it is classified as money or not — and the doc-comment above it claims exactly
+  that guarantee. But `header: _, // PII only — no money` dismisses the whole `HouseholdHeader` with a
+  wildcard, so **`HouseholdHeader` is NOT exhaustively destructured**. Add a `Usd` to the header and the
+  negative-money screen silently misses it — a fail-OPEN, in the one function whose comment promises it
+  cannot happen. (Today "no money" is true, so nothing is wrong *yet*; the guarantee is what is broken.)
+  Also "PII only" is simply false — the header holds the dependent flags and the presidential-fund flags,
+  and the dependent flag is tax-affecting. **Destructure `HouseholdHeader` too.** *Important — a stated
+  guarantee that does not hold.*
+
+- **`SPEC_dependent_flag.md` motivates the recovery path with an installed base that does not exist → P8.**
+  Its §3(4) prose ("a wall, landing on people who did exactly what the spec told them to") presupposes
+  users. **There has never been a user of this software.** The *conclusion* (`income answer` must exist) is
+  right on its own merits — answering is now mandatory, and a TOML file must not be the only way in — but
+  the argument should not lean on a fiction. `LIMITATIONS.md` was corrected in `aaf3f07`; the spec still
+  carries the framing. *Nit — but it is the kind of thing that becomes folklore if left.*
