@@ -234,27 +234,35 @@ mod p8a_migration_tests {
 
     /// A PRE-P8a vault: the old 2-column schema, holding a blob written by the SHIPPED code.
     ///
-    /// The blob is built by SERIALIZING a real `ReturnInputs` and rewriting the one key — because a bare
-    /// `bool` is always serialized, so every v0 row carries `false` for it whether or not the filer was
-    /// ever asked. Hand-writing the JSON would drift from the struct (and did: my first version omitted a
-    /// required field and every assertion below passed VACUOUSLY against a default header).
-    fn v0_blob(answer: Option<bool>) -> String {
-        let ri = ReturnInputs::default();
-        let j = serde_json::to_string(&ri).unwrap();
-        let want = match answer {
-            Some(true) => "true",
-            Some(false) => "false",
-            None => unreachable!("a v0 row ALWAYS carries the flag — that is the defect"),
-        };
-        let out = j.replace(
-            "\"can_be_claimed_as_dependent_taxpayer\":null",
-            &format!("\"can_be_claimed_as_dependent_taxpayer\":{want}"),
-        );
-        assert_ne!(out, j, "the v0 rewrite must actually hit the key — else the test is vacuous");
+    /// The blob is built by SERIALIZING a real `ReturnInputs` and rewriting the flag keys — because a bare
+    /// `bool` is always serialized, so every v0 row carries `false` for BOTH flags whether or not the filer
+    /// was ever asked. Hand-writing the JSON would drift from the struct (and did: my first version put the
+    /// flag at the top level instead of under `header`, so every assertion below passed VACUOUSLY against a
+    /// defaulted header).
+    ///
+    /// ★ It rewrites **both** flags, and asserts each rewrite lands. The first version rewrote only the
+    /// taxpayer key — so the SPOUSE half of the migration was held by no test at all, and deleting it left
+    /// the whole suite green (Fable P8a r1 I2). A fixture that silently covers half of what it claims to
+    /// cover is worse than no fixture: it reports success for the part it never touched.
+    fn v0_blob(taxpayer: bool, spouse: bool) -> String {
+        let j = serde_json::to_string(&ReturnInputs::default()).unwrap();
+        let mut out = j.clone();
+        for (key, v) in [
+            ("can_be_claimed_as_dependent_taxpayer", taxpayer),
+            ("can_be_claimed_as_dependent_spouse", spouse),
+        ] {
+            let before = out.clone();
+            out = out.replace(&format!("\"{key}\":null"), &format!("\"{key}\":{v}"));
+            assert_ne!(
+                out, before,
+                "the v0 rewrite must actually hit `{key}` — else the test that reads it is vacuous"
+            );
+        }
         out
     }
 
-    fn old_schema_vault(year: i32, answer: Option<bool>) -> Connection {
+    /// A v0 vault whose row answers both flags the way the shipped `bool` did: `false`, unasked.
+    fn old_schema_vault(year: i32, taxpayer: bool, spouse: bool) -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE return_inputs (year INTEGER PRIMARY KEY, inputs_json TEXT NOT NULL);",
@@ -262,14 +270,14 @@ mod p8a_migration_tests {
         .unwrap();
         conn.execute(
             "INSERT INTO return_inputs(year,inputs_json) VALUES(?1,?2)",
-            rusqlite::params![year, v0_blob(answer)],
+            rusqlite::params![year, v0_blob(taxpayer, spouse)],
         )
         .unwrap();
         conn
     }
 
     fn old_schema_vault_with_unanswered_row(year: i32) -> Connection {
-        old_schema_vault(year, Some(false))
+        old_schema_vault(year, false, false)
     }
 
     /// ★ The whole point. A pre-P8a row's `false` is INDISTINGUISHABLE from "never asked" — so it must
@@ -288,15 +296,36 @@ mod p8a_migration_tests {
     /// A stored `true` can only have been TYPED — nothing defaults to true. Preserve it.
     #[test]
     fn a_version_0_rows_true_is_preserved() {
-        let conn = old_schema_vault(2024, Some(true));
+        let conn = old_schema_vault(2024, true, true);
+        let h = get(&conn, 2024).unwrap().unwrap().header;
+        assert_eq!(
+            h.can_be_claimed_as_dependent_taxpayer,
+            Some(true),
+            "nothing defaults to true — a stored true was typed, and must survive"
+        );
+        assert_eq!(
+            h.can_be_claimed_as_dependent_spouse,
+            Some(true),
+            "...and the same is true of the SPOUSE flag"
+        );
+    }
+
+    /// ★ **Fable P8a r1 I2.** The SPOUSE half of the migration had no test: deleting
+    /// `unlaunder(&mut ri.header.can_be_claimed_as_dependent_spouse)` left 1729/1729 passing, because the
+    /// fixture only ever rewrote the taxpayer key. Without this, every v0 MFJ/MFS row's spouse `false` is
+    /// ratified as an answered "No" — `DependentSpouseStatusUnanswered` never fires for exactly the
+    /// population that has the bug, and the 1040 prints the spouse box unchecked, unaffirmed.
+    #[test]
+    fn a_version_0_rows_unanswered_spouse_false_also_loads_as_none() {
+        let conn = old_schema_vault_with_unanswered_row(2024);
         assert_eq!(
             get(&conn, 2024)
                 .unwrap()
                 .unwrap()
                 .header
-                .can_be_claimed_as_dependent_taxpayer,
-            Some(true),
-            "nothing defaults to true — a stored true was typed, and must survive"
+                .can_be_claimed_as_dependent_spouse,
+            None,
+            "a v0 spouse `false` was never answered either — it must not be ratified as a No"
         );
     }
 

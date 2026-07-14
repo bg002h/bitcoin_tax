@@ -431,12 +431,6 @@ pub fn golden_usd(v: f64) -> Usd {
     Usd::try_from(v).expect("the oracle emits finite figures")
 }
 
-/// Build the SAME household in btctax's own input model.
-///
-/// The mapping is deliberately literal: the oracle's `w2_income` is a W-2's box 1 (and its box 3 / box 5,
-/// which is what a real W-2 carries), its capital gains are crypto disposals on the ledger (which is how
-/// btctax gets to Schedule D at all), and its `self_employment_income` is business crypto — a Schedule C
-/// trade or business, which is the only way btctax produces SE tax.
 /// A header that has **answered** the §63(c)(5) "someone can claim you as a dependent" question — with a
 /// "no", which is what an ordinary filer says.
 ///
@@ -451,6 +445,12 @@ pub fn not_a_dependent() -> HouseholdHeader {
     }
 }
 
+/// Build the SAME household in btctax's own input model.
+///
+/// The mapping is deliberately literal: the oracle's `w2_income` is a W-2's box 1 (and its box 3 / box 5,
+/// which is what a real W-2 carries), its capital gains are crypto disposals on the ledger (which is how
+/// btctax gets to Schedule D at all), and its `self_employment_income` is business crypto — a Schedule C
+/// trade or business, which is the only way btctax produces SE tax.
 pub fn build_golden_household(h: &GoldenHousehold) -> (ReturnInputs, LedgerState) {
     let i = &h.inputs;
     let status = match i.filing_status.as_str() {
