@@ -323,10 +323,42 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   whether the fault is in OTS itself or in the `tenforty` wrapper — driving OTS directly would answer it,
   and if the wrapper is at fault it is worth reporting.** Filed as `p7-ots-vs-wrapper-localisation → post-v1`.
 
-- **p7-ots-vs-wrapper-localisation → post-v1 (nit).** Localise the flat-SE-tax fault: OTS itself, or the
-  `tenforty` wrapper failing to pass W-2 wages into OTS's Schedule SE inputs. Run OTS directly (observe-only;
-  never read its GPL source into btctax). If the wrapper is at fault, report it upstream. Does not affect
-  btctax — the tiebreaker already confirmed our figure.
+- **[✅ DONE] p7-ots-vs-wrapper-localisation — ANSWERED: the fault is the WRAPPER. OTS is exonerated.**
+  Driving `taxsolve_US_1040_Sched_SE_2024` directly (observe-only; no GPL source read into btctax) reproduces
+  btctax's figures **to the cent** across the whole sweep — L9=0, L10=0, L12=2142.52 at $220k of wages. OTS's
+  Schedule SE reads and honours `L8a`; its 1040 reads `L13` (the §199A deduction). **Both fields exist; the
+  `tenforty` wrapper fills neither.** So the earlier shorthand "the oracle is wrong about SE tax" (commit
+  `9ebf9a5`) was mislocalised, and `golden_returns.rs` has been corrected accordingly.
+
+  One important nuance, found by reading tenforty's own tests rather than assuming: their omission of line 8a
+  is **deliberate for Married/Joint** and correct to be careful about. `w2_income` is a *household aggregate*
+  while Schedule SE is a *per-person* form, so for MFJ you cannot tell whose wages are whose, and attributing
+  the household total to the self-employed spouse would wrongly wipe out their wage base. Our diverging golden
+  household (`mfj_se_over_the_addl_medicare_threshold`) is exactly that MFJ case — so for **that** row the
+  disagreement is a **modelling mismatch, not a tenforty bug**: btctax's `se_w2_ss_wages` means *the filer's
+  own* box-3 wages, and the fixture says all $220k are the SE person's. taxcalc agrees with btctax once given
+  the same per-person split (`e00200p`/`e00900p`). btctax remains correct **by construction** — it reads the
+  actual W-2 — but we should not have called tenforty simply "wrong" here.
+
+  Where tenforty **is** unambiguously wrong is the **Single** filer: one person, no aggregate ambiguity, and
+  line 8a still unfilled ⇒ a Single filer with $168,600 of wages and $60,000 of Schedule C profit is
+  overcharged **$6,870.84**. Reported upstream with a fix.
+
+- **[✅ DONE] p7-tenforty-upstream-report — FILED.** [Issue #278](https://github.com/mmacpherson/tenforty/issues/278)
+  (both defects: Schedule SE line 8a, and §199A/1040 line 13 never supplied — the two backends disagree by
+  $16,000 of taxable income on identical inputs) and [PR #279](https://github.com/mmacpherson/tenforty/pull/279)
+  (fixes the Schedule SE half; 663 passed / 0 failed on their suite, their MFJ regression test untouched and
+  still passing). Both disclose that the author is Claude. The QBI half was deliberately **not** patched: its
+  taxable-income limitation is circular with taxable income itself, so the fix needs an architecture decision
+  that is the maintainer's to make.
+
+- **p7-tenforty-upstream-followup → post-v1.** ★ **Check back on the responses to
+  [issue #278](https://github.com/mmacpherson/tenforty/issues/278) and
+  [PR #279](https://github.com/mmacpherson/tenforty/pull/279).** Watch for: maintainer review comments, CI
+  results (their workflows need maintainer approval for a first-time contributor, so nothing had run at filing
+  time), a request to split the issue in two, or a steer on how they want the §199A fix shaped — we offered to
+  send that patch and the per-spouse wage split (`e00200p`/`e00200s`-style) if wanted. Nothing here gates
+  btctax: we no longer depend on tenforty (see `p7-oracle-swap`).
 
 - **[SUPERSEDED — the original entry, for the record] p7-se-divergence-tiebreaker → P7.** ★ **Break the tie
   on the SE-tax divergence with a SECOND independent engine.**
