@@ -111,7 +111,7 @@ pub fn standard_deduction(
 /// (income-tax path) → W-2 state/local withholding + state estimated payments + prior-year balance paid.
 /// (A nonzero `salt_sales_tax_amount` with the election OFF is refused upstream — R3-M9.)
 fn salt_line_5a(ri: &ReturnInputs, a: &crate::tax::return_inputs::ScheduleAInputs) -> Usd {
-    if a.salt_use_sales_tax {
+    if a.salt_use_sales_tax == Some(true) {
         a.salt_sales_tax_amount
     } else {
         let w2_wh: Usd = ri
@@ -301,7 +301,7 @@ pub fn schedule_a_parts(
     let mortgage_8a = a.mortgage_interest_1098;
 
     Some(ScheduleAParts {
-        salt_is_sales_tax: a.salt_use_sales_tax,
+        salt_is_sales_tax: a.salt_use_sales_tax == Some(true),
         medical_expenses: a.medical,
         agi,
         medical_floor,
@@ -2088,7 +2088,7 @@ mod tests {
     fn person(dob: Option<Date>, blind: bool) -> Person {
         Person {
             date_of_birth: dob,
-            blind,
+            blind: Some(blind),
             ..Default::default()
         }
     }
@@ -2112,7 +2112,7 @@ mod tests {
         );
         // Single + blind → +$1,950.
         let mut blind = filer(FilingStatus::Single);
-        blind.header.taxpayer.blind = true;
+        blind.header.taxpayer.blind = Some(true);
         assert_eq!(standard_deduction(&blind, &p, 2024, Usd::ZERO), dec!(16550));
         // MFJ, BOTH spouses 65+ → basic $29,200 + 2 × $1,550 = $32,300.
         let mut mfj = filer(FilingStatus::Mfj);
@@ -2161,7 +2161,7 @@ mod tests {
         assert_eq!(standard_deduction(&dep, &p, 2024, dec!(20000)), dec!(14600));
         // Dependent + blind → floor base ($1,300) + $1,950 aged/blind.
         let mut db = dep.clone();
-        db.header.taxpayer.blind = true;
+        db.header.taxpayer.blind = Some(true);
         assert_eq!(standard_deduction(&db, &p, 2024, Usd::ZERO), dec!(3250));
     }
 
@@ -2230,7 +2230,7 @@ mod tests {
     fn schedule_a_salt_election_and_mfs_cap() {
         let mut r = filer(FilingStatus::Single);
         r.schedule_a = Some(ScheduleAInputs {
-            salt_use_sales_tax: true,
+            salt_use_sales_tax: Some(true),
             salt_sales_tax_amount: dec!(3000),
             salt_state_estimated_payments: dec!(9999), // IGNORED under the sales-tax election
             salt_real_estate: dec!(4000),

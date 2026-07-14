@@ -128,8 +128,11 @@ pub struct Person {
     #[serde(default)]
     pub ssn_valid_for_employment: bool,
     pub date_of_birth: Option<Date>,
+    /// §63(f) additional standard deduction for blindness — a class-(B) TRI-STATE (P9 §2.2). `None` = never
+    /// asked; the advisory fires on `None` (never on `Some(false)`), so a filer who told us they are sighted
+    /// is not nagged. A bare `bool` here was the D-8 shape: never-asked indistinguishable from answered-No.
     #[serde(default)]
-    pub blind: bool,
+    pub blind: Option<bool>,
     #[serde(default)]
     pub occupation: String,
 }
@@ -283,11 +286,13 @@ pub struct CharitableCarryItem {
 pub struct ScheduleAInputs {
     #[serde(default)]
     pub medical: Usd,
-    /// §164(b)(5) election: `true` → 5a = sales-tax amount only; `false` → income taxes only.
+    /// §164(b)(5) election — a class-(B) TRI-STATE (P9 §2.2). `Some(true)` → 5a = sales-tax amount only;
+    /// `Some(false)` → income taxes only; `None` = never asked (the `SalesTaxElectionNotAsked` advisory fires
+    /// on `None`, scoped to returns that carry a Schedule A).
     #[serde(default)]
-    pub salt_use_sales_tax: bool,
+    pub salt_use_sales_tax: Option<bool>,
     #[serde(default)]
-    pub salt_sales_tax_amount: Usd, // used iff `salt_use_sales_tax`
+    pub salt_sales_tax_amount: Usd, // used iff `salt_use_sales_tax == Some(true)`
     #[serde(default)]
     pub salt_state_estimated_payments: Usd, // income-tax path
     #[serde(default)]
@@ -298,6 +303,12 @@ pub struct ScheduleAInputs {
     pub salt_personal_property: Usd, // 5c
     #[serde(default)]
     pub mortgage_interest_1098: Usd, // 8a only
+    /// §163(h)(3)(F) mixed-use mortgage — a class-(A) DECLARATION (P9 §2.7), live when this Schedule A carries
+    /// mortgage interest. `None` ⇒ refuse (`MixedUseMortgageUnanswered`); `Some(false)` ⇒ 8a is zeroed, the
+    /// line-8 box is checked, and `MixedUseMortgageNotAllocated` advises (v1 cannot do the Pub. 936 split);
+    /// `Some(true)` ⇒ full 8a, box unchecked.
+    #[serde(default)]
+    pub mortgage_all_used_to_buy_build_improve: Option<bool>,
     #[serde(default)]
     pub charitable: Vec<CharitableGift>, // non-crypto; crypto flows from the ledger
 }
@@ -316,9 +327,12 @@ pub struct Schedule1Inputs {
     /// An IRA deduction claimed → refuses in v1 (the phase-out worksheet is a follow-on, I3).
     #[serde(default)]
     pub ira_deduction_claimed: Usd,
-    /// HSA present → refuses (couples to Form 8889).
+    /// §223 HSA ACTIVITY — a class-(A) DECLARATION (P9 §2.4), live always. RENAMED from `hsa_present`: the old
+    /// field asked "do you hold an HSA?"; this asks whether a Form 8889 *trigger* fired (a contribution by
+    /// anyone, a distribution, a testing-period inclusion, or an inheritance). `None` ⇒ refuse
+    /// (`HsaActivityUnanswered`); `Some(true)` ⇒ refuse unsupported; `Some(false)` ⇒ a dormant holder proceeds.
     #[serde(default)]
-    pub hsa_present: bool,
+    pub hsa_activity: Option<bool>,
 }
 
 /// Estimated/extension/other payments (SPEC §4.8). Withholding (25a/25b/25c) is summed from the W-2/1099
@@ -399,6 +413,12 @@ pub struct ReturnInputs {
     pub foreign_trust: Option<bool>,
     #[serde(default)]
     pub foreign_country_names: String,
+    /// 1040 header "you were a dual-status alien" — a class-(A) DECLARATION (P9 §2.5), live always. A single
+    /// box asserting a fact whose unchecked state we print today from the MFS coupling alone; `None` ⇒ refuse
+    /// (`DualStatusAlienUnanswered`), `Some(true)` ⇒ refuse unsupported (§63(c)(6)(B): NRA standard deduction
+    /// is zero), `Some(false)` ⇒ proceed.
+    #[serde(default)]
+    pub dual_status_alien: Option<bool>,
 }
 
 impl Default for ReturnInputs {
@@ -422,6 +442,7 @@ impl Default for ReturnInputs {
             foreign_accounts: None,
             foreign_trust: None,
             foreign_country_names: String::new(),
+            dual_status_alien: None,
         }
     }
 }
@@ -465,5 +486,34 @@ mod tests {
     fn schedule_c_default_naics() {
         let sc = ScheduleCInputs::default();
         assert_eq!(sc.naics_code, "999999");
+    }
+
+    /// ★ P9 step 1 — the answered-ness fields are tri-state, and DEFAULT TO UNANSWERED (`None`), never to a
+    /// fabricated "No". A bare `bool` here is the D-8 defect (never-asked == answered-No). The rename
+    /// `hsa_present → hsa_activity` and the two NEW declarations are asserted here so the shape is pinned by a
+    /// test, not just by the compiler.
+    #[test]
+    fn p9_answeredness_fields_default_to_unanswered() {
+        let p = Person::default();
+        assert_eq!(p.blind, None, "§63(f) blindness is a tri-state; unasked is None, not false");
+
+        let a = ScheduleAInputs::default();
+        assert_eq!(a.salt_use_sales_tax, None, "§164(b)(5) election is a tri-state; unasked is None");
+        assert_eq!(
+            a.mortgage_all_used_to_buy_build_improve, None,
+            "§163(h)(3)(F) mixed-use question is a NEW declaration; unasked is None"
+        );
+
+        let s1 = Schedule1Inputs::default();
+        assert_eq!(
+            s1.hsa_activity, None,
+            "hsa_present RENAMED to hsa_activity (a different question — §223 triggers, not mere holding); unasked is None"
+        );
+
+        let ri = ReturnInputs::default();
+        assert_eq!(
+            ri.dual_status_alien, None,
+            "§63(c)(6)(B) dual-status is a NEW declaration, live always; unasked is None"
+        );
     }
 }

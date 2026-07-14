@@ -375,7 +375,7 @@ mod tests {
             header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
         };
-        ri.sch1.hsa_present = true;
+        ri.sch1.hsa_activity = Some(true);
         return_inputs::set(&c, 2024, &ri).unwrap();
         let r = resolve(&c, 2024, false, &fr, &tt);
         assert_eq!(r.provenance, Provenance::ReturnInputs);

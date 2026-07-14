@@ -209,9 +209,9 @@ impl AgedBlindBoxes {
             .filter(|_| ri.filing_status == FilingStatus::Mfj);
         Self {
             taxpayer_aged: is_aged(t.date_of_birth, year),
-            taxpayer_blind: t.blind,
+            taxpayer_blind: t.blind == Some(true),
             spouse_aged: joint_spouse.is_some_and(|s| is_aged(s.date_of_birth, year)),
-            spouse_blind: joint_spouse.is_some_and(|s| s.blind),
+            spouse_blind: joint_spouse.is_some_and(|s| s.blind == Some(true)),
         }
     }
 
@@ -643,11 +643,11 @@ mod tests {
         // Taxpayer is 65+ AND blind (2 boxes); spouse is blind only (1 box) ⇒ 3 boxes.
         ri.header.taxpayer = Person {
             date_of_birth: Some(date!(1955 - 03 - 02)),
-            blind: true,
+            blind: Some(true),
             ..person("John", "Doe", "123456789")
         };
         ri.header.spouse = Some(Person {
-            blind: true,
+            blind: Some(true),
             ..person("Jane", "Doe", "987654321")
         });
 
@@ -675,7 +675,7 @@ mod tests {
         };
         ri.header.taxpayer = person("John", "Doe", "123456789");
         ri.header.spouse = Some(Person {
-            blind: true,
+            blind: Some(true),
             date_of_birth: Some(date!(1950 - 01 - 01)),
             ..person("Jane", "Doe", "987654321")
         });

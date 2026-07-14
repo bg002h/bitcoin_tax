@@ -104,8 +104,10 @@ pub enum RefuseReason {
     ForeignTaxOverCeiling,
     /// A single employer over-withheld Social Security (not creditable — recover from the employer).
     SingleEmployerExcessSs,
-    /// Schedule 1 line 13 HSA present → Form 8889 mandatory.
-    HsaPresent,
+    /// Schedule 1 line 13 HSA ACTIVITY (§223 trigger) affirmed → Form 8889 mandatory, out of scope for v1.
+    /// (Renamed from `HsaPresent`: the field it reads was renamed `hsa_present → hsa_activity` in P9 §2.4 —
+    /// the question is now whether a trigger fired, not mere holding.)
+    HsaActivityUnsupported,
     /// Schedule 1 line 20 IRA deduction claimed → active-participant phase-out unmodeled in v1.
     IraDeductionClaimed,
     // ── Compute-dependent rows (SPEC §4.10; need the assembled income / ledger, screened in P2) ──
@@ -218,6 +220,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         foreign_accounts: _,
         foreign_trust: _,
         foreign_country_names: _,
+        dual_status_alien: _,
     } = ri;
 
     for w in w2s {
@@ -395,6 +398,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             salt_real_estate,
             salt_personal_property,
             mortgage_interest_1098,
+            mortgage_all_used_to_buy_build_improve: _,
             charitable,
         } = a;
         if neg(*medical) {
@@ -440,7 +444,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         state_refund_taxable,
         student_loan_interest_paid,
         ira_deduction_claimed,
-        hsa_present: _,
+        hsa_activity: _,
     } = sch1;
     if neg(*state_refund_taxable) {
         return Some("Schedule 1 taxable state refund");
@@ -525,7 +529,7 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     // Schedule A §164(b)(5) SALT: a sales-tax amount with the election OFF is an input error — fail loud
     // rather than silently drop it (R3-M9).
     if let Some(a) = &ri.schedule_a {
-        if a.salt_sales_tax_amount > Usd::ZERO && !a.salt_use_sales_tax {
+        if a.salt_sales_tax_amount > Usd::ZERO && a.salt_use_sales_tax != Some(true) {
             return refuse(
                 RefuseReason::SaltSalesTaxWithoutElection,
                 "a Schedule A sales-tax amount is set but the §164(b)(5) sales-tax election is off — turn \
@@ -734,11 +738,14 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         );
     }
 
-    // Schedule 1 minimal surface: HSA and any claimed IRA deduction refuse in v1.
-    if ri.sch1.hsa_present {
+    // Schedule 1 minimal surface: an affirmed HSA activity and any claimed IRA deduction refuse in v1.
+    // (`None` — never asked — is caught by the registry's unanswered screen, P9 step 4; here we handle only
+    // the affirmed `Some(true)`. `Some(false)`, a dormant holder, proceeds — un-bricking r2 C-1.)
+    if ri.sch1.hsa_activity == Some(true) {
         return refuse(
-            RefuseReason::HsaPresent,
-            "an HSA requires Form 8889 — out of scope for v1",
+            RefuseReason::HsaActivityUnsupported,
+            "a Form 8889 trigger (HSA contribution, distribution, testing-period inclusion, or inheritance) \
+             was affirmed — Form 8889 is out of scope for v1",
         );
     }
     if ri.sch1.ira_deduction_claimed > Usd::ZERO {
@@ -1334,20 +1341,20 @@ mod tests {
         let mut r = ri();
         r.schedule_a = Some(ScheduleAInputs {
             salt_sales_tax_amount: dec!(2000),
-            salt_use_sales_tax: false, // amount set but election OFF → input error
+            salt_use_sales_tax: Some(false), // amount set but election OFF → input error
             ..Default::default()
         });
         assert_eq!(reason(&r), Some(RefuseReason::SaltSalesTaxWithoutElection));
         // Election ON → no refusal.
-        r.schedule_a.as_mut().unwrap().salt_use_sales_tax = true;
+        r.schedule_a.as_mut().unwrap().salt_use_sales_tax = Some(true);
         assert_eq!(reason(&r), None);
     }
 
     #[test]
     fn hsa_and_ira_refuse() {
         let mut a = ri();
-        a.sch1.hsa_present = true;
-        assert_eq!(reason(&a), Some(RefuseReason::HsaPresent));
+        a.sch1.hsa_activity = Some(true);
+        assert_eq!(reason(&a), Some(RefuseReason::HsaActivityUnsupported));
         let mut b = ri();
         b.sch1.ira_deduction_claimed = dec!(6000);
         assert_eq!(reason(&b), Some(RefuseReason::IraDeductionClaimed));

@@ -1584,14 +1584,14 @@ fn the_1040_prints_the_aged_blind_boxes_its_line_12_depends_on() {
         last_name: "Doe".into(),
         ssn: "123456789".into(),
         date_of_birth: Some(time::macros::date!(1955 - 03 - 02)), // 65+
-        blind: true,
+        blind: Some(true),
         ..Default::default()
     };
     ri.header.spouse = Some(Person {
         first_name: "Jane".into(),
         last_name: "Doe".into(),
         ssn: "987654321".into(),
-        blind: true,
+        blind: Some(true),
         ..Default::default()
     });
     let h = ReturnHeader::build(&ri, 2024).unwrap();
