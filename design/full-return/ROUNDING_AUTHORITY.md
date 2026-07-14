@@ -55,6 +55,28 @@ how a filed return will be treated — and **worthless as authority for what the
 have repeatedly held the IRM does not have the force of law and creates no taxpayer rights; the same
 goes for form instructions and publications.
 
+### ★ And post-*Loper Bright*, an ambiguous statute is NOT the agency's to resolve
+
+***Loper Bright Enterprises v. Raimondo*, 603 U.S. 369 (2024)** — which **overruled *Chevron***:
+
+> "The Administrative Procedure Act requires courts to **exercise their independent judgment** in
+> deciding whether an agency has acted within its statutory authority, and **courts may not defer to an
+> agency interpretation of the law simply because a statute is ambiguous**; *Chevron* is overruled."
+
+This is the whole ballgame for a question like ours. §6102 **is** ambiguous (§1 below). Before 2024 an
+agency's reading of an ambiguous statute might have commanded deference. It no longer does. A court
+exercises **independent judgment** on the best reading, and the agency's view earns at most ***Skidmore*
+respect** — persuasive weight *in proportion to its thoroughness and CONSISTENCY*.
+
+★ **And the IRS's pronouncements here are not consistent with each other.** The form instructions imply
+round-the-total; the IRS's own **wire format cannot carry cents**; its own **engine cross-foots and says
+so in a code comment**; and its own **IRM** transcribes lines 1–23 in dollars-only but line 24 in cents.
+An agency speaking with four voices has forfeited even *Skidmore* weight on the point.
+
+**Consequence for btctax:** taking a well-founded statutory reading that differs from an IRS publication
+is not defiance and not a "departure". It is what the law contemplates a filer doing when the Code is
+ambiguous — and it is a court, not the Service, that says who is right.
+
 **This matters concretely.** Version 3 of this file weakened btctax's position because IRM 3.11.3.14.2.28
 says IRS clerks transcribe line 24 "as dollars and cents". That is a *keypunch procedure*. It says
 nothing about what a taxpayer is required to ENTER on the form, and it cannot make a lawful entry

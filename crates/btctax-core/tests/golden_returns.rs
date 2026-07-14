@@ -163,6 +163,12 @@ const DECLARED_DIVERGENCES: &[Divergence] = &[
         outlier: dec!(16832),
         outlier_alt: None,
         why: "★ THE LAW IS 26 USC §6102, AND IT IS GENUINELY AMBIGUOUS. BOTH READINGS ARE LAWFUL. \
+              And post-LOPER BRIGHT (603 U.S. 369 (2024), overruling Chevron) an ambiguous statute is \
+              NOT the agency's to resolve: courts 'exercise their independent judgment' and 'may not \
+              defer to an agency interpretation of the law simply because a statute is ambiguous'. The \
+              IRS's view earns at most Skidmore respect — weight in proportion to CONSISTENCY — and here \
+              it speaks with four voices (instructions say round-the-total; MeF cannot carry cents; \
+              Direct File cross-foots; the IRM transcribes L1-23 in dollars but L24 in cents). \
               §6102(a): any amount required to be SHOWN on a form 'shall be entered at the nearest \
               whole-dollar amount'. §6102(c): that does not apply to 'items which must be taken into \
               account in making the computations necessary to determine the amount required to be shown \
