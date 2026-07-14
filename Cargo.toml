@@ -8,3 +8,20 @@ rust-version = "1.88"
 repository = "https://github.com/bg002h/bitcoin_tax"
 homepage = "https://github.com/bg002h/bitcoin_tax"
 keywords = ["bitcoin", "tax", "cryptocurrency", "accounting", "ledger"]
+
+# ── Test/build speed only. Nothing here changes behaviour. See also .cargo/config.toml. ──
+#
+# The suite is dominated by CLI integration tests that SPAWN the btctax binary and by the TUI
+# end-to-end tests — i.e. by how fast the compiled code RUNS, not by how fast it builds. So:
+[profile.dev]
+# Line tables keep panic backtraces pointing at the right file and line (all the suite needs)
+# without the full DWARF that makes ~20 test binaries slow to link.
+debug = "line-tables-only"
+# A little optimization of our own crates. Costs some compile time, but every integration test
+# that shells out to the binary pays for unoptimized code on every invocation.
+opt-level = 1
+
+# Dependencies are compiled ONCE and cached, so optimizing them is nearly free on an incremental
+# rebuild — and rust_decimal, lopdf and the PDF/crypto paths are exactly where the test time goes.
+[profile.dev.package."*"]
+opt-level = 2

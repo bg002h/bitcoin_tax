@@ -1,0 +1,14 @@
+# Build/test speed. Nothing here changes what is COMPILED — only how fast.
+#
+# The workspace links ~20 separate test binaries, so link time, not codegen, is the bottleneck
+# on a warm `cargo test`. Two changes address it:
+#
+#   1. `lld` instead of GNU ld — substantially faster at linking many binaries.
+#   2. `debug = "line-tables-only"` (see the workspace Cargo.toml) — keeps panic backtraces
+#      with file/line, which is all the suite ever needs, while dropping the full DWARF that
+#      makes each test binary large and slow to link.
+#
+# Prefer `make check` (or `cargo nextest run`) over `cargo test`: nextest runs tests across ALL
+# binaries in parallel rather than one binary at a time, which on this suite is ~2.8x faster.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]

@@ -51,3 +51,5 @@ scripts/.pii-patterns.bak
 # Generated man-page PDFs (build artifacts; gropdf embeds a timestamp → not reproducible).
 # Regenerate with `make docs` / `cargo run -p xtask -- docs --pdf`. The .1 sources ARE committed.
 docs/pdf/
+target-clippy/
+__pycache__/

@@ -1,7 +1,30 @@
 # btctax — developer convenience targets.
-# The real build/test entry points remain `cargo build` / `cargo test --workspace`.
 
-.PHONY: docs docs-man bundles help
+.PHONY: check test lint docs docs-man bundles help
+
+## check: the validation gate — the full test suite AND clippy, run CONCURRENTLY (~6s warm)
+##
+## Clippy is given its own target directory on purpose. It compiles with different rustc flags
+## than `test` does, so sharing one `target/` makes the two evict each other's artifacts and
+## silently forces a near-full rebuild on every alternation. Separate dirs keep both warm — and
+## let them run at the same time, which makes clippy effectively free.
+##
+## Speed, warm, on this suite: `cargo test --workspace` took 402s. This takes about 6.
+## The win is mostly `[profile.dev] opt-level` (see Cargo.toml): the suite is dominated by
+## integration tests that spawn the btctax binary, so it was bound by how fast the compiled code
+## RAN, not by how fast it built. nextest (parallel across test binaries) and lld do the rest.
+check:
+	@cargo nextest run --workspace & \
+	 CARGO_TARGET_DIR=target-clippy cargo clippy --workspace --all-targets --all-features -- -D warnings & \
+	 wait
+
+## test: the full suite on its own (nextest — parallel across test binaries, unlike `cargo test`)
+test:
+	cargo nextest run --workspace
+
+## lint: clippy on its own, in its own target dir so it does not thrash the test cache
+lint:
+	CARGO_TARGET_DIR=target-clippy cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 ## docs: regenerate the committed man pages AND the PDFs (requires `groff` with the pdf device)
 docs:
