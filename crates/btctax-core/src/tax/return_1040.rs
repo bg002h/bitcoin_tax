@@ -1456,22 +1456,21 @@ pub fn apply_carryover_writeback(
 const SCHEDULE_B_THRESHOLD: Usd = dec!(1500);
 
 /// Whether Schedule B must be filed (SPEC §7.1, R3-I2 — the single normative site): **taxable interest >
-/// $1,500** OR **ordinary dividends > $1,500** OR `foreign_accounts == Some(true)` (Part III trigger (b)).
+/// $1,500** OR **ordinary dividends > $1,500** OR a Part III trigger is affirmed —
+/// `foreign_accounts == Some(true)` (trigger b) OR `foreign_trust == Some(true)` (trigger, §2.9).
 /// Uses the NON-crypto 1040 2b / 3b figures (crypto lending interest lands on Sch 1 L8v, not 2b).
-/// `foreign_trust == Some(true)` refuses upstream (§4.10) and is never a Schedule-B path.
+///
+/// ★ P9 §2.9: the foreign-account/-trust ANSWERS are collected unconditionally by the FORM_QUESTIONS
+/// registry (they are live ALWAYS), so this predicate no longer gates whether they are asked — it only
+/// decides whether the schedule PRINTS. Adding `foreign_trust` here is belt-and-braces: the predicate is
+/// true whenever Part III is required, independent of screen order. (A `foreign_trust == Some(true)` return
+/// refuses upstream as unsupported, so this branch is refusal-shadowed at the print — deliberately kept so
+/// the predicate is correct on its own terms.)
 pub fn schedule_b_files(ri: &ReturnInputs) -> bool {
     sum_taxable_interest(ri) > SCHEDULE_B_THRESHOLD
         || sum_ordinary_dividends(ri) > SCHEDULE_B_THRESHOLD
         || ri.foreign_accounts == Some(true)
-}
-
-/// When Schedule B files, Part III lines **7a** (foreign financial accounts) AND **8** (foreign trust)
-/// MUST be answered — a `None` tri-state is a fail-loud gap (SPEC §7.1 / I7), never a silent "no".
-/// `true` ⇒ Schedule B files but `foreign_accounts` **or** `foreign_trust` is unanswered (the caller
-/// refuses rather than guess). (`foreign_trust == Some(true)` refuses earlier as `ForeignTrust`; this
-/// catches the unanswered `None`.) Wired into `screen_inputs` (input-screenable, review P2-I1).
-pub fn schedule_b_part3_unanswered(ri: &ReturnInputs) -> bool {
-    schedule_b_files(ri) && (ri.foreign_accounts.is_none() || ri.foreign_trust.is_none())
+        || ri.foreign_trust == Some(true)
 }
 
 #[cfg(test)]
@@ -2039,50 +2038,11 @@ mod tests {
         assert!(schedule_b_files(&fa));
     }
 
-    /// Part III must be answered when Schedule B files — a `None` foreign-accounts tri-state fails loud.
-    #[test]
-    fn schedule_b_part3_none_is_fail_loud_only_when_filing() {
-        // Files ($2,000 interest) but foreign_accounts unanswered → fail-loud.
-        let unanswered = ReturnInputs {
-            filing_status: FilingStatus::Single,
-            int_1099: vec![Form1099Int {
-                box1_interest: dec!(2000),
-                ..Default::default()
-            }],
-            foreign_accounts: None,
-            ..Default::default()
-        };
-        assert!(schedule_b_part3_unanswered(&unanswered));
-        // Files, foreign_accounts answered but foreign_trust (line 8) unanswered → still fail-loud.
-        let trust_unanswered = ReturnInputs {
-            filing_status: FilingStatus::Single,
-            int_1099: vec![Form1099Int {
-                box1_interest: dec!(2000),
-                ..Default::default()
-            }],
-            foreign_accounts: Some(false),
-            foreign_trust: None,
-            ..Default::default()
-        };
-        assert!(schedule_b_part3_unanswered(&trust_unanswered));
-        // Files with BOTH answered → fine.
-        let answered = ReturnInputs {
-            foreign_trust: Some(false),
-            ..trust_unanswered.clone()
-        };
-        assert!(!schedule_b_part3_unanswered(&answered));
-        // Not filing (small amounts) → a None is fine (Schedule B not required).
-        let not_filing = ReturnInputs {
-            filing_status: FilingStatus::Single,
-            int_1099: vec![Form1099Int {
-                box1_interest: dec!(100),
-                ..Default::default()
-            }],
-            foreign_accounts: None,
-            ..Default::default()
-        };
-        assert!(!schedule_b_part3_unanswered(&not_filing));
-    }
+    // (`schedule_b_part3_none_is_fail_loud_only_when_filing` DELETED — P9 §2.9. Its premise ("only when
+    //  filing") WAS the circular-liveness bug: the foreign questions must be answered on EVERY return,
+    //  because their own answer is what decides whether Schedule B files. The correct behaviour is now
+    //  tested in return_refuse::tests (`a_foreign_account_question_is_live_even_below_the_schedule_b_threshold`
+    //  and the per-question property test), and the `schedule_b_part3_unanswered` predicate is deleted.)
 
     // ── §63 standard deduction (Phase 3 task 1) ──────────────────────────────────────────────────
     fn person(dob: Option<Date>, blind: bool) -> Person {

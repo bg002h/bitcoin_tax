@@ -449,6 +449,7 @@ fn export_dispatches_a_full_return_year_to_the_full_packet() {
             ssn: "222-33-4444".into(),
             ..Default::default()
         };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }
@@ -516,11 +517,11 @@ fn a_full_return_without_an_ssn_refuses_and_writes_no_bytes() {
         return_inputs::set(
             s.conn(),
             2024,
-            &ReturnInputs {
+            &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
                 header: btctax_core::tax::testonly::not_a_dependent(), // no header ⇒ no SSN
                 ..Default::default()
-            },
+            }),
         )
         .unwrap();
         s.save().unwrap();
@@ -579,6 +580,7 @@ fn the_two_pipelines_cannot_overwrite_each_others_files() {
             ssn: "222-33-4444".into(),
             ..Default::default()
         };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }

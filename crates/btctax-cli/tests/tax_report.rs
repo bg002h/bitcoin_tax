@@ -623,7 +623,7 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     let toml = _dir.path().join("inputs.toml");
     std::fs::write(
         &toml,
-        "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
+        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
     )
     .unwrap();
     // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
@@ -674,7 +674,7 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
 
     // Full-return inputs for 2024 with NO Schedule C.
     let toml = _dir.path().join("inputs.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n").unwrap();
+    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n[sch1]\nhsa_activity = false\n").unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
@@ -1462,7 +1462,7 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
         btctax_cli::return_inputs::set(
             s.conn(),
             2024,
-            &ReturnInputs {
+            &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
                 header: btctax_core::tax::testonly::not_a_dependent(),
                 w2s: vec![W2 {
@@ -1473,7 +1473,7 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
                     ..Default::default()
                 }],
                 ..Default::default()
-            },
+            }),
         )
         .unwrap();
         s.save().unwrap();
@@ -1536,7 +1536,7 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
         btctax_cli::return_inputs::set(
             s.conn(),
             2024,
-            &ReturnInputs {
+            &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
                 header: btctax_core::tax::testonly::not_a_dependent(),
                 w2s: vec![W2 {
@@ -1554,7 +1554,7 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
                     ..Default::default()
                 }),
                 ..Default::default()
-            },
+            }),
         )
         .unwrap();
         s.save().unwrap();
@@ -1572,11 +1572,11 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
         btctax_cli::return_inputs::set(
             s.conn(),
             2025,
-            &ReturnInputs {
+            &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
                 header: btctax_core::tax::testonly::not_a_dependent(),
                 ..Default::default()
-            },
+            }),
         )
         .unwrap();
         s.save().unwrap();
@@ -1610,6 +1610,7 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
             origin_year: 2023,
             provenance: CarryProvenance::User,
         }];
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut y2025);
         btctax_cli::return_inputs::set(s.conn(), 2025, &y2025).unwrap();
         s.save().unwrap();
     }
@@ -1649,7 +1650,7 @@ fn import_preserves_a_computed_carryover() {
         btctax_cli::return_inputs::set(
             s.conn(),
             2024,
-            &ReturnInputs {
+            &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
                 header: btctax_core::tax::testonly::not_a_dependent(),
                 w2s: vec![W2 {
@@ -1667,18 +1668,18 @@ fn import_preserves_a_computed_carryover() {
                     ..Default::default()
                 }),
                 ..Default::default()
-            },
+            }),
         )
         .unwrap();
         // 2025 row must exist before the write-back (I1).
         btctax_cli::return_inputs::set(
             s.conn(),
             2025,
-            &ReturnInputs {
+            &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
                 header: btctax_core::tax::testonly::not_a_dependent(),
                 ..Default::default()
-            },
+            }),
         )
         .unwrap();
         s.save().unwrap();
@@ -1732,6 +1733,7 @@ fn full_return_report_surfaces_conservative_omission_advisories() {
         };
         ri.header.dependents = vec![Dependent::default()]; // → CTC/ODC omission
                                                            // taxpayer.date_of_birth stays None → the §63(f) aged box is forfeited
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }
@@ -1796,8 +1798,10 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
     // (c) The user no longer has the TOML — they deleted it, as the plaintext-hygiene guidance says to.
     std::fs::remove_file(&toml).unwrap();
 
-    // (d) `income answer` is the way out. "n" to the dependent question, Enter to skip the DOB.
-    let mut keystrokes: &[u8] = b"n\n\n";
+    // (d) `income answer` is the way out. `income answer` now asks FIVE mandatory declarations in
+    // registry order (dependent-taxpayer, foreign-accounts, foreign-trust, HSA-activity, dual-status) —
+    // "n" to each — then Enter to skip the (skippable) date of birth.
+    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\n\n";
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(&vault, &pp(), 2024, &mut keystrokes, &mut screen).unwrap();
     let screen = String::from_utf8(screen).unwrap();

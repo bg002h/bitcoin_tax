@@ -13,7 +13,6 @@
 //! `TaxOutcome::NotComputable(..)` at the report boundary (Phase 4).
 use crate::conventions::Usd;
 use crate::tax::packet::{Ssn, SsnError};
-use crate::tax::return_1040::schedule_b_part3_unanswered;
 use crate::tax::return_inputs::{
     Box12Entry, CharitableCarryItem, CharitableClass, CharitableGift, Form1099Div, Form1099G,
     Form1099Int, Owner, Payments, QbiInputs, ReturnInputs, Schedule1Inputs, ScheduleAInputs,
@@ -518,21 +517,24 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         );
     }
 
-    // (c) foreign trust → Form 3520.
+    // ★ P9 §3.2 — THE REGISTRY LOOP. Placed after the integrity gates (negative money, malformed SSN) and
+    // before every value-dependent rule (r1 M-2). This is the ONLY unanswered-declaration screen: every
+    // live class-(A) question that is `None` refuses here, deriving its reason + detail + liveness from the
+    // single [`FORM_QUESTIONS`] list. It replaces four hand-written blocks (dependent ×2, MFS-itemizes,
+    // Schedule B Part III) and `schedule_b_part3_unanswered` — the latter was circular (§2.9). Refusal
+    // PRECEDENCE is explicitly not contract: on a multi-defect return the reported reason may differ from
+    // the pre-P9 order.
+    for q in crate::tax::questions::FORM_QUESTIONS {
+        if (q.live)(ri) && (q.get)(ri).is_none() {
+            return refuse(q.unanswered.clone(), q.unanswered_detail);
+        }
+    }
+
+    // (c) foreign trust → Form 3520. VALUE-refusal (`Some(true)`); disjoint from the unanswered loop above.
     if ri.foreign_trust == Some(true) {
         return refuse(
             RefuseReason::ForeignTrust,
             "a foreign trust requires Form 3520, which is out of scope for v1",
-        );
-    }
-
-    // Schedule B Part III (7a/8) must be answered when Schedule B files — a `None` tri-state fails loud
-    // rather than guess a foreign-account/-trust disclosure (SPEC §7.1, plan P2 task 4 / P2-I1).
-    if schedule_b_part3_unanswered(ri) {
-        return refuse(
-            RefuseReason::ScheduleBPart3Unanswered,
-            "Schedule B is required (interest/dividends > $1,500 or a foreign account) but its Part III \
-             foreign-account/foreign-trust questions are unanswered — set `foreign_accounts`/`foreign_trust`",
         );
     }
 
@@ -548,15 +550,8 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         }
     }
 
-    // §63(c)(6): an MFS return must state whether the spouse itemizes (it forces this filer's std/itemize
-    // choice); a `None` tri-state is fail-loud, never a silent assumption (G15).
-    if ri.filing_status == FilingStatus::Mfs && ri.mfs_spouse_itemizes.is_none() {
-        return refuse(
-            RefuseReason::MfsSpouseItemizeUnknown,
-            "a married-filing-separately return must state whether the spouse itemizes (§63(c)(6)) — set \
-             `mfs_spouse_itemizes`",
-        );
-    }
+    // (§63(c)(6) MFS-spouse-itemizes, D-8 dependent-taxpayer, and dependent-spouse UNANSWERED checks are now
+    //  the registry loop above — the ONLY copy of each liveness predicate.)
 
     // §170(b) non-50%-org charitable classes need the Pub. 526 "special 30% limit" ordering v1 doesn't
     // implement — refuse rather than mis-limit / understate tax (review C1). Checks both current gifts and
@@ -589,24 +584,9 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     // which v1 doesn't model (the spouse flag is otherwise unconsumed) — refuse rather than grant the full
     // basic std and understate tax (review I1). Narrow/usually-invalid input (a claimable spouse generally
     // can't file jointly).
-    // ★ D-8. UNANSWERED ≠ "No". The taxpayer flag is required on EVERY return — it swaps the basic std
-    // for the §63(c)(5) dependent floor and gates the §1(g) kiddie-tax refusal, so a silent `false` both
-    // UNDERSTATES tax and prints an unchecked box the filer never affirmed. Ask; never assume.
-    if ri.header.can_be_claimed_as_dependent_taxpayer.is_none() {
-        return refuse(
-            RefuseReason::DependentStatusUnanswered,
-            "every return must state whether someone can claim YOU as a dependent (it selects the \
-             §63(c)(5) standard-deduction floor and is a checkbox on the 1040) — run `btctax income answer`",
-        );
-    }
-    // The spouse flag is only a question when a spouse is actually on the return.
-    if ri.header.spouse.is_some() && ri.header.can_be_claimed_as_dependent_spouse.is_none() {
-        return refuse(
-            RefuseReason::DependentSpouseStatusUnanswered,
-            "this return has a spouse, so it must state whether someone can claim YOUR SPOUSE as a \
-             dependent (it is a checkbox on the 1040) — run `btctax income answer`",
-        );
-    }
+    // (The D-8 dependent-taxpayer and dependent-spouse UNANSWERED checks are the registry loop above.)
+    // A claimable-as-dependent SPOUSE (`Some(true)`) is a VALUE-refusal (it limits the joint standard
+    // deduction, unmodeled) — disjoint from the unanswered loop.
     if ri.header.can_be_claimed_as_dependent_spouse == Some(true) {
         return refuse(
             RefuseReason::DependentSpouseUnsupported,
@@ -818,9 +798,15 @@ mod tests {
             filing_status: FilingStatus::Single,
             ..Default::default()
         };
-        // ★ ANSWERED, not defaulted. Every fixture must state this — that is the whole point of D-8, and
-        // if `Default` supplied it these tests would be re-asserting the very guess we just removed.
+        // ★ ANSWERED, not defaulted. Every fixture must state these — that is the whole point of D-8/P9, and
+        // if `Default` supplied them these tests would be re-asserting the very guess we just removed. All
+        // FIVE always-live declarations are answered here so a computing fixture is not tripped by the
+        // registry loop (§3.1 churn note); a test that wants one UNANSWERED re-blanks it explicitly.
         ri.header.can_be_claimed_as_dependent_taxpayer = Some(false);
+        ri.foreign_accounts = Some(false);
+        ri.foreign_trust = Some(false);
+        ri.sch1.hsa_activity = Some(false);
+        ri.dual_status_alien = Some(false);
         ri
     }
     fn reason(ri: &ReturnInputs) -> Option<RefuseReason> {
@@ -851,6 +837,114 @@ mod tests {
             reason(&r),
             Some(RefuseReason::DependentStatusUnanswered),
             "a claimable filer ANSWERED — it must not be treated as unanswered"
+        );
+    }
+
+    // ── P9 step 4: the registry derivations ──────────────────────────────────────────────────────
+
+    use crate::tax::questions::{QuestionId, FORM_QUESTIONS};
+
+    /// A Single return with EVERY always-live declaration answered "no". The baseline the property test
+    /// blanks one question at a time from. (Single ⇒ DependentSpouse and MfsSpouseItemizes are not live;
+    /// no `schedule_a` ⇒ the mortgage question is not live.)
+    fn fully_answered() -> ReturnInputs {
+        let mut r = ri(); // answers DependentTaxpayer
+        r.foreign_accounts = Some(false);
+        r.foreign_trust = Some(false);
+        r.sch1.hsa_activity = Some(false);
+        r.dual_status_alien = Some(false);
+        r
+    }
+
+    /// A minimal return set up so `id` is LIVE, with NOTHING answered yet (every question `None`). The
+    /// property test answers all questions EXCEPT the target, so the target's `None` is the sole defect.
+    fn scenario_for(id: QuestionId) -> ReturnInputs {
+        use crate::tax::return_inputs::ScheduleAInputs;
+        let mut r = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        match id {
+            QuestionId::DependentSpouse => r.filing_status = FilingStatus::Mfj, // live with no spouse Person (P8a I1)
+            QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
+            QuestionId::MortgageAllUsedToBuyBuildImprove => {
+                r.schedule_a = Some(ScheduleAInputs {
+                    mortgage_interest_1098: dec!(9000),
+                    ..Default::default()
+                });
+            }
+            _ => {}
+        }
+        r
+    }
+
+    /// ★ THE PER-QUESTION PROPERTY TEST (§3.5). For each registry entry: build a return where it is LIVE and
+    /// blank, assert `screen_inputs` refuses with THAT entry's reason; then answer it and assert that reason
+    /// no longer fires. Anchored to the registry, but the completeness anchor (questions.rs) is what stops a
+    /// dropped entry from silently dropping its own scenario (r1 I-4).
+    #[test]
+    fn every_live_unanswered_declaration_refuses_with_its_own_reason() {
+        for q in FORM_QUESTIONS {
+            let mut r = scenario_for(q.id); // nothing answered yet
+            // Answer every OTHER live question, leaving q blank (None, from Default).
+            for other in FORM_QUESTIONS {
+                if other.id != q.id && (other.live)(&r) {
+                    (other.set)(&mut r, false);
+                }
+            }
+            assert!((q.live)(&r), "{:?} must be live in its own scenario", q.id);
+            assert!((q.get)(&r).is_none(), "{:?} must start blank", q.id);
+            assert_eq!(
+                reason(&r),
+                Some(q.unanswered.clone()),
+                "blank {:?} must refuse with its own unanswered reason",
+                q.id
+            );
+            // Answering it (n) removes ITS unanswered reason (a value-refusal on a different axis may still
+            // fire on some multi-part fixtures, so assert the specific reason is gone — not that all is well).
+            (q.set)(&mut r, false);
+            assert_ne!(
+                reason(&r),
+                Some(q.unanswered.clone()),
+                "answered {:?} must no longer fire its unanswered reason",
+                q.id
+            );
+        }
+    }
+
+    /// ★ §2.9 — THE CIRCULAR-LIVENESS BUG, in shipped code. A filer with $100 of interest and an unanswered
+    /// foreign-account question must REFUSE. Under the shipped `schedule_b_files` (which reads
+    /// `foreign_accounts` itself) the return computes clean and silently omits Schedule B — the FBAR/FinCEN
+    /// disclosure. This test is red on the pre-P9 boundary; the always-live registry entry turns it green.
+    #[test]
+    fn a_foreign_account_question_is_live_even_below_the_schedule_b_threshold() {
+        let mut r = fully_answered();
+        r.int_1099 = vec![crate::tax::return_inputs::Form1099Int {
+            payer: "Bank".into(),
+            box1_interest: dec!(100), // WELL below the $1,500 Schedule B threshold
+            ..Default::default()
+        }];
+        r.foreign_accounts = None; // never asked
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::ScheduleBPart3Unanswered),
+            "an unanswered foreign-account question must refuse regardless of the Schedule B threshold (§2.9)"
+        );
+    }
+
+    /// ★ P8a I1 — an MFJ return with NO spouse `Person` record still owes the joint dependent-spouse box.
+    /// The shipped scope (`spouse.is_some()`) missed it; the registry liveness `Mfj || spouse.is_some()`
+    /// catches it.
+    #[test]
+    fn mfj_with_no_spouse_record_still_requires_the_dependent_spouse_answer() {
+        let mut r = fully_answered();
+        r.filing_status = FilingStatus::Mfj;
+        r.header.spouse = None; // no spouse Person on the return
+        r.header.can_be_claimed_as_dependent_spouse = None; // and the joint box is unanswered
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::DependentSpouseStatusUnanswered),
+            "MFJ owes the spouse-dependent box even with no spouse Person (P8a I1)"
         );
     }
 
@@ -1091,6 +1185,7 @@ mod tests {
         // MFJ dual-earner: $15k taxpayer + $15k spouse — each under $23k → NO refuse (review I1).
         let mut ok = ri();
         ok.filing_status = FilingStatus::Mfj;
+        ok.header.can_be_claimed_as_dependent_spouse = Some(false); // MFJ makes the spouse box live (P8a I1)
         ok.w2s.push(W2 {
             owner: Owner::Taxpayer,
             box12: vec![Box12Entry {
@@ -1166,8 +1261,10 @@ mod tests {
                 foreign_trust: Some(false),
                 ..Default::default()
             };
-            // ...and the D-8 question, which `answered()` is named for.
+            // ...and the D-8/P9 always-live declarations, which `answered()` is named for.
             r.header.can_be_claimed_as_dependent_taxpayer = Some(false);
+            r.sch1.hsa_activity = Some(false);
+            r.dual_status_alien = Some(false);
             r
         };
         // I4: box 1b (qualified) > box 1a (ordinary) on a form ⇒ refuse (phantom preferential income).
@@ -1219,6 +1316,7 @@ mod tests {
         // MFJ ceiling is doubled ($600): $301 is fine.
         let mut mfj = r.clone();
         mfj.filing_status = FilingStatus::Mfj;
+        mfj.header.can_be_claimed_as_dependent_spouse = Some(false); // MFJ makes the spouse box live (P8a I1)
         assert_eq!(reason(&mfj), None);
         // QSS is NOT a joint return — ceiling stays $300, so $301 refuses (review I2).
         let mut qss = r.clone();
@@ -1314,25 +1412,28 @@ mod tests {
         // The SAME split on a joint return is legitimate (two earners) → no spouse-owner refusal.
         let mut mfj = single.clone();
         mfj.filing_status = FilingStatus::Mfj;
+        mfj.header.can_be_claimed_as_dependent_spouse = Some(false); // MFJ makes the spouse box live (P8a I1)
         assert_eq!(reason(&mfj), None);
     }
 
     #[test]
     fn schedule_b_part3_unanswered_refuses() {
-        // Files ($2,000 interest > $1,500) but Part III foreign-account/-trust questions unanswered (None).
+        // Above the $1,500 threshold, an unanswered Part III still refuses (the below-threshold case — the
+        // §2.9 bug — is covered separately). `ri()` now answers the foreign questions, so re-blank 7a.
         let mut r = ri();
         r.int_1099.push(Form1099Int {
             box1_interest: dec!(2000),
             ..Default::default()
         });
+        r.foreign_accounts = None; // re-blank line 7a
         assert_eq!(reason(&r), Some(RefuseReason::ScheduleBPart3Unanswered));
-        // Answer BOTH 7a and 8 → no refusal.
+        // Answer 7a; now line 8 (foreign trust) unanswered → still fail-loud (registry covers both).
         r.foreign_accounts = Some(false);
-        r.foreign_trust = Some(false);
-        assert_eq!(reason(&r), None);
-        // Line 8 (foreign trust) left unanswered while filing → still fail-loud.
         r.foreign_trust = None;
         assert_eq!(reason(&r), Some(RefuseReason::ScheduleBPart3Unanswered));
+        // Both answered → no refusal.
+        r.foreign_trust = Some(false);
+        assert_eq!(reason(&r), None);
     }
 
     #[test]

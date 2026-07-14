@@ -225,11 +225,11 @@ fn resolve_all_screened_maps_a_corrupt_year_to_a_refusal_not_a_brick() {
         return_inputs::set(
             s.conn(),
             2024,
-            &ReturnInputs {
+            &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
                 header: btctax_core::tax::testonly::not_a_dependent(),
                 ..Default::default()
-            },
+            }),
         )
         .unwrap();
         s.conn()

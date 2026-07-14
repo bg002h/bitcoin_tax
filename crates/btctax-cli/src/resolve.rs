@@ -300,7 +300,7 @@ mod tests {
         let c = mem();
         let (fr, tt) = ty2024();
         tax_profile::set(&c, 2024, &prof()).unwrap();
-        let ri = ReturnInputs {
+        let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             w2s: vec![W2 {
@@ -310,6 +310,7 @@ mod tests {
             }],
             ..Default::default()
         };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri); // P9: answer the always-live declarations
         return_inputs::set(&c, 2024, &ri).unwrap();
         let r = resolve(&c, 2024, true, &fr, &tt);
         assert_eq!(r.provenance, Provenance::ReturnInputs); // highest precedence
@@ -329,7 +330,7 @@ mod tests {
         let c = mem();
         let (fr, tt) = ty2024();
         tax_profile::set(&c, 2024, &prof()).unwrap(); // a raw MFJ/$120k stored profile
-        let ri = ReturnInputs {
+        let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             w2s: vec![W2 {
@@ -339,6 +340,7 @@ mod tests {
             }],
             ..Default::default()
         };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri); // P9: answer the always-live declarations
         return_inputs::set(&c, 2024, &ri).unwrap();
         let state = btctax_core::LedgerState::default();
         match resolve_and_screen(

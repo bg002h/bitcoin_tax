@@ -10,147 +10,96 @@
 //! no-echo. `answer` is an ordinary echoing prompt — routing a secret through it would print a crown jewel
 //! into terminal scrollback.
 use crate::{return_inputs, CliError, Session};
+use btctax_core::tax::questions::{FormQuestion, QuestionId, FORM_QUESTIONS};
 use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_store::Passphrase;
 use std::io::Write;
 use std::path::Path;
 
-/// A question `income answer` may ask.
+/// A SKIPPABLE prompt `income answer` asks in addition to the mandatory registry declarations. Skippable
+/// means a bare Enter leaves the value `None` — the opposite of a declaration, where silence is refused
+/// (D-8). Only the §63(f) dates of birth for now; the class-(B) blind/SALT skippables join in a later step
+/// (bundled with the advisories that make skipping them meaningful).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Question {
-    /// 1040 "Someone can claim YOU as a dependent" — asked on every return.
-    DependentTaxpayer,
-    /// 1040 "Someone can claim YOUR SPOUSE as a dependent" — only when a spouse is on the return.
-    DependentSpouse,
-    /// Schedule B Part III line 7a (foreign accounts) — only when Schedule B files.
-    ForeignAccounts,
-    /// Schedule B Part III line 8 (foreign trust) — only when Schedule B files.
-    ForeignTrust,
-    /// §63(c)(6) — only on MFS, where it couples the spouses' std/itemize choice.
-    MfsSpouseItemizes,
-    /// §63(f) aged addition. SKIPPABLE — see [`Question::is_skippable`].
+pub enum Skippable {
+    /// §63(f) aged addition. A mandatory DOB prompt would force the user to INVENT a birthday, and an
+    /// invented-old one grants the aged addition and understates tax — so `None` must stay reachable.
     DateOfBirthTaxpayer,
-    /// §63(f) aged addition for the spouse — only when a spouse is on the return. Skippable.
+    /// §63(f) aged addition for the spouse — only when a spouse `Person` is on the return (a `set_date` on
+    /// an absent spouse is silently discarded, so the prompt is gated to match, r3 I-7).
     DateOfBirthSpouse,
 }
 
-impl Question {
-    /// The prompt text — phrased as the FORM phrases it. The user is answering a 1040 line, not a struct
-    /// field, and the words printed on the form are the ones they can check against their own paperwork.
+impl Skippable {
+    /// The prompt text — phrased as the FORM phrases it.
     pub fn prompt(self) -> &'static str {
         match self {
-            Self::DependentTaxpayer => "Can someone claim YOU as a dependent on their return?",
-            Self::DependentSpouse => "Can someone claim YOUR SPOUSE as a dependent on their return?",
-            Self::ForeignAccounts => {
-                "Schedule B line 7a: did you have a financial interest in, or signature authority over, \
-                 a FOREIGN financial account?"
-            }
-            Self::ForeignTrust => {
-                "Schedule B line 8: did you receive a distribution from — or were you the grantor of, or \
-                 transferor to — a FOREIGN TRUST?"
-            }
-            Self::MfsSpouseItemizes => {
-                "Does your spouse ITEMIZE deductions on their separate return? (§63(c)(6) forces your \
-                 choice to match theirs)"
-            }
             Self::DateOfBirthTaxpayer => "YOUR date of birth",
             Self::DateOfBirthSpouse => "YOUR SPOUSE's date of birth",
         }
     }
-
-    /// Whether this is a date question (rather than a yes/no).
-    pub fn is_date(self) -> bool {
-        matches!(self, Self::DateOfBirthTaxpayer | Self::DateOfBirthSpouse)
-    }
-
-    /// ★ The DOB prompts are SKIPPABLE; the tri-states are NOT.
-    ///
-    /// A *mandatory* date-of-birth prompt is a forcing function to INVENT a value — and an invented-old
-    /// birthday grants the §63(f) aged addition, which understates tax. `None` is the safe state, and the
-    /// prompt must permit it. The tri-states are the exact opposite: their whole purpose is that silence
-    /// is not an answer.
-    pub fn is_skippable(self) -> bool {
-        self.is_date()
-    }
-}
-
-/// ★ EXACTLY the questions this return needs answered — scoped the same way the REFUSALS are scoped.
-///
-/// Asking a Single filer about a spouse who does not exist is the prompt-level twin of the refusal-level
-/// bug D-8 fixed (a spouse flag demanded of a return that has no spouse). The two scopes must agree, so
-/// both read the same predicates: `header.spouse.is_some()`, `schedule_b_files`, `filing_status == Mfs`.
-///
-/// **Every live question is asked in ONE pass** — including ones already answered, whose current value is
-/// offered as the default. Once the screen-before-store gate lands, a blob the screen refuses cannot be
-/// stored; so answering only *some* questions would leave the return still-refused and therefore still
-/// unstorable, and the user could never answer the rest. Asking everything at once is what prevents that
-/// deadlock.
-pub fn live_questions(ri: &ReturnInputs) -> Vec<Question> {
-    let mut qs = vec![Question::DependentTaxpayer];
-    let has_spouse = ri.header.spouse.is_some();
-    if has_spouse {
-        qs.push(Question::DependentSpouse);
-    }
-    if btctax_core::tax::return_1040::schedule_b_files(ri) {
-        qs.push(Question::ForeignAccounts);
-        qs.push(Question::ForeignTrust);
-    }
-    if ri.filing_status == btctax_core::FilingStatus::Mfs {
-        qs.push(Question::MfsSpouseItemizes);
-    }
-    qs.push(Question::DateOfBirthTaxpayer);
-    if has_spouse {
-        qs.push(Question::DateOfBirthSpouse);
-    }
-    qs
-}
-
-/// The yes/no currently on file for `q`, so the prompt can offer it as the default (Enter keeps it).
-pub fn current_bool(ri: &ReturnInputs, q: Question) -> Option<bool> {
-    match q {
-        Question::DependentTaxpayer => ri.header.can_be_claimed_as_dependent_taxpayer,
-        Question::DependentSpouse => ri.header.can_be_claimed_as_dependent_spouse,
-        Question::ForeignAccounts => ri.foreign_accounts,
-        Question::ForeignTrust => ri.foreign_trust,
-        Question::MfsSpouseItemizes => ri.mfs_spouse_itemizes,
-        Question::DateOfBirthTaxpayer | Question::DateOfBirthSpouse => None,
-    }
-}
-
-/// The date currently on file for `q`.
-pub fn current_date(ri: &ReturnInputs, q: Question) -> Option<time::Date> {
-    match q {
-        Question::DateOfBirthTaxpayer => ri.header.taxpayer.date_of_birth,
-        Question::DateOfBirthSpouse => ri.header.spouse.as_ref().and_then(|s| s.date_of_birth),
-        _ => None,
-    }
-}
-
-/// Record a yes/no answer.
-pub fn set_bool(ri: &mut ReturnInputs, q: Question, v: bool) {
-    match q {
-        Question::DependentTaxpayer => ri.header.can_be_claimed_as_dependent_taxpayer = Some(v),
-        Question::DependentSpouse => ri.header.can_be_claimed_as_dependent_spouse = Some(v),
-        Question::ForeignAccounts => ri.foreign_accounts = Some(v),
-        Question::ForeignTrust => ri.foreign_trust = Some(v),
-        Question::MfsSpouseItemizes => ri.mfs_spouse_itemizes = Some(v),
-        Question::DateOfBirthTaxpayer | Question::DateOfBirthSpouse => {
-            debug_assert!(false, "{q:?} is a date, not a yes/no")
+    /// The date currently on file (offered as the default; Enter keeps it).
+    pub fn current_date(self, ri: &ReturnInputs) -> Option<time::Date> {
+        match self {
+            Self::DateOfBirthTaxpayer => ri.header.taxpayer.date_of_birth,
+            Self::DateOfBirthSpouse => ri.header.spouse.as_ref().and_then(|s| s.date_of_birth),
         }
     }
-}
-
-/// Record a date-of-birth answer.
-pub fn set_date(ri: &mut ReturnInputs, q: Question, v: time::Date) {
-    match q {
-        Question::DateOfBirthTaxpayer => ri.header.taxpayer.date_of_birth = Some(v),
-        Question::DateOfBirthSpouse => {
-            if let Some(sp) = ri.header.spouse.as_mut() {
-                sp.date_of_birth = Some(v);
+    /// Record a date-of-birth answer. A spouse DOB on a return with no spouse `Person` is silently
+    /// discarded — which is exactly why `live_questions` gates the spouse DOB prompt on `spouse.is_some()`.
+    pub fn set_date(self, ri: &mut ReturnInputs, v: time::Date) {
+        match self {
+            Self::DateOfBirthTaxpayer => ri.header.taxpayer.date_of_birth = Some(v),
+            Self::DateOfBirthSpouse => {
+                if let Some(sp) = ri.header.spouse.as_mut() {
+                    sp.date_of_birth = Some(v);
+                }
             }
         }
-        _ => debug_assert!(false, "{q:?} is a yes/no, not a date"),
     }
+}
+
+/// One thing `income answer` asks: a MANDATORY declaration (from the [`FORM_QUESTIONS`] registry — a bare
+/// Enter with nothing on file is refused, never accepted as an answer) or a SKIPPABLE prompt.
+pub enum Ask {
+    Declaration(&'static FormQuestion),
+    Skippable(Skippable),
+}
+
+impl Ask {
+    /// The registry `QuestionId` if this is a declaration — for tests that assert WHICH questions are live.
+    pub fn declaration_id(&self) -> Option<QuestionId> {
+        match self {
+            Ask::Declaration(q) => Some(q.id),
+            Ask::Skippable(_) => None,
+        }
+    }
+    /// Whether a bare Enter with nothing on file is a legitimate outcome. True for skippables (DOBs), false
+    /// for declarations — silence on a declaration is exactly what D-8 forbids.
+    pub fn is_skippable(&self) -> bool {
+        matches!(self, Ask::Skippable(_))
+    }
+}
+
+/// ★ EXACTLY the questions this return needs — the MANDATORY declarations DERIVED from the registry (so the
+/// prompt scope IS the refusal scope, by identity: the no-brick property is now true by construction, not by
+/// a second hand-written list that can drift, r1 M-1), then the skippable DOBs.
+///
+/// **Every live declaration is asked in ONE pass** — including ones already answered, whose current value
+/// is offered as the default. A blob the screen refuses cannot be stored, so answering only *some*
+/// declarations would leave the return refused and unstorable; asking everything at once prevents that
+/// deadlock. The spouse DOB prompt is gated on `header.spouse.is_some()` (r3 I-7).
+pub fn live_questions(ri: &ReturnInputs) -> Vec<Ask> {
+    let mut asks: Vec<Ask> = FORM_QUESTIONS
+        .iter()
+        .filter(|q| (q.live)(ri))
+        .map(Ask::Declaration)
+        .collect();
+    asks.push(Ask::Skippable(Skippable::DateOfBirthTaxpayer));
+    if ri.header.spouse.is_some() {
+        asks.push(Ask::Skippable(Skippable::DateOfBirthSpouse));
+    }
+    asks
 }
 
 /// Parse one yes/no reply. `""` (a bare Enter) means "keep `default`", and is only an ANSWER when there
@@ -195,54 +144,57 @@ pub fn answer_return_inputs(
         )));
     };
 
-    for q in live_questions(&ri) {
-        if q.is_date() {
-            let cur = current_date(&ri, q);
-            loop {
-                let shown = cur.map_or_else(|| "none".to_string(), |d| d.to_string());
-                write!(out, "{} [{}; Enter to skip]: ", q.prompt(), shown)?;
-                out.flush()?;
-                let mut line = String::new();
-                if input.read_line(&mut line)? == 0 {
-                    return Err(CliError::Usage(
-                        "input ended before every question was answered — nothing was stored".into(),
-                    ));
-                }
-                match parse_date(&line) {
-                    // A bare Enter KEEPS whatever is on file (which may be `None`). It never CLEARS a date
-                    // the user already gave us — "skip" must not be a destructive default.
-                    Ok(None) => break,
-                    Ok(Some(d)) => {
-                        set_date(&mut ri, q, d);
-                        break;
+    for ask in live_questions(&ri) {
+        match ask {
+            // A MANDATORY declaration — silence with nothing on file is refused, never accepted (D-8).
+            Ask::Declaration(q) => {
+                let cur = (q.get)(&ri);
+                loop {
+                    let shown = match cur {
+                        Some(true) => "y/n, currently y",
+                        Some(false) => "y/n, currently n",
+                        None => "y/n",
+                    };
+                    write!(out, "{} [{}]: ", q.prompt, shown)?;
+                    out.flush()?;
+                    let mut line = String::new();
+                    if input.read_line(&mut line)? == 0 {
+                        return Err(CliError::Usage(
+                            "input ended before every question was answered — nothing was stored".into(),
+                        ));
                     }
-                    Err(e) => writeln!(out, "  not a date (YYYY-MM-DD): {e}")?,
+                    match parse_yes_no(&line, cur) {
+                        Some(v) => {
+                            (q.set)(&mut ri, v);
+                            break;
+                        }
+                        // ★ No default and no answer ⇒ ASK AGAIN. Accepting silence here would reintroduce
+                        // D-8 through the front door.
+                        None => writeln!(out, "  please answer y or n")?,
+                    }
                 }
             }
-        } else {
-            let cur = current_bool(&ri, q);
-            loop {
-                let shown = match cur {
-                    Some(true) => "y/n, currently y",
-                    Some(false) => "y/n, currently n",
-                    None => "y/n",
-                };
-                write!(out, "{} [{}]: ", q.prompt(), shown)?;
-                out.flush()?;
-                let mut line = String::new();
-                if input.read_line(&mut line)? == 0 {
-                    return Err(CliError::Usage(
-                        "input ended before every question was answered — nothing was stored".into(),
-                    ));
-                }
-                match parse_yes_no(&line, cur) {
-                    Some(v) => {
-                        set_bool(&mut ri, q, v);
-                        break;
+            // A SKIPPABLE prompt (DOB) — a bare Enter KEEPS whatever is on file (which may be `None`).
+            Ask::Skippable(sk) => {
+                let cur = sk.current_date(&ri);
+                loop {
+                    let shown = cur.map_or_else(|| "none".to_string(), |d| d.to_string());
+                    write!(out, "{} [{}; Enter to skip]: ", sk.prompt(), shown)?;
+                    out.flush()?;
+                    let mut line = String::new();
+                    if input.read_line(&mut line)? == 0 {
+                        return Err(CliError::Usage(
+                            "input ended before every question was answered — nothing was stored".into(),
+                        ));
                     }
-                    // ★ No default and no answer ⇒ ASK AGAIN. This is the one place the whole feature
-                    // turns on: accepting silence here would reintroduce D-8 through the front door.
-                    None => writeln!(out, "  please answer y or n")?,
+                    match parse_date(&line) {
+                        Ok(None) => break,
+                        Ok(Some(d)) => {
+                            sk.set_date(&mut ri, d);
+                            break;
+                        }
+                        Err(e) => writeln!(out, "  not a date (YYYY-MM-DD): {e}")?,
+                    }
                 }
             }
         }
@@ -276,52 +228,60 @@ mod tests {
         ri
     }
 
-    /// A Single filer with no Schedule B is asked TWO things: the dependent flag, and (skippably) a DOB.
-    /// Nothing about a spouse who does not exist.
+    /// The registry `QuestionId`s asked for a return, in order.
+    fn declaration_ids(ri: &ReturnInputs) -> Vec<QuestionId> {
+        live_questions(ri).iter().filter_map(Ask::declaration_id).collect()
+    }
+    fn has_spouse_dob(ri: &ReturnInputs) -> bool {
+        live_questions(ri)
+            .iter()
+            .any(|a| matches!(a, Ask::Skippable(Skippable::DateOfBirthSpouse)))
+    }
+
+    /// A Single filer is asked the FIVE always-live declarations (dependent-taxpayer, both foreign
+    /// questions, HSA activity, dual-status) and — skippably — a DOB. Nothing about a spouse who does not
+    /// exist, and (post-§2.9) the foreign questions appear even with no Schedule B.
     #[test]
-    fn a_single_filer_is_not_asked_about_a_spouse() {
+    fn a_single_filer_is_asked_the_always_live_declarations_and_no_spouse_question() {
         assert_eq!(
-            live_questions(&single()),
-            vec![Question::DependentTaxpayer, Question::DateOfBirthTaxpayer]
+            declaration_ids(&single()),
+            vec![
+                QuestionId::DependentTaxpayer,
+                QuestionId::ForeignAccounts,
+                QuestionId::ForeignTrust,
+                QuestionId::HsaActivity,
+                QuestionId::DualStatusAlien,
+            ]
         );
+        assert!(!has_spouse_dob(&single()), "no spouse ⇒ no spouse DOB");
     }
 
     /// ★ The prompt scope must track the REFUSAL scope. A spouse question asked of a spouse-less return is
     /// the prompt-level twin of the refusal-level bug D-8 fixed.
     #[test]
     fn spouse_questions_appear_exactly_when_a_spouse_does() {
-        let qs = live_questions(&with_spouse(single()));
-        assert!(qs.contains(&Question::DependentSpouse));
-        assert!(qs.contains(&Question::DateOfBirthSpouse));
-        for q in live_questions(&single()) {
-            assert!(
-                !matches!(q, Question::DependentSpouse | Question::DateOfBirthSpouse),
-                "no spouse ⇒ no spouse question, got {q:?}"
-            );
-        }
+        assert!(declaration_ids(&with_spouse(single())).contains(&QuestionId::DependentSpouse));
+        assert!(has_spouse_dob(&with_spouse(single())));
+        assert!(!declaration_ids(&single()).contains(&QuestionId::DependentSpouse));
+        assert!(!has_spouse_dob(&single()));
     }
 
-    /// Schedule-B Part III is asked only when Schedule B actually files — the same predicate the refusal
-    /// uses, so `answer` can always clear the refusal it is there to clear.
+    /// ★ §2.9 — the foreign-account/-trust questions are asked on EVERY return, INCLUDING below the
+    /// Schedule B threshold. Scoping them by `schedule_b_files` was the circular-liveness bug: that
+    /// predicate reads `foreign_accounts` itself, so a never-asked account silently omitted Schedule B.
     #[test]
-    fn schedule_b_questions_appear_exactly_when_schedule_b_files() {
-        assert!(!live_questions(&single()).contains(&Question::ForeignAccounts));
-        let mut files = single();
-        files.int_1099.push(Form1099Int {
-            box1_interest: dec!(2000), // > the $1,500 Schedule-B threshold
-            ..Default::default()
-        });
-        let qs = live_questions(&files);
-        assert!(qs.contains(&Question::ForeignAccounts));
-        assert!(qs.contains(&Question::ForeignTrust));
+    fn foreign_questions_are_asked_even_below_the_schedule_b_threshold() {
+        let ids = declaration_ids(&single()); // no interest at all — well below $1,500
+        assert!(ids.contains(&QuestionId::ForeignAccounts));
+        assert!(ids.contains(&QuestionId::ForeignTrust));
     }
 
     #[test]
     fn mfs_is_asked_whether_the_spouse_itemizes() {
         let mut mfs = single();
         mfs.filing_status = FilingStatus::Mfs;
-        assert!(live_questions(&mfs).contains(&Question::MfsSpouseItemizes));
-        assert!(!live_questions(&single()).contains(&Question::MfsSpouseItemizes));
+        assert!(declaration_ids(&mfs).contains(&QuestionId::MfsSpouseItemizes));
+        assert!(!declaration_ids(&single()).contains(&QuestionId::MfsSpouseItemizes));
     }
 
     /// ★ Every question the SCREEN can refuse for must be ASKABLE — otherwise `answer` cannot clear the
@@ -348,24 +308,29 @@ mod tests {
             screen_inputs(&ri, table, params).is_some(),
             "an all-unanswered return must refuse — else this test proves nothing"
         );
-        for q in live_questions(&ri) {
-            if q.is_date() {
-                continue; // skippable by design
+        for ask in live_questions(&ri) {
+            match ask {
+                Ask::Declaration(q) => (q.set)(&mut ri, false), // answer "no"
+                Ask::Skippable(_) => {}                          // skippable by design
             }
-            set_bool(&mut ri, q, false);
         }
         assert!(
             screen_inputs(&ri, table, params).is_none(),
-            "answering every LIVE question must clear the screen — if it does not, `answer` cannot \
+            "answering every LIVE declaration must clear the screen — if it does not, `answer` cannot \
              rescue a bricked year and the whole command is a dead end"
         );
     }
 
-    /// The tri-states are not skippable; the DOBs are.
+    /// The mandatory declarations are not skippable; the DOBs are. (Anchored to the enum shape, not a value:
+    /// every `Skippable` is skippable, every `Declaration` is not.)
     #[test]
-    fn only_the_dobs_are_skippable() {
-        for q in live_questions(&with_spouse(single())) {
-            assert_eq!(q.is_skippable(), q.is_date(), "{q:?}");
+    fn only_the_skippables_are_skippable() {
+        for ask in live_questions(&with_spouse(single())) {
+            assert_eq!(
+                ask.is_skippable(),
+                ask.declaration_id().is_none(),
+                "a declaration must not be skippable; a skippable must not be a declaration"
+            );
         }
     }
 

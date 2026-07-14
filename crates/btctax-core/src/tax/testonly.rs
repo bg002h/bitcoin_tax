@@ -18,8 +18,33 @@ use crate::tax::return_inputs::{
 use crate::tax::tables::{
     AmtParams, FullReturnParams, LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable,
 };
+use crate::tax::questions::{QuestionId, FORM_QUESTIONS};
 use crate::tax::types::FilingStatus;
 use rust_decimal_macros::dec;
+
+/// ★ P9 — answer every LIVE `FORM_QUESTIONS` declaration that a fixture left blank, so a computing fixture
+/// is not tripped by the registry's unanswered screen (§3.1 churn note). Derived from the registry itself,
+/// so a new always-live declaration is covered here with zero new fixture edits — the whole point of P9.
+///
+/// Every declaration answers "no" EXCEPT the mixed-use-mortgage question, which answers "yes" (all of the
+/// loan was used to buy/build/improve): a fixture that reports mortgage interest means to DEDUCT it, and
+/// "yes" is what keeps line 8a full and the box unchecked (a "no" would zero 8a — §2.7). A deliberate
+/// answer already set by the caller is preserved (the loop only fills `None`).
+pub fn answer_all_live_declarations(ri: &mut ReturnInputs) {
+    for q in FORM_QUESTIONS {
+        if (q.live)(ri) && (q.get)(ri).is_none() {
+            let ans = matches!(q.id, QuestionId::MortgageAllUsedToBuyBuildImprove);
+            (q.set)(ri, ans);
+        }
+    }
+}
+
+/// [`answer_all_live_declarations`] as a by-value wrapper, for fixtures that pass a `&ReturnInputs { ... }`
+/// temporary straight into `set` and expect it to COMPUTE: `set(conn, year, &testonly::answered(ReturnInputs { .. }))`.
+pub fn answered(mut ri: ReturnInputs) -> ReturnInputs {
+    answer_all_live_declarations(&mut ri);
+    ri
+}
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use time::macros::date;
@@ -138,7 +163,7 @@ fn person(first: &str, last: &str, ssn: &str, occupation: &str) -> Person {
 /// fixtures. Every figure is chosen to clear a threshold, and the reason is stated where it is not
 /// obvious — a fixture that silently stops tripping a threshold is a KAT that silently stops testing.
 pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
-    let ri = ReturnInputs {
+    let mut ri = ReturnInputs {
         filing_status: FilingStatus::Mfj,
         header: HouseholdHeader {
             taxpayer: person("John", "Doe", "123-45-6789", "Engineer"),
@@ -276,6 +301,7 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
         ..Default::default()
     };
 
+    answer_all_live_declarations(&mut ri);
     (ri, state)
 }
 
@@ -293,7 +319,7 @@ pub fn kitchen_sink_header() -> crate::tax::packet::ReturnHeader {
 /// Box 6 is EXACTLY 1.45% × box 5, so Form 8959 line 24 (the withholding reconciliation) is zero too —
 /// the form is not required on either leg.
 pub fn w2_only_household() -> (ReturnInputs, LedgerState) {
-    let ri = ReturnInputs {
+    let mut ri = ReturnInputs {
         filing_status: FilingStatus::Single,
         header: HouseholdHeader {
             taxpayer: person("Pat", "Roe", "222-33-4444", "Teacher"),
@@ -316,6 +342,7 @@ pub fn w2_only_household() -> (ReturnInputs, LedgerState) {
         }],
         ..Default::default()
     };
+    answer_all_live_declarations(&mut ri);
     (ri, LedgerState::default())
 }
 
@@ -537,6 +564,7 @@ pub fn build_golden_household(h: &GoldenHousehold) -> (ReturnInputs, LedgerState
     // Schedule B Part III must be answered when Schedule B files.
     ri.foreign_accounts = Some(false);
     ri.foreign_trust = Some(false);
+    answer_all_live_declarations(&mut ri);
 
     // ── The ledger: capital gains are DISPOSALS; SE income is business crypto. ──────────────────
     let mut state = LedgerState::default();
