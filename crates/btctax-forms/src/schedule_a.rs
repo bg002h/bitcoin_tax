@@ -84,6 +84,27 @@ pub fn fill_schedule_a_with_map(
         &header.taxpayer.ssn,
         &blank_fields,
     )?;
+    // ★ The two ELECTIONS core already honoured but the form never showed (ARCH-P6.3a Q7):
+    // §164(b)(5) sales-tax-instead-of-income-tax, and §63(e) itemize-below-the-standard-deduction.
+    // Without the latter the Service's math-error unit may "correct" the return to the standard.
+    for (choice, on) in [
+        (&map.check_5a_sales_tax, lines.line5a_is_sales_tax),
+        (&map.check_18_elects_smaller, lines.line18_elects_smaller),
+    ] {
+        if on {
+            writes.push((
+                choice.field.clone(),
+                pdf::FieldValue::Check {
+                    on: choice.on.clone(),
+                },
+            ));
+            placements.push(FlatPlacement::check(
+                choice.field.clone(),
+                crate::cells::page_of(&choice.field),
+            ));
+        }
+    }
+
     let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;

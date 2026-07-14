@@ -31,6 +31,12 @@
 form = "f1040sa"
 year = 2024
 
+# ── The two ELECTION checkboxes (P6.3a Q7): elections core already honours in the ARITHMETIC that
+#    the filed form never showed. c1_1 is the top-most button (y=566) = line 5a's "check this box";
+#    the line-18 button names itself (Line18_ReadOrder).
+check_5a_sales_tax      = { field = "topmostSubform[0].Page1[0].c1_1[0]", on = "1" }
+check_18_elects_smaller = { field = "topmostSubform[0].Page1[0].Line18_ReadOrder[0].c1_3[0]", on = "1" }
+
 # ── Medical and Dental Expenses ─────────────────────────────────────────────────────────────────
 line1  = "topmostSubform[0].Page1[0].f1_3[0]"    # "Medical and dental expenses"                      MID
 line2  = "topmostSubform[0].Page1[0].f1_4[0]"    # "Enter amount from Form 1040…, line 11"   ★ AGI-INLINE

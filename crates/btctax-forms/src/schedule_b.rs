@@ -16,11 +16,13 @@
 //! the full sum, so the printed form would not add up — and if it were totalled from the visible rows
 //! instead, the return would understate income.
 //!
-//! **★ Part III is transcribed, never decided.** Lines 7a and 8 carry the filer's own declared
-//! answers (`screen_inputs` refuses the return if they were left unanswered). The unnumbered FBAR
-//! sub-question under 7a and line 7b's country list are left BLANK — v1 has no input for them, and
-//! the `FbarFinCen` advisory tells the filer in terms that they must decide it themselves. An
-//! incomplete Part III is the honest output here; a guessed one would not be.
+//! **★ Part III is transcribed, never decided.** Lines 7a, 7b and 8 all carry the filer's OWN declared
+//! answers (`screen_inputs` refuses the return if 7a/8 were left unanswered). Line 7b's country list is
+//! captured too — the previous claim that "v1 has no input for it" was FALSE, and the input was being
+//! dropped on the floor (ARCH-P6.3a Q7 item 7). Only the unnumbered FBAR sub-question under 7a stays
+//! BLANK: for THAT one there genuinely is no input, and the `FbarFinCen` advisory tells the filer in
+//! terms that they must decide it themselves. An incomplete Part III is the honest output there; a
+//! guessed one would not be.
 
 use crate::cells::{push_identity, push_money};
 use crate::error::FormsError;
@@ -169,6 +171,19 @@ pub fn fill_schedule_b_with_map(
         &header.taxpayer.ssn,
         &blank_fields,
     )?;
+    // L7b — the filer's own country list, printed verbatim when 7a is "Yes" (it WAS captured all along;
+    // the code comment claiming otherwise was false — ARCH-P6.3a Q7 item 7).
+    if !lines.line7b_countries.is_empty() {
+        writes.push((
+            map.line7b_countries.clone(),
+            pdf::FieldValue::Text(lines.line7b_countries.clone()),
+        ));
+        placements.push(FlatPlacement::free(
+            map.line7b_countries.clone(),
+            crate::cells::page_of(&map.line7b_countries),
+        ));
+    }
+
     let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;

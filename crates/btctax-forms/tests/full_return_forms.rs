@@ -513,6 +513,8 @@ fn sch_a_lines() -> ScheduleALines {
     // SALT 8,000 + 4,000 + 500 = 12,500 ⇒ capped at 10,000. Mortgage 12,000.
     // Charitable 1,000 cash + 2,000 noncash + 500 carryover = 3,500. Total 28,000.
     ScheduleALines {
+        line5a_is_sales_tax: false,
+        line18_elects_smaller: false,
         line1: dec!(10000),
         line2: dec!(100000),
         line3: dec!(7500),
@@ -674,6 +676,9 @@ fn schedule_1_fills_both_parts_across_two_pages() {
 fn schedule_c_fills_the_printed_chain_and_reads_back() {
     // $60,000 of crypto mining gross, $8,000 of expenses ⇒ $52,000 net profit.
     let lines = ScheduleCLines {
+        line_a_business: "Bitcoin mining".into(),
+        line_b_naics: "518210".into(),
+        line_f_accrual: false,
         line1: dec!(60000),
         line3: dec!(60000),
         line5: dec!(60000),
@@ -746,6 +751,9 @@ fn schedule_c_fills_the_printed_chain_and_reads_back() {
 #[test]
 fn schedule_c_same_column_swap_fails_closed() {
     let lines = ScheduleCLines {
+        line_a_business: "Bitcoin mining".into(),
+        line_b_naics: "518210".into(),
+        line_f_accrual: false,
         line1: dec!(60000),
         line3: dec!(60000),
         line5: dec!(60000),
@@ -774,6 +782,7 @@ fn sch_b(part1: Vec<ScheduleBRow>, part2: Vec<ScheduleBRow>, fa: bool, ft: bool)
     let line2: Usd = part1.iter().map(|r| r.amount).sum();
     let line6: Usd = part2.iter().map(|r| r.amount).sum();
     ScheduleBLines {
+        line7b_countries: String::new(),
         part1_rows: part1,
         line2,
         line4: line2,
@@ -1273,6 +1282,7 @@ fn schedule_d_full_refuses_a_negative_in_a_parenthesized_cell() {
 
 fn f1040() -> Form1040Lines {
     Form1040Lines {
+        line2a: dec!(1234),
         line1z: dec!(120000),
         line2b: dec!(2000),
         line3a: dec!(3000), // ★ SUBLINE column — the preferential slice
@@ -1693,5 +1703,120 @@ fn more_dependents_than_the_form_holds_fails_closed() {
             }
         ),
         "expected a capacity refusal, got {err:?}"
+    );
+}
+
+// ── The ARCH-P6.3a Q7 sweep: each captured input now reaches its CELL ────────────────────────────
+
+/// The three 1040 header items that reached the arithmetic (or the vault) but never the page: line 2a
+/// (tax-exempt interest — the IRS document-matches 1099-INT box 8), the occupation cells, and the
+/// **IP PIN**, whose absence gets a paper return REJECTED when one was issued.
+#[test]
+fn the_1040_prints_tax_exempt_interest_the_occupations_and_the_ip_pin() {
+    use btctax_core::tax::packet::ReturnHeader;
+    use btctax_core::tax::return_inputs::{Person, ReturnInputs};
+
+    let mut ri = ReturnInputs {
+        filing_status: FilingStatus::Single,
+        ..Default::default()
+    };
+    ri.header.taxpayer = Person {
+        first_name: "Pat".into(),
+        last_name: "Roe".into(),
+        ssn: "222334444".into(),
+        occupation: "Teacher".into(),
+        ..Default::default()
+    };
+    ri.header.ip_pin = Some("123456".into());
+    let h = ReturnHeader::build(&ri, 2024).unwrap();
+
+    let mut lines = f1040();
+    lines.line2a = dec!(1234);
+    let pdf = btctax_forms::fill_form_1040_full(&lines, &h, FilingStatus::Single, 2024).unwrap();
+
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_42[0]").as_deref(),
+        Some("1234"),
+        "line 2a — tax-exempt interest"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page2[0].f2_33[0]").as_deref(),
+        Some("Teacher"),
+        "the occupation cell"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page2[0].f2_34[0]").as_deref(),
+        Some("123456"),
+        "★ the IP PIN — a paper return that omits an ISSUED one is rejected"
+    );
+}
+
+/// Schedule A's two ELECTION checkboxes. Core honoured both in the arithmetic; the form showed neither.
+/// Without the line-18 box especially, the Service's math-error unit may "correct" a §63(e) return back
+/// to the standard deduction — silently undoing the filer's own election.
+#[test]
+fn schedule_a_prints_the_sales_tax_and_force_itemize_election_boxes() {
+    let mut lines = sch_a_lines();
+    lines.line5a_is_sales_tax = true;
+    lines.line18_elects_smaller = true;
+    let pdf = btctax_forms::fill_schedule_a(&lines, &kitchen_sink_header(), 2024).unwrap();
+
+    assert!(
+        box_on(&pdf, "topmostSubform[0].Page1[0].c1_1[0]"),
+        "the §164(b)(5) sales-tax election"
+    );
+    assert!(
+        box_on(
+            &pdf,
+            "topmostSubform[0].Page1[0].Line18_ReadOrder[0].c1_3[0]"
+        ),
+        "the §63(e) itemize-below-the-standard election"
+    );
+
+    // …and an ordinary itemizing return checks neither.
+    let plain = sch_a_lines();
+    let pdf = btctax_forms::fill_schedule_a(&plain, &kitchen_sink_header(), 2024).unwrap();
+    assert!(!box_on(&pdf, "topmostSubform[0].Page1[0].c1_1[0]"));
+    assert!(!box_on(
+        &pdf,
+        "topmostSubform[0].Page1[0].Line18_ReadOrder[0].c1_3[0]"
+    ));
+}
+
+/// Schedule C's lines A, B and F — captured expressly for those cells. A Schedule C with a blank
+/// "Principal business or profession" is incomplete on its face.
+#[test]
+fn schedule_c_prints_its_business_naics_and_accounting_method() {
+    let lines = ScheduleCLines {
+        line_a_business: "Bitcoin mining".into(),
+        line_b_naics: "518210".into(),
+        line_f_accrual: false, // Cash
+        line1: dec!(60000),
+        line3: dec!(60000),
+        line5: dec!(60000),
+        line7: dec!(60000),
+        line28: dec!(8000),
+        line29: dec!(52000),
+        line31: dec!(52000),
+    };
+    let pdf = btctax_forms::fill_schedule_c(&lines, &kitchen_sink_header(), 2024).unwrap();
+
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_3[0]").as_deref(),
+        Some("Bitcoin mining"),
+        "line A"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].BComb[0].f1_4[0]").as_deref(),
+        Some("518210"),
+        "line B — the NAICS code (a 6-character comb)"
+    );
+    assert!(
+        box_on(&pdf, "topmostSubform[0].Page1[0].c1_1[0]"),
+        "line F — Cash, the captured method"
+    );
+    assert!(
+        !box_on(&pdf, "topmostSubform[0].Page1[0].c1_1[1]"),
+        "…and NOT accrual"
     );
 }

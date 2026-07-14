@@ -129,6 +129,16 @@ pub fn fill_form_1040_full_with_map(
             Some((GRP_P1_AMOUNT, ord as u32)),
         );
     }
+    // Line 2a — tax-exempt interest, the SUBLINE column, one printed row ABOVE 3a (so ordinal 0).
+    push_money(
+        &mut writes,
+        &mut placements,
+        need(&map.line2a, "line2a", y)?,
+        lines.line2a,
+        COL_SUBLINE,
+        Some((GRP_P1_SUBLINE, 0)),
+    );
+
     // ★ Line 3a — the SUBLINE column. The preferential-rate slice; a wrong box misreports it.
     push_money(
         &mut writes,
@@ -136,7 +146,7 @@ pub fn fill_form_1040_full_with_map(
         need(&map.line3a, "line3a", y)?,
         lines.line3a,
         COL_SUBLINE,
-        Some((GRP_P1_SUBLINE, 0)),
+        Some((GRP_P1_SUBLINE, 1)),
     );
 
     // ── Page 2, AMOUNT column. ──────────────────────────────────────────────────────────────────
@@ -295,6 +305,16 @@ fn push_header_block(
         if status == FilingStatus::Mfs {
             text(w, p, &cells.mfs_spouse_name, &sp.full_name());
         }
+    }
+
+    // The signature block (page 2): occupations, and the IP PIN — whose absence gets a paper return
+    // REJECTED when one was issued. The spouse's IP PIN is not captured, so that cell stays blank.
+    text(w, p, &cells.occupation_taxpayer, &t.occupation);
+    if let Some(sp) = &header.spouse {
+        text(w, p, &cells.occupation_spouse, &sp.occupation);
+    }
+    if let Some(pin) = &header.ip_pin {
+        text(w, p, &cells.ip_pin, pin.digits());
     }
 
     text(w, p, &cells.address_street, &header.address_street);

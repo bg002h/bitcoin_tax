@@ -36,6 +36,14 @@
 form = "f1040sc"
 year = 2024
 
+# ── Lines A / B / F (P6.3a Q7) — captured expressly for these cells and printed by no one until now.
+#    Line F's group is (1) Cash / (2) Accrual / (3) Other, left→right at y=601; v1 captures only the
+#    first two, so "Other" is never checked. Line B is a 6-character comb (/MaxLen 6).
+line_a_business = "topmostSubform[0].Page1[0].f1_3[0]"
+line_b_naics    = "topmostSubform[0].Page1[0].BComb[0].f1_4[0]"
+method_cash     = { field = "topmostSubform[0].Page1[0].c1_1[0]", on = "1" }
+method_accrual  = { field = "topmostSubform[0].Page1[0].c1_1[1]", on = "2" }
+
 line1  = "topmostSubform[0].Page1[0].f1_10[0]"   # "Gross receipts or sales"
 line3  = "topmostSubform[0].Page1[0].f1_12[0]"   # "Subtract line 2 from line 1"
 line5  = "topmostSubform[0].Page1[0].f1_14[0]"   # "Gross profit. Subtract line 4 from line 3"

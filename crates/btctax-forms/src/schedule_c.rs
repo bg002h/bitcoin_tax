@@ -77,6 +77,33 @@ pub fn fill_schedule_c_with_map(
         &proprietor.ssn,
         &blank_fields,
     )?;
+    // Lines A / B / F — captured expressly for these cells (a Schedule C with a blank line A is
+    // incomplete on its face). Line B is a 6-character comb; the /MaxLen guard enforces that.
+    for (fqn, value) in [
+        (&map.line_a_business, lines.line_a_business.as_str()),
+        (&map.line_b_naics, lines.line_b_naics.as_str()),
+    ] {
+        if !value.is_empty() {
+            writes.push((fqn.clone(), pdf::FieldValue::Text(value.to_string())));
+            placements.push(FlatPlacement::free(fqn.clone(), crate::cells::page_of(fqn)));
+        }
+    }
+    let method = if lines.line_f_accrual {
+        &map.method_accrual
+    } else {
+        &map.method_cash
+    };
+    writes.push((
+        method.field.clone(),
+        pdf::FieldValue::Check {
+            on: method.on.clone(),
+        },
+    ));
+    placements.push(FlatPlacement::check(
+        method.field.clone(),
+        crate::cells::page_of(&method.field),
+    ));
+
     let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;

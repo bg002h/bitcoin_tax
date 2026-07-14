@@ -336,6 +336,9 @@ pub fn schedule_1_lines(ar: &AbsoluteReturn) -> Option<Schedule1Lines> {
 pub struct Form1040Lines {
     /// L1a / L1z — wages (Σ W-2 box 1). v1 has no other line-1 component, so 1z = 1a.
     pub line1z: Usd,
+    /// L2a — **tax-exempt interest** (Σ 1099-INT box 8 + 1099-DIV box 12). Changes no tax; the IRS
+    /// document-matches it, and a return that omits it misstates itself (ARCH-P6.3a Q7 item 2).
+    pub line2a: Usd,
     /// L2b — taxable interest: **Schedule B's printed line 4** when Schedule B files, else the sum.
     pub line2b: Usd,
     /// L3a — qualified dividends (Σ 1099-DIV box 1b; the preferential slice).
@@ -434,6 +437,7 @@ pub fn form_1040_lines(
 ) -> Form1040Lines {
     // ── Income ──────────────────────────────────────────────────────────────────────────────────
     let line1z = round_dollar(ar.wages);
+    let line2a = round_dollar(ar.printed_inputs.tax_exempt_interest);
     // Schedule B, when it files, IS the source of 2b and 3b — take its printed totals, not a
     // re-rounding of the exact sums, or the 1040 and its own Schedule B differ by a dollar.
     let line2b = sch_b.map_or_else(|| round_dollar(ar.taxable_interest), |b| b.line4);
@@ -492,6 +496,7 @@ pub fn form_1040_lines(
 
     Form1040Lines {
         line1z,
+        line2a,
         line2b,
         line3a,
         line3b,
@@ -678,9 +683,13 @@ pub struct ScheduleBRow {
 /// **Part III is TRANSCRIBED, never decided.** Lines 7a (a financial interest in a foreign account)
 /// and 8 (a distribution from a foreign trust) carry the filer's OWN declared answers — `screen_inputs`
 /// REFUSES the return if they were left unanswered, precisely so that btctax never has to guess. The
-/// unnumbered FBAR sub-question under 7a, and line 7b's country list, are left BLANK: v1 has no input
-/// for them, and the `FbarFinCen` advisory tells the filer in terms that they must decide it
-/// themselves. An incomplete Part III is the honest output here; a guessed one would not be.
+/// Line **7b's country list** is the filer's own too — it IS captured (`ReturnInputs
+/// .foreign_country_names`), and the claim that "v1 has no input for it" was simply FALSE: the input
+/// existed, was screened, and was then dropped on the floor (ARCH-P6.3a Q7 item 7). It now prints.
+///
+/// Only the unnumbered FBAR sub-question under 7a is left BLANK — for that one there genuinely is no
+/// input, and the `FbarFinCen` advisory tells the filer in terms that they must decide it themselves.
+/// An incomplete Part III is the honest output there; a guessed one would not be.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleBLines {
     /// L1 — the listed interest payers (Part I).
@@ -698,6 +707,8 @@ pub struct ScheduleBLines {
     pub foreign_accounts_7a: bool,
     /// L8 — "did you receive a distribution from… a foreign trust?" — the filer's own answer.
     pub foreign_trust_8: bool,
+    /// L7b — the foreign-country list. The filer's own words, printed verbatim when 7a is "Yes".
+    pub line7b_countries: String,
 }
 
 /// Derive the printed Schedule B chain from the filer's 1099s. Returns `None` when Schedule B is not
@@ -748,6 +759,12 @@ pub fn schedule_b_lines(ri: &crate::tax::return_inputs::ReturnInputs) -> Option<
         part2_rows,
         line6,
         foreign_accounts_7a: ri.foreign_accounts.unwrap_or(false),
+        // Printed only when 7a is "Yes" — a country list beside a "No" would contradict the answer.
+        line7b_countries: if ri.foreign_accounts == Some(true) {
+            ri.foreign_country_names.clone()
+        } else {
+            String::new()
+        },
         foreign_trust_8: ri.foreign_trust.unwrap_or(false),
     })
 }
@@ -766,8 +783,15 @@ pub fn schedule_b_lines(ri: &crate::tax::return_inputs::ReturnInputs) -> Option<
 ///
 /// **A Schedule C LOSS is refused upstream** (§465 at-risk substantiation is out of scope), so line 31
 /// is always ≥ 0 and the at-risk checkboxes on lines 32a/32b are never needed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleCLines {
+    /// Line **A** — "Principal business or profession". Captured (`ScheduleCInputs.business_description`)
+    /// expressly for this cell; a Schedule C with a blank line A is incomplete on its face (Q7 item 6).
+    pub line_a_business: String,
+    /// Line **B** — the NAICS code.
+    pub line_b_naics: String,
+    /// Line **F** — the accounting method (a checkbox: Cash or Accrual).
+    pub line_f_accrual: bool,
     /// L1 — gross receipts or sales.
     pub line1: Usd,
     /// L3 — subtract line 2 (returns/allowances, blank) from line 1 ⇒ `= line1`.
@@ -788,6 +812,7 @@ pub struct ScheduleCLines {
 /// Derive the printed Schedule C chain. Returns `None` when the filer has no crypto trade or business.
 pub fn schedule_c_lines(ar: &AbsoluteReturn) -> Option<ScheduleCLines> {
     let p = ar.schedule_c.as_ref()?;
+    let h = &ar.printed_inputs.schedule_c_header;
 
     let line1 = round_dollar(p.gross_receipts_1);
     let line3 = line1; // − line 2 (returns and allowances), blank
@@ -798,6 +823,9 @@ pub fn schedule_c_lines(ar: &AbsoluteReturn) -> Option<ScheduleCLines> {
     let line31 = line29; // − line 30 (home office), blank
 
     Some(ScheduleCLines {
+        line_a_business: h.business_description.clone(),
+        line_b_naics: h.naics_code.clone(),
+        line_f_accrual: h.accrual,
         line1,
         line3,
         line5,
@@ -821,6 +849,14 @@ pub fn schedule_c_lines(ar: &AbsoluteReturn) -> Option<ScheduleCLines> {
 /// "Reserved for future use" — a ReadOnly widget that must never be written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScheduleALines {
+    /// L5a's **checkbox** — §164(b)(5): "If you elect to include general sales taxes instead of income
+    /// taxes, check this box". The election is already in the arithmetic; without the box the filed form
+    /// claims income taxes the filer did not use (ARCH-P6.3a Q7 item 3).
+    pub line5a_is_sales_tax: bool,
+    /// L18's **checkbox** — §63(e): "If you elect to itemize deductions even though they are less than
+    /// your standard deduction, check this box". Without it the Service's math-error unit may "correct"
+    /// the return back to the standard deduction (Q7 item 4).
+    pub line18_elects_smaller: bool,
     /// L1 — medical and dental expenses.
     pub line1: Usd,
     /// L2 — AGI (the floor's base).
@@ -903,6 +939,12 @@ pub fn schedule_a_lines(ar: &AbsoluteReturn) -> Option<ScheduleALines> {
     let line17 = line4 + line7 + line10 + line14;
 
     Some(ScheduleALines {
+        line5a_is_sales_tax: p.salt_is_sales_tax,
+        // §63(e) is only an ELECTION when the itemized total is actually SMALLER than the standard
+        // deduction — otherwise itemizing simply won, and the box would misstate what the filer did.
+        line18_elects_smaller: ar
+            .itemized_deduction
+            .is_some_and(|it| it < ar.standard_deduction),
         line1,
         line2,
         line3,
@@ -1082,6 +1124,8 @@ mod tests {
             printed_inputs: crate::tax::return_1040::PrintedInputs {
                 medicare_wages: z,
                 medicare_withheld: z,
+                schedule_c_header: crate::tax::return_1040::ScheduleCHeader::default(),
+                tax_exempt_interest: z,
                 crypto_lending_interest: z,
                 reit_dividends: z,
                 reit_ptp_carryforward_in: z,
@@ -1094,6 +1138,104 @@ mod tests {
                 digital_asset_activity: false,
             },
         }
+    }
+
+    // ── The ARCH-P6.3a Q7 sweep: captured inputs that reached the ARITHMETIC but never the FORM ──
+
+    /// A Schedule A whose SALT line 5a is the §164(b)(5) SALES-TAX election.
+    fn sched_a_parts_sales_tax() -> crate::tax::return_1040::ScheduleAParts {
+        crate::tax::return_1040::ScheduleAParts {
+            salt_is_sales_tax: true,
+            medical_expenses: Usd::ZERO,
+            agi: dec!(50000),
+            medical_floor: dec!(3750),
+            medical_allowed: Usd::ZERO,
+            salt_5a: dec!(4000),
+            salt_5b: Usd::ZERO,
+            salt_5c: Usd::ZERO,
+            salt_5d: dec!(4000),
+            salt_cap: dec!(10000),
+            salt_5e: dec!(4000),
+            mortgage_8a: dec!(5000),
+            charitable_cash_11: Usd::ZERO,
+            charitable_noncash_12: Usd::ZERO,
+            charitable_carryover_13: Usd::ZERO,
+            charitable_14: Usd::ZERO,
+            total_17: dec!(9000),
+        }
+    }
+
+    /// 1040 **line 2a** — tax-exempt interest (Σ 1099-INT box 8 + 1099-DIV box 12). It changes no tax,
+    /// but the IRS document-matches box 8, and SPEC §5 stage 1 puts it on the return. It reached
+    /// NOTHING: `Form1040Lines` had no line 2a (Q7 item 2).
+    #[test]
+    fn form_1040_line2a_carries_tax_exempt_interest() {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.printed_inputs.tax_exempt_interest = dec!(1234.49);
+        let sd = schedule_d_lines(&ar, None);
+        let f8959 = form_8959_lines(FilingStatus::Single, Usd::ZERO, Usd::ZERO, None);
+
+        let l = form_1040_lines(
+            &ar,
+            None,
+            None,
+            None,
+            &sd,
+            None,
+            None,
+            &f8959,
+            None,
+            Usd::ZERO,
+            Usd::ZERO,
+            false,
+        );
+        assert_eq!(
+            l.line2a,
+            dec!(1234),
+            "rounded at the line, like every printed cell"
+        );
+    }
+
+    /// Schedule A **5a's checkbox** — "If you elect to include general sales taxes instead of income
+    /// taxes, check this box". Core honours the §164(b)(5) election in the ARITHMETIC; without the box a
+    /// sales-tax-electing return files claiming INCOME taxes (Q7 item 3).
+    ///
+    /// And Schedule A **line 18** — "If you elect to itemize deductions even though they are less than
+    /// your standard deduction, check this box" (§63(e)). Without it the Service's math-error unit may
+    /// "correct" the return back to the standard deduction (Q7 item 4).
+    #[test]
+    fn schedule_a_prints_the_sales_tax_and_force_itemize_elections_it_already_honours() {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.deduction_is_itemized = true;
+        ar.standard_deduction = dec!(14600);
+        ar.itemized_deduction = Some(dec!(9000)); // SMALLER than the standard ⇒ §63(e) was elected
+        ar.schedule_a = Some(sched_a_parts_sales_tax());
+
+        let a = schedule_a_lines(&ar).expect("the return itemizes");
+        assert!(
+            a.line5a_is_sales_tax,
+            "the §164(b)(5) election must PRINT, not just compute"
+        );
+        assert!(
+            a.line18_elects_smaller,
+            "§63(e): itemizing BELOW the standard deduction must be declared on the form"
+        );
+    }
+
+    /// …and neither box is checked on an ordinary return that simply itemizes because itemizing wins.
+    #[test]
+    fn schedule_a_leaves_both_election_boxes_unchecked_when_no_election_was_made() {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.deduction_is_itemized = true;
+        ar.standard_deduction = dec!(14600);
+        ar.itemized_deduction = Some(dec!(20000)); // itemizing simply WINS — no §63(e) election
+        let mut parts = sched_a_parts_sales_tax();
+        parts.salt_is_sales_tax = false;
+        ar.schedule_a = Some(parts);
+
+        let a = schedule_a_lines(&ar).unwrap();
+        assert!(!a.line5a_is_sales_tax);
+        assert!(!a.line18_elects_smaller);
     }
 
     // ── Schedule SE printed chain (ARCH-P6.3a D5) ───────────────────────────────────────────────
@@ -1188,6 +1330,9 @@ mod tests {
     fn no_se_tax_files_no_schedule_se() {
         let ar = ar_with(None, Usd::ZERO, Usd::ZERO);
         let sch_c = ScheduleCLines {
+            line_a_business: String::new(),
+            line_b_naics: String::new(),
+            line_f_accrual: false,
             line1: Usd::ZERO,
             line3: Usd::ZERO,
             line5: Usd::ZERO,
@@ -1469,6 +1614,7 @@ mod tests {
         let salt_5e = salt_5d.min(salt_cap);
         let medical_allowed = (medical - floor).max(Usd::ZERO);
         ScheduleAParts {
+            salt_is_sales_tax: false,
             medical_expenses: medical,
             agi,
             medical_floor: floor,

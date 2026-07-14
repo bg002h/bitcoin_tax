@@ -42,6 +42,9 @@ da_no = { field = "topmostSubform[0].Page1[0].c1_5[1]", on = "2" }
 
 # ── Page 1: income → taxable income ────────────────────────────────────────────────────────────
 line1z = "topmostSubform[0].Page1[0].f1_41[0]"                              # wages (Σ W-2 box 1)   AMOUNT
+# L2a — the SUBLINE column at the same printed row as 2b (f1_42 sits at x≈252-323, y=234-246; f1_43 is
+# the AMOUNT cell on that row). Anchored by the identical 3a/3b pair one row below (f1_44 / f1_45).
+line2a = "topmostSubform[0].Page1[0].f1_42[0]"                              # tax-exempt interest   SUBLINE
 line2b = "topmostSubform[0].Page1[0].f1_43[0]"                             # taxable interest      AMOUNT
 line3a = "topmostSubform[0].Page1[0].f1_44[0]"                             # qualified dividends   SUBLINE ★
 line3b = "topmostSubform[0].Page1[0].f1_45[0]"                             # ordinary dividends    AMOUNT
@@ -111,6 +114,11 @@ address_city    = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_12[0]"
 address_state   = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_13[0]"
 address_zip     = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_14[0]"
 mfs_spouse_name = "topmostSubform[0].Page1[0].f1_18[0]"
+# The page-2 signature block: occupations and the taxpayer's IP PIN (a 6-character comb — the spouse's
+# IP PIN cell exists (f2_36) but ReturnInputs does not capture one, so it is left BLANK, never guessed).
+occupation_taxpayer = "topmostSubform[0].Page2[0].f2_33[0]"
+occupation_spouse   = "topmostSubform[0].Page2[0].f2_35[0]"
+ip_pin              = "topmostSubform[0].Page2[0].f2_34[0]"
 
 presidential_taxpayer      = { field = "topmostSubform[0].Page1[0].c1_1[0]",  on = "1" }
 presidential_spouse        = { field = "topmostSubform[0].Page1[0].c1_2[0]",  on = "1" }

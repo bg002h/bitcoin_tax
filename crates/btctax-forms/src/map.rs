@@ -237,6 +237,12 @@ pub struct Form1040HeaderCells {
     pub address_zip: String,
     /// "If you checked the MFS box, enter the name of your spouse" — written on MFS only.
     pub mfs_spouse_name: String,
+    /// The signature block's occupation cells (page 2).
+    pub occupation_taxpayer: String,
+    pub occupation_spouse: String,
+    /// The taxpayer's Identity Protection PIN cell (page 2, a 6-character comb). A paper return that
+    /// omits an ISSUED IP PIN is rejected or delayed (ARCH-P6.3a Q7 item 5).
+    pub ip_pin: String,
     /// The §6096 Presidential Election Campaign boxes.
     pub presidential_taxpayer: CheckChoice,
     pub presidential_spouse: CheckChoice,
@@ -308,6 +314,9 @@ pub struct Form1040Map {
     pub da_no: Option<CheckChoice>,
 
     // ── Full-return extension (P6). Absent from the 2017/2025 maps, hence optional. ───────────
+    /// L2a — tax-exempt interest. SUBLINE column. Full-return only (absent from the 2017/2025 maps).
+    #[serde(default)]
+    pub line2a: Option<MoneyCell>,
     /// L1z — wages. AMOUNT column.
     #[serde(default)]
     pub line1z: Option<MoneyCell>,
@@ -1107,6 +1116,11 @@ pub struct ScheduleAMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// L5a's §164(b)(5) sales-tax election checkbox — the election core already honours in the
+    /// arithmetic, which the filed form never showed (ARCH-P6.3a Q7 item 3).
+    pub check_5a_sales_tax: CheckChoice,
+    /// L18's §63(e) "itemize even though less than the standard deduction" checkbox (Q7 item 4).
+    pub check_18_elects_smaller: CheckChoice,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -1276,6 +1290,14 @@ pub struct ScheduleCMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// Line A — "Principal business or profession".
+    pub line_a_business: String,
+    /// Line B — the NAICS code (a 6-character comb).
+    pub line_b_naics: String,
+    /// Line F — the accounting-method checkboxes. `(1) Cash` and `(2) Accrual`; `(3) Other` is never
+    /// checked (v1 captures only the two).
+    pub method_cash: CheckChoice,
+    pub method_accrual: CheckChoice,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -1359,6 +1381,9 @@ pub struct ScheduleBMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// L7b — the foreign-country list. It IS a captured input; the claim that v1 had none was false
+    /// (ARCH-P6.3a Q7 item 7).
+    pub line7b_countries: String,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,

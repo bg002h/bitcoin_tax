@@ -103,6 +103,42 @@ impl fmt::Display for SsnError {
     }
 }
 
+/// An IRS **Identity Protection PIN** — six digits, and PII.
+///
+/// A paper return that omits an issued IP PIN is rejected or delayed, so this is the one header omission
+/// with a concrete processing consequence (ARCH-P6.3a Q7 item 5). `Debug` is **masked**, exactly like
+/// [`Ssn`]: a PIN in a log or a panic message is an identity-theft credential in a log.
+#[derive(Clone, PartialEq, Eq)]
+pub struct IpPin(String);
+
+impl IpPin {
+    /// Six digits, however typed (spaces stripped). Anything else is not an IP PIN.
+    pub fn canonical(raw: &str) -> Result<Self, SsnError> {
+        let digits: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+        if digits.is_empty() {
+            return Err(SsnError::Missing);
+        }
+        if let Some(c) = digits.chars().find(|c| !c.is_ascii_digit()) {
+            return Err(SsnError::NotDigits(c));
+        }
+        if digits.len() != 6 {
+            return Err(SsnError::WrongLength(digits.len()));
+        }
+        Ok(Self(digits))
+    }
+
+    /// The six digits — the form's cell is a 6-character comb.
+    pub fn digits(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for IpPin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "IpPin(******)")
+    }
+}
+
 /// A person as they appear ON the filed return.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FiledPerson {
@@ -216,6 +252,10 @@ pub struct ReturnHeader {
     /// is a return that does not say what the filer said.
     pub presidential_fund_taxpayer: bool,
     pub presidential_fund_spouse: bool,
+    /// The taxpayer's IRS-issued Identity Protection PIN, when they have one. A paper return that omits
+    /// an issued IP PIN is REJECTED or delayed (ARCH-P6.3a Q7 item 5). The spouse's IP PIN is not
+    /// captured by `ReturnInputs` at all — a capture gap, recorded in LIMITATIONS rather than fabricated.
+    pub ip_pin: Option<IpPin>,
     pub dependents: Vec<DependentRow>,
     /// Schedule C's header is "Name of **proprietor**", not the return's name line: a spouse-owned
     /// business files under the SPOUSE's name and SSN even on a joint return. `None` when there is no
@@ -279,6 +319,12 @@ impl ReturnHeader {
                 && ri.mfs_spouse_itemizes == Some(true),
             presidential_fund_taxpayer: ri.header.presidential_fund_taxpayer,
             presidential_fund_spouse: ri.header.presidential_fund_spouse,
+            ip_pin: ri
+                .header
+                .ip_pin
+                .as_deref()
+                .map(IpPin::canonical)
+                .transpose()?,
             dependents,
             proprietor,
         })

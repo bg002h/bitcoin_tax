@@ -42,6 +42,10 @@
 form = "f1040sb"
 year = 2024
 
+# ── L7b (P6.3a Q7) — the foreign-country list. It IS a captured input; the code comment claiming
+#    otherwise was false. Printed only when 7a is "Yes" — a country beside a "No" contradicts the answer.
+line7b_countries = "topmostSubform[0].Page1[0].f1_65[0]"
+
 # ── Root totals (must precede the row tables — see the TOML note above) ─────────────────────
 line2 = "topmostSubform[0].Page1[0].f1_31[0]"   # "Add the amounts on line 1"
 line4 = "topmostSubform[0].Page1[0].f1_33[0]"   # "Subtract line 3 from line 2" → 1040 line 2b

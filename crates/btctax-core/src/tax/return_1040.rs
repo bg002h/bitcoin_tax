@@ -218,6 +218,10 @@ pub struct Schedule1Parts {
 /// rounds each line half-up and re-adds the ROUNDED lines so the filed form cross-foots — SPEC §3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScheduleAParts {
+    /// §164(b)(5): the filer ELECTED sales taxes instead of income taxes on line 5a. Core already honours
+    /// this in the arithmetic; Schedule A's own 5a CHECKBOX must say so, or the filed form claims income
+    /// taxes it did not use (Q7 item 3).
+    pub salt_is_sales_tax: bool,
     /// L1 — medical and dental expenses (as entered).
     pub medical_expenses: Usd,
     /// L2 — AGI (the floor's base). **Clamped at 0**: a negative AGI would shrink the 7.5% floor below
@@ -291,6 +295,7 @@ pub fn schedule_a_parts(
     let mortgage_8a = a.mortgage_interest_1098;
 
     Some(ScheduleAParts {
+        salt_is_sales_tax: a.salt_use_sales_tax,
         medical_expenses: a.medical,
         agi,
         medical_floor,
@@ -875,6 +880,17 @@ pub struct AbsoluteReturn {
     pub printed_inputs: PrintedInputs,
 }
 
+/// Schedule C's non-money header (lines A, B and F). Strings, so `PrintedInputs` is not `Copy`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ScheduleCHeader {
+    /// Line A — principal business or profession.
+    pub business_description: String,
+    /// Line B — the NAICS code.
+    pub naics_code: String,
+    /// Line F — `true` = accrual, `false` = cash.
+    pub accrual: bool,
+}
+
 /// The Form 8959 / 8960 / 8995 inputs, captured at derivation.
 ///
 /// These are not new facts — they are the *same* values `assemble_absolute` fed to the COMPUTED
@@ -887,7 +903,7 @@ pub struct AbsoluteReturn {
 /// field here is a wrong number on a filed return. A defaulted `capital_loss_limit` of $0 would zero the
 /// §1211(b) capital-loss deduction; a defaulted `extension_payment` would re-bill a payment already made.
 /// Every field is spelled out at the one construction site (and in the fixtures).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrintedInputs {
     /// Form 8959 line 1 — Σ W-2 box 5 (household total Medicare wages).
     pub medicare_wages: Usd,
@@ -904,6 +920,12 @@ pub struct PrintedInputs {
     pub ti_before_qbi: Usd,
     /// Form 8995 line 12 — net capital gain (qualified dividends + §1(h) preferential net LTCG).
     pub qbi_net_capital_gain: Usd,
+    /// Schedule C's **header lines A / B / F** — captured expressly for those cells, and printed by no
+    /// one until now (ARCH-P6.3a Q7 item 6).
+    pub schedule_c_header: ScheduleCHeader,
+    /// 1040 **line 2a** — tax-exempt interest (Σ 1099-INT box 8 + 1099-DIV box 12). Changes no tax, but
+    /// the IRS document-matches 1099-INT box 8: a return that omits it misstates itself (Q7 item 2).
+    pub tax_exempt_interest: Usd,
     /// Schedule SE **line 8a** — the SE earner's OWN W-2 Social Security wages (box 3 + box 7 tips). The
     /// §1402(b)(1) cap is PER-INDIVIDUAL, so this is the owner's own wages, never the household total.
     pub se_w2_ss_wages: Usd,
@@ -1220,6 +1242,25 @@ pub fn assemble_absolute(
             reit_ptp_carryforward_in: ri.qbi.reit_ptp_carryforward_in,
             ti_before_qbi: agi - deduction,
             qbi_net_capital_gain: net_capital_gain,
+            schedule_c_header: ri
+                .schedule_c
+                .as_ref()
+                .map_or_else(ScheduleCHeader::default, |c| ScheduleCHeader {
+                    business_description: c.business_description.clone(),
+                    naics_code: c.naics_code.clone(),
+                    accrual: c.accounting_method
+                        == crate::tax::return_inputs::AccountingMethod::Accrual,
+                }),
+            tax_exempt_interest: ri
+                .int_1099
+                .iter()
+                .map(|i| i.box8_tax_exempt_interest)
+                .chain(
+                    ri.div_1099
+                        .iter()
+                        .map(|d| d.box12_exempt_interest_dividends),
+                )
+                .sum(),
             se_w2_ss_wages: w2_ss_wages,
             ss_wage_base: table.ss_wage_base,
             capital_loss_limit: loss_limit(status),
