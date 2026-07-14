@@ -310,23 +310,25 @@
       "inputs": {
         "filing_status": "Single",
         "self_employment_income": 60000,
-        "long_term_capital_gains": 40000
+        "long_term_capital_gains": 40000,
+        "qualified_dividends": 5000,
+        "ordinary_dividends": 5000
       },
       "expected_ots": {
-        "adjusted_gross_income": 95761.14,
-        "taxable_income": 72928.91,
+        "adjusted_gross_income": 100761.14,
+        "taxable_income": 77928.91,
         "qbi_deduction": 8232.23,
-        "income_tax_before_credits": 7604.59,
+        "income_tax_before_credits": 8354.59,
         "se_tax": 8477.73,
         "niit": 0.0,
         "additional_medicare_tax": 0.0,
-        "total_tax": 16082.32
+        "total_tax": 16832.32
       },
       "expected_taxcalc": {
-        "adjusted_gross_income": 95761.135,
-        "taxable_income": 72928.908,
+        "adjusted_gross_income": 100761.135,
+        "taxable_income": 77928.908,
         "qbi_deduction": 8232.226999999999,
-        "income_tax_before_credits": 7605.055159999998,
+        "income_tax_before_credits": 8355.055159999998,
         "se_tax": 8477.73,
         "niit": 0.0,
         "additional_medicare_tax": 0.0

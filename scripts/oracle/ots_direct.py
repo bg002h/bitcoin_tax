@@ -16,6 +16,21 @@ itself is correct in both cases** — its Schedule SE solver reads and honours `
 reads `L13`, and it even ships a Form 8995 solver. The wrapper simply never passed the values.
 So we drop the wrapper and drive the engine.
 
+★ A LIMIT on this oracle's independence — say it out loud (Fable P7 r2, Minor)
+--------------------------------------------------------------------------
+OTS's 1040 is driven from raw inputs and derives everything itself. Its **Form 8995** is not:
+this harness hand-computes two of its inputs — `L1_i_c` (the QBI base = Schedule C profit net of
+the §164(f) half-SE deduction) and `L12` (§1222(11) net capital gain, increased by qualified
+dividends) — because OTS's 8995 reads a 1040 *output* file that carries a taxable income, not
+those quantities. OTS still computes the whole 8995 chain and the income limitation from them.
+
+The consequence: on those two inputs OTS cannot independently catch an error — if btctax's notion
+of net capital gain were wrong, the same wrong number would be handed to OTS and it would agree.
+**PSL Tax-Calculator is the only fully independent witness there** (it derives line 12 from
+`p23250`/`p22250`/`e00650`). It agrees. But that is one witness, not two, and the two-oracle claim
+is thinner on the QBI path than everywhere else. Deriving `L12` from OTS's own Schedule D output
+would close it.
+
 ★ Licensing / clean-room posture (SPEC §9, recon 05)
 ----------------------------------------------------
 OTS is GPL-2.0, INCOMPATIBLE with our `MIT OR Unlicense`. It is used **observe-only**: we

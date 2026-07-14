@@ -35,11 +35,18 @@ use btctax_core::Usd;
 /// So two clusters suffice, and no cell gets a weaker check than its neighbours.
 const F8995_COL_MID: usize = 0;
 const F8995_COL_AMOUNT: usize = 1;
-/// Part I row 1i's three cells. They share a y, so they cannot join the ordinal-y descent group — the
-/// column band is their check, and it is deliberately TIGHT: `row1_qbi`'s x-center is **529.2**, which
-/// sits INSIDE the ordinary AMOUNT cluster [504, 576] (center 540). A loose band would happily accept a
-/// cell mis-mapped between the two. `row1_qbi` is additionally pinned as descent ordinal 0, which
-/// asserts the row really does sit ABOVE line 2.
+/// Part I row 1i's three cells.
+///
+/// The column bands are deliberately TIGHT: `row1_qbi`'s x-center is **529.2**, which sits INSIDE the
+/// ordinary AMOUNT cluster [504, 576] (center 540), so a loose band would happily accept a cell
+/// mis-mapped between the two.
+///
+/// Only ONE of the three can carry an ordinal-y descent ordinal — they share a y, and descent demands
+/// a STRICT decrease — so `row1_qbi` takes ordinal 0, which asserts the row really does sit above line
+/// 2. The other two are y-banded instead (`Y_ROW1`): the (a) and (b) columns are shared by all FIVE
+/// table rows (y = 564/540/516/492/468), so without a y check a map typo pointing `row1_business` at
+/// row 1ii would print the business name on a different row than its income, and pass geometry
+/// silently (Fable P7 r2, Minor).
 const F8995_COL_ROW1_BUSINESS: usize = 2;
 const F8995_COL_ROW1_TIN: usize = 3;
 const F8995_COL_ROW1_QBI: usize = 4;
@@ -74,6 +81,52 @@ fn assert_paren_magnitudes(lines: &Form8995Lines) -> Result<(), FormsError> {
     Ok(())
 }
 
+/// ★ **A row is a row.** The three Part I row-1i cells must occupy the same ROW of the table.
+///
+/// Only `row1_qbi` can carry a descent ordinal (the three share a row, and descent demands a STRICT
+/// y-decrease), and the (a) and (b) columns are shared by ALL FIVE table rows — the row bands are
+/// y = [552,576], [528,552], [504,528], [480,504], [456,480]. So without this, a map typo pointing
+/// `row1_business` at row **1ii**'s name cell would pass every geometric check and print the business's
+/// name on a different row from its income (Fable P7 r2, Minor).
+///
+/// Their y-CENTERS are not equal and must not be required to be: the (a) cell spans the full 24pt row
+/// height (center 564) while (b) and (c) are 12pt half-height cells sitting in its upper half (center
+/// 558). The invariant is CONTAINMENT — (b) and (c) must fall inside (a)'s y-extent, which *is* the
+/// row. Mis-map any one of the three to another row and the containment breaks.
+fn assert_row1_is_one_row(blank: &[pdf::Field], map: &Form8995Map) -> Result<(), FormsError> {
+    let field = |cell: &crate::map::MoneyCell| -> Result<&pdf::Field, FormsError> {
+        let fqn = match cell {
+            crate::map::MoneyCell::Single(f) => f,
+            crate::map::MoneyCell::Pair(mp) => &mp.dollars_field,
+        };
+        blank
+            .iter()
+            .find(|f| &f.fqn == fqn)
+            .ok_or_else(|| FormsError::MapFieldMissing(fqn.clone()))
+    };
+    // (a) spans the whole row: its rect IS the row band.
+    let a = field(&map.row1_business)?;
+    let [_, y0, _, y1] = a.rect.ok_or_else(|| {
+        FormsError::Geometry("Form 8995 row 1i(a) has no /Rect to band the row with".into())
+    })?;
+    let (lo, hi) = (y0.min(y1), y0.max(y1));
+
+    for (what, cell) in [("(b) TIN", &map.row1_tin), ("(c) QBI", &map.row1_qbi)] {
+        let f = field(cell)?;
+        let cy = f
+            .cy()
+            .ok_or_else(|| FormsError::MapFieldMissing(f.fqn.clone()))?;
+        if cy < lo || cy > hi {
+            return Err(FormsError::Geometry(format!(
+                "Form 8995 Part I row 1i is not one ROW: cell {what} sits at y {cy:.1}, outside row 1i's \
+                 band [{lo:.1}, {hi:.1}] (taken from the full-height (a) cell). A row whose name and \
+                 income are on different lines names the WRONG business."
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Fill Form 8995 from the core-derived line chain. The serialized bytes are read back through the
 /// geometric verifier (a mis-mapped cell FAILS CLOSED).
 pub fn fill_form_8995_with_map(
@@ -86,10 +139,37 @@ pub fn fill_form_8995_with_map(
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<FlatPlacement> = Vec::new();
 
-    // ── Part I row 1i — the trade or business, when there is one. ───────────────────────────────────
-    // Written BEFORE the lines so the descent group reads top-down: row 1i(c) is ordinal 0 and line 2
-    // must sit strictly below it.
-    if !lines.business_name.is_empty() {
+    // ── Part I row 1i — the trade or business. ─────────────────────────────────────────────────────
+    //
+    // ★ Keyed off the QBI (line 2), NOT off the business NAME (Fable P7 r2 I2). Gating on the name made
+    // the whole defect conditional on an unvalidated free-text field: `business_description` is
+    // `#[serde(default)]`, so an import that omitted it produced a blank name — and therefore a blank
+    // row — under a NON-ZERO line 2. That is precisely the defect r1 I1 raised, re-created. Core now
+    // REFUSES an unnamed Schedule C (`ScheduleCNoBusinessDescription`), and this fails closed if one
+    // ever reaches here anyway: a form claiming a deduction for a business it cannot name must not be
+    // produced at all.
+    if lines.line2 > Usd::ZERO {
+        if lines.business_name.trim().is_empty() {
+            return Err(FormsError::Geometry(
+                "Form 8995 line 2 is non-zero but the trade or business has no name: line 2 is \"Total \
+                 qualified business income or (loss). Combine lines 1i through 1v, column (c)\", so this \
+                 would file a total over an EMPTY column, claiming a §199A deduction for a business the \
+                 return never names."
+                    .into(),
+            ));
+        }
+        // (b) the business's TIN. ★ The PROPRIETOR's, not the return's primary taxpayer's (Fable P7 r2
+        // I1). A spouse-owned business files under the SPOUSE's name and SSN even on a joint return —
+        // Schedule C and Schedule SE already do this via `header.proprietor`, and an 8995 reporting a
+        // business TIN that matches no Schedule C in the same packet is exactly the mismatch IRS
+        // matching flags. A sole proprietor's TIN is their own SSN; btctax has no EIN input.
+        let proprietor = header.proprietor.as_ref().ok_or_else(|| {
+            FormsError::Geometry(
+                "Form 8995 has trade-or-business QBI but the return names no proprietor to file the \
+                 business under"
+                    .into(),
+            )
+        })?;
         push_literal(
             &mut writes,
             &mut placements,
@@ -97,18 +177,16 @@ pub fn fill_form_8995_with_map(
             &lines.business_name,
             F8995_COL_ROW1_BUSINESS,
         );
-        // (b) the TIN. A sole proprietor's is their own SSN; btctax has no EIN input. The cell's
-        // /MaxLen is 11, i.e. the HYPHENATED form — `ssn_for_cell` reads the blank PDF's own /MaxLen
-        // rather than guessing, exactly as the identity header does.
+        // The cell's /MaxLen is 11 ⇒ the HYPHENATED SSN.
         push_literal(
             &mut writes,
             &mut placements,
             &map.row1_tin,
-            &header.taxpayer.ssn.hyphenated(),
+            &proprietor.ssn.hyphenated(),
             F8995_COL_ROW1_TIN,
         );
-        // (c) this business's QBI. With one business the column total IS the row, so line 2 is written
-        // from the same figure — they cannot disagree.
+        // (c) this business's QBI. With one business the column total IS the row, so it is written from
+        // the same value as line 2 — they cannot disagree.
         push_money(
             &mut writes,
             &mut placements,
@@ -153,6 +231,7 @@ pub fn fill_form_8995_with_map(
     // Identity header (P6.2): `push_identity` reads the SSN cell's own /MaxLen to decide
     // hyphenated-vs-digits, so it needs the blank PDF's fields.
     let blank_fields = pdf::collect_fields(&doc)?;
+    assert_row1_is_one_row(&blank_fields, map)?;
     push_identity(
         &mut writes,
         &mut placements,

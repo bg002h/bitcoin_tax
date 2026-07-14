@@ -85,16 +85,18 @@ fn every_golden_household_prints_the_oracles_figures_onto_the_1040() {
             let on_paper = got.get(cell).map(String::as_str).unwrap_or("<BLANK>");
             let mut expected = printed(oracle);
 
-            // ★ The ONE declared cross-footing exception (mirrors `golden_returns.rs`). Under the
-            // round-all-amounts election the filed line 24 adds the PRINTED lines — 7,605 + 8,478 =
-            // 16,083 — while OTS keeps cents and rounds the total at the end (16,082.32 → 16,082).
-            // Neither is wrong about the tax; the IRS instructions put the rounding at the LINE, so
-            // 16,083 is what the filer writes. Named explicitly rather than absorbed into a ±1
-            // tolerance, which would quietly weaken every other cell on every other household.
+            // ★ The ONE declared cross-footing exception (mirrors `golden_returns.rs`, where the full
+            // reasoning lives). btctax DEPARTS from the 1040 instructions here, knowingly: they say
+            // "include cents when adding the amounts and round off only the total" (2024, p. 23), which
+            // gives OTS's 16,832. SPEC §3.1 elects round-at-each-line and cross-foots, giving 16,833 —
+            // the number that makes the filed form's own printed lines add up. Named explicitly rather
+            // than absorbed into a ±1 tolerance, which would quietly weaken every other cell on every
+            // other household. Whether the election is right is a SPEC question, filed as
+            // `spec-3.1-crossfoot-vs-round-the-total`.
             if h.name == "single_miner_qbi_limited_by_net_capital_gain" && cell == "line24" {
-                assert_eq!(expected, "16082", "the cross-footing exception is pinned to OTS's figure; \
+                assert_eq!(expected, "16832", "the cross-footing exception is pinned to OTS's figure; \
                     if OTS moved, re-derive rather than re-pin");
-                expected = "16083".to_string();
+                expected = "16833".to_string();
             }
 
             if on_paper != expected {
@@ -303,7 +305,8 @@ fn each_golden_packet_carries_exactly_the_forms_that_return_requires() {
         // only household that carries both, and it is why Form 8995 line 12 is oracle-checked at all.
         (
             "single_miner_qbi_limited_by_net_capital_gain",
-            &["f1040", "f1040s1", "f1040s2", "f1040sc", "schedule_d", "f8949", "schedule_se", "f8995"][..],
+            // $5,000 of dividends clears the $1,500 Schedule B trigger too.
+            &["f1040", "f1040s1", "f1040s2", "f1040sb", "f1040sc", "schedule_d", "f8949", "schedule_se", "f8995"][..],
         ),
         // Same, but $300k MFJ clears the $250k Additional-Medicare threshold ⇒ 8959.
         (

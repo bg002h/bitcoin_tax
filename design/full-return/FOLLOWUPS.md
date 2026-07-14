@@ -304,6 +304,35 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
 
 ## Open — owned by P7 (golden returns)
 
+- **★ spec-3.1-crossfoot-vs-round-the-total → SPEC AMENDMENT (needs a user decision).**
+  **btctax knowingly departs from the 1040 instructions on how totals are rounded, and the departure can
+  understate tax by $1.** Surfaced by Fable P7 r2 I3, which caught the first draft of the divergence
+  entry citing the instruction *backwards*.
+
+  **What the instructions say** — Form 1040 instructions, *Rounding Off to Whole Dollars* (2024, p. 23),
+  verbatim: *"If you have to add two or more amounts to figure the amount to enter on a line, include
+  cents when adding the amounts and round off only the total."* Line 24 (= 22 + 23) is such a line. So
+  the instruction directs `round(Σexact)`.
+
+  **What btctax does** — SPEC §3.1 elects round-at-each-line and CROSS-FOOTS: printed totals sum the
+  already-rounded lines, `Σround`. On `single_miner_qbi_limited_by_net_capital_gain` that is 8,355 +
+  8,478 = **16,833**, where the instruction gives 8,354.59 + 8,477.73 = 16,832.32 → **16,832**. OTS
+  follows the instruction; btctax does not.
+
+  **Why the election exists, and it is not nothing:** it is what makes the filed form's own printed
+  lines ADD UP. Under `round(Σexact)` a reader adding the printed lines 22 and 23 gets a different
+  number from the printed line 24 — the form does not cross-foot on its face.
+
+  **The exposure:** the error is bounded by ~$0.50 per addend but can fall EITHER WAY. Here it
+  overstates the tax by $1 (the filer overpays — btctax's usual conservative direction). A different
+  cents pattern understates it by $1, which is the direction btctax's whole posture refuses. Small, but
+  real, and it is not currently disclosed as a departure.
+
+  **Decision needed (SPEC, not P7):** keep the cross-footing election and disclose it in LIMITATIONS.md
+  as a deliberate departure, or switch printed totals to `round(Σexact)` and accept forms whose printed
+  lines do not visibly add up. Also check whether the same instruction bites on Schedule D vs the 8949
+  row totals, and on Schedule A / Schedules 1–3, where §3.1's rule applies identically.
+
 - **[✅ DONE — the answer is NO] p7-ats-scenario-2 — the IRS scenario is NOT a golden return.**
   The plan's P7 task said "ingest IRS ATS Scenario 2 with a partial-line diff". It cannot be done, and
   recon 05's premise was wrong. We fetched the PDF, rendered it and LOOKED at the pages:

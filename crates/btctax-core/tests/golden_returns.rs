@@ -142,21 +142,30 @@ const DECLARED_DIVERGENCES: &[Divergence] = &[
         outlier_alt: None,
         why: "Tax Table bin midpoint vs the exact rate schedule — see above.",
     },
-    // ── CROSS-FOOTING: Σround ≠ roundΣ. A different class from the Tax Table, and the only one here. ──
+    // ── CROSS-FOOTING: Σround ≠ roundΣ. A DELIBERATE DEPARTURE from the instructions, not a reading
+    //    of them. Read the `why` — the first draft of this entry cited the instruction backwards, and
+    //    the reviewer caught it. A divergence whose citation does not check out IS the escape hatch.
     Divergence {
         household: "single_miner_qbi_limited_by_net_capital_gain",
         line: "TOTAL TAX (L24)",
-        btctax: dec!(16083),
-        agrees_with: "the 1040's own instructions (taxcalc reports no comparable TOTAL)",
-        outlier: dec!(16082),
+        btctax: dec!(16833),
+        agrees_with: "neither — a declared departure (taxcalc reports no comparable TOTAL)",
+        outlier: dec!(16832),
         outlier_alt: None,
-        why: "The round-all-amounts election (SPEC §3.1) is not a rounding convenience — it changes the \
-              FILED number. Line 24 says \"add lines 22 and 23\", and those lines PRINT 7,605 and 8,478, \
-              so line 24 is 16,083 and that is what the filer writes. OTS keeps cents internally and \
-              rounds the total at the end: 7,604.59 + 8,477.73 = 16,082.32 → 16,082. Neither is wrong \
-              about the TAX; they disagree about where rounding happens, and the IRS instructions put it \
-              at the line. Every component line agrees exactly — including the §199A deduction (8,232) \
-              that this household exists to test.",
+        why: "★ btctax DEPARTS from the 1040 instructions here, knowingly, and OTS is the one following \
+              them. Form 1040 instructions, 'Rounding Off to Whole Dollars' (2024, p. 23), verbatim: \
+              'If you have to add two or more amounts to figure the amount to enter on a line, include \
+              cents when adding the amounts and round off only the total.' Line 24 IS such a line \
+              (22 + 23), so the instruction gives 8,354.59 + 8,477.73 = 16,832.32 → 16,832. That is \
+              OTS's figure. SPEC §3.1 instead elects round-at-each-line and CROSS-FOOTS the printed \
+              totals, so line 24 adds the printed 8,355 and 8,478 to 16,833 — which is what makes the \
+              filed form's own lines add up when a reader adds them. \
+              The cost is bounded by ~$0.50 per addend and it can fall EITHER WAY: here it overstates \
+              the tax by $1 (the filer overpays), but a different cents pattern would understate it by \
+              $1. That is a real, if tiny, exposure in the direction btctax otherwise refuses, and \
+              whether §3.1's election is right is a SPEC question, not a P7 one — filed as \
+              `spec-3.1-crossfoot-vs-round-the-total`. Every COMPONENT line agrees exactly, including \
+              the §199A deduction (8,232) this household exists to test.",
     },
     Divergence {
         household: "single_crypto_business_se",

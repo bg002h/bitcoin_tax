@@ -222,3 +222,131 @@ fn sch_b(part1: Vec<ScheduleBRow>, part2: Vec<ScheduleBRow>, fa: bool, ft: bool)
         foreign_trust_8: ft,
     }
 }
+
+// ───────────────── Fable P7 r2 I1 + I2 — Form 8995's Part I row 1i ─────────────────
+
+/// ★ **The business TIN is the PROPRIETOR's, not the primary taxpayer's.**
+///
+/// A spouse-owned business files under the SPOUSE's name and SSN even on a joint return — Schedule C
+/// and Schedule SE already do this via `ReturnHeader::proprietor`. Form 8995 hardcoded
+/// `header.taxpayer`, so an MFJ return whose spouse ran the mining business filed a Schedule C under
+/// the spouse's SSN and an 8995 claiming the §199A deduction for a business whose TIN it reported as
+/// the *taxpayer's* — a business TIN matching no Schedule C in the same packet.
+#[test]
+fn form_8995_row_1i_carries_the_proprietors_tin_not_the_taxpayers() {
+    use btctax_core::tax::return_inputs::{Owner, Person, ScheduleCInputs};
+    use btctax_core::tax::packet::ReturnHeader;
+
+    let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
+        filing_status: FilingStatus::Mfj,
+        ..Default::default()
+    };
+    ri.header.taxpayer = Person {
+        first_name: "Primary".into(),
+        last_name: "Filer".into(),
+        ssn: "111111111".into(),
+        ..Default::default()
+    };
+    ri.header.spouse = Some(Person {
+        first_name: "Spouse".into(),
+        last_name: "Filer".into(),
+        ssn: "222222222".into(),
+        ..Default::default()
+    });
+    // ★ The SPOUSE runs the business.
+    ri.schedule_c = Some(ScheduleCInputs {
+        owner: Owner::Spouse,
+        business_description: "Bitcoin mining".into(),
+        ..Default::default()
+    });
+    let header = ReturnHeader::build(&ri, 2024).unwrap();
+
+    let lines = btctax_core::tax::qbi::form_8995_lines(
+        "Bitcoin mining",
+        dec!(55761), // business QBI
+        Usd::ZERO,
+        Usd::ZERO,
+        dec!(81161), // TI before QBI
+        Usd::ZERO,
+    )
+    .expect("there is QBI");
+    let pdf = btctax_forms::fill_form_8995(&lines, &header, 2024).unwrap();
+    let got = extract_lines(&pdf, btctax_forms::testonly::F8995_MAP_2024).unwrap();
+
+    assert_eq!(
+        got.get("row1_tin").map(String::as_str),
+        Some("222-22-2222"),
+        "row 1i(b) is the BUSINESS's TIN — the spouse owns it, so it is the SPOUSE's SSN. Printing the \
+         primary taxpayer's would report a TIN that matches no Schedule C in the packet."
+    );
+    assert_eq!(
+        got.get("row1_business").map(String::as_str),
+        Some("Bitcoin mining")
+    );
+}
+
+/// ★ **A non-zero line 2 over an unnamed business FAILS CLOSED.**
+///
+/// The r1 fix keyed the row off the business NAME, which made the whole defect conditional on
+/// `business_description` — a `#[serde(default)]` free-text field that nothing validated. An import
+/// omitting it produced a blank row under a non-zero line 2: the very defect r1 raised, re-created.
+/// Core now REFUSES an unnamed Schedule C; this is the second line of defence, because a form claiming
+/// a deduction for a business it cannot name must never be produced at all.
+#[test]
+fn form_8995_refuses_to_file_a_qbi_total_for_an_unnamed_business() {
+    let lines = btctax_core::tax::qbi::form_8995_lines(
+        "", // no name — as an import omitting `business_description` would give
+        dec!(55761),
+        Usd::ZERO,
+        Usd::ZERO,
+        dec!(81161),
+        Usd::ZERO,
+    )
+    .expect("there is QBI");
+    assert!(
+        lines.line2 > Usd::ZERO,
+        "the fixture must have a non-zero line 2, else this test is vacuous"
+    );
+
+    let err = btctax_forms::fill_form_8995(&lines, &kitchen_sink_header(), 2024)
+        .expect_err("a QBI total over an unnamed business must not produce a PDF");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("EMPTY column") || msg.contains("never names"),
+        "the refusal must say WHY: got {msg}"
+    );
+}
+
+/// A REIT-only Form 8995 leaves Part I BLANK. The other half of the contract.
+///
+/// r2 caught the golden-packet test that *claimed* to pin this asserting only that the whole form was
+/// absent, and pointing at "unit KATs" that did not exist. Inventing a trade or business for a filer
+/// whose only QBI is REIT dividends would name a business they do not have.
+#[test]
+fn form_8995_with_only_reit_dividends_leaves_part_i_blank() {
+    let lines = btctax_core::tax::qbi::form_8995_lines(
+        "",         // no trade or business…
+        Usd::ZERO,  // …and no business QBI
+        dec!(10000), // just REIT dividends
+        Usd::ZERO,
+        dec!(100000),
+        dec!(20000),
+    )
+    .expect("REIT dividends are QBI");
+
+    assert_eq!(lines.line2, Usd::ZERO, "no business ⇒ line 2 is zero");
+    let pdf = btctax_forms::fill_form_8995(&lines, &kitchen_sink_header(), 2024).unwrap();
+    let got = extract_lines(&pdf, btctax_forms::testonly::F8995_MAP_2024).unwrap();
+
+    for cell in ["row1_business", "row1_tin", "row1_qbi"] {
+        assert!(
+            !got.contains_key(cell),
+            "{cell} must be BLANK — this filer has no trade or business, and the form must not name one"
+        );
+    }
+    assert_eq!(
+        got.get("line6").map(String::as_str),
+        Some("10000"),
+        "the REIT leg still files"
+    );
+}

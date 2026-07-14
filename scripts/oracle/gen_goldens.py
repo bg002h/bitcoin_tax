@@ -184,6 +184,11 @@ HOUSEHOLDS = [
         "filing_status": "Single",
         "self_employment_income": 60_000,
         "long_term_capital_gains": 40_000,
+        # Form 8995 line 12 is "net capital gain" INCREASED BY qualified dividends. Without these, the
+        # qualified-dividend term of that line is zero on every household that has a Form 8995 at all —
+        # drop it from the code and nothing goes red. $5,000 makes it load-bearing.
+        "qualified_dividends": 5_000,
+        "ordinary_dividends": 5_000,
     },
     {
         "name": "mfj_se_over_the_addl_medicare_threshold",

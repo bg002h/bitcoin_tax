@@ -109,6 +109,12 @@ pub enum RefuseReason {
     BusinessIncomeWithoutScheduleC,
     /// Schedule C net profit < 0 (a loss): §465 at-risk + a negative Sch 1 L3 is unsubstantiated in v1 (I2).
     ScheduleCLoss,
+    /// A Schedule C with no `business_description`. **Fable P7 r2 I2.** Schedule C line A ("Principal
+    /// business or profession") and Form 8995 row 1i(a) ("Trade, business, or aggregation name") both
+    /// demand it, and the field is `#[serde(default)]` so an import that omits it yields `""`. Left
+    /// unrefused, the filer files a Schedule C with a blank line A and a Form 8995 whose non-zero line 2
+    /// totals an EMPTY column (c) — a deduction claimed for a business the return never names.
+    ScheduleCNoBusinessDescription,
     /// A claimable-as-dependent filer with unearned income over the §1(g) kiddie-tax threshold → Form 8615
     /// (the child's-rate `qdcgt_line16` would understate; the parent's rate is required — C1/F2).
     KiddieTax,
@@ -581,6 +587,21 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
             return refuse(
                 RefuseReason::SpouseOwnerWithoutJointReturn,
                 "a spouse-owned W-2/Schedule C is only valid on a joint (MFJ) return — check the `owner` tag or the filing status",
+            );
+        }
+    }
+
+    // ★ Fable P7 r2 I2 — a business the return does not NAME cannot be filed. Schedule C line A and
+    // Form 8995 row 1i(a) both require it, and `business_description` is `#[serde(default)]`, so an
+    // import that simply omits the key produces "". The forms would then be facially incomplete: a
+    // Schedule C with a blank line A, and a Form 8995 claiming a §199A deduction over an empty column.
+    if let Some(c) = &ri.schedule_c {
+        if c.business_description.trim().is_empty() {
+            return refuse(
+                RefuseReason::ScheduleCNoBusinessDescription,
+                "the Schedule C has no `business_description` — Schedule C line A and Form 8995 row 1i(a) \
+                 both require the name of the trade or business the return is filing (and claiming a \
+                 §199A deduction) for",
             );
         }
     }
