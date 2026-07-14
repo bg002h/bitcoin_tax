@@ -545,11 +545,13 @@ fn a_full_return_without_an_ssn_refuses_and_writes_no_bytes() {
 /// so the filename set is unchanged either way — it passed with the fix reverted. Fable caught it, and
 /// it is the same false-safety-claim class the finding itself was about.
 ///
-/// This version hashes every packet file's BYTES before the second pipeline runs and asserts they are
-/// untouched afterwards. Revert the sequence-prefix and `f8949.pdf` / `schedule_d.pdf` /
-/// `schedule_se.pdf` get overwritten by the slice's cents versions — and this test fails, which is the
-/// whole point: it was the explicit condition on deleting the P5-C1 refusal, because a cents Schedule SE
-/// beside a whole-dollar 1040 is the chimera return the dispatch mitigation exists to prevent.
+/// This version snapshots every packet file's BYTES before the second pipeline runs and asserts they are
+/// untouched afterwards. This fixture's packet contains **Form 8949 and Schedule D** (an Acquire+Dispose
+/// ledger, so no SE income and no Schedule SE) — and those are exactly the names the slice also writes.
+/// Revert the sequence-prefix and the slice's CENTS `f8949.pdf` / `schedule_d.pdf` overwrite the packet's
+/// whole-dollar ones, and this test fails — which is the whole point. It was the explicit condition on
+/// deleting the P5-C1 refusal: a cents form inside a whole-dollar return is the chimera the dispatch
+/// mitigation exists to prevent. (Schedule SE collides too, on a ledger that has SE income.)
 #[test]
 fn the_two_pipelines_cannot_overwrite_each_others_files() {
     use btctax_cli::{return_inputs, Session};
@@ -558,7 +560,7 @@ fn the_two_pipelines_cannot_overwrite_each_others_files() {
     use std::collections::BTreeMap;
 
     // ★ The ledger's crypto activity must be in 2024, so the PACKET actually contains the forms that
-    // collide (Schedule D, 8949, Schedule SE). With a crypto-less 2024 the packet is a lone 1040 and the
+    // collide (here: Schedule D + Form 8949). With a crypto-less 2024 the packet is a lone 1040 and the
     // test cannot fail even with the fix reverted — which is precisely how the r1 version was vacuous.
     let (_dir, vault) = make_vault(&real_events_2024());
     let out = tempfile::tempdir().unwrap();

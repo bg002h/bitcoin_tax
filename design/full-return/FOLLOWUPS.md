@@ -348,6 +348,13 @@ Full text: `reviews/IMPL-P6-fable-review-r1.md` and `reviews/IMPL-P6-fable-revie
 - **p6-r1-n4-zero-idiom → P6.7.** 1040 line 7 prints "0" where the form's idiom is "-0-".
 - **p6-r1-n5-foreign-address-row → P6.7.** The 1040's foreign-address row (f1_15–f1_17) is unmapped and
   undocumented.
+- **[✅ DONE — not deferred] p6-r3-nm7 + the r3 nit.** The QDCGT KAT now runs END TO END through
+  `form_1040_lines` on a bin-straddling fixture (printed Sch D 5,003 vs exact 5,000, printed L15 = 60,000 ⇒
+  the worksheet's ordinary remainder is 54,997 vs 55,000 — different $50 bins), asserting the filed L16 IS
+  the worksheet on PRINTED operands and is NOT the worksheet on the exact ones. Fault-injected the
+  pass-through to watch it fail before claiming it. The disjointness KAT's comment no longer overstates its
+  fixture's collision census (Schedule D + 8949; no Schedule SE on that ledger).
+
 - **p6-r1-obs-partial-packet-on-io-error → P6.7 (observation).** All-or-nothing holds against filler refusals
   (every form fills before any byte is written), but an I/O error mid-write-loop can still leave a partial
   packet on disk. LIMITATIONS' "you never find a half-packet" is scoped to fill failures. Write to a temp dir
@@ -355,6 +362,10 @@ Full text: `reviews/IMPL-P6-fable-review-r1.md` and `reviews/IMPL-P6-fable-revie
 
 
 ## Open — owned by P6 (the PDF fillers)
+
+- **[✅ CLOSED in P6.5] p5-c1-crypto-slice-export-refusal.** `CliError::CryptoSliceExportForFullReturnYear`
+  is DELETED and replaced by the dispatch (`export_irs_pdf` → full packet when the year has `ReturnInputs`,
+  else the crypto slice), pinned in BOTH directions plus a byte-level no-overwrite KAT. Original entry:
 
 - **p5-c1-crypto-slice-export-refusal → P6.** `export-irs-pdf` now REFUSES for a year with full-return inputs
   (`CliError::CryptoSliceExportForFullReturnYear`), because its Schedule D fills only the crypto totals (no
@@ -371,10 +382,21 @@ Full text: `reviews/IMPL-P6-fable-review-r1.md` and `reviews/IMPL-P6-fable-revie
   today; LIMITATIONS.md now says so in present tense. SPEC §9 wants an **always-on DRAFT gate for full-return
   PDFs**. It lands with the P6 fillers (there is no full-return PDF to stamp before then). Owning phase: **P6**.
 
+- **[✅ LARGELY CLOSED in P6.3b; residual → P6.7] p5-m1-report-lacks-interior-schedule-lines.** Every
+  1040-level figure the report prints is now the PRINTED figure, and the packet itself is filled — so the
+  original need ("transcribe by hand from the report") is gone: the filer gets the FORMS. What is NOT printed
+  is the interior per-line detail of each schedule (a form-by-form transcription aid), which now has no
+  consumer. **Residual scope → P6.7: decide whether to print the interior lines at all, or close this as
+  obsoleted by the packet.** Original entry:
+
 - **p5-m1-report-lacks-interior-schedule-lines → P6.** The report prints the 1040-level summary, not the
   interior per-line figures of Schedules 1/2/3/A/B/C and Forms 8959/8960/8995, so the "transcribe by hand"
   instruction is not fully actionable from the report alone. Once P6's `*_lines` printed chains exist (see
   `p6-printed-line-chain` below) the report can print them. Owning phase: **P6**.
+
+- **[✅ CLOSED in P6] p6-printed-line-chain.** Every form in the packet now has its core printed chain, and
+  the chains COMPOSE on the printed lines (SPEC §3.1's citation-composition rule, now normative with its
+  closed list). Original entry:
 
 - **p6-printed-line-chain (architectural, surfaced building Form 8959).** SPEC §3.1's round-all-amounts
   election means every printed form needs a **printed line chain**: each line `round_dollar`ed AT THE LINE,
@@ -384,11 +406,19 @@ Full text: `reviews/IMPL-P6-fable-review-r1.md` and `reviews/IMPL-P6-fable-revie
   transcribes it (`other_taxes::form_8959_lines` is the pattern). Every remaining P6 form (Sch 1/2/3/A/B/C,
   8960, 8995, the full 1040, Sch D L17–22) needs its own. Owning phase: **P6**.
 
+- **[✅ CLOSED in P6.3b] p5-report-vs-pdf-may-differ-by-rounding.** Resolved BY CONSTRUCTION, per the
+  architect's Q3 ruling: the report renders the PRINTED figures, so there is no user-visible divergence left
+  to disclose — the terminal and the filed form carry the same characters (KAT reads the figure back out of
+  the PDF). LIMITATIONS explains the whole-dollar election. Original entry:
+
 - **p5-report-vs-pdf-may-differ-by-rounding → P6.** A direct consequence of the above: the exact-cents report
   and the whole-dollar cross-footing PDF can differ by a few dollars. That is what the round-all-amounts
   election means, and the PDF is the filed document. P6 must decide how the report surfaces this (print the
   printed-line figures alongside the exact ones, or state the difference) and LIMITATIONS.md must say it.
   Owning phase: **P6**.
+
+- **[✅ CLOSED in P6.3] p5-n5-advisory-line-wrapping.** `wrap_bulleted` wraps advisories at 92 columns with a
+  hanging indent (KAT `advisories_wrap_to_the_house_width_with_a_hanging_indent`). Original entry:
 
 - **p5-n5-advisory-line-wrapping → P6 (render).** `render_advisories` (`crates/btctax-cli/src/render.rs`)
   emits each advisory as ONE unwrapped 300–400-char line; the house style wraps everywhere else. Nit — folds

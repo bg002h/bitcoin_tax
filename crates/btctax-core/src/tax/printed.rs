@@ -1643,22 +1643,24 @@ mod tests {
         );
     }
 
-    /// ★ **r2 NEW-I1.** The QDCGT worksheet's line-3 operand is the figure a human reads off the FILED
-    /// Schedule D — `min(printed L15, printed L16)`, ≥ 0 — not a re-rounding of the exact preferential
-    /// gain. The printed Schedule D lines are sums of printed operands and drift from the exact figure
-    /// (that is what the 302≠301 8949 KAT is about); a $1 drift here shifts the worksheet's ordinary
-    /// remainder by $1, which lands in a different $50 Tax-Table bin and moves the filed L16 by a whole
-    /// bin step.
+    /// ★ **r2 NEW-I1, pinned END TO END (r3 NM7).** The QDCGT worksheet's line-3 operand is the figure a
+    /// human reads off the FILED Schedule D — `min(printed L15, printed L16)`, ≥ 0 — not a re-rounding of
+    /// the exact preferential gain. The printed Schedule D lines are sums of printed operands (their 8949
+    /// column totals are `Σround`, not `roundΣ` — that is what the 302≠301 KAT is about), so they drift.
+    ///
+    /// This goes THROUGH `form_1040_lines`, not just the income block, because the r2 fold's first KAT
+    /// pinned only the operand and a revert of the pass-through kept the suite green. The fixture is
+    /// bin-straddling: printed Sch D = 5,003 vs exact 5,000, with printed L15 = 60,000, so the worksheet's
+    /// ordinary remainder is 54,997 (bin [54,950–55,000)) on the printed operand and 55,000 (the NEXT bin)
+    /// on the exact one — the $50-tread step function moves the filed L16 by a whole bin.
     #[test]
     fn form_1040_line16_takes_the_qdcgt_operand_off_the_printed_schedule_d() {
         let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
         ar.wages = dec!(60000);
-        ar.agi = dec!(65000);
-        ar.deduction = dec!(5000);
-        ar.taxable_income = dec!(60000);
+        ar.deduction = dec!(5003);
         ar.net_ltcg = dec!(5000); // the EXACT preferential gain…
 
-        // …but the PRINTED Schedule D says 5,003 (its lines are sums of printed 8949 rows).
+        // …but the PRINTED Schedule D says 5,003 (its lines sum the printed 8949 rows).
         let mut sd = schedule_d_lines(&ar, None);
         sd.line15 = dec!(5003);
         sd.line16 = dec!(5003);
@@ -1674,6 +1676,49 @@ mod tests {
             income.qdcgt_net_capital_gain,
             round_dollar(ar.net_ltcg),
             "…and NOT a re-rounding of the exact preferential gain"
+        );
+
+        let f8959 = form_8959_lines(FilingStatus::Single, Usd::ZERO, Usd::ZERO, None);
+        let l = form_1040_lines(
+            &ar,
+            &income,
+            None,
+            None,
+            None,
+            &f8959,
+            None,
+            &tt(),
+            FilingStatus::Single,
+            Usd::ZERO,
+            Usd::ZERO,
+            false,
+        );
+        assert_eq!(
+            l.line15,
+            dec!(60000),
+            "the fixture's printed taxable income"
+        );
+
+        let worksheet = |net_cap_gain: Usd| {
+            crate::tax::method::qdcgt_line16(
+                tt().ordinary_for(FilingStatus::Single),
+                tt().ltcg_for(FilingStatus::Single),
+                l.line15,
+                l.line3a,
+                net_cap_gain,
+            )
+        };
+        // ★ The FILED L16 is the worksheet a human runs on the FILED forms…
+        assert_eq!(
+            l.line16,
+            worksheet(income.qdcgt_net_capital_gain),
+            "★ line 16 IS the worksheet on the PRINTED operands"
+        );
+        // …and it is NOT the worksheet on the exact-cents figure — the two land in different $50 bins.
+        assert_ne!(
+            l.line16,
+            worksheet(round_dollar(ar.net_ltcg)),
+            "a $1 drift in the operand crosses a Tax-Table bin edge and moves the filed L16"
         );
     }
 
