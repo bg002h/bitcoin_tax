@@ -564,6 +564,11 @@ pub struct Form8283Map {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The FILER's identity — "Name(s) shown on your income tax return" + identifying number. `Option`
+    /// because the crypto slice never writes it (its 8283 rides beside a return btctax did not produce)
+    /// and the 2017/2025 maps have no verified FQNs; the FULL-return filler refuses on `None`.
+    #[serde(default)]
+    pub identity: Option<IdentityCells>,
     /// Section A (≤ $5,000).
     pub section_a: Section8283A,
     /// Section B (> $5,000).
@@ -1428,6 +1433,12 @@ pub struct ScheduleSeMap {
     pub form: String,
     /// Tax year.
     pub year: i32,
+    /// The identity header — "Name of person **with self-employment income**" + THAT person's SSN, i.e.
+    /// the PROPRIETOR, not the return's joint name line. `Option` because this map is shared with the
+    /// crypto slice (whose 2017/2025 editions have no verified identity FQNs and write no identity at
+    /// all); the FULL-return filler refuses on `None`.
+    #[serde(default)]
+    pub identity: Option<IdentityCells>,
     /// Line 2 — net profit (net_se), amount column.
     pub line2: MoneyCell,
     /// Line 3 — combine 1a/1b/2 (= line 2), amount column.

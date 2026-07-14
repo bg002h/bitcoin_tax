@@ -1820,3 +1820,210 @@ fn schedule_c_prints_its_business_naics_and_accounting_method() {
         "…and NOT accrual"
     );
 }
+
+// ── Full-return Schedule SE (ARCH-P6.3a D5/D6) ──────────────────────────────────────────────────
+
+/// ★ The full-return Schedule SE prints WHOLE DOLLARS and is headed by the **proprietor** — "Name of
+/// person with self-employment income" — not the return's joint name line. On a joint return with a
+/// spouse-owned business that is the SPOUSE, with the SPOUSE's SSN; filing it under the taxpayer would
+/// attribute the self-employment tax to the wrong person.
+///
+/// Its line 12 is what Schedule 2 line 4 carries, so the two must be the same integer.
+#[test]
+fn the_full_return_schedule_se_prints_whole_dollars_under_the_proprietors_name() {
+    use btctax_core::tax::packet::ReturnHeader;
+    use btctax_core::tax::printed::ScheduleSeLines;
+    use btctax_core::tax::return_inputs::{Owner, Person, ReturnInputs, ScheduleCInputs};
+
+    let mut ri = ReturnInputs {
+        filing_status: FilingStatus::Mfj,
+        schedule_c: Some(ScheduleCInputs {
+            owner: Owner::Spouse, // ★ the SPOUSE owns the business
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    ri.header.taxpayer = Person {
+        first_name: "John".into(),
+        last_name: "Doe".into(),
+        ssn: "123456789".into(),
+        ..Default::default()
+    };
+    ri.header.spouse = Some(Person {
+        first_name: "Jane".into(),
+        last_name: "Roe".into(),
+        ssn: "987654321".into(),
+        ..Default::default()
+    });
+    let h = ReturnHeader::build(&ri, 2024).unwrap();
+
+    let lines = ScheduleSeLines {
+        line2: dec!(52000),
+        line3: dec!(52000),
+        line4a: dec!(48022),
+        line4c: dec!(48022),
+        line6: dec!(48022),
+        line8a: dec!(90000),
+        line8d: dec!(90000),
+        line9: dec!(78600),
+        line10: dec!(5955),
+        line11: dec!(1393),
+        line12: dec!(7348), // = the PRINTED 10 + 11 → Schedule 2 line 4
+        line13: dec!(3674),
+    };
+    let pdf = btctax_forms::fill_schedule_se_full(&lines, &h, 2024).unwrap();
+
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_1[0]").as_deref(),
+        Some("Jane Roe"),
+        "★ the PROPRIETOR — the spouse who owns the business, not the joint name line"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_2[0]").as_deref(),
+        Some("987-65-4321"),
+        "…and the PROPRIETOR's SSN"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_21[0]").as_deref(),
+        Some("7348"),
+        "line 12 — whole dollars, and the figure Schedule 2 line 4 carries"
+    );
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_22[0]").as_deref(),
+        Some("3674"),
+        "line 13 → Schedule 1 line 15"
+    );
+    // No cents anywhere on the filed page — the §3.1 election is all-or-nothing.
+    for fqn in [
+        "topmostSubform[0].Page1[0].f1_19[0]",
+        "topmostSubform[0].Page1[0].f1_20[0]",
+    ] {
+        let v = tv(&pdf, fqn).unwrap_or_default();
+        assert!(!v.contains('.'), "{fqn} printed cents: {v:?}");
+    }
+}
+
+// ── Full-return Form 8949 + the CROSS-PDF byte oracle (ARCH-P6.3a D2/D3) ────────────────────────
+
+/// ★ The cross-PDF oracle: Schedule D's line-3(d) **cell text** equals Form 8949's Part I column-(d)
+/// **total cell text** — read back out of two separately serialized PDFs.
+///
+/// This is the one leg no other test covers: the core KATs prove the CHAIN composes, and the read-back
+/// KATs prove each form transcribes its own chain, but only this proves the composition SURVIVED
+/// transcription into the two documents a filer actually staples together.
+///
+/// The fixture is deliberately discriminating (KAT-9, one level deeper): rows of $100.50 and $200.50
+/// print 101 + 201 = **302**, while re-rounding the exact aggregate (301.00) would print 301.
+#[test]
+fn schedule_d_line3_cell_text_equals_the_8949s_printed_column_total() {
+    use btctax_core::forms::{Form8949Box, Form8949Part, Form8949Row};
+    use btctax_core::identity::WalletId;
+    use btctax_core::tax::printed::form_8949_printed;
+
+    let row = |proceeds: Usd, basis: Usd| Form8949Row {
+        part: Form8949Part::ShortTerm,
+        box_: Form8949Box::C,
+        box_needs_review: false,
+        description: "1.00000000 BTC".into(),
+        date_acquired: time::macros::date!(2024 - 01 - 02),
+        date_sold: time::macros::date!(2024 - 05 - 01),
+        proceeds,
+        cost_basis: basis,
+        adjustment_code: String::new(),
+        adjustment_amount: Usd::ZERO,
+        gain: proceeds - basis,
+        wallet: WalletId::SelfCustody { label: "w".into() },
+        disposition_kind: btctax_core::event::DisposeKind::Sell,
+    };
+    let printed = form_8949_printed(&[row(dec!(100.50), Usd::ZERO), row(dec!(200.50), Usd::ZERO)])
+        .expect("there are rows");
+    assert_eq!(
+        printed.st_totals.proceeds_d,
+        dec!(302),
+        "Σ of the PRINTED rows"
+    );
+
+    // Fill the 8949…
+    let pdf_8949 = btctax_forms::fill_8949_full(&printed, 2024).unwrap();
+    let map_8949 = btctax_forms::Form8949Map::ty2024();
+    let part1 = map_8949
+        .parts
+        .iter()
+        .find(|p| p.term == "short")
+        .expect("Part I");
+    let total_8949 =
+        tv(&pdf_8949, &part1.totals.proceeds_d).expect("the Part I (d) total cell is filled");
+
+    // …and the Schedule D that CITES it.
+    let mut ar_sd = sd(
+        dec!(302),
+        Usd::ZERO,
+        Usd::ZERO,
+        Usd::ZERO,
+        Usd::ZERO,
+        ScheduleDRouting::BothGains,
+    );
+    ar_sd.line3_d = printed.st_totals.proceeds_d;
+    ar_sd.line3_e = printed.st_totals.cost_e;
+    ar_sd.line3_h = printed.st_totals.gain_h;
+    let pdf_sd = btctax_forms::fill_schedule_d_full(&ar_sd, &kitchen_sink_header(), 2024).unwrap();
+    let map_sd = btctax_forms::ScheduleDMap::ty2024();
+    let cell_sd = tv(&pdf_sd, &map_sd.line3.proceeds_d).expect("Schedule D line 3(d) is filled");
+
+    assert_eq!(
+        cell_sd, total_8949,
+        "★ the filed Schedule D and the filed Form 8949 must carry the SAME characters in the cells \
+         that cite each other"
+    );
+    assert_eq!(
+        cell_sd, "302",
+        "…and it is the sum of the PRINTED rows, not round(exact)"
+    );
+}
+
+/// The full-return Form 8283 carries the FILER's identity ("Name(s) shown on your income tax return")
+/// and whole-dollar money columns. The crypto slice writes neither — its 8283 rides beside a return
+/// btctax did not produce — and that difference is exactly why the two paths stay separate.
+#[test]
+fn the_full_return_8283_names_the_filer_and_prints_whole_dollars() {
+    use btctax_core::forms::{Form8283HowAcquired, Form8283Row, Form8283Section};
+    use btctax_core::tax::printed::form_8283_printed;
+
+    let row = Form8283Row {
+        section: Some(Form8283Section::A),
+        description: "0.50000000 BTC".into(),
+        how_acquired: Form8283HowAcquired::Purchased,
+        date_acquired: time::macros::date!(2021 - 03 - 01),
+        date_contributed: time::macros::date!(2024 - 07 - 04),
+        cost_basis: dec!(1200.49),
+        fmv: dec!(30000.50),
+        claimed_deduction: Some(dec!(30000.50)),
+        fmv_method: String::new(),
+        donee: "Habitat".into(),
+        appraiser: String::new(),
+        needs_review: false,
+        details: None,
+    };
+    let printed = form_8283_printed(&[row]).expect("there is a donation");
+    let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("a donation ⇒ an 8283");
+
+    assert_eq!(
+        tv(&pdf, "Form8283[0].Page1[0].f1_01[0]").as_deref(),
+        Some("John Doe & Jane Doe"),
+        "the filer's name line"
+    );
+    assert_eq!(
+        tv(&pdf, "Form8283[0].Page1[0].f1_02[0]").as_deref(),
+        Some("123-45-6789"),
+        "…and their identifying number (this cell is /MaxLen 11 ⇒ hyphenated)"
+    );
+    // The money columns are whole dollars — no cents anywhere on the filed page.
+    assert_eq!(printed.rows()[0].cost_basis, dec!(1200));
+    assert_eq!(
+        printed.rows()[0].fmv,
+        dec!(30001),
+        "30,000.50 rounds at the cell"
+    );
+}

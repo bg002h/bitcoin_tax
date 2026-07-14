@@ -19,3 +19,10 @@ line10 = "topmostSubform[0].Page1[0].f1_19[0]"
 line11 = "topmostSubform[0].Page1[0].f1_20[0]"
 line12 = "topmostSubform[0].Page1[0].f1_21[0]"
 line13 = "topmostSubform[0].Page1[0].f1_22[0]"
+
+# ── Identity header (P6.3a). ★ Schedule SE's header is "Name of person WITH SELF-EMPLOYMENT INCOME"
+#    and THAT person's SSN — the PROPRIETOR, who on a joint return may be the spouse. It is NOT the
+#    return's joint name line. The SSN cell is /MaxLen 11 ⇒ hyphenated.
+[identity]
+name = "topmostSubform[0].Page1[0].f1_1[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_2[0]"

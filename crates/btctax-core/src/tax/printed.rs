@@ -32,8 +32,14 @@ use crate::tax::return_1040::{AbsoluteReturn, MEDICAL_FLOOR_RATE};
 /// own subtraction (proceeds 100.49 → 100, basis 0.50 → 1, exact gain 99.99 → 100, but 100 − 1 = 99),
 /// and it drifts Σh away from Σd − Σe, which would then break Schedule D's Part I, whose columns carry
 /// the same subtract-and-combine header. Deriving h makes both identities hold exactly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Printed8949Row {
+    /// (a) description — the exact BTC amount, 8dp (never rounded: it is a quantity, not money).
+    pub description: String,
+    /// (b) date acquired.
+    pub date_acquired: crate::conventions::TaxDate,
+    /// (c) date sold.
+    pub date_sold: crate::conventions::TaxDate,
     /// (d) proceeds — `round_dollar` at the cell.
     pub proceeds_d: Usd,
     /// (e) cost basis — `round_dollar` at the cell.
@@ -72,6 +78,9 @@ pub fn form_8949_printed(rows: &[crate::forms::Form8949Row]) -> Option<Printed89
         let proceeds_d = round_dollar(r.proceeds);
         let cost_e = round_dollar(r.cost_basis);
         Printed8949Row {
+            description: r.description.clone(),
+            date_acquired: r.date_acquired,
+            date_sold: r.date_sold,
             proceeds_d,
             cost_e,
             // ★ derived from the PRINTED cells, not from `r.gain`
@@ -102,6 +111,56 @@ pub fn form_8949_printed(rows: &[crate::forms::Form8949Row]) -> Option<Printed89
         long_term,
     })
 }
+
+// ── Form 8283 — the printed rows (ARCH-P6.3a D7) ────────────────────────────────────────────────
+
+/// The PRINTED Form 8283 rows: the same rows the crypto slice emits, with the three money columns
+/// (`cost_basis`, `fmv`, `claimed_deduction`) rounded to whole dollars for the filed packet.
+///
+/// A **newtype**, not a bare `Vec<Form8283Row>`, on purpose: the slice's rows carry CENTS, and the two
+/// must not be interchangeable. Handing a cents row to the full-return filler would put an 8283 under a
+/// different rounding regime from the Schedule A it is attached to — which is the whole defect this
+/// phase exists to close.
+///
+/// **Unlike Schedule D ← 8949, Schedule A line 12 does NOT re-derive from this.** The rule is: a line
+/// whose form text CITES another form as its source composes on that form's printed line; a line that
+/// merely REQUIRES an attachment does not. Schedule A L12's text is "…You must attach Form 8283 if over
+/// $500" — an attachment requirement. Form 8283 has no grand-total line for L12 to equal, and the
+/// §170(b) ceilings legitimately make L12 *smaller* than the sum of the 8283's per-donation amounts (the
+/// excess becomes carryover). Forcing them equal would be wrong.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Printed8283Rows(Vec<crate::forms::Form8283Row>);
+
+impl Printed8283Rows {
+    /// The rows, whole-dollar.
+    pub fn rows(&self) -> &[crate::forms::Form8283Row] {
+        &self.0
+    }
+}
+
+/// Round the ledger's Form 8283 rows for the filed packet. `None` when there are no donation rows.
+///
+/// The PRESENCE rule (does an 8283 get attached at all?) is the packet's, not this function's: the form
+/// is required when the return itemizes AND the printed Schedule A line 12 exceeds $500.
+pub fn form_8283_printed(rows: &[crate::forms::Form8283Row]) -> Option<Printed8283Rows> {
+    if rows.is_empty() {
+        return None;
+    }
+    Some(Printed8283Rows(
+        rows.iter()
+            .map(|r| crate::forms::Form8283Row {
+                cost_basis: round_dollar(r.cost_basis),
+                fmv: round_dollar(r.fmv),
+                claimed_deduction: r.claimed_deduction.map(round_dollar),
+                ..r.clone()
+            })
+            .collect(),
+    ))
+}
+
+/// Form 8283 is REQUIRED when the return itemizes and its printed noncash gifts exceed $500 — the
+/// threshold is printed on Schedule A line 12 itself ("You must attach Form 8283 if over $500").
+pub const FORM_8283_THRESHOLD: Usd = rust_decimal_macros::dec!(500);
 
 // ── Schedule SE — the printed chain (ARCH-P6.3a D5) ─────────────────────────────────────────────
 

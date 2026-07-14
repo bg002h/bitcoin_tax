@@ -40,3 +40,11 @@ rows = [
   { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_45[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_47[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_57[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_58[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_59[0]", deduction = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_62[0]" },
   { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_48[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_50[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_63[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_64[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_65[0]", deduction = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_68[0]" },
 ]
+
+# ── The FILER's identity (P6.3a D7): "Name(s) shown on your income tax return" + identifying number.
+#    The crypto slice never writes these (its 8283 rides beside a return btctax did not produce); the
+#    FULL-return path must, or it attaches an unnamed substantiation form. SSN cell is /MaxLen 11 ⇒
+#    hyphenated.
+[identity]
+name = "Form8283[0].Page1[0].f1_01[0]"
+ssn  = "Form8283[0].Page1[0].f1_02[0]"

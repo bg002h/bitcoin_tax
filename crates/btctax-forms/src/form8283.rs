@@ -19,6 +19,7 @@ use crate::error::FormsError;
 use crate::map::Form8283Map;
 use crate::verify::{verify_flat, FlatPlacement};
 use crate::{fmt_date, overflow, pdf};
+use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::{DonationDetails, Form8283HowAcquired, Form8283Row, Form8283Section};
 use time::macros::format_description;
 
@@ -112,6 +113,24 @@ pub fn fill_form_8283(
     rows: &[Form8283Row],
     map: &Form8283Map,
 ) -> Result<Option<Vec<u8>>, FormsError> {
+    fill_form_8283_inner(rows, map, None)
+}
+
+/// The **full-return** Form 8283: whole-dollar rows (`Printed8283Rows` — a newtype precisely so a CENTS
+/// row cannot be handed here by accident) plus the FILER's identity block, which the slice never writes.
+pub fn fill_form_8283_full(
+    printed: &btctax_core::tax::printed::Printed8283Rows,
+    header: &ReturnHeader,
+    map: &Form8283Map,
+) -> Result<Option<Vec<u8>>, FormsError> {
+    fill_form_8283_inner(printed.rows(), map, Some(header))
+}
+
+fn fill_form_8283_inner(
+    rows: &[Form8283Row],
+    map: &Form8283Map,
+    filer: Option<&ReturnHeader>,
+) -> Result<Option<Vec<u8>>, FormsError> {
     if rows.is_empty() {
         return Ok(None);
     }
@@ -140,7 +159,7 @@ pub fn fill_form_8283(
             for k in 0..n_copies {
                 let chunk: Vec<&Form8283Row> = rows.iter().skip(k * cap).take(cap).collect();
                 let details = chunk.iter().find_map(|r| r.details.as_ref());
-                copies.push(fill_one(&chunk, section, map, details)?);
+                copies.push(fill_one(&chunk, section, map, details, filer)?);
             }
         }
         // Section B: group donations by donee + appraiser identity, then count-overflow each group.
@@ -150,7 +169,7 @@ pub fn fill_form_8283(
                 for k in 0..n {
                     let chunk: Vec<&Form8283Row> =
                         group.rows.iter().skip(k * cap).take(cap).copied().collect();
-                    copies.push(fill_one(&chunk, section, map, group.details)?);
+                    copies.push(fill_one(&chunk, section, map, group.details, filer)?);
                 }
             }
         }
@@ -306,6 +325,7 @@ fn fill_one(
     section: Form8283Section,
     map: &Form8283Map,
     details: Option<&DonationDetails>,
+    filer: Option<&ReturnHeader>,
 ) -> Result<Vec<u8>, FormsError> {
     let mut w: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut p: Vec<FlatPlacement> = Vec::new();
@@ -421,6 +441,31 @@ fn fill_one(
             }
         }
     };
+    // The blank's fields are needed for the identity cells' /MaxLen.
+    let blank_for_identity = pdf::collect_fields(&pdf::load(pdf::f8283_pdf(map.year)?)?)?;
+    // ★ The FILER's identity — "Name(s) shown on your income tax return" + identifying number. The
+    // crypto slice never wrote it (its 8283 rides beside a return btctax did not produce); a FULL
+    // return may not attach an unnamed substantiation form, so the full path passes a header and the
+    // map must carry the cells (ARCH-P6.3a D7).
+    if let Some(header) = filer {
+        let blank = &blank_for_identity;
+        let identity = map.identity.as_ref().ok_or_else(|| {
+            FormsError::Geometry(format!(
+                "the {} Form 8283 map has no [identity] block — a full return cannot file an unnamed \
+                 Form 8283",
+                map.year
+            ))
+        })?;
+        crate::cells::push_identity(
+            &mut w,
+            &mut p,
+            identity,
+            &header.name_line,
+            &header.taxpayer.ssn,
+            blank,
+        )?;
+    }
+
     let clusters = sec_clusters(map.year, section);
     let writes = w;
     let placements = p;

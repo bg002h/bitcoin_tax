@@ -19,6 +19,7 @@
 mod cells;
 mod error;
 mod fill8949;
+mod fill8949_full;
 mod form1040;
 mod form1040_full;
 mod form8283;
@@ -35,6 +36,7 @@ mod schedule_c;
 mod schedule_d;
 mod schedule_d_full;
 mod schedule_se;
+mod schedule_se_full;
 mod verify;
 mod watermark;
 
@@ -257,6 +259,40 @@ pub fn fill_schedule_d_full(
     schedule_d_full::fill_schedule_d_full_with_map(lines, header, &map)
 }
 
+/// Fill the **full-return Form 8283** for `year` — whole-dollar rows plus the FILER's identity block
+/// (which the crypto slice never writes). `Ok(None)` when there are no donation rows.
+pub fn fill_form_8283_full(
+    printed: &btctax_core::tax::printed::Printed8283Rows,
+    header: &btctax_core::tax::packet::ReturnHeader,
+    year: i32,
+) -> Result<Option<Vec<u8>>, FormsError> {
+    let map = Form8283Map::for_year(year)?;
+    form8283::fill_form_8283_full(printed, header, &map)
+}
+
+/// Fill the **full-return Form 8949** for `year` from the core-derived printed chain
+/// (`btctax_core::tax::printed::form_8949_printed`). Whole dollars, and column (h) is DERIVED from the
+/// printed (d) − (e). Schedule D lines 3/10 ARE this form's printed column totals.
+pub fn fill_8949_full(
+    printed: &btctax_core::tax::printed::Printed8949,
+    year: i32,
+) -> Result<Vec<u8>, FormsError> {
+    let map = Form8949Map::for_year(year)?;
+    fill8949_full::fill_8949_full_with_map(printed, &map)
+}
+
+/// Fill the **full-return Schedule SE** for `year` from the core-derived printed chain
+/// (`btctax_core::tax::printed::schedule_se_lines`). Whole dollars — the crypto slice's
+/// `fill_schedule_se` keeps its exact-cents rendering and is untouched.
+pub fn fill_schedule_se_full(
+    lines: &btctax_core::tax::printed::ScheduleSeLines,
+    header: &btctax_core::tax::packet::ReturnHeader,
+    year: i32,
+) -> Result<Vec<u8>, FormsError> {
+    let map = ScheduleSeMap::for_year(year)?;
+    schedule_se_full::fill_schedule_se_full_with_map(lines, header, &map)
+}
+
 /// Fill **Schedule B** (Interest and Ordinary Dividends) for `year` from the core-derived printed
 /// chain (`btctax_core::tax::printed::schedule_b_lines`, which returns `None` when Schedule B is not
 /// required — interest and dividends both at or under $1,500 and no declared foreign account).
@@ -324,6 +360,7 @@ pub fn rows_possibly_broker_reported(rows: &[Form8949Row]) -> usize {
 pub mod testonly {
     pub use crate::cells::fmt_money_pair;
     pub use crate::fill8949::{fill_8949_parts, part_data, pdf_has_xfa, split_parts, PartData};
+    pub use crate::fill8949_full::fill_8949_full_with_map;
     pub use crate::form1040::{fill_form_1040_capgains as fill_1040_with_map, Form1040Fill};
     pub use crate::form1040_full::fill_form_1040_full_with_map;
     pub use crate::form8283::fill_form_8283 as fill_8283_with_map;
@@ -351,6 +388,7 @@ pub mod testonly {
     pub use crate::schedule_d::fill_schedule_d_totals;
     pub use crate::schedule_d_full::fill_schedule_d_full_with_map;
     pub use crate::schedule_se::fill_schedule_se_with_map;
+    pub use crate::schedule_se_full::fill_schedule_se_full_with_map;
     pub use crate::verify::{
         no_unmapped_filled, topmost_yes_no_pair, verify_8949, verify_flat, FlatPlacement, Geo,
         Placement,
