@@ -584,7 +584,7 @@ fn report_tax_year_with_return_inputs_for_unsupported_year_refuses_with_income_c
     cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
 
     let toml = dir.path().join("inputs.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\n").unwrap();
+    std::fs::write(&toml, "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n").unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap_err();
@@ -623,7 +623,7 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     let toml = _dir.path().join("inputs.toml");
     std::fs::write(
         &toml,
-        "filing_status = \"Single\"\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
+        "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
     )
     .unwrap();
     // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
@@ -674,7 +674,7 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
 
     // Full-return inputs for 2024 with NO Schedule C.
     let toml = _dir.path().join("inputs.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\n").unwrap();
+    std::fs::write(&toml, "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n").unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
@@ -1464,6 +1464,7 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
             2024,
             &ReturnInputs {
                 filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
                 w2s: vec![W2 {
                     owner: Owner::Taxpayer,
                     box1_wages: dec!(80000),
@@ -1537,6 +1538,7 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
             2024,
             &ReturnInputs {
                 filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
                 w2s: vec![W2 {
                     owner: Owner::Taxpayer,
                     box1_wages: dec!(50000),
@@ -1572,6 +1574,7 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
             2025,
             &ReturnInputs {
                 filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
                 ..Default::default()
             },
         )
@@ -1598,6 +1601,7 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut y2025 = ReturnInputs {
             filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
         };
         y2025.charitable_carryover_in = vec![CharitableCarryItem {
@@ -1647,6 +1651,7 @@ fn import_preserves_a_computed_carryover() {
             2024,
             &ReturnInputs {
                 filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
                 w2s: vec![W2 {
                     owner: Owner::Taxpayer,
                     box1_wages: dec!(50000),
@@ -1671,6 +1676,7 @@ fn import_preserves_a_computed_carryover() {
             2025,
             &ReturnInputs {
                 filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
                 ..Default::default()
             },
         )
@@ -1681,7 +1687,7 @@ fn import_preserves_a_computed_carryover() {
 
     // Re-import 2025 from a TOML that carries NO carryover — the computed one must SURVIVE.
     let toml = csv_dir.path().join("2025.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\n").unwrap();
+    std::fs::write(&toml, "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n").unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml).unwrap();
     let after = {
         let s = Session::open(&vault, &pp()).unwrap();
@@ -1712,6 +1718,7 @@ fn full_return_report_surfaces_conservative_omission_advisories() {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
             w2s: vec![W2 {
                 owner: Owner::Taxpayer,
                 box1_wages: dec!(40000),
@@ -1739,4 +1746,106 @@ fn full_return_report_surfaces_conservative_omission_advisories() {
     assert!(dual.contains("FBAR"), "{dual}");
     // AGI = 40k wages + 10k LTCG = 50k < the $70k EIC advisory ceiling, with earned income → EIC too.
     assert!(dual.contains("EIC NOT COMPUTED"), "{dual}");
+}
+
+/// ★ **D-8 acceptance, end to end: the bug reaches the rows that ALREADY have it, and the user can get out.**
+///
+/// This is the whole point of P8a, and it is the ONE test that exercises the real path a real person is
+/// on. A vault written by the SHIPPED code carries `can_be_claimed_as_dependent_taxpayer: false` on every
+/// row — a value nobody was ever asked for. Under the old code that silently bought the filer the full
+/// basic standard deduction (and a free pass on the §1(g) kiddie-tax screen), and printed an unchecked box
+/// on a filed 1040.
+///
+/// So the fix must do BOTH halves, and this asserts both:
+///   1. the laundered `false` is NOT trusted — the year refuses rather than computing a wrong number; and
+///   2. `income answer` gets them out of it — WITHOUT the TOML file, which the spec told them to delete.
+///
+/// A fix with only half 1 is a brick. A fix with only half 2 never reaches the people who have the bug.
+#[test]
+fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
+    use btctax_cli::return_inputs;
+
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // (a) A return imported the way the SHIPPED code did it: no dependent answer anywhere in the TOML,
+    //     because the shipped code had nowhere to put one.
+    let toml = _dir.path().join("inputs.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\n\
+         box1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
+
+    // (b) It REFUSES — loudly, as an error. It does not quietly hand back a number computed from a guess.
+    let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("claim YOU as a dependent"),
+        "the refusal must name the unanswered question: {msg}"
+    );
+    // ★ And it must tell them HOW to get out. A refusal with no exit is just a brick with better prose.
+    assert!(
+        msg.contains("income answer"),
+        "the refusal must point at its own remedy: {msg}"
+    );
+
+    // (c) The user no longer has the TOML — they deleted it, as the plaintext-hygiene guidance says to.
+    std::fs::remove_file(&toml).unwrap();
+
+    // (d) `income answer` is the way out. "n" to the dependent question, Enter to skip the DOB.
+    let mut keystrokes: &[u8] = b"n\n\n";
+    let mut screen: Vec<u8> = Vec::new();
+    cmd::answer::answer_return_inputs(&vault, &pp(), 2024, &mut keystrokes, &mut screen).unwrap();
+    let screen = String::from_utf8(screen).unwrap();
+    assert!(
+        screen.contains("claim YOU as a dependent"),
+        "it must actually ASK the question: {screen}"
+    );
+    assert!(
+        !screen.contains("SPOUSE"),
+        "a Single filer must not be asked about a spouse who does not exist: {screen}"
+    );
+
+    // (e) The year computes again — and the answer is on file as an ANSWER (`Some(false)`), not as the
+    //     absence that the same `false` used to mean.
+    let TaxYearReport { outcome, .. } = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
+    assert!(
+        matches!(outcome, btctax_core::TaxOutcome::Computed(_)),
+        "after answering, the year must compute: {outcome:?}"
+    );
+    let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+    assert_eq!(
+        return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap()
+            .header
+            .can_be_claimed_as_dependent_taxpayer,
+        Some(false),
+        "the answer must PERSIST as an answer — if it re-launders to None the year re-bricks on next read"
+    );
+}
+
+/// `income answer` refuses a year that has no return. Answering questions about a return that does not
+/// exist would MATERIALIZE a near-empty `ReturnInputs` row — which then takes precedence over the user's
+/// `tax-profile` (the resolver ranks `ReturnInputs` first), silently replacing a working profile with an
+/// empty return. A missing row is a mistake to report, not a shape to invent.
+#[test]
+fn income_answer_refuses_a_year_with_no_return() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2025(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    let mut keystrokes: &[u8] = b"n\n\n";
+    let mut screen: Vec<u8> = Vec::new();
+    let err = cmd::answer::answer_return_inputs(&vault, &pp(), 2024, &mut keystrokes, &mut screen)
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("income import"),
+        "the refusal must say how to create the return: {err}"
+    );
+    assert!(screen.is_empty(), "it must not ask anything before refusing");
 }

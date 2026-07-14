@@ -141,7 +141,7 @@ fn set_profile_is_refused_while_return_inputs_exist_unless_forced() {
     let toml = dir.path().join("inputs.toml");
     std::fs::write(
         &toml,
-        "filing_status = \"Single\"\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"82000\"\nbox2_fed_withheld = \"9100\"\n",
+        "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"82000\"\nbox2_fed_withheld = \"9100\"\n",
     )
     .unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
@@ -188,7 +188,7 @@ fn income_import_then_show_redacts_pii_at_the_vault_level() {
     let toml = dir.path().join("inputs.toml");
     std::fs::write(
         &toml,
-        "filing_status = \"Single\"\n\n[header.taxpayer]\nfirst_name = \"Pat\"\nlast_name = \"Doe\"\nssn = \"123-45-6789\"\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"82000\"\nbox2_fed_withheld = \"9100\"\n",
+        "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n[header.taxpayer]\nfirst_name = \"Pat\"\nlast_name = \"Doe\"\nssn = \"123-45-6789\"\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"82000\"\nbox2_fed_withheld = \"9100\"\n",
     )
     .unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
@@ -227,6 +227,7 @@ fn resolve_all_screened_maps_a_corrupt_year_to_a_refusal_not_a_brick() {
             2024,
             &ReturnInputs {
                 filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
                 ..Default::default()
             },
         )

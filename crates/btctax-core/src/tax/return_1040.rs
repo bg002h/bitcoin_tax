@@ -75,7 +75,13 @@ pub fn standard_deduction(
 ) -> Usd {
     let status = ri.filing_status;
     let basic = params.std_deduction_for(status);
-    let base = if ri.header.can_be_claimed_as_dependent_taxpayer {
+    // ★ `!= Some(false)` — i.e. UNKNOWN takes the dependent branch, not the basic-std branch (D-8).
+    //
+    // `screen_inputs` refuses an unanswered flag, so `None` cannot reach here on any real path. This is
+    // defense-in-depth, and what matters is its DIRECTION: the §63(c)(5) floor is never larger than the
+    // basic std, so an unknown flag can only OVERSTATE tax. `unwrap_or(false)` — the idiom that caused
+    // this defect — points the other way and silently understates. Both are one token; only one is safe.
+    let base = if ri.header.can_be_claimed_as_dependent_taxpayer != Some(false) {
         // §63(c)(5): min(basic, max($1,300, earned + $450)).
         basic.min(
             (dependent_earned_income + params.dependent_std_earned_addon)
@@ -615,7 +621,9 @@ pub fn screen_compute_dependent(
     // preserving that direction: an under-count would let a real kiddie return slip through at the child's
     // rate (an understatement). A capital LOSS correctly lowers unearned (`capital_gain_line7` is the
     // §1211-limited L7, which the Form 8615 worksheet also uses) — that is not an under-refuse.
-    if ri.header.can_be_claimed_as_dependent_taxpayer {
+    // `!= Some(false)`: an unknown flag RUNS the kiddie-tax screen rather than skipping it (fail-closed —
+    // skipping can only under-refuse). Unreachable past `screen_inputs`; see `standard_deduction`.
+    if ri.header.can_be_claimed_as_dependent_taxpayer != Some(false) {
         let unearned = sum_taxable_interest(ri)
             + sum_ordinary_dividends(ri)
             + capital_gain_line7(ri, state, year, ri.filing_status)
@@ -1633,6 +1641,8 @@ mod tests {
     fn single_household() -> ReturnInputs {
         ReturnInputs {
             filing_status: FilingStatus::Single,
+            // D-8: an ordinary filer, who has ANSWERED that nobody can claim them.
+            header: crate::tax::testonly::not_a_dependent(),
             w2s: vec![w2(Owner::Taxpayer, dec!(98600), dec!(98600), dec!(98600))],
             int_1099: vec![Form1099Int {
                 box1_interest: dec!(4000),
@@ -2085,6 +2095,8 @@ mod tests {
     fn filer(status: FilingStatus) -> ReturnInputs {
         ReturnInputs {
             filing_status: status,
+            // D-8: an ordinary filer, who has ANSWERED that nobody can claim them.
+            header: crate::tax::testonly::not_a_dependent(),
             ..Default::default()
         }
     }
@@ -2140,7 +2152,7 @@ mod tests {
     fn dependent_floor() {
         let p = ty2024_params();
         let mut dep = filer(FilingStatus::Single);
-        dep.header.can_be_claimed_as_dependent_taxpayer = true;
+        dep.header.can_be_claimed_as_dependent_taxpayer = Some(true);
         // Earned $0 → max($1,300, $450) = $1,300.
         assert_eq!(standard_deduction(&dep, &p, 2024, Usd::ZERO), dec!(1300));
         // Earned $5,000 → max($1,300, $5,450) = $5,450 (< basic).
@@ -2314,6 +2326,8 @@ mod tests {
     fn single() -> ReturnInputs {
         ReturnInputs {
             filing_status: FilingStatus::Single,
+            // D-8: an ordinary filer, who has ANSWERED that nobody can claim them.
+            header: crate::tax::testonly::not_a_dependent(),
             ..Default::default()
         }
     }
@@ -2367,7 +2381,7 @@ mod tests {
     fn kiddie_tax_refuses_dependent_over_threshold() {
         let dependent = |interest: Usd| {
             let mut ri = single();
-            ri.header.can_be_claimed_as_dependent_taxpayer = true;
+            ri.header.can_be_claimed_as_dependent_taxpayer = Some(true);
             ri.int_1099 = vec![Form1099Int {
                 box1_interest: interest,
                 ..Default::default()
@@ -2390,8 +2404,20 @@ mod tests {
         );
         // NOT claimable as a dependent ⇒ never kiddie, even with high unearned income.
         let mut not_dep = dependent(dec!(9000));
-        not_dep.header.can_be_claimed_as_dependent_taxpayer = false;
+        not_dep.header.can_be_claimed_as_dependent_taxpayer = Some(false);
         assert_eq!(screened(&not_dep, &empty), None);
+
+        // ★ D-8, fail-closed. An UNANSWERED flag must still RUN this screen, not skip it. `screen_inputs`
+        // refuses `None` long before compute, so this is defense-in-depth — but its direction is the whole
+        // point: skipping can only UNDER-refuse (a real kiddie return slips through at the child's rate),
+        // while running it can only over-refuse. `unwrap_or(false)` here skips. `!= Some(false)` runs.
+        let mut unknown = dependent(dec!(9000));
+        unknown.header.can_be_claimed_as_dependent_taxpayer = None;
+        assert_eq!(
+            screened(&unknown, &empty),
+            Some(RefuseReason::KiddieTax),
+            "an unknown dependent flag must not silently skip the §1(g) screen"
+        );
     }
 
     /// Wages (earned) do NOT count toward the kiddie unearned threshold — a working dependent with big
@@ -2399,7 +2425,7 @@ mod tests {
     #[test]
     fn kiddie_excludes_earned_wages() {
         let mut ri = single();
-        ri.header.can_be_claimed_as_dependent_taxpayer = true;
+        ri.header.can_be_claimed_as_dependent_taxpayer = Some(true);
         ri.w2s = vec![w2(Owner::Taxpayer, dec!(20000), dec!(20000), dec!(20000))]; // earned
         ri.int_1099 = vec![Form1099Int {
             box1_interest: dec!(500),
@@ -2565,7 +2591,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        ri.header.can_be_claimed_as_dependent_taxpayer = true;
+        ri.header.can_be_claimed_as_dependent_taxpayer = Some(true);
         let st = state_income(vec![mining(dec!(10000))]); // Sch C net $10,000, earned (not kiddie-unearned)
         let ar = assemble_absolute(&ri, &st, &ty2024_params(), &synthetic_table(2024), 2024);
         let half = ar.half_se_deduction;
@@ -2857,6 +2883,8 @@ mod tests {
     fn wages_single(wages: Usd) -> ReturnInputs {
         ReturnInputs {
             filing_status: FilingStatus::Single,
+            // D-8: an ordinary filer, who has ANSWERED that nobody can claim them.
+            header: crate::tax::testonly::not_a_dependent(),
             w2s: vec![w2(Owner::Taxpayer, wages, wages, wages)],
             ..Default::default()
         }
@@ -3519,6 +3547,9 @@ mod tests {
     fn section6_pref_over_ti_delta_overstates_and_does_not_reconcile() {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
+            // D-8: a retiree, not somebody's dependent — and the return must SAY so (an unanswered flag
+            // now conservatively takes the §63(c)(5) floor, which would change this test's numbers).
+            header: crate::tax::testonly::not_a_dependent(),
             w2s: vec![w2(Owner::Taxpayer, dec!(5000), dec!(5000), dec!(5000))],
             div_1099: vec![Form1099Div {
                 box1a_ordinary: dec!(50000),

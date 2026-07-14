@@ -316,8 +316,10 @@ impl ReturnHeader {
             address_state: ri.header.address_state.clone(),
             address_zip: ri.header.address_zip.clone(),
             aged_blind: AgedBlindBoxes::for_return(ri, year),
-            claimed_as_dependent_taxpayer: ri.header.can_be_claimed_as_dependent_taxpayer,
-            claimed_as_dependent_spouse: ri.header.can_be_claimed_as_dependent_spouse,
+            // `== Some(true)`: an UNANSWERED flag already refused upstream (`DependentStatusUnanswered`),
+            // so it never reaches a printed form. Collapsing it here is a projection, not a guess (D-8).
+            claimed_as_dependent_taxpayer: ri.header.can_be_claimed_as_dependent_taxpayer == Some(true),
+            claimed_as_dependent_spouse: ri.header.can_be_claimed_as_dependent_spouse == Some(true),
             // Only meaningful on MFS (§63(c)(6)); `None` on MFS already refuses upstream
             // (`MfsSpouseItemizeUnknown`), so an unanswered flag never reaches a filed return.
             mfs_spouse_itemizes: ri.filing_status == FilingStatus::Mfs
@@ -753,7 +755,7 @@ mod tests {
             ..Default::default()
         };
         ri.header.taxpayer = person("John", "Doe", "123456789");
-        ri.header.can_be_claimed_as_dependent_taxpayer = true;
+        ri.header.can_be_claimed_as_dependent_taxpayer = Some(true);
 
         let h = ReturnHeader::build(&ri, 2024).unwrap();
         assert!(

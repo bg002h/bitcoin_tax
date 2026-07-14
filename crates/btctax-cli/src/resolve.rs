@@ -302,6 +302,7 @@ mod tests {
         tax_profile::set(&c, 2024, &prof()).unwrap();
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
             w2s: vec![W2 {
                 box1_wages: dec!(100000),
                 box5_medicare_wages: dec!(100000),
@@ -330,6 +331,7 @@ mod tests {
         tax_profile::set(&c, 2024, &prof()).unwrap(); // a raw MFJ/$120k stored profile
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
             w2s: vec![W2 {
                 box1_wages: dec!(100000),
                 box5_medicare_wages: dec!(100000),
@@ -370,6 +372,7 @@ mod tests {
         // An HSA present ⇒ the refuse-guard refuses (Form 8889); derivation must NOT proceed.
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
         };
         ri.sch1.hsa_present = true;

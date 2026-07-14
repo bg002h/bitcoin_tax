@@ -148,6 +148,12 @@ pub struct Dependent {
 /// 1040 header / PII (vault-only). Fold into the per-year `ReturnInputs` blob (the 1040 is per-year).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct HouseholdHeader {
+    /// `#[serde(default)]` deliberately: the taxpayer's PII is captured LATER (`btctax set-pii`) and is
+    /// only enforced at export (an SSN-less return refuses there, not at import). Without the default, any
+    /// partial `[header]` table — e.g. one that answers only the dependent flag — failed with
+    /// "missing field `taxpayer`", which D-8 turned from a curiosity into a wall, since `[header]` is now
+    /// mandatory on every return.
+    #[serde(default)]
     pub taxpayer: Person,
     #[serde(default)]
     pub spouse: Option<Person>,
@@ -161,10 +167,20 @@ pub struct HouseholdHeader {
     pub address_zip: String,
     #[serde(default)]
     pub dependents: Vec<Dependent>,
+    /// 1040 "Someone can claim: **You** as a dependent" — a TRI-STATE, and it must stay one.
+    ///
+    /// `None` = **never asked**, and it REFUSES (`DependentStatusUnanswered`). A bare `bool` here was a
+    /// live defect: it made "unanswered" and "answered No" the same value, so an unasked filer silently
+    /// got the FULL basic standard deduction instead of the §63(c)(5) dependent floor (understating tax),
+    /// slipped past the §1(g)/Form-8615 kiddie-tax refusal, AND printed the 1040's checkbox unchecked —
+    /// a false statement on a filed form. There is no safe default: guessing `false` understates, and
+    /// guessing `true` overstates. Only the filer knows. See `design/SPEC_dependent_flag.md`.
     #[serde(default)]
-    pub can_be_claimed_as_dependent_taxpayer: bool,
+    pub can_be_claimed_as_dependent_taxpayer: Option<bool>,
+    /// 1040 "Someone can claim: **Your spouse** as a dependent" — tri-state, same reasoning. Required
+    /// only when a spouse is actually on this return; `Some(true)` refuses (`DependentSpouseUnsupported`).
     #[serde(default)]
-    pub can_be_claimed_as_dependent_spouse: bool,
+    pub can_be_claimed_as_dependent_spouse: Option<bool>,
     #[serde(default)]
     pub presidential_fund_taxpayer: bool,
     #[serde(default)]

@@ -376,6 +376,21 @@ pub enum IncomeCmd {
         #[arg(long)]
         year: i32,
     },
+    /// Answer the return's fail-loud questions interactively — the yes/no boxes that have no safe
+    /// default (can someone claim you as a dependent? Schedule B's foreign-account and foreign-trust
+    /// lines) plus the optional dates of birth.
+    ///
+    /// These questions REFUSE the return until they are answered: guessing "no" on your behalf would
+    /// understate your tax and print an unchecked box you never affirmed. This is the only way to answer
+    /// them without editing a TOML file. It never asks for a secret — SSNs and the IP PIN belong to
+    /// `set-pii`, which does not echo what you type.
+    ///
+    /// Requires an existing return for the year (create one with `income import`).
+    Answer {
+        /// The tax year (e.g. 2024).
+        #[arg(long)]
+        year: i32,
+    },
 }
 
 /// `what-if` subcommand tree (task #43). READ-ONLY hypothetical-transaction tax planning: NOTHING is

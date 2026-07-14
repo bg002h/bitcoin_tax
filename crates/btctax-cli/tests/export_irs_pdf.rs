@@ -440,6 +440,7 @@ fn export_dispatches_a_full_return_year_to_the_full_packet() {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
         };
         ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
@@ -516,7 +517,8 @@ fn a_full_return_without_an_ssn_refuses_and_writes_no_bytes() {
             s.conn(),
             2024,
             &ReturnInputs {
-                filing_status: FilingStatus::Single, // no header ⇒ no SSN
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(), // no header ⇒ no SSN
                 ..Default::default()
             },
         )
@@ -568,6 +570,7 @@ fn the_two_pipelines_cannot_overwrite_each_others_files() {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
         };
         ri.header.taxpayer = btctax_core::tax::return_inputs::Person {

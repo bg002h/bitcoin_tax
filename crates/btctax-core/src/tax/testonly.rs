@@ -437,6 +437,20 @@ pub fn golden_usd(v: f64) -> Usd {
 /// which is what a real W-2 carries), its capital gains are crypto disposals on the ledger (which is how
 /// btctax gets to Schedule D at all), and its `self_employment_income` is business crypto — a Schedule C
 /// trade or business, which is the only way btctax produces SE tax.
+/// A header that has **answered** the §63(c)(5) "someone can claim you as a dependent" question — with a
+/// "no", which is what an ordinary filer says.
+///
+/// Every `ReturnInputs` fixture needs this. `Default` leaves the flag `None` on purpose (D-8: unanswered
+/// is not "no"), and an unanswered return now REFUSES, so a fixture that skips it is testing the refusal
+/// rather than whatever it meant to test. Answering it in `Default` would reinstate the very guess we
+/// removed — which is why this is a separate, explicit call.
+pub fn not_a_dependent() -> HouseholdHeader {
+    HouseholdHeader {
+        can_be_claimed_as_dependent_taxpayer: Some(false),
+        ..Default::default()
+    }
+}
+
 pub fn build_golden_household(h: &GoldenHousehold) -> (ReturnInputs, LedgerState) {
     let i = &h.inputs;
     let status = match i.filing_status.as_str() {
@@ -455,6 +469,8 @@ pub fn build_golden_household(h: &GoldenHousehold) -> (ReturnInputs, LedgerState
         ssn: "123456789".into(),
         ..Default::default()
     };
+    // Nobody can claim a golden household — but it must SAY so (D-8: unanswered refuses).
+    ri.header.can_be_claimed_as_dependent_taxpayer = Some(false);
     if status == FilingStatus::Mfj {
         ri.header.spouse = Some(crate::tax::return_inputs::Person {
             first_name: "Golden".into(),
@@ -462,6 +478,7 @@ pub fn build_golden_household(h: &GoldenHousehold) -> (ReturnInputs, LedgerState
             ssn: "987654321".into(),
             ..Default::default()
         });
+        ri.header.can_be_claimed_as_dependent_spouse = Some(false);
     }
 
     // ★ ONE W-2 carrying the household's whole wage figure. `mfj_two_w2_standard`'s name is about the

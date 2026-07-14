@@ -68,6 +68,14 @@ pub enum RefuseReason {
     /// MFS return without `mfs_spouse_itemizes` answered — §63(c)(6) couples the spouses' std/itemize
     /// choice, so it's required (`None` ⇒ fail-loud, G15).
     MfsSpouseItemizeUnknown,
+    /// "Someone can claim you as a dependent" is UNANSWERED. Required on EVERY return: it selects the
+    /// §63(c)(5) dependent standard-deduction floor over the basic std, gates the §1(g)/Form-8615
+    /// kiddie-tax refusal, and prints a checkbox on the 1040 itself. Guessing `false` UNDERSTATES tax and
+    /// files a false checkbox; guessing `true` overstates. Fail loud (D-8).
+    DependentStatusUnanswered,
+    /// "Someone can claim your spouse as a dependent" is unanswered on a return that HAS a spouse. Same
+    /// reasoning as the taxpayer flag; only asked when a spouse is on the return (D-8).
+    DependentSpouseStatusUnanswered,
     /// A charitable gift/carryover to a **non-50%-organization** (Cash30/OrdinaryProp30/CapGainProp20 —
     /// private foundations etc.) needs the Pub. 526 "special 30% limit" ordering v1 doesn't implement;
     /// refuse rather than mis-limit and understate tax (review C1). Never produced by the crypto ledger.
@@ -567,7 +575,25 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     // which v1 doesn't model (the spouse flag is otherwise unconsumed) — refuse rather than grant the full
     // basic std and understate tax (review I1). Narrow/usually-invalid input (a claimable spouse generally
     // can't file jointly).
-    if ri.header.can_be_claimed_as_dependent_spouse {
+    // ★ D-8. UNANSWERED ≠ "No". The taxpayer flag is required on EVERY return — it swaps the basic std
+    // for the §63(c)(5) dependent floor and gates the §1(g) kiddie-tax refusal, so a silent `false` both
+    // UNDERSTATES tax and prints an unchecked box the filer never affirmed. Ask; never assume.
+    if ri.header.can_be_claimed_as_dependent_taxpayer.is_none() {
+        return refuse(
+            RefuseReason::DependentStatusUnanswered,
+            "every return must state whether someone can claim YOU as a dependent (it selects the \
+             §63(c)(5) standard-deduction floor and is a checkbox on the 1040) — run `btctax income answer`",
+        );
+    }
+    // The spouse flag is only a question when a spouse is actually on the return.
+    if ri.header.spouse.is_some() && ri.header.can_be_claimed_as_dependent_spouse.is_none() {
+        return refuse(
+            RefuseReason::DependentSpouseStatusUnanswered,
+            "this return has a spouse, so it must state whether someone can claim YOUR SPOUSE as a \
+             dependent (it is a checkbox on the 1040) — run `btctax income answer`",
+        );
+    }
+    if ri.header.can_be_claimed_as_dependent_spouse == Some(true) {
         return refuse(
             RefuseReason::DependentSpouseUnsupported,
             "a claimable-as-dependent spouse is out of scope for v1 — it limits the joint standard deduction",
@@ -771,13 +797,115 @@ mod tests {
         crate::tax::tables::synthetic_table(2024) // ss_wage_base = 176,100 (synthetic); MAX = 10,918.20
     }
     fn ri() -> ReturnInputs {
-        ReturnInputs {
+        let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
             ..Default::default()
-        }
+        };
+        // ★ ANSWERED, not defaulted. Every fixture must state this — that is the whole point of D-8, and
+        // if `Default` supplied it these tests would be re-asserting the very guess we just removed.
+        ri.header.can_be_claimed_as_dependent_taxpayer = Some(false);
+        ri
     }
     fn reason(ri: &ReturnInputs) -> Option<RefuseReason> {
         screen_inputs(ri, &tbl(), &params()).map(|r| r.reason)
+    }
+
+    /// ★ **D-8 — and this guard shipped, once, with no test at all.**
+    ///
+    /// The flag used to be a bare `bool` with `#[serde(default)]`, so "never asked" and "answered No" were
+    /// the same value and the engine silently chose the answer that UNDERSTATES tax. Deleting the fix and
+    /// re-running the suite passed 1715/1715 — every fixture simply answers the question now, so nothing
+    /// was asserting the refusal FIRES. These four tests are that assertion.
+    #[test]
+    fn an_unanswered_dependent_flag_refuses() {
+        let mut r = ri();
+        r.header.can_be_claimed_as_dependent_taxpayer = None; // as a pre-D-8 vault loads
+        assert_eq!(reason(&r), Some(RefuseReason::DependentStatusUnanswered));
+    }
+
+    /// Both ANSWERS are accepted — the refusal is about silence, not about the content of the answer.
+    #[test]
+    fn an_answered_dependent_flag_does_not_refuse() {
+        let mut r = ri();
+        r.header.can_be_claimed_as_dependent_taxpayer = Some(false);
+        assert_eq!(reason(&r), None);
+        r.header.can_be_claimed_as_dependent_taxpayer = Some(true);
+        assert_ne!(
+            reason(&r),
+            Some(RefuseReason::DependentStatusUnanswered),
+            "a claimable filer ANSWERED — it must not be treated as unanswered"
+        );
+    }
+
+    /// The spouse question is only a question when there IS a spouse. Asking it of a Single filer would be
+    /// an unanswerable refusal — a return you could never file.
+    #[test]
+    fn an_unanswered_spouse_flag_refuses_only_when_a_spouse_is_on_the_return() {
+        let mut single = ri();
+        single.header.can_be_claimed_as_dependent_spouse = None;
+        assert_eq!(reason(&single), None, "no spouse ⇒ no spouse question");
+
+        let mut joint = ri();
+        joint.filing_status = FilingStatus::Mfj;
+        joint.header.spouse = Some(crate::tax::return_inputs::Person {
+            first_name: "Pat".into(),
+            last_name: "Doe".into(),
+            ssn: "987654321".into(),
+            ..Default::default()
+        });
+        joint.header.can_be_claimed_as_dependent_spouse = None;
+        assert_eq!(
+            reason(&joint),
+            Some(RefuseReason::DependentSpouseStatusUnanswered)
+        );
+    }
+
+    /// ★ The refusal is what LETS the compute layer project the tri-state down to a `bool`. If it ever
+    /// stops firing before compute, `standard_deduction` silently grants the full basic std to a filer who
+    /// should get the §63(c)(5) floor — an understatement. This test pins the two together: the flag must
+    /// still be unanswerable-and-refused at the screen that gates compute.
+    #[test]
+    fn the_unanswered_refusal_is_what_guards_the_63c5_floor() {
+        let mut unanswered = ri();
+        unanswered.header.can_be_claimed_as_dependent_taxpayer = None;
+        assert!(
+            screen_inputs(&unanswered, &tbl(), &params()).is_some(),
+            "compute must never see an unanswered flag — it would fall through to the basic std"
+        );
+
+        // ★ And if compute ever DOES see an unknown flag, it must err toward the SMALLER deduction. This
+        // is the assertion `== Some(true)` could not make: `unwrap_or(false)` is indistinguishable from
+        // `== Some(true)` for a bool, so a style rule alone tests nothing. Pinning the None branch to the
+        // dependent floor makes the safe direction a fact the suite can check.
+        let p = params();
+        let mut unknown = ri();
+        unknown.header.can_be_claimed_as_dependent_taxpayer = None;
+        let mut claimable = ri();
+        claimable.header.can_be_claimed_as_dependent_taxpayer = Some(true);
+        let mut not_claimable = ri();
+        not_claimable.header.can_be_claimed_as_dependent_taxpayer = Some(false);
+        let sd = |r: &ReturnInputs| crate::tax::return_1040::standard_deduction(r, &p, 2024, Usd::ZERO);
+        assert_eq!(
+            sd(&unknown),
+            sd(&claimable),
+            "an UNKNOWN flag must take the §63(c)(5) floor — the direction that overstates tax"
+        );
+        assert!(
+            sd(&unknown) < sd(&not_claimable),
+            "...and that floor must really be the smaller deduction, or 'fail-closed' means nothing"
+        );
+
+        // And the two answers really do compute DIFFERENT deductions, so the question is load-bearing.
+        let mut dep = ri();
+        dep.header.can_be_claimed_as_dependent_taxpayer = Some(true);
+        let mut not_dep = ri();
+        not_dep.header.can_be_claimed_as_dependent_taxpayer = Some(false);
+        let earned = Usd::ZERO;
+        assert_ne!(
+            crate::tax::return_1040::standard_deduction(&dep, &p, 2024, earned),
+            crate::tax::return_1040::standard_deduction(&not_dep, &p, 2024, earned),
+            "if these were equal the flag would not matter and this whole refusal would be pointless"
+        );
     }
 
     /// ★ **Fable P7 r3 I1.** A Schedule C the return does not NAME cannot be filed.
@@ -1014,11 +1142,16 @@ mod tests {
     #[test]
     fn dividend_subset_inconsistency_refuses() {
         // Part III answered so the Schedule-B trigger doesn't mask the subset check.
-        let answered = || ReturnInputs {
-            filing_status: FilingStatus::Single,
-            foreign_accounts: Some(false),
-            foreign_trust: Some(false),
-            ..Default::default()
+        let answered = || {
+            let mut r = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                foreign_accounts: Some(false),
+                foreign_trust: Some(false),
+                ..Default::default()
+            };
+            // ...and the D-8 question, which `answered()` is named for.
+            r.header.can_be_claimed_as_dependent_taxpayer = Some(false);
+            r
         };
         // I4: box 1b (qualified) > box 1a (ordinary) on a form ⇒ refuse (phantom preferential income).
         let mut a = answered();
@@ -1299,9 +1432,9 @@ mod tests {
     #[test]
     fn dependent_spouse_flag_refuses() {
         let mut r = ri();
-        r.header.can_be_claimed_as_dependent_spouse = true;
+        r.header.can_be_claimed_as_dependent_spouse = Some(true);
         assert_eq!(reason(&r), Some(RefuseReason::DependentSpouseUnsupported));
-        r.header.can_be_claimed_as_dependent_spouse = false;
+        r.header.can_be_claimed_as_dependent_spouse = Some(false);
         assert_eq!(reason(&r), None);
     }
 }

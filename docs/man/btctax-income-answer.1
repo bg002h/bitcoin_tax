@@ -1,0 +1,20 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-income-answer 1  btctax "btctax manual"
+.SH NAME
+answer \- Answer the return\*(Aqs fail\-loud questions interactively — the yes/no boxes that have no safe default (can someone claim you as a dependent? Schedule B\*(Aqs foreign\-account and foreign\-trust lines) plus the optional dates of birth
+.SH SYNOPSIS
+\fBanswer\fR <\fB\-\-year\fR> [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Answer the return\*(Aqs fail\-loud questions interactively — the yes/no boxes that have no safe default (can someone claim you as a dependent? Schedule B\*(Aqs foreign\-account and foreign\-trust lines) plus the optional dates of birth.
+.PP
+These questions REFUSE the return until they are answered: guessing "no" on your behalf would understate your tax and print an unchecked box you never affirmed. This is the only way to answer them without editing a TOML file. It never asks for a secret — SSNs and the IP PIN belong to `set\-pii`, which does not echo what you type.
+.PP
+Requires an existing return for the year (create one with `income import`).
+.SH OPTIONS
+.TP
+\fB\-\-year\fR \fI<YEAR>\fR
+The tax year (e.g. 2024)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)

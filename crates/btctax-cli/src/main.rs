@@ -245,6 +245,14 @@ fn run() -> Result<ExitCode, CliError> {
                     None => println!("No full-return inputs set for tax year {year}."),
                 }
             }
+            IncomeCmd::Answer { year } => {
+                let pp = passphrase(false)?;
+                let stdin = std::io::stdin();
+                let mut input = stdin.lock();
+                let mut out = std::io::stdout();
+                cmd::answer::answer_return_inputs(vault, &pp, year, &mut input, &mut out)?;
+                println!("Answered the full-return questions for tax year {year}.");
+            }
             IncomeCmd::Clear { year } => {
                 let pp = passphrase(false)?;
                 if cmd::tax::clear_return_inputs(vault, &pp, year)? {
