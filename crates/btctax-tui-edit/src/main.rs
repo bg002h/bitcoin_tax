@@ -920,12 +920,17 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
         // Enter: open the buffer on a text kind, or cycle/toggle a cycle kind in place.
         KeyCode::Enter => {
             if let Some(k) = crate::edit::tax_inputs::focused_kind(form) {
-                if crate::edit::tax_inputs::is_text_kind(k) {
+                if crate::edit::tax_inputs::is_text_kind(k)
+                    || crate::edit::tax_inputs::is_secret_kind(k)
+                {
+                    // Text kinds AND Secret kinds open the edit buffer. A Secret opens NO-ECHO: keystrokes
+                    // land in `buf` but the pane renders bullets (`draw_edit::field_pane_lines`), and the
+                    // commit routes through `parse_ssn`/`parse_ip_pin` by `FieldId`.
                     crate::edit::tax_inputs::begin_edit(form);
                 } else if crate::edit::tax_inputs::is_cycle_kind(k) {
                     crate::edit::tax_inputs::cycle_focused(form);
                 }
-                // Secret (Task 4) / no field: no-op.
+                // No editable field: no-op.
             }
         }
         // Space: cycle/toggle a cycle kind (Enum/TriState/Bool) in place — incl. the NI-2 materialization.
@@ -9412,6 +9417,70 @@ mod tests {
             (field.get)(ri, &RowAddr::default()),
             Some(FieldValue::Money(rust_decimal_macros::dec!(50000)))
         );
+    }
+
+    /// Secret no-echo entry (plan 3 task 4): `Enter` on a focused Secret (SSN) opens NO-ECHO entry; typed
+    /// digits accumulate in the buffer; a second `Enter` commits (`parse_ssn` → `SecretEntry` → `apply`) and
+    /// the field reads back MASKED via `get` — never digits, asserted through the accessor.
+    #[test]
+    fn tax_inputs_secret_ssn_via_keys_commits_masked() {
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId, SecretView};
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        // Focus Taxpayer → SSN (a Secret singleton field, addr `[]`).
+        let ri = form.working.as_ref().unwrap();
+        let sections = crate::edit::form::live_sections(ri);
+        let sec = sections
+            .iter()
+            .position(|s| s.id == SectionId::Taxpayer)
+            .unwrap();
+        let fld = crate::edit::form::live_fields(sections[sec], ri)
+            .iter()
+            .position(|f| f.id == FieldId::TpSsn)
+            .unwrap();
+        form.section_idx = sec;
+        form.field_focus = fld;
+        app.tax_inputs_form = Some(form);
+
+        // Enter opens no-echo entry; digits fill the buffer; Enter commits.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().editing,
+            "Enter on a Secret opens no-echo entry"
+        );
+        type_str(&mut app, "123456789");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        let form = app.tax_inputs_form.as_ref().unwrap();
+        assert!(!form.editing, "a valid SSN commit exits entry mode");
+        assert!(form.error.is_none(), "a valid SSN leaves no error");
+        // Assert via the `get` accessor: the SSN reads back masked, never digits.
+        let ri = form.working.as_ref().unwrap();
+        let sections = crate::edit::form::live_sections(ri);
+        let tp = sections
+            .iter()
+            .find(|s| s.id == SectionId::Taxpayer)
+            .unwrap();
+        let field = crate::edit::form::live_fields(tp, ri)
+            .into_iter()
+            .find(|f| f.id == FieldId::TpSsn)
+            .unwrap();
+        match (field.get)(ri, &RowAddr::default()) {
+            Some(FieldValue::Secret(SecretView::Set { masked })) => {
+                assert!(masked.starts_with("***-**-"), "read-back is masked");
+                assert!(!masked.contains("12345"), "middle digits never surface");
+            }
+            other => panic!("expected a Set SecretView, got {other:?}"),
+        }
     }
 
     // ── KAT-U1 — unlock parity ───────────────────────────────────────────────

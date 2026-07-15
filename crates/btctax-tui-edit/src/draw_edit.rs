@@ -2145,9 +2145,15 @@ fn field_pane_lines(
     for (i, f) in fields.iter().enumerate() {
         let is_focus = i == field_focus;
         // While editing the focused field, show the raw buffer being typed with a cursor block — NOT the
-        // committed value (which only updates on a successful parse+apply).
+        // committed value (which only updates on a successful parse+apply). ★ A Secret field is NO-ECHO:
+        // one bullet per typed char (mirrors `draw_unlock_screen`), NEVER the buffer content — digits must
+        // not reach the screen during entry.
         let value = if is_focus && editing {
-            format!("{buf}\u{2588}")
+            if matches!(f.kind, FieldKind::Secret) {
+                "\u{25cf}".repeat(buf.chars().count())
+            } else {
+                format!("{buf}\u{2588}")
+            }
         } else {
             (f.get)(ri, addr)
                 .map(|v| render_field_value(&v))
@@ -5702,6 +5708,112 @@ mod tests {
         assert!(
             r.contains("123\u{2588}"),
             "the edit buffer shows the typed text with a cursor while editing"
+        );
+    }
+
+    /// Task 4 (a) — render-layer masking KAT (folds the Task-2 review Minor): a SET Secret (SSN) field's
+    /// DISPLAY value shows the masked form (`***-**-NNNN`) and NEVER the raw or middle digits. The SSN is
+    /// set through the engine (`SecretEntry` inbound), never a leaf assignment.
+    #[test]
+    fn tax_inputs_secret_display_is_masked_never_digits() {
+        use crate::edit::form::{live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        // Set the taxpayer SSN via the engine (SecretEntry is inbound-only).
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::TpSsn,
+                addr: RowAddr::default(),
+                value: FieldValue::SecretEntry("123456789".into()),
+            },
+        )
+        .unwrap();
+        // Focus the Taxpayer section (display, NOT editing).
+        let ri = form.working.as_ref().unwrap();
+        let sections = live_sections(ri);
+        form.section_idx = sections
+            .iter()
+            .position(|s| s.id == SectionId::Taxpayer)
+            .unwrap();
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(r.contains("***-**-"), "a set SSN renders its masked form");
+        assert!(
+            !r.contains("123456789"),
+            "the raw SSN digits must never render on display"
+        );
+        assert!(
+            !r.contains("12345"),
+            "the masked middle digits must never render on display"
+        );
+    }
+
+    /// Task 4 (b) — no-echo entry: while ENTERING a Secret (SSN), the pane shows one bullet per typed char
+    /// and NEVER the typed digits. This is the render the no-leak mutation-check targets.
+    #[test]
+    fn tax_inputs_secret_entry_shows_bullets_never_digits() {
+        use crate::edit::form::{live_fields, live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        // Focus Taxpayer → SSN and enter no-echo mode with digits already in the buffer.
+        let ri = form.working.as_ref().unwrap();
+        let sections = live_sections(ri);
+        let sec = sections
+            .iter()
+            .position(|s| s.id == SectionId::Taxpayer)
+            .unwrap();
+        let fld = live_fields(sections[sec], ri)
+            .iter()
+            .position(|f| f.id == FieldId::TpSsn)
+            .unwrap();
+        form.section_idx = sec;
+        form.field_focus = fld;
+        form.editing = true;
+        form.buf.set("123456789");
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains(&"\u{25cf}".repeat(9)),
+            "no-echo entry renders one bullet per typed char"
+        );
+        assert!(
+            !r.contains("123456789"),
+            "the typed SSN digits must never render during entry"
+        );
+        assert!(
+            !r.contains("12345"),
+            "no run of typed digits may render during entry"
         );
     }
 

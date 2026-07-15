@@ -17,8 +17,8 @@ use crate::edit::form::{filing_status_field, live_fields, live_sections, TaxInpu
 use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::Usd;
 use btctax_input_form::{
-    apply, parse, ApplyError, Edit, Field, FieldId, FieldKind, FieldValue, ParseError, RowAddr,
-    SectionKind, SetError,
+    apply, parse, parse_ip_pin, parse_ssn, ApplyError, Edit, Field, FieldId, FieldKind, FieldValue,
+    ParseError, RowAddr, SectionKind, SetError,
 };
 
 // ── Focused-field projection ─────────────────────────────────────────────────────────────────────────
@@ -55,6 +55,13 @@ pub fn is_cycle_kind(k: FieldKind) -> bool {
     matches!(k, FieldKind::Enum(_) | FieldKind::TriState | FieldKind::Bool)
 }
 
+/// A no-echo secret-entry kind (SSN / IP-PIN): `Enter` opens the buffer, keystrokes are MASKED to bullets
+/// (never echoed), a second `Enter` commits via `parse_ssn`/`parse_ip_pin`. Distinct from `is_text_kind`
+/// because a Secret is never seeded from its value and never renders its buffer.
+pub fn is_secret_kind(k: FieldKind) -> bool {
+    matches!(k, FieldKind::Secret)
+}
+
 // ── Edit-buffer entry / commit (text kinds) ──────────────────────────────────────────────────────────
 
 /// Open the edit buffer on the focused text-kind field: seed `buf` from the current value (via `get`), set
@@ -79,9 +86,17 @@ pub fn tax_inputs_apply_edit(form: &mut TaxInputsFormState, raw: &str) -> bool {
         return false;
     };
     let (id, kind) = (field.id, field.kind);
-    // ★ The parse-error guard (spec §5.7): a bad value is rejected HERE — we build the `Edit` from
-    // `parse`'s `Ok`, never from the raw text, so a `ParseError` never reaches `apply`.
-    let value = match parse(kind, raw) {
+    // ★ The parse-error guard (spec §5.7): a bad value is rejected HERE — we build the `Edit` from the
+    // parser's `Ok`, never from the raw text, so a `ParseError` never reaches `apply`. A `Secret` field
+    // (Task 4) is parsed by the DEDICATED entry point chosen from its `FieldId` (`parse_ssn` for
+    // `TpSsn`/`SpSsn`/`DepSsn`, `parse_ip_pin` for `IpPin`) — the generic `parse` refuses `Secret` on
+    // purpose (it can't know which). Either way the digits leave `raw` only inside an opaque `SecretEntry`.
+    let parsed = if matches!(kind, FieldKind::Secret) {
+        parse_secret(id, raw)
+    } else {
+        parse(kind, raw)
+    };
+    let value = match parsed {
         Ok(v) => v,
         Err(e) => {
             form.error = Some(parse_error_msg(e));
@@ -218,6 +233,18 @@ fn next_tristate_edit(id: FieldId, addr: &RowAddr, current: Option<&FieldValue>)
             id,
             addr: addr.clone(),
         },
+    }
+}
+
+/// Parse a `Secret` field's raw entry via the entry point selected by `FieldId`: `parse_ssn` for the
+/// SSN fields (`TpSsn`/`SpSsn`/`DepSsn`), `parse_ip_pin` for `IpPin`. On success the canonical digits are
+/// wrapped in an opaque `SecretEntry` (masked `Debug`); on failure a `BadSsn`/`BadIpPin` is surfaced (never
+/// a panic, never a leak). Any other `FieldId` is not a `Secret` in the spec — refuse rather than guess.
+fn parse_secret(id: FieldId, raw: &str) -> Result<FieldValue, ParseError> {
+    match id {
+        FieldId::TpSsn | FieldId::SpSsn | FieldId::DepSsn => parse_ssn(raw),
+        FieldId::IpPin => parse_ip_pin(raw),
+        _ => Err(ParseError::BadSsn),
     }
 }
 
@@ -377,5 +404,70 @@ mod tests {
         cycle_focused(&mut form);
         assert_eq!(read(&form), None, "no → never (via ClearField)");
         assert!(form.error.is_none());
+    }
+
+    /// (c) Task 4 — a valid 9-digit SSN commits a `SecretEntry` (chosen by `FieldId` → `parse_ssn`): the
+    /// field reads back SET and MASKED via `get`, never digits, and no error.
+    #[test]
+    fn secret_ssn_commit_sets_field_masked_via_get() {
+        use btctax_input_form::SecretView;
+        let mut form = TaxInputsFormState::fresh(2024);
+        assert!(tax_inputs_apply_edit(&mut form, "Single"));
+        focus_field(&mut form, SectionId::Taxpayer, FieldId::TpSsn);
+        assert!(
+            tax_inputs_apply_edit(&mut form, "123456789"),
+            "a valid 9-digit SSN commits"
+        );
+        match focused_value(&form) {
+            Some(FieldValue::Secret(SecretView::Set { masked })) => {
+                assert!(
+                    masked.starts_with("***-**-"),
+                    "the read-back is masked, never digits"
+                );
+                assert!(!masked.contains("12345"), "the middle digits never surface");
+            }
+            other => panic!("expected a Set SecretView, got {other:?}"),
+        }
+        assert!(form.error.is_none());
+    }
+
+    /// (c-bis) Task 4 — the parser is chosen by `FieldId`: a 6-digit IP PIN commits via `parse_ip_pin`.
+    /// The SAME string is `BadSsn` under `parse_ssn` (wrong length), so a mis-dispatch would REJECT it —
+    /// this asserts the `IpPin` → `parse_ip_pin` selection specifically.
+    #[test]
+    fn secret_ip_pin_commit_uses_parse_ip_pin_not_ssn() {
+        use btctax_input_form::SecretView;
+        let mut form = TaxInputsFormState::fresh(2024);
+        assert!(tax_inputs_apply_edit(&mut form, "Single"));
+        focus_field(&mut form, SectionId::Taxpayer, FieldId::IpPin);
+        assert!(
+            tax_inputs_apply_edit(&mut form, "112233"),
+            "a 6-digit IP PIN commits via parse_ip_pin (BadSsn under parse_ssn)"
+        );
+        assert!(matches!(
+            focused_value(&form),
+            Some(FieldValue::Secret(SecretView::Set { .. }))
+        ));
+        assert!(form.error.is_none());
+    }
+
+    /// (d) Task 4 — an invalid SSN (`123`) surfaces `BadSsn` in `form.error` and applies NOTHING: the field
+    /// stays unset (`Empty`), never a partial or leaked value.
+    #[test]
+    fn invalid_ssn_sets_error_and_does_not_apply() {
+        use btctax_input_form::SecretView;
+        let mut form = TaxInputsFormState::fresh(2024);
+        assert!(tax_inputs_apply_edit(&mut form, "Single"));
+        focus_field(&mut form, SectionId::Taxpayer, FieldId::TpSsn);
+        assert!(
+            !tax_inputs_apply_edit(&mut form, "123"),
+            "a 3-digit SSN must not commit"
+        );
+        assert!(form.error.is_some(), "BadSsn is surfaced inline");
+        assert_eq!(
+            focused_value(&form),
+            Some(FieldValue::Secret(SecretView::Empty)),
+            "the bad entry did not set the field"
+        );
     }
 }
