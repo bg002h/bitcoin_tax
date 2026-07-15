@@ -1,5 +1,11 @@
 # SPEC — the full-return INPUT SURFACE (P8)
 
+> **⚠️ SUPERSEDED (2026-07-15) by `SPEC_input_form.md` (the input-form feature).** The *authoring* direction
+> changed: the interactive `btctax-tui-edit` "tax inputs" mode replaced the proposed TOML-generation path.
+> **`income template` and `set-pii` proposed below were NEVER built** — do NOT treat them as shipped
+> commands or document them (the shipped `IncomeCmd` is `import`/`show`/`clear`/`answer` only). This file is
+> retained for its recon/history; the live spec is `SPEC_input_form.md`.
+
 *Ceremony scaled down per `STANDARD_WORKFLOW.md` §8: one spec covering both cycles, no separate plan
 document (the build order is §7 below). The gates are NOT scaled down — Fable reviews to 0C/0I.*
 
