@@ -57,6 +57,31 @@ impl From<btctax_core::CoreError> for PersistError {
     }
 }
 
+/// Resolve the working `ReturnInputs` for `year` through [`btctax_cli::input_form_store::load`]
+/// (§6.1 precedence + §6.3 stale split) — the input-form flow's read side.
+///
+/// Lives HERE, not in the flow's opener, because `Session::conn()` is confined to this module by
+/// construction (the KAT-G1 mechanized gate) — `persist` is the ONLY module permitted to name the
+/// mutation surface. This is a pure READ: it takes `&Session` (never `&mut`), performs no `save()`,
+/// and therefore needs none of the snapshot/rollback machinery. (The one §6.3 in-memory stale-WIP
+/// delete `load` may perform is unpersisted crash-scratch cleanup — it never reaches disk here, and
+/// is committed only by a LATER autosave/commit; see `input_form_store::load`'s contract.)
+///
+/// Takes `&Session` so the opener borrows `app.session` DISJOINTLY from `app.tax_inputs_form`
+/// (review I-1) — a whole-`self`/`&mut self` accessor would collide with the flow's live borrow.
+pub fn load_return_inputs(
+    session: &btctax_cli::Session,
+    year: i32,
+) -> Result<
+    (
+        btctax_cli::input_form_store::Loaded,
+        Option<btctax_cli::input_form_store::StaleNote>,
+    ),
+    btctax_cli::CliError,
+> {
+    btctax_cli::input_form_store::load(session.conn(), year)
+}
+
 /// Revert the in-memory DB to `pre` after a mutation-committing step failed, mapping the error:
 /// `RolledBack` if the revert succeeds, `ResidueLive` if the revert ALSO fails (residue is live).
 fn rollback(

@@ -28,8 +28,8 @@ use crate::edit::form::{
     ResolveConflictStep, ResolveKind, SafeHarborAllocateFlowState, SafeHarborAllocateModalState,
     SafeHarborAttestFlowState, SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState,
     SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
-    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState,
-    VoidModalState, DONATION_FIELD_LABELS, FIELD_LABELS,
+    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TaxInputsFormState,
+    VoidFlowState, VoidModalState, DONATION_FIELD_LABELS, FIELD_LABELS,
 };
 use crate::editor::{EditorApp, EditorScreen};
 use btctax_core::{DisposeKind, InboundClass, OutflowClass, Persistability};
@@ -204,6 +204,9 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(form) = app.profile_form.as_ref() {
         draw_profile_form(frame, area, form);
+    }
+    if let Some(form) = app.tax_inputs_form.as_ref() {
+        draw_tax_inputs_form(frame, area, form);
     }
     if let Some(modal) = app.mutation_modal.as_ref() {
         draw_mutation_modal(frame, area, modal);
@@ -1908,6 +1911,79 @@ fn draw_void_modal(frame: &mut Frame, area: Rect, modal: &VoidModalState) {
 /// keys are global). Lines are sized to fit an 80×24 terminal (no scroll; `centered_rect` truncates).
 /// KEEP IN SYNC with the Browse key handler (`handle_key` in main.rs) — the KAT
 /// `help_lists_every_browse_action_key` pins that every action key appears here.
+/// Render the "tax inputs" editing flow (Task 1 stub).
+///
+/// ★ First branch (P2-a): when `form.discard_offered`, render ONLY the stale-parked message + the
+/// back-out hint — NOT an editing surface (Task 8 wires the 'X' → `discard_parked_draft`). Otherwise
+/// draw a minimal placeholder; Task 2 replaces this with the real 3-region render (section list ·
+/// field pane · status line).
+fn draw_tax_inputs_form(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+    let rect = centered_rect(78, 14, area);
+    frame.render_widget(Clear, rect);
+
+    let (title, border, lines): (&str, Color, Vec<Line>) = if form.discard_offered {
+        // ★ P2-a: stale PARKED draft — discard-only, no editing surface.
+        let mut v = vec![
+            Line::from(Span::styled(
+                format!("Stale parked draft for {}", form.year),
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+        ];
+        if let Some(err) = form.error.as_ref() {
+            v.push(Line::from(err.clone()));
+            v.push(Line::from(""));
+        }
+        v.push(Line::from("Press X to discard the parked draft, Esc to back out."));
+        (" Tax inputs — stale parked draft ", Color::Red, v)
+    } else {
+        let state = if form.working.is_some() {
+            "editing a return"
+        } else {
+            "choose a filing status" // NI-2: no ReturnInputs until filing status is chosen
+        };
+        let mut v = vec![
+            Line::from(Span::styled(
+                format!("Tax inputs — {}", form.year),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(state.to_string()),
+            Line::from(format!(
+                "section {} · row depth {}",
+                form.section_idx,
+                form.addr.0.len()
+            )),
+        ];
+        if form.parked {
+            v.push(Line::from("(parked)"));
+        }
+        if let Some(note) = form.stale_note.as_ref() {
+            v.push(Line::from(note.to_string()));
+        }
+        if let Some(err) = form.error.as_ref() {
+            v.push(Line::from(err.clone()));
+        }
+        v.push(Line::from(""));
+        v.push(Line::from(Span::styled(
+            "  Esc  to close",
+            Style::default().fg(Color::DarkGray),
+        )));
+        (" Tax inputs ", Color::Yellow, v)
+    };
+
+    let p = Paragraph::new(lines).block(
+        Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border)),
+    );
+    frame.render_widget(p, rect);
+}
+
 fn draw_help_overlay(frame: &mut Frame, area: Rect) {
     let hdr = |s: &'static str| {
         Line::from(Span::styled(
@@ -1933,7 +2009,7 @@ fn draw_help_overlay(frame: &mut Frame, area: Rect) {
         Line::from("  P approve pseudo-reconcile defaults (when the [PSEUDO] banner shows)"),
         Line::from(""),
         hdr("App"),
-        Line::from("  p profile   ? help   q/Esc close"),
+        Line::from("  p profile   T tax-inputs   ? help   q/Esc close"),
         Line::from(""),
         Line::from(Span::styled(
             "  ? · Esc · q  to close",

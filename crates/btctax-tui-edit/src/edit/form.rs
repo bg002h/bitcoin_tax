@@ -139,6 +139,38 @@ pub struct MutationModalState {
     pub profile: TaxProfile,
 }
 
+/// Live state for the "tax inputs" editing flow — a renderer over the `btctax-input-form`
+/// engine that drives the `btctax-cli::input_form_store` (plan 3).
+///
+/// The flow holds a [`btctax_input_form::Working`] (`Option<ReturnInputs>`; `None` until a filing
+/// status is chosen — NI-2) and never names a `ReturnInputs` field directly (all access goes through
+/// the engine's `form_spec()` accessors, later tasks). It NEVER constructs a `ReturnInputs` — only
+/// `apply` materializes one.
+///
+/// Task 1 carries the minimal skeleton: the opener's `load`-resolved `working`/`parked`/`stale_note`,
+/// the current section/row cursor, an inline `error`, and the P2-a `discard_offered` flag. The edit
+/// buffer, per-kind editing, autosave/commit, and the source toggle land in later tasks.
+pub struct TaxInputsFormState {
+    /// The tax year being edited (reuses `EditorApp::selected_year`).
+    pub year: i32,
+    /// The working return: `None` until a filing status materializes it (NI-2).
+    pub working: btctax_input_form::Working,
+    /// Index into the live section list (left-pane cursor). Task 2 renders/navigates it.
+    pub section_idx: usize,
+    /// The current row address (`[]` for singletons; `[w2_i]`/`[w2_i, box12_i]` for rows). Task 5.
+    pub addr: btctax_input_form::RowAddr,
+    /// Inline error surfaced under the field pane (parse/apply/store failures). `None` when clean.
+    pub error: Option<String>,
+    /// Whether this working copy came from a PARKED committed return (NI-1). Carried across edits.
+    pub parked: bool,
+    /// The §6.3 stale-WIP-discard note from `load`, if any — Task 2 renders it in the status line.
+    pub stale_note: Option<btctax_cli::input_form_store::StaleNote>,
+    /// ★ P2-a: `true` when `load` refused a stale PARKED draft (`CliError::StaleParkedDraft`). In this
+    /// state the flow renders ONLY the stale-parked message + an 'X' to discard (Task 8) / Esc to back
+    /// out — NOT a normal editing form — so the undiscardable parked draft becomes discardable in-app.
+    pub discard_offered: bool,
+}
+
 /// Cycle through the 5 `FilingStatus` variants in declaration order.
 /// Tab from the last wraps back to the first.
 pub fn cycle_filing_status(fs: FilingStatus) -> FilingStatus {

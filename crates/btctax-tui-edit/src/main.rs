@@ -47,8 +47,8 @@ use edit::form::{
     SafeHarborAllocateModalState, SafeHarborAllocateStep, SafeHarborAttestFlowState,
     SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
     SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
-    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TransferOutItem, VoidFlowState,
-    VoidListItem, VoidModalState, VoidStep, VoidTarget, WalletItem, FREETEXT_CAP,
+    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TaxInputsFormState, TransferOutItem,
+    VoidFlowState, VoidListItem, VoidModalState, VoidStep, VoidTarget, WalletItem, FREETEXT_CAP,
 };
 use editor::{EditorApp, EditorScreen, PseudoApproveModalState};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -360,6 +360,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         handle_optimize_accept_flow_key(app, key);
         return;
     }
+    // ── Tax-inputs flow dispatch — BEFORE form + screen dispatch ──────────────
+    // A flow like the others: `q`/Esc must never fall through to a Browse quit arm while it blocks.
+    if app.tax_inputs_form.is_some() {
+        handle_tax_inputs_key(app, key);
+        return;
+    }
 
     // ── 10. Form dispatch — BEFORE screen dispatch ────────────────────────────
     if app.profile_form.is_some() {
@@ -420,6 +426,8 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                     reset_selections(app);
                 }
                 KeyCode::Char('p') => open_profile_form(app),
+                // Tax-inputs editing flow (the btctax-input-form engine over input_form_store).
+                KeyCode::Char('T') => open_tax_inputs_form(app),
                 KeyCode::Char('c') => open_classify_inbound_flow(app),
                 KeyCode::Char('o') => open_reclassify_outflow_flow(app),
                 KeyCode::Char('r') => open_reclassify_income_flow(app),
@@ -739,6 +747,104 @@ fn open_profile_form(app: &mut EditorApp) {
     }
 
     app.profile_form = Some(form);
+}
+
+// ── Tax-inputs flow (btctax-input-form engine over input_form_store) ───────────
+
+/// Open the "tax inputs" editing flow for `selected_year`.
+///
+/// Resolves the year's working return through [`input_form_store::load`] (§6.1 precedence + §6.3 stale
+/// split) and maps it onto a [`TaxInputsFormState`]:
+///
+/// - `Loaded::Fresh` → `working = None` (NI-2: no `ReturnInputs` until a filing status is chosen).
+/// - `Loaded::Committed(ri)` → `working = Some(ri)`, `parked = false`.
+/// - `Loaded::Draft { ri, parked }` → `working = Some(ri)`, carrying `parked`.
+/// - any returned [`StaleNote`] is carried for the status line (Task 2 renders it).
+/// - **★ P2-a** — `Err(CliError::StaleParkedDraft)`: do NOT open a normal editing form. Open the flow
+///   in a `discard_offered = true` state that shows ONLY the stale-parked message + Esc to back out
+///   (Task 8 wires the 'X' → `discard_parked_draft`), so the otherwise-undiscardable parked draft
+///   becomes discardable in-app.
+/// - any other `Err` → set `app.status` and do NOT open the flow.
+///
+/// ★ I-1 (session access): `session` is a bare field; `app.session` and `app.tax_inputs_form` are
+/// borrowed as DISJOINT fields (no `session()` method). The `load` itself routes through
+/// `edit::persist::load_return_inputs` because `Session::conn()` is confined to `edit/persist.rs`
+/// by the KAT-G1 mechanized source gate — see that fn.
+fn open_tax_inputs_form(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    if app.session.is_none() {
+        return;
+    }
+    let year = app.selected_year;
+    // ★ I-1 + KAT-G1: disjoint-field read via the persist seam (conn() lives only in edit/persist.rs).
+    let loaded = edit::persist::load_return_inputs(app.session.as_ref().unwrap(), year);
+    let form = match loaded {
+        Ok((btctax_cli::input_form_store::Loaded::Fresh, stale_note)) => TaxInputsFormState {
+            year,
+            working: None,
+            section_idx: 0,
+            addr: btctax_input_form::RowAddr::default(),
+            error: None,
+            parked: false,
+            stale_note,
+            discard_offered: false,
+        },
+        Ok((btctax_cli::input_form_store::Loaded::Committed(ri), stale_note)) => TaxInputsFormState {
+            year,
+            working: Some(ri),
+            section_idx: 0,
+            addr: btctax_input_form::RowAddr::default(),
+            error: None,
+            parked: false,
+            stale_note,
+            discard_offered: false,
+        },
+        Ok((btctax_cli::input_form_store::Loaded::Draft { ri, parked }, stale_note)) => {
+            TaxInputsFormState {
+                year,
+                working: Some(ri),
+                section_idx: 0,
+                addr: btctax_input_form::RowAddr::default(),
+                error: None,
+                parked,
+                stale_note,
+                discard_offered: false,
+            }
+        }
+        Err(e @ btctax_cli::CliError::StaleParkedDraft { .. }) => {
+            // ★ P2-a: a stale PARKED draft is fail-closed by `load` — open a DISCARD-ONLY state (the
+            // message + Esc/'X') so it is discardable in-app rather than undiscardable. `parked = true`
+            // reflects reality (it IS a parked draft); Task 8 wires the confirmed `discard_parked_draft`.
+            TaxInputsFormState {
+                year,
+                working: None,
+                section_idx: 0,
+                addr: btctax_input_form::RowAddr::default(),
+                error: Some(e.to_string()),
+                parked: true,
+                stale_note: None,
+                discard_offered: true,
+            }
+        }
+        Err(e) => {
+            app.status = Some(format!("could not load the tax inputs for {year}: {e}"));
+            return;
+        }
+    };
+    app.tax_inputs_form = Some(form);
+}
+
+/// Handle a key press while the tax-inputs flow is open (Task 1 stub).
+///
+/// Esc closes the flow (from both the normal state and the P2-a discard-offered state). The per-kind
+/// editing keys, section/field navigation, commit/toggle, and the 'X' discard land in later tasks.
+fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
+    if key.code == KeyCode::Esc {
+        app.tax_inputs_form = None;
+    }
 }
 
 // ── Classify-inbound modal handler ────────────────────────────────────────────
@@ -9028,6 +9134,52 @@ mod tests {
         for c in s.chars() {
             handle_key(app, press(KeyCode::Char(c)));
         }
+    }
+
+    /// Unlock a freshly-`init`'d empty vault to the Browse screen (the `kat_c1_...` setup, extracted).
+    ///
+    /// Returns the app AND the `TempDir` guard — the caller MUST keep the guard alive (if it drops,
+    /// the temp dir and vault file inside it are deleted while the `Session` still holds them).
+    ///
+    /// ★ M9: an empty vault leaves `selected_year` at its 2025 default (`editor.rs`); 2025 has no
+    /// full-return tables, so we set `selected_year = year` explicitly (else a stray commit → NoTables).
+    fn unlocked_app_on_empty_vault(year: i32) -> (EditorApp, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "empty-vault-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+        let mut app = EditorApp::new(vault.clone());
+        for c in pp_str.chars() {
+            app.unlock.push_char(c);
+        }
+        app.do_unlock();
+        assert_eq!(
+            app.screen,
+            EditorScreen::Browse,
+            "an empty vault must unlock to Browse"
+        );
+        app.selected_year = year; // ★ M9: override the 2025 default
+        (app, dir)
+    }
+
+    /// Opening the tax-inputs flow on a fresh (never-committed, no-draft) year yields a `None`
+    /// working copy — NI-2: no `ReturnInputs` exists until a filing status is chosen — and no
+    /// stale-discard note.
+    #[test]
+    fn open_tax_inputs_on_fresh_year_has_none_working() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        handle_key(&mut app, press(KeyCode::Char('T'))); // the chosen open key
+        let f = app.tax_inputs_form.as_ref().expect("form opened");
+        assert!(
+            f.working.is_none(),
+            "NI-2: a fresh year starts with no ReturnInputs until filing status is chosen"
+        );
+        assert!(f.stale_note.is_none());
+        assert!(
+            !f.discard_offered,
+            "a fresh year is not a stale-parked-draft refusal"
+        );
     }
 
     // ── KAT-U1 — unlock parity ───────────────────────────────────────────────

@@ -417,6 +417,7 @@ dependencies = [
  "btctax-adapters",
  "btctax-cli",
  "btctax-core",
+ "btctax-input-form",
  "btctax-store",
  "btctax-tui",
  "crossterm",
