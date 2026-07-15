@@ -157,6 +157,9 @@ pub struct TaxInputsFormState {
     pub working: btctax_input_form::Working,
     /// Index into the live section list (left-pane cursor). Task 2 renders/navigates it.
     pub section_idx: usize,
+    /// Index into the SELECTED section's live-field list (field-pane cursor). Task 2 navigates it
+    /// (`Up`/`Down`); reset to 0 on a section change (the new section has different fields).
+    pub field_focus: usize,
     /// The current row address (`[]` for singletons; `[w2_i]`/`[w2_i, box12_i]` for rows). Task 5.
     pub addr: btctax_input_form::RowAddr,
     /// Inline error surfaced under the field pane (parse/apply/store failures). `None` when clean.
@@ -169,6 +172,92 @@ pub struct TaxInputsFormState {
     /// state the flow renders ONLY the stale-parked message + an 'X' to discard (Task 8) / Esc to back
     /// out — NOT a normal editing form — so the undiscardable parked draft becomes discardable in-app.
     pub discard_offered: bool,
+}
+
+impl TaxInputsFormState {
+    /// A fresh flow for `year` with no working return (NI-2: `working = None`). The renderer shows
+    /// ONLY the filing-status choice until an `apply` materializes the return. Test/opener helper.
+    pub fn fresh(year: i32) -> Self {
+        Self {
+            year,
+            working: None,
+            section_idx: 0,
+            field_focus: 0,
+            addr: btctax_input_form::RowAddr::default(),
+            error: None,
+            parked: false,
+            stale_note: None,
+            discard_offered: false,
+        }
+    }
+}
+
+// ── Live-section / live-field projection over the FormSpec (shared by the renderer + the nav) ──────────
+//
+// ★ All access goes through `form_spec()` accessors — never a `ReturnInputs` struct field (spec §9A/§13,
+// Task 9 tests it). The Spouse-visibility + nested-skip rules are TUI-side knowledge the engine's
+// `OptionalSingleton` does not carry (review I-2).
+
+/// The `FilingStatus` field, located by its stable `FieldId` in `form_spec()`.
+pub fn filing_status_field() -> &'static btctax_input_form::Field {
+    btctax_input_form::form_spec()
+        .iter()
+        .flat_map(|s| s.fields.iter())
+        .find(|f| f.id == btctax_input_form::FieldId::FilingStatus)
+        .expect("FilingStatus field is present in form_spec()")
+}
+
+/// The chosen filing status as its stable enum name (`"Single"`/`"Mfj"`/…), read via the accessor —
+/// NEVER `ri.filing_status` (spec §9A/§13).
+fn filing_status_name(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> Option<String> {
+    match (filing_status_field().get)(ri, &btctax_input_form::RowAddr::default()) {
+        Some(btctax_input_form::FieldValue::Choice(c)) => Some(c),
+        _ => None,
+    }
+}
+
+/// Whether the Spouse section is OFFERED for this return — MFJ/MFS/QSS only (hidden on Single/HoH).
+/// TUI-side gate (review I-2); reads the filing status via the accessor.
+fn spouse_offered(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> bool {
+    matches!(
+        filing_status_name(ri).as_deref(),
+        Some("Mfj") | Some("Mfs") | Some("Qss")
+    )
+}
+
+/// Is this section shown as a top-level left-pane entry for `ri`?
+/// - `W2Box12` / `ScheduleACharitable`: logically nested (Task 5 renders them within their parent's
+///   rows) → skipped here.
+/// - `Spouse`: offered only for MFJ/MFS/QSS.
+/// - every other section (`Singleton`, `Repeating`, `ScheduleA`) is always shown.
+fn section_is_live(
+    section: &btctax_input_form::Section,
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+) -> bool {
+    use btctax_input_form::SectionId;
+    match section.id {
+        SectionId::W2Box12 | SectionId::ScheduleACharitable => false,
+        SectionId::Spouse => spouse_offered(ri),
+        _ => true,
+    }
+}
+
+/// The sections a renderer lists for this working return, in spec §9A order.
+pub fn live_sections(
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+) -> Vec<&'static btctax_input_form::Section> {
+    btctax_input_form::form_spec()
+        .iter()
+        .filter(|s| section_is_live(s, ri))
+        .collect()
+}
+
+/// The live fields of a section for this return (`field.live(ri)`).
+pub fn live_fields(
+    section: &'static btctax_input_form::Section,
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+) -> Vec<&'static btctax_input_form::Field> {
+    section.fields.iter().filter(|f| (f.live)(ri)).collect()
 }
 
 /// Cycle through the 5 `FilingStatus` variants in declaration order.

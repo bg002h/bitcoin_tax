@@ -786,6 +786,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             year,
             working: None,
             section_idx: 0,
+            field_focus: 0,
             addr: btctax_input_form::RowAddr::default(),
             error: None,
             parked: false,
@@ -796,6 +797,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             year,
             working: Some(ri),
             section_idx: 0,
+            field_focus: 0,
             addr: btctax_input_form::RowAddr::default(),
             error: None,
             parked: false,
@@ -807,6 +809,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 year,
                 working: Some(ri),
                 section_idx: 0,
+                field_focus: 0,
                 addr: btctax_input_form::RowAddr::default(),
                 error: None,
                 parked,
@@ -822,6 +825,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 year,
                 working: None,
                 section_idx: 0,
+                field_focus: 0,
                 addr: btctax_input_form::RowAddr::default(),
                 error: Some(e.to_string()),
                 parked: true,
@@ -837,13 +841,64 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
     app.tax_inputs_form = Some(form);
 }
 
-/// Handle a key press while the tax-inputs flow is open (Task 1 stub).
+/// Handle a key press while the tax-inputs flow is open (plan 3 task 2: section/field navigation).
 ///
-/// Esc closes the flow (from both the normal state and the P2-a discard-offered state). The per-kind
-/// editing keys, section/field navigation, commit/toggle, and the 'X' discard land in later tasks.
+/// Esc closes the flow (from both the normal state and the P2-a discard-offered state). `Up`/`Down`
+/// move the field-pane cursor within the selected section; `Left`/`Right`/`Tab` move the section
+/// cursor across the LIVE sections (clamped at both ends). The live section/field counts are
+/// recomputed each keypress — they change after edits (materialization, create/delete). The per-kind
+/// editing keys, commit/toggle, and the 'X' discard land in later tasks.
 fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
     if key.code == KeyCode::Esc {
         app.tax_inputs_form = None;
+        return;
+    }
+    let Some(form) = app.tax_inputs_form.as_mut() else {
+        return;
+    };
+    // ★ P2-a discard-only state: only Esc (above) / 'X' (Task 8) act here — swallow the rest.
+    if form.discard_offered {
+        return;
+    }
+
+    // Recompute the live section/field counts (they change after edits). `None` (NI-2) has no live
+    // sections yet — nav is a no-op until a filing status materializes the return.
+    let (n_sections, n_fields) = match form.working.as_ref() {
+        Some(ri) => {
+            let sections = crate::edit::form::live_sections(ri);
+            if sections.is_empty() {
+                (0, 0)
+            } else {
+                let sel = form.section_idx.min(sections.len() - 1);
+                let n_fields = crate::edit::form::live_fields(sections[sel], ri).len();
+                (sections.len(), n_fields)
+            }
+        }
+        None => (0, 0),
+    };
+
+    match key.code {
+        KeyCode::Up => form.field_focus = form.field_focus.saturating_sub(1),
+        KeyCode::Down if form.field_focus + 1 < n_fields => {
+            form.field_focus += 1;
+        }
+        KeyCode::Left => {
+            let sel = form.section_idx.min(n_sections.saturating_sub(1));
+            form.section_idx = sel.saturating_sub(1);
+            form.field_focus = 0;
+        }
+        KeyCode::Right | KeyCode::Tab => {
+            let sel = form.section_idx.min(n_sections.saturating_sub(1));
+            if sel + 1 < n_sections {
+                form.section_idx = sel + 1;
+            }
+            form.field_focus = 0;
+        }
+        _ => {}
+    }
+    // Normalize the section cursor (defensive: the live set can shrink after an edit).
+    if n_sections > 0 {
+        form.section_idx = form.section_idx.min(n_sections - 1);
     }
 }
 
@@ -9179,6 +9234,58 @@ mod tests {
         assert!(
             !f.discard_offered,
             "a fresh year is not a stale-parked-draft refusal"
+        );
+    }
+
+    /// Section/field navigation (plan 3 task 2): `Right`/`Tab` advance the section cursor across the
+    /// LIVE sections and clamp at the last; `Left` retreats and clamps at 0; `Down` clamps field focus
+    /// to the selected section's live-field count.
+    #[test]
+    fn tax_inputs_nav_moves_section_and_field_and_clamps() {
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        app.tax_inputs_form = Some(form);
+
+        // Right advances; Tab advances; Left retreats.
+        handle_key(&mut app, press(KeyCode::Right));
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().section_idx, 1);
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().section_idx, 2);
+        handle_key(&mut app, press(KeyCode::Left));
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().section_idx, 1);
+
+        // Right past the end clamps at the last live section (Single → 9 sections, max idx 8).
+        for _ in 0..50 {
+            handle_key(&mut app, press(KeyCode::Right));
+        }
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().section_idx,
+            8,
+            "section cursor clamps at the last live section (9 on Single: Spouse hidden, box12/charitable nested)"
+        );
+        // Left past the start clamps at 0.
+        for _ in 0..50 {
+            handle_key(&mut app, press(KeyCode::Left));
+        }
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().section_idx, 0);
+
+        // On ReturnOptions (idx 0) only FilingStatus is live (ItemizeElection needs a Schedule A) →
+        // Down clamps field focus at 0.
+        handle_key(&mut app, press(KeyCode::Down));
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().field_focus,
+            0,
+            "field focus clamps: ReturnOptions has a single live field on a Single return"
         );
     }
 

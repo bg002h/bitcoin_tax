@@ -31,8 +31,11 @@ use crate::edit::form::{
     SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TaxInputsFormState,
     VoidFlowState, VoidModalState, DONATION_FIELD_LABELS, FIELD_LABELS,
 };
+use crate::edit::form::{filing_status_field, live_fields, live_sections};
 use crate::editor::{EditorApp, EditorScreen};
+use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::{DisposeKind, InboundClass, OutflowClass, Persistability};
+use btctax_input_form::{FieldKind, FieldValue, RowAddr, Section, SectionKind, SecretView};
 use btctax_tui::app::Tab;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -1911,77 +1914,319 @@ fn draw_void_modal(frame: &mut Frame, area: Rect, modal: &VoidModalState) {
 /// keys are global). Lines are sized to fit an 80×24 terminal (no scroll; `centered_rect` truncates).
 /// KEEP IN SYNC with the Browse key handler (`handle_key` in main.rs) — the KAT
 /// `help_lists_every_browse_action_key` pins that every action key appears here.
-/// Render the "tax inputs" editing flow (Task 1 stub).
+/// Render the "tax inputs" editing flow — the 3-region layout (section list · field pane · status
+/// line), a full-area overlay over Browse (plan 3 task 2).
 ///
-/// ★ First branch (P2-a): when `form.discard_offered`, render ONLY the stale-parked message + the
-/// back-out hint — NOT an editing surface (Task 8 wires the 'X' → `discard_parked_draft`). Otherwise
-/// draw a minimal placeholder; Task 2 replaces this with the real 3-region render (section list ·
-/// field pane · status line).
+/// ★ Branch order (review M7): `discard_offered` FIRST — the P2-a stale-parked state renders ONLY the
+/// discard message (no editing surface). Then NI-2 (`working == None`) renders ONLY the filing-status
+/// choice. Otherwise the full 3-region render over the LIVE sections.
+///
+/// All field access is through `form_spec()` accessors (`live_sections`/`live_fields`/`field.get`) —
+/// this renderer NEVER names a `ReturnInputs` struct field (spec §9A/§13).
 fn draw_tax_inputs_form(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
-    let rect = centered_rect(78, 14, area);
-    frame.render_widget(Clear, rect);
+    frame.render_widget(Clear, area);
 
-    let (title, border, lines): (&str, Color, Vec<Line>) = if form.discard_offered {
-        // ★ P2-a: stale PARKED draft — discard-only, no editing surface.
-        let mut v = vec![
-            Line::from(Span::styled(
-                format!("Stale parked draft for {}", form.year),
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-        ];
-        if let Some(err) = form.error.as_ref() {
-            v.push(Line::from(err.clone()));
-            v.push(Line::from(""));
-        }
-        v.push(Line::from("Press X to discard the parked draft, Esc to back out."));
-        (" Tax inputs — stale parked draft ", Color::Red, v)
-    } else {
-        let state = if form.working.is_some() {
-            "editing a return"
-        } else {
-            "choose a filing status" // NI-2: no ReturnInputs until filing status is chosen
+    // ★ P2-a FIRST: a stale PARKED draft is discard-only — no editing surface.
+    if form.discard_offered {
+        draw_tax_inputs_discard(frame, area, form);
+        return;
+    }
+
+    // 3 regions: [left section list | right field pane] over a bottom status line.
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(4)])
+        .split(area);
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(34), Constraint::Min(1)])
+        .split(rows[0]);
+    let (left_area, right_area, status_area) = (cols[0], cols[1], rows[1]);
+
+    let cyan = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let yellow = Style::default().fg(Color::Yellow);
+
+    // ── NI-2: no return yet — show ONLY the filing-status choice ──────────────
+    let Some(ri) = form.working.as_ref() else {
+        let left = Paragraph::new(vec![Line::from("  Return options")]).block(
+            Block::default()
+                .title(" Sections ")
+                .borders(Borders::ALL)
+                .border_style(cyan),
+        );
+        frame.render_widget(left, left_area);
+
+        let fs = filing_status_field();
+        let choices = match fs.kind {
+            FieldKind::Enum(opts) => opts.join(" / "),
+            _ => String::new(),
         };
-        let mut v = vec![
+        let right = Paragraph::new(vec![
             Line::from(Span::styled(
-                format!("Tax inputs — {}", form.year),
+                format!("  {}", fs.label),
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )),
-            Line::from(state.to_string()),
-            Line::from(format!(
-                "section {} · row depth {}",
-                form.section_idx,
-                form.addr.0.len()
+            Line::from(format!("    choices: {choices}")),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  no return yet — choose a filing status to begin (NI-2)",
+                Style::default().fg(Color::DarkGray),
             )),
-        ];
-        if form.parked {
-            v.push(Line::from("(parked)"));
-        }
-        if let Some(note) = form.stale_note.as_ref() {
-            v.push(Line::from(note.to_string()));
-        }
-        if let Some(err) = form.error.as_ref() {
-            v.push(Line::from(err.clone()));
-        }
-        v.push(Line::from(""));
-        v.push(Line::from(Span::styled(
-            "  Esc  to close",
-            Style::default().fg(Color::DarkGray),
-        )));
-        (" Tax inputs ", Color::Yellow, v)
+        ])
+        .block(
+            Block::default()
+                .title(" Return options ")
+                .borders(Borders::ALL)
+                .border_style(yellow),
+        );
+        frame.render_widget(right, right_area);
+
+        draw_tax_inputs_status(frame, status_area, form);
+        return;
     };
 
-    let p = Paragraph::new(lines).block(
+    // ── Live sections (Some(ri)) ─────────────────────────────────────────────
+    let sections = live_sections(ri);
+    let sel = form.section_idx.min(sections.len().saturating_sub(1));
+
+    // Left pane: the section list with a per-section status glyph + focus marker.
+    let mut left_lines: Vec<Line> = Vec::with_capacity(sections.len());
+    for (i, s) in sections.iter().enumerate() {
+        let glyph = section_glyph(s, ri);
+        let marker = if i == sel { '>' } else { ' ' };
+        let style = if i == sel {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        left_lines.push(Line::from(Span::styled(
+            format!("{marker} {glyph} {}", s.title),
+            style,
+        )));
+    }
+    let left = Paragraph::new(left_lines).block(
         Block::default()
-            .title(title)
+            .title(" Sections ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(border)),
+            .border_style(cyan),
+    );
+    frame.render_widget(left, left_area);
+
+    // Right pane: the selected section's field pane.
+    let section = sections[sel];
+    let right_lines = field_pane_lines(section, ri, &form.addr, form.field_focus, form.error.as_deref());
+    let right = Paragraph::new(right_lines).block(
+        Block::default()
+            .title(format!(" {} ", section.title))
+            .borders(Borders::ALL)
+            .border_style(yellow),
+    );
+    frame.render_widget(right, right_area);
+
+    draw_tax_inputs_status(frame, status_area, form);
+}
+
+/// ★ P2-a: the stale-PARKED-draft discard-only screen — the message + the back-out hint, NO editing
+/// surface (Task 8 wires the 'X' → `discard_parked_draft`).
+fn draw_tax_inputs_discard(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+    let rect = centered_rect(78, 14, area);
+    frame.render_widget(Clear, rect);
+    let mut v = vec![
+        Line::from(Span::styled(
+            format!("Stale parked draft for {}", form.year),
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+    if let Some(err) = form.error.as_ref() {
+        v.push(Line::from(err.clone()));
+        v.push(Line::from(""));
+    }
+    v.push(Line::from(
+        "Press X to discard the parked draft, Esc to back out.",
+    ));
+    let p = Paragraph::new(v).block(
+        Block::default()
+            .title(" Tax inputs — stale parked draft ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red)),
     );
     frame.render_widget(p, rect);
+}
+
+/// The bottom status line: the active-source placeholder (Task 8 wires the real `active_source`), a
+/// key legend, and — if present — the §6.3 stale-WIP-discard note.
+fn draw_tax_inputs_status(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+    let mut lines: Vec<Line> = vec![Line::from(vec![
+        Span::raw("  active source: "),
+        Span::styled("full return", Style::default().fg(Color::Cyan)),
+        Span::styled(
+            "   [↑/↓] field · [←/→ or Tab] section · [Esc] close",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ])];
+    if let Some(note) = form.stale_note.as_ref() {
+        lines.push(Line::from(Span::styled(
+            format!("  {note}"),
+            Style::default().fg(Color::Yellow),
+        )));
+    }
+    let p = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    );
+    frame.render_widget(p, area);
+}
+
+/// The field-pane lines for the selected section: its live `Field`s as `label  [value]`, the focused
+/// field highlighted; a `[create]` affordance for an absent optional-singleton; a row-count summary
+/// for a repeating group (row editing lands in a later task).
+fn field_pane_lines(
+    section: &'static Section,
+    ri: &ReturnInputs,
+    addr: &RowAddr,
+    field_focus: usize,
+    error: Option<&str>,
+) -> Vec<Line<'static>> {
+    let focus_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let dark = Style::default().fg(Color::DarkGray);
+    let mut lines: Vec<Line> = Vec::new();
+
+    // An absent optional-singleton shows a [create] affordance instead of fields.
+    if let SectionKind::OptionalSingleton { present, .. } = section.kind {
+        if !present(ri) {
+            lines.push(Line::from("  (not present)"));
+            lines.push(Line::from(Span::styled(
+                "  [create] — press c to add this section",
+                dark,
+            )));
+            push_error(&mut lines, error);
+            return lines;
+        }
+    }
+    // A repeating group shows its row count (row navigation/editing is a later task).
+    if let SectionKind::Repeating { len, .. } = section.kind {
+        let n = len(ri, &RowAddr::default());
+        lines.push(Line::from(format!("  {n} row(s)")));
+        lines.push(Line::from(Span::styled(
+            "  press a to add a row (row editing lands next)",
+            dark,
+        )));
+        push_error(&mut lines, error);
+        return lines;
+    }
+
+    // Singleton / present optional-singleton: the live fields as `label  [value]`.
+    let fields = live_fields(section, ri);
+    if fields.is_empty() {
+        lines.push(Line::from(Span::styled("  (no live fields)", dark)));
+    }
+    for (i, f) in fields.iter().enumerate() {
+        let value = (f.get)(ri, addr)
+            .map(|v| render_field_value(&v))
+            .unwrap_or_else(|| "—".to_string());
+        let style = if i == field_focus {
+            focus_style
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  {}  [{}]", f.label, value),
+            style,
+        )));
+    }
+    push_error(&mut lines, error);
+    lines
+}
+
+/// Append the flow's inline error (parse/apply/store failure) under the field pane, in red.
+fn push_error(lines: &mut Vec<Line<'static>>, error: Option<&str>) {
+    if let Some(err) = error {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  error: {err}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+}
+
+/// The per-section status glyph: `✓` when every live field is answered, `…` otherwise (Task 7 adds
+/// `!` for a screen refusal). An absent optional-singleton is `…`; a repeating group is `✓` (its rows
+/// are optional here — refined in Task 7).
+fn section_glyph(section: &'static Section, ri: &ReturnInputs) -> char {
+    if let SectionKind::OptionalSingleton { present, .. } = section.kind {
+        if !present(ri) {
+            return '…';
+        }
+    }
+    if let SectionKind::Repeating { .. } = section.kind {
+        return '✓';
+    }
+    let fields = live_fields(section, ri);
+    let complete = !fields.is_empty()
+        && fields.iter().all(|f| {
+            (f.get)(ri, &RowAddr::default())
+                .map(|v| value_is_answered(&v))
+                .unwrap_or(false)
+        });
+    if complete {
+        '✓'
+    } else {
+        '…'
+    }
+}
+
+/// Whether a field value counts as "answered" for the section-completeness glyph.
+fn value_is_answered(v: &FieldValue) -> bool {
+    match v {
+        FieldValue::Money(m) => !m.is_zero(),
+        FieldValue::Text(s) => !s.is_empty(),
+        FieldValue::Bool(b) => *b,
+        FieldValue::TriState(t) => t.is_some(),
+        FieldValue::Date(d) => d.is_some(),
+        FieldValue::Choice(_) => true,
+        FieldValue::Secret(sv) => matches!(sv, SecretView::Set { .. }),
+        // `get` never returns `SecretEntry` (inbound-only); treat defensively as answered.
+        FieldValue::SecretEntry(_) => true,
+    }
+}
+
+/// Render a field value for display, per kind. A `Secret` shows its `SecretView` (masked or
+/// `(unset)`) — NEVER raw digits.
+fn render_field_value(v: &FieldValue) -> String {
+    match v {
+        FieldValue::Money(m) => format!("${m}"),
+        FieldValue::Text(s) => s.clone(),
+        FieldValue::Bool(b) => if *b { "[x]" } else { "[ ]" }.to_string(),
+        FieldValue::TriState(t) => match t {
+            Some(true) => "yes",
+            Some(false) => "no",
+            None => "—",
+        }
+        .to_string(),
+        FieldValue::Date(d) => match d {
+            Some(d) => d.to_string(),
+            None => "—".to_string(),
+        },
+        FieldValue::Choice(c) => c.clone(),
+        FieldValue::Secret(sv) => match sv {
+            SecretView::Empty => "(unset)".to_string(),
+            SecretView::Set { masked } => masked.clone(),
+        },
+        // Unreachable via `get` (SecretEntry is inbound-only); never echo it.
+        FieldValue::SecretEntry(_) => "(unset)".to_string(),
+    }
 }
 
 fn draw_help_overlay(frame: &mut Frame, area: Rect) {
@@ -5365,6 +5610,114 @@ mod tests {
             rendered.contains("ordinary_taxable_income"),
             "form must show field label"
         );
+    }
+
+    // ── Tax-inputs 3-region render (plan 3 task 2) ───────────────────────────
+
+    /// Flatten a rendered `Buffer` into a row-major `String` (one char per cell) — the recon's
+    /// cell-collect pattern, named for the tax-inputs snapshot tests.
+    fn flatten(buf: &ratatui::buffer::Buffer) -> String {
+        buf.content()
+            .iter()
+            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    /// NI-2: on a `None` working copy the render shows ONLY the filing-status choice — no other
+    /// section is offered until a filing status is chosen.
+    #[test]
+    fn tax_inputs_renders_only_filing_status_when_fresh() {
+        use crate::edit::form::TaxInputsFormState;
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let form = TaxInputsFormState::fresh(2024); // working = None
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(r.contains("Filing status"), "the fresh screen shows the filing-status choice");
+        assert!(
+            !r.contains("W-2"),
+            "no other section is offered until filing status is chosen (NI-2)"
+        );
+    }
+
+    /// A materialized `Single` return: the left pane lists the live sections in §9A order (Spouse
+    /// hidden; the nested charitable section skipped), the right pane shows the selected section's
+    /// live fields as `label  [value]`, and the bottom shows the active source + a key legend.
+    #[test]
+    fn tax_inputs_lists_live_sections_for_single_return() {
+        use crate::edit::form::TaxInputsFormState;
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        // Materialize a Single return via `apply` — never construct a `ReturnInputs` directly (NI-2).
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+
+        // Left pane lists every live section title.
+        for title in [
+            "Return options",
+            "Taxpayer",
+            "Address",
+            "Dependents",
+            "W-2s",
+            "Schedule A",
+            "Payments",
+            "Declarations",
+            "Skippables",
+        ] {
+            assert!(r.contains(title), "left pane must list the section {title:?}");
+        }
+        // Spouse is HIDDEN on Single; the nested charitable section is not a top-level entry.
+        assert!(!r.contains("Spouse"), "Spouse is hidden on a Single return");
+        assert!(
+            !r.contains("charitable"),
+            "the nested Schedule-A charitable section is not a top-level left-pane entry"
+        );
+
+        // §9A order (left-pane rows are top-to-bottom → monotonic in the row-major flatten).
+        let pos = |t: &str| r.find(t).unwrap_or_else(|| panic!("missing {t:?}"));
+        let order = [
+            "Return options",
+            "Taxpayer",
+            "Address",
+            "Dependents",
+            "W-2s",
+            "Schedule A",
+            "Payments",
+            "Declarations",
+            "Skippables",
+        ];
+        for w in order.windows(2) {
+            assert!(pos(w[0]) < pos(w[1]), "section order: {:?} must precede {:?}", w[0], w[1]);
+        }
+
+        // Per-section status glyph: ReturnOptions is complete (its one live field is set) → ✓; an
+        // incomplete section (e.g. Taxpayer, blank name) → …. Both appear in the left pane.
+        assert!(r.contains('✓'), "a complete section shows the ✓ glyph");
+        assert!(r.contains('…'), "an incomplete section shows the … glyph");
+
+        // Right pane: the selected section (ReturnOptions, idx 0) shows its field as `label  [value]`.
+        assert!(r.contains("[Single]"), "the filing-status value renders as the chosen enum");
+
+        // Bottom: the active-source line + a key legend naming section navigation.
+        assert!(r.contains("active source"), "status line shows the active source");
+        assert!(r.contains("section"), "the key legend mentions section navigation");
     }
 
     // ── EDITOR marker in Browse screen ───────────────────────────────────────
