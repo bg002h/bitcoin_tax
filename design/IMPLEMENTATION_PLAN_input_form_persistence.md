@@ -121,7 +121,12 @@ pub(crate) fn get_draft_row(conn: &Connection, year: i32) -> Result<Option<Draft
     );
     match row {
         Ok((json, version, parked)) => {
-            let ri: ReturnInputs = serde_json::from_str(&json)?;
+            // ★ I-A: CliError has NO From<serde_json::Error> — map explicitly like return_inputs.rs:66-69
+            // (a bad blob is a typed error, not a `?`-panic). Do NOT use `?` on serde here.
+            let ri: ReturnInputs = serde_json::from_str(&json).map_err(|e| CliError::BadConfigValue {
+                key: format!("return_inputs_draft[{year}]"),
+                value: format!("invalid JSON: {e}"),
+            })?;
             Ok(Some(DraftRow { ri, version, parked: parked != 0 }))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -131,7 +136,11 @@ pub(crate) fn get_draft_row(conn: &Connection, year: i32) -> Result<Option<Draft
 
 pub(crate) fn set_draft_row(conn: &Connection, year: i32, ri: &ReturnInputs, parked: bool) -> Result<(), CliError> {
     init_draft_table(conn)?;
-    let j = serde_json::to_string(ri)?;
+    // ★ I-A: map serde explicitly (no From<serde_json::Error> on CliError) — mirror return_inputs.rs:92-95.
+    let j = serde_json::to_string(ri).map_err(|e| CliError::BadConfigValue {
+        key: format!("return_inputs_draft[{year}]"),
+        value: format!("could not serialize: {e}"),
+    })?;
     conn.execute(
         "INSERT INTO return_inputs_draft(year,inputs_json,schema_version,parked) VALUES(?1,?2,?3,?4) \
          ON CONFLICT(year) DO UPDATE SET inputs_json=?2, schema_version=?3, parked=?4",
@@ -176,12 +185,24 @@ Add `pub mod input_form_store;` to `lib.rs` (near `pub mod return_inputs;`). Not
 - Consumes: `crate::Session` (`sess.conn()`, `sess.save()`), Task-1 fns.
 - Produces: `pub fn save_draft(sess: &mut Session, year: i32, ri: &ReturnInputs) -> Result<(), CliError>` — reads the existing row's `parked` flag (default `false` if absent), upserts with that flag PRESERVED (NI-1), then `sess.save()` (reaches disk).
 
-- [ ] **Step 1: Write the failing tests.** Use an on-disk temp vault so the disk round-trip is real (mirror how `return_inputs.rs` tests build a `Session` — grep its tests for the `Session::create`/temp-path helper and reuse it).
+**★ M-3 — the `tmp_vault()` helper MUST return the `TempDir` guard** (else it drops and deletes the vault before `Session::open`). Ground it in `session.rs:1322-1334`:
+```rust
+fn pp() -> Passphrase { Passphrase::new("test-pass".into()) }
+fn tmp_vault() -> (tempfile::TempDir, std::path::PathBuf, Passphrase) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vault.pgp");
+    { let _ = Session::create(&path, &pp()).unwrap(); }   // create + drop releases the lock so `open` can re-acquire
+    (dir, path, pp())                                     // caller binds `let (_dir, path, pp) = tmp_vault();` — keep `_dir` alive
+}
+```
+(Confirm `Session::create` vs a create-then-reopen against the real `session.rs` test helper; the point is the returned `TempDir` must outlive every `Session::open`.)
+
+- [ ] **Step 1: Write the failing tests.** Use `tmp_vault()` (above) so the disk round-trip is real.
 
 ```rust
 #[test]
 fn save_draft_preserves_parked_and_reaches_disk() {
-    let (path, pp) = tmp_vault();                 // helper: creates an empty vault, returns (path, passphrase)
+    let (_dir, path, pp) = tmp_vault();                 // helper: creates an empty vault, returns (path, passphrase)
     let ri_a = ReturnInputs { filing_status: FilingStatus::Single, ..Default::default() };
     {
         let mut sess = Session::open(&path, &pp).unwrap();
@@ -200,7 +221,7 @@ fn save_draft_preserves_parked_and_reaches_disk() {
 
 #[test]
 fn save_draft_on_fresh_year_is_unparked() {
-    let (path, pp) = tmp_vault();
+    let (_dir, path, pp) = tmp_vault();
     let mut sess = Session::open(&path, &pp).unwrap();
     save_draft(&mut sess, 2024, &ReturnInputs::default()).unwrap();
     assert_eq!(parked_flag(sess.conn(), 2024).unwrap(), Some(false));
@@ -329,12 +350,12 @@ pub fn load(conn: &Connection, year: i32) -> Result<Loaded, CliError> {
 
 **Behavior:** if `table` or `params` is `None` → `NoTables` (write nothing — I-11). Else `screen_inputs(ri, table, params)`: `Some(refusal)` → `Refused(refusal)` (write nothing); `None` → snapshot, `return_inputs::set(conn, year, ri)`, `delete_draft(conn, year)`, `sess.save()` (restore snapshot on save failure) → `Committed`.
 
-- [ ] **Step 1: Write the failing tests.** For the params, load the real bundled tables (grep `BundledTaxTables`/`BundledFullReturnTables` usage in `resolve.rs`/tests for the exact load + lookup call — e.g. `BundledTaxTables::load()?.table_for(2024)` and `BundledFullReturnTables::load()?.full_return_for(2024)`).
+- [ ] **Step 1: Write the failing tests.** For the params, load the real bundled tables. **`BundledTaxTables::load()` / `BundledFullReturnTables::load()` return `Self` (NOT `Result`)** — call them bare (`let tables = BundledTaxTables::load();`, verified `session.rs:460`), then `tables.table_for(2024)` / `fr.full_return_for(2024)` return `Option<&…>` (unwrap THOSE). Full-return params exist only for 2024 (I-11).
 
 ```rust
 #[test]
 fn commit_non2024_is_notables_and_writes_nothing() {
-    let (path, pp) = tmp_vault();
+    let (_dir, path, pp) = tmp_vault();
     let mut sess = Session::open(&path, &pp).unwrap();
     let ri = ReturnInputs { filing_status: FilingStatus::Single, ..Default::default() };
     set_draft_row(sess.conn(), 2099, &ri, false).unwrap();
@@ -347,10 +368,10 @@ fn commit_non2024_is_notables_and_writes_nothing() {
 
 #[test]
 fn commit_clean_sets_row_and_deletes_draft_refused_writes_nothing() {
-    let (path, pp) = tmp_vault();
-    let tables = BundledTaxTables::load().unwrap();
-    let fr = BundledFullReturnTables::load().unwrap();
-    let (t, p) = (tables.table_for(2024).unwrap(), fr.full_return_for(2024).unwrap());
+    let (_dir, path, pp) = tmp_vault();
+    let tables = BundledTaxTables::load();          // ★ I-B: load() returns Self, NOT Result — no `?`, no `.unwrap()`
+    let fr = BundledFullReturnTables::load();
+    let (t, p) = (tables.table_for(2024).unwrap(), fr.full_return_for(2024).unwrap());  // these DO return Option
     let mut sess = Session::open(&path, &pp).unwrap();
     // A screen-clean minimal return: choose the fixture that `every_live_question_can_actually_be_answered`
     // uses (all 8 declarations answered, no income) — build it the same way that test does. Call it `clean`.
@@ -412,7 +433,7 @@ pub fn commit(sess: &mut Session, year: i32, ri: &ReturnInputs,
 **Interfaces:**
 - Produces: `pub fn coherence_clear_or_refuse(conn: &Connection, year: i32) -> Result<(), CliError>` — no draft → `Ok`; `parked = 0` WIP → `delete_draft` (warn if it deserializes to a non-trivial return); `parked = 1` → `Err(ParkedDraftBlocksWrite { year })`.
 
-**RULE (§6.2):** an authoritative committed-row write CLEARS that year's WIP draft but REFUSES a parked one. The four writers call `coherence_clear_or_refuse` **immediately BEFORE** their `return_inputs::set`/`delete` (fail-fast: a parked-draft `Err` aborts the command before any committed-row mutation — no wasted in-memory write to discard), and before the shared `s.save()`. A WIP draft is deleted in the same `conn`, so the subsequent `set` + `s.save()` persist both changes together. `write_back_carryover` writes `year + 1`, so it checks coherence on `year + 1`.
+**RULE (§6.2):** an authoritative committed-row write CLEARS that year's WIP draft but REFUSES a parked one. **★ M-1 — the call goes RIGHT AFTER `Session::open`, before any committed-row READ or write.** Placing it merely before the `set`/`delete` would shadow the parked-refuse in two writers: `answer_return_inputs` (`answer.rs:105`) and `write_back_carryover` (`tax.rs:450`) both early-return when the required committed row is absent — and a parked year HAS no committed row — so they would exit with a generic "no inputs" message before ever reaching the coherence check, never surfacing the C-1 remedy. Running coherence first fixes this uniformly: a parked-draft `Err` aborts the command up front (before any mutation, and before the "no committed row" early-return), and a WIP draft is deleted in the same `conn` so the later `set` + shared `s.save()` persist together. `write_back_carryover` writes/reads `year + 1`, so it checks coherence on `year + 1`; the other three on `year`.
 
 - [ ] **Step 1: Write the failing tests** (in `input_form_store.rs`).
 
@@ -437,7 +458,7 @@ fn coherence_clears_wip_but_refuses_parked() {
     coherence_clear_or_refuse(&conn, 2030).unwrap();
 }
 ```
-Also add ONE integration test that `income import` refuses on a parked draft (build a Session, seed a `parked=1` draft for 2024 via `set_draft_row`, run the import path, assert `Err(ParkedDraftBlocksWrite)` and the committed row was NOT written). If wiring an end-to-end `income import` in a unit test is heavy, instead assert the writer calls the helper by placing the helper call and adding a focused test on `import_return_inputs`'s public entry with a seeded parked draft — pick whichever the existing `tax.rs` tests support.
+Also add ONE integration test pinning a real writer's wiring — **`income clear` is the cheapest reachable parked-refuse** (`clear_return_inputs`'s `return_inputs::delete` requires no pre-existing committed row, so the coherence check is always reached): build a `Session` on a `tmp_vault()`, seed a `parked=1` draft for 2024 via `set_draft_row`, run `clear_return_inputs`'s entry, assert it returns `Err(ParkedDraftBlocksWrite { year: 2024 })` and the parked draft is STILL present (not destroyed). Match whatever entry shape `tax.rs`'s existing tests invoke.
 
 - [ ] **Step 2: Run to verify it fails** — FAIL.
 
@@ -466,17 +487,17 @@ pub fn coherence_clear_or_refuse(conn: &Connection, year: i32) -> Result<(), Cli
     }
 }
 ```
-Wire (each: insert the call **immediately before** the existing `return_inputs::set`/`delete`; grep for the write site rather than trusting a line number, since plan 1 shifted `answer.rs`):
-- `tax.rs` `import_return_inputs` (before `return_inputs::set(s.conn(), year, &ri)?;`): `crate::input_form_store::coherence_clear_or_refuse(s.conn(), year)?;`
-- `answer.rs` `answer_return_inputs` (before its `return_inputs::set(...)?;`): same, on `year`.
-- `tax.rs` `write_back_carryover` (before `return_inputs::set(s.conn(), year + 1, &updated)?;`): `crate::input_form_store::coherence_clear_or_refuse(s.conn(), year + 1)?;`
-- `tax.rs` `clear_return_inputs` (before `return_inputs::delete(s.conn(), year)?;`): same, on `year`.
+Wire (each: insert the call **right after `Session::open`**, before the committed-row read/write — grep for the `Session::open` site rather than trusting a line number, since plan 1 shifted `answer.rs`):
+- `tax.rs` `import_return_inputs` (after `let mut s = Session::open(...)?;`, ~:57): `crate::input_form_store::coherence_clear_or_refuse(s.conn(), year)?;`
+- `answer.rs` `answer_return_inputs` (after its `Session::open`, ~:104): same, on `year` — BEFORE the `return_inputs::get(...) else { return … }` early-return, so a parked year surfaces the C-1 remedy.
+- `tax.rs` `write_back_carryover` (after its `Session::open`, ~:406): `crate::input_form_store::coherence_clear_or_refuse(s.conn(), year + 1)?;` — before the `year+1` committed-row read (~:450).
+- `tax.rs` `clear_return_inputs` (after its `Session::open`, ~:164): same, on `year`.
 
 Note: `ReturnInputs` must be `PartialEq` for the `!= default` warn (it is — used across the codebase; verify).
 
 - [ ] **Step 4: Run green**; `make check` green (the four writers still pass their existing tests, now also clearing/refusing drafts).
 
-- [ ] **Step 5: Mutation-check** — change `Some(true) => Err(...)` to `Some(true) => Ok(())` → `coherence_clears_wip_but_refuses_parked` FAILS on the parked assertion; restore. Then confirm at least one writer's wiring is load-bearing: remove the `coherence_clear_or_refuse` call from `import_return_inputs` → the import-refuses-on-parked integration test fails; restore.
+- [ ] **Step 5: Mutation-check** — (a) change `Some(true) => Err(...)` to `Some(true) => Ok(())` → `coherence_clears_wip_but_refuses_parked` FAILS on the parked assertion; restore. (b) Confirm the writer wiring is load-bearing: remove the `coherence_clear_or_refuse` call from `clear_return_inputs` → the `income clear` parked-refuse integration test FAILS; restore. Both via cp-backup + touch.
 
 - [ ] **Step 6: Commit** — `git commit -m "feat(input-form persistence): §6.2 draft-coherence rule across the committed-row writers (plan 2 task 5)"`
 
@@ -490,13 +511,13 @@ Note: `ReturnInputs` must be `PartialEq` for the `!= default` warn (it is — us
 **Interfaces:**
 - Produces: `pub fn park_to_profile(sess: &mut Session, year: i32) -> Result<(), CliError>` — stashes the committed row into its draft with `parked = 1`, THEN deletes the committed row (in-session `return_inputs::delete`, NOT `income clear` — N-1), atomically (snapshot/restore). Refuses (writes nothing) if there is no committed row, or if a divergent WIP draft already occupies the slot (clean-state gate, §9).
 
-**Behavior:** (1) `return_inputs::get(conn, year)` — `None` → `Err(Usage("no committed return to park"))`. (2) clean-state gate: if a `parked = 0` draft exists → `Err(Usage("finish or discard the work-in-progress draft first"))` (parking would clobber it). (3) `snapshot`; `set_draft_row(conn, year, &ri, parked=true)`; `return_inputs::delete(conn, year)`; `sess.save()` (restore on failure).
+**Behavior:** (1) `return_inputs::get(conn, year)` — `None` → `Err(Usage("no committed return to park"))`. (2) clean-state gate: if a `parked = 0` draft exists → `Err(Usage("finish or discard the work-in-progress draft first"))` (parking would clobber the one-per-year draft slot). **★ M-4 — this refuses ANY WIP draft, not only a "divergent" one (§9's wording); the conservatism is intentional and safe — the store can't cheaply tell "divergent from committed" apart, and refusing a same-valued WIP costs the user nothing.** (3) `snapshot`; `set_draft_row(conn, year, &ri, parked=true)`; `return_inputs::delete(conn, year)`; `sess.save()` (restore on failure).
 
 - [ ] **Step 1: Write the failing tests.**
 ```rust
 #[test]
 fn park_stashes_then_deletes_committed_atomically() {
-    let (path, pp) = tmp_vault();
+    let (_dir, path, pp) = tmp_vault();
     let mut sess = Session::open(&path, &pp).unwrap();
     let ri = ReturnInputs { filing_status: FilingStatus::Mfj, ..Default::default() };
     crate::return_inputs::set(sess.conn(), 2024, &ri).unwrap();
@@ -512,8 +533,8 @@ fn park_stashes_then_deletes_committed_atomically() {
 }
 
 #[test]
-fn park_refuses_without_committed_row_and_on_divergent_wip() {
-    let (path, pp) = tmp_vault();
+fn park_refuses_without_committed_row_and_on_any_wip() {
+    let (_dir, path, pp) = tmp_vault();
     let mut sess = Session::open(&path, &pp).unwrap();
     assert!(park_to_profile(&mut sess, 2024).is_err(), "nothing to park");
     let ri = ReturnInputs { filing_status: FilingStatus::Single, ..Default::default() };
@@ -546,7 +567,7 @@ pub fn park_to_profile(sess: &mut Session, year: i32) -> Result<(), CliError> {
 
 - [ ] **Step 4: Run green**; `make check` green.
 
-- [ ] **Step 5: Mutation-check** — reorder to delete-before-stash (swap the two lines) is NOT a good mutation (still passes on success); instead, mutation-check the clean-state gate: change `== Some(false)` to `== Some(true)` → `park_refuses_...on_divergent_wip` FAILS; restore. And delete the clean-state gate block entirely → same test fails; restore.
+- [ ] **Step 5: Mutation-check** — reorder to delete-before-stash (swap the two lines) is NOT a good mutation (still passes on success); instead, mutation-check the clean-state gate: change `== Some(false)` to `== Some(true)` → `park_refuses_without_committed_row_and_on_any_wip` FAILS; restore. And delete the clean-state gate block entirely → same test fails; restore.
 
 - [ ] **Step 6: Commit** — `git commit -m "feat(input-form persistence): park_to_profile — atomic stash→delete + clean-state gate (plan 2 task 6)"`
 
@@ -582,7 +603,7 @@ fn active_source_follows_resolve_precedence() {
 
 #[test]
 fn discard_parked_draft_only_deletes_a_parked_row() {
-    let (path, pp) = tmp_vault();
+    let (_dir, path, pp) = tmp_vault();
     let mut sess = Session::open(&path, &pp).unwrap();
     let ri = ReturnInputs { filing_status: FilingStatus::Single, ..Default::default() };
     // a WIP draft is NOT discardable via this path
@@ -603,6 +624,9 @@ fn discard_parked_draft_only_deletes_a_parked_row() {
 pub enum ActiveSource { FullReturn, TaxProfile, Neither }
 
 pub fn active_source(conn: &Connection, year: i32) -> Result<ActiveSource, CliError> {
+    // ★ M-5: advisory display hint. Uses `exists` (a SELECT 1), so a schema-STALE committed row still reports
+    // FullReturn — which is honest: that stale row IS the active source (resolve would refuse it as uncomputable,
+    // but it still shadows the profile). Do NOT "fix" this to `get` — the stale row is intentionally the source.
     if crate::return_inputs::exists(conn, year)? { return Ok(ActiveSource::FullReturn); }
     if crate::tax_profile::years(conn)?.contains(&year) { return Ok(ActiveSource::TaxProfile); }
     Ok(ActiveSource::Neither)
