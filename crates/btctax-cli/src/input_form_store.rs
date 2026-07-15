@@ -72,7 +72,7 @@ pub(crate) fn set_draft_row(
     Ok(())
 }
 
-pub fn delete_draft(conn: &Connection, year: i32) -> Result<bool, CliError> {
+pub(crate) fn delete_draft(conn: &Connection, year: i32) -> Result<bool, CliError> {
     init_draft_table(conn)?;
     Ok(conn.execute("DELETE FROM return_inputs_draft WHERE year=?1", [year])? > 0)
 }
@@ -122,6 +122,27 @@ pub enum Loaded {
     Fresh,
 }
 
+/// The §6.3 fact that [`load`] discarded a stale work-in-progress draft (schema `found` — a version this
+/// build does not read — vs `expected`). Returned ALONGSIDE `Loaded` so the caller can surface it: a store
+/// read fn must not `eprintln!` the note itself, because its only future caller is plan 3's raw-mode,
+/// alternate-screen TUI, where stderr is invisible/screen-corrupting (I-1). `pub` so plan 3 can render it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaleNote {
+    pub year: i32,
+    pub found: i64,
+    pub expected: i64,
+}
+
+impl std::fmt::Display for StaleNote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "discarded a stale draft for {} (schema v{}, expected v{})",
+            self.year, self.found, self.expected
+        )
+    }
+}
+
 /// Resolve the working return for `year` (§6.1 precedence + §6.3 stale split).
 ///
 /// A draft row takes precedence over the committed row. If the draft is at a schema version this build does
@@ -129,13 +150,15 @@ pub enum Loaded {
 ///
 /// - **WIP** (`parked = 0`) → the draft is regenerable, so **DISCARD** it: delete the stale row (an
 ///   in-memory delete the caller's next `save_draft` persists — this is a read path, no `sess.save()` here)
-///   and fall through to committed/Fresh, noting the discard on stderr.
+///   and fall through to committed/Fresh, RETURNING a [`StaleNote`] so the caller (not this store fn) can
+///   surface the discard (I-1).
 /// - **parked** (`parked = 1`) → it may hold carryover that exists ONLY in the draft (C-1), so **REFUSE**
 ///   with [`CliError::StaleParkedDraft`] (fail closed) rather than destroy irreplaceable data.
 ///
 /// A version-current draft yields `Draft { ri, parked }`. With no draft, the committed row (if any) is
-/// `Committed`, else `Fresh`.
-pub fn load(conn: &Connection, year: i32) -> Result<Loaded, CliError> {
+/// `Committed`, else `Fresh`. The second tuple element is `Some(StaleNote)` ONLY on the stale-WIP discard
+/// path; every other path returns `None`.
+pub fn load(conn: &Connection, year: i32) -> Result<(Loaded, Option<StaleNote>), CliError> {
     if let Some(d) = get_draft_row(conn, year)? {
         if d.version != SCHEMA_VERSION {
             if d.parked {
@@ -145,19 +168,30 @@ pub fn load(conn: &Connection, year: i32) -> Result<Loaded, CliError> {
                     expected: SCHEMA_VERSION,
                 });
             }
-            // ★ §6.3: a stale WIP draft is regenerable — discard-with-note, fall through.
-            eprintln!(
-                "note: discarded a stale draft for {year} (schema v{} vs v{SCHEMA_VERSION}).",
-                d.version
-            );
+            // ★ §6.3 / I-1: a stale WIP draft is regenerable — discard it and RETURN the note (never
+            // eprintln! from a store read fn: plan 3's raw-mode TUI would swallow/garble it), fall through.
             delete_draft(conn, year)?;
+            let note = StaleNote {
+                year,
+                found: d.version,
+                expected: SCHEMA_VERSION,
+            };
+            return Ok((committed_or_fresh(conn, year)?, Some(note)));
         } else {
-            return Ok(Loaded::Draft {
-                ri: d.ri,
-                parked: d.parked,
-            });
+            return Ok((
+                Loaded::Draft {
+                    ri: d.ri,
+                    parked: d.parked,
+                },
+                None,
+            ));
         }
     }
+    Ok((committed_or_fresh(conn, year)?, None))
+}
+
+/// The no-draft tail of [`load`]: the committed `return_inputs` row (if any) else `Fresh`.
+fn committed_or_fresh(conn: &Connection, year: i32) -> Result<Loaded, CliError> {
     match crate::return_inputs::get(conn, year)? {
         Some(ri) => Ok(Loaded::Committed(ri)),
         None => Ok(Loaded::Fresh),
@@ -238,6 +272,11 @@ pub fn commit(
     let (Some(table), Some(params)) = (table, params) else {
         return Ok(CommitOutcome::NoTables); // I-11: no tables for this year → write nothing
     };
+    if table.year != year || params.year != year {
+        // ★ I-11 is per-YEAR, not per-call: tables for a DIFFERENT year would `screen_inputs`-pass and
+        // write a committed row for a table-less `year`, poisoning it at resolve. Write nothing.
+        return Ok(CommitOutcome::NoTables);
+    }
     if let Some(refusal) = screen_inputs(ri, table, params) {
         return Ok(CommitOutcome::Refused(refusal)); // fail-closed: writes nothing
     }
@@ -425,15 +464,21 @@ mod tests {
         crate::return_inputs::init_table(&conn).unwrap();
         init_draft_table(&conn).unwrap();
         // Fresh
-        assert!(matches!(load(&conn, 2024).unwrap(), Loaded::Fresh));
+        let (loaded, note) = load(&conn, 2024).unwrap();
+        assert!(matches!(loaded, Loaded::Fresh));
+        assert!(note.is_none(), "no stale discard on a fresh year");
         // Committed only
         let cri = ReturnInputs { filing_status: FilingStatus::HoH, ..Default::default() };
         crate::return_inputs::set(&conn, 2024, &cri).unwrap();
-        assert!(matches!(load(&conn, 2024).unwrap(), Loaded::Committed(r) if r.filing_status == FilingStatus::HoH));
+        let (loaded, note) = load(&conn, 2024).unwrap();
+        assert!(matches!(loaded, Loaded::Committed(r) if r.filing_status == FilingStatus::HoH));
+        assert!(note.is_none(), "no stale discard on the committed path");
         // Draft shadows committed
         let dri = ReturnInputs { filing_status: FilingStatus::Mfj, ..Default::default() };
         set_draft_row(&conn, 2024, &dri, false).unwrap();
-        assert!(matches!(load(&conn, 2024).unwrap(), Loaded::Draft { ri, parked: false } if ri.filing_status == FilingStatus::Mfj));
+        let (loaded, note) = load(&conn, 2024).unwrap();
+        assert!(matches!(loaded, Loaded::Draft { ri, parked: false } if ri.filing_status == FilingStatus::Mfj));
+        assert!(note.is_none(), "no stale discard on a version-current draft");
     }
 
     #[test]
@@ -442,9 +487,16 @@ mod tests {
         init_draft_table(&conn).unwrap();
         let ri = ReturnInputs { filing_status: FilingStatus::Single, ..Default::default() };
         let j = serde_json::to_string(&ri).unwrap();
-        // stale WIP (parked=0) at an old version → discarded, falls through to Fresh, row is GONE
+        // stale WIP (parked=0) at an old version → discarded, falls through to Fresh, row is GONE,
+        // and the discard fact is RETURNED as a StaleNote (I-1: never eprintln!'d from this store fn).
         conn.execute("INSERT INTO return_inputs_draft(year,inputs_json,schema_version,parked) VALUES(2024,?1,0,0)", [&j]).unwrap();
-        assert!(matches!(load(&conn, 2024).unwrap(), Loaded::Fresh));
+        let (loaded, note) = load(&conn, 2024).unwrap();
+        assert!(matches!(loaded, Loaded::Fresh));
+        assert_eq!(
+            note,
+            Some(StaleNote { year: 2024, found: 0, expected: SCHEMA_VERSION }),
+            "the stale-WIP discard returns the note (not an eprintln!)"
+        );
         assert!(!draft_exists(&conn, 2024).unwrap(), "stale WIP is discarded");
         // stale PARKED (parked=1) → REFUSE, row PRESERVED
         conn.execute("INSERT INTO return_inputs_draft(year,inputs_json,schema_version,parked) VALUES(2025,?1,0,1)", [&j]).unwrap();
@@ -534,6 +586,35 @@ mod tests {
         assert!(
             draft_exists(sess.conn(), 2024).unwrap(),
             "a refused commit leaves the draft"
+        );
+    }
+
+    /// ★ I-3 — `commit` gates I-11 per-YEAR, not per-call: passing the (only) 2024 tables with `year = 2025`
+    /// would `screen_inputs`-pass, but writing a committed row for a table-less year poisons it at resolve.
+    /// The year-consistency guard returns `NoTables` and writes NOTHING.
+    #[test]
+    fn commit_refuses_tables_for_a_different_year_and_writes_nothing() {
+        use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
+        use btctax_core::tax::tables::FullReturnTables;
+        use btctax_core::TaxTables;
+        let (_dir, path, pp) = tmp_vault();
+        let tables = BundledTaxTables::load(); // ★ I-B: load() returns Self, not Result
+        let fr = BundledFullReturnTables::load();
+        let (t2024, p2024) = (
+            tables.table_for(2024).unwrap(),
+            fr.full_return_for(2024).unwrap(),
+        );
+        let mut sess = Session::open(&path, &pp).unwrap();
+        let clean = clean_screened_ri();
+        // 2024 tables passed with year = 2025 → the year↔table mismatch is caught before any write.
+        let out = commit(&mut sess, 2025, &clean, Some(t2024), Some(p2024)).unwrap();
+        assert!(
+            matches!(out, CommitOutcome::NoTables),
+            "tables for a different year → NoTables, not a committed write"
+        );
+        assert!(
+            !crate::return_inputs::exists(sess.conn(), 2025).unwrap(),
+            "the table-less year is never poisoned with a committed row"
         );
     }
 
