@@ -226,7 +226,10 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
     // Top level — a new `ReturnInputs` field breaks this destructure until it is classified.
     let ReturnInputs {
         filing_status: _,
-        header: _, // PII only — no money
+        // PII only — no money today. This `_` is the ONE header waiver; its exhaustiveness (a future field
+        // in HouseholdHeader/Person/Dependent) is now compiler-forced by the P9 §3.3 CLASSIFIER, which
+        // destructures those three with no `..` — closing the old `header: _` "false floor" (P8 review r1 F4).
+        header: _,
         w2s,
         int_1099,
         div_1099,

@@ -4,6 +4,7 @@
 pub mod advisories;
 pub mod amt;
 pub mod charitable;
+pub mod classifier;
 pub mod compute;
 pub mod frozen_guard;
 pub mod method;
