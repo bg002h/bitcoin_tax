@@ -117,11 +117,87 @@ reclassify\-outflow
 .B p
 profile
 .TP
+.B T
+tax inputs (full\-return authoring \(em see
+.B TAX INPUTS MODE
+below)
+.TP
 .B ?
 help overlay
 .TP
 .B q / Esc
 close / quit
+.SH "TAX INPUTS MODE"
+On the Browse screen,
+.B T
+opens the
+.I "tax inputs"
+editor for the selected year \(em the interactive way to author a full\-return
+.B ReturnInputs
+(filer header/PII, W\-2s including box 12, Schedule A including charitable
+contributions, dependents, Payments \(em estimated tax, extension, other
+withholding \(em declarations, and skippable sections) WITHOUT hand\-editing
+TOML.
+.PP
+The screen is a section list on the left and a per\-field pane on the right,
+with live per\-field validation as you type; a status line shows the active
+source, the screen status, and the key legend.
+.PP
+A filing status must be chosen first \(em the return materializes only once a
+status is picked. Within the form:
+.TP
+.B Up / Down
+Move the field cursor.
+.TP
+.B Left / Right , Tab
+Move between sections.
+.TP
+.B Enter
+Edit the focused field.
+.TP
+.B a / d
+Add / remove a repeating row (e.g. an additional W\-2 or dependent).
+.TP
+.B c / x
+Create / delete an optional section (Schedule A, spouse).
+.PP
+Nested entries (W\-2 box 12 codes, Schedule A charitable gifts) have their own
+drill\-in editor reached from the parent row.
+.TP
+.B s
+Commit. This runs the same screen
+.RI ( screen_inputs )
+the resolver uses before computing a return; a refusal jumps the cursor to the
+offending field instead of committing.
+.TP
+.B t
+Toggle the active source between the full return and the tax\-profile
+estimate.
+.TP
+.B X
+Discard a parked draft.
+.TP
+.B q / Esc
+Close the editor. The in\-progress return is autosaved to an encrypted draft
+(including a partially filled one); Social Security numbers and IP\-PINs are
+entered no\-echo and displayed masked.
+.PP
+The form commits only a
+.I screen_inputs\-clean
+return \(em the same gate
+.B report
+uses, so a committed return is never worse than what a
+.B report
+run would compute. It covers the common subset of a full return; it is
+complementary to, not a replacement for, the file\-based path: import a
+filled\-out TOML with
+.B "income import"
+(inspect it with
+.BR "income show" ,
+clear it with
+.BR "income clear" ,
+or answer outstanding questions with
+.BR "income answer" ).
 .SH FILES
 .TP
 .B ~/Documents/BitcoinTax/vault.pgp
