@@ -1,15 +1,20 @@
 # CONTINUITY — P9 IMPLEMENTATION (the FORM QUESTION REGISTRY)
 
-*Written 2026-07-14 at a deliberate context boundary. Branch `main`, HEAD `db04781`, tree CLEAN,
-pushed to `origin/main`. `make check` GREEN (1736 passed, 1 skipped).*
+*Updated 2026-07-14. Branch `main`, HEAD `badb682` (step 6), tree CLEAN, **NOT yet pushed** (steps 1–6
+are ahead of `origin/main`; push at the ~step-8 milestone). `make check` GREEN (1750 passed, 1 skipped).*
 
 ---
 
 ## ⚡ THE ONE COMMAND TO RESUME
 
 ```
-Read design/full-return/CONTINUITY_P9_IMPL.md and continue the P9 implementation from step 6.
+Read design/full-return/CONTINUITY_P9_IMPL.md and continue the P9 implementation from step 7.
 ```
+
+**★ PROCESS FOOTGUN (learned step 6):** do NOT `git checkout -- <file>` to revert a mutation while the
+step's own changes are UNCOMMITTED — it blows away the uncommitted work, not just the mutation. Either
+commit the step first and revert to it, or mutate-then-restore from a `cp` backup (`cp f f.bak; mutate;
+test; mv f.bak f`), which never touches sibling files. See [[git-checkout-eats-uncommitted-mutation-reverts]].
 
 ---
 
@@ -38,6 +43,7 @@ structural via a `FORM_QUESTIONS` **registry** that `screen_inputs`, `income ans
 | 3 | `bb72ae6` | `crates/btctax-core/src/tax/questions.rs` — `FormQuestion`, `QuestionId`(+`ALL`), `FORM_QUESTIONS` (8 entries); completeness anchor |
 | 4 | `0ac80e2` | `screen_inputs` + `income answer` DERIVE from the registry; deleted 4 hand-written unanswered blocks + `schedule_b_part3_unanswered`; `foreign_trust` added to `schedule_b_files`. **§2.9 + P8a I1 now GREEN by named test.** `income answer` refactored (`Question`→`Skippable`(DOB) + new `Ask` enum; `live_questions -> Vec<Ask>`) |
 | 5 | `db04781` | `ReturnHeader::build` → `HeaderError { Ssn, Unanswered(QuestionId), MfjWithoutSpouse }`; the fail-closed PRINT boundary (P8a I3 + r3 M-6); neutralizes `printed.rs:936/943 unwrap_or(false)`; `admin.rs` uses HeaderError Display |
+| 6 | `badb682` | Sch A line 8 mixed-use mortgage (§2.7/§3.4), value+advisory ONE step. `mixed_use_mortgage_forgone` (the ONE derivation) → 8a=0 + `ScheduleAParts.mortgage_mixed_use_box` + `ScheduleALines.line8_mixed_use_box` + forms `check_8_mixed_use` (`Line8_ReadOrder c1_2`) + `Advisory::MixedUseMortgageNotAllocated{forgone_interest,itemized}` (text branches on deduction taken, r5 M-1). `advisories()` gained `deduction_is_itemized`. NO refusal (r4 I-2). **9 guards mutation-checked; regression: mixed-use filer COMPUTES under Auto-std-wins AND ForceItemize.** |
 
 **Two shipped-code bugs fixed + held by mutation-checked tests:** §2.9 (circular Schedule B liveness silently
 omitting the FBAR surface) and P8a I1 (MFJ-no-spouse dependent box).
@@ -57,13 +63,7 @@ closed until step 8.)*
 
 ## 4. Steps REMAINING (resume here — spec §5 has the detail)
 
-- **Step 6 — Sch A line 8 value behaviour + advisory, ONE step** (§2.7/§3.4). `mortgage_all_used_to_buy_build_improve
-  == Some(false)` ⇒ **8a = 0 AND the line-8 box CHECKED AND** `MixedUseMortgageNotAllocated` advisory fires.
-  Advisory TEXT branches on the deduction actually taken (itemized vs standard-wins — do NOT tell a
-  standard-deduction filer "your Schedule A claimed $0"); `forgone_interest` = full `mortgage_interest_1098`,
-  documented as a CEILING ("up to"). Scoped to `mortgage_interest_1098 > 0`. **Value + advisory are ONE step**
-  (do not ship the advisory a step before the value — r5 M-2). **Regression test: the mixed-use filer
-  COMPUTES under BOTH `Auto`-standard-wins AND `ForceItemize`** (there is NO refusal — r4 I-2 deleted it).
+- **✅ Step 6 — DONE (`badb682`).** Sch A line 8 mixed-use mortgage value+advisory. See §3 table.
 - **Step 7 — the blind + SALT advisories (fire on `None`) AND their skippable PROMPTS in `income answer`.**
   *(★ The prompts were moved here from spec-step-4 so prompt+advisory ship together — see §6.)*
   `BlindBoxForfeitedNotDeclared { per_box, persons }` — `persons` = `[taxpayer.blind.is_none()]` +
@@ -127,7 +127,8 @@ closed until step 8.)*
 ## 7. The commit trail (implementation)
 
 ```
-db04781  impl(P9 step 5): ReturnHeader::build -> HeaderError — the fail-closed print boundary   ← HEAD
+badb682  impl(P9 step 6): Sch A line 8 mixed-use mortgage — value + advisory, one step        ← HEAD
+db04781  impl(P9 step 5): ReturnHeader::build -> HeaderError — the fail-closed print boundary
 0ac80e2  impl(P9 step 4): screen_inputs + income answer DERIVE from the registry
 bb72ae6  impl(P9 step 3): questions.rs — the FORM QUESTION REGISTRY
 a3ec138  impl(P9 step 2): SCHEMA_VERSION=2 — a stale row REFUSES, it is not migrated
