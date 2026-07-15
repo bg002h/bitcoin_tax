@@ -47,8 +47,8 @@ use edit::form::{
     SafeHarborAllocateModalState, SafeHarborAllocateStep, SafeHarborAttestFlowState,
     SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState, SelectLotsStep,
     SetDonationDetailsFlowState, SetDonationDetailsModalState, SetDonationDetailsStep,
-    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TransferOutItem, VoidFlowState,
-    VoidListItem, VoidModalState, VoidStep, VoidTarget, WalletItem, FREETEXT_CAP,
+    SetFmvFlowState, SetFmvModalState, SetFmvStep, TargetList, TaxInputsFormState, TransferOutItem,
+    VoidFlowState, VoidListItem, VoidModalState, VoidStep, VoidTarget, WalletItem, FREETEXT_CAP,
 };
 use editor::{EditorApp, EditorScreen, PseudoApproveModalState};
 use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
@@ -360,6 +360,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         handle_optimize_accept_flow_key(app, key);
         return;
     }
+    // ── Tax-inputs flow dispatch — BEFORE form + screen dispatch ──────────────
+    // A flow like the others: `q`/Esc must never fall through to a Browse quit arm while it blocks.
+    if app.tax_inputs_form.is_some() {
+        handle_tax_inputs_key(app, key);
+        return;
+    }
 
     // ── 10. Form dispatch — BEFORE screen dispatch ────────────────────────────
     if app.profile_form.is_some() {
@@ -420,6 +426,8 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                     reset_selections(app);
                 }
                 KeyCode::Char('p') => open_profile_form(app),
+                // Tax-inputs editing flow (the btctax-input-form engine over input_form_store).
+                KeyCode::Char('T') => open_tax_inputs_form(app),
                 KeyCode::Char('c') => open_classify_inbound_flow(app),
                 KeyCode::Char('o') => open_reclassify_outflow_flow(app),
                 KeyCode::Char('r') => open_reclassify_income_flow(app),
@@ -739,6 +747,778 @@ fn open_profile_form(app: &mut EditorApp) {
     }
 
     app.profile_form = Some(form);
+}
+
+// ── Tax-inputs flow (btctax-input-form engine over input_form_store) ───────────
+
+/// Open the "tax inputs" editing flow for `selected_year`.
+///
+/// Resolves the year's working return through [`input_form_store::load`] (§6.1 precedence + §6.3 stale
+/// split) and maps it onto a [`TaxInputsFormState`]:
+///
+/// - `Loaded::Fresh` → `working = None` (NI-2: no `ReturnInputs` until a filing status is chosen).
+/// - `Loaded::Committed(ri)` → `working = Some(ri)`, `parked = false`.
+/// - `Loaded::Draft { ri, parked }` → `working = Some(ri)`, carrying `parked`.
+/// - any returned [`StaleNote`] is carried for the status line (Task 2 renders it).
+/// - **★ P2-a** — `Err(CliError::StaleParkedDraft)`: do NOT open a normal editing form. Open the flow
+///   in a `discard_offered = true` state that shows ONLY the stale-parked message + Esc to back out
+///   (Task 8 wires the 'X' → `discard_parked_draft`), so the otherwise-undiscardable parked draft
+///   becomes discardable in-app.
+/// - any other `Err` → set `app.status` and do NOT open the flow.
+///
+/// ★ I-1 (session access): `session` is a bare field; `app.session` and `app.tax_inputs_form` are
+/// borrowed as DISJOINT fields (no `session()` method). The `load` itself routes through
+/// `edit::persist::load_return_inputs` because `Session::conn()` is confined to `edit/persist.rs`
+/// by the KAT-G1 mechanized source gate — see that fn.
+fn open_tax_inputs_form(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    if app.session.is_none() {
+        return;
+    }
+    let year = app.selected_year;
+    // ★ I-1 + KAT-G1: disjoint-field read via the persist seam (conn() lives only in edit/persist.rs).
+    let loaded = edit::persist::load_return_inputs(app.session.as_ref().unwrap(), year);
+    // ★ Task 8: cache the active-source label for the status line (committed full return › tax-profile ›
+    // neither). A read failure is non-fatal — default to `(none)` (the render never blocks on it).
+    let active_source_label = edit::persist::form_active_source(app.session.as_ref().unwrap(), year)
+        .map(|a| crate::edit::form::active_source_label(&a))
+        .unwrap_or("(none)");
+    let form = match loaded {
+        Ok((btctax_cli::input_form_store::Loaded::Fresh, stale_note)) => TaxInputsFormState {
+            year,
+            working: None,
+            section_idx: 0,
+            field_focus: 0,
+            addr: btctax_input_form::RowAddr::default(),
+            editing: false,
+            buf: crate::edit::form::FieldBuffer::new(),
+            error: None,
+            dirty: false,
+            parked: false,
+            stale_note,
+            discard_offered: false,
+            active_source_label,
+            pending_remove: None,
+            descent: None,
+            modal: None,
+            refused_section: None,
+        },
+        Ok((btctax_cli::input_form_store::Loaded::Committed(ri), stale_note)) => TaxInputsFormState {
+            year,
+            working: Some(ri),
+            section_idx: 0,
+            field_focus: 0,
+            addr: btctax_input_form::RowAddr::default(),
+            editing: false,
+            buf: crate::edit::form::FieldBuffer::new(),
+            error: None,
+            dirty: false,
+            parked: false,
+            stale_note,
+            discard_offered: false,
+            active_source_label,
+            pending_remove: None,
+            descent: None,
+            modal: None,
+            refused_section: None,
+        },
+        Ok((btctax_cli::input_form_store::Loaded::Draft { ri, parked }, stale_note)) => {
+            TaxInputsFormState {
+                year,
+                working: Some(ri),
+                section_idx: 0,
+                field_focus: 0,
+                addr: btctax_input_form::RowAddr::default(),
+                editing: false,
+                buf: crate::edit::form::FieldBuffer::new(),
+                error: None,
+                dirty: false,
+                parked,
+                stale_note,
+                discard_offered: false,
+                active_source_label,
+                pending_remove: None,
+                descent: None,
+                modal: None,
+                refused_section: None,
+            }
+        }
+        Err(e @ btctax_cli::CliError::StaleParkedDraft { .. }) => {
+            // ★ P2-a: a stale PARKED draft is fail-closed by `load` — open a DISCARD-ONLY state (the
+            // message + Esc/'X') so it is discardable in-app rather than undiscardable. `parked = true`
+            // reflects reality (it IS a parked draft); Task 8 wires the confirmed `discard_parked_draft`.
+            TaxInputsFormState {
+                year,
+                working: None,
+                section_idx: 0,
+                field_focus: 0,
+                addr: btctax_input_form::RowAddr::default(),
+                editing: false,
+                buf: crate::edit::form::FieldBuffer::new(),
+                error: Some(e.to_string()),
+                dirty: false,
+                parked: true,
+                stale_note: None,
+                discard_offered: true,
+                active_source_label,
+                pending_remove: None,
+                descent: None,
+                modal: None,
+                refused_section: None,
+            }
+        }
+        Err(e) => {
+            app.status = Some(format!("could not load the tax inputs for {year}: {e}"));
+            return;
+        }
+    };
+    app.tax_inputs_form = Some(form);
+}
+
+/// Flush the in-progress tax-inputs working return to the draft table via [`edit::persist::form_save_draft`]
+/// (which reaches disk through `Vault::save` — I-7). The DEBOUNCED autosave: called at flush points ONLY (a
+/// section change, the editor's idle tick, the flow close, and `q`) — never per keystroke.
+///
+/// A no-op unless the flow is `dirty` AND holds a materialized `Some(ReturnInputs)`: a `None` working copy
+/// has nothing chosen yet, so it writes NO draft (NI-2). Clears `dirty` on a clean flush; on error routes the
+/// [`btctax_cli::CliError`] (NOT a `PersistError` — review M1) to `app.status` and LEAVES `dirty` set so the
+/// next flush point retries.
+///
+/// ★ I-1 (disjoint-field session access): the working `ReturnInputs` is cloned OUT of `app.tax_inputs_form`
+/// under a short read borrow that ENDS before `app.session.as_mut()` is taken, so the two field borrows
+/// never alias (a whole-`self` accessor would not compile against the flow's live borrow).
+fn flush_tax_inputs_draft(app: &mut EditorApp) {
+    let (year, ri) = {
+        let Some(form) = app.tax_inputs_form.as_ref() else {
+            return;
+        };
+        if !form.dirty {
+            return; // debounce: nothing changed since the last flush
+        }
+        let Some(ri) = form.working.clone() else {
+            return; // NI-2: no return chosen yet — autosave nothing
+        };
+        (form.year, ri)
+    };
+    match edit::persist::form_save_draft(app.session.as_mut().unwrap(), year, &ri) {
+        Ok(()) => {
+            // The draft reached disk — drop the dirty latch (the next idle tick is then a no-op).
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                form.dirty = false;
+            }
+        }
+        // ★ M1: `form_save_draft` yields a `CliError`, NOT a `PersistError` — do NOT route it through
+        // `on_persist_error`; surface it directly. `dirty` stays set so a later flush point retries.
+        Err(e) => app.status = Some(format!("{e}")),
+    }
+}
+
+/// ★ I-3: after a final flush, whether the flow still holds UNSAVED in-memory edits (a FAILED flush) — the
+/// close-decision. `flush_tax_inputs_draft` clears `dirty` only on a clean disk write, so a still-`dirty`
+/// flow with a live `working` copy means the flush errored and the edits exist only in memory. Closing then
+/// would silently drop them — the opposite of the retry latch's purpose — so `q`/`Esc` KEEP the flow open in
+/// that case (the error is already in `app.status`, visible via I-2). Closing is safe when the draft is on
+/// disk (`!dirty`) or there is nothing to lose (`working.is_none()`; `dirty ⟹ working.is_some()` anyway,
+/// since only a successful `apply` sets `dirty`).
+fn tax_inputs_flush_left_unsaved(app: &EditorApp) -> bool {
+    app.tax_inputs_form
+        .as_ref()
+        .is_some_and(|f| f.dirty && f.working.is_some())
+}
+
+/// Handle a key press while the tax-inputs flow is open (plan 3 task 2: section/field navigation).
+///
+/// Esc closes the flow (from both the normal state and the P2-a discard-offered state). `Up`/`Down`
+/// move the field-pane cursor within the selected section; `Left`/`Right`/`Tab` move the section
+/// cursor across the LIVE sections (clamped at both ends). The live section/field counts are
+/// recomputed each keypress — they change after edits (materialization, create/delete). The per-kind
+/// editing keys, commit/toggle, and the 'X' discard land in later tasks.
+fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
+    // ── Edit-buffer mode FIRST (Task 3): the focused text-kind field is capturing keystrokes. Esc here
+    //    cancels the edit (not the flow); a second Enter commits (parse+apply). ──
+    if app
+        .tax_inputs_form
+        .as_ref()
+        .is_some_and(|f| f.editing)
+    {
+        let form = app.tax_inputs_form.as_mut().unwrap();
+        match key.code {
+            KeyCode::Char(c) => form.buf.push_char(c),
+            KeyCode::Backspace => form.buf.pop_char(),
+            KeyCode::Enter => {
+                let raw = form.buf.as_str().to_owned();
+                if crate::edit::tax_inputs::tax_inputs_apply_edit(form, &raw) {
+                    form.editing = false;
+                    form.buf.set("");
+                }
+                // On a parse/apply error the flow stays in edit mode with `form.error` set (rendered inline).
+            }
+            KeyCode::Esc => {
+                form.editing = false;
+                form.buf.set("");
+                form.error = None;
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // ── Remove-confirm modal (Task 5): a staged `RemoveRow` awaiting confirmation. Dispatched BEFORE the
+    //    field keymap — Enter applies the frozen `RemoveRow`, Esc cancels; every other key is swallowed
+    //    (a payload-confirm, like the other flows' mutation modals). ──
+    if app
+        .tax_inputs_form
+        .as_ref()
+        .is_some_and(|f| f.pending_remove.is_some())
+    {
+        let form = app.tax_inputs_form.as_mut().unwrap();
+        match key.code {
+            KeyCode::Enter => {
+                crate::edit::tax_inputs::confirm_remove(form);
+            }
+            KeyCode::Esc => crate::edit::tax_inputs::cancel_remove(form),
+            _ => {}
+        }
+        return;
+    }
+
+    // ── Payload-confirm modal (Task 7 commit · Task 8 park/discard): dispatched BEFORE the field keymap
+    //    (review M5). Enter runs the confirmed action through the persist seam — routed by the modal's
+    //    `kind`; Esc cancels (writes nothing); every other key is swallowed (a payload-confirm, like the
+    //    remove-row modal). ──
+    if let Some(kind) = app
+        .tax_inputs_form
+        .as_ref()
+        .and_then(|f| f.modal.as_ref())
+        .map(|m| m.kind)
+    {
+        use crate::edit::form::TaxInputsModalKind;
+        match key.code {
+            KeyCode::Enter => match kind {
+                TaxInputsModalKind::Commit => commit_tax_inputs(app),
+                TaxInputsModalKind::ParkToProfile => confirm_park_to_profile(app),
+                TaxInputsModalKind::DiscardParked => discard_parked_now(app),
+            },
+            KeyCode::Esc => {
+                if let Some(form) = app.tax_inputs_form.as_mut() {
+                    form.modal = None; // cancel — writes nothing
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    let Some(form) = app.tax_inputs_form.as_mut() else {
+        return;
+    };
+
+    // ★ P2-a discard-only state (Task 8): only 'X' (discard) / Esc (back out) act here — swallow the rest.
+    // The stale-parked screen IS the payload-showing confirmation ("Press X to discard … Esc to back out"),
+    // so 'X' discards directly (no second modal) and closes the flow on success; a store refusal / save
+    // error surfaces to `app.status` and leaves the flow open (the message stays reachable).
+    if form.discard_offered {
+        match key.code {
+            KeyCode::Char('X') => discard_parked_now(app),
+            KeyCode::Esc => app.tax_inputs_form = None,
+            _ => {}
+        }
+        return;
+    }
+
+    // Not editing: Esc backs OUT one level — leave a repeating row if inside one (pop `form.addr`), else
+    // close the whole flow. Either way it is a debounce boundary → flush the draft first (Task 6, I-7).
+    if key.code == KeyCode::Esc {
+        let left_a_row = crate::edit::tax_inputs::leave_row(form);
+        flush_tax_inputs_draft(app); // `form` borrow ended above; re-borrow `app` disjointly (I-1)
+        // ★ I-3: close ONLY when the flush left nothing unsaved. A FAILED final flush keeps the flow open so
+        // the in-memory edits survive (the error is in `app.status`, visible via I-2) — never drop work.
+        if !left_a_row && !tax_inputs_flush_left_unsaved(app) {
+            app.tax_inputs_form = None;
+        }
+        return;
+    }
+
+    // ★ Task 6 (review I-3 / §9A): `q` quits the flow. Flush any pending edit to disk FIRST (so `q` never
+    // loses work). ★ I-3: close ONLY on a clean flush — a FAILED flush KEEPS the flow open (the edits live
+    // only in memory; closing would drop them, defeating the retry latch), the error already in `app.status`.
+    // Without this arm the flow gate silently swallows `q` (it would fall to the `_ => {}`).
+    if key.code == KeyCode::Char('q') {
+        let (was_dirty, year) = (form.dirty, form.year);
+        flush_tax_inputs_draft(app); // reaches disk; on error sets app.status (M1), leaves `dirty` set
+        if tax_inputs_flush_left_unsaved(app) {
+            // the flush FAILED — keep the flow open with the buffers intact (the error is in `app.status`).
+            return;
+        }
+        if was_dirty {
+            // the flush persisted cleanly (was dirty, now clean) — the draft is safe (§9A).
+            app.status = Some(format!("tax inputs {year}: draft autosaved"));
+        }
+        app.tax_inputs_form = None;
+        return;
+    }
+
+    // ★ Task 7: `s` opens the commit payload-confirm modal. Handled as a pre-match block (not a `match`
+    // arm) because building the summary needs `shadows_profile`, a `app.session` read DISJOINT from the
+    // `app.tax_inputs_form` borrow (review I-1) — a whole-`self` path would collide with the live `form`
+    // borrow. `open_tax_inputs_commit_modal` requires `working.is_some()` (else it sets the status).
+    if key.code == KeyCode::Char('s') {
+        open_tax_inputs_commit_modal(app);
+        return;
+    }
+
+    // ★ Task 8: `t` toggles the source — park the committed full return into the tax-profile (a confirm,
+    // offered ONLY from a clean/committed state), or reinstate a parked full return for re-commit. `X`
+    // discards a parked draft (a payload-confirm). BOTH are pre-match blocks (like `s`) because they read
+    // `active_source`, an `app.session` read DISJOINT from the `app.tax_inputs_form` borrow (review I-1) —
+    // a whole-`self` path would collide with the live `form` borrow. `X` (discard-PARKED) is DISTINCT from
+    // `x` (delete an optional section, Task 5, handled in the match below).
+    if key.code == KeyCode::Char('t') {
+        toggle_source(app);
+        return;
+    }
+    if key.code == KeyCode::Char('X') {
+        open_discard_parked_modal(app);
+        return;
+    }
+
+    // The navigable-item count of the CURRENTLY-drawn pane (fields, rows, or 0 for `[create]`) — the
+    // field-cursor fold, so `Down` never advances an invisible cursor off the drawn pane. The live section
+    // count drives the section cursor. Both are recomputed each keypress (they change after edits).
+    let n_items = crate::edit::tax_inputs::navigable_count(form);
+    let n_sections = form
+        .working
+        .as_ref()
+        .map_or(0, |ri| crate::edit::form::live_sections(ri).len());
+
+    match key.code {
+        // ── Enter: on a row LIST, enter the selected row (push its index); else open/cycle the field. ──
+        KeyCode::Enter => {
+            if matches!(
+                crate::edit::tax_inputs::active_pane(form),
+                crate::edit::tax_inputs::Pane::RowList(_)
+            ) {
+                // A row LIST (top-level rows OR a nested sub-list): enter the selected row (push its index).
+                crate::edit::tax_inputs::enter_selected_row(form);
+            } else if crate::edit::tax_inputs::on_nested_drill_entry(form) {
+                // ★ Task-5 fix: the synthetic "Box 12 entries (n) →" / "Charitable gifts (n) →" entry —
+                // DESCEND into the nested repeating group (its sub-list).
+                crate::edit::tax_inputs::enter_nested_group(form);
+            } else if let Some(k) = crate::edit::tax_inputs::focused_kind(form) {
+                if crate::edit::tax_inputs::is_text_kind(k)
+                    || crate::edit::tax_inputs::is_secret_kind(k)
+                {
+                    // Text kinds AND Secret kinds open the edit buffer. A Secret opens NO-ECHO: keystrokes
+                    // land in `buf` but the pane renders bullets, and the commit routes through
+                    // `parse_ssn`/`parse_ip_pin` by `FieldId`.
+                    crate::edit::tax_inputs::begin_edit(form);
+                } else if crate::edit::tax_inputs::is_cycle_kind(k) {
+                    crate::edit::tax_inputs::cycle_focused(form);
+                }
+                // No editable field: no-op.
+            }
+        }
+        // Space: cycle/toggle a cycle kind (Enum/TriState/Bool) in place — incl. the NI-2 materialization.
+        KeyCode::Char(' ')
+            if crate::edit::tax_inputs::focused_kind(form)
+                .is_some_and(crate::edit::tax_inputs::is_cycle_kind) =>
+        {
+            crate::edit::tax_inputs::cycle_focused(form);
+        }
+        // ── Shape edits (Task 5) — all via `apply`; each is a no-op off its own pane/kind. ──
+        // `a` add row / `d` remove row (payload-confirm) — repeating groups.
+        KeyCode::Char('a') => {
+            crate::edit::tax_inputs::add_row(form);
+        }
+        KeyCode::Char('d') => {
+            crate::edit::tax_inputs::stage_remove_selected(form);
+        }
+        // `c` create / `x` delete — optional-singletons. `x` is DISTINCT from `X` (discard parked, Task 8).
+        KeyCode::Char('c') => {
+            crate::edit::tax_inputs::create_selected_section(form);
+        }
+        KeyCode::Char('x') => {
+            crate::edit::tax_inputs::delete_selected_section(form);
+        }
+        // ★ Task-5 fix: `<` backs OUT one nested/row level (parallels Esc's `leave_row`), but never closes
+        // the flow or retreats the section — a dedicated "up one level" key for the drill-down.
+        KeyCode::Char('<') => {
+            crate::edit::tax_inputs::leave_row(form);
+        }
+        // ── navigation ──
+        KeyCode::Up => form.field_focus = form.field_focus.saturating_sub(1),
+        KeyCode::Down if form.field_focus + 1 < n_items => {
+            form.field_focus += 1;
+        }
+        // Left: leave a row if inside one (pop `form.addr`); else retreat the section cursor (a new
+        // section starts at its root — reset the row path + field cursor).
+        KeyCode::Left => {
+            let left_a_row = crate::edit::tax_inputs::leave_row(form);
+            if !left_a_row {
+                let sel = form.section_idx.min(n_sections.saturating_sub(1));
+                form.section_idx = sel.saturating_sub(1);
+                form.field_focus = 0;
+                form.addr = btctax_input_form::RowAddr::default();
+            }
+        }
+        // Right/Tab: advance the section cursor (leaving any row/nested group — the new section starts at
+        // its root: reset the row path, the field cursor, AND the nested-descent marker).
+        KeyCode::Right | KeyCode::Tab => {
+            let sel = form.section_idx.min(n_sections.saturating_sub(1));
+            if sel + 1 < n_sections {
+                form.section_idx = sel + 1;
+            }
+            form.field_focus = 0;
+            form.addr = btctax_input_form::RowAddr::default();
+            form.descent = None;
+        }
+        _ => {}
+    }
+    // Normalize the section cursor (defensive: the live set can grow/shrink after an edit — e.g. a
+    // materialization or a section create/delete). Re-clamp against the CURRENT live set.
+    if let Some(ri) = form.working.as_ref() {
+        let n = crate::edit::form::live_sections(ri).len();
+        if n > 0 {
+            form.section_idx = form.section_idx.min(n - 1);
+        }
+    }
+
+    // ★ Task 6 (autosave, I-7): a section change (`Left`/`Right`/`Tab`) is a debounce boundary — flush the
+    // draft to disk. Debounced: `flush_tax_inputs_draft` no-ops unless the flow is dirty with a materialized
+    // working copy. The `form` borrow above has ended, so `app` is re-borrowed disjointly (review I-1).
+    if matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Tab) {
+        flush_tax_inputs_draft(app);
+    }
+}
+
+/// ★ Task 7: open the commit payload-confirm modal (`s`). Requires a materialized working copy (NI-2 — else
+/// the status "choose a filing status first"). Reads `shadows_profile` through the persist seam
+/// (`app.session` borrowed DISJOINTLY from `app.tax_inputs_form` — review I-1), then builds the summary
+/// from the working return via the `FilingStatus` `get` accessor (never `ri.filing_status` — review M6).
+fn open_tax_inputs_commit_modal(app: &mut EditorApp) {
+    let (year, has_working) = match app.tax_inputs_form.as_ref() {
+        Some(f) => (f.year, f.working.is_some()),
+        None => return,
+    };
+    if !has_working {
+        app.status = Some("choose a filing status first".to_string());
+        return;
+    }
+    // shadows_profile via the persist seam (the read surface is confined to edit/persist.rs — KAT-G1). A
+    // read error is non-fatal here — default to no-shadow; `commit` itself is the authoritative gate.
+    let shadows =
+        edit::persist::form_shadows_profile(app.session.as_ref().unwrap(), year).unwrap_or(false);
+    if let Some(form) = app.tax_inputs_form.as_mut() {
+        let ri = form.working.as_ref().unwrap();
+        let modal = crate::edit::form::TaxInputsModalState {
+            kind: crate::edit::form::TaxInputsModalKind::Commit,
+            year,
+            filing_status_label: crate::edit::form::filing_status_label(ri),
+            summary: crate::edit::tax_inputs::commit_summary(ri, shadows),
+            shadows,
+        };
+        form.modal = Some(modal);
+    }
+}
+
+/// ★ Task 7: run the staged commit (the modal's Enter). Binds the bundled tables to a `let` BEFORE the
+/// per-year lookup (review M2), clones the working return OUT of the flow (disjoint from the `&mut Session`
+/// borrow — review I-1), and writes through the persist seam `edit::persist::form_commit` (NOT
+/// `input_form_store::commit` directly — the crate's store write lives ONLY in edit/persist.rs). Then
+/// dispatches the `CommitOutcome`:
+/// - `Committed` → status "committed {year} as {filing_status}"; CLOSE the flow (the draft is gone and the
+///   committed row is authoritative — reopening `T` `load`s it as `Committed`; closing subsumes clearing
+///   `dirty`).
+/// - `Refused(refusal)` → jump focus to the attributed anchor (`focus_refusal`, SPEC §7); set
+///   `form.error`/status to the refusal detail; close the modal but keep the flow open to fix it.
+/// - `NoTables` → status "year {year} has no full-return tables (2024 only)"; close the modal.
+/// - `Err(e)` → surface the save error; close the modal.
+fn commit_tax_inputs(app: &mut EditorApp) {
+    use btctax_cli::input_form_store::CommitOutcome;
+    use btctax_core::tax::tables::FullReturnTables;
+    use btctax_core::TaxTables;
+
+    // Extract the year + a CLONE of the working return (this read borrow ENDS before `app.session.as_mut()`).
+    let (year, ri) = {
+        let Some(form) = app.tax_inputs_form.as_ref() else {
+            return;
+        };
+        if form.modal.is_none() {
+            return;
+        }
+        let Some(ri) = form.working.clone() else {
+            return; // NI-2 — the modal is never opened on a None working copy
+        };
+        (form.year, ri)
+    };
+
+    // ★ M2: bind the bundle to a `let` BEFORE the per-year lookup (else a borrow of a dropped temporary).
+    let tables = btctax_adapters::BundledTaxTables::load();
+    let fr = btctax_adapters::BundledFullReturnTables::load();
+    let (table, params) = (tables.table_for(year), fr.full_return_for(year));
+
+    // Write via the persist seam (disjoint `app.session` borrow — review I-1).
+    let outcome =
+        edit::persist::form_commit(app.session.as_mut().unwrap(), year, &ri, table, params);
+
+    let status: Option<String> = match outcome {
+        Ok(CommitOutcome::Committed) => {
+            let label = app
+                .tax_inputs_form
+                .as_ref()
+                .and_then(|f| f.modal.as_ref())
+                .map(|m| m.filing_status_label.clone())
+                .unwrap_or_default();
+            app.tax_inputs_form = None; // close the flow; the committed row is authoritative
+            // ★ I-1: re-project the Browse snapshot — a commit changes the year's resolve outcome, so the
+            // Tax/Forms tabs must show the newly-committed liability, not the pre-mutation one (mirrors the
+            // profile-save site). `build_snapshot` is a READ via the persist-seam pattern; a re-projection
+            // failure is non-fatal (keep the old snapshot; tell the filer to restart).
+            let new_snap = {
+                let session = app.session.as_ref().unwrap();
+                btctax_tui::unlock::build_snapshot(session)
+            };
+            match new_snap {
+                Ok((snap, _)) => {
+                    app.snapshot = Some(snap);
+                    Some(format!("committed {year} as {label}"))
+                }
+                Err(e) => Some(format!(
+                    "committed {year} as {label}, but re-projection failed ({e}) — restart to refresh"
+                )),
+            }
+        }
+        Ok(CommitOutcome::Refused(refusal)) => {
+            let mut msg = refusal.detail.clone();
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                // Jump focus to the attributed anchor (SPEC §7). A NotInForm-only refusal appends its note.
+                if let crate::edit::tax_inputs::RefusalFocus::NotInForm(note) =
+                    crate::edit::tax_inputs::focus_refusal(form, &refusal.reason)
+                {
+                    msg = format!("{} ({note})", refusal.detail);
+                }
+                form.error = Some(refusal.detail.clone());
+                form.modal = None; // close the confirm; keep the flow open to fix
+            }
+            Some(msg)
+        }
+        Ok(CommitOutcome::NoTables) => {
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                form.modal = None;
+            }
+            Some(format!("year {year} has no full-return tables (2024 only)"))
+        }
+        Err(e) => {
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                form.modal = None;
+            }
+            Some(format!("{e}"))
+        }
+    };
+    app.status = status;
+}
+
+/// ★ Task 8: the `t` source toggle. Reads `active_source(conn, year)` through the persist seam (the
+/// `app.session` read is DISJOINT from `app.tax_inputs_form` — review I-1), then:
+/// - **`FullReturn` active** (a committed return is the source) → offer PARK, but ONLY from a clean state:
+///   if the flow is `dirty` (un-flushed edits the store cannot see), REFUSE with a status and open no modal;
+///   else open the `ParkToProfile` payload-confirm.
+/// - **a parked full return is loaded** (`form.parked`; the tax-profile/neither is the active source) →
+///   "use full return": re-`load` the parked draft into `working` so a subsequent `s` re-commits it
+///   (Task 7's flow, which consumes the parked draft). Writes nothing — no confirm.
+/// - otherwise (a tax-profile / nothing, no parked full return) → a status; nothing to toggle.
+fn toggle_source(app: &mut EditorApp) {
+    use btctax_cli::input_form_store::ActiveSource;
+    let (year, dirty, parked) = match app.tax_inputs_form.as_ref() {
+        Some(f) => (f.year, f.dirty, f.parked),
+        None => return,
+    };
+    let active = match edit::persist::form_active_source(app.session.as_ref().unwrap(), year) {
+        Ok(a) => a,
+        Err(e) => {
+            app.status = Some(format!("{e}"));
+            return;
+        }
+    };
+    match active {
+        ActiveSource::FullReturn => {
+            // ★ Clean-state gate: park is offered ONLY from a clean/committed state. The store's
+            // `park_to_profile` refuses a FLUSHED WIP draft, but it cannot see un-flushed in-memory edits,
+            // so the TUI gates on `dirty` — parking dirty edits would silently drop them.
+            if dirty {
+                app.status = Some(format!(
+                    "year {year} has unsaved edits — save or commit them before switching to the tax-profile"
+                ));
+                return;
+            }
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                form.modal = Some(crate::edit::form::TaxInputsModalState {
+                    kind: crate::edit::form::TaxInputsModalKind::ParkToProfile,
+                    year,
+                    filing_status_label: String::new(),
+                    summary: format!(
+                        "use the tax-profile (park this full return)?\n\nthe committed return for {year} is \
+                         stashed as a parked draft and the year resolves through your tax-profile again. \
+                         Reinstate it later with 't' (use full return), or discard it with 'X'."
+                    ),
+                    shadows: false,
+                });
+            }
+        }
+        ActiveSource::TaxProfile | ActiveSource::Neither => {
+            if parked {
+                reinstate_parked_full_return(app, year);
+            } else {
+                app.status = Some(format!(
+                    "year {year} has no committed or parked full return to switch to"
+                ));
+            }
+        }
+    }
+}
+
+/// ★ Task 8: the `t` "use full return" branch — re-`load` the parked draft into `working` so it becomes
+/// editable and a subsequent `s` re-commits it (Task 7's flow consumes the parked draft). Writes NOTHING
+/// (a pure read via the persist seam — I-1 disjoint borrow). Resets the cursor + edit state to root.
+fn reinstate_parked_full_return(app: &mut EditorApp, year: i32) {
+    use btctax_cli::input_form_store::Loaded;
+    match edit::persist::load_return_inputs(app.session.as_ref().unwrap(), year) {
+        Ok((Loaded::Draft { ri, parked }, _note)) => {
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                form.working = Some(ri);
+                form.parked = parked;
+                form.section_idx = 0;
+                form.field_focus = 0;
+                form.addr = btctax_input_form::RowAddr::default();
+                form.descent = None;
+                form.editing = false;
+                form.buf.set("");
+                form.error = None;
+                form.dirty = false;
+            }
+            app.status = Some(format!(
+                "editing the parked full return for {year} — press 's' to re-commit it"
+            ));
+        }
+        // The parked draft vanished under us (raced / already consumed) — nothing to reinstate.
+        Ok(_) => {
+            app.status = Some(format!("year {year} has no parked full return to switch to"));
+        }
+        Err(e) => app.status = Some(format!("{e}")),
+    }
+}
+
+/// ★ Task 8: run the confirmed park (the `ParkToProfile` modal's Enter). Writes through the persist seam
+/// `edit::persist::form_park_to_profile` (the disjoint `app.session` borrow — review I-1). On success the
+/// committed row is stashed as a `parked = 1` draft and the year resolves through the tax-profile again; the
+/// flow STAYS open (now editing the parked full return), so refresh the cached active-source label (the ONE
+/// store mutation that changes the active source while the flow is open) and mark the working copy parked.
+/// `park_to_profile` refuses (writing nothing) if a WIP draft occupies the slot — surface its `CliError`.
+/// Either way the modal closes.
+fn confirm_park_to_profile(app: &mut EditorApp) {
+    let year = match app.tax_inputs_form.as_ref() {
+        Some(f) if f.modal.is_some() => f.year,
+        _ => return,
+    };
+    match edit::persist::form_park_to_profile(app.session.as_mut().unwrap(), year) {
+        Ok(()) => {
+            // Recompute the cached active-source label — the committed row is gone; the tax-profile (if any)
+            // is active again. A read failure is non-fatal (default `(none)`).
+            let label = edit::persist::form_active_source(app.session.as_ref().unwrap(), year)
+                .map(|a| crate::edit::form::active_source_label(&a))
+                .unwrap_or("(none)");
+            // ★ I-1: re-project the Browse snapshot — parking changes the year's resolve outcome (it now
+            // resolves through the tax-profile, not the committed full return), so the Tax/Forms tabs must
+            // reflect the profile-derived liability. A re-projection failure is non-fatal (restart to refresh).
+            let new_snap = {
+                let session = app.session.as_ref().unwrap();
+                btctax_tui::unlock::build_snapshot(session)
+            };
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                form.modal = None;
+                form.active_source_label = label;
+                form.parked = true; // the working copy is now the sole parked draft (re-commit via `s`)
+                form.dirty = false;
+            }
+            match new_snap {
+                Ok((snap, _)) => {
+                    app.snapshot = Some(snap);
+                    app.status = Some(format!(
+                        "parked the full return for {year}; now using the tax-profile"
+                    ));
+                }
+                Err(e) => {
+                    app.status = Some(format!(
+                        "parked the full return for {year}, but re-projection failed ({e}) — restart to refresh"
+                    ));
+                }
+            }
+        }
+        Err(e) => {
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                form.modal = None; // close the confirm; keep the flow open (the refusal is in the status)
+            }
+            app.status = Some(format!("{e}"));
+        }
+    }
+}
+
+/// ★ Task 8: the `X` discard-parked entry (normal editing state). Opens the `DiscardParked` payload-confirm
+/// ONLY when a parked draft is loaded (`form.parked`) — else `X` is inert (the store would refuse it), with
+/// a status. The P2-a `discard_offered` state does NOT reach here (its own screen IS the confirm — its `X`
+/// is handled earlier). DISTINCT from `x` (delete an optional section, Task 5).
+fn open_discard_parked_modal(app: &mut EditorApp) {
+    let (year, parked) = match app.tax_inputs_form.as_ref() {
+        Some(f) => (f.year, f.parked),
+        None => return,
+    };
+    if !parked {
+        // ★ X-only-when-parked gate: no parked draft → open no modal (the store's discard_parked_draft
+        // refuses a non-parked year; this gate keeps `X` inert rather than opening a confirm that must fail).
+        app.status = Some(format!("year {year} has no parked draft to discard"));
+        return;
+    }
+    if let Some(form) = app.tax_inputs_form.as_mut() {
+        form.modal = Some(crate::edit::form::TaxInputsModalState {
+            kind: crate::edit::form::TaxInputsModalKind::DiscardParked,
+            year,
+            filing_status_label: String::new(),
+            summary: format!(
+                "discard the parked draft for {year}?\n\nthis permanently deletes the stashed full return \
+                 for this year (the ONLY copy). The year then falls back to the tax-profile (or a fresh \
+                 return) on the next open. This cannot be undone."
+            ),
+            shadows: false,
+        });
+    }
+}
+
+/// ★ Task 8: run the confirmed discard (the `DiscardParked` modal's Enter AND the P2-a discard-only
+/// screen's `X`). Writes through the persist seam `edit::persist::form_discard_parked_draft` (the disjoint
+/// `app.session` borrow — review I-1), the ONLY deleter of a `parked = 1` row (it REFUSES a non-parked year
+/// — surface that refusal). On success CLOSE the flow (the parked draft is gone; reopening falls back to
+/// committed/profile/fresh — P2-a's reachable escape). On error surface the `CliError` and keep the flow
+/// open (close any confirm modal).
+fn discard_parked_now(app: &mut EditorApp) {
+    let year = match app.tax_inputs_form.as_ref() {
+        Some(f) => f.year,
+        None => return,
+    };
+    match edit::persist::form_discard_parked_draft(app.session.as_mut().unwrap(), year) {
+        Ok(()) => {
+            app.tax_inputs_form = None; // the parked draft is gone — close the flow (P2-a escape / normal)
+            app.status = Some(format!("discarded the parked draft for {year}"));
+        }
+        Err(e) => {
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                form.modal = None; // close the confirm (if any); keep the flow open to see the refusal
+            }
+            app.status = Some(format!("{e}"));
+        }
+    }
 }
 
 // ── Classify-inbound modal handler ────────────────────────────────────────────
@@ -8972,6 +9752,11 @@ fn run(
             if let Event::Key(key) = event::read()? {
                 handle_key(&mut app, key);
             }
+        } else {
+            // ★ Task 6 (autosave, I-7): no event within the poll window — the idle tick is a debounced
+            // autosave flush point. A no-op unless the tax-inputs flow is dirty with a materialized working
+            // copy (so `save_draft`/`Vault::save` runs on a short idle, NOT per keystroke).
+            flush_tax_inputs_draft(&mut app);
         }
     }
     Ok(())
@@ -9028,6 +9813,1792 @@ mod tests {
         for c in s.chars() {
             handle_key(app, press(KeyCode::Char(c)));
         }
+    }
+
+    /// Unlock a freshly-`init`'d empty vault to the Browse screen (the `kat_c1_...` setup, extracted).
+    ///
+    /// Returns the app AND the `TempDir` guard — the caller MUST keep the guard alive (if it drops,
+    /// the temp dir and vault file inside it are deleted while the `Session` still holds them).
+    ///
+    /// ★ M9: an empty vault leaves `selected_year` at its 2025 default (`editor.rs`); 2025 has no
+    /// full-return tables, so we set `selected_year = year` explicitly (else a stray commit → NoTables).
+    fn unlocked_app_on_empty_vault(year: i32) -> (EditorApp, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "empty-vault-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+        let mut app = EditorApp::new(vault.clone());
+        for c in pp_str.chars() {
+            app.unlock.push_char(c);
+        }
+        app.do_unlock();
+        assert_eq!(
+            app.screen,
+            EditorScreen::Browse,
+            "an empty vault must unlock to Browse"
+        );
+        app.selected_year = year; // ★ M9: override the 2025 default
+        (app, dir)
+    }
+
+    /// Opening the tax-inputs flow on a fresh (never-committed, no-draft) year yields a `None`
+    /// working copy — NI-2: no `ReturnInputs` exists until a filing status is chosen — and no
+    /// stale-discard note.
+    #[test]
+    fn open_tax_inputs_on_fresh_year_has_none_working() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        handle_key(&mut app, press(KeyCode::Char('T'))); // the chosen open key
+        let f = app.tax_inputs_form.as_ref().expect("form opened");
+        assert!(
+            f.working.is_none(),
+            "NI-2: a fresh year starts with no ReturnInputs until filing status is chosen"
+        );
+        assert!(f.stale_note.is_none());
+        assert!(
+            !f.discard_offered,
+            "a fresh year is not a stale-parked-draft refusal"
+        );
+    }
+
+    /// Section/field navigation (plan 3 task 2): `Right`/`Tab` advance the section cursor across the
+    /// LIVE sections and clamp at the last; `Left` retreats and clamps at 0; `Down` clamps field focus
+    /// to the selected section's live-field count.
+    #[test]
+    fn tax_inputs_nav_moves_section_and_field_and_clamps() {
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        app.tax_inputs_form = Some(form);
+
+        // Right advances; Tab advances; Left retreats.
+        handle_key(&mut app, press(KeyCode::Right));
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().section_idx, 1);
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().section_idx, 2);
+        handle_key(&mut app, press(KeyCode::Left));
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().section_idx, 1);
+
+        // Right past the end clamps at the last live section (Single → 9 sections, max idx 8).
+        for _ in 0..50 {
+            handle_key(&mut app, press(KeyCode::Right));
+        }
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().section_idx,
+            8,
+            "section cursor clamps at the last live section (9 on Single: Spouse hidden, box12/charitable nested)"
+        );
+        // Left past the start clamps at 0.
+        for _ in 0..50 {
+            handle_key(&mut app, press(KeyCode::Left));
+        }
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().section_idx, 0);
+
+        // On ReturnOptions (idx 0) only FilingStatus is live (ItemizeElection needs a Schedule A) →
+        // Down clamps field focus at 0.
+        handle_key(&mut app, press(KeyCode::Down));
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().field_focus,
+            0,
+            "field focus clamps: ReturnOptions has a single live field on a Single return"
+        );
+    }
+
+    /// Task 6 (autosave, I-7): an edit followed by a section change flushes the draft to DISK via
+    /// `save_draft` — a FRESH `Session` reopened on the same vault sees the draft row carrying the edited
+    /// value. Proves the debounced autosave reached `Vault::save`, not just the in-memory conn.
+    #[test]
+    fn tax_inputs_autosave_reaches_disk_on_section_change() {
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open the flow (working None, focus FilingStatus)
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → Single (materializes)
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle → Mfj (a distinctive, non-fresh value)
+        let expected_fs = app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .working
+            .as_ref()
+            .expect("the filing-status choice materialized the return")
+            .filing_status;
+        assert_eq!(expected_fs, FilingStatus::Mfj, "two cycles land on Mfj");
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().dirty,
+            "a successful apply marks the flow dirty"
+        );
+
+        // A section change is a debounce boundary → flush save_draft to disk, clearing dirty.
+        handle_key(&mut app, press(KeyCode::Right));
+        assert!(
+            !app.tax_inputs_form.as_ref().unwrap().dirty,
+            "the section-change flush clears dirty"
+        );
+
+        // Drop the app (releases the exclusive vault lock — VaultLock note) BEFORE reopening a fresh Session.
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        match btctax_cli::input_form_store::load(sess.conn(), 2024).unwrap() {
+            (btctax_cli::input_form_store::Loaded::Draft { ri, parked }, _note) => {
+                assert_eq!(
+                    ri.filing_status, expected_fs,
+                    "the edited value reached disk (I-7)"
+                );
+                assert!(!parked, "an autosaved WIP draft is not parked (NI-1 default)");
+            }
+            _ => panic!("expected a Draft on disk after the autosave flush"),
+        }
+    }
+
+    /// Task 6 (autosave, NI-2): a `None` working copy — nothing chosen yet — writes NO draft even when the
+    /// flow is marked dirty. Guards the `flush_tax_inputs_draft` None-skip: a `None` return is never persisted.
+    #[test]
+    fn tax_inputs_autosave_skips_a_none_working_copy() {
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        // Force the flush path to run on a None working copy: dirty = true, working = None (NI-2).
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.dirty = true;
+        assert!(form.working.is_none());
+        app.tax_inputs_form = Some(form);
+
+        handle_key(&mut app, press(KeyCode::Right)); // section change → flush attempt (must write nothing)
+
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        assert!(
+            !btctax_cli::input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
+            "a None working copy autosaves nothing (NI-2)"
+        );
+    }
+
+    /// Task 6 (review I-3 / §9A): `q` inside the flow flushes the in-progress draft to disk and CLOSES the
+    /// flow (back to Browse) — quit is safe because the draft is autosaved. It does NOT quit the whole app,
+    /// and (without this arm) the flow gate would silently swallow `q`.
+    #[test]
+    fn tax_inputs_q_flushes_draft_and_closes_flow() {
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open the flow
+        handle_key(&mut app, press(KeyCode::Char(' '))); // materialize Single (marks dirty)
+        assert!(app.tax_inputs_form.as_ref().unwrap().dirty);
+
+        handle_key(&mut app, press(KeyCode::Char('q'))); // q: flush the draft, then close the flow
+        assert!(
+            app.tax_inputs_form.is_none(),
+            "q closes the tax-inputs flow"
+        );
+        assert!(
+            !app.should_quit,
+            "q inside the flow does not quit the whole app"
+        );
+
+        // The draft was flushed to disk BEFORE the close (§9A: quit is safe).
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        assert!(
+            btctax_cli::input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
+            "q flushes the in-progress draft to disk before closing"
+        );
+    }
+
+    // ── Task 7: the commit flow (`s` → payload-confirm → Enter → commit) ──────────────────────────────
+
+    /// Task 7 test (a): a screen-refused return (bare `Single`, unanswered declarations) → `s` → Enter →
+    /// `Refused`. The flow JUMPS focus to the field `attribute(refusal.reason)` names (the unanswered
+    /// dependent-taxpayer declaration) and surfaces the refusal text. Mutation-checked: neuter the focus
+    /// jump in `focus_refusal` and the `focused_field` assertion fails.
+    #[test]
+    fn tax_inputs_commit_refused_jumps_focus_to_the_anchor() {
+        use btctax_input_form::FieldId;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+
+        // Materialize a bare Single (every declaration still `None`) via the flow.
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open (working None, focus FilingStatus)
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → Single (materializes)
+
+        // Before the commit, focus is on FilingStatus (section 0, field 0).
+        {
+            let form = app.tax_inputs_form.as_ref().unwrap();
+            assert_eq!(
+                crate::edit::tax_inputs::focused_field(form).unwrap().id,
+                FieldId::FilingStatus,
+                "focus starts on FilingStatus"
+            );
+        }
+
+        // `s` opens the confirm modal; Enter runs the commit → screen-refused (unanswered declarations).
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().modal.is_some(),
+            "`s` opens the commit payload-confirm modal"
+        );
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        let form = app
+            .tax_inputs_form
+            .as_ref()
+            .expect("a refused commit keeps the flow open");
+        assert!(form.modal.is_none(), "the modal closes on a refusal");
+        assert_eq!(
+            crate::edit::tax_inputs::focused_field(form).unwrap().id,
+            FieldId::DeclDependentTaxpayer,
+            "the refusal jumps focus to the attributed declaration field (attribute → anchor)"
+        );
+        assert!(
+            form.error.as_deref().is_some_and(|e| !e.is_empty()),
+            "the refusal detail is surfaced inline"
+        );
+        assert!(
+            app.status.as_deref().is_some_and(|s| !s.is_empty()),
+            "the refusal detail is also surfaced in the status"
+        );
+    }
+
+    /// Task 7 test (b): a screen-clean return (`not_a_dependent()` + `answer_all_live_declarations()`) → `s`
+    /// opens the modal NAMING the filing status → Enter → `Committed`. A fresh Session sees a committed
+    /// `return_inputs` row AND the draft is GONE. Mutation-checked: make the modal Enter skip `form_commit`
+    /// and the committed-row read-back fails.
+    #[test]
+    fn tax_inputs_commit_clean_writes_row_and_clears_draft() {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        // The plan-2 Task-4 commit fixture: not-a-dependent + every live declaration answered. Constructed
+        // directly — a TEST may name `ReturnInputs`; the FLOW never does.
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+
+        // Seed a draft on disk so the commit's draft-delete is observable, then inject the working copy.
+        btctax_cli::input_form_store::save_draft(app.session.as_mut().unwrap(), 2024, &ri).unwrap();
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.working = Some(ri);
+        form.dirty = true;
+        app.tax_inputs_form = Some(form);
+
+        // `s` opens the modal naming the filing status (read via the accessor).
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        {
+            let m = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .modal
+                .as_ref()
+                .expect("commit modal opened");
+            assert_eq!(
+                m.filing_status_label, "Single",
+                "the modal names the filing status (via the accessor, never `ri.filing_status`)"
+            );
+            assert!(m.summary.contains("Single"), "the summary names the filing status");
+        }
+
+        // Enter commits → Committed: the flow closes and the status confirms.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.tax_inputs_form.is_none(),
+            "a clean commit closes the flow"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or_default()
+                .contains("committed 2024 as Single"),
+            "status confirms the commit: {:?}",
+            app.status
+        );
+
+        // Fresh-Session read-back: a committed row now exists AND the draft is gone.
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        match btctax_cli::input_form_store::load(sess.conn(), 2024).unwrap() {
+            (btctax_cli::input_form_store::Loaded::Committed(cri), _) => {
+                assert_eq!(
+                    cri.filing_status,
+                    FilingStatus::Single,
+                    "the committed row is the clean return"
+                );
+            }
+            _ => panic!("expected a committed return_inputs row after a clean commit"),
+        }
+        assert!(
+            !btctax_cli::input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
+            "a clean commit deletes the draft"
+        );
+    }
+
+    /// Task 7 test (c): a non-2024 year has no full-return tables → `Committed` never happens; the commit
+    /// returns `NoTables`, the flow stays open with the modal closed, the status names the 2024-only gate,
+    /// and NOTHING is written.
+    #[test]
+    fn tax_inputs_commit_non_2024_is_notables_and_writes_nothing() {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2099);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2099);
+        form.working = Some(ri);
+        app.tax_inputs_form = Some(form);
+
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(app.tax_inputs_form.as_ref().unwrap().modal.is_some());
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        let form = app
+            .tax_inputs_form
+            .as_ref()
+            .expect("NoTables keeps the flow open");
+        assert!(form.modal.is_none(), "NoTables closes the modal");
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or_default()
+                .contains("no full-return tables"),
+            "status names the 2024-only gate: {:?}",
+            app.status
+        );
+
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        assert!(
+            !btctax_cli::return_inputs::exists(sess.conn(), 2099).unwrap(),
+            "NoTables writes no committed row"
+        );
+    }
+
+    // ── Whole-branch P3 fix-pass (I-1..I-4) ──────────────────────────────────
+
+    /// Render the WHOLE editor (Browse + the tax-inputs overlay) to a flat row-major string. The overlay
+    /// reads `app.status` (I-2), so this exercises the real render path a filer sees inside the flow.
+    fn render_editor(app: &mut EditorApp) -> String {
+        use ratatui::{backend::TestBackend, Terminal};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, app)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    /// ★ I-1 (commit site): a clean `Committed` commit RE-PROJECTS the Browse snapshot — the year that had
+    /// no resolved profile now appears in `snapshot.profiles`/`refused`, so the Tax/Forms tabs read the
+    /// newly-committed liability rather than the stale pre-mutation one. Mutation-check: delete the
+    /// re-projection block in `commit_tax_inputs`'s `Committed` arm and 2024 stays absent → this fails.
+    #[test]
+    fn tax_inputs_commit_reprojects_the_browse_snapshot() {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+
+        // The empty-vault snapshot (built at unlock) knows nothing about 2024 yet.
+        let known_before = |app: &EditorApp| {
+            let s = app.snapshot.as_ref().unwrap();
+            s.profiles.contains_key(&2024) || s.refused.contains_key(&2024)
+        };
+        assert!(!known_before(&app), "precondition: 2024 unresolved before the commit");
+
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+        btctax_cli::input_form_store::save_draft(app.session.as_mut().unwrap(), 2024, &ri).unwrap();
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.working = Some(ri);
+        form.dirty = true;
+        app.tax_inputs_form = Some(form);
+
+        handle_key(&mut app, press(KeyCode::Char('s'))); // open the commit modal
+        handle_key(&mut app, press(KeyCode::Enter)); // Committed
+
+        assert!(app.tax_inputs_form.is_none(), "a clean commit closes the flow");
+        assert!(
+            known_before(&app),
+            "★ I-1: the snapshot re-projected — 2024 now resolves through the committed return"
+        );
+    }
+
+    /// ★ I-1 (park site): a confirmed park RE-PROJECTS the Browse snapshot — the year now resolves through
+    /// the tax-profile again, so the Tax/Forms tabs reflect the profile-derived liability. Mutation-check:
+    /// delete the re-projection in `confirm_park_to_profile`'s `Ok` arm and 2024 stays absent → this fails.
+    #[test]
+    fn tax_inputs_park_reprojects_the_browse_snapshot() {
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
+        // The snapshot was built at unlock (empty vault), BEFORE the seed reached disk — 2024 is absent.
+        let resolved = |app: &EditorApp| {
+            let s = app.snapshot.as_ref().unwrap();
+            s.profiles.contains_key(&2024) || s.refused.contains_key(&2024)
+        };
+        assert!(!resolved(&app), "precondition: 2024 unresolved in the stale snapshot");
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open on the committed full return
+        handle_key(&mut app, press(KeyCode::Char('t'))); // park confirm
+        handle_key(&mut app, press(KeyCode::Enter)); // run the park
+
+        assert!(
+            app.tax_inputs_form.as_ref().is_some_and(|f| f.parked),
+            "park keeps the flow open on the parked draft"
+        );
+        assert!(
+            resolved(&app),
+            "★ I-1: the snapshot re-projected — 2024 now resolves through the tax-profile"
+        );
+    }
+
+    /// ★ I-2: a `NoTables` commit routes its message to `app.status` while the flow stays open; the flow's
+    /// full-frame overlay clears the Browse footer, so the message must be surfaced INSIDE the flow render.
+    /// The rendered buffer must carry the "no full-return tables" text (else the modal just vanished silently).
+    #[test]
+    fn tax_inputs_notables_status_is_visible_in_flow_render() {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2099); // no full-return tables
+
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2099);
+        form.working = Some(ri);
+        app.tax_inputs_form = Some(form);
+
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Enter)); // NoTables — flow stays open, status set
+
+        assert!(app.tax_inputs_form.is_some(), "NoTables keeps the flow open");
+        let rendered = render_editor(&mut app);
+        assert!(
+            rendered.contains("no full-return tables"),
+            "★ I-2: the NoTables status is VISIBLE inside the flow render, not swallowed by the overlay"
+        );
+    }
+
+    /// ★ I-3: `q` must NOT close the flow when the final flush FAILS (that would drop the in-memory edits —
+    /// the opposite of the retry latch's purpose). Simulate a `Vault::save` failure by removing the vault's
+    /// directory out from under the session, so the autosave write errors. The flow stays open + dirty and
+    /// the error is surfaced. Mutation-check: make the close in the `q` arm unconditional → this fails
+    /// (the flow closes and the edits are lost).
+    #[test]
+    fn tax_inputs_q_keeps_flow_open_when_final_flush_fails() {
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open (working None)
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → Single (materializes, dirty)
+        assert!(
+            app.tax_inputs_form.as_ref().is_some_and(|f| f.dirty && f.working.is_some()),
+            "precondition: a dirty flow with a live working copy"
+        );
+
+        // Pull the rug: remove the directory holding the vault so `Vault::save`'s atomic write fails.
+        std::fs::remove_dir_all(dir.path()).unwrap();
+
+        handle_key(&mut app, press(KeyCode::Char('q')));
+
+        assert!(
+            app.tax_inputs_form.is_some(),
+            "★ I-3: a FAILED final flush keeps the flow OPEN — the in-memory edits are not dropped"
+        );
+        assert!(
+            app.tax_inputs_form.as_ref().is_some_and(|f| f.dirty),
+            "the flow is still dirty (the draft never reached disk)"
+        );
+        assert!(
+            app.status.as_deref().is_some_and(|s| !s.is_empty()),
+            "the flush error is surfaced (visible via I-2): {:?}",
+            app.status
+        );
+    }
+
+    /// ★ I-3 (unit): the close-decision helper. A dirty flow with a live working copy (a failed flush) is
+    /// NOT safe to close; a clean flow (or one with no working copy) is. Directly pins the guard the `q`/`Esc`
+    /// arms consult.
+    #[test]
+    fn tax_inputs_flush_left_unsaved_gates_the_close() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.working = None;
+        form.dirty = false;
+        app.tax_inputs_form = Some(form);
+        assert!(!tax_inputs_flush_left_unsaved(&app), "None working → safe to close");
+
+        // A dirty flow with a live working copy (the failed-flush shape) must block the close.
+        {
+            let f = app.tax_inputs_form.as_mut().unwrap();
+            f.working = Some(btctax_core::tax::return_inputs::ReturnInputs::default());
+            f.dirty = true;
+        }
+        assert!(
+            tax_inputs_flush_left_unsaved(&app),
+            "dirty + working → unsaved edits → keep the flow open"
+        );
+
+        app.tax_inputs_form.as_mut().unwrap().dirty = false;
+        assert!(!tax_inputs_flush_left_unsaved(&app), "clean → safe to close");
+    }
+
+    /// ★ I-4 (§9A): a screen-refused commit attributes the refusal to a live SECTION (a `SectionId`, never a
+    /// leaf), renders the `!` glyph on that section in the left pane, and shows the `1 issue: <section>`
+    /// screen status. The SALT election mismatch attributes to Schedule A. A later successful `apply` clears
+    /// the attribution back to `screens clean`.
+    #[test]
+    fn tax_inputs_screen_refusal_renders_bang_glyph_and_issue_status() {
+        use btctax_core::tax::return_inputs::{ReturnInputs, ScheduleAInputs};
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        use btctax_input_form::SectionId;
+        use rust_decimal_macros::dec;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+        // A SALT sales-tax amount with the election left unanswered → a screen refusal on Schedule A.
+        ri.schedule_a = Some(ScheduleAInputs {
+            salt_sales_tax_amount: dec!(500),
+            ..Default::default()
+        });
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.working = Some(ri);
+        app.tax_inputs_form = Some(form);
+
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Enter)); // Refused → focus jumps to Schedule A
+
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().refused_section,
+            Some(SectionId::ScheduleA),
+            "★ I-4: the refusal is attributed to the Schedule A SECTION (a SectionId, not a leaf)"
+        );
+
+        let rendered = render_editor(&mut app);
+        assert!(
+            rendered.contains("! Schedule"),
+            "★ I-4: the `!` glyph marks the refused section in the left pane"
+        );
+        assert!(
+            rendered.contains("1 issue"),
+            "★ I-4: the screen status reads `1 issue: <section>`"
+        );
+
+        // A successful apply clears the attribution → `screens clean` again (the `!` re-arms only on a
+        // fresh refusal). Navigation alone does NOT clear it — so retreat to ReturnOptions (Left resets the
+        // field cursor to FilingStatus) and cycle the filing status (an Enum apply that always succeeds).
+        for _ in 0..10 {
+            handle_key(&mut app, press(KeyCode::Left));
+        }
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().refused_section.is_some(),
+            "navigation alone must NOT clear the refusal attribution"
+        );
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → a successful apply
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().refused_section.is_none(),
+            "★ I-4: a successful apply clears the stale refusal attribution"
+        );
+        let rendered2 = render_editor(&mut app);
+        assert!(
+            rendered2.contains("screens clean"),
+            "★ I-4: with no refusal the screen status is honest — `screens clean, except what report computes`"
+        );
+    }
+
+    /// Field editing (plan 3 task 3, brief test (b)): key-driven Money edit. `Enter` opens the edit
+    /// buffer on a focused Money field; typing digits fills it; a second `Enter` commits (parse+apply) and
+    /// exits edit mode; `get` then reads back the committed value — asserted via the accessor, never a leaf.
+    #[test]
+    fn tax_inputs_money_edit_via_keys_roundtrips_through_get() {
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        // Materialize a Single return via `apply` — never construct a `ReturnInputs`.
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        // Focus Payments → PayEstimated (a singleton Money field, addr `[]`).
+        let ri = form.working.as_ref().unwrap();
+        let sections = crate::edit::form::live_sections(ri);
+        let sec = sections
+            .iter()
+            .position(|s| s.id == SectionId::Payments)
+            .unwrap();
+        let fld = crate::edit::form::live_fields(sections[sec], ri)
+            .iter()
+            .position(|f| f.id == FieldId::PayEstimated)
+            .unwrap();
+        form.section_idx = sec;
+        form.field_focus = fld;
+        app.tax_inputs_form = Some(form);
+
+        // Enter opens the buffer; digits fill it; Enter commits.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().editing,
+            "Enter on a Money field opens the edit buffer"
+        );
+        type_str(&mut app, "50000");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        let form = app.tax_inputs_form.as_ref().unwrap();
+        assert!(!form.editing, "a successful commit exits edit mode");
+        assert!(form.error.is_none(), "a valid Money entry leaves no error");
+        // Assert via the `get` accessor: PayEstimated == $50,000.
+        let ri = form.working.as_ref().unwrap();
+        let sections = crate::edit::form::live_sections(ri);
+        let pay = sections
+            .iter()
+            .find(|s| s.id == SectionId::Payments)
+            .unwrap();
+        let field = crate::edit::form::live_fields(pay, ri)
+            .into_iter()
+            .find(|f| f.id == FieldId::PayEstimated)
+            .unwrap();
+        assert_eq!(
+            (field.get)(ri, &RowAddr::default()),
+            Some(FieldValue::Money(rust_decimal_macros::dec!(50000)))
+        );
+    }
+
+    /// Secret no-echo entry (plan 3 task 4): `Enter` on a focused Secret (SSN) opens NO-ECHO entry; typed
+    /// digits accumulate in the buffer; a second `Enter` commits (`parse_ssn` → `SecretEntry` → `apply`) and
+    /// the field reads back MASKED via `get` — never digits, asserted through the accessor.
+    #[test]
+    fn tax_inputs_secret_ssn_via_keys_commits_masked() {
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId, SecretView};
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        // Focus Taxpayer → SSN (a Secret singleton field, addr `[]`).
+        let ri = form.working.as_ref().unwrap();
+        let sections = crate::edit::form::live_sections(ri);
+        let sec = sections
+            .iter()
+            .position(|s| s.id == SectionId::Taxpayer)
+            .unwrap();
+        let fld = crate::edit::form::live_fields(sections[sec], ri)
+            .iter()
+            .position(|f| f.id == FieldId::TpSsn)
+            .unwrap();
+        form.section_idx = sec;
+        form.field_focus = fld;
+        app.tax_inputs_form = Some(form);
+
+        // Enter opens no-echo entry; digits fill the buffer; Enter commits.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().editing,
+            "Enter on a Secret opens no-echo entry"
+        );
+        type_str(&mut app, "123456789");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        let form = app.tax_inputs_form.as_ref().unwrap();
+        assert!(!form.editing, "a valid SSN commit exits entry mode");
+        assert!(form.error.is_none(), "a valid SSN leaves no error");
+        // Assert via the `get` accessor: the SSN reads back masked, never digits.
+        let ri = form.working.as_ref().unwrap();
+        let sections = crate::edit::form::live_sections(ri);
+        let tp = sections
+            .iter()
+            .find(|s| s.id == SectionId::Taxpayer)
+            .unwrap();
+        let field = crate::edit::form::live_fields(tp, ri)
+            .into_iter()
+            .find(|f| f.id == FieldId::TpSsn)
+            .unwrap();
+        match (field.get)(ri, &RowAddr::default()) {
+            Some(FieldValue::Secret(SecretView::Set { masked })) => {
+                assert!(masked.starts_with("***-**-"), "read-back is masked");
+                assert!(!masked.contains("12345"), "middle digits never surface");
+            }
+            other => panic!("expected a Set SecretView, got {other:?}"),
+        }
+    }
+
+    // ── Task 5 — repeating/optional shape edits + row nav (key-driven) ────────
+
+    /// Materialize a `Single` return, open the tax-inputs flow, and focus the given section (row cursor at
+    /// its root, `addr = []`). Returns the app + the temp-dir guard.
+    fn tax_inputs_app_on_section(
+        sec: btctax_input_form::SectionId,
+    ) -> (EditorApp, tempfile::TempDir) {
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        let ri = form.working.as_ref().unwrap();
+        form.section_idx = crate::edit::form::live_sections(ri)
+            .iter()
+            .position(|s| s.id == sec)
+            .unwrap();
+        app.tax_inputs_form = Some(form);
+        (app, dir)
+    }
+
+    /// The engine's row count for a top-level repeating section (via its `Repeating::len` accessor).
+    fn tax_inputs_row_count(app: &EditorApp, sec: btctax_input_form::SectionId) -> usize {
+        use btctax_input_form::{RowAddr, SectionKind};
+        let ri = app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .working
+            .as_ref()
+            .unwrap();
+        let s = btctax_input_form::form_spec()
+            .iter()
+            .find(|s| s.id == sec)
+            .unwrap();
+        let SectionKind::Repeating { len, .. } = s.kind else {
+            panic!("{sec:?} is not repeating")
+        };
+        len(ri, &RowAddr::default())
+    }
+
+    /// (a) `a` on the W-2s section adds a row via `AddRow`, and the new row is focusable in the row list.
+    #[test]
+    fn tax_inputs_a_adds_w2_row_via_keys() {
+        use btctax_input_form::SectionId;
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::W2s);
+        assert_eq!(tax_inputs_row_count(&app, SectionId::W2s), 0, "starts with no W-2s");
+
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert_eq!(
+            tax_inputs_row_count(&app, SectionId::W2s),
+            1,
+            "`a` adds a W-2 row via AddRow"
+        );
+        let form = app.tax_inputs_form.as_ref().unwrap();
+        assert_eq!(
+            crate::edit::tax_inputs::navigable_count(form),
+            1,
+            "the row list now has one focusable row"
+        );
+        assert_eq!(form.field_focus, 0, "the cursor lands on the new row");
+        assert!(form.error.is_none());
+    }
+
+    /// (b) `c` creates Schedule A (its fields appear); `x` deletes it and — the engine's I-10 reset — the
+    /// `itemize_election` returns to `Auto` (asserted via the `get` accessor).
+    #[test]
+    fn tax_inputs_c_creates_x_deletes_schedule_a_resetting_itemize() {
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId, SectionKind};
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::ScheduleA);
+
+        let present = |app: &EditorApp| -> bool {
+            let ri = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .working
+                .as_ref()
+                .unwrap();
+            let s = btctax_input_form::form_spec()
+                .iter()
+                .find(|s| s.id == SectionId::ScheduleA)
+                .unwrap();
+            let SectionKind::OptionalSingleton { present, .. } = s.kind else {
+                panic!()
+            };
+            present(ri)
+        };
+        let itemize = |app: &EditorApp| -> String {
+            let ri = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .working
+                .as_ref()
+                .unwrap();
+            let f = btctax_input_form::form_spec()
+                .iter()
+                .flat_map(|s| s.fields.iter())
+                .find(|f| f.id == FieldId::ItemizeElection)
+                .unwrap();
+            match (f.get)(ri, &RowAddr::default()) {
+                Some(FieldValue::Choice(c)) => c,
+                other => panic!("expected a Choice, got {other:?}"),
+            }
+        };
+
+        assert!(!present(&app), "Schedule A starts absent");
+        handle_key(&mut app, press(KeyCode::Char('c')));
+        assert!(present(&app), "`c` creates Schedule A");
+
+        // Force itemizing (precondition), then delete Schedule A via `x`.
+        {
+            let form = app.tax_inputs_form.as_mut().unwrap();
+            apply(
+                &mut form.working,
+                Edit::SetField {
+                    id: FieldId::ItemizeElection,
+                    addr: RowAddr::default(),
+                    value: FieldValue::Choice("ForceItemize".into()),
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(itemize(&app), "ForceItemize");
+
+        handle_key(&mut app, press(KeyCode::Char('x')));
+        assert!(!present(&app), "`x` deletes Schedule A");
+        assert_eq!(
+            itemize(&app),
+            "Auto",
+            "I-10: deleting Schedule A resets itemize_election to Auto"
+        );
+    }
+
+    /// (c) `d` on a selected W-2 row opens a payload-confirm ("remove W-2 #1?"); Enter applies the
+    /// `RemoveRow` and the list shrinks; the staging clears.
+    #[test]
+    fn tax_inputs_d_removes_w2_row_via_confirm() {
+        use btctax_input_form::SectionId;
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::W2s);
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert_eq!(tax_inputs_row_count(&app, SectionId::W2s), 2);
+
+        // Select row 0, then stage its removal.
+        handle_key(&mut app, press(KeyCode::Up));
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        {
+            let pr = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .pending_remove
+                .as_ref()
+                .expect("`d` stages a remove-confirm");
+            assert!(
+                pr.label.contains("W-2 #1"),
+                "the confirm names the selected row: {}",
+                pr.label
+            );
+        }
+        // Enter confirms → the RemoveRow applies and the staging clears.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(
+            tax_inputs_row_count(&app, SectionId::W2s),
+            1,
+            "confirming removes exactly the selected W-2"
+        );
+        assert!(
+            app.tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .pending_remove
+                .is_none(),
+            "the staging clears after the confirm"
+        );
+    }
+
+    /// (c-bis) Esc on the remove-confirm cancels: nothing is removed and the staging clears.
+    #[test]
+    fn tax_inputs_d_confirm_esc_cancels_no_removal() {
+        use btctax_input_form::SectionId;
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::W2s);
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        assert!(app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .pending_remove
+            .is_some());
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(
+            app.tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .pending_remove
+                .is_none(),
+            "Esc cancels the staged removal"
+        );
+        assert_eq!(
+            tax_inputs_row_count(&app, SectionId::W2s),
+            1,
+            "cancelling removes nothing"
+        );
+        assert!(
+            app.tax_inputs_form.is_some(),
+            "Esc on the confirm modal does NOT close the whole flow"
+        );
+    }
+
+    // ── Task-5 fix — nested-group interactive drill-down (W2Box12 / ScheduleACharitable) ───────
+
+    /// The engine's row count for a nested repeating section at an explicit PARENT address (its
+    /// `Repeating::len` accessor): `W2Box12` at `[w2_i]`, `ScheduleACharitable` at `[]`.
+    fn nested_row_count(
+        app: &EditorApp,
+        sec: btctax_input_form::SectionId,
+        parent: &btctax_input_form::RowAddr,
+    ) -> usize {
+        use btctax_input_form::SectionKind;
+        let ri = app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .working
+            .as_ref()
+            .unwrap();
+        let s = btctax_input_form::form_spec()
+            .iter()
+            .find(|s| s.id == sec)
+            .unwrap();
+        let SectionKind::Repeating { len, .. } = s.kind else {
+            panic!("{sec:?} is not repeating")
+        };
+        len(ri, parent)
+    }
+
+    /// Read a field's value via its `get` accessor at `addr` (never a leaf).
+    fn nested_get(
+        app: &EditorApp,
+        id: btctax_input_form::FieldId,
+        addr: &btctax_input_form::RowAddr,
+    ) -> Option<btctax_input_form::FieldValue> {
+        let ri = app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .working
+            .as_ref()
+            .unwrap();
+        let f = btctax_input_form::form_spec()
+            .iter()
+            .flat_map(|s| s.fields.iter())
+            .find(|f| f.id == id)
+            .unwrap();
+        (f.get)(ri, addr)
+    }
+
+    /// Drive the cursor onto the synthetic nested-group drill entry (the last field-pane item) with `Down`
+    /// keypresses, then `Enter` to drill in. Asserts the cursor actually reached the drill entry first.
+    fn drill_into_nested(app: &mut EditorApp) {
+        for _ in 0..40 {
+            if crate::edit::tax_inputs::on_nested_drill_entry(app.tax_inputs_form.as_ref().unwrap()) {
+                break;
+            }
+            handle_key(app, press(KeyCode::Down));
+        }
+        assert!(
+            crate::edit::tax_inputs::on_nested_drill_entry(app.tax_inputs_form.as_ref().unwrap()),
+            "the cursor must reach the synthetic nested-group drill entry"
+        );
+        handle_key(app, press(KeyCode::Enter));
+    }
+
+    /// (Task-5 fix, test 1) From a W-2 row, `Enter` on the synthetic "Box 12 entries →" drills into the
+    /// box-12 sub-list; `a` adds a box-12 entry (parent `[0]`); drilling into it and editing `Box12Code`="W"
+    /// and `Box12Amount`=1000 reads back via the engine `get` at DEPTH 2 `[0, 0]` — all key-driven.
+    #[test]
+    fn tax_inputs_drill_into_box12_add_and_edit_via_keys() {
+        use btctax_input_form::{FieldId, FieldValue, RowAddr, SectionId};
+        use rust_decimal_macros::dec;
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::W2s);
+        // Add a W-2 (row 0) and enter it → the W-2 row-fields pane (addr [0]).
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().addr, RowAddr(vec![0]));
+
+        // Drill into the box-12 sub-list, then add one entry (parent [0]).
+        drill_into_nested(&mut app);
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().descent,
+            Some(SectionId::W2Box12),
+            "Enter on the synthetic entry descends into the box-12 group"
+        );
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert_eq!(
+            nested_row_count(&app, SectionId::W2Box12, &RowAddr(vec![0])),
+            1,
+            "`a` in the box-12 sub-list adds an entry under W-2 [0]"
+        );
+
+        // Enter the new box-12 entry → its fields (addr [0,0]); edit Box12Code (Text) then Box12Amount (Money).
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().addr, RowAddr(vec![0, 0]));
+        // Box12Code is the first nested field (focus 0): Enter opens the buffer, type "W", Enter commits.
+        handle_key(&mut app, press(KeyCode::Enter));
+        type_str(&mut app, "W");
+        handle_key(&mut app, press(KeyCode::Enter));
+        // Down to Box12Amount, Enter, "1000", Enter.
+        handle_key(&mut app, press(KeyCode::Down));
+        handle_key(&mut app, press(KeyCode::Enter));
+        type_str(&mut app, "1000");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert_eq!(
+            nested_get(&app, FieldId::Box12Code, &RowAddr(vec![0, 0])),
+            Some(FieldValue::Text("W".into())),
+            "Box12Code committed at depth-2 [0,0]"
+        );
+        assert_eq!(
+            nested_get(&app, FieldId::Box12Amount, &RowAddr(vec![0, 0])),
+            Some(FieldValue::Money(dec!(1000))),
+            "Box12Amount committed at depth-2 [0,0]"
+        );
+        assert!(app.tax_inputs_form.as_ref().unwrap().error.is_none());
+    }
+
+    /// (Task-5 fix, test 2) In Schedule A, `Enter` on the synthetic "Charitable gifts →" drills into the
+    /// charitable sub-list (parent `[]`); `a` adds a gift; editing `CharAmount`=500 reads back at `[0]`.
+    #[test]
+    fn tax_inputs_drill_into_charitable_add_and_edit_via_keys() {
+        use btctax_input_form::{FieldId, FieldValue, RowAddr, SectionId};
+        use rust_decimal_macros::dec;
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::ScheduleA);
+        // Create Schedule A (absent by default), then drill into its charitable sub-list.
+        handle_key(&mut app, press(KeyCode::Char('c')));
+        drill_into_nested(&mut app);
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().descent,
+            Some(SectionId::ScheduleACharitable),
+            "Enter on the synthetic entry descends into the charitable group"
+        );
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert_eq!(
+            nested_row_count(&app, SectionId::ScheduleACharitable, &RowAddr::default()),
+            1,
+            "`a` in the charitable sub-list adds a gift under Schedule A (parent [])"
+        );
+
+        // Enter the gift (addr [0]); CharClass is field 0 (Enum), CharAmount is field 1 (Money).
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().addr, RowAddr(vec![0]));
+        handle_key(&mut app, press(KeyCode::Down)); // → CharAmount
+        handle_key(&mut app, press(KeyCode::Enter));
+        type_str(&mut app, "500");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert_eq!(
+            nested_get(&app, FieldId::CharAmount, &RowAddr(vec![0])),
+            Some(FieldValue::Money(dec!(500))),
+            "CharAmount committed at [0]"
+        );
+        assert!(app.tax_inputs_form.as_ref().unwrap().error.is_none());
+    }
+
+    /// (Task-5 fix, test 3) `d` in the box-12 sub-list stages a payload-confirm naming a box-12 entry; Enter
+    /// removes exactly the selected entry and the nested list shrinks (2 → 1).
+    #[test]
+    fn tax_inputs_d_removes_box12_entry_via_confirm() {
+        use btctax_input_form::{RowAddr, SectionId};
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::W2s);
+        handle_key(&mut app, press(KeyCode::Char('a'))); // W-2 row 0
+        handle_key(&mut app, press(KeyCode::Enter)); // enter it
+        drill_into_nested(&mut app); // → box-12 sub-list
+        handle_key(&mut app, press(KeyCode::Char('a'))); // box-12 entry 0
+        handle_key(&mut app, press(KeyCode::Char('a'))); // box-12 entry 1
+        assert_eq!(nested_row_count(&app, SectionId::W2Box12, &RowAddr(vec![0])), 2);
+
+        // Select entry 0, stage its removal — the confirm names a box-12 entry.
+        handle_key(&mut app, press(KeyCode::Up));
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        {
+            let pr = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .pending_remove
+                .as_ref()
+                .expect("`d` stages a remove-confirm in the box-12 sub-list");
+            assert_eq!(pr.section, SectionId::W2Box12);
+            assert_eq!(pr.addr, RowAddr(vec![0, 0]), "the staged addr is depth-2 [0,0]");
+            assert!(
+                pr.label.contains("box-12 entry"),
+                "the confirm names a box-12 entry: {}",
+                pr.label
+            );
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm
+        assert_eq!(
+            nested_row_count(&app, SectionId::W2Box12, &RowAddr(vec![0])),
+            1,
+            "confirming removes exactly the selected box-12 entry"
+        );
+        assert!(app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .pending_remove
+            .is_none());
+    }
+
+    /// (Task-5 fix, test 4) Back-navigation: from a box-12 sub-row the back key (`Esc`) pops to the sub-list,
+    /// and again to the W-2 row's fields (descent cleared, `addr` back to `[0]`) — no panic, flow stays open.
+    #[test]
+    fn tax_inputs_back_nav_pops_out_of_box12_no_panic() {
+        use btctax_input_form::{RowAddr, SectionId};
+        use crate::edit::tax_inputs::{active_pane, Pane};
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::W2s);
+        handle_key(&mut app, press(KeyCode::Char('a'))); // W-2 row 0
+        handle_key(&mut app, press(KeyCode::Enter)); // enter it → addr [0]
+        drill_into_nested(&mut app); // → box-12 sub-list (descent Some, addr [0])
+        handle_key(&mut app, press(KeyCode::Char('a'))); // one entry
+        handle_key(&mut app, press(KeyCode::Enter)); // enter entry → addr [0,0]
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().addr, RowAddr(vec![0, 0]));
+        assert!(matches!(
+            active_pane(app.tax_inputs_form.as_ref().unwrap()),
+            Pane::RowFields(_)
+        ));
+
+        // Back #1: sub-row fields → sub-list (addr pops to [0], descent still the box-12 group).
+        handle_key(&mut app, press(KeyCode::Esc));
+        {
+            let form = app.tax_inputs_form.as_ref().unwrap();
+            assert_eq!(form.addr, RowAddr(vec![0]));
+            assert_eq!(form.descent, Some(SectionId::W2Box12));
+            assert!(matches!(active_pane(form), Pane::RowList(_)));
+        }
+
+        // Back #2: sub-list → the W-2 row's fields (descent cleared, addr stays [0]).
+        handle_key(&mut app, press(KeyCode::Esc));
+        {
+            let form = app.tax_inputs_form.as_ref().unwrap();
+            assert_eq!(form.addr, RowAddr(vec![0]), "back lands on the W-2 row, addr [0]");
+            assert_eq!(form.descent, None, "the descent marker is cleared");
+            assert!(matches!(active_pane(form), Pane::RowFields(_)));
+        }
+        assert!(
+            app.tax_inputs_form.is_some(),
+            "backing out of the nested group does not close the whole flow"
+        );
+    }
+
+    // ── Task 8: source toggle (`t`) + discard-parked (`X`) + active-source status + P2-a ──────────────
+
+    /// A minimal valid `TaxProfile` for the toggle fixtures — the values are immaterial (`active_source`
+    /// only checks presence).
+    fn toggle_fixture_profile() -> btctax_core::TaxProfile {
+        use btctax_core::{Carryforward, TaxProfile};
+        use btctax_core::tax::types::FilingStatus;
+        use rust_decimal_macros::dec;
+        TaxProfile {
+            filing_status: FilingStatus::Single,
+            ordinary_taxable_income: dec!(50000),
+            magi_excluding_crypto: dec!(50000),
+            qualified_dividends_and_other_pref_income: dec!(0),
+            other_net_capital_gain: dec!(0),
+            capital_loss_carryforward_in: Carryforward {
+                short: dec!(0),
+                long: dec!(0),
+            },
+            w2_ss_wages: dec!(0),
+            w2_medicare_wages: dec!(0),
+            schedule_c_expenses: dec!(0),
+        }
+    }
+
+    /// Seed a committed `return_inputs` row + a `tax_profile` for `year` (both to disk). The committed row is
+    /// the ACTIVE source (it shadows the profile); parking it falls the year back to the profile. A TEST may
+    /// name `ReturnInputs` (the flow never does).
+    fn seed_committed_return_and_profile(
+        app: &mut EditorApp,
+        year: i32,
+        fs: btctax_core::tax::types::FilingStatus,
+    ) {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        let ri = ReturnInputs {
+            filing_status: fs,
+            ..Default::default()
+        };
+        let sess = app.session.as_mut().unwrap();
+        btctax_cli::tax_profile::set(sess.conn(), year, &toggle_fixture_profile()).unwrap();
+        btctax_cli::return_inputs::set(sess.conn(), year, &ri).unwrap();
+        sess.save().unwrap();
+    }
+
+    /// Task 8 test (a): with a committed full return active (`active_source == FullReturn`) and no WIP, `t`
+    /// opens the park confirm; Enter runs `park_to_profile` — the committed row is stashed as a `parked = 1`
+    /// draft and deleted, the year now resolves through the tax-profile, and the flow's cached active-source
+    /// label flips to "tax-profile". A fresh Session confirms the on-disk swap.
+    #[test]
+    fn tax_inputs_t_parks_committed_return_to_profile() {
+        use btctax_cli::input_form_store::{self, ActiveSource, Loaded};
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+        seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open — the committed full return is the source
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().active_source_label,
+            "full return",
+            "the committed full return is the active source at open"
+        );
+
+        // `t` from a clean/committed state opens the park payload-confirm.
+        handle_key(&mut app, press(KeyCode::Char('t')));
+        {
+            let m = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .modal
+                .as_ref()
+                .expect("`t` opens the park confirm from a clean committed state");
+            assert_eq!(m.kind, crate::edit::form::TaxInputsModalKind::ParkToProfile);
+        }
+
+        // Enter parks: the flow stays open, the modal closes, and the cached active source flips.
+        handle_key(&mut app, press(KeyCode::Enter));
+        {
+            let form = app.tax_inputs_form.as_ref().expect("park keeps the flow open");
+            assert!(form.modal.is_none(), "the park confirm closes");
+            assert_eq!(
+                form.active_source_label, "tax-profile",
+                "the status now shows the tax-profile as the active source"
+            );
+            assert!(form.parked, "the working copy is now the parked draft");
+        }
+
+        // Fresh-Session read-back: the committed row is GONE, a parked draft exists, the profile is active.
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        assert!(
+            !btctax_cli::return_inputs::exists(sess.conn(), 2024).unwrap(),
+            "park deletes the committed return_inputs row"
+        );
+        match input_form_store::load(sess.conn(), 2024).unwrap() {
+            (Loaded::Draft { parked, .. }, _) => {
+                assert!(parked, "the stashed draft is parked")
+            }
+            _ => panic!("expected a parked Draft on disk after park"),
+        }
+        assert!(
+            matches!(
+                input_form_store::active_source(sess.conn(), 2024).unwrap(),
+                ActiveSource::TaxProfile
+            ),
+            "the year resolves through the tax-profile after park"
+        );
+    }
+
+    /// Task 8 mutation-check — the clean-state gate: `t` on a DIRTY flow must NOT park (the store can't see
+    /// un-flushed edits, so the TUI refuses). No park modal opens, a status explains, and the committed row
+    /// survives. Neuter the `dirty` gate in `toggle_source` and the modal-is-some assertion fails.
+    #[test]
+    fn tax_inputs_t_refuses_park_when_dirty() {
+        use btctax_cli::input_form_store::{self, ActiveSource};
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open on the committed return
+        app.tax_inputs_form.as_mut().unwrap().dirty = true; // simulate un-flushed edits
+
+        handle_key(&mut app, press(KeyCode::Char('t')));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().modal.is_none(),
+            "a dirty flow opens NO park confirm (the clean-state gate)"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or_default()
+                .contains("unsaved edits"),
+            "the refusal explains: {:?}",
+            app.status
+        );
+        assert!(
+            matches!(
+                input_form_store::active_source(app.session.as_ref().unwrap().conn(), 2024).unwrap(),
+                ActiveSource::FullReturn
+            ),
+            "the committed full return is still the active source — park never ran"
+        );
+    }
+
+    /// Task 8 test (b): with `active_source == TaxProfile` and a parked full return loaded, `t` ("use full
+    /// return") re-loads the parked draft into `working` (editable; a subsequent `s` re-commits it via Task
+    /// 7). It writes nothing and opens no confirm. Proven by clearing `working` first and watching `t`
+    /// reload the distinctive Mfj return from disk.
+    #[test]
+    fn tax_inputs_t_reinstates_parked_full_return() {
+        use btctax_cli::input_form_store::{self, ActiveSource};
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Mfj);
+        input_form_store::park_to_profile(app.session.as_mut().unwrap(), 2024).unwrap();
+        assert!(matches!(
+            input_form_store::active_source(app.session.as_ref().unwrap().conn(), 2024).unwrap(),
+            ActiveSource::TaxProfile
+        ));
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open — load returns the parked Draft
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().parked,
+            "the parked full return is loaded"
+        );
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().active_source_label,
+            "tax-profile"
+        );
+
+        // Prove the reload: clear `working`, then `t` re-loads the parked Mfj return.
+        app.tax_inputs_form.as_mut().unwrap().working = None;
+        handle_key(&mut app, press(KeyCode::Char('t')));
+        let form = app.tax_inputs_form.as_ref().unwrap();
+        assert!(
+            form.modal.is_none(),
+            "use-full-return writes nothing — no confirm"
+        );
+        assert_eq!(
+            form.working
+                .as_ref()
+                .expect("the parked return is reloaded into working")
+                .filing_status,
+            FilingStatus::Mfj,
+            "`t` reloads the parked full return, ready for re-commit"
+        );
+    }
+
+    /// Task 8 test (c): `X` on a year with a parked draft opens a payload-confirm; Enter runs
+    /// `discard_parked_draft`, the parked draft is deleted, and the flow closes. A fresh Session confirms the
+    /// draft is gone.
+    #[test]
+    fn tax_inputs_capital_x_discards_parked_draft() {
+        use btctax_cli::input_form_store;
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+        seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
+        input_form_store::park_to_profile(app.session.as_mut().unwrap(), 2024).unwrap();
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open — a parked full return is loaded
+        assert!(app.tax_inputs_form.as_ref().unwrap().parked);
+
+        // `X` opens the discard payload-confirm (distinct from `x` delete-section).
+        handle_key(&mut app, press(KeyCode::Char('X')));
+        {
+            let m = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .modal
+                .as_ref()
+                .expect("`X` opens the discard confirm when a parked draft exists");
+            assert_eq!(m.kind, crate::edit::form::TaxInputsModalKind::DiscardParked);
+        }
+
+        // Enter discards and closes the flow.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.tax_inputs_form.is_none(),
+            "a successful discard closes the flow"
+        );
+        assert!(app
+            .status
+            .as_deref()
+            .unwrap_or_default()
+            .contains("discarded"));
+
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        assert!(
+            !input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
+            "the parked draft is gone after discard"
+        );
+    }
+
+    /// Task 8 mutation-check — the X-only-when-parked gate: `X` on a committed (NON-parked) flow opens NO
+    /// discard confirm and writes nothing. Neuter the `!parked` gate in `open_discard_parked_modal` and the
+    /// modal-is-none assertion fails.
+    #[test]
+    fn tax_inputs_capital_x_inert_when_not_parked() {
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open on the committed return (NOT parked)
+        assert!(!app.tax_inputs_form.as_ref().unwrap().parked);
+
+        handle_key(&mut app, press(KeyCode::Char('X')));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().modal.is_none(),
+            "X opens no confirm when there is no parked draft (X-only-when-parked)"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or_default()
+                .contains("no parked draft"),
+            "a status explains: {:?}",
+            app.status
+        );
+    }
+
+    /// Task 8 test (d) — P2-a: a flow opened in the `discard_offered` state (from a `StaleParkedDraft` load
+    /// error, Task 1) has `X` as its reachable escape: `X` runs `discard_parked_draft`, the stale parked
+    /// draft is gone, and the flow closes. Without this, a stale parked draft would be undiscardable in-app.
+    #[test]
+    fn tax_inputs_p2a_capital_x_discards_stale_parked_and_closes() {
+        use btctax_cli::input_form_store;
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        // Seed a parked draft (park a committed return), then downgrade its schema version (SCHEMA_VERSION=2)
+        // so `load` refuses it as a STALE parked draft (fail-closed → discard_offered).
+        seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
+        input_form_store::park_to_profile(app.session.as_mut().unwrap(), 2024).unwrap();
+        {
+            let sess = app.session.as_mut().unwrap();
+            sess.conn()
+                .execute(
+                    "UPDATE return_inputs_draft SET schema_version = 0 WHERE year = 2024",
+                    [],
+                )
+                .unwrap();
+            sess.save().unwrap();
+        }
+
+        // Open → P2-a discard-only state (the stale parked draft is fail-closed).
+        handle_key(&mut app, press(KeyCode::Char('T')));
+        {
+            let form = app
+                .tax_inputs_form
+                .as_ref()
+                .expect("the flow opens in the discard-offered state");
+            assert!(
+                form.discard_offered,
+                "a stale parked draft opens the P2-a discard-only state"
+            );
+            assert!(form.working.is_none());
+        }
+
+        // `X` is the reachable escape: discard the stale parked draft and close the flow.
+        handle_key(&mut app, press(KeyCode::Char('X')));
+        assert!(
+            app.tax_inputs_form.is_none(),
+            "P2-a: X discards and closes the flow"
+        );
+
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        assert!(
+            !input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
+            "the stale parked draft is discarded"
+        );
+    }
+
+    // ── Task 9: §9A/§10 snapshot + KAT coverage sweep ───────────────────────────────────────────────────
+    //
+    // §10 KAT #1 (empty year) is already pinned as a named §9A KAT by
+    // `tax_inputs_renders_only_filing_status_when_fresh` (draw_edit.rs) — no new test.
+    // §10 KAT #2 (two-W-2 MFJ render) and #7 (never names a `ReturnInputs` field) live in draw_edit.rs
+    // (render-layer KATs). §10 KAT #4 (commit modal) also gets a render-layer snapshot in draw_edit.rs —
+    // the key-driven modal-content assertions below stay as the behavioral half.
+
+    /// §10 KAT #3: a screen-REFUSED SALT state — Schedule A carries a positive `salt_sales_tax_amount`
+    /// with the §164(b)(5) election left `None` (`RefuseReason::SaltSalesTaxWithoutElection`, the
+    /// Schedule-A collapse-guard — R3-M9), DISTINCT from test (a)'s Declarations refusal. `s` → Enter
+    /// refuses, and focus jumps to the Schedule-A anchor `attribute` names first (`SaSaltSalesTaxAmt`).
+    #[test]
+    fn tax_inputs_commit_salt_refusal_jumps_focus_to_schedule_a() {
+        use btctax_core::tax::return_inputs::{ReturnInputs, ScheduleAInputs};
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        use btctax_input_form::FieldId;
+        use rust_decimal_macros::dec;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+        // The SALT sales-tax amount is set but the election is left unanswered (`None`, not `Some(true)`)
+        // — a positive amount with the election not-on is an input error, not a silent drop (R3-M9). The
+        // skippable SALT election is NOT among `FORM_QUESTIONS`, so `answer_all_live_declarations` (which
+        // only walks `FORM_QUESTIONS`) never touches it — this state is reachable exactly as constructed.
+        ri.schedule_a = Some(ScheduleAInputs {
+            salt_sales_tax_amount: dec!(500),
+            ..Default::default()
+        });
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.working = Some(ri);
+        app.tax_inputs_form = Some(form);
+
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().modal.is_some(),
+            "`s` opens the commit payload-confirm modal"
+        );
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        let form = app
+            .tax_inputs_form
+            .as_ref()
+            .expect("a refused commit keeps the flow open");
+        assert!(form.modal.is_none(), "the modal closes on a refusal");
+        assert_eq!(
+            crate::edit::tax_inputs::focused_field(form).unwrap().id,
+            FieldId::SaSaltSalesTaxAmt,
+            "the SALT refusal jumps focus to the Schedule-A sales-tax-amount anchor (attribute → anchor)"
+        );
+        let detail = form.error.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("164(b)(5)") || detail.to_lowercase().contains("sales-tax election"),
+            "the refusal names the SALT election mismatch: {detail:?}"
+        );
+        assert!(
+            app.status.as_deref().is_some_and(|s| !s.is_empty()),
+            "the refusal detail is also surfaced in the status"
+        );
+    }
+
+    /// Fold (Task-7 review Minor): the commit modal's `shadows == true` branch — untested by Task 7's
+    /// three tests (all ran against an empty vault with no `tax_profile`). Seed a `tax_profile` for 2024,
+    /// then `s` on a clean working return: the modal's `shadows` flag is true and the summary carries the
+    /// shadow/all-zero warning text (`commit_summary`'s `if shadows` branch).
+    #[test]
+    fn tax_inputs_commit_modal_shadows_summary_when_a_tax_profile_exists() {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+
+        // Seed a raw tax-profile for 2024 — `shadows_profile` reads `tax_profile::years`.
+        {
+            let sess = app.session.as_mut().unwrap();
+            btctax_cli::tax_profile::set(sess.conn(), 2024, &toggle_fixture_profile()).unwrap();
+        }
+        // The tax-profile write reaches disk via the WIP-draft autosave below (one Session, one save()).
+
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+        btctax_cli::input_form_store::save_draft(app.session.as_mut().unwrap(), 2024, &ri).unwrap();
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.working = Some(ri);
+        app.tax_inputs_form = Some(form);
+
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        let m = app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .modal
+            .as_ref()
+            .expect("`s` opens the commit modal");
+        assert!(
+            m.shadows,
+            "a tax-profile exists for 2024 — the modal's shadows flag is true"
+        );
+        assert!(
+            m.summary.contains("tax-profile estimate stays saved and unused"),
+            "the summary carries the shadow/all-zero warning: {:?}",
+            m.summary
+        );
+    }
+
+    /// §10 KAT #5: the toggle prompt names the shadow/park consequence — Task 8's own test only asserted
+    /// `m.kind`, never the summary TEXT a filer actually reads before switching source.
+    #[test]
+    fn tax_inputs_toggle_prompt_names_park_consequence() {
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
+
+        handle_key(&mut app, press(KeyCode::Char('T')));
+        handle_key(&mut app, press(KeyCode::Char('t')));
+
+        let m = app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .modal
+            .as_ref()
+            .expect("`t` opens the park confirm from a clean committed state");
+        assert_eq!(m.kind, crate::edit::form::TaxInputsModalKind::ParkToProfile);
+        let summary = m.summary.to_lowercase();
+        assert!(
+            summary.contains("tax-profile"),
+            "the confirm names the tax-profile consequence: {:?}",
+            m.summary
+        );
+        assert!(
+            summary.contains("park"),
+            "the confirm names the park action: {:?}",
+            m.summary
+        );
+    }
+
+    /// §10 KAT #6: `q` on a dirty flow WARNS (the status names the autosave) — the draft is already
+    /// autosaved, so quitting is safe. `tax_inputs_q_flushes_draft_and_closes_flow` (Task 6) pins the
+    /// disk-reaches / flow-closes / should_quit-false behavior; this pins the missing piece — the actual
+    /// warning text a filer reads (`app.status` naming the autosave), which that test never asserted.
+    #[test]
+    fn tax_inputs_q_warns_on_unsaved_draft_and_quit_is_safe() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open the flow
+        handle_key(&mut app, press(KeyCode::Char(' '))); // materialize Single (marks dirty)
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().dirty,
+            "the un-flushed edit marks the flow dirty (the divergence `q` must warn about)"
+        );
+
+        handle_key(&mut app, press(KeyCode::Char('q'))); // q: flush + warn, then close
+        assert!(app.tax_inputs_form.is_none(), "q closes the tax-inputs flow");
+        assert!(!app.should_quit, "q inside the flow does not quit the whole app");
+        assert!(
+            app.status
+                .as_deref()
+                .is_some_and(|s| s.contains("draft autosaved")),
+            "q warns about the unsaved-draft divergence — the draft is already autosaved: {:?}",
+            app.status
+        );
+    }
+
+    /// Fold (Task-8 review Minor): the `t`-park refusal `Err` arm — untested until now. A flushed WIP
+    /// draft (unparked, seeded directly via `save_draft`) occupies the year's one-per-year slot alongside
+    /// a COMMITTED row (which makes `t` offer the park confirm — active source is `FullReturn`, flow is
+    /// clean). `park_to_profile` refuses rather than clobber the WIP draft; the refusal surfaces via
+    /// `app.status`, the confirm closes, the flow stays open, and the committed row is untouched.
+    #[test]
+    fn tax_inputs_t_park_refuses_over_a_flushed_wip_draft_and_surfaces_status() {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        let committed = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        let wip = ReturnInputs {
+            filing_status: FilingStatus::Mfj,
+            ..Default::default()
+        };
+        {
+            let sess = app.session.as_mut().unwrap();
+            btctax_cli::return_inputs::set(sess.conn(), 2024, &committed).unwrap();
+        }
+        // `save_draft` reaches disk (I-7) and covers both writes (one Session, one save()).
+        btctax_cli::input_form_store::save_draft(app.session.as_mut().unwrap(), 2024, &wip).unwrap();
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open (loads the WIP draft; committed is still the active source)
+        assert!(
+            !app.tax_inputs_form.as_ref().unwrap().dirty,
+            "a freshly-opened flow is clean"
+        );
+
+        handle_key(&mut app, press(KeyCode::Char('t')));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().modal.is_some(),
+            "`t` opens the park confirm (committed row is the active source, flow is clean)"
+        );
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert!(
+            app.tax_inputs_form.is_some(),
+            "a refused park keeps the flow open (nothing was clobbered)"
+        );
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().modal.is_none(),
+            "the confirm closes on a refusal"
+        );
+        let status = app.status.as_deref().unwrap_or_default();
+        assert!(
+            status.contains("work-in-progress draft"),
+            "the refusal is surfaced via app.status: {status:?}"
+        );
+
+        // Nothing was lost: the committed row and the WIP draft are both exactly as seeded.
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        match btctax_cli::input_form_store::load(sess.conn(), 2024).unwrap() {
+            (btctax_cli::input_form_store::Loaded::Draft { parked, .. }, _) => {
+                assert!(!parked, "the WIP draft is untouched (still unparked)");
+            }
+            _ => panic!("expected the WIP draft to still be present"),
+        }
+        assert_eq!(
+            btctax_cli::return_inputs::get(sess.conn(), 2024)
+                .unwrap()
+                .unwrap()
+                .filing_status,
+            FilingStatus::Single,
+            "the committed row is untouched by the refused park"
+        );
     }
 
     // ── KAT-U1 — unlock parity ───────────────────────────────────────────────

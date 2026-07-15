@@ -28,11 +28,16 @@ use crate::edit::form::{
     ResolveConflictStep, ResolveKind, SafeHarborAllocateFlowState, SafeHarborAllocateModalState,
     SafeHarborAttestFlowState, SafeHarborAttestStep, SelectLotsFlowState, SelectLotsModalState,
     SelectLotsStep, SetDonationDetailsFlowState, SetDonationDetailsModalState,
-    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, VoidFlowState,
-    VoidModalState, DONATION_FIELD_LABELS, FIELD_LABELS,
+    SetDonationDetailsStep, SetFmvFlowState, SetFmvModalState, SetFmvStep, TaxInputsFormState,
+    VoidFlowState, VoidModalState, DONATION_FIELD_LABELS, FIELD_LABELS,
 };
+use crate::edit::form::{filing_status_field, live_fields, live_sections};
 use crate::editor::{EditorApp, EditorScreen};
+use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::{DisposeKind, InboundClass, OutflowClass, Persistability};
+use btctax_input_form::{
+    FieldKind, FieldValue, RowAddr, Section, SectionId, SectionKind, SecretView,
+};
 use btctax_tui::app::Tab;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -204,6 +209,11 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
     if let Some(form) = app.profile_form.as_ref() {
         draw_profile_form(frame, area, form);
+    }
+    if let Some(form) = app.tax_inputs_form.as_ref() {
+        // ★ I-2: thread `app.status` INTO the overlay — this full-frame overlay clears the Browse footer
+        // that normally renders it, so an in-flow status is invisible unless the flow draws it itself.
+        draw_tax_inputs_form(frame, area, form, app.status.as_deref());
     }
     if let Some(modal) = app.mutation_modal.as_ref() {
         draw_mutation_modal(frame, area, modal);
@@ -1908,6 +1918,704 @@ fn draw_void_modal(frame: &mut Frame, area: Rect, modal: &VoidModalState) {
 /// keys are global). Lines are sized to fit an 80×24 terminal (no scroll; `centered_rect` truncates).
 /// KEEP IN SYNC with the Browse key handler (`handle_key` in main.rs) — the KAT
 /// `help_lists_every_browse_action_key` pins that every action key appears here.
+/// Render the "tax inputs" editing flow — the 3-region layout (section list · field pane · status
+/// line), a full-area overlay over Browse (plan 3 task 2).
+///
+/// ★ Branch order (review M7): `discard_offered` FIRST — the P2-a stale-parked state renders ONLY the
+/// discard message (no editing surface). Then NI-2 (`working == None`) renders ONLY the filing-status
+/// choice. Otherwise the full 3-region render over the LIVE sections.
+///
+/// All field access is through `form_spec()` accessors (`live_sections`/`live_fields`/`field.get`) —
+/// this renderer NEVER names a `ReturnInputs` struct field (spec §9A/§13).
+fn draw_tax_inputs_form(
+    frame: &mut Frame,
+    area: Rect,
+    form: &TaxInputsFormState,
+    status: Option<&str>,
+) {
+    frame.render_widget(Clear, area);
+
+    // ★ P2-a FIRST: a stale PARKED draft is discard-only — no editing surface.
+    if form.discard_offered {
+        draw_tax_inputs_discard(frame, area, form, status);
+        return;
+    }
+
+    // 3 regions: [left section list | right field pane] over a bottom status block. The block is 5 rows
+    // (border + 3 content lines): active-source/screen-status, the key legend, and a NOTICE line that
+    // surfaces `app.status`/the stale-WIP note inside the flow (I-2 — the overlay clears the Browse footer).
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(5)])
+        .split(area);
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(34), Constraint::Min(1)])
+        .split(rows[0]);
+    let (left_area, right_area, status_area) = (cols[0], cols[1], rows[1]);
+
+    let cyan = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let yellow = Style::default().fg(Color::Yellow);
+
+    // ── NI-2: no return yet — show ONLY the filing-status choice ──────────────
+    let Some(ri) = form.working.as_ref() else {
+        let left = Paragraph::new(vec![Line::from("  Return options")]).block(
+            Block::default()
+                .title(" Sections ")
+                .borders(Borders::ALL)
+                .border_style(cyan),
+        );
+        frame.render_widget(left, left_area);
+
+        let fs = filing_status_field();
+        let choices = match fs.kind {
+            FieldKind::Enum(opts) => opts.join(" / "),
+            _ => String::new(),
+        };
+        let right = Paragraph::new(vec![
+            Line::from(Span::styled(
+                format!("  {}", fs.label),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(format!("    choices: {choices}")),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  no return yet — choose a filing status to begin (NI-2)",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ])
+        .block(
+            Block::default()
+                .title(" Return options ")
+                .borders(Borders::ALL)
+                .border_style(yellow),
+        );
+        frame.render_widget(right, right_area);
+
+        draw_tax_inputs_status(frame, status_area, form, status);
+        return;
+    };
+
+    // ── Live sections (Some(ri)) ─────────────────────────────────────────────
+    let sections = live_sections(ri);
+    let sel = form.section_idx.min(sections.len().saturating_sub(1));
+
+    // Left pane: the section list with a per-section status glyph + focus marker.
+    let mut left_lines: Vec<Line> = Vec::with_capacity(sections.len());
+    for (i, s) in sections.iter().enumerate() {
+        let glyph = section_glyph(s, ri, form.refused_section);
+        let marker = if i == sel { '>' } else { ' ' };
+        let style = if i == sel {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        left_lines.push(Line::from(Span::styled(
+            format!("{marker} {glyph} {}", s.title),
+            style,
+        )));
+    }
+    let left = Paragraph::new(left_lines).block(
+        Block::default()
+            .title(" Sections ")
+            .borders(Borders::ALL)
+            .border_style(cyan),
+    );
+    frame.render_widget(left, left_area);
+
+    // Right pane: the pane the nav model projects for the current (section, addr, descent) — descending
+    // into a nested group swaps in that group's sub-list / sub-row fields and title (Task-5 fix).
+    let section = sections[sel];
+    let (pane_title, right_lines) = field_pane_lines(form, section, ri);
+    let right = Paragraph::new(right_lines).block(
+        Block::default()
+            .title(format!(" {pane_title} "))
+            .borders(Borders::ALL)
+            .border_style(yellow),
+    );
+    frame.render_widget(right, right_area);
+
+    draw_tax_inputs_status(frame, status_area, form, status);
+
+    // ★ Task 5: the remove-row payload-confirm, drawn ON TOP of the editing surface.
+    if form.pending_remove.is_some() {
+        draw_tax_inputs_remove_modal(frame, area, form);
+    }
+
+    // ★ Task 7: the commit payload-confirm, drawn ON TOP of the editing surface.
+    if form.modal.is_some() {
+        draw_tax_inputs_modal(frame, area, form);
+    }
+}
+
+/// ★ Task 7: the commit payload-confirm modal — the summary (filing status, sections present, and the
+/// shadow/all-zero warning when a tax-profile is shadowed) + the `[Enter] commit / [Esc] cancel` legend.
+/// Mirrors `draw_mutation_modal`'s centered-`Clear` shape.
+fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+    use crate::edit::form::TaxInputsModalKind;
+    let Some(m) = form.modal.as_ref() else {
+        return;
+    };
+    // ★ Task 8: one modal serves three confirms — the header, title, and action verb branch on the kind.
+    let (header, title, verb) = match m.kind {
+        TaxInputsModalKind::Commit => (
+            format!("  Commit tax inputs for {} — WRITES THE VAULT", m.year),
+            format!(" Confirm commit for {} ", m.year),
+            "commit",
+        ),
+        TaxInputsModalKind::ParkToProfile => (
+            format!("  Park the full return for {} — WRITES THE VAULT", m.year),
+            format!(" Switch to tax-profile for {} ", m.year),
+            "park",
+        ),
+        TaxInputsModalKind::DiscardParked => (
+            format!("  Discard the parked draft for {} — WRITES THE VAULT", m.year),
+            format!(" Discard parked draft for {} ", m.year),
+            "discard",
+        ),
+    };
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(
+            header,
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+    for s in m.summary.lines() {
+        lines.push(Line::from(format!("  {s}")));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("  [Enter] {verb}   [Esc] cancel — writes nothing"),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let height = (lines.len() as u16 + 2).max(10);
+    let rect = centered_rect(70, height, area);
+    frame.render_widget(Clear, rect);
+    let p = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Red)),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(p, rect);
+}
+
+/// ★ Task 5: the remove-row payload-confirm modal — names the exact row being removed ("remove W-2 #2?")
+/// and its `[Enter] remove / [Esc] cancel` legend. Mirrors `draw_mutation_modal`'s centered-`Clear` shape.
+fn draw_tax_inputs_remove_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+    let Some(pr) = form.pending_remove.as_ref() else {
+        return;
+    };
+    let rect = centered_rect(60, 9, area);
+    frame.render_widget(Clear, rect);
+    let lines = vec![
+        Line::from(Span::styled(
+            format!("  {}", pr.label),
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  [Enter] remove   [Esc] cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    let p = Paragraph::new(lines).block(
+        Block::default()
+            .title(" Confirm remove ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red)),
+    );
+    frame.render_widget(p, rect);
+}
+
+/// ★ P2-a: the stale-PARKED-draft discard-only screen — the message + the back-out hint, NO editing
+/// surface (Task 8 wires the 'X' → `discard_parked_draft`).
+fn draw_tax_inputs_discard(
+    frame: &mut Frame,
+    area: Rect,
+    form: &TaxInputsFormState,
+    status: Option<&str>,
+) {
+    let rect = centered_rect(78, 14, area);
+    frame.render_widget(Clear, rect);
+    let mut v = vec![
+        Line::from(Span::styled(
+            format!("Stale parked draft for {}", form.year),
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+    if let Some(err) = form.error.as_ref() {
+        v.push(Line::from(err.clone()));
+        v.push(Line::from(""));
+    }
+    // ★ I-2: a discard refusal / save error in this P2-a state routes to `app.status`; the full-frame Clear
+    // hides the Browse footer, so surface it HERE (else the `X` failure looks identical to a success).
+    if let Some(s) = status {
+        v.push(Line::from(Span::styled(
+            s.to_string(),
+            Style::default().fg(Color::Yellow),
+        )));
+        v.push(Line::from(""));
+    }
+    v.push(Line::from(
+        "Press X to discard the parked draft, Esc to back out.",
+    ));
+    let p = Paragraph::new(v).block(
+        Block::default()
+            .title(" Tax inputs — stale parked draft ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red)),
+    );
+    frame.render_widget(p, rect);
+}
+
+/// The bottom status block (border + 3 content lines):
+/// 1. the CACHED active source (`full return` / `tax-profile` / `(none)`, Task 8) + the §9A **screen
+///    status** (`screens clean, except what report computes` / `1 issue: <section>` — I-4);
+/// 2. the key legend (`t` toggle source, `X` discard-parked when parked; the close hint is dirty-aware — I-3);
+/// 3. a NOTICE line surfacing `app.status` (I-2 — the overlay clears the Browse footer that normally renders
+///    it) or, absent one, the §6.3 stale-WIP-discard note.
+fn draw_tax_inputs_status(
+    frame: &mut Frame,
+    area: Rect,
+    form: &TaxInputsFormState,
+    status: Option<&str>,
+) {
+    // ★ I-4 (§9A): the screen status — a recorded screen refusal names its section; else clean-but-honest.
+    let (screen_status, screen_style) = match form.refused_section {
+        Some(id) => {
+            let title = btctax_input_form::form_spec()
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.title)
+                .unwrap_or("a section");
+            (format!("1 issue: {title}"), Style::default().fg(Color::Yellow))
+        }
+        None => (
+            "screens clean, except what report computes".to_string(),
+            Style::default().fg(Color::DarkGray),
+        ),
+    };
+    // ★ I-3: the close hint reflects the real state — an unflushed (dirty) draft is NOT yet autosaved.
+    let close_hint = if form.dirty {
+        "[Esc/q] save & close"
+    } else {
+        "[Esc/q] close (autosaved)"
+    };
+    // `X` discard-parked is offered only when a parked draft is loaded (else the store would refuse it).
+    let legend = if form.parked {
+        format!("   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [X] discard-parked · {close_hint}")
+    } else {
+        format!("   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · {close_hint}")
+    };
+    let mut lines: Vec<Line> = vec![
+        Line::from(vec![
+            Span::raw("  active source: "),
+            Span::styled(form.active_source_label, Style::default().fg(Color::Cyan)),
+            Span::raw("   ·   "),
+            Span::styled(screen_status, screen_style),
+        ]),
+        Line::from(Span::styled(legend, Style::default().fg(Color::DarkGray))),
+    ];
+    // ★ I-2: the NOTICE line — `app.status` (every in-flow refusal/error/outcome routed there stays VISIBLE)
+    // takes precedence over the one-time §6.3 stale-WIP note, which shows only when there is no live status.
+    if let Some(s) = status {
+        lines.push(Line::from(Span::styled(
+            format!("  {s}"),
+            Style::default().fg(Color::Cyan),
+        )));
+    } else if let Some(note) = form.stale_note.as_ref() {
+        lines.push(Line::from(Span::styled(
+            format!("  {note}"),
+            Style::default().fg(Color::Yellow),
+        )));
+    }
+    let p = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    );
+    frame.render_widget(p, area);
+}
+
+/// The field-pane lines + title for the CURRENT pane the nav model projects (Task 5 + the Task-5-fix
+/// nested drill-down), all keyed off `edit::tax_inputs::active_pane` so the field cursor (`field_focus`)
+/// never advances off the drawn pane (the Task-2 Minor fold):
+/// - a `[create]` affordance for an ABSENT optional-singleton;
+/// - the live `Field`s as `label  [value]` for a singleton / PRESENT optional-singleton (with an `[x]
+///   delete` hint), PLUS a synthetic "… (n) →" drill entry when the section has a nested child;
+/// - a selectable ROW LIST for a repeating group at its container path (`addr` empty), each row with an
+///   index and a `[a] add / [d] remove / [Enter] edit row` legend;
+/// - INSIDE a row (`addr` non-empty) that row's fields, read/written at `addr`, with a `[Left/Esc] back`
+///   hint, PLUS the synthetic "Box 12 entries (n) →" drill entry;
+/// - DESCENDED into a nested group (`form.descent` set) that group's sub-list or a sub-row's fields.
+///
+/// Returns the pane TITLE too (the nested group's title while descended, else the section's).
+fn field_pane_lines(
+    form: &TaxInputsFormState,
+    section: &'static Section,
+    ri: &ReturnInputs,
+) -> (String, Vec<Line<'static>>) {
+    use crate::edit::tax_inputs::{active_pane, nested_section, Pane};
+    let dark = Style::default().fg(Color::DarkGray);
+    let focus = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let addr = &form.addr;
+    let field_focus = form.field_focus;
+    let editing = form.editing;
+    let buf = form.buf.as_str();
+    let error = form.error.as_deref();
+    let mut lines: Vec<Line> = Vec::new();
+
+    // ── DESCENDED into a nested group: render its sub-list or a sub-row's fields (Task-5 fix). ──
+    if let Some(nested_id) = form.descent {
+        let nested = nested_section(nested_id);
+        match active_pane(form) {
+            Pane::RowList(n) => {
+                if n == 0 {
+                    lines.push(Line::from(Span::styled("  (no entries yet)", dark)));
+                }
+                for i in 0..n {
+                    let is_focus = i == field_focus;
+                    let marker = if is_focus { '>' } else { ' ' };
+                    let style = if is_focus { focus } else { Style::default() };
+                    lines.push(Line::from(Span::styled(
+                        format!("{marker} #{}{}", i + 1, nested_row_preview(nested, ri, addr, i)),
+                        style,
+                    )));
+                }
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "  [a] add  [d] remove  [Enter] edit  [Left/Esc] back",
+                    dark,
+                )));
+            }
+            _ => {
+                // A nested sub-row's fields (read/written at `addr`) + a back hint.
+                if let Some(row) = addr.0.last() {
+                    lines.push(Line::from(Span::styled(
+                        format!("  {} #{}", nested.title, row + 1),
+                        dark,
+                    )));
+                }
+                push_field_lines(&mut lines, nested, ri, addr, field_focus, editing, buf);
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled("  [Left/Esc] back", dark)));
+            }
+        }
+        push_error(&mut lines, error);
+        return (nested.title.to_string(), lines);
+    }
+
+    // An ABSENT optional-singleton shows a [create] affordance instead of fields.
+    if let SectionKind::OptionalSingleton { present, .. } = section.kind {
+        if !present(ri) {
+            lines.push(Line::from("  (not present)"));
+            lines.push(Line::from(Span::styled(
+                "  [create] — press c to add this section",
+                dark,
+            )));
+            push_error(&mut lines, error);
+            return (section.title.to_string(), lines);
+        }
+    }
+
+    // A repeating group: the ROW LIST at its container path (addr empty), or INSIDE a row (addr non-empty).
+    if let SectionKind::Repeating { len, .. } = section.kind {
+        if addr.0.is_empty() {
+            let n = len(ri, &RowAddr::default());
+            if n == 0 {
+                lines.push(Line::from(Span::styled("  (no rows yet)", dark)));
+            }
+            for i in 0..n {
+                let is_focus = i == field_focus;
+                let marker = if is_focus { '>' } else { ' ' };
+                let style = if is_focus { focus } else { Style::default() };
+                lines.push(Line::from(Span::styled(
+                    format!("{marker} #{}{}", i + 1, row_preview(section, ri, i)),
+                    style,
+                )));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  [a] add  [d] remove  [Enter] edit row",
+                dark,
+            )));
+            push_error(&mut lines, error);
+            return (section.title.to_string(), lines);
+        }
+        // Inside a row: header + the row's fields (read/written at `addr`) + the nested drill entry + a back hint.
+        if let Some(row) = addr.0.last() {
+            lines.push(Line::from(Span::styled(
+                format!("  {} #{}", section.title, row + 1),
+                dark,
+            )));
+        }
+        push_field_lines(&mut lines, section, ri, addr, field_focus, editing, buf);
+        push_nested_drill_entry(&mut lines, form, section, ri);
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("  [Left/Esc] back to rows", dark)));
+        push_error(&mut lines, error);
+        return (section.title.to_string(), lines);
+    }
+
+    // Singleton / PRESENT optional-singleton: the live fields as `label  [value]` + the nested drill entry.
+    push_field_lines(&mut lines, section, ri, addr, field_focus, editing, buf);
+    push_nested_drill_entry(&mut lines, form, section, ri);
+    if matches!(section.kind, SectionKind::OptionalSingleton { .. }) {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  [x] delete this section",
+            dark,
+        )));
+    }
+    push_error(&mut lines, error);
+    (section.title.to_string(), lines)
+}
+
+/// Append the synthetic "Box 12 entries (n) →" / "Charitable gifts (n) →" drill entry to a parent-fields
+/// pane whose section has a nested child (Task-5 fix). It is a navigable item at index == live-field count;
+/// highlighted (yellow, bold) when the field cursor is on it — `Enter` there descends into the group.
+fn push_nested_drill_entry(
+    lines: &mut Vec<Line<'static>>,
+    form: &TaxInputsFormState,
+    section: &'static Section,
+    ri: &ReturnInputs,
+) {
+    let Some(child) = crate::edit::tax_inputs::nested_child_here(form) else {
+        return;
+    };
+    let (label, count) = nested_drill_summary(child, ri, &form.addr);
+    let on_entry = form.field_focus == live_fields(section, ri).len() && !form.editing;
+    let style = if on_entry {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Cyan)
+    };
+    lines.push(Line::from(Span::styled(
+        format!("  {label} ({count}) \u{2192}"),
+        style,
+    )));
+}
+
+/// The label + current row count for a nested group's synthetic drill entry, counted via the group's
+/// `Repeating::len` accessor at its parent address (`[w2_i]` for box-12, `[]` for charitable).
+fn nested_drill_summary(child: SectionId, ri: &ReturnInputs, parent_addr: &RowAddr) -> (&'static str, usize) {
+    let count = match crate::edit::tax_inputs::nested_section(child).kind {
+        SectionKind::Repeating { len, .. } => len(ri, parent_addr),
+        _ => 0,
+    };
+    let label = match child {
+        SectionId::W2Box12 => "Box 12 entries",
+        SectionId::ScheduleACharitable => "Charitable gifts",
+        _ => "entries",
+    };
+    (label, count)
+}
+
+/// A one-line preview for a NESTED repeating row (box-12 / charitable) at `parent_addr + [i]`: the group's
+/// first field rendered there, or empty when uninformative. Mirrors `row_preview` but at a deeper address.
+fn nested_row_preview(
+    section: &'static Section,
+    ri: &ReturnInputs,
+    parent_addr: &RowAddr,
+    i: usize,
+) -> String {
+    let mut addr = parent_addr.clone();
+    addr.0.push(i);
+    let Some(f) = section.fields.first() else {
+        return String::new();
+    };
+    match (f.get)(ri, &addr) {
+        Some(v) => {
+            let s = render_field_value(&v);
+            if s.is_empty() || s == "—" {
+                String::new()
+            } else {
+                format!("  — {s}")
+            }
+        }
+        None => String::new(),
+    }
+}
+
+/// Push the live `Field`s of `section` (read at `addr`) as `label  [value]`, the focused field highlighted.
+/// Shared by the singleton pane and the inside-a-row pane so per-row editing renders identically.
+fn push_field_lines(
+    lines: &mut Vec<Line<'static>>,
+    section: &'static Section,
+    ri: &ReturnInputs,
+    addr: &RowAddr,
+    field_focus: usize,
+    editing: bool,
+    buf: &str,
+) {
+    let focus_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let dark = Style::default().fg(Color::DarkGray);
+    let fields = live_fields(section, ri);
+    if fields.is_empty() {
+        lines.push(Line::from(Span::styled("  (no live fields)", dark)));
+    }
+    for (i, f) in fields.iter().enumerate() {
+        let is_focus = i == field_focus;
+        // While editing the focused field, show the raw buffer being typed with a cursor block — NOT the
+        // committed value (which only updates on a successful parse+apply). ★ A Secret field is NO-ECHO:
+        // one bullet per typed char (mirrors `draw_unlock_screen`), NEVER the buffer content — digits must
+        // not reach the screen during entry.
+        let value = if is_focus && editing {
+            if matches!(f.kind, FieldKind::Secret) {
+                "\u{25cf}".repeat(buf.chars().count())
+            } else {
+                format!("{buf}\u{2588}")
+            }
+        } else {
+            (f.get)(ri, addr)
+                .map(|v| render_field_value(&v))
+                .unwrap_or_else(|| "—".to_string())
+        };
+        let style = if is_focus {
+            focus_style
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  {}  [{}]", f.label, value),
+            style,
+        )));
+    }
+}
+
+/// A one-line preview for a repeating row: the section's first field rendered at `[i]` (e.g. a W-2's owner,
+/// a dependent's name), or empty when it has no informative value. Depth-1 groups only (the nested
+/// box-12/charitable groups are never top-level rows).
+fn row_preview(section: &'static Section, ri: &ReturnInputs, i: usize) -> String {
+    let addr = RowAddr(vec![i]);
+    let Some(f) = section.fields.first() else {
+        return String::new();
+    };
+    match (f.get)(ri, &addr) {
+        Some(v) => {
+            let s = render_field_value(&v);
+            if s.is_empty() || s == "—" {
+                String::new()
+            } else {
+                format!("  — {}", s)
+            }
+        }
+        None => String::new(),
+    }
+}
+
+/// Append the flow's inline error (parse/apply/store failure) under the field pane, in red.
+fn push_error(lines: &mut Vec<Line<'static>>, error: Option<&str>) {
+    if let Some(err) = error {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  error: {err}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+}
+
+/// The per-section status glyph: `!` when a screen refusal (from the last `commit`) is attributed to this
+/// section (I-4/§9A — takes precedence, it is the one thing the filer must fix), else `✓` when every live
+/// field is answered, `…` otherwise. An absent optional-singleton is `…`; a repeating group is `✓` (its
+/// rows are optional here).
+fn section_glyph(
+    section: &'static Section,
+    ri: &ReturnInputs,
+    refused_section: Option<btctax_input_form::SectionId>,
+) -> char {
+    // ★ I-4: a refusal attributed to this section wins over completeness — the filer must resolve it first.
+    if refused_section == Some(section.id) {
+        return '!';
+    }
+    if let SectionKind::OptionalSingleton { present, .. } = section.kind {
+        if !present(ri) {
+            return '…';
+        }
+    }
+    if let SectionKind::Repeating { .. } = section.kind {
+        return '✓';
+    }
+    let fields = live_fields(section, ri);
+    let complete = !fields.is_empty()
+        && fields.iter().all(|f| {
+            (f.get)(ri, &RowAddr::default())
+                .map(|v| value_is_answered(&v))
+                .unwrap_or(false)
+        });
+    if complete {
+        '✓'
+    } else {
+        '…'
+    }
+}
+
+/// Whether a field value counts as "answered" for the section-completeness glyph.
+fn value_is_answered(v: &FieldValue) -> bool {
+    match v {
+        FieldValue::Money(m) => !m.is_zero(),
+        FieldValue::Text(s) => !s.is_empty(),
+        FieldValue::Bool(b) => *b,
+        FieldValue::TriState(t) => t.is_some(),
+        FieldValue::Date(d) => d.is_some(),
+        FieldValue::Choice(_) => true,
+        FieldValue::Secret(sv) => matches!(sv, SecretView::Set { .. }),
+        // `get` never returns `SecretEntry` (inbound-only); treat defensively as answered.
+        FieldValue::SecretEntry(_) => true,
+    }
+}
+
+/// Render a field value for display, per kind. A `Secret` shows its `SecretView` (masked or
+/// `(unset)`) — NEVER raw digits.
+fn render_field_value(v: &FieldValue) -> String {
+    match v {
+        FieldValue::Money(m) => format!("${m}"),
+        FieldValue::Text(s) => s.clone(),
+        FieldValue::Bool(b) => if *b { "[x]" } else { "[ ]" }.to_string(),
+        FieldValue::TriState(t) => match t {
+            Some(true) => "yes",
+            Some(false) => "no",
+            None => "—",
+        }
+        .to_string(),
+        FieldValue::Date(d) => match d {
+            Some(d) => d.to_string(),
+            None => "—".to_string(),
+        },
+        FieldValue::Choice(c) => c.clone(),
+        FieldValue::Secret(sv) => match sv {
+            SecretView::Empty => "(unset)".to_string(),
+            SecretView::Set { masked } => masked.clone(),
+        },
+        // Unreachable via `get` (SecretEntry is inbound-only); never echo it.
+        FieldValue::SecretEntry(_) => "(unset)".to_string(),
+    }
+}
+
 fn draw_help_overlay(frame: &mut Frame, area: Rect) {
     let hdr = |s: &'static str| {
         Line::from(Span::styled(
@@ -1933,7 +2641,7 @@ fn draw_help_overlay(frame: &mut Frame, area: Rect) {
         Line::from("  P approve pseudo-reconcile defaults (when the [PSEUDO] banner shows)"),
         Line::from(""),
         hdr("App"),
-        Line::from("  p profile   ? help   q/Esc close"),
+        Line::from("  p profile   T tax-inputs   ? help   q/Esc close"),
         Line::from(""),
         Line::from(Span::styled(
             "  ? · Esc · q  to close",
@@ -5288,6 +5996,753 @@ mod tests {
         assert!(
             rendered.contains("ordinary_taxable_income"),
             "form must show field label"
+        );
+    }
+
+    // ── Tax-inputs 3-region render (plan 3 task 2) ───────────────────────────
+
+    /// Flatten a rendered `Buffer` into a row-major `String` (one char per cell) — the recon's
+    /// cell-collect pattern, named for the tax-inputs snapshot tests.
+    fn flatten(buf: &ratatui::buffer::Buffer) -> String {
+        buf.content()
+            .iter()
+            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    /// NI-2: on a `None` working copy the render shows ONLY the filing-status choice — no other
+    /// section is offered until a filing status is chosen.
+    #[test]
+    fn tax_inputs_renders_only_filing_status_when_fresh() {
+        use crate::edit::form::TaxInputsFormState;
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let form = TaxInputsFormState::fresh(2024); // working = None
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(r.contains("Filing status"), "the fresh screen shows the filing-status choice");
+        assert!(
+            !r.contains("W-2"),
+            "no other section is offered until filing status is chosen (NI-2)"
+        );
+    }
+
+    /// Task 3: while editing a focused text-kind field the pane shows the RAW buffer being typed (with a
+    /// cursor block), NOT the committed value — the value only updates on a successful parse+apply.
+    #[test]
+    fn tax_inputs_renders_the_edit_buffer_while_editing() {
+        use crate::edit::form::{live_fields, live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        // Focus Payments → PayEstimated and enter edit mode with a partial buffer.
+        let ri = form.working.as_ref().unwrap();
+        let sections = live_sections(ri);
+        let sec = sections
+            .iter()
+            .position(|s| s.id == SectionId::Payments)
+            .unwrap();
+        let fld = live_fields(sections[sec], ri)
+            .iter()
+            .position(|f| f.id == FieldId::PayEstimated)
+            .unwrap();
+        form.section_idx = sec;
+        form.field_focus = fld;
+        form.editing = true;
+        form.buf.set("123");
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains("123\u{2588}"),
+            "the edit buffer shows the typed text with a cursor while editing"
+        );
+    }
+
+    /// Task 4 (a) — render-layer masking KAT (folds the Task-2 review Minor): a SET Secret (SSN) field's
+    /// DISPLAY value shows the masked form (`***-**-NNNN`) and NEVER the raw or middle digits. The SSN is
+    /// set through the engine (`SecretEntry` inbound), never a leaf assignment.
+    #[test]
+    fn tax_inputs_secret_display_is_masked_never_digits() {
+        use crate::edit::form::{live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        // Set the taxpayer SSN via the engine (SecretEntry is inbound-only).
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::TpSsn,
+                addr: RowAddr::default(),
+                value: FieldValue::SecretEntry("123456789".into()),
+            },
+        )
+        .unwrap();
+        // Focus the Taxpayer section (display, NOT editing).
+        let ri = form.working.as_ref().unwrap();
+        let sections = live_sections(ri);
+        form.section_idx = sections
+            .iter()
+            .position(|s| s.id == SectionId::Taxpayer)
+            .unwrap();
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(r.contains("***-**-"), "a set SSN renders its masked form");
+        assert!(
+            !r.contains("123456789"),
+            "the raw SSN digits must never render on display"
+        );
+        assert!(
+            !r.contains("12345"),
+            "the masked middle digits must never render on display"
+        );
+    }
+
+    /// Task 4 (b) — no-echo entry: while ENTERING a Secret (SSN), the pane shows one bullet per typed char
+    /// and NEVER the typed digits. This is the render the no-leak mutation-check targets.
+    #[test]
+    fn tax_inputs_secret_entry_shows_bullets_never_digits() {
+        use crate::edit::form::{live_fields, live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        // Focus Taxpayer → SSN and enter no-echo mode with digits already in the buffer.
+        let ri = form.working.as_ref().unwrap();
+        let sections = live_sections(ri);
+        let sec = sections
+            .iter()
+            .position(|s| s.id == SectionId::Taxpayer)
+            .unwrap();
+        let fld = live_fields(sections[sec], ri)
+            .iter()
+            .position(|f| f.id == FieldId::TpSsn)
+            .unwrap();
+        form.section_idx = sec;
+        form.field_focus = fld;
+        form.editing = true;
+        form.buf.set("123456789");
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains(&"\u{25cf}".repeat(9)),
+            "no-echo entry renders one bullet per typed char"
+        );
+        assert!(
+            !r.contains("123456789"),
+            "the typed SSN digits must never render during entry"
+        );
+        assert!(
+            !r.contains("12345"),
+            "no run of typed digits may render during entry"
+        );
+    }
+
+    /// A materialized `Single` return: the left pane lists the live sections in §9A order (Spouse
+    /// hidden; the nested charitable section skipped), the right pane shows the selected section's
+    /// live fields as `label  [value]`, and the bottom shows the active source + a key legend.
+    #[test]
+    fn tax_inputs_lists_live_sections_for_single_return() {
+        use crate::edit::form::TaxInputsFormState;
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        // Materialize a Single return via `apply` — never construct a `ReturnInputs` directly (NI-2).
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+
+        // Left pane lists every live section title.
+        for title in [
+            "Return options",
+            "Taxpayer",
+            "Address",
+            "Dependents",
+            "W-2s",
+            "Schedule A",
+            "Payments",
+            "Declarations",
+            "Skippables",
+        ] {
+            assert!(r.contains(title), "left pane must list the section {title:?}");
+        }
+        // Spouse is HIDDEN on Single; the nested charitable section is not a top-level entry.
+        assert!(!r.contains("Spouse"), "Spouse is hidden on a Single return");
+        assert!(
+            !r.contains("charitable"),
+            "the nested Schedule-A charitable section is not a top-level left-pane entry"
+        );
+
+        // §9A order (left-pane rows are top-to-bottom → monotonic in the row-major flatten).
+        let pos = |t: &str| r.find(t).unwrap_or_else(|| panic!("missing {t:?}"));
+        let order = [
+            "Return options",
+            "Taxpayer",
+            "Address",
+            "Dependents",
+            "W-2s",
+            "Schedule A",
+            "Payments",
+            "Declarations",
+            "Skippables",
+        ];
+        for w in order.windows(2) {
+            assert!(pos(w[0]) < pos(w[1]), "section order: {:?} must precede {:?}", w[0], w[1]);
+        }
+
+        // Per-section status glyph: ReturnOptions is complete (its one live field is set) → ✓; an
+        // incomplete section (e.g. Taxpayer, blank name) → …. Both appear in the left pane.
+        assert!(r.contains('✓'), "a complete section shows the ✓ glyph");
+        assert!(r.contains('…'), "an incomplete section shows the … glyph");
+
+        // Right pane: the selected section (ReturnOptions, idx 0) shows its field as `label  [value]`.
+        assert!(r.contains("[Single]"), "the filing-status value renders as the chosen enum");
+
+        // Bottom: the active-source line + a key legend naming section navigation.
+        assert!(r.contains("active source"), "status line shows the active source");
+        assert!(r.contains("section"), "the key legend mentions section navigation");
+    }
+
+    /// Task 8: the status line renders the CACHED active-source label (`full return` / `tax-profile` /
+    /// `(none)`), replacing Task 2's hardcoded placeholder — a `tax-profile` cache renders "tax-profile".
+    #[test]
+    fn tax_inputs_status_renders_cached_active_source_label() {
+        use crate::edit::form::TaxInputsFormState;
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        form.active_source_label = "tax-profile"; // the cache the opener/park handler sets
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains("active source"),
+            "the status line labels the active source"
+        );
+        assert!(
+            r.contains("tax-profile"),
+            "the status line renders the cached active-source label, not a hardcoded placeholder"
+        );
+    }
+
+    /// Task 5: a repeating section (W-2s) at its row-list level renders the rows as a selectable list
+    /// (index per row, the selected row marked) plus the `[a] add / [d] remove / [Enter] edit row` legend —
+    /// NOT the section's 13 W-2 fields (the field-cursor fold at the render layer).
+    #[test]
+    fn tax_inputs_repeating_section_renders_a_selectable_row_list() {
+        use crate::edit::form::{live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        // Two W-2 rows via the engine.
+        for _ in 0..2 {
+            apply(
+                &mut form.working,
+                Edit::AddRow {
+                    section: SectionId::W2s,
+                    parent: RowAddr::default(),
+                },
+            )
+            .unwrap();
+        }
+        // Select the W-2s section (row list, addr []), cursor on the second row.
+        let ri = form.working.as_ref().unwrap();
+        form.section_idx = live_sections(ri)
+            .iter()
+            .position(|s| s.id == SectionId::W2s)
+            .unwrap();
+        form.field_focus = 1;
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(r.contains("#1"), "the row list shows the first row's index");
+        assert!(r.contains("#2"), "the row list shows the second row's index");
+        assert!(
+            r.contains("[a] add") && r.contains("[d] remove"),
+            "the row list shows the add/remove legend"
+        );
+        // The selected-row marker '>' appears (row 2 is focused).
+        assert!(r.contains("> #2"), "the focused row is marked");
+    }
+
+    /// Task-5 fix: inside a W-2 row the pane renders a synthetic "Box 12 entries (n) →" drill entry, and
+    /// DESCENDING (`descent = W2Box12`) swaps in the box-12 sub-list with its own add/remove/back legend and
+    /// title — so the nested group is reachable and visible, not just addressable.
+    #[test]
+    fn tax_inputs_renders_box12_drill_entry_and_nested_sublist() {
+        use crate::edit::form::{live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        apply(
+            &mut form.working,
+            Edit::AddRow {
+                section: SectionId::W2s,
+                parent: RowAddr::default(),
+            },
+        )
+        .unwrap();
+        let ri = form.working.as_ref().unwrap();
+        form.section_idx = live_sections(ri)
+            .iter()
+            .position(|s| s.id == SectionId::W2s)
+            .unwrap();
+
+        // Inside the W-2 row (addr [0], descent None): the synthetic drill entry renders.
+        form.addr = RowAddr(vec![0]);
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains("Box 12 entries (0)"),
+            "the W-2 row pane shows the synthetic box-12 drill entry"
+        );
+
+        // Descended into the box-12 group (addr [0] is the parent path): the sub-list + its legend render.
+        form.descent = Some(SectionId::W2Box12);
+        form.field_focus = 0;
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains("W-2 box 12"),
+            "the descended pane titles the nested box-12 group"
+        );
+        assert!(
+            r.contains("[a] add") && r.contains("[Left/Esc] back"),
+            "the box-12 sub-list shows the add + back legend"
+        );
+    }
+
+    /// Task 5: the remove-confirm modal renders the payload it will delete ("remove W-2 #1?") + its legend.
+    #[test]
+    fn tax_inputs_remove_confirm_modal_names_the_row() {
+        use crate::edit::form::{live_sections, PendingRemove, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        apply(
+            &mut form.working,
+            Edit::AddRow {
+                section: SectionId::W2s,
+                parent: RowAddr::default(),
+            },
+        )
+        .unwrap();
+        let ri = form.working.as_ref().unwrap();
+        form.section_idx = live_sections(ri)
+            .iter()
+            .position(|s| s.id == SectionId::W2s)
+            .unwrap();
+        form.pending_remove = Some(PendingRemove {
+            section: SectionId::W2s,
+            addr: RowAddr(vec![0]),
+            label: "remove W-2 #1?".to_string(),
+        });
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(r.contains("remove W-2 #1?"), "the confirm names the exact row");
+        assert!(
+            r.contains("[Enter] remove") && r.contains("[Esc] cancel"),
+            "the confirm shows its legend"
+        );
+    }
+
+    // ── Task 9: §9A/§10 snapshot + KAT coverage sweep ───────────────────────────────────────────────────
+    //
+    // §10 KAT #1 (empty year) is already pinned above as a named §9A KAT by
+    // `tax_inputs_renders_only_filing_status_when_fresh` — no new test needed.
+
+    /// §10 KAT #2: a two-W-2 MFJ return, built via `apply` edits (Mfj + two `AddRow{W2s}` + Box-1 wages on
+    /// each row — never a direct `ReturnInputs` construction, per NI-2). The render shows BOTH W-2 rows
+    /// (the row list at the W2s section), the MFJ filing status, and the Spouse section now present in the
+    /// left pane (hidden on Single — `tax_inputs_lists_live_sections_for_single_return`).
+    #[test]
+    fn tax_inputs_two_w2_mfj_return_renders_rows_status_and_spouse() {
+        use crate::edit::form::{live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Mfj".into()),
+            },
+        )
+        .unwrap();
+        for _ in 0..2 {
+            apply(
+                &mut form.working,
+                Edit::AddRow {
+                    section: SectionId::W2s,
+                    parent: RowAddr::default(),
+                },
+            )
+            .unwrap();
+        }
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::Box1Wages,
+                addr: RowAddr(vec![0]),
+                value: FieldValue::Money(dec!(60000)),
+            },
+        )
+        .unwrap();
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::Box1Wages,
+                addr: RowAddr(vec![1]),
+                value: FieldValue::Money(dec!(45000)),
+            },
+        )
+        .unwrap();
+
+        // Both box-1 values round-trip through the `get` accessor (never a leaf) — proves the `apply`
+        // edits landed on the RIGHT rows.
+        let ri = form.working.as_ref().unwrap();
+        let box1 = btctax_input_form::form_spec()
+            .iter()
+            .find(|s| s.id == SectionId::W2s)
+            .unwrap()
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::Box1Wages)
+            .unwrap();
+        assert_eq!(
+            (box1.get)(ri, &RowAddr(vec![0])),
+            Some(FieldValue::Money(dec!(60000))),
+            "row 0's box-1 wages"
+        );
+        assert_eq!(
+            (box1.get)(ri, &RowAddr(vec![1])),
+            Some(FieldValue::Money(dec!(45000))),
+            "row 1's box-1 wages"
+        );
+
+        // Render 1 (ReturnOptions selected, the default `section_idx = 0`): the MFJ filing status renders,
+        // and the left pane now lists Spouse (hidden on Single).
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(r.contains("[Mfj]"), "the filing-status value renders as Mfj");
+        assert!(
+            r.contains("Spouse"),
+            "MFJ offers the Spouse section (hidden on Single)"
+        );
+
+        // Render 2: select the W2s section — both rows appear in the row list.
+        form.section_idx = live_sections(ri)
+            .iter()
+            .position(|s| s.id == SectionId::W2s)
+            .unwrap();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(r.contains("#1"), "the first W-2 row renders");
+        assert!(r.contains("#2"), "the second W-2 row renders");
+    }
+
+    /// §10 KAT #4: the commit payload-confirm modal RENDERS the filing status + the full payload summary
+    /// (n W-2s, Schedule A yes/no, n dependents) — Task 7 built the modal (key-driven tests pin its
+    /// behavior), but no render-layer snapshot pinned its ON-SCREEN content until now. The summary comes
+    /// from the real `commit_summary` pipeline (built off a real `apply`-constructed return), not a
+    /// fabricated string.
+    #[test]
+    fn tax_inputs_commit_modal_renders_filing_status_and_summary() {
+        use crate::edit::form::{TaxInputsFormState, TaxInputsModalKind, TaxInputsModalState};
+        use crate::edit::tax_inputs::commit_summary;
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        for _ in 0..2 {
+            apply(
+                &mut form.working,
+                Edit::AddRow {
+                    section: SectionId::W2s,
+                    parent: RowAddr::default(),
+                },
+            )
+            .unwrap();
+        }
+        let ri = form.working.as_ref().unwrap();
+        let summary = commit_summary(ri, false);
+        form.modal = Some(TaxInputsModalState {
+            kind: TaxInputsModalKind::Commit,
+            year: 2024,
+            filing_status_label: "Single".to_string(),
+            summary,
+            shadows: false,
+        });
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains("Confirm commit for 2024"),
+            "the modal title names the year"
+        );
+        assert!(
+            r.contains("filing status: Single"),
+            "the modal names the filing status"
+        );
+        assert!(r.contains("2 W-2(s)"), "the modal names the W-2 count");
+        assert!(
+            r.contains("Schedule A: no"),
+            "the modal names Schedule A absence"
+        );
+        assert!(
+            r.contains("[Enter] commit") && r.contains("[Esc] cancel"),
+            "the modal shows its commit/cancel legend"
+        );
+    }
+
+    /// §10 KAT #7 (★ spec §9A/§13): the renderer NEVER names a `ReturnInputs` field — a rendered field
+    /// shows the `FormSpec` `Field.label`, never a struct field name. `AddrStreet`'s struct field is
+    /// `header.address_street`; its label is "Street address" — the render must show the label text and
+    /// never the raw struct-field name.
+    #[test]
+    fn tax_inputs_render_uses_field_label_never_a_struct_field_name() {
+        use crate::edit::form::{live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        let ri = form.working.as_ref().unwrap();
+        form.section_idx = live_sections(ri)
+            .iter()
+            .position(|s| s.id == SectionId::Address)
+            .unwrap();
+
+        let field = btctax_input_form::form_spec()
+            .iter()
+            .find(|s| s.id == SectionId::Address)
+            .unwrap()
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::AddrStreet)
+            .unwrap();
+        assert_eq!(
+            field.label, "Street address",
+            "sanity: the label text the render must show"
+        );
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains(field.label),
+            "the rendered field shows the FormSpec `Field.label`"
+        );
+        assert!(
+            !r.contains("address_street"),
+            "the renderer must never name the ReturnInputs struct field"
+        );
+    }
+
+    /// §10 KAT #7, mechanized half: a permanent regression scanner over this file's own non-test source —
+    /// every `draw_tax_inputs_*` fn (and its helpers, which all share the `ri: &ReturnInputs` parameter
+    /// name in this file) reads ONLY through `form_spec()` accessors (`Field::get`/`Section::kind`), never
+    /// a bare `ri.<field>` struct access. Self-checks the scanner FIRST (a planted violation must be
+    /// caught; a lookalike identifier — `bri.get()` — must not be a false positive), then scans the real
+    /// file. Zero hits today; a future direct-field regression trips this.
+    #[test]
+    fn tax_inputs_render_never_reads_a_bare_return_inputs_field() {
+        fn strip_comment(line: &str) -> &str {
+            match line.find("//") {
+                Some(idx) => &line[..idx],
+                None => line,
+            }
+        }
+        fn bare_ri_field_hits(content: &str) -> Vec<(usize, String)> {
+            let mut hits = Vec::new();
+            for (n, raw) in content.lines().enumerate() {
+                let line = strip_comment(raw);
+                let bytes = line.as_bytes();
+                let mut i = 0;
+                while let Some(rel) = line[i..].find("ri.") {
+                    let idx = i + rel;
+                    let prev_is_ident = idx > 0 && {
+                        let c = bytes[idx - 1] as char;
+                        c.is_ascii_alphanumeric() || c == '_'
+                    };
+                    if !prev_is_ident {
+                        hits.push((n + 1, raw.to_string()));
+                        break;
+                    }
+                    i = idx + 3;
+                }
+            }
+            hits
+        }
+
+        // ── Self-check FIRST: the scanner must catch a planted bare `ri.` access, and must NOT flag a
+        //    lookalike identifier that merely ENDS in "ri" (`bri.get()`) ──
+        let planted = "fn bad(ri: &ReturnInputs) -> Usd {\n    ri.filing_status\n}\n\
+                        fn fine(bri: &Thing) {\n    bri.get();\n}\n";
+        let self_check = bare_ri_field_hits(planted);
+        assert_eq!(
+            self_check.len(),
+            1,
+            "self-check FAILED: scanner must catch exactly the planted bare `ri.` access — gate is broken: {self_check:?}"
+        );
+
+        // ── The real scan: this file's own non-test region ──
+        let path = {
+            let manifest = std::env::var("CARGO_MANIFEST_DIR")
+                .expect("CARGO_MANIFEST_DIR must be set in tests");
+            std::path::PathBuf::from(manifest)
+                .join("src")
+                .join("draw_edit.rs")
+        };
+        let content = std::fs::read_to_string(&path).expect("must read draw_edit.rs");
+        let non_test = match content.find("#[cfg(test)]") {
+            Some(pos) => &content[..pos],
+            None => content.as_str(),
+        };
+        let hits = bare_ri_field_hits(non_test);
+        assert!(
+            hits.is_empty(),
+            "draw_edit.rs must never read a bare `ri.<field>` — only `form_spec()` accessors \
+             (Field::get / Section::kind); the renderer never names a ReturnInputs field (§9A/§13). \
+             Violations: {hits:?}"
         );
     }
 

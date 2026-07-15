@@ -8,6 +8,7 @@ pub mod cmd;
 pub mod config;
 pub mod donation_details;
 pub mod eventref;
+pub mod input_form_store;
 pub mod optimize_attest;
 pub mod price_cache;
 pub mod render;
@@ -70,6 +71,30 @@ pub enum CliError {
         prior = year - 1
     )]
     StaleReturnInputs { year: i32, found: i64, expected: i64 },
+    /// §6.3 / C-1: a PARKED input-form draft is at a schema version this build does not read, and this
+    /// build does not migrate it. Unlike a stale WIP draft (regenerable → discarded), a parked draft may
+    /// hold irreplaceable carryover that exists ONLY in the draft — there is no committed row to re-import
+    /// from — so we REFUSE (fail closed) rather than discard. The remedy therefore is NOT `income import`
+    /// (that recovers a WIP row from committed state, which a parked draft has none of): the message must
+    /// tell the filer the data lives in the draft, must not be discarded, and to re-run on / export from the
+    /// app version that wrote it. (Retire alongside `StaleReturnInputs` the moment migrations exist.)
+    #[error(
+        "year {year}'s parked full return is schema v{found} but this build expects v{expected}; \
+         an upgrade changed the input format. Its data lives only in the draft — do not discard it. \
+         Re-run on the app version that wrote it, or export it there first."
+    )]
+    StaleParkedDraft { year: i32, found: i64, expected: i64 },
+    /// §6.2 draft-coherence: an authoritative committed-row write (`income import` / `income answer` /
+    /// carryover write-back / `income clear`) was attempted for a year whose input-form draft is PARKED.
+    /// A parked draft is the SOLE copy of a screened return (C-1) — clobbering it via the committed row
+    /// would silently destroy irreplaceable data — so the write is REFUSED (fail closed). The message
+    /// names BOTH in-form exits (M-d): re-commit it (`use full return`) or drop it (`discard parked
+    /// draft`, a confirmed delete); a WIP draft, by contrast, is regenerable and is cleared silently.
+    #[error(
+        "year {year} holds a parked full return — in the form, 'use full return' to re-commit it, or \
+         'discard parked draft' (a confirmed delete) to drop it; then re-run this command."
+    )]
+    ParkedDraftBlocksWrite { year: i32 },
     /// Sub-project 3 attestation gate: an export was attempted while the ledger is pseudo-reconciled
     /// (a synthetic, non-persisted default contributes to the projection) and NO attestation phrase was
     /// supplied. Producing a form/data file from a fictional draft requires typing the exact phrase.

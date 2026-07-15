@@ -1,0 +1,20 @@
+[package]
+name = "btctax-input-form"
+version = "0.5.0"
+edition.workspace = true
+license.workspace = true
+description = "UI-agnostic form engine (FormSpec + Edit seam) for authoring btctax ReturnInputs."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories = ["finance"]
+
+[dependencies]
+btctax-core = { path = "../btctax-core", version = "0.5.0" }
+rust_decimal = { version = "1.36", default-features = false, features = ["serde-str", "std"] }
+time = { version = "0.3", features = ["serde-well-known", "macros", "parsing", "formatting"] }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
+rust_decimal_macros = "1.36"

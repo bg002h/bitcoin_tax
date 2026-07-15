@@ -55,6 +55,9 @@ pub fn import_return_inputs(
     let text = std::fs::read_to_string(file)?;
     let mut ri = parse_return_inputs_toml(&text)?;
     let mut s = Session::open(vault, pp)?;
+    // ★ §6.2 (M-1): reconcile the crash-recovery draft BEFORE any committed-row read/write — clear a WIP
+    // draft (regenerable) so it can't shadow this write, or refuse a parked one (its sole copy).
+    crate::input_form_store::coherence_clear_or_refuse(s.conn(), year)?;
     // §4 R3-M6 (Fable P4.9 r1 I2): `income import` is a whole-blob upsert, so a re-import would SILENTLY
     // DROP a carryover that `report --write-carryover` computed onto this row. For QBI that is a fail-OPEN
     // (losing the REIT/PTP loss carryforward OVERSTATES the QBI deduction ⇒ understates tax). So a
@@ -162,6 +165,9 @@ fn mask_pii(ri: &ReturnInputs) -> ReturnInputs {
 /// `ReturnInputs` isn't a dead end while derivation is pending — review I3). Returns whether a row existed.
 pub fn clear_return_inputs(vault: &Path, pp: &Passphrase, year: i32) -> Result<bool, CliError> {
     let mut s = Session::open(vault, pp)?;
+    // ★ §6.2 (M-1): a parked draft is the sole copy of a screened return — refuse rather than let this
+    // clear leave it silently orphaned; a WIP draft is cleared alongside the committed-row delete.
+    crate::input_form_store::coherence_clear_or_refuse(s.conn(), year)?;
     let removed = return_inputs::delete(s.conn(), year)?;
     s.save()?;
     Ok(removed)
@@ -404,6 +410,10 @@ pub fn write_back_carryover(
     force: bool,
 ) -> Result<String, CliError> {
     let mut s = Session::open(vault, pp)?;
+    // ★ §6.2 (M-1): write-back reads AND writes the year+1 committed row, so it reconciles the year+1
+    // draft here — before the year+1 read below, which early-returns on an absent row (a parked year has
+    // none) and would otherwise shadow the parked-refuse remedy.
+    crate::input_form_store::coherence_clear_or_refuse(s.conn(), year + 1)?;
     let (_events, state, cfg) = s.load_events_and_project()?;
     let tables = BundledTaxTables::load();
     let fr_tables = BundledFullReturnTables::load();
@@ -474,6 +484,48 @@ mod tests {
     use btctax_core::tax::return_inputs::CharitableClass;
     use btctax_core::FilingStatus;
     use rust_decimal_macros::dec;
+
+    /// Shared temp-vault fixture (mirrors `input_form_store.rs`'s helper, M-3): `create` + drop releases
+    /// the store single-instance lock so a later `Session::open` (here, the one inside the command under
+    /// test) can re-acquire it. The `TempDir` guard MUST be kept alive by the caller.
+    fn tmp_vault() -> (tempfile::TempDir, std::path::PathBuf, Passphrase) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.pgp");
+        {
+            let _ = Session::create(&path, &Passphrase::new("test-pass".into())).unwrap();
+        }
+        (dir, path, Passphrase::new("test-pass".into()))
+    }
+
+    /// ★ §6.2 wiring — `income clear` REFUSES a year that holds a PARKED draft (the draft is the sole copy
+    /// of a screened return, C-1), and never destroys it. `clear_return_inputs` needs no pre-existing
+    /// committed row, so the coherence call is the cheapest reachable parked-refuse: this test pins the
+    /// wiring into a real writer. Remove the `coherence_clear_or_refuse` call from `clear_return_inputs`
+    /// and this goes red (mutation-check b).
+    #[test]
+    fn income_clear_refuses_a_parked_draft_and_preserves_it() {
+        let (_dir, path, pp) = tmp_vault();
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        {
+            let mut s = Session::open(&path, &pp).unwrap();
+            crate::input_form_store::set_draft_row(s.conn(), 2024, &ri, true).unwrap(); // parked
+            s.save().unwrap();
+        }
+        let err = clear_return_inputs(&path, &pp, 2024).unwrap_err();
+        assert!(
+            matches!(err, CliError::ParkedDraftBlocksWrite { year: 2024 }),
+            "income clear must refuse a parked-draft year, got {err:?}"
+        );
+        // the parked draft is STILL present — a committed-row write never silently destroys it.
+        let s = Session::open(&path, &pp).unwrap();
+        assert!(
+            crate::input_form_store::draft_exists(s.conn(), 2024).unwrap(),
+            "a refused clear must leave the parked draft intact"
+        );
+    }
 
     /// A representative `income import` TOML deserializes into `ReturnInputs` — exercises money-as-string
     /// (serde-str), the FilingStatus/Owner/CharitableClass enum reprs, and nested `[[w2s]]` / charitable

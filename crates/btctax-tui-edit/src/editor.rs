@@ -26,7 +26,7 @@ use crate::edit::form::{
     ResolveConflictFlowState, ResolveConflictModalState, SafeHarborAllocateFlowState,
     SafeHarborAllocateModalState, SafeHarborAttestFlowState, SelectLotsFlowState,
     SelectLotsModalState, SetDonationDetailsFlowState, SetDonationDetailsModalState,
-    SetFmvFlowState, SetFmvModalState, VoidFlowState, VoidModalState,
+    SetFmvFlowState, SetFmvModalState, TaxInputsFormState, VoidFlowState, VoidModalState,
 };
 use btctax_cli::Session;
 use btctax_store::Passphrase;
@@ -110,6 +110,11 @@ pub struct EditorApp {
     /// The tax-profile form. `Some` while the form is open.
     /// Pre-populated from the selected year's existing profile when present.
     pub profile_form: Option<ProfileFormState>,
+    /// The "tax inputs" editing flow (the `btctax-input-form` engine over `input_form_store`).
+    /// `Some` while the flow is open; opened by `open_tax_inputs_form` (Browse `T`). Dispatched
+    /// with the other flow gates (modals → flows → this → Browse), so `q`/Esc never fall through
+    /// to a quit arm while it is blocking. At most one flow is `Some` at a time (the invariant).
+    pub tax_inputs_form: Option<TaxInputsFormState>,
     /// The per-mutation confirmation modal. `Some` while awaiting Enter/Esc.
     ///
     /// Modal dispatch precedes form and screen dispatch (the R0-M4 lesson —
@@ -298,6 +303,7 @@ impl EditorApp {
             income_cursor: btctax_tui::tabs::income::DEFAULT_SORT.col,
             forms_state: TableState::default(),
             profile_form: None,
+            tax_inputs_form: None,
             mutation_modal: None,
             classify_inbound_flow: None,
             classify_inbound_modal: None,

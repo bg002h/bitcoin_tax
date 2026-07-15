@@ -77,6 +77,11 @@ impl FieldBuffer {
     pub fn is_empty(&self) -> bool {
         self.buf.is_empty()
     }
+
+    /// The buffer's current content as a `&str` (for `parse`).
+    pub fn as_str(&self) -> &str {
+        &self.buf
+    }
 }
 
 impl Default for FieldBuffer {
@@ -137,6 +142,245 @@ impl ProfileFormState {
 pub struct MutationModalState {
     pub year: i32,
     pub profile: TaxProfile,
+}
+
+/// Live state for the "tax inputs" editing flow — a renderer over the `btctax-input-form`
+/// engine that drives the `btctax-cli::input_form_store` (plan 3).
+///
+/// The flow holds a [`btctax_input_form::Working`] (`Option<ReturnInputs>`; `None` until a filing
+/// status is chosen — NI-2) and never names a `ReturnInputs` field directly (all access goes through
+/// the engine's `form_spec()` accessors, later tasks). It NEVER constructs a `ReturnInputs` — only
+/// `apply` materializes one.
+///
+/// Task 1 carries the minimal skeleton: the opener's `load`-resolved `working`/`parked`/`stale_note`,
+/// the current section/row cursor, an inline `error`, and the P2-a `discard_offered` flag. The edit
+/// buffer, per-kind editing, autosave/commit, and the source toggle land in later tasks.
+pub struct TaxInputsFormState {
+    /// The tax year being edited (reuses `EditorApp::selected_year`).
+    pub year: i32,
+    /// The working return: `None` until a filing status materializes it (NI-2).
+    pub working: btctax_input_form::Working,
+    /// Index into the live section list (left-pane cursor). Task 2 renders/navigates it.
+    pub section_idx: usize,
+    /// Index into the SELECTED section's live-field list (field-pane cursor). Task 2 navigates it
+    /// (`Up`/`Down`); reset to 0 on a section change (the new section has different fields).
+    pub field_focus: usize,
+    /// The current row address (`[]` for singletons; `[w2_i]`/`[w2_i, box12_i]` for rows). Task 5.
+    pub addr: btctax_input_form::RowAddr,
+    /// ★ Task 3: `true` while the focused text-kind field (Money/Text/Date) is being edited — the
+    /// `buf` is capturing keystrokes. A second `Enter` commits (parse+apply); `Esc` cancels. Cycle
+    /// kinds (Enum/TriState/Bool) never set this — they apply in place on the keypress.
+    pub editing: bool,
+    /// ★ Task 3: the reused, pre-allocated raw-text edit buffer (`FieldBuffer`, no realloc). Seeded
+    /// from the focused field's current value on edit-entry; `parse`d on commit.
+    pub buf: FieldBuffer,
+    /// Inline error surfaced under the field pane (parse/apply/store failures). `None` when clean.
+    pub error: Option<String>,
+    /// ★ Task 6 (autosave, I-7): `true` after a SUCCESSFUL mutating `apply` (field/shape edit or the
+    /// filing-status materialization) and cleared when the draft is flushed to disk via `save_draft`. The
+    /// debounce latch — the flow flushes at flush points ONLY (section change, idle tick, flow close, `q`)
+    /// when this is set, NEVER per keystroke.
+    pub dirty: bool,
+    /// Whether this working copy came from a PARKED committed return (NI-1). Carried across edits.
+    pub parked: bool,
+    /// The §6.3 stale-WIP-discard note from `load`, if any — Task 2 renders it in the status line.
+    pub stale_note: Option<btctax_cli::input_form_store::StaleNote>,
+    /// ★ P2-a: `true` when `load` refused a stale PARKED draft (`CliError::StaleParkedDraft`). In this
+    /// state the flow renders ONLY the stale-parked message + an 'X' to discard (Task 8) / Esc to back
+    /// out — NOT a normal editing form — so the undiscardable parked draft becomes discardable in-app.
+    pub discard_offered: bool,
+    /// ★ Task 8: the cached `active source: …` label shown in the status line — `"full return"` /
+    /// `"tax-profile"` / `"(none)"`, mapped by [`active_source_label`] from `input_form_store::active_source`
+    /// (via the `edit::persist::form_active_source` seam). Set at OPEN and refreshed after the one store
+    /// mutation that changes the active source while the flow stays open — a `park_to_profile` (commit and
+    /// discard both close the flow; autosave/reinstate never change the active source). The render is a pure
+    /// `fn(form)` (the profile-form template), and while the flow is open it is the sole store writer under
+    /// the exclusive vault lock, so the cache is always consistent with disk after each handler.
+    pub active_source_label: &'static str,
+    /// ★ Task 5: a staged `RemoveRow` awaiting the payload-confirm ("remove W-2 #2?"). `Some` while the
+    /// confirm modal is open — Enter applies it, Esc clears it. It carries the VALIDATED row address (never
+    /// a raw cursor), so a later cursor move cannot re-target the delete.
+    pub pending_remove: Option<PendingRemove>,
+    /// ★ Task-5 fix (nested drill-down): `None` at a section's OWN level; `Some(nested_id)` while descended
+    /// INTO a nested repeating group (`W2Box12` under a W-2 row, `ScheduleACharitable` under Schedule A).
+    /// It is the ONE extra nav bit that disambiguates "viewing W-2 row `[w2_i]`'s fields" (descent `None`,
+    /// `addr = [w2_i]`) from "browsing the box-12 list under `[w2_i]`" (descent `Some(W2Box12)`,
+    /// `addr = [w2_i]`) — same `form.addr`, different pane. At a nested sub-list `form.addr` is the group's
+    /// PARENT path; at a nested sub-row it is that row's path (one deeper). See `edit/tax_inputs.rs`.
+    pub descent: Option<btctax_input_form::SectionId>,
+    /// ★ Task 7/8: the payload-confirm modal (`s` commit · `t` park · `X` discard-parked). `Some` while
+    /// it is open — Enter runs the confirmed action (dispatched by [`TaxInputsModalState::kind`]), Esc
+    /// cancels (writes nothing). NESTED here (review M5), dispatched in `handle_tax_inputs_key` BEFORE the
+    /// field keymap. `s` requires `working.is_some()` (else the status "choose a filing status first").
+    pub modal: Option<TaxInputsModalState>,
+    /// ★ I-4 (SPEC §9A): the SECTION a screen refusal is attributed to — set by [`focus_refusal`] when the
+    /// last `commit` returned `Refused` and its anchor resolved to a LIVE in-form section, CLEARED on the
+    /// next successful `apply` (the model changed → the refusal is stale) and subsumed by the flow close on
+    /// a clean commit. Drives the `!` glyph on that section (left pane) and the status line's `1 issue:
+    /// <section>` segment (else `screens clean, except what report computes`). Stores a `SectionId` — a
+    /// FormSpec section key, NEVER a `ReturnInputs` leaf (the never-name-a-leaf seam holds).
+    pub refused_section: Option<btctax_input_form::SectionId>,
+}
+
+/// ★ Task 8: which confirmed action a [`TaxInputsModalState`] gates — one nested modal field serves all
+/// three payload-confirms (the `EditorApp` invariant: at most one modal `Some`), with the flow's Enter
+/// dispatching by this tag.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TaxInputsModalKind {
+    /// `s` — screen + write the committed `return_inputs` row (Task 7).
+    Commit,
+    /// `t` — park the committed full return into a `parked = 1` draft and switch to the tax-profile.
+    ParkToProfile,
+    /// `X` — discard the year's `parked = 1` draft (the ONLY deleter of a parked row).
+    DiscardParked,
+}
+
+/// ★ Task 7: the COMMIT payload-confirm modal (`s` → this → Enter runs `commit`). A NESTED field on
+/// [`TaxInputsFormState`] (`form.modal`), dispatched inside `handle_tax_inputs_key` BEFORE the field
+/// keymap — NOT a separate top-level `EditorApp` `Option` (review M5).
+///
+/// Carries the SUMMARY strings shown before the write — built once at `s`-press from the working return
+/// via the `FilingStatus` `get` ACCESSOR ([`filing_status_label`]/`commit_summary`), NEVER `ri.filing_status`
+/// (review M6 — Task 9 pins "never names a `ReturnInputs` field"). It holds no raw `ReturnInputs`: the
+/// modal's Enter re-reads (clones) the flow's live `working`, so the confirmed payload is what is on screen.
+pub struct TaxInputsModalState {
+    /// ★ Task 8: which confirmed action this modal gates (commit · park · discard) — the flow's Enter
+    /// dispatches on it. `Commit` for the Task-7 flow; `ParkToProfile`/`DiscardParked` for the `t`/`X` toggle.
+    pub kind: TaxInputsModalKind,
+    /// The tax year being committed.
+    pub year: i32,
+    /// The chosen filing status label (`"Single"`/`"Mfj"`/…), read via the accessor — the status message
+    /// on a clean commit ("committed {year} as {filing_status_label}").
+    pub filing_status_label: String,
+    /// The multi-line payload summary: the filing status, the sections present (n W-2s, Schedule A?, n
+    /// dependents), and — when `shadows` — the shadow + all-zero warning.
+    pub summary: String,
+    /// Whether a raw `tax_profile` is shadowed by this commit (`shadows_profile(conn, year)`).
+    pub shadows: bool,
+}
+
+/// A staged repeating-row removal awaiting its payload-confirm (Task 5). Built from the CURRENT row cursor
+/// at `d`-press and frozen here, so the confirmed `RemoveRow` deletes exactly the row the prompt named.
+pub struct PendingRemove {
+    /// The repeating section the row belongs to (`W2s`/`Dependents`/…).
+    pub section: btctax_input_form::SectionId,
+    /// The full row address to remove (`[w2_i]`; `[w2_i, box12_i]` for the nested box-12 group).
+    pub addr: btctax_input_form::RowAddr,
+    /// The human-readable payload the confirm shows ("remove W-2 #2?").
+    pub label: String,
+}
+
+impl TaxInputsFormState {
+    /// A fresh flow for `year` with no working return (NI-2: `working = None`). The renderer shows
+    /// ONLY the filing-status choice until an `apply` materializes the return. Test/opener helper.
+    pub fn fresh(year: i32) -> Self {
+        Self {
+            year,
+            working: None,
+            section_idx: 0,
+            field_focus: 0,
+            addr: btctax_input_form::RowAddr::default(),
+            editing: false,
+            buf: FieldBuffer::new(),
+            error: None,
+            dirty: false,
+            parked: false,
+            stale_note: None,
+            discard_offered: false,
+            active_source_label: active_source_label(&btctax_cli::input_form_store::ActiveSource::Neither),
+            pending_remove: None,
+            descent: None,
+            modal: None,
+            refused_section: None,
+        }
+    }
+}
+
+/// The `active source: …` status-line label for an [`btctax_cli::input_form_store::ActiveSource`] (Task 8):
+/// `"full return"` / `"tax-profile"` / `"(none)"`. Used by the opener + the `t`-park handler to cache
+/// [`TaxInputsFormState::active_source_label`], which the render prints (keeping the render a pure `fn(form)`).
+pub fn active_source_label(a: &btctax_cli::input_form_store::ActiveSource) -> &'static str {
+    use btctax_cli::input_form_store::ActiveSource;
+    match a {
+        ActiveSource::FullReturn => "full return",
+        ActiveSource::TaxProfile => "tax-profile",
+        ActiveSource::Neither => "(none)",
+    }
+}
+
+// ── Live-section / live-field projection over the FormSpec (shared by the renderer + the nav) ──────────
+//
+// ★ All access goes through `form_spec()` accessors — never a `ReturnInputs` struct field (spec §9A/§13,
+// Task 9 tests it). The Spouse-visibility + nested-skip rules are TUI-side knowledge the engine's
+// `OptionalSingleton` does not carry (review I-2).
+
+/// The `FilingStatus` field, located by its stable `FieldId` in `form_spec()`.
+pub fn filing_status_field() -> &'static btctax_input_form::Field {
+    btctax_input_form::form_spec()
+        .iter()
+        .flat_map(|s| s.fields.iter())
+        .find(|f| f.id == btctax_input_form::FieldId::FilingStatus)
+        .expect("FilingStatus field is present in form_spec()")
+}
+
+/// The chosen filing status as its stable enum name (`"Single"`/`"Mfj"`/…), read via the accessor —
+/// NEVER `ri.filing_status` (spec §9A/§13).
+fn filing_status_name(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> Option<String> {
+    match (filing_status_field().get)(ri, &btctax_input_form::RowAddr::default()) {
+        Some(btctax_input_form::FieldValue::Choice(c)) => Some(c),
+        _ => None,
+    }
+}
+
+/// The commit modal's `filing_status_label` — the chosen filing status as its stable label, read via the
+/// [`filing_status_field`] `get` accessor, NEVER `ri.filing_status` (review M6 — spec §9A/§13; Task 9
+/// pins it). A materialized working copy always has one; the `(unset)` fallback is belt-and-suspenders.
+pub fn filing_status_label(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> String {
+    filing_status_name(ri).unwrap_or_else(|| "(unset)".to_string())
+}
+
+/// Whether the Spouse section is OFFERED for this return — MFJ/MFS/QSS only (hidden on Single/HoH).
+/// TUI-side gate (review I-2); reads the filing status via the accessor.
+fn spouse_offered(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> bool {
+    matches!(
+        filing_status_name(ri).as_deref(),
+        Some("Mfj") | Some("Mfs") | Some("Qss")
+    )
+}
+
+/// Is this section shown as a top-level left-pane entry for `ri`?
+/// - `W2Box12` / `ScheduleACharitable`: logically nested (Task 5 renders them within their parent's
+///   rows) → skipped here.
+/// - `Spouse`: offered only for MFJ/MFS/QSS.
+/// - every other section (`Singleton`, `Repeating`, `ScheduleA`) is always shown.
+fn section_is_live(
+    section: &btctax_input_form::Section,
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+) -> bool {
+    use btctax_input_form::SectionId;
+    match section.id {
+        SectionId::W2Box12 | SectionId::ScheduleACharitable => false,
+        SectionId::Spouse => spouse_offered(ri),
+        _ => true,
+    }
+}
+
+/// The sections a renderer lists for this working return, in spec §9A order.
+pub fn live_sections(
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+) -> Vec<&'static btctax_input_form::Section> {
+    btctax_input_form::form_spec()
+        .iter()
+        .filter(|s| section_is_live(s, ri))
+        .collect()
+}
+
+/// The live fields of a section for this return (`field.live(ri)`).
+pub fn live_fields(
+    section: &'static btctax_input_form::Section,
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+) -> Vec<&'static btctax_input_form::Field> {
+    section.fields.iter().filter(|f| (f.live)(ri)).collect()
 }
 
 /// Cycle through the 5 `FilingStatus` variants in declaration order.

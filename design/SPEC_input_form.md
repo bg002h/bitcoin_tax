@@ -374,7 +374,11 @@ B 7b field — MUST be in-form so a "Yes" 7a is answerable, else commit refuses 
 with no in-form remedy)*.
 
 **`Skippables`** (synthetic, from the new core `SKIPPABLE_QUESTIONS`): `BlindTaxpayer` **Tri** (always),
-`BlindSpouse` **Tri** (spouse present), `SalesTaxElection` **Tri** (`schedule_a.is_some()`),
+`BlindSpouse` **Tri** (spouse present), `SalesTaxElection` **Tri** (`schedule_a.is_some()`) *(the
+`salt_use_sales_tax` leaf — one FieldId `SaSaltUseSalesTax`, **shown in ScheduleA above**; its backing
+`ScheduleAInputs` is deleteable, so its FieldId is Schedule-A-owned, mirroring the `MortgageAllUsed` dedup.
+The Skippables **section** shrinks to blind ×2 + DOB ×2; the coverage KAT asserts every `SkippableId` maps to
+exactly one FieldId *somewhere in the form*, not that it appears in this section)*,
 `DateOfBirthTaxpayer` **D** (always), `DateOfBirthSpouse` **D** (spouse present).
 
 **`Payments`** (singleton, `payments: Payments`) — **M** ×3: `estimated_tax_payments`, `extension_payment`,
@@ -513,7 +517,7 @@ hold irreplaceable carryover). A draft splits by `parked`:
    | `SingleEmployerExcessSs` | `Section(W2s)` (`box4_ss_withheld` — an in-form field; I-4) |
    | `SpouseOwnerWithoutJointReturn` | `[Section(W2s), NotInForm]` — also fires from `schedule_c.owner` (deferred; M-3) |
    | `NonCryptoNoncashGift` | `Section(ScheduleACharitable)` — form-reachable (a `CapGainProp*`/`OrdinaryProp*` gift > $500), but *compute-side* (`return_1040.rs:598-609`), so it surfaces at `report`, not the commit-screen; the anchor lets a reopened form point at the gift (M-c/M-4) |
-   | `NegativeAmount(_)` / `SsnMalformed(_)` | the named `Field` — **defensive only**; unreachable (tier-1 parse rejects negatives and bad SSNs before they enter the working copy) |
+   | `NegativeAmount(_)` / `SsnMalformed(_)` | `NotInForm { note }` — the payload is display-prose (this section forbids parsing it), so no `FieldId` is recoverable at tier-3, and no single `Section` is honest (a negative can come from any money field, in-form or deferred); **defensive only** anyway — unreachable, since tier-1 parse rejects negatives and bad SSNs before they enter the working copy |
    | everything else (`BusinessInterestIncome`, `BusinessIncomeWithoutScheduleC`, `ScheduleCLoss`, `ScheduleCNoBusinessDescription`, `KiddieTax`, `QbiAboveThreshold`, `AmtScreenTriggered`, `TaxableIncomeNonPositiveWithCarryforward`, `ForeignTaxOverCeiling`, `IraDeductionClaimed`, `PrivateActivityBondAmt`, `UnrecapturedOrSpecialRateGain`, `InconsistentDividendSubset`) | `NotInForm { note }` — a **deferred section** (Schedule C, QBI, 1099s incl. `PrivateActivityBondAmt`'s 1099-INT box 9 / 1099-DIV box 13 — I-3, carryforwards) or a **compute/absolute** screen; the form says "entered via TOML import / computed at `report`" |
 
    The `NotInForm` sentinel keeps the `match` exhaustive *and* honest: a v1 form cannot fix a Schedule-C
@@ -669,7 +673,7 @@ field.
 7. **The toggle** — in-session stash/clear/re-commit, atomicity, clean-state gate, active-source state.
 8. **The TUI "tax inputs" mode** — the renderer over `FormSpec`, key handling, the payload-confirm modal,
    secret no-echo input, snapshot tests.
-9. **Docs** — man pages; `income template`/`income import` remain as import/export; `LIMITATIONS.md` note
+9. **Docs** — man pages; `income import` remains as import/export (`income template` was recon'd in P8 but never built — do NOT document it); `LIMITATIONS.md` note
    that the form is the primary authoring path and what it cannot see at entry.
 
 ## 12. Follow-ups this phase files (non-gating)

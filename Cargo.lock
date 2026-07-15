@@ -368,6 +368,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "btctax-input-form"
+version = "0.5.0"
+dependencies = [
+ "btctax-core",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "serde",
+ "serde_json",
+ "time",
+]
+
+[[package]]
 name = "btctax-store"
 version = "0.5.0"
 dependencies = [
@@ -405,6 +417,7 @@ dependencies = [
  "btctax-adapters",
  "btctax-cli",
  "btctax-core",
+ "btctax-input-form",
  "btctax-store",
  "btctax-tui",
  "crossterm",

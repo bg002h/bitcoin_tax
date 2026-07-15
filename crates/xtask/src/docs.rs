@@ -424,5 +424,14 @@ mod tests {
                 "btctax-tui-edit.1 must list the {key:?} action key (copy of the ? overlay)"
             );
         }
+        // The tax-inputs mode entry key. Line-anchored on BOTH ends (`\n.B T\n`, not just
+        // `\n.B T`): the page already contains `\n.B Tab / Shift\-Tab` (Navigation), which
+        // contains `\n.B T` as a substring, so an unanchored match would pass vacuously and
+        // guard nothing. `\n.B T\n` only matches a real `.B T` keymap entry on its own line.
+        assert!(
+            edit.contains("\n.B T\n"),
+            "btctax-tui-edit.1 must list the `T` (tax-inputs mode) action key on its own \
+             .B line"
+        );
     }
 }

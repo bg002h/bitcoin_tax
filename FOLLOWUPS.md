@@ -4,6 +4,167 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## input-form PLAN 3 (TUI) — whole-branch review Minors (2026-07-15)
+
+The Fable plan-3 whole-branch review (`design/input-form/reviews/WHOLE-BRANCH-P3-fable-r1.md`, 0C/4I) — the
+4 Importants (I-1 snapshot re-projection, I-2 status invisible, I-3 close-on-failed-flush, I-4 `!` glyph +
+screen-status) are folded in fix r1. Deferred Minors/Nits (ownerless polish unless noted):
+
+- **(P3-a)** `TaxInputsModalState.shadows` is production-dead (only tests read it; the summary embeds the
+  warning) — drop the field or read it. — OPEN, ownerless.
+- **(P3-b)** on persistent flush failure the idle tick retries a full vault re-encrypt every ~100ms — add a
+  backoff / stop-retrying-until-next-edit. (Related to fix-r1 I-3.) — OPEN, ownerless.
+- **(P3-c)** `reinstate_parked_full_return` labels any `Loaded::Draft` "the parked full return" even if
+  `parked=false` (unreachable in-session under the exclusive lock) — tighten the label. — OPEN, ownerless.
+- **(P3-d)** `value_is_answered` treats `Money(0)`/`Bool(false)` as unanswered, pinning the section glyph at
+  `…` for a deliberately-zero field (cosmetic). — OPEN, ownerless.
+- **(P3-e)** `seed_string` through the 64-byte `FieldBuffer` cap would silently truncate a longer
+  externally-imported Text value on re-commit (v1 fields are short in practice). — OPEN, ownerless.
+
+---
+
+## input-form PLAN 2 (persistence) — whole-branch review carry-forwards (2026-07-15)
+
+The Fable plan-2 whole-branch review (`design/input-form/reviews/WHOLE-BRANCH-P2-fable-r1.md`, 0C/3I) —
+the 3 Importants (I-1 load StaleNote, I-2 delete_draft pub(crate), I-3 commit per-year I-11 gate) are folded
+in fix r1. Deferred Minors/Nits, each with owner:
+
+- **(P2-a) stale-PARKED remedy chain is two-hop; discard must be reachable when `load` errors — owned by
+  PLAN 3.** A stale parked draft surfaces `ParkedDraftBlocksWrite` from a committed-row writer, but both its
+  named exits are unexecutable for the stale case ('use full return' → `load` refuses `StaleParkedDraft`
+  first; 'discard' lives inside a form that may not open). PLAN 3 MUST make the 'X' discard-parked affordance
+  reachable when `load` returns `StaleParkedDraft` (else a stale parked draft is undiscardable in-app).
+  Optionally, `coherence_clear_or_refuse` could check `schema_version` and emit `StaleParkedDraft` directly.
+  — OPEN, owned by **PLAN 3**. — input_form_store.rs load/coherence.
+- **(P2-b) `draft_exists` swallows real DB errors — ownerless cleanup.** `.is_ok()` maps a genuine rusqlite
+  failure to `false` (a hidden affordance) instead of `Err`; fix to `.optional()?` like `parked_flag` /
+  `return_inputs::exists`. — OPEN, ownerless. — input_form_store.rs `draft_exists`.
+- **(P2-c) `save_draft` silently overwrites/heals a STALE parked draft — ownerless hardening.** `parked_flag`
+  ignores `schema_version`; a version check on the parked path would hold §6.3 by construction. Unreachable
+  via the intended flow (`load` refuses first), so caller-convention-held today. — OPEN, ownerless.
+- **(P2-d) post-snapshot/pre-save errors don't `restore` in commit/park/discard — ownerless hardening.**
+  Disk is safe (save never ran), but restoring on ANY post-snapshot `Err` makes the fns fully transactional
+  (double-fault territory otherwise). — OPEN, ownerless. — input_form_store.rs commit/park/discard.
+- **(P2-Nits) ownerless polish:** park clean-state gate `== Some(false)` → `.is_some()` (closes the
+  parked-overwrite corner for free); latch both errors when `restore` itself fails; `discard_parked_draft`
+  refuse message is slightly off for the WIP case; a one-line comment on why `save_draft` omits snapshot/
+  restore (plan-blessed, behaviorally right). — OPEN, ownerless.
+
+---
+
+## ✅ input-form engine (plan 1) — follow-up reconciliation after whole-branch review (2026-07-15)
+
+The final Fable whole-branch review (`design/input-form/reviews/WHOLE-BRANCH-fable-r1.md`, 0C/7I) triaged the
+deferred Minors below and flagged a per-phase-burndown violation (I-7). Reconciled:
+
+- **RESOLVED in whole-branch fix r1 (commit `3bebaf8`):** **(e)** ClearField→None un-answer path — now a
+  `Field.clear` closure per §5.7 M-6 (was the false-"§10" deferral = review I-1); **(b)** SecretView guarded
+  `set_masked` constructor (review I-3); **(d)** coverage KAT get→set round-trip breadth (review I-6);
+  **(k)** mask short-input full-mask (subsumed by I-3); **(f)** KAT `Some` seeds (verified done); **(g)**
+  same-kind-`None`/clear boundary now pinned; **(i)** RowAddr arity guard (verified done, was already burned
+  in Task 7); **(j)** Bool/Date kinds exercised by the KAT (verified done).
+- **RESOLVED (manifest, commit follows):** **(c)** `btctax-input-form/Cargo.toml` now self-declares
+  `rust_decimal serde-str` + `time serde-well-known` (no longer relies on feature unification).
+- **STILL OPEN — genuinely ownerless, legitimately parked (not merge-blockers):** **(h)** near-duplicate
+  `decl_tristate!`/`skippable_tristate!` macros; **(l)** coverage KAT does not assert its `EXEMPT` literals
+  are live (cosmetic dead-literal hygiene); **(m)** the NI-2 first-edit arm (`apply`, `None` → the initial
+  `SetField{FilingStatus}`) does not `guard_arity` the addr, so an over-long addr on the very first edit is
+  accepted while the identical post-materialization edit is refused (re-review r2 Nit — no panic, no wrong
+  value, just an inconsistency). Batch to a later cleanup pass.
+
+The individual item entries below are retained for history; their status is superseded by this banner.
+
+---
+
+## input-form engine (plan 1) — Task-2 review Minors, filed with owning task (2026-07-14)
+
+Task-2 (seam types) review was GREEN after the one Important — the `salt_use_sales_tax` duplicate
+`FieldId` — was folded (dropped `FieldId::SalesTaxElection`, kept `SaSaltUseSalesTax`; per Fable-blessed
+Option A; spec §5.8 amended with the "shown in ScheduleA above" dedup, mirroring `MortgageAllUsed`). Three
+Minors deferred, each to its owning task:
+
+- **(a) coverage-KAT assertion shape — owned by Task 5 (accessors + KAT).** When the coverage KAT is
+  written, assert *"every `SkippableId` maps to exactly one `FieldId` somewhere in the form"*, NOT *"the
+  SALT skippable appears in the Skippables section"* — the SALT election's FieldId is Schedule-A-owned
+  (`SaSaltUseSalesTax`), so the Skippables section is blind ×2 + DOB ×2. — OPEN, owned by **Task 5**. —
+  seam.rs `FieldId`; spec §5.6/§5.8.
+- **(b) `SecretView::Set{masked}` has no type-level "never digits" guard — owned by Task 5 (Secret
+  getters).** Today the masking invariant is convention-held (no constructor exists yet). When Task 5
+  writes the `Secret` getters, give it a stronger guarantee (e.g. a private-constructor newtype) so a
+  future caller cannot stuff raw digits into `masked`. Matches the answered-ness-by-convention pattern this
+  codebase otherwise avoids. — OPEN, owned by **Task 5**. — seam.rs `SecretView`.
+- **(c) `btctax-input-form/Cargo.toml` doesn't self-declare the serde features its wire types need — owned
+  by Task 5 (or opportunistic).** `FieldValue::Money(Usd)`/`Date` derive `Serialize`/`Deserialize` but the
+  manifest requests `rust_decimal = ["std"]` / `time = ["macros","parsing","formatting"]` — it compiles
+  only because `btctax-core` enables `serde-str`/`serde-well-known` and Cargo unifies features across the
+  shared graph (a real transitive guarantee, since the dep is unconditional). Declare them directly for
+  manifest hygiene. Low risk. — OPEN, owned by **Task 5** (or any Cargo.toml touch). — Cargo.toml:14-15.
+- **(d) `Edit`/`FieldValue` serde round-trip test covers only `Money` — owned by Task 5.** Broaden the
+  round-trip KAT to `Text`/`Bool`/`TriState`/`Date`/`Choice`/`Secret`/`SecretEntry` and `SectionId`/
+  `RowAddr` before the web renderer relies on the wire contract. Matches the brief's Step-1 test exactly,
+  so not a Task-2 failure. — OPEN, owned by **Task 5**. — seam.rs `tests::edit_roundtrips_through_json`.
+
+### Task-4 review carry-forwards (2026-07-15)
+
+- **(e) `ClearField`→`None` clear path for registry-delegating TriState/Date fields — owned by Task 7.**
+  Declarations/Skippables `Field.set` delegates to the core registry, whose setter is `fn(&mut RI, bool)`
+  / `fn(&mut RI, Date)` and CANNOT express a clear — so `SetField{TriState(None)}`/`Date(None)` are
+  (correctly) rejected `WrongKind`. Spec §5.8 M-6 requires `ClearField` on a `TriState`/`Date` to yield
+  `None` (the answered-ness "true unasked" path). Task-4 review ruled this lands on **Task 7's `apply` +
+  a DISTINCT clear path**, not on `Field.set` (routing clear through `set` is architecturally impossible
+  for a delegating field). Recommended design: add a `clear: fn(&mut ReturnInputs, &RowAddr) ->
+  Result<(),SetError>` to the `Field` struct (seam.rs), populated by every section builder
+  (registries.rs + Task 5's tree); registry-delegating fields' `clear` writes `None` to the underlying
+  `Option` leaf directly; plain fields clear to their M-6 empty; `apply` routes `ClearField` → `Field.clear`
+  (Enum → `Immutable`). — OPEN, owned by **Task 7**. — registries.rs setters; spec §5.8 M-6; seam.rs `Field`.
+- **(f) Task-6 round-trip KAT must seed `Some` for registry-delegating TriState/Date fields — owned by
+  Task 6.** Because `None` can't be set through these delegating setters (see (e)), any get→set→get
+  round-trip over a Declarations/Skippables field must use a `Some(bool)`/`Some(Date)` seed, not `None`. —
+  OPEN, owned by **Task 6**. — the coverage/round-trip KAT.
+- **(g) same-kind-`None` rejection is unpinned by a test — owned by Task 7.** The wrong-kind tests use
+  CROSS-kind values (Text on a Decl, `Date(None)` on a YesNo field); the exact behavior (e) relies on —
+  `TriState(None)` rejected on a `TriState` field, `Date(None)` on a `Date` field — has no assert. It is
+  correct-by-construction (refutable `let … Some(b) = v else`), but an untested guard ([[untested-guard-pattern]]).
+  When Task 7 builds the clear path, pin this boundary so a later refactor can't silently no-op same-kind
+  `None`. — OPEN, owned by **Task 7**. — registries.rs:287,325.
+- **(h) `decl_tristate!`/`skippable_tristate!` near-duplicate macros — ownerless polish, batch to end.**
+  Differ only in registry path + accessor names (`get`/`set` vs `get_bool`/`set_bool`). Collapsing adds
+  macro complexity across two registries; justifiable as written. Non-gating. — OPEN, ownerless. —
+  registries.rs:275-312.
+
+### Task-5 review carry-forwards (2026-07-15)
+
+- **(i) malformed-arity `RowAddr` panics a row accessor — owned by Task 7 (apply layer). IMPORTANT there.**
+  Row accessors index `a.0[0]`/`a.0[1]` directly; the row-beyond-length case fails safe (`.get()`→`None`/
+  `NoSuchRow`), but an EMPTY or too-short `RowAddr` panics (index out of bounds). `Edit`/`RowAddr` are
+  serde-deserialized from an untrusted web renderer (spec §4/§13 day-one seam consumer), so a malformed
+  addr is wire-reachable → a panic-on-untrusted-input. Task 5's `a.0[0]` matches the brief's prescribed
+  pattern and arity is an apply-layer contract, so it's not a Task-5 defect — but Task 7's `apply` MUST
+  fail closed on malformed-arity addrs (validate arity per section depth → `ApplyError`, or have accessors
+  read `a.0.get(n)`), NEVER panic. — OPEN, owned by **Task 7**; IMPORTANT at the apply layer. —
+  sections.rs:113,116,508,588-600; seam.rs:10 (`RowAddr(pub Vec<usize>)`).
+- **(j) Bool + Date field kinds are not round-trip-tested in Task-5 spot checks — owned by Task 6.** They
+  rely on macro/pattern uniformity only (`TpPresidentialFund`/`SpPresidentialFund` Bool; `DepDob` Date).
+  Task 6's exhaustive coverage KAT must exercise EVERY kind incl. Bool/Date. — OPEN, owned by **Task 6**. —
+  sections.rs (presidential-fund, DepDob).
+- **(k) `mask_secret` reveals the full value for a ≤4-char secret (takes last 4) — Nit, owned by Task 8.**
+  Unreachable in practice (SSN=9 digits, IP PIN=6), and Task 8's `parse` enforces canonical length before
+  a `SecretEntry` is built. Defensive full-mask on short input is cheap. Non-gating. — OPEN, owned by
+  **Task 8** (or ownerless). — sections.rs:96-99 (`mask_secret`).
+
+### Task-6 review carry-forward (2026-07-15)
+
+- **(l) coverage KAT does not assert its `EXEMPT` literals are live — ownerless polish, batch to end.**
+  `is_exempt` is a predicate; nothing asserts each `EXEMPT_LEAVES`/`EXEMPT_PREFIXES` entry matches ≥1
+  realized fixture leaf, so a renamed/removed `sch1` leaf would leave a harmless DEAD literal. NOT a bite
+  hole — the dangerous "deferred struct becomes in-scope ⇒ covered AND exempt" case is caught by the
+  `covered_and_exempt` guard; only the cosmetic dead-literal case slips. Cheap fix:
+  `assert!(EXEMPT_LEAVES.iter().all(|e| before.contains_key(*e)))` + each prefix matches ≥1 key. — OPEN,
+  ownerless. — coverage.rs:201-211. *(The other two Task-6 Minors — fail-loud `addr_for`, theoretical
+  array-collapse with no in-scope `Vec<scalar>` trigger — are accepted as-is; no action.)*
+
+---
+
 ## P9 (form question registry) — deferred work, filed per `SPEC_form_questions.md` §5 step 12 (2026-07-14)
 
 Two items P9 deliberately did not do, each filed with its OWNING PHASE per the per-phase follow-up

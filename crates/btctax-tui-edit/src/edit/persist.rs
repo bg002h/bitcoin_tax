@@ -57,6 +57,158 @@ impl From<btctax_core::CoreError> for PersistError {
     }
 }
 
+/// Resolve the working `ReturnInputs` for `year` through [`btctax_cli::input_form_store::load`]
+/// (§6.1 precedence + §6.3 stale split) — the input-form flow's read side.
+///
+/// Lives HERE, not in the flow's opener, because `Session::conn()` is confined to this module by
+/// construction (the KAT-G1 mechanized gate) — `persist` is the ONLY module permitted to name the
+/// mutation surface. This is a pure READ: it takes `&Session` (never `&mut`), performs no `save()`,
+/// and therefore needs none of the snapshot/rollback machinery. (The one §6.3 in-memory stale-WIP
+/// delete `load` may perform is unpersisted crash-scratch cleanup — it never reaches disk here, and
+/// is committed only by a LATER autosave/commit; see `input_form_store::load`'s contract.)
+///
+/// Takes `&Session` so the opener borrows `app.session` DISJOINTLY from `app.tax_inputs_form`
+/// (review I-1) — a whole-`self`/`&mut self` accessor would collide with the flow's live borrow.
+pub fn load_return_inputs(
+    session: &btctax_cli::Session,
+    year: i32,
+) -> Result<
+    (
+        btctax_cli::input_form_store::Loaded,
+        Option<btctax_cli::input_form_store::StaleNote>,
+    ),
+    btctax_cli::CliError,
+> {
+    btctax_cli::input_form_store::load(session.conn(), year)
+}
+
+/// Autosave the input-form working return for `year` to the draft side-table through
+/// [`btctax_cli::input_form_store::save_draft`] — the input-form flow's WRITE side (the debounced
+/// autosave, I-7). The flow calls THIS wrapper, never `input_form_store::save_draft` directly.
+///
+/// Lives HERE, alongside [`load_return_inputs`], because the mutation surface (`Session::conn()` /
+/// `Session::save()`) is confined to this module by construction (the KAT-G1 mechanized gate). Keeping the
+/// crate's ONLY store write in `persist.rs` preserves the module invariant and gives error mapping a single
+/// home — the same discipline as the read wrapper.
+///
+/// `save_draft` preserves the row's `parked` flag (NI-1) and reaches disk via `Vault::save` (I-7 — nothing
+/// survives a crash until it returns). It returns [`btctax_cli::CliError`], NOT [`PersistError`]: it is not
+/// an append/upsert-with-`save_or_rollback` — it is a raw draft-row autosave whose failure the caller routes
+/// to `app.status` DIRECTLY (NOT `EditorApp::on_persist_error`, which is `PersistError`-only — review M1).
+///
+/// Takes `&mut Session` so the flow borrows `app.session` DISJOINTLY from `app.tax_inputs_form`
+/// (review I-1) — a whole-`self`/`&mut self` accessor would collide with the flow's live borrow.
+pub fn form_save_draft(
+    session: &mut btctax_cli::Session,
+    year: i32,
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+) -> Result<(), btctax_cli::CliError> {
+    btctax_cli::input_form_store::save_draft(session, year, ri)
+}
+
+/// Commit the input-form working return for `year` through [`btctax_cli::input_form_store::commit`]
+/// (SPEC §5.7) — the input-form flow's COMMIT side (the payload-confirm modal's Enter). A thin wrapper
+/// like [`form_save_draft`]: `commit` screens `ri` and, ONLY if it passes, writes the committed
+/// `return_inputs` row and deletes the draft; a screen-refusal or a table-less year writes nothing (the
+/// outcome is returned in [`btctax_cli::input_form_store::CommitOutcome`]).
+///
+/// Lives HERE, alongside [`load_return_inputs`]/[`form_save_draft`], because the mutation surface
+/// (`Session::conn()` / `Session::save()`) is confined to this module by construction (the KAT-G1
+/// mechanized gate). The flow calls THIS wrapper, never `input_form_store::commit` directly.
+///
+/// Returns [`btctax_cli::CliError`], NOT [`PersistError`]: `commit` does its OWN snapshot/restore around
+/// its `save()` (it never leaves an in-memory/disk split — SPEC §5.7), so it is NOT an
+/// append/upsert-with-`save_or_rollback` and its `Err` is routed to `app.status` DIRECTLY, not through
+/// `EditorApp::on_persist_error` (mirrors `form_save_draft`, review M1).
+///
+/// Takes `&mut Session` so the flow borrows `app.session` DISJOINTLY from `app.tax_inputs_form`
+/// (review I-1). The caller binds the bundled tables to a `let` and passes `table_for(year)` /
+/// `full_return_for(year)` (both `Option`; `full_return_for` is `Some` only for 2024 — a non-2024 year
+/// yields `CommitOutcome::NoTables`).
+pub fn form_commit(
+    session: &mut btctax_cli::Session,
+    year: i32,
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+    table: Option<&btctax_core::tax::tables::TaxTable>,
+    params: Option<&btctax_core::tax::tables::FullReturnParams>,
+) -> Result<btctax_cli::input_form_store::CommitOutcome, btctax_cli::CliError> {
+    btctax_cli::input_form_store::commit(session, year, ri, table, params)
+}
+
+/// Whether a raw `tax_profile` exists for `year` — the commit modal's shadow warning (§9 create-row
+/// amendment): committing a full return for a year that also has a tax-profile leaves the profile saved
+/// but no longer active. A thin read wrapper over [`btctax_cli::input_form_store::shadows_profile`].
+///
+/// Lives HERE for the same reason as [`load_return_inputs`]: `Session::conn()` is confined to this module
+/// by the KAT-G1 gate. A pure READ — takes `&Session` (never `&mut`), performs no `save()` — so the
+/// opener borrows `app.session` DISJOINTLY from `app.tax_inputs_form` (review I-1).
+pub fn form_shadows_profile(
+    session: &btctax_cli::Session,
+    year: i32,
+) -> Result<bool, btctax_cli::CliError> {
+    btctax_cli::input_form_store::shadows_profile(session.conn(), year)
+}
+
+/// Which source is CURRENTLY active for `year` — the source-toggle's read side (§9A) and the input-form
+/// status line's `active source: …` display. A thin read wrapper over
+/// [`btctax_cli::input_form_store::active_source`] (committed full return › `tax_profile` › neither).
+///
+/// Lives HERE for the same reason as [`load_return_inputs`]/[`form_shadows_profile`]: `Session::conn()` is
+/// confined to this module by the KAT-G1 gate. A pure READ — takes `&Session` (never `&mut`), performs no
+/// `save()` — so the flow borrows `app.session` DISJOINTLY from `app.tax_inputs_form` (review I-1). The
+/// flow calls THIS wrapper, never `input_form_store::active_source` directly.
+pub fn form_active_source(
+    session: &btctax_cli::Session,
+    year: i32,
+) -> Result<btctax_cli::input_form_store::ActiveSource, btctax_cli::CliError> {
+    btctax_cli::input_form_store::active_source(session.conn(), year)
+}
+
+/// Park the committed full return for `year` into its draft (the `t` "use tax-profile" toggle — C-1/§9A) —
+/// the input-form flow's PARK side. A thin wrapper over [`btctax_cli::input_form_store::park_to_profile`],
+/// which stashes the committed row as a `parked = 1` draft and deletes the committed row so the year
+/// resolves through the `tax_profile` again; it REFUSES (writing nothing) when there is no committed row or
+/// when a work-in-progress draft already occupies the slot (M-4 clean-state gate). The TUI ADDITIONALLY
+/// gates the offer on a clean (non-dirty) flow, because the store cannot see un-flushed in-memory edits.
+///
+/// Lives HERE, alongside [`form_commit`], because the mutation surface (`Session::conn()` /
+/// `Session::save()`) is confined to this module (the KAT-G1 gate). The flow calls THIS wrapper, never
+/// `input_form_store::park_to_profile` directly.
+///
+/// Returns [`btctax_cli::CliError`], NOT [`PersistError`]: `park_to_profile` does its OWN snapshot/restore
+/// around its `save()` (stash-first, then delete, one atomic save — D-6), so it never leaves an
+/// in-memory/disk split and its `Err` is routed to `app.status` DIRECTLY, not through
+/// `EditorApp::on_persist_error` (mirrors [`form_commit`], review M1). Takes `&mut Session` so the flow
+/// borrows `app.session` DISJOINTLY from `app.tax_inputs_form` (review I-1).
+pub fn form_park_to_profile(
+    session: &mut btctax_cli::Session,
+    year: i32,
+) -> Result<(), btctax_cli::CliError> {
+    btctax_cli::input_form_store::park_to_profile(session, year)
+}
+
+/// Discard the parked draft for `year` — the `X` discard-parked path (§9A/P2-a) — the input-form flow's
+/// PARKED-DISCARD side. A thin wrapper over [`btctax_cli::input_form_store::discard_parked_draft`], the ONLY
+/// deleter of a `parked = 1` row; it REFUSES ([`btctax_cli::CliError::Usage`]) unless the year's draft is
+/// parked, so it can never be reached to delete a work-in-progress draft (or a year with no draft) behind
+/// the "discard parked draft" affordance — the parked check is the whole safety property, and the flow
+/// surfaces the refusal to `app.status` rather than suppressing it.
+///
+/// Lives HERE, alongside [`form_park_to_profile`], because the mutation surface (`Session::conn()` /
+/// `Session::save()`) is confined to this module (the KAT-G1 gate). The flow calls THIS wrapper, never
+/// `input_form_store::discard_parked_draft` directly.
+///
+/// Returns [`btctax_cli::CliError`], NOT [`PersistError`]: `discard_parked_draft` does its OWN
+/// snapshot/restore around its `save()` (mirrors `park_to_profile`'s atomicity), so its `Err` is routed to
+/// `app.status` DIRECTLY, not through `EditorApp::on_persist_error` (review M1). Takes `&mut Session` so the
+/// flow borrows `app.session` DISJOINTLY from `app.tax_inputs_form` (review I-1).
+pub fn form_discard_parked_draft(
+    session: &mut btctax_cli::Session,
+    year: i32,
+) -> Result<(), btctax_cli::CliError> {
+    btctax_cli::input_form_store::discard_parked_draft(session, year)
+}
+
 /// Revert the in-memory DB to `pre` after a mutation-committing step failed, mapping the error:
 /// `RolledBack` if the revert succeeds, `ResidueLive` if the revert ALSO fails (residue is live).
 fn rollback(
