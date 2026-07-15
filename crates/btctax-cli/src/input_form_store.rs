@@ -251,6 +251,48 @@ pub fn commit(
     Ok(CommitOutcome::Committed)
 }
 
+/// Park the committed return for `year` into its draft (the "switch to tax-profile" toggle — C-1).
+///
+/// Stashes the committed [`ReturnInputs`] row into the draft table with `parked = 1`, then deletes the
+/// committed row, so the year resolves through the [`crate::tax_profile`] again at `resolve.rs` precedence
+/// — the full return is not lost, it is preserved as the sole `parked` copy (D-6) and reinstated by a later
+/// `use full return`. The `tax_profile` itself is never touched; it simply stops being shadowed.
+///
+/// Refuses (writing nothing) when:
+///
+/// - **no committed row** → [`CliError::Usage`] (there is nothing to park).
+/// - **a WIP draft already occupies the slot** (`parked = 0`) → [`CliError::Usage`]. ★ M-4: this refuses
+///   ANY work-in-progress draft, not only one that diverges from the committed row. The store cannot
+///   cheaply tell "divergent" apart, the draft slot is one-per-year, and stashing would clobber the user's
+///   in-progress edit — so refusing a same-valued WIP costs nothing and the conservatism is intentional.
+///
+/// The stash and the delete are ordered stash-FIRST and committed together by a single `sess.save()`: on
+/// save failure `restore(&snap)` rolls BOTH back, so a failed park never loses the committed row's SSNs
+/// (D-6 atomicity, I-7). The delete is the in-session [`crate::return_inputs::delete`] on THIS session's
+/// `conn()` — never the `income clear` command, which would open a second `Session` and deadlock against
+/// the held lock (N-1). Takes `&mut Session` for `save()`.
+pub fn park_to_profile(sess: &mut Session, year: i32) -> Result<(), CliError> {
+    let Some(ri) = crate::return_inputs::get(sess.conn(), year)? else {
+        return Err(CliError::Usage(format!(
+            "no committed return to park for {year}"
+        )));
+    };
+    if parked_flag(sess.conn(), year)? == Some(false) {
+        // ★ clean-state gate (§9 / M-4): a WIP draft owns the one-per-year slot; parking would clobber it.
+        return Err(CliError::Usage(format!(
+            "year {year} has a work-in-progress draft; finish or discard it before switching to the tax-profile"
+        )));
+    }
+    let snap = sess.snapshot()?;
+    set_draft_row(sess.conn(), year, &ri, true)?; // ★ stash FIRST (parked=1)
+    crate::return_inputs::delete(sess.conn(), year)?; // ★ N-1: in-session delete, NOT `income clear`
+    if let Err(e) = sess.save() {
+        sess.restore(&snap)?; // ★ atomic (D-6): a failed park never loses the committed row
+        return Err(e);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,6 +507,53 @@ mod tests {
         );
         // no draft → Ok
         coherence_clear_or_refuse(&conn, 2030).unwrap();
+    }
+
+    #[test]
+    fn park_stashes_then_deletes_committed_atomically() {
+        let (_dir, path, pp) = tmp_vault();
+        let mut sess = Session::open(&path, &pp).unwrap();
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Mfj,
+            ..Default::default()
+        };
+        crate::return_inputs::set(sess.conn(), 2024, &ri).unwrap();
+        park_to_profile(&mut sess, 2024).unwrap();
+        // committed row gone; draft holds it with parked=1
+        assert!(
+            !crate::return_inputs::exists(sess.conn(), 2024).unwrap(),
+            "park deletes the committed row"
+        );
+        let d = get_draft_row(sess.conn(), 2024).unwrap().unwrap();
+        assert!(
+            d.parked && d.ri.filing_status == FilingStatus::Mfj,
+            "park stashes the row as parked"
+        );
+        // survives disk (I-7)
+        drop(sess);
+        let s2 = Session::open(&path, &pp).unwrap();
+        assert!(get_draft_row(s2.conn(), 2024).unwrap().unwrap().parked);
+    }
+
+    #[test]
+    fn park_refuses_without_committed_row_and_on_any_wip() {
+        let (_dir, path, pp) = tmp_vault();
+        let mut sess = Session::open(&path, &pp).unwrap();
+        assert!(park_to_profile(&mut sess, 2024).is_err(), "nothing to park");
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        crate::return_inputs::set(sess.conn(), 2024, &ri).unwrap();
+        set_draft_row(sess.conn(), 2024, &ri, false).unwrap(); // a WIP draft occupies the slot
+        assert!(
+            park_to_profile(&mut sess, 2024).is_err(),
+            "clean-state gate: won't clobber a WIP draft"
+        );
+        assert!(
+            crate::return_inputs::exists(sess.conn(), 2024).unwrap(),
+            "a refused park leaves the committed row"
+        );
     }
 
     #[test]
