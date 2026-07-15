@@ -32,6 +32,34 @@ Minors deferred, each to its owning task:
   `RowAddr` before the web renderer relies on the wire contract. Matches the brief's Step-1 test exactly,
   so not a Task-2 failure. — OPEN, owned by **Task 5**. — seam.rs `tests::edit_roundtrips_through_json`.
 
+### Task-4 review carry-forwards (2026-07-15)
+
+- **(e) `ClearField`→`None` clear path for registry-delegating TriState/Date fields — owned by Task 7.**
+  Declarations/Skippables `Field.set` delegates to the core registry, whose setter is `fn(&mut RI, bool)`
+  / `fn(&mut RI, Date)` and CANNOT express a clear — so `SetField{TriState(None)}`/`Date(None)` are
+  (correctly) rejected `WrongKind`. Spec §5.8 M-6 requires `ClearField` on a `TriState`/`Date` to yield
+  `None` (the answered-ness "true unasked" path). Task-4 review ruled this lands on **Task 7's `apply` +
+  a DISTINCT clear path**, not on `Field.set` (routing clear through `set` is architecturally impossible
+  for a delegating field). Recommended design: add a `clear: fn(&mut ReturnInputs, &RowAddr) ->
+  Result<(),SetError>` to the `Field` struct (seam.rs), populated by every section builder
+  (registries.rs + Task 5's tree); registry-delegating fields' `clear` writes `None` to the underlying
+  `Option` leaf directly; plain fields clear to their M-6 empty; `apply` routes `ClearField` → `Field.clear`
+  (Enum → `Immutable`). — OPEN, owned by **Task 7**. — registries.rs setters; spec §5.8 M-6; seam.rs `Field`.
+- **(f) Task-6 round-trip KAT must seed `Some` for registry-delegating TriState/Date fields — owned by
+  Task 6.** Because `None` can't be set through these delegating setters (see (e)), any get→set→get
+  round-trip over a Declarations/Skippables field must use a `Some(bool)`/`Some(Date)` seed, not `None`. —
+  OPEN, owned by **Task 6**. — the coverage/round-trip KAT.
+- **(g) same-kind-`None` rejection is unpinned by a test — owned by Task 7.** The wrong-kind tests use
+  CROSS-kind values (Text on a Decl, `Date(None)` on a YesNo field); the exact behavior (e) relies on —
+  `TriState(None)` rejected on a `TriState` field, `Date(None)` on a `Date` field — has no assert. It is
+  correct-by-construction (refutable `let … Some(b) = v else`), but an untested guard ([[untested-guard-pattern]]).
+  When Task 7 builds the clear path, pin this boundary so a later refactor can't silently no-op same-kind
+  `None`. — OPEN, owned by **Task 7**. — registries.rs:287,325.
+- **(h) `decl_tristate!`/`skippable_tristate!` near-duplicate macros — ownerless polish, batch to end.**
+  Differ only in registry path + accessor names (`get`/`set` vs `get_bool`/`set_bool`). Collapsing adds
+  macro complexity across two registries; justifiable as written. Non-gating. — OPEN, ownerless. —
+  registries.rs:275-312.
+
 ---
 
 ## P9 (form question registry) — deferred work, filed per `SPEC_form_questions.md` §5 step 12 (2026-07-14)
