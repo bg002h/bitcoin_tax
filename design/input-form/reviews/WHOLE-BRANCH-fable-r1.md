@@ -1,0 +1,67 @@
+# Whole-branch review — `feat/input-form-engine` (plan 1), independent Fable pass r1
+
+*Persisted VERBATIM (STANDARD_WORKFLOW §2). Reviewer: Fable. Persisted 2026-07-15 against HEAD `b6563d3`
+(merge-base `9ddc5cf`, 12 commits, ~3275 additions). The final whole-branch gate for plan 1.*
+
+---
+
+VERDICT: 0 Critical / 7 Important
+
+## Strengths
+
+- **NI-2 is airtight and well-tested.** The `None` arm accepts exactly one edit shape, assigns only on a successful set (an unparseable `Choice("Nope")` leaves `None` — tested), and nothing else in the crate constructs a `ReturnInputs`. The doctrine holds by construction.
+- **The two dedups are threaded consistently through all six surfaces** (enum, section builders, both total maps, KAT, apply, attribute) — I found no place that still assumes two FieldIds, and no double/under-coverage.
+- **The wire-panic hole (follow-up i) was genuinely closed**: `guard_arity` + exhaustive `row_depth` + `.get()`-based accessors; I could not construct a wire-reachable panic.
+- The mutate-and-diff coverage KAT (maximal fixture, exactly-one-leaf, dedup panic, phantom check, count tripwires, per-kind exercise) is a strong drift guard; the §4 veto is honored (`serde_json` is dev-dep, `Value`-walking only in `coverage.rs`).
+- Attribution is exhaustive with no `_` arm, and every `Field(FieldId)` anchor it can emit resolves to a real Field in `form_spec()` (I checked all of them). Frozen files untouched.
+
+## Issues
+
+### Important
+
+**I-1. No TriState in the entire form can be un-answered — spec §5.7 M-6 is unmet, and the code cites a spec blessing that does not exist.** All 11 TriState fields (7 `Decl*`, `BlindTaxpayer/Spouse`, `SaSaltUseSalesTax`, `SaMortgageAllUsed`) and 2 of 3 Date fields are registry-delegating; `ClearField` on them returns `WrongKind` (`crates/btctax-input-form/src/apply.rs:60-77`, `registries.rs:38,57,76`). Spec §5.7 M-6 mandates `TriState→None`, `Date→None` — "the un-answer path… answered-ness-relevant: only TriState/Date clear to a true 'unasked'" — unconditionally. `apply.rs:66` calls this "the documented v1 limitation (spec §10)", but §10 contains no such documentation (I read it in full; the only spec edits on this branch are the §5.8 dedup note and the §7 erratum). Failure scenario: a filer mistakenly answers `ForeignAccounts` (or blindness) and wants to return it to "never asked" — impossible; worse, §9A specifies the TUI TriState control as a cycle "never→yes→no→never", which this engine cannot execute — plan 3 is blocked or ships the OTS default-display bug in reverse. FOLLOWUP (e) was phase-owned by Task 7 and crossed its owning gate unburned — under the standing workflow that is overdue, not deferred. Fix: (e)'s own design — a `clear: fn(&mut ReturnInputs, &RowAddr) -> Result<(), SetError>` on `Field`, writing `None` to the underlying `Option` leaf for delegating fields; `apply` routes `ClearField` through it. Seam: Task 3 (unfailable setter shape) × Task 4 (macros) × Task 7 (apply).
+
+**I-2. `ClearField(IpPin)` writes `Some("")` — a screen-clean, export-bricking state with no in-form way back to `None`.** `apply.rs:74` clears Secret to `SecretEntry("")`; the IpPin setter does `ri.header.ip_pin = Some(s)` (`sections.rs:206`). `screen_inputs` never checks the PIN, so commit is clean; `ReturnHeader::build` then runs `ip_pin.as_deref().map(IpPin::canonical).transpose()?` (`btctax-core/src/tax/packet.rs:388-393`) and errors on `""` at print/export. The form renders `Some("")` as `SecretView::Empty` — indistinguishable from the healthy `None` — and no edit produces `None` (Taxpayer is a plain Singleton; SetField requires a valid 6-digit entry the filer may not have — IP PINs are annual/opt-in). Scenario: enter a PIN, clear it, commit, `export` fails, no in-form remedy. Note the clear-matrix test covers `TpSsn` (a plain `String`, clears fine) but not `IpPin` — the one Secret backed by an `Option`; the untested-guard pattern again. Fix: map empty `SecretEntry` → `None` in the IpPin setter, or route through I-1's `clear`. Seam: Task 5 setter × Task 7 clear matrix.
+
+**I-3. The IP-PIN mask reveals 4 of its 6 digits — a regression against the exact discipline spec §4 cites.** `mask_secret` (`sections.rs:28-35`) formats `***-**-{last4}` for every secret; the test pins `masked == "***-**-2233"` for PIN `112233`. Existing discipline: `income show` masks the PIN to `Some("***")` (`btctax-cli/src/cmd/tax.rs:155-157`), Debug is `IpPin(******)` (`packet.rs:187`) — zero digits. Spec §4: "(Mirrors the existing mask_ssn / IpPin(******) Debug discipline.)" `SecretView::Set{masked}` crosses the render model and the future wire, so every render leaks 2/3 of the anti-fraud secret (search space 100). SSN last-4 matches `mask_ssn` and is fine. Fix: mask by field (full-mask non-SSN secrets); this also subsumes FOLLOWUP (k)'s ≤4-char full-reveal (note `mask_ssn("12")` → `***-**-****`, another divergence). Seam: Task 5's one masker serving two secrets with different disciplines — the per-task review filed only the short-input corner.
+
+**I-4. The four presence-gated delegating setters silently drop the write and report `Ok(())` — a lying success on the wire.** `BlindSpouse`/`DobSpouse` without a spouse and `SaSaltUseSalesTax`/`SaMortgageAllUsed` without a `schedule_a`: the macro set (`registries.rs:38,57,76`) unconditionally returns `Ok` after calling a core setter whose `if let` discards the write (`questions.rs:277-281, 293-297, 322-326, 191`). Contrast the same states on sibling fields: `SpFirstName` → `NoSuchRow`, every `scha_money!` → `NoSuchRow`. Scenario: a web client (or a replayed edit log where `DeleteSection(Spouse)` lands before `SetField(BlindSpouse, Some(true))`) is told the blindness claim was recorded; it wasn't; the committed return silently forgoes the §63(f) addition the filer confirmed — overstated tax behind a reported success. Same class: `AddRow{ScheduleACharitable}`/`AddRow{W2Box12}` with an absent/out-of-range parent no-op and return `Ok`; and the delegating `get` returns `Some(TriState(None))` for an absent section where siblings return `None` — absent vs unanswered are indistinguishable. Fix: presence-check in the macros (→ `NoSuchRow`), and make `add`/`remove` report. Seam: Task 3's unfailable `fn(&mut RI, bool)` signature × Task 4's macros × Task 7's trust in `Ok` — each slice locally defensible (the CLI gates by `live`), the combination lies to a consumer that has no gate.
+
+**I-5. `ItemizeElection.live` is `|_| true`; spec §5.8 says `live: schedule_a.is_some()` — re-opening the spec's one named result-bearing hazard through the set door.** `sections.rs:106`. §5.1/I-10's whole point: `ForceItemize` with no Schedule A "returns the itemized arm even with no Schedule A (a $0 deduction)". The branch's `delete` reset (correct, tested) closes the delete-after-set door, but wrong liveness metadata means the plan-3 renderer will show the field on a no-Schedule-A return; a filer sets `ForceItemize`, no refusal covers the state, and commit produces a $0-deduction return — the standard deduction silently forfeited. Fix: `live: |ri| ri.schedule_a.is_some()` + a pinning test. Seam: Task 5 vs the §5.8 inventory — a per-task field-presence check passes; only the liveness column was dropped.
+
+**I-6. Spec §10's first engine KAT — "every non-Secret Field get→FieldValue→set round-trips; kind mismatch is a SetError" — was never implemented, and the coverage KAT is transposition-blind.** The KAT exercises only `set` and asserts cardinality, not pairing: a coherent swap (e.g. `Box3SsWages` ↔ `Box5MedWages` field idents in `w2_money!`) still yields a perfect bijection — no double-cover, no uncovered leaf, and a get→set round-trip would also pass since both accessors use the same wrong leaf. `get` is untested for roughly 40 of 62 fields (all W-2 money boxes, Schedule-A money, Address, Dependents, Char*, Payments…), and Enum `get` uses `format!("{:?}")`, so token-vs-options drift is unguarded. I verified by inspection that every current pairing is correct — but nothing holds it. The plan's Self-Review never assigned this §10 bullet to any task, so no per-task review could catch its absence — a pure whole-branch gap. Fix: in `coverage.rs`, assert the observed `covered: path → FieldId` map against a pinned literal (kills transposition), and add get-after-set-equals-sentinel to the existing loop (kills get drift, ~15 lines).
+
+**I-7. Per-phase follow-up burndown violated, and FOLLOWUPS.md is stale in both directions.** Task-owned items crossed their owning gates unburned: (b) `SecretView` masked-string newtype (Task 5 — now more pressing given I-3), (c) manifest serde features (Task 5), (d) wire round-trip breadth beyond `Money` (Task 5), (k) `mask_secret` short-input (Task 8), and (e) (Task 7 — counted as I-1). Meanwhile (a), (f), (g), (i), (j) ARE done in the code but remain marked OPEN in `FOLLOWUPS.md` — "reconciliation is a grep" now greps wrong both ways. Before merge: burn (b)/(c)/(d) or get an explicit owner re-file to a later plan with rationale, and flip the five completed items to resolved.
+
+### Minor
+
+- **M-1.** `ApplyError::NotChosenYet` is never constructed — a dead variant on a wire-adjacent error enum (`seam.rs:144`); either use it for the `None`-arm non-SetField case or drop it.
+- **M-2.** `guard_arity` rejects only too-short addrs; over-long addrs (`Box1Wages` at `[0,7,9]`) are accepted with extra indices silently ignored — exact-arity would be the cleaner fail-closed contract (`apply.rs`, `guard_arity`).
+- **M-3.** `parse(FieldKind::Secret, _)` always returns `BadSsn`, even when the caller meant an IP PIN — a misleading variant (documented, but a dedicated `ParseError` variant is one line).
+- **M-4.** `income answer` prompt order changed (DOBs now after blindness/SALT, in registry order) — behavior is not strictly "identical"; harmless (no users; the integration test was updated honestly), but worth stating in the PR.
+
+### Nit
+
+- **N-1.** The seam has no section-level "offered" predicate: a renderer cannot know Spouse is offered only on Mfj/Mfs/Qss without naming `ReturnInputs` fields (§3's load-bearing rule), and `CreateSection(Spouse)` on a Single return is accepted. The spec's illustrative §5.7 signatures omit it too — flag for plan 3 rather than fix here.
+- **N-2.** `SkippableId::DobTaxpayer` vs the spec's `DateOfBirthTaxpayer` naming — cosmetic drift between spec §5.8 and code.
+
+## FOLLOWUPS triage (e–l)
+
+- **(e) — YES, a merge-blocker** (I-1). It was filed as the fix design for a spec-M-6 conformance gap, owned by Task 7, and Task 7 instead shipped the rejection re-labelled "documented v1 limitation" with a false §10 citation. Not deferrable past this branch.
+- **(i)** — correctly burned (guard_arity + tests) but still marked OPEN; flip it.
+- **(f), (g), (j)** — done in code (KAT `Some` sentinels; ClearField matrix pins same-kind `None`; `seen_kinds` covers Bool/Date); flip to resolved.
+- **(b), (c), (d)** — content-Minor but OVERDUE (owning Task 5 closed); (b) is the right vehicle for I-3's fix (one masker, one constructor — newtype it while touching it).
+- **(k)** — subsumed by I-3; resolve together.
+- **(h), (l)** — legitimately parked ownerless; not blockers.
+
+## Whole-branch seams
+
+1. **Two dedups end-to-end: HELD.** No `SalesTaxElection`/`DeclMortgageAllUsed` FieldId anywhere; Declarations=7+1, Skippables=4; ScheduleA carries both via `skippable_tristate!(2)`/`decl_tristate!(7)` (`sections.rs:596,598`, indices verified against registry order); both maps total both directions; KAT 62/62 single-cover; attribute resolves via `question_to_field`; core `SkippableId::SalesTaxElection` intact and never conflated.
+2. **Registry move vs P9: HELD** (one Minor). Liveness gates and prompt strings lifted verbatim; the sacred no-brick test survives at `answer.rs:294` and still consumes `live_questions`; registries genuinely separate (`screen_inputs` loops only `FORM_QUESTIONS`; the separateness test pins it). Prompt ORDER changed (M-4).
+3. **NI-2: HELD** — by construction and by test (single accepted shape, assign-on-success, bad-choice leaves `None`); no bypassing constructor exists in the crate.
+4. **Fail-closed wire input: HELD for panics, BROKEN for truthfulness** — no wire-reachable panic found (guard_arity + `.get()` accessors), but the silent-drop `Ok` (I-4) means "accepted" does not mean "stored" for four fields and the row-add no-ops.
+5. **Secrets end-to-end: BROKEN at the IP PIN** (I-2 clear-to-`Some("")`, I-3 last-4-of-6 mask); the SSN path is sound (parse-canonical → `SecretEntry` → masked Debug → last-4 view matching `mask_ssn`).
+6. **Coverage KAT: HELD for coverage, blind to pairing** — non-vacuous (maximal fixture, count tripwires, precise exempt set, `covered_and_exempt` guard), but it cannot see a Field↔leaf transposition or a `get`-side defect (I-6).
+7. **Accessor/apply/attribute triangle: HELD** — every `Field` anchor `attribute` can emit is built in the tree; `MixedUseMortgageUnanswered` → `SaMortgageAllUsed` and the SALT set resolve through the dedup maps as designed.
+
+The branch is strong work with a genuinely held NI-2 core, but it is not mergeable as-is: I-1/I-2 leave the answered-ness "un-answer" path — the project's own doctrine — unexpressible or corrupting, I-5 re-opens the spec's one named result-bearing hazard, and I-7 is a standing-workflow gate violation. All seven have small, well-localized fixes.
