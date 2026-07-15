@@ -7,5 +7,5 @@
 mod seam;      pub use seam::*;      // Task 2
 mod spec;      pub use spec::*;      // Tasks 4-5
 mod apply;     pub use apply::*;     // Task 7
-// mod parse;     pub use parse::*;     // Task 8
+mod parse;     pub use parse::*;     // Task 8
 // mod attribute; pub use attribute::*; // Task 9
