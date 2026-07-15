@@ -794,6 +794,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             parked: false,
             stale_note,
             discard_offered: false,
+            pending_remove: None,
         },
         Ok((btctax_cli::input_form_store::Loaded::Committed(ri), stale_note)) => TaxInputsFormState {
             year,
@@ -807,6 +808,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             parked: false,
             stale_note,
             discard_offered: false,
+            pending_remove: None,
         },
         Ok((btctax_cli::input_form_store::Loaded::Draft { ri, parked }, stale_note)) => {
             TaxInputsFormState {
@@ -821,6 +823,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 parked,
                 stale_note,
                 discard_offered: false,
+                pending_remove: None,
             }
         }
         Err(e @ btctax_cli::CliError::StaleParkedDraft { .. }) => {
@@ -839,6 +842,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 parked: true,
                 stale_note: None,
                 discard_offered: true,
+                pending_remove: None,
             }
         }
         Err(e) => {
@@ -886,46 +890,70 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
-    // Not editing: Esc closes the whole flow.
-    if key.code == KeyCode::Esc {
-        app.tax_inputs_form = None;
+    // ── Remove-confirm modal (Task 5): a staged `RemoveRow` awaiting confirmation. Dispatched BEFORE the
+    //    field keymap — Enter applies the frozen `RemoveRow`, Esc cancels; every other key is swallowed
+    //    (a payload-confirm, like the other flows' mutation modals). ──
+    if app
+        .tax_inputs_form
+        .as_ref()
+        .is_some_and(|f| f.pending_remove.is_some())
+    {
+        let form = app.tax_inputs_form.as_mut().unwrap();
+        match key.code {
+            KeyCode::Enter => {
+                crate::edit::tax_inputs::confirm_remove(form);
+            }
+            KeyCode::Esc => crate::edit::tax_inputs::cancel_remove(form),
+            _ => {}
+        }
         return;
     }
+
     let Some(form) = app.tax_inputs_form.as_mut() else {
         return;
     };
-    // ★ P2-a discard-only state: only Esc (above) / 'X' (Task 8) act here — swallow the rest.
+
+    // ★ P2-a discard-only state: only Esc (close) / 'X' (Task 8) act here — swallow the rest.
     if form.discard_offered {
+        if key.code == KeyCode::Esc {
+            app.tax_inputs_form = None;
+        }
         return;
     }
 
-    // Recompute the live section/field counts (they change after edits). `None` (NI-2) has no live
-    // sections yet — nav is a no-op until a filing status materializes the return.
-    let (n_sections, n_fields) = match form.working.as_ref() {
-        Some(ri) => {
-            let sections = crate::edit::form::live_sections(ri);
-            if sections.is_empty() {
-                (0, 0)
-            } else {
-                let sel = form.section_idx.min(sections.len() - 1);
-                let n_fields = crate::edit::form::live_fields(sections[sel], ri).len();
-                (sections.len(), n_fields)
-            }
+    // Not editing: Esc backs OUT one level — leave a repeating row if inside one (pop `form.addr`), else
+    // close the whole flow.
+    if key.code == KeyCode::Esc {
+        if !crate::edit::tax_inputs::leave_row(form) {
+            app.tax_inputs_form = None;
         }
-        None => (0, 0),
-    };
+        return;
+    }
+
+    // The navigable-item count of the CURRENTLY-drawn pane (fields, rows, or 0 for `[create]`) — the
+    // field-cursor fold, so `Down` never advances an invisible cursor off the drawn pane. The live section
+    // count drives the section cursor. Both are recomputed each keypress (they change after edits).
+    let n_items = crate::edit::tax_inputs::navigable_count(form);
+    let n_sections = form
+        .working
+        .as_ref()
+        .map_or(0, |ri| crate::edit::form::live_sections(ri).len());
 
     match key.code {
-        // ── Task 3 edit keys ──
-        // Enter: open the buffer on a text kind, or cycle/toggle a cycle kind in place.
+        // ── Enter: on a row LIST, enter the selected row (push its index); else open/cycle the field. ──
         KeyCode::Enter => {
-            if let Some(k) = crate::edit::tax_inputs::focused_kind(form) {
+            if matches!(
+                crate::edit::tax_inputs::active_pane(form),
+                crate::edit::tax_inputs::Pane::RowList(_)
+            ) {
+                crate::edit::tax_inputs::enter_selected_row(form);
+            } else if let Some(k) = crate::edit::tax_inputs::focused_kind(form) {
                 if crate::edit::tax_inputs::is_text_kind(k)
                     || crate::edit::tax_inputs::is_secret_kind(k)
                 {
                     // Text kinds AND Secret kinds open the edit buffer. A Secret opens NO-ECHO: keystrokes
-                    // land in `buf` but the pane renders bullets (`draw_edit::field_pane_lines`), and the
-                    // commit routes through `parse_ssn`/`parse_ip_pin` by `FieldId`.
+                    // land in `buf` but the pane renders bullets, and the commit routes through
+                    // `parse_ssn`/`parse_ip_pin` by `FieldId`.
                     crate::edit::tax_inputs::begin_edit(form);
                 } else if crate::edit::tax_inputs::is_cycle_kind(k) {
                     crate::edit::tax_inputs::cycle_focused(form);
@@ -934,29 +962,51 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
             }
         }
         // Space: cycle/toggle a cycle kind (Enum/TriState/Bool) in place — incl. the NI-2 materialization.
-        // (A Space on a text/Secret/no field falls through to the `_` arm — a no-op.)
         KeyCode::Char(' ')
             if crate::edit::tax_inputs::focused_kind(form)
                 .is_some_and(crate::edit::tax_inputs::is_cycle_kind) =>
         {
             crate::edit::tax_inputs::cycle_focused(form);
         }
+        // ── Shape edits (Task 5) — all via `apply`; each is a no-op off its own pane/kind. ──
+        // `a` add row / `d` remove row (payload-confirm) — repeating groups.
+        KeyCode::Char('a') => {
+            crate::edit::tax_inputs::add_row(form);
+        }
+        KeyCode::Char('d') => {
+            crate::edit::tax_inputs::stage_remove_selected(form);
+        }
+        // `c` create / `x` delete — optional-singletons. `x` is DISTINCT from `X` (discard parked, Task 8).
+        KeyCode::Char('c') => {
+            crate::edit::tax_inputs::create_selected_section(form);
+        }
+        KeyCode::Char('x') => {
+            crate::edit::tax_inputs::delete_selected_section(form);
+        }
         // ── navigation ──
         KeyCode::Up => form.field_focus = form.field_focus.saturating_sub(1),
-        KeyCode::Down if form.field_focus + 1 < n_fields => {
+        KeyCode::Down if form.field_focus + 1 < n_items => {
             form.field_focus += 1;
         }
+        // Left: leave a row if inside one (pop `form.addr`); else retreat the section cursor (a new
+        // section starts at its root — reset the row path + field cursor).
         KeyCode::Left => {
-            let sel = form.section_idx.min(n_sections.saturating_sub(1));
-            form.section_idx = sel.saturating_sub(1);
-            form.field_focus = 0;
+            let left_a_row = crate::edit::tax_inputs::leave_row(form);
+            if !left_a_row {
+                let sel = form.section_idx.min(n_sections.saturating_sub(1));
+                form.section_idx = sel.saturating_sub(1);
+                form.field_focus = 0;
+                form.addr = btctax_input_form::RowAddr::default();
+            }
         }
+        // Right/Tab: advance the section cursor (leaving any row — the new section starts at its root).
         KeyCode::Right | KeyCode::Tab => {
             let sel = form.section_idx.min(n_sections.saturating_sub(1));
             if sel + 1 < n_sections {
                 form.section_idx = sel + 1;
             }
             form.field_focus = 0;
+            form.addr = btctax_input_form::RowAddr::default();
         }
         _ => {}
     }
@@ -9481,6 +9531,225 @@ mod tests {
             }
             other => panic!("expected a Set SecretView, got {other:?}"),
         }
+    }
+
+    // ── Task 5 — repeating/optional shape edits + row nav (key-driven) ────────
+
+    /// Materialize a `Single` return, open the tax-inputs flow, and focus the given section (row cursor at
+    /// its root, `addr = []`). Returns the app + the temp-dir guard.
+    fn tax_inputs_app_on_section(
+        sec: btctax_input_form::SectionId,
+    ) -> (EditorApp, tempfile::TempDir) {
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        let ri = form.working.as_ref().unwrap();
+        form.section_idx = crate::edit::form::live_sections(ri)
+            .iter()
+            .position(|s| s.id == sec)
+            .unwrap();
+        app.tax_inputs_form = Some(form);
+        (app, dir)
+    }
+
+    /// The engine's row count for a top-level repeating section (via its `Repeating::len` accessor).
+    fn tax_inputs_row_count(app: &EditorApp, sec: btctax_input_form::SectionId) -> usize {
+        use btctax_input_form::{RowAddr, SectionKind};
+        let ri = app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .working
+            .as_ref()
+            .unwrap();
+        let s = btctax_input_form::form_spec()
+            .iter()
+            .find(|s| s.id == sec)
+            .unwrap();
+        let SectionKind::Repeating { len, .. } = s.kind else {
+            panic!("{sec:?} is not repeating")
+        };
+        len(ri, &RowAddr::default())
+    }
+
+    /// (a) `a` on the W-2s section adds a row via `AddRow`, and the new row is focusable in the row list.
+    #[test]
+    fn tax_inputs_a_adds_w2_row_via_keys() {
+        use btctax_input_form::SectionId;
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::W2s);
+        assert_eq!(tax_inputs_row_count(&app, SectionId::W2s), 0, "starts with no W-2s");
+
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert_eq!(
+            tax_inputs_row_count(&app, SectionId::W2s),
+            1,
+            "`a` adds a W-2 row via AddRow"
+        );
+        let form = app.tax_inputs_form.as_ref().unwrap();
+        assert_eq!(
+            crate::edit::tax_inputs::navigable_count(form),
+            1,
+            "the row list now has one focusable row"
+        );
+        assert_eq!(form.field_focus, 0, "the cursor lands on the new row");
+        assert!(form.error.is_none());
+    }
+
+    /// (b) `c` creates Schedule A (its fields appear); `x` deletes it and — the engine's I-10 reset — the
+    /// `itemize_election` returns to `Auto` (asserted via the `get` accessor).
+    #[test]
+    fn tax_inputs_c_creates_x_deletes_schedule_a_resetting_itemize() {
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId, SectionKind};
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::ScheduleA);
+
+        let present = |app: &EditorApp| -> bool {
+            let ri = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .working
+                .as_ref()
+                .unwrap();
+            let s = btctax_input_form::form_spec()
+                .iter()
+                .find(|s| s.id == SectionId::ScheduleA)
+                .unwrap();
+            let SectionKind::OptionalSingleton { present, .. } = s.kind else {
+                panic!()
+            };
+            present(ri)
+        };
+        let itemize = |app: &EditorApp| -> String {
+            let ri = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .working
+                .as_ref()
+                .unwrap();
+            let f = btctax_input_form::form_spec()
+                .iter()
+                .flat_map(|s| s.fields.iter())
+                .find(|f| f.id == FieldId::ItemizeElection)
+                .unwrap();
+            match (f.get)(ri, &RowAddr::default()) {
+                Some(FieldValue::Choice(c)) => c,
+                other => panic!("expected a Choice, got {other:?}"),
+            }
+        };
+
+        assert!(!present(&app), "Schedule A starts absent");
+        handle_key(&mut app, press(KeyCode::Char('c')));
+        assert!(present(&app), "`c` creates Schedule A");
+
+        // Force itemizing (precondition), then delete Schedule A via `x`.
+        {
+            let form = app.tax_inputs_form.as_mut().unwrap();
+            apply(
+                &mut form.working,
+                Edit::SetField {
+                    id: FieldId::ItemizeElection,
+                    addr: RowAddr::default(),
+                    value: FieldValue::Choice("ForceItemize".into()),
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(itemize(&app), "ForceItemize");
+
+        handle_key(&mut app, press(KeyCode::Char('x')));
+        assert!(!present(&app), "`x` deletes Schedule A");
+        assert_eq!(
+            itemize(&app),
+            "Auto",
+            "I-10: deleting Schedule A resets itemize_election to Auto"
+        );
+    }
+
+    /// (c) `d` on a selected W-2 row opens a payload-confirm ("remove W-2 #1?"); Enter applies the
+    /// `RemoveRow` and the list shrinks; the staging clears.
+    #[test]
+    fn tax_inputs_d_removes_w2_row_via_confirm() {
+        use btctax_input_form::SectionId;
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::W2s);
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert_eq!(tax_inputs_row_count(&app, SectionId::W2s), 2);
+
+        // Select row 0, then stage its removal.
+        handle_key(&mut app, press(KeyCode::Up));
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        {
+            let pr = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .pending_remove
+                .as_ref()
+                .expect("`d` stages a remove-confirm");
+            assert!(
+                pr.label.contains("W-2 #1"),
+                "the confirm names the selected row: {}",
+                pr.label
+            );
+        }
+        // Enter confirms → the RemoveRow applies and the staging clears.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(
+            tax_inputs_row_count(&app, SectionId::W2s),
+            1,
+            "confirming removes exactly the selected W-2"
+        );
+        assert!(
+            app.tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .pending_remove
+                .is_none(),
+            "the staging clears after the confirm"
+        );
+    }
+
+    /// (c-bis) Esc on the remove-confirm cancels: nothing is removed and the staging clears.
+    #[test]
+    fn tax_inputs_d_confirm_esc_cancels_no_removal() {
+        use btctax_input_form::SectionId;
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::W2s);
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        assert!(app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .pending_remove
+            .is_some());
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(
+            app.tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .pending_remove
+                .is_none(),
+            "Esc cancels the staged removal"
+        );
+        assert_eq!(
+            tax_inputs_row_count(&app, SectionId::W2s),
+            1,
+            "cancelling removes nothing"
+        );
+        assert!(
+            app.tax_inputs_form.is_some(),
+            "Esc on the confirm modal does NOT close the whole flow"
+        );
     }
 
     // ── KAT-U1 — unlock parity ───────────────────────────────────────────────

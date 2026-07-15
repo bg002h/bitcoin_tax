@@ -13,30 +13,107 @@
 //!   keypress, no buffer). Enum cycles the options; TriState `never→yes→no→never`; Bool toggles.
 //! - `Secret` is skipped here (no-echo masked entry is Task 4).
 
-use crate::edit::form::{filing_status_field, live_fields, live_sections, TaxInputsFormState};
+use crate::edit::form::{
+    filing_status_field, live_fields, live_sections, PendingRemove, TaxInputsFormState,
+};
 use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::Usd;
 use btctax_input_form::{
     apply, parse, parse_ip_pin, parse_ssn, ApplyError, Edit, Field, FieldId, FieldKind, FieldValue,
-    ParseError, RowAddr, SectionKind, SetError,
+    ParseError, RowAddr, Section, SectionId, SectionKind, SetError,
 };
+
+// ── Pane projection (the field-cursor fold, Task-2 Minor) ──────────────────────────────────────────────
+//
+// The renderer draws ONE of these panes for the selected section, and the field cursor advances ONLY over
+// the CURRENTLY-drawn pane's items — never an invisible cursor on a row-list / `[create]` pane. Both the
+// render (`draw_edit`) and the nav (`main.rs`) derive the pane from `(section_idx, form.addr)`, so the two
+// can never disagree.
+
+/// What the field pane draws for the selected section (Task 5). The `usize` is the number of navigable
+/// items — the field cursor (`field_focus`) is clamped to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pane {
+    /// A singleton (or a PRESENT optional-singleton): its live fields. `usize` = # live fields.
+    Fields(usize),
+    /// An ABSENT optional-singleton: the `[create]` affordance. No navigable items.
+    Create,
+    /// A repeating section's row LIST (no row entered yet — `form.addr` at the container path). `usize` =
+    /// # rows; the cursor selects a row.
+    RowList(usize),
+    /// INSIDE a repeating row (`form.addr` = the row path): that row's live fields. `usize` = # live fields.
+    RowFields(usize),
+}
+
+impl Pane {
+    /// The number of navigable items in this pane — the clamp for the field/row cursor (the fold: a
+    /// row-list navigates ROWS, a `[create]` navigates NOTHING, a fields pane navigates FIELDS).
+    pub fn navigable(self) -> usize {
+        match self {
+            Pane::Fields(n) | Pane::RowFields(n) | Pane::RowList(n) => n,
+            Pane::Create => 0,
+        }
+    }
+}
+
+/// The selected top-level [`Section`] for the current `section_idx`, or `None` when there is no live
+/// section yet (a `None` working copy has none until a filing status materializes it).
+fn selected_section(ri: &ReturnInputs, section_idx: usize) -> Option<&'static Section> {
+    let sections = live_sections(ri);
+    let sel = section_idx.min(sections.len().checked_sub(1)?);
+    sections.get(sel).copied()
+}
+
+/// The [`Pane`] drawn for the selected section — the single source of truth the render and the nav share.
+/// On a `None` working copy the only pane is the filing-status choice (one navigable field, NI-2).
+pub fn active_pane(form: &TaxInputsFormState) -> Pane {
+    let Some(ri) = form.working.as_ref() else {
+        return Pane::Fields(1); // NI-2: only the filing-status field
+    };
+    let Some(section) = selected_section(ri, form.section_idx) else {
+        return Pane::Fields(0);
+    };
+    match section.kind {
+        SectionKind::Singleton => Pane::Fields(live_fields(section, ri).len()),
+        SectionKind::OptionalSingleton { present, .. } => {
+            if present(ri) {
+                Pane::Fields(live_fields(section, ri).len())
+            } else {
+                Pane::Create
+            }
+        }
+        // A repeating section: `form.addr` empty ⇒ the row LIST; non-empty ⇒ INSIDE a row (that row's
+        // fields, read/written at `form.addr`). Entering a row pushed the index; leaving pops it.
+        SectionKind::Repeating { len, .. } => {
+            if form.addr.0.is_empty() {
+                Pane::RowList(len(ri, &RowAddr::default()))
+            } else {
+                Pane::RowFields(live_fields(section, ri).len())
+            }
+        }
+    }
+}
+
+/// The number of navigable items in the currently-drawn pane (the field-cursor clamp).
+pub fn navigable_count(form: &TaxInputsFormState) -> usize {
+    active_pane(form).navigable()
+}
 
 // ── Focused-field projection ─────────────────────────────────────────────────────────────────────────
 
-/// The currently-focused editable [`Field`], or `None` when the selected section exposes no editable field
-/// (a repeating group, or an absent optional-singleton — those get their own row/create keys in Task 5).
-/// On a `None` working copy the ONLY field is the filing-status choice (NI-2).
+/// The currently-focused editable [`Field`], or `None` when the drawn pane is a row LIST or a `[create]`
+/// affordance (those get their own row/create keys). On a `None` working copy the ONLY field is the
+/// filing-status choice (NI-2). Inside a repeating row the field is read/written at `form.addr` (the row).
 pub fn focused_field(form: &TaxInputsFormState) -> Option<&'static Field> {
     let Some(ri) = form.working.as_ref() else {
         return Some(filing_status_field());
     };
-    let sections = live_sections(ri);
-    let sel = form.section_idx.min(sections.len().checked_sub(1)?);
-    let section = *sections.get(sel)?;
-    match section.kind {
-        SectionKind::Repeating { .. } => None,
-        SectionKind::OptionalSingleton { present, .. } if !present(ri) => None,
-        _ => live_fields(section, ri).get(form.field_focus).copied(),
+    let section = selected_section(ri, form.section_idx)?;
+    match active_pane(form) {
+        Pane::Fields(_) | Pane::RowFields(_) => {
+            live_fields(section, ri).get(form.field_focus).copied()
+        }
+        Pane::Create | Pane::RowList(_) => None,
     }
 }
 
@@ -147,6 +224,167 @@ pub fn cycle_focused(form: &mut TaxInputsFormState) {
     apply_edit(form, edit);
 }
 
+// ── Shape edits: add/remove row (Repeating) · create/delete section (OptionalSingleton) ────────────────
+//
+// Every shape edit goes through `apply(&mut form.working, Edit::…)` (via `apply_edit`) — the flow NEVER
+// mutates `working` directly and never names a `ReturnInputs` leaf. A malformed `RowAddr` (or a create/
+// delete on the wrong section kind) is the engine's fail-closed `ApplyError` → `form.error`, never a panic.
+
+/// The selected section as a `Repeating` group, with its container path (`form.addr`) and row count.
+/// `None` when the selected section is not a repeating group. The container path is `form.addr` — `[]` at a
+/// top-level repeating section (W-2s/Dependents), one level shallower than a row of the group.
+fn selected_repeating(form: &TaxInputsFormState) -> Option<(SectionId, usize)> {
+    let ri = form.working.as_ref()?;
+    let section = selected_section(ri, form.section_idx)?;
+    if let SectionKind::Repeating { len, .. } = section.kind {
+        Some((section.id, len(ri, &form.addr)))
+    } else {
+        None
+    }
+}
+
+/// The selected section as an `OptionalSingleton`, with whether it is currently present.
+/// `None` when the selected section is not an optional-singleton.
+fn selected_optional(form: &TaxInputsFormState) -> Option<(SectionId, bool)> {
+    let ri = form.working.as_ref()?;
+    let section = selected_section(ri, form.section_idx)?;
+    if let SectionKind::OptionalSingleton { present, .. } = section.kind {
+        Some((section.id, present(ri)))
+    } else {
+        None
+    }
+}
+
+/// `a` — add a row to the selected repeating group: `AddRow{ section, parent: form.addr }` (the container
+/// path). On success the cursor moves to the newly-added last row so it is immediately focusable. A no-op
+/// (returns `false`) when the selected section is not a repeating group, or the row list is not the drawn
+/// pane (`form.addr` non-empty ⇒ we are inside a row, not the list).
+pub fn add_row(form: &mut TaxInputsFormState) -> bool {
+    if !matches!(active_pane(form), Pane::RowList(_)) {
+        return false;
+    }
+    let Some((section, _)) = selected_repeating(form) else {
+        return false;
+    };
+    let ok = apply_edit(
+        form,
+        Edit::AddRow {
+            section,
+            parent: form.addr.clone(),
+        },
+    );
+    if ok {
+        if let Some((_, rows)) = selected_repeating(form) {
+            form.field_focus = rows.saturating_sub(1);
+        }
+    }
+    ok
+}
+
+/// `d` — stage the payload-confirm for removing the CURRENTLY-selected row (the modal's Enter then calls
+/// [`confirm_remove`]). Freezes the row's address NOW so a later cursor move cannot re-target the delete.
+/// A no-op when the row list is not the drawn pane or the group is empty.
+pub fn stage_remove_selected(form: &mut TaxInputsFormState) {
+    let Some((section, rows)) = selected_repeating(form) else {
+        return;
+    };
+    if rows == 0 || !matches!(active_pane(form), Pane::RowList(_)) {
+        return;
+    }
+    let row = form.field_focus.min(rows - 1);
+    let mut addr = form.addr.clone();
+    addr.0.push(row);
+    form.pending_remove = Some(PendingRemove {
+        section,
+        addr,
+        label: remove_label(section, row),
+    });
+}
+
+/// The confirm-modal Enter: apply the staged `RemoveRow` and clear the staging. Returns `true` on a clean
+/// remove. A malformed/stale address surfaces as `form.error` (never a panic) and the staging is cleared.
+pub fn confirm_remove(form: &mut TaxInputsFormState) -> bool {
+    let Some(pr) = form.pending_remove.take() else {
+        return false;
+    };
+    apply_edit(
+        form,
+        Edit::RemoveRow {
+            section: pr.section,
+            addr: pr.addr,
+        },
+    )
+}
+
+/// The confirm-modal Esc: drop the staged removal without touching the working copy.
+pub fn cancel_remove(form: &mut TaxInputsFormState) {
+    form.pending_remove = None;
+}
+
+/// `c` — create the selected optional-singleton (`CreateSection{ section }`). A no-op when the selected
+/// section is not an optional-singleton, or it is already present.
+pub fn create_selected_section(form: &mut TaxInputsFormState) -> bool {
+    let Some((section, present)) = selected_optional(form) else {
+        return false;
+    };
+    if present {
+        return false;
+    }
+    apply_edit(form, Edit::CreateSection { section })
+}
+
+/// `x` — delete the selected optional-singleton (`DeleteSection{ section }`). For `ScheduleA` the engine's
+/// `delete` also resets `itemize_election` to `Auto` (I-10) — we route through it, never re-implement it.
+/// DISTINCT from `X` (discard a parked draft, Task 8). A no-op when the section is not present.
+pub fn delete_selected_section(form: &mut TaxInputsFormState) -> bool {
+    let Some((section, present)) = selected_optional(form) else {
+        return false;
+    };
+    if !present {
+        return false;
+    }
+    apply_edit(form, Edit::DeleteSection { section })
+}
+
+// ── Row navigation (the `form.addr` push/pop) ──────────────────────────────────────────────────────────
+
+/// `Enter` on a row-list pane — enter the selected row: push its index onto `form.addr` (so per-row field
+/// editing, Task 3, targets that row) and reset the field cursor to the row's first field. A no-op unless
+/// the drawn pane is a non-empty row list.
+pub fn enter_selected_row(form: &mut TaxInputsFormState) {
+    if let Pane::RowList(rows) = active_pane(form) {
+        if rows > 0 {
+            let row = form.field_focus.min(rows - 1);
+            form.addr.0.push(row);
+            form.field_focus = 0;
+        }
+    }
+}
+
+/// `Left`/`Esc` inside a row — leave it: pop the last index off `form.addr` and restore the cursor to the
+/// row we were in (so the caller lands back on the row list at the same row). `true` when a level was
+/// popped (there was a row to leave), `false` at the top level.
+pub fn leave_row(form: &mut TaxInputsFormState) -> bool {
+    if let Some(row) = form.addr.0.pop() {
+        form.field_focus = row;
+        true
+    } else {
+        false
+    }
+}
+
+/// The payload string the remove-confirm shows, e.g. "remove W-2 #2?".
+fn remove_label(section: SectionId, row: usize) -> String {
+    let noun = match section {
+        SectionId::W2s => "W-2",
+        SectionId::Dependents => "dependent",
+        SectionId::W2Box12 => "box-12 entry",
+        SectionId::ScheduleACharitable => "charitable gift",
+        _ => "row",
+    };
+    format!("remove {noun} #{}?", row + 1)
+}
+
 // ── Internals ────────────────────────────────────────────────────────────────────────────────────────
 
 /// Apply an already-built `Edit` to `form.working`. On `Ok`: clear the error and re-clamp focus (a
@@ -166,7 +404,9 @@ fn apply_edit(form: &mut TaxInputsFormState, edit: Edit) -> bool {
     }
 }
 
-/// Re-clamp `section_idx`/`field_focus` into the CURRENT live set after a successful apply.
+/// Re-clamp `section_idx`/`field_focus` into the CURRENT live set after a successful apply. The field
+/// cursor clamps to the CURRENTLY-DRAWN pane's navigable count (rows for a row list, fields for a fields
+/// pane, 0 for a `[create]`) — the Task-2 Minor fold, so the cursor never lands off the drawn pane.
 fn clamp_focus(form: &mut TaxInputsFormState) {
     let Some(ri) = form.working.as_ref() else {
         return;
@@ -178,8 +418,8 @@ fn clamp_focus(form: &mut TaxInputsFormState) {
         return;
     }
     form.section_idx = form.section_idx.min(sections.len() - 1);
-    let n_fields = live_fields(sections[form.section_idx], ri).len();
-    form.field_focus = form.field_focus.min(n_fields.saturating_sub(1));
+    let n = navigable_count(form);
+    form.field_focus = form.field_focus.min(n.saturating_sub(1));
 }
 
 /// The raw editable string to seed the buffer with for a text-kind field, from its current value via `get`.
@@ -449,6 +689,147 @@ mod tests {
             Some(FieldValue::Secret(SecretView::Set { .. }))
         ));
         assert!(form.error.is_none());
+    }
+
+    /// Point `section_idx` at a section (by id), resetting the row cursor to its root (`addr = []`).
+    fn focus_section(form: &mut TaxInputsFormState, sec: SectionId) {
+        let ri = form.working.as_ref().unwrap();
+        let sections = live_sections(ri);
+        form.section_idx = sections.iter().position(|x| x.id == sec).unwrap();
+        form.addr = RowAddr::default();
+        form.field_focus = 0;
+    }
+
+    /// The engine's row count for a repeating section (via its `Repeating::len` accessor — never a leaf).
+    fn row_count(form: &TaxInputsFormState, sec: SectionId, parent: &RowAddr) -> usize {
+        let ri = form.working.as_ref().unwrap();
+        let section = btctax_input_form::form_spec()
+            .iter()
+            .find(|s| s.id == sec)
+            .unwrap();
+        match section.kind {
+            SectionKind::Repeating { len, .. } => len(ri, parent),
+            _ => panic!("{sec:?} is not a repeating section"),
+        }
+    }
+
+    /// Read a field's value via its `get` accessor at `addr` (never a leaf).
+    fn get_at(form: &TaxInputsFormState, id: FieldId, addr: &RowAddr) -> Option<FieldValue> {
+        let ri = form.working.as_ref().unwrap();
+        let field = btctax_input_form::form_spec()
+            .iter()
+            .flat_map(|s| s.fields.iter())
+            .find(|f| f.id == id)
+            .unwrap();
+        (field.get)(ri, addr)
+    }
+
+    /// (Task 5, d) The nested `W2Box12` group is addressed at DEPTH 2: `AddRow` parents on `[w2_i]` and
+    /// `RemoveRow` targets `[w2_i, box12_i]`. A malformed (too-shallow) address is the engine's fail-closed
+    /// `ApplyError` → `form.error`, never a panic, never a mutation.
+    #[test]
+    fn nested_box12_uses_depth2_addr_and_bad_addr_errors_no_panic() {
+        let mut form = TaxInputsFormState::fresh(2024);
+        assert!(tax_inputs_apply_edit(&mut form, "Single"));
+        // Add a W-2 (row 0) via the flow's row-list `add_row`.
+        focus_section(&mut form, SectionId::W2s);
+        assert!(add_row(&mut form));
+        assert_eq!(row_count(&form, SectionId::W2s, &RowAddr::default()), 1);
+
+        // box-12 add: parent = [0] (the W-2 row). The nested group grows under that W-2.
+        assert!(apply_edit(
+            &mut form,
+            Edit::AddRow {
+                section: SectionId::W2Box12,
+                parent: RowAddr(vec![0]),
+            }
+        ));
+        assert_eq!(row_count(&form, SectionId::W2Box12, &RowAddr(vec![0])), 1);
+        // A box-12 row reads back at DEPTH 2: [w2_i, box12_i] = [0, 0].
+        assert!(get_at(&form, FieldId::Box12Code, &RowAddr(vec![0, 0])).is_some());
+
+        // box-12 remove: addr = [0, 0].
+        assert!(apply_edit(
+            &mut form,
+            Edit::RemoveRow {
+                section: SectionId::W2Box12,
+                addr: RowAddr(vec![0, 0]),
+            }
+        ));
+        assert_eq!(row_count(&form, SectionId::W2Box12, &RowAddr(vec![0])), 0);
+
+        // ★ A malformed box-12 `AddRow` (empty parent — too shallow for a depth-2 group) is a clean error,
+        // never a panic and never a mutation.
+        assert!(!apply_edit(
+            &mut form,
+            Edit::AddRow {
+                section: SectionId::W2Box12,
+                parent: RowAddr::default(),
+            }
+        ));
+        assert!(form.error.is_some(), "a bad RowAddr surfaces as form.error");
+        assert_eq!(row_count(&form, SectionId::W2Box12, &RowAddr(vec![0])), 0);
+    }
+
+    /// (Task 5) Entering a repeating row pushes its index onto `form.addr` so per-row field editing
+    /// (Task 3) targets THAT row's address; leaving pops it. A `SetField` while inside W-2 row 0 writes at
+    /// `[0]` and reads back there.
+    #[test]
+    fn entering_a_row_edits_fields_at_the_row_addr() {
+        let mut form = TaxInputsFormState::fresh(2024);
+        assert!(tax_inputs_apply_edit(&mut form, "Single"));
+        focus_section(&mut form, SectionId::W2s);
+        assert!(add_row(&mut form)); // one W-2, still at the row LIST (addr [])
+        assert!(form.addr.0.is_empty(), "add_row leaves us at the row list");
+        assert!(matches!(active_pane(&form), Pane::RowList(1)));
+
+        // Enter the row → addr = [0], the field cursor resets to the row's first field.
+        enter_selected_row(&mut form);
+        assert_eq!(form.addr, RowAddr(vec![0]));
+        assert!(matches!(active_pane(&form), Pane::RowFields(_)));
+
+        // Focus Box1Wages within the row and commit $50,000 — it writes at the row addr [0].
+        let ri = form.working.as_ref().unwrap();
+        let section = live_sections(ri)
+            .into_iter()
+            .find(|s| s.id == SectionId::W2s)
+            .unwrap();
+        form.field_focus = live_fields(section, ri)
+            .iter()
+            .position(|f| f.id == FieldId::Box1Wages)
+            .unwrap();
+        assert!(tax_inputs_apply_edit(&mut form, "50000"));
+        assert_eq!(
+            get_at(&form, FieldId::Box1Wages, &RowAddr(vec![0])),
+            Some(FieldValue::Money(dec!(50000))),
+            "the per-row edit landed at the row address [0]"
+        );
+
+        // Leaving pops the index; we're back at the row list on the row we edited.
+        assert!(leave_row(&mut form));
+        assert!(form.addr.0.is_empty());
+        assert_eq!(form.field_focus, 0);
+    }
+
+    /// (Task 5) The field-cursor fold: the navigable count matches the DRAWN pane — a repeating row list
+    /// navigates ROWS (not the section's 13 W-2 fields), an absent optional-singleton navigates NOTHING.
+    #[test]
+    fn navigable_count_matches_the_drawn_pane() {
+        let mut form = TaxInputsFormState::fresh(2024);
+        assert!(tax_inputs_apply_edit(&mut form, "Single"));
+
+        // W-2s row list: 0 rows → 0 navigable; after two adds → 2 (rows, NOT the 13 W-2 fields).
+        focus_section(&mut form, SectionId::W2s);
+        assert_eq!(navigable_count(&form), 0);
+        assert!(add_row(&mut form));
+        assert!(add_row(&mut form));
+        assert_eq!(navigable_count(&form), 2, "the row list navigates ROWS, not fields");
+        assert!(matches!(active_pane(&form), Pane::RowList(2)));
+
+        // Schedule A absent → the [create] pane navigates NOTHING.
+        focus_section(&mut form, SectionId::ScheduleA);
+        assert_eq!(navigable_count(&form), 0);
+        assert!(matches!(active_pane(&form), Pane::Create));
     }
 
     /// (d) Task 4 — an invalid SSN (`123`) surfaces `BadSsn` in `form.error` and applies NOTHING: the field

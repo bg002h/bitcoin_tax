@@ -184,6 +184,21 @@ pub struct TaxInputsFormState {
     /// state the flow renders ONLY the stale-parked message + an 'X' to discard (Task 8) / Esc to back
     /// out — NOT a normal editing form — so the undiscardable parked draft becomes discardable in-app.
     pub discard_offered: bool,
+    /// ★ Task 5: a staged `RemoveRow` awaiting the payload-confirm ("remove W-2 #2?"). `Some` while the
+    /// confirm modal is open — Enter applies it, Esc clears it. It carries the VALIDATED row address (never
+    /// a raw cursor), so a later cursor move cannot re-target the delete.
+    pub pending_remove: Option<PendingRemove>,
+}
+
+/// A staged repeating-row removal awaiting its payload-confirm (Task 5). Built from the CURRENT row cursor
+/// at `d`-press and frozen here, so the confirmed `RemoveRow` deletes exactly the row the prompt named.
+pub struct PendingRemove {
+    /// The repeating section the row belongs to (`W2s`/`Dependents`/…).
+    pub section: btctax_input_form::SectionId,
+    /// The full row address to remove (`[w2_i]`; `[w2_i, box12_i]` for the nested box-12 group).
+    pub addr: btctax_input_form::RowAddr,
+    /// The human-readable payload the confirm shows ("remove W-2 #2?").
+    pub label: String,
 }
 
 impl TaxInputsFormState {
@@ -202,6 +217,7 @@ impl TaxInputsFormState {
             parked: false,
             stale_note: None,
             discard_offered: false,
+            pending_remove: None,
         }
     }
 }

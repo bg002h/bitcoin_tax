@@ -2038,6 +2038,41 @@ fn draw_tax_inputs_form(frame: &mut Frame, area: Rect, form: &TaxInputsFormState
     frame.render_widget(right, right_area);
 
     draw_tax_inputs_status(frame, status_area, form);
+
+    // ★ Task 5: the remove-row payload-confirm, drawn ON TOP of the editing surface.
+    if form.pending_remove.is_some() {
+        draw_tax_inputs_remove_modal(frame, area, form);
+    }
+}
+
+/// ★ Task 5: the remove-row payload-confirm modal — names the exact row being removed ("remove W-2 #2?")
+/// and its `[Enter] remove / [Esc] cancel` legend. Mirrors `draw_mutation_modal`'s centered-`Clear` shape.
+fn draw_tax_inputs_remove_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+    let Some(pr) = form.pending_remove.as_ref() else {
+        return;
+    };
+    let rect = centered_rect(60, 9, area);
+    frame.render_widget(Clear, rect);
+    let lines = vec![
+        Line::from(Span::styled(
+            format!("  {}", pr.label),
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  [Enter] remove   [Esc] cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    let p = Paragraph::new(lines).block(
+        Block::default()
+            .title(" Confirm remove ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red)),
+    );
+    frame.render_widget(p, rect);
 }
 
 /// ★ P2-a: the stale-PARKED-draft discard-only screen — the message + the back-out hint, NO editing
@@ -2095,9 +2130,16 @@ fn draw_tax_inputs_status(frame: &mut Frame, area: Rect, form: &TaxInputsFormSta
     frame.render_widget(p, area);
 }
 
-/// The field-pane lines for the selected section: its live `Field`s as `label  [value]`, the focused
-/// field highlighted; a `[create]` affordance for an absent optional-singleton; a row-count summary
-/// for a repeating group (row editing lands in a later task).
+/// The field-pane lines for the selected section (Task 5):
+/// - a `[create]` affordance for an ABSENT optional-singleton;
+/// - the live `Field`s as `label  [value]` for a singleton / PRESENT optional-singleton (with an `[x]
+///   delete` hint);
+/// - a selectable ROW LIST for a repeating group at its container path (`addr` empty), each row with an
+///   index and a `[a] add / [d] remove / [Enter] edit row` legend;
+/// - INSIDE a row (`addr` non-empty) that row's fields, read/written at `addr`, with a `[Left/Esc] back` hint.
+///
+/// The pane drawn here matches `edit::tax_inputs::active_pane` exactly, so the field cursor (`field_focus`)
+/// never advances off the drawn pane (the Task-2 Minor fold).
 fn field_pane_lines(
     section: &'static Section,
     ri: &ReturnInputs,
@@ -2107,13 +2149,10 @@ fn field_pane_lines(
     buf: &str,
     error: Option<&str>,
 ) -> Vec<Line<'static>> {
-    let focus_style = Style::default()
-        .fg(Color::Yellow)
-        .add_modifier(Modifier::BOLD);
     let dark = Style::default().fg(Color::DarkGray);
     let mut lines: Vec<Line> = Vec::new();
 
-    // An absent optional-singleton shows a [create] affordance instead of fields.
+    // An ABSENT optional-singleton shows a [create] affordance instead of fields.
     if let SectionKind::OptionalSingleton { present, .. } = section.kind {
         if !present(ri) {
             lines.push(Line::from("  (not present)"));
@@ -2125,19 +2164,79 @@ fn field_pane_lines(
             return lines;
         }
     }
-    // A repeating group shows its row count (row navigation/editing is a later task).
+
+    // A repeating group: the ROW LIST at its container path (addr empty), or INSIDE a row (addr non-empty).
     if let SectionKind::Repeating { len, .. } = section.kind {
-        let n = len(ri, &RowAddr::default());
-        lines.push(Line::from(format!("  {n} row(s)")));
-        lines.push(Line::from(Span::styled(
-            "  press a to add a row (row editing lands next)",
-            dark,
-        )));
+        if addr.0.is_empty() {
+            let n = len(ri, &RowAddr::default());
+            if n == 0 {
+                lines.push(Line::from(Span::styled("  (no rows yet)", dark)));
+            }
+            for i in 0..n {
+                let is_focus = i == field_focus;
+                let marker = if is_focus { '>' } else { ' ' };
+                let style = if is_focus {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                lines.push(Line::from(Span::styled(
+                    format!("{marker} #{}{}", i + 1, row_preview(section, ri, i)),
+                    style,
+                )));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  [a] add  [d] remove  [Enter] edit row",
+                dark,
+            )));
+            push_error(&mut lines, error);
+            return lines;
+        }
+        // Inside a row: header + the row's fields (read/written at `addr`) + a back hint.
+        if let Some(row) = addr.0.last() {
+            lines.push(Line::from(Span::styled(
+                format!("  {} #{}", section.title, row + 1),
+                dark,
+            )));
+        }
+        push_field_lines(&mut lines, section, ri, addr, field_focus, editing, buf);
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("  [Left/Esc] back to rows", dark)));
         push_error(&mut lines, error);
         return lines;
     }
 
-    // Singleton / present optional-singleton: the live fields as `label  [value]`.
+    // Singleton / PRESENT optional-singleton: the live fields as `label  [value]`.
+    push_field_lines(&mut lines, section, ri, addr, field_focus, editing, buf);
+    if matches!(section.kind, SectionKind::OptionalSingleton { .. }) {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  [x] delete this section",
+            dark,
+        )));
+    }
+    push_error(&mut lines, error);
+    lines
+}
+
+/// Push the live `Field`s of `section` (read at `addr`) as `label  [value]`, the focused field highlighted.
+/// Shared by the singleton pane and the inside-a-row pane so per-row editing renders identically.
+fn push_field_lines(
+    lines: &mut Vec<Line<'static>>,
+    section: &'static Section,
+    ri: &ReturnInputs,
+    addr: &RowAddr,
+    field_focus: usize,
+    editing: bool,
+    buf: &str,
+) {
+    let focus_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let dark = Style::default().fg(Color::DarkGray);
     let fields = live_fields(section, ri);
     if fields.is_empty() {
         lines.push(Line::from(Span::styled("  (no live fields)", dark)));
@@ -2169,8 +2268,27 @@ fn field_pane_lines(
             style,
         )));
     }
-    push_error(&mut lines, error);
-    lines
+}
+
+/// A one-line preview for a repeating row: the section's first field rendered at `[i]` (e.g. a W-2's owner,
+/// a dependent's name), or empty when it has no informative value. Depth-1 groups only (the nested
+/// box-12/charitable groups are never top-level rows).
+fn row_preview(section: &'static Section, ri: &ReturnInputs, i: usize) -> String {
+    let addr = RowAddr(vec![i]);
+    let Some(f) = section.fields.first() else {
+        return String::new();
+    };
+    match (f.get)(ri, &addr) {
+        Some(v) => {
+            let s = render_field_value(&v);
+            if s.is_empty() || s == "—" {
+                String::new()
+            } else {
+                format!("  — {}", s)
+            }
+        }
+        None => String::new(),
+    }
 }
 
 /// Append the flow's inline error (parse/apply/store failure) under the field pane, in red.
@@ -5892,6 +6010,107 @@ mod tests {
         // Bottom: the active-source line + a key legend naming section navigation.
         assert!(r.contains("active source"), "status line shows the active source");
         assert!(r.contains("section"), "the key legend mentions section navigation");
+    }
+
+    /// Task 5: a repeating section (W-2s) at its row-list level renders the rows as a selectable list
+    /// (index per row, the selected row marked) plus the `[a] add / [d] remove / [Enter] edit row` legend —
+    /// NOT the section's 13 W-2 fields (the field-cursor fold at the render layer).
+    #[test]
+    fn tax_inputs_repeating_section_renders_a_selectable_row_list() {
+        use crate::edit::form::{live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        // Two W-2 rows via the engine.
+        for _ in 0..2 {
+            apply(
+                &mut form.working,
+                Edit::AddRow {
+                    section: SectionId::W2s,
+                    parent: RowAddr::default(),
+                },
+            )
+            .unwrap();
+        }
+        // Select the W-2s section (row list, addr []), cursor on the second row.
+        let ri = form.working.as_ref().unwrap();
+        form.section_idx = live_sections(ri)
+            .iter()
+            .position(|s| s.id == SectionId::W2s)
+            .unwrap();
+        form.field_focus = 1;
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(r.contains("#1"), "the row list shows the first row's index");
+        assert!(r.contains("#2"), "the row list shows the second row's index");
+        assert!(
+            r.contains("[a] add") && r.contains("[d] remove"),
+            "the row list shows the add/remove legend"
+        );
+        // The selected-row marker '>' appears (row 2 is focused).
+        assert!(r.contains("> #2"), "the focused row is marked");
+    }
+
+    /// Task 5: the remove-confirm modal renders the payload it will delete ("remove W-2 #1?") + its legend.
+    #[test]
+    fn tax_inputs_remove_confirm_modal_names_the_row() {
+        use crate::edit::form::{live_sections, PendingRemove, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        apply(
+            &mut form.working,
+            Edit::AddRow {
+                section: SectionId::W2s,
+                parent: RowAddr::default(),
+            },
+        )
+        .unwrap();
+        let ri = form.working.as_ref().unwrap();
+        form.section_idx = live_sections(ri)
+            .iter()
+            .position(|s| s.id == SectionId::W2s)
+            .unwrap();
+        form.pending_remove = Some(PendingRemove {
+            section: SectionId::W2s,
+            addr: RowAddr(vec![0]),
+            label: "remove W-2 #1?".to_string(),
+        });
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(r.contains("remove W-2 #1?"), "the confirm names the exact row");
+        assert!(
+            r.contains("[Enter] remove") && r.contains("[Esc] cancel"),
+            "the confirm shows its legend"
+        );
     }
 
     // ── EDITOR marker in Browse screen ───────────────────────────────────────

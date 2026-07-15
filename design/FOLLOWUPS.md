@@ -1,3 +1,4 @@
+# Follow-ups
 
-
-
+- **Interactive nested-group (W2Box12 / ScheduleACharitable) row management** — owning phase: **input-form TUI plan-3, Task 9 (coverage/polish)**. Severity: **Minor**.
+  Task 5 wired the top-level repeating groups (W-2s, Dependents) and optional-singletons (Schedule A, Spouse) fully interactively (row list + `a`/`d`/`c`/`x` + enter/leave-row `form.addr` push/pop), and it implemented the **depth-2 nested address** for `W2Box12` (parent `[w2_i]`, row `[w2_i, box12_i]`) in the generic `apply`-routing, covered by the module test `nested_box12_uses_depth2_addr_and_bad_addr_errors_no_panic`. What is NOT yet reachable by keystroke is the *drill-down* into a nested group from inside its parent row (add/remove a box-12 entry while editing a W-2 row; add/remove a charitable gift inside Schedule A). Reason: `form.addr`-length alone cannot disambiguate "viewing W-2 row `[w2_i]`'s fields" from "browsing the box-12 list under `[w2_i]`" — that needs one extra bit of nav state (a nested-descent marker) beyond this task's tested scope. Engine support and the depth-2 addresses are correct and consumed; only the interactive affordance is deferred.
