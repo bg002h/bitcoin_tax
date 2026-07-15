@@ -60,6 +60,37 @@ Minors deferred, each to its owning task:
   macro complexity across two registries; justifiable as written. Non-gating. — OPEN, ownerless. —
   registries.rs:275-312.
 
+### Task-5 review carry-forwards (2026-07-15)
+
+- **(i) malformed-arity `RowAddr` panics a row accessor — owned by Task 7 (apply layer). IMPORTANT there.**
+  Row accessors index `a.0[0]`/`a.0[1]` directly; the row-beyond-length case fails safe (`.get()`→`None`/
+  `NoSuchRow`), but an EMPTY or too-short `RowAddr` panics (index out of bounds). `Edit`/`RowAddr` are
+  serde-deserialized from an untrusted web renderer (spec §4/§13 day-one seam consumer), so a malformed
+  addr is wire-reachable → a panic-on-untrusted-input. Task 5's `a.0[0]` matches the brief's prescribed
+  pattern and arity is an apply-layer contract, so it's not a Task-5 defect — but Task 7's `apply` MUST
+  fail closed on malformed-arity addrs (validate arity per section depth → `ApplyError`, or have accessors
+  read `a.0.get(n)`), NEVER panic. — OPEN, owned by **Task 7**; IMPORTANT at the apply layer. —
+  sections.rs:113,116,508,588-600; seam.rs:10 (`RowAddr(pub Vec<usize>)`).
+- **(j) Bool + Date field kinds are not round-trip-tested in Task-5 spot checks — owned by Task 6.** They
+  rely on macro/pattern uniformity only (`TpPresidentialFund`/`SpPresidentialFund` Bool; `DepDob` Date).
+  Task 6's exhaustive coverage KAT must exercise EVERY kind incl. Bool/Date. — OPEN, owned by **Task 6**. —
+  sections.rs (presidential-fund, DepDob).
+- **(k) `mask_secret` reveals the full value for a ≤4-char secret (takes last 4) — Nit, owned by Task 8.**
+  Unreachable in practice (SSN=9 digits, IP PIN=6), and Task 8's `parse` enforces canonical length before
+  a `SecretEntry` is built. Defensive full-mask on short input is cheap. Non-gating. — OPEN, owned by
+  **Task 8** (or ownerless). — sections.rs:96-99 (`mask_secret`).
+
+### Task-6 review carry-forward (2026-07-15)
+
+- **(l) coverage KAT does not assert its `EXEMPT` literals are live — ownerless polish, batch to end.**
+  `is_exempt` is a predicate; nothing asserts each `EXEMPT_LEAVES`/`EXEMPT_PREFIXES` entry matches ≥1
+  realized fixture leaf, so a renamed/removed `sch1` leaf would leave a harmless DEAD literal. NOT a bite
+  hole — the dangerous "deferred struct becomes in-scope ⇒ covered AND exempt" case is caught by the
+  `covered_and_exempt` guard; only the cosmetic dead-literal case slips. Cheap fix:
+  `assert!(EXEMPT_LEAVES.iter().all(|e| before.contains_key(*e)))` + each prefix matches ≥1 key. — OPEN,
+  ownerless. — coverage.rs:201-211. *(The other two Task-6 Minors — fail-loud `addr_for`, theoretical
+  array-collapse with no in-scope `Vec<scalar>` trigger — are accepted as-is; no action.)*
+
 ---
 
 ## P9 (form question registry) — deferred work, filed per `SPEC_form_questions.md` §5 step 12 (2026-07-14)
