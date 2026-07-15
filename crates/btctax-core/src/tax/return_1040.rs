@@ -251,8 +251,15 @@ pub struct ScheduleAParts {
     /// PRINTED line 5d — the printed chain cannot re-derive the cap without doing tax logic in the
     /// forms crate, which is precisely what it must not do.
     pub salt_cap: Usd,
-    /// L8a — home-mortgage interest reported on Form 1098.
+    /// L8a — home-mortgage interest reported on Form 1098. ★ §2.7: **$0** when [`mortgage_mixed_use_box`]
+    /// is set — a mixed-use mortgage's non-acquisition portion is non-deductible (§163(h)(3)(F)) and v1
+    /// cannot compute the Pub. 936 split, so it claims none of it.
     pub mortgage_8a: Usd,
+    /// ★ §2.7 — Schedule A **line 8's checkbox**: "If you didn't use all of your home mortgage loan(s) to
+    /// buy, build, or improve your home, check this box." Set iff the filer declared a mixed-use mortgage
+    /// (`mortgage_all_used_to_buy_build_improve == Some(false)`) on a Schedule A that reports 1098 interest —
+    /// see [`mixed_use_mortgage_forgone`], the single derivation this and [`mortgage_8a`] share.
+    pub mortgage_mixed_use_box: bool,
     /// L11 — current-year CASH charitable contributions allowed (§170(b)-limited).
     pub charitable_cash_11: Usd,
     /// L12 — current-year NONCASH contributions allowed, including crypto donations.
@@ -272,6 +279,20 @@ pub struct ScheduleAParts {
 /// `agi` is the caller's AGI: the derivation passes NON-crypto AGI (and non-crypto charitable); the
 /// absolute return passes with-crypto AGI (+ crypto donations) — a documented delta-vs-absolute divergence
 /// (§6) whenever an AGI-sensitive line (medical floor, charitable ceiling) binds.
+/// ★ §2.7 — the ONE derivation of the §163(h)(3)(F) mixed-use-mortgage disposition, shared by
+/// [`schedule_a_parts`] (which zeroes line 8a and checks the line-8 box) and
+/// [`crate::tax::advisories`] (the owner-mandate note). Returns the CEILING of interest a Pub. 936
+/// allocation could restore — the full `mortgage_interest_1098`, documented as "up to" — when the
+/// mixed-use question is LIVE (a `schedule_a` reporting 1098 interest > 0) and the filer answered
+/// `Some(false)`; `None` otherwise. v1 cannot compute the allocation, so it deducts none of it
+/// ($0 ≤ the true allocation, always ⇒ tax overstated, never understated).
+pub fn mixed_use_mortgage_forgone(ri: &ReturnInputs) -> Option<Usd> {
+    let a = ri.schedule_a.as_ref()?;
+    (a.mortgage_all_used_to_buy_build_improve == Some(false)
+        && a.mortgage_interest_1098 > Usd::ZERO)
+        .then_some(a.mortgage_interest_1098)
+}
+
 pub fn schedule_a_parts(
     ri: &ReturnInputs,
     agi: Usd,
@@ -297,8 +318,15 @@ pub fn schedule_a_parts(
     };
     let salt_5e = salt_5d.min(salt_cap);
 
-    // Line 8a — home-mortgage interest (points/8b are refuse-or-advise).
-    let mortgage_8a = a.mortgage_interest_1098;
+    // Line 8a — home-mortgage interest (points/8b are refuse-or-advise). ★ §2.7: a MIXED-USE mortgage
+    // (`Some(false)`) zeroes 8a and checks the line-8 box — v1 cannot do the Pub. 936 split, so it deducts
+    // none of the interest. Both key on the SINGLE `mixed_use_mortgage_forgone` derivation.
+    let mortgage_mixed_use_box = mixed_use_mortgage_forgone(ri).is_some();
+    let mortgage_8a = if mortgage_mixed_use_box {
+        Usd::ZERO
+    } else {
+        a.mortgage_interest_1098
+    };
 
     Some(ScheduleAParts {
         salt_is_sales_tax: a.salt_use_sales_tax == Some(true),
@@ -313,6 +341,7 @@ pub fn schedule_a_parts(
         salt_5e,
         salt_cap,
         mortgage_8a,
+        mortgage_mixed_use_box,
         charitable_cash_11: charitable.allowed_cash,
         charitable_noncash_12: charitable.allowed_noncash,
         charitable_carryover_13: charitable.allowed_carryover,
@@ -2165,6 +2194,66 @@ mod tests {
             schedule_a_deduction(&r, dec!(100000), &no_charity(), &ty2024_params()),
             Some(dec!(24500))
         );
+    }
+
+    /// ★ P9 §2.7 — a MIXED-USE mortgage (`mortgage_all_used_to_buy_build_improve == Some(false)`) on a
+    /// Schedule A that reports mortgage interest ZEROES line 8a and CHECKS the line-8 box: v1 cannot do the
+    /// Pub. 936 allocation, and §163(h)(3)(F) makes the non-acquisition portion non-deductible, so it claims
+    /// NONE of it ($0 ≤ the true allocation always ⇒ tax overstated, never understated).
+    /// `mixed_use_mortgage_forgone` reports the FULL 1098 interest as the ceiling.
+    #[test]
+    fn mixed_use_mortgage_zeroes_8a_and_checks_the_box() {
+        let mut r = filer(FilingStatus::Single);
+        r.schedule_a = Some(ScheduleAInputs {
+            mortgage_interest_1098: dec!(12000),
+            mortgage_all_used_to_buy_build_improve: Some(false),
+            ..Default::default()
+        });
+        let parts = schedule_a_parts(&r, dec!(100000), &no_charity(), &ty2024_params()).unwrap();
+        assert_eq!(parts.mortgage_8a, Usd::ZERO, "8a zeroed — v1 cannot allocate");
+        assert!(parts.mortgage_mixed_use_box, "the line-8 box is checked");
+        assert_eq!(parts.total_17, Usd::ZERO, "no other Schedule A items ⇒ total is $0");
+        assert_eq!(
+            mixed_use_mortgage_forgone(&r),
+            Some(dec!(12000)),
+            "the forgone ceiling is the full 1098 interest"
+        );
+    }
+
+    /// `Some(true)` (acquisition-only) keeps line 8a FULL and the box unchecked; and there is nothing
+    /// forgone. The value behaviour fires ONLY on an explicit "no".
+    #[test]
+    fn acquisition_only_mortgage_keeps_full_8a_and_box_off() {
+        let mut r = filer(FilingStatus::Single);
+        r.schedule_a = Some(ScheduleAInputs {
+            mortgage_interest_1098: dec!(12000),
+            mortgage_all_used_to_buy_build_improve: Some(true),
+            ..Default::default()
+        });
+        let parts = schedule_a_parts(&r, dec!(100000), &no_charity(), &ty2024_params()).unwrap();
+        assert_eq!(parts.mortgage_8a, dec!(12000));
+        assert!(!parts.mortgage_mixed_use_box);
+        assert_eq!(mixed_use_mortgage_forgone(&r), None);
+    }
+
+    /// ★ §2.7 third row (r6 Nit-3): the box-check and the forgone amount are BOTH scoped to the LIVE
+    /// predicate (interest > 0), never to the bare `Some(false)`. A $0-interest "no" forgoes nothing, so
+    /// the box stays unchecked and nothing is forgone.
+    #[test]
+    fn zero_interest_mixed_use_checks_no_box() {
+        let mut r = filer(FilingStatus::Single);
+        r.schedule_a = Some(ScheduleAInputs {
+            mortgage_interest_1098: Usd::ZERO,
+            mortgage_all_used_to_buy_build_improve: Some(false),
+            ..Default::default()
+        });
+        let parts = schedule_a_parts(&r, dec!(100000), &no_charity(), &ty2024_params()).unwrap();
+        assert_eq!(parts.mortgage_8a, Usd::ZERO);
+        assert!(
+            !parts.mortgage_mixed_use_box,
+            "no interest ⇒ not live ⇒ box unchecked"
+        );
+        assert_eq!(mixed_use_mortgage_forgone(&r), None);
     }
 
     /// Review M1 / r2 N1: a negative AGI is clamped to zero for the 7.5% medical floor, so the medical

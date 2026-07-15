@@ -87,8 +87,11 @@ pub fn fill_schedule_a_with_map(
     // ★ The two ELECTIONS core already honoured but the form never showed (ARCH-P6.3a Q7):
     // §164(b)(5) sales-tax-instead-of-income-tax, and §63(e) itemize-below-the-standard-deduction.
     // Without the latter the Service's math-error unit may "correct" the return to the standard.
+    // ★ P9 §2.7: the line-8 §163(h)(3)(F) mixed-use-mortgage DECLARATION — core zeroed 8a; without this
+    // box a $0 line 8a beside an unchecked box is an unaffirmed statement.
     for (choice, on) in [
         (&map.check_5a_sales_tax, lines.line5a_is_sales_tax),
+        (&map.check_8_mixed_use, lines.line8_mixed_use_box),
         (&map.check_18_elects_smaller, lines.line18_elects_smaller),
     ] {
         if on {

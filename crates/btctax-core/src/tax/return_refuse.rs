@@ -912,6 +912,62 @@ mod tests {
         }
     }
 
+    /// ★ P9 §2.7 / §3.5 (r5 I-2) — a mixed-use-mortgage filer who answers "no" truthfully is NOT bricked:
+    /// the return COMPUTES, with Schedule A line 8a = $0, the line-8 box CHECKED, and
+    /// `MixedUseMortgageNotAllocated` firing — under BOTH `Auto` (where the zeroed 8a lets the standard
+    /// deduction win) AND `ForceItemize`. r3 refused outright (bricking the standard-wins filer, r3 I-2);
+    /// r4's screen-layer refusal could not see the itemize decision it fired on (r4 I-2). There is NO
+    /// mortgage refusal left — the answer zeroes the line and checks the box instead — and this proves it.
+    #[test]
+    fn mixed_use_mortgage_filer_computes_under_both_elections() {
+        use crate::state::LedgerState;
+        use crate::tax::advisories::{advisories_for, Advisory};
+        use crate::tax::return_1040::assemble_absolute;
+        use crate::tax::return_inputs::{ItemizeElection, Owner, ScheduleAInputs};
+
+        let mut base = ri(); // Single, all always-live declarations answered
+        base.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            box1_wages: dec!(120000),
+            ..Default::default()
+        }];
+        base.schedule_a = Some(ScheduleAInputs {
+            salt_real_estate: dec!(5000), // itemized ≈ $5,000 (< $14,600 std) once the mixed-use 8a is zeroed
+            mortgage_interest_1098: dec!(12000),
+            mortgage_all_used_to_buy_build_improve: Some(false),
+            ..Default::default()
+        });
+
+        for (election, expect_itemized) in [
+            (ItemizeElection::Auto, false), // zeroed 8a ⇒ the standard deduction wins
+            (ItemizeElection::ForceItemize, true), // §63(e) forces the tiny Schedule A
+        ] {
+            let mut r = base.clone();
+            r.itemize_election = election;
+
+            // No brick: the screen does not refuse a truthfully-answered mixed-use return.
+            assert_eq!(reason(&r), None, "{election:?}: must not refuse");
+
+            // …and it COMPUTES, with 8a zeroed and the box checked, under either deduction.
+            let ar = assemble_absolute(&r, &LedgerState::default(), &params(), &tbl(), 2024);
+            assert_eq!(ar.deduction_is_itemized, expect_itemized, "{election:?}");
+            let a = ar.schedule_a.as_ref().expect("Schedule A parts computed");
+            assert_eq!(a.mortgage_8a, Usd::ZERO, "{election:?}: 8a zeroed");
+            assert!(a.mortgage_mixed_use_box, "{election:?}: line-8 box checked");
+
+            // …and the owner-mandate advisory fires, naming the full 1098 interest as the ceiling, with the
+            // branch matching the deduction actually taken.
+            let advs = advisories_for(&r, &LedgerState::default(), &ar, &params(), 2024);
+            assert!(
+                advs.contains(&Advisory::MixedUseMortgageNotAllocated {
+                    forgone_interest: dec!(12000),
+                    itemized: expect_itemized,
+                }),
+                "{election:?}: the advisory must fire with the ceiling and the right branch: {advs:?}"
+            );
+        }
+    }
+
     /// ★ §2.9 — THE CIRCULAR-LIVENESS BUG, in shipped code. A filer with $100 of interest and an unanswered
     /// foreign-account question must REFUSE. Under the shipped `schedule_b_files` (which reads
     /// `foreign_accounts` itself) the return computes clean and silently omits Schedule B — the FBAR/FinCEN

@@ -31,10 +31,12 @@
 form = "f1040sa"
 year = 2024
 
-# ── The two ELECTION checkboxes (P6.3a Q7): elections core already honours in the ARITHMETIC that
-#    the filed form never showed. c1_1 is the top-most button (y=566) = line 5a's "check this box";
-#    the line-18 button names itself (Line18_ReadOrder).
+# ── The three declaration/election checkboxes. Elections core honoured in the ARITHMETIC the filed form
+#    never showed (P6.3a Q7); the line-8 box is the P9 §2.7 mixed-use-mortgage DECLARATION. c1_1 is the
+#    top-most button (y=566) = line 5a's "check this box"; the line-8 button (y=434) and the line-18 button
+#    (y=74) each name themselves (Line8_ReadOrder / Line18_ReadOrder), verified via `xtask dump-fields`.
 check_5a_sales_tax      = { field = "topmostSubform[0].Page1[0].c1_1[0]", on = "1" }
+check_8_mixed_use       = { field = "topmostSubform[0].Page1[0].Line8_ReadOrder[0].c1_2[0]", on = "1" }
 check_18_elects_smaller = { field = "topmostSubform[0].Page1[0].Line18_ReadOrder[0].c1_3[0]", on = "1" }
 
 # ── Medical and Dental Expenses ─────────────────────────────────────────────────────────────────

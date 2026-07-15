@@ -12,7 +12,7 @@
 //! things that *would* make the return wrong are refusals (`return_refuse.rs`), not advisories.
 use crate::conventions::Usd;
 use crate::state::{LedgerState, RemovalKind};
-use crate::tax::return_1040::AbsoluteReturn;
+use crate::tax::return_1040::{mixed_use_mortgage_forgone, AbsoluteReturn};
 use crate::tax::return_inputs::ReturnInputs;
 use crate::tax::tables::FullReturnParams;
 use crate::tax::types::FilingStatus;
@@ -65,6 +65,14 @@ pub enum Advisory {
     /// §3.4 / SPEC §9.2 conservative omission: v1 never fills the 1040 direct-deposit block (L35b–d),
     /// so a refund arrives as a **paper check**. Fires only when the return is actually due a refund.
     RefundByPaperCheck { refund: Usd },
+    /// ★ §163(h)(3)(F) (P9 §2.7 / §3.4): the filer declared a MIXED-USE mortgage, and v1 cannot compute the
+    /// Pub. 936 allocation — so Schedule A line 8a was treated as $0 and the line-8 box was checked. This can
+    /// be a LARGE overstatement of tax (a $500k acquisition mortgage with a $20k HELOC forfeits ~96% of a
+    /// real deduction). MANDATORY: it names the whole forgone amount as a CEILING ("up to"). Fires on
+    /// `Some(false)` — the filer ANSWERED, and answered the way that costs them money. `itemized` records
+    /// which deduction the return actually took, so the text does not describe a form the filer did not file
+    /// (r5 M-1).
+    MixedUseMortgageNotAllocated { forgone_interest: Usd, itemized: bool },
 }
 
 /// Format a dollar amount for advisory prose: `$1,950` / `$1,234.56` — thousands-separated, and
@@ -141,6 +149,32 @@ impl Advisory {
                  routing and account numbers by hand if you want it deposited.",
                 fmt_usd(*refund)
             ),
+            // ★ §3.4 (r5 M-1): the text branches on the deduction actually taken. The itemized filer filed a
+            // Schedule A with a $0 line 8a and a checked box; the standard filer filed NO Schedule A, so the
+            // note must not describe one. `forgone_interest` is a CEILING ("up to"), never "the amount lost".
+            Advisory::MixedUseMortgageNotAllocated {
+                forgone_interest,
+                itemized,
+            } => {
+                if *itemized {
+                    format!(
+                        "MIXED-USE MORTGAGE — Your Schedule A claimed $0 on line 8a and the mixed-use box is \
+                         checked. Because not all of the loan was used to buy, build, or improve the home, \
+                         §163(h)(3)(F) makes the rest non-deductible and v1 cannot compute the Pub. 936 \
+                         allocation. A Pub. 936 allocation could restore up to {} of mortgage interest — your \
+                         tax is OVERSTATED.",
+                        fmt_usd(*forgone_interest)
+                    )
+                } else {
+                    format!(
+                        "MIXED-USE MORTGAGE — Your return took the standard deduction. Because you declared a \
+                         mixed-use mortgage, line 8a was treated as $0 (§163(h)(3)(F); v1 cannot compute the \
+                         Pub. 936 allocation); a Pub. 936 allocation of up to {} of mortgage interest might \
+                         have made itemizing win.",
+                        fmt_usd(*forgone_interest)
+                    )
+                }
+            }
         }
     }
 }
@@ -162,12 +196,15 @@ pub fn advisories_for(
         ar.overpayment_refund,
         params,
         year,
+        ar.deduction_is_itemized,
     )
 }
 
 /// Collect every advisory that applies (the scalar form — `earned_income` = wages + net SE earnings;
-/// `agi` = 1040 L11; `refund` = 1040 L34/L35a, zero when the return owes).
+/// `agi` = 1040 L11; `refund` = 1040 L34/L35a, zero when the return owes; `deduction_is_itemized` is the
+/// filed return's deduction choice, which the mixed-use-mortgage advisory branches its text on — §3.4).
 /// Order is stable: omissions first (they cost the filer money), then disclosures.
+#[allow(clippy::too_many_arguments)]
 pub fn advisories(
     ri: &ReturnInputs,
     state: &LedgerState,
@@ -176,6 +213,7 @@ pub fn advisories(
     refund: Usd,
     params: &FullReturnParams,
     year: i32,
+    deduction_is_itemized: bool,
 ) -> Vec<Advisory> {
     let mut out = Vec::new();
 
@@ -226,6 +264,17 @@ pub fn advisories(
         out.push(Advisory::AgedBoxForfeitedNoDob { per_box });
     }
 
+    // ★ §2.7 / §3.4 — a declared MIXED-USE mortgage forgoes the interest v1 cannot allocate. The single
+    // `mixed_use_mortgage_forgone` derivation decides liveness AND the ceiling (the same one that zeroed 8a
+    // and checked the box); the text branches on the deduction the return actually took. Fires on the
+    // ANSWERED "no" — a benefit forgone because the filer told us the truth is forgone just as hard.
+    if let Some(forgone_interest) = mixed_use_mortgage_forgone(ri) {
+        out.push(Advisory::MixedUseMortgageNotAllocated {
+            forgone_interest,
+            itemized: deduction_is_itemized,
+        });
+    }
+
     // FinCEN Notice 2020-2 — a declared foreign account.
     if ri.foreign_accounts == Some(true) {
         out.push(Advisory::FbarFinCen);
@@ -247,7 +296,7 @@ pub fn advisories(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tax::return_inputs::Dependent;
+    use crate::tax::return_inputs::{Dependent, ScheduleAInputs};
 
     /// The advisory set is driven by the inputs/ledger, and every message names the direction of the error
     /// (OVERSTATED) so a filer knows the omission costs them money, not the IRS.
@@ -342,6 +391,7 @@ mod tests {
             Usd::ZERO,
             &params(),
             2024,
+            false,
         );
         assert_eq!(got, vec![Advisory::OtherCreditsOmitted], "{got:?}");
     }
@@ -364,6 +414,7 @@ mod tests {
             Usd::ZERO,
             &params(),
             2024,
+            false,
         );
         assert_eq!(
             got,
@@ -396,7 +447,8 @@ mod tests {
             dec!(30000), /* AGI (1040 L11) */
             Usd::ZERO,
             &p,
-            2024
+            2024,
+            false
         )
         .contains(&Advisory::EicOmitted));
         // Earned income but AGI at/over the ceiling → no EIC advisory. [★ P5-I3] This leg used
@@ -409,7 +461,8 @@ mod tests {
             dec!(70000), /* AGI (1040 L11) */
             Usd::ZERO,
             &p,
-            2024
+            2024,
+            false
         )
         .contains(&Advisory::EicOmitted));
         // Earned income + low AGI → fires.
@@ -420,7 +473,8 @@ mod tests {
             dec!(30000), /* AGI (1040 L11) */
             Usd::ZERO,
             &p,
-            2024
+            2024,
+            false
         )
         .contains(&Advisory::EicOmitted));
     }
@@ -441,6 +495,7 @@ mod tests {
             Usd::ZERO,
             &params(),
             2024,
+            false,
         );
         assert!(got.contains(&Advisory::FbarFinCen));
         assert!(got.contains(&Advisory::AgedBoxForfeitedNoDob {
@@ -472,6 +527,7 @@ mod tests {
             Usd::ZERO,
             &params(),
             2024,
+            false,
         );
         assert!(
             got.contains(&Advisory::EicOmitted),
@@ -503,6 +559,7 @@ mod tests {
             Usd::ZERO,    // no refund
             &p,
             2024,
+            false,
         );
         assert!(owes.contains(&Advisory::OtherCreditsOmitted));
         assert!(!owes
@@ -518,6 +575,7 @@ mod tests {
             dec!(1234.56),
             &p,
             2024,
+            false,
         );
         assert!(refunded.contains(&Advisory::OtherCreditsOmitted));
         assert!(refunded.contains(&Advisory::RefundByPaperCheck {
@@ -562,12 +620,126 @@ mod tests {
             Usd::ZERO,
             &params(),
             2024,
+            false,
         );
         assert!(
             got.contains(&Advisory::AgedBoxForfeitedNoDob {
                 per_box: dec!(1550) // married rate
             }),
             "an absent MFJ spouse record must not forfeit the aged box silently: {got:?}"
+        );
+    }
+
+    /// A Single filer WITH a DOB (so the aged-box advisory is quiet) and a Schedule A reporting mortgage
+    /// interest, with the mixed-use answer supplied by the caller.
+    fn mixed_use_ri(answer: Option<bool>, interest: Usd) -> ReturnInputs {
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.header.taxpayer.date_of_birth = Some(time::macros::date!(1980 - 01 - 01));
+        ri.schedule_a = Some(ScheduleAInputs {
+            mortgage_interest_1098: interest,
+            mortgage_all_used_to_buy_build_improve: answer,
+            ..Default::default()
+        });
+        ri
+    }
+
+    /// ★ P9 §2.7 / §3.4 — a declared MIXED-USE mortgage (`Some(false)`) forgoes the mortgage-interest
+    /// deduction v1 cannot allocate, so the owner mandate fires a loud note. It fires on the ANSWERED "no"
+    /// (never on `None`, which refuses upstream), carries the FULL 1098 interest as the ceiling, and records
+    /// which deduction the return took so the text can be truthful about the form.
+    #[test]
+    fn mixed_use_mortgage_advisory_fires_on_declared_no() {
+        let ri = mixed_use_ri(Some(false), dec!(20000));
+        // Itemizing return.
+        let itemized = advisories(
+            &ri,
+            &LedgerState::default(),
+            dec!(150000),
+            dec!(150000),
+            Usd::ZERO,
+            &params(),
+            2024,
+            true,
+        );
+        assert!(itemized.contains(&Advisory::MixedUseMortgageNotAllocated {
+            forgone_interest: dec!(20000),
+            itemized: true,
+        }));
+        // Standard-wins return — same forgone ceiling, but the flag records the standard deduction.
+        let standard = advisories(
+            &ri,
+            &LedgerState::default(),
+            dec!(150000),
+            dec!(150000),
+            Usd::ZERO,
+            &params(),
+            2024,
+            false,
+        );
+        assert!(standard.contains(&Advisory::MixedUseMortgageNotAllocated {
+            forgone_interest: dec!(20000),
+            itemized: false,
+        }));
+    }
+
+    /// The advisory is silent unless the filer DECLARED a mixed-use mortgage on a Schedule A with interest:
+    /// `Some(true)` (all acquisition debt), `None` (unanswered — refuses upstream), $0 interest, and no
+    /// Schedule A at all each fire nothing.
+    #[test]
+    fn mixed_use_mortgage_advisory_quiet_unless_declared_no() {
+        let quiet = |ri: &ReturnInputs| {
+            !advisories(
+                ri,
+                &LedgerState::default(),
+                dec!(150000),
+                dec!(150000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                true,
+            )
+            .iter()
+            .any(|a| matches!(a, Advisory::MixedUseMortgageNotAllocated { .. }))
+        };
+        assert!(quiet(&mixed_use_ri(Some(true), dec!(20000))), "acquisition-only");
+        assert!(quiet(&mixed_use_ri(None, dec!(20000))), "unanswered");
+        assert!(quiet(&mixed_use_ri(Some(false), Usd::ZERO)), "no interest ⇒ not live");
+        let no_sched_a = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        assert!(quiet(&no_sched_a), "no Schedule A");
+    }
+
+    /// ★ §3.4 (r5 M-1) — the message TEXT branches on the deduction actually taken: the itemized branch
+    /// names the Schedule A the filer filed; the standard branch must NOT describe a form they did not file.
+    /// Both name the ceiling as "up to {forgone}", never as "the amount you lost".
+    #[test]
+    fn mixed_use_mortgage_advisory_text_branches_on_deduction_taken() {
+        let itemized = Advisory::MixedUseMortgageNotAllocated {
+            forgone_interest: dec!(20000),
+            itemized: true,
+        }
+        .message();
+        assert!(itemized.contains("Schedule A"), "{itemized}");
+        assert!(itemized.contains("line 8a"), "{itemized}");
+        assert!(itemized.contains("up to $20,000"), "the ceiling, comma-grouped: {itemized}");
+        assert!(itemized.contains("OVERSTATED"), "{itemized}");
+
+        let standard = Advisory::MixedUseMortgageNotAllocated {
+            forgone_interest: dec!(20000),
+            itemized: false,
+        }
+        .message();
+        assert!(standard.contains("standard deduction"), "{standard}");
+        assert!(standard.contains("up to $20,000"), "{standard}");
+        // ★ It must not tell a standard-deduction filer their Schedule A claimed anything (r5 M-1).
+        assert!(
+            !standard.contains("Your Schedule A claimed"),
+            "the standard branch must not describe a form the filer did not file: {standard}"
         );
     }
 }

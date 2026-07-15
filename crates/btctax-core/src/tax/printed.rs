@@ -1032,6 +1032,11 @@ pub struct ScheduleALines {
     /// your standard deduction, check this box". Without it the Service's math-error unit may "correct"
     /// the return back to the standard deduction (Q7 item 4).
     pub line18_elects_smaller: bool,
+    /// ★ §2.7 — L8's **checkbox**: "If you didn't use all of your home mortgage loan(s) to buy, build, or
+    /// improve your home, check this box." Set from [`ScheduleAParts::mortgage_mixed_use_box`]; when set,
+    /// line 8a above prints $0 (v1 cannot do the Pub. 936 allocation — the `MixedUseMortgageNotAllocated`
+    /// advisory names the forgone interest).
+    pub line8_mixed_use_box: bool,
     /// L1 — medical and dental expenses.
     pub line1: Usd,
     /// L2 — AGI (the floor's base).
@@ -1130,6 +1135,7 @@ pub fn schedule_a_lines(ar: &AbsoluteReturn, line11_1040: Usd) -> Option<Schedul
         line18_elects_smaller: ar
             .itemized_deduction
             .is_some_and(|it| it < ar.standard_deduction),
+        line8_mixed_use_box: p.mortgage_mixed_use_box,
         line1,
         line2,
         line3,
@@ -1348,6 +1354,7 @@ mod tests {
             salt_cap: dec!(10000),
             salt_5e: dec!(4000),
             mortgage_8a: dec!(5000),
+            mortgage_mixed_use_box: false,
             charitable_cash_11: Usd::ZERO,
             charitable_noncash_12: Usd::ZERO,
             charitable_carryover_13: Usd::ZERO,
@@ -1428,6 +1435,40 @@ mod tests {
         let a = schedule_a_lines(&ar, round_dollar(ar.agi)).unwrap();
         assert!(!a.line5a_is_sales_tax);
         assert!(!a.line18_elects_smaller);
+    }
+
+    /// ★ P9 §2.7 — the Schedule A **line-8 checkbox** ("didn't use all of your mortgage to buy/build/improve
+    /// your home") propagates from the parts into the printed chain, and a mixed-use mortgage prints 8a as $0.
+    /// (`schedule_a_lines` only returns Some on an itemizing return; a standard-wins mixed-use filer files no
+    /// Schedule A — the advisory's "standard" branch, not this box, covers that case.)
+    #[test]
+    fn schedule_a_line8_mixed_use_box_prints_with_zeroed_8a() {
+        let mut p = sched_a_parts_sales_tax();
+        p.salt_is_sales_tax = false;
+        // The filer declared a mixed-use mortgage: `schedule_a_parts` has already zeroed 8a and set the box.
+        p.mortgage_8a = Usd::ZERO;
+        p.mortgage_mixed_use_box = true;
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.deduction_is_itemized = true;
+        ar.itemized_deduction = Some(dec!(20000));
+        ar.schedule_a = Some(p);
+
+        let a = schedule_a_lines(&ar, round_dollar(ar.agi)).unwrap();
+        assert!(a.line8_mixed_use_box, "the line-8 mixed-use box must print");
+        assert_eq!(a.line8a, Usd::ZERO, "8a printed as $0");
+        assert_eq!(a.line8e, Usd::ZERO, "8e = 8a");
+    }
+
+    /// An acquisition-only mortgage leaves the line-8 box unchecked and prints full 8a.
+    #[test]
+    fn schedule_a_line8_box_off_for_acquisition_only_mortgage() {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.deduction_is_itemized = true;
+        ar.itemized_deduction = Some(dec!(20000));
+        ar.schedule_a = Some(sched_a_parts_sales_tax()); // mortgage_8a = 5000, box false
+        let a = schedule_a_lines(&ar, round_dollar(ar.agi)).unwrap();
+        assert!(!a.line8_mixed_use_box);
+        assert_eq!(a.line8a, dec!(5000));
     }
 
     // ── Schedule SE printed chain (ARCH-P6.3a D5) ───────────────────────────────────────────────
@@ -2047,6 +2088,7 @@ mod tests {
             salt_5e,
             salt_cap,
             mortgage_8a: mortgage,
+            mortgage_mixed_use_box: false,
             charitable_cash_11: cash,
             charitable_noncash_12: noncash,
             charitable_carryover_13: carryover,

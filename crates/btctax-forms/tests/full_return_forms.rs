@@ -520,6 +520,7 @@ fn sch_a_lines() -> ScheduleALines {
     ScheduleALines {
         line5a_is_sales_tax: false,
         line18_elects_smaller: false,
+        line8_mixed_use_box: false,
         line1: dec!(10000),
         line2: dec!(100000),
         line3: dec!(7500),
@@ -1790,6 +1791,28 @@ fn schedule_a_prints_the_sales_tax_and_force_itemize_election_boxes() {
         &pdf,
         "topmostSubform[0].Page1[0].Line18_ReadOrder[0].c1_3[0]"
     ));
+}
+
+/// ★ P9 §2.7 — Schedule A's line-8 **mixed-use-mortgage** checkbox ("If you didn't use all of your home
+/// mortgage loan(s) to buy, build, or improve your home, check this box"). Core zeroes line 8a and sets
+/// this box (§163(h)(3)(F)); the filed form must SHOW it, or a $0 line 8a beside an unchecked box is an
+/// unaffirmed statement. The box is `Line8_ReadOrder[0].c1_2[0]`, nested like line 18's own read-order box.
+#[test]
+fn schedule_a_prints_the_mixed_use_mortgage_box() {
+    const MIXED_USE_BOX: &str = "topmostSubform[0].Page1[0].Line8_ReadOrder[0].c1_2[0]";
+    let mut lines = sch_a_lines();
+    lines.line8_mixed_use_box = true;
+    lines.line8a = Usd::ZERO; // core zeroes 8a whenever the box is set
+    lines.line8e = Usd::ZERO;
+    let pdf = btctax_forms::fill_schedule_a(&lines, &kitchen_sink_header(), 2024).unwrap();
+    assert!(
+        box_on(&pdf, MIXED_USE_BOX),
+        "the §163(h)(3)(F) mixed-use box must print"
+    );
+
+    // …and an ordinary itemizing return (all acquisition debt) leaves it unchecked.
+    let pdf = btctax_forms::fill_schedule_a(&sch_a_lines(), &kitchen_sink_header(), 2024).unwrap();
+    assert!(!box_on(&pdf, MIXED_USE_BOX));
 }
 
 /// Schedule C's lines A, B and F — captured expressly for those cells. A Schedule C with a blank

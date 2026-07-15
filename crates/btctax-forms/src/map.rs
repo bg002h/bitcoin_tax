@@ -1141,6 +1141,10 @@ pub struct ScheduleAMap {
     /// L5a's §164(b)(5) sales-tax election checkbox — the election core already honours in the
     /// arithmetic, which the filed form never showed (ARCH-P6.3a Q7 item 3).
     pub check_5a_sales_tax: CheckChoice,
+    /// ★ §2.7 — L8's §163(h)(3)(F) mixed-use-mortgage checkbox: "If you didn't use all of your home
+    /// mortgage loan(s) to buy, build, or improve your home, check this box." Nested under
+    /// `Line8_ReadOrder[0]`, like line 18's own read-order box.
+    pub check_8_mixed_use: CheckChoice,
     /// L18's §63(e) "itemize even though less than the standard deduction" checkbox (Q7 item 4).
     pub check_18_elects_smaller: CheckChoice,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
