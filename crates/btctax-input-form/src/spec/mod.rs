@@ -5,6 +5,8 @@
 #[macro_use]
 mod registries;
 mod sections;
+#[cfg(test)]
+mod coverage; // Task 6 — the drift-proofing coverage KAT (spec §5.6).
 pub use registries::{field_to_question, field_to_skippable, question_to_field, skippable_to_field};
 
 use crate::seam::Section;
