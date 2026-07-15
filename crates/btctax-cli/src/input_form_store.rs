@@ -8,6 +8,8 @@
 use crate::return_inputs::SCHEMA_VERSION;
 use crate::{CliError, Session};
 use btctax_core::tax::return_inputs::ReturnInputs;
+use btctax_core::tax::return_refuse::{screen_inputs, Refusal};
+use btctax_core::tax::tables::{FullReturnParams, TaxTable};
 use rusqlite::Connection;
 
 /// Create the draft side-table if absent. Idempotent; called first by every fn (safe on an older vault).
@@ -162,6 +164,57 @@ pub fn load(conn: &Connection, year: i32) -> Result<Loaded, CliError> {
     }
 }
 
+/// The outcome of a [`commit`] attempt.
+///
+/// - `Committed` — the return screened CLEAN; the committed `return_inputs` row was written and the draft
+///   deleted.
+/// - `Refused(refusal)` — [`screen_inputs`] tripped a fail-closed guard; NOTHING was written (the year is
+///   never poisoned at `resolve`, and the draft is left intact for the user to fix).
+/// - `NoTables` — the year has no full-return tables/params (v1 bundles TY2024 only — I-11); NOTHING was
+///   written.
+pub enum CommitOutcome {
+    Committed,
+    Refused(Refusal),
+    NoTables,
+}
+
+/// Screen `ri`, and ONLY if it passes write the committed row and delete the draft (SPEC §5.7).
+///
+/// The write is all-or-nothing:
+///
+/// - No `table`/`params` for the year → [`CommitOutcome::NoTables`] (the TY2024-only gate, I-11) — writes
+///   nothing.
+/// - [`screen_inputs`] returns `Some(refusal)` → [`CommitOutcome::Refused`] — writes nothing, so a refused
+///   commit never poisons the year at `resolve` and the draft remains for the user to fix.
+/// - Clean → snapshot the in-memory DB, `return_inputs::set` the committed row, `delete_draft`, then
+///   `sess.save()` to reach disk. If the save fails, RESTORE the snapshot so there is never an
+///   in-memory/disk split (the committed row + draft-deletion are rolled back together, I-7).
+///
+/// Takes `&mut Session` for `save()`; reads through the SAME session's `conn()` — never opens a second
+/// Session (N-1).
+pub fn commit(
+    sess: &mut Session,
+    year: i32,
+    ri: &ReturnInputs,
+    table: Option<&TaxTable>,
+    params: Option<&FullReturnParams>,
+) -> Result<CommitOutcome, CliError> {
+    let (Some(table), Some(params)) = (table, params) else {
+        return Ok(CommitOutcome::NoTables); // I-11: no tables for this year → write nothing
+    };
+    if let Some(refusal) = screen_inputs(ri, table, params) {
+        return Ok(CommitOutcome::Refused(refusal)); // fail-closed: writes nothing
+    }
+    let snap = sess.snapshot()?;
+    crate::return_inputs::set(sess.conn(), year, ri)?;
+    delete_draft(sess.conn(), year)?;
+    if let Err(e) = sess.save() {
+        sess.restore(&snap)?; // atomic: never leave an in-memory/disk split
+        return Err(e);
+    }
+    Ok(CommitOutcome::Committed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,6 +309,91 @@ mod tests {
         conn.execute("INSERT INTO return_inputs_draft(year,inputs_json,schema_version,parked) VALUES(2025,?1,0,1)", [&j]).unwrap();
         assert!(matches!(load(&conn, 2025), Err(CliError::StaleParkedDraft { year: 2025, found: 0, .. })));
         assert!(draft_exists(&conn, 2025).unwrap(), "stale parked is preserved, not discarded");
+    }
+
+    /// The canonical screen-clean return: a minimal Single filer that is not a dependent and has answered
+    /// every always-live declaration (mirrors `resolve.rs`'s fixture / the `answer.rs`
+    /// `every_live_question_can_actually_be_answered_and_clears_the_screen` test). No income is needed —
+    /// `screen_inputs` only checks the input-screenable rows, so this passes the screen cleanly.
+    fn clean_screened_ri() -> ReturnInputs {
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        ri
+    }
+
+    #[test]
+    fn commit_non2024_is_notables_and_writes_nothing() {
+        let (_dir, path, pp) = tmp_vault();
+        let mut sess = Session::open(&path, &pp).unwrap();
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        set_draft_row(sess.conn(), 2099, &ri, false).unwrap();
+        // no full-return params for 2099 → NoTables
+        let out = commit(&mut sess, 2099, &ri, None, None).unwrap();
+        assert!(matches!(out, CommitOutcome::NoTables));
+        assert!(
+            !crate::return_inputs::exists(sess.conn(), 2099).unwrap(),
+            "NoTables writes no committed row"
+        );
+        assert!(
+            draft_exists(sess.conn(), 2099).unwrap(),
+            "NoTables leaves the draft"
+        );
+    }
+
+    #[test]
+    fn commit_clean_sets_row_and_deletes_draft_refused_writes_nothing() {
+        use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
+        use btctax_core::tax::tables::FullReturnTables;
+        use btctax_core::TaxTables;
+        let (_dir, path, pp) = tmp_vault();
+        let tables = BundledTaxTables::load(); // ★ I-B: load() returns Self, NOT Result — no `?`, no `.unwrap()`
+        let fr = BundledFullReturnTables::load();
+        let (t, p) = (
+            tables.table_for(2024).unwrap(),
+            fr.full_return_for(2024).unwrap(),
+        ); // these DO return Option
+        let mut sess = Session::open(&path, &pp).unwrap();
+        // A screen-clean minimal return (all live declarations answered, no income).
+        let clean = clean_screened_ri();
+        set_draft_row(sess.conn(), 2024, &clean, false).unwrap();
+        assert!(matches!(
+            commit(&mut sess, 2024, &clean, Some(t), Some(p)).unwrap(),
+            CommitOutcome::Committed
+        ));
+        assert!(
+            crate::return_inputs::exists(sess.conn(), 2024).unwrap(),
+            "clean commit writes the row"
+        );
+        assert!(
+            !draft_exists(sess.conn(), 2024).unwrap(),
+            "clean commit deletes the draft"
+        );
+        // A refused return (unanswered live declarations) writes nothing.
+        let refused = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        }; // ~5 live None decls
+        set_draft_row(sess.conn(), 2024, &refused, false).unwrap();
+        assert!(matches!(
+            commit(&mut sess, 2024, &refused, Some(t), Some(p)).unwrap(),
+            CommitOutcome::Refused(_)
+        ));
+        // the committed 2024 row is still the earlier `clean` one; the refused draft remains
+        assert!(
+            crate::return_inputs::exists(sess.conn(), 2024).unwrap(),
+            "a refused commit does not delete the earlier committed row"
+        );
+        assert!(
+            draft_exists(sess.conn(), 2024).unwrap(),
+            "a refused commit leaves the draft"
+        );
     }
 
     #[test]
