@@ -106,6 +106,49 @@ pub fn form_save_draft(
     btctax_cli::input_form_store::save_draft(session, year, ri)
 }
 
+/// Commit the input-form working return for `year` through [`btctax_cli::input_form_store::commit`]
+/// (SPEC §5.7) — the input-form flow's COMMIT side (the payload-confirm modal's Enter). A thin wrapper
+/// like [`form_save_draft`]: `commit` screens `ri` and, ONLY if it passes, writes the committed
+/// `return_inputs` row and deletes the draft; a screen-refusal or a table-less year writes nothing (the
+/// outcome is returned in [`btctax_cli::input_form_store::CommitOutcome`]).
+///
+/// Lives HERE, alongside [`load_return_inputs`]/[`form_save_draft`], because the mutation surface
+/// (`Session::conn()` / `Session::save()`) is confined to this module by construction (the KAT-G1
+/// mechanized gate). The flow calls THIS wrapper, never `input_form_store::commit` directly.
+///
+/// Returns [`btctax_cli::CliError`], NOT [`PersistError`]: `commit` does its OWN snapshot/restore around
+/// its `save()` (it never leaves an in-memory/disk split — SPEC §5.7), so it is NOT an
+/// append/upsert-with-`save_or_rollback` and its `Err` is routed to `app.status` DIRECTLY, not through
+/// `EditorApp::on_persist_error` (mirrors `form_save_draft`, review M1).
+///
+/// Takes `&mut Session` so the flow borrows `app.session` DISJOINTLY from `app.tax_inputs_form`
+/// (review I-1). The caller binds the bundled tables to a `let` and passes `table_for(year)` /
+/// `full_return_for(year)` (both `Option`; `full_return_for` is `Some` only for 2024 — a non-2024 year
+/// yields `CommitOutcome::NoTables`).
+pub fn form_commit(
+    session: &mut btctax_cli::Session,
+    year: i32,
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+    table: Option<&btctax_core::tax::tables::TaxTable>,
+    params: Option<&btctax_core::tax::tables::FullReturnParams>,
+) -> Result<btctax_cli::input_form_store::CommitOutcome, btctax_cli::CliError> {
+    btctax_cli::input_form_store::commit(session, year, ri, table, params)
+}
+
+/// Whether a raw `tax_profile` exists for `year` — the commit modal's shadow warning (§9 create-row
+/// amendment): committing a full return for a year that also has a tax-profile leaves the profile saved
+/// but no longer active. A thin read wrapper over [`btctax_cli::input_form_store::shadows_profile`].
+///
+/// Lives HERE for the same reason as [`load_return_inputs`]: `Session::conn()` is confined to this module
+/// by the KAT-G1 gate. A pure READ — takes `&Session` (never `&mut`), performs no `save()` — so the
+/// opener borrows `app.session` DISJOINTLY from `app.tax_inputs_form` (review I-1).
+pub fn form_shadows_profile(
+    session: &btctax_cli::Session,
+    year: i32,
+) -> Result<bool, btctax_cli::CliError> {
+    btctax_cli::input_form_store::shadows_profile(session.conn(), year)
+}
+
 /// Revert the in-memory DB to `pre` after a mutation-committing step failed, mapping the error:
 /// `RolledBack` if the revert succeeds, `ResidueLive` if the revert ALSO fails (residue is live).
 fn rollback(

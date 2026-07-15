@@ -14,13 +14,15 @@
 //! - `Secret` is skipped here (no-echo masked entry is Task 4).
 
 use crate::edit::form::{
-    filing_status_field, live_fields, live_sections, PendingRemove, TaxInputsFormState,
+    filing_status_field, filing_status_label, live_fields, live_sections, PendingRemove,
+    TaxInputsFormState,
 };
 use btctax_core::tax::return_inputs::ReturnInputs;
+use btctax_core::tax::return_refuse::RefuseReason;
 use btctax_core::Usd;
 use btctax_input_form::{
-    apply, parse, parse_ip_pin, parse_ssn, ApplyError, Edit, Field, FieldId, FieldKind, FieldValue,
-    ParseError, RowAddr, Section, SectionId, SectionKind, SetError,
+    apply, parse, parse_ip_pin, parse_ssn, Anchor, ApplyError, Edit, Field, FieldId, FieldKind,
+    FieldValue, ParseError, RowAddr, Section, SectionId, SectionKind, SetError,
 };
 
 // ── Pane projection (the field-cursor fold, Task-2 Minor) ──────────────────────────────────────────────
@@ -644,6 +646,159 @@ fn parse_error_msg(e: ParseError) -> String {
         ParseError::BadSsn => "bad SSN".to_string(),
         ParseError::BadIpPin => "bad IP PIN".to_string(),
         ParseError::NotAChoice => "not a valid choice".to_string(),
+    }
+}
+
+// ── Task 7: the commit payload-confirm summary + the refusal → anchor → focus jump ─────────────────────
+
+/// A top-level section's `&'static Section` by id (its accessors). Panics only on a stable-id typo.
+fn section_by_id(id: SectionId) -> &'static Section {
+    btctax_input_form::form_spec()
+        .iter()
+        .find(|s| s.id == id)
+        .expect("section id is present in form_spec()")
+}
+
+/// The row count of a Repeating section for `ri`, via its `Repeating::len` accessor (NEVER a `ReturnInputs`
+/// leaf). `0` for a non-repeating section (defensive — callers pass repeating ids).
+fn repeating_len(ri: &ReturnInputs, id: SectionId) -> usize {
+    match section_by_id(id).kind {
+        SectionKind::Repeating { len, .. } => len(ri, &RowAddr::default()),
+        _ => 0,
+    }
+}
+
+/// Whether an OptionalSingleton section is present for `ri`, via its `present` accessor (NEVER a leaf).
+fn optional_present(ri: &ReturnInputs, id: SectionId) -> bool {
+    match section_by_id(id).kind {
+        SectionKind::OptionalSingleton { present, .. } => present(ri),
+        _ => false,
+    }
+}
+
+/// The commit modal's multi-line payload summary (Task 7): the filing status (read via the accessor, never
+/// `ri.filing_status`), the sections present (n W-2s, whether a Schedule A, n dependents — all via the
+/// engine's `Repeating::len` / `OptionalSingleton::present` accessors, never a leaf), and — when a raw
+/// `tax_profile` is shadowed (`shadows`) — the shadow + all-zero warning (§9 create-row amendment).
+pub fn commit_summary(ri: &ReturnInputs, shadows: bool) -> String {
+    let fs = filing_status_label(ri);
+    let w2s = repeating_len(ri, SectionId::W2s);
+    let deps = repeating_len(ri, SectionId::Dependents);
+    let sched_a = if optional_present(ri, SectionId::ScheduleA) {
+        "yes"
+    } else {
+        "no"
+    };
+    let mut s =
+        format!("filing status: {fs}\n{w2s} W-2(s)  ·  Schedule A: {sched_a}  ·  {deps} dependent(s)");
+    if shadows {
+        s.push_str(
+            "\n\na tax-profile estimate exists for this year — it stays saved and unused once this full \
+             return commits (your tax-profile estimate stays saved and unused). A declarations-only \
+             return (no income entered) commits \u{2248} $0.",
+        );
+    }
+    s
+}
+
+/// The outcome of [`focus_refusal`]: focus moved to an in-form anchor, or the refusal points only OUTSIDE
+/// the v1 form (a `NotInForm` note to surface), or nothing was focusable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefusalFocus {
+    /// Focus moved to the first in-form anchor (a live field/section).
+    Moved,
+    /// No in-form anchor was focusable; the refusal points outside the v1 form — surface this note.
+    NotInForm(&'static str),
+    /// Nothing to focus (no working copy; should not happen on a refused commit).
+    None,
+}
+
+/// The section shown at the TOP level for an anchor's section: a nested group maps to its parent
+/// (`W2Box12 → W2s`, `ScheduleACharitable → ScheduleA`), everything else is itself. `live_sections` never
+/// lists the two nested groups, so those anchors focus the parent that owns them.
+fn top_level_section(id: SectionId) -> SectionId {
+    match id {
+        SectionId::W2Box12 => SectionId::W2s,
+        SectionId::ScheduleACharitable => SectionId::ScheduleA,
+        other => other,
+    }
+}
+
+/// The section that OWNS a field in `form_spec()` (the section whose `fields` contains `id`), if any.
+fn owning_section_of_field(id: FieldId) -> Option<SectionId> {
+    btctax_input_form::form_spec()
+        .iter()
+        .find(|s| s.fields.iter().any(|f| f.id == id))
+        .map(|s| s.id)
+}
+
+/// Resolve an `Anchor::Section(id)` to its live-section index (mapping a nested group to its parent), or
+/// `None` when that section is not a live top-level entry for `ri`.
+fn resolve_section_anchor(ri: &ReturnInputs, id: SectionId) -> Option<usize> {
+    let top = top_level_section(id);
+    live_sections(ri).iter().position(|s| s.id == top)
+}
+
+/// Resolve an `Anchor::Field(id)` to a `(section_idx, field_focus)` in the CURRENT live layout, or `None`
+/// when the field's top-level section is not live. Prefers the field's own live index; falls back to the
+/// section (field 0) when the field itself is not currently a live field.
+fn resolve_field_anchor(ri: &ReturnInputs, id: FieldId) -> Option<(usize, usize)> {
+    let owner = owning_section_of_field(id)?;
+    let sidx = resolve_section_anchor(ri, owner)?;
+    let sections = live_sections(ri);
+    let fidx = live_fields(sections[sidx], ri)
+        .iter()
+        .position(|f| f.id == id)
+        .unwrap_or(0);
+    Some((sidx, fidx))
+}
+
+/// ★ Task 7: jump focus to the FIRST in-form anchor `attribute(reason)` names — the refused-commit remedy
+/// (SPEC §7). Sets `section_idx` + `field_focus` (clearing the row path + nested `descent`) to the first
+/// `Field`/`Section` anchor that maps to a LIVE section/field. A `NotInForm` anchor moves nothing; its note
+/// is returned so the caller surfaces it. The mutation-checked behavior: neuter the move and a refused
+/// filer is stranded on whatever field they pressed `s` from (test (a)'s focus assertion fails).
+pub fn focus_refusal(form: &mut TaxInputsFormState, reason: &RefuseReason) -> RefusalFocus {
+    // Compute the target under an immutable borrow of `working`, THEN mutate `form` (disjoint borrows).
+    let (target, not_in_form) = {
+        let Some(ri) = form.working.as_ref() else {
+            return RefusalFocus::None;
+        };
+        let mut target: Option<(usize, usize)> = None;
+        let mut note: Option<&'static str> = None;
+        for anchor in btctax_input_form::attribute(reason) {
+            match anchor {
+                Anchor::Field(id) => {
+                    if let Some(t) = resolve_field_anchor(ri, id) {
+                        target = Some(t);
+                        break;
+                    }
+                }
+                Anchor::Section(id) => {
+                    if let Some(sidx) = resolve_section_anchor(ri, id) {
+                        target = Some((sidx, 0));
+                        break;
+                    }
+                }
+                Anchor::NotInForm { note: n } => {
+                    note.get_or_insert(n);
+                }
+            }
+        }
+        (target, note)
+    };
+    match target {
+        Some((sidx, fidx)) => {
+            form.section_idx = sidx;
+            form.field_focus = fidx;
+            form.addr = RowAddr::default();
+            form.descent = None;
+            RefusalFocus::Moved
+        }
+        None => match not_in_form {
+            Some(n) => RefusalFocus::NotInForm(n),
+            None => RefusalFocus::None,
+        },
     }
 }
 

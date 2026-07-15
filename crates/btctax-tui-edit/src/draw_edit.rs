@@ -2038,6 +2038,50 @@ fn draw_tax_inputs_form(frame: &mut Frame, area: Rect, form: &TaxInputsFormState
     if form.pending_remove.is_some() {
         draw_tax_inputs_remove_modal(frame, area, form);
     }
+
+    // ★ Task 7: the commit payload-confirm, drawn ON TOP of the editing surface.
+    if form.modal.is_some() {
+        draw_tax_inputs_modal(frame, area, form);
+    }
+}
+
+/// ★ Task 7: the commit payload-confirm modal — the summary (filing status, sections present, and the
+/// shadow/all-zero warning when a tax-profile is shadowed) + the `[Enter] commit / [Esc] cancel` legend.
+/// Mirrors `draw_mutation_modal`'s centered-`Clear` shape.
+fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+    let Some(m) = form.modal.as_ref() else {
+        return;
+    };
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(
+            format!("  Commit tax inputs for {} — WRITES THE VAULT", m.year),
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+    for s in m.summary.lines() {
+        lines.push(Line::from(format!("  {s}")));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  [Enter] commit   [Esc] cancel — writes nothing",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let height = (lines.len() as u16 + 2).max(10);
+    let rect = centered_rect(70, height, area);
+    frame.render_widget(Clear, rect);
+    let p = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .title(format!(" Confirm commit for {} ", m.year))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Red)),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(p, rect);
 }
 
 /// ★ Task 5: the remove-row payload-confirm modal — names the exact row being removed ("remove W-2 #2?")

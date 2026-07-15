@@ -200,6 +200,31 @@ pub struct TaxInputsFormState {
     /// `addr = [w2_i]`) — same `form.addr`, different pane. At a nested sub-list `form.addr` is the group's
     /// PARENT path; at a nested sub-row it is that row's path (one deeper). See `edit/tax_inputs.rs`.
     pub descent: Option<btctax_input_form::SectionId>,
+    /// ★ Task 7: the COMMIT payload-confirm modal (`s`). `Some` while it is open — Enter runs `commit`,
+    /// Esc cancels (writes nothing). NESTED here (review M5), dispatched in `handle_tax_inputs_key` BEFORE
+    /// the field keymap. `s` requires `working.is_some()` (else the status "choose a filing status first").
+    pub modal: Option<TaxInputsModalState>,
+}
+
+/// ★ Task 7: the COMMIT payload-confirm modal (`s` → this → Enter runs `commit`). A NESTED field on
+/// [`TaxInputsFormState`] (`form.modal`), dispatched inside `handle_tax_inputs_key` BEFORE the field
+/// keymap — NOT a separate top-level `EditorApp` `Option` (review M5).
+///
+/// Carries the SUMMARY strings shown before the write — built once at `s`-press from the working return
+/// via the `FilingStatus` `get` ACCESSOR ([`filing_status_label`]/`commit_summary`), NEVER `ri.filing_status`
+/// (review M6 — Task 9 pins "never names a `ReturnInputs` field"). It holds no raw `ReturnInputs`: the
+/// modal's Enter re-reads (clones) the flow's live `working`, so the confirmed payload is what is on screen.
+pub struct TaxInputsModalState {
+    /// The tax year being committed.
+    pub year: i32,
+    /// The chosen filing status label (`"Single"`/`"Mfj"`/…), read via the accessor — the status message
+    /// on a clean commit ("committed {year} as {filing_status_label}").
+    pub filing_status_label: String,
+    /// The multi-line payload summary: the filing status, the sections present (n W-2s, Schedule A?, n
+    /// dependents), and — when `shadows` — the shadow + all-zero warning.
+    pub summary: String,
+    /// Whether a raw `tax_profile` is shadowed by this commit (`shadows_profile(conn, year)`).
+    pub shadows: bool,
 }
 
 /// A staged repeating-row removal awaiting its payload-confirm (Task 5). Built from the CURRENT row cursor
@@ -232,6 +257,7 @@ impl TaxInputsFormState {
             discard_offered: false,
             pending_remove: None,
             descent: None,
+            modal: None,
         }
     }
 }
@@ -258,6 +284,13 @@ fn filing_status_name(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> Opt
         Some(btctax_input_form::FieldValue::Choice(c)) => Some(c),
         _ => None,
     }
+}
+
+/// The commit modal's `filing_status_label` — the chosen filing status as its stable label, read via the
+/// [`filing_status_field`] `get` accessor, NEVER `ri.filing_status` (review M6 — spec §9A/§13; Task 9
+/// pins it). A materialized working copy always has one; the `(unset)` fallback is belt-and-suspenders.
+pub fn filing_status_label(ri: &btctax_core::tax::return_inputs::ReturnInputs) -> String {
+    filing_status_name(ri).unwrap_or_else(|| "(unset)".to_string())
 }
 
 /// Whether the Spouse section is OFFERED for this return — MFJ/MFS/QSS only (hidden on Single/HoH).

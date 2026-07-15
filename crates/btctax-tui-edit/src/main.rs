@@ -797,6 +797,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             discard_offered: false,
             pending_remove: None,
             descent: None,
+            modal: None,
         },
         Ok((btctax_cli::input_form_store::Loaded::Committed(ri), stale_note)) => TaxInputsFormState {
             year,
@@ -813,6 +814,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             discard_offered: false,
             pending_remove: None,
             descent: None,
+            modal: None,
         },
         Ok((btctax_cli::input_form_store::Loaded::Draft { ri, parked }, stale_note)) => {
             TaxInputsFormState {
@@ -830,6 +832,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 discard_offered: false,
                 pending_remove: None,
                 descent: None,
+                modal: None,
             }
         }
         Err(e @ btctax_cli::CliError::StaleParkedDraft { .. }) => {
@@ -851,6 +854,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 discard_offered: true,
                 pending_remove: None,
                 descent: None,
+                modal: None,
             }
         }
         Err(e) => {
@@ -955,6 +959,26 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
         return;
     }
 
+    // ── Commit payload-confirm modal (Task 7): `s` staged this; dispatched BEFORE the field keymap
+    //    (review M5). Enter runs the commit through the persist seam; Esc cancels (writes nothing); every
+    //    other key is swallowed (a payload-confirm, like the remove-row modal). ──
+    if app
+        .tax_inputs_form
+        .as_ref()
+        .is_some_and(|f| f.modal.is_some())
+    {
+        match key.code {
+            KeyCode::Enter => commit_tax_inputs(app),
+            KeyCode::Esc => {
+                if let Some(form) = app.tax_inputs_form.as_mut() {
+                    form.modal = None; // cancel — writes nothing
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
     let Some(form) = app.tax_inputs_form.as_mut() else {
         return;
     };
@@ -989,6 +1013,15 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
             app.status = Some(format!("tax inputs {year}: draft autosaved"));
         }
         app.tax_inputs_form = None;
+        return;
+    }
+
+    // ★ Task 7: `s` opens the commit payload-confirm modal. Handled as a pre-match block (not a `match`
+    // arm) because building the summary needs `shadows_profile`, a `app.session` read DISJOINT from the
+    // `app.tax_inputs_form` borrow (review I-1) — a whole-`self` path would collide with the live `form`
+    // borrow. `open_tax_inputs_commit_modal` requires `working.is_some()` (else it sets the status).
+    if key.code == KeyCode::Char('s') {
+        open_tax_inputs_commit_modal(app);
         return;
     }
 
@@ -1099,6 +1132,116 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
     if matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Tab) {
         flush_tax_inputs_draft(app);
     }
+}
+
+/// ★ Task 7: open the commit payload-confirm modal (`s`). Requires a materialized working copy (NI-2 — else
+/// the status "choose a filing status first"). Reads `shadows_profile` through the persist seam
+/// (`app.session` borrowed DISJOINTLY from `app.tax_inputs_form` — review I-1), then builds the summary
+/// from the working return via the `FilingStatus` `get` accessor (never `ri.filing_status` — review M6).
+fn open_tax_inputs_commit_modal(app: &mut EditorApp) {
+    let (year, has_working) = match app.tax_inputs_form.as_ref() {
+        Some(f) => (f.year, f.working.is_some()),
+        None => return,
+    };
+    if !has_working {
+        app.status = Some("choose a filing status first".to_string());
+        return;
+    }
+    // shadows_profile via the persist seam (the read surface is confined to edit/persist.rs — KAT-G1). A
+    // read error is non-fatal here — default to no-shadow; `commit` itself is the authoritative gate.
+    let shadows =
+        edit::persist::form_shadows_profile(app.session.as_ref().unwrap(), year).unwrap_or(false);
+    if let Some(form) = app.tax_inputs_form.as_mut() {
+        let ri = form.working.as_ref().unwrap();
+        let modal = crate::edit::form::TaxInputsModalState {
+            year,
+            filing_status_label: crate::edit::form::filing_status_label(ri),
+            summary: crate::edit::tax_inputs::commit_summary(ri, shadows),
+            shadows,
+        };
+        form.modal = Some(modal);
+    }
+}
+
+/// ★ Task 7: run the staged commit (the modal's Enter). Binds the bundled tables to a `let` BEFORE the
+/// per-year lookup (review M2), clones the working return OUT of the flow (disjoint from the `&mut Session`
+/// borrow — review I-1), and writes through the persist seam `edit::persist::form_commit` (NOT
+/// `input_form_store::commit` directly — the crate's store write lives ONLY in edit/persist.rs). Then
+/// dispatches the `CommitOutcome`:
+/// - `Committed` → status "committed {year} as {filing_status}"; CLOSE the flow (the draft is gone and the
+///   committed row is authoritative — reopening `T` `load`s it as `Committed`; closing subsumes clearing
+///   `dirty`).
+/// - `Refused(refusal)` → jump focus to the attributed anchor (`focus_refusal`, SPEC §7); set
+///   `form.error`/status to the refusal detail; close the modal but keep the flow open to fix it.
+/// - `NoTables` → status "year {year} has no full-return tables (2024 only)"; close the modal.
+/// - `Err(e)` → surface the save error; close the modal.
+fn commit_tax_inputs(app: &mut EditorApp) {
+    use btctax_cli::input_form_store::CommitOutcome;
+    use btctax_core::tax::tables::FullReturnTables;
+    use btctax_core::TaxTables;
+
+    // Extract the year + a CLONE of the working return (this read borrow ENDS before `app.session.as_mut()`).
+    let (year, ri) = {
+        let Some(form) = app.tax_inputs_form.as_ref() else {
+            return;
+        };
+        if form.modal.is_none() {
+            return;
+        }
+        let Some(ri) = form.working.clone() else {
+            return; // NI-2 — the modal is never opened on a None working copy
+        };
+        (form.year, ri)
+    };
+
+    // ★ M2: bind the bundle to a `let` BEFORE the per-year lookup (else a borrow of a dropped temporary).
+    let tables = btctax_adapters::BundledTaxTables::load();
+    let fr = btctax_adapters::BundledFullReturnTables::load();
+    let (table, params) = (tables.table_for(year), fr.full_return_for(year));
+
+    // Write via the persist seam (disjoint `app.session` borrow — review I-1).
+    let outcome =
+        edit::persist::form_commit(app.session.as_mut().unwrap(), year, &ri, table, params);
+
+    let status: Option<String> = match outcome {
+        Ok(CommitOutcome::Committed) => {
+            let label = app
+                .tax_inputs_form
+                .as_ref()
+                .and_then(|f| f.modal.as_ref())
+                .map(|m| m.filing_status_label.clone())
+                .unwrap_or_default();
+            app.tax_inputs_form = None; // close the flow; the committed row is authoritative
+            Some(format!("committed {year} as {label}"))
+        }
+        Ok(CommitOutcome::Refused(refusal)) => {
+            let mut msg = refusal.detail.clone();
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                // Jump focus to the attributed anchor (SPEC §7). A NotInForm-only refusal appends its note.
+                if let crate::edit::tax_inputs::RefusalFocus::NotInForm(note) =
+                    crate::edit::tax_inputs::focus_refusal(form, &refusal.reason)
+                {
+                    msg = format!("{} ({note})", refusal.detail);
+                }
+                form.error = Some(refusal.detail.clone());
+                form.modal = None; // close the confirm; keep the flow open to fix
+            }
+            Some(msg)
+        }
+        Ok(CommitOutcome::NoTables) => {
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                form.modal = None;
+            }
+            Some(format!("year {year} has no full-return tables (2024 only)"))
+        }
+        Err(e) => {
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                form.modal = None;
+            }
+            Some(format!("{e}"))
+        }
+    };
+    app.status = status;
 }
 
 // ── Classify-inbound modal handler ────────────────────────────────────────────
@@ -9595,6 +9738,187 @@ mod tests {
         assert!(
             btctax_cli::input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
             "q flushes the in-progress draft to disk before closing"
+        );
+    }
+
+    // ── Task 7: the commit flow (`s` → payload-confirm → Enter → commit) ──────────────────────────────
+
+    /// Task 7 test (a): a screen-refused return (bare `Single`, unanswered declarations) → `s` → Enter →
+    /// `Refused`. The flow JUMPS focus to the field `attribute(refusal.reason)` names (the unanswered
+    /// dependent-taxpayer declaration) and surfaces the refusal text. Mutation-checked: neuter the focus
+    /// jump in `focus_refusal` and the `focused_field` assertion fails.
+    #[test]
+    fn tax_inputs_commit_refused_jumps_focus_to_the_anchor() {
+        use btctax_input_form::FieldId;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+
+        // Materialize a bare Single (every declaration still `None`) via the flow.
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open (working None, focus FilingStatus)
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → Single (materializes)
+
+        // Before the commit, focus is on FilingStatus (section 0, field 0).
+        {
+            let form = app.tax_inputs_form.as_ref().unwrap();
+            assert_eq!(
+                crate::edit::tax_inputs::focused_field(form).unwrap().id,
+                FieldId::FilingStatus,
+                "focus starts on FilingStatus"
+            );
+        }
+
+        // `s` opens the confirm modal; Enter runs the commit → screen-refused (unanswered declarations).
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().modal.is_some(),
+            "`s` opens the commit payload-confirm modal"
+        );
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        let form = app
+            .tax_inputs_form
+            .as_ref()
+            .expect("a refused commit keeps the flow open");
+        assert!(form.modal.is_none(), "the modal closes on a refusal");
+        assert_eq!(
+            crate::edit::tax_inputs::focused_field(form).unwrap().id,
+            FieldId::DeclDependentTaxpayer,
+            "the refusal jumps focus to the attributed declaration field (attribute → anchor)"
+        );
+        assert!(
+            form.error.as_deref().is_some_and(|e| !e.is_empty()),
+            "the refusal detail is surfaced inline"
+        );
+        assert!(
+            app.status.as_deref().is_some_and(|s| !s.is_empty()),
+            "the refusal detail is also surfaced in the status"
+        );
+    }
+
+    /// Task 7 test (b): a screen-clean return (`not_a_dependent()` + `answer_all_live_declarations()`) → `s`
+    /// opens the modal NAMING the filing status → Enter → `Committed`. A fresh Session sees a committed
+    /// `return_inputs` row AND the draft is GONE. Mutation-checked: make the modal Enter skip `form_commit`
+    /// and the committed-row read-back fails.
+    #[test]
+    fn tax_inputs_commit_clean_writes_row_and_clears_draft() {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        // The plan-2 Task-4 commit fixture: not-a-dependent + every live declaration answered. Constructed
+        // directly — a TEST may name `ReturnInputs`; the FLOW never does.
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+
+        // Seed a draft on disk so the commit's draft-delete is observable, then inject the working copy.
+        btctax_cli::input_form_store::save_draft(app.session.as_mut().unwrap(), 2024, &ri).unwrap();
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.working = Some(ri);
+        form.dirty = true;
+        app.tax_inputs_form = Some(form);
+
+        // `s` opens the modal naming the filing status (read via the accessor).
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        {
+            let m = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .modal
+                .as_ref()
+                .expect("commit modal opened");
+            assert_eq!(
+                m.filing_status_label, "Single",
+                "the modal names the filing status (via the accessor, never `ri.filing_status`)"
+            );
+            assert!(m.summary.contains("Single"), "the summary names the filing status");
+        }
+
+        // Enter commits → Committed: the flow closes and the status confirms.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.tax_inputs_form.is_none(),
+            "a clean commit closes the flow"
+        );
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or_default()
+                .contains("committed 2024 as Single"),
+            "status confirms the commit: {:?}",
+            app.status
+        );
+
+        // Fresh-Session read-back: a committed row now exists AND the draft is gone.
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        match btctax_cli::input_form_store::load(sess.conn(), 2024).unwrap() {
+            (btctax_cli::input_form_store::Loaded::Committed(cri), _) => {
+                assert_eq!(
+                    cri.filing_status,
+                    FilingStatus::Single,
+                    "the committed row is the clean return"
+                );
+            }
+            _ => panic!("expected a committed return_inputs row after a clean commit"),
+        }
+        assert!(
+            !btctax_cli::input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
+            "a clean commit deletes the draft"
+        );
+    }
+
+    /// Task 7 test (c): a non-2024 year has no full-return tables → `Committed` never happens; the commit
+    /// returns `NoTables`, the flow stays open with the modal closed, the status names the 2024-only gate,
+    /// and NOTHING is written.
+    #[test]
+    fn tax_inputs_commit_non_2024_is_notables_and_writes_nothing() {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2099);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2099);
+        form.working = Some(ri);
+        app.tax_inputs_form = Some(form);
+
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        assert!(app.tax_inputs_form.as_ref().unwrap().modal.is_some());
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        let form = app
+            .tax_inputs_form
+            .as_ref()
+            .expect("NoTables keeps the flow open");
+        assert!(form.modal.is_none(), "NoTables closes the modal");
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap_or_default()
+                .contains("no full-return tables"),
+            "status names the 2024-only gate: {:?}",
+            app.status
+        );
+
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        assert!(
+            !btctax_cli::return_inputs::exists(sess.conn(), 2099).unwrap(),
+            "NoTables writes no committed row"
         );
     }
 
