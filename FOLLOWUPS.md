@@ -4,6 +4,27 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ✅ input-form engine (plan 1) — follow-up reconciliation after whole-branch review (2026-07-15)
+
+The final Fable whole-branch review (`design/input-form/reviews/WHOLE-BRANCH-fable-r1.md`, 0C/7I) triaged the
+deferred Minors below and flagged a per-phase-burndown violation (I-7). Reconciled:
+
+- **RESOLVED in whole-branch fix r1 (commit `3bebaf8`):** **(e)** ClearField→None un-answer path — now a
+  `Field.clear` closure per §5.7 M-6 (was the false-"§10" deferral = review I-1); **(b)** SecretView guarded
+  `set_masked` constructor (review I-3); **(d)** coverage KAT get→set round-trip breadth (review I-6);
+  **(k)** mask short-input full-mask (subsumed by I-3); **(f)** KAT `Some` seeds (verified done); **(g)**
+  same-kind-`None`/clear boundary now pinned; **(i)** RowAddr arity guard (verified done, was already burned
+  in Task 7); **(j)** Bool/Date kinds exercised by the KAT (verified done).
+- **RESOLVED (manifest, commit follows):** **(c)** `btctax-input-form/Cargo.toml` now self-declares
+  `rust_decimal serde-str` + `time serde-well-known` (no longer relies on feature unification).
+- **STILL OPEN — genuinely ownerless, legitimately parked (not merge-blockers):** **(h)** near-duplicate
+  `decl_tristate!`/`skippable_tristate!` macros; **(l)** coverage KAT does not assert its `EXEMPT` literals
+  are live (cosmetic dead-literal hygiene). Batch to a later cleanup pass.
+
+The individual item entries below are retained for history; their status is superseded by this banner.
+
+---
+
 ## input-form engine (plan 1) — Task-2 review Minors, filed with owning task (2026-07-14)
 
 Task-2 (seam types) review was GREEN after the one Important — the `salt_use_sales_tax` duplicate

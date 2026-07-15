@@ -11,8 +11,8 @@ categories = ["finance"]
 
 [dependencies]
 btctax-core = { path = "../btctax-core", version = "0.5.0" }
-rust_decimal = { version = "1.36", default-features = false, features = ["std"] }
-time = { version = "0.3", features = ["macros", "parsing", "formatting"] }
+rust_decimal = { version = "1.36", default-features = false, features = ["serde-str", "std"] }
+time = { version = "0.3", features = ["serde-well-known", "macros", "parsing", "formatting"] }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
