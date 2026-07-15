@@ -4,7 +4,7 @@
 #![forbid(unsafe_code)]
 
 // modules land in later tasks:
-// mod seam;      pub use seam::*;      // Task 2
+mod seam;      pub use seam::*;      // Task 2
 // mod spec;      pub use spec::*;      // Tasks 4-5
 // mod apply;     pub use apply::*;     // Task 7
 // mod parse;     pub use parse::*;     // Task 8

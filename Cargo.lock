@@ -373,7 +373,9 @@ version = "0.5.0"
 dependencies = [
  "btctax-core",
  "rust_decimal",
+ "rust_decimal_macros",
  "serde",
+ "serde_json",
  "time",
 ]
 
