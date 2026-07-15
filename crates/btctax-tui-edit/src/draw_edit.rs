@@ -2107,7 +2107,7 @@ fn draw_tax_inputs_status(frame: &mut Frame, area: Rect, form: &TaxInputsFormSta
         Span::raw("  active source: "),
         Span::styled("full return", Style::default().fg(Color::Cyan)),
         Span::styled(
-            "   [↑/↓] field · [←/→ or Tab] section · [Esc] close",
+            "   [↑/↓] field · [←/→ or Tab] section · [Esc/q] close (autosaved)",
             Style::default().fg(Color::DarkGray),
         ),
     ])];

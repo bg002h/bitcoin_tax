@@ -82,6 +82,30 @@ pub fn load_return_inputs(
     btctax_cli::input_form_store::load(session.conn(), year)
 }
 
+/// Autosave the input-form working return for `year` to the draft side-table through
+/// [`btctax_cli::input_form_store::save_draft`] — the input-form flow's WRITE side (the debounced
+/// autosave, I-7). The flow calls THIS wrapper, never `input_form_store::save_draft` directly.
+///
+/// Lives HERE, alongside [`load_return_inputs`], because the mutation surface (`Session::conn()` /
+/// `Session::save()`) is confined to this module by construction (the KAT-G1 mechanized gate). Keeping the
+/// crate's ONLY store write in `persist.rs` preserves the module invariant and gives error mapping a single
+/// home — the same discipline as the read wrapper.
+///
+/// `save_draft` preserves the row's `parked` flag (NI-1) and reaches disk via `Vault::save` (I-7 — nothing
+/// survives a crash until it returns). It returns [`btctax_cli::CliError`], NOT [`PersistError`]: it is not
+/// an append/upsert-with-`save_or_rollback` — it is a raw draft-row autosave whose failure the caller routes
+/// to `app.status` DIRECTLY (NOT `EditorApp::on_persist_error`, which is `PersistError`-only — review M1).
+///
+/// Takes `&mut Session` so the flow borrows `app.session` DISJOINTLY from `app.tax_inputs_form`
+/// (review I-1) — a whole-`self`/`&mut self` accessor would collide with the flow's live borrow.
+pub fn form_save_draft(
+    session: &mut btctax_cli::Session,
+    year: i32,
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+) -> Result<(), btctax_cli::CliError> {
+    btctax_cli::input_form_store::save_draft(session, year, ri)
+}
+
 /// Revert the in-memory DB to `pre` after a mutation-committing step failed, mapping the error:
 /// `RolledBack` if the revert succeeds, `ResidueLive` if the revert ALSO fails (residue is live).
 fn rollback(

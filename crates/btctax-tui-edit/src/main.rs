@@ -791,6 +791,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             editing: false,
             buf: crate::edit::form::FieldBuffer::new(),
             error: None,
+            dirty: false,
             parked: false,
             stale_note,
             discard_offered: false,
@@ -806,6 +807,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             editing: false,
             buf: crate::edit::form::FieldBuffer::new(),
             error: None,
+            dirty: false,
             parked: false,
             stale_note,
             discard_offered: false,
@@ -822,6 +824,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 editing: false,
                 buf: crate::edit::form::FieldBuffer::new(),
                 error: None,
+                dirty: false,
                 parked,
                 stale_note,
                 discard_offered: false,
@@ -842,6 +845,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 editing: false,
                 buf: crate::edit::form::FieldBuffer::new(),
                 error: Some(e.to_string()),
+                dirty: false,
                 parked: true,
                 stale_note: None,
                 discard_offered: true,
@@ -855,6 +859,44 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
         }
     };
     app.tax_inputs_form = Some(form);
+}
+
+/// Flush the in-progress tax-inputs working return to the draft table via [`edit::persist::form_save_draft`]
+/// (which reaches disk through `Vault::save` — I-7). The DEBOUNCED autosave: called at flush points ONLY (a
+/// section change, the editor's idle tick, the flow close, and `q`) — never per keystroke.
+///
+/// A no-op unless the flow is `dirty` AND holds a materialized `Some(ReturnInputs)`: a `None` working copy
+/// has nothing chosen yet, so it writes NO draft (NI-2). Clears `dirty` on a clean flush; on error routes the
+/// [`btctax_cli::CliError`] (NOT a `PersistError` — review M1) to `app.status` and LEAVES `dirty` set so the
+/// next flush point retries.
+///
+/// ★ I-1 (disjoint-field session access): the working `ReturnInputs` is cloned OUT of `app.tax_inputs_form`
+/// under a short read borrow that ENDS before `app.session.as_mut()` is taken, so the two field borrows
+/// never alias (a whole-`self` accessor would not compile against the flow's live borrow).
+fn flush_tax_inputs_draft(app: &mut EditorApp) {
+    let (year, ri) = {
+        let Some(form) = app.tax_inputs_form.as_ref() else {
+            return;
+        };
+        if !form.dirty {
+            return; // debounce: nothing changed since the last flush
+        }
+        let Some(ri) = form.working.clone() else {
+            return; // NI-2: no return chosen yet — autosave nothing
+        };
+        (form.year, ri)
+    };
+    match edit::persist::form_save_draft(app.session.as_mut().unwrap(), year, &ri) {
+        Ok(()) => {
+            // The draft reached disk — drop the dirty latch (the next idle tick is then a no-op).
+            if let Some(form) = app.tax_inputs_form.as_mut() {
+                form.dirty = false;
+            }
+        }
+        // ★ M1: `form_save_draft` yields a `CliError`, NOT a `PersistError` — do NOT route it through
+        // `on_persist_error`; surface it directly. `dirty` stays set so a later flush point retries.
+        Err(e) => app.status = Some(format!("{e}")),
+    }
 }
 
 /// Handle a key press while the tax-inputs flow is open (plan 3 task 2: section/field navigation).
@@ -926,11 +968,27 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
     }
 
     // Not editing: Esc backs OUT one level — leave a repeating row if inside one (pop `form.addr`), else
-    // close the whole flow.
+    // close the whole flow. Either way it is a debounce boundary → flush the draft first (Task 6, I-7).
     if key.code == KeyCode::Esc {
-        if !crate::edit::tax_inputs::leave_row(form) {
+        let left_a_row = crate::edit::tax_inputs::leave_row(form);
+        flush_tax_inputs_draft(app); // `form` borrow ended above; re-borrow `app` disjointly (I-1)
+        if !left_a_row {
             app.tax_inputs_form = None;
         }
+        return;
+    }
+
+    // ★ Task 6 (review I-3 / §9A): `q` quits the flow. The draft is autosaved, so quitting is safe — flush
+    // any pending edit to disk FIRST (so `q` never loses work), note the autosave when the flow was dirty,
+    // then close. Without this arm the flow gate silently swallows `q` (it would fall to the `_ => {}`).
+    if key.code == KeyCode::Char('q') {
+        let (was_dirty, year) = (form.dirty, form.year);
+        flush_tax_inputs_draft(app); // reaches disk; on error sets app.status (M1), leaves `dirty` set
+        if was_dirty && app.tax_inputs_form.as_ref().is_some_and(|f| !f.dirty) {
+            // the flush persisted cleanly — the draft is safe (§9A); a flush error already set app.status.
+            app.status = Some(format!("tax inputs {year}: draft autosaved"));
+        }
+        app.tax_inputs_form = None;
         return;
     }
 
@@ -1033,6 +1091,13 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
         if n > 0 {
             form.section_idx = form.section_idx.min(n - 1);
         }
+    }
+
+    // ★ Task 6 (autosave, I-7): a section change (`Left`/`Right`/`Tab`) is a debounce boundary — flush the
+    // draft to disk. Debounced: `flush_tax_inputs_draft` no-ops unless the flow is dirty with a materialized
+    // working copy. The `form` borrow above has ended, so `app` is re-borrowed disjointly (review I-1).
+    if matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Tab) {
+        flush_tax_inputs_draft(app);
     }
 }
 
@@ -9267,6 +9332,11 @@ fn run(
             if let Event::Key(key) = event::read()? {
                 handle_key(&mut app, key);
             }
+        } else {
+            // ★ Task 6 (autosave, I-7): no event within the poll window — the idle tick is a debounced
+            // autosave flush point. A no-op unless the tax-inputs flow is dirty with a materialized working
+            // copy (so `save_draft`/`Vault::save` runs on a short idle, NOT per keystroke).
+            flush_tax_inputs_draft(&mut app);
         }
     }
     Ok(())
@@ -9420,6 +9490,111 @@ mod tests {
             app.tax_inputs_form.as_ref().unwrap().field_focus,
             0,
             "field focus clamps: ReturnOptions has a single live field on a Single return"
+        );
+    }
+
+    /// Task 6 (autosave, I-7): an edit followed by a section change flushes the draft to DISK via
+    /// `save_draft` — a FRESH `Session` reopened on the same vault sees the draft row carrying the edited
+    /// value. Proves the debounced autosave reached `Vault::save`, not just the in-memory conn.
+    #[test]
+    fn tax_inputs_autosave_reaches_disk_on_section_change() {
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open the flow (working None, focus FilingStatus)
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → Single (materializes)
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle → Mfj (a distinctive, non-fresh value)
+        let expected_fs = app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .working
+            .as_ref()
+            .expect("the filing-status choice materialized the return")
+            .filing_status;
+        assert_eq!(expected_fs, FilingStatus::Mfj, "two cycles land on Mfj");
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().dirty,
+            "a successful apply marks the flow dirty"
+        );
+
+        // A section change is a debounce boundary → flush save_draft to disk, clearing dirty.
+        handle_key(&mut app, press(KeyCode::Right));
+        assert!(
+            !app.tax_inputs_form.as_ref().unwrap().dirty,
+            "the section-change flush clears dirty"
+        );
+
+        // Drop the app (releases the exclusive vault lock — VaultLock note) BEFORE reopening a fresh Session.
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        match btctax_cli::input_form_store::load(sess.conn(), 2024).unwrap() {
+            (btctax_cli::input_form_store::Loaded::Draft { ri, parked }, _note) => {
+                assert_eq!(
+                    ri.filing_status, expected_fs,
+                    "the edited value reached disk (I-7)"
+                );
+                assert!(!parked, "an autosaved WIP draft is not parked (NI-1 default)");
+            }
+            _ => panic!("expected a Draft on disk after the autosave flush"),
+        }
+    }
+
+    /// Task 6 (autosave, NI-2): a `None` working copy — nothing chosen yet — writes NO draft even when the
+    /// flow is marked dirty. Guards the `flush_tax_inputs_draft` None-skip: a `None` return is never persisted.
+    #[test]
+    fn tax_inputs_autosave_skips_a_none_working_copy() {
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        // Force the flush path to run on a None working copy: dirty = true, working = None (NI-2).
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.dirty = true;
+        assert!(form.working.is_none());
+        app.tax_inputs_form = Some(form);
+
+        handle_key(&mut app, press(KeyCode::Right)); // section change → flush attempt (must write nothing)
+
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        assert!(
+            !btctax_cli::input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
+            "a None working copy autosaves nothing (NI-2)"
+        );
+    }
+
+    /// Task 6 (review I-3 / §9A): `q` inside the flow flushes the in-progress draft to disk and CLOSES the
+    /// flow (back to Browse) — quit is safe because the draft is autosaved. It does NOT quit the whole app,
+    /// and (without this arm) the flow gate would silently swallow `q`.
+    #[test]
+    fn tax_inputs_q_flushes_draft_and_closes_flow() {
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open the flow
+        handle_key(&mut app, press(KeyCode::Char(' '))); // materialize Single (marks dirty)
+        assert!(app.tax_inputs_form.as_ref().unwrap().dirty);
+
+        handle_key(&mut app, press(KeyCode::Char('q'))); // q: flush the draft, then close the flow
+        assert!(
+            app.tax_inputs_form.is_none(),
+            "q closes the tax-inputs flow"
+        );
+        assert!(
+            !app.should_quit,
+            "q inside the flow does not quit the whole app"
+        );
+
+        // The draft was flushed to disk BEFORE the close (§9A: quit is safe).
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        assert!(
+            btctax_cli::input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
+            "q flushes the in-progress draft to disk before closing"
         );
     }
 

@@ -176,6 +176,11 @@ pub struct TaxInputsFormState {
     pub buf: FieldBuffer,
     /// Inline error surfaced under the field pane (parse/apply/store failures). `None` when clean.
     pub error: Option<String>,
+    /// ★ Task 6 (autosave, I-7): `true` after a SUCCESSFUL mutating `apply` (field/shape edit or the
+    /// filing-status materialization) and cleared when the draft is flushed to disk via `save_draft`. The
+    /// debounce latch — the flow flushes at flush points ONLY (section change, idle tick, flow close, `q`)
+    /// when this is set, NEVER per keystroke.
+    pub dirty: bool,
     /// Whether this working copy came from a PARKED committed return (NI-1). Carried across edits.
     pub parked: bool,
     /// The §6.3 stale-WIP-discard note from `load`, if any — Task 2 renders it in the status line.
@@ -221,6 +226,7 @@ impl TaxInputsFormState {
             editing: false,
             buf: FieldBuffer::new(),
             error: None,
+            dirty: false,
             parked: false,
             stale_note: None,
             discard_offered: false,

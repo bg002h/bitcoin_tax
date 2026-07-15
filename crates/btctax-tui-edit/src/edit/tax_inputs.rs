@@ -538,6 +538,9 @@ fn apply_edit(form: &mut TaxInputsFormState, edit: Edit) -> bool {
     match apply(&mut form.working, edit) {
         Ok(()) => {
             form.error = None;
+            // ★ Task 6 (autosave, I-7): a successful mutating apply marks the flow dirty; the disk flush is
+            // DEBOUNCED to the flow's flush points (section change / idle tick / flow close / `q`), never here.
+            form.dirty = true;
             clamp_focus(form);
             true
         }
