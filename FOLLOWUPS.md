@@ -4,6 +4,36 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## input-form engine (plan 1) — Task-2 review Minors, filed with owning task (2026-07-14)
+
+Task-2 (seam types) review was GREEN after the one Important — the `salt_use_sales_tax` duplicate
+`FieldId` — was folded (dropped `FieldId::SalesTaxElection`, kept `SaSaltUseSalesTax`; per Fable-blessed
+Option A; spec §5.8 amended with the "shown in ScheduleA above" dedup, mirroring `MortgageAllUsed`). Three
+Minors deferred, each to its owning task:
+
+- **(a) coverage-KAT assertion shape — owned by Task 5 (accessors + KAT).** When the coverage KAT is
+  written, assert *"every `SkippableId` maps to exactly one `FieldId` somewhere in the form"*, NOT *"the
+  SALT skippable appears in the Skippables section"* — the SALT election's FieldId is Schedule-A-owned
+  (`SaSaltUseSalesTax`), so the Skippables section is blind ×2 + DOB ×2. — OPEN, owned by **Task 5**. —
+  seam.rs `FieldId`; spec §5.6/§5.8.
+- **(b) `SecretView::Set{masked}` has no type-level "never digits" guard — owned by Task 5 (Secret
+  getters).** Today the masking invariant is convention-held (no constructor exists yet). When Task 5
+  writes the `Secret` getters, give it a stronger guarantee (e.g. a private-constructor newtype) so a
+  future caller cannot stuff raw digits into `masked`. Matches the answered-ness-by-convention pattern this
+  codebase otherwise avoids. — OPEN, owned by **Task 5**. — seam.rs `SecretView`.
+- **(c) `btctax-input-form/Cargo.toml` doesn't self-declare the serde features its wire types need — owned
+  by Task 5 (or opportunistic).** `FieldValue::Money(Usd)`/`Date` derive `Serialize`/`Deserialize` but the
+  manifest requests `rust_decimal = ["std"]` / `time = ["macros","parsing","formatting"]` — it compiles
+  only because `btctax-core` enables `serde-str`/`serde-well-known` and Cargo unifies features across the
+  shared graph (a real transitive guarantee, since the dep is unconditional). Declare them directly for
+  manifest hygiene. Low risk. — OPEN, owned by **Task 5** (or any Cargo.toml touch). — Cargo.toml:14-15.
+- **(d) `Edit`/`FieldValue` serde round-trip test covers only `Money` — owned by Task 5.** Broaden the
+  round-trip KAT to `Text`/`Bool`/`TriState`/`Date`/`Choice`/`Secret`/`SecretEntry` and `SectionId`/
+  `RowAddr` before the web renderer relies on the wire contract. Matches the brief's Step-1 test exactly,
+  so not a Task-2 failure. — OPEN, owned by **Task 5**. — seam.rs `tests::edit_roundtrips_through_json`.
+
+---
+
 ## P9 (form question registry) — deferred work, filed per `SPEC_form_questions.md` §5 step 12 (2026-07-14)
 
 Two items P9 deliberately did not do, each filed with its OWNING PHASE per the per-phase follow-up

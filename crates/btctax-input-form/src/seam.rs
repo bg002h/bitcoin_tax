@@ -47,8 +47,8 @@ pub enum FieldId {
     DeclDependentTaxpayer, DeclDependentSpouse, DeclMfsSpouseItemizes,
     DeclForeignAccounts, DeclForeignTrust, DeclHsaActivity, DeclDualStatusAlien,
     ForeignCountryNames,
-    // Skippables (from SKIPPABLE_QUESTIONS)
-    BlindTaxpayer, BlindSpouse, SalesTaxElection, DobTaxpayer, DobSpouse,
+    // Skippables (from SKIPPABLE_QUESTIONS); SALT election = SaSaltUseSalesTax in Schedule A above
+    BlindTaxpayer, BlindSpouse, DobTaxpayer, DobSpouse,
 }
 
 /// The value shape of a field.

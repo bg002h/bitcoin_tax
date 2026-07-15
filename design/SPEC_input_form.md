@@ -374,7 +374,11 @@ B 7b field — MUST be in-form so a "Yes" 7a is answerable, else commit refuses 
 with no in-form remedy)*.
 
 **`Skippables`** (synthetic, from the new core `SKIPPABLE_QUESTIONS`): `BlindTaxpayer` **Tri** (always),
-`BlindSpouse` **Tri** (spouse present), `SalesTaxElection` **Tri** (`schedule_a.is_some()`),
+`BlindSpouse` **Tri** (spouse present), `SalesTaxElection` **Tri** (`schedule_a.is_some()`) *(the
+`salt_use_sales_tax` leaf — one FieldId `SaSaltUseSalesTax`, **shown in ScheduleA above**; its backing
+`ScheduleAInputs` is deleteable, so its FieldId is Schedule-A-owned, mirroring the `MortgageAllUsed` dedup.
+The Skippables **section** shrinks to blind ×2 + DOB ×2; the coverage KAT asserts every `SkippableId` maps to
+exactly one FieldId *somewhere in the form*, not that it appears in this section)*,
 `DateOfBirthTaxpayer` **D** (always), `DateOfBirthSpouse` **D** (spouse present).
 
 **`Payments`** (singleton, `payments: Payments`) — **M** ×3: `estimated_tax_payments`, `extension_payment`,
