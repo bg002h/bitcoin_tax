@@ -107,19 +107,28 @@ pub fn standard_deduction(
 
 // ── Schedule A itemized deduction (Phase 3 task 2) ───────────────────────────────────────────────
 
+/// The INCOME-tax path of Schedule A line 5a: W-2 state/local withholding (box 17/19) + state estimated
+/// payments + a prior-year balance paid. ★ ONE derivation (Fable IMPL r3 MINOR-1): both `salt_line_5a`
+/// (when the §164(b)(5) election is off) and the `SalesTaxElectionWithoutAmount` refusal (which must know
+/// whether electing sales tax would COLLAPSE this to $0) call it, so the deducted set and the guarded set
+/// cannot drift — the "one derivation" rule §2.7 states.
+pub fn income_tax_salt(ri: &ReturnInputs, a: &crate::tax::return_inputs::ScheduleAInputs) -> Usd {
+    let w2_wh: Usd = ri
+        .w2s
+        .iter()
+        .map(|w| w.box17_state_tax_withheld + w.box19_local_tax)
+        .sum();
+    w2_wh + a.salt_state_estimated_payments + a.salt_prior_year_balance_paid
+}
+
 /// The §164(b)(5) SALT line 5a election: `true` (sales-tax path) → `salt_sales_tax_amount` ONLY; `false`
-/// (income-tax path) → W-2 state/local withholding + state estimated payments + prior-year balance paid.
-/// (A nonzero `salt_sales_tax_amount` with the election OFF is refused upstream — R3-M9.)
+/// (income-tax path) → [`income_tax_salt`]. (A nonzero `salt_sales_tax_amount` with the election OFF is
+/// refused upstream — R3-M9.)
 fn salt_line_5a(ri: &ReturnInputs, a: &crate::tax::return_inputs::ScheduleAInputs) -> Usd {
     if a.salt_use_sales_tax == Some(true) {
         a.salt_sales_tax_amount
     } else {
-        let w2_wh: Usd = ri
-            .w2s
-            .iter()
-            .map(|w| w.box17_state_tax_withheld + w.box19_local_tax)
-            .sum();
-        w2_wh + a.salt_state_estimated_payments + a.salt_prior_year_balance_paid
+        income_tax_salt(ri, a)
     }
 }
 

@@ -213,6 +213,10 @@ pub fn answer_return_inputs(
         )));
     };
 
+    // ★ r3 NIT-2 — the questions say "in this tax year" but the registry prompts are `&'static str` and
+    // cannot interpolate the year; a one-line banner anchors them so the filer need not hold it in their head.
+    writeln!(out, "Answering full-return questions for tax year {year}:")?;
+
     for ask in live_questions(&ri) {
         match ask {
             // A MANDATORY declaration — silence with nothing on file is refused, never accepted (D-8).

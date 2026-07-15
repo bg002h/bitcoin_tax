@@ -83,7 +83,9 @@ pub enum Advisory {
     /// asked, and a Schedule A exists — so SALT used income taxes. Fires on `salt_use_sales_tax.is_none()`
     /// ∧ `schedule_a.is_some()` (NOT "∧ the return itemizes", which would go silent exactly when the unasked
     /// election is what would flip the return into itemizing). Overstates tax if sales taxes are larger.
-    SalesTaxElectionNotAsked,
+    /// `itemized` records which deduction the return took, so the text does not tell a standard-deduction
+    /// filer their Schedule A "used" income taxes on a form they did not file (r3 MINOR-3, the r5 M-1 shape).
+    SalesTaxElectionNotAsked { itemized: bool },
 }
 
 /// Format a dollar amount for advisory prose: `$1,950` / `$1,234.56` — thousands-separated, and
@@ -193,13 +195,26 @@ impl Advisory {
                  `btctax income answer`: your tax is currently OVERSTATED.",
                 fmt_usd(*per_box)
             ),
-            Advisory::SalesTaxElectionNotAsked =>
-                "SALES-TAX ELECTION NOT ASKED — your Schedule A used state and local INCOME taxes, but you \
-                 were never asked whether to deduct general SALES taxes instead (§164(b)(5)). In a \
-                 no-income-tax state or a big-purchase year the sales-tax figure can be larger — and can \
-                 even flip a near-standard return into itemizing. If so, your SALT deduction is too small \
-                 and your tax is OVERSTATED. Run `btctax income answer` to choose."
-                    .to_string(),
+            // ★ r3 MINOR-3 — branch on the deduction actually taken (the r5 M-1 shape): the itemized filer
+            // filed a Schedule A that used income taxes; the standard filer filed none, so the text must not
+            // say "your Schedule A used …".
+            Advisory::SalesTaxElectionNotAsked { itemized } => {
+                if *itemized {
+                    "SALES-TAX ELECTION NOT ASKED — your Schedule A used state and local INCOME taxes, but \
+                     you were never asked whether to deduct general SALES taxes instead (§164(b)(5)). In a \
+                     no-income-tax state or a big-purchase year the sales-tax figure can be larger. If so, \
+                     your SALT deduction is too small and your tax is OVERSTATED. Run `btctax income answer` \
+                     to choose."
+                        .to_string()
+                } else {
+                    "SALES-TAX ELECTION NOT ASKED — you have Schedule A items but took the standard \
+                     deduction, and were never asked whether to deduct general SALES taxes instead of \
+                     income taxes (§164(b)(5)). In a no-income-tax state or a big-purchase year the \
+                     sales-tax figure can be larger — and could even flip this return into itemizing. If \
+                     so, your tax is OVERSTATED. Run `btctax income answer` to choose."
+                        .to_string()
+                }
+            }
         }
     }
 }
@@ -326,7 +341,9 @@ pub fn advisories(
         .as_ref()
         .is_some_and(|a| a.salt_use_sales_tax.is_none())
     {
-        out.push(Advisory::SalesTaxElectionNotAsked);
+        out.push(Advisory::SalesTaxElectionNotAsked {
+            itemized: deduction_is_itemized,
+        });
     }
 
     // FinCEN Notice 2020-2 — a declared foreign account.
@@ -848,18 +865,18 @@ mod tests {
                 false,
             )
         };
-        assert!(go(&ri).contains(&Advisory::SalesTaxElectionNotAsked));
+        assert!(go(&ri).contains(&Advisory::SalesTaxElectionNotAsked { itemized: false }));
 
         // Answered → silent.
         ri.schedule_a.as_mut().unwrap().salt_use_sales_tax = Some(false);
-        assert!(!go(&ri).contains(&Advisory::SalesTaxElectionNotAsked));
+        assert!(!go(&ri).contains(&Advisory::SalesTaxElectionNotAsked { itemized: false }));
 
         // No Schedule A → not live.
         let no_a = ReturnInputs {
             filing_status: FilingStatus::Single,
             ..Default::default()
         };
-        assert!(!go(&no_a).contains(&Advisory::SalesTaxElectionNotAsked));
+        assert!(!go(&no_a).contains(&Advisory::SalesTaxElectionNotAsked { itemized: false }));
     }
 
     /// ★ §3.4 (r5 M-1) — the message TEXT branches on the deduction actually taken: the itemized branch
@@ -904,9 +921,28 @@ mod tests {
         assert!(blind.contains("§63(f)"), "{blind}");
         assert!(blind.contains("OVERSTATED"), "{blind}");
 
-        let salt = Advisory::SalesTaxElectionNotAsked.message();
+        let salt = Advisory::SalesTaxElectionNotAsked { itemized: true }.message();
         assert!(salt.contains("§164(b)(5)") || salt.contains("sales tax"), "{salt}");
         assert!(salt.contains("OVERSTATED"), "{salt}");
         assert!(salt.contains("income answer"), "names the exit: {salt}");
+    }
+
+    /// ★ r3 MINOR-3 — the SALT advisory text branches on the deduction taken: the itemized filer's Schedule
+    /// A "used" income taxes, but the standard filer filed none, so the text must not say so (the r5 M-1
+    /// shape the sibling mixed-use advisory already honors).
+    #[test]
+    fn sales_tax_advisory_does_not_describe_a_form_the_standard_filer_did_not_file() {
+        let itemized = Advisory::SalesTaxElectionNotAsked { itemized: true }.message();
+        assert!(
+            itemized.contains("your Schedule A used"),
+            "the itemized filer DID file a Schedule A: {itemized}"
+        );
+        let standard = Advisory::SalesTaxElectionNotAsked { itemized: false }.message();
+        assert!(
+            !standard.contains("your Schedule A used"),
+            "the standard filer filed NO Schedule A — do not say it 'used' income taxes: {standard}"
+        );
+        assert!(standard.contains("standard deduction"), "{standard}");
+        assert!(standard.contains("OVERSTATED"), "{standard}");
     }
 }

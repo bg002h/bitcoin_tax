@@ -587,22 +587,19 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         // ★ P9 §2.2 (Fable r2 I-3) — the SYMMETRIC twin: the election is ON with a $0 amount, so 5a = $0,
         // while income-tax SALT (W-2 box 17/19 + estimates + prior-year balance) would otherwise be
         // deducted. The election silently collapses the whole SALT deduction — fail loud rather than lose it.
-        if a.salt_use_sales_tax == Some(true) && a.salt_sales_tax_amount == Usd::ZERO {
-            let income_tax_salt: Usd = ri
-                .w2s
-                .iter()
-                .map(|w| w.box17_state_tax_withheld + w.box19_local_tax)
-                .sum::<Usd>()
-                + a.salt_state_estimated_payments
-                + a.salt_prior_year_balance_paid;
-            if income_tax_salt > Usd::ZERO {
-                return refuse(
-                    RefuseReason::SalesTaxElectionWithoutAmount,
-                    "the §164(b)(5) sales-tax election is ON but `salt_sales_tax_amount` is $0, so Schedule \
-                     A line 5a would be $0 and your state/local income taxes (withholding, estimates) drop \
-                     out — enter the sales-tax amount, or turn the election off to deduct income taxes",
-                );
-            }
+        // ★ The income-tax SALT set is the SHARED `income_tax_salt` derivation (return_1040), not a second
+        // copy — so the guarded set cannot drift from the set `salt_line_5a` actually deducts (r3 MINOR-1).
+        if a.salt_use_sales_tax == Some(true)
+            && a.salt_sales_tax_amount == Usd::ZERO
+            && crate::tax::return_1040::income_tax_salt(ri, a) > Usd::ZERO
+        {
+            return refuse(
+                RefuseReason::SalesTaxElectionWithoutAmount,
+                "the §164(b)(5) sales-tax election is ON but `salt_sales_tax_amount` is $0, so Schedule A \
+                 line 5a would be $0 and your state/local income taxes (W-2 box 17/19 withholding, \
+                 estimates, prior-year balance) drop out — enter the amount and re-run `btctax income \
+                 import`, or run `btctax income answer` to turn the election off and deduct income taxes",
+            );
         }
     }
 
@@ -956,15 +953,18 @@ mod tests {
                 "blank {:?} must refuse with its own unanswered reason",
                 q.id
             );
-            // Answering it (n) removes ITS unanswered reason (a value-refusal on a different axis may still
-            // fire on some multi-part fixtures, so assert the specific reason is gone — not that all is well).
-            (q.set)(&mut r, false);
-            assert_ne!(
-                reason(&r),
-                Some(q.unanswered.clone()),
-                "answered {:?} must no longer fire its unanswered reason",
-                q.id
-            );
+            // ★ §3.5 mandates "answer it (n AND y)". Both answers remove ITS unanswered reason — a
+            // value-refusal on a different axis (e.g. `Some(true)` ⇒ unsupported for four of the eight) may
+            // still fire, so assert the SPECIFIC unanswered reason is gone, not that all is well (r3 NIT-1).
+            for answer in [false, true] {
+                (q.set)(&mut r, answer);
+                assert_ne!(
+                    reason(&r),
+                    Some(q.unanswered.clone()),
+                    "{:?} answered {answer} must no longer fire its unanswered reason",
+                    q.id
+                );
+            }
         }
     }
 
@@ -1613,25 +1613,49 @@ mod tests {
     /// when income-tax SALT would otherwise be deducted. The symmetric twin of `SaltSalesTaxWithoutElection`.
     #[test]
     fn sales_tax_election_without_amount_refuses() {
-        use crate::tax::return_inputs::ScheduleAInputs;
+        use crate::tax::return_inputs::{Owner, ScheduleAInputs, W2};
+        let sched = |estimated: Usd| {
+            Some(ScheduleAInputs {
+                salt_use_sales_tax: Some(true),
+                salt_sales_tax_amount: Usd::ZERO,
+                salt_state_estimated_payments: estimated,
+                ..Default::default()
+            })
+        };
+
+        // (a) the estimated-payments leg refuses…
         let mut r = ri();
-        r.schedule_a = Some(ScheduleAInputs {
-            salt_use_sales_tax: Some(true),
-            salt_sales_tax_amount: Usd::ZERO,
-            salt_state_estimated_payments: dec!(5000), // income-tax SALT that the election would ZERO out
+        r.schedule_a = sched(dec!(5000));
+        let refusal = screen_inputs(&r, &tbl(), &params()).expect("estimated-payments SALT must refuse");
+        assert_eq!(refusal.reason, RefuseReason::SalesTaxElectionWithoutAmount);
+        // ★ MINOR-2 — the detail NAMES both exits: `income import` (to enter the amount — `answer` can't
+        // capture a dollar figure) and `income answer` (to flip the skippable election off).
+        assert!(refusal.detail.contains("income import"), "{}", refusal.detail);
+        assert!(refusal.detail.contains("income answer"), "{}", refusal.detail);
+
+        // ★ MINOR-1 — the W-2 box-17/19 withholding leg, ALONE (no estimated payments). This is the most
+        // common filer shape, and it kills the mutation "drop the W-2 Σ from the income-tax-SALT set": with
+        // the leg gone, `income_tax_salt` would be $0 here and the return would compute with 5a = $0.
+        let mut w = ri();
+        w.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            box17_state_tax_withheld: dec!(4000),
             ..Default::default()
-        });
-        assert_eq!(reason(&r), Some(RefuseReason::SalesTaxElectionWithoutAmount));
+        }];
+        w.schedule_a = sched(Usd::ZERO);
+        assert_eq!(
+            reason(&w),
+            Some(RefuseReason::SalesTaxElectionWithoutAmount),
+            "W-2 state withholding ALONE must trip the collapse guard"
+        );
+
         // With a sales-tax amount → no collapse, no refusal.
         r.schedule_a.as_mut().unwrap().salt_sales_tax_amount = dec!(3000);
         assert_ne!(reason(&r), Some(RefuseReason::SalesTaxElectionWithoutAmount));
+
         // Election on, $0 amount, but NO income-tax SALT to lose → nothing collapses, so NOT this refusal.
         let mut r2 = ri();
-        r2.schedule_a = Some(ScheduleAInputs {
-            salt_use_sales_tax: Some(true),
-            salt_sales_tax_amount: Usd::ZERO,
-            ..Default::default()
-        });
+        r2.schedule_a = sched(Usd::ZERO);
         assert_ne!(reason(&r2), Some(RefuseReason::SalesTaxElectionWithoutAmount));
     }
 
