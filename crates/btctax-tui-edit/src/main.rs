@@ -795,6 +795,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             stale_note,
             discard_offered: false,
             pending_remove: None,
+            descent: None,
         },
         Ok((btctax_cli::input_form_store::Loaded::Committed(ri), stale_note)) => TaxInputsFormState {
             year,
@@ -809,6 +810,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             stale_note,
             discard_offered: false,
             pending_remove: None,
+            descent: None,
         },
         Ok((btctax_cli::input_form_store::Loaded::Draft { ri, parked }, stale_note)) => {
             TaxInputsFormState {
@@ -824,6 +826,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 stale_note,
                 discard_offered: false,
                 pending_remove: None,
+                descent: None,
             }
         }
         Err(e @ btctax_cli::CliError::StaleParkedDraft { .. }) => {
@@ -843,6 +846,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 stale_note: None,
                 discard_offered: true,
                 pending_remove: None,
+                descent: None,
             }
         }
         Err(e) => {
@@ -946,7 +950,12 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
                 crate::edit::tax_inputs::active_pane(form),
                 crate::edit::tax_inputs::Pane::RowList(_)
             ) {
+                // A row LIST (top-level rows OR a nested sub-list): enter the selected row (push its index).
                 crate::edit::tax_inputs::enter_selected_row(form);
+            } else if crate::edit::tax_inputs::on_nested_drill_entry(form) {
+                // ★ Task-5 fix: the synthetic "Box 12 entries (n) →" / "Charitable gifts (n) →" entry —
+                // DESCEND into the nested repeating group (its sub-list).
+                crate::edit::tax_inputs::enter_nested_group(form);
             } else if let Some(k) = crate::edit::tax_inputs::focused_kind(form) {
                 if crate::edit::tax_inputs::is_text_kind(k)
                     || crate::edit::tax_inputs::is_secret_kind(k)
@@ -983,6 +992,11 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
         KeyCode::Char('x') => {
             crate::edit::tax_inputs::delete_selected_section(form);
         }
+        // ★ Task-5 fix: `<` backs OUT one nested/row level (parallels Esc's `leave_row`), but never closes
+        // the flow or retreats the section — a dedicated "up one level" key for the drill-down.
+        KeyCode::Char('<') => {
+            crate::edit::tax_inputs::leave_row(form);
+        }
         // ── navigation ──
         KeyCode::Up => form.field_focus = form.field_focus.saturating_sub(1),
         KeyCode::Down if form.field_focus + 1 < n_items => {
@@ -999,7 +1013,8 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
                 form.addr = btctax_input_form::RowAddr::default();
             }
         }
-        // Right/Tab: advance the section cursor (leaving any row — the new section starts at its root).
+        // Right/Tab: advance the section cursor (leaving any row/nested group — the new section starts at
+        // its root: reset the row path, the field cursor, AND the nested-descent marker).
         KeyCode::Right | KeyCode::Tab => {
             let sel = form.section_idx.min(n_sections.saturating_sub(1));
             if sel + 1 < n_sections {
@@ -1007,6 +1022,7 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
             }
             form.field_focus = 0;
             form.addr = btctax_input_form::RowAddr::default();
+            form.descent = None;
         }
         _ => {}
     }
@@ -9749,6 +9765,248 @@ mod tests {
         assert!(
             app.tax_inputs_form.is_some(),
             "Esc on the confirm modal does NOT close the whole flow"
+        );
+    }
+
+    // ── Task-5 fix — nested-group interactive drill-down (W2Box12 / ScheduleACharitable) ───────
+
+    /// The engine's row count for a nested repeating section at an explicit PARENT address (its
+    /// `Repeating::len` accessor): `W2Box12` at `[w2_i]`, `ScheduleACharitable` at `[]`.
+    fn nested_row_count(
+        app: &EditorApp,
+        sec: btctax_input_form::SectionId,
+        parent: &btctax_input_form::RowAddr,
+    ) -> usize {
+        use btctax_input_form::SectionKind;
+        let ri = app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .working
+            .as_ref()
+            .unwrap();
+        let s = btctax_input_form::form_spec()
+            .iter()
+            .find(|s| s.id == sec)
+            .unwrap();
+        let SectionKind::Repeating { len, .. } = s.kind else {
+            panic!("{sec:?} is not repeating")
+        };
+        len(ri, parent)
+    }
+
+    /// Read a field's value via its `get` accessor at `addr` (never a leaf).
+    fn nested_get(
+        app: &EditorApp,
+        id: btctax_input_form::FieldId,
+        addr: &btctax_input_form::RowAddr,
+    ) -> Option<btctax_input_form::FieldValue> {
+        let ri = app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .working
+            .as_ref()
+            .unwrap();
+        let f = btctax_input_form::form_spec()
+            .iter()
+            .flat_map(|s| s.fields.iter())
+            .find(|f| f.id == id)
+            .unwrap();
+        (f.get)(ri, addr)
+    }
+
+    /// Drive the cursor onto the synthetic nested-group drill entry (the last field-pane item) with `Down`
+    /// keypresses, then `Enter` to drill in. Asserts the cursor actually reached the drill entry first.
+    fn drill_into_nested(app: &mut EditorApp) {
+        for _ in 0..40 {
+            if crate::edit::tax_inputs::on_nested_drill_entry(app.tax_inputs_form.as_ref().unwrap()) {
+                break;
+            }
+            handle_key(app, press(KeyCode::Down));
+        }
+        assert!(
+            crate::edit::tax_inputs::on_nested_drill_entry(app.tax_inputs_form.as_ref().unwrap()),
+            "the cursor must reach the synthetic nested-group drill entry"
+        );
+        handle_key(app, press(KeyCode::Enter));
+    }
+
+    /// (Task-5 fix, test 1) From a W-2 row, `Enter` on the synthetic "Box 12 entries →" drills into the
+    /// box-12 sub-list; `a` adds a box-12 entry (parent `[0]`); drilling into it and editing `Box12Code`="W"
+    /// and `Box12Amount`=1000 reads back via the engine `get` at DEPTH 2 `[0, 0]` — all key-driven.
+    #[test]
+    fn tax_inputs_drill_into_box12_add_and_edit_via_keys() {
+        use btctax_input_form::{FieldId, FieldValue, RowAddr, SectionId};
+        use rust_decimal_macros::dec;
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::W2s);
+        // Add a W-2 (row 0) and enter it → the W-2 row-fields pane (addr [0]).
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().addr, RowAddr(vec![0]));
+
+        // Drill into the box-12 sub-list, then add one entry (parent [0]).
+        drill_into_nested(&mut app);
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().descent,
+            Some(SectionId::W2Box12),
+            "Enter on the synthetic entry descends into the box-12 group"
+        );
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert_eq!(
+            nested_row_count(&app, SectionId::W2Box12, &RowAddr(vec![0])),
+            1,
+            "`a` in the box-12 sub-list adds an entry under W-2 [0]"
+        );
+
+        // Enter the new box-12 entry → its fields (addr [0,0]); edit Box12Code (Text) then Box12Amount (Money).
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().addr, RowAddr(vec![0, 0]));
+        // Box12Code is the first nested field (focus 0): Enter opens the buffer, type "W", Enter commits.
+        handle_key(&mut app, press(KeyCode::Enter));
+        type_str(&mut app, "W");
+        handle_key(&mut app, press(KeyCode::Enter));
+        // Down to Box12Amount, Enter, "1000", Enter.
+        handle_key(&mut app, press(KeyCode::Down));
+        handle_key(&mut app, press(KeyCode::Enter));
+        type_str(&mut app, "1000");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert_eq!(
+            nested_get(&app, FieldId::Box12Code, &RowAddr(vec![0, 0])),
+            Some(FieldValue::Text("W".into())),
+            "Box12Code committed at depth-2 [0,0]"
+        );
+        assert_eq!(
+            nested_get(&app, FieldId::Box12Amount, &RowAddr(vec![0, 0])),
+            Some(FieldValue::Money(dec!(1000))),
+            "Box12Amount committed at depth-2 [0,0]"
+        );
+        assert!(app.tax_inputs_form.as_ref().unwrap().error.is_none());
+    }
+
+    /// (Task-5 fix, test 2) In Schedule A, `Enter` on the synthetic "Charitable gifts →" drills into the
+    /// charitable sub-list (parent `[]`); `a` adds a gift; editing `CharAmount`=500 reads back at `[0]`.
+    #[test]
+    fn tax_inputs_drill_into_charitable_add_and_edit_via_keys() {
+        use btctax_input_form::{FieldId, FieldValue, RowAddr, SectionId};
+        use rust_decimal_macros::dec;
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::ScheduleA);
+        // Create Schedule A (absent by default), then drill into its charitable sub-list.
+        handle_key(&mut app, press(KeyCode::Char('c')));
+        drill_into_nested(&mut app);
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().descent,
+            Some(SectionId::ScheduleACharitable),
+            "Enter on the synthetic entry descends into the charitable group"
+        );
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        assert_eq!(
+            nested_row_count(&app, SectionId::ScheduleACharitable, &RowAddr::default()),
+            1,
+            "`a` in the charitable sub-list adds a gift under Schedule A (parent [])"
+        );
+
+        // Enter the gift (addr [0]); CharClass is field 0 (Enum), CharAmount is field 1 (Money).
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().addr, RowAddr(vec![0]));
+        handle_key(&mut app, press(KeyCode::Down)); // → CharAmount
+        handle_key(&mut app, press(KeyCode::Enter));
+        type_str(&mut app, "500");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert_eq!(
+            nested_get(&app, FieldId::CharAmount, &RowAddr(vec![0])),
+            Some(FieldValue::Money(dec!(500))),
+            "CharAmount committed at [0]"
+        );
+        assert!(app.tax_inputs_form.as_ref().unwrap().error.is_none());
+    }
+
+    /// (Task-5 fix, test 3) `d` in the box-12 sub-list stages a payload-confirm naming a box-12 entry; Enter
+    /// removes exactly the selected entry and the nested list shrinks (2 → 1).
+    #[test]
+    fn tax_inputs_d_removes_box12_entry_via_confirm() {
+        use btctax_input_form::{RowAddr, SectionId};
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::W2s);
+        handle_key(&mut app, press(KeyCode::Char('a'))); // W-2 row 0
+        handle_key(&mut app, press(KeyCode::Enter)); // enter it
+        drill_into_nested(&mut app); // → box-12 sub-list
+        handle_key(&mut app, press(KeyCode::Char('a'))); // box-12 entry 0
+        handle_key(&mut app, press(KeyCode::Char('a'))); // box-12 entry 1
+        assert_eq!(nested_row_count(&app, SectionId::W2Box12, &RowAddr(vec![0])), 2);
+
+        // Select entry 0, stage its removal — the confirm names a box-12 entry.
+        handle_key(&mut app, press(KeyCode::Up));
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        {
+            let pr = app
+                .tax_inputs_form
+                .as_ref()
+                .unwrap()
+                .pending_remove
+                .as_ref()
+                .expect("`d` stages a remove-confirm in the box-12 sub-list");
+            assert_eq!(pr.section, SectionId::W2Box12);
+            assert_eq!(pr.addr, RowAddr(vec![0, 0]), "the staged addr is depth-2 [0,0]");
+            assert!(
+                pr.label.contains("box-12 entry"),
+                "the confirm names a box-12 entry: {}",
+                pr.label
+            );
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // confirm
+        assert_eq!(
+            nested_row_count(&app, SectionId::W2Box12, &RowAddr(vec![0])),
+            1,
+            "confirming removes exactly the selected box-12 entry"
+        );
+        assert!(app
+            .tax_inputs_form
+            .as_ref()
+            .unwrap()
+            .pending_remove
+            .is_none());
+    }
+
+    /// (Task-5 fix, test 4) Back-navigation: from a box-12 sub-row the back key (`Esc`) pops to the sub-list,
+    /// and again to the W-2 row's fields (descent cleared, `addr` back to `[0]`) — no panic, flow stays open.
+    #[test]
+    fn tax_inputs_back_nav_pops_out_of_box12_no_panic() {
+        use btctax_input_form::{RowAddr, SectionId};
+        use crate::edit::tax_inputs::{active_pane, Pane};
+        let (mut app, _dir) = tax_inputs_app_on_section(SectionId::W2s);
+        handle_key(&mut app, press(KeyCode::Char('a'))); // W-2 row 0
+        handle_key(&mut app, press(KeyCode::Enter)); // enter it → addr [0]
+        drill_into_nested(&mut app); // → box-12 sub-list (descent Some, addr [0])
+        handle_key(&mut app, press(KeyCode::Char('a'))); // one entry
+        handle_key(&mut app, press(KeyCode::Enter)); // enter entry → addr [0,0]
+        assert_eq!(app.tax_inputs_form.as_ref().unwrap().addr, RowAddr(vec![0, 0]));
+        assert!(matches!(
+            active_pane(app.tax_inputs_form.as_ref().unwrap()),
+            Pane::RowFields(_)
+        ));
+
+        // Back #1: sub-row fields → sub-list (addr pops to [0], descent still the box-12 group).
+        handle_key(&mut app, press(KeyCode::Esc));
+        {
+            let form = app.tax_inputs_form.as_ref().unwrap();
+            assert_eq!(form.addr, RowAddr(vec![0]));
+            assert_eq!(form.descent, Some(SectionId::W2Box12));
+            assert!(matches!(active_pane(form), Pane::RowList(_)));
+        }
+
+        // Back #2: sub-list → the W-2 row's fields (descent cleared, addr stays [0]).
+        handle_key(&mut app, press(KeyCode::Esc));
+        {
+            let form = app.tax_inputs_form.as_ref().unwrap();
+            assert_eq!(form.addr, RowAddr(vec![0]), "back lands on the W-2 row, addr [0]");
+            assert_eq!(form.descent, None, "the descent marker is cleared");
+            assert!(matches!(active_pane(form), Pane::RowFields(_)));
+        }
+        assert!(
+            app.tax_inputs_form.is_some(),
+            "backing out of the nested group does not close the whole flow"
         );
     }
 

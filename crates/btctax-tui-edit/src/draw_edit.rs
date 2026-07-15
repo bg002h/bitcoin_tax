@@ -35,7 +35,9 @@ use crate::edit::form::{filing_status_field, live_fields, live_sections};
 use crate::editor::{EditorApp, EditorScreen};
 use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::{DisposeKind, InboundClass, OutflowClass, Persistability};
-use btctax_input_form::{FieldKind, FieldValue, RowAddr, Section, SectionKind, SecretView};
+use btctax_input_form::{
+    FieldKind, FieldValue, RowAddr, Section, SectionId, SectionKind, SecretView,
+};
 use btctax_tui::app::Tab;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -2018,20 +2020,13 @@ fn draw_tax_inputs_form(frame: &mut Frame, area: Rect, form: &TaxInputsFormState
     );
     frame.render_widget(left, left_area);
 
-    // Right pane: the selected section's field pane.
+    // Right pane: the pane the nav model projects for the current (section, addr, descent) — descending
+    // into a nested group swaps in that group's sub-list / sub-row fields and title (Task-5 fix).
     let section = sections[sel];
-    let right_lines = field_pane_lines(
-        section,
-        ri,
-        &form.addr,
-        form.field_focus,
-        form.editing,
-        form.buf.as_str(),
-        form.error.as_deref(),
-    );
+    let (pane_title, right_lines) = field_pane_lines(form, section, ri);
     let right = Paragraph::new(right_lines).block(
         Block::default()
-            .title(format!(" {} ", section.title))
+            .title(format!(" {pane_title} "))
             .borders(Borders::ALL)
             .border_style(yellow),
     );
@@ -2130,27 +2125,75 @@ fn draw_tax_inputs_status(frame: &mut Frame, area: Rect, form: &TaxInputsFormSta
     frame.render_widget(p, area);
 }
 
-/// The field-pane lines for the selected section (Task 5):
+/// The field-pane lines + title for the CURRENT pane the nav model projects (Task 5 + the Task-5-fix
+/// nested drill-down), all keyed off `edit::tax_inputs::active_pane` so the field cursor (`field_focus`)
+/// never advances off the drawn pane (the Task-2 Minor fold):
 /// - a `[create]` affordance for an ABSENT optional-singleton;
 /// - the live `Field`s as `label  [value]` for a singleton / PRESENT optional-singleton (with an `[x]
-///   delete` hint);
+///   delete` hint), PLUS a synthetic "… (n) →" drill entry when the section has a nested child;
 /// - a selectable ROW LIST for a repeating group at its container path (`addr` empty), each row with an
 ///   index and a `[a] add / [d] remove / [Enter] edit row` legend;
-/// - INSIDE a row (`addr` non-empty) that row's fields, read/written at `addr`, with a `[Left/Esc] back` hint.
+/// - INSIDE a row (`addr` non-empty) that row's fields, read/written at `addr`, with a `[Left/Esc] back`
+///   hint, PLUS the synthetic "Box 12 entries (n) →" drill entry;
+/// - DESCENDED into a nested group (`form.descent` set) that group's sub-list or a sub-row's fields.
 ///
-/// The pane drawn here matches `edit::tax_inputs::active_pane` exactly, so the field cursor (`field_focus`)
-/// never advances off the drawn pane (the Task-2 Minor fold).
+/// Returns the pane TITLE too (the nested group's title while descended, else the section's).
 fn field_pane_lines(
+    form: &TaxInputsFormState,
     section: &'static Section,
     ri: &ReturnInputs,
-    addr: &RowAddr,
-    field_focus: usize,
-    editing: bool,
-    buf: &str,
-    error: Option<&str>,
-) -> Vec<Line<'static>> {
+) -> (String, Vec<Line<'static>>) {
+    use crate::edit::tax_inputs::{active_pane, nested_section, Pane};
     let dark = Style::default().fg(Color::DarkGray);
+    let focus = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let addr = &form.addr;
+    let field_focus = form.field_focus;
+    let editing = form.editing;
+    let buf = form.buf.as_str();
+    let error = form.error.as_deref();
     let mut lines: Vec<Line> = Vec::new();
+
+    // ── DESCENDED into a nested group: render its sub-list or a sub-row's fields (Task-5 fix). ──
+    if let Some(nested_id) = form.descent {
+        let nested = nested_section(nested_id);
+        match active_pane(form) {
+            Pane::RowList(n) => {
+                if n == 0 {
+                    lines.push(Line::from(Span::styled("  (no entries yet)", dark)));
+                }
+                for i in 0..n {
+                    let is_focus = i == field_focus;
+                    let marker = if is_focus { '>' } else { ' ' };
+                    let style = if is_focus { focus } else { Style::default() };
+                    lines.push(Line::from(Span::styled(
+                        format!("{marker} #{}{}", i + 1, nested_row_preview(nested, ri, addr, i)),
+                        style,
+                    )));
+                }
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "  [a] add  [d] remove  [Enter] edit  [Left/Esc] back",
+                    dark,
+                )));
+            }
+            _ => {
+                // A nested sub-row's fields (read/written at `addr`) + a back hint.
+                if let Some(row) = addr.0.last() {
+                    lines.push(Line::from(Span::styled(
+                        format!("  {} #{}", nested.title, row + 1),
+                        dark,
+                    )));
+                }
+                push_field_lines(&mut lines, nested, ri, addr, field_focus, editing, buf);
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled("  [Left/Esc] back", dark)));
+            }
+        }
+        push_error(&mut lines, error);
+        return (nested.title.to_string(), lines);
+    }
 
     // An ABSENT optional-singleton shows a [create] affordance instead of fields.
     if let SectionKind::OptionalSingleton { present, .. } = section.kind {
@@ -2161,7 +2204,7 @@ fn field_pane_lines(
                 dark,
             )));
             push_error(&mut lines, error);
-            return lines;
+            return (section.title.to_string(), lines);
         }
     }
 
@@ -2175,13 +2218,7 @@ fn field_pane_lines(
             for i in 0..n {
                 let is_focus = i == field_focus;
                 let marker = if is_focus { '>' } else { ' ' };
-                let style = if is_focus {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
+                let style = if is_focus { focus } else { Style::default() };
                 lines.push(Line::from(Span::styled(
                     format!("{marker} #{}{}", i + 1, row_preview(section, ri, i)),
                     style,
@@ -2193,9 +2230,9 @@ fn field_pane_lines(
                 dark,
             )));
             push_error(&mut lines, error);
-            return lines;
+            return (section.title.to_string(), lines);
         }
-        // Inside a row: header + the row's fields (read/written at `addr`) + a back hint.
+        // Inside a row: header + the row's fields (read/written at `addr`) + the nested drill entry + a back hint.
         if let Some(row) = addr.0.last() {
             lines.push(Line::from(Span::styled(
                 format!("  {} #{}", section.title, row + 1),
@@ -2203,14 +2240,16 @@ fn field_pane_lines(
             )));
         }
         push_field_lines(&mut lines, section, ri, addr, field_focus, editing, buf);
+        push_nested_drill_entry(&mut lines, form, section, ri);
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("  [Left/Esc] back to rows", dark)));
         push_error(&mut lines, error);
-        return lines;
+        return (section.title.to_string(), lines);
     }
 
-    // Singleton / PRESENT optional-singleton: the live fields as `label  [value]`.
+    // Singleton / PRESENT optional-singleton: the live fields as `label  [value]` + the nested drill entry.
     push_field_lines(&mut lines, section, ri, addr, field_focus, editing, buf);
+    push_nested_drill_entry(&mut lines, form, section, ri);
     if matches!(section.kind, SectionKind::OptionalSingleton { .. }) {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
@@ -2219,7 +2258,75 @@ fn field_pane_lines(
         )));
     }
     push_error(&mut lines, error);
-    lines
+    (section.title.to_string(), lines)
+}
+
+/// Append the synthetic "Box 12 entries (n) →" / "Charitable gifts (n) →" drill entry to a parent-fields
+/// pane whose section has a nested child (Task-5 fix). It is a navigable item at index == live-field count;
+/// highlighted (yellow, bold) when the field cursor is on it — `Enter` there descends into the group.
+fn push_nested_drill_entry(
+    lines: &mut Vec<Line<'static>>,
+    form: &TaxInputsFormState,
+    section: &'static Section,
+    ri: &ReturnInputs,
+) {
+    let Some(child) = crate::edit::tax_inputs::nested_child_here(form) else {
+        return;
+    };
+    let (label, count) = nested_drill_summary(child, ri, &form.addr);
+    let on_entry = form.field_focus == live_fields(section, ri).len() && !form.editing;
+    let style = if on_entry {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Cyan)
+    };
+    lines.push(Line::from(Span::styled(
+        format!("  {label} ({count}) \u{2192}"),
+        style,
+    )));
+}
+
+/// The label + current row count for a nested group's synthetic drill entry, counted via the group's
+/// `Repeating::len` accessor at its parent address (`[w2_i]` for box-12, `[]` for charitable).
+fn nested_drill_summary(child: SectionId, ri: &ReturnInputs, parent_addr: &RowAddr) -> (&'static str, usize) {
+    let count = match crate::edit::tax_inputs::nested_section(child).kind {
+        SectionKind::Repeating { len, .. } => len(ri, parent_addr),
+        _ => 0,
+    };
+    let label = match child {
+        SectionId::W2Box12 => "Box 12 entries",
+        SectionId::ScheduleACharitable => "Charitable gifts",
+        _ => "entries",
+    };
+    (label, count)
+}
+
+/// A one-line preview for a NESTED repeating row (box-12 / charitable) at `parent_addr + [i]`: the group's
+/// first field rendered there, or empty when uninformative. Mirrors `row_preview` but at a deeper address.
+fn nested_row_preview(
+    section: &'static Section,
+    ri: &ReturnInputs,
+    parent_addr: &RowAddr,
+    i: usize,
+) -> String {
+    let mut addr = parent_addr.clone();
+    addr.0.push(i);
+    let Some(f) = section.fields.first() else {
+        return String::new();
+    };
+    match (f.get)(ri, &addr) {
+        Some(v) => {
+            let s = render_field_value(&v);
+            if s.is_empty() || s == "—" {
+                String::new()
+            } else {
+                format!("  — {s}")
+            }
+        }
+        None => String::new(),
+    }
 }
 
 /// Push the live `Field`s of `section` (read at `addr`) as `label  [value]`, the focused field highlighted.
@@ -6063,6 +6170,68 @@ mod tests {
         );
         // The selected-row marker '>' appears (row 2 is focused).
         assert!(r.contains("> #2"), "the focused row is marked");
+    }
+
+    /// Task-5 fix: inside a W-2 row the pane renders a synthetic "Box 12 entries (n) →" drill entry, and
+    /// DESCENDING (`descent = W2Box12`) swaps in the box-12 sub-list with its own add/remove/back legend and
+    /// title — so the nested group is reachable and visible, not just addressable.
+    #[test]
+    fn tax_inputs_renders_box12_drill_entry_and_nested_sublist() {
+        use crate::edit::form::{live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        apply(
+            &mut form.working,
+            Edit::AddRow {
+                section: SectionId::W2s,
+                parent: RowAddr::default(),
+            },
+        )
+        .unwrap();
+        let ri = form.working.as_ref().unwrap();
+        form.section_idx = live_sections(ri)
+            .iter()
+            .position(|s| s.id == SectionId::W2s)
+            .unwrap();
+
+        // Inside the W-2 row (addr [0], descent None): the synthetic drill entry renders.
+        form.addr = RowAddr(vec![0]);
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains("Box 12 entries (0)"),
+            "the W-2 row pane shows the synthetic box-12 drill entry"
+        );
+
+        // Descended into the box-12 group (addr [0] is the parent path): the sub-list + its legend render.
+        form.descent = Some(SectionId::W2Box12);
+        form.field_focus = 0;
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains("W-2 box 12"),
+            "the descended pane titles the nested box-12 group"
+        );
+        assert!(
+            r.contains("[a] add") && r.contains("[Left/Esc] back"),
+            "the box-12 sub-list shows the add + back legend"
+        );
     }
 
     /// Task 5: the remove-confirm modal renders the payload it will delete ("remove W-2 #1?") + its legend.

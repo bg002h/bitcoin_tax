@@ -188,6 +188,13 @@ pub struct TaxInputsFormState {
     /// confirm modal is open — Enter applies it, Esc clears it. It carries the VALIDATED row address (never
     /// a raw cursor), so a later cursor move cannot re-target the delete.
     pub pending_remove: Option<PendingRemove>,
+    /// ★ Task-5 fix (nested drill-down): `None` at a section's OWN level; `Some(nested_id)` while descended
+    /// INTO a nested repeating group (`W2Box12` under a W-2 row, `ScheduleACharitable` under Schedule A).
+    /// It is the ONE extra nav bit that disambiguates "viewing W-2 row `[w2_i]`'s fields" (descent `None`,
+    /// `addr = [w2_i]`) from "browsing the box-12 list under `[w2_i]`" (descent `Some(W2Box12)`,
+    /// `addr = [w2_i]`) — same `form.addr`, different pane. At a nested sub-list `form.addr` is the group's
+    /// PARENT path; at a nested sub-row it is that row's path (one deeper). See `edit/tax_inputs.rs`.
+    pub descent: Option<btctax_input_form::SectionId>,
 }
 
 /// A staged repeating-row removal awaiting its payload-confirm (Task 5). Built from the CURRENT row cursor
@@ -218,6 +225,7 @@ impl TaxInputsFormState {
             stale_note: None,
             discard_offered: false,
             pending_remove: None,
+            descent: None,
         }
     }
 }

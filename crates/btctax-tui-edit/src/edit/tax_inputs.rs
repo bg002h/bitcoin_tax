@@ -70,14 +70,30 @@ pub fn active_pane(form: &TaxInputsFormState) -> Pane {
     let Some(ri) = form.working.as_ref() else {
         return Pane::Fields(1); // NI-2: only the filing-status field
     };
+    // ★ Task-5 fix: a nested drill-down (`descent` set) projects the NESTED group's pane — its sub-list when
+    // `form.addr` is the parent path, or a sub-row's fields when it is one level deeper. `descent` is the
+    // extra bit that tells "box-12 list under [w2_i]" (RowList) apart from "W-2 row [w2_i] fields".
+    if let Some(nested_id) = form.descent {
+        let nested = nested_section(nested_id);
+        let SectionKind::Repeating { len, .. } = nested.kind else {
+            return Pane::Fields(0); // unreachable: descent targets are Repeating groups
+        };
+        return if form.addr.0.len() == nested_parent_depth(nested_id) {
+            Pane::RowList(len(ri, &form.addr))
+        } else {
+            Pane::RowFields(live_fields(nested, ri).len())
+        };
+    }
     let Some(section) = selected_section(ri, form.section_idx) else {
         return Pane::Fields(0);
     };
+    // A parent-fields pane with a nested child appends ONE synthetic "… (n) →" drill entry (a navigable item).
+    let synth = nested_child_here(form).is_some() as usize;
     match section.kind {
         SectionKind::Singleton => Pane::Fields(live_fields(section, ri).len()),
         SectionKind::OptionalSingleton { present, .. } => {
             if present(ri) {
-                Pane::Fields(live_fields(section, ri).len())
+                Pane::Fields(live_fields(section, ri).len() + synth)
             } else {
                 Pane::Create
             }
@@ -88,7 +104,7 @@ pub fn active_pane(form: &TaxInputsFormState) -> Pane {
             if form.addr.0.is_empty() {
                 Pane::RowList(len(ri, &RowAddr::default()))
             } else {
-                Pane::RowFields(live_fields(section, ri).len())
+                Pane::RowFields(live_fields(section, ri).len() + synth)
             }
         }
     }
@@ -108,8 +124,20 @@ pub fn focused_field(form: &TaxInputsFormState) -> Option<&'static Field> {
     let Some(ri) = form.working.as_ref() else {
         return Some(filing_status_field());
     };
+    // ★ Task-5 fix: inside a nested drill-down a focused field exists only at a sub-row (RowFields), read
+    // from the NESTED section at `form.addr`; the sub-list level has no focused field (it navigates rows).
+    if let Some(nested_id) = form.descent {
+        return match active_pane(form) {
+            Pane::RowFields(_) => live_fields(nested_section(nested_id), ri)
+                .get(form.field_focus)
+                .copied(),
+            _ => None,
+        };
+    }
     let section = selected_section(ri, form.section_idx)?;
     match active_pane(form) {
+        // The synthetic drill entry sits at index == live-field count; `.get` yields `None` there (it is
+        // not an editable field — `Enter` on it drills in instead, via `on_nested_drill_entry`).
         Pane::Fields(_) | Pane::RowFields(_) => {
             live_fields(section, ri).get(form.field_focus).copied()
         }
@@ -235,6 +263,15 @@ pub fn cycle_focused(form: &mut TaxInputsFormState) {
 /// top-level repeating section (W-2s/Dependents), one level shallower than a row of the group.
 fn selected_repeating(form: &TaxInputsFormState) -> Option<(SectionId, usize)> {
     let ri = form.working.as_ref()?;
+    // ★ Task-5 fix: inside a nested drill-down the ACTIVE repeating group is the nested section, counted at
+    // `form.addr` (its parent path). So `a`/`d` target the box-12/charitable list, NOT the parent W-2/section.
+    if let Some(nested_id) = form.descent {
+        let nested = nested_section(nested_id);
+        return match nested.kind {
+            SectionKind::Repeating { len, .. } => Some((nested.id, len(ri, &form.addr))),
+            _ => None,
+        };
+    }
     let section = selected_section(ri, form.section_idx)?;
     if let SectionKind::Repeating { len, .. } = section.kind {
         Some((section.id, len(ri, &form.addr)))
@@ -246,6 +283,11 @@ fn selected_repeating(form: &TaxInputsFormState) -> Option<(SectionId, usize)> {
 /// The selected section as an `OptionalSingleton`, with whether it is currently present.
 /// `None` when the selected section is not an optional-singleton.
 fn selected_optional(form: &TaxInputsFormState) -> Option<(SectionId, bool)> {
+    // ★ Task-5 fix: inside a nested drill-down, `c`/`x` must NOT act on the parent optional-singleton
+    // (otherwise `x` while browsing the charitable list would delete Schedule A out from under it).
+    if form.descent.is_some() {
+        return None;
+    }
     let ri = form.working.as_ref()?;
     let section = selected_section(ri, form.section_idx)?;
     if let SectionKind::OptionalSingleton { present, .. } = section.kind {
@@ -365,12 +407,114 @@ pub fn enter_selected_row(form: &mut TaxInputsFormState) {
 /// row we were in (so the caller lands back on the row list at the same row). `true` when a level was
 /// popped (there was a row to leave), `false` at the top level.
 pub fn leave_row(form: &mut TaxInputsFormState) -> bool {
+    // ★ Task-5 fix: inside a nested drill-down, back-navigation pops WITHIN the nested context first — a
+    // sub-row's fields → the sub-list (pop the row index), then the sub-list → the parent's fields (clear
+    // `descent`, land on the synthetic drill entry). Only THEN does the top-level pop/close apply.
+    if let Some(nested_id) = form.descent {
+        if form.addr.0.len() > nested_parent_depth(nested_id) {
+            let row = form.addr.0.pop().unwrap_or(0);
+            form.field_focus = row;
+        } else {
+            form.descent = None;
+            form.field_focus = parent_live_fields_len(form);
+        }
+        return true;
+    }
     if let Some(row) = form.addr.0.pop() {
         form.field_focus = row;
         true
     } else {
         false
     }
+}
+
+// ── Nested-group drill-down (Task-5 fix) ───────────────────────────────────────────────────────────────
+//
+// Two v1 groups are addressed at DEPTH 2 by the engine but are NOT top-level sections (`section_is_live`
+// skips them): `W2Box12` (a W-2's box-12 lines) and `ScheduleACharitable` (Schedule-A gifts). The filer
+// reaches them by DESCENDING from the parent's fields pane via a synthetic "… (n) →" entry. `form.descent`
+// is the one extra nav bit that disambiguates the descent from the parent's own row-fields (same `addr`).
+//
+// Address depths (confirmed against the engine's `Repeating` accessors in `sections.rs`):
+//   • `W2Box12`             — parent `[w2_i]` (depth 1); a row `[w2_i, box12_i]` (depth 2).
+//   • `ScheduleACharitable` — parent `[]` (depth 0); a gift `[charitable_i]` (depth 1).
+
+/// The nested repeating child section reachable from a parent section, if any.
+fn nested_child_of(id: SectionId) -> Option<SectionId> {
+    match id {
+        SectionId::W2s => Some(SectionId::W2Box12),
+        SectionId::ScheduleA => Some(SectionId::ScheduleACharitable),
+        _ => None,
+    }
+}
+
+/// The PARENT-address depth of a nested repeating group — the number of indices in its parent path (one
+/// less than a row's own depth). `W2Box12` sits under a W-2 row (`[w2_i]`, depth 1); `ScheduleACharitable`
+/// sits under the optional Schedule-A singleton (`[]`, depth 0).
+fn nested_parent_depth(id: SectionId) -> usize {
+    match id {
+        SectionId::W2Box12 => 1,
+        _ => 0,
+    }
+}
+
+/// Look up a nested section's `&'static Section` (its `Repeating` accessors + live fields).
+pub fn nested_section(id: SectionId) -> &'static Section {
+    btctax_input_form::form_spec()
+        .iter()
+        .find(|s| s.id == id)
+        .expect("nested section is present in form_spec()")
+}
+
+/// The nested repeating child whose synthetic "… (n) →" drill entry the CURRENT parent-fields pane carries,
+/// if any. `Some` only at the parent level (`descent == None`) when the parent is showing its OWN fields:
+/// inside a W-2 row (`W2s → W2Box12`) or a PRESENT Schedule A (`ScheduleA → ScheduleACharitable`). `None`
+/// everywhere else — a row list, a `[create]`, or already inside a nested group.
+pub fn nested_child_here(form: &TaxInputsFormState) -> Option<SectionId> {
+    if form.descent.is_some() {
+        return None;
+    }
+    let ri = form.working.as_ref()?;
+    let section = selected_section(ri, form.section_idx)?;
+    let child = nested_child_of(section.id)?;
+    let shows_fields = match section.kind {
+        SectionKind::Repeating { .. } => !form.addr.0.is_empty(), // inside a row (not the row list)
+        SectionKind::OptionalSingleton { present, .. } => present(ri),
+        _ => false,
+    };
+    shows_fields.then_some(child)
+}
+
+/// The number of live fields of the currently-selected PARENT section — the index of its synthetic drill
+/// entry (appended after the fields), and where the cursor lands when popping back out of a nested group.
+fn parent_live_fields_len(form: &TaxInputsFormState) -> usize {
+    form.working
+        .as_ref()
+        .and_then(|ri| selected_section(ri, form.section_idx).map(|s| live_fields(s, ri).len()))
+        .unwrap_or(0)
+}
+
+/// Is the field cursor on the synthetic nested-group drill entry (the last item of a parent-fields pane
+/// that has a nested child)? The gate for the drill-in key — `Enter` on "Box 12 entries (n) →" /
+/// "Charitable gifts (n) →".
+pub fn on_nested_drill_entry(form: &TaxInputsFormState) -> bool {
+    nested_child_here(form).is_some() && form.field_focus == parent_live_fields_len(form)
+}
+
+/// Drill INTO the nested repeating group whose synthetic entry the cursor is on. Sets the `descent` marker
+/// and lands on the group's sub-list — `form.addr` STAYS the parent path (`[w2_i]` for box-12, `[]` for
+/// charitable), which is exactly that group's `Repeating::len`/`add` parent. A no-op (returns `false`) off
+/// the synthetic entry — the mutation-checked guard: neuter it and no box-12/charitable entry is reachable.
+pub fn enter_nested_group(form: &mut TaxInputsFormState) -> bool {
+    if !on_nested_drill_entry(form) {
+        return false;
+    }
+    let Some(child) = nested_child_here(form) else {
+        return false;
+    };
+    form.descent = Some(child);
+    form.field_focus = 0;
+    true
 }
 
 /// The payload string the remove-confirm shows, e.g. "remove W-2 #2?".
