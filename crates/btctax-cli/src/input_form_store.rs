@@ -293,6 +293,69 @@ pub fn park_to_profile(sess: &mut Session, year: i32) -> Result<(), CliError> {
     Ok(())
 }
 
+/// The source the input form is CURRENTLY displaying/editing for `year` — the toggle's read side.
+///
+/// Mirrors `resolve.rs`'s precedence: a committed full return always wins over a `tax_profile`, which
+/// wins over nothing at all. This is a display hint for plan 3 (the TUI), not a resolver decision.
+pub enum ActiveSource {
+    FullReturn,
+    TaxProfile,
+    Neither,
+}
+
+/// Which source is active for `year`, mirroring `resolve.rs` precedence (committed full return, then
+/// `tax_profile`, then neither).
+///
+/// ★ M-5: this uses [`crate::return_inputs::exists`] (a cheap `SELECT 1`), so a schema-STALE committed
+/// row still reports `FullReturn` — that is correct, not a bug to "fix" to `get`. The stale row IS the
+/// active source (it is what shadows the `tax_profile` and what `resolve.rs` would refuse to compute
+/// from); reporting `Neither`/`TaxProfile` here would be a false display, hiding the row that is actually
+/// blocking the toggle.
+pub fn active_source(conn: &Connection, year: i32) -> Result<ActiveSource, CliError> {
+    if crate::return_inputs::exists(conn, year)? {
+        return Ok(ActiveSource::FullReturn);
+    }
+    if crate::tax_profile::years(conn)?.contains(&year) {
+        return Ok(ActiveSource::TaxProfile);
+    }
+    Ok(ActiveSource::Neither)
+}
+
+/// Whether a `tax_profile` exists for `year` — the TUI's commit-time shadow warning (§9 create-row
+/// amendment): committing a full return for a year that also has a `tax_profile` leaves the profile
+/// in place but no longer active, so the form warns before writing.
+///
+/// `tax_profile.rs` has no cheaper `exists` probe; `years(conn)?.contains(&year)` is the correct one
+/// (confirmed against current source — it does not deserialize any profile blob).
+pub fn shadows_profile(conn: &Connection, year: i32) -> Result<bool, CliError> {
+    Ok(crate::tax_profile::years(conn)?.contains(&year))
+}
+
+/// Discard the parked draft for `year` — the 'X' path (§9A/M-2), the ONLY deleter of a `parked = 1` row.
+///
+/// The TUI owns the confirmation modal; this fn is the confirmed action. It REFUSES
+/// ([`CliError::Usage`]) unless the year's draft is parked, so it can never be reached to delete a
+/// work-in-progress draft (or a year with no draft at all) behind a "discard parked draft" affordance —
+/// the parked check is the entire safety property of this function.
+///
+/// Snapshots before the delete and restores on a failed `sess.save()` (mirrors `park_to_profile`'s
+/// atomicity), so a failed discard never leaves an in-memory/disk split.
+pub fn discard_parked_draft(sess: &mut Session, year: i32) -> Result<(), CliError> {
+    if parked_flag(sess.conn(), year)? != Some(true) {
+        // never delete a WIP draft (or a non-existent one) behind this affordance
+        return Err(CliError::Usage(format!(
+            "year {year} has no parked draft to discard"
+        )));
+    }
+    let snap = sess.snapshot()?;
+    delete_draft(sess.conn(), year)?;
+    if let Err(e) = sess.save() {
+        sess.restore(&snap)?;
+        return Err(e);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,6 +596,10 @@ mod tests {
         drop(sess);
         let s2 = Session::open(&path, &pp).unwrap();
         assert!(get_draft_row(s2.conn(), 2024).unwrap().unwrap().parked);
+        assert!(
+            !crate::return_inputs::exists(s2.conn(), 2024).unwrap(),
+            "the committed-row DELETE also reached disk, not just the stash"
+        );
     }
 
     #[test]
@@ -554,6 +621,53 @@ mod tests {
             crate::return_inputs::exists(sess.conn(), 2024).unwrap(),
             "a refused park leaves the committed row"
         );
+    }
+
+    /// Mirrors `tax_profile::tests::prof()` (that fixture is private to its own module) — a minimal
+    /// well-formed `TaxProfile` sufficient to make `tax_profile::years` report the year as present.
+    fn sample_profile() -> btctax_core::TaxProfile {
+        use btctax_core::{Carryforward, TaxProfile};
+        use rust_decimal_macros::dec;
+        TaxProfile {
+            filing_status: FilingStatus::Mfj,
+            ordinary_taxable_income: dec!(120000),
+            magi_excluding_crypto: dec!(130000),
+            qualified_dividends_and_other_pref_income: dec!(0),
+            other_net_capital_gain: dec!(0),
+            capital_loss_carryforward_in: Carryforward { short: dec!(0), long: dec!(0) },
+            w2_ss_wages: dec!(0),
+            w2_medicare_wages: dec!(0),
+            schedule_c_expenses: dec!(0),
+        }
+    }
+
+    #[test]
+    fn active_source_follows_resolve_precedence() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::return_inputs::init_table(&conn).unwrap();
+        crate::tax_profile::init_table(&conn).unwrap();
+        assert!(matches!(active_source(&conn, 2024).unwrap(), ActiveSource::Neither));
+        crate::tax_profile::set(&conn, 2024, &sample_profile()).unwrap();
+        assert!(matches!(active_source(&conn, 2024).unwrap(), ActiveSource::TaxProfile));
+        assert!(shadows_profile(&conn, 2024).unwrap());
+        // committed return_inputs wins
+        crate::return_inputs::set(&conn, 2024, &ReturnInputs::default()).unwrap();
+        assert!(matches!(active_source(&conn, 2024).unwrap(), ActiveSource::FullReturn));
+    }
+
+    #[test]
+    fn discard_parked_draft_only_deletes_a_parked_row() {
+        let (_dir, path, pp) = tmp_vault();
+        let mut sess = Session::open(&path, &pp).unwrap();
+        let ri = ReturnInputs { filing_status: FilingStatus::Single, ..Default::default() };
+        // a WIP draft is NOT discardable via this path
+        set_draft_row(sess.conn(), 2024, &ri, false).unwrap();
+        assert!(discard_parked_draft(&mut sess, 2024).is_err(), "won't delete a WIP behind 'discard parked'");
+        assert!(draft_exists(sess.conn(), 2024).unwrap());
+        // a parked draft IS discardable
+        set_draft_row(sess.conn(), 2024, &ri, true).unwrap();
+        discard_parked_draft(&mut sess, 2024).unwrap();
+        assert!(!draft_exists(sess.conn(), 2024).unwrap());
     }
 
     #[test]
