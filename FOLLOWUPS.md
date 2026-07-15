@@ -4,6 +4,35 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## input-form PLAN 2 (persistence) — whole-branch review carry-forwards (2026-07-15)
+
+The Fable plan-2 whole-branch review (`design/input-form/reviews/WHOLE-BRANCH-P2-fable-r1.md`, 0C/3I) —
+the 3 Importants (I-1 load StaleNote, I-2 delete_draft pub(crate), I-3 commit per-year I-11 gate) are folded
+in fix r1. Deferred Minors/Nits, each with owner:
+
+- **(P2-a) stale-PARKED remedy chain is two-hop; discard must be reachable when `load` errors — owned by
+  PLAN 3.** A stale parked draft surfaces `ParkedDraftBlocksWrite` from a committed-row writer, but both its
+  named exits are unexecutable for the stale case ('use full return' → `load` refuses `StaleParkedDraft`
+  first; 'discard' lives inside a form that may not open). PLAN 3 MUST make the 'X' discard-parked affordance
+  reachable when `load` returns `StaleParkedDraft` (else a stale parked draft is undiscardable in-app).
+  Optionally, `coherence_clear_or_refuse` could check `schema_version` and emit `StaleParkedDraft` directly.
+  — OPEN, owned by **PLAN 3**. — input_form_store.rs load/coherence.
+- **(P2-b) `draft_exists` swallows real DB errors — ownerless cleanup.** `.is_ok()` maps a genuine rusqlite
+  failure to `false` (a hidden affordance) instead of `Err`; fix to `.optional()?` like `parked_flag` /
+  `return_inputs::exists`. — OPEN, ownerless. — input_form_store.rs `draft_exists`.
+- **(P2-c) `save_draft` silently overwrites/heals a STALE parked draft — ownerless hardening.** `parked_flag`
+  ignores `schema_version`; a version check on the parked path would hold §6.3 by construction. Unreachable
+  via the intended flow (`load` refuses first), so caller-convention-held today. — OPEN, ownerless.
+- **(P2-d) post-snapshot/pre-save errors don't `restore` in commit/park/discard — ownerless hardening.**
+  Disk is safe (save never ran), but restoring on ANY post-snapshot `Err` makes the fns fully transactional
+  (double-fault territory otherwise). — OPEN, ownerless. — input_form_store.rs commit/park/discard.
+- **(P2-Nits) ownerless polish:** park clean-state gate `== Some(false)` → `.is_some()` (closes the
+  parked-overwrite corner for free); latch both errors when `restore` itself fails; `discard_parked_draft`
+  refuse message is slightly off for the WIP case; a one-line comment on why `save_draft` omits snapshot/
+  restore (plan-blessed, behaviorally right). — OPEN, ownerless.
+
+---
+
 ## ✅ input-form engine (plan 1) — follow-up reconciliation after whole-branch review (2026-07-15)
 
 The final Fable whole-branch review (`design/input-form/reviews/WHOLE-BRANCH-fable-r1.md`, 0C/7I) triaged the
