@@ -887,6 +887,20 @@ mod tests {
     }
 
     #[test]
+    fn itemize_election_live_only_with_schedule_a_i5() {
+        // ★ I-5 (spec §5.8): the election is live ONLY with a Schedule A. This pins the liveness metadata so
+        // a mutation back to `|_| true` cannot silently re-open the $0-deduction ForceItemize hazard.
+        let opts = section(SectionId::ReturnOptions);
+        let f = opts.fields.iter().find(|f| f.id == FieldId::ItemizeElection).unwrap();
+        let mut ri = fresh_single();
+        assert!(!(f.live)(&ri), "I-5: ItemizeElection not live without a Schedule A");
+        let sa = section(SectionId::ScheduleA);
+        let SectionKind::OptionalSingleton { create, .. } = sa.kind else { panic!() };
+        (create)(&mut ri);
+        assert!((f.live)(&ri), "I-5: ItemizeElection live once a Schedule A exists");
+    }
+
+    #[test]
     fn singleton_and_optional_singleton_get_set_spotcheck() {
         let mut ri = fresh_single();
         // ReturnOptions singleton: FilingStatus enum roundtrip + wrong-choice rejection.
