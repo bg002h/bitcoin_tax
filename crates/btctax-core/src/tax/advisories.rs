@@ -73,6 +73,17 @@ pub enum Advisory {
     /// which deduction the return actually took, so the text does not describe a form the filer did not file
     /// (r5 M-1).
     MixedUseMortgageNotAllocated { forgone_interest: Usd, itemized: bool },
+    /// ★ §63(f) (P9 §2.2 / §3.4): a person's blindness was never declared, so the additional standard
+    /// deduction for blindness was NOT granted. Fires on `blind.is_none()` (never asked) — never on
+    /// `Some(false)`. `persons` counts the taxpayer's box plus, ON MFJ ONLY, the spouse's (an absent MFJ
+    /// spouse forfeits too; MFS never counts the spouse). Same statute, dollars and worksheet line as the
+    /// aged box (`AgedBoxForfeitedNoDob`), and the two STACK. Overstates tax if anyone is blind.
+    BlindBoxForfeitedNotDeclared { per_box: Usd, persons: usize },
+    /// ★ §164(b)(5) (P9 §2.2 / §3.4, r5 Nit-3): the sales-tax-instead-of-income-tax election was never
+    /// asked, and a Schedule A exists — so SALT used income taxes. Fires on `salt_use_sales_tax.is_none()`
+    /// ∧ `schedule_a.is_some()` (NOT "∧ the return itemizes", which would go silent exactly when the unasked
+    /// election is what would flip the return into itemizing). Overstates tax if sales taxes are larger.
+    SalesTaxElectionNotAsked,
 }
 
 /// Format a dollar amount for advisory prose: `$1,950` / `$1,234.56` — thousands-separated, and
@@ -175,6 +186,20 @@ impl Advisory {
                     )
                 }
             }
+            Advisory::BlindBoxForfeitedNotDeclared { per_box, persons } => format!(
+                "BLINDNESS NOT DECLARED — the §63(f) additional standard deduction for blindness ({} per \
+                 box) was NOT granted for {persons} person(s) whose blindness was never stated (v1 never \
+                 assumes it). It STACKS with the age-65+ box. If you (or your spouse) are legally blind, run \
+                 `btctax income answer`: your tax is currently OVERSTATED.",
+                fmt_usd(*per_box)
+            ),
+            Advisory::SalesTaxElectionNotAsked =>
+                "SALES-TAX ELECTION NOT ASKED — your Schedule A used state and local INCOME taxes, but you \
+                 were never asked whether to deduct general SALES taxes instead (§164(b)(5)). In a \
+                 no-income-tax state or a big-purchase year the sales-tax figure can be larger — and can \
+                 even flip a near-standard return into itemizing. If so, your SALT deduction is too small \
+                 and your tax is OVERSTATED. Run `btctax income answer` to choose."
+                    .to_string(),
         }
     }
 }
@@ -264,6 +289,24 @@ pub fn advisories(
         out.push(Advisory::AgedBoxForfeitedNoDob { per_box });
     }
 
+    // ★ §63(f) BLINDNESS forgone (P9 §2.2) — same statute, rate and worksheet line as the aged box, and it
+    // STACKS. Fires on `blind.is_none()` (never asked), never on `Some(false)`, counting the spouse box only
+    // on MFJ (an ABSENT MFJ spouse forfeits too; MFS never counts the spouse — mirrors `AgedBlindBoxes`).
+    let taxpayer_no_blind = ri.header.taxpayer.blind.is_none();
+    let spouse_blind_on_file = ri
+        .header
+        .spouse
+        .as_ref()
+        .is_some_and(|s| s.blind.is_some());
+    let spouse_no_blind = ri.filing_status == FilingStatus::Mfj && !spouse_blind_on_file;
+    let blind_persons = usize::from(taxpayer_no_blind) + usize::from(spouse_no_blind);
+    if blind_persons > 0 {
+        out.push(Advisory::BlindBoxForfeitedNotDeclared {
+            per_box,
+            persons: blind_persons,
+        });
+    }
+
     // ★ §2.7 / §3.4 — a declared MIXED-USE mortgage forgoes the interest v1 cannot allocate. The single
     // `mixed_use_mortgage_forgone` derivation decides liveness AND the ceiling (the same one that zeroed 8a
     // and checked the box); the text branches on the deduction the return actually took. Fires on the
@@ -273,6 +316,17 @@ pub fn advisories(
             forgone_interest,
             itemized: deduction_is_itemized,
         });
+    }
+
+    // ★ §164(b)(5) sales-tax election never asked (P9 §2.2, r5 Nit-3) — fires on `None` ∧ a Schedule A
+    // exists, NOT "∧ the return itemizes": the unasked election can be exactly what would FLIP a
+    // near-standard return into itemizing, and scoping by "itemizes" goes silent in that case.
+    if ri
+        .schedule_a
+        .as_ref()
+        .is_some_and(|a| a.salt_use_sales_tax.is_none())
+    {
+        out.push(Advisory::SalesTaxElectionNotAsked);
     }
 
     // FinCEN Notice 2020-2 — a declared foreign account.
@@ -383,6 +437,7 @@ mod tests {
             ..Default::default()
         };
         ri.header.taxpayer.date_of_birth = Some(time::macros::date!(1980 - 01 - 01));
+        ri.header.taxpayer.blind = Some(false); // a truly clean return has ANSWERED blindness, so no §63(f) blind note
         let got = advisories(
             &ri,
             &LedgerState::default(),
@@ -405,7 +460,9 @@ mod tests {
             ..Default::default()
         };
         ri.header.dependents = vec![Dependent::default(), Dependent::default()];
-        // taxpayer.date_of_birth defaults to None → aged box forfeited.
+        // taxpayer.date_of_birth defaults to None → aged box forfeited. Blindness IS declared here so the
+        // vector stays focused on the aged/CTC/EIC omissions this test is about (the blind note has its own).
+        ri.header.taxpayer.blind = Some(false);
         let got = advisories(
             &ri,
             &LedgerState::default(),
@@ -714,6 +771,97 @@ mod tests {
         assert!(quiet(&no_sched_a), "no Schedule A");
     }
 
+    /// ★ P9 §2.2/§3.4 — §63(f) BLINDNESS forgone. Fires on `None` (never asked), never on `Some(false)`;
+    /// counts the spouse box only on MFJ (mirrors `AgedBlindBoxes::for_return` — MFS never counts the
+    /// spouse, and an ABSENT MFJ spouse still forfeits). Same statute/dollars as the aged box; they STACK.
+    #[test]
+    fn blind_advisory_counts_taxpayer_and_mfj_spouse_and_fires_on_none() {
+        let dob = time::macros::date!(1980 - 01 - 01); // suppresses the aged advisory
+        let go = |ri: &ReturnInputs| {
+            advisories(
+                ri,
+                &LedgerState::default(),
+                dec!(150000),
+                dec!(150000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+        };
+        let has_blind = |ri: &ReturnInputs, per_box, persons| {
+            go(ri).contains(&Advisory::BlindBoxForfeitedNotDeclared { per_box, persons })
+        };
+
+        // Single, blindness unasked → persons = 1, unmarried rate.
+        let mut single = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        single.header.taxpayer.date_of_birth = Some(dob);
+        assert!(has_blind(&single, dec!(1950), 1));
+
+        // Declared NOT blind → the advisory is silent (fires on None, not Some(false)).
+        let mut declared = single.clone();
+        declared.header.taxpayer.blind = Some(false);
+        assert!(
+            !go(&declared)
+                .iter()
+                .any(|a| matches!(a, Advisory::BlindBoxForfeitedNotDeclared { .. })),
+            "declared-not-blind must be silent"
+        );
+
+        // MFJ, taxpayer blindness unasked + spouse ABSENT → persons = 2, married rate.
+        let mut mfj = ReturnInputs {
+            filing_status: FilingStatus::Mfj,
+            ..Default::default()
+        };
+        mfj.header.taxpayer.date_of_birth = Some(dob);
+        assert!(has_blind(&mfj, dec!(1550), 2), "MFJ absent spouse forfeits too");
+
+        // MFS never counts the spouse box, even with a spouse Person present → persons = 1.
+        let mut mfs = ReturnInputs {
+            filing_status: FilingStatus::Mfs,
+            ..Default::default()
+        };
+        mfs.header.taxpayer.date_of_birth = Some(dob);
+        mfs.header.spouse = Some(Default::default());
+        assert!(has_blind(&mfs, dec!(1550), 1), "MFS: spouse box is not this filer's");
+    }
+
+    /// ★ §2.2/§3.4 (r5 Nit-3) — the §164(b)(5) sales-tax election was never asked. Fires on `None` ∧ a
+    /// Schedule A EXISTS — NOT "∧ the return itemizes", which would go silent exactly when the unasked
+    /// election is what would flip the return into itemizing.
+    #[test]
+    fn sales_tax_election_advisory_fires_on_none_with_a_schedule_a() {
+        // Acquisition-only mortgage (no mixed-use advisory), Schedule A present, SALT election unasked.
+        let mut ri = mixed_use_ri(Some(true), dec!(1));
+        let go = |ri: &ReturnInputs| {
+            advisories(
+                ri,
+                &LedgerState::default(),
+                dec!(150000),
+                dec!(150000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+        };
+        assert!(go(&ri).contains(&Advisory::SalesTaxElectionNotAsked));
+
+        // Answered → silent.
+        ri.schedule_a.as_mut().unwrap().salt_use_sales_tax = Some(false);
+        assert!(!go(&ri).contains(&Advisory::SalesTaxElectionNotAsked));
+
+        // No Schedule A → not live.
+        let no_a = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        assert!(!go(&no_a).contains(&Advisory::SalesTaxElectionNotAsked));
+    }
+
     /// ★ §3.4 (r5 M-1) — the message TEXT branches on the deduction actually taken: the itemized branch
     /// names the Schedule A the filer filed; the standard branch must NOT describe a form they did not file.
     /// Both name the ceiling as "up to {forgone}", never as "the amount you lost".
@@ -741,5 +889,24 @@ mod tests {
             !standard.contains("Your Schedule A claimed"),
             "the standard branch must not describe a form the filer did not file: {standard}"
         );
+    }
+
+    /// The two new class-(B) advisories name the direction of the error (OVERSTATED) and, for the blind box,
+    /// the forfeited per-box amount (thousands-separated, like every printed figure).
+    #[test]
+    fn blind_and_sales_tax_advisories_name_the_stakes() {
+        let blind = Advisory::BlindBoxForfeitedNotDeclared {
+            per_box: dec!(1950),
+            persons: 1,
+        }
+        .message();
+        assert!(blind.contains("$1,950"), "thousands-separated: {blind}");
+        assert!(blind.contains("§63(f)"), "{blind}");
+        assert!(blind.contains("OVERSTATED"), "{blind}");
+
+        let salt = Advisory::SalesTaxElectionNotAsked.message();
+        assert!(salt.contains("§164(b)(5)") || salt.contains("sales tax"), "{salt}");
+        assert!(salt.contains("OVERSTATED"), "{salt}");
+        assert!(salt.contains("income answer"), "names the exit: {salt}");
     }
 }

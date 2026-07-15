@@ -1800,8 +1800,8 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
 
     // (d) `income answer` is the way out. `income answer` now asks FIVE mandatory declarations in
     // registry order (dependent-taxpayer, foreign-accounts, foreign-trust, HSA-activity, dual-status) —
-    // "n" to each — then Enter to skip the (skippable) date of birth.
-    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\n\n";
+    // "n" to each — then Enter to skip the two always-live skippables (date of birth, then §63(f) blindness).
+    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(&vault, &pp(), 2024, &mut keystrokes, &mut screen).unwrap();
     let screen = String::from_utf8(screen).unwrap();
