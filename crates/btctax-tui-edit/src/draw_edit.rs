@@ -6384,6 +6384,297 @@ mod tests {
         );
     }
 
+    // ── Task 9: §9A/§10 snapshot + KAT coverage sweep ───────────────────────────────────────────────────
+    //
+    // §10 KAT #1 (empty year) is already pinned above as a named §9A KAT by
+    // `tax_inputs_renders_only_filing_status_when_fresh` — no new test needed.
+
+    /// §10 KAT #2: a two-W-2 MFJ return, built via `apply` edits (Mfj + two `AddRow{W2s}` + Box-1 wages on
+    /// each row — never a direct `ReturnInputs` construction, per NI-2). The render shows BOTH W-2 rows
+    /// (the row list at the W2s section), the MFJ filing status, and the Spouse section now present in the
+    /// left pane (hidden on Single — `tax_inputs_lists_live_sections_for_single_return`).
+    #[test]
+    fn tax_inputs_two_w2_mfj_return_renders_rows_status_and_spouse() {
+        use crate::edit::form::{live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Mfj".into()),
+            },
+        )
+        .unwrap();
+        for _ in 0..2 {
+            apply(
+                &mut form.working,
+                Edit::AddRow {
+                    section: SectionId::W2s,
+                    parent: RowAddr::default(),
+                },
+            )
+            .unwrap();
+        }
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::Box1Wages,
+                addr: RowAddr(vec![0]),
+                value: FieldValue::Money(dec!(60000)),
+            },
+        )
+        .unwrap();
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::Box1Wages,
+                addr: RowAddr(vec![1]),
+                value: FieldValue::Money(dec!(45000)),
+            },
+        )
+        .unwrap();
+
+        // Both box-1 values round-trip through the `get` accessor (never a leaf) — proves the `apply`
+        // edits landed on the RIGHT rows.
+        let ri = form.working.as_ref().unwrap();
+        let box1 = btctax_input_form::form_spec()
+            .iter()
+            .find(|s| s.id == SectionId::W2s)
+            .unwrap()
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::Box1Wages)
+            .unwrap();
+        assert_eq!(
+            (box1.get)(ri, &RowAddr(vec![0])),
+            Some(FieldValue::Money(dec!(60000))),
+            "row 0's box-1 wages"
+        );
+        assert_eq!(
+            (box1.get)(ri, &RowAddr(vec![1])),
+            Some(FieldValue::Money(dec!(45000))),
+            "row 1's box-1 wages"
+        );
+
+        // Render 1 (ReturnOptions selected, the default `section_idx = 0`): the MFJ filing status renders,
+        // and the left pane now lists Spouse (hidden on Single).
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(r.contains("[Mfj]"), "the filing-status value renders as Mfj");
+        assert!(
+            r.contains("Spouse"),
+            "MFJ offers the Spouse section (hidden on Single)"
+        );
+
+        // Render 2: select the W2s section — both rows appear in the row list.
+        form.section_idx = live_sections(ri)
+            .iter()
+            .position(|s| s.id == SectionId::W2s)
+            .unwrap();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(r.contains("#1"), "the first W-2 row renders");
+        assert!(r.contains("#2"), "the second W-2 row renders");
+    }
+
+    /// §10 KAT #4: the commit payload-confirm modal RENDERS the filing status + the full payload summary
+    /// (n W-2s, Schedule A yes/no, n dependents) — Task 7 built the modal (key-driven tests pin its
+    /// behavior), but no render-layer snapshot pinned its ON-SCREEN content until now. The summary comes
+    /// from the real `commit_summary` pipeline (built off a real `apply`-constructed return), not a
+    /// fabricated string.
+    #[test]
+    fn tax_inputs_commit_modal_renders_filing_status_and_summary() {
+        use crate::edit::form::{TaxInputsFormState, TaxInputsModalKind, TaxInputsModalState};
+        use crate::edit::tax_inputs::commit_summary;
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        for _ in 0..2 {
+            apply(
+                &mut form.working,
+                Edit::AddRow {
+                    section: SectionId::W2s,
+                    parent: RowAddr::default(),
+                },
+            )
+            .unwrap();
+        }
+        let ri = form.working.as_ref().unwrap();
+        let summary = commit_summary(ri, false);
+        form.modal = Some(TaxInputsModalState {
+            kind: TaxInputsModalKind::Commit,
+            year: 2024,
+            filing_status_label: "Single".to_string(),
+            summary,
+            shadows: false,
+        });
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains("Confirm commit for 2024"),
+            "the modal title names the year"
+        );
+        assert!(
+            r.contains("filing status: Single"),
+            "the modal names the filing status"
+        );
+        assert!(r.contains("2 W-2(s)"), "the modal names the W-2 count");
+        assert!(
+            r.contains("Schedule A: no"),
+            "the modal names Schedule A absence"
+        );
+        assert!(
+            r.contains("[Enter] commit") && r.contains("[Esc] cancel"),
+            "the modal shows its commit/cancel legend"
+        );
+    }
+
+    /// §10 KAT #7 (★ spec §9A/§13): the renderer NEVER names a `ReturnInputs` field — a rendered field
+    /// shows the `FormSpec` `Field.label`, never a struct field name. `AddrStreet`'s struct field is
+    /// `header.address_street`; its label is "Street address" — the render must show the label text and
+    /// never the raw struct-field name.
+    #[test]
+    fn tax_inputs_render_uses_field_label_never_a_struct_field_name() {
+        use crate::edit::form::{live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        let ri = form.working.as_ref().unwrap();
+        form.section_idx = live_sections(ri)
+            .iter()
+            .position(|s| s.id == SectionId::Address)
+            .unwrap();
+
+        let field = btctax_input_form::form_spec()
+            .iter()
+            .find(|s| s.id == SectionId::Address)
+            .unwrap()
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::AddrStreet)
+            .unwrap();
+        assert_eq!(
+            field.label, "Street address",
+            "sanity: the label text the render must show"
+        );
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains(field.label),
+            "the rendered field shows the FormSpec `Field.label`"
+        );
+        assert!(
+            !r.contains("address_street"),
+            "the renderer must never name the ReturnInputs struct field"
+        );
+    }
+
+    /// §10 KAT #7, mechanized half: a permanent regression scanner over this file's own non-test source —
+    /// every `draw_tax_inputs_*` fn (and its helpers, which all share the `ri: &ReturnInputs` parameter
+    /// name in this file) reads ONLY through `form_spec()` accessors (`Field::get`/`Section::kind`), never
+    /// a bare `ri.<field>` struct access. Self-checks the scanner FIRST (a planted violation must be
+    /// caught; a lookalike identifier — `bri.get()` — must not be a false positive), then scans the real
+    /// file. Zero hits today; a future direct-field regression trips this.
+    #[test]
+    fn tax_inputs_render_never_reads_a_bare_return_inputs_field() {
+        fn strip_comment(line: &str) -> &str {
+            match line.find("//") {
+                Some(idx) => &line[..idx],
+                None => line,
+            }
+        }
+        fn bare_ri_field_hits(content: &str) -> Vec<(usize, String)> {
+            let mut hits = Vec::new();
+            for (n, raw) in content.lines().enumerate() {
+                let line = strip_comment(raw);
+                let bytes = line.as_bytes();
+                let mut i = 0;
+                while let Some(rel) = line[i..].find("ri.") {
+                    let idx = i + rel;
+                    let prev_is_ident = idx > 0 && {
+                        let c = bytes[idx - 1] as char;
+                        c.is_ascii_alphanumeric() || c == '_'
+                    };
+                    if !prev_is_ident {
+                        hits.push((n + 1, raw.to_string()));
+                        break;
+                    }
+                    i = idx + 3;
+                }
+            }
+            hits
+        }
+
+        // ── Self-check FIRST: the scanner must catch a planted bare `ri.` access, and must NOT flag a
+        //    lookalike identifier that merely ENDS in "ri" (`bri.get()`) ──
+        let planted = "fn bad(ri: &ReturnInputs) -> Usd {\n    ri.filing_status\n}\n\
+                        fn fine(bri: &Thing) {\n    bri.get();\n}\n";
+        let self_check = bare_ri_field_hits(planted);
+        assert_eq!(
+            self_check.len(),
+            1,
+            "self-check FAILED: scanner must catch exactly the planted bare `ri.` access — gate is broken: {self_check:?}"
+        );
+
+        // ── The real scan: this file's own non-test region ──
+        let path = {
+            let manifest = std::env::var("CARGO_MANIFEST_DIR")
+                .expect("CARGO_MANIFEST_DIR must be set in tests");
+            std::path::PathBuf::from(manifest)
+                .join("src")
+                .join("draw_edit.rs")
+        };
+        let content = std::fs::read_to_string(&path).expect("must read draw_edit.rs");
+        let non_test = match content.find("#[cfg(test)]") {
+            Some(pos) => &content[..pos],
+            None => content.as_str(),
+        };
+        let hits = bare_ri_field_hits(non_test);
+        assert!(
+            hits.is_empty(),
+            "draw_edit.rs must never read a bare `ri.<field>` — only `form_spec()` accessors \
+             (Field::get / Section::kind); the renderer never names a ReturnInputs field (§9A/§13). \
+             Violations: {hits:?}"
+        );
+    }
+
     // ── EDITOR marker in Browse screen ───────────────────────────────────────
 
     #[test]
