@@ -1,11 +1,10 @@
 //! Per-year `return_inputs_draft(year, inputs_json, schema_version, parked)` side-table — the input form's
 //! crash-recovery scratch, INVISIBLE to `resolve.rs`. `parked = 1` marks a parked committed return (C-1).
 //!
-//! Plan-2 task 1 built the table + low-level row I/O; task 2 adds `save_draft` (the autosave primitive).
-//! `set_draft_row`/`parked_flag` now have a non-test caller (`save_draft`), so they carry no `dead_code`
-//! allow. `DraftRow`/`get_draft_row` are still only read by tests (task 3's `load` is their first non-test
-//! consumer), so they each carry a per-item `#[allow(dead_code)]` until then — per the codebase's per-item
-//! convention (see `tests/fixtures.rs`), not a broad module-level allow.
+//! Plan-2 task 1 built the table + low-level row I/O; task 2 added `save_draft` (the autosave primitive);
+//! task 3 adds `load` (the read path: draft ⇒ committed ⇒ fresh, with the §6.3 stale split). Every low-level
+//! item now has a non-test caller — `set_draft_row`/`parked_flag` via `save_draft`, and `DraftRow`/
+//! `get_draft_row` via `load` — so none carries a `#[allow(dead_code)]` any longer.
 use crate::return_inputs::SCHEMA_VERSION;
 use crate::{CliError, Session};
 use btctax_core::tax::return_inputs::ReturnInputs;
@@ -22,7 +21,6 @@ pub fn init_draft_table(conn: &Connection) -> Result<(), CliError> {
     Ok(())
 }
 
-#[allow(dead_code)] // read only by tests until task 3's `load`
 pub(crate) struct DraftRow {
     pub ri: ReturnInputs,
     pub version: i64,
@@ -30,7 +28,6 @@ pub(crate) struct DraftRow {
 }
 
 /// The RAW draft row — does NOT gate on `SCHEMA_VERSION` (Task 3 `load` decides discard-vs-refuse per §6.3).
-#[allow(dead_code)] // called only by tests until task 3's `load`
 pub(crate) fn get_draft_row(conn: &Connection, year: i32) -> Result<Option<DraftRow>, CliError> {
     init_draft_table(conn)?;
     let row = conn.query_row(
@@ -112,6 +109,59 @@ pub fn save_draft(sess: &mut Session, year: i32, ri: &ReturnInputs) -> Result<()
     Ok(())
 }
 
+/// The working return for a year, resolved through the §6.1 precedence: a draft shadows the committed row.
+///
+/// - `Draft { ri, parked }` — a version-current draft exists (the crash-recovery scratch wins over committed).
+/// - `Committed(ri)` — no draft; the committed `return_inputs` row is the working return.
+/// - `Fresh` — neither exists; start a blank return.
+pub enum Loaded {
+    Draft { ri: ReturnInputs, parked: bool },
+    Committed(ReturnInputs),
+    Fresh,
+}
+
+/// Resolve the working return for `year` (§6.1 precedence + §6.3 stale split).
+///
+/// A draft row takes precedence over the committed row. If the draft is at a schema version this build does
+/// not read (`d.version != SCHEMA_VERSION`), the split is by `parked`:
+///
+/// - **WIP** (`parked = 0`) → the draft is regenerable, so **DISCARD** it: delete the stale row (an
+///   in-memory delete the caller's next `save_draft` persists — this is a read path, no `sess.save()` here)
+///   and fall through to committed/Fresh, noting the discard on stderr.
+/// - **parked** (`parked = 1`) → it may hold carryover that exists ONLY in the draft (C-1), so **REFUSE**
+///   with [`CliError::StaleParkedDraft`] (fail closed) rather than destroy irreplaceable data.
+///
+/// A version-current draft yields `Draft { ri, parked }`. With no draft, the committed row (if any) is
+/// `Committed`, else `Fresh`.
+pub fn load(conn: &Connection, year: i32) -> Result<Loaded, CliError> {
+    if let Some(d) = get_draft_row(conn, year)? {
+        if d.version != SCHEMA_VERSION {
+            if d.parked {
+                return Err(CliError::StaleParkedDraft {
+                    year,
+                    found: d.version,
+                    expected: SCHEMA_VERSION,
+                });
+            }
+            // ★ §6.3: a stale WIP draft is regenerable — discard-with-note, fall through.
+            eprintln!(
+                "note: discarded a stale draft for {year} (schema v{} vs v{SCHEMA_VERSION}).",
+                d.version
+            );
+            delete_draft(conn, year)?;
+        } else {
+            return Ok(Loaded::Draft {
+                ri: d.ri,
+                parked: d.parked,
+            });
+        }
+    }
+    match crate::return_inputs::get(conn, year)? {
+        Some(ri) => Ok(Loaded::Committed(ri)),
+        None => Ok(Loaded::Fresh),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +223,39 @@ mod tests {
         let mut sess = Session::open(&path, &pp).unwrap();
         save_draft(&mut sess, 2024, &ReturnInputs::default()).unwrap();
         assert_eq!(parked_flag(sess.conn(), 2024).unwrap(), Some(false));
+    }
+
+    #[test]
+    fn load_precedence_draft_then_committed_then_fresh() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::return_inputs::init_table(&conn).unwrap();
+        init_draft_table(&conn).unwrap();
+        // Fresh
+        assert!(matches!(load(&conn, 2024).unwrap(), Loaded::Fresh));
+        // Committed only
+        let cri = ReturnInputs { filing_status: FilingStatus::HoH, ..Default::default() };
+        crate::return_inputs::set(&conn, 2024, &cri).unwrap();
+        assert!(matches!(load(&conn, 2024).unwrap(), Loaded::Committed(r) if r.filing_status == FilingStatus::HoH));
+        // Draft shadows committed
+        let dri = ReturnInputs { filing_status: FilingStatus::Mfj, ..Default::default() };
+        set_draft_row(&conn, 2024, &dri, false).unwrap();
+        assert!(matches!(load(&conn, 2024).unwrap(), Loaded::Draft { ri, parked: false } if ri.filing_status == FilingStatus::Mfj));
+    }
+
+    #[test]
+    fn load_discards_stale_wip_but_refuses_stale_parked() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_draft_table(&conn).unwrap();
+        let ri = ReturnInputs { filing_status: FilingStatus::Single, ..Default::default() };
+        let j = serde_json::to_string(&ri).unwrap();
+        // stale WIP (parked=0) at an old version → discarded, falls through to Fresh, row is GONE
+        conn.execute("INSERT INTO return_inputs_draft(year,inputs_json,schema_version,parked) VALUES(2024,?1,0,0)", [&j]).unwrap();
+        assert!(matches!(load(&conn, 2024).unwrap(), Loaded::Fresh));
+        assert!(!draft_exists(&conn, 2024).unwrap(), "stale WIP is discarded");
+        // stale PARKED (parked=1) → REFUSE, row PRESERVED
+        conn.execute("INSERT INTO return_inputs_draft(year,inputs_json,schema_version,parked) VALUES(2025,?1,0,1)", [&j]).unwrap();
+        assert!(matches!(load(&conn, 2025), Err(CliError::StaleParkedDraft { year: 2025, found: 0, .. })));
+        assert!(draft_exists(&conn, 2025).unwrap(), "stale parked is preserved, not discarded");
     }
 
     #[test]
