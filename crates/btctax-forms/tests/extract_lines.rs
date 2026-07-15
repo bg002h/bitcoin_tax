@@ -259,6 +259,7 @@ fn form_8995_row_1i_carries_the_proprietors_tin_not_the_taxpayers() {
         business_description: "Bitcoin mining".into(),
         ..Default::default()
     });
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
     let header = ReturnHeader::build(&ri, 2024).unwrap();
 
     let lines = btctax_core::tax::qbi::form_8995_lines(

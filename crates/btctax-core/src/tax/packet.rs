@@ -26,6 +26,7 @@ use crate::tax::printed::{
 };
 use crate::tax::printed::{form_8283_printed, Printed8283Rows, FORM_8283_THRESHOLD};
 use crate::tax::qbi::{form_8995_lines, Form8995Lines};
+use crate::tax::questions::{QuestionId, FORM_QUESTIONS};
 use crate::tax::return_1040::{is_aged, AbsoluteReturn};
 use crate::tax::return_inputs::{Owner, Person, ReturnInputs};
 use crate::tax::tables::TaxTable;
@@ -104,6 +105,49 @@ impl fmt::Display for SsnError {
             Self::Missing => write!(f, "no SSN was entered"),
             Self::NotDigits(c) => write!(f, "contains {c:?}, which is not a digit"),
             Self::WrongLength(n) => write!(f, "has {n} digits — an SSN has exactly 9"),
+        }
+    }
+}
+
+/// Why a [`ReturnHeader`] cannot be built — the fail-closed PRINT boundary (P9 §3.2, P8a I3). `SsnError`
+/// alone cannot say all of this: a header fails to build not only on a malformed identity but also when a
+/// live class-(A) DECLARATION is unanswered (an unanswered box must never reach a filed form), or when a
+/// joint return carries no spouse identity to fill the joint header cells.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HeaderError {
+    /// An SSN in the household (taxpayer, spouse, or a dependent) cannot be canonicalized.
+    Ssn(SsnError),
+    /// ★ A live DECLARATION is unanswered. At PRINT there is no conservative direction — an unchecked box is
+    /// a false "No" and a checked box is a false "Yes" — so refusal is the ONLY fail-closed behaviour. This
+    /// is the second boundary behind `screen_inputs` (P8a I3): even a caller that skips the screen cannot
+    /// print an unaffirmed box, and it closes the Schedule B Part III `unwrap_or(false)` print site.
+    Unanswered(QuestionId),
+    /// A joint (MFJ) return with no spouse `Person` — the joint name line and the spouse SSN cell cannot be
+    /// filled (r3 M-6). Distinct from `Unanswered`: the spouse DECLARATION may be answered, yet the spouse
+    /// IDENTITY is still absent.
+    MfjWithoutSpouse,
+}
+
+impl From<SsnError> for HeaderError {
+    fn from(e: SsnError) -> Self {
+        HeaderError::Ssn(e)
+    }
+}
+
+impl fmt::Display for HeaderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ssn(e) => write!(f, "an SSN {e} — fix the identity and re-run"),
+            Self::Unanswered(id) => write!(
+                f,
+                "the {id:?} question is unanswered, and an unanswered box must not reach a filed form — \
+                 run `btctax income answer`"
+            ),
+            Self::MfjWithoutSpouse => write!(
+                f,
+                "a married-filing-jointly return has no spouse on file — the joint name and SSN cannot be \
+                 printed; add the spouse's identity (`btctax set-pii`) or change the filing status"
+            ),
         }
     }
 }
@@ -272,7 +316,22 @@ impl ReturnHeader {
     /// Build the header from the captured household. Fails if ANY SSN in it — taxpayer, spouse, or a
     /// dependent — cannot be canonicalized: fail-closed, since a return cannot be built around an
     /// identity that cannot be printed.
-    pub fn build(ri: &ReturnInputs, year: i32) -> Result<Self, SsnError> {
+    pub fn build(ri: &ReturnInputs, year: i32) -> Result<Self, HeaderError> {
+        // ★ P8a I3 — the fail-closed print boundary. Every live class-(A) declaration must be answered
+        // before any form is composed: an unchecked box is a false "No" and a checked box a false "Yes",
+        // so there is no conservative direction at print. This is the second boundary behind
+        // `screen_inputs`; it also closes the Schedule B Part III `unwrap_or(false)` print site.
+        for q in FORM_QUESTIONS {
+            if (q.live)(ri) && (q.get)(ri).is_none() {
+                return Err(HeaderError::Unanswered(q.id));
+            }
+        }
+        // r3 M-6 — a joint return needs a spouse IDENTITY to fill the joint name line and the spouse SSN
+        // cell; the spouse DECLARATION being answered is not enough.
+        if ri.filing_status == FilingStatus::Mfj && ri.header.spouse.is_none() {
+            return Err(HeaderError::MfjWithoutSpouse);
+        }
+
         let taxpayer = FiledPerson::build(&ri.header.taxpayer)?;
         let spouse = ri
             .header
@@ -404,7 +463,7 @@ pub fn assemble_printed_return(
     ar: &AbsoluteReturn,
     table: &TaxTable,
     year: i32,
-) -> Result<PrintedReturn, SsnError> {
+) -> Result<PrintedReturn, HeaderError> {
     Ok(PrintedReturn {
         header: ReturnHeader::build(ri, year)?,
         filing_status: ri.filing_status,
@@ -571,7 +630,7 @@ mod tests {
         ri.header.taxpayer = person("John", "Doe", "123-45-6789");
         ri.header.spouse = Some(person("Jane", "Doe", "987-65-4321"));
 
-        let h = ReturnHeader::build(&ri, 2024).unwrap();
+        let h = ReturnHeader::build(&crate::tax::testonly::answered(ri.clone()), 2024).unwrap();
         assert_eq!(h.name_line, "John Doe & Jane Doe");
         assert_eq!(h.taxpayer.ssn.hyphenated(), "123-45-6789");
         assert_eq!(
@@ -592,7 +651,7 @@ mod tests {
             ri.header.taxpayer = person("John", "Doe", "123456789");
             ri.header.spouse = Some(person("Jane", "Doe", "987654321"));
 
-            let h = ReturnHeader::build(&ri, 2024).unwrap();
+            let h = ReturnHeader::build(&crate::tax::testonly::answered(ri.clone()), 2024).unwrap();
             assert_eq!(h.name_line, "John Doe", "status = {status:?}");
         }
     }
@@ -613,7 +672,7 @@ mod tests {
         ri.header.taxpayer = person("John", "Doe", "123456789");
         ri.header.spouse = Some(person("Jane", "Roe", "987654321"));
 
-        let h = ReturnHeader::build(&ri, 2024).unwrap();
+        let h = ReturnHeader::build(&crate::tax::testonly::answered(ri.clone()), 2024).unwrap();
         let p = h
             .proprietor
             .as_ref()
@@ -651,7 +710,7 @@ mod tests {
             ..person("Jane", "Doe", "987654321")
         });
 
-        let h = ReturnHeader::build(&ri, 2024).unwrap();
+        let h = ReturnHeader::build(&crate::tax::testonly::answered(ri.clone()), 2024).unwrap();
         assert!(h.aged_blind.taxpayer_aged);
         assert!(h.aged_blind.taxpayer_blind);
         assert!(!h.aged_blind.spouse_aged);
@@ -680,7 +739,7 @@ mod tests {
             ..person("Jane", "Doe", "987654321")
         });
 
-        let h = ReturnHeader::build(&ri, 2024).unwrap();
+        let h = ReturnHeader::build(&crate::tax::testonly::answered(ri.clone()), 2024).unwrap();
         assert!(!h.aged_blind.spouse_aged);
         assert!(!h.aged_blind.spouse_blind);
         assert_eq!(h.aged_blind.count(), 0);
@@ -691,7 +750,9 @@ mod tests {
     #[test]
     fn dependents_carry_through_with_canonical_ssns() {
         let ri = ReturnInputs {
-            filing_status: FilingStatus::Mfj,
+            // Single (not MFJ): this test is about DEPENDENT carry-through, and an MFJ return with no
+            // spouse `Person` now correctly refuses at build (`MfjWithoutSpouse`, r3 M-6).
+            filing_status: FilingStatus::Single,
             header: HouseholdHeader {
                 taxpayer: person("John", "Doe", "123456789"),
                 dependents: vec![Dependent {
@@ -705,7 +766,7 @@ mod tests {
             ..Default::default()
         };
 
-        let h = ReturnHeader::build(&ri, 2024).unwrap();
+        let h = ReturnHeader::build(&crate::tax::testonly::answered(ri.clone()), 2024).unwrap();
         assert_eq!(h.dependents.len(), 1);
         assert_eq!(h.dependents[0].name, "Sam Doe");
         assert_eq!(h.dependents[0].ssn.hyphenated(), "111-22-3333");
@@ -732,10 +793,52 @@ mod tests {
             ..Default::default()
         };
         let good = "123456789";
-        assert!(ReturnHeader::build(&base(good, good, good), 2024).is_ok());
-        assert!(ReturnHeader::build(&base("12345", good, good), 2024).is_err());
-        assert!(ReturnHeader::build(&base(good, "nope", good), 2024).is_err());
-        assert!(ReturnHeader::build(&base(good, good, "1234567890"), 2024).is_err());
+        // `answered(..)` so the SSN is the ONLY defect under test (build now also refuses unanswered
+        // declarations — P8a I3, tested below). A malformed SSN still refuses; the good case builds.
+        let a = crate::tax::testonly::answered;
+        assert!(ReturnHeader::build(&a(base(good, good, good)), 2024).is_ok());
+        assert!(ReturnHeader::build(&a(base("12345", good, good)), 2024).is_err());
+        assert!(ReturnHeader::build(&a(base(good, "nope", good)), 2024).is_err());
+        assert!(ReturnHeader::build(&a(base(good, good, "1234567890")), 2024).is_err());
+    }
+
+    /// ★ P8a I3 — `ReturnHeader::build` is the fail-closed PRINT boundary: even a caller that skips
+    /// `screen_inputs` cannot print an unaffirmed box. A live declaration left `None` refuses here too.
+    #[test]
+    fn build_refuses_an_unanswered_live_declaration() {
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.header.taxpayer = person("John", "Doe", "123456789"); // a printable identity
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        assert!(ReturnHeader::build(&ri, 2024).is_ok(), "fully answered ⇒ builds");
+
+        // Blank ONE declaration (the HSA activity) — build must refuse, naming it.
+        ri.sch1.hsa_activity = None;
+        assert_eq!(
+            ReturnHeader::build(&ri, 2024),
+            Err(HeaderError::Unanswered(QuestionId::HsaActivity)),
+            "an unanswered live declaration must not reach a printed form (P8a I3)"
+        );
+    }
+
+    /// ★ r3 M-6 — a joint return with no spouse `Person` cannot fill the joint name line or the spouse SSN
+    /// cell. Distinct from the unanswered check: the spouse DECLARATION is answered, the IDENTITY is absent.
+    #[test]
+    fn build_refuses_mfj_with_no_spouse_identity() {
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Mfj,
+            ..Default::default()
+        };
+        ri.header.taxpayer = person("John", "Doe", "123456789");
+        ri.header.spouse = None; // no spouse identity on a joint return
+        crate::tax::testonly::answer_all_live_declarations(&mut ri); // every declaration answered
+        assert_eq!(
+            ReturnHeader::build(&ri, 2024),
+            Err(HeaderError::MfjWithoutSpouse),
+            "MFJ with no spouse Person cannot print the joint header (r3 M-6)"
+        );
     }
 
     /// ★ The OTHER two checkbox-consistency gaps, of the same class as the aged/blind boxes and found
@@ -757,7 +860,7 @@ mod tests {
         ri.header.taxpayer = person("John", "Doe", "123456789");
         ri.header.can_be_claimed_as_dependent_taxpayer = Some(true);
 
-        let h = ReturnHeader::build(&ri, 2024).unwrap();
+        let h = ReturnHeader::build(&crate::tax::testonly::answered(ri.clone()), 2024).unwrap();
         assert!(
             h.claimed_as_dependent_taxpayer,
             "the §63(c)(5) floor is claimed ⇒ the box must print"
@@ -770,7 +873,7 @@ mod tests {
             ..Default::default()
         };
         ri.header.taxpayer = person("John", "Doe", "123456789");
-        let h = ReturnHeader::build(&ri, 2024).unwrap();
+        let h = ReturnHeader::build(&crate::tax::testonly::answered(ri.clone()), 2024).unwrap();
         assert!(
             h.mfs_spouse_itemizes,
             "§63(c)(6) coupling is in force ⇒ the box must print"

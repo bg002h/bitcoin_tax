@@ -475,9 +475,9 @@ fn export_full_return(
         &ri, state, &details, &ar, table, tax_year,
     )
     .map_err(|e| {
-        CliError::Usage(format!(
-            "the {tax_year} return cannot be printed: {e} — fix the identity and re-run"
-        ))
+        // `HeaderError`'s Display carries the right remedy per variant (a malformed SSN, an unanswered
+        // declaration, or an MFJ return with no spouse) — no longer always "fix the identity" (P9 §3.2).
+        CliError::Usage(format!("the {tax_year} return cannot be printed: {e}"))
     })?;
 
     // ★ ALL-OR-NOTHING: every form fills BEFORE anything is written.

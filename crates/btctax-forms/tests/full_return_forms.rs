@@ -1594,6 +1594,7 @@ fn the_1040_prints_the_aged_blind_boxes_its_line_12_depends_on() {
         blind: Some(true),
         ..Default::default()
     });
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
     let h = ReturnHeader::build(&ri, 2024).unwrap();
     assert_eq!(h.aged_blind.count(), 3, "the fixture claims three boxes");
 
@@ -1695,6 +1696,7 @@ fn more_dependents_than_the_form_holds_fails_closed() {
             ..Default::default()
         })
         .collect();
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
     let h = ReturnHeader::build(&ri, 2024).unwrap();
 
     let err = btctax_forms::fill_form_1040_full(&f1040(), &h, FilingStatus::Single, 2024)
@@ -1734,6 +1736,7 @@ fn the_1040_prints_tax_exempt_interest_the_occupations_and_the_ip_pin() {
         ..Default::default()
     };
     ri.header.ip_pin = Some("123456".into());
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
     let h = ReturnHeader::build(&ri, 2024).unwrap();
 
     let mut lines = f1040();
@@ -1861,6 +1864,7 @@ fn the_full_return_schedule_se_prints_whole_dollars_under_the_proprietors_name()
         ssn: "987654321".into(),
         ..Default::default()
     });
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
     let h = ReturnHeader::build(&ri, 2024).unwrap();
 
     let lines = ScheduleSeLines {
