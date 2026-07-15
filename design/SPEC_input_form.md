@@ -13,8 +13,11 @@ renamed `btctax-input-form`; N-1..4). r1 validated in brainstorm + two Fable arc
 NI-1 (a parked draft keeps `parked=1` through edits — `save_draft` preserves it, `Loaded::Draft{parked}`
 round-trips it); NI-2 (the working model is `Working = Option<ReturnInputs>`, so "filing status chosen" ≡
 "the RI exists" — held by construction, not a renderer bool; both renderers inherit it); M-a `FieldKind::Bool`
-in §5.2; M-b Payments in the §9A order; M-c `NonCryptoNoncashGift` anchored; M-d the discard-parked path named.
-**Pending re-review of the r4 fold.***
+in §5.2; M-b Payments in the §9A order; M-c `NonCryptoNoncashGift` anchored; M-d the discard-parked path named.*
+*★ **r5 — GREEN.** The r4 fold was re-reviewed **0C/0I** (`SPEC-input-form-fable-r3.md`; the `Working` model
+change probed seam-free, the `RefuseReason` match confirmed 37/37); r5 folds its 4 residual non-gating
+Minors (M-1 §3 box synced; M-2 the discard-parked key in §9A; M-3 the NI-2 materialization guard test; M-4
+§10 wording). **Spec is green — ready for an implementation plan.***
 *Provenance: brainstorm 2026-07-14; supersedes the deferred "guided full-return TUI form" follow-up in
 `SPEC_input_surface.md` (P8) §8. Depends on P9 (`SPEC_form_questions.md`, shipped) for `FORM_QUESTIONS`,
 the skippable registry, and `screen_inputs`.*
@@ -75,19 +78,19 @@ of one core:
 ┌─ btctax-input-form (NEW crate; depends on core ONLY; vault-free; unit-testable) ─┐
 │  • FormSpec: a tree of Sections → Fields (stable ids, kind, help, live,     │
 │    accessors)                                                               │
-│  • apply(&mut ReturnInputs, Edit) -> Result<(), ApplyError>                 │
-│  • validate(&ReturnInputs) -> field/section errors  (attributes screen_inputs)│
-│  • the RefuseReason -> FieldId/SectionId attribution map                    │
+│  • apply(&mut Working, Edit) -> Result<(), ApplyError>   (Working = Option<RI>)│
+│  • attribute(&RefuseReason) -> Vec<Anchor>   (the exhaustive 37/37 map)      │
 │  • adapts the two CORE registries (declarations + skippables) into sections │
 └──────────────┬─────────────────────────────────────────────────────────────┘
                │ reuses, unchanged:
    FORM_QUESTIONS + SKIPPABLE_QUESTIONS (core registries) · screen_inputs (gate) · ReturnInputs (type)
 
 ┌─ btctax-cli :: input_form_store (NEW module beside return_inputs.rs) ───────┐
-│  • load(year) · save_draft(year, &RI) · commit(year, &RI) · toggle(...)     │
-│  • the `return_inputs_draft` table (mirrors return_inputs, discard-on-stale)│
+│  • load(sess,year) · save_draft(sess,year,&RI) · commit(sess,year,&RI,table,params) · park(sess,year)│
+│  • the `return_inputs_draft` table (mirrors return_inputs + `parked` flag)   │
 │  operates on ReturnInputs + screen_inputs (core); need NOT depend on btctax-input-form │
 └─────────────────────────────────────────────────────────────────────────────┘
+(§5.7 is the canonical signature list; this box is the overview.)
 ```
 
 *(★ M-7 — the crate is `btctax-input-form`, NOT `btctax-form`: the latter is one letter from the existing,
@@ -591,6 +594,8 @@ first `SetField(filing_status)` materializes the return and the rest of the sect
   refusal; if clean, a **payload-confirm modal** → write → clear draft.
 - `t` **toggle source** (offered only from a clean/committed state, §9): use-tax-profile (park) /
   use-full-return (re-commit).
+- `X` **discard parked draft** (M-2 — only shown when a `parked = 1` draft exists; a payload-showing
+  confirm; the sole path that deletes a parked row, §6.2). Distinct from `x` (delete an *optional section*).
 - `q` quit (warns on an unsaved-draft divergence, but the draft is already autosaved).
 
 **Autosave (I-7 — must reach disk).** The vault is an in-memory SQLite; nothing is persisted until
@@ -612,6 +617,11 @@ the commit modal, the toggle prompt).
 - **`apply` + liveness:** each `Edit` mutates the working copy and liveness is re-evaluated (a
   `filing_status` edit changes the live set). **I-10:** `DeleteSection(ScheduleA)` resets `itemize_election`
   to `Auto` (assert a `ForceItemize` + delete-Schedule-A cannot leave a $0-deduction return).
+- **★ NI-2 materialization guard (M-3 — the anti-laundering construction; pin it):** `apply(None, e)` where
+  `e` is **not** `SetField{filing_status}` → `ApplyError` (nothing materializes); `apply(None,
+  SetField{filing_status=X})` → `Some(RI)` with `filing_status == X` **and every other field at default**;
+  and `filing_status` never returns to `None` (Enum has no clear — `ClearField{filing_status}` is a
+  `SetError`).
 - **Tree edits:** `AddRow`/`RemoveRow` (incl. `box12` at depth 2, `RemoveRow [w2,box12]`),
   `CreateSection`/`DeleteSection` (Schedule A, spouse).
 - **Exhaustive attribution:** every one of the 37 `RefuseReason`s maps (compile-forced); a representative
@@ -625,8 +635,9 @@ the commit modal, the toggle prompt).
 - **Draft is invisible to `resolve.rs`:** a screen-refused draft never poisons the year (the D-3/D-7
   property, re-pinned for the new table).
 - **`commit`** screens → writes → deletes the draft; a screen-refused working copy does **not** commit; a
-  non-2024 year returns `NoTables` and writes nothing (I-11); a `Fresh`/unchosen `filing_status` blocks
-  commit (I-9).
+  non-2024 year returns `NoTables` and writes nothing (I-11). *(An unchosen `filing_status` cannot reach
+  `commit` at all — the `Working = None` model gives it no `&RI` to pass; enforced by construction, not an
+  in-`commit` check — I-9/NI-2/M-4.)*
 - **Coherence rule (§6.2):** `income import` / **`income answer`** (I-6) / `write-carryover` / `income clear`
   clear a **WIP** draft — and **REFUSE** when it is `parked` (C-1). *(set-pii inherits this when it lands.)*
 - **Draft stale-version:** a WIP draft **DISCARDS**; a **parked** draft **REFUSES-and-reimports** (C-1).
