@@ -19,7 +19,10 @@ deferred Minors below and flagged a per-phase-burndown violation (I-7). Reconcil
   `rust_decimal serde-str` + `time serde-well-known` (no longer relies on feature unification).
 - **STILL OPEN — genuinely ownerless, legitimately parked (not merge-blockers):** **(h)** near-duplicate
   `decl_tristate!`/`skippable_tristate!` macros; **(l)** coverage KAT does not assert its `EXEMPT` literals
-  are live (cosmetic dead-literal hygiene). Batch to a later cleanup pass.
+  are live (cosmetic dead-literal hygiene); **(m)** the NI-2 first-edit arm (`apply`, `None` → the initial
+  `SetField{FilingStatus}`) does not `guard_arity` the addr, so an over-long addr on the very first edit is
+  accepted while the identical post-materialization edit is refused (re-review r2 Nit — no panic, no wrong
+  value, just an inconsistency). Batch to a later cleanup pass.
 
 The individual item entries below are retained for history; their status is superseded by this banner.
 
