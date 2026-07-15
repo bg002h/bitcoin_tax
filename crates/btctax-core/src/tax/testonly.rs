@@ -177,7 +177,6 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
                 ssn: "111-22-3333".into(),
                 relationship: "Son".into(),
                 date_of_birth: Some(date!(2012 - 04 - 15)),
-                ..Default::default()
             }],
             ..Default::default()
         },

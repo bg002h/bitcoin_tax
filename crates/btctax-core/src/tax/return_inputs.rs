@@ -55,8 +55,6 @@ pub struct W2 {
     #[serde(default)]
     pub box12: Vec<Box12Entry>,
     #[serde(default)]
-    pub box13_retirement_plan: bool,
-    #[serde(default)]
     pub box8_allocated_tips: Usd, // refuse-guard if > 0 (§4.10)
     #[serde(default)]
     pub box10_dependent_care: Usd, // refuse-guard if > 0 (§4.10)
@@ -125,8 +123,6 @@ pub struct Person {
     pub first_name: String,
     pub last_name: String,
     pub ssn: String,
-    #[serde(default)]
-    pub ssn_valid_for_employment: bool,
     pub date_of_birth: Option<Date>,
     /// §63(f) additional standard deduction for blindness — a class-(B) TRI-STATE (P9 §2.2). `None` = never
     /// asked; the advisory fires on `None` (never on `Some(false)`), so a filer who told us they are sighted
@@ -142,8 +138,6 @@ pub struct Person {
 pub struct Dependent {
     pub name: String,
     pub ssn: String,
-    #[serde(default)]
-    pub ssn_valid_for_employment: bool,
     pub relationship: String,
     pub date_of_birth: Option<Date>,
 }

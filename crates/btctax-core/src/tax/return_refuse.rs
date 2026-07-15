@@ -260,7 +260,6 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             box17_state_tax_withheld,
             box19_local_tax,
             box12,
-            box13_retirement_plan: _,
             box8_allocated_tips,
             box10_dependent_care,
         } = w;

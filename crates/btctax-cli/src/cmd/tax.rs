@@ -100,8 +100,32 @@ pub fn import_return_inputs(
 }
 
 /// Parse a `ReturnInputs` from TOML text (split out for testing).
+///
+/// ★ P9 §2.3 — REJECTS unknown keys, via `serde_ignored` rather than a hand-written key list (which would
+/// be the exact drift-prone hand-wiring P9 abolishes). `serde_ignored` reports every ignored path DURING
+/// the same deserialization, so the key set is DERIVED from the type: no list to forget, and `[[w2s]]`
+/// arrays, nested tables and comments all work for free. This binds ONLY the CLI's TOML import — the
+/// stored-JSON path (`return_inputs::get`) keeps its documented forward-compat and is untouched. Without
+/// this, a faithfully-transcribed `box13_retirement_plan` (a deleted field) or a `hsa_present` (the §2.4
+/// rename) would import CLEAN and silently vanish — no error, no trace even in `income show`.
 fn parse_return_inputs_toml(text: &str) -> Result<ReturnInputs, CliError> {
-    toml::from_str(text).map_err(|e| CliError::Usage(format!("invalid ReturnInputs TOML: {e}")))
+    // Parse to the TOML tree FIRST (toml's streaming deserializer + serde_ignored mishandles arrays of
+    // tables), then run `serde_ignored` over the in-memory `Value` to collect every unknown path.
+    let value: toml::Value =
+        toml::from_str(text).map_err(|e| CliError::Usage(format!("invalid ReturnInputs TOML: {e}")))?;
+    let mut ignored: Vec<String> = Vec::new();
+    let ri: ReturnInputs = serde_ignored::deserialize(value, |path| ignored.push(path.to_string()))
+        .map_err(|e| CliError::Usage(format!("invalid ReturnInputs TOML: {e}")))?;
+    if !ignored.is_empty() {
+        return Err(CliError::Usage(format!(
+            "unknown key(s) in the ReturnInputs TOML: {}. btctax does not honor these — likely a typo or a \
+             field removed in this version (e.g. `hsa_present` was RENAMED to `sch1.hsa_activity`; \
+             `box13_retirement_plan` and `ssn_valid_for_employment` were REMOVED). Fix or delete them, then \
+             re-run `btctax income import` — a silently-ignored key would drop data you meant to enter.",
+            ignored.join(", ")
+        )));
+    }
+    Ok(ri)
 }
 
 /// Redact an SSN/ITIN to `***-**-NNNN` (last 4 digits), or empty/`***-**-****` when too short (review I5).
@@ -529,5 +553,32 @@ mod tests {
             parse_return_inputs_toml("not = = toml").unwrap_err(),
             CliError::Usage(_)
         ));
+    }
+
+    /// ★ P9 §2.3 / §3.5 (r7 I-2) — `income import` REJECTS unknown TOML keys via `serde_ignored`, not a
+    /// hand-written key list. A TOML carrying `hsa_present` (the §2.4 rename) AND `box13_retirement_plan`
+    /// (a deleted dead field — a real W-2 box 13 faithfully transcribed) must REFUSE naming BOTH, rather
+    /// than import clean and silently vanish (the exact hole §2.3 exists to close). Mutation: revert to a
+    /// bare `toml::from_str` ⇒ this fails.
+    #[test]
+    fn income_import_rejects_unknown_toml_keys_naming_each() {
+        let text = r#"
+            filing_status = "Single"
+            hsa_present = false
+
+            [[w2s]]
+            owner = "taxpayer"
+            employer = "ACME"
+            box1_wages = "50000"
+            box2_fed_withheld = "8000"
+            box13_retirement_plan = true
+        "#;
+        let err = parse_return_inputs_toml(text).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("hsa_present"), "must name the renamed key: {msg}");
+        assert!(
+            msg.contains("box13_retirement_plan"),
+            "must name the deleted dead field so a transcribed W-2 box 13 can't silently vanish: {msg}"
+        );
     }
 }
