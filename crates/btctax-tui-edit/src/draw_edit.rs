@@ -2049,12 +2049,31 @@ fn draw_tax_inputs_form(frame: &mut Frame, area: Rect, form: &TaxInputsFormState
 /// shadow/all-zero warning when a tax-profile is shadowed) + the `[Enter] commit / [Esc] cancel` legend.
 /// Mirrors `draw_mutation_modal`'s centered-`Clear` shape.
 fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+    use crate::edit::form::TaxInputsModalKind;
     let Some(m) = form.modal.as_ref() else {
         return;
     };
+    // ★ Task 8: one modal serves three confirms — the header, title, and action verb branch on the kind.
+    let (header, title, verb) = match m.kind {
+        TaxInputsModalKind::Commit => (
+            format!("  Commit tax inputs for {} — WRITES THE VAULT", m.year),
+            format!(" Confirm commit for {} ", m.year),
+            "commit",
+        ),
+        TaxInputsModalKind::ParkToProfile => (
+            format!("  Park the full return for {} — WRITES THE VAULT", m.year),
+            format!(" Switch to tax-profile for {} ", m.year),
+            "park",
+        ),
+        TaxInputsModalKind::DiscardParked => (
+            format!("  Discard the parked draft for {} — WRITES THE VAULT", m.year),
+            format!(" Discard parked draft for {} ", m.year),
+            "discard",
+        ),
+    };
     let mut lines: Vec<Line> = vec![
         Line::from(Span::styled(
-            format!("  Commit tax inputs for {} — WRITES THE VAULT", m.year),
+            header,
             Style::default()
                 .fg(Color::Red)
                 .add_modifier(Modifier::BOLD),
@@ -2066,7 +2085,7 @@ fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormStat
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  [Enter] commit   [Esc] cancel — writes nothing",
+        format!("  [Enter] {verb}   [Esc] cancel — writes nothing"),
         Style::default().fg(Color::DarkGray),
     )));
 
@@ -2076,7 +2095,7 @@ fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormStat
     let p = Paragraph::new(lines)
         .block(
             Block::default()
-                .title(format!(" Confirm commit for {} ", m.year))
+                .title(title)
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Red)),
         )
@@ -2144,16 +2163,21 @@ fn draw_tax_inputs_discard(frame: &mut Frame, area: Rect, form: &TaxInputsFormSt
     frame.render_widget(p, rect);
 }
 
-/// The bottom status line: the active-source placeholder (Task 8 wires the real `active_source`), a
-/// key legend, and — if present — the §6.3 stale-WIP-discard note.
+/// The bottom status line: the CACHED active source (`full return` / `tax-profile` / `(none)`, Task 8 —
+/// from `input_form_store::active_source` via the `form_active_source` seam, refreshed at open + after a
+/// park), a key legend (`t` toggle source, `X` discard-parked when a parked draft is loaded), and — if
+/// present — the §6.3 stale-WIP-discard note.
 fn draw_tax_inputs_status(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+    // `X` discard-parked is offered only when a parked draft is loaded (else the store would refuse it).
+    let legend = if form.parked {
+        "   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [X] discard-parked · [Esc/q] close"
+    } else {
+        "   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [Esc/q] close (autosaved)"
+    };
     let mut lines: Vec<Line> = vec![Line::from(vec![
         Span::raw("  active source: "),
-        Span::styled("full return", Style::default().fg(Color::Cyan)),
-        Span::styled(
-            "   [↑/↓] field · [←/→ or Tab] section · [Esc/q] close (autosaved)",
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(form.active_source_label, Style::default().fg(Color::Cyan)),
+        Span::styled(legend, Style::default().fg(Color::DarkGray)),
     ])];
     if let Some(note) = form.stale_note.as_ref() {
         lines.push(Line::from(Span::styled(
@@ -6161,6 +6185,40 @@ mod tests {
         // Bottom: the active-source line + a key legend naming section navigation.
         assert!(r.contains("active source"), "status line shows the active source");
         assert!(r.contains("section"), "the key legend mentions section navigation");
+    }
+
+    /// Task 8: the status line renders the CACHED active-source label (`full return` / `tax-profile` /
+    /// `(none)`), replacing Task 2's hardcoded placeholder — a `tax-profile` cache renders "tax-profile".
+    #[test]
+    fn tax_inputs_status_renders_cached_active_source_label() {
+        use crate::edit::form::TaxInputsFormState;
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        form.active_source_label = "tax-profile"; // the cache the opener/park handler sets
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains("active source"),
+            "the status line labels the active source"
+        );
+        assert!(
+            r.contains("tax-profile"),
+            "the status line renders the cached active-source label, not a hardcoded placeholder"
+        );
     }
 
     /// Task 5: a repeating section (W-2s) at its row-list level renders the rows as a selectable list

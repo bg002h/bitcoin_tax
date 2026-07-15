@@ -189,6 +189,14 @@ pub struct TaxInputsFormState {
     /// state the flow renders ONLY the stale-parked message + an 'X' to discard (Task 8) / Esc to back
     /// out — NOT a normal editing form — so the undiscardable parked draft becomes discardable in-app.
     pub discard_offered: bool,
+    /// ★ Task 8: the cached `active source: …` label shown in the status line — `"full return"` /
+    /// `"tax-profile"` / `"(none)"`, mapped by [`active_source_label`] from `input_form_store::active_source`
+    /// (via the `edit::persist::form_active_source` seam). Set at OPEN and refreshed after the one store
+    /// mutation that changes the active source while the flow stays open — a `park_to_profile` (commit and
+    /// discard both close the flow; autosave/reinstate never change the active source). The render is a pure
+    /// `fn(form)` (the profile-form template), and while the flow is open it is the sole store writer under
+    /// the exclusive vault lock, so the cache is always consistent with disk after each handler.
+    pub active_source_label: &'static str,
     /// ★ Task 5: a staged `RemoveRow` awaiting the payload-confirm ("remove W-2 #2?"). `Some` while the
     /// confirm modal is open — Enter applies it, Esc clears it. It carries the VALIDATED row address (never
     /// a raw cursor), so a later cursor move cannot re-target the delete.
@@ -200,10 +208,24 @@ pub struct TaxInputsFormState {
     /// `addr = [w2_i]`) — same `form.addr`, different pane. At a nested sub-list `form.addr` is the group's
     /// PARENT path; at a nested sub-row it is that row's path (one deeper). See `edit/tax_inputs.rs`.
     pub descent: Option<btctax_input_form::SectionId>,
-    /// ★ Task 7: the COMMIT payload-confirm modal (`s`). `Some` while it is open — Enter runs `commit`,
-    /// Esc cancels (writes nothing). NESTED here (review M5), dispatched in `handle_tax_inputs_key` BEFORE
-    /// the field keymap. `s` requires `working.is_some()` (else the status "choose a filing status first").
+    /// ★ Task 7/8: the payload-confirm modal (`s` commit · `t` park · `X` discard-parked). `Some` while
+    /// it is open — Enter runs the confirmed action (dispatched by [`TaxInputsModalState::kind`]), Esc
+    /// cancels (writes nothing). NESTED here (review M5), dispatched in `handle_tax_inputs_key` BEFORE the
+    /// field keymap. `s` requires `working.is_some()` (else the status "choose a filing status first").
     pub modal: Option<TaxInputsModalState>,
+}
+
+/// ★ Task 8: which confirmed action a [`TaxInputsModalState`] gates — one nested modal field serves all
+/// three payload-confirms (the `EditorApp` invariant: at most one modal `Some`), with the flow's Enter
+/// dispatching by this tag.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TaxInputsModalKind {
+    /// `s` — screen + write the committed `return_inputs` row (Task 7).
+    Commit,
+    /// `t` — park the committed full return into a `parked = 1` draft and switch to the tax-profile.
+    ParkToProfile,
+    /// `X` — discard the year's `parked = 1` draft (the ONLY deleter of a parked row).
+    DiscardParked,
 }
 
 /// ★ Task 7: the COMMIT payload-confirm modal (`s` → this → Enter runs `commit`). A NESTED field on
@@ -215,6 +237,9 @@ pub struct TaxInputsFormState {
 /// (review M6 — Task 9 pins "never names a `ReturnInputs` field"). It holds no raw `ReturnInputs`: the
 /// modal's Enter re-reads (clones) the flow's live `working`, so the confirmed payload is what is on screen.
 pub struct TaxInputsModalState {
+    /// ★ Task 8: which confirmed action this modal gates (commit · park · discard) — the flow's Enter
+    /// dispatches on it. `Commit` for the Task-7 flow; `ParkToProfile`/`DiscardParked` for the `t`/`X` toggle.
+    pub kind: TaxInputsModalKind,
     /// The tax year being committed.
     pub year: i32,
     /// The chosen filing status label (`"Single"`/`"Mfj"`/…), read via the accessor — the status message
@@ -255,10 +280,23 @@ impl TaxInputsFormState {
             parked: false,
             stale_note: None,
             discard_offered: false,
+            active_source_label: active_source_label(&btctax_cli::input_form_store::ActiveSource::Neither),
             pending_remove: None,
             descent: None,
             modal: None,
         }
+    }
+}
+
+/// The `active source: …` status-line label for an [`btctax_cli::input_form_store::ActiveSource`] (Task 8):
+/// `"full return"` / `"tax-profile"` / `"(none)"`. Used by the opener + the `t`-park handler to cache
+/// [`TaxInputsFormState::active_source_label`], which the render prints (keeping the render a pure `fn(form)`).
+pub fn active_source_label(a: &btctax_cli::input_form_store::ActiveSource) -> &'static str {
+    use btctax_cli::input_form_store::ActiveSource;
+    match a {
+        ActiveSource::FullReturn => "full return",
+        ActiveSource::TaxProfile => "tax-profile",
+        ActiveSource::Neither => "(none)",
     }
 }
 

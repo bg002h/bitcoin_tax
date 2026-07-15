@@ -149,6 +149,66 @@ pub fn form_shadows_profile(
     btctax_cli::input_form_store::shadows_profile(session.conn(), year)
 }
 
+/// Which source is CURRENTLY active for `year` — the source-toggle's read side (§9A) and the input-form
+/// status line's `active source: …` display. A thin read wrapper over
+/// [`btctax_cli::input_form_store::active_source`] (committed full return › `tax_profile` › neither).
+///
+/// Lives HERE for the same reason as [`load_return_inputs`]/[`form_shadows_profile`]: `Session::conn()` is
+/// confined to this module by the KAT-G1 gate. A pure READ — takes `&Session` (never `&mut`), performs no
+/// `save()` — so the flow borrows `app.session` DISJOINTLY from `app.tax_inputs_form` (review I-1). The
+/// flow calls THIS wrapper, never `input_form_store::active_source` directly.
+pub fn form_active_source(
+    session: &btctax_cli::Session,
+    year: i32,
+) -> Result<btctax_cli::input_form_store::ActiveSource, btctax_cli::CliError> {
+    btctax_cli::input_form_store::active_source(session.conn(), year)
+}
+
+/// Park the committed full return for `year` into its draft (the `t` "use tax-profile" toggle — C-1/§9A) —
+/// the input-form flow's PARK side. A thin wrapper over [`btctax_cli::input_form_store::park_to_profile`],
+/// which stashes the committed row as a `parked = 1` draft and deletes the committed row so the year
+/// resolves through the `tax_profile` again; it REFUSES (writing nothing) when there is no committed row or
+/// when a work-in-progress draft already occupies the slot (M-4 clean-state gate). The TUI ADDITIONALLY
+/// gates the offer on a clean (non-dirty) flow, because the store cannot see un-flushed in-memory edits.
+///
+/// Lives HERE, alongside [`form_commit`], because the mutation surface (`Session::conn()` /
+/// `Session::save()`) is confined to this module (the KAT-G1 gate). The flow calls THIS wrapper, never
+/// `input_form_store::park_to_profile` directly.
+///
+/// Returns [`btctax_cli::CliError`], NOT [`PersistError`]: `park_to_profile` does its OWN snapshot/restore
+/// around its `save()` (stash-first, then delete, one atomic save — D-6), so it never leaves an
+/// in-memory/disk split and its `Err` is routed to `app.status` DIRECTLY, not through
+/// `EditorApp::on_persist_error` (mirrors [`form_commit`], review M1). Takes `&mut Session` so the flow
+/// borrows `app.session` DISJOINTLY from `app.tax_inputs_form` (review I-1).
+pub fn form_park_to_profile(
+    session: &mut btctax_cli::Session,
+    year: i32,
+) -> Result<(), btctax_cli::CliError> {
+    btctax_cli::input_form_store::park_to_profile(session, year)
+}
+
+/// Discard the parked draft for `year` — the `X` discard-parked path (§9A/P2-a) — the input-form flow's
+/// PARKED-DISCARD side. A thin wrapper over [`btctax_cli::input_form_store::discard_parked_draft`], the ONLY
+/// deleter of a `parked = 1` row; it REFUSES ([`btctax_cli::CliError::Usage`]) unless the year's draft is
+/// parked, so it can never be reached to delete a work-in-progress draft (or a year with no draft) behind
+/// the "discard parked draft" affordance — the parked check is the whole safety property, and the flow
+/// surfaces the refusal to `app.status` rather than suppressing it.
+///
+/// Lives HERE, alongside [`form_park_to_profile`], because the mutation surface (`Session::conn()` /
+/// `Session::save()`) is confined to this module (the KAT-G1 gate). The flow calls THIS wrapper, never
+/// `input_form_store::discard_parked_draft` directly.
+///
+/// Returns [`btctax_cli::CliError`], NOT [`PersistError`]: `discard_parked_draft` does its OWN
+/// snapshot/restore around its `save()` (mirrors `park_to_profile`'s atomicity), so its `Err` is routed to
+/// `app.status` DIRECTLY, not through `EditorApp::on_persist_error` (review M1). Takes `&mut Session` so the
+/// flow borrows `app.session` DISJOINTLY from `app.tax_inputs_form` (review I-1).
+pub fn form_discard_parked_draft(
+    session: &mut btctax_cli::Session,
+    year: i32,
+) -> Result<(), btctax_cli::CliError> {
+    btctax_cli::input_form_store::discard_parked_draft(session, year)
+}
+
 /// Revert the in-memory DB to `pre` after a mutation-committing step failed, mapping the error:
 /// `RolledBack` if the revert succeeds, `ResidueLive` if the revert ALSO fails (residue is live).
 fn rollback(
