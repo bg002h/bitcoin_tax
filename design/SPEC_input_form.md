@@ -673,7 +673,7 @@ field.
 7. **The toggle** — in-session stash/clear/re-commit, atomicity, clean-state gate, active-source state.
 8. **The TUI "tax inputs" mode** — the renderer over `FormSpec`, key handling, the payload-confirm modal,
    secret no-echo input, snapshot tests.
-9. **Docs** — man pages; `income template`/`income import` remain as import/export; `LIMITATIONS.md` note
+9. **Docs** — man pages; `income import` remains as import/export (`income template` was recon'd in P8 but never built — do NOT document it); `LIMITATIONS.md` note
    that the form is the primary authoring path and what it cannot see at entry.
 
 ## 12. Follow-ups this phase files (non-gating)
