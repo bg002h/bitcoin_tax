@@ -9,3 +9,4 @@
 
 pub mod form;
 pub mod persist;
+pub mod tax_inputs;

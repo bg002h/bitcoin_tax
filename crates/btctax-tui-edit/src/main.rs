@@ -788,6 +788,8 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             section_idx: 0,
             field_focus: 0,
             addr: btctax_input_form::RowAddr::default(),
+            editing: false,
+            buf: crate::edit::form::FieldBuffer::new(),
             error: None,
             parked: false,
             stale_note,
@@ -799,6 +801,8 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             section_idx: 0,
             field_focus: 0,
             addr: btctax_input_form::RowAddr::default(),
+            editing: false,
+            buf: crate::edit::form::FieldBuffer::new(),
             error: None,
             parked: false,
             stale_note,
@@ -811,6 +815,8 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 section_idx: 0,
                 field_focus: 0,
                 addr: btctax_input_form::RowAddr::default(),
+                editing: false,
+                buf: crate::edit::form::FieldBuffer::new(),
                 error: None,
                 parked,
                 stale_note,
@@ -827,6 +833,8 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 section_idx: 0,
                 field_focus: 0,
                 addr: btctax_input_form::RowAddr::default(),
+                editing: false,
+                buf: crate::edit::form::FieldBuffer::new(),
                 error: Some(e.to_string()),
                 parked: true,
                 stale_note: None,
@@ -849,6 +857,36 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
 /// recomputed each keypress — they change after edits (materialization, create/delete). The per-kind
 /// editing keys, commit/toggle, and the 'X' discard land in later tasks.
 fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
+    // ── Edit-buffer mode FIRST (Task 3): the focused text-kind field is capturing keystrokes. Esc here
+    //    cancels the edit (not the flow); a second Enter commits (parse+apply). ──
+    if app
+        .tax_inputs_form
+        .as_ref()
+        .is_some_and(|f| f.editing)
+    {
+        let form = app.tax_inputs_form.as_mut().unwrap();
+        match key.code {
+            KeyCode::Char(c) => form.buf.push_char(c),
+            KeyCode::Backspace => form.buf.pop_char(),
+            KeyCode::Enter => {
+                let raw = form.buf.as_str().to_owned();
+                if crate::edit::tax_inputs::tax_inputs_apply_edit(form, &raw) {
+                    form.editing = false;
+                    form.buf.set("");
+                }
+                // On a parse/apply error the flow stays in edit mode with `form.error` set (rendered inline).
+            }
+            KeyCode::Esc => {
+                form.editing = false;
+                form.buf.set("");
+                form.error = None;
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // Not editing: Esc closes the whole flow.
     if key.code == KeyCode::Esc {
         app.tax_inputs_form = None;
         return;
@@ -878,6 +916,27 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
     };
 
     match key.code {
+        // ── Task 3 edit keys ──
+        // Enter: open the buffer on a text kind, or cycle/toggle a cycle kind in place.
+        KeyCode::Enter => {
+            if let Some(k) = crate::edit::tax_inputs::focused_kind(form) {
+                if crate::edit::tax_inputs::is_text_kind(k) {
+                    crate::edit::tax_inputs::begin_edit(form);
+                } else if crate::edit::tax_inputs::is_cycle_kind(k) {
+                    crate::edit::tax_inputs::cycle_focused(form);
+                }
+                // Secret (Task 4) / no field: no-op.
+            }
+        }
+        // Space: cycle/toggle a cycle kind (Enum/TriState/Bool) in place — incl. the NI-2 materialization.
+        // (A Space on a text/Secret/no field falls through to the `_` arm — a no-op.)
+        KeyCode::Char(' ')
+            if crate::edit::tax_inputs::focused_kind(form)
+                .is_some_and(crate::edit::tax_inputs::is_cycle_kind) =>
+        {
+            crate::edit::tax_inputs::cycle_focused(form);
+        }
+        // ── navigation ──
         KeyCode::Up => form.field_focus = form.field_focus.saturating_sub(1),
         KeyCode::Down if form.field_focus + 1 < n_fields => {
             form.field_focus += 1;
@@ -896,9 +955,13 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
         }
         _ => {}
     }
-    // Normalize the section cursor (defensive: the live set can shrink after an edit).
-    if n_sections > 0 {
-        form.section_idx = form.section_idx.min(n_sections - 1);
+    // Normalize the section cursor (defensive: the live set can grow/shrink after an edit — e.g. a
+    // materialization or a section create/delete). Re-clamp against the CURRENT live set.
+    if let Some(ri) = form.working.as_ref() {
+        let n = crate::edit::form::live_sections(ri).len();
+        if n > 0 {
+            form.section_idx = form.section_idx.min(n - 1);
+        }
     }
 }
 
@@ -9286,6 +9349,68 @@ mod tests {
             app.tax_inputs_form.as_ref().unwrap().field_focus,
             0,
             "field focus clamps: ReturnOptions has a single live field on a Single return"
+        );
+    }
+
+    /// Field editing (plan 3 task 3, brief test (b)): key-driven Money edit. `Enter` opens the edit
+    /// buffer on a focused Money field; typing digits fills it; a second `Enter` commits (parse+apply) and
+    /// exits edit mode; `get` then reads back the committed value — asserted via the accessor, never a leaf.
+    #[test]
+    fn tax_inputs_money_edit_via_keys_roundtrips_through_get() {
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        // Materialize a Single return via `apply` — never construct a `ReturnInputs`.
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        // Focus Payments → PayEstimated (a singleton Money field, addr `[]`).
+        let ri = form.working.as_ref().unwrap();
+        let sections = crate::edit::form::live_sections(ri);
+        let sec = sections
+            .iter()
+            .position(|s| s.id == SectionId::Payments)
+            .unwrap();
+        let fld = crate::edit::form::live_fields(sections[sec], ri)
+            .iter()
+            .position(|f| f.id == FieldId::PayEstimated)
+            .unwrap();
+        form.section_idx = sec;
+        form.field_focus = fld;
+        app.tax_inputs_form = Some(form);
+
+        // Enter opens the buffer; digits fill it; Enter commits.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().editing,
+            "Enter on a Money field opens the edit buffer"
+        );
+        type_str(&mut app, "50000");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        let form = app.tax_inputs_form.as_ref().unwrap();
+        assert!(!form.editing, "a successful commit exits edit mode");
+        assert!(form.error.is_none(), "a valid Money entry leaves no error");
+        // Assert via the `get` accessor: PayEstimated == $50,000.
+        let ri = form.working.as_ref().unwrap();
+        let sections = crate::edit::form::live_sections(ri);
+        let pay = sections
+            .iter()
+            .find(|s| s.id == SectionId::Payments)
+            .unwrap();
+        let field = crate::edit::form::live_fields(pay, ri)
+            .into_iter()
+            .find(|f| f.id == FieldId::PayEstimated)
+            .unwrap();
+        assert_eq!(
+            (field.get)(ri, &RowAddr::default()),
+            Some(FieldValue::Money(rust_decimal_macros::dec!(50000)))
         );
     }
 

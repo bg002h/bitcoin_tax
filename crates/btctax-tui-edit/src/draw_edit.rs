@@ -2020,7 +2020,15 @@ fn draw_tax_inputs_form(frame: &mut Frame, area: Rect, form: &TaxInputsFormState
 
     // Right pane: the selected section's field pane.
     let section = sections[sel];
-    let right_lines = field_pane_lines(section, ri, &form.addr, form.field_focus, form.error.as_deref());
+    let right_lines = field_pane_lines(
+        section,
+        ri,
+        &form.addr,
+        form.field_focus,
+        form.editing,
+        form.buf.as_str(),
+        form.error.as_deref(),
+    );
     let right = Paragraph::new(right_lines).block(
         Block::default()
             .title(format!(" {} ", section.title))
@@ -2095,6 +2103,8 @@ fn field_pane_lines(
     ri: &ReturnInputs,
     addr: &RowAddr,
     field_focus: usize,
+    editing: bool,
+    buf: &str,
     error: Option<&str>,
 ) -> Vec<Line<'static>> {
     let focus_style = Style::default()
@@ -2133,10 +2143,17 @@ fn field_pane_lines(
         lines.push(Line::from(Span::styled("  (no live fields)", dark)));
     }
     for (i, f) in fields.iter().enumerate() {
-        let value = (f.get)(ri, addr)
-            .map(|v| render_field_value(&v))
-            .unwrap_or_else(|| "—".to_string());
-        let style = if i == field_focus {
+        let is_focus = i == field_focus;
+        // While editing the focused field, show the raw buffer being typed with a cursor block — NOT the
+        // committed value (which only updates on a successful parse+apply).
+        let value = if is_focus && editing {
+            format!("{buf}\u{2588}")
+        } else {
+            (f.get)(ri, addr)
+                .map(|v| render_field_value(&v))
+                .unwrap_or_else(|| "—".to_string())
+        };
+        let style = if is_focus {
             focus_style
         } else {
             Style::default()
@@ -5640,6 +5657,51 @@ mod tests {
         assert!(
             !r.contains("W-2"),
             "no other section is offered until filing status is chosen (NI-2)"
+        );
+    }
+
+    /// Task 3: while editing a focused text-kind field the pane shows the RAW buffer being typed (with a
+    /// cursor block), NOT the committed value — the value only updates on a successful parse+apply.
+    #[test]
+    fn tax_inputs_renders_the_edit_buffer_while_editing() {
+        use crate::edit::form::{live_fields, live_sections, TaxInputsFormState};
+        use btctax_input_form::{apply, Edit, FieldId, FieldValue, RowAddr, SectionId};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut form = TaxInputsFormState::fresh(2024);
+        apply(
+            &mut form.working,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr::default(),
+                value: FieldValue::Choice("Single".into()),
+            },
+        )
+        .unwrap();
+        // Focus Payments → PayEstimated and enter edit mode with a partial buffer.
+        let ri = form.working.as_ref().unwrap();
+        let sections = live_sections(ri);
+        let sec = sections
+            .iter()
+            .position(|s| s.id == SectionId::Payments)
+            .unwrap();
+        let fld = live_fields(sections[sec], ri)
+            .iter()
+            .position(|f| f.id == FieldId::PayEstimated)
+            .unwrap();
+        form.section_idx = sec;
+        form.field_focus = fld;
+        form.editing = true;
+        form.buf.set("123");
+
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains("123\u{2588}"),
+            "the edit buffer shows the typed text with a cursor while editing"
         );
     }
 

@@ -77,6 +77,11 @@ impl FieldBuffer {
     pub fn is_empty(&self) -> bool {
         self.buf.is_empty()
     }
+
+    /// The buffer's current content as a `&str` (for `parse`).
+    pub fn as_str(&self) -> &str {
+        &self.buf
+    }
 }
 
 impl Default for FieldBuffer {
@@ -162,6 +167,13 @@ pub struct TaxInputsFormState {
     pub field_focus: usize,
     /// The current row address (`[]` for singletons; `[w2_i]`/`[w2_i, box12_i]` for rows). Task 5.
     pub addr: btctax_input_form::RowAddr,
+    /// ★ Task 3: `true` while the focused text-kind field (Money/Text/Date) is being edited — the
+    /// `buf` is capturing keystrokes. A second `Enter` commits (parse+apply); `Esc` cancels. Cycle
+    /// kinds (Enum/TriState/Bool) never set this — they apply in place on the keypress.
+    pub editing: bool,
+    /// ★ Task 3: the reused, pre-allocated raw-text edit buffer (`FieldBuffer`, no realloc). Seeded
+    /// from the focused field's current value on edit-entry; `parse`d on commit.
+    pub buf: FieldBuffer,
     /// Inline error surfaced under the field pane (parse/apply/store failures). `None` when clean.
     pub error: Option<String>,
     /// Whether this working copy came from a PARKED committed return (NI-1). Carried across edits.
@@ -184,6 +196,8 @@ impl TaxInputsFormState {
             section_idx: 0,
             field_focus: 0,
             addr: btctax_input_form::RowAddr::default(),
+            editing: false,
+            buf: FieldBuffer::new(),
             error: None,
             parked: false,
             stale_note: None,
