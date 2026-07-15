@@ -2,16 +2,31 @@
 //! the sections; it grows over the plan's tasks 4–5. Task 4 lands the two synthetic registry-driven sections
 //! ([`Declarations`](SectionId::Declarations) + [`Skippables`](SectionId::Skippables)); Task 5 prepends the
 //! header/W-2/Schedule-A/... sections and re-orders `form_spec()` into the §5.8 render order.
+#[macro_use]
 mod registries;
+mod sections;
 pub use registries::{field_to_question, field_to_skippable, question_to_field, skippable_to_field};
 
 use crate::seam::Section;
 
-/// The v1 `FormSpec`: the sections a renderer walks, in render order. **Grows over tasks 4–5** — Task 5 must
-/// insert the header/W-2/Schedule-A/etc. sections *before* these two so the final order matches spec §9A
-/// (`… Payments → Declarations → Skippables`).
+/// The v1 `FormSpec`: the twelve sections a renderer walks, in spec §9A render order — the ten
+/// header/W-2/Schedule-A/... sections (the `sections` module), then the two synthetic registry-driven
+/// sections (`Declarations` + `Skippables`), so the tail is `… Payments → Declarations → Skippables`.
 pub fn form_spec() -> &'static [Section] {
-    const SECTIONS: &[Section] = &[registries::DECLARATIONS, registries::SKIPPABLES];
+    const SECTIONS: &[Section] = &[
+        sections::RETURN_OPTIONS,
+        sections::TAXPAYER,
+        sections::SPOUSE,
+        sections::ADDRESS,
+        sections::DEPENDENTS,
+        sections::W2S,
+        sections::W2_BOX12,
+        sections::SCHEDULE_A,
+        sections::SCHEDULE_A_CHARITABLE,
+        sections::PAYMENTS,
+        registries::DECLARATIONS,
+        registries::SKIPPABLES,
+    ];
     SECTIONS
 }
 
