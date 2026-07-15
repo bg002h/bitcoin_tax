@@ -164,6 +164,42 @@ pub fn load(conn: &Connection, year: i32) -> Result<Loaded, CliError> {
     }
 }
 
+/// §6.2 draft-coherence: reconcile that year's input-form draft with an authoritative committed-row write.
+///
+/// The four writers of the committed `return_inputs` row (`income import`, `income answer`, carryover
+/// write-back, `income clear`) are ignorant of the crash-recovery draft. A stale draft would then silently
+/// shadow the freshly-written committed row at the next `load` (§6.1 precedence), and a PARKED draft — the
+/// sole copy of a screened return (C-1) — could be clobbered out of existence. This helper closes both:
+///
+/// - **no draft** → `Ok(())` (a no-op; the writer proceeds unchanged).
+/// - **WIP** (`parked = 0`) → the draft is regenerable crash-scratch, so the write SUPERSEDES it:
+///   `delete_draft` (noting on stderr only if it held a non-trivial return, i.e. `!= default`). The delete
+///   is in-memory on `conn`; the writer's own `s.save()` persists it together with the committed write.
+/// - **parked** (`parked = 1`) → REFUSE with [`CliError::ParkedDraftBlocksWrite`] (fail closed) BEFORE any
+///   committed-row mutation — never silently destroy irreplaceable data.
+///
+/// ★ M-1: callers invoke this RIGHT AFTER `Session::open`, before any committed-row read or write — else
+/// the two writers that early-return on an absent committed row (`answer`, write-back) would exit with a
+/// generic "no inputs" message before the parked-refuse is ever reached (a parked year has no committed
+/// row). Takes `&Connection` (read + a conditional in-memory delete); a parked `Err` propagates via `?`.
+pub fn coherence_clear_or_refuse(conn: &Connection, year: i32) -> Result<(), CliError> {
+    match parked_flag(conn, year)? {
+        None => Ok(()),
+        Some(true) => Err(CliError::ParkedDraftBlocksWrite { year }), // ★ C-1: never clobber the sole copy
+        Some(false) => {
+            if let Some(d) = get_draft_row(conn, year)? {
+                if d.ri != ReturnInputs::default() {
+                    eprintln!(
+                        "note: superseding a work-in-progress draft for {year} with this write."
+                    );
+                }
+            }
+            delete_draft(conn, year)?;
+            Ok(())
+        }
+    }
+}
+
 /// The outcome of a [`commit`] attempt.
 ///
 /// - `Committed` — the return screened CLEAN; the committed `return_inputs` row was written and the draft
@@ -394,6 +430,41 @@ mod tests {
             draft_exists(sess.conn(), 2024).unwrap(),
             "a refused commit leaves the draft"
         );
+    }
+
+    /// ★ §6.2 — an authoritative committed-row write CLEARS a WIP draft but REFUSES a parked one. A WIP
+    /// draft is regenerable crash-scratch, so the write supersedes it; a parked draft is the SOLE copy of a
+    /// screened return (C-1), so it is never silently destroyed — the write is refused, naming both exits.
+    #[test]
+    fn coherence_clears_wip_but_refuses_parked() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_draft_table(&conn).unwrap();
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        // WIP draft → cleared
+        set_draft_row(&conn, 2024, &ri, false).unwrap();
+        coherence_clear_or_refuse(&conn, 2024).unwrap();
+        assert!(
+            !draft_exists(&conn, 2024).unwrap(),
+            "coherence clears a WIP draft"
+        );
+        // parked draft → refused, preserved, message names both exits
+        set_draft_row(&conn, 2025, &ri, true).unwrap();
+        let err = coherence_clear_or_refuse(&conn, 2025).unwrap_err();
+        assert!(matches!(err, CliError::ParkedDraftBlocksWrite { year: 2025 }));
+        let msg = err.to_string();
+        assert!(
+            msg.contains("use full return") && msg.contains("discard parked draft"),
+            "M-d: names both exits"
+        );
+        assert!(
+            draft_exists(&conn, 2025).unwrap(),
+            "a parked draft is never silently destroyed"
+        );
+        // no draft → Ok
+        coherence_clear_or_refuse(&conn, 2030).unwrap();
     }
 
     #[test]

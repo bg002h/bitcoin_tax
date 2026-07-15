@@ -102,6 +102,10 @@ pub fn answer_return_inputs(
     out: &mut impl Write,
 ) -> Result<(), CliError> {
     let mut s = Session::open(vault, pp)?;
+    // ★ §6.2 (M-1): reconcile the draft BEFORE the committed-row read below — that read early-returns a
+    // generic "no inputs" message on an absent row, and a PARKED year has no committed row, so running
+    // coherence first is what surfaces the parked-refuse remedy instead of the generic message.
+    crate::input_form_store::coherence_clear_or_refuse(s.conn(), year)?;
     let Some(mut ri) = return_inputs::get(s.conn(), year)? else {
         return Err(CliError::Usage(format!(
             "no full-return inputs for tax year {year} — `income answer` fills in the questions on an \
