@@ -213,6 +213,13 @@ pub struct TaxInputsFormState {
     /// cancels (writes nothing). NESTED here (review M5), dispatched in `handle_tax_inputs_key` BEFORE the
     /// field keymap. `s` requires `working.is_some()` (else the status "choose a filing status first").
     pub modal: Option<TaxInputsModalState>,
+    /// ★ I-4 (SPEC §9A): the SECTION a screen refusal is attributed to — set by [`focus_refusal`] when the
+    /// last `commit` returned `Refused` and its anchor resolved to a LIVE in-form section, CLEARED on the
+    /// next successful `apply` (the model changed → the refusal is stale) and subsumed by the flow close on
+    /// a clean commit. Drives the `!` glyph on that section (left pane) and the status line's `1 issue:
+    /// <section>` segment (else `screens clean, except what report computes`). Stores a `SectionId` — a
+    /// FormSpec section key, NEVER a `ReturnInputs` leaf (the never-name-a-leaf seam holds).
+    pub refused_section: Option<btctax_input_form::SectionId>,
 }
 
 /// ★ Task 8: which confirmed action a [`TaxInputsModalState`] gates — one nested modal field serves all
@@ -284,6 +291,7 @@ impl TaxInputsFormState {
             pending_remove: None,
             descent: None,
             modal: None,
+            refused_section: None,
         }
     }
 }

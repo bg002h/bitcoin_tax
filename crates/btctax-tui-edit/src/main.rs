@@ -804,6 +804,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             pending_remove: None,
             descent: None,
             modal: None,
+            refused_section: None,
         },
         Ok((btctax_cli::input_form_store::Loaded::Committed(ri), stale_note)) => TaxInputsFormState {
             year,
@@ -822,6 +823,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             pending_remove: None,
             descent: None,
             modal: None,
+            refused_section: None,
         },
         Ok((btctax_cli::input_form_store::Loaded::Draft { ri, parked }, stale_note)) => {
             TaxInputsFormState {
@@ -841,6 +843,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 pending_remove: None,
                 descent: None,
                 modal: None,
+                refused_section: None,
             }
         }
         Err(e @ btctax_cli::CliError::StaleParkedDraft { .. }) => {
@@ -864,6 +867,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 pending_remove: None,
                 descent: None,
                 modal: None,
+                refused_section: None,
             }
         }
         Err(e) => {
@@ -910,6 +914,19 @@ fn flush_tax_inputs_draft(app: &mut EditorApp) {
         // `on_persist_error`; surface it directly. `dirty` stays set so a later flush point retries.
         Err(e) => app.status = Some(format!("{e}")),
     }
+}
+
+/// ★ I-3: after a final flush, whether the flow still holds UNSAVED in-memory edits (a FAILED flush) — the
+/// close-decision. `flush_tax_inputs_draft` clears `dirty` only on a clean disk write, so a still-`dirty`
+/// flow with a live `working` copy means the flush errored and the edits exist only in memory. Closing then
+/// would silently drop them — the opposite of the retry latch's purpose — so `q`/`Esc` KEEP the flow open in
+/// that case (the error is already in `app.status`, visible via I-2). Closing is safe when the draft is on
+/// disk (`!dirty`) or there is nothing to lose (`working.is_none()`; `dirty ⟹ working.is_some()` anyway,
+/// since only a successful `apply` sets `dirty`).
+fn tax_inputs_flush_left_unsaved(app: &EditorApp) -> bool {
+    app.tax_inputs_form
+        .as_ref()
+        .is_some_and(|f| f.dirty && f.working.is_some())
 }
 
 /// Handle a key press while the tax-inputs flow is open (plan 3 task 2: section/field navigation).
@@ -1017,20 +1034,27 @@ fn handle_tax_inputs_key(app: &mut EditorApp, key: KeyEvent) {
     if key.code == KeyCode::Esc {
         let left_a_row = crate::edit::tax_inputs::leave_row(form);
         flush_tax_inputs_draft(app); // `form` borrow ended above; re-borrow `app` disjointly (I-1)
-        if !left_a_row {
+        // ★ I-3: close ONLY when the flush left nothing unsaved. A FAILED final flush keeps the flow open so
+        // the in-memory edits survive (the error is in `app.status`, visible via I-2) — never drop work.
+        if !left_a_row && !tax_inputs_flush_left_unsaved(app) {
             app.tax_inputs_form = None;
         }
         return;
     }
 
-    // ★ Task 6 (review I-3 / §9A): `q` quits the flow. The draft is autosaved, so quitting is safe — flush
-    // any pending edit to disk FIRST (so `q` never loses work), note the autosave when the flow was dirty,
-    // then close. Without this arm the flow gate silently swallows `q` (it would fall to the `_ => {}`).
+    // ★ Task 6 (review I-3 / §9A): `q` quits the flow. Flush any pending edit to disk FIRST (so `q` never
+    // loses work). ★ I-3: close ONLY on a clean flush — a FAILED flush KEEPS the flow open (the edits live
+    // only in memory; closing would drop them, defeating the retry latch), the error already in `app.status`.
+    // Without this arm the flow gate silently swallows `q` (it would fall to the `_ => {}`).
     if key.code == KeyCode::Char('q') {
         let (was_dirty, year) = (form.dirty, form.year);
         flush_tax_inputs_draft(app); // reaches disk; on error sets app.status (M1), leaves `dirty` set
-        if was_dirty && app.tax_inputs_form.as_ref().is_some_and(|f| !f.dirty) {
-            // the flush persisted cleanly — the draft is safe (§9A); a flush error already set app.status.
+        if tax_inputs_flush_left_unsaved(app) {
+            // the flush FAILED — keep the flow open with the buffers intact (the error is in `app.status`).
+            return;
+        }
+        if was_dirty {
+            // the flush persisted cleanly (was dirty, now clean) — the draft is safe (§9A).
             app.status = Some(format!("tax inputs {year}: draft autosaved"));
         }
         app.tax_inputs_form = None;
@@ -1249,7 +1273,23 @@ fn commit_tax_inputs(app: &mut EditorApp) {
                 .map(|m| m.filing_status_label.clone())
                 .unwrap_or_default();
             app.tax_inputs_form = None; // close the flow; the committed row is authoritative
-            Some(format!("committed {year} as {label}"))
+            // ★ I-1: re-project the Browse snapshot — a commit changes the year's resolve outcome, so the
+            // Tax/Forms tabs must show the newly-committed liability, not the pre-mutation one (mirrors the
+            // profile-save site). `build_snapshot` is a READ via the persist-seam pattern; a re-projection
+            // failure is non-fatal (keep the old snapshot; tell the filer to restart).
+            let new_snap = {
+                let session = app.session.as_ref().unwrap();
+                btctax_tui::unlock::build_snapshot(session)
+            };
+            match new_snap {
+                Ok((snap, _)) => {
+                    app.snapshot = Some(snap);
+                    Some(format!("committed {year} as {label}"))
+                }
+                Err(e) => Some(format!(
+                    "committed {year} as {label}, but re-projection failed ({e}) — restart to refresh"
+                )),
+            }
         }
         Ok(CommitOutcome::Refused(refusal)) => {
             let mut msg = refusal.detail.clone();
@@ -1390,15 +1430,32 @@ fn confirm_park_to_profile(app: &mut EditorApp) {
             let label = edit::persist::form_active_source(app.session.as_ref().unwrap(), year)
                 .map(|a| crate::edit::form::active_source_label(&a))
                 .unwrap_or("(none)");
+            // ★ I-1: re-project the Browse snapshot — parking changes the year's resolve outcome (it now
+            // resolves through the tax-profile, not the committed full return), so the Tax/Forms tabs must
+            // reflect the profile-derived liability. A re-projection failure is non-fatal (restart to refresh).
+            let new_snap = {
+                let session = app.session.as_ref().unwrap();
+                btctax_tui::unlock::build_snapshot(session)
+            };
             if let Some(form) = app.tax_inputs_form.as_mut() {
                 form.modal = None;
                 form.active_source_label = label;
                 form.parked = true; // the working copy is now the sole parked draft (re-commit via `s`)
                 form.dirty = false;
             }
-            app.status = Some(format!(
-                "parked the full return for {year}; now using the tax-profile"
-            ));
+            match new_snap {
+                Ok((snap, _)) => {
+                    app.snapshot = Some(snap);
+                    app.status = Some(format!(
+                        "parked the full return for {year}; now using the tax-profile"
+                    ));
+                }
+                Err(e) => {
+                    app.status = Some(format!(
+                        "parked the full return for {year}, but re-projection failed ({e}) — restart to refresh"
+                    ));
+                }
+            }
         }
         Err(e) => {
             if let Some(form) = app.tax_inputs_form.as_mut() {
@@ -10139,6 +10196,255 @@ mod tests {
         assert!(
             !btctax_cli::return_inputs::exists(sess.conn(), 2099).unwrap(),
             "NoTables writes no committed row"
+        );
+    }
+
+    // ── Whole-branch P3 fix-pass (I-1..I-4) ──────────────────────────────────
+
+    /// Render the WHOLE editor (Browse + the tax-inputs overlay) to a flat row-major string. The overlay
+    /// reads `app.status` (I-2), so this exercises the real render path a filer sees inside the flow.
+    fn render_editor(app: &mut EditorApp) -> String {
+        use ratatui::{backend::TestBackend, Terminal};
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, app)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    /// ★ I-1 (commit site): a clean `Committed` commit RE-PROJECTS the Browse snapshot — the year that had
+    /// no resolved profile now appears in `snapshot.profiles`/`refused`, so the Tax/Forms tabs read the
+    /// newly-committed liability rather than the stale pre-mutation one. Mutation-check: delete the
+    /// re-projection block in `commit_tax_inputs`'s `Committed` arm and 2024 stays absent → this fails.
+    #[test]
+    fn tax_inputs_commit_reprojects_the_browse_snapshot() {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+
+        // The empty-vault snapshot (built at unlock) knows nothing about 2024 yet.
+        let known_before = |app: &EditorApp| {
+            let s = app.snapshot.as_ref().unwrap();
+            s.profiles.contains_key(&2024) || s.refused.contains_key(&2024)
+        };
+        assert!(!known_before(&app), "precondition: 2024 unresolved before the commit");
+
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+        btctax_cli::input_form_store::save_draft(app.session.as_mut().unwrap(), 2024, &ri).unwrap();
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.working = Some(ri);
+        form.dirty = true;
+        app.tax_inputs_form = Some(form);
+
+        handle_key(&mut app, press(KeyCode::Char('s'))); // open the commit modal
+        handle_key(&mut app, press(KeyCode::Enter)); // Committed
+
+        assert!(app.tax_inputs_form.is_none(), "a clean commit closes the flow");
+        assert!(
+            known_before(&app),
+            "★ I-1: the snapshot re-projected — 2024 now resolves through the committed return"
+        );
+    }
+
+    /// ★ I-1 (park site): a confirmed park RE-PROJECTS the Browse snapshot — the year now resolves through
+    /// the tax-profile again, so the Tax/Forms tabs reflect the profile-derived liability. Mutation-check:
+    /// delete the re-projection in `confirm_park_to_profile`'s `Ok` arm and 2024 stays absent → this fails.
+    #[test]
+    fn tax_inputs_park_reprojects_the_browse_snapshot() {
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
+        // The snapshot was built at unlock (empty vault), BEFORE the seed reached disk — 2024 is absent.
+        let resolved = |app: &EditorApp| {
+            let s = app.snapshot.as_ref().unwrap();
+            s.profiles.contains_key(&2024) || s.refused.contains_key(&2024)
+        };
+        assert!(!resolved(&app), "precondition: 2024 unresolved in the stale snapshot");
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open on the committed full return
+        handle_key(&mut app, press(KeyCode::Char('t'))); // park confirm
+        handle_key(&mut app, press(KeyCode::Enter)); // run the park
+
+        assert!(
+            app.tax_inputs_form.as_ref().is_some_and(|f| f.parked),
+            "park keeps the flow open on the parked draft"
+        );
+        assert!(
+            resolved(&app),
+            "★ I-1: the snapshot re-projected — 2024 now resolves through the tax-profile"
+        );
+    }
+
+    /// ★ I-2: a `NoTables` commit routes its message to `app.status` while the flow stays open; the flow's
+    /// full-frame overlay clears the Browse footer, so the message must be surfaced INSIDE the flow render.
+    /// The rendered buffer must carry the "no full-return tables" text (else the modal just vanished silently).
+    #[test]
+    fn tax_inputs_notables_status_is_visible_in_flow_render() {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2099); // no full-return tables
+
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2099);
+        form.working = Some(ri);
+        app.tax_inputs_form = Some(form);
+
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Enter)); // NoTables — flow stays open, status set
+
+        assert!(app.tax_inputs_form.is_some(), "NoTables keeps the flow open");
+        let rendered = render_editor(&mut app);
+        assert!(
+            rendered.contains("no full-return tables"),
+            "★ I-2: the NoTables status is VISIBLE inside the flow render, not swallowed by the overlay"
+        );
+    }
+
+    /// ★ I-3: `q` must NOT close the flow when the final flush FAILS (that would drop the in-memory edits —
+    /// the opposite of the retry latch's purpose). Simulate a `Vault::save` failure by removing the vault's
+    /// directory out from under the session, so the autosave write errors. The flow stays open + dirty and
+    /// the error is surfaced. Mutation-check: make the close in the `q` arm unconditional → this fails
+    /// (the flow closes and the edits are lost).
+    #[test]
+    fn tax_inputs_q_keeps_flow_open_when_final_flush_fails() {
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open (working None)
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → Single (materializes, dirty)
+        assert!(
+            app.tax_inputs_form.as_ref().is_some_and(|f| f.dirty && f.working.is_some()),
+            "precondition: a dirty flow with a live working copy"
+        );
+
+        // Pull the rug: remove the directory holding the vault so `Vault::save`'s atomic write fails.
+        std::fs::remove_dir_all(dir.path()).unwrap();
+
+        handle_key(&mut app, press(KeyCode::Char('q')));
+
+        assert!(
+            app.tax_inputs_form.is_some(),
+            "★ I-3: a FAILED final flush keeps the flow OPEN — the in-memory edits are not dropped"
+        );
+        assert!(
+            app.tax_inputs_form.as_ref().is_some_and(|f| f.dirty),
+            "the flow is still dirty (the draft never reached disk)"
+        );
+        assert!(
+            app.status.as_deref().is_some_and(|s| !s.is_empty()),
+            "the flush error is surfaced (visible via I-2): {:?}",
+            app.status
+        );
+    }
+
+    /// ★ I-3 (unit): the close-decision helper. A dirty flow with a live working copy (a failed flush) is
+    /// NOT safe to close; a clean flow (or one with no working copy) is. Directly pins the guard the `q`/`Esc`
+    /// arms consult.
+    #[test]
+    fn tax_inputs_flush_left_unsaved_gates_the_close() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.working = None;
+        form.dirty = false;
+        app.tax_inputs_form = Some(form);
+        assert!(!tax_inputs_flush_left_unsaved(&app), "None working → safe to close");
+
+        // A dirty flow with a live working copy (the failed-flush shape) must block the close.
+        {
+            let f = app.tax_inputs_form.as_mut().unwrap();
+            f.working = Some(btctax_core::tax::return_inputs::ReturnInputs::default());
+            f.dirty = true;
+        }
+        assert!(
+            tax_inputs_flush_left_unsaved(&app),
+            "dirty + working → unsaved edits → keep the flow open"
+        );
+
+        app.tax_inputs_form.as_mut().unwrap().dirty = false;
+        assert!(!tax_inputs_flush_left_unsaved(&app), "clean → safe to close");
+    }
+
+    /// ★ I-4 (§9A): a screen-refused commit attributes the refusal to a live SECTION (a `SectionId`, never a
+    /// leaf), renders the `!` glyph on that section in the left pane, and shows the `1 issue: <section>`
+    /// screen status. The SALT election mismatch attributes to Schedule A. A later successful `apply` clears
+    /// the attribution back to `screens clean`.
+    #[test]
+    fn tax_inputs_screen_refusal_renders_bang_glyph_and_issue_status() {
+        use btctax_core::tax::return_inputs::{ReturnInputs, ScheduleAInputs};
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+        use btctax_input_form::SectionId;
+        use rust_decimal_macros::dec;
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+        // A SALT sales-tax amount with the election left unanswered → a screen refusal on Schedule A.
+        ri.schedule_a = Some(ScheduleAInputs {
+            salt_sales_tax_amount: dec!(500),
+            ..Default::default()
+        });
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.working = Some(ri);
+        app.tax_inputs_form = Some(form);
+
+        handle_key(&mut app, press(KeyCode::Char('s')));
+        handle_key(&mut app, press(KeyCode::Enter)); // Refused → focus jumps to Schedule A
+
+        assert_eq!(
+            app.tax_inputs_form.as_ref().unwrap().refused_section,
+            Some(SectionId::ScheduleA),
+            "★ I-4: the refusal is attributed to the Schedule A SECTION (a SectionId, not a leaf)"
+        );
+
+        let rendered = render_editor(&mut app);
+        assert!(
+            rendered.contains("! Schedule"),
+            "★ I-4: the `!` glyph marks the refused section in the left pane"
+        );
+        assert!(
+            rendered.contains("1 issue"),
+            "★ I-4: the screen status reads `1 issue: <section>`"
+        );
+
+        // A successful apply clears the attribution → `screens clean` again (the `!` re-arms only on a
+        // fresh refusal). Navigation alone does NOT clear it — so retreat to ReturnOptions (Left resets the
+        // field cursor to FilingStatus) and cycle the filing status (an Enum apply that always succeeds).
+        for _ in 0..10 {
+            handle_key(&mut app, press(KeyCode::Left));
+        }
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().refused_section.is_some(),
+            "navigation alone must NOT clear the refusal attribution"
+        );
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → a successful apply
+        assert!(
+            app.tax_inputs_form.as_ref().unwrap().refused_section.is_none(),
+            "★ I-4: a successful apply clears the stale refusal attribution"
+        );
+        let rendered2 = render_editor(&mut app);
+        assert!(
+            rendered2.contains("screens clean"),
+            "★ I-4: with no refusal the screen status is honest — `screens clean, except what report computes`"
         );
     }
 

@@ -540,6 +540,9 @@ fn apply_edit(form: &mut TaxInputsFormState, edit: Edit) -> bool {
     match apply(&mut form.working, edit) {
         Ok(()) => {
             form.error = None;
+            // ★ I-4: a successful mutating apply changes the model — any recorded screen refusal is now
+            // stale, so clear the `!` attribution (it re-arms only on the next refused commit).
+            form.refused_section = None;
             // ★ Task 6 (autosave, I-7): a successful mutating apply marks the flow dirty; the disk flush is
             // DEBOUNCED to the flow's flush points (section change / idle tick / flow close / `q`), never here.
             form.dirty = true;
@@ -760,7 +763,9 @@ fn resolve_field_anchor(ri: &ReturnInputs, id: FieldId) -> Option<(usize, usize)
 /// filer is stranded on whatever field they pressed `s` from (test (a)'s focus assertion fails).
 pub fn focus_refusal(form: &mut TaxInputsFormState, reason: &RefuseReason) -> RefusalFocus {
     // Compute the target under an immutable borrow of `working`, THEN mutate `form` (disjoint borrows).
-    let (target, not_in_form) = {
+    // ★ I-4: alongside the focus target, capture the LIVE top-level section it lands on (a `SectionId`,
+    // never a leaf) so the `!` glyph + `1 issue: <section>` status can attribute the refusal.
+    let (target, section_id, not_in_form) = {
         let Some(ri) = form.working.as_ref() else {
             return RefusalFocus::None;
         };
@@ -785,7 +790,8 @@ pub fn focus_refusal(form: &mut TaxInputsFormState, reason: &RefuseReason) -> Re
                 }
             }
         }
-        (target, note)
+        let section_id = target.map(|(sidx, _)| live_sections(ri)[sidx].id);
+        (target, section_id, note)
     };
     match target {
         Some((sidx, fidx)) => {
@@ -793,12 +799,18 @@ pub fn focus_refusal(form: &mut TaxInputsFormState, reason: &RefuseReason) -> Re
             form.field_focus = fidx;
             form.addr = RowAddr::default();
             form.descent = None;
+            // ★ I-4: attribute the `!` glyph to the section the focus jumped to.
+            form.refused_section = section_id;
             RefusalFocus::Moved
         }
-        None => match not_in_form {
-            Some(n) => RefusalFocus::NotInForm(n),
-            None => RefusalFocus::None,
-        },
+        None => {
+            // ★ I-4: no in-form anchor to attribute — carry no `!` glyph (the note/status still surfaces).
+            form.refused_section = None;
+            match not_in_form {
+                Some(n) => RefusalFocus::NotInForm(n),
+                None => RefusalFocus::None,
+            }
+        }
     }
 }
 

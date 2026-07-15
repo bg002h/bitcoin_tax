@@ -211,7 +211,9 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
         draw_profile_form(frame, area, form);
     }
     if let Some(form) = app.tax_inputs_form.as_ref() {
-        draw_tax_inputs_form(frame, area, form);
+        // ★ I-2: thread `app.status` INTO the overlay — this full-frame overlay clears the Browse footer
+        // that normally renders it, so an in-flow status is invisible unless the flow draws it itself.
+        draw_tax_inputs_form(frame, area, form, app.status.as_deref());
     }
     if let Some(modal) = app.mutation_modal.as_ref() {
         draw_mutation_modal(frame, area, modal);
@@ -1925,19 +1927,26 @@ fn draw_void_modal(frame: &mut Frame, area: Rect, modal: &VoidModalState) {
 ///
 /// All field access is through `form_spec()` accessors (`live_sections`/`live_fields`/`field.get`) —
 /// this renderer NEVER names a `ReturnInputs` struct field (spec §9A/§13).
-fn draw_tax_inputs_form(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+fn draw_tax_inputs_form(
+    frame: &mut Frame,
+    area: Rect,
+    form: &TaxInputsFormState,
+    status: Option<&str>,
+) {
     frame.render_widget(Clear, area);
 
     // ★ P2-a FIRST: a stale PARKED draft is discard-only — no editing surface.
     if form.discard_offered {
-        draw_tax_inputs_discard(frame, area, form);
+        draw_tax_inputs_discard(frame, area, form, status);
         return;
     }
 
-    // 3 regions: [left section list | right field pane] over a bottom status line.
+    // 3 regions: [left section list | right field pane] over a bottom status block. The block is 5 rows
+    // (border + 3 content lines): active-source/screen-status, the key legend, and a NOTICE line that
+    // surfaces `app.status`/the stale-WIP note inside the flow (I-2 — the overlay clears the Browse footer).
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(4)])
+        .constraints([Constraint::Min(1), Constraint::Length(5)])
         .split(area);
     let cols = Layout::default()
         .direction(Direction::Horizontal)
@@ -1987,7 +1996,7 @@ fn draw_tax_inputs_form(frame: &mut Frame, area: Rect, form: &TaxInputsFormState
         );
         frame.render_widget(right, right_area);
 
-        draw_tax_inputs_status(frame, status_area, form);
+        draw_tax_inputs_status(frame, status_area, form, status);
         return;
     };
 
@@ -1998,7 +2007,7 @@ fn draw_tax_inputs_form(frame: &mut Frame, area: Rect, form: &TaxInputsFormState
     // Left pane: the section list with a per-section status glyph + focus marker.
     let mut left_lines: Vec<Line> = Vec::with_capacity(sections.len());
     for (i, s) in sections.iter().enumerate() {
-        let glyph = section_glyph(s, ri);
+        let glyph = section_glyph(s, ri, form.refused_section);
         let marker = if i == sel { '>' } else { ' ' };
         let style = if i == sel {
             Style::default()
@@ -2032,7 +2041,7 @@ fn draw_tax_inputs_form(frame: &mut Frame, area: Rect, form: &TaxInputsFormState
     );
     frame.render_widget(right, right_area);
 
-    draw_tax_inputs_status(frame, status_area, form);
+    draw_tax_inputs_status(frame, status_area, form, status);
 
     // ★ Task 5: the remove-row payload-confirm, drawn ON TOP of the editing surface.
     if form.pending_remove.is_some() {
@@ -2135,7 +2144,12 @@ fn draw_tax_inputs_remove_modal(frame: &mut Frame, area: Rect, form: &TaxInputsF
 
 /// ★ P2-a: the stale-PARKED-draft discard-only screen — the message + the back-out hint, NO editing
 /// surface (Task 8 wires the 'X' → `discard_parked_draft`).
-fn draw_tax_inputs_discard(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+fn draw_tax_inputs_discard(
+    frame: &mut Frame,
+    area: Rect,
+    form: &TaxInputsFormState,
+    status: Option<&str>,
+) {
     let rect = centered_rect(78, 14, area);
     frame.render_widget(Clear, rect);
     let mut v = vec![
@@ -2151,6 +2165,15 @@ fn draw_tax_inputs_discard(frame: &mut Frame, area: Rect, form: &TaxInputsFormSt
         v.push(Line::from(err.clone()));
         v.push(Line::from(""));
     }
+    // ★ I-2: a discard refusal / save error in this P2-a state routes to `app.status`; the full-frame Clear
+    // hides the Browse footer, so surface it HERE (else the `X` failure looks identical to a success).
+    if let Some(s) = status {
+        v.push(Line::from(Span::styled(
+            s.to_string(),
+            Style::default().fg(Color::Yellow),
+        )));
+        v.push(Line::from(""));
+    }
     v.push(Line::from(
         "Press X to discard the parked draft, Esc to back out.",
     ));
@@ -2163,23 +2186,62 @@ fn draw_tax_inputs_discard(frame: &mut Frame, area: Rect, form: &TaxInputsFormSt
     frame.render_widget(p, rect);
 }
 
-/// The bottom status line: the CACHED active source (`full return` / `tax-profile` / `(none)`, Task 8 —
-/// from `input_form_store::active_source` via the `form_active_source` seam, refreshed at open + after a
-/// park), a key legend (`t` toggle source, `X` discard-parked when a parked draft is loaded), and — if
-/// present — the §6.3 stale-WIP-discard note.
-fn draw_tax_inputs_status(frame: &mut Frame, area: Rect, form: &TaxInputsFormState) {
+/// The bottom status block (border + 3 content lines):
+/// 1. the CACHED active source (`full return` / `tax-profile` / `(none)`, Task 8) + the §9A **screen
+///    status** (`screens clean, except what report computes` / `1 issue: <section>` — I-4);
+/// 2. the key legend (`t` toggle source, `X` discard-parked when parked; the close hint is dirty-aware — I-3);
+/// 3. a NOTICE line surfacing `app.status` (I-2 — the overlay clears the Browse footer that normally renders
+///    it) or, absent one, the §6.3 stale-WIP-discard note.
+fn draw_tax_inputs_status(
+    frame: &mut Frame,
+    area: Rect,
+    form: &TaxInputsFormState,
+    status: Option<&str>,
+) {
+    // ★ I-4 (§9A): the screen status — a recorded screen refusal names its section; else clean-but-honest.
+    let (screen_status, screen_style) = match form.refused_section {
+        Some(id) => {
+            let title = btctax_input_form::form_spec()
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.title)
+                .unwrap_or("a section");
+            (format!("1 issue: {title}"), Style::default().fg(Color::Yellow))
+        }
+        None => (
+            "screens clean, except what report computes".to_string(),
+            Style::default().fg(Color::DarkGray),
+        ),
+    };
+    // ★ I-3: the close hint reflects the real state — an unflushed (dirty) draft is NOT yet autosaved.
+    let close_hint = if form.dirty {
+        "[Esc/q] save & close"
+    } else {
+        "[Esc/q] close (autosaved)"
+    };
     // `X` discard-parked is offered only when a parked draft is loaded (else the store would refuse it).
     let legend = if form.parked {
-        "   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [X] discard-parked · [Esc/q] close"
+        format!("   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [X] discard-parked · {close_hint}")
     } else {
-        "   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · [Esc/q] close (autosaved)"
+        format!("   [↑/↓] field · [←/→ or Tab] section · [s] commit · [t] source · {close_hint}")
     };
-    let mut lines: Vec<Line> = vec![Line::from(vec![
-        Span::raw("  active source: "),
-        Span::styled(form.active_source_label, Style::default().fg(Color::Cyan)),
-        Span::styled(legend, Style::default().fg(Color::DarkGray)),
-    ])];
-    if let Some(note) = form.stale_note.as_ref() {
+    let mut lines: Vec<Line> = vec![
+        Line::from(vec![
+            Span::raw("  active source: "),
+            Span::styled(form.active_source_label, Style::default().fg(Color::Cyan)),
+            Span::raw("   ·   "),
+            Span::styled(screen_status, screen_style),
+        ]),
+        Line::from(Span::styled(legend, Style::default().fg(Color::DarkGray))),
+    ];
+    // ★ I-2: the NOTICE line — `app.status` (every in-flow refusal/error/outcome routed there stays VISIBLE)
+    // takes precedence over the one-time §6.3 stale-WIP note, which shows only when there is no live status.
+    if let Some(s) = status {
+        lines.push(Line::from(Span::styled(
+            format!("  {s}"),
+            Style::default().fg(Color::Cyan),
+        )));
+    } else if let Some(note) = form.stale_note.as_ref() {
         lines.push(Line::from(Span::styled(
             format!("  {note}"),
             Style::default().fg(Color::Yellow),
@@ -2477,10 +2539,19 @@ fn push_error(lines: &mut Vec<Line<'static>>, error: Option<&str>) {
     }
 }
 
-/// The per-section status glyph: `✓` when every live field is answered, `…` otherwise (Task 7 adds
-/// `!` for a screen refusal). An absent optional-singleton is `…`; a repeating group is `✓` (its rows
-/// are optional here — refined in Task 7).
-fn section_glyph(section: &'static Section, ri: &ReturnInputs) -> char {
+/// The per-section status glyph: `!` when a screen refusal (from the last `commit`) is attributed to this
+/// section (I-4/§9A — takes precedence, it is the one thing the filer must fix), else `✓` when every live
+/// field is answered, `…` otherwise. An absent optional-singleton is `…`; a repeating group is `✓` (its
+/// rows are optional here).
+fn section_glyph(
+    section: &'static Section,
+    ri: &ReturnInputs,
+    refused_section: Option<btctax_input_form::SectionId>,
+) -> char {
+    // ★ I-4: a refusal attributed to this section wins over completeness — the filer must resolve it first.
+    if refused_section == Some(section.id) {
+        return '!';
+    }
     if let SectionKind::OptionalSingleton { present, .. } = section.kind {
         if !present(ri) {
             return '…';
@@ -5949,7 +6020,7 @@ mod tests {
         let form = TaxInputsFormState::fresh(2024); // working = None
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(r.contains("Filing status"), "the fresh screen shows the filing-status choice");
@@ -5995,7 +6066,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -6043,7 +6114,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(r.contains("***-**-"), "a set SSN renders its masked form");
@@ -6093,7 +6164,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -6132,7 +6203,7 @@ mod tests {
         .unwrap();
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
 
@@ -6208,7 +6279,7 @@ mod tests {
         form.active_source_label = "tax-profile"; // the cache the opener/park handler sets
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -6261,7 +6332,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(r.contains("#1"), "the row list shows the first row's index");
@@ -6311,7 +6382,7 @@ mod tests {
         form.addr = RowAddr(vec![0]);
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -6323,7 +6394,7 @@ mod tests {
         form.descent = Some(SectionId::W2Box12);
         form.field_focus = 0;
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -6374,7 +6445,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(r.contains("remove W-2 #1?"), "the confirm names the exact row");
@@ -6464,7 +6535,7 @@ mod tests {
         // and the left pane now lists Spouse (hidden on Single).
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(r.contains("[Mfj]"), "the filing-status value renders as Mfj");
@@ -6479,7 +6550,7 @@ mod tests {
             .position(|s| s.id == SectionId::W2s)
             .unwrap();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(r.contains("#1"), "the first W-2 row renders");
@@ -6530,7 +6601,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
@@ -6593,7 +6664,7 @@ mod tests {
 
         let area = terminal.get_frame().area();
         terminal
-            .draw(|f| draw_tax_inputs_form(f, area, &form))
+            .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(
