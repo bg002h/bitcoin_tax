@@ -8,8 +8,13 @@ and every Important (I-1 `ip_pin`; I-2 secret-entry asymmetry; I-3/I-4 attributi
 `FieldKind::Bool`; I-9 no laundered `filing_status`; I-10 `DeleteSection(ScheduleA)` resets
 `itemize_election`; I-11 TY2024-only commit gate) plus the Minors/Nits (M-1 Payments into v1; M-2/M-3 SALT &
 deferred-leg anchors; M-4 `NonCryptoNoncashGift` honesty; M-5 owned `Edit`; M-6 `ClearField`; M-7 crate
-renamed `btctax-input-form`; N-1..4). r1 validated in brainstorm + two Fable architect passes. **Pending
-re-review of this fold.***
+renamed `btctax-input-form`; N-1..4). r1 validated in brainstorm + two Fable architect passes.*
+*★ **r4** — the r3 fold was re-reviewed (0C/**2I**/4M: the fold's own new seams) and r4 folds those too:
+NI-1 (a parked draft keeps `parked=1` through edits — `save_draft` preserves it, `Loaded::Draft{parked}`
+round-trips it); NI-2 (the working model is `Working = Option<ReturnInputs>`, so "filing status chosen" ≡
+"the RI exists" — held by construction, not a renderer bool; both renderers inherit it); M-a `FieldKind::Bool`
+in §5.2; M-b Payments in the §9A order; M-c `NonCryptoNoncashGift` anchored; M-d the discard-parked path named.
+**Pending re-review of the r4 fold.***
 *Provenance: brainstorm 2026-07-14; supersedes the deferred "guided full-return TUI form" follow-up in
 `SPEC_input_surface.md` (P8) §8. Depends on P9 (`SPEC_form_questions.md`, shipped) for `FORM_QUESTIONS`,
 the skippable registry, and `screen_inputs`.*
@@ -164,8 +169,9 @@ single result-bearing case.
 
 `{ id: FieldId, label, help: &'static str, kind: FieldKind, live: fn(&RI)->bool, get, set }`. `label`/`help`
 are **single-sourced** — the help line *is* the doc (the P8 "comment = doc" idea), and it is phrased as the
-form phrases it. `FieldKind ∈ { Money(Usd, ≥0), Text, TriState(Option<bool>), Date(Option<Date>),
-Enum(&[&str]), Secret }`.
+form phrases it. `FieldKind ∈ { Money(Usd, ≥0), Text, Bool, TriState(Option<bool>), Date(Option<Date>),
+Enum(&[&str]), Secret }` *(★ M-a — `Bool` is the plain-checkbox kind added by I-8; §5.7 is the canonical
+list)*.
 
 ### 5.3 The two CORE registries — declarations and skippables, kept SEPARATE
 
@@ -269,15 +275,29 @@ pub enum Edit {                               // serde-serializable — the web 
     DeleteSection { section: SectionId },
 }
 
-pub fn apply(ri: &mut ReturnInputs, e: Edit) -> Result<(), ApplyError>;        // then re-eval liveness
+// ★ NI-2 — the WORKING MODEL is `Option<ReturnInputs>`: `None` until a filing status is chosen. This makes
+// "filing_status was chosen" ≡ "the RI exists" — held BY CONSTRUCTION, not by a renderer bool (which would
+// be answered-ness by convention, the project's named sin). Both renderers (TUI, web) inherit the guard.
+pub type Working = Option<ReturnInputs>;
+pub fn apply(w: &mut Working, e: Edit) -> Result<(), ApplyError>;              // then re-eval liveness
+//   On `None` (Fresh), the ONLY accepted Edit is `SetField{ ReturnOptions.filing_status }`, which
+//   MATERIALIZES `Some(ReturnInputs{ filing_status, ..default })`. Any other Edit on `None` is `ApplyError`.
+//   `commit`/`save_draft` take `&ReturnInputs` (a materialized working copy) — so an unchosen return simply
+//   has nothing to commit; no in-`commit` "is it chosen?" check exists (it structurally cannot, I-9/NI-2).
 pub fn parse(kind: FieldKind, raw: &str) -> Result<FieldValue, ParseError>;    // reuses Ssn/IpPin/Decimal
 pub fn attribute(r: &RefuseReason) -> Vec<Anchor>;                             // EXHAUSTIVE match, §7
 pub enum Anchor { Field(FieldId), Section(SectionId), NotInForm { note: &'static str } }
 
 // btctax-cli :: input_form_store   (needs Session; depends on core types, not on the engine crate)
 pub fn load(sess, year) -> Result<Loaded, CliError>;                  // draft ⇒ committed ⇒ FRESH (I-9)
-pub enum Loaded { Draft(ReturnInputs), Committed(ReturnInputs), Fresh /* no filing_status yet — I-9 */ }
-pub fn save_draft(sess, year, ri: &ReturnInputs) -> Result<(), CliError>;   // writes draft + Vault::save (I-7)
+pub enum Loaded {
+    Draft { ri: ReturnInputs, parked: bool },   // ★ NI-1: parked round-trips so editing can't strip it
+    Committed(ReturnInputs),
+    Fresh,                                       // Working = None; no filing_status yet — I-9/NI-2
+}
+pub fn save_draft(sess, year, ri: &ReturnInputs) -> Result<(), CliError>;
+//   ★ NI-1: read-modify-write PRESERVES the existing row's `parked` flag; a parked return stays parked
+//   across edits until a successful re-commit consumes the row. (An unchosen `Working=None` writes no draft.)
 pub fn commit(sess, year, ri: &ReturnInputs,
               table: &TaxTable, params: &FullReturnParams) -> Result<CommitOutcome, CliError>;   // N-2
 pub fn park_to_profile(sess, year) -> Result<(), CliError>;          // stash→draft(parked=1) THEN delete (C-1)
@@ -367,10 +387,10 @@ leaves.
 ## 6. Data flow, and the draft table
 
 ```
-load(year)   → Draft(ri) | Committed(ri) | Fresh   (Fresh = no filing_status yet — I-9; TY2024-only — I-11)
-apply(Edit)  → mutate working copy → re-eval liveness → field-parse (tier 1, §7)
-save_draft   → return_inputs_draft table + Vault::save (I-7) — ANYTIME, incl. mid-invalid; resolve.rs NEVER reads it
-commit       → require filing_status chosen (I-9) → screen_inputs(working) → [caller: payload-confirm] →
+load(year)   → Draft{ri,parked} | Committed(ri) | Fresh   (Fresh = Working None, no filing_status — I-9/NI-2; TY2024-only — I-11)
+apply(Edit)  → Working(Option<RI>): first Edit on None MUST set filing_status (materializes RI) → re-eval liveness → parse
+save_draft   → return_inputs_draft + Vault::save (I-7), preserving `parked` (NI-1) — ANYTIME; resolve.rs NEVER reads it
+commit       → (only a materialized RI reaches here — NI-2) screen_inputs(RI) → [caller: payload-confirm] →
                return_inputs::set → DELETE draft
 ```
 
@@ -407,11 +427,13 @@ hatch (`resolve.rs:85–109`, verified). A form is *necessarily* refused mid-ent
   only for TY2024 in v1 (`resolve.rs:86–94` fails closed elsewhere). The form **opens only table-bearing
   years** (the §12 year picker greys the rest); `commit` on a year without params returns `NoTables` and
   writes nothing — it never commits unscreened (which would poison the year at resolve).
-- **`commit(sess, year, &RI, table, params)`** (the `btctax-cli` store fn) **first requires `filing_status`
-  explicitly chosen (I-9)**, then runs `screen_inputs`; if refused it **returns the `Refusal` and writes
-  nothing**; if clean it `return_inputs::set`s and deletes the draft. The **payload-showing confirm** —
-  which **prominently names the filing status** (I-9) and the row it replaces ("commit as **MFJ**; replaces
-  the stored 2024 row; 2 W-2s, Schedule A, 1 dependent…") — is the **caller's** (TUI's) responsibility
+- **`commit(sess, year, &RI, table, params)`** (the `btctax-cli` store fn) takes a **materialized**
+  `&ReturnInputs` — the `Working = Option<RI>` model (NI-2) means an unchosen return has no `RI` to pass, so
+  "filing status was chosen" is enforced **by construction upstream**, not by an (impossible) in-`commit`
+  check on a non-`Option` enum. `commit` runs `screen_inputs`; if refused it **returns the `Refusal` and
+  writes nothing**; if clean it `return_inputs::set`s and deletes the draft. The **payload-showing confirm**
+  — which **prominently names the filing status** (I-9) and the row it replaces ("commit as **MFJ**;
+  replaces the stored 2024 row; 2 W-2s, Schedule A, 1 dependent…") — is the **caller's** (TUI's) responsibility
   *before* calling `commit`; a returned refusal is surfaced via the §7 attribution map.
 
 ### 6.2 ★ Draft-vs-committed COHERENCE across sessions (Fable's near-blocking item)
@@ -427,9 +449,12 @@ hazard: edit → close → `income import` (writes the row, draft untouched) →
 > `return_inputs::set` / `delete` from **`income import`, `income answer`, `report --write-carryover`,
 > `income clear`, and (future) `set-pii`** also delete that year's `return_inputs_draft` row **when
 > `parked = 0`** (warn if discarding a non-trivial WIP). A fresh committed write supersedes stale WIP.
-> **★ C-1: when `parked = 1`, the write instead REFUSES** ("year {y} holds a parked full return; toggle it
-> back or discard it first") — the parked blob is the sole copy of a screened return and must not be
-> silently destroyed. **The toggle's park/commit (§9) is the one path that manages the draft explicitly.**
+> **★ C-1: when `parked = 1`, the write instead REFUSES**, naming the two real exits (M-d): *"year {y} holds
+> a parked full return — in the form, **'use full return'** to re-commit it, or **'discard parked draft'**
+> (a confirmed delete) to drop it; then re-run this command."* The parked blob is the sole copy of a
+> screened return and must not be silently destroyed. **The toggle's park/commit (§9) is the one path that
+> manages the draft explicitly**, and the form's **'discard parked draft'** is the only path that deletes a
+> `parked = 1` row (a payload-showing confirm — never silent).
 > *(I-6: `income answer` is in this list — it was the omitted fifth writer. set-pii is not yet implemented;
 > it inherits the rule when it lands.)*
 
@@ -484,7 +509,8 @@ hold irreplaceable carryover). A draft splits by `parked`:
    | `ExcessElectiveDeferral` / `AllocatedTips` / `DependentCareBenefit` | `Section(W2s)` (box 12 D/E/F/G/S / box 8 / box 10) |
    | `SingleEmployerExcessSs` | `Section(W2s)` (`box4_ss_withheld` — an in-form field; I-4) |
    | `SpouseOwnerWithoutJointReturn` | `[Section(W2s), NotInForm]` — also fires from `schedule_c.owner` (deferred; M-3) |
-   | `NegativeAmount(_)` / `SsnMalformed(_)` / `NonCryptoNoncashGift` | **defensive**: `NegativeAmount`/`SsnMalformed` are unreachable (tier-1 parse rejects them); `NonCryptoNoncashGift` is *compute-side*, not `screen_inputs` — see the honesty note (M-4) |
+   | `NonCryptoNoncashGift` | `Section(ScheduleACharitable)` — form-reachable (a `CapGainProp*`/`OrdinaryProp*` gift > $500), but *compute-side* (`return_1040.rs:598-609`), so it surfaces at `report`, not the commit-screen; the anchor lets a reopened form point at the gift (M-c/M-4) |
+   | `NegativeAmount(_)` / `SsnMalformed(_)` | the named `Field` — **defensive only**; unreachable (tier-1 parse rejects negatives and bad SSNs before they enter the working copy) |
    | everything else (`BusinessInterestIncome`, `BusinessIncomeWithoutScheduleC`, `ScheduleCLoss`, `ScheduleCNoBusinessDescription`, `KiddieTax`, `QbiAboveThreshold`, `AmtScreenTriggered`, `TaxableIncomeNonPositiveWithCarryforward`, `ForeignTaxOverCeiling`, `IraDeductionClaimed`, `PrivateActivityBondAmt`, `UnrecapturedOrSpecialRateGain`, `InconsistentDividendSubset`) | `NotInForm { note }` — a **deferred section** (Schedule C, QBI, 1099s incl. `PrivateActivityBondAmt`'s 1099-INT box 9 / 1099-DIV box 13 — I-3, carryforwards) or a **compute/absolute** screen; the form says "entered via TOML import / computed at `report`" |
 
    The `NotInForm` sentinel keeps the `match` exhaustive *and* honest: a v1 form cannot fix a Schedule-C
@@ -521,28 +547,33 @@ the presence/absence of the RI row.
   ≈ $0 — the one-key toggle-back makes this recoverable, but the confirm must not hide it.
 - **The form always shows which source is active** for the year.
 - **One-key NON-DESTRUCTIVE toggle:**
-  - *"use tax-profile"* — **stash the committed row into its draft, THEN delete the committed row**, via
-    **in-session `return_inputs::delete` on the held `conn`** (⚠️ **NOT** the CLI `income clear` command —
-    that re-opens `Session`, and `VaultLock::acquire` uses `try_lock_exclusive` (non-blocking, `lock.rs:18`),
-    so the nested open **errors with lock contention** against itself — N-1). The
-    `tax_profile` resumes automatically via precedence, untouched.
-  - *"use full return"* — re-commit the stashed draft.
+  - *"use tax-profile"* — **stash the committed row into its draft with `parked = 1`, THEN delete the
+    committed row**, via **in-session `return_inputs::delete` on the held session** (⚠️ **NOT** the CLI
+    `income clear` command — that re-opens `Session`, and `VaultLock::acquire` uses `try_lock_exclusive`
+    (non-blocking, `lock.rs:18`), so the nested open **errors with lock contention** against itself — N-1).
+    The `tax_profile` resumes automatically via precedence, untouched.
+  - *"use full return"* — re-commit the parked draft (which consumes the row and clears `parked`).
   - **Stash-before-clear is atomic:** the delete is conditional on a **confirmed successful stash** within
     one session — a failed stash must never delete the row, because those SSNs (D-6) exist nowhere else.
   - **Offer "use tax-profile" only from a clean/committed state** (no WIP divergent from the committed
-    row), so the one-row-per-year draft slot cannot clobber unsaved edits. Once parked, the parked blob
-    *becomes* the WIP and re-commits on toggle-back — one table suffices, and the collision moment is gated
-    away.
+    row), so the one-row-per-year draft slot cannot clobber unsaved edits.
+  - **★ NI-1 — a parked draft STAYS `parked = 1` through edits until a successful re-commit consumes it.**
+    Once parked, the blob becomes the editable working copy, but `save_draft` preserves its `parked` flag
+    (read-modify-write) and `Loaded::Draft{parked}` round-trips it to the renderer — so the C-1 protection
+    (coherence-writes refuse, stale refuses-and-reimports) holds for the whole edit window, not just a
+    pristine parked row. Only a re-commit (`return_inputs::set` + delete draft) drops `parked`.
 - **The `tax_profile` is NEVER auto-deleted.** It is the fallback.
 
 ## 9A. The TUI interaction model (`btctax-tui-edit` "tax inputs" mode)
 
-A thin renderer over `FormSpec` — it holds a working `ReturnInputs`, a raw text buffer for the field being
-edited, and the current `RowAddr`; it never names a `ReturnInputs` field.
+A thin renderer over `FormSpec` — it holds a `Working` (`Option<ReturnInputs>`; `None` until a filing status
+is chosen — NI-2), a raw text buffer for the field being edited, and the current `RowAddr`; it never names a
+`ReturnInputs` field. On a `Fresh`/`None` working copy it presents **only** the filing-status choice; the
+first `SetField(filing_status)` materializes the return and the rest of the sections appear.
 
 **Layout** — three regions:
 - **Left: section list.** The live sections in order (`ReturnOptions → Taxpayer → Spouse? → Address →
-  Dependents → W-2s → Schedule A? → Declarations → Skippables`), each with a status glyph (`✓` all live
+  Dependents → W-2s → Schedule A? → Payments → Declarations → Skippables` — Payments per M-b), each with a status glyph (`✓` all live
   fields set / `…` incomplete / `!` a screen refusal attributed here). Non-live sections (e.g. `Spouse` on
   a Single return) are hidden, recomputed after every `apply`.
 - **Right: field pane** for the selected section — each live `Field` as `label  [value]  ‹inline error›`.
