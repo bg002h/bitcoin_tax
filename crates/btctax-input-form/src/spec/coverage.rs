@@ -21,7 +21,7 @@
 //! test. No accessor in this crate walks `Value`.
 
 use super::form_spec;
-use crate::seam::{Field, FieldId, FieldKind, FieldValue, RowAddr, SectionId};
+use crate::seam::{Field, FieldId, FieldKind, FieldValue, RowAddr, SectionId, SecretView, SetError};
 use btctax_core::tax::return_inputs::{
     Box12Entry, CharitableClass, CharitableGift, Dependent, Person, ReturnInputs, ScheduleAInputs, W2,
 };
@@ -65,11 +65,17 @@ fn leaf_map(ri: &ReturnInputs) -> BTreeMap<String, Value> {
 }
 
 /// A MAXIMALLY-POPULATED fixture. Every optional is `Some`, every IN-SCOPE Vec has ≥1 element, so every
-/// in-scope leaf path is realized. Leaf VALUES are the empty/zero/`None` defaults, so every sentinel below
-/// is guaranteed to differ from what's here — the diff can never be a false "not covered". Exempt Vecs
-/// (`int_1099`/…) stay empty and `schedule_c` stays `None`: they are exempt by struct-prefix regardless.
+/// in-scope leaf path is realized. Leaf VALUES are the empty/zero/`None` defaults (bar the two liveness
+/// primers below), so every sentinel below is guaranteed to differ from what's here — the diff can never be
+/// a false "not covered". Exempt Vecs (`int_1099`/…) stay empty and `schedule_c` stays `None`: they are
+/// exempt by struct-prefix regardless.
+///
+/// ★ Two liveness primers (review I-4 makes the delegating `set` gate on `live`, so the KAT's `set` of every
+/// field must land on a return where that field is live): `filing_status = Mfs` makes `DeclMfsSpouseItemizes`
+/// live, and `mortgage_interest_1098 = 1` makes `SaMortgageAllUsed` live. Both primer values are non-default
+/// but still differ from their own field's sentinel, so their diff stays exact.
 fn maximal_fixture() -> ReturnInputs {
-    let mut ri = ReturnInputs { filing_status: FilingStatus::Mfj, ..Default::default() };
+    let mut ri = ReturnInputs { filing_status: FilingStatus::Mfs, ..Default::default() };
     ri.header.spouse = Some(Person::default());
     ri.header.ip_pin = Some("000000".to_string());
     ri.header.dependents = vec![Dependent::default()];
@@ -81,6 +87,7 @@ fn maximal_fixture() -> ReturnInputs {
     ri.schedule_a = Some(ScheduleAInputs {
         // `CharitableGift` has no `Default`; Cash60/zero is the sections.rs `add` starting point.
         charitable: vec![CharitableGift { class: CharitableClass::Cash60, amount: dec!(0) }],
+        mortgage_interest_1098: dec!(1), // liveness primer for SaMortgageAllUsed (see doc above)
         ..Default::default()
     });
     ri
@@ -99,7 +106,7 @@ fn sentinel(f: &Field) -> FieldValue {
         FieldKind::Secret => FieldValue::SecretEntry("123456789".to_string()),
         FieldKind::Enum(_) => {
             let choice = match f.id {
-                FieldId::FilingStatus => "Single",      // fixture is Mfj
+                FieldId::FilingStatus => "Single",      // fixture is Mfs
                 FieldId::ItemizeElection => "ForceItemize", // fixture is Auto
                 FieldId::W2Owner => "Spouse",           // fixture default is Taxpayer
                 FieldId::CharClass => "OrdinaryProp50", // fixture is Cash60
@@ -144,9 +151,39 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
                 FieldKind::Secret => "Secret",
             });
 
+            let s = sentinel(field);
             let mut ri = fixture.clone();
-            (field.set)(&mut ri, &addr, sentinel(field))
+            (field.set)(&mut ri, &addr, s.clone())
                 .unwrap_or_else(|e| panic!("set failed for {:?} in {:?}: {e:?}", field.id, section.id));
+
+            // ── ★ I-6 (spec §10): the get→set round-trip. A non-Secret field must read back EXACTLY what
+            // was written — catching a `get` that reads a DIFFERENT leaf than `set` writes (untested for ~40
+            // of 62 fields before this) and Enum token drift. A Secret keeps the §10 I-2 carve-out: `get`
+            // returns PRESENCE (a masked `SecretView`), never the entry — so assert the asymmetry, not a
+            // symmetric round-trip.
+            let read_back = (field.get)(&ri, &addr);
+            if let FieldKind::Secret = field.kind {
+                assert!(
+                    matches!(read_back, Some(FieldValue::Secret(SecretView::Set { .. }))),
+                    "{:?} ({:?}): Secret get must return a Set presence view after a non-empty entry",
+                    field.id,
+                    section.id
+                );
+                assert_ne!(
+                    read_back.as_ref(),
+                    Some(&s),
+                    "{:?}: a Secret get must NOT echo the SecretEntry back (§4/§5.5)",
+                    field.id
+                );
+            } else {
+                assert_eq!(
+                    read_back,
+                    Some(s.clone()),
+                    "{:?} ({:?}): get after set must read back the written value (get↔set pairing, §10)",
+                    field.id,
+                    section.id
+                );
+            }
 
             let after = leaf_map(&ri);
             let all_keys: BTreeSet<&String> = before.keys().chain(after.keys()).collect();
@@ -224,4 +261,118 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(field_count, 62, "expected 62 Fields (one per §5.8 in-scope leaf)");
     assert_eq!(covered.len(), 62, "expected 62 distinctly-covered in-scope leaves");
+
+    // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
+    // The cardinality asserts above cannot see a coherent Field↔leaf SWAP between two same-typed leaves
+    // (e.g. `Box3SsWages` ↔ `Box5MedWages`): both accessors move together, so the bijection stays perfect
+    // and the get↔set round-trip also passes (both read/write the same wrong leaf). This literal is the
+    // ground truth — a transposition or a re-pointed accessor names itself in the assert diff.
+    // Compared in the `leaf-path → FieldId` direction (`String` is `Ord`, so no seam `Ord` on `FieldId`);
+    // `covered` already IS the observed map. The pinned literal is inverted into the same shape.
+    let expected: BTreeMap<String, FieldId> =
+        EXPECTED_LEAF_PATHS.iter().map(|(id, p)| ((*p).to_string(), *id)).collect();
+    assert_eq!(
+        covered, expected,
+        "the observed leaf-path → FieldId map drifted from the pinned expectation — a Field writes a \
+         DIFFERENT leaf than declared (a transposition, or an accessor re-pointed at the wrong leaf)"
+    );
+
+    // ── 6. ★ I-6 (spec §10): a wrong-`FieldValue`-kind `set` on a representative field per kind → WrongKind. ──
+    let wrong_kind: &[(FieldId, FieldValue)] = &[
+        (FieldId::Box1Wages, FieldValue::Text("x".to_string())),         // Money
+        (FieldId::TpFirstName, FieldValue::Money(dec!(1))),              // Text
+        (FieldId::TpPresidentialFund, FieldValue::Text("x".to_string())), // Bool
+        (FieldId::DeclForeignAccounts, FieldValue::Money(dec!(1))),      // TriState (delegating, always live)
+        (FieldId::DepDob, FieldValue::Money(dec!(1))),                   // Date
+        (FieldId::FilingStatus, FieldValue::Money(dec!(1))),             // Enum
+        (FieldId::TpSsn, FieldValue::Text("x".to_string())),            // Secret
+    ];
+    for (id, bad) in wrong_kind {
+        let (field, addr) = locate(*id);
+        let mut ri = fixture.clone();
+        assert_eq!(
+            (field.set)(&mut ri, &addr, bad.clone()),
+            Err(SetError::WrongKind),
+            "a wrong-kind set on {id:?} must be WrongKind (§10)"
+        );
+    }
 }
+
+/// Find a `Field` and the `RowAddr` its section addresses row 0 at (test helper for the §10 kind-mismatch).
+fn locate(id: FieldId) -> (&'static Field, RowAddr) {
+    for s in form_spec() {
+        if let Some(f) = s.fields.iter().find(|f| f.id == id) {
+            return (f, addr_for(s.id));
+        }
+    }
+    panic!("field {id:?} not found in form_spec()");
+}
+
+/// ★ THE PINNED FieldId → serde-leaf-path GROUND TRUTH (review I-6). Every one of the 62 in-scope `Field`s
+/// maps to the exact `ReturnInputs` leaf its `set` must write, at the maximal fixture's row 0. The KAT
+/// asserts the OBSERVED (mutate-and-diff) map equals this literal, so a Field wired to the wrong same-typed
+/// leaf — invisible to a pure cardinality check — fails loudly and names itself.
+const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
+    (FieldId::FilingStatus, "filing_status"),
+    (FieldId::ItemizeElection, "itemize_election"),
+    (FieldId::TpFirstName, "header.taxpayer.first_name"),
+    (FieldId::TpLastName, "header.taxpayer.last_name"),
+    (FieldId::TpSsn, "header.taxpayer.ssn"),
+    (FieldId::TpOccupation, "header.taxpayer.occupation"),
+    (FieldId::TpPresidentialFund, "header.presidential_fund_taxpayer"),
+    (FieldId::IpPin, "header.ip_pin"),
+    (FieldId::SpFirstName, "header.spouse.first_name"),
+    (FieldId::SpLastName, "header.spouse.last_name"),
+    (FieldId::SpSsn, "header.spouse.ssn"),
+    (FieldId::SpOccupation, "header.spouse.occupation"),
+    (FieldId::SpPresidentialFund, "header.presidential_fund_spouse"),
+    (FieldId::AddrStreet, "header.address_street"),
+    (FieldId::AddrCity, "header.address_city"),
+    (FieldId::AddrState, "header.address_state"),
+    (FieldId::AddrZip, "header.address_zip"),
+    (FieldId::DepName, "header.dependents[0].name"),
+    (FieldId::DepSsn, "header.dependents[0].ssn"),
+    (FieldId::DepRelationship, "header.dependents[0].relationship"),
+    (FieldId::DepDob, "header.dependents[0].date_of_birth"),
+    (FieldId::W2Owner, "w2s[0].owner"),
+    (FieldId::W2Employer, "w2s[0].employer"),
+    (FieldId::Box1Wages, "w2s[0].box1_wages"),
+    (FieldId::Box2FedWh, "w2s[0].box2_fed_withheld"),
+    (FieldId::Box3SsWages, "w2s[0].box3_ss_wages"),
+    (FieldId::Box4SsWh, "w2s[0].box4_ss_withheld"),
+    (FieldId::Box5MedWages, "w2s[0].box5_medicare_wages"),
+    (FieldId::Box6MedWh, "w2s[0].box6_medicare_withheld"),
+    (FieldId::Box7SsTips, "w2s[0].box7_ss_tips"),
+    (FieldId::Box17StateWh, "w2s[0].box17_state_tax_withheld"),
+    (FieldId::Box19LocalTax, "w2s[0].box19_local_tax"),
+    (FieldId::Box8AllocTips, "w2s[0].box8_allocated_tips"),
+    (FieldId::Box10DepCare, "w2s[0].box10_dependent_care"),
+    (FieldId::Box12Code, "w2s[0].box12[0].code"),
+    (FieldId::Box12Amount, "w2s[0].box12[0].amount"),
+    (FieldId::SaMedical, "schedule_a.medical"),
+    (FieldId::SaSaltRealEstate, "schedule_a.salt_real_estate"),
+    (FieldId::SaSaltPersonalProp, "schedule_a.salt_personal_property"),
+    (FieldId::SaSaltStateEst, "schedule_a.salt_state_estimated_payments"),
+    (FieldId::SaSaltPriorYear, "schedule_a.salt_prior_year_balance_paid"),
+    (FieldId::SaSaltSalesTaxAmt, "schedule_a.salt_sales_tax_amount"),
+    (FieldId::SaMortgage1098, "schedule_a.mortgage_interest_1098"),
+    (FieldId::SaSaltUseSalesTax, "schedule_a.salt_use_sales_tax"),
+    (FieldId::SaMortgageAllUsed, "schedule_a.mortgage_all_used_to_buy_build_improve"),
+    (FieldId::CharClass, "schedule_a.charitable[0].class"),
+    (FieldId::CharAmount, "schedule_a.charitable[0].amount"),
+    (FieldId::PayEstimated, "payments.estimated_tax_payments"),
+    (FieldId::PayExtension, "payments.extension_payment"),
+    (FieldId::PayOtherWh, "payments.other_withholding"),
+    (FieldId::DeclDependentTaxpayer, "header.can_be_claimed_as_dependent_taxpayer"),
+    (FieldId::DeclDependentSpouse, "header.can_be_claimed_as_dependent_spouse"),
+    (FieldId::DeclMfsSpouseItemizes, "mfs_spouse_itemizes"),
+    (FieldId::DeclForeignAccounts, "foreign_accounts"),
+    (FieldId::DeclForeignTrust, "foreign_trust"),
+    (FieldId::DeclHsaActivity, "sch1.hsa_activity"),
+    (FieldId::DeclDualStatusAlien, "dual_status_alien"),
+    (FieldId::ForeignCountryNames, "foreign_country_names"),
+    (FieldId::BlindTaxpayer, "header.taxpayer.blind"),
+    (FieldId::BlindSpouse, "header.spouse.blind"),
+    (FieldId::DobTaxpayer, "header.taxpayer.date_of_birth"),
+    (FieldId::DobSpouse, "header.spouse.date_of_birth"),
+];

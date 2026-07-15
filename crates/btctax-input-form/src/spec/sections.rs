@@ -21,17 +21,32 @@ use btctax_core::tax::return_inputs::{
 };
 use btctax_core::tax::types::FilingStatus;
 
-// ── The Secret masker — the ONE constructor of `SecretView::Set` in this crate ─────────────────────────────
-// A caller cannot store raw digits through it: it emits only the `***-**-NNNN` presence shape (spec §4/§5.5),
-// showing at most the last four characters. Empty input → `Empty`. Canonical validation of the raw entry is
-// Task 8's `parse`, upstream of the `SecretEntry` this masker never sees.
-fn mask_secret(raw: &str) -> SecretView {
+// ── The Secret maskers — the ONLY constructors of `SecretView::Set` in this crate (via `set_masked`) ────────
+// A caller cannot store raw digits through them: each emits only a fixed presence shape (spec §4/§5.5), and
+// both route through the guarded `SecretView::set_masked`. The discipline is PER SECRET (review I-3):
+//   • SSN → `***-**-NNNN`, revealing the last four ONLY for a canonical 9-digit input (matching the CLI's
+//     `mask_ssn` and `mask_pii`); any other length is fully masked to `***-**-****` (no digits of a
+//     non-canonical secret leak — folds follow-up (k)'s short-input reveal).
+//   • IP PIN (and any non-SSN secret) → a fixed all-`*` token with ZERO digits, mirroring the `IpPin(******)`
+//     Debug discipline (a 6-digit anti-fraud PIN has a search space of 10^6 — last-4 would leak 2/3 of it).
+// Empty input → `Empty`. Canonical validation of the raw entry is `parse`, upstream of the `SecretEntry`.
+fn mask_ssn(raw: &str) -> SecretView {
     if raw.is_empty() {
         return SecretView::Empty;
     }
-    let n = raw.chars().count();
-    let last4: String = raw.chars().skip(n.saturating_sub(4)).collect();
-    SecretView::Set { masked: format!("***-**-{last4}") }
+    if raw.chars().count() == 9 && raw.chars().all(|c| c.is_ascii_digit()) {
+        let last4: String = raw.chars().skip(5).collect();
+        SecretView::set_masked(format!("***-**-{last4}"))
+    } else {
+        SecretView::set_masked("***-**-****".to_string())
+    }
+}
+
+fn mask_ip_pin(raw: &str) -> SecretView {
+    if raw.is_empty() {
+        return SecretView::Empty;
+    }
+    SecretView::set_masked("******".to_string())
 }
 
 // ── Leaf generators for the repetitive money families (one struct-field ident is all that varies) ──────────
@@ -41,6 +56,7 @@ macro_rules! w2_money {
     ($id:expr, $label:literal, $help:literal, $field:ident) => {
         Field {
             id: $id,
+            clear: None,
             label: $label,
             help: $help,
             kind: FieldKind::Money,
@@ -60,6 +76,7 @@ macro_rules! scha_money {
     ($id:expr, $label:literal, $help:literal, $field:ident) => {
         Field {
             id: $id,
+            clear: None,
             label: $label,
             help: $help,
             kind: FieldKind::Money,
@@ -79,6 +96,7 @@ macro_rules! scha_money {
 const RETURN_OPTIONS_FIELDS: &[Field] = &[
     Field {
         id: FieldId::FilingStatus,
+        clear: None,
         label: "Filing status",
         help: "Single / MFJ / MFS / HoH / QSS (§1). Choosing it materializes the working return.",
         kind: FieldKind::Enum(&["Single", "Mfj", "Mfs", "HoH", "Qss"]),
@@ -99,11 +117,15 @@ const RETURN_OPTIONS_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::ItemizeElection,
+        clear: None,
         label: "Itemize election",
         help: "Auto = take the larger of standard vs Schedule A; ForceItemize = §63(e) elect to itemize \
                even if smaller.",
         kind: FieldKind::Enum(&["Auto", "ForceItemize"]),
-        live: |_| true,
+        // ★ I-5 (spec §5.8): live ONLY with a Schedule A. Otherwise a renderer would show the election on a
+        // no-Schedule-A return, a filer forces itemize, and commit produces a $0-deduction return (the
+        // standard deduction silently forfeited — the §5.1/I-10 hazard through the set door).
+        live: |ri| ri.schedule_a.is_some(),
         get: |ri, _| Some(FieldValue::Choice(format!("{:?}", ri.itemize_election))),
         set: |ri, _, v| {
             let FieldValue::Choice(c) = v else { return Err(SetError::WrongKind) };
@@ -129,6 +151,7 @@ pub(crate) const RETURN_OPTIONS: Section = Section {
 const TAXPAYER_FIELDS: &[Field] = &[
     Field {
         id: FieldId::TpFirstName,
+        clear: None,
         label: "First name",
         help: "The taxpayer's legal first name (1040 header).",
         kind: FieldKind::Text,
@@ -142,6 +165,7 @@ const TAXPAYER_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::TpLastName,
+        clear: None,
         label: "Last name",
         help: "The taxpayer's legal last name (1040 header).",
         kind: FieldKind::Text,
@@ -155,11 +179,12 @@ const TAXPAYER_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::TpSsn,
+        clear: None,
         label: "SSN",
         help: "The taxpayer's Social Security number. Stored as entered; shown masked (`***-**-NNNN`).",
         kind: FieldKind::Secret,
         live: |_| true,
-        get: |ri, _| Some(FieldValue::Secret(mask_secret(&ri.header.taxpayer.ssn))),
+        get: |ri, _| Some(FieldValue::Secret(mask_ssn(&ri.header.taxpayer.ssn))),
         set: |ri, _, v| {
             let FieldValue::SecretEntry(s) = v else { return Err(SetError::WrongKind) };
             ri.header.taxpayer.ssn = s;
@@ -168,6 +193,7 @@ const TAXPAYER_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::TpOccupation,
+        clear: None,
         label: "Occupation",
         help: "The taxpayer's occupation (1040 signature block).",
         kind: FieldKind::Text,
@@ -181,6 +207,7 @@ const TAXPAYER_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::TpPresidentialFund,
+        clear: None,
         label: "Presidential Election Campaign Fund",
         help: "1040 header: check to direct $3 to the fund (does not change tax owed).",
         kind: FieldKind::Bool,
@@ -194,16 +221,20 @@ const TAXPAYER_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::IpPin,
+        clear: None,
         label: "Identity Protection PIN",
         help: "The IRS-issued 6-digit IP PIN, if you have one. Stored as entered; shown masked.",
         kind: FieldKind::Secret,
         live: |_| true,
         get: |ri, _| {
-            Some(FieldValue::Secret(ri.header.ip_pin.as_deref().map_or(SecretView::Empty, mask_secret)))
+            Some(FieldValue::Secret(ri.header.ip_pin.as_deref().map_or(SecretView::Empty, mask_ip_pin)))
         },
+        // ★ I-2: an empty entry maps to `None`, NEVER `Some("")` — a `Some("")` is screen-clean but bricks
+        // `export` (`IpPin::canonical("")` errors) and renders identically to a healthy `None`. With I-1's
+        // clear routing, both `ClearField(IpPin)` and `SetField(IpPin, SecretEntry(""))` now yield `None`.
         set: |ri, _, v| {
             let FieldValue::SecretEntry(s) = v else { return Err(SetError::WrongKind) };
-            ri.header.ip_pin = Some(s);
+            ri.header.ip_pin = if s.is_empty() { None } else { Some(s) };
             Ok(())
         },
     },
@@ -222,6 +253,7 @@ pub(crate) const TAXPAYER: Section = Section {
 const SPOUSE_FIELDS: &[Field] = &[
     Field {
         id: FieldId::SpFirstName,
+        clear: None,
         label: "Spouse first name",
         help: "The spouse's legal first name (MFJ/MFS 1040 header).",
         kind: FieldKind::Text,
@@ -235,6 +267,7 @@ const SPOUSE_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::SpLastName,
+        clear: None,
         label: "Spouse last name",
         help: "The spouse's legal last name.",
         kind: FieldKind::Text,
@@ -248,11 +281,12 @@ const SPOUSE_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::SpSsn,
+        clear: None,
         label: "Spouse SSN",
         help: "The spouse's Social Security number. Stored as entered; shown masked.",
         kind: FieldKind::Secret,
         live: |_| true,
-        get: |ri, _| ri.header.spouse.as_ref().map(|s| FieldValue::Secret(mask_secret(&s.ssn))),
+        get: |ri, _| ri.header.spouse.as_ref().map(|s| FieldValue::Secret(mask_ssn(&s.ssn))),
         set: |ri, _, v| {
             let FieldValue::SecretEntry(s) = v else { return Err(SetError::WrongKind) };
             ri.header.spouse.as_mut().ok_or(SetError::NoSuchRow)?.ssn = s;
@@ -261,6 +295,7 @@ const SPOUSE_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::SpOccupation,
+        clear: None,
         label: "Spouse occupation",
         help: "The spouse's occupation (1040 signature block).",
         kind: FieldKind::Text,
@@ -274,6 +309,7 @@ const SPOUSE_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::SpPresidentialFund,
+        clear: None,
         label: "Spouse Presidential Election Campaign Fund",
         help: "1040 header: check to direct $3 to the fund for the spouse. Requires a spouse on the return.",
         kind: FieldKind::Bool,
@@ -313,6 +349,7 @@ pub(crate) const SPOUSE: Section = Section {
 const ADDRESS_FIELDS: &[Field] = &[
     Field {
         id: FieldId::AddrStreet,
+        clear: None,
         label: "Street address",
         help: "Home address — street (1040 header).",
         kind: FieldKind::Text,
@@ -326,6 +363,7 @@ const ADDRESS_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::AddrCity,
+        clear: None,
         label: "City",
         help: "Home address — city or town.",
         kind: FieldKind::Text,
@@ -339,6 +377,7 @@ const ADDRESS_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::AddrState,
+        clear: None,
         label: "State",
         help: "Home address — state (two-letter USPS code).",
         kind: FieldKind::Text,
@@ -352,6 +391,7 @@ const ADDRESS_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::AddrZip,
+        clear: None,
         label: "ZIP code",
         help: "Home address — ZIP code.",
         kind: FieldKind::Text,
@@ -377,6 +417,7 @@ pub(crate) const ADDRESS: Section = Section {
 const DEPENDENT_FIELDS: &[Field] = &[
     Field {
         id: FieldId::DepName,
+        clear: None,
         label: "Dependent name",
         help: "The dependent's full name (1040 dependents grid).",
         kind: FieldKind::Text,
@@ -390,12 +431,13 @@ const DEPENDENT_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::DepSsn,
+        clear: None,
         label: "Dependent SSN",
         help: "The dependent's Social Security number. Stored as entered; shown masked.",
         kind: FieldKind::Secret,
         live: |_| true,
         get: |ri, a| {
-            ri.header.dependents.get(a.0[0]).map(|d| FieldValue::Secret(mask_secret(&d.ssn)))
+            ri.header.dependents.get(a.0[0]).map(|d| FieldValue::Secret(mask_ssn(&d.ssn)))
         },
         set: |ri, a, v| {
             let FieldValue::SecretEntry(s) = v else { return Err(SetError::WrongKind) };
@@ -405,6 +447,7 @@ const DEPENDENT_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::DepRelationship,
+        clear: None,
         label: "Relationship",
         help: "The dependent's relationship to you (e.g. son, daughter, parent).",
         kind: FieldKind::Text,
@@ -420,6 +463,7 @@ const DEPENDENT_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::DepDob,
+        clear: None,
         label: "Date of birth",
         help: "The dependent's date of birth.",
         kind: FieldKind::Date,
@@ -438,10 +482,17 @@ pub(crate) const DEPENDENTS: Section = Section {
     title: "Dependents",
     kind: SectionKind::Repeating {
         len: |ri, _| ri.header.dependents.len(),
-        add: |ri, _| ri.header.dependents.push(Dependent::default()),
+        // Top-level Vec: `add` always has a container, so it succeeds; `remove` reports out-of-range (I-4).
+        add: |ri, _| {
+            ri.header.dependents.push(Dependent::default());
+            Ok(())
+        },
         remove: |ri, a| {
             if a.0[0] < ri.header.dependents.len() {
                 ri.header.dependents.remove(a.0[0]);
+                Ok(())
+            } else {
+                Err(SetError::NoSuchRow)
             }
         },
     },
@@ -453,6 +504,7 @@ pub(crate) const DEPENDENTS: Section = Section {
 const W2_FIELDS: &[Field] = &[
     Field {
         id: FieldId::W2Owner,
+        clear: None,
         label: "Owner",
         help: "Whose W-2 this is (Taxpayer or Spouse) — load-bearing for the per-earner SS wage cap (§1402(b)).",
         kind: FieldKind::Enum(&["Taxpayer", "Spouse"]),
@@ -471,6 +523,7 @@ const W2_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::W2Employer,
+        clear: None,
         label: "Employer",
         help: "The employer's name (W-2 box c).",
         kind: FieldKind::Text,
@@ -500,10 +553,16 @@ pub(crate) const W2S: Section = Section {
     title: "W-2s",
     kind: SectionKind::Repeating {
         len: |ri, _| ri.w2s.len(),
-        add: |ri, _| ri.w2s.push(W2::default()),
+        add: |ri, _| {
+            ri.w2s.push(W2::default());
+            Ok(())
+        },
         remove: |ri, a| {
             if a.0[0] < ri.w2s.len() {
                 ri.w2s.remove(a.0[0]);
+                Ok(())
+            } else {
+                Err(SetError::NoSuchRow)
             }
         },
     },
@@ -516,6 +575,7 @@ pub(crate) const W2S: Section = Section {
 const W2_BOX12_FIELDS: &[Field] = &[
     Field {
         id: FieldId::Box12Code,
+        clear: None,
         label: "Box 12 — code",
         help: "The W-2 box-12 code letter (e.g. D, DD, W). Only inert-allowlist codes are ignorable (§4.10).",
         kind: FieldKind::Text,
@@ -538,6 +598,7 @@ const W2_BOX12_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::Box12Amount,
+        clear: None,
         label: "Box 12 — amount",
         help: "The dollars coded on this box-12 line.",
         kind: FieldKind::Money,
@@ -566,16 +627,19 @@ pub(crate) const W2_BOX12: Section = Section {
     kind: SectionKind::Repeating {
         len: |ri, a| ri.w2s.get(a.0[0]).map_or(0, |w| w.box12.len()),
         add: |ri, a| {
-            if let Some(w) = ri.w2s.get_mut(a.0[0]) {
-                // `Box12Entry` has no `Default` (a blank code + zero dollars is the empty new row).
-                w.box12.push(Box12Entry { code: String::new(), amount: Usd::ZERO });
-            }
+            // Nested: an absent parent W-2 (`a.0[0]` out of range) → `NoSuchRow`, not a silent no-op (I-4).
+            let w = ri.w2s.get_mut(a.0[0]).ok_or(SetError::NoSuchRow)?;
+            // `Box12Entry` has no `Default` (a blank code + zero dollars is the empty new row).
+            w.box12.push(Box12Entry { code: String::new(), amount: Usd::ZERO });
+            Ok(())
         },
         remove: |ri, a| {
-            if let Some(w) = ri.w2s.get_mut(a.0[0]) {
-                if a.0[1] < w.box12.len() {
-                    w.box12.remove(a.0[1]);
-                }
+            let w = ri.w2s.get_mut(a.0[0]).ok_or(SetError::NoSuchRow)?;
+            if a.0[1] < w.box12.len() {
+                w.box12.remove(a.0[1]);
+                Ok(())
+            } else {
+                Err(SetError::NoSuchRow)
             }
         },
     },
@@ -593,9 +657,23 @@ const SCHEDULE_A_FIELDS: &[Field] = &[
     scha_money!(FieldId::SaSaltSalesTaxAmt, "General sales-tax amount", "Sch A line 5a sales-tax amount — used iff the §164(b)(5) sales-tax election is Yes.", salt_sales_tax_amount),
     scha_money!(FieldId::SaMortgage1098, "Home-mortgage interest (1098)", "Sch A line 8a — mortgage interest reported on Form 1098.", mortgage_interest_1098),
     // ★ Registry-driven — DELEGATES to `SKIPPABLE_QUESTIONS::SalesTaxElection` (index 2). live = schedule_a.is_some().
-    skippable_tristate!(2, FieldId::SaSaltUseSalesTax),
+    skippable_tristate!(2, FieldId::SaSaltUseSalesTax, |ri| {
+        if let Some(a) = ri.schedule_a.as_mut() {
+            a.salt_use_sales_tax = None;
+            Ok(())
+        } else {
+            Err(SetError::NoSuchRow)
+        }
+    }),
     // ★ Registry-driven — DELEGATES to `FORM_QUESTIONS::MortgageAllUsedToBuyBuildImprove` (index 7).
-    decl_tristate!(7, FieldId::SaMortgageAllUsed),
+    decl_tristate!(7, FieldId::SaMortgageAllUsed, |ri| {
+        if let Some(a) = ri.schedule_a.as_mut() {
+            a.mortgage_all_used_to_buy_build_improve = None;
+            Ok(())
+        } else {
+            Err(SetError::NoSuchRow)
+        }
+    }),
 ];
 
 pub(crate) const SCHEDULE_A: Section = Section {
@@ -623,6 +701,7 @@ pub(crate) const SCHEDULE_A: Section = Section {
 const CHARITABLE_FIELDS: &[Field] = &[
     Field {
         id: FieldId::CharClass,
+        clear: None,
         label: "Gift class",
         help: "§170(b) ceiling class: Cash60 / Cash30 / CapGainProp30 / CapGainProp20 / OrdinaryProp50 / OrdinaryProp30.",
         kind: FieldKind::Enum(&[
@@ -661,6 +740,7 @@ const CHARITABLE_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::CharAmount,
+        clear: None,
         label: "Gift amount",
         help: "The dollar amount of this non-crypto charitable gift (crypto flows from the ledger).",
         kind: FieldKind::Money,
@@ -689,17 +769,20 @@ pub(crate) const SCHEDULE_A_CHARITABLE: Section = Section {
     kind: SectionKind::Repeating {
         len: |ri, _| ri.schedule_a.as_ref().map_or(0, |sa| sa.charitable.len()),
         add: |ri, _| {
-            if let Some(sa) = ri.schedule_a.as_mut() {
-                // `CharitableGift`/`CharitableClass` have no `Default`; a cash gift to a 50%-org is the
-                // most common class and a safe starting point (the filer then picks the real class).
-                sa.charitable.push(CharitableGift { class: CharitableClass::Cash60, amount: Usd::ZERO });
-            }
+            // Nested under the optional Schedule A: absent `schedule_a` → `NoSuchRow`, not a no-op (I-4).
+            let sa = ri.schedule_a.as_mut().ok_or(SetError::NoSuchRow)?;
+            // `CharitableGift`/`CharitableClass` have no `Default`; a cash gift to a 50%-org is the
+            // most common class and a safe starting point (the filer then picks the real class).
+            sa.charitable.push(CharitableGift { class: CharitableClass::Cash60, amount: Usd::ZERO });
+            Ok(())
         },
         remove: |ri, a| {
-            if let Some(sa) = ri.schedule_a.as_mut() {
-                if a.0[0] < sa.charitable.len() {
-                    sa.charitable.remove(a.0[0]);
-                }
+            let sa = ri.schedule_a.as_mut().ok_or(SetError::NoSuchRow)?;
+            if a.0[0] < sa.charitable.len() {
+                sa.charitable.remove(a.0[0]);
+                Ok(())
+            } else {
+                Err(SetError::NoSuchRow)
             }
         },
     },
@@ -711,6 +794,7 @@ pub(crate) const SCHEDULE_A_CHARITABLE: Section = Section {
 const PAYMENTS_FIELDS: &[Field] = &[
     Field {
         id: FieldId::PayEstimated,
+        clear: None,
         label: "Estimated tax payments",
         help: "§6654 estimated-tax payments made for the year → 1040 line 26.",
         kind: FieldKind::Money,
@@ -724,6 +808,7 @@ const PAYMENTS_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::PayExtension,
+        clear: None,
         label: "Extension payment",
         help: "Amount paid with a Form 4868 extension request → Sch 3 line 10.",
         kind: FieldKind::Money,
@@ -737,6 +822,7 @@ const PAYMENTS_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::PayOtherWh,
+        clear: None,
         label: "Other withholding",
         help: "Other federal income tax withheld (e.g. Form 1099 backup withholding) → 1040 line 25c.",
         kind: FieldKind::Money,
@@ -772,7 +858,7 @@ mod tests {
         let mut ri = fresh_single();
         let w2s = section(SectionId::W2s);
         let SectionKind::Repeating { add, len, .. } = w2s.kind else { panic!() };
-        (add)(&mut ri, &RowAddr::default());
+        (add)(&mut ri, &RowAddr::default()).unwrap();
         assert_eq!((len)(&ri, &RowAddr::default()), 1);
         let box1 = w2s.fields.iter().find(|f| f.id == FieldId::Box1Wages).unwrap();
         (box1.set)(&mut ri, &RowAddr(vec![0]), FieldValue::Money(dec!(50000))).unwrap();
@@ -780,7 +866,7 @@ mod tests {
         // nested box12
         let b12 = section(SectionId::W2Box12);
         let SectionKind::Repeating { add: add12, .. } = b12.kind else { panic!() };
-        (add12)(&mut ri, &RowAddr(vec![0])); // parent = w2 index 0
+        (add12)(&mut ri, &RowAddr(vec![0])).unwrap(); // parent = w2 index 0
         assert_eq!(ri.w2s[0].box12.len(), 1);
         let amt = b12.fields.iter().find(|f| f.id == FieldId::Box12Amount).unwrap();
         (amt.set)(&mut ri, &RowAddr(vec![0, 0]), FieldValue::Money(dec!(23000))).unwrap();
@@ -873,7 +959,25 @@ mod tests {
         else {
             panic!("expected a Set secret view for ip_pin")
         };
-        assert_eq!(masked, "***-**-2233");
+        // ★ I-3 (updated from the old buggy `***-**-2233`): the IP-PIN mask reveals ZERO digits — the
+        // anti-fraud discipline of `IpPin(******)`, NOT the SSN's last-4 reveal.
+        assert_eq!(masked, "******");
+        for d in ['1', '2', '3'] {
+            assert!(!masked.contains(d), "IP-PIN mask must not leak digit {d}: {masked}");
+        }
+
+        // ★ I-2: an empty entry (and thus `ClearField`) maps the IP PIN to `None`, never `Some("")`.
+        (ippin.set)(&mut ri, &RowAddr::default(), FieldValue::SecretEntry(String::new())).unwrap();
+        assert_eq!(ri.header.ip_pin, None, "empty IP-PIN entry must clear to None, not Some(\"\")");
+
+        // ★ I-3: a short/non-canonical SSN entry is FULLY masked (no partial reveal — folds follow-up (k)).
+        (ssn.set)(&mut ri, &RowAddr::default(), FieldValue::SecretEntry("12".into())).unwrap();
+        let FieldValue::Secret(SecretView::Set { masked }) =
+            (ssn.get)(&ri, &RowAddr::default()).unwrap()
+        else {
+            panic!("expected a Set secret view")
+        };
+        assert_eq!(masked, "***-**-****", "a non-9-digit SSN entry is fully masked");
     }
 
     #[test]

@@ -72,6 +72,21 @@ pub enum FieldValue {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SecretView { Empty, Set { masked: String } }
 
+impl SecretView {
+    /// ★ The single guarded producer of a `Set` view (spec §4/§5.5; folds review follow-up (b)). The two
+    /// maskers in `spec::sections` are its ONLY callers, and this guard rejects a `masked` string that still
+    /// carries a run of 5+ raw digits (a raw SSN is 9 digits, an IP PIN 6) — so a raw secret can never be
+    /// stored as a "mask", even by a future caller. The SSN last-4 reveal (`***-**-6789`) has only a 4-digit
+    /// run and passes.
+    pub(crate) fn set_masked(masked: String) -> SecretView {
+        debug_assert!(
+            !masked.as_bytes().windows(5).any(|w| w.iter().all(u8::is_ascii_digit)),
+            "SecretView::set_masked was given a string with a 5+ digit run (a raw secret?): {masked:?}"
+        );
+        SecretView::Set { masked }
+    }
+}
+
 impl fmt::Debug for FieldValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -87,6 +102,10 @@ impl fmt::Debug for FieldValue {
     }
 }
 
+/// The un-answer closure a delegating `Field` carries (review I-1). Aliased so the `Option`-wrapped field
+/// stays within clippy's type-complexity budget.
+pub type ClearFn = fn(&mut ReturnInputs, &RowAddr) -> Result<(), SetError>;
+
 /// A leaf field (spec §5.2). Accessors are monomorphic over `(&ReturnInputs, RowAddr)` — the row type never
 /// appears (spec §4). Secret `get` returns presence; `set` accepts only `SecretEntry`.
 pub struct Field {
@@ -97,6 +116,11 @@ pub struct Field {
     pub live: fn(&ReturnInputs) -> bool,
     pub get: fn(&ReturnInputs, &RowAddr) -> Option<FieldValue>,
     pub set: fn(&mut ReturnInputs, &RowAddr, FieldValue) -> Result<(), SetError>,
+    /// ★ The un-answer path (spec §5.7 M-6, review I-1). `Some` only for fields whose clear must write a
+    /// specific empty the plain per-kind `set(empty)` path cannot express — the 13 registry-delegating
+    /// tri-state/date leaves, which clear their underlying `Option` leaf to `None` (a definite-only registry
+    /// `set` cannot). `None` for every plain field; `apply` then clears it via `set(empty_for_kind)`.
+    pub clear: Option<ClearFn>,
 }
 
 /// A section: a singleton, an optional-singleton (create/delete), or a repeating group (spec §5.1).
@@ -116,8 +140,11 @@ pub enum SectionKind {
     },
     Repeating {
         len: fn(&ReturnInputs, &RowAddr) -> usize,
-        add: fn(&mut ReturnInputs, &RowAddr),
-        remove: fn(&mut ReturnInputs, &RowAddr),
+        // ★ `add`/`remove` REPORT (review I-4): an absent parent (`[w2_i]` with no such W-2, or a nested
+        // group whose owning optional-singleton is `None`) or an out-of-range row → `Err(NoSuchRow)`, never a
+        // silent no-op that lies `Ok` on the wire. `apply` propagates the `Result`.
+        add: fn(&mut ReturnInputs, &RowAddr) -> Result<(), SetError>,
+        remove: fn(&mut ReturnInputs, &RowAddr) -> Result<(), SetError>,
     },
 }
 

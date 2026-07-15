@@ -22,61 +22,97 @@ use btctax_core::tax::questions::{QuestionId, SkippableId, FORM_QUESTIONS, SKIPP
 // not. The index is a literal so the reference is compile-time; the registry's `QuestionId::ALL`-ordered
 // completeness test pins that ordering, and the delegation tests here pin each index → registry entry.
 
+// ★ Each delegating macro takes a leaf-clear closure `|ri| <expr: Result<(), SetError>>` (review I-1): the
+// caller names the underlying `Option` leaf to set to `None` (the registry `set` can only write a definite
+// yes/no, so it cannot un-answer). The `|$ri:ident|` capture makes the caller's `ri` the SAME token the
+// closure binds — macro hygiene otherwise hides the closure param from the passed-in expression.
+
 /// A class-(A) declaration → a `TriState` `Field` over `FORM_QUESTIONS[$idx]`.
 macro_rules! decl_tristate {
-    ($idx:literal, $fid:expr) => {
+    ($idx:literal, $fid:expr, |$ri:ident| $clear:expr) => {
         Field {
             id: $fid,
             label: FORM_QUESTIONS[$idx].prompt,
             help: FORM_QUESTIONS[$idx].unanswered_detail,
             kind: FieldKind::TriState,
             live: FORM_QUESTIONS[$idx].live,
-            get: |ri, _| Some(FieldValue::TriState((FORM_QUESTIONS[$idx].get)(ri))),
-            // The registry setter writes a definite yes/no only; un-answering (→ `None`) is a `ClearField`
-            // (Task 7), never a `SetField`. So `TriState(None)` and every non-`TriState` value are rejected.
+            // ★ I-4: a non-live (absent-parent / inapplicable) question reads as `None`, distinct from a
+            // live-but-unanswered `Some(TriState(None))` — absent must be distinguishable from unanswered.
+            get: |ri, _| {
+                if !(FORM_QUESTIONS[$idx].live)(ri) {
+                    return None;
+                }
+                Some(FieldValue::TriState((FORM_QUESTIONS[$idx].get)(ri)))
+            },
+            // ★ I-4: refuse (`NoSuchRow`) a set on a non-live question rather than silently dropping the
+            // write and lying `Ok`. Un-answering (→ `None`) is a `ClearField`, never a `SetField`, so a
+            // `TriState(None)` and every non-`TriState` value stay `WrongKind`.
             set: |ri, _, v| {
+                if !(FORM_QUESTIONS[$idx].live)(ri) {
+                    return Err(SetError::NoSuchRow);
+                }
                 let FieldValue::TriState(Some(b)) = v else { return Err(SetError::WrongKind) };
                 (FORM_QUESTIONS[$idx].set)(ri, b);
                 Ok(())
             },
+            // ★ I-1 (spec §5.7 M-6): the un-answer path — write the underlying `Option` leaf to `None`.
+            clear: Some(|$ri, _| $clear),
         }
     };
 }
 
 /// A class-(B) `YesNo` skippable → a `TriState` `Field` over `SKIPPABLE_QUESTIONS[$idx]`.
 macro_rules! skippable_tristate {
-    ($idx:literal, $fid:expr) => {
+    ($idx:literal, $fid:expr, |$ri:ident| $clear:expr) => {
         Field {
             id: $fid,
             label: SKIPPABLE_QUESTIONS[$idx].prompt,
             help: SKIPPABLE_QUESTIONS[$idx].help,
             kind: FieldKind::TriState,
             live: SKIPPABLE_QUESTIONS[$idx].live,
-            get: |ri, _| Some(FieldValue::TriState((SKIPPABLE_QUESTIONS[$idx].get_bool)(ri))),
+            get: |ri, _| {
+                if !(SKIPPABLE_QUESTIONS[$idx].live)(ri) {
+                    return None;
+                }
+                Some(FieldValue::TriState((SKIPPABLE_QUESTIONS[$idx].get_bool)(ri)))
+            },
             set: |ri, _, v| {
+                if !(SKIPPABLE_QUESTIONS[$idx].live)(ri) {
+                    return Err(SetError::NoSuchRow);
+                }
                 let FieldValue::TriState(Some(b)) = v else { return Err(SetError::WrongKind) };
                 (SKIPPABLE_QUESTIONS[$idx].set_bool)(ri, b);
                 Ok(())
             },
+            clear: Some(|$ri, _| $clear),
         }
     };
 }
 
 /// A class-(B) `Date` skippable → a `Date` `Field` over `SKIPPABLE_QUESTIONS[$idx]`.
 macro_rules! skippable_date {
-    ($idx:literal, $fid:expr) => {
+    ($idx:literal, $fid:expr, |$ri:ident| $clear:expr) => {
         Field {
             id: $fid,
             label: SKIPPABLE_QUESTIONS[$idx].prompt,
             help: SKIPPABLE_QUESTIONS[$idx].help,
             kind: FieldKind::Date,
             live: SKIPPABLE_QUESTIONS[$idx].live,
-            get: |ri, _| Some(FieldValue::Date((SKIPPABLE_QUESTIONS[$idx].get_date)(ri))),
+            get: |ri, _| {
+                if !(SKIPPABLE_QUESTIONS[$idx].live)(ri) {
+                    return None;
+                }
+                Some(FieldValue::Date((SKIPPABLE_QUESTIONS[$idx].get_date)(ri)))
+            },
             set: |ri, _, v| {
+                if !(SKIPPABLE_QUESTIONS[$idx].live)(ri) {
+                    return Err(SetError::NoSuchRow);
+                }
                 let FieldValue::Date(Some(d)) = v else { return Err(SetError::WrongKind) };
                 (SKIPPABLE_QUESTIONS[$idx].set_date)(ri, d);
                 Ok(())
             },
+            clear: Some(|$ri, _| $clear),
         }
     };
 }
@@ -99,18 +135,41 @@ const FOREIGN_COUNTRY_NAMES: Field = Field {
         ri.foreign_country_names = s;
         Ok(())
     },
+    // A plain Text leaf: `apply` clears it via `set(Text(""))`.
+    clear: None,
 };
 
 /// The 7 delegating declarations (indices 0–6 of `FORM_QUESTIONS`, in `QuestionId::ALL` order; index 7, the
 /// mortgage box, is deduped to `SaMortgageAllUsed`) plus the country Text leaf.
 const DECL_FIELDS: &[Field] = &[
-    decl_tristate!(0, FieldId::DeclDependentTaxpayer),
-    decl_tristate!(1, FieldId::DeclDependentSpouse),
-    decl_tristate!(2, FieldId::DeclMfsSpouseItemizes),
-    decl_tristate!(3, FieldId::DeclForeignAccounts),
-    decl_tristate!(4, FieldId::DeclForeignTrust),
-    decl_tristate!(5, FieldId::DeclHsaActivity),
-    decl_tristate!(6, FieldId::DeclDualStatusAlien),
+    decl_tristate!(0, FieldId::DeclDependentTaxpayer, |ri| {
+        ri.header.can_be_claimed_as_dependent_taxpayer = None;
+        Ok(())
+    }),
+    decl_tristate!(1, FieldId::DeclDependentSpouse, |ri| {
+        ri.header.can_be_claimed_as_dependent_spouse = None;
+        Ok(())
+    }),
+    decl_tristate!(2, FieldId::DeclMfsSpouseItemizes, |ri| {
+        ri.mfs_spouse_itemizes = None;
+        Ok(())
+    }),
+    decl_tristate!(3, FieldId::DeclForeignAccounts, |ri| {
+        ri.foreign_accounts = None;
+        Ok(())
+    }),
+    decl_tristate!(4, FieldId::DeclForeignTrust, |ri| {
+        ri.foreign_trust = None;
+        Ok(())
+    }),
+    decl_tristate!(5, FieldId::DeclHsaActivity, |ri| {
+        ri.sch1.hsa_activity = None;
+        Ok(())
+    }),
+    decl_tristate!(6, FieldId::DeclDualStatusAlien, |ri| {
+        ri.dual_status_alien = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -127,10 +186,31 @@ pub(crate) const DECLARATIONS: Section = Section {
 /// deduped to `SaSaltUseSalesTax`). Equivalent to `SKIPPABLE_QUESTIONS.filter(|s| s.id != SalesTaxElection)`,
 /// enumerated by index because `Field` accessors must be `const`/`&'static`, not built by a runtime loop.
 const SKIPPABLE_FIELDS: &[Field] = &[
-    skippable_tristate!(0, FieldId::BlindTaxpayer),
-    skippable_tristate!(1, FieldId::BlindSpouse),
-    skippable_date!(3, FieldId::DobTaxpayer),
-    skippable_date!(4, FieldId::DobSpouse),
+    skippable_tristate!(0, FieldId::BlindTaxpayer, |ri| {
+        ri.header.taxpayer.blind = None;
+        Ok(())
+    }),
+    // ★ Parent-gated (spouse): a clear on an absent spouse is `NoSuchRow`, not a silent Ok (I-1/I-4).
+    skippable_tristate!(1, FieldId::BlindSpouse, |ri| {
+        if let Some(sp) = ri.header.spouse.as_mut() {
+            sp.blind = None;
+            Ok(())
+        } else {
+            Err(SetError::NoSuchRow)
+        }
+    }),
+    skippable_date!(3, FieldId::DobTaxpayer, |ri| {
+        ri.header.taxpayer.date_of_birth = None;
+        Ok(())
+    }),
+    skippable_date!(4, FieldId::DobSpouse, |ri| {
+        if let Some(sp) = ri.header.spouse.as_mut() {
+            sp.date_of_birth = None;
+            Ok(())
+        } else {
+            Err(SetError::NoSuchRow)
+        }
+    }),
 ];
 
 pub(crate) const SKIPPABLES: Section = Section {

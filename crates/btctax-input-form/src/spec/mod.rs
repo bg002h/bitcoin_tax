@@ -126,12 +126,20 @@ mod tests {
                 let ri = ReturnInputs { filing_status: fs, ..Default::default() };
                 assert_eq!((f.live)(&ri), (entry.live)(&ri), "live delegation {:?} @ {fs:?}", f.id);
             }
+            // ★ I-4: the delegating get/set now gate on `live`, so seed a return on which EVERY Decl* is
+            // live (Mfs makes `MfsSpouseItemizes` live; a spouse `Person` makes `DependentSpouse` live).
+            let live_ri = || {
+                let mut ri = ReturnInputs { filing_status: FilingStatus::Mfs, ..Default::default() };
+                ri.header.spouse = Some(Person::default());
+                ri
+            };
+            assert!((entry.live)(&live_ri()), "test fixture must be live for {:?}", f.id);
             // get delegates: a value written through the registry setter is read back by the Field getter.
-            let mut ri = fresh_single();
+            let mut ri = live_ri();
             (entry.set)(&mut ri, true);
             assert_eq!((f.get)(&ri, &RowAddr::default()), Some(FieldValue::TriState(Some(true))));
             // set delegates: a value written through the Field setter is read back by the registry getter.
-            let mut ri2 = fresh_single();
+            let mut ri2 = live_ri();
             (f.set)(&mut ri2, &RowAddr::default(), FieldValue::TriState(Some(false))).unwrap();
             assert_eq!((entry.get)(&ri2), Some(false), "set delegation {:?}", f.id);
             // wrong FieldValue kind is rejected.
@@ -141,6 +149,17 @@ mod tests {
                 "wrong-kind set on {:?}",
                 f.id
             );
+            // ★ I-4: a set on a NON-live question refuses (`NoSuchRow`), not a silent Ok.
+            if !(entry.live)(&fresh_single()) {
+                let mut dead = fresh_single();
+                assert_eq!(
+                    (f.set)(&mut dead, &RowAddr::default(), FieldValue::TriState(Some(true))),
+                    Err(SetError::NoSuchRow),
+                    "set on non-live {:?} must refuse",
+                    f.id
+                );
+                assert_eq!((f.get)(&dead, &RowAddr::default()), None, "get on non-live {:?} is None", f.id);
+            }
         }
     }
 

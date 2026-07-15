@@ -60,18 +60,25 @@ fn apply_to(ri: &mut ReturnInputs, e: Edit) -> Result<(), ApplyError> {
         Edit::ClearField { id, addr } => {
             let (field, depth) = locate_field(id).ok_or(ApplyError::NoSuchSection)?;
             guard_arity(&addr, depth)?;
-            // Per-kind empty via the field's own setter. Enum has no empty state (this includes
-            // filing_status) → Immutable, WITHOUT calling set. The 13 registry-delegating tri-state/date
-            // leaves reject their `None` empty (their core setters take `bool`/`Date`, not `Option`) →
-            // `WrongKind`; that is the documented v1 limitation (spec §10), returned cleanly, never a panic.
+            // ★ The un-answer path (spec §5.7 M-6, review I-1). An `Enum` has no empty state (this includes
+            // `filing_status`) → `Immutable`, WITHOUT touching anything. Else, a field carrying a dedicated
+            // `clear` (the 13 registry-delegating tri-state/date leaves — whose registry setter writes only a
+            // definite yes/no, so it cannot un-answer) routes through it, writing its `Option` leaf to `None`.
+            // Every plain field clears via its own `set(empty_for_kind)`.
+            if let FieldKind::Enum(_) = field.kind {
+                return Err(ApplyError::SetError(SetError::Immutable));
+            }
+            if let Some(clear) = field.clear {
+                return clear(ri, &addr).map_err(ApplyError::SetError);
+            }
             let empty = match field.kind {
-                FieldKind::Enum(_) => return Err(ApplyError::SetError(SetError::Immutable)),
                 FieldKind::Money => FieldValue::Money(Usd::ZERO),
                 FieldKind::Text => FieldValue::Text(String::new()),
                 FieldKind::Bool => FieldValue::Bool(false),
                 FieldKind::Date => FieldValue::Date(None),
                 FieldKind::TriState => FieldValue::TriState(None),
                 FieldKind::Secret => FieldValue::SecretEntry(String::new()),
+                FieldKind::Enum(_) => unreachable!("Enum returned Immutable above"),
             };
             (field.set)(ri, &addr, empty).map_err(ApplyError::SetError)
         }
@@ -82,8 +89,8 @@ fn apply_to(ri: &mut ReturnInputs, e: Edit) -> Result<(), ApplyError> {
             };
             // `parent` addresses the CONTAINER — one level shallower than a row of this section.
             guard_arity(&parent, row_depth(section).saturating_sub(1))?;
-            add(ri, &parent);
-            Ok(())
+            // ★ I-4: propagate the builder's `Result` — an absent parent is `NoSuchRow`, not a lying `Ok`.
+            add(ri, &parent).map_err(ApplyError::SetError)
         }
         Edit::RemoveRow { section, addr } => {
             let s = find_section(section).ok_or(ApplyError::NoSuchSection)?;
@@ -91,8 +98,7 @@ fn apply_to(ri: &mut ReturnInputs, e: Edit) -> Result<(), ApplyError> {
                 return Err(ApplyError::NoSuchSection);
             };
             guard_arity(&addr, row_depth(section))?;
-            remove(ri, &addr);
-            Ok(())
+            remove(ri, &addr).map_err(ApplyError::SetError)
         }
         Edit::CreateSection { section } => {
             let s = find_section(section).ok_or(ApplyError::NoSuchSection)?;
@@ -134,12 +140,14 @@ fn row_depth(id: SectionId) -> usize {
 }
 
 /// ★ Fail-closed arity guard (untrusted wire input, spec §4/§13): the row accessors index `a.0[0]`/`a.0[1]`
-/// and PANIC on a short vector, so refuse a too-shallow addr BEFORE any accessor sees it.
+/// and PANIC on a short vector, so refuse a too-shallow addr BEFORE any accessor sees it. EXACT arity per
+/// depth (review M-2): a too-LONG addr (extra indices a section never reads) is refused too — a fail-closed
+/// contract, not silently-ignored trailing junk.
 fn guard_arity(addr: &RowAddr, required: usize) -> Result<(), ApplyError> {
-    if addr.0.len() < required {
-        Err(ApplyError::SetError(SetError::NoSuchRow))
-    } else {
+    if addr.0.len() == required {
         Ok(())
+    } else {
+        Err(ApplyError::SetError(SetError::NoSuchRow))
     }
 }
 
@@ -438,11 +446,12 @@ mod tests {
         );
     }
 
-    /// ClearField per-kind: Enum → `Immutable`; the 13 registry-delegating tri-state/date fields → `WrongKind`
-    /// (the documented v1 limitation — core setters take `bool`/`Date`, not `Option`); plain Date/Money/Text/
-    /// Bool/Secret clear cleanly to their empty value.
+    /// ★ ClearField per-kind (review I-1/I-2, updated from the old "registry limitation" that pinned the bug):
+    /// Enum → `Immutable`; the 13 registry-delegating tri-state/date fields UN-ANSWER their underlying `Option`
+    /// leaf to `None` (spec §5.7 M-6); plain Date/Money/Text/Bool/Secret clear to their empty value; and the
+    /// `IpPin` Secret clears to `None` (never `Some("")`).
     #[test]
-    fn clearfield_kind_matrix_and_registry_limitation() {
+    fn clearfield_kind_matrix_and_registry_unanswer() {
         let mut w: Working = None;
         materialize(&mut w, FilingStatus::Single);
 
@@ -452,19 +461,52 @@ mod tests {
             Err(ApplyError::SetError(SetError::Immutable)),
         );
 
-        // A registry-delegating TriState (DeclForeignAccounts): TriState(None) → WrongKind (v1 limitation).
+        // ★ I-1: a registry-delegating TriState (DeclForeignAccounts) un-answers to `None`. Seed a definite
+        // answer, then clear, and assert the underlying `Option<bool>` leaf is back to `None`.
+        apply(
+            &mut w,
+            Edit::SetField {
+                id: FieldId::DeclForeignAccounts,
+                addr: RowAddr::default(),
+                value: FieldValue::TriState(Some(true)),
+            },
+        )
+        .unwrap();
+        assert_eq!(w.as_ref().unwrap().foreign_accounts, Some(true));
+        apply(&mut w, Edit::ClearField { id: FieldId::DeclForeignAccounts, addr: RowAddr::default() })
+            .unwrap();
+        assert_eq!(w.as_ref().unwrap().foreign_accounts, None, "I-1: TriState un-answers to None");
+
+        // ★ I-1: a registry-delegating Date (DobTaxpayer) un-answers to `None` likewise.
+        apply(
+            &mut w,
+            Edit::SetField {
+                id: FieldId::DobTaxpayer,
+                addr: RowAddr::default(),
+                value: FieldValue::Date(Some(date!(1980 - 03 - 04))),
+            },
+        )
+        .unwrap();
         assert_eq!(
-            apply(
-                &mut w,
-                Edit::ClearField { id: FieldId::DeclForeignAccounts, addr: RowAddr::default() }
-            ),
-            Err(ApplyError::SetError(SetError::WrongKind)),
+            w.as_ref().unwrap().header.taxpayer.date_of_birth,
+            Some(date!(1980 - 03 - 04))
         );
-        // A registry-delegating Date (DobTaxpayer): Date(None) → WrongKind (same limitation).
-        assert_eq!(
-            apply(&mut w, Edit::ClearField { id: FieldId::DobTaxpayer, addr: RowAddr::default() }),
-            Err(ApplyError::SetError(SetError::WrongKind)),
-        );
+        apply(&mut w, Edit::ClearField { id: FieldId::DobTaxpayer, addr: RowAddr::default() }).unwrap();
+        assert_eq!(w.as_ref().unwrap().header.taxpayer.date_of_birth, None, "I-1: Date un-answers to None");
+
+        // ★ I-2: the IpPin Secret (an `Option<String>`) clears to `None`, NOT `Some("")` (the export-brick).
+        apply(
+            &mut w,
+            Edit::SetField {
+                id: FieldId::IpPin,
+                addr: RowAddr::default(),
+                value: FieldValue::SecretEntry("112233".into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(w.as_ref().unwrap().header.ip_pin.as_deref(), Some("112233"));
+        apply(&mut w, Edit::ClearField { id: FieldId::IpPin, addr: RowAddr::default() }).unwrap();
+        assert_eq!(w.as_ref().unwrap().header.ip_pin, None, "I-2: IpPin clears to None, not Some(\"\")");
 
         // A PLAIN Date leaf (DepDob) DOES clear to None cleanly.
         apply(&mut w, Edit::AddRow { section: SectionId::Dependents, parent: RowAddr::default() })
@@ -556,6 +598,185 @@ mod tests {
         assert_eq!(
             apply(&mut w, Edit::CreateSection { section: SectionId::Payments }),
             Err(ApplyError::NoSuchSection),
+        );
+    }
+
+    /// ★ I-1: the two Schedule-A registry-delegating tri-states and a skippable tri-state un-answer their
+    /// underlying `Option` leaf to `None` when the parent IS present (the parent-absent case is I-4 below).
+    #[test]
+    fn delegating_clear_unanswers_schedule_a_and_blind_taxpayer_i1() {
+        let mut w: Working = None;
+        materialize(&mut w, FilingStatus::Single);
+        apply(&mut w, Edit::CreateSection { section: SectionId::ScheduleA }).unwrap();
+        // Prime mortgage interest so SaMortgageAllUsed is live (its set/clear gate on `mortgage_question_live`).
+        apply(
+            &mut w,
+            Edit::SetField {
+                id: FieldId::SaMortgage1098,
+                addr: RowAddr::default(),
+                value: FieldValue::Money(dec!(1000)),
+            },
+        )
+        .unwrap();
+        for id in [FieldId::SaSaltUseSalesTax, FieldId::SaMortgageAllUsed] {
+            apply(
+                &mut w,
+                Edit::SetField { id, addr: RowAddr::default(), value: FieldValue::TriState(Some(true)) },
+            )
+            .unwrap();
+            apply(&mut w, Edit::ClearField { id, addr: RowAddr::default() }).unwrap();
+        }
+        let sa = w.as_ref().unwrap().schedule_a.as_ref().unwrap();
+        assert_eq!(sa.salt_use_sales_tax, None, "I-1: SaSaltUseSalesTax un-answers to None");
+        assert_eq!(sa.mortgage_all_used_to_buy_build_improve, None, "I-1: SaMortgageAllUsed un-answers to None");
+
+        // A skippable tri-state (BlindTaxpayer, always live) likewise.
+        apply(
+            &mut w,
+            Edit::SetField {
+                id: FieldId::BlindTaxpayer,
+                addr: RowAddr::default(),
+                value: FieldValue::TriState(Some(true)),
+            },
+        )
+        .unwrap();
+        apply(&mut w, Edit::ClearField { id: FieldId::BlindTaxpayer, addr: RowAddr::default() }).unwrap();
+        assert_eq!(w.as_ref().unwrap().header.taxpayer.blind, None, "I-1: BlindTaxpayer un-answers to None");
+    }
+
+    /// ★ I-4: a presence-gated delegating `SetField` on an absent parent must REFUSE (`NoSuchRow`), never
+    /// report a lying `Ok` after silently dropping the write; and a `ClearField` on an absent parent likewise
+    /// refuses. When the parent IS present, both succeed.
+    #[test]
+    fn delegating_set_and_clear_refuse_on_absent_parent_i4() {
+        let mut w: Working = None;
+        materialize(&mut w, FilingStatus::Single); // no spouse, no schedule_a
+
+        // BlindSpouse with no spouse → NoSuchRow (was a silent Ok that dropped the §63(f) claim).
+        assert_eq!(
+            apply(
+                &mut w,
+                Edit::SetField {
+                    id: FieldId::BlindSpouse,
+                    addr: RowAddr::default(),
+                    value: FieldValue::TriState(Some(true)),
+                }
+            ),
+            Err(ApplyError::SetError(SetError::NoSuchRow)),
+        );
+        // SaSaltUseSalesTax with no schedule_a → NoSuchRow.
+        assert_eq!(
+            apply(
+                &mut w,
+                Edit::SetField {
+                    id: FieldId::SaSaltUseSalesTax,
+                    addr: RowAddr::default(),
+                    value: FieldValue::TriState(Some(true)),
+                }
+            ),
+            Err(ApplyError::SetError(SetError::NoSuchRow)),
+        );
+        // A clear on the same absent parents also refuses (not a silent Ok).
+        assert_eq!(
+            apply(&mut w, Edit::ClearField { id: FieldId::BlindSpouse, addr: RowAddr::default() }),
+            Err(ApplyError::SetError(SetError::NoSuchRow)),
+        );
+        assert_eq!(
+            apply(&mut w, Edit::ClearField { id: FieldId::SaSaltUseSalesTax, addr: RowAddr::default() }),
+            Err(ApplyError::SetError(SetError::NoSuchRow)),
+        );
+
+        // With the parents present, the same edits succeed and stick.
+        apply(&mut w, Edit::CreateSection { section: SectionId::Spouse }).unwrap();
+        apply(&mut w, Edit::CreateSection { section: SectionId::ScheduleA }).unwrap();
+        apply(
+            &mut w,
+            Edit::SetField {
+                id: FieldId::BlindSpouse,
+                addr: RowAddr::default(),
+                value: FieldValue::TriState(Some(true)),
+            },
+        )
+        .unwrap();
+        assert_eq!(w.as_ref().unwrap().header.spouse.as_ref().unwrap().blind, Some(true));
+        apply(
+            &mut w,
+            Edit::SetField {
+                id: FieldId::SaSaltUseSalesTax,
+                addr: RowAddr::default(),
+                value: FieldValue::TriState(Some(false)),
+            },
+        )
+        .unwrap();
+        assert_eq!(w.as_ref().unwrap().schedule_a.as_ref().unwrap().salt_use_sales_tax, Some(false));
+    }
+
+    /// ★ I-4: `AddRow`/`RemoveRow` report an absent parent / out-of-range row rather than silently no-op'ing.
+    #[test]
+    fn addrow_removerow_report_absent_parent_and_out_of_range_i4() {
+        let mut w: Working = None;
+        materialize(&mut w, FilingStatus::Single);
+
+        // AddRow box-12 with parent [0] but no W-2 at index 0 → NoSuchRow (was a silent Ok no-op).
+        assert_eq!(
+            apply(&mut w, Edit::AddRow { section: SectionId::W2Box12, parent: RowAddr(vec![0]) }),
+            Err(ApplyError::SetError(SetError::NoSuchRow)),
+        );
+        // AddRow charitable with no schedule_a → NoSuchRow.
+        assert_eq!(
+            apply(
+                &mut w,
+                Edit::AddRow { section: SectionId::ScheduleACharitable, parent: RowAddr::default() }
+            ),
+            Err(ApplyError::SetError(SetError::NoSuchRow)),
+        );
+        // RemoveRow of a W-2 that isn't there → NoSuchRow.
+        assert_eq!(
+            apply(&mut w, Edit::RemoveRow { section: SectionId::W2s, addr: RowAddr(vec![3]) }),
+            Err(ApplyError::SetError(SetError::NoSuchRow)),
+        );
+
+        // With a W-2 present, AddRow box-12 succeeds; removing an out-of-range box-12 still refuses.
+        apply(&mut w, Edit::AddRow { section: SectionId::W2s, parent: RowAddr::default() }).unwrap();
+        apply(&mut w, Edit::AddRow { section: SectionId::W2Box12, parent: RowAddr(vec![0]) }).unwrap();
+        assert_eq!(w.as_ref().unwrap().w2s[0].box12.len(), 1);
+        assert_eq!(
+            apply(&mut w, Edit::RemoveRow { section: SectionId::W2Box12, addr: RowAddr(vec![0, 5]) }),
+            Err(ApplyError::SetError(SetError::NoSuchRow)),
+        );
+    }
+
+    /// ★ M-2: `guard_arity` is EXACT — a too-LONG addr (extra indices the section never reads) is refused,
+    /// not silently accepted with the tail ignored.
+    #[test]
+    fn overlong_rowaddr_is_rejected_m2() {
+        let mut w: Working = None;
+        materialize(&mut w, FilingStatus::Single);
+        apply(&mut w, Edit::AddRow { section: SectionId::W2s, parent: RowAddr::default() }).unwrap();
+
+        // Box1Wages needs depth 1; a depth-3 addr is over-long → NoSuchRow.
+        assert_eq!(
+            apply(
+                &mut w,
+                Edit::SetField {
+                    id: FieldId::Box1Wages,
+                    addr: RowAddr(vec![0, 7, 9]),
+                    value: FieldValue::Money(dec!(1)),
+                }
+            ),
+            Err(ApplyError::SetError(SetError::NoSuchRow)),
+        );
+        // A singleton field needs depth 0; any index is over-long → NoSuchRow.
+        assert_eq!(
+            apply(
+                &mut w,
+                Edit::SetField {
+                    id: FieldId::TpFirstName,
+                    addr: RowAddr(vec![0]),
+                    value: FieldValue::Text("x".into()),
+                }
+            ),
+            Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
     }
 }
