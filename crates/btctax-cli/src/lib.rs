@@ -8,6 +8,7 @@ pub mod cmd;
 pub mod config;
 pub mod donation_details;
 pub mod eventref;
+pub mod input_form_store;
 pub mod optimize_attest;
 pub mod price_cache;
 pub mod render;
