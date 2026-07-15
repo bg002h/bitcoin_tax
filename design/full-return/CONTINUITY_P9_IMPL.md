@@ -1,20 +1,25 @@
 # CONTINUITY — P9 IMPLEMENTATION (the FORM QUESTION REGISTRY)
 
-*Updated 2026-07-14. Branch `main`, HEAD `badb682` (step 6), tree CLEAN, **NOT yet pushed** (steps 1–6
-are ahead of `origin/main`; push at the ~step-8 milestone). `make check` GREEN (1750 passed, 1 skipped).*
+*Updated 2026-07-14. **★ P9 IS COMPLETE — all 12 steps shipped.** Branch `main`, HEAD `f815c7f`, tree
+CLEAN, pushed to `origin/main`. `make check` GREEN (1761 passed, 1 skipped). Independent Fable review of
+steps 6–10 (`reviews/P9-IMPL-fable-r3.md`) returned **0C/0I** — no escape in steps 1–5 either; its 3
+Minors + 2 Nits were folded and mutation-checked (`f815c7f`). Steps 1–5 were r1/r2 green earlier. There is
+nothing left to resume — this file is now a record, not a resume point.*
 
 ---
 
-## ⚡ THE ONE COMMAND TO RESUME
+## ⚡ STATUS: DONE. Nothing to resume.
 
-```
-Read design/full-return/CONTINUITY_P9_IMPL.md and continue the P9 implementation from step 7.
-```
+P9 shipped the FORM_QUESTIONS registry + the compile-time classifier: `screen_inputs`, `income answer`, and
+`ReturnHeader::build` all derive from one liveness list, and a new bool/`Option<bool>`/defaulted-enum field
+reachable from `ReturnInputs` no longer compiles until a human edits `tax/classifier.rs`. The answered-ness
+invariant is now structural, not conventional.
 
 **★ PROCESS FOOTGUN (learned step 6):** do NOT `git checkout -- <file>` to revert a mutation while the
 step's own changes are UNCOMMITTED — it blows away the uncommitted work, not just the mutation. Either
 commit the step first and revert to it, or mutate-then-restore from a `cp` backup (`cp f f.bak; mutate;
-test; mv f.bak f`), which never touches sibling files. See [[git-checkout-eats-uncommitted-mutation-reverts]].
+test; mv f.bak f`; then `touch` before the final re-run — mtime), which never touches sibling files. See
+[[git-checkout-eats-uncommitted-mutation-reverts]].
 
 ---
 
