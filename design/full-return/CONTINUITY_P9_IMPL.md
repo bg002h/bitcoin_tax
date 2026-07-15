@@ -42,6 +42,19 @@ structural via a `FORM_QUESTIONS` **registry** that `screen_inputs`, `income ans
 **Two shipped-code bugs fixed + held by mutation-checked tests:** §2.9 (circular Schedule B liveness silently
 omitting the FBAR surface) and P8a I1 (MFJ-no-spouse dependent box).
 
+**★ STEPS 1–5 WERE INDEPENDENTLY REVIEWED AND ARE GREEN (0C/0I).** Fable reviewed the core mechanism
+(`reviews/P9-IMPL-fable-r1.md`, 0C/2I/1M/3Nit): the mechanism is faithful and 8 guards are mutation-held, but
+**2 guards were held by NOTHING** (the [[untested-guard-pattern]], proven by mutations that survived the full
+suite): the mortgage question could be dropped from `income answer`; `income import` could silently swallow a
+stale row (dropping a Computed carryover — understating tax). **BOTH FOLDED** (`8b46b2b`, test-only + 3
+comment fixes) and **the fold was re-reviewed GREEN** (`reviews/P9-IMPL-fable-r2.md`, 0C/0I): each new test
+was confirmed to kill the reviewer's exact mutation. The production code never changed — only the tests that
+hold it. **Lesson for steps 6–12: `make check` green ≠ guard held. Mutation-check every guard, AND make the
+"answered/asked/refused" assertions registry-DERIVED so a new question is covered with zero edits.**
+*(One recorded, non-blocking: IMPL r1 Nit-3 — the interim window where `dual_status_alien`/`foreign`/`salt`
+value-refusals are not yet live is spec-conformant sequencing; they land at step 8. Keep the release gate
+closed until step 8.)*
+
 ## 4. Steps REMAINING (resume here — spec §5 has the detail)
 
 - **Step 6 — Sch A line 8 value behaviour + advisory, ONE step** (§2.7/§3.4). `mortgage_all_used_to_buy_build_improve
