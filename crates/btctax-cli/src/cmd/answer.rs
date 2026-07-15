@@ -321,6 +321,50 @@ mod tests {
         );
     }
 
+    /// A return set up so `id` is LIVE (nothing answered yet).
+    fn scenario_for(id: QuestionId) -> ReturnInputs {
+        use btctax_core::tax::return_inputs::ScheduleAInputs;
+        let mut r = single();
+        match id {
+            QuestionId::DependentSpouse => r.filing_status = FilingStatus::Mfj,
+            QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
+            QuestionId::MortgageAllUsedToBuyBuildImprove => {
+                r.schedule_a = Some(ScheduleAInputs {
+                    mortgage_interest_1098: dec!(9000),
+                    ..Default::default()
+                });
+            }
+            _ => {}
+        }
+        r
+    }
+
+    /// ★ THE no-brick property, registry-DERIVED (§3.5 assertion 3 / r4 I-3 / IMPL r1 I-1). For EVERY
+    /// registry entry: on a return where it is live, `income answer` must ASK it. Held by identity today,
+    /// but the spec mandated this assertion by name after it went red three revisions running — and a
+    /// hand-written per-question test silently omitted the mortgage question (its liveness is the one
+    /// non-trivial predicate). Deriving it means a dropped or mis-filtered entry — for ANY question, incl.
+    /// the ones steps 6–12 keep adding to this file — fails a named test.
+    #[test]
+    fn income_answer_asks_every_live_declaration() {
+        for q in FORM_QUESTIONS {
+            let ri = scenario_for(q.id);
+            assert!(
+                (q.live)(&ri),
+                "{:?} must be live in its own scenario (test bug otherwise)",
+                q.id
+            );
+            assert!(
+                live_questions(&ri)
+                    .iter()
+                    .any(|a| a.declaration_id() == Some(q.id)),
+                "income answer must ask {:?} when it is live — else the screen can refuse for a question \
+                 the user can never answer (the near-brick D-8's recovery exists to prevent)",
+                q.id
+            );
+        }
+    }
+
     /// The mandatory declarations are not skippable; the DOBs are. (Anchored to the enum shape, not a value:
     /// every `Skippable` is skippable, every `Declaration` is not.)
     #[test]

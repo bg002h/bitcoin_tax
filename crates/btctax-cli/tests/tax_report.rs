@@ -1853,3 +1853,211 @@ fn income_answer_refuses_a_year_with_no_return() {
     );
     assert!(screen.is_empty(), "it must not ask anything before refusing");
 }
+
+// ── P9 §2.6 — the stale-row REMEDY chain (IMPL r1 I-2) ───────────────────────────────────────────
+//
+// `p9_stale_row_refuses` (in the library) holds the version gate and the error TEXT. These hold the
+// remedy's BEHAVIOUR: that `income import` over a stale row refuses (rather than silently overwriting and
+// dropping the row's Computed carryover — the fail-open §2.6 adjudicated and REJECTED), that
+// `clear` + `import` recovers to v2, and that the full chain restores the carryover `clear` discards.
+
+/// A minimal, fully-answered import TOML (every always-live declaration answered).
+fn answered_toml(dir: &Path) -> PathBuf {
+    let toml = dir.join("inputs.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\n\
+         dual_status_alien = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n\
+         [sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\n\
+         box1_wages = \"50000\"\nbox2_fed_withheld = \"6000\"\nbox5_medicare_wages = \"50000\"\n",
+    )
+    .unwrap();
+    toml
+}
+
+/// Force an existing `return_inputs` row to a PRE-P9 schema version (as a real pre-P9 vault would hold).
+fn stale_the_row(vault: &Path, year: i32) {
+    let mut s = Session::open(vault, &pp()).unwrap();
+    let n = s
+        .conn()
+        .execute(
+            "UPDATE return_inputs SET schema_version = 1 WHERE year = ?1",
+            [year],
+        )
+        .unwrap();
+    assert_eq!(n, 1, "the row must exist to be staled");
+    s.save().unwrap();
+}
+
+fn row_version(vault: &Path, year: i32) -> i64 {
+    let s = Session::open(vault, &pp()).unwrap();
+    s.conn()
+        .query_row(
+            "SELECT schema_version FROM return_inputs WHERE year = ?1",
+            [year],
+            |r| r.get(0),
+        )
+        .unwrap()
+}
+
+/// ★ IMPL r1 I-2, test (a). `income import` READS the existing row (the §4 R3-M6 carryover-preservation
+/// read), so over a STALE row it must REFUSE — not silently overwrite. This is the test the reviewer's
+/// mutation (`get(...).ok().flatten()` in `import_return_inputs`) kills: with the read swallowed, import
+/// would overwrite the stale row at v2 and drop its Computed carryover with no error.
+#[test]
+fn import_over_a_stale_row_refuses() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    let toml_dir = tempfile::tempdir().unwrap();
+    let toml = answered_toml(toml_dir.path());
+
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap(); // a v2 row
+    stale_the_row(&vault, 2024); // now it is pre-P9
+
+    let err = cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap_err();
+    assert!(
+        matches!(err, btctax_cli::CliError::StaleReturnInputs { year: 2024, .. }),
+        "import over a stale row must refuse (naming the remedy), not silently overwrite it: {err:?}"
+    );
+}
+
+/// ★ IMPL r1 I-2, test (b). The named remedy WORKS: `income clear` (a bare DELETE — it never deserializes,
+/// so it cannot itself refuse) then `income import` recovers the year, and the fresh row is stamped v2.
+#[test]
+fn clear_then_import_recovers_a_stale_row_to_v2() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    let toml_dir = tempfile::tempdir().unwrap();
+    let toml = answered_toml(toml_dir.path());
+
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
+    stale_the_row(&vault, 2024);
+
+    assert!(
+        cmd::tax::clear_return_inputs(&vault, &pp(), 2024).unwrap(),
+        "clear works on a stale row (it never deserializes)"
+    );
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap(); // no existing row now ⇒ succeeds
+    assert_eq!(row_version(&vault, 2024), 2, "the recovered row is stamped v2");
+}
+
+/// ★ IMPL r1 I-2, test (c). THE FULL CHAIN restores what `clear` discards. Seed 2024, write a Computed
+/// carryover onto 2025, stale BOTH rows, then run the whole remedy (clear+import each year, then re-run
+/// `--write-carryover`) and assert 2025's Computed carryover is back — the "disclosure is not restoration"
+/// guarantee (r6 I-1) that `clear` alone would silently drop.
+#[test]
+fn the_full_remedy_chain_restores_a_computed_carryover() {
+    use btctax_core::tax::return_inputs::{
+        CarryProvenance, CharitableClass, CharitableGift, ReturnInputs, ScheduleAInputs, W2,
+    };
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // 2024: a $40k cash gift that overflows the 60%-of-AGI ceiling ⇒ a charitable carryover to 2025.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &btctax_core::tax::testonly::answered(ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                w2s: vec![W2 {
+                    box1_wages: dec!(50000),
+                    box5_medicare_wages: dec!(50000),
+                    ..Default::default()
+                }],
+                schedule_a: Some(ScheduleAInputs {
+                    charitable: vec![CharitableGift {
+                        class: CharitableClass::Cash60,
+                        amount: dec!(40000),
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        // 2025 row must exist for the write-back (I1).
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2025,
+            &btctax_core::tax::testonly::answered(ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    // Compute the carryover onto 2025.
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    let carry_before = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let n = btctax_cli::return_inputs::get(s.conn(), 2025).unwrap().unwrap();
+        assert!(
+            n.charitable_carryover_in
+                .iter()
+                .any(|c| c.provenance == CarryProvenance::Computed),
+            "precondition: 2025 carries a Computed carryover"
+        );
+        n.charitable_carryover_in.clone()
+    };
+
+    // Both rows go stale (a pre-P9 vault).
+    stale_the_row(&vault, 2024);
+    stale_the_row(&vault, 2025);
+
+    // THE REMEDY, in order: clear + re-import each year (from the same inputs), THEN rebuild the carryover.
+    let toml_dir = tempfile::tempdir().unwrap();
+    let toml = answered_toml(toml_dir.path());
+    for year in [2024, 2025] {
+        cmd::tax::clear_return_inputs(&vault, &pp(), year).unwrap();
+        cmd::tax::import_return_inputs(&vault, &pp(), year, &toml).unwrap();
+    }
+    // NOTE: the re-imported 2024 has no charitable gift (the minimal TOML), so to reproduce the carryover
+    // the filer re-imports 2024's REAL inputs. Here we re-store them, then re-run the write-back.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &btctax_core::tax::testonly::answered(ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                w2s: vec![W2 {
+                    box1_wages: dec!(50000),
+                    box5_medicare_wages: dec!(50000),
+                    ..Default::default()
+                }],
+                schedule_a: Some(ScheduleAInputs {
+                    charitable: vec![CharitableGift {
+                        class: CharitableClass::Cash60,
+                        amount: dec!(40000),
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+
+    let carry_after = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap()
+            .charitable_carryover_in
+    };
+    assert_eq!(
+        carry_after, carry_before,
+        "the full remedy chain (clear + import + write-carryover) restores 2025's Computed carryover"
+    );
+}

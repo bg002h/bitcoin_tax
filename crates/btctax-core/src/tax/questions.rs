@@ -120,8 +120,8 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         unanswered: RefuseReason::ScheduleBPart3Unanswered,
         unanswered_detail:
             "Schedule B Part III line 7a (a foreign financial account) must be answered on every return — \
-             it is the FBAR/FinCEN disclosure, and its own answer is what decides whether Schedule B files \
-             (§2.9) — run `btctax income answer`",
+             it is the FBAR/FinCEN disclosure, and its own answer is what decides whether Schedule B files — \
+             run `btctax income answer`",
         // ★ = §2.9: live ALWAYS. It CANNOT be scoped by `schedule_b_files`, because that predicate reads
         // this very answer — the circular liveness that silently omitted Schedule B in shipped code.
         live: |_ri| true,
@@ -136,7 +136,7 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         unanswered_detail:
             "Schedule B Part III line 8 (a foreign trust) must be answered on every return — a foreign \
              trust independently requires Part III, so it cannot be scoped by whether Schedule B otherwise \
-             files (§2.9) — run `btctax income answer`",
+             files — run `btctax income answer`",
         live: |_ri| true,
         get: |ri| ri.foreign_trust,
         set: |ri, v| ri.foreign_trust = Some(v),
@@ -200,9 +200,11 @@ mod tests {
 
     /// ★ THE COMPLETENESS ANCHOR (§3.5). Anchored to the ENUM, not to `FORM_QUESTIONS` — an anti-vacuity
     /// test that ITERATED the list would silently drop its own scenario when an entry was dropped (r1 I-4).
-    /// The `match` is exhaustive, so a NEW `QuestionId` variant is a COMPILE ERROR until it is listed here;
-    /// the index round-trip (r2 M-3) is what stops "add the match arm, skip the `ALL` element", which would
-    /// compile green and never be iterated.
+    /// The `match` is exhaustive, so a NEW `QuestionId` variant is a COMPILE ERROR until it is listed here —
+    /// a human MUST edit this test, right next to the hardcoded `len() == 8` tripwires. The index round-trip
+    /// (r2 M-3) then catches a MIS-ORDERED `ALL`. (Honest limit, IMPL r1 M-1: a human who adds the match arm
+    /// but forgets the `ALL` element AND the count still slips through — the compiler forces the edit, not
+    /// its correctness, exactly as §3.3 states.)
     #[test]
     fn every_question_id_is_in_all_in_order_and_has_exactly_one_entry() {
         for (i, id) in QuestionId::ALL.iter().enumerate() {

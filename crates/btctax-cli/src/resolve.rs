@@ -371,12 +371,16 @@ mod tests {
     fn return_inputs_refused_by_guard_is_uncomputable_with_reason() {
         let c = mem();
         let (fr, tt) = ty2024();
-        // An HSA present ⇒ the refuse-guard refuses (Form 8889); derivation must NOT proceed.
+        // An affirmed HSA activity ⇒ the value-refusal refuses (Form 8889); derivation must NOT proceed.
+        // Answer the OTHER always-live declarations so the HSA refusal is the SOLE defect (else the
+        // registry's unanswered loop would refuse first, and this test would pass for a different reason —
+        // IMPL r1 Nit-2).
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
             ..Default::default()
         };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         ri.sch1.hsa_activity = Some(true);
         return_inputs::set(&c, 2024, &ri).unwrap();
         let r = resolve(&c, 2024, false, &fr, &tt);
