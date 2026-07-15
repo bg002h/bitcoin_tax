@@ -117,6 +117,20 @@ pub enum RefuseReason {
     /// (Renamed from `HsaPresent`: the field it reads was renamed `hsa_present → hsa_activity` in P9 §2.4 —
     /// the question is now whether a trigger fired, not mere holding.)
     HsaActivityUnsupported,
+    /// P9 §2.5 (r5 I-3) — `dual_status_alien == Some(true)`. A dual-status return is out of scope for v1, and
+    /// §63(c)(6)(B) zeroes a nonresident alien's standard deduction: proceeding would take the full standard
+    /// deduction the statute denies (a silent understatement). VALUE-refusal, disjoint from the `None`
+    /// registry loop.
+    DualStatusAlienUnsupported,
+    /// P9 §2.2 (Fable r2 I-3) — the §164(b)(5) sales-tax election is ON (`Some(true)`) with a $0
+    /// `salt_sales_tax_amount`, and income-tax SALT (W-2 box 17/19, estimated payments, prior-year balance)
+    /// would otherwise be deducted. 5a = the sales-tax amount ONLY, so the election collapses SALT to $0 — a
+    /// silent loss. The symmetric twin of `SaltSalesTaxWithoutElection`.
+    SalesTaxElectionWithoutAmount,
+    /// P9 §3.2 (r1 I-6) — Schedule B 7a "Yes" (`foreign_accounts == Some(true)`) with a BLANK 7b
+    /// (`foreign_country_names` empty/whitespace). The filed Schedule B Part III would omit the required
+    /// country list. Its detail names `income import` (not `income answer` — `answer` cannot capture strings).
+    ScheduleBForeignCountryMissing,
     /// Schedule 1 line 20 IRA deduction claimed → active-participant phase-out unmodeled in v1.
     IraDeductionClaimed,
     // ── Compute-dependent rows (SPEC §4.10; need the assembled income / ledger, screened in P2) ──
@@ -538,6 +552,26 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         );
     }
 
+    // ★ P9 §2.5 (r5 I-3) — a truthful dual-status "yes" is UNSUPPORTED. VALUE-refusal (`Some(true)`);
+    // WITHOUT it a "yes" computes, taking the standard deduction §63(c)(6)(B) denies a nonresident alien.
+    if ri.dual_status_alien == Some(true) {
+        return refuse(
+            RefuseReason::DualStatusAlienUnsupported,
+            "you were a dual-status alien — v1 does not compute a dual-status return (§63(c)(6)(B) zeroes a \
+             nonresident alien's standard deduction), so it refuses rather than over-deduct",
+        );
+    }
+
+    // ★ P9 §3.2 (r1 I-6) — Schedule B 7a "Yes" with a blank 7b (country names). The exit is `income import`
+    // (a TOML re-import), never `income answer` — `answer` captures bools and dates, never strings.
+    if ri.foreign_accounts == Some(true) && ri.foreign_country_names.trim().is_empty() {
+        return refuse(
+            RefuseReason::ScheduleBForeignCountryMissing,
+            "you declared a foreign financial account (Schedule B line 7a), but line 7b (the country \
+             name(s)) is blank — add `foreign_country_names` to the TOML and re-run `btctax income import`",
+        );
+    }
+
     // Schedule A §164(b)(5) SALT: a sales-tax amount with the election OFF is an input error — fail loud
     // rather than silently drop it (R3-M9).
     if let Some(a) = &ri.schedule_a {
@@ -547,6 +581,26 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
                 "a Schedule A sales-tax amount is set but the §164(b)(5) sales-tax election is off — turn \
                  the election on (5a = sales tax) or clear `salt_sales_tax_amount`",
             );
+        }
+        // ★ P9 §2.2 (Fable r2 I-3) — the SYMMETRIC twin: the election is ON with a $0 amount, so 5a = $0,
+        // while income-tax SALT (W-2 box 17/19 + estimates + prior-year balance) would otherwise be
+        // deducted. The election silently collapses the whole SALT deduction — fail loud rather than lose it.
+        if a.salt_use_sales_tax == Some(true) && a.salt_sales_tax_amount == Usd::ZERO {
+            let income_tax_salt: Usd = ri
+                .w2s
+                .iter()
+                .map(|w| w.box17_state_tax_withheld + w.box19_local_tax)
+                .sum::<Usd>()
+                + a.salt_state_estimated_payments
+                + a.salt_prior_year_balance_paid;
+            if income_tax_salt > Usd::ZERO {
+                return refuse(
+                    RefuseReason::SalesTaxElectionWithoutAmount,
+                    "the §164(b)(5) sales-tax election is ON but `salt_sales_tax_amount` is $0, so Schedule \
+                     A line 5a would be $0 and your state/local income taxes (withholding, estimates) drop \
+                     out — enter the sales-tax amount, or turn the election off to deduct income taxes",
+                );
+            }
         }
     }
 
@@ -1535,6 +1589,82 @@ mod tests {
         // Some(false) / None do not refuse.
         r.foreign_trust = Some(false);
         assert_eq!(reason(&r), None);
+    }
+
+    /// ★ P9 §2.5 / §3.5 (r5 I-3) — a TRUTHFUL dual-status "yes" is UNSUPPORTED: v1 cannot do a dual-status
+    /// return, and §63(c)(6)(B) zeroes a nonresident alien's standard deduction. WITHOUT this guard a "yes"
+    /// would COMPUTE, taking the full standard deduction the statute denies — a silent understatement, and
+    /// the untested-guard pattern on the one new refusal r5 caught scheduled by no step. (`Some(false)`
+    /// proceeds; `None` is the registry's unanswered refusal.)
+    #[test]
+    fn dual_status_alien_yes_refuses_as_unsupported() {
+        let mut r = ri();
+        r.dual_status_alien = Some(true);
+        assert_eq!(reason(&r), Some(RefuseReason::DualStatusAlienUnsupported));
+        // Some(false) proceeds — the refusal is about the UNSUPPORTED case, not the answer's existence.
+        r.dual_status_alien = Some(false);
+        assert_ne!(reason(&r), Some(RefuseReason::DualStatusAlienUnsupported));
+    }
+
+    /// ★ P9 §2.2 (Fable r2 I-3) — the §164(b)(5) election ON with a $0 sales-tax amount silently collapses
+    /// SALT to $0 (5a = `salt_sales_tax_amount` ONLY — income-tax withholding/estimates drop out). Refuse
+    /// when income-tax SALT would otherwise be deducted. The symmetric twin of `SaltSalesTaxWithoutElection`.
+    #[test]
+    fn sales_tax_election_without_amount_refuses() {
+        use crate::tax::return_inputs::ScheduleAInputs;
+        let mut r = ri();
+        r.schedule_a = Some(ScheduleAInputs {
+            salt_use_sales_tax: Some(true),
+            salt_sales_tax_amount: Usd::ZERO,
+            salt_state_estimated_payments: dec!(5000), // income-tax SALT that the election would ZERO out
+            ..Default::default()
+        });
+        assert_eq!(reason(&r), Some(RefuseReason::SalesTaxElectionWithoutAmount));
+        // With a sales-tax amount → no collapse, no refusal.
+        r.schedule_a.as_mut().unwrap().salt_sales_tax_amount = dec!(3000);
+        assert_ne!(reason(&r), Some(RefuseReason::SalesTaxElectionWithoutAmount));
+        // Election on, $0 amount, but NO income-tax SALT to lose → nothing collapses, so NOT this refusal.
+        let mut r2 = ri();
+        r2.schedule_a = Some(ScheduleAInputs {
+            salt_use_sales_tax: Some(true),
+            salt_sales_tax_amount: Usd::ZERO,
+            ..Default::default()
+        });
+        assert_ne!(reason(&r2), Some(RefuseReason::SalesTaxElectionWithoutAmount));
+    }
+
+    /// ★ P9 §3.2 (r1 I-6, named r3 M-2) — Schedule B 7a "Yes" with a BLANK 7b (country names) refuses. Its
+    /// detail names `income import` as the exit, NOT `income answer`: `answer` captures bools and dates,
+    /// never strings, so it cannot supply the country list.
+    #[test]
+    fn schedule_b_foreign_country_missing_refuses_and_names_import() {
+        let mut r = ri();
+        r.foreign_accounts = Some(true); // 7a Yes
+        r.foreign_country_names = String::new(); // 7b blank
+        let refusal = screen_inputs(&r, &tbl(), &params()).expect("must refuse");
+        assert_eq!(refusal.reason, RefuseReason::ScheduleBForeignCountryMissing);
+        assert!(
+            refusal.detail.contains("income import"),
+            "names the string-capable exit: {}",
+            refusal.detail
+        );
+        assert!(
+            !refusal.detail.contains("income answer"),
+            "answer cannot capture strings, so it must NOT be named: {}",
+            refusal.detail
+        );
+        // A non-empty country list → no refusal.
+        r.foreign_country_names = "Canada".into();
+        assert_ne!(
+            reason(&r),
+            Some(RefuseReason::ScheduleBForeignCountryMissing)
+        );
+        // Whitespace-only is still blank (the `.trim()` in the guard).
+        r.foreign_country_names = "   ".into();
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::ScheduleBForeignCountryMissing)
+        );
     }
 
     // ── Review C1: a non-50%-org charitable class (gift OR carryover-in) is refused — its Pub. 526

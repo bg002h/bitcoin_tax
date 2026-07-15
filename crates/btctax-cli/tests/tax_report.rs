@@ -1728,6 +1728,7 @@ fn full_return_report_surfaces_conservative_omission_advisories() {
                 ..Default::default()
             }],
             foreign_accounts: Some(true), // → FBAR disclosure
+            foreign_country_names: "Canada".into(), // 7b — required now that 7a is "Yes" (P9 §3.2)
             foreign_trust: Some(false),
             ..Default::default()
         };
