@@ -10,119 +10,20 @@
 //! no-echo. `answer` is an ordinary echoing prompt — routing a secret through it would print a crown jewel
 //! into terminal scrollback.
 use crate::{return_inputs, CliError, Session};
-use btctax_core::tax::questions::{FormQuestion, QuestionId, FORM_QUESTIONS};
+use btctax_core::tax::questions::{
+    FormQuestion, QuestionId, SkippableKind, SkippableQuestion, FORM_QUESTIONS, SKIPPABLE_QUESTIONS,
+};
 use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_store::Passphrase;
 use std::io::Write;
 use std::path::Path;
 
-/// A SKIPPABLE prompt `income answer` asks in addition to the mandatory registry declarations. Skippable
-/// means a bare Enter leaves the value `None` — the opposite of a declaration, where silence is refused
-/// (D-8). Two value shapes: the §63(f) dates of birth, and the class-(B) yes/no forgone-benefit questions
-/// (§2.2 blindness + the §164(b)(5) sales-tax election), which land here bundled with the advisories that
-/// make skipping them meaningful (§5 step 7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Skippable {
-    /// §63(f) aged addition. A mandatory DOB prompt would force the user to INVENT a birthday, and an
-    /// invented-old one grants the aged addition and understates tax — so `None` must stay reachable.
-    DateOfBirthTaxpayer,
-    /// §63(f) aged addition for the spouse — only when a spouse `Person` is on the return (a `set_date` on
-    /// an absent spouse is silently discarded, so the prompt is gated to match, r3 I-7).
-    DateOfBirthSpouse,
-    /// ★ §63(f) BLINDNESS (taxpayer). Skippable ⇒ a bare Enter leaves `None`, and `BlindBoxForfeitedNotDeclared`
-    /// fires (the owner mandate: a forgone benefit, but never in silence). Not a declaration — the burden to
-    /// CLAIM is the taxpayer's (New Colonial Ice), so silence forgoes rather than asserts.
-    BlindTaxpayer,
-    /// ★ §63(f) BLINDNESS (spouse) — only with a spouse `Person` (a `set_bool` on an absent spouse is
-    /// silently discarded, so the prompt is gated to match, the r3 I-7 twin of the spouse-DOB gate).
-    BlindSpouse,
-    /// ★ §164(b)(5) sales-tax election — only with a `schedule_a` (nowhere to write it otherwise; the §2.2
-    /// footgun scope). Skippable ⇒ `None` leaves SALT on income taxes and `SalesTaxElectionNotAsked` fires.
-    SalesTaxElection,
-}
-
-/// The value shape of a [`Skippable`] — a calendar date, or a yes/no answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SkippableKind {
-    Date,
-    YesNo,
-}
-
-impl Skippable {
-    /// Whether this prompt reads a date or a yes/no — the answer loop branches on it.
-    pub fn kind(self) -> SkippableKind {
-        match self {
-            Self::DateOfBirthTaxpayer | Self::DateOfBirthSpouse => SkippableKind::Date,
-            Self::BlindTaxpayer | Self::BlindSpouse | Self::SalesTaxElection => SkippableKind::YesNo,
-        }
-    }
-    /// The prompt text — phrased as the FORM phrases it.
-    pub fn prompt(self) -> &'static str {
-        match self {
-            Self::DateOfBirthTaxpayer => "YOUR date of birth",
-            Self::DateOfBirthSpouse => "YOUR SPOUSE's date of birth",
-            Self::BlindTaxpayer => "Are YOU legally blind? (§63(f) additional deduction)",
-            Self::BlindSpouse => "Is YOUR SPOUSE legally blind? (§63(f) additional deduction)",
-            Self::SalesTaxElection => {
-                "Deduct general SALES taxes instead of state/local income taxes? (§164(b)(5))"
-            }
-        }
-    }
-    /// The date currently on file (offered as the default; Enter keeps it). `None` for the yes/no kinds.
-    pub fn current_date(self, ri: &ReturnInputs) -> Option<time::Date> {
-        match self {
-            Self::DateOfBirthTaxpayer => ri.header.taxpayer.date_of_birth,
-            Self::DateOfBirthSpouse => ri.header.spouse.as_ref().and_then(|s| s.date_of_birth),
-            _ => None,
-        }
-    }
-    /// Record a date-of-birth answer. A spouse DOB on a return with no spouse `Person` is silently
-    /// discarded — which is exactly why `live_questions` gates the spouse DOB prompt on `spouse.is_some()`.
-    pub fn set_date(self, ri: &mut ReturnInputs, v: time::Date) {
-        match self {
-            Self::DateOfBirthTaxpayer => ri.header.taxpayer.date_of_birth = Some(v),
-            Self::DateOfBirthSpouse => {
-                if let Some(sp) = ri.header.spouse.as_mut() {
-                    sp.date_of_birth = Some(v);
-                }
-            }
-            _ => {}
-        }
-    }
-    /// The yes/no currently on file (offered as the default; Enter keeps it). `None` for the date kinds.
-    pub fn current_bool(self, ri: &ReturnInputs) -> Option<bool> {
-        match self {
-            Self::BlindTaxpayer => ri.header.taxpayer.blind,
-            Self::BlindSpouse => ri.header.spouse.as_ref().and_then(|s| s.blind),
-            Self::SalesTaxElection => ri.schedule_a.as_ref().and_then(|a| a.salt_use_sales_tax),
-            _ => None,
-        }
-    }
-    /// Record a yes/no answer. A spouse-blind answer on a return with no spouse `Person`, or a SALT answer
-    /// with no `schedule_a`, is silently discarded — which is why `live_questions` gates each prompt to match.
-    pub fn set_bool(self, ri: &mut ReturnInputs, v: bool) {
-        match self {
-            Self::BlindTaxpayer => ri.header.taxpayer.blind = Some(v),
-            Self::BlindSpouse => {
-                if let Some(sp) = ri.header.spouse.as_mut() {
-                    sp.blind = Some(v);
-                }
-            }
-            Self::SalesTaxElection => {
-                if let Some(a) = ri.schedule_a.as_mut() {
-                    a.salt_use_sales_tax = Some(v);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
 /// One thing `income answer` asks: a MANDATORY declaration (from the [`FORM_QUESTIONS`] registry — a bare
-/// Enter with nothing on file is refused, never accepted as an answer) or a SKIPPABLE prompt.
+/// Enter with nothing on file is refused, never accepted as an answer) or a SKIPPABLE prompt (from the
+/// core [`SKIPPABLE_QUESTIONS`] registry — a bare Enter leaves `None`, forgoing the benefit lawfully).
 pub enum Ask {
     Declaration(&'static FormQuestion),
-    Skippable(Skippable),
+    Skippable(&'static SkippableQuestion),
 }
 
 impl Ask {
@@ -154,20 +55,15 @@ pub fn live_questions(ri: &ReturnInputs) -> Vec<Ask> {
         .filter(|q| (q.live)(ri))
         .map(Ask::Declaration)
         .collect();
-    asks.push(Ask::Skippable(Skippable::DateOfBirthTaxpayer));
-    if ri.header.spouse.is_some() {
-        asks.push(Ask::Skippable(Skippable::DateOfBirthSpouse));
-    }
-    // ★ P9 §2.2 class-(B) skippables (step 7): blindness + the §164(b)(5) sales-tax election. Silence leaves
-    // `None` and the matching advisory fires. Spouse-blind is gated on a spouse `Person` (set_bool discards
-    // on an absent spouse — the r3 I-7 twin); SALT is gated on a `schedule_a` (nowhere to write it otherwise).
-    asks.push(Ask::Skippable(Skippable::BlindTaxpayer));
-    if ri.header.spouse.is_some() {
-        asks.push(Ask::Skippable(Skippable::BlindSpouse));
-    }
-    if ri.schedule_a.is_some() {
-        asks.push(Ask::Skippable(Skippable::SalesTaxElection));
-    }
+    // ★ P9 §2.2 class-(B) skippables — DERIVED from the core [`SKIPPABLE_QUESTIONS`] registry (the DOBs, the
+    // blindness pair, and the §164(b)(5) sales-tax election), each gated by its own `live` predicate so the
+    // prompt scope tracks the WRITE scope (a `set` on an absent spouse / Schedule A is silently discarded).
+    asks.extend(
+        SKIPPABLE_QUESTIONS
+            .iter()
+            .filter(|s| (s.live)(ri))
+            .map(Ask::Skippable),
+    );
     asks
 }
 
@@ -249,12 +145,12 @@ pub fn answer_return_inputs(
             }
             // A SKIPPABLE prompt — a bare Enter KEEPS whatever is on file (which may be `None`, forgoing the
             // benefit; the matching advisory then tells the filer). Two value shapes, branched by `kind()`.
-            Ask::Skippable(sk) => match sk.kind() {
+            Ask::Skippable(sk) => match sk.kind {
                 SkippableKind::Date => {
-                    let cur = sk.current_date(&ri);
+                    let cur = (sk.get_date)(&ri);
                     loop {
                         let shown = cur.map_or_else(|| "none".to_string(), |d| d.to_string());
-                        write!(out, "{} [{}; Enter to skip]: ", sk.prompt(), shown)?;
+                        write!(out, "{} [{}; Enter to skip]: ", sk.prompt, shown)?;
                         out.flush()?;
                         let mut line = String::new();
                         if input.read_line(&mut line)? == 0 {
@@ -265,7 +161,7 @@ pub fn answer_return_inputs(
                         match parse_date(&line) {
                             Ok(None) => break,
                             Ok(Some(d)) => {
-                                sk.set_date(&mut ri, d);
+                                (sk.set_date)(&mut ri, d);
                                 break;
                             }
                             Err(e) => writeln!(out, "  not a date (YYYY-MM-DD): {e}")?,
@@ -273,14 +169,14 @@ pub fn answer_return_inputs(
                     }
                 }
                 SkippableKind::YesNo => {
-                    let cur = sk.current_bool(&ri);
+                    let cur = (sk.get_bool)(&ri);
                     loop {
                         let shown = match cur {
                             Some(true) => "y/n, currently y",
                             Some(false) => "y/n, currently n",
                             None => "y/n",
                         };
-                        write!(out, "{} [{}; Enter to skip]: ", sk.prompt(), shown)?;
+                        write!(out, "{} [{}; Enter to skip]: ", sk.prompt, shown)?;
                         out.flush()?;
                         let mut line = String::new();
                         if input.read_line(&mut line)? == 0 {
@@ -295,7 +191,7 @@ pub fn answer_return_inputs(
                         }
                         match parse_yes_no(line.trim(), None) {
                             Some(v) => {
-                                sk.set_bool(&mut ri, v);
+                                (sk.set_bool)(&mut ri, v);
                                 break;
                             }
                             None => writeln!(out, "  please answer y or n, or Enter to skip")?,
@@ -314,6 +210,7 @@ pub fn answer_return_inputs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use btctax_core::tax::questions::SkippableId;
     use btctax_core::tax::return_inputs::{Form1099Int, Person};
     use btctax_core::FilingStatus;
     use rust_decimal_macros::dec;
@@ -341,7 +238,7 @@ mod tests {
     fn has_spouse_dob(ri: &ReturnInputs) -> bool {
         live_questions(ri)
             .iter()
-            .any(|a| matches!(a, Ask::Skippable(Skippable::DateOfBirthSpouse)))
+            .any(|a| matches!(a, Ask::Skippable(s) if s.id == SkippableId::DobSpouse))
     }
 
     /// A Single filer is asked the FIVE always-live declarations (dependent-taxpayer, both foreign
@@ -477,30 +374,34 @@ mod tests {
     #[test]
     fn income_answer_asks_the_class_b_skippables_when_live() {
         use btctax_core::tax::return_inputs::ScheduleAInputs;
-        fn has(ri: &ReturnInputs, want: Skippable) -> bool {
+        // The core registry entry for `id` — the source of truth `income answer` now derives from.
+        fn reg(id: SkippableId) -> &'static SkippableQuestion {
+            SKIPPABLE_QUESTIONS.iter().find(|s| s.id == id).expect("id is a registry entry")
+        }
+        fn has(ri: &ReturnInputs, want: SkippableId) -> bool {
             live_questions(ri)
                 .iter()
-                .any(|a| matches!(a, Ask::Skippable(s) if *s == want))
+                .any(|a| matches!(a, Ask::Skippable(s) if s.id == want))
         }
         // Taxpayer blindness is always live; spouse-blind and SALT only when their gate is met.
-        assert!(has(&single(), Skippable::BlindTaxpayer));
-        assert!(!has(&single(), Skippable::BlindSpouse), "no spouse ⇒ no spouse-blind");
-        assert!(!has(&single(), Skippable::SalesTaxElection), "no Sch A ⇒ no SALT");
+        assert!(has(&single(), SkippableId::BlindTaxpayer));
+        assert!(!has(&single(), SkippableId::BlindSpouse), "no spouse ⇒ no spouse-blind");
+        assert!(!has(&single(), SkippableId::SalesTaxElection), "no Sch A ⇒ no SALT");
 
-        assert!(has(&with_spouse(single()), Skippable::BlindSpouse));
+        assert!(has(&with_spouse(single()), SkippableId::BlindSpouse));
 
         let mut with_a = single();
         with_a.schedule_a = Some(ScheduleAInputs::default());
-        assert!(has(&with_a, Skippable::SalesTaxElection));
+        assert!(has(&with_a, SkippableId::SalesTaxElection));
 
-        // A bool skippable roundtrips through its accessors and is genuinely skippable.
+        // A bool skippable roundtrips through the CORE registry accessors and is genuinely skippable.
         let mut ri = with_spouse(single());
-        assert_eq!(Skippable::BlindTaxpayer.current_bool(&ri), None);
-        Skippable::BlindTaxpayer.set_bool(&mut ri, true);
+        assert_eq!((reg(SkippableId::BlindTaxpayer).get_bool)(&ri), None);
+        (reg(SkippableId::BlindTaxpayer).set_bool)(&mut ri, true);
         assert_eq!(ri.header.taxpayer.blind, Some(true));
-        Skippable::BlindSpouse.set_bool(&mut ri, false);
+        (reg(SkippableId::BlindSpouse).set_bool)(&mut ri, false);
         assert_eq!(ri.header.spouse.as_ref().unwrap().blind, Some(false));
-        assert!(Ask::Skippable(Skippable::BlindTaxpayer).is_skippable());
+        assert!(Ask::Skippable(reg(SkippableId::BlindTaxpayer)).is_skippable());
     }
 
     /// The mandatory declarations are not skippable; the DOBs are. (Anchored to the enum shape, not a value:
@@ -513,6 +414,15 @@ mod tests {
                 ask.declaration_id().is_none(),
                 "a declaration must not be skippable; a skippable must not be a declaration"
             );
+            // ★ Every skippable `Ask` is a genuine entry of the CORE registry (the source of truth
+            // post-move) — the prompt scope IS the `SKIPPABLE_QUESTIONS` scope, by derivation.
+            if let Ask::Skippable(s) = ask {
+                assert!(
+                    SKIPPABLE_QUESTIONS.iter().any(|r| r.id == s.id),
+                    "a skippable Ask must come from SKIPPABLE_QUESTIONS, got {:?}",
+                    s.id
+                );
+            }
         }
     }
 

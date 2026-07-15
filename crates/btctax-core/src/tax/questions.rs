@@ -9,6 +9,7 @@ use crate::conventions::Usd;
 use crate::tax::return_inputs::ReturnInputs;
 use crate::tax::return_refuse::RefuseReason;
 use crate::tax::types::FilingStatus;
+use time::Date;
 
 /// A DECLARATION (§2, class A) — the filer ASSERTS it under §6065's jurat, so there is NO lawful default
 /// and an unanswered one must REFUSE.
@@ -194,6 +195,139 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
     },
 ];
 
+/// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
+/// Enter leaves the value `None`, forgoing a benefit whose burden to CLAIM is the filer's (New Colonial
+/// Ice), and the matching advisory then fires (never in silence — the owner mandate).
+///
+/// ★ A SEPARATE identity space from [`QuestionId`] (spec §5.3 HARD RULE). A skippable is `None`-legal; a
+/// [`FormQuestion`] declaration is not. Merging the two registries would brick `screen_inputs` — it would
+/// refuse a lawfully-unanswered skippable — so the two lists must never be one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkippableId {
+    /// ★ §63(f) BLINDNESS (taxpayer). Always live; `None` forgoes the addition and fires the advisory.
+    BlindTaxpayer,
+    /// ★ §63(f) BLINDNESS (spouse) — live only with a spouse `Person` (a `set_bool` on an absent spouse is
+    /// silently discarded, so the prompt is gated to match).
+    BlindSpouse,
+    /// ★ §164(b)(5) sales-tax election — live only with a `schedule_a` (nowhere to write it otherwise).
+    SalesTaxElection,
+    /// §63(f) aged addition (taxpayer). A mandatory DOB prompt would force the filer to INVENT a birthday,
+    /// and an invented-old one understates tax — so `None` must stay reachable.
+    DobTaxpayer,
+    /// §63(f) aged addition (spouse) — live only with a spouse `Person` (its `set_date` twin gate).
+    DobSpouse,
+}
+
+/// The value shape of a [`SkippableQuestion`] — a yes/no answer, or a calendar date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkippableKind {
+    YesNo,
+    Date,
+}
+
+/// A SKIPPABLE prompt (§2.2, class B). The same fn-pointer shape as [`FormQuestion`], but silence is a
+/// LAWFUL outcome here: a bare Enter leaves the value `None`. The accessors split by [`kind`](Self::kind):
+/// the pair that does not apply to this question's `kind` returns `None` / is a no-op (the catch-all lifted
+/// from the old `answer.rs::Skippable`). Each `set` is also a no-op when its target row is absent — which
+/// is exactly why `live` gates the spouse/Schedule-A prompts, so the prompt scope tracks the WRITE scope.
+pub struct SkippableQuestion {
+    pub id: SkippableId,
+    /// The prompt, phrased as the FORM phrases it (the words the filer can check against their paperwork).
+    pub prompt: &'static str,
+    /// What skipping forgoes — the advisory framing, for a UI that shows help beside the prompt.
+    pub help: &'static str,
+    /// Whether this prompt reads a yes/no or a date — the answer loop branches on it.
+    pub kind: SkippableKind,
+    /// ★ THE liveness predicate — the ONLY copy, lifted from the old `answer.rs::live_questions` gates.
+    pub live: fn(&ReturnInputs) -> bool,
+    /// The yes/no on file (`None` for the `Date` kinds).
+    pub get_bool: fn(&ReturnInputs) -> Option<bool>,
+    /// Record a yes/no (a no-op for the `Date` kinds, or when the target row is absent).
+    pub set_bool: fn(&mut ReturnInputs, bool),
+    /// The date on file (`None` for the `YesNo` kinds).
+    pub get_date: fn(&ReturnInputs) -> Option<Date>,
+    /// Record a date (a no-op for the `YesNo` kinds, or when the target row is absent).
+    pub set_date: fn(&mut ReturnInputs, Date),
+}
+
+/// ★ THE SKIPPABLE REGISTRY. Five class-(B) prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
+/// liveness gates and prompts are lifted verbatim from the old `answer.rs::Skippable`; the `income answer`
+/// flow and the form engine both DERIVE their skippable prompts from this one list.
+pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
+    SkippableQuestion {
+        id: SkippableId::BlindTaxpayer,
+        prompt: "Are YOU legally blind? (§63(f) additional deduction)",
+        help: "§63(f): legal blindness adds an extra standard-deduction amount. Skipping leaves it \
+               unclaimed — lawful, since the burden to claim is yours — and the forgone-benefit advisory fires.",
+        kind: SkippableKind::YesNo,
+        live: |_ri| true,
+        get_bool: |ri| ri.header.taxpayer.blind,
+        set_bool: |ri, v| ri.header.taxpayer.blind = Some(v),
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
+    SkippableQuestion {
+        id: SkippableId::BlindSpouse,
+        prompt: "Is YOUR SPOUSE legally blind? (§63(f) additional deduction)",
+        help: "§63(f): the spouse's legal blindness adds an extra standard-deduction amount. Skipping \
+               leaves it unclaimed and the forgone-benefit advisory fires.",
+        kind: SkippableKind::YesNo,
+        live: |ri| ri.header.spouse.is_some(),
+        get_bool: |ri| ri.header.spouse.as_ref().and_then(|s| s.blind),
+        set_bool: |ri, v| {
+            if let Some(sp) = ri.header.spouse.as_mut() {
+                sp.blind = Some(v);
+            }
+        },
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
+    SkippableQuestion {
+        id: SkippableId::SalesTaxElection,
+        prompt: "Deduct general SALES taxes instead of state/local income taxes? (§164(b)(5))",
+        help: "§164(b)(5): elect to deduct general sales taxes instead of state and local income taxes. \
+               Skipping keeps income taxes on the return; the election is advised when a Schedule A exists.",
+        kind: SkippableKind::YesNo,
+        live: |ri| ri.schedule_a.is_some(),
+        get_bool: |ri| ri.schedule_a.as_ref().and_then(|a| a.salt_use_sales_tax),
+        set_bool: |ri, v| {
+            if let Some(a) = ri.schedule_a.as_mut() {
+                a.salt_use_sales_tax = Some(v);
+            }
+        },
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
+    SkippableQuestion {
+        id: SkippableId::DobTaxpayer,
+        prompt: "YOUR date of birth",
+        help: "§63(f): your date of birth establishes the age-65 additional standard deduction. Skipping \
+               leaves it unclaimed — a mandatory prompt would force you to invent a birthday, so silence stays reachable.",
+        kind: SkippableKind::Date,
+        live: |_ri| true,
+        get_bool: |_ri| None,
+        set_bool: |_ri, _v| {},
+        get_date: |ri| ri.header.taxpayer.date_of_birth,
+        set_date: |ri, v| ri.header.taxpayer.date_of_birth = Some(v),
+    },
+    SkippableQuestion {
+        id: SkippableId::DobSpouse,
+        prompt: "YOUR SPOUSE's date of birth",
+        help: "§63(f): the spouse's date of birth establishes the age-65 additional standard deduction. \
+               Skipping leaves it unclaimed.",
+        kind: SkippableKind::Date,
+        live: |ri| ri.header.spouse.is_some(),
+        get_bool: |_ri| None,
+        set_bool: |_ri, _v| {},
+        get_date: |ri| ri.header.spouse.as_ref().and_then(|s| s.date_of_birth),
+        set_date: |ri, v| {
+            if let Some(sp) = ri.header.spouse.as_mut() {
+                sp.date_of_birth = Some(v);
+            }
+        },
+    },
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,5 +361,22 @@ mod tests {
         }
         assert_eq!(QuestionId::ALL.len(), 8, "there are 8 declarations");
         assert_eq!(FORM_QUESTIONS.len(), 8, "one entry per declaration");
+    }
+
+    #[test]
+    fn skippable_registry_is_separate_and_has_five_entries_with_correct_liveness() {
+        use crate::tax::types::FilingStatus;
+        assert_eq!(SKIPPABLE_QUESTIONS.len(), 5, "blind ×2, SALT, DOB ×2");
+        // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
+        let salt = SKIPPABLE_QUESTIONS.iter().find(|s| s.id == SkippableId::SalesTaxElection).unwrap();
+        let mut ri = ReturnInputs { filing_status: FilingStatus::Single, ..Default::default() };
+        assert!(!(salt.live)(&ri));
+        ri.schedule_a = Some(Default::default());
+        assert!((salt.live)(&ri));
+        // The skippables are NOT in FORM_QUESTIONS (merging would brick screen_inputs on a None-legal skippable).
+        for s in SKIPPABLE_QUESTIONS {
+            assert!(!FORM_QUESTIONS.iter().any(|q| format!("{:?}", q.id) == format!("{:?}", s.id)),
+                    "a skippable must not also be a mandatory FORM_QUESTIONS declaration");
+        }
     }
 }
