@@ -136,16 +136,14 @@ cannot model it correctly.
 - **A 1099-DIV whose box 1b (qualified) or box 5 (§199A) exceeds its box 1a** (ordinary) — box 1b/box 5 are subsets of box 1a.
 - **A spouse-owned W-2 or Schedule C on a non-joint return.**
 - **Foreign trust** (`foreign_trust = true`) → Form 3520.
-- **Schedule B filed but its Part III (foreign accounts / foreign trust) unanswered** — v1 will not guess a disclosure answer.
-- **"Someone can claim you as a dependent" unanswered** — required on **every** return. It selects the §63(c)(5) dependent standard-deduction floor over the basic standard deduction, gates the §1(g)/Form-8615 kiddie-tax refusal, and is a **checkbox printed on your 1040**. There is no safe default: guessing "no" *understates* your tax and files an unchecked box you never affirmed; guessing "yes" overstates it. Only you know. (Likewise for your spouse, on a return that has one.) **Answer it with `btctax income answer --year N`** — no TOML file needed.
-
-  ⚠️ **A return stored by v0.2.0 will newly refuse on this question.** That is the bug surfacing, not a
-  regression: v0.2.0 stored the flag as a plain true/false defaulting to *false*, so a return nobody was
-  ever asked about was recorded as though the answer were "no". Those cannot be told apart from a real
-  "no", and "no" is the reading that understates tax — so a v0.2.0 answer is treated as **unasked**, and
-  the year refuses until it is answered. A stored "yes" is preserved (nothing ever defaulted to "yes").
+- **You were a dual-status alien** (`dual_status_alien = true`) — v1 does not compute a dual-status return; §63(c)(6)(B) zeroes a nonresident alien's standard deduction, so it refuses rather than over-deduct. This question is asked on every return (`btctax income answer`).
+- **The foreign-account (Schedule B line 7a) or foreign-trust (line 8) question is unanswered.** These are now asked on **every** return, not only when Schedule B otherwise files — because the answer is itself what decides whether Schedule B files, so scoping the question by "does Schedule B file" was a circular defect that silently omitted the FBAR/FinCEN disclosure surface. Unanswered ⇒ refuses (`ScheduleBPart3Unanswered`). Answer with `btctax income answer --year N`.
+- **Schedule B line 7a answered "Yes" but line 7b (the foreign country name[s]) is blank** — refuses. The remedy is to add `foreign_country_names` to your TOML and re-run `btctax income import` — **not** `income answer`, because `income answer` captures only yes/no answers and dates, never free-text strings.
+- **"Someone can claim you as a dependent" unanswered** — required on **every** return. It selects the §63(c)(5) dependent standard-deduction floor over the basic standard deduction, gates the §1(g)/Form-8615 kiddie-tax refusal, and is a **checkbox printed on your 1040**. There is no safe default: guessing "no" *understates* your tax and files an unchecked box you never affirmed; guessing "yes" overstates it. Only you know. (Likewise for your spouse, on a return that has one.) **Answer it with `btctax income answer --year N`** — no TOML file needed. (A return stored by a pre-P9 build refuses *as a whole* before this check is even reached — see the stale-row bullet below — so the fix there is `income clear` + re-import, not answering this one question.)
 - **A Schedule A sales-tax amount with the §164(b)(5) sales-tax election OFF** (a silent drop would hide an input error).
-- **MFS without stating whether your spouse itemizes** (§63(c)(6) couples the choice).
+- **The §164(b)(5) sales-tax election is ON but the sales-tax amount is $0** while you have state/local income taxes (W-2 box 17/19, estimates, prior-year balance) — the election would make Schedule A line 5a = $0 and silently drop your income taxes. Enter the sales-tax amount, or turn the election off.
+- **A Schedule A that reports mortgage interest, but you have not stated whether ALL the loan was used to buy, build, or improve the home** (§163(h)(3)(F), Schedule A line 8) — unanswered refuses. Answer with `btctax income answer`. (If you answer "no", see the mixed-use advisory below.)
+- **MFS without stating whether your spouse itemizes** (§63(c)(6) couples the choice) — the refusal message now names `btctax income answer` as the remedy (previously it gave no exit).
 - **A charitable contribution to a non-50% organization** (private foundation etc. — the Pub. 526 "special 30% limit" ordering is unmodeled).
 - **A claimable-as-dependent spouse** (it limits the joint standard deduction).
 - **A W-2 box-12 code outside the inert allowlist** `{D,E,F,G,H,S,AA,BB,EE,DD}` — e.g. **W** (HSA), **K**, **R**, **T**, **Z**.
@@ -155,7 +153,9 @@ cannot model it correctly.
 - **1099-DIV box 2b / 2c / 2d** (unrecaptured §1250, §1202, 28% collectibles → the Schedule D Tax Worksheet).
 - **Foreign tax above the §904(j) ceiling** ($300 / $600 MFJ) → Form 1116.
 - **A single employer over-withholding Social Security** (not creditable — recover it from the employer).
-- **Schedule 1 line 13** (HSA → Form 8889) or **line 20 with an IRA deduction claimed** (the active-participant phase-out is unmodeled).
+- **A Form 8889 trigger fires and the question is unanswered.** The question is no longer merely "do you hold an HSA" — it is whether **any** Form 8889 trigger occurred: a contribution by anyone on your behalf, a distribution, a testing-period inclusion (the last-month rule, or IRA-to-HSA funding followed by losing eligibility), or an inheritance. Unanswered refuses (`HsaActivityUnanswered`); answered "yes" also refuses, because Form 8889 itself is unsupported. A dormant HSA (no such activity) answers "no" and proceeds. Answer with `btctax income answer`.
+- **Schedule 1 line 20 with an IRA deduction claimed** (the active-participant phase-out is unmodeled).
+- **A stored return from a pre-P9 build refuses as stale** (`StaleReturnInputs`, schema version mismatch). This is deliberate — pre-P9 rows stored some yes/no answers as bare defaults that cannot be told apart from a real "no". The remedy, IN ORDER: `btctax income clear <year>` (this DISCARDS any computed carryover that a prior `report --write-carryover` put on the row), then `btctax income import`, and THEN — **if that row carried a computed carryover** — `btctax report --tax-year <year−1> --write-carryover` to rebuild it. Note `btctax income show` also refuses a stale row, so you cannot inspect it before clearing.
 
 **From the computation / your ledger:**
 
@@ -186,6 +186,24 @@ There is nowhere to enter these, and a return that needs them is out of scope:
 
 ---
 
+## Boxes btctax answers by SCOPE — verify they fit you
+
+A few printed checkboxes are answered by btctax's reasoning about *which returns it supports*, not by your
+data. They are silently wrong the moment someone outside that supported archetype uses the program — verify
+each one fits you:
+
+- **Schedule D QOF "No"** — checked unconditionally. btctax supports returns whose dispositions all come from
+  the bitcoin ledger; a Qualified Opportunity Fund disposition has no input and no ledger representation, so a
+  filer with one is outside the supported set.
+- **Form 8949 Box I (short-term) / Box L (long-term)** — checked on every Form 8949 with rows. These mean
+  "transactions NOT reported to you on Form 1099-B." btctax has no 1099-B / 1099-DA input at all, so every
+  ledger disposition is un-reported by construction. Never Box C/F.
+- **Schedule C lines G, H, I, J** — left blank (deferred to your pen): material participation, whether you
+  started/acquired the business this year, whether you made payments requiring Form 1099, and whether you
+  filed them. Fill them in yourself.
+
+---
+
 ## Conservative simplifications (they overstate, never understate)
 
 - **Form 8960 (NIIT), Part II — the state/local tax allocation is omitted.** Properly allocated state income tax attributable to net investment income would *reduce* NII. Omitting it can only make your NIIT **higher**.
@@ -197,6 +215,9 @@ There is nowhere to enter these, and a return that needs them is out of scope:
 - **FBAR / FinCEN.** Under FinCEN Notice 2020-2, accounts holding *only* virtual currency are (for now) outside the FBAR requirement — but this is under active reconsideration, and an account holding crypto **plus** fiat or securities may well be reportable. `btctax` **never auto-answers Schedule B Part III** for you. Decide, and answer, yourself.
 - **Charitable donee class.** The ledger classifies a crypto donation assuming a **public charity (50% organization)** donee — long-term gifts at FMV under the 30% ceiling. If your donee is a **private foundation**, the correct treatment is the 20% ceiling at *basis*, which v1 refuses. Verify who you gave to.
 - **Qualified appraisal.** A year's BTC donations totaling **more than $5,000** need a qualified appraisal and Form 8283 Section B (CCA 202302012: crypto does *not* get the readily-valued exception).
+- **Blindness not declared (§63(f)).** If you never stated whether you (or, on a joint return, your spouse) are legally blind, the additional standard deduction for blindness ($1,550 married / $1,950 unmarried per box) is forfeited — never assumed. It STACKS with the age-65+ box. If blind, answer with `btctax income answer`; your tax is currently overstated.
+- **Sales-tax election not asked (§164(b)(5)).** If you have a Schedule A but were never asked whether to deduct general sales taxes instead of state/local income taxes, and sales taxes would be larger (a no-income-tax state, or a big-purchase year), your SALT deduction — and your tax — may be overstated. It can even flip a near-standard return into itemizing. Choose with `btctax income answer`.
+- **Mixed-use mortgage (§163(h)(3)(F)).** If you declared that NOT all of your mortgage was used to buy/build/improve the home, v1 cannot compute the Pub. 936 allocation, so Schedule A line 8a is treated as **$0** and the line-8 box is checked. This can be a large overstatement (a $500k acquisition mortgage with a $20k HELOC forfeits ~96% of a real deduction). The advisory names, as a ceiling, up to the full 1098 interest that a Pub. 936 allocation could restore.
 
 ---
 

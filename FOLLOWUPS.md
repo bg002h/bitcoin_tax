@@ -4,6 +4,27 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## P9 (form question registry) — deferred work, filed per `SPEC_form_questions.md` §5 step 12 (2026-07-14)
+
+Two items P9 deliberately did not do, each filed with its OWNING PHASE per the per-phase follow-up
+burndown rule (`/scratch/code/CLAUDE.md`, `STANDARD_WORKFLOW.md`) — burn down on that phase's schedule,
+not "all at the end."
+
+- **(a) `mortgage_interest_deductible` input — owned by P8 (input surface).** Capture the Pub. 936
+  worksheet result as an input so a mixed-use-mortgage filer who HAS done the worksheet can enter its
+  result and have Schedule A line 8a take it. §2.7 zeroes line 8a for a mixed-use mortgage (closing the
+  false-statement — an unaffirmed box beside a full deduction); P8 recovers the money. Until then, a
+  mixed-use filer forfeits the whole mortgage-interest deduction. — OPEN, owned by **P8**. — spec §2.7,
+  §5 step 12(a).
+- **(b) retire refuse-and-reimport — owned by the RELEASE GATE.** The §2.6 "refuse-and-reimport" policy
+  for pre-P9 stored rows (`StaleReturnInputs`) is lawful ONLY while every stored row is test data. The
+  moment a real return is entered, "re-import everything" stops being free — prior-year carryforwards
+  (capital-loss and charitable carryforwards, the QBI REIT/PTP carryforward) are exactly what a real
+  filer cannot reconstruct. The first real return must RETIRE refuse-and-reimport and require real schema
+  migrations. — OPEN, owned by **the release gate**, not "later". — spec §2.6, §5 step 12(b).
+
+---
+
 ## ✅ reconcile defaults: HIFO global default + long-term self-transfer-in — IMPLEMENTED on `feat/reconcile-defaults` (2026-07-05) — the auto-reconcile estimate is less punitive
 
 Two user-mandated tax-policy default changes (revises [[self-transfer-completion-policy]]), per
