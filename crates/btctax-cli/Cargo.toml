@@ -1,6 +1,6 @@
 [package]
 name = "btctax-cli"
-version = "0.5.0"
+version = "0.6.0"
 edition.workspace = true
 license.workspace = true
 description = "btctax — an offline, single-user US Bitcoin tax ledger (CLI: import, reconcile, and compute)."
@@ -19,10 +19,10 @@ name = "btctax"
 path = "src/main.rs"
 
 [dependencies]
-btctax-core = { path = "../btctax-core", version = "0.5.0" }
-btctax-store = { path = "../btctax-store", version = "0.5.0" }
-btctax-adapters = { path = "../btctax-adapters", version = "0.5.0" }
-btctax-forms = { path = "../btctax-forms", version = "0.5.0" }  # export-irs-pdf: fills official IRS PDFs
+btctax-core = { path = "../btctax-core", version = "0.6.0" }
+btctax-store = { path = "../btctax-store", version = "0.6.0" }
+btctax-adapters = { path = "../btctax-adapters", version = "0.6.0" }
+btctax-forms = { path = "../btctax-forms", version = "0.6.0" }  # export-irs-pdf: fills official IRS PDFs
 rust_decimal = { version = "1.36", default-features = false, features = ["std"] }
 time = { version = "0.3", features = ["macros", "parsing", "formatting"] }
 rusqlite = { version = "0.31", features = ["bundled"] } # cli_config side-table over the vault Connection
@@ -40,4 +40,4 @@ tempfile = "3"
 rust_decimal_macros = "1.36"
 time = { version = "0.3", features = ["macros"] }
 # Integration tests inject a controlled synthetic price provider via `Session::set_prices` [R0-C1].
-btctax-adapters = { path = "../btctax-adapters", version = "0.5.0" }
+btctax-adapters = { path = "../btctax-adapters", version = "0.6.0" }

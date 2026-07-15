@@ -1,6 +1,6 @@
 [package]
 name = "btctax-update-prices"
-version = "0.5.0"
+version = "0.6.0"
 edition.workspace = true
 license.workspace = true
 description = "Opt-in online updater that fetches newer daily BTC/USD closes into a local cache for the btctax Bitcoin tax ledger. The ONLY btctax crate with a network dependency."
@@ -20,7 +20,7 @@ path = "src/main.rs"
 [dependencies]
 # Format/provider crate (BundledPrices + the cache CSV format). btctax-core arrives TRANSITIVELY via
 # adapters (core is itself network-free) — NO direct btctax-core / btctax-cli dep [R0-r2 M-C].
-btctax-adapters = { path = "../btctax-adapters", version = "0.5.0" }
+btctax-adapters = { path = "../btctax-adapters", version = "0.6.0" }
 # The ONLY HTTP client in the whole workspace — rustls-tls, blocking. Its presence is asserted ABSENT
 # from every tax binary via the xtask cargo-tree isolation check.
 ureq = { version = "2", default-features = false, features = ["tls"] }

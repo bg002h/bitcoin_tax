@@ -1,6 +1,6 @@
 [package]
 name = "btctax-adapters"
-version = "0.5.0"
+version = "0.6.0"
 edition.workspace = true
 license.workspace = true
 description = "Exchange-CSV/XLSX parsers and bundled price data for the btctax Bitcoin tax ledger."
@@ -10,7 +10,7 @@ keywords.workspace = true
 categories = ["finance"]
 
 [dependencies]
-btctax-core = { path = "../btctax-core", version = "0.5.0" }
+btctax-core = { path = "../btctax-core", version = "0.6.0" }
 # Exact decimal money (NFR5); same pin as core. serde-str unused here but keeps the feature set aligned.
 rust_decimal = { version = "1.36", default-features = false, features = ["std"] }
 rust_decimal_macros = "1.36"             # dec! macro — used in production code for bundled TY2025 table (tax_tables.rs)
