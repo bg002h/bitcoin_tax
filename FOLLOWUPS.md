@@ -4,6 +4,25 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## input-form PLAN 3 (TUI) — whole-branch review Minors (2026-07-15)
+
+The Fable plan-3 whole-branch review (`design/input-form/reviews/WHOLE-BRANCH-P3-fable-r1.md`, 0C/4I) — the
+4 Importants (I-1 snapshot re-projection, I-2 status invisible, I-3 close-on-failed-flush, I-4 `!` glyph +
+screen-status) are folded in fix r1. Deferred Minors/Nits (ownerless polish unless noted):
+
+- **(P3-a)** `TaxInputsModalState.shadows` is production-dead (only tests read it; the summary embeds the
+  warning) — drop the field or read it. — OPEN, ownerless.
+- **(P3-b)** on persistent flush failure the idle tick retries a full vault re-encrypt every ~100ms — add a
+  backoff / stop-retrying-until-next-edit. (Related to fix-r1 I-3.) — OPEN, ownerless.
+- **(P3-c)** `reinstate_parked_full_return` labels any `Loaded::Draft` "the parked full return" even if
+  `parked=false` (unreachable in-session under the exclusive lock) — tighten the label. — OPEN, ownerless.
+- **(P3-d)** `value_is_answered` treats `Money(0)`/`Bool(false)` as unanswered, pinning the section glyph at
+  `…` for a deliberately-zero field (cosmetic). — OPEN, ownerless.
+- **(P3-e)** `seed_string` through the 64-byte `FieldBuffer` cap would silently truncate a longer
+  externally-imported Text value on re-commit (v1 fields are short in practice). — OPEN, ownerless.
+
+---
+
 ## input-form PLAN 2 (persistence) — whole-branch review carry-forwards (2026-07-15)
 
 The Fable plan-2 whole-branch review (`design/input-form/reviews/WHOLE-BRANCH-P2-fable-r1.md`, 0C/3I) —
