@@ -498,7 +498,16 @@ pub fn not_a_dependent() -> HouseholdHeader {
 /// btctax gets to Schedule D at all), and its `self_employment_income` is business crypto — a Schedule C
 /// trade or business, which is the only way btctax produces SE tax.
 pub fn build_golden_household(h: &GoldenHousehold) -> (ReturnInputs, LedgerState) {
-    let i = &h.inputs;
+    build_golden_return(&h.inputs)
+}
+
+/// Build btctax's `(ReturnInputs, LedgerState)` from the oracle [`GoldenInputs`] **alone** — the core of
+/// [`build_golden_household`], factored out (T7) so the §9 oracle-sweep harness can assemble the SAME
+/// return from a bare `GoldenInputs` read off stdin. The harness has no oracle-expectation fields with
+/// which to fill a whole `GoldenHousehold`, and `build_golden_household` never read anything but
+/// `h.inputs` — so `build_golden_household(h)` is now exactly `build_golden_return(&h.inputs)`, and the
+/// two produce an IDENTICAL return by construction.
+pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
     let status = match i.filing_status.as_str() {
         "Single" => FilingStatus::Single,
         "Married/Joint" => FilingStatus::Mfj,

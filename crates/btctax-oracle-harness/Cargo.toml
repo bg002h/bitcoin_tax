@@ -1,0 +1,28 @@
+[package]
+name = "btctax-oracle-harness"
+version = "0.6.0"
+edition.workspace = true
+license.workspace = true
+# ★ UNPUBLISHED — this is a test-only harness for the oracle sweep (§9), never a shipped artifact.
+# It is a SEPARATE crate (not `btctax-forms/src/bin/`) precisely so `serde_json` — which the forms
+# LIBRARY does not depend on — is not dragged into the published `btctax-forms`, and so no
+# `oracle_harness` binary lands in `cargo install btctax-forms` (M2).
+publish = false
+description = "Test-only oracle-sweep harness: assemble+fill+read-back a scenario, and reproduce/classify divergences in Rust (part of btctax; unpublished)."
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+# The tax model + assembly chain + the §9 reproduction/classification helpers (`oracle_diff`) and the
+# golden fixtures (`testonly`). `testonly`/`oracle_diff` are plain `pub mod`s, so both are reachable.
+btctax-core = { path = "../btctax-core", version = "0.6.0" }
+# The PDF fill + the line-keyed inverse transcriber (`fill_full_return` / `extract_lines`).
+btctax-forms = { path = "../btctax-forms", version = "0.6.0" }
+# The stdin/stdout JSON contract. This is the dependency that must NOT reach the published library —
+# it lives here, in the unpublished harness, and nowhere downstream.
+serde_json = "1"
+
+[dev-dependencies]
+# The smoke test reads the baked golden matrix (for the household's inputs + its baked OTS AGI) and
+# parses the harness's own JSON stdout.
+serde_json = "1"
