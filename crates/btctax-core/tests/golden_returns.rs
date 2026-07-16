@@ -102,6 +102,12 @@ fn every_golden_household_matches_the_independent_oracles() {
     }
 
     // ── Liveness sweep — no declared class may be DEAD (T11: pinned cells hold the provenance classes) ──
+    // ★ §12 CLASS-LIVENESS (this `dead()` sweep, mirrored on paper by
+    // `golden_packet::the_paper_differential_engages_every_divergence_class`): every declared divergence
+    // class must fire for ≥1 corpus household or be held by its §5.1 pinned cell — a class matching nothing
+    // is an unread claim about the tax code and is deleted. (T13 satisfies the §12 obligation by REFERENCE.)
+    // The other §12 KATs live at the paper level (`golden_packet.rs`): deeper-line teeth, read-back
+    // fault-injection, anchor-derivation; determinism is the offline `scripts/oracle/check_determinism.py`.
     let dead = liveness.dead(&["taxcalc_methodology", "ots_provenance", "taxcalc_provenance"]);
     assert!(
         dead.is_empty(),
@@ -480,6 +486,78 @@ fn stacking_ok_guards_golden_returns_against_btctax_alone() {
         ),
         "btctax alone against BOTH oracles, above the ceiling, with no absorbing class must be REJECTED — \
          the anti-world guard is the whole point of the class machinery."
+    );
+}
+
+/// ★ **Every deeper line has TEETH at the COMPUTE level (§12).** The paper-level twin
+/// (`golden_packet::deeper_lines_have_teeth`) proves the read-off-paper comparisons bite; this proves the
+/// compute-level comparison code — a SEPARATE path in `adjudicate_household` — is equally load-bearing.
+/// For each compute-level deeper line, a baked witness where perturbing ONLY the oracle's leaf must surface
+/// a disagreement NAMING that line. Drop the line's comparison and the perturbed witness goes quiet, so
+/// this reddens — the mutation that turns "compared" into "load-bearing". (SE-L12 / 8959-L18 are cross-foot
+/// LEGS folded into the L24 witness at the compute level, so they carry their own line tag only on paper;
+/// their teeth live in the paper-level twin.)
+#[test]
+fn deeper_lines_have_teeth_at_the_compute_level() {
+    let params = ty2024_params();
+    let table = ty2024_table();
+    // (baked witness, perturb ONLY the OTS leaf the line compares, the compute-level line tag that MUST
+    // then appear). Each perturbation is a whole $100 — always across a `round_leaf` dollar boundary.
+    // A deeper-line teeth case, aliased so the case table stays clippy-clean (type_complexity).
+    type TeethCase = (&'static str, fn(&mut GoldenHousehold), &'static str);
+    let cases: &[TeethCase] = &[
+        (
+            "single_w2_only_standard",
+            |h| h.expected_ots.deduction_taken = h.expected_ots.deduction_taken.map(|v| v + 100.0),
+            "deduction taken (L12)",
+        ),
+        (
+            "single_w2_plus_crypto_ltcg",
+            |h| h.expected_ots.sch_d_to_l7 = h.expected_ots.sch_d_to_l7.map(|v| v + 100.0),
+            "Sch D → 1040 L7",
+        ),
+        (
+            "mfj_itemized_salt_over_the_cap",
+            |h| h.expected_ots.salt_capped = h.expected_ots.salt_capped.map(|v| v + 100.0),
+            "SALT capped (Sch A L5e)",
+        ),
+        (
+            "single_miner_qbi_limited_by_net_capital_gain",
+            |h| h.expected_ots.qbi_cap_l12 = h.expected_ots.qbi_cap_l12.map(|v| v + 100.0),
+            "8995 L12 net-cap-gain",
+        ),
+    ];
+
+    let mut toothless = Vec::new();
+    for &(name, perturb, tag) in cases {
+        let mut h = golden_households()
+            .into_iter()
+            .find(|h| h.name == name)
+            .unwrap_or_else(|| panic!("§12 compute-teeth witness {name:?} is not in the baked corpus"));
+        // Clean before perturbation (the corpus is green), so the disagreement below is provably caused by
+        // the perturbation. A fresh ledger each run — liveness is irrelevant here.
+        let clean = adjudicate_household(&h, &params, &table, &mut LivenessLedger::default());
+        if !clean.is_empty() {
+            toothless.push(format!(
+                "  {name:<46} [{tag}] witness is NOT clean before perturbation: {clean:?}"
+            ));
+            continue;
+        }
+        perturb(&mut h);
+        let diffs = adjudicate_household(&h, &params, &table, &mut LivenessLedger::default());
+        if !diffs.iter().any(|d| d.contains(tag)) {
+            toothless.push(format!(
+                "  {name:<46} [{tag}] perturbing the oracle leaf surfaced NO `{tag}` disagreement — the \
+                 compute-level comparison has no teeth (drop it and this differential would not notice). \
+                 diffs: {diffs:?}"
+            ));
+        }
+    }
+    assert!(
+        toothless.is_empty(),
+        "compute-level deeper line(s) whose comparison does NOT bite — a compared line not load-bearing \
+         in any corpus scenario is decoration, not a check (§12):\n{}",
+        toothless.join("\n")
     );
 }
 

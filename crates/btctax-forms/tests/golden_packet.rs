@@ -723,7 +723,7 @@ fn the_shards_partition_every_household() {
     );
 }
 
-/// ★ **Every declared divergence class must ENGAGE — the full liveness sweep (T11).**
+/// ★ **Every declared divergence class must ENGAGE — the full liveness sweep (T11, §12 class-liveness).**
 ///
 /// Positive liveness, mirroring the compute level: the taxcalc Tax-Table methodology class fires on the
 /// Table anchors, and the two per-oracle L16 PROVENANCE classes fire on the §5.1 pinned cells (bin-edge ⇒
@@ -866,8 +866,10 @@ fn derive_form_set(i: &GoldenInputs) -> BTreeSet<&'static str> {
     set
 }
 
-/// ★ **The derivation reproduces the twelve hand-audited anchor sets** (r3-M1). The pinned sets are the
-/// same ones the packet was proven to carry; `derive_form_set` must reproduce each from inputs ALONE.
+/// ★ **The derivation reproduces the twelve hand-audited anchor sets** (r3-M1, **§12 anchor-derivation
+/// KAT**). The pinned sets are the same ones the packet was proven to carry; `derive_form_set` must
+/// reproduce each from inputs ALONE — so a systematically-wrong derivation is caught rather than silently
+/// agreeing with a matching filler bug. (T13 satisfies the §12 obligation by REFERENCE — this is the KAT.)
 #[test]
 fn derived_form_set_reproduces_the_twelve_anchors() {
     // The hand-audited law, pinned per anchor.
@@ -1225,5 +1227,206 @@ fn the_salt_cap_is_printed_onto_schedule_a() {
         "35000",
         "total itemized = the CAPPED $10,000 + $25,000 mortgage. It beats the $29,200 standard \
          deduction, so the cap actually changes this filer's tax."
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//  §12 VALIDATION KATs (T13) — the teeth that make the whole sweep trustworthy.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// A differential is only as good as its ability to CATCH a regression. §12 obligates a set of proofs that
+// this harness would actually bite — this block is the T13 index of where each one is discharged (two are
+// NEW here, the rest are satisfied by REFERENCE to their existing home per the plan's T13 interfaces):
+//
+//   • **Deeper-line teeth** (`deeper_lines_have_teeth`, below) — for EACH deeper line the corpus now
+//     exercises, a corpus witness where PERTURBING the oracle's leaf surfaces a disagreement. Drop the
+//     line's comparison logic and the witness goes quiet — so the KAT reddens. That is the difference
+//     between a live check and dead decoration.
+//   • **Read-back fault-injection** (`readback_reads_the_pdf_not_the_struct`, below) — a `#[should_panic]`
+//     fixture that swaps the 1040 map so `extract_lines` pulls the WRONG cell off the SAME filled PDF, and
+//     shows the differential's own comparison catches it. Proof the sweep reads the PAPER, not btctax's
+//     internal struct: had it read the struct, the map swap would inject nothing.
+//   • **Anchor-derivation KAT** (§12) — already `derived_form_set_reproduces_the_twelve_anchors` (T6):
+//     the §7 trigger-derivation reproduces all twelve hand-audited anchor form sets, so a systematically
+//     wrong derivation is caught rather than silently agreeing with a matching filler bug.
+//   • **Class-liveness** (§12) — already `the_paper_differential_engages_every_divergence_class` (T11):
+//     every declared divergence class must fire for ≥1 household or be held by its §5.1 pinned cell; the
+//     `LivenessLedger::dead()` sweep deletes any class nothing exercises.
+//   • **Determinism** (§12, r5-M1) — regenerating the corpus yields an IDENTICAL `households` payload
+//     (excluding the one non-deterministic `_provenance.generated` date). It runs the external oracles, so
+//     it CANNOT run under the network-free `make check`; it is codified as the OFFLINE, repeatable check
+//     `scripts/oracle/check_determinism.py` (run instructions in that file's header).
+//   • **Runtime budget** (§8) — MEASURED (2026-07-16, warm): the paper differential (the eight
+//     `diff_shard_*` `#[test]`s, parallelized by nextest, plus the whole-corpus property tests) runs in
+//     ~4.7s, and the full `make check` in ~7.8s (nextest summary) — inside the §8 ~8s warm budget. The
+//     T13 KATs added negligible wall-clock (they parallelize behind the ~5.1s byte-reproducibility pole;
+//     make check was ~7.9s before and ~7.8s after). The differential shards across cores precisely to
+//     hold that line as the corpus grows (see `SHARDS`).
+
+/// A deeper-line teeth case: `(baked witness name, perturb the oracle leaf in place, the line tag the
+/// perturbation must then surface)`. Factored into an alias so the case table stays clippy-clean.
+type TeethCase = (&'static str, fn(&mut GoldenHousehold), &'static str);
+
+/// One golden household by name, owned and mutable — the teeth KATs clone a real BAKED corpus scenario
+/// and perturb its oracle leaves (`GoldenHousehold` is not `Clone`, so this re-derives it from the corpus).
+fn find_household(name: &str) -> GoldenHousehold {
+    golden_households()
+        .into_iter()
+        .find(|h| h.name == name)
+        .unwrap_or_else(|| panic!("§12 teeth witness {name:?} is not in the baked corpus"))
+}
+
+/// The paper-level differential's verdict on one household — the accumulated three-way-localized
+/// disagreements (`empty` ⇒ every compared line agrees with both oracles on the paper).
+fn diffs_for(h: &GoldenHousehold) -> Vec<String> {
+    let mut wrong = Vec::new();
+    diff_household(h, &mut wrong);
+    wrong
+}
+
+/// ★ **Every deeper line has TEETH (§12).** For each deeper line the corpus now exercises, a real baked
+/// witness where the line's leaf is live and non-trivial. The KAT proves the line's comparison BITES:
+/// perturbing ONLY the oracle's leaf (btctax's fill — the paper — is untouched) must surface a
+/// disagreement NAMING that line. Drop the line's comparison block from `diff_household` and the perturbed
+/// witness goes silent, so this KAT reddens — the mutation test that turns "compared" into "load-bearing".
+///
+/// The t=3 named triples GUARANTEE the 8995-L12 (qualified-dividend cap) witness exists; the rest are
+/// pinned anchors. The line tags are the exact substrings `diff_household` emits. Each perturbation is a
+/// whole $100, which always crosses a `round_leaf` dollar boundary, so the disagreement cannot round away.
+#[test]
+fn deeper_lines_have_teeth() {
+    // (baked witness, perturb ONLY the OTS leaf the line compares, the line tag that MUST then appear).
+    // `niit` is a required `f64`; every other leaf is an `Option` mapped through `+100.0`.
+    let cases: &[TeethCase] = &[
+        (
+            "single_w2_only_standard",
+            |h| h.expected_ots.deduction_taken = h.expected_ots.deduction_taken.map(|v| v + 100.0),
+            "deduction (L12)",
+        ),
+        (
+            "mfj_itemized_salt_over_the_cap",
+            |h| h.expected_ots.salt_capped = h.expected_ots.salt_capped.map(|v| v + 100.0),
+            "SALT (Sch A L5e)",
+        ),
+        (
+            "single_w2_plus_crypto_ltcg",
+            |h| h.expected_ots.sch_d_to_l7 = h.expected_ots.sch_d_to_l7.map(|v| v + 100.0),
+            "Sch D → L7",
+        ),
+        (
+            "single_miner_qbi_limited_by_net_capital_gain",
+            |h| h.expected_ots.qbi_cap_l12 = h.expected_ots.qbi_cap_l12.map(|v| v + 100.0),
+            "8995 L12",
+        ),
+        (
+            // SE L12 is a CROSS-FOOT of two legs (`se_l10_oasdi` + `se_l11_medicare`); perturbing the
+            // OASDI leg breaks `sum_round([l10, l11])` and reddens the Schedule SE line-12 comparison.
+            "single_crypto_business_se",
+            |h| h.expected_ots.se_l10_oasdi = h.expected_ots.se_l10_oasdi.map(|v| v + 100.0),
+            "Sch SE L12",
+        ),
+        (
+            // 8959 L18 is the cross-foot `sum_round([f8959_l7, f8959_l13])`; perturb the L7 leg.
+            "mfj_high_income_niit_and_addl_medicare",
+            |h| h.expected_ots.f8959_l7 = h.expected_ots.f8959_l7.map(|v| v + 100.0),
+            "8959 L18",
+        ),
+        (
+            "mfj_itemized_over_100k",
+            |h| h.expected_ots.niit += 100.0,
+            "8960 L17",
+        ),
+    ];
+
+    let mut toothless = Vec::new();
+    for &(name, perturb, tag) in cases {
+        let mut h = find_household(name);
+        // The witness must be CLEAN before we perturb it (the corpus is green), so the disagreement below
+        // is provably caused by the perturbation and not pre-existing noise.
+        let clean = diffs_for(&h);
+        if !clean.is_empty() {
+            toothless.push(format!(
+                "  {name:<46} [{tag}] witness is NOT clean before perturbation: {clean:?}"
+            ));
+            continue;
+        }
+        perturb(&mut h);
+        let diffs = diffs_for(&h);
+        if !diffs.iter().any(|d| d.contains(tag)) {
+            toothless.push(format!(
+                "  {name:<46} [{tag}] perturbing the oracle leaf surfaced NO `{tag}` disagreement — the \
+                 line's comparison has no teeth (drop it and this differential would not notice). \
+                 diffs: {diffs:?}"
+            ));
+        }
+    }
+    assert!(
+        toothless.is_empty(),
+        "deeper line(s) whose paper-level comparison does NOT bite — a compared line that is not \
+         load-bearing in any corpus scenario is decoration, not a check (§12):\n{}",
+        toothless.join("\n")
+    );
+}
+
+/// ★ **The differential reads the FILLED PDF, not btctax's internal struct (§12 read-back fault-injection).**
+///
+/// The whole point of the paper level is that it reads the number OFF THE PAPER — an engine that computes
+/// the right answer and prints it in the wrong box files a wrong return, and only a read-off-paper check
+/// catches that. This fault-injection PROVES the read path is genuine: it repoints the 1040 map's `line16`
+/// key at line 15's PDF widget, so `extract_lines` transcribes line 15's PRINTED value under `line16` — a
+/// wrong number that came THROUGH the PDF. The differential's own `line16`-vs-oracle comparison then
+/// REJECTS it. Had the differential compared btctax's internal `ar.regular_tax` instead, swapping the map
+/// would inject nothing and this would pass — so the injected discrepancy failing is the proof.
+///
+/// `#[should_panic]` keyed on a load-bearing fragment: the two setup asserts (the honest map matches the
+/// oracle; the swap actually changes what is read) do NOT carry that fragment, so a panic there would fail
+/// the `expected` match — the test can only pass by reaching the injected-discrepancy assertion.
+#[test]
+#[should_panic(expected = "read-back fault-injection: the on-paper L16 came off the PDF")]
+fn readback_reads_the_pdf_not_the_struct() {
+    // A witness whose L16 (tax) and L15 (taxable income) are both present and DIFFERENT, so misreading
+    // L16 as L15 injects a value that cannot equal the oracle's L16.
+    let h = find_household("single_w2_plus_crypto_ltcg");
+    let a = full_return(&h);
+    let bytes = &a
+        .forms
+        .iter()
+        .find(|f| f.name == "f1040")
+        .expect("every return has a 1040")
+        .bytes;
+    let oracle_l16 = round_leaf(h.expected_ots.income_tax_before_credits);
+
+    // CONTROL — with the HONEST map the on-paper L16 matches the oracle (a clean witness). This is what
+    // makes the injection meaningful: only a real PDF read can tell the two maps apart.
+    let honest = extract_lines(bytes, F1040_MAP_2024).expect("the filled 1040 must transcribe");
+    let honest_l16 = paper_money(&honest, "line16");
+    assert_eq!(
+        honest_l16, oracle_l16,
+        "control: the honest map's on-paper L16 must match the oracle — else the witness is not clean"
+    );
+
+    // INJECT — repoint `line16` at line 15's PDF widget. `str::replace` rewrites the field name, so the
+    // `line16` key now resolves (through `extract_lines`) to line 15's PRINTED value on the SAME bytes.
+    let l16_field = "topmostSubform[0].Page2[0].f2_02[0]"; // 1040 line 16 widget
+    let l15_field = "topmostSubform[0].Page1[0].f1_60[0]"; // 1040 line 15 widget
+    let swapped_map = F1040_MAP_2024.replace(l16_field, l15_field);
+    assert_ne!(
+        swapped_map, F1040_MAP_2024,
+        "the swap must actually rewrite the map — else the L16 field name drifted"
+    );
+    let injected = extract_lines(bytes, &swapped_map).expect("the swapped map must still transcribe");
+    let injected_l16 = paper_money(&injected, "line16");
+    assert_ne!(
+        injected_l16, honest_l16,
+        "the map swap must CHANGE what is read off the PDF — else the read is not going through \
+         extract_lines and the whole proof is vacuous"
+    );
+
+    // The differential's line-16 comparison (paper vs oracle) now bites the injected value — precisely
+    // because the number was read OFF THE PAPER. THIS assertion is the `#[should_panic]`.
+    assert_eq!(
+        injected_l16, oracle_l16,
+        "read-back fault-injection: the on-paper L16 came off the PDF via extract_lines, so a perturbed \
+         cell fails the oracle comparison — the differential does NOT silently read btctax's struct"
     );
 }

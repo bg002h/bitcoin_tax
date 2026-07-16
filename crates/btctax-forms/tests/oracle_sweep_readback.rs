@@ -110,7 +110,10 @@ fn present_zero_regime_rejects_an_absent_cell() {
 }
 
 #[test]
-#[should_panic(expected = "5")]
+// T4-m1: the expectation is the LOAD-BEARING fragment of the panic — it names the KEY (`line17`), the
+// regime's requirement (`== "0"`) AND the offending raw value (`got "5"`). A bare `"5"` would match a
+// stray "5" anywhere in any panic (a line number, an unrelated value) and could pass for the wrong reason.
+#[should_panic(expected = r#"PresentZero requires "line17" == "0", got "5""#)]
 fn present_zero_regime_rejects_a_nonzero_cell() {
     let c = cells(&[("line17", "5")]);
     let _ = cell_or_zero(&c, "line17", Blank::PresentZero);
