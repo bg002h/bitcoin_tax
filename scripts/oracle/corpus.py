@@ -145,6 +145,18 @@ def _se_w2_ok(se_label, w2_label):
     return se_label == "none" or w2_label in ("none", "low")
 
 
+def _itemizer_w2_ok(dedsalt_label, w2_label):
+    """A NON-DEGENERATE itemizer needs earned income the itemized deduction bites into. With w2='none'
+    (and, under `_se_w2_ok`, at most a 'low' wage otherwise), a standard-clearing itemized total (~$32–35k:
+    $25k mortgage + $7–10k SALT) EXCEEDS the household's whole income, so taxable income floors at $0 and
+    itemizing no longer STRICTLY reduces tax — the engines then disagree BENIGNLY on the itemize-vs-standard
+    election (btctax + OTS itemize; taxcalc takes the standard, same $0 tax). Requiring w2 present makes
+    every itemizer non-degenerate (w2 'low' = $42k already exceeds any itemized total). SE itemizers still
+    exist: se ⇒ w2∈{none,low} and this ⇒ w2='low', so an SE itemizer carries ≥ $42k wage + $55k Schedule-C
+    profit — comfortably income-positive."""
+    return dedsalt_label == "std" or w2_label != "none"
+
+
 # ── Block A — full cartesian over the named triple {SE, LTCG, qualified-dividends} × status × ctx ──
 # t=3-COMPLETE on {SE, LTCG, qual-div} by construction: all 3 (se) × 2 (ltcg) × 2 (qd) = 12 value
 # combinations appear (for BOTH filing statuses, AND in two interest contexts, so the load-bearing
@@ -225,6 +237,11 @@ PAIRWISE_AXES = [
 
 def _row_feasible(assign, full):
     if not _se_w2_ok(assign.get("se", "none"), assign.get("w2", "none")):
+        return False
+    # Itemizer non-degeneracy — only when BOTH axes are pinned. A partial pair with an itemized `dedsalt`
+    # but `w2` unassigned is still feasible via w2∈{low,mid,high}, so it must NOT be dropped from the
+    # feasible-pair set; the constraint applies only once w2 is actually fixed to "none".
+    if "dedsalt" in assign and "w2" in assign and not _itemizer_w2_ok(assign["dedsalt"], assign["w2"]):
         return False
     if full:
         inp = _build(

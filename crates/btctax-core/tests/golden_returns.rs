@@ -29,13 +29,15 @@ use std::collections::BTreeMap;
 
 use btctax_core::conventions::{round_dollar, Usd};
 use btctax_core::tax::oracle_diff::{
-    round_leaf, stacking_ok, sum_round, table_l16, taxcalc_methodology_class, L16Operands,
-    LivenessLedger,
+    provenance_class_fires, round_leaf, stacking_ok, sum_round, table_l16, taxcalc_methodology_class,
+    L16Operands, LivenessLedger,
 };
 use btctax_core::tax::packet::assemble_printed_forms;
 use btctax_core::tax::return_1040::assemble_absolute;
+use btctax_core::tax::tables::{FullReturnParams, TaxTable};
 use btctax_core::tax::testonly::{
     build_golden_household, golden_households, golden_usd as usd, ty2024_params, ty2024_table,
+    GoldenHousehold,
 };
 use btctax_core::tax::FilingStatus;
 
@@ -86,239 +88,28 @@ fn every_golden_household_matches_the_independent_oracles() {
     let table = ty2024_table();
     let mut diffs: Vec<String> = Vec::new();
 
-    // ── Class liveness (§6.2/§6.4) ────────────────────────────────────────────────────────────────────
-    // The taxcalc Tax-Table methodology class is LIVE now — it fires on the households whose QDCGT
-    // worksheet consulted the IRS Tax Table (btctax + OTS bin at the $50 midpoint; taxcalc uses the
-    // continuous schedule). Registered here via `record_fire`; the per-oracle PROVENANCE classes cannot fire
-    // until the oracle L16 leaves bake (T11), so their liveness and the full `LivenessLedger::dead()` sweep
-    // (over ALL declared classes, held alive by the §5.1 pinned cells) are enabled in T11 with the pinned
-    // cells. A plain positive check (`methodology_class_fired`) proves the live class engaged this run.
+    // ── Class liveness (§6.2/§6.4) — T11 ACTIVE ─────────────────────────────────────────────────────
+    // Every declared divergence class must ENGAGE this run: the taxcalc Tax-Table methodology class on the
+    // Table anchors, and the two per-oracle L16 PROVENANCE classes on the §5.1 pinned cells (now baked,
+    // with their own oracle L16 leaves present so `provenance_class_fires` can witness them).
+    // `adjudicate_household` records the class that ABSORBS each L16 dissent; the `dead()` sweep below
+    // deletes any declared class that never fired — a class that no household exercises is an unread claim
+    // about the tax code, not a live guard.
     let mut liveness = LivenessLedger::default();
-    let mut methodology_class_fired = false;
 
     for h in &households {
-        let (ri, state) = build_golden_household(h);
-        let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
-        // The FILED forms. No golden household makes a charitable donation, so there are no §170(e)
-        // details to carry.
-        let printed = assemble_printed_forms(&ri, &state, &BTreeMap::new(), &ar, &table, 2024);
-        let e = &h.expected_ots;
-        let t = &h.expected_taxcalc;
-
-        // ── The §6.2(b) reproduced operands — btctax's OWN return operands, sourced from `ar` ──────────
-        // These feed `table_l16` / the methodology class. They are the RETURN's own §1(h) worksheet
-        // inputs — 1040 L15 taxable income, L3a qualified dividends, and the QD-EXCLUSIVE preferential net
-        // LTCG — exactly the three args `assemble_absolute` passes to `qdcgt_line16` (return_1040.rs:1216).
-        // Derivable PRE-T11: they are btctax's own figures, not the oracle's `Option` leaves.
-        let reproduced_ops = L16Operands {
-            status: ri.filing_status,
-            ti: ar.taxable_income,
-            qd_l3a: ar.qualified_dividends,
-            net_ltcg_qd_excl: ar.net_ltcg,
-        };
-
-        // ── Level 1: the six cent-exact leaf totals — EXACT vs BOTH oracles (as HEAD) ──────────────────
-        // `round_dollar` both sides; btctax must equal `round_leaf(OTS)` AND `round_leaf(taxcalc)`. No
-        // class escape — these have matched both engines on all twelve households since the SE-tax wrapper
-        // bug was fixed, and a class here would only hide a regression. (bit-equal on SE tax / NIIT /
-        // Add'l Medicare; within the §3.1 whole-dollar residual on TI / AGI / QBI, where OTS line-rounds
-        // the 8995 chain and taxcalc does not — the `round_dollar`-both-sides shape is what passes, r3-M1.)
-        let cent_exact: [(&str, Usd, f64, f64); 6] = [
-            (
-                "QBI deduction (8995 L15)",
-                ar.qbi_deduction,
-                e.qbi_deduction,
-                t.qbi_deduction,
-            ),
-            (
-                "AGI (1040 L11)",
-                ar.agi,
-                e.adjusted_gross_income,
-                t.adjusted_gross_income,
-            ),
-            (
-                "taxable income (L15)",
-                ar.taxable_income,
-                e.taxable_income,
-                t.taxable_income,
-            ),
-            ("SE tax (Sch 2 L4)", ar.se_tax_sch2_l4, e.se_tax, t.se_tax),
-            (
-                "Additional Medicare",
-                ar.additional_medicare.additional_medicare_tax,
-                e.additional_medicare_tax,
-                t.additional_medicare_tax,
-            ),
-            ("NIIT (Form 8960)", ar.niit.tax, e.niit, t.niit),
-        ];
-        for (line, ours, ots, taxcalc) in cent_exact {
-            let ours = round_dollar(ours);
-            if ours == round_leaf(ots) && ours == round_leaf(taxcalc) {
-                continue; // every oracle agrees with btctax exactly
-            }
-            diffs.push(format!(
-                "  {:<42} {:<22} btctax {:>10}  OTS {:>10}  taxcalc {:>10}   ({})",
-                h.name,
-                line,
-                ours,
-                round_leaf(ots),
-                round_leaf(taxcalc),
-                h.why
-            ));
-        }
-
-        // ── Level 2a: L16 (tax) — the §6.2 two-part (structural reproduction + class stacking) ──────────
-        // Part 1 (structural, r2-I2 Table-semantics witness): `oracle_diff::table_l16`, run on btctax's
-        // OWN return operands, must reproduce the compute engine's L16 exactly. A drift between the
-        // reproduction and `method::qdcgt_line16` breaks this before any oracle is consulted.
-        assert_eq!(
-            table_l16(
-                reproduced_ops.status,
-                reproduced_ops.ti,
-                reproduced_ops.qd_l3a,
-                reproduced_ops.net_ltcg_qd_excl,
-            ),
-            ar.regular_tax,
-            "{}: oracle_diff::table_l16 must reproduce btctax's own compute-engine L16 exactly",
-            h.name,
-        );
-        // Part 2 (class stacking): btctax and OTS agree (both consult the Table where mandatory); taxcalc
-        // dissents on the Table anchors via its continuous schedule. `stacking_ok` absorbs the dissent ONLY
-        // through a named class, and is the anti-world guard — a both-oracle disagreement with no absorbing
-        // class FAILS (see `stacking_ok_guards_golden_returns_against_btctax_alone`).
-        let l16_line = "tax (L16)";
-        let l16_ours = round_dollar(ar.regular_tax);
-        let l16_ots = e.income_tax_before_credits;
-        let l16_taxcalc = t.income_tax_before_credits;
-        let l16_agrees_all = l16_ours == round_leaf(l16_ots) && l16_ours == round_leaf(l16_taxcalc);
-        if !l16_agrees_all {
-            // Provenance leaves are None pre-T11 (⇒ `provenance_class_fires == false`), so the only class
-            // that can absorb a dissent now is the taxcalc methodology class. OTS necessarily agrees when
-            // `stacking_ok` passes pre-T11 (its provenance conjunct cannot fire), so a surviving taxcalc
-            // dissent is the methodology difference — register it live.
-            if stacking_ok(
-                l16_ours,
-                l16_ots,
-                Some(l16_taxcalc),
-                None, // ots_ops: provenance leaves inert until T11
-                None, // taxcalc_ops: provenance leaves inert until T11
-                &reproduced_ops,
-                None, // no known-defect pin
-            ) {
-                if taxcalc_methodology_class(&reproduced_ops) {
-                    liveness.record_fire("taxcalc_methodology");
-                    methodology_class_fired = true;
-                }
-            } else {
-                diffs.push(format!(
-                    "  {:<42} {:<22} btctax {:>10}  OTS {:>10}  taxcalc {:>10}   \
-                     (btctax alone — no lawful class absorbs it)",
-                    h.name,
-                    l16_line,
-                    l16_ours,
-                    round_leaf(l16_ots),
-                    round_leaf(l16_taxcalc),
-                ));
-            }
-        }
-
-        // ── Level 2b: L24 (TOTAL TAX) — the cross-foot dissolves the phantom Σround≠roundΣ divergence ───
-        // btctax's PRINTED line 24 (`round(L22) + round(L23)`) is held against `sum_round` of OTS's own
-        // COMPONENT totals — `Σ round_dollar(leg)`, NOT `round_dollar(OTS's exact total)`. The latter is the
-        // lawful §6102 roundΣ residual that used to force the `single_miner_qbi` divergence; comparing
-        // cross-foot to cross-foot dissolves it (OTS's exact total is never consulted). OTS-single-witness —
-        // taxcalc bundles payroll tax on W-2 wages that 1040 L24 does not, so it reports no comparable total.
-        // Pre-T11 fallback (plan lines 68-72): the legs are the baked per-line TOTALS; the leg form
-        // `sum_round([se_l10_oasdi, se_l11_medicare, f8959_l7, f8959_l13, …])` activates when they bake (T11).
-        let l24_ours = round_dollar(printed.f1040.line24);
-        let l24_ots = sum_round(&[
-            e.income_tax_before_credits,
-            e.se_tax,
-            e.additional_medicare_tax,
-            e.niit,
-        ]);
-        if l24_ours != l24_ots {
-            // OTS-single-witness: with no taxcalc opinion, a mismatch is btctax alone against OTS → fail.
-            diffs.push(format!(
-                "  {:<42} {:<22} btctax {:>10}  OTS {:>10}  taxcalc {:>10}   \
-                 (btctax alone vs OTS on the L24 cross-foot)",
-                h.name, "TOTAL TAX (L24)", l24_ours, l24_ots, "—",
-            ));
-        }
-
-        // ── Deeper-line rows — INERT until the oracle leaves bake (T11) ─────────────────────────────────
-        // Every deeper oracle leaf is `None` in today's baked JSON, so each `if let Some` block is a no-op
-        // NOW; they light up at the T11 re-bake without another rewrite (and are validated there). Compute
-        // level: btctax's figure is its own compute value (`ar.*`), held against `round_leaf(oracle leaf)` —
-        // OTS + taxcalc where both witness, OTS-single-witness where the reproduction table (plan §6.1)
-        // marks it so.
-        let deeper: [(&str, Usd, Option<f64>, Option<f64>); 3] = [
-            (
-                "deduction taken (L12)",
-                ar.deduction,
-                e.deduction_taken,
-                t.deduction_taken,
-            ),
-            (
-                "Sch D → 1040 L7",
-                ar.capital_gain,
-                e.sch_d_to_l7,
-                t.sch_d_to_l7,
-            ),
-            (
-                "SALT capped (Sch A L5e)",
-                ar.schedule_a.as_ref().map_or(Usd::ZERO, |a| a.salt_5e),
-                e.salt_capped,
-                t.salt_capped,
-            ),
-        ];
-        for (line, ours, ots_leaf, taxcalc_leaf) in deeper {
-            let ours = round_dollar(ours);
-            if let Some(o) = ots_leaf {
-                if ours != round_leaf(o) {
-                    diffs.push(format!(
-                        "  {:<42} {:<22} btctax {:>10}  OTS {:>10}   (deeper-line, T11)",
-                        h.name,
-                        line,
-                        ours,
-                        round_leaf(o)
-                    ));
-                }
-            }
-            if let Some(tc) = taxcalc_leaf {
-                if ours != round_leaf(tc) {
-                    diffs.push(format!(
-                        "  {:<42} {:<22} btctax {:>10}  taxcalc {:>10}   (deeper-line, T11)",
-                        h.name,
-                        line,
-                        ours,
-                        round_leaf(tc)
-                    ));
-                }
-            }
-        }
-        // 8995 L12 net-capital-gain cap — OTS single-witness / WEAK (plan §6.1: OTS's is driver-hand-fed,
-        // §14.2 closure is a follow-up), so it is gated on the OTS leaf alone.
-        if let Some(o) = e.qbi_cap_l12 {
-            let ours = round_dollar(ar.printed_inputs.qbi_net_capital_gain);
-            if ours != round_leaf(o) {
-                diffs.push(format!(
-                    "  {:<42} {:<22} btctax {:>10}  OTS {:>10}   (deeper-line, T11, OTS single-witness)",
-                    h.name, "8995 L12 net-cap-gain", ours, round_leaf(o)
-                ));
-            }
-        }
+        diffs.extend(adjudicate_household(h, &params, &table, &mut liveness));
     }
 
-    // ── Liveness (positive) — the methodology class must have engaged this run ──────────────────────────
-    // The full `LivenessLedger::dead()` sweep (over ALL declared classes, incl. the per-oracle provenance
-    // classes held alive by the §5.1 pinned cells) and provenance-class liveness are enabled in T11 with the
-    // pinned cells. `liveness` is registered now (via `record_fire`) so T11 extends it without a rewrite.
+    // ── Liveness sweep — no declared class may be DEAD (T11: pinned cells hold the provenance classes) ──
+    let dead = liveness.dead(&["taxcalc_methodology", "ots_provenance", "taxcalc_provenance"]);
     assert!(
-        methodology_class_fired,
-        "the taxcalc Tax-Table methodology class never fired: no household's QDCGT worksheet CONSULTED the \
-         IRS Tax Table on operands where taxcalc's continuous schedule dissents from btctax + OTS. The class \
-         is declared live and must engage on the Table anchors — re-derive if the anchors changed."
+        dead.is_empty(),
+        "declared divergence class(es) never fired and are not pinned: {dead:?}. Each names a lawful \
+         disagreement that MUST actually occur in the corpus — the Table anchors hold the methodology class \
+         live, and the two §5.1 pinned cells hold the per-oracle provenance classes live (bin-edge ⇒ \
+         `ots_provenance`, cents-flip ⇒ `taxcalc_provenance`). A dead class is dead weight: re-derive the \
+         pinned cell that should hold it (an engine bump may have moved the edge), or delete the class."
     );
 
     assert!(
@@ -332,14 +123,343 @@ fn every_golden_household_matches_the_independent_oracles() {
     );
 }
 
-/// ★ **The anti-world guard has TEETH — a synthetic both-oracle disagreement.**
+/// Reproduce btctax's whole-dollar 1040 L15 from an oracle's OWN line-rounded component leaves (C1 table):
+/// `round_leaf(AGI) − round_leaf(deduction_taken) − round_leaf(qbi_deduction)`. btctax prints L15 as
+/// `L11 − L12 − L13` on already-whole-dollar lines, so this cross-foot matches it EXACTLY — the lawful
+/// rounding-order residual, where an oracle carries cents through the 8995 chain and its exact L15
+/// straddles a dollar (r3-M1), never appears. It stays an EXACT witness (no tolerance): reproduced from
+/// the oracle's own AGI/deduction/QBI leaves, all of which are separately held cent-exact against btctax.
+/// `None` while the deduction leaf is unbaked (pre-T11), falling the caller back to `round_leaf(total)`.
+fn ti_crossfoot(agi: f64, deduction_taken: Option<f64>, qbi_deduction: f64) -> Option<Usd> {
+    // 1040 L15 is floored at 0 ("if zero or less, enter -0-") — the oracle's AGI − deduction can go
+    // negative (a low-income filer whose deduction exceeds AGI), where btctax prints 0.
+    deduction_taken.map(|ded| (round_leaf(agi) - round_leaf(ded) - round_leaf(qbi_deduction)).max(Usd::ZERO))
+}
+
+/// An oracle's OWN §1(h) line-16 operands, assembled from its baked provenance leaves (`qual_div_l3a`,
+/// `net_ltcg_qd_exclusive`, and its exact-cents taxable income). Returns `None` while either leaf is
+/// unbaked (pre-T11) — which is exactly what keeps [`provenance_class_fires`] inert then (the named M4
+/// mutation target). Post-bake both are `Some`, so the per-oracle provenance class can witness the §5.1
+/// pinned cells on the oracle's own figures.
+fn oracle_ops(
+    status: FilingStatus,
+    taxable_income: f64,
+    qual_div_l3a: Option<f64>,
+    net_ltcg_qd_exclusive: Option<f64>,
+) -> Option<L16Operands> {
+    match (qual_div_l3a, net_ltcg_qd_exclusive) {
+        (Some(qd), Some(ltcg)) => Some(L16Operands {
+            status,
+            ti: usd(taxable_income),
+            qd_l3a: usd(qd),
+            net_ltcg_qd_excl: usd(ltcg),
+        }),
+        _ => None,
+    }
+}
+
+/// Adjudicate ONE household into its divergence diffs (empty ⇒ it agrees with the oracles under the class
+/// machinery), recording the class that ABSORBS each L16 dissent into `liveness`.
 ///
-/// None of the twelve real households is a both-oracle disagreement (OTS always agrees with btctax on
-/// L16), so the FAIL branch in the main loop never fires on real data. This synthetic scenario pins the
-/// guard directly: btctax alone (47,030) against OTS and taxcalc (both 47,031), ABOVE the Tax-Table ceiling
-/// so the methodology class cannot fire, with no baked provenance leaves and no pin — [`stacking_ok`] MUST
-/// reject it. **Mutation-check:** force `stacking_ok` to return `true` and this test fails; restore and it
-/// passes. That is the difference between a guard and decoration.
+/// ★ This **IS** the per-household body of the main loop, extracted so the loop's own FAIL-wiring
+/// (`else { diffs.push(...) }`) is itself exercised on a synthetic divergence
+/// (`the_main_loop_reports_a_both_oracle_l16_divergence`, T5-m1) — the `stacking_ok`-returns-false path
+/// wiring, not just the `stacking_ok` function. And it records *which* class fired (methodology /
+/// OTS-provenance / taxcalc-provenance), so [`LivenessLedger::dead`] is meaningful (T5-m2).
+fn adjudicate_household(
+    h: &GoldenHousehold,
+    params: &FullReturnParams,
+    table: &TaxTable,
+    liveness: &mut LivenessLedger,
+) -> Vec<String> {
+    let mut diffs: Vec<String> = Vec::new();
+    let (ri, state) = build_golden_household(h);
+    let ar = assemble_absolute(&ri, &state, params, table, 2024);
+    // The FILED forms. No golden household makes a charitable donation, so there are no §170(e)
+    // details to carry.
+    let printed = assemble_printed_forms(&ri, &state, &BTreeMap::new(), &ar, table, 2024);
+    let e = &h.expected_ots;
+    let t = &h.expected_taxcalc;
+
+    // ── The §6.2(b) reproduced operands — btctax's OWN return operands, sourced from `ar` ──────────────
+    // These feed `table_l16` / the methodology class. They are the RETURN's own §1(h) worksheet inputs —
+    // 1040 L15 taxable income, L3a qualified dividends, and the QD-EXCLUSIVE preferential net LTCG —
+    // exactly the three args `assemble_absolute` passes to `qdcgt_line16` (return_1040.rs:1216).
+    let reproduced_ops = L16Operands {
+        status: ri.filing_status,
+        ti: ar.taxable_income,
+        qd_l3a: ar.qualified_dividends,
+        net_ltcg_qd_excl: ar.net_ltcg,
+    };
+
+    // ── Level 1: the five cent-exact leaf totals — EXACT vs BOTH oracles ────────────────────────────────
+    // `round_dollar` both sides; btctax must equal `round_leaf(OTS)` AND `round_leaf(taxcalc)`. No class
+    // escape — these have matched both engines since the SE-tax wrapper bug was fixed, and a class here
+    // would only hide a regression. (Taxable income is handled just below by the C1 CROSS-FOOT, not here.)
+    let cent_exact: [(&str, Usd, f64, f64); 5] = [
+        (
+            "QBI deduction (8995 L15)",
+            ar.qbi_deduction,
+            e.qbi_deduction,
+            t.qbi_deduction,
+        ),
+        (
+            "AGI (1040 L11)",
+            ar.agi,
+            e.adjusted_gross_income,
+            t.adjusted_gross_income,
+        ),
+        ("SE tax (Sch 2 L4)", ar.se_tax_sch2_l4, e.se_tax, t.se_tax),
+        (
+            "Additional Medicare",
+            ar.additional_medicare.additional_medicare_tax,
+            e.additional_medicare_tax,
+            t.additional_medicare_tax,
+        ),
+        ("NIIT (Form 8960)", ar.niit.tax, e.niit, t.niit),
+    ];
+    for (line, ours, ots, taxcalc) in cent_exact {
+        let ours = round_dollar(ours);
+        if ours == round_leaf(ots) && ours == round_leaf(taxcalc) {
+            continue; // every oracle agrees with btctax exactly
+        }
+        diffs.push(format!(
+            "  {:<42} {:<22} btctax {:>10}  OTS {:>10}  taxcalc {:>10}   ({})",
+            h.name,
+            line,
+            ours,
+            round_leaf(ots),
+            round_leaf(taxcalc),
+            h.why
+        ));
+    }
+
+    // ── Taxable income (1040 L15) — the C1 CROSS-FOOT, EXACT vs BOTH oracles ────────────────────────────
+    // btctax prints L15 = L11 − L12 − L13 on whole-dollar lines. Reproducing each oracle's L15 the SAME
+    // way — `round_leaf(AGI) − round_leaf(deduction) − round_leaf(QBI)` from its own component leaves —
+    // matches btctax exactly and dissolves the lawful rounding-order residual (an oracle carrying cents
+    // through the 8995 chain, its exact L15 straddling a dollar; r3-M1). Both oracles remain exact
+    // witnesses (no tolerance); pre-T11 the deduction leaf is `None`, so this falls back to the HEAD shape
+    // `round_leaf(oracle taxable_income)`.
+    let ti_ours = round_dollar(ar.taxable_income);
+    let ti_ots =
+        ti_crossfoot(e.adjusted_gross_income, e.deduction_taken, e.qbi_deduction).unwrap_or_else(|| round_leaf(e.taxable_income));
+    let ti_tc =
+        ti_crossfoot(t.adjusted_gross_income, t.deduction_taken, t.qbi_deduction).unwrap_or_else(|| round_leaf(t.taxable_income));
+    if !(ti_ours == ti_ots && ti_ours == ti_tc) {
+        diffs.push(format!(
+            "  {:<42} {:<22} btctax {:>10}  OTS {:>10}  taxcalc {:>10}   ({})",
+            h.name, "taxable income (L15)", ti_ours, ti_ots, ti_tc, h.why
+        ));
+    }
+
+    // ── Level 2a: L16 (tax) — the §6.2 two-part (structural reproduction + class stacking) ──────────────
+    // Part 1 (structural, Table-semantics witness): `table_l16`, run on btctax's OWN return operands, must
+    // reproduce the compute engine's L16 exactly, before any oracle is consulted.
+    assert_eq!(
+        table_l16(
+            reproduced_ops.status,
+            reproduced_ops.ti,
+            reproduced_ops.qd_l3a,
+            reproduced_ops.net_ltcg_qd_excl,
+        ),
+        ar.regular_tax,
+        "{}: oracle_diff::table_l16 must reproduce btctax's own compute-engine L16 exactly",
+        h.name,
+    );
+    // Part 2 (class stacking). The oracles' OWN L16 operands (baked provenance leaves) are `Some` at T11,
+    // so the per-oracle PROVENANCE classes can now witness the §5.1 pinned cells (bin-edge ⇒ OTS, cents-flip
+    // ⇒ taxcalc). btctax alone against BOTH oracles, with no absorbing class, still FAILS (the anti-world
+    // guard — see `stacking_ok_guards_golden_returns_against_btctax_alone`).
+    let ots_ops = oracle_ops(
+        ri.filing_status,
+        e.taxable_income,
+        e.qual_div_l3a,
+        e.net_ltcg_qd_exclusive,
+    );
+    let taxcalc_ops = oracle_ops(
+        ri.filing_status,
+        t.taxable_income,
+        t.qual_div_l3a,
+        t.net_ltcg_qd_exclusive,
+    );
+    let l16_ours = round_dollar(ar.regular_tax);
+    let l16_ots = e.income_tax_before_credits;
+    let l16_taxcalc = t.income_tax_before_credits;
+    let l16_agrees_all = l16_ours == round_leaf(l16_ots) && l16_ours == round_leaf(l16_taxcalc);
+    if !l16_agrees_all {
+        if stacking_ok(
+            l16_ours,
+            l16_ots,
+            Some(l16_taxcalc),
+            ots_ops.as_ref(),
+            taxcalc_ops.as_ref(),
+            &reproduced_ops,
+            None, // no known-defect pin
+        ) {
+            // ── T5-m2: record WHICH class actually absorbed each oracle's dissent ───────────────────────
+            // OTS carries a provenance class only: a surviving OTS dissent is witnessed by it.
+            if l16_ours != round_leaf(l16_ots)
+                && provenance_class_fires(ots_ops.as_ref(), &reproduced_ops, l16_ots)
+            {
+                liveness.record_fire("ots_provenance");
+            }
+            // taxcalc: the Tax-Table methodology class takes precedence (as in `stacking_ok`), else its
+            // provenance class explains the dissent.
+            if l16_ours != round_leaf(l16_taxcalc) {
+                if taxcalc_methodology_class(&reproduced_ops) {
+                    liveness.record_fire("taxcalc_methodology");
+                } else if provenance_class_fires(taxcalc_ops.as_ref(), &reproduced_ops, l16_taxcalc) {
+                    liveness.record_fire("taxcalc_provenance");
+                }
+            }
+        } else {
+            diffs.push(format!(
+                "  {:<42} {:<22} btctax {:>10}  OTS {:>10}  taxcalc {:>10}   \
+                 (btctax alone — no lawful class absorbs it)",
+                h.name,
+                "tax (L16)",
+                l16_ours,
+                round_leaf(l16_ots),
+                round_leaf(l16_taxcalc),
+            ));
+        }
+    }
+
+    // ── Level 2b: L24 (TOTAL TAX) — the cross-foot dissolves the phantom Σround≠roundΣ divergence ───────
+    // btctax's PRINTED line 24 (`round(L22) + round(L23)`) held against `round_leaf(L16) + reproduced
+    // SE-L12 + reproduced 8959-L18 + round_leaf(NIIT)`. At T11 the OTS component LEGS bake, so SE-L12 /
+    // 8959-L18 switch from the pre-T11 `round_leaf(total)` fallback to the true cross-foot `sum_round(legs)`
+    // — and L24 INHERITS them, so the lawful §6102 Σround≠roundΣ residual can never resurrect on L24 (it
+    // would, with no class to absorb it, if L24 instead summed `round(exact total)`). OTS-single-witness —
+    // taxcalc bundles payroll tax on W-2 wages that 1040 L24 does not, so it reports no comparable total.
+    let se_l12_ots = match (e.se_l10_oasdi, e.se_l11_medicare) {
+        (Some(l10), Some(l11)) => sum_round(&[l10, l11]),
+        _ => round_leaf(e.se_tax),
+    };
+    let f8959_l18_ots = match (e.f8959_l7, e.f8959_l13) {
+        (Some(l7), Some(l13)) => sum_round(&[l7, l13]),
+        _ => round_leaf(e.additional_medicare_tax),
+    };
+    // The L16 leg is btctax's OWN FILED L16 (`printed.f1040.line16` — the exact value btctax summed into
+    // its printed L24), NOT the oracle's L16 and NOT the compute `round_dollar(ar.regular_tax)` (the filed
+    // QDCGT-worksheet L16 can differ from the compute figure by the §3.1 rounding point — printed.rs:612).
+    // The L16 VALUE is separately adjudicated by the two-part comparison above (with its
+    // provenance/methodology class), so L24 must not re-litigate it: here it witnesses btctax's cross-foot
+    // arithmetic and the SE-L12 / 8959-L18 / NIIT legs against OTS. This keeps L24 green on BOTH §5.1
+    // pinned cells (whose L16 legitimately differs from an oracle's by the class-absorbed Tax-Table bin /
+    // cents flip) while still reddening on any real btctax cross-foot, Sch-2-leg, or L16 bug.
+    let l24_ours = round_dollar(printed.f1040.line24);
+    let l24_ots = printed.f1040.line16 + se_l12_ots + f8959_l18_ots + round_leaf(e.niit);
+    if l24_ours != l24_ots {
+        // OTS-single-witness: with no taxcalc opinion, a mismatch is btctax alone against OTS → fail.
+        diffs.push(format!(
+            "  {:<42} {:<22} btctax {:>10}  OTS {:>10}  taxcalc {:>10}   \
+             (btctax alone vs OTS on the L24 cross-foot)",
+            h.name, "TOTAL TAX (L24)", l24_ours, l24_ots, "—",
+        ));
+    }
+
+    // ── Deeper-line rows — LIVE at T11 (oracle leaves baked) ────────────────────────────────────────────
+    // btctax's figure is its own compute value (`ar.*`), held against `round_leaf(oracle leaf)` — OTS +
+    // taxcalc where both witness. Deduction taken (L12) and Sch D → 1040 L7 apply to every household.
+    let deeper: [(&str, Usd, Option<f64>, Option<f64>); 2] = [
+        (
+            "deduction taken (L12)",
+            ar.deduction,
+            e.deduction_taken,
+            t.deduction_taken,
+        ),
+        ("Sch D → 1040 L7", ar.capital_gain, e.sch_d_to_l7, t.sch_d_to_l7),
+    ];
+    for (line, ours, ots_leaf, taxcalc_leaf) in deeper {
+        let ours = round_dollar(ours);
+        if let Some(o) = ots_leaf {
+            if ours != round_leaf(o) {
+                diffs.push(format!(
+                    "  {:<42} {:<22} btctax {:>10}  OTS {:>10}   (deeper-line, T11)",
+                    h.name,
+                    line,
+                    ours,
+                    round_leaf(o)
+                ));
+            }
+        }
+        if let Some(tc) = taxcalc_leaf {
+            if ours != round_leaf(tc) {
+                diffs.push(format!(
+                    "  {:<42} {:<22} btctax {:>10}  taxcalc {:>10}   (deeper-line, T11)",
+                    h.name,
+                    line,
+                    ours,
+                    round_leaf(tc)
+                ));
+            }
+        }
+    }
+
+    // ── SALT (Sch A L5e) — SCOPED to ITEMIZING households (T9 salt_capped scoping) ──────────────────────
+    // btctax's `ar.schedule_a` is populated whenever there are Schedule-A INPUTS, even when the standard
+    // deduction wins; taxcalc's `salt_capped` (`c18300`) is "SALT as DEDUCTED" (0 when standard wins) and
+    // OTS's is `None` when standard wins. Comparing btctax's computed L5e on a SALT-paying-but-standard
+    // household would be a false red — so gate the row on whether btctax's DEDUCTION is actually the
+    // itemized one (`ar.deduction_is_itemized`), the deduction PATH. (In the corpus D-3 forces itemizing to
+    // win wherever there are itemized inputs, so this is defensive; it makes the row correct by
+    // construction rather than by that invariant.)
+    if ar.deduction_is_itemized {
+        if let Some(a) = ar.schedule_a.as_ref() {
+            let ours = round_dollar(a.salt_5e);
+            if let Some(o) = e.salt_capped {
+                if ours != round_leaf(o) {
+                    diffs.push(format!(
+                        "  {:<42} {:<22} btctax {:>10}  OTS {:>10}   (SALT L5e, T11)",
+                        h.name,
+                        "SALT capped (Sch A L5e)",
+                        ours,
+                        round_leaf(o)
+                    ));
+                }
+            }
+            if let Some(tc) = t.salt_capped {
+                if ours != round_leaf(tc) {
+                    diffs.push(format!(
+                        "  {:<42} {:<22} btctax {:>10}  taxcalc {:>10}   (SALT L5e, T11)",
+                        h.name,
+                        "SALT capped (Sch A L5e)",
+                        ours,
+                        round_leaf(tc)
+                    ));
+                }
+            }
+        }
+    }
+
+    // ── 8995 L12 net-capital-gain cap — OTS single-witness / WEAK ───────────────────────────────────────
+    // (plan §6.1: OTS's is driver-hand-fed, §14.2 closure is a follow-up), so it is gated on the OTS leaf
+    // alone.
+    if let Some(o) = e.qbi_cap_l12 {
+        let ours = round_dollar(ar.printed_inputs.qbi_net_capital_gain);
+        if ours != round_leaf(o) {
+            diffs.push(format!(
+                "  {:<42} {:<22} btctax {:>10}  OTS {:>10}   (deeper-line, T11, OTS single-witness)",
+                h.name,
+                "8995 L12 net-cap-gain",
+                ours,
+                round_leaf(o)
+            ));
+        }
+    }
+
+    diffs
+}
+
+/// ★ **The anti-world guard has TEETH — a synthetic both-oracle disagreement (the FUNCTION).**
+///
+/// This pins [`stacking_ok`] directly: btctax alone (47,030) against OTS and taxcalc (both 47,031), ABOVE
+/// the Tax-Table ceiling so the methodology class cannot fire, with no baked provenance leaves and no pin —
+/// it MUST reject. **Mutation-check:** force `stacking_ok` to return `true` and this test fails; restore
+/// and it passes. That is the difference between a guard and decoration. Its companion,
+/// `the_main_loop_reports_a_both_oracle_l16_divergence`, pins the main loop's own FAIL-wiring (T5-m1).
 #[test]
 fn stacking_ok_guards_golden_returns_against_btctax_alone() {
     let ops = L16Operands {
@@ -360,5 +480,48 @@ fn stacking_ok_guards_golden_returns_against_btctax_alone() {
         ),
         "btctax alone against BOTH oracles, above the ceiling, with no absorbing class must be REJECTED — \
          the anti-world guard is the whole point of the class machinery."
+    );
+}
+
+/// ★ **The MAIN LOOP reports a both-oracle divergence — the loop's own FAIL-wiring (T5-m1).**
+///
+/// `stacking_ok_guards_golden_returns_against_btctax_alone` pins the *function*; this pins that the loop
+/// body actually TURNS a `stacking_ok`-returns-false into a reported diff. It runs the SAME
+/// `adjudicate_household` the main loop runs, on a real ABOVE-ceiling anchor whose oracle L16 has been
+/// forced to disagree with btctax and whose provenance leaves are cleared (so no class can absorb it) —
+/// and asserts the L16 "btctax alone" line is reported. Delete the `else { diffs.push(...) }` wiring and
+/// this goes red; the function-level guard alone would not.
+#[test]
+fn the_main_loop_reports_a_both_oracle_l16_divergence() {
+    let params = ty2024_params();
+    let table = ty2024_table();
+
+    // A real ABOVE-ceiling anchor (TI ≈ 253,943 ⇒ methodology class cannot fire).
+    let mut h = golden_households()
+        .into_iter()
+        .find(|h| h.name == "mfj_se_over_the_addl_medicare_threshold")
+        .expect("the above-ceiling SE anchor is in the matrix");
+
+    // Force BOTH oracles' L16 to a value btctax cannot possibly print (its real L16 here is ~47,031), and
+    // CLEAR the provenance leaves so no provenance class can fire either — btctax alone against both, with
+    // no lawful class. Every other baked leaf stays real (it agrees with btctax), so the loop reports
+    // exactly the engineered L16 (and the L24 it feeds) — not a wall of noise.
+    h.expected_ots.income_tax_before_credits = 999_999.0;
+    h.expected_taxcalc.income_tax_before_credits = 999_999.0;
+    h.expected_ots.qual_div_l3a = None;
+    h.expected_ots.net_ltcg_qd_exclusive = None;
+    h.expected_taxcalc.qual_div_l3a = None;
+    h.expected_taxcalc.net_ltcg_qd_exclusive = None;
+
+    let mut liveness = LivenessLedger::default();
+    let diffs = adjudicate_household(&h, &params, &table, &mut liveness);
+
+    assert!(
+        diffs
+            .iter()
+            .any(|d| d.contains("tax (L16)") && d.contains("btctax alone")),
+        "the main loop must REPORT a both-oracle L16 divergence that no class absorbs — its \
+         `else {{ diffs.push(...) }}` FAIL-wiring, not just `stacking_ok`. Got diffs:\n{}",
+        diffs.join("\n")
     );
 }

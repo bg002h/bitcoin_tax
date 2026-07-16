@@ -658,12 +658,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_goldens_parse_with_optional_deeper_fields_absent() {
+    fn goldens_carry_the_deeper_and_provenance_leaves() {
+        // Post-T11 the baked corpus CARRIES the deeper-line + provenance leaves on every household — the
+        // deeper differential and the per-oracle provenance classes depend on them; a re-bake that dropped
+        // them would silently make those checks inert. (`qbi_cap_l12` + the C1 SE legs are per-form, so
+        // they bake only on the relevant households — checked on an SE household below — not on the
+        // W-2-only floor case.)
         let hs = golden_households(); // parses GOLDEN_RETURNS_JSON
-        let h = &hs[0];
-        // The new deeper/provenance fields are absent in today's JSON ⇒ None, not a parse error.
-        assert!(h.expected_ots.qbi_cap_l12.is_none());
-        assert!(h.expected_ots.net_ltcg_qd_exclusive.is_none());
-        assert!(h.expected_taxcalc.total_tax.is_none());
+        let floor = &hs[0]; // single_w2_only_standard
+        assert!(floor.expected_ots.net_ltcg_qd_exclusive.is_some());
+        assert!(floor.expected_ots.qual_div_l3a.is_some());
+        assert!(floor.expected_ots.deduction_taken.is_some());
+        assert!(floor.expected_taxcalc.total_tax.is_some());
+        assert!(floor.expected_taxcalc.net_ltcg_qd_exclusive.is_some());
+
+        let se = hs
+            .iter()
+            .find(|h| h.name == "single_crypto_business_se")
+            .expect("the SE anchor is in the matrix");
+        assert!(se.expected_ots.qbi_cap_l12.is_some());
+        assert!(se.expected_ots.se_l10_oasdi.is_some());
+        assert!(se.expected_ots.se_l11_medicare.is_some());
+
+        // …and the `#[serde(default)]` optionals STILL default to None when a record OMITS them (a
+        // hand-written or older JSON must keep parsing) — the schema tolerance the original test guarded.
+        let minimal: ExpectedOts = serde_json::from_str(
+            r#"{"adjusted_gross_income":0.0,"taxable_income":0.0,"qbi_deduction":0.0,
+                "income_tax_before_credits":0.0,"se_tax":0.0,"niit":0.0,
+                "additional_medicare_tax":0.0,"total_tax":0.0}"#,
+        )
+        .expect("a record without the optional deeper leaves still parses");
+        assert!(minimal.net_ltcg_qd_exclusive.is_none());
+        assert!(minimal.qbi_cap_l12.is_none());
+        assert!(minimal.se_l10_oasdi.is_none());
     }
 }

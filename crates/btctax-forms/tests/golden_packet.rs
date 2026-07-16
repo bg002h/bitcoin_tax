@@ -48,14 +48,15 @@
 
 use btctax_core::conventions::{round_dollar, Usd};
 use btctax_core::tax::oracle_diff::{
-    round_leaf, stacking_ok, sum_round, table_l16, taxcalc_methodology_class, L16Operands,
-    LivenessLedger,
+    provenance_class_fires, round_leaf, stacking_ok, sum_round, table_l16, taxcalc_methodology_class,
+    L16Operands, LivenessLedger,
 };
 use btctax_core::tax::return_1040::assemble_absolute;
 use btctax_core::tax::testonly::{
     build_golden_household, golden_households, ty2024_params, ty2024_table, GoldenHousehold,
     GoldenInputs,
 };
+use btctax_core::tax::FilingStatus;
 use btctax_forms::testonly::{
     extract_lines, F1040_MAP_2024, F8959_MAP_2024, F8960_MAP_2024, F8995_MAP_2024,
     SCHEDULE_A_MAP_2024, SCHEDULE_C_MAP_2024, SCHEDULE_SE_MAP_2024,
@@ -70,6 +71,27 @@ use common::{cell_or_zero, form, full_return, on_paper_signed, packet, Blank, Si
 
 fn usd(v: f64) -> Usd {
     Usd::try_from(v).expect("the oracles emit finite figures")
+}
+
+/// An oracle's OWN §1(h) line-16 operands, assembled from its baked provenance leaves (`qual_div_l3a`,
+/// `net_ltcg_qd_exclusive`, and its exact-cents taxable income). `None` while either leaf is unbaked
+/// (pre-T11), which keeps [`provenance_class_fires`] inert then; `Some` post-bake so the per-oracle
+/// provenance class can witness the §5.1 pinned cells' paper-L16 dissent.
+fn oracle_ops(
+    status: FilingStatus,
+    taxable_income: f64,
+    qual_div_l3a: Option<f64>,
+    net_ltcg_qd_exclusive: Option<f64>,
+) -> Option<L16Operands> {
+    match (qual_div_l3a, net_ltcg_qd_exclusive) {
+        (Some(qd), Some(ltcg)) => Some(L16Operands {
+            status,
+            ti: usd(taxable_income),
+            qd_l3a: usd(qd),
+            net_ltcg_qd_excl: usd(ltcg),
+        }),
+        _ => None,
+    }
 }
 
 /// A PRESENT unsigned money cell, as the SIGNED integer it prints (whole dollars, SPEC §3.1). Panics if
@@ -137,6 +159,52 @@ fn check_both(
     ));
 }
 
+/// A line held against BOTH oracles at PRE-COMPUTED whole-dollar targets (not `round_leaf` of a total) —
+/// used for 1040 L15, whose target is the C1 cross-foot [`ti_crossfoot`]. Localized three ways like
+/// [`check_both`].
+#[allow(clippy::too_many_arguments)]
+fn check_both_targets(
+    wrong: &mut Vec<String>,
+    name: &str,
+    label: &str,
+    why: &str,
+    on_paper: Usd,
+    internal: Usd,
+    ots: Usd,
+    taxcalc: Usd,
+) {
+    if on_paper == ots && on_paper == taxcalc {
+        return;
+    }
+    let target = if on_paper != ots { ots } else { taxcalc };
+    wrong.push(format!(
+        "  {:<42} {:<26} paper {:>10}  internal {:>10}  OTS {:>10}  taxcalc {:>10}   {}   ({})",
+        name,
+        label,
+        on_paper,
+        internal,
+        ots,
+        taxcalc,
+        localize(on_paper, internal, target),
+        why
+    ));
+}
+
+/// Reproduce btctax's whole-dollar 1040 L15 from an oracle's OWN line-rounded component leaves (C1 table):
+/// `round_leaf(AGI) − round_leaf(deduction_taken) − round_leaf(qbi_deduction)`. btctax prints L15 as
+/// `L11 − L12 − L13` on whole-dollar lines, so this matches its paper L15 EXACTLY — the lawful
+/// rounding-order residual (an oracle carrying cents through the 8995 chain, its exact L15 straddling a
+/// dollar; r3-M1) never appears, with no tolerance. Pre-T11 the deduction leaf is `None` ⇒ HEAD fallback
+/// `round_leaf(total)`.
+fn ti_crossfoot(agi: f64, deduction_taken: Option<f64>, qbi_deduction: f64, total: f64) -> Usd {
+    match deduction_taken {
+        // 1040 L15 is floored at 0 ("if zero or less, enter -0-"): AGI − deduction can go negative for a
+        // low-income filer whose deduction exceeds AGI, where btctax prints 0.
+        Some(ded) => (round_leaf(agi) - round_leaf(ded) - round_leaf(qbi_deduction)).max(Usd::ZERO),
+        None => round_leaf(total),
+    }
+}
+
 /// A line witnessed by OTS alone (a cross-foot or a WEAK leaf; taxcalc exposes no comparable figure).
 fn check_ots(
     wrong: &mut Vec<String>,
@@ -166,17 +234,21 @@ fn check_ots(
 //  The paper-level differential — the shared body, and the shards that parallelize it.
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
-/// How many `#[test]` shards the differential loop is split across (§8, r2-M1). The twelve anchors are
-/// tiny; T11 (~80–120 households) re-measures the wall-clock and may raise this.
+/// How many `#[test]` shards the differential loop is split across (§8, r2-M1). The differential runs the
+/// FULL corpus (all ~104 households, PDF fill + read-back) — nextest parallelizes the shards across cores,
+/// so this is the cheap way to keep the whole-corpus oracle check inside the `make check` budget. **T11
+/// raised N 4 → 8** after measuring the 104-household wall-clock (the un-parallelizable whole-corpus
+/// property tests — byte-repro / identity / carries — take the §8 SAMPLE instead, since a single `#[test]`
+/// cannot be split across cores; see `sample_households`).
 ///
-/// ★ MUST equal `SHARD_WRAPPERS` (the count of `diff_shard_*` `#[test]`s below). Raise one and you must
-/// raise the other — else the `idx % SHARDS == SHARDS-1` households are silently dropped. The guard
-/// `the_shards_partition_every_household` pins the two together and would go RED rather than lose coverage.
-const SHARDS: usize = 4;
+/// ★ MUST equal `SHARD_WRAPPERS` (the count of `diff_shard_*` `#[test]`s below), enforced at COMPILE time
+/// by the `[fn(); SHARDS]` array in `the_shards_partition_every_household` (T6-m1). Raise one and you must
+/// raise the other, else the `idx % SHARDS == SHARDS-1` households are silently dropped.
+const SHARDS: usize = 8;
 
 /// The number of `diff_shard_*` wrappers that actually run — kept in lockstep with `SHARDS` by the
-/// coverage guard. (Owning phase: T11 re-measures N and, if it raises `SHARDS`, adds the wrappers.)
-const SHARD_WRAPPERS: usize = 4;
+/// compile-time array guard.
+const SHARD_WRAPPERS: usize = 8;
 
 /// ★ **The figures two independent engines computed are the figures in the boxes on the paper.** The
 /// per-household body every shard runs: read the full compared line set OFF THE FILLED PDF, hold each
@@ -215,15 +287,18 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
         e.adjusted_gross_income,
         t.adjusted_gross_income,
     );
-    check_both(
+    // Taxable income (1040 L15) — the C1 CROSS-FOOT target (AGI − deduction − QBI, each line-rounded from
+    // the oracle's own leaves), not `round_leaf(total)` — matches btctax's whole-dollar L15 exactly and
+    // dissolves the lawful 8995-chain rounding-order residual. Both oracles stay exact witnesses.
+    check_both_targets(
         wrong,
         &h.name,
         "taxable income (L15)",
         &h.why,
         paper_money(&f1040, "line15"),
         round_dollar(a.ar.taxable_income),
-        e.taxable_income,
-        t.taxable_income,
+        ti_crossfoot(e.adjusted_gross_income, e.deduction_taken, e.qbi_deduction, e.taxable_income),
+        ti_crossfoot(t.adjusted_gross_income, t.deduction_taken, t.qbi_deduction, t.taxable_income),
     );
     // QBI deduction (1040 L13 / 8995 L15). Line 13 is on every return (0 when there is no QBI), so read
     // it under AbsentIsZero — present-"0" or absent both mean $0.
@@ -269,13 +344,27 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
     let l16_internal = round_dollar(a.ar.regular_tax);
     let ots16 = e.income_tax_before_credits;
     let tc16 = t.income_tax_before_credits;
+    // The oracles' OWN L16 operands (baked provenance leaves) — LIVE at T11, so the per-oracle provenance
+    // classes can absorb the §5.1 pinned cells' paper-L16 dissent (bin-edge ⇒ OTS, cents-flip ⇒ taxcalc).
+    let ots_ops = oracle_ops(
+        a.pr.filing_status,
+        e.taxable_income,
+        e.qual_div_l3a,
+        e.net_ltcg_qd_exclusive,
+    );
+    let taxcalc_ops = oracle_ops(
+        a.pr.filing_status,
+        t.taxable_income,
+        t.qual_div_l3a,
+        t.net_ltcg_qd_exclusive,
+    );
     if !(l16_paper == round_leaf(ots16) && l16_paper == round_leaf(tc16))
         && !stacking_ok(
             l16_paper,
             ots16,
             Some(tc16),
-            None, // ots_ops: provenance leaves inert until T11
-            None, // taxcalc_ops: provenance leaves inert until T11
+            ots_ops.as_ref(),
+            taxcalc_ops.as_ref(),
             &reproduced_ops,
             None, // no known-defect pin
         )
@@ -321,6 +410,12 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
     //    else the formula would understate the total. ─────────────────────────────────────────────────
     let _ = cell_or_zero(&f1040, "line17", Blank::PresentZero); // Sch 2 L3 (AMT / excess APTC)
     let _ = cell_or_zero(&f1040, "line21", Blank::PresentZero); // L19 + L20 (nonrefundable credits)
+    // The L16 leg is btctax's OWN printed L16 (`l16_paper`, read off the form above) — the value btctax
+    // actually summed into L24 — NOT the oracle's L16. The L16 VALUE is separately adjudicated by the
+    // two-part comparison above (with its provenance/methodology class), so L24 witnesses btctax's
+    // cross-foot arithmetic + the SE-L12 / 8959-L18 / NIIT legs against OTS, and stays green on the §5.1
+    // pinned OTS-provenance cell (whose L16 legitimately differs from OTS's by the Tax-Table bin the L16
+    // class absorbs) while still reddening on any real btctax cross-foot / Sch-2-leg / L16 bug.
     check_ots(
         wrong,
         &h.name,
@@ -328,7 +423,7 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
         &h.why,
         paper_money(&f1040, "line24"),
         a.pr.forms.f1040.line24, // btctax's printed Σround L24
-        round_leaf(e.income_tax_before_credits) + se_l12_ots + f8959_l18_ots + round_leaf(e.niit),
+        l16_paper + se_l12_ots + f8959_l18_ots + round_leaf(e.niit),
     );
 
     // ── Schedule SE line 12 — the C1 cross-foot reproduction hoisted above. This REPLACES the old
@@ -568,6 +663,22 @@ fn diff_shard_2() {
 fn diff_shard_3() {
     run_shard(3);
 }
+#[test]
+fn diff_shard_4() {
+    run_shard(4);
+}
+#[test]
+fn diff_shard_5() {
+    run_shard(5);
+}
+#[test]
+fn diff_shard_6() {
+    run_shard(6);
+}
+#[test]
+fn diff_shard_7() {
+    run_shard(7);
+}
 
 /// ★ **The shards PARTITION every household exactly once.** `SHARDS` and the `diff_shard_*` wrapper
 /// count are coupled only by convention; raising `SHARDS` to 5 without adding `diff_shard_4` would
@@ -576,6 +687,21 @@ fn diff_shard_3() {
 /// wrappers cover each of the twelve household indices exactly once.
 #[test]
 fn the_shards_partition_every_household() {
+    // ★ COMPILE-TIME coupling (T6-m1): this array must hold exactly `SHARDS` wrapper fns, so raising
+    // `SHARDS` without adding a matching `diff_shard_*` wrapper is a COMPILE error — not merely a runtime
+    // mismatch against the `SHARD_WRAPPERS` const. The wrappers are named directly, so the pairing cannot
+    // silently decay (the `idx % SHARDS == SHARDS-1` households can never be dropped for want of a runner).
+    let _wrappers: [fn(); SHARDS] = [
+        diff_shard_0,
+        diff_shard_1,
+        diff_shard_2,
+        diff_shard_3,
+        diff_shard_4,
+        diff_shard_5,
+        diff_shard_6,
+        diff_shard_7,
+    ];
+
     assert_eq!(
         SHARDS, SHARD_WRAPPERS,
         "every shard index 0..SHARDS needs a diff_shard_* wrapper — raise SHARDS and SHARD_WRAPPERS \
@@ -597,13 +723,16 @@ fn the_shards_partition_every_household() {
     );
 }
 
-/// The taxcalc Tax-Table methodology class must ENGAGE on the paper differential's Table anchors —
-/// positive liveness, as the compute level asserts. Cheap and NON-sharded: it needs only btctax's own
-/// compute operands (`ar`), never a filled PDF, so a single test can see all twelve. The full
-/// `LivenessLedger::dead()` sweep over ALL declared classes (the per-oracle provenance classes held
-/// alive by the §5.1 pinned cells) is enabled in T11 — this is the hook it extends.
+/// ★ **Every declared divergence class must ENGAGE — the full liveness sweep (T11).**
+///
+/// Positive liveness, mirroring the compute level: the taxcalc Tax-Table methodology class fires on the
+/// Table anchors, and the two per-oracle L16 PROVENANCE classes fire on the §5.1 pinned cells (bin-edge ⇒
+/// `ots_provenance`, cents-flip ⇒ `taxcalc_provenance`), whose oracle L16 leaves now bake. Cheap and
+/// NON-sharded: it needs only btctax's own compute operands (`ar`) and the baked oracle leaves, never a
+/// filled PDF, so a single test can see the whole corpus and no per-shard split can make it spuriously
+/// miss a Table (or pinned) household. The `dead()` sweep deletes any class no household exercises.
 #[test]
-fn the_paper_differential_engages_the_methodology_class() {
+fn the_paper_differential_engages_every_divergence_class() {
     let params = ty2024_params();
     let table = ty2024_table();
     let mut liveness = LivenessLedger::default();
@@ -616,18 +745,43 @@ fn the_paper_differential_engages_the_methodology_class() {
             qd_l3a: ar.qualified_dividends,
             net_ltcg_qd_excl: ar.net_ltcg,
         };
-        // A surviving taxcalc dissent that the methodology class explains (OTS agrees pre-T11) ⇒ fired.
-        if round_dollar(ar.regular_tax) != round_leaf(h.expected_taxcalc.income_tax_before_credits)
-            && taxcalc_methodology_class(&ops)
+        let e = &h.expected_ots;
+        let t = &h.expected_taxcalc;
+        let l16 = round_dollar(ar.regular_tax);
+        let ots_ops = oracle_ops(
+            ri.filing_status,
+            e.taxable_income,
+            e.qual_div_l3a,
+            e.net_ltcg_qd_exclusive,
+        );
+        let taxcalc_ops = oracle_ops(
+            ri.filing_status,
+            t.taxable_income,
+            t.qual_div_l3a,
+            t.net_ltcg_qd_exclusive,
+        );
+        // OTS carries a provenance class only: a surviving OTS dissent it witnesses ⇒ fired.
+        if l16 != round_leaf(e.income_tax_before_credits)
+            && provenance_class_fires(ots_ops.as_ref(), &ops, e.income_tax_before_credits)
         {
-            liveness.record_fire("taxcalc_methodology");
+            liveness.record_fire("ots_provenance");
+        }
+        // taxcalc: the methodology class takes precedence (as in `stacking_ok`), else its provenance class.
+        if l16 != round_leaf(t.income_tax_before_credits) {
+            if taxcalc_methodology_class(&ops) {
+                liveness.record_fire("taxcalc_methodology");
+            } else if provenance_class_fires(taxcalc_ops.as_ref(), &ops, t.income_tax_before_credits) {
+                liveness.record_fire("taxcalc_provenance");
+            }
         }
     }
+    let dead = liveness.dead(&["taxcalc_methodology", "ots_provenance", "taxcalc_provenance"]);
     assert!(
-        liveness.dead(&["taxcalc_methodology"]).is_empty(),
-        "the taxcalc Tax-Table methodology class never fired: no golden household's QDCGT worksheet \
-         CONSULTED the IRS Tax Table on operands where taxcalc's continuous schedule dissents from \
-         btctax + OTS. The class is declared live and must engage on the Table anchors."
+        dead.is_empty(),
+        "declared divergence class(es) never fired and are not pinned: {dead:?}. The Table anchors hold \
+         the methodology class live; the two §5.1 pinned cells hold the per-oracle provenance classes live \
+         (bin-edge ⇒ ots_provenance, cents-flip ⇒ taxcalc_provenance). A dead class is dead weight — \
+         re-derive the pinned cell that should hold it (an engine bump can move the edge), or delete it."
     );
 }
 
@@ -751,18 +905,17 @@ fn derived_form_set_reproduces_the_twelve_anchors() {
     ]);
 
     let mut wrong = Vec::new();
+    let mut checked = 0;
     for h in &golden_households() {
-        let want: BTreeSet<&str> = pinned
-            .get(h.name.as_str())
-            .unwrap_or_else(|| {
-                panic!(
-                    "{}: no pinned set — a household was added and its derivation went unchecked",
-                    h.name
-                )
-            })
-            .iter()
-            .copied()
-            .collect();
+        // This test pins the 12 hand-audited ANCHOR sets as a regression check. The generated + §5.1
+        // pinned corpus households (added at T11) are validated instead by the whole-corpus
+        // `each_golden_packet_carries_exactly_the_forms_the_derived_law_requires`; skip anything not in
+        // the anchor map rather than demanding a pinned set for all ~104 households.
+        let Some(want_set) = pinned.get(h.name.as_str()) else {
+            continue;
+        };
+        checked += 1;
+        let want: BTreeSet<&str> = want_set.iter().copied().collect();
         let got: BTreeSet<&str> = derive_form_set(&h.inputs).into_iter().collect();
         if got != want {
             let missing: Vec<_> = want.difference(&got).collect();
@@ -773,6 +926,12 @@ fn derived_form_set_reproduces_the_twelve_anchors() {
             ));
         }
     }
+    assert_eq!(
+        checked,
+        pinned.len(),
+        "not every hand-audited anchor was found in the corpus — an anchor was renamed or dropped, so its \
+         derivation is going unchecked"
+    );
     assert!(
         wrong.is_empty(),
         "derive_form_set disagrees with the hand-audited anchor sets — fix the derivation, not the \
@@ -781,16 +940,56 @@ fn derived_form_set_reproduces_the_twelve_anchors() {
     );
 }
 
+/// The §8 make-check SAMPLE stride: one in every `SAMPLE_STRIDE` GENERATED households is kept (all
+/// anchors + both §5.1 pinned cells are ALWAYS kept). Sized so the un-parallelizable whole-corpus
+/// property tests stay inside the `make check` budget; the full corpus runs in their `#[ignore]` twins.
+const SAMPLE_STRIDE: usize = 15;
+
+/// The bounded, DETERMINISTIC make-check SAMPLE (§8 runtime fallback). A single `#[test]` — byte
+/// reproducibility, the identity sweep, the form-set check — cannot be split across cores the way the
+/// sharded differential can, so re-filling all ~104 households in each would blow the `make check` budget.
+/// The sample keeps EVERY anchor (they carry every deeper-line / form-set teeth scenario and the
+/// methodology class) and BOTH §5.1 pinned cells (the provenance classes), plus every `SAMPLE_STRIDE`-th
+/// generated covering-array row for breadth. The DIFFERENTIAL itself still runs the FULL corpus in
+/// `make check` (it shards across cores); only these three property tests take the sample, with their
+/// `#[ignore]`d `*_whole_corpus` twins covering all ~104 on demand / in CI.
+fn sample_households() -> Vec<GoldenHousehold> {
+    let mut generated = 0usize;
+    golden_households()
+        .into_iter()
+        .filter(|h| {
+            if h.name.starts_with("ca_") {
+                let keep = generated.is_multiple_of(SAMPLE_STRIDE);
+                generated += 1;
+                keep
+            } else {
+                true // every hand-audited anchor + both §5.1 pinned cells
+            }
+        })
+        .collect()
+}
+
+/// The 12 anchors + 2 §5.1 pinned cells (the non-generated households) — every filler and FORM TYPE, and
+/// both provenance classes. The "every form type" property tests (byte-reproducibility, the identity
+/// sweep) take THIS rather than the wider sample: the generated covering array adds no new serialization
+/// path or form type, and re-filling it in a single un-parallelizable `#[test]` would cost budget for no
+/// coverage. Their `#[ignore]` twins still run the whole corpus.
+fn anchors_and_pinned() -> Vec<GoldenHousehold> {
+    golden_households()
+        .into_iter()
+        .filter(|h| !h.name.starts_with("ca_"))
+        .collect()
+}
+
 /// ★ **Exactly the forms the DERIVED law requires — no more, no fewer.** The whole-corpus check, now
 /// against `derive_form_set` rather than a hand-written map, so it scales to the T11 corpus.
 ///
 /// A DROPPED form understates the return (P6 found Schedule 3 missing its line 10, and a filer billed
 /// twice for tax already paid). A SPURIOUS form makes an assertion the filer did not intend: an empty
 /// Schedule SE stapled to a W-2 filer's return tells the IRS they had self-employment income.
-#[test]
-fn each_golden_packet_carries_exactly_the_forms_the_derived_law_requires() {
+fn assert_packets_carry_the_derived_forms(households: &[GoldenHousehold]) {
     let mut wrong = Vec::new();
-    for h in &golden_households() {
+    for h in households {
         let want: BTreeSet<String> = derive_form_set(&h.inputs).iter().map(|s| s.to_string()).collect();
         let got: BTreeSet<String> = packet(h).iter().map(|f| f.name.clone()).collect();
         let missing: Vec<_> = want.difference(&got).collect();
@@ -807,6 +1006,19 @@ fn each_golden_packet_carries_exactly_the_forms_the_derived_law_requires() {
         "the assembled packet is not the return the DERIVED law requires:\n{}",
         wrong.join("\n")
     );
+}
+
+#[test]
+fn each_golden_packet_carries_exactly_the_forms_the_derived_law_requires() {
+    assert_packets_carry_the_derived_forms(&sample_households());
+}
+
+/// The full-corpus twin (§8) — validates `derive_form_set` against the assembler over ALL ~104 households
+/// (the safety net if a generated scenario lands on a form-set edge). `#[ignore]`d: run on demand / in CI.
+#[test]
+#[ignore = "full corpus (~104) — the make-check gate runs the sample; run in CI / on demand"]
+fn each_golden_packet_carries_exactly_the_forms_whole_corpus() {
+    assert_packets_carry_the_derived_forms(&golden_households());
 }
 
 // ══════════════════════════ the packet as an ARTIFACT: identity, determinism, one anchor ═══════════
@@ -842,8 +1054,7 @@ fn a_w2_only_household_gets_no_schedule_se_and_no_schedule_c() {
 /// A schedule that arrives at the IRS without an SSN on it is a loose page. This iterates the WHOLE
 /// packet for EVERY household rather than pinning one form — the P6 review found an unnamed Form 8949
 /// precisely because a test that checked one form had promised to check all of them.
-#[test]
-fn every_form_of_every_golden_packet_carries_the_filers_identity() {
+fn assert_every_form_carries_the_filers_identity(households: &[GoldenHousehold]) {
     // The map key under which each form carries its identity block, and the map to read it with.
     let maps: BTreeMap<&str, &str> = BTreeMap::from([
         ("f1040", F1040_MAP_2024),
@@ -864,7 +1075,7 @@ fn every_form_of_every_golden_packet_carries_the_filers_identity() {
     let mut naked: Vec<String> = Vec::new();
     let mut seen = 0;
 
-    for h in &golden_households() {
+    for h in households {
         for f in &packet(h) {
             let Some(map) = maps.get(f.name.as_str()) else {
                 panic!(
@@ -904,6 +1115,20 @@ fn every_form_of_every_golden_packet_carries_the_filers_identity() {
     );
 }
 
+#[test]
+fn every_form_of_every_golden_packet_carries_the_filers_identity() {
+    // The identity property is per FORM TYPE; the anchors + pinned cells carry every form type, so this
+    // runs them (not the wider sample) to stay cheap. The whole corpus runs in the `#[ignore]` twin.
+    assert_every_form_carries_the_filers_identity(&anchors_and_pinned());
+}
+
+/// The full-corpus twin (§8) — the identity sweep over ALL ~104 households. `#[ignore]`d: on demand / CI.
+#[test]
+#[ignore = "full corpus (~104) — the make-check gate runs the sample; run in CI / on demand"]
+fn every_form_carries_the_filers_identity_whole_corpus() {
+    assert_every_form_carries_the_filers_identity(&golden_households());
+}
+
 /// ★ **The same return fills to the same bytes.** Twice, for every household.
 ///
 /// Each individual filler already pins its own content hash, but nothing until now asserted the
@@ -911,9 +1136,8 @@ fn every_form_of_every_golden_packet_carries_the_filers_identity() {
 /// serializes a dozen documents — is reproducible end to end. Anything non-deterministic that leaked
 /// into the output (a hash-map iteration order reaching a page tree, a timestamp, a fresh object id)
 /// would show up here and nowhere else. A return you cannot reproduce is a return you cannot attest to.
-#[test]
-fn the_whole_packet_is_byte_reproducible() {
-    for h in &golden_households() {
+fn assert_the_whole_packet_is_byte_reproducible(households: &[GoldenHousehold]) {
+    for h in households {
         let a = packet(h);
         let b = packet(h);
 
@@ -941,6 +1165,22 @@ fn the_whole_packet_is_byte_reproducible() {
             );
         }
     }
+}
+
+#[test]
+fn the_whole_packet_is_byte_reproducible() {
+    // Byte-reproducibility is a per-fill DETERMINISM property, and it fills each household TWICE — the
+    // heaviest whole-corpus test. The anchors + both pinned cells already exercise every filler and form
+    // type, so this runs THEM rather than the wider sample. The full corpus is covered by the `#[ignore]`
+    // twin.
+    assert_the_whole_packet_is_byte_reproducible(&anchors_and_pinned());
+}
+
+/// The full-corpus twin (§8) — byte reproducibility over ALL ~104 households. `#[ignore]`d: on demand / CI.
+#[test]
+#[ignore = "full corpus (~104) — the make-check gate runs the sample; run in CI / on demand"]
+fn the_whole_packet_is_byte_reproducible_whole_corpus() {
+    assert_the_whole_packet_is_byte_reproducible(&golden_households());
 }
 
 /// ★ **The §164(b)(5) SALT cap is applied ON THE PAPER, not just in the engine.**

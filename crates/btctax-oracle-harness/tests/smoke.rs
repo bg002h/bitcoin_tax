@@ -108,17 +108,10 @@ fn the_amt_screen_anchor_is_reported_refused_in_default_mode() {
     assert!(out.get("lines").is_none(), "a refused scenario carries no lines");
 }
 
-#[test]
-fn check_mode_reconciles_every_line_of_every_admitted_golden_household() {
-    // The golden matrix is green by construction (the T6 paper differential passes on all twelve), so
-    // `--check` must return `all_reconciled` for every household btctax ADMITS — exercising the
-    // cross-foots (L24, SE L12, 8959 L18), the L16 methodology class, NIIT, and the SALT cap across the
-    // whole matrix, not one anchor. The lone AMT-screen anchor is (correctly) refused instead.
-    let matrix: serde_json::Value =
-        serde_json::from_str(GOLDEN_RETURNS_JSON).expect("the golden matrix parses");
-    let households = matrix["households"].as_array().expect("households array");
-    assert!(households.len() >= 12, "the matrix carries the twelve anchors");
-
+/// Drive `--check` over `households` and assert every ADMITTED one reconciles on every compared line
+/// (the golden matrix is green by construction), and that exactly the AMT-screen anchor is refused.
+/// Each call SPAWNS the harness subprocess per household, so this is inherently serial.
+fn sweep_check_reconciliation(households: &[serde_json::Value]) {
     let mut refused: Vec<String> = Vec::new();
     let mut admitted = 0;
     for household in households {
@@ -142,4 +135,40 @@ fn check_mode_reconciles_every_line_of_every_admitted_golden_household() {
         "exactly the known AMT-screen anchor should be refused; a change here means the AMT screen's \
          behavior moved — update EXPECTED_REFUSED deliberately, don't paper over it"
     );
+}
+
+/// ★ The make-check sweep: the 12 hand-audited ANCHORS + the 2 §5.1 PINNED cells (the non-`ca_` names).
+/// Together they exercise EVERY reconciliation category `--check` implements — the L16 methodology class
+/// (Table anchors), BOTH per-oracle provenance classes (the pinned cells), the C1 cross-foots (L24, SE
+/// L12, 8959 L18), NIIT, the SALT cap and the deeper lines. The generated covering array is swept
+/// differentially in `make check` by the sharded `golden_packet` (and by the `#[ignore]` twin below); a
+/// serial subprocess-per-household loop over all ~104 here would blow the `make check` budget (§8).
+#[test]
+fn check_mode_reconciles_every_line_of_the_anchors_and_pinned_cells() {
+    let matrix: serde_json::Value =
+        serde_json::from_str(GOLDEN_RETURNS_JSON).expect("the golden matrix parses");
+    let households: Vec<serde_json::Value> = matrix["households"]
+        .as_array()
+        .expect("households array")
+        .iter()
+        .filter(|h| !h["name"].as_str().unwrap_or("").starts_with("ca_"))
+        .cloned()
+        .collect();
+    assert!(
+        households.len() >= 12,
+        "the matrix carries the twelve anchors + the two pinned cells"
+    );
+    sweep_check_reconciliation(&households);
+}
+
+/// The whole-corpus twin (§8) — `--check` reconciles every line of ALL ~104 admitted households. A serial
+/// subprocess-per-household loop, so `#[ignore]`d by default: run on demand / in CI.
+#[test]
+#[ignore = "full corpus (~104), serial subprocess per household — make-check sweeps the anchors + pinned cells; run in CI / on demand"]
+fn check_mode_reconciles_every_line_of_every_admitted_golden_household() {
+    let matrix: serde_json::Value =
+        serde_json::from_str(GOLDEN_RETURNS_JSON).expect("the golden matrix parses");
+    let households = matrix["households"].as_array().expect("households array");
+    assert!(households.len() >= 100, "the whole T11 corpus");
+    sweep_check_reconciliation(households);
 }

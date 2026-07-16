@@ -49,8 +49,9 @@ use std::io::Read;
 
 use btctax_core::conventions::{round_dollar, Usd};
 use btctax_core::tax::oracle_diff::{
-    round_leaf, stacking_ok, sum_round, taxcalc_methodology_class, L16Operands,
+    round_leaf, stacking_ok, sum_round, taxcalc_methodology_class, usd, L16Operands,
 };
+use btctax_core::tax::FilingStatus;
 use btctax_core::tax::packet::{assemble_printed_return, PrintedReturn};
 use btctax_core::tax::return_1040::{
     assemble_absolute, screen_absolute, screen_compute_dependent, AbsoluteReturn,
@@ -134,6 +135,10 @@ fn run_check(stdin: &str) -> Value {
 
     let e = &h.expected_ots;
     let t = &h.expected_taxcalc;
+    // The oracles' OWN L16 operands (baked provenance leaves) — so the per-oracle provenance classes can
+    // absorb the §5.1 pinned cells' L16 dissent (bin-edge ⇒ OTS, cents-flip ⇒ taxcalc). `None` pre-bake.
+    let ots_ops = oracle_ops(pr.filing_status, e.taxable_income, e.qual_div_l3a, e.net_ltcg_qd_exclusive);
+    let taxcalc_ops = oracle_ops(pr.filing_status, t.taxable_income, t.qual_div_l3a, t.net_ltcg_qd_exclusive);
     let mut verdicts: Vec<Value> = Vec::new();
 
     // Paper reader off the flattened line map (whole dollars, SPEC §3.1). `None` ⇒ the line is not on
@@ -150,9 +155,14 @@ fn run_check(stdin: &str) -> Value {
         "1040.line11", "AGI (1040 L11)",
         paper("1040.line11"), round_dollar(ar.agi), e.adjusted_gross_income, t.adjusted_gross_income,
     ));
-    verdicts.push(verdict_both(
+    // Taxable income (L15) — the C1 CROSS-FOOT (AGI − deduction − QBI, each line-rounded from the oracle's
+    // own leaves), floored at 0: matches btctax's whole-dollar L15 and dissolves the 8995-chain
+    // rounding-order residual. Both oracles stay exact witnesses.
+    verdicts.push(verdict_both_targets(
         "1040.line15", "taxable income (L15)",
-        paper("1040.line15"), round_dollar(ar.taxable_income), e.taxable_income, t.taxable_income,
+        paper("1040.line15"), round_dollar(ar.taxable_income),
+        ti_crossfoot(e.adjusted_gross_income, e.deduction_taken, e.qbi_deduction, e.taxable_income),
+        ti_crossfoot(t.adjusted_gross_income, t.deduction_taken, t.qbi_deduction, t.taxable_income),
     ));
     // L13 is on every return (0 when there is no QBI): absent-or-present-"0" both mean $0.
     verdicts.push(verdict_both(
@@ -166,7 +176,8 @@ fn run_check(stdin: &str) -> Value {
     verdicts.push(verdict_l16(
         "1040.line16", "tax (L16)",
         paper("1040.line16"), round_dollar(ar.regular_tax),
-        e.income_tax_before_credits, t.income_tax_before_credits, &reproduced,
+        e.income_tax_before_credits, t.income_tax_before_credits,
+        ots_ops.as_ref(), taxcalc_ops.as_ref(), &reproduced,
     ));
 
     // ── The C1 cross-foot reproductions, hoisted so L24 INHERITS them (pre-T11 the legs are `None`, so
@@ -183,8 +194,11 @@ fn run_check(stdin: &str) -> Value {
     // ── TOTAL TAX L24 — OTS single-witness cross-foot that inherits SE-L12 / 8959-L18:
     //    `round_leaf(L16) + SE-L12 + 8959-L18 + round_leaf(NIIT)`. line17 (AMT/APTC) and line21
     //    (credits) are read as the precondition (must be 0 for an admitted scenario) and echoed. ────────
+    // L16 leg = btctax's OWN FILED L16 (the value summed into printed L24), not the oracle's L16 — the L16
+    // VALUE is adjudicated separately by verdict_l16 (with its provenance/methodology class). Keeps L24
+    // reconciled on the §5.1 pinned cells while still catching a real cross-foot / Sch-2-leg / L16 bug.
     let l24_target =
-        round_leaf(e.income_tax_before_credits) + se_l12_ots + f8959_l18_ots + round_leaf(e.niit);
+        pr.forms.f1040.line16 + se_l12_ots + f8959_l18_ots + round_leaf(e.niit);
     let mut l24 = verdict_ots(
         "1040.line24", "TOTAL TAX (L24)", paper("1040.line24"), pr.forms.f1040.line24, l24_target,
     );
@@ -291,9 +305,8 @@ fn run_check(stdin: &str) -> Value {
     })
 }
 
-/// A line held against BOTH oracles (`round_leaf` both sides) — AGI / taxable income / QBI deduction.
-/// Reconciled iff the on-paper whole dollars equal each oracle's `round_leaf`. No class absorbs a
-/// dissent here (these are the exact-vs-both lines).
+/// A line held against BOTH oracles (`round_leaf` both sides) — AGI / QBI deduction. Reconciled iff the
+/// on-paper whole dollars equal each oracle's `round_leaf`. No class absorbs a dissent here.
 fn verdict_both(line: &str, label: &str, on_paper: Option<i64>, internal: Usd, ots: f64, taxcalc: f64) -> Value {
     let o = round_leaf(ots);
     let tc = round_leaf(taxcalc);
@@ -302,17 +315,62 @@ fn verdict_both(line: &str, label: &str, on_paper: Option<i64>, internal: Usd, o
     verdict(line, label, on_paper, internal, Some(o), Some(tc), reconciled, if reconciled { "agree-both" } else { "diverge" })
 }
 
-/// Tax L16 — reconciled iff `stacking_ok` accepts it (agree, or the taxcalc methodology/provenance class
-/// explains the dissent while OTS agrees). The class NAME is diagnostic; `reconciled` is `stacking_ok`'s
-/// authoritative verdict, not a re-derivation.
-fn verdict_l16(line: &str, label: &str, on_paper: Option<i64>, internal: Usd, ots16: f64, tc16: f64, reproduced: &L16Operands) -> Value {
+/// A line held against BOTH oracles at PRE-COMPUTED whole-dollar targets (not `round_leaf` of a total) —
+/// used for 1040 L15, whose target is the C1 cross-foot [`ti_crossfoot`].
+fn verdict_both_targets(line: &str, label: &str, on_paper: Option<i64>, internal: Usd, ots: Usd, taxcalc: Usd) -> Value {
+    let p = on_paper.map(Usd::from);
+    let reconciled = p == Some(ots) && p == Some(taxcalc);
+    verdict(line, label, on_paper, internal, Some(ots), Some(taxcalc), reconciled, if reconciled { "agree-both" } else { "diverge" })
+}
+
+/// Reproduce btctax's whole-dollar 1040 L15 from an oracle's OWN line-rounded component leaves (C1 table):
+/// `round_leaf(AGI) − round_leaf(deduction) − round_leaf(QBI)`, floored at 0 (L15 "if zero or less, enter
+/// -0-"). Matches btctax's whole-dollar `L11 − L12 − L13`, so the 8995-chain rounding-order residual never
+/// appears. `None` deduction leaf (pre-T11) ⇒ HEAD fallback `round_leaf(total)`.
+fn ti_crossfoot(agi: f64, deduction_taken: Option<f64>, qbi_deduction: f64, total: f64) -> Usd {
+    match deduction_taken {
+        Some(ded) => (round_leaf(agi) - round_leaf(ded) - round_leaf(qbi_deduction)).max(Usd::ZERO),
+        None => round_leaf(total),
+    }
+}
+
+/// An oracle's OWN §1(h) L16 operands, from its baked provenance leaves — `Some` post-T11 so the
+/// per-oracle provenance class can witness the §5.1 pinned cells; `None` while a leaf is unbaked.
+fn oracle_ops(status: FilingStatus, taxable_income: f64, qual_div_l3a: Option<f64>, net_ltcg_qd_exclusive: Option<f64>) -> Option<L16Operands> {
+    match (qual_div_l3a, net_ltcg_qd_exclusive) {
+        (Some(qd), Some(ltcg)) => Some(L16Operands {
+            status,
+            ti: usd(taxable_income),
+            qd_l3a: usd(qd),
+            net_ltcg_qd_excl: usd(ltcg),
+        }),
+        _ => None,
+    }
+}
+
+/// Tax L16 — reconciled iff `stacking_ok` accepts it (agree, or a per-oracle provenance / the taxcalc
+/// methodology class explains the dissent). The class NAME is diagnostic; `reconciled` is `stacking_ok`'s
+/// authoritative verdict, not a re-derivation. `ots_ops`/`taxcalc_ops` are each oracle's OWN baked L16
+/// operands, so the provenance classes can witness the §5.1 pinned cells.
+#[allow(clippy::too_many_arguments)]
+fn verdict_l16(
+    line: &str,
+    label: &str,
+    on_paper: Option<i64>,
+    internal: Usd,
+    ots16: f64,
+    tc16: f64,
+    ots_ops: Option<&L16Operands>,
+    taxcalc_ops: Option<&L16Operands>,
+    reproduced: &L16Operands,
+) -> Value {
     let o = round_leaf(ots16);
     let tc = round_leaf(tc16);
     let Some(pi) = on_paper else {
         return verdict(line, label, on_paper, internal, Some(o), Some(tc), false, "absent");
     };
     let p = Usd::from(pi);
-    let reconciled = stacking_ok(p, ots16, Some(tc16), None, None, reproduced, None);
+    let reconciled = stacking_ok(p, ots16, Some(tc16), ots_ops, taxcalc_ops, reproduced, None);
     let class = if p == o && p == tc {
         "agree-both"
     } else if reconciled {
