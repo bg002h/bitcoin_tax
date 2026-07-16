@@ -9,6 +9,7 @@
 use crate::conventions::{round_dollar, Usd};
 use crate::tax::method::{qdcgt_line16, TAX_TABLE_CEILING};
 use crate::tax::testonly::ty2024_table;
+use std::collections::BTreeSet;
 
 /// An oracle's finite `f64` figure as exact [`Usd`] — the `golden_usd` convention (a NaN/∞ oracle
 /// figure is a generator bug, not a tax case, so it panics rather than silently coercing).
@@ -89,6 +90,169 @@ pub fn consulted_table(
     l5 < TAX_TABLE_CEILING || ti < TAX_TABLE_CEILING
 }
 
+// ─── Divergence-class machinery (§6.2/§6.4, the intricate core) ───────────────────────────────────
+//
+// When btctax's figure on a line disagrees with an oracle, the disagreement is only tolerated if it
+// falls into a *named, lawful class* — a methodology difference we expect, or a per-oracle provenance
+// difference we can independently witness on that oracle's own leaves. Anything else is btctax alone
+// against the world, which is the exact shape of a confidently-wrong engine, and it fails.
+
+/// Which independent oracle a leaf/figure came from. OTS carries only a provenance class; taxcalc
+/// carries both a methodology class (Tax-Table vs schedule) and a provenance class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OracleId {
+    /// OpenTaxSolver.
+    Ots,
+    /// Tax-Calculator (PSL `taxcalc`).
+    Taxcalc,
+}
+
+/// An oracle's *own* exact §1(h) line-16 leaves (not btctax's) — `ti` = 1040 L15, `qd_l3a` = L3a,
+/// `net_ltcg_qd_excl` = the §1(h) net capital gain QD-exclusive. Uniform arity so the four fields feed
+/// [`table_l16`]/[`consulted_table`] directly. Reproducing an oracle's L16 means running *these* leaves
+/// through btctax's own worksheet — a paper-to-paper comparison, never a printed dollar vs an exact float.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct L16Operands {
+    /// 1040 filing status.
+    pub status: crate::tax::FilingStatus,
+    /// 1040 line 15 (taxable income).
+    pub ti: Usd,
+    /// 1040 line 3a (qualified dividends).
+    pub qd_l3a: Usd,
+    /// The §1(h) net capital gain, QD-exclusive.
+    pub net_ltcg_qd_excl: Usd,
+}
+
+/// **taxcalc methodology class** (r3-I1) — the *condition* under which a btctax-vs-taxcalc line-16
+/// disagreement is an expected Tax-Table-vs-schedule methodology difference: btctax's worksheet
+/// CONSULTED the IRS Tax Table on these operands while taxcalc always uses the continuous schedule.
+///
+/// Condition-only — **no value check** (r4-N1 declined: a value check under-absorbs mixed
+/// methodology+provenance households; the OTS provenance conjunct under [`stacking_ok`] is the backstop
+/// against a genuine below-ceiling taxcalc bug — if taxcalc were wrong and OTS right, OTS would dissent
+/// from btctax and its provenance conjunct-1 would fail, re-opening the line).
+pub fn taxcalc_methodology_class(reproduced_ops: &L16Operands) -> bool {
+    consulted_table(
+        reproduced_ops.status,
+        reproduced_ops.ti,
+        reproduced_ops.qd_l3a,
+        reproduced_ops.net_ltcg_qd_excl,
+    )
+}
+
+/// **Per-oracle provenance class** (§6.2(b), r4-I1) — fires iff btctax's OWN Tax-Table lookup, run on
+/// the *oracle's* leaves, reproduces the oracle's printed L16 (`table_l16(oracle_ops) ==
+/// round_leaf(oracle_l16)` — the falsifiable witness: a real `Table_btctax` semantics bug fails this
+/// conjunct and stays red) AND does *not* reproduce it on btctax's own leaves (`table_l16(reproduced_ops)
+/// != round_leaf(oracle_l16)` — so the class only fires where the two genuinely diverge).
+///
+/// `oracle_ops == None` (the oracle's L16 leaves are not yet baked, i.e. pre-T11) ⇒ **`false`, the class
+/// CANNOT fire** (M4). A default of `true` would make the anti-world guard vacuous — this `None` arm is
+/// the named mutation-check target.
+pub fn provenance_class_fires(
+    oracle_ops: Option<&L16Operands>,
+    reproduced_ops: &L16Operands,
+    oracle_l16: f64,
+) -> bool {
+    let Some(o) = oracle_ops else {
+        return false; // M4: leaves not baked ⇒ the class cannot fire (never vacuously true).
+    };
+    let oracle_printed = round_leaf(oracle_l16);
+    // Conjunct-1 (the witness): btctax's lookup reproduces the oracle's L16 on the oracle's own leaves.
+    table_l16(o.status, o.ti, o.qd_l3a, o.net_ltcg_qd_excl) == oracle_printed
+        // Conjunct-2: but NOT on btctax's own leaves — otherwise there is nothing to explain.
+        && table_l16(
+            reproduced_ops.status,
+            reproduced_ops.ti,
+            reproduced_ops.qd_l3a,
+            reproduced_ops.net_ltcg_qd_excl,
+        ) != oracle_printed
+}
+
+/// A caught btctax bug, pinned against an open `FOLLOWUPS.md` id (§10, user-mandated) — the ONE
+/// sanctioned way a both-oracle disagreement passes without a lawful class. Separate, loudly-named
+/// category; never a class. A stale pin (btctax's value moved — bug fixed or changed) fails
+/// [`stacking_ok`], forcing the entry's removal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KnownDefect {
+    /// The open `FOLLOWUPS.md` id this wrong value is pinned against.
+    pub fu_id: &'static str,
+    /// btctax's current (WRONG) value on the line — the guard passes only while `figure` still equals it.
+    pub btctax_value: Usd,
+}
+
+/// **The guard, in class form** (r3-I2a) — replaces the old `agrees_with:"neither"` + `outlier_alt`
+/// stack (`golden_returns.rs:358-372`). `figure` is btctax's value on the line (the on-paper value at
+/// the paper level, or the compute figure at the compute level). If `figure` agrees with an oracle,
+/// that oracle needs no class; a both-oracle disagreement passes **only when each dissenting oracle's
+/// diff independently matches its own class** — taxcalc: methodology OR its provenance; OTS: its
+/// provenance. `taxcalc_l16 == None` means taxcalc reports no comparable figure on this line, so it
+/// does not dissent and needs no class.
+///
+/// The ONE sanctioned exception (§10): a `KnownDefect` declared for this `(household, line)` whose
+/// `btctax_value` still equals `figure` also passes — pinning btctax's current wrong value against an
+/// open FOLLOWUPS id.
+#[allow(clippy::too_many_arguments)]
+pub fn stacking_ok(
+    figure: Usd,
+    ots_l16: f64,
+    taxcalc_l16: Option<f64>,
+    ots_ops: Option<&L16Operands>,
+    taxcalc_ops: Option<&L16Operands>,
+    reproduced_ops: &L16Operands,
+    known_defect: Option<&KnownDefect>,
+) -> bool {
+    // OTS: agree, or its provenance class explains the dissent (OTS has no methodology class).
+    let ots_ok =
+        figure == round_leaf(ots_l16) || provenance_class_fires(ots_ops, reproduced_ops, ots_l16);
+    // taxcalc: no opinion ⇒ not dissenting; else agree, or its methodology OR provenance class explains it.
+    let taxcalc_ok = match taxcalc_l16 {
+        None => true,
+        Some(v) => {
+            figure == round_leaf(v)
+                || taxcalc_methodology_class(reproduced_ops)
+                || provenance_class_fires(taxcalc_ops, reproduced_ops, v)
+        }
+    };
+    // The §10 caught-bug pin: passes only while btctax's value still equals the pinned wrong value
+    // (a stale pin fails here, forcing removal).
+    let known_defect_pins = known_defect.is_some_and(|kd| figure == kd.btctax_value);
+
+    (ots_ok && taxcalc_ok) || known_defect_pins
+}
+
+/// **Class-liveness ledger** (r3-I2b) — the predicate analogue of the never-fired sweep at
+/// `golden_returns.rs:388-401`. A declared divergence class that never `fired` and is not held by a
+/// `pinned` §5.1 cell is DEAD: it explains a disagreement that no longer happens and is now just an
+/// unread claim about the tax code, to be deleted.
+#[derive(Debug, Clone, Default)]
+pub struct LivenessLedger {
+    fired: BTreeSet<&'static str>,
+    pinned: BTreeSet<&'static str>,
+}
+
+impl LivenessLedger {
+    /// Record that `class` fired (a real household exercised it this run).
+    pub fn record_fire(&mut self, class: &'static str) {
+        self.fired.insert(class);
+    }
+
+    /// Record that `class` is held alive by a pinned §5.1 cell (kept without needing to fire).
+    pub fn declare_pinned(&mut self, class: &'static str) {
+        self.pinned.insert(class);
+    }
+
+    /// The `declared` classes that are neither fired nor pinned — the dead ones (N4). Preserves the
+    /// caller's declaration order.
+    pub fn dead(&self, declared: &[&'static str]) -> Vec<&'static str> {
+        declared
+            .iter()
+            .copied()
+            .filter(|c| !self.fired.contains(c) && !self.pinned.contains(c))
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,5 +285,77 @@ mod tests {
         assert!(consulted_table(FilingStatus::Single, usd(112_400.0), usd(8_000.0), usd(25_000.0)));
         // TI 253_943, no preferential ⇒ remainder = TI ≥ ceiling ⇒ false.
         assert!(!consulted_table(FilingStatus::Mfj, usd(253_943.0), usd(0.0), usd(0.0)));
+    }
+
+    // taxcalc methodology class fires on single_qdcgt_both_slices (remainder below ceiling), the anchor
+    // the old "TI < $100k" gloss wrongly excluded (r3-I1).
+    #[test]
+    fn methodology_class_fires_on_qdcgt_both_slices() {
+        let ops = L16Operands { status: FilingStatus::Single, ti: usd(112_400.0), qd_l3a: usd(8_000.0), net_ltcg_qd_excl: usd(25_000.0) };
+        assert!(taxcalc_methodology_class(&ops));
+    }
+
+    // Below the ceiling the taxcalc PROVENANCE conjunct-1 fails (Table_btctax bins; taxcalc uses the schedule)
+    // ⇒ the provenance class cannot fire/over-absorb there (§6.4 composition).
+    #[test]
+    fn taxcalc_provenance_cannot_fire_below_ceiling() {
+        // single_crypto_business_se: taxcalc TI 70_008.908, L16 10_454.96 (baked); Table_btctax bins to 10_459.
+        let ops = L16Operands { status: FilingStatus::Single, ti: usd(70_008.908), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
+        assert!(!provenance_class_fires(Some(&ops), &ops, 10_454.96));
+    }
+
+    // A real Table_btctax semantics bug fails conjunct-1 ⇒ NOT absorbed (teeth). Simulated by feeding an
+    // oracle L16 that btctax's own lookup does NOT reproduce on the oracle's operands.
+    #[test]
+    fn provenance_class_keeps_teeth_against_a_semantics_mismatch() {
+        let ops = L16Operands { status: FilingStatus::Mfj, ti: usd(253_942.94), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
+        assert!(!provenance_class_fires(Some(&ops), &ops, 99_999.0)); // 99,999 ≠ Table_btctax(253,942.94)
+    }
+
+    // ★ M4 (the NAMED mutation target): with the oracle's L16 leaves not yet baked (pre-T11), the
+    // provenance class CANNOT fire — `None` must return false, never vacuously true, or the whole
+    // anti-world guard is dead weight for the entire pre-T11 period.
+    #[test]
+    fn provenance_class_cannot_fire_without_baked_oracle_leaves() {
+        let ops = L16Operands { status: FilingStatus::Single, ti: usd(112_400.0), qd_l3a: usd(8_000.0), net_ltcg_qd_excl: usd(25_000.0) };
+        assert!(!provenance_class_fires(None, &ops, 17_477.0)); // oracle_ops absent ⇒ false
+    }
+
+    // stacking_ok — below the ceiling, a taxcalc dissent (schedule vs Tax Table) is ABSORBED by the
+    // methodology class while OTS agrees with btctax; the guard passes. (single_crypto_business_se:
+    // btctax L16 = 10_459 = OTS Tax-Table; taxcalc = 10_454.96 via the continuous schedule.)
+    #[test]
+    fn stacking_ok_absorbs_a_below_ceiling_methodology_dissent() {
+        let ops = L16Operands { status: FilingStatus::Single, ti: usd(70_008.908), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
+        assert!(stacking_ok(usd(10_459.0), 10_459.0, Some(10_454.96), None, None, &ops, None));
+    }
+
+    // stacking_ok — above the ceiling (methodology cannot fire) with no baked provenance leaves and no
+    // pin, btctax alone against BOTH oracles is REJECTED (the anti-world guard, incl. the M4 None arm).
+    #[test]
+    fn stacking_ok_rejects_btctax_alone_against_both() {
+        let ops = L16Operands { status: FilingStatus::Mfj, ti: usd(253_942.94), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
+        // btctax 47_030 (a hypothetical wrong value) vs OTS/taxcalc 47_031 — no class, no pin ⇒ fails.
+        assert!(!stacking_ok(usd(47_030.0), 47_031.31, Some(47_031.31), None, None, &ops, None));
+    }
+
+    // stacking_ok — the §10 KnownDefect pin holds btctax's caught-wrong value against both oracles while
+    // it still equals the pinned value, and a STALE pin (btctax's value moved) fails, forcing removal.
+    #[test]
+    fn stacking_ok_known_defect_pin_holds_then_goes_stale() {
+        let ops = L16Operands { status: FilingStatus::Mfj, ti: usd(253_942.94), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
+        let kd = KnownDefect { fu_id: "FU-EXAMPLE", btctax_value: usd(47_030.0) };
+        assert!(stacking_ok(usd(47_030.0), 47_031.31, Some(47_031.31), None, None, &ops, Some(&kd)));
+        assert!(!stacking_ok(usd(47_029.0), 47_031.31, Some(47_031.31), None, None, &ops, Some(&kd)));
+    }
+
+    // LivenessLedger: a declared-but-neither-fired-nor-pinned class is "dead".
+    #[test]
+    fn liveness_flags_a_dead_class() {
+        let mut l = LivenessLedger::default();
+        l.declare_pinned("ots_provenance");        // held by a §5.1 pinned cell
+        l.record_fire("taxcalc_methodology");
+        // "taxcalc_provenance" declared below but neither fired nor pinned ⇒ dead.
+        assert_eq!(l.dead(&["taxcalc_methodology","ots_provenance","taxcalc_provenance"]), vec!["taxcalc_provenance"]);
     }
 }
