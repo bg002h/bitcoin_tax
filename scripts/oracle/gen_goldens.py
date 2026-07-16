@@ -231,22 +231,49 @@ def admit(candidates):
     only if btctax assembles it AND both oracles report zero AMT and zero L21 credits:
 
       * btctax (the harness): `refused == false`, and paper **L17 == 0** (AMT/APTC) and **L21 == 0**
-        (credits) — the exact L24-cross-foot precondition (`golden_packet.rs:104-119`). The Form 6251
+        (credits) — the exact L24-cross-foot precondition (`golden_packet.rs:317-323`). The Form 6251
         AMT screen inside `assemble` makes `refused` the OTS-side AMT guard too (same assembled
         return; `ots_direct` is frozen at T8 and surfaces no AMT line of its own).
       * taxcalc (oracle 2): **c09600 == 0** (AMT) and **c07100 == 0** (nonrefundable credits → L21).
 
+    ★ The 12 anchors are the FIXED baseline (SPEC §5.1 / plan T10 Step 3 "~80–120 + 12 anchors + 2
+    pinned"): the D-2 **refusal** gate polices the GENERATED candidates, not the anchors, so an anchor
+    is EXEMPT from the refusal rejection and bakes verbatim even when the harness reports it `refused`.
+    Its substance is still checked — the taxcalc AMT/credit conjunct still applies to anchors — and the
+    harness-refusal is logged loudly (T12's live sweep skips such an anchor; `smoke.rs`'s
+    `EXPECTED_REFUSED` requires it baked so the `--check` refusal set is exactly this anchor). Today
+    only `mfj_high_income_niit_and_addl_medicare` is a refused-but-baked anchor (btctax's conservative
+    Form 6251 *screening* worksheet fires though actual AMT is $0 on both oracles). A refused GENERATED
+    candidate is still rejected, and a refused PINNED cell is still a hard error (checked in `main`).
+
     Returns `(admitted, rejected)` where `rejected` is a list of `(name, reason)` — logged, not dropped
     silently.
     """
+    anchor_names = {a["name"] for a in corpus.ANCHORS}
     amt_credits = _taxcalc_amt_credits([h["inputs"] for h in candidates])
     admitted, rejected = [], []
     for h, (amt, credits) in zip(candidates, amt_credits):
+        is_anchor = h["name"] in anchor_names
+        # The AMT/credit SUBSTANCE check applies to EVERYONE (anchors included): a scenario the oracles
+        # see AMT/credits on is not L24-comparable, full stop.
+        if amt or credits:
+            rejected.append((h["name"], f"taxcalc AMT c09600={amt} credits c07100={credits}"))
+            continue
         hv = _harness_default(h["inputs"])
         if hv.get("malformed"):  # pragma: no cover — a generator-side shape bug, not a tax case
             rejected.append((h["name"], f"harness rejected the scenario shape: {hv['stderr'][:100]}"))
             continue
         if hv["refused"]:
+            if is_anchor:
+                # Anchor exemption: bake verbatim despite the harness refusal, but say so loudly.
+                print(
+                    f"[anchor] {h['name']}: harness-refused (btctax's conservative Form 6251 AMT screen; "
+                    "actual AMT $0 on both oracles) — BAKED verbatim as a §5.1 anchor; the live sweep (T12) "
+                    "skips it.",
+                    file=sys.stderr,
+                )
+                admitted.append(h)
+                continue
             rejected.append((h["name"], "btctax REFUSED (AMT screen / QBI-over-threshold / unmodeled input)"))
             continue
         lines = hv["lines"]
@@ -254,9 +281,6 @@ def admit(candidates):
         l21 = int(lines.get("1040.line21", "0"))
         if l17 or l21:
             rejected.append((h["name"], f"btctax paper L17={l17} L21={l21} (AMT/credit ⇒ not L24-comparable)"))
-            continue
-        if amt or credits:
-            rejected.append((h["name"], f"taxcalc AMT c09600={amt} credits c07100={credits}"))
             continue
         admitted.append(h)
     return admitted, rejected
@@ -321,27 +345,25 @@ def main() -> None:
         file=sys.stderr,
     )
 
-    # The two pinned cells MUST admit — a dropped pinned cell cannot hold its L16 class live, so that
-    # is a hard error. An anchor that D-2 rejects is a LOUD warning, not a hard error: D-2 (refusal-
-    # free, the plan's "AMT-triggering scenarios OUT") is authoritative over the "12 anchors" wish, and
-    # a rejected anchor is a legitimate REJECTION (logged above), never a silent keep. (Today
-    # `mfj_high_income_niit_and_addl_medicare` trips btctax's conservative Form 6251 AMT *screening*
-    # worksheet — actual AMT is $0 on both oracles — so the harness refuses it and it drops out.)
+    # The two pinned cells MUST admit — a dropped pinned cell cannot hold its L16 class live. All 12
+    # anchors MUST admit — they are the fixed §5.1 baseline and are exempt from the refusal gate (only
+    # the taxcalc AMT/credit SUBSTANCE check can drop one, which would flag a genuine non-comparable
+    # anchor). A miss on either is a hard error, never a silent corpus shrink.
     admitted_names = {h["name"] for h in admitted}
     for cell in corpus.PINNED_CELLS:
         if cell["name"] not in admitted_names:  # pragma: no cover
             sys.exit(f"pinned cell {cell['name']!r} was REJECTED by admission — it cannot hold its class live.")
-    dropped_anchors = [a["name"] for a in corpus.ANCHORS if a["name"] not in admitted_names]
-    if dropped_anchors:
-        print(
-            f"[warn] {len(dropped_anchors)} anchor(s) dropped by D-2 admission (refusal-free / AMT-out): "
-            f"{dropped_anchors} — the baked anchor set is {len(corpus.ANCHORS) - len(dropped_anchors)}, "
-            "not 12; reconcile the golden-test anchor list at bake time (T11).",
-            file=sys.stderr,
-        )
+    for anchor in corpus.ANCHORS:
+        if anchor["name"] not in admitted_names:  # pragma: no cover
+            sys.exit(
+                f"anchor {anchor['name']!r} was dropped by admission (taxcalc AMT/credit substance check) — "
+                "an anchor the oracles see AMT/credits on is not L24-comparable; the corpus is broken."
+            )
 
-    # t=3 completeness on the two named triples, proven over the ADMITTED corpus (§5.1).
+    # t=3 completeness on the two named triples AND t=2 completeness elsewhere, proven over the
+    # ADMITTED corpus (§5.1) — a committed guard so a future axis edit cannot silently decay coverage.
     corpus.assert_named_triple_coverage(admitted)
+    corpus.assert_pairwise_t2_coverage(admitted)
 
     inputs = [h["inputs"] for h in admitted]
     ots = [ots_direct.evaluate(i) for i in inputs]

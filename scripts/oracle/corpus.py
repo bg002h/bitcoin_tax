@@ -289,14 +289,20 @@ def block_p():
                 best_val = "none" if axis in ("w2", "interest", "cap", "se") else values[0]
             assign[axis] = best_val
         if not _row_feasible(assign, full=True):
-            # A fully-assigned infeasible row (all-none): force a minimal income and retry feasibility.
-            assign["w2"] = "low"
+            # A fully-assigned infeasible row (all-none): inject minimal income on an income axis NOT
+            # pinned by the seed, so the seed pair is NEVER sacrificed (there are 5 income axes and only
+            # 2 seed axes, so a free one always exists).
+            seed_axes = {seed[0], seed[2]}
+            for inc_axis, inc_val in (("interest", "under"), ("cap", "LT"), ("div", "qual"), ("w2", "low")):
+                if inc_axis not in seed_axes and _row_feasible({**assign, inc_axis: inc_val}, full=False):
+                    assign[inc_axis] = inc_val
+                    break
         covered = _pairs_of(assign)
         newly = covered & remaining
-        if not newly:
-            # Safety: the seed pair must be covered; drop it to guarantee progress.
-            remaining.discard(seed)
-            continue
+        if not newly:  # the seed's two axes are pinned in `assign`, so the seed pair MUST be in
+            # `covered` ⇒ this is unreachable. A hard error (never a silent pair-sacrifice) so a future
+            # edit that breaks the invariant fails loudly instead of dropping a feasible t=2 pair.
+            raise RuntimeError(f"pairwise seed {seed} produced no new coverage — construction invariant broken")
         remaining -= covered
         inp = _build(assign["status"], assign["w2"], assign["interest"], assign["div"], assign["cap"], assign["se"], assign["dedsalt"])
         rows.append(
@@ -513,7 +519,7 @@ def _triple_b_cell(inp):
         inp.get(k, 0) for k in ("state_income_tax", "real_estate_tax", "mortgage_interest", "itemized_deductions")
     )
     salt_over = (inp.get("state_income_tax", 0) + inp.get("real_estate_tax", 0)) > 10_000
-    high = inp.get("w2_income", 0) >= W2["high"] or inp.get("self_employment_income", 0) >= W2["high"]
+    high = inp.get("w2_income", 0) >= W2["high"]  # the "high-income" leg is W-2-driven (SE never reaches it)
     salt = ("over" if salt_over else "under") if itemized else "na"
     return (itemized, salt, high)
 
@@ -531,9 +537,56 @@ def assert_named_triple_coverage(admitted):
     return len(want_a), len(want_b)
 
 
+def _reconstruct_cell(inp):
+    """Map a household's `inputs` back to its pairwise axis-value LABELS, or `None` when it is not a
+    clean covering-array cell (an anchor's bespoke wage / lump itemized / off-grid SE) — those add only
+    extra coverage and are skipped by the t=2 assertion, which guards the GENERATED construction."""
+    w2 = next((k for k, v in W2.items() if v == inp.get("w2_income", 0)), None)
+    interest = next((k for k, v in INTEREST.items() if v == inp.get("taxable_interest", 0)), None)
+    if w2 is None or interest is None:
+        return None
+    sev = inp.get("self_employment_income", 0)
+    if sev and sev not in (SE["present"], SE["over"]):
+        return None  # an anchor's off-grid Schedule-C profit
+    se = "over" if sev >= SE["over"] else ("present" if sev > 0 else "none")
+    div = "qual" if inp.get("qualified_dividends", 0) else "none"
+    if inp.get("long_term_capital_gains", 0) > 0:
+        cap = "LT"
+    elif inp.get("short_term_capital_gains", 0) > 0:
+        cap = "ST"
+    elif inp.get("short_term_capital_gains", 0) < 0:
+        cap = "loss"
+    else:
+        cap = "none"
+    if inp.get("standard_or_itemized") == "Itemized":
+        dedsalt = "io" if (inp.get("state_income_tax", 0) + inp.get("real_estate_tax", 0)) > 10_000 else "iu"
+    elif any(inp.get(k, 0) for k in ("state_income_tax", "real_estate_tax", "mortgage_interest", "itemized_deductions")):
+        return None  # itemized-by-components without the Itemized flag (anchor lump) — not a grid cell
+    else:
+        dedsalt = "std"
+    return {"status": inp["filing_status"], "w2": w2, "interest": interest, "div": div, "cap": cap, "se": se, "dedsalt": dedsalt}
+
+
+def assert_pairwise_t2_coverage(admitted):
+    """Prove t=2 completeness ("t=2 elsewhere"): every FEASIBLE axis-value PAIR co-occurs in ≥1 admitted
+    household. A committed guard so a future axis edit cannot silently decay the pairwise construction
+    (the `block_p` seed-injection is already hard-errored; this catches any residual gap end-to-end)."""
+    covered = set()
+    for h in admitted:
+        cell = _reconstruct_cell(h["inputs"])
+        if cell is not None:
+            covered |= _pairs_of(cell)
+    want = _all_feasible_pairs()
+    missing = want - covered
+    assert not missing, f"t=2 pairwise coverage incomplete; {len(missing)} feasible pair(s) missing: {sorted(missing)[:8]}"
+    return len(want)
+
+
 if __name__ == "__main__":  # a quick offline sanity dump (no oracles)
     hs = households()
     print(f"candidates: {len(hs)} (anchors {len(ANCHORS)} + pinned {len(PINNED_CELLS)} + generated {len(hs) - len(ANCHORS) - len(PINNED_CELLS)})")
     print(f"  block A {len(block_a())}, block B {len(block_b())}, block P {len(block_p())}")
     na, nb = assert_named_triple_coverage(hs)
     print(f"named-triple coverage OK on candidates: triple-A {na} combos, triple-B {nb} combos")
+    npairs = assert_pairwise_t2_coverage(hs)
+    print(f"pairwise t=2 coverage OK on candidates: {npairs} feasible pairs all covered")
