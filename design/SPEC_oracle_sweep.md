@@ -308,7 +308,10 @@ either a check that cannot fail or a source of undeclared reds:
   `agrees_with:"neither"` + `outlier_alt` stack (`golden_returns.rs:41-53, 358-372`), and *stronger*: a
   btctax Table bug matches neither predicate and stays red. Without this class-stacking rule a straddle
   household — *necessarily* a both-oracle disagreement (btctax taxes the bin midpoint, taxcalc the exact
-  schedule at the edge) — could never legally fire its class.
+  schedule at the edge) — could never legally fire its class. The **one** sanctioned exception is an
+  explicitly-declared **known-defect divergence** (§10) — a both-oracle disagreement where btctax is the one
+  that is wrong, pinned with an open follow-up id: the deliberate, loud escape hatch, never silent, and
+  structurally distinct from the lawful classes.
 - **Class liveness (r2-M6, r3-I2b, r4-I1):** every declared class fires for ≥1 corpus household **OR** carries
   a §5.1 pinned-cell obligation. The taxcalc **methodology** class is live via `single_qdcgt_both_slices` (+
   four more Table anchors, `golden_returns.rs:94-144`). The two **provenance** classes are occasional and the
@@ -388,16 +391,27 @@ require authoring a vault that *reconciles* to the same ledger — far from "thi
 the **same on-paper values** the CI test reads (r1 N-3). Never in the gating suite (needs the oracle
 binaries/venv; non-deterministic across seeds).
 
-## 10. Divergence lifecycle (r1 L-1)
+## 10. Divergence lifecycle (r1 L-1; caught-bug policy user-mandated 2026-07-16)
 
-Every sweep divergence is triaged into exactly one of: **btctax wrong** (compute or fill; the three-way
-report says which) → fix + freeze the scenario into the baked corpus as a regression; **btctax right, an
-oracle differs** → add or extend a declared divergence **class** (§6.4) and promote the scenario; **an
-oracle wrong** → record + exclude the line for that engine with a statute cite.
+Every divergence (baked corpus or sweep) is triaged into exactly one of:
+
+- **btctax is wrong** (compute or fill; the three-way report says which) → **file a `FOLLOWUPS.md` entry**
+  (with a severity and an owning phase, per STANDARD_WORKFLOW §4). **Fixing it is out of *this* project's
+  scope** — the harness reads-and-fails; a compute/fill fix is separate work (**user-mandated 2026-07-16:
+  caught bugs file follow-ups**). To keep the corpus green while the follow-up is open, the scenario is
+  pinned as a **declared known-defect divergence**: btctax's *current* (wrong) value is asserted, labelled
+  `KNOWN DEFECT → <FU-id>`, with the oracles' correct figures recorded beside it. A known-defect divergence
+  is a **separate, loudly-named category — never one of the §6.4 lawful classes** (so a bug can never
+  masquerade as a lawful difference), and it carries the follow-up id so it is burned down, not rotted. When
+  the fix lands (separate work), the scenario converts to an ordinary green agreement.
+- **btctax right, an oracle differs** → add or extend a declared divergence **class** (§6.4) and promote the
+  scenario;
+- **an oracle wrong** → record + exclude the line for that engine with a statute cite.
 
 **Invariant L-1:** the baked corpus is always fully green — every difference in it is covered by a declared
-class or is a promoted, reconciled scenario. The class mechanism (not per-household entries) is what keeps
-L-1 satisfiable as the corpus grows.
+lawful class, a promoted reconciled scenario, or a declared **known-defect** divergence carrying an open
+follow-up. Nothing is ever silently tolerated; the class / known-defect mechanisms (not per-household `dec!`
+entries) keep L-1 satisfiable as the corpus grows.
 
 ## 11. Engine-version drift policy (r1 M-3)
 

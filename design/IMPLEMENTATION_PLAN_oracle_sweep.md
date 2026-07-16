@@ -18,6 +18,7 @@
 - **Deeper-line and provenance assertions gate on `Option::Some`** — they are inert on the current baked JSON (fields default `None`) and activate only after the offline re-bake (T11). This is how each Rust task stays green before the corpus carries the data.
 - **MFS deferred; AMT-triggering scenarios OUT; dependents/credits OUT; TY2024 only.** The domain is {Single, MFJ}, refusal-free (D-2), itemizing-wins when itemized (D-3).
 - **Two-oracle common-mode limit is accepted** (an identical OTS+btctax Table bug is why taxcalc is in the design; not a defect to fix here).
+- **Caught bugs file FOLLOWUPS — they are NOT fixed in this plan (user-mandated 2026-07-16).** If a corpus scenario (T11) or a sweep run (T12) surfaces a genuine btctax fill/compute bug, file a `FOLLOWUPS.md` entry (severity + owning phase) and pin the scenario as a **declared known-defect divergence** (btctax's current value asserted, labelled `KNOWN DEFECT → <FU-id>`, the oracles' correct figures beside it) so `make check` stays green with the bug tracked — never weaken/skip a test, never fix compute/fill here (§10).
 - Reviews use **Fable** (standing user directive). Per task: TDD (write the failing test, watch it fail, implement, watch it pass, commit); mutation-check each new guard (delete it → a named test fails → restore via `cp` backup, never `git checkout` on uncommitted work). Fish shell: quote globs; `git commit -F -` via heredoc.
 
 ---
@@ -141,7 +142,8 @@ mod tests {
   - `struct L16Operands { status: FilingStatus, ti: Usd, qd_l3a: Usd, net_ltcg_qd_excl: Usd }` (an oracle's own leaves, exact);
   - `fn taxcalc_methodology_class(reproduced_ops: &L16Operands) -> bool` — the class **condition**: `consulted_table(reproduced_ops)` (r3-I1). Condition-only, no value check (r4-N1 declined — a value check under-absorbs mixed methodology+provenance households; backstopped by the OTS provenance conjunct under stacking).
   - `fn provenance_class_fires(oracle_ops: &L16Operands, reproduced_ops: &L16Operands, oracle_l16: f64) -> bool` — the **per-oracle provenance predicate** (§6.2(b), r4-I1): `table_l16(oracle_ops) == round_leaf(oracle_l16)` **AND** `table_l16(reproduced_ops) != round_leaf(oracle_l16)`. The first conjunct is the falsifiable witness — a real `Table_btctax` semantics bug fails it and stays red.
-  - `fn stacking_ok(paper: Usd, ots_l16: f64, taxcalc_l16: Option<f64>, ots_ops, taxcalc_ops, reproduced_ops) -> bool` — the guard's class-form (r3-I2a): if the paper agrees with an oracle that oracle needs no class; a both-oracle disagreement passes **only when each dissenting oracle's diff independently matches its own class** (taxcalc: methodology OR its provenance; OTS: its provenance). Replaces the old `agrees_with:"neither"` + `outlier_alt` stack (`golden_returns.rs:41-53,358-372`).
+  - `fn stacking_ok(paper: Usd, ots_l16: f64, taxcalc_l16: Option<f64>, ots_ops, taxcalc_ops, reproduced_ops, known_defect: Option<&KnownDefect>) -> bool` — the guard's class-form (r3-I2a): if the paper agrees with an oracle that oracle needs no class; a both-oracle disagreement passes **only when each dissenting oracle's diff independently matches its own class** (taxcalc: methodology OR its provenance; OTS: its provenance). Replaces the old `agrees_with:"neither"` + `outlier_alt` stack (`golden_returns.rs:41-53,358-372`). **One sanctioned exception (§10, user-mandated):** a both-oracle disagreement also passes when a `KnownDefect { fu_id: &'static str, btctax_value: Usd }` is declared for that `(household, line)` and `paper == btctax_value` — pinning btctax's current WRONG value against an open `FOLLOWUPS.md` id. A known-defect is a **separate, loudly-named category, never a lawful class**, and a stale one (btctax's value moved — bug fixed or changed) fails, forcing the entry's removal.
+  - `struct KnownDefect { fu_id: &'static str, btctax_value: Usd }` — the §10 caught-bug pin.
   - `struct LivenessLedger { fired: BTreeSet<&'static str>, pinned: BTreeSet<&'static str> }` with `fn record_fire(class)`, `fn declare_pinned(class)`, `fn dead() -> Vec<&'static str>` = declared classes neither fired nor pinned (r3-I2b, predicate analogue of `golden_returns.rs:388-401`).
 
 - [ ] **Step 1: Write the failing tests** — pin fire/refute against the named anchors and the composition (§6.2(b)/§6.4):
@@ -330,13 +332,14 @@ fn line7_is_signed_and_schedule_d_is_parenthesized_magnitude() {
 **Files:**
 - Modify: `crates/btctax-core/tests/goldens/full_return_goldens.json` (regenerated, offline)
 - Modify: `crates/btctax-core/tests/golden_returns.rs` + `crates/btctax-forms/tests/golden_packet.rs` (turn on the provenance-class **liveness** assertion; the deeper-line rows now have `Some` data and become live)
+- Modify (only if bugs surface): `FOLLOWUPS.md` (one known-defect entry per caught btctax bug — §10, user-mandated) + a `KnownDefect` pin in the test
 
 **Interfaces:**
 - Produces: the full baked corpus at the new schema; every deeper-line comparison and both provenance classes now active and green; the class-liveness guard asserts each declared class fired ≥1 or is pinned (both pinned cells now present).
 
 - [ ] **Step 1** (offline): `env OTS_DIR=… .venv/bin/python scripts/oracle/gen_goldens.py > crates/btctax-core/tests/goldens/full_return_goldens.json` (per the file header recipe).
 - [ ] **Step 2** enable the `LivenessLedger::dead()` assertion in both tests (it was deferred in T5/T6); the two pinned cells make the provenance classes live.
-- [ ] **Step 3** `make check` → green on the FULL corpus. Investigate any red as a real finding (a genuine btctax fill/compute bug the corpus now catches, or a corpus/steering error) — do **not** weaken the test. Re-measure the runtime; adjust the T6 shard count if the budget is exceeded (§8 fallback: anchors + sample in `make check`, full corpus in a CI-only test).
+- [ ] **Step 3** `make check` → green on the FULL corpus. Investigate any red: a **corpus/steering error** → fix the generator (T10); a **genuine btctax fill/compute bug** the corpus now catches → do **not** fix it here and do **not** weaken the test — **file a `FOLLOWUPS.md` entry** (severity + owning phase) and pin the scenario as a **declared known-defect divergence** (`KnownDefect { fu_id, btctax_value }`, `KNOWN DEFECT → <FU-id>`, oracle figures beside it) so `make check` goes green with the bug tracked (§10, user-mandated). Re-measure the runtime; adjust the T6 shard count if the budget is exceeded (§8 fallback: anchors + sample in `make check`, full corpus in a CI-only test).
 - [ ] **Step 4: Commit** — `feat(oracle-sweep): regenerate baked corpus (~NN households); activate deeper lines + provenance classes (T11)`
 
 ---
@@ -348,7 +351,7 @@ fn line7_is_signed_and_schedule_d_is_parenthesized_magnitude() {
 
 **Interfaces:**
 - Consumes: `corpus.py` (threshold-biased seeded sampling), the T7 `oracle_harness` bin (btctax on-paper values), `ots_direct.evaluate` + `taxcalc_run` (live oracles), `oracle_diff`'s predicates re-expressed in Python OR (preferred) a `--check` mode of the harness that returns the classification. Decide at implementation; simplest is to reuse the harness for btctax values and re-run the reproduction in Python.
-- Produces: `sweep.py --seed N --count K` → for each seeded threshold-biased scenario (§5.2; honors D-2/D-3), diff the full line set live and emit a **divergence report** (the scenario as a paste-ready household dict, the disagreeing line, `oracle-1 / oracle-2 / btctax-on-paper`, the seed+index). Never in `make check`.
+- Produces: `sweep.py --seed N --count K` → for each seeded threshold-biased scenario (§5.2; honors D-2/D-3), diff the full line set live and emit a **divergence report** (the scenario as a paste-ready household dict, the disagreeing line, `oracle-1 / oracle-2 / btctax-on-paper`, the seed+index). A genuine btctax bug the sweep surfaces is triaged per §10 — **file a `FOLLOWUPS.md` entry** (don't fix here); promoting the scenario into the baked corpus makes it a `KnownDefect` pin there. Never in `make check`.
 
 - [ ] **Step 1** implement the seeded generator (threshold-biased toward the $1,500 Sch B trigger, $10k SALT cap, $200k/$250k thresholds, the wage base, the standard-deduction crossover) and the per-scenario diff+report.
 - [ ] **Step 2** (offline) run `sweep.py --seed 1 --count 50`; confirm a clean run prints "0 undeclared divergences" and that an injected wrong figure surfaces a report.
