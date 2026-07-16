@@ -99,6 +99,9 @@ pub fn consulted_table(
 
 /// Which independent oracle a leaf/figure came from. OTS carries only a provenance class; taxcalc
 /// carries both a methodology class (Tax-Table vs schedule) and a provenance class.
+///
+/// Forward interface: this tag is CONSUMED at the compute/paper levels in T5/T6 (which oracle a leaf
+/// belongs to when wiring `stacking_ok` into the differential sweep); it is not yet read at T3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OracleId {
     /// OpenTaxSolver.
@@ -189,9 +192,12 @@ pub struct KnownDefect {
 /// provenance. `taxcalc_l16 == None` means taxcalc reports no comparable figure on this line, so it
 /// does not dissent and needs no class.
 ///
-/// The ONE sanctioned exception (§10): a `KnownDefect` declared for this `(household, line)` whose
-/// `btctax_value` still equals `figure` also passes — pinning btctax's current wrong value against an
-/// open FOLLOWUPS id.
+/// The ONE sanctioned exception (§10): a declared `KnownDefect` is AUTHORITATIVE for this
+/// `(household, line)` — evaluated BEFORE the class path, it passes iff btctax still prints the pinned
+/// WRONG value. A stale pin FAILS in BOTH directions — the bug is fixed (`figure` moves to the correct
+/// value ≠ `btctax_value`) OR the wrong value changed — forcing the entry's removal; it never lingers
+/// green re-armed to silently re-absorb a same-value regression. Once the pin is deleted the class path
+/// catches any real regression. A known-defect is a SEPARATE category, never a lawful class.
 #[allow(clippy::too_many_arguments)]
 pub fn stacking_ok(
     figure: Usd,
@@ -202,6 +208,12 @@ pub fn stacking_ok(
     reproduced_ops: &L16Operands,
     known_defect: Option<&KnownDefect>,
 ) -> bool {
+    // §10, authoritative: a declared pin decides the line on its own — it passes iff btctax still prints
+    // the pinned WRONG value. Evaluated BEFORE the class path so a FIXED bug (figure now agrees with the
+    // oracles ≠ btctax_value) does not slip through `ots_ok && taxcalc_ok` and leave the pin lingering.
+    if let Some(kd) = known_defect {
+        return figure == kd.btctax_value;
+    }
     // OTS: agree, or its provenance class explains the dissent (OTS has no methodology class).
     let ots_ok =
         figure == round_leaf(ots_l16) || provenance_class_fires(ots_ops, reproduced_ops, ots_l16);
@@ -214,11 +226,7 @@ pub fn stacking_ok(
                 || provenance_class_fires(taxcalc_ops, reproduced_ops, v)
         }
     };
-    // The §10 caught-bug pin: passes only while btctax's value still equals the pinned wrong value
-    // (a stale pin fails here, forcing removal).
-    let known_defect_pins = known_defect.is_some_and(|kd| figure == kd.btctax_value);
-
-    (ots_ok && taxcalc_ok) || known_defect_pins
+    ots_ok && taxcalc_ok
 }
 
 /// **Class-liveness ledger** (r3-I2b) — the predicate analogue of the never-fired sweep at
@@ -312,6 +320,26 @@ mod tests {
         assert!(!provenance_class_fires(Some(&ops), &ops, 99_999.0)); // 99,999 ≠ Table_btctax(253,942.94)
     }
 
+    // Conjunct-2 (the anti-over-absorption guard): btctax's OWN leaves already reproduce the oracle's L16,
+    // so there is nothing to explain ⇒ the class must NOT fire. Same leaves for oracle & reproduced ⇒
+    // c1 true (Table_btctax(253_942.94)=47_031 == round_leaf(47_031.31)) ∧ c2 false ⇒ false. Kills a
+    // conjunct-2 drop (which would leave c1 alone = true).
+    #[test]
+    fn provenance_conjunct2_blocks_over_absorption_on_identical_leaves() {
+        let ops = L16Operands { status: FilingStatus::Mfj, ti: usd(253_942.94), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
+        assert!(!provenance_class_fires(Some(&ops), &ops, 47_031.31));
+    }
+
+    // Positive fire on DISTINCT operands (the class actually working): oracle = Mfj 253_942.94 with
+    // L16 47_031.31 (c1: Table_btctax==round_leaf ⇒ true); reproduced = Single 70_008.908 (Table_btctax
+    // bins to 10_459 ≠ 47_031 ⇒ c2 true) ⇒ fires. Kills an always-`false` predicate.
+    #[test]
+    fn provenance_class_fires_on_distinct_operands() {
+        let oracle_ops = L16Operands { status: FilingStatus::Mfj, ti: usd(253_942.94), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
+        let reproduced_ops = L16Operands { status: FilingStatus::Single, ti: usd(70_008.908), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
+        assert!(provenance_class_fires(Some(&oracle_ops), &reproduced_ops, 47_031.31));
+    }
+
     // ★ M4 (the NAMED mutation target): with the oracle's L16 leaves not yet baked (pre-T11), the
     // provenance class CANNOT fire — `None` must return false, never vacuously true, or the whole
     // anti-world guard is dead weight for the entire pre-T11 period.
@@ -339,14 +367,21 @@ mod tests {
         assert!(!stacking_ok(usd(47_030.0), 47_031.31, Some(47_031.31), None, None, &ops, None));
     }
 
-    // stacking_ok — the §10 KnownDefect pin holds btctax's caught-wrong value against both oracles while
-    // it still equals the pinned value, and a STALE pin (btctax's value moved) fails, forcing removal.
+    // stacking_ok — the §10 KnownDefect pin is AUTHORITATIVE: it holds btctax's caught-wrong value while
+    // btctax still prints it, and a STALE pin FAILS in BOTH directions — the wrong value CHANGED, and (the
+    // review's arm) the bug is FIXED so btctax now AGREES with both oracles. A fixed bug must NOT pass with
+    // the pin still declared, or the pin lingers green re-armed to silently re-absorb a same-value regression.
     #[test]
     fn stacking_ok_known_defect_pin_holds_then_goes_stale() {
         let ops = L16Operands { status: FilingStatus::Mfj, ti: usd(253_942.94), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
         let kd = KnownDefect { fu_id: "FU-EXAMPLE", btctax_value: usd(47_030.0) };
+        // Held: btctax still prints the pinned wrong 47_030 against both oracles' 47_031.
         assert!(stacking_ok(usd(47_030.0), 47_031.31, Some(47_031.31), None, None, &ops, Some(&kd)));
+        // Stale (value moved to another wrong value): fails, forcing removal.
         assert!(!stacking_ok(usd(47_029.0), 47_031.31, Some(47_031.31), None, None, &ops, Some(&kd)));
+        // Stale (bug FIXED): btctax now agrees with both oracles (47_031), but the pin (old wrong 47_030)
+        // is still declared — the authoritative pin FAILS, forcing the entry's deletion.
+        assert!(!stacking_ok(usd(47_031.0), 47_031.31, Some(47_031.31), None, None, &ops, Some(&kd)));
     }
 
     // LivenessLedger: a declared-but-neither-fired-nor-pinned class is "dead".
