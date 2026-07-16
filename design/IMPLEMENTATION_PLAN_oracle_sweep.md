@@ -10,7 +10,7 @@
 
 **Spec:** `design/SPEC_oracle_sweep.md` (r5, GREEN 0C/0I). Section refs (§N) below are to that spec; review-finding tags (r4-I1, …) trace the reviewed rationale.
 
-*Plan review: r1 (`design/oracle-sweep/reviews/PLAN-oracle-sweep-fable-r1.md`) 1C/4I/4M/4Nit → folded to **r2** (this doc); the caught-bug policy (`9fdb9cc`) is also folded in.*
+*Plan review: r1 (`…/PLAN-oracle-sweep-fable-r1.md`) 1C/4I/4M/4Nit → r2; r2 (`…/PLAN-oracle-sweep-fable-r2.md`) 0C/4I/3M/5Nit (C1 + all r1 Importants confirmed FIXED) → folded to **r3** (this doc); the caught-bug policy (`9fdb9cc`) is also folded in.*
 
 ## Global Constraints
 
@@ -37,12 +37,13 @@ table fixes the pattern, the operands, and which oracle witnesses each line.
 
 | §6.1 line | btctax prints (source) | Reproduction on oracle leaves | Witness |
 |---|---|---|---|
-| **AGI** 1040 L11 | L9 = Σ printed income; L11 = L9 − Sch1 L26 (= `round(half-SE)`) (`printed.rs:341-357`) | `sum_round(whole-dollar income inputs) − round_leaf(oracle_se_tax/2)` | OTS + taxcalc (each with its own `se_tax`) |
+| **AGI** 1040 L11 | L9 = Σ printed income (`printed.rs:518-542`); L11 = L9 − Sch1 L26 (= `round(half-SE)`, `printed.rs:341-357`) | `sum_round(income legs) − round_leaf(oracle_se_tax/2)`, where the **capital leg is the §1211-netted Sch-D→L7** (`net = stcg+ltcg`, floored at −3,000 when negative — `printed.rs:533-538`; or `round_leaf(oracle_sch_d_to_l7)` post-bake), **NOT** the raw gain inputs (r2-M1/N4) | OTS + taxcalc (each with its own `se_tax`) |
 | **Taxable income** L15 | `(L11 − L13 QBI − L12 ded).max(0)` (cross-foot of printed lines) | reproduced-AGI − `round_leaf(oracle_deduction_taken)` − `round_leaf(oracle_qbi_deduction)` | OTS + taxcalc |
 | **Tax** L16 | Table/QDCGT on **printed** L15 (`method.rs:74-91`) | **two-part** (§6.2b): structural `table_l16(reproduced ops)` + the per-oracle provenance/methodology classes | two-part |
+| **QBI deduction** 1040 L13 / 8995 L15 (r2-I2) | printed 8995 chain: `min(round(20%×round(QBI)), round(20%×(round(TI_bq)−round(ncg))))` (`qbi.rs:195-211`) — **not a leaf** | `round_leaf(oracle_qbi_deduction)` (reuse the existing `qbi_deduction` field — baked today on both structs) | OTS + taxcalc; epsilon residual (exact-.50 / min-near-tie) → §10 triage, **not** a class |
 | **Sch SE L12** | `round(L10 OASDI) + round(L11 Medicare)` (`printed.rs:231-233`) | `sum_round([oracle_se_l10, oracle_se_l11])` | **OTS single-witness** — taxcalc exposes only `setax` (exact total), a different quantity (§6.4 `Option`) |
 | **8959 L18** | `round(L7) + round(L13)` (`other_taxes.rs:167,173,178`) | `sum_round([oracle_8959_l7, oracle_8959_l13])` | **OTS single-witness** — taxcalc `ptax_amc` is the exact total |
-| **NIIT** 8960 L17 | `round(3.8% × printed L16)` (`other_taxes.rs:236,288`) | `round_leaf(oracle_niit)` (OTS `niit` is the printed L17); taxcalc `niit` is exact ⇒ weak/optional | OTS primary |
+| **NIIT** 8960 L17 | `round(3.8% × printed base)` (`other_taxes.rs:320`) | **paper:** `round_leaf(oracle_niit)` — OTS single-witness, with a ±cents epsilon (OTS's L17 is computed on cents-MAGI, not printed operands) → §10 triage, not a class. taxcalc's exact `niit` is compared at the **compute level** (T5, exact-vs-both — r2-I4), not on paper. **Needs the T8 fix: OTS 8960 L5a must be the §1211-limited net (r2-I3).** | OTS (paper) + taxcalc (compute) |
 | **Total tax** L24 | `round(L22)+round(L23)`; L22 = L16 + Sch2 (SE L12 + 8959 L18 + NIIT) (`printed.rs:289-292,627`) | `sum_round([reproduced L16, reproduced SE-L12, reproduced 8959-L18, round_leaf(oracle_niit)])` — **inherits** the SE/8959 cross-foots | **OTS single-witness** (taxcalc bundles payroll — already excluded today) |
 | **Deduction taken** L12 | `round(std or itemized)` (leaf) | `round_leaf(oracle_deduction_taken)` | OTS + taxcalc |
 | **SALT** Sch A L5e | `min(round(5d), 10000)` (leaf) | `round_leaf(oracle_salt_capped)` | OTS + taxcalc |
@@ -53,6 +54,14 @@ The four component leaves the cross-foots consume — OTS **Sch SE L10 (OASDI)**
 **8959 L7** + **L13** — are all already in `ots_direct.py`'s `_parse` reach (it captures every `Lxx`);
 T1 bakes them, T8 emits them, T2's `sum_round` consumes them. Taxcalc has no SE/8959 leg split, so those
 lines are OTS-single-witness by §6.4's `Option` rule (T9 leaves them `None`).
+
+**★ This table is the PAPER level (T6).** The single-witness dispositions above are paper-level — where
+btctax prints a cross-foot (`Σround(legs)`) and taxcalc exposes only an exact total. At the **COMPUTE level
+(T5, `golden_returns.rs`)** the leaf totals that agree cent-for-cent across all three engines today — **SE
+tax, Additional Medicare, NIIT, taxable income, AGI, QBI deduction** — keep their **exact-vs-BOTH-oracles**
+comparison (r2-I4; Add'l Medicare has no other taxcalc witness). Only **L16** (two-part) and **L24** (the
+`sum_round` cross-foot, OTS-single-witness) use the reproduction at the compute level; their exact chains
+lawfully differ in cents across engines, so exact-vs-exact is NOT forced there.
 
 ---
 
@@ -131,14 +140,14 @@ mod tests {
     use super::*;
     use crate::tax::FilingStatus; // the re-export (N2), not crate::tax::return_inputs::
 
-    // ★ C1: Sch SE L12 cross-foots from OTS's TWO printed legs — round(L10)+round(L11) — which can
-    // differ from round(exact se_tax) by $1. Read the exact se_l10_oasdi / se_l11_medicare for a cents-
-    // carrying SE anchor from full_return_goldens.json (do NOT guess); pick a household where the legs'
-    // cents make round(L10)+round(L11) ≠ round(L10+L11) so the test actually pins the cross-foot.
+    // ★ C1: sum_round is Σround(legs), NOT round(exact_total). Pin the cross-foot with a SYNTHETIC
+    // flipping pair (mirrors the repo's own KAT, other_taxes.rs:80-85): 274.50 → 275, 499.50 → 500,
+    // so the legs sum to 775, but round(774.00) = 774. The legs are NOT baked until T11 and no anchor
+    // flips anyway, so this uses literals — do NOT read the JSON here (r2-I1).
     #[test]
-    fn se_l12_cross_foots_from_legs_not_the_exact_total() {
-        let (l10, l11) = (/*OTS Sch SE L10*/ 0.0_f64, /*L11*/ 0.0_f64); // ← baked legs
-        assert_eq!(sum_round(&[l10, l11]), round_leaf(l10) + round_leaf(l11));
+    fn sum_round_cross_foots_the_legs_not_the_exact_total() {
+        assert_eq!(sum_round(&[274.50, 499.50]), dec!(775));                    // round(274.50)+round(499.50)
+        assert_ne!(sum_round(&[274.50, 499.50]), round_leaf(274.50 + 499.50)); // ≠ round(774.00) = 774 — the whole point
     }
 
     // Table_btctax reproduces OTS's exact-cents L16 at whole dollars for the above-ceiling SE anchor.
@@ -160,7 +169,7 @@ mod tests {
     }
 }
 ```
-*(Replace the placeholder OTS component figures in the first test with the exact baked values read from `full_return_goldens.json` during implementation — do not guess; open the file.)*
+*(The `table_l16` / `consulted_table` literals ARE baked figures — read the exact values from `full_return_goldens.json` during implementation; the `sum_round` test above is a synthetic-literal unit test and needs no JSON read.)*
 
 - [ ] **Step 2: Run to verify they fail** — `cargo test -p btctax-core --lib oracle_diff` → FAIL (module absent).
 
@@ -205,7 +214,7 @@ fn methodology_class_fires_on_qdcgt_both_slices() {
 fn taxcalc_provenance_cannot_fire_below_ceiling() {
     // single_crypto_business_se: taxcalc TI 70_008.908, L16 10_454.96 (baked); Table_btctax bins to 10_459.
     let ops = L16Operands { status: FilingStatus::Single, ti: usd(70_008.908), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
-    assert!(!provenance_class_fires(&ops, &ops, 10_454.96));
+    assert!(!provenance_class_fires(Some(&ops), &ops, 10_454.96));
 }
 
 // A real Table_btctax semantics bug fails conjunct-1 ⇒ NOT absorbed (teeth). Simulated by feeding an
@@ -213,7 +222,7 @@ fn taxcalc_provenance_cannot_fire_below_ceiling() {
 #[test]
 fn provenance_class_keeps_teeth_against_a_semantics_mismatch() {
     let ops = L16Operands { status: FilingStatus::Mfj, ti: usd(253_942.94), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
-    assert!(!provenance_class_fires(&ops, &ops, 99_999.0)); // 99,999 ≠ Table_btctax(253,942.94)
+    assert!(!provenance_class_fires(Some(&ops), &ops, 99_999.0)); // 99,999 ≠ Table_btctax(253,942.94)
 }
 
 // LivenessLedger: a declared-but-neither-fired-nor-pinned class is "dead".
@@ -286,10 +295,10 @@ fn line7_is_signed_and_schedule_d_is_parenthesized_magnitude() {
 
 **Interfaces:**
 - Consumes: `oracle_diff::*` (T2/T3), the (still 12-household) `golden_households()`.
-- Produces: the compute-level differential — btctax's `assemble_absolute`/`method` figures vs BOTH oracles across the full line set, adjudicated by the class machinery. This is the §6.2(b) **Table-semantics witness** (r2-I2). Deeper-line comparisons gate on `Option::Some` (inert until T11). Provenance classes are declared but their **liveness assertion is deferred to T11** (on the 12 whole-dollar anchors btctax == OTS exactly, so no provenance divergence exists yet; the methodology class is live via the 5 Table anchors).
+- Produces: the compute-level differential — btctax's compute + printed-chain figures vs the oracles across the full line set, adjudicated by the class machinery. This is the §6.2(b) **Table-semantics witness** (r2-I2). **Two-level rule (r2-I4):** the leaf totals that agree cent-exact across all three engines today — **SE tax, Additional Medicare, NIIT, taxable income, AGI, QBI deduction** — keep their **exact-vs-BOTH-oracles** comparison (as HEAD, `golden_returns.rs:249-297`; no new fields, and this preserves taxcalc's independent witness — Add'l Medicare has no other). Only **L16** (§6.2 two-part; taxcalc's exact-schedule divergence absorbed by the methodology class) and **L24** (the `sum_round` cross-foot of OTS's components, OTS-single-witness — taxcalc bundles payroll, excluded today) use the reproduction; do **NOT** force exact-vs-exact on L16/L24 (their exact chains lawfully differ in cents across engines). Deeper-line comparisons gate on `Option::Some` (inert until T11); provenance-class liveness is deferred to T11 (the methodology class is live via the 6 Table anchors).
 
 - [ ] **Step 1: Characterize green first.** Run `cargo test -p btctax-core --test golden_returns` and note it passes today (baseline).
-- [ ] **Step 2: Write the new comparison** — replace the per-household `DECLARED_DIVERGENCES` array with the class calls. Each line is reproduced **per the C1 table** (SE L12 / 8959 L18 / L24 are OTS-single-witness `sum_round` of the OTS legs — taxcalc's totals are NOT compared there; L16 is the §6.2 two-part; leaf lines are `round_leaf`). For each household×line: if the paper/compute figure agrees with every opinionated oracle → continue; else require `stacking_ok(...)` and `LivenessLedger::record_fire` the class(es) that absorbed it. Register the methodology class live; **do not** yet assert provenance-class liveness (comment: "enabled in T11 with the pinned cells"). Keep the anti-world guarantee via `stacking_ok`. The component legs + deeper-line rows gate on `Option::Some` (`if let Some(x) = h.expected_ots.qbi_cap_l12 { … }`) — inert until T11.
+- [ ] **Step 2: Write the new comparison** — replace the per-household `DECLARED_DIVERGENCES` array with the class calls, **per the two-level rule** (Produces): the six cent-exact totals (SE tax, Add'l Medicare, NIIT, TI, AGI, QBI deduction) stay **exact-vs-both-oracles** (as HEAD); **L16** uses the §6.2 two-part (`table_l16(reproduced ops)` + `stacking_ok` over the methodology/provenance classes); **L24** compares btctax's **printed** L24 (`printed.f1040.line24` — `golden_returns.rs` already builds the printed chain, `:243,297`; r2-M2 — NOT the exact `ar` figure) against `sum_round` of OTS's components, OTS-single-witness. For each household×line: if the figure agrees with every opinionated oracle → continue; else require `stacking_ok(...)` and `LivenessLedger::record_fire` the class(es) that absorbed it. Register the methodology class live; **do not** yet assert provenance-class liveness (comment: "enabled in T11 with the pinned cells"). Keep the anti-world guarantee via `stacking_ok`. The deeper-line rows gate on `Option::Some` (`if let Some(x) = h.expected_ots.qbi_cap_l12 { … }`) — inert until T11.
 - [ ] **Step 3: Run** `cargo test -p btctax-core --test golden_returns` → PASS on the 12 households. Disposition of today's `DECLARED_DIVERGENCES` (M1): the **6** taxcalc Table-L16 entries (`golden_returns.rs:95-144` + `single_crypto_business_se` `:192-202`) are now absorbed by `taxcalc_methodology_class`; the **7th** (`single_miner_qbi…` L24 `agrees_with:"neither"` `:157-191`) **dissolves** — the L24 `sum_round` reproduction equals btctax's printed L24 from OTS's own components, so OTS's exact total is never consulted (the §6102 rounding rationale now lives in the reproduction rule, not a per-household entry). Mutation-check: break `stacking_ok` (force `true`) → a synthetic both-disagree test fails → restore.
 - [ ] **Step 4:** `make check` → green.
 - [ ] **Step 5: Commit** — `refactor(oracle-sweep): golden_returns onto divergence classes + full line set, 12-household green (T5)`
@@ -337,9 +346,10 @@ fn line7_is_signed_and_schedule_d_is_parenthesized_magnitude() {
 - Modify: `scripts/oracle/ots_direct.py` (the `evaluate` return dict :348-359; it already `_parse`s every `Lxx` at :164-171)
 
 **Interfaces:**
-- Produces: `evaluate` returns, in addition to today's keys, `deduction_taken` (1040 L12), `salt_capped` (Sch A L5e when itemized), `sch_d_to_l7` (1040 L7, **signed**), `qbi_cap_l12` (marked **single-witness/WEAK** — it is the driver's hand-fed `round(net_capital_gain)`, I1; keep baking it but T5/T6 treat it single-witness, and file the §14.2 closure — derive OTS's L12 from OTS's own Schedule-D output — as a follow-up), the provenance leaves `qual_div_l3a` (= `h["qualified_dividends"]`), **`net_ltcg_qd_exclusive` = `max(0.0, min(ltcg, ltcg+stcg))`** (QD-EXCLUSIVE subterm, NOT the QD-inclusive `net_capital_gain` at `:292-294` — r5-N2), and **the C1 cross-foot legs** `se_l10_oasdi` = `se.get("L10")`, `se_l11_medicare` = `se.get("L11")` (the SE solver's printed OASDI/Medicare lines), `f8959_l7` = `f8959.get("L7")`, `f8959_l13` = `f8959.get("L13")` (the 8959 solver's legs) — all already in `_parse`'s reach (`:164-171` captures every `Lxx`). `taxable_income` is already the exact-cents TI leaf.
+- Produces: `evaluate` returns, in addition to today's keys, `deduction_taken` (1040 L12), `salt_capped` (Sch A L5e when itemized), `sch_d_to_l7` (1040 L7, **signed**), `qbi_cap_l12` (marked **single-witness/WEAK** — it is the driver's hand-fed `round(net_capital_gain)`, I1; keep baking it but T5/T6 treat it single-witness, and file the §14.2 closure — derive OTS's L12 from OTS's own Schedule-D output — as a follow-up **with a severity + owning phase, STANDARD_WORKFLOW §4** — r2-N3), the provenance leaves `qual_div_l3a` (= `h["qualified_dividends"]`), **`net_ltcg_qd_exclusive` = `max(0.0, min(ltcg, ltcg+stcg))`** (QD-EXCLUSIVE subterm, NOT the QD-inclusive `net_capital_gain` at `:292-294` — r5-N2), and **the C1 cross-foot legs** `se_l10_oasdi` = `se.get("L10")`, `se_l11_medicare` = `se.get("L11")` (the SE solver's printed OASDI/Medicare lines), `f8959_l7` = `f8959.get("L7")`, `f8959_l13` = `f8959.get("L13")` (the 8959 solver's legs) — all already in `_parse`'s reach (`:164-171` captures every `Lxx`). `taxable_income` is already the exact-cents TI leaf.
+- **★ r2-I3 — fix the OTS Form 8960 feed (a driver correctness bug, not just an emit):** `ots_direct.py:341` currently sets 8960 `L5a = max(ltcg,0) + max(stcg,0)`, which **never applies the §1211 loss limitation** btctax correctly applies (`other_taxes.rs:219-222,308`: a §1211-limited loss is NEGATIVE and REDUCES NII). On a capped-loss × NIIT-firing cell (pairwise-guaranteed) OTS's NII is $3,000 too high → OTS's NIIT is wrong **by construction**, and T11 would file a FALSE btctax bug + pin btctax's correct value as a KNOWN DEFECT. **Set 8960 `L5a` to the §1211-limited net figure the driver already computes for `sch_d_to_l7`** (the capped Sch-D→L7 value). Leave `L13 = p1.get("L11")` (pass-1 cents-MAGI) as today — hence NIIT is a paper-level ±cents epsilon → §10 triage, NOT "the printed L17" (the old gloss is dropped from the table).
 
-- [ ] **Step 1** (offline, needs `OTS_DIR`): add the keys to the return dict, reading them from the already-parsed OTS output dicts (`se.get("L10")`/`se.get("L11")`, `f8959.get("L7")`/`f8959.get("L13")`, the 1040sa parse for L5e, `final.get("L7")` for Sch-D→L7, `final.get("L12")` for the 1040 deduction, etc.). Keep `qbi_cap_l12` from the existing `round(net_capital_gain)` (weak, per Interfaces) and add the separate QD-exclusive leaf.
+- [ ] **Step 1** (offline, needs `OTS_DIR`): add the keys to the return dict, reading them from the already-parsed OTS output dicts (`se.get("L10")`/`se.get("L11")`, `f8959.get("L7")`/`f8959.get("L13")`, `final.get("L7")` for Sch-D→L7, `final.get("L12")` for the 1040 deduction, etc.). **For `salt_capped` (Sch A L5e): the driver runs NO separate Schedule-A solver — A5a/5b/8a ride the `US_1040` input (`:261-268`)** — so read L5e from the `US_1040` output if it prints it, else DERIVE `salt_capped = min(state_income_tax + real_estate_tax, 10000)` and mark it driver-derived (r2-N2). Keep `qbi_cap_l12` from the existing `round(net_capital_gain)` (weak, per Interfaces) and add the separate QD-exclusive leaf. Also apply the §1211 8960-L5a fix (Interfaces, r2-I3).
 - [ ] **Step 2** run `python3 scripts/oracle/ots_direct.py`-driven `gen_goldens.py` for a single household locally and eyeball the new keys (no CI impact — Python is offline).
 - [ ] **Step 3: Commit** — `feat(oracle-sweep): ots_direct emits deeper lines + QD-exclusive provenance leaf (T8)`
 
@@ -351,7 +361,7 @@ fn line7_is_signed_and_schedule_d_is_parenthesized_magnitude() {
 - Modify: `scripts/oracle/gen_goldens.py` (`taxcalc_run` :204-260; the JSON assembly :263-327)
 
 **Interfaces:**
-- Produces: `expected_taxcalc` gains the **leaf** deeper lines it can express — `deduction_taken` (`c04470`/`standard`), `salt_capped`, `sch_d_to_l7` — plus `total_tax` (taxcalc's L24-equivalent excluding W-2 payroll — reuse the existing exclusion note) and the provenance leaves (`qual_div_l3a = e00650`, `net_ltcg_qd_exclusive = max(0, min(p23250, p23250+p22250))`, `taxable_income` already `c04800` at exact cents). **It leaves `se_l10_oasdi`/`se_l11_medicare`/`f8959_l7`/`f8959_l13`/`qbi_cap_l12` ABSENT (`None`)** — taxcalc exposes no SE/8959 leg split and no 8995-L12-granular variable — so SE L12 / 8959 L18 / L24 / 8995 L12 are **OTS-single-witness** (§6.4 `Option` rule; do NOT compare taxcalc's `setax`/`ptax_amc` totals there — they are `round(exact)`, a different quantity). Names verified against the `taxcalc` variable set at implementation.
+- Produces: `expected_taxcalc` gains the **leaf** deeper lines it can express — `deduction_taken` (`c04470`/`standard`), `salt_capped`, `sch_d_to_l7` — plus `total_tax` (taxcalc's L24-equivalent excluding W-2 payroll — reuse the existing exclusion note) and the provenance leaves (`qual_div_l3a = e00650`, `net_ltcg_qd_exclusive = max(0, min(p23250, p23250+p22250))`, `taxable_income` already `c04800` at exact cents). **It leaves `se_l10_oasdi`/`se_l11_medicare`/`f8959_l7`/`f8959_l13`/`qbi_cap_l12` ABSENT (`None`)** — taxcalc exposes no SE/8959 leg split and no 8995-L12-granular variable — so the **paper-level** SE L12 / 8959 L18 / L24 rows are **OTS-single-witness** (§6.4 `Option` rule — taxcalc's printed cross-foot legs don't exist). **This is PAPER-level only (r2-I4):** at the **compute level (T5)** taxcalc's exact `setax` / `ptax_amc` / `niit` totals ARE compared (exact-vs-both — they agree cent-for-cent today, and Add'l Medicare has no other taxcalc witness). 8995 L12 stays OTS-single-witness/WEAK (I1). Names verified against the `taxcalc` variable set at implementation.
 
 - [ ] **Step 1** (offline venv): add the `calc.array(...)` extractions; write the new keys into the `expected_taxcalc` dict.
 - [ ] **Step 2** eyeball one household's JSON.
@@ -387,7 +397,7 @@ fn line7_is_signed_and_schedule_d_is_parenthesized_magnitude() {
 
 - [ ] **Step 1** (offline): `env OTS_DIR=… .venv/bin/python scripts/oracle/gen_goldens.py > crates/btctax-core/tests/goldens/full_return_goldens.json` (per the file header recipe).
 - [ ] **Step 2** enable the `LivenessLedger::dead()` assertion in both tests (it was deferred in T5/T6); the two pinned cells make the provenance classes live.
-- [ ] **Step 3** `make check` → green on the FULL corpus. Investigate any red — exactly two legitimate causes (a lawful Σround≠roundΣ residual is **not** one: the C1 component legs make every cross-foot exact, so a red on SE L12 / 8959 L18 / L24 means either the T8 legs weren't baked → fix T8, or a genuine bug): a **corpus/steering error** → fix the generator (T10); a **genuine btctax fill/compute bug** the corpus now catches → do **not** fix it here and do **not** weaken the test — **file a `FOLLOWUPS.md` entry** (severity + owning phase) and pin the scenario as a **declared known-defect divergence** (`KnownDefect { fu_id, btctax_value }`, `KNOWN DEFECT → <FU-id>`, oracle figures beside it) so `make check` goes green with the bug tracked (§10, user-mandated). Re-measure the runtime; adjust the T6 shard count if the budget is exceeded (§8 fallback: anchors + sample in `make check`, full corpus in a CI-only test).
+- [ ] **Step 3** `make check` → green on the FULL corpus. Investigate any red — **four legitimate causes** (a lawful Σround≠roundΣ residual is **not** one — the C1 legs make every cross-foot exact; r2-M3): **(i) corpus/steering error** → fix the generator (T10); **(ii) genuine btctax fill/compute bug** → do **not** fix here, do **not** weaken — **file a `FOLLOWUPS.md` entry** (severity + owning phase, STANDARD_WORKFLOW §4) and pin a **declared known-defect divergence** (`KnownDefect { fu_id, btctax_value }`, `KNOWN DEFECT → <FU-id>`, oracle figures beside it) so `make check` goes green with the bug tracked (§10, user-mandated); **(iii) oracle-driver / extraction error** (a mis-named taxcalc variable, a mis-parsed OTS line, the r2-I3 8960-L5a shape) → fix T8/T9 (§10 "an oracle is wrong → record + cite"), **never** a false btctax KNOWN-DEFECT pin; **(iv) epsilon residual** on a row whose oracle side is `round_leaf` of a *non-leaf* quantity (QBI L15, NIIT L17 — exact-.50 / min-near-tie / cents-MAGI) → §10 triage, never a class-widening. Re-measure the runtime; adjust the T6 shard count if the budget is exceeded (§8 fallback: anchors + sample in `make check`, full corpus in a CI-only test).
 - [ ] **Step 4: Commit** — `feat(oracle-sweep): regenerate baked corpus (~NN households); activate deeper lines + provenance classes (T11)`
 
 ---
@@ -399,7 +409,7 @@ fn line7_is_signed_and_schedule_d_is_parenthesized_magnitude() {
 
 **Interfaces:**
 - Consumes: `corpus.py` (threshold-biased seeded sampling), `ots_direct.evaluate` + `taxcalc_run` (live oracles), and the T7 `oracle_harness` **`--check` mode** for BOTH the btctax on-paper values AND the reproduction + classification (**I4 — mandatory**: the sweep never re-implements `round_dollar`, the Tax Table, or the QDCGT worksheet in Python — Python's banker's `round()` drifts on `.50` and would either spam false divergences or silently absorb real ones, blinding the discovery mechanism §9 exists to provide).
-- Produces: `sweep.py --seed N --count K` → for each seeded threshold-biased scenario (§5.2; honors D-2/D-3), diff the full line set live and emit a **divergence report** (the scenario as a paste-ready household dict, the disagreeing line, `oracle-1 / oracle-2 / btctax-on-paper`, the seed+index). A genuine btctax bug the sweep surfaces is triaged per §10 — **file a `FOLLOWUPS.md` entry** (don't fix here); promoting the scenario into the baked corpus makes it a `KnownDefect` pin there. Never in `make check`.
+- Produces: `sweep.py --seed N --count K` → for each seeded threshold-biased scenario (§5.2; honors D-2/D-3), diff the full line set live and emit a **divergence report** (the scenario as a paste-ready household dict, the disagreeing line, `oracle-1 / oracle-2 / btctax-on-paper`, the seed+index). A genuine btctax bug the sweep surfaces is triaged per §10 — **file a `FOLLOWUPS.md` entry** (severity + owning phase, STANDARD_WORKFLOW §4; don't fix here); promoting the scenario into the baked corpus makes it a `KnownDefect` pin there. Never in `make check`.
 
 - [ ] **Step 1** implement the seeded generator (threshold-biased toward the $1,500 Sch B trigger, $10k SALT cap, $200k/$250k thresholds, the wage base, the standard-deduction crossover) and the per-scenario diff+report.
 - [ ] **Step 2** (offline) run `sweep.py --seed 1 --count 50`; confirm a clean run prints "0 undeclared divergences" and that an injected wrong figure surfaces a report.
@@ -430,3 +440,4 @@ fn line7_is_signed_and_schedule_d_is_parenthesized_magnitude() {
 - **Placeholder scan:** the two former "decide at implementation" points are now **resolved** — T7 is a separate unpublished bin-crate (M2), T12 mandates the harness `--check` mode (I4); neither is a deferred choice. All oracle figure literals in test code are flagged "read the exact baked value, do not guess."
 - **Type consistency:** `L16Operands`/`OracleId`/`LivenessLedger`/`KnownDefect`/`taxcalc_methodology_class`/`provenance_class_fires`/`stacking_ok` are named identically in T3 and consumed in T5/T6/T11; `table_l16`/`consulted_table`/`sum_round`/`round_leaf`/`rate_on_printed` from T2 are used unchanged downstream; the C1 component-leg field names (`se_l10_oasdi`/`se_l11_medicare`/`f8959_l7`/`f8959_l13`) match across T1 (schema), T8 (OTS emit), the per-line table, and the T2/T5/T6 reads; taxcalc leaves them `None` (T9). `oracle_ops: Option<&L16Operands>` (M4) and `dead(&self, &[…])` (N4) reconciled between T3's Interfaces and its tests.
 - **r1 review (1C/4I/4M/4Nit) folded → r2:** C1 (per-line reproduction table + OTS component legs); I1 (L12 single-witness/weak + §14.2 follow-up); I2 (the four `checked==3` tests migrated); I3 (`tests/common/` share); I4 (`--check`); M1 (6+1 divergence disposition); M2 (bin-crate); M3 (cartesian-triples ∪ pairwise); M4 (`Option` fail-closed); N1–N4 (create-not-append, import path, comment, `dead` sig).
+- **r2 review (0C/4I/3M/5Nit) folded → r3:** I1 (synthetic-literal `sum_round` flip test — the leg-flip is unbakeable pre-T11 and no anchor flips); I2 (QBI-deduction row added — the dropped §6.1 headline line, reuses the existing `qbi_deduction` field, epsilon→§10 triage); I3 (NIIT witness rebuilt — the T8 OTS 8960-L5a §1211 fix + paper=OTS-epsilon/compute=taxcalc disposition); I4 (the **two-level rule** — compute-level keeps exact-vs-both for SE/AddlMed/NIIT/TI/AGI/QBI, paper stays OTS-single-witness for the cross-foots); M1 (AGI capital leg = §1211-netted Sch-D→L7); M2 (L24 reads the printed chain, not the exact `ar`); M3 (T11 step 3 = four causes, incl. oracle-driver error ≠ false btctax pin); N1–N5 (NIIT cite, salt driver-derived, owning-phase at every FOLLOWUPS filing, AGI L9 cite, `Some(&ops)`).
