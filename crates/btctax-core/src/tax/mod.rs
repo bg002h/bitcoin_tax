@@ -8,6 +8,11 @@ pub mod classifier;
 pub mod compute;
 pub mod frozen_guard;
 pub mod method;
+/// Test-support (§6.2): reproduces btctax's §3.1 printed chain on an independent oracle's figures for
+/// the differential sweep. Like [`testonly`], a plain `pub mod` (NOT `#[cfg(test)]`) so the `tests/`
+/// integration suite can reach it; no tax logic — every function re-prints an oracle leaf.
+#[doc(hidden)]
+pub mod oracle_diff;
 pub mod other_taxes;
 pub mod packet;
 pub mod printed;
