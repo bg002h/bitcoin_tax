@@ -1,6 +1,6 @@
 # SPEC — the ORACLE SWEEP (double-oracle differential testing, read from the filled PDF)
 
-*Status: **DRAFT r5** — folds the r4 re-review (`design/oracle-sweep/reviews/SPEC-oracle-sweep-fable-r4.md`,
+*Status: **r5 — GREEN (0C/0I)** — folds the r4 re-review (`design/oracle-sweep/reviews/SPEC-oracle-sweep-fable-r4.md`,
 **0C/1I**/1M/1Nit): r4 confirmed r3-I1 resolved-as-scoped and r3-I2 resolved; the lone residual r4-I1 was
 the **mirror image** of the OTS provenance predicate — the same lawful printed-vs-exact-operand residual
 exists **taxcalc-side above the Table ceiling**. r5 makes the provenance class **per-oracle** O ∈ {OTS,
@@ -9,8 +9,11 @@ cannot over-absorb; at/above, `Table_btctax` *is* the exact schedule so it absor
 residual — a real bug still failing conjunct-1), with a second §5.1 pinned liveness cell (§6.2b/§6.4/§5.1/§12).
 Also folds r4-M1 (the predicate needs the oracle's exact **leaf** figures — L15 cents, L3a, net-LTCG — already
 obtainable, not OTS worksheet internals) and declines r4-N1 with rationale. Earlier history: r1 2C/6I → r2
-0C/2I → r3 0C/2I → r4 0C/1I; the differential test is an **evolution of `golden_packet.rs`**; per-household
-divergences became **classes**; MFS/AMT deferred. Pending re-review. NOT green until 0C/0I.*
+0C/2I → r3 0C/2I → r4 0C/1I → **r5 0C/0I**; the differential test is an **evolution of `golden_packet.rs`**;
+per-household divergences became **classes**; MFS/AMT deferred. The r5 re-review
+(`design/oracle-sweep/reviews/SPEC-oracle-sweep-fable-r5.md`) is **GREEN**; its own 1 Minor + 2 Nits (the
+regime-crossing-straddle §10 note; two wording/citation precisions) are folded here. **Spec is green —
+ready for an implementation plan.***
 *Provenance: extends the shipped P7 harness — `crates/btctax-core/tests/golden_returns.rs` (numbers vs two
 engines), **`crates/btctax-forms/tests/golden_packet.rs` (the paper already held vs OTS)**,
 `scripts/oracle/{gen_goldens,ots_direct}.py`, `crates/btctax-core/tests/goldens/full_return_goldens.json`.*
@@ -238,8 +241,10 @@ either a check that cannot fail or a source of undeclared reds:
   printed-vs-exact operands flip a rounded dollar (`method.rs:84-90`). `Table_btctax` is `qdcgt_line16`,
   which takes the three **leaf** figures (TI/L15 at cents, qualified dividends/L3a, the Sch-D net-LTCG term)
   and derives the remainder and slices internally (`method.rs:74-91`) — so the drivers expose those **exact
-  leaves** (L15 cents and the net-LTCG term are already baked/derived — `ots_direct.py:164-171,292-294`; L3a
-  is a driver input), **not** worksheet internals OTS's output may never print (r4-M1). Fail-closed bonus: if
+  leaves**: L15 at cents (baked), L3a (a driver input), and the **QD-*exclusive*** §1(h) net-LTCG subterm
+  `max(0, min(ltcg, ltcg+stcg))` — note `ots_direct.py:292-294` computes the QD-*inclusive* 8995-L12 variant,
+  so the driver exposes the subterm alone, never that value, else QD double-counts (r5-N2) — **not**
+  worksheet internals OTS's output may never print (r4-M1). Fail-closed bonus: if
   an oracle's internal worksheet ever diverges from what its leaves imply (an oracle worksheet bug), conjunct
   1 fails, no class absorbs, and §10 triage catches it — the correct behavior. Part (b) restores the oracle's
   opinion of the *tax* that part (a) alone drops (`golden_packet.rs:129`); it is a **compute-level**
@@ -285,12 +290,18 @@ either a check that cannot fail or a source of undeclared reds:
       independent figure exactly, which witnesses btctax's Table semantics.
     - **`(O, L16-family, the §6.2(b) provenance predicate holds)` for O ∈ {OTS, taxcalc} (r4-I1)** — the
       printed-vs-exact-operand rounding residual, **per oracle**. Composition is clean by construction:
-      **below** the ceiling the taxcalc conjunct 1 *fails* (`Table_btctax` bins, taxcalc uses the schedule),
-      so the methodology class above is the sole taxcalc absorber there and this class cannot over-absorb;
-      **at/above** the ceiling `Table_btctax` *is* the exact schedule (`method.rs:52-55`), so the taxcalc
-      conjunct 1 holds exactly and the class absorbs precisely the lawful cents residual the §5.1 high-income
-      SE cells produce — while a real btctax TCW/schedule bug still fails conjunct 1 and stays red. The OTS
-      variant applies throughout (OTS uses the Table like btctax).
+      **below** the ceiling (all operands) the taxcalc conjunct 1 *fails* (`Table_btctax` bins, taxcalc uses
+      the schedule), so the methodology class is the taxcalc absorber there; in a **mixed** household a
+      below-ceiling remainder near its bin midpoint may satisfy conjunct 1, but then the absorbed diff is
+      identically a pure operand-provenance residual — lawful, not over-absorption (r5-N1). **At/above** the
+      ceiling `Table_btctax` *is* the exact schedule (`method.rs:52-55`), so the taxcalc conjunct 1 holds
+      exactly and the class absorbs precisely the lawful cents residual the §5.1 high-income SE cells produce
+      — while a real btctax TCW/schedule bug still fails conjunct 1 and stays red. The OTS variant applies
+      throughout (OTS uses the Table like btctax). **The one out-of-class residual** — a Table↔TCW
+      regime-crossing straddle (exact TI a few dollars below the ceiling, the printed chain crossing it) — is
+      measure-epsilon, cannot occur in the deterministic baked corpus, and falls to §10 triage if the sweep
+      surfaces one; it is **not** fixed by widening the methodology condition to printed operands (that would
+      also absorb a real btctax TCW bug — r5-M1).
 - **The guard's class-form (r3-I2a).** The anti-"btctax against the world" guard stays, stated for classes: a
   line where btctax disagrees with **both** oracles passes **only when EACH oracle's diff independently
   matches its own declared, condition-bearing predicate** — the class analogue of the old per-household
