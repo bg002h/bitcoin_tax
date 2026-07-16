@@ -27,32 +27,14 @@
 //! different taxpayer than the one the oracle validated — while still passing. One fixture, one packet.
 
 use btctax_core::conventions::{round_dollar, Usd};
-use btctax_core::tax::packet::assemble_printed_return;
-use btctax_core::tax::return_1040::assemble_absolute;
-use btctax_core::tax::testonly::{
-    build_golden_household, golden_households, ty2024_params, ty2024_table, GoldenHousehold,
-};
+use btctax_core::tax::testonly::golden_households;
 use btctax_forms::testonly::{extract_lines, F1040_MAP_2024};
-use btctax_forms::{fill_full_return, NamedForm};
 use std::collections::BTreeMap;
 
-/// Fill the whole packet for one golden household.
-fn packet(h: &GoldenHousehold) -> Vec<NamedForm> {
-    let (ri, state) = build_golden_household(h);
-    let params = ty2024_params();
-    let table = ty2024_table();
-    let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
-    // No golden household makes a charitable donation, so there are no §170(e) details to carry.
-    let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, 2024)
-        .expect("the golden households carry well-formed SSNs");
-    fill_full_return(&pr, 2024).unwrap_or_else(|e| panic!("{}: the packet must fill — {e}", h.name))
-}
-
-fn form<'a>(pkt: &'a [NamedForm], name: &str) -> &'a NamedForm {
-    pkt.iter()
-        .find(|f| f.name == name)
-        .unwrap_or_else(|| panic!("the packet is missing {name}"))
-}
+// The `packet`/`form` builders live in the shared `tests/common/mod.rs` — ONE builder, so the P7
+// round-trip and the oracle-sweep read-back (T4) fill the SAME households, never a drifting copy.
+mod common;
+use common::{form, packet};
 
 fn usd(v: f64) -> Usd {
     Usd::try_from(v).expect("the oracles emit finite figures")
