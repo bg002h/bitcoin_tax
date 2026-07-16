@@ -128,6 +128,14 @@ fn sweep_check_reconciliation(households: &[serde_json::Value]) {
             "{name}: every compared line must reconcile against BOTH oracles:\n{}",
             serde_json::to_string_pretty(&out["verdicts"]).unwrap()
         );
+        // T7-m1: the Part-1 structural reproduction witness holds on every admitted household — btctax's
+        // own `table_l16` reproduces its own filed L16 (true by construction; the sweep checks this field
+        // on operand regions the anchors never reach).
+        assert_eq!(
+            out["reproduction_ok"],
+            serde_json::json!(true),
+            "{name}: table_l16(btctax operands) must reproduce btctax's own regular tax"
+        );
     }
     assert!(admitted >= 10, "most anchors are admitted and swept, got {admitted}");
     assert_eq!(
@@ -171,4 +179,64 @@ fn check_mode_reconciles_every_line_of_every_admitted_golden_household() {
     let households = matrix["households"].as_array().expect("households array");
     assert!(households.len() >= 100, "the whole T11 corpus");
     sweep_check_reconciliation(households);
+}
+
+/// ★ T7-m2: the `--known-defect` pass-through has TEETH. A pinned §10 known-defect is authoritative for
+/// its line — a `--check` run reconciles L16 iff btctax still prints the pinned wrong value — and a STALE
+/// pin FAILS, forcing the entry's removal. To exercise a divergence on the green corpus we INJECT a wrong
+/// oracle L16 into the household (both oracles perturbed off btctax's on-paper figure), so without a pin
+/// the line diverges; the pin at btctax's ACTUAL printed value then suppresses it, and a pin at any other
+/// value stays red.
+#[test]
+fn known_defect_pin_suppresses_an_l16_divergence_and_a_stale_pin_stays_red() {
+    let mut household = raw_household("single_w2_only_standard");
+
+    // btctax's ACTUAL on-paper L16 (whole dollars) — read it back once, never guessed.
+    let baseline = run(&["--check"], &serde_json::to_string(&household).unwrap());
+    let l16 = baseline["verdicts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["line"] == serde_json::json!("1040.line16"))
+        .expect("an L16 verdict");
+    let on_paper: i64 = l16["on_paper"].as_str().unwrap().parse().unwrap();
+    assert_eq!(l16["reconciled"], serde_json::json!(true), "green baseline");
+
+    // Inject a wrong oracle L16 on BOTH oracles (off btctax's figure) so the line genuinely diverges.
+    let wrong = (on_paper + 500) as f64;
+    household["expected_ots"]["income_tax_before_credits"] = serde_json::json!(wrong);
+    household["expected_taxcalc"]["income_tax_before_credits"] = serde_json::json!(wrong);
+    let hj = serde_json::to_string(&household).unwrap();
+
+    let l16_of = |out: &serde_json::Value| -> serde_json::Value {
+        out["verdicts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["line"] == serde_json::json!("1040.line16"))
+            .cloned()
+            .expect("an L16 verdict")
+    };
+
+    // No pin ⇒ the injected divergence surfaces (the anti-world guard, no class absorbs it above ceiling
+    // — here below ceiling the methodology class would absorb a taxcalc-only dissent, but OTS is ALSO
+    // wrong, so OTS's provenance conjunct-1 fails and the line stays red).
+    let bare = run(&["--check"], &hj);
+    assert_eq!(bare["all_reconciled"], serde_json::json!(false), "injected divergence must surface");
+    assert_eq!(l16_of(&bare)["reconciled"], serde_json::json!(false));
+
+    // Pin at btctax's ACTUAL value ⇒ the known defect is suppressed (reconciled, labelled `known-defect`).
+    let pinned = run(
+        &["--check", "--known-defect", &format!("1040.line16={on_paper}@FU-SMOKE")],
+        &hj,
+    );
+    assert_eq!(l16_of(&pinned)["reconciled"], serde_json::json!(true), "the pin holds");
+    assert_eq!(l16_of(&pinned)["class"], serde_json::json!("known-defect"));
+
+    // STALE pin (btctax's value is not what was pinned) ⇒ stays red, forcing the entry's removal.
+    let stale = run(
+        &["--check", "--known-defect", &format!("1040.line16={}@FU-SMOKE", on_paper + 1)],
+        &hj,
+    );
+    assert_eq!(l16_of(&stale)["reconciled"], serde_json::json!(false), "a stale pin must fail");
 }

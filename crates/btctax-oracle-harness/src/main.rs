@@ -49,7 +49,8 @@ use std::io::Read;
 
 use btctax_core::conventions::{round_dollar, Usd};
 use btctax_core::tax::oracle_diff::{
-    round_leaf, stacking_ok, sum_round, taxcalc_methodology_class, usd, L16Operands,
+    round_leaf, stacking_ok, sum_round, table_l16, taxcalc_methodology_class, usd, KnownDefect,
+    L16Operands,
 };
 use btctax_core::tax::FilingStatus;
 use btctax_core::tax::packet::{assemble_printed_return, PrintedReturn};
@@ -72,7 +73,16 @@ use serde_json::{json, Map, Value};
 const YEAR: i32 = 2024;
 
 fn main() {
-    let check = std::env::args().skip(1).any(|a| a == "--check");
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let check = args.iter().any(|a| a == "--check");
+    // T7-m2: an OPTIONAL `--known-defect 1040.line16=<value>@<fu-id>` pin (only meaningful with --check).
+    let known_defect = match parse_known_defect(&args) {
+        Ok(kd) => kd,
+        Err(msg) => {
+            eprintln!("oracle_harness: {msg}");
+            std::process::exit(2);
+        }
+    };
 
     let mut stdin = String::new();
     if let Err(e) = std::io::stdin().read_to_string(&mut stdin) {
@@ -80,9 +90,56 @@ fn main() {
         std::process::exit(2);
     }
 
-    let out = if check { run_check(&stdin) } else { run_default(&stdin) };
+    let out = if check {
+        run_check(&stdin, known_defect.as_ref())
+    } else {
+        run_default(&stdin)
+    };
     // A single line of JSON — the drivers read one object per harness invocation.
     println!("{out}");
+}
+
+/// Parse an optional `--known-defect <line>=<btctax_value>@<fu-id>` argument (§10 / T7-m2). It pins
+/// btctax's CURRENT (caught-wrong) whole-dollar value on a line against an open `FOLLOWUPS.md` id, so a
+/// `--check` run reconciles that line iff btctax still prints the pinned value — the SAME authoritative
+/// [`KnownDefect`] the baked corpus declares at promotion (`stacking_ok`, `oracle_diff.rs`). This is the
+/// channel the live sweep uses to SUPPRESS an already-filed known defect (so a re-discovery is labelled
+/// `known-defect`, not a fresh alarm) instead of hardwiring `None`.
+///
+/// Only `1040.line16` is supported: it is the sole line with a class / `stacking_ok` path (every other
+/// compared line is an exact-match cross-foot or leaf, so a non-L16 pin is a direct value assertion
+/// declared in the golden test at promote-time, not a `--check` argument).
+fn parse_known_defect(args: &[String]) -> Result<Option<KnownDefect>, String> {
+    let Some(pos) = args.iter().position(|a| a == "--known-defect") else {
+        return Ok(None);
+    };
+    let spec = args
+        .get(pos + 1)
+        .ok_or("--known-defect needs an argument: <line>=<value>@<fu-id>")?;
+    let (line, rest) = spec
+        .split_once('=')
+        .ok_or_else(|| format!("malformed --known-defect {spec:?}: expected <line>=<value>@<fu-id>"))?;
+    if line != "1040.line16" {
+        return Err(format!(
+            "--known-defect only supports 1040.line16 (the only class/stacking line); got {line:?}. \
+             A non-L16 pin is declared in the golden test at promotion, not on --check."
+        ));
+    }
+    let (value, fu_id) = rest
+        .split_once('@')
+        .ok_or_else(|| format!("malformed --known-defect {spec:?}: expected <value>@<fu-id>"))?;
+    let value: i64 = value
+        .parse()
+        .map_err(|_| format!("--known-defect value {value:?} is not a whole-dollar integer"))?;
+    if fu_id.is_empty() {
+        return Err("--known-defect fu-id must be non-empty".into());
+    }
+    Ok(Some(KnownDefect {
+        // A short-lived one-shot CLI process: leaking the id to `&'static str` (what `KnownDefect` holds
+        // for the baked-corpus declarations) is fine and never accumulates.
+        fu_id: Box::leak(fu_id.to_string().into_boxed_str()),
+        btctax_value: Usd::from(value),
+    }))
 }
 
 // ── DEFAULT mode ───────────────────────────────────────────────────────────────────────────────────
@@ -110,7 +167,7 @@ fn run_default(stdin: &str) -> Value {
 
 // ── `--check` mode: the reproduction + classification, in Rust ───────────────────────────────────────
 
-fn run_check(stdin: &str) -> Value {
+fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
     let h: GoldenHousehold = match serde_json::from_str(stdin) {
         Ok(h) => h,
         Err(e) => {
@@ -132,6 +189,19 @@ fn run_check(stdin: &str) -> Value {
         qd_l3a: ar.qualified_dividends,
         net_ltcg_qd_excl: ar.net_ltcg,
     };
+
+    // ── T7-m1: the Part-1 STRUCTURAL witness (SPEC §6.2(b)) ──────────────────────────────────────────
+    // `table_l16` on btctax's OWN operands must reproduce btctax's OWN filed regular tax. It holds by
+    // construction on a correct build (both sides run `qdcgt_line16` on the same L15/L3a/net-LTCG), so
+    // it is a self-consistency check that the `oracle_diff` reproduction seam and the `return_1040`
+    // compute path agree — on operand regions the 12 anchors never reach, exactly where the live sweep
+    // hunts. A `false` here is a genuine reproduction/Table-semantics signal the sweep must surface.
+    let reproduction_ok = table_l16(
+        reproduced.status,
+        reproduced.ti,
+        reproduced.qd_l3a,
+        reproduced.net_ltcg_qd_excl,
+    ) == ar.regular_tax;
 
     let e = &h.expected_ots;
     let t = &h.expected_taxcalc;
@@ -177,7 +247,7 @@ fn run_check(stdin: &str) -> Value {
         "1040.line16", "tax (L16)",
         paper("1040.line16"), round_dollar(ar.regular_tax),
         e.income_tax_before_credits, t.income_tax_before_credits,
-        ots_ops.as_ref(), taxcalc_ops.as_ref(), &reproduced,
+        ots_ops.as_ref(), taxcalc_ops.as_ref(), &reproduced, known_defect,
     ));
 
     // ── The C1 cross-foot reproductions, hoisted so L24 INHERITS them (pre-T11 the legs are `None`, so
@@ -295,6 +365,9 @@ fn run_check(stdin: &str) -> Value {
     json!({
         "refused": false,
         "all_reconciled": all_reconciled,
+        // T7-m1: the Part-1 structural reproduction witness (see above) — a separate field the sweep
+        // checks alongside `all_reconciled`.
+        "reproduction_ok": reproduction_ok,
         "reproduced_ops": {
             "status": format!("{:?}", reproduced.status),
             "ti": money(reproduced.ti),
@@ -363,6 +436,7 @@ fn verdict_l16(
     ots_ops: Option<&L16Operands>,
     taxcalc_ops: Option<&L16Operands>,
     reproduced: &L16Operands,
+    known_defect: Option<&KnownDefect>,
 ) -> Value {
     let o = round_leaf(ots16);
     let tc = round_leaf(tc16);
@@ -370,8 +444,12 @@ fn verdict_l16(
         return verdict(line, label, on_paper, internal, Some(o), Some(tc), false, "absent");
     };
     let p = Usd::from(pi);
-    let reconciled = stacking_ok(p, ots16, Some(tc16), ots_ops, taxcalc_ops, reproduced, None);
-    let class = if p == o && p == tc {
+    // T7-m2: `known_defect` is threaded through (was hardwired `None`) — a declared §10 pin is
+    // authoritative, so a suppressed known defect reconciles while btctax still prints its wrong value.
+    let reconciled = stacking_ok(p, ots16, Some(tc16), ots_ops, taxcalc_ops, reproduced, known_defect);
+    let class = if reconciled && known_defect.is_some_and(|kd| p == kd.btctax_value) {
+        "known-defect"
+    } else if p == o && p == tc {
         "agree-both"
     } else if reconciled {
         if taxcalc_methodology_class(reproduced) { "methodology-taxcalc" } else { "provenance" }
