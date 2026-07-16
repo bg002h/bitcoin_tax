@@ -1,15 +1,15 @@
 # SPEC — the ORACLE SWEEP (double-oracle differential testing, read from the filled PDF)
 
-*Status: **DRAFT r2** — r1 (`design/oracle-sweep/reviews/SPEC-oracle-sweep-fable-r1.md`, 2C/6I/7M/3Nit) is
-folded here. The two Criticals were both refuted-by-source claims: C-1 (the printed chain cross-foots at
-every total, so "compare paper to `round(exact-oracle)`" manufactures reds) and C-2 ("corpus growth needs
-no Rust change" — `golden_packet.rs` breaks first, and the divergence model doesn't scale as per-household
-entries). r2 rewrites the comparison rule around the **printed-chain-on-oracle-figures** pattern that
-already ships (`golden_packet.rs:81-131`), makes the differential test an **evolution of
-`golden_packet.rs`** rather than a new file beside it, replaces per-household divergences with declared
-divergence **classes**, defers **MFS**, adds a **refusal-freedom** domain invariant, a **per-line
-sign/cross-foot** table, a **runtime budget**, and an **engine-version drift** policy. Pending re-review.
-NOT green until the loop reaches 0C/0I.*
+*Status: **DRAFT r3** — folds the r2 re-review (`design/oracle-sweep/reviews/SPEC-oracle-sweep-fable-r2.md`,
+**0C/2I**/6M/1Nit): the r1 fold cleared both Criticals, and r3 clears the two residual Importants — r2-I1
+(the Tax-Table family / L16 is made **two-part** — a structural check against btctax's own reproduced
+lookup, plus an oracle **witness** with a declared bin-straddle divergence class, §6.2) and r2-I2
+(**`golden_returns.rs` is disposed** — it runs the full corpus at compute level as the Table-semantics
+witness, §7) — plus the six Minors and the Nit (nextest wording; the 4th print pattern; anchor form-set
+pinning; the D-2 enforcement vehicle + credits scope; class-liveness). r1/r2 history: two refuted-by-source
+Criticals (printed-chain cross-foot; consumer breakage) rewritten around the in-repo `golden_packet.rs:81-131`
+pattern; the differential test is an **evolution of `golden_packet.rs`**; per-household divergences became
+**classes**; MFS/AMT deferred. Pending re-review. NOT green until the loop reaches 0C/0I.*
 *Provenance: extends the shipped P7 harness — `crates/btctax-core/tests/golden_returns.rs` (numbers vs two
 engines), **`crates/btctax-forms/tests/golden_packet.rs` (the paper already held vs OTS)**,
 `scripts/oracle/{gen_goldens,ots_direct}.py`, `crates/btctax-core/tests/goldens/full_return_goldens.json`.*
@@ -122,12 +122,16 @@ SALT cap can bind.
   directly comparable. The builder already stamps `can_be_claimed_as_dependent_* = Some(false)`
   (`testonly.rs:498-509`).
 - **D-2 (refusal-free — r1 I-1):** the corpus contains **only** scenarios btctax assembles without
-  refusal. AMT-screen trippers and any other refusal are excluded by construction — the generator keeps
-  amounts inside the refusal-free region — and the harness treats a refused assembly as a **generator
-  bug** (loud panic naming the scenario), never a divergence and never silent. Admissibility is enforced
-  at generation time: a candidate scenario is admitted only if btctax assembles it AND both oracles report
-  **zero AMT and zero credits** (the AMT/credits "guards" are oracle-side *admission predicates*, not
-  paper reads — there is no Form 6251 in the repo and Schedule 2 Part I never prints; r1 I-1, N-2).
+  refusal. Enforcement is at generation time **via the §9 test-only harness binary**, invoked per candidate
+  — generation is Python and assembly is Rust, so the check crosses that boundary through the harness, not a
+  Python re-implementation of the AMT screen that could drift (r2-M4). A candidate is admitted only if the
+  harness assembles it AND both oracles report **zero AMT** and **zero L18–L21-band credits** — the band the
+  L24 cross-foot precondition actually requires (`golden_packet.rs:104-119`). EIC is payments-side and
+  touches no compared line, so childless EIC (which taxcalc computes automatically below ~$18.6k Single /
+  ~$25.5k MFJ) is **not** a disqualifier, and the "low" W-2 band is floored above it so the covering array
+  stays satisfiable (r2-M5). These guards are oracle-side *admission predicates*, not paper reads (no Form
+  6251 in the repo; Schedule 2 Part I never prints — r1 I-1, N-2). A refusal that slips through anyway
+  panics loudly at bake time (`return_refuse.rs:161`), before commit.
 - **D-3 (comparability of the itemize election — r1 I-3):** itemized scenarios are constrained so
   itemizing **wins** (itemized total > standard). This removes the OTS `A18: Yes` forcing vs btctax's
   take-the-larger election as a confound (`ots_direct.py:261-268`).
@@ -191,18 +195,38 @@ to the **printed** L15 at `:607-610`). So comparing the paper to `round_dollar(e
 lawful $1-class disagreement on the very lines today's test matches.
 
 The rule, already proven for L24 at `golden_packet.rs:81-131`: **push the oracle's figures through btctax's
-own §3.1 printing, then compare to the paper — exact, no tolerance.** Per line, by class:
+own §3.1 printing, then compare to the paper — exact, no tolerance.** Each compared line's reproduction is
+derived line-by-line from `printed.rs`/`other_taxes.rs` in the plan; the patterns below are **illustrative,
+not an exhaustive taxonomy** (r2-M2):
 
-| Class | btctax prints | Held against | Example |
+| Pattern | btctax prints | Held against | Example |
 |---|---|---|---|
-| **Leaf** | `round_dollar(exact_line)` | `round_dollar(oracle_line)` | Sch SE L10/L11 parts; 8960 base |
+| **Leaf** | `round_dollar(exact_line)` | `round_dollar(oracle_line)` | Sch SE L10 (SS), L11 (Medicare); 8960 L13 = round(exact AGI) |
 | **Cross-footed total** | `Σ round_dollar(component)` | `Σ round_dollar(oracle_component)` | L24; AGI (L11); taxable income (L15); Sch SE L12; 8959 L18 |
-| **Tax-table** | `Table(printed L15)` (or QDCGT on printed operands) | `Table(reproduced printed TI)` | L16 |
+| **Rate-on-printed-operand** | `round_dollar(rate × printed_operand)` | `round_dollar(rate × reproduced printed_operand)` | 8959 L7/L13 (0.9%); 8960 L17 (3.8%) |
+| **Tax-table** | `Table(printed L15)` / QDCGT on printed operands | *two-part rule below* | L16 |
 
-Cross-footed lines therefore require the oracle drivers to expose the **component** lines they sum
-(deepening the extraction — exactly what §2.A entails); where an oracle exposes only the total, that line is
-single-witness against the oracle that exposes the components. The **rejected** alternative (a ±$k residual
-tolerance on Σ-lines) is weaker — it would mask a genuine off-by-a-few-dollars fill bug — and is not used.
+**Cross-footed and rate-on-printed lines** require the oracle drivers to expose the **component/operand**
+lines they consume (deepening the extraction — exactly §2.A; `ots_direct.py:164-171` already parses every
+`Lxx` OTS prints, and taxcalc exposes the component arrays). Where an oracle exposes only the total, that
+line is single-witness against the oracle that exposes the parts. The **rejected** alternative (a ±$k
+residual tolerance on Σ-lines) is weaker — it would mask a genuine off-by-a-few-dollars fill bug.
+
+**The Tax-table family (L16 and every total it flows into) is TWO-PART (r2-I1)** — either part alone is
+either a check that cannot fail or a source of undeclared reds:
+
+- **(a) Structural, exact:** paper L16 `==` `Table_btctax(reproduced printed TI)` — with the QDCGT variant
+  computed on the **reproduced printed operands** on *both* sides where it applies (r2-N1). `Table_btctax`
+  is btctax's own `qdcgt_line16` + `ty2024_table()` (reachable cross-crate: `method.rs:74`, `testonly`).
+  This catches every fill/transcription/printed-chain bug, but — both sides using btctax's own lookup — it
+  is **blind to a Tax-Table *semantics* bug** (wrong bin, schedule-below-$100k, a QDCGT worksheet error).
+- **(b) Witness, exact:** `Table_btctax(reproduced printed TI)` vs `round_dollar(oracle L16)`, with ONE
+  declared divergence **class** `(OTS, L16-family, reproduced-TI and oracle-TI straddle a $50 Tax-Table bin
+  boundary)` — the predicate is computable from the two TIs the deepened extraction already carries. This
+  restores the oracle's opinion of the *tax* (which today's `golden_packet.rs:129` has and part (a) alone
+  drops). Part (b) is a **compute-level** comparison — it is where the compute-side test earns its keep (§7).
+- **L24's tax component is the part-(a) figure**, so the total inherits the two-part treatment instead of
+  smuggling the raw oracle L16 back in as a component (which would re-open the bin-straddle red on L24).
 
 ### 6.3 Sign conventions and blanks (r1 I-4, M-6)
 
@@ -232,7 +256,11 @@ tolerance on Σ-lines) is weaker — it would mask a genuine off-by-a-few-dollar
   1040 instructions below $100k); taxcalc uses the exact rate schedule (`golden_returns.rs:16-22, 102-104`).
   Per-household `dec!` figures do not scale (6 today → 40–60 over a ~100 corpus, each re-derived every
   regeneration); a class scales to any corpus size. The anti-"btctax against the world" guard stays: a line
-  where btctax disagrees with **both** oracles is never silently classed.
+  where btctax disagrees with **both** oracles is never silently classed. **Two L16 classes coexist:** the
+  taxcalc-exact-schedule class above (systematic below $100k) and the **OTS bin-straddle** class from
+  §6.2(b) (occasional). **Class liveness (r2-M6):** every declared class must fire for ≥1 corpus household —
+  the predicate analogue of the per-entry dead-entry guard (`golden_returns.rs:388-401`) — so a class whose
+  engine later adopts different semantics fails loudly rather than rotting as an unread claim.
 - **L12 single-witness closure (r1 I-5):** OTS cannot infer net capital gain — our driver **hand-computes**
   8995 L12 and feeds it to OTS (`ots_direct.py:19-33, 283-304`), so "paper L12 vs OTS L12" is
   self-referential and cannot fail on a wrong-formula bug. The plan closes the loop per `ots_direct.py`'s
@@ -255,17 +283,31 @@ bug; both btctax values differ ⇒ a compute bug.
   hand-written per-name form-set map and hard `checked == N` counts with **derived** expectations — the
   expected form set is computed from the household's inputs against the documented trigger thresholds (Sch B
   $1,500; 8959 $200k/$250k; 8995 with QBI; Sch D with gains; Sch A when itemized), and SE/Sch-C counts are
-  derived from the inputs. Only then does adding a household need no Rust edit.
+  derived from the inputs. Only then does adding a household need no Rust edit. **The 12 anchors keep their
+  hand-written form sets** (`golden_packet.rs:300-350`) as pinned data, and §12 obligates the derivation to
+  reproduce all twelve — so the trigger-derivation (which re-implements core's assembly triggers) is itself
+  anchored by twelve known-answer sets, and a systematically-wrong derivation is caught rather than silently
+  agreeing with a matching filler bug (r2-M3).
 - The existing **whole-corpus determinism loops** — byte-reproducibility, the identity sweep — run over the
   **12 anchors only**, not the full generated array (they test packet-assembly determinism, which the
   anchors already exercise; running them over ~100 households is what blows the budget — §8).
+- **`golden_returns.rs` (the second same-JSON consumer) is disposed, not left to break (r2-I2):** it
+  **stays** and runs the **full generated corpus at compute level** — btctax's compute structs vs both
+  oracles, cheap (no PDF fills) — adopting the same declared-class mechanism (§6.4). This is deliberate: it
+  is the **compute-side witness** §6.2(b) needs — btctax's Tax-Table lookup held against the oracle's L16 —
+  and the layer that catches a Table-*semantics* bug the paper's structural check (§6.2(a)) cannot. Its
+  per-household `DECLARED_DIVERGENCES` become classes; its dead-entry liveness guard becomes the
+  class-liveness rule (§6.4). Without this, regenerating the JSON turns `make check` red in `btctax-core`
+  before the evolved forms test exists.
 
 ## 8. Runtime budget (r1 I-6)
 
 `make check` is the gate: `cargo nextest run --workspace` + clippy, concurrently, **~6s warm**
 (`Makefile:26-31`); the project treats this as sacred ([[fast-validation-gate]]). Measured ~150–250 ms per
-packet fill; a single `#[test]` looping ~100 households is ~20–30 s serial (nextest parallelizes *across*
-test binaries, not within one). Budget and mitigations, all in-spec:
+packet fill; a single `#[test]` looping ~100 households is ~20–30 s serial (nextest runs each `#[test]` in
+its own process, parallel across the whole run; the serial cost is *within* a single `#[test]`, which is
+exactly why sharding the loop across many `#[test]`s parallelizes it — r2-M1). Budget and mitigations, all
+in-spec:
 
 - **The differential loop is sharded** across multiple `#[test]` functions (by household-hash into N
   shards), so nextest runs them in parallel and no single test dominates the gate.
@@ -327,8 +369,9 @@ v1; no change to compute, fillers, or map TOMLs; no automated/scheduled sweep in
 
 ## 14. Open decisions for the plan (trimmed)
 
-1. **MFS deferral** (§2) — flagged for the user; v1 is {Single, MFJ}. (Overridable: doing MFS means the
-   harness work listed in §2.)
+1. **MFS deferral** (§2) — **user-confirmed low priority** (2026-07-15: "definitely low priority to support
+   mfs … maybe we will do this later when we understand why it exists"); v1 is {Single, MFJ}. Not revisited
+   without an explicit ask; doing MFS means the harness work listed in §2.
 2. **The L12 closure** (§6.4) — derive OTS L12 from OTS Schedule D vs resolve a taxcalc L12 variable vs
    ship it single-witness/weak.
 3. **Full-corpus runtime split** (§8) — whether the full ~100 corpus fits the fast gate sharded, or splits
