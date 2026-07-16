@@ -53,3 +53,6 @@ scripts/.pii-patterns.bak
 docs/pdf/
 target-clippy/
 __pycache__/
+
+# Offline oracle toolchain venv (taxcalc + the Python drivers) — build artifact, NEVER commit.
+.venv/

@@ -39,14 +39,22 @@ boundary). The plan is self-contained; read it + this doc + the auto-memory `[[o
 - **Phase C — T12–T13:** the live `sweep.py` + the §12 validation KATs (fault-injection, deeper-line teeth,
   determinism).
 
-**Toolchain prerequisite for Phase B (T8+) — NOT confirmed ready as of this session:** needs the OTS 2024
-binaries + a working `taxcalc` venv. A `/scratch/code/.venv` exists but **`import taxcalc` FAILED** in it on
-2026-07-16, and the OTS install seen at `…/scratchpad/OpenTaxSolver2024_22.07_linux64` is under a
-session-specific scratchpad that will likely be gone. **So at T8, expect to (re)provision the toolchain:**
-create/repair a venv with `python -m venv .venv && .venv/bin/pip install taxcalc pandas`, and locate or
-re-download the `OpenTaxSolver2024_22.07_linux64` build, then `export OTS_DIR=…`. Full recipe in
-`scripts/oracle/gen_goldens.py`'s header. **Ask the user** to confirm/point at both before running T8–T11.
-Phase A (T1–T7) needs NONE of this — start there regardless; the toolchain only gates the T8 boundary.
+**Toolchain for Phase B (T8+):**
+
+- **`taxcalc` venv — READY (2026-07-16).** Repo-local **`.venv`** (Python 3.12, **gitignored**) has
+  `taxcalc==6.7.2` + pandas 3.0.3 + numpy 2.4.6, and a `tc.Calculator` runs for 2024 (verified, not just
+  imports). Drive it as `.venv/bin/python scripts/oracle/gen_goldens.py …` (the recipe's `.venv`
+  convention; its `pip show taxcalc` provenance step works because the venv is `uv venv --seed`, i.e. has
+  pip). **Do NOT** use `/scratch/code/.venv` — that one is `uv`-made, pip-less, and holds `uvicorn` for an
+  unrelated project. The `6.7.2` pin matches the baked goldens' provenance so the re-bake reproduces the
+  12-anchor baseline.
+- **OTS 2024 binaries — STILL NEEDED.** `gen_goldens.py` imports `ots_direct`, which drives the
+  `OpenTaxSolver2024_22.07_linux64` binaries via `OTS_DIR`. An install was seen under a (session-specific,
+  now likely gone) scratchpad. **At T8: locate or re-download `OpenTaxSolver2024_22.07_linux64`, `export
+  OTS_DIR=…`, and confirm `ots_direct.evaluate` runs on one household** — ask the user if it is not on disk.
+  (GPL, observe-only per SPEC §9 licensing posture.)
+
+Phase A (T1–T7) needs NEITHER — start there regardless; the toolchain only gates the T8 boundary.
 
 ## Standing constraints (do not violate)
 
