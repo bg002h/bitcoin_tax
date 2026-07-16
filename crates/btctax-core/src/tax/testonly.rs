@@ -406,6 +406,18 @@ pub struct ExpectedOts {
     pub niit: f64,
     pub additional_medicare_tax: f64,
     pub total_tax: f64,
+    #[serde(default)] pub deduction_taken: Option<f64>,       // 1040 L12
+    #[serde(default)] pub salt_capped: Option<f64>,           // Sch A L5e
+    #[serde(default)] pub sch_d_to_l7: Option<f64>,           // 1040 L7 (signed)
+    #[serde(default)] pub qbi_cap_l12: Option<f64>,           // 8995 L12 — OTS single-witness/WEAK (I1): driver-hand-fed, NOT an independent check; §14.2 closure = follow-up
+    // provenance leaves for the §6.2(b) predicate (Table_btctax inputs):
+    #[serde(default)] pub qual_div_l3a: Option<f64>,          // 1040 L3a
+    #[serde(default)] pub net_ltcg_qd_exclusive: Option<f64>, // §1(h) term, QD-EXCLUSIVE (r5-N2)
+    // C1 cross-foot legs — OTS only (taxcalc has no split):
+    #[serde(default)] pub se_l10_oasdi: Option<f64>,          // Sch SE L10 (OASDI leg)
+    #[serde(default)] pub se_l11_medicare: Option<f64>,       // Sch SE L11 (Medicare leg)
+    #[serde(default)] pub f8959_l7: Option<f64>,              // 8959 L7 leg
+    #[serde(default)] pub f8959_l13: Option<f64>,             // 8959 L13 leg
 }
 
 /// The second oracle's outputs. Only the lines whose definitions are unambiguous across engines: we do
@@ -420,6 +432,14 @@ pub struct ExpectedTaxcalc {
     pub se_tax: f64,
     pub niit: f64,
     pub additional_medicare_tax: f64,
+    #[serde(default)] pub deduction_taken: Option<f64>,       // 1040 L12
+    #[serde(default)] pub salt_capped: Option<f64>,           // Sch A L5e
+    #[serde(default)] pub sch_d_to_l7: Option<f64>,           // 1040 L7 (signed)
+    #[serde(default)] pub qbi_cap_l12: Option<f64>,           // 8995 L12 — OTS single-witness/WEAK (I1): driver-hand-fed, NOT an independent check; §14.2 closure = follow-up
+    // provenance leaves for the §6.2(b) predicate (Table_btctax inputs):
+    #[serde(default)] pub qual_div_l3a: Option<f64>,          // 1040 L3a
+    #[serde(default)] pub net_ltcg_qd_exclusive: Option<f64>, // §1(h) term, QD-EXCLUSIVE (r5-N2)
+    #[serde(default)] pub total_tax: Option<f64>,             // OTS's is required f64; taxcalc's is optional — §6.4 M-4
 }
 
 #[derive(Debug, Deserialize)]
@@ -622,4 +642,19 @@ pub fn build_golden_household(h: &GoldenHousehold) -> (ReturnInputs, LedgerState
     }
 
     (ri, state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_goldens_parse_with_optional_deeper_fields_absent() {
+        let hs = golden_households(); // parses GOLDEN_RETURNS_JSON
+        let h = &hs[0];
+        // The new deeper/provenance fields are absent in today's JSON ⇒ None, not a parse error.
+        assert!(h.expected_ots.qbi_cap_l12.is_none());
+        assert!(h.expected_ots.net_ltcg_qd_exclusive.is_none());
+        assert!(h.expected_taxcalc.total_tax.is_none());
+    }
 }
