@@ -122,3 +122,12 @@ fn absent_is_zero_regime_reads_absent_as_zero_and_present_as_itself() {
     assert_eq!(cell_or_zero(&c, "absent", Blank::AbsentIsZero), 0);
     assert_eq!(cell_or_zero(&c, "present", Blank::AbsentIsZero), 42);
 }
+
+#[test]
+#[should_panic(expected = "not a parseable integer")]
+fn absent_is_zero_regime_panics_on_a_present_unparseable_cell() {
+    // Parse discipline (§6.3), the branch T4 left untested (T4-m2): AbsentIsZero reads an ABSENT key as
+    // 0, but a PRESENT key that is not an integer is a bug in the filler or the map — never a silent 0.
+    let c = cells(&[("v", "not-a-number")]);
+    let _ = cell_or_zero(&c, "v", Blank::AbsentIsZero);
+}

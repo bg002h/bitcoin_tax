@@ -2,8 +2,8 @@
 //! everything is built inline from invented values.
 #![allow(dead_code)] // each integration-test crate uses a different subset of these helpers
 
-use btctax_core::tax::packet::assemble_printed_return;
-use btctax_core::tax::return_1040::assemble_absolute;
+use btctax_core::tax::packet::{assemble_printed_return, PrintedReturn};
+use btctax_core::tax::return_1040::{assemble_absolute, AbsoluteReturn};
 use btctax_core::tax::testonly::{
     build_golden_household, ty2024_params, ty2024_table, GoldenHousehold,
 };
@@ -108,9 +108,26 @@ pub fn totals_for(rows: &[Form8949Row]) -> ScheduleDTotals {
 // would fill forms for a different taxpayer than the one the oracle validated — while still passing.
 // One fixture, one packet: keep it here and let both integration-test crates share it via `mod common;`.
 
-/// Fill the whole packet for one golden household — the exact chain the return itself takes:
-/// `assemble_absolute` → `assemble_printed_return` → `fill_full_return`.
-pub fn packet(h: &GoldenHousehold) -> Vec<NamedForm> {
+/// One golden household assembled all the way to paper — the INTERNAL chain (`ar` exact compute,
+/// `pr` printed chain) AND the filled `forms`. The double-oracle **paper-level** differential (T6)
+/// needs all three at once: the filled PDF is what it reads BACK, and the internal figures are what
+/// make the §6.5 three-way localization possible (a mismatch is `oracle / btctax-internal /
+/// btctax-on-paper` — internal matches the oracle but paper does not ⇒ a fill bug; both btctax values
+/// differ ⇒ a compute bug). One assembly, so the reproduction reads the SAME return it filled.
+pub struct FullReturn {
+    /// The exact-cents compute (1040 line figures as [`AbsoluteReturn`]) — the "btctax-internal" side.
+    pub ar: AbsoluteReturn,
+    /// The §3.1 printed chain (the whole-dollar lines btctax INTENDS to print) — the internal value a
+    /// correct fill lands on paper.
+    pub pr: PrintedReturn,
+    /// The filled packet, in Attachment Sequence order — the "btctax-on-paper" side.
+    pub forms: Vec<NamedForm>,
+}
+
+/// Assemble one golden household to paper — the exact chain the return itself takes:
+/// `assemble_absolute` → `assemble_printed_return` → `fill_full_return` — returning the internal
+/// chain alongside the filled forms (see [`FullReturn`]).
+pub fn full_return(h: &GoldenHousehold) -> FullReturn {
     let (ri, state) = build_golden_household(h);
     let params = ty2024_params();
     let table = ty2024_table();
@@ -118,7 +135,15 @@ pub fn packet(h: &GoldenHousehold) -> Vec<NamedForm> {
     // No golden household makes a charitable donation, so there are no §170(e) details to carry.
     let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, 2024)
         .expect("the golden households carry well-formed SSNs");
-    fill_full_return(&pr, 2024).unwrap_or_else(|e| panic!("{}: the packet must fill — {e}", h.name))
+    let forms =
+        fill_full_return(&pr, 2024).unwrap_or_else(|e| panic!("{}: the packet must fill — {e}", h.name));
+    FullReturn { ar, pr, forms }
+}
+
+/// Fill the whole packet for one golden household (the filled forms only; see [`full_return`] for the
+/// internal chain too).
+pub fn packet(h: &GoldenHousehold) -> Vec<NamedForm> {
+    full_return(h).forms
 }
 
 /// The named form in a filled packet (panics if the packet is missing it).
