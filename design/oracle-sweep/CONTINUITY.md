@@ -39,12 +39,14 @@ boundary). The plan is self-contained; read it + this doc + the auto-memory `[[o
 - **Phase C — T12–T13:** the live `sweep.py` + the §12 validation KATs (fault-injection, deeper-line teeth,
   determinism).
 
-**Toolchain prerequisite for Phase B (T8+):** the OTS 2024 binaries + a `taxcalc` venv. As of this session
-an OTS install was at `…/scratchpad/OpenTaxSolver2024_22.07_linux64` (scratchpad is session-specific — may
-be gone) and a venv at `/scratch/code/.venv`. **At T8, first locate/confirm both:** `taxcalc` must import
-(`/scratch/code/.venv/bin/python -c "import taxcalc"`) and `OTS_DIR` must point at the OTS install; the
-regeneration recipe is in `scripts/oracle/gen_goldens.py`'s header. If missing, ask the user to provide
-them. Phase A needs none of this, so start there regardless.
+**Toolchain prerequisite for Phase B (T8+) — NOT confirmed ready as of this session:** needs the OTS 2024
+binaries + a working `taxcalc` venv. A `/scratch/code/.venv` exists but **`import taxcalc` FAILED** in it on
+2026-07-16, and the OTS install seen at `…/scratchpad/OpenTaxSolver2024_22.07_linux64` is under a
+session-specific scratchpad that will likely be gone. **So at T8, expect to (re)provision the toolchain:**
+create/repair a venv with `python -m venv .venv && .venv/bin/pip install taxcalc pandas`, and locate or
+re-download the `OpenTaxSolver2024_22.07_linux64` build, then `export OTS_DIR=…`. Full recipe in
+`scripts/oracle/gen_goldens.py`'s header. **Ask the user** to confirm/point at both before running T8–T11.
+Phase A (T1–T7) needs NONE of this — start there regardless; the toolchain only gates the T8 boundary.
 
 ## Standing constraints (do not violate)
 
