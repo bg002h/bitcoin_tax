@@ -31,7 +31,10 @@
 //!   - **TOTAL TAX L24, Schedule SE L12, Form 8959 L18** — OTS-single-witness CROSS-FOOTS (`sum_round`
 //!     of the oracle's own printed legs; taxcalc bundles payroll / exposes only exact totals). Pre-T11
 //!     the component legs are `None`, so each falls back to `round_leaf` of the baked per-line total —
-//!     the HEAD shape, green on the anchors; the leg form activates when the operands bake at T11.
+//!     the HEAD shape, green on the anchors; the leg form activates when the operands bake at T11. L24
+//!     INHERITS the SE-L12 / 8959-L18 reproductions (C1 table) so all three switch together at T11.
+//!   - **Form 8960 L17 (NIIT)** — OTS-single-witness `round_leaf(oracle_niit)`, cent-exact on the
+//!     anchors, carrying an inherent ±cents epsilon (OTS's L17 is on cents-MAGI) → §10 triage, not a class.
 //!   - **deduction L12, SALT L5e, Sch-D→L7, 8995 L12** — deeper rows, read off the paper NOW but
 //!     oracle-compared only when their `Option` leaf bakes (T11); inert on today's JSON.
 //!
@@ -54,8 +57,8 @@ use btctax_core::tax::testonly::{
     GoldenInputs,
 };
 use btctax_forms::testonly::{
-    extract_lines, F1040_MAP_2024, F8959_MAP_2024, F8995_MAP_2024, SCHEDULE_A_MAP_2024,
-    SCHEDULE_C_MAP_2024, SCHEDULE_SE_MAP_2024,
+    extract_lines, F1040_MAP_2024, F8959_MAP_2024, F8960_MAP_2024, F8995_MAP_2024,
+    SCHEDULE_A_MAP_2024, SCHEDULE_C_MAP_2024, SCHEDULE_SE_MAP_2024,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -75,6 +78,13 @@ fn paper_money(cells: &BTreeMap<String, String>, key: &str) -> Usd {
     let raw = cells
         .get(key)
         .unwrap_or_else(|| panic!("paper_money: the compared cell {key:?} is absent from the paper"));
+    // `parse::<i64>()` would silently accept a leading minus, so a SIGNED line misrouted here would pass
+    // unnoticed. Fail loud: an unsigned reader must never read a signed cell (use `on_paper_signed`).
+    assert!(
+        !raw.starts_with('-'),
+        "paper_money: cell {key:?} carries a leading minus ({raw:?}) — read a signed line with \
+         on_paper_signed, not paper_money"
+    );
     let n: i64 = raw
         .parse()
         .unwrap_or_else(|_| panic!("paper_money: cell {key:?} is present but not an integer: {raw:?}"));
@@ -158,7 +168,15 @@ fn check_ots(
 
 /// How many `#[test]` shards the differential loop is split across (§8, r2-M1). The twelve anchors are
 /// tiny; T11 (~80–120 households) re-measures the wall-clock and may raise this.
+///
+/// ★ MUST equal `SHARD_WRAPPERS` (the count of `diff_shard_*` `#[test]`s below). Raise one and you must
+/// raise the other — else the `idx % SHARDS == SHARDS-1` households are silently dropped. The guard
+/// `the_shards_partition_every_household` pins the two together and would go RED rather than lose coverage.
 const SHARDS: usize = 4;
+
+/// The number of `diff_shard_*` wrappers that actually run — kept in lockstep with `SHARDS` by the
+/// coverage guard. (Owning phase: T11 re-measures N and, if it raises `SHARDS`, adds the wrappers.)
+const SHARD_WRAPPERS: usize = 4;
 
 /// ★ **The figures two independent engines computed are the figures in the boxes on the paper.** The
 /// per-household body every shard runs: read the full compared line set OFF THE FILLED PDF, hold each
@@ -181,6 +199,7 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
     let f1040 = read("f1040", F1040_MAP_2024).expect("every return has a 1040");
     let sch_se = read("schedule_se", SCHEDULE_SE_MAP_2024);
     let f8959 = read("f8959", F8959_MAP_2024);
+    let f8960 = read("f8960", F8960_MAP_2024);
     let sch_a = read("f1040sa", SCHEDULE_A_MAP_2024);
     let f8995 = read("f8995", F8995_MAP_2024);
     let sch_c = read("f1040sc", SCHEDULE_C_MAP_2024);
@@ -279,9 +298,27 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
         ));
     }
 
-    // ── TOTAL TAX L24 — OTS-single-witness cross-foot. The precondition (no AMT, no credits) is read
-    //    OFF THE PAPER: lines 17 and 21 must be PRESENT-and-"0" (a dropped line fails loudly) — else the
-    //    `sum_round([L16, SE-L12, 8959-L18, NIIT])` formula would understate the total. ───────────────
+    // ── The C1 cross-foot reproductions, hoisted so L24 INHERITS them (C1 table, plan line 47) ───────
+    // Schedule SE L12 = `sum_round([L10 OASDI, L11 Medicare])`; Form 8959 L18 = `sum_round([L7, L13])`.
+    // Pre-T11 the legs are `None`, so each falls back to `round_leaf` of the baked per-line total — the
+    // HEAD shape, numerically identical to the leg form on the anchors. L24 (below) sums THESE SAME
+    // reproductions, so when the legs bake at T11 all three switch to `sum_round(legs)` together and the
+    // §6102 Σround≠roundΣ residual never resurrects on L24 (it would, with no class to absorb it, if L24
+    // instead summed `round(exact total)`).
+    let se_l12_ots = match (e.se_l10_oasdi, e.se_l11_medicare) {
+        (Some(l10), Some(l11)) => sum_round(&[l10, l11]),
+        _ => round_leaf(e.se_tax),
+    };
+    let f8959_l18_ots = match (e.f8959_l7, e.f8959_l13) {
+        (Some(l7), Some(l13)) => sum_round(&[l7, l13]),
+        _ => round_leaf(e.additional_medicare_tax),
+    };
+
+    // ── TOTAL TAX L24 — OTS-single-witness cross-foot that INHERITS the SE-L12 / 8959-L18 reproductions:
+    //    `round_leaf(L16) + SE-L12 + 8959-L18 + round_leaf(NIIT)` (each an already-printed whole-dollar
+    //    line, summed — the printed `round(L22)+round(L23)` shape). The precondition (no AMT, no credits)
+    //    is read OFF THE PAPER: lines 17 and 21 must be PRESENT-and-"0" (a dropped line fails loudly) —
+    //    else the formula would understate the total. ─────────────────────────────────────────────────
     let _ = cell_or_zero(&f1040, "line17", Blank::PresentZero); // Sch 2 L3 (AMT / excess APTC)
     let _ = cell_or_zero(&f1040, "line21", Blank::PresentZero); // L19 + L20 (nonrefundable credits)
     check_ots(
@@ -291,17 +328,11 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
         &h.why,
         paper_money(&f1040, "line24"),
         a.pr.forms.f1040.line24, // btctax's printed Σround L24
-        sum_round(&[
-            e.income_tax_before_credits,
-            e.se_tax,
-            e.additional_medicare_tax,
-            e.niit,
-        ]),
+        round_leaf(e.income_tax_before_credits) + se_l12_ots + f8959_l18_ots + round_leaf(e.niit),
     );
 
-    // ── Schedule SE line 12 — the C1 cross-foot `sum_round([L10 OASDI, L11 Medicare])`. This REPLACES
-    //    the old `round(exact se_tax)` comparison; pre-T11 the legs are `None`, so it falls back to
-    //    `round_leaf(e.se_tax)` (the HEAD shape, green on the anchors). OTS single-witness. ────────────
+    // ── Schedule SE line 12 — the C1 cross-foot reproduction hoisted above. This REPLACES the old
+    //    `round(exact se_tax)` comparison. OTS single-witness. ─────────────────────────────────────────
     if h.inputs.self_employment_income > 0.0 {
         if let Some(se) = &sch_se {
             check_ots(
@@ -316,16 +347,13 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
                     .as_ref()
                     .expect("an SE household has a printed Schedule SE")
                     .line12,
-                match (e.se_l10_oasdi, e.se_l11_medicare) {
-                    (Some(l10), Some(l11)) => sum_round(&[l10, l11]),
-                    _ => round_leaf(e.se_tax),
-                },
+                se_l12_ots,
             );
         }
     }
 
-    // ── Form 8959 line 18 — the C1 cross-foot `sum_round([L7, L13])`; pre-T11 fallback
-    //    `round_leaf(e.additional_medicare_tax)`. OTS single-witness (taxcalc's `ptax_amc` is exact). ──
+    // ── Form 8959 line 18 — the C1 cross-foot reproduction hoisted above. OTS single-witness (taxcalc's
+    //    `ptax_amc` is the exact total). ─────────────────────────────────────────────────────────────
     if let Some(f) = &f8959 {
         check_ots(
             wrong,
@@ -334,10 +362,29 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
             &h.why,
             paper_money(f, "line18"),
             a.pr.forms.f8959.line18,
-            match (e.f8959_l7, e.f8959_l13) {
-                (Some(l7), Some(l13)) => sum_round(&[l7, l13]),
-                _ => round_leaf(e.additional_medicare_tax),
-            },
+            f8959_l18_ots,
+        );
+    }
+
+    // ── Form 8960 line 17 — NIIT. Paper side is `round_leaf(oracle_niit)`, OTS single-witness. It carries
+    //    a ±cents epsilon by nature (OTS computes L17 on cents-MAGI, not the printed operands btctax
+    //    rounds) → §10 TRIAGE if a corpus scenario surfaces one, NEVER a divergence class. Cent-exact on
+    //    the anchors today (btctax's NIIT equals `e.niit`), and the T8 OTS-8960-L5a §1211 fix (r2-I3)
+    //    tightens OTS's own NII so the T11 corpus stays tight. ─────────────────────────────────────────
+    if let Some(f) = &f8960 {
+        check_ots(
+            wrong,
+            &h.name,
+            "8960 L17 (NIIT)",
+            &h.why,
+            paper_money(f, "line17"),
+            a.pr
+                .forms
+                .f8960
+                .as_ref()
+                .expect("a NIIT household has a printed Form 8960")
+                .line17,
+            round_leaf(e.niit),
         );
     }
 
@@ -522,6 +569,34 @@ fn diff_shard_3() {
     run_shard(3);
 }
 
+/// ★ **The shards PARTITION every household exactly once.** `SHARDS` and the `diff_shard_*` wrapper
+/// count are coupled only by convention; raising `SHARDS` to 5 without adding `diff_shard_4` would
+/// silently drop every `idx % 5 == 4` household — the exact silent coverage loss the brief warns
+/// against. This guard fails loudly instead: it pins `SHARDS == SHARD_WRAPPERS` AND that the running
+/// wrappers cover each of the twelve household indices exactly once.
+#[test]
+fn the_shards_partition_every_household() {
+    assert_eq!(
+        SHARDS, SHARD_WRAPPERS,
+        "every shard index 0..SHARDS needs a diff_shard_* wrapper — raise SHARDS and SHARD_WRAPPERS \
+         together, and add the wrapper"
+    );
+    let n = golden_households().len();
+    let mut covered = vec![0u32; n];
+    for shard in 0..SHARD_WRAPPERS {
+        for (idx, c) in covered.iter_mut().enumerate() {
+            if idx % SHARDS == shard {
+                *c += 1;
+            }
+        }
+    }
+    assert!(
+        covered.iter().all(|&c| c == 1),
+        "the running shards do not partition the {n} households exactly once (each must be covered by \
+         exactly one wrapper): {covered:?}"
+    );
+}
+
 /// The taxcalc Tax-Table methodology class must ENGAGE on the paper differential's Table anchors —
 /// positive liveness, as the compute level asserts. Cheap and NON-sharded: it needs only btctax's own
 /// compute operands (`ar`), never a filled PDF, so a single test can see all twelve. The full
@@ -577,9 +652,12 @@ fn the_paper_differential_engages_the_methodology_class() {
 ///   * Schedule 2 carries Part-II other taxes: SE tax, Additional Medicare (8959), or NIIT (8960).
 ///   * Schedule 3 (credits) is out of the domain (D-1: no credits) — never filed here.
 ///
-/// The Form 8959/8960 bases are modeled at the documented threshold and are FAITHFUL on the anchors;
-/// they approximate MAGI at the AGI level (the ½-SE adjustment, which flips no anchor, is omitted). T11
-/// re-validates the derivation against the real assembler over the generated corpus.
+/// The Form 8959/8960 bases are modeled at the documented threshold and are FAITHFUL on the anchors, but
+/// APPROXIMATE: Form 8959 uses raw `w2 + SE` (it omits the 0.9235 net-SE factor and the SS-wage-base
+/// interaction, so an SE-heavy household near $200k could derive a spurious `f8959`); Form 8960
+/// approximates MAGI at the AGI level (the ½-SE adjustment, which flips no anchor, is omitted). Neither
+/// flips any of the twelve anchors, and T11's whole-corpus `derive_form_set`-vs-assembler check
+/// re-validates the derivation over the generated corpus — the safety net if a scenario lands on an edge.
 fn derive_form_set(i: &GoldenInputs) -> BTreeSet<&'static str> {
     let mut set: BTreeSet<&'static str> = BTreeSet::new();
     set.insert("f1040"); // every return
