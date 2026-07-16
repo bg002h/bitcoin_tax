@@ -4,6 +4,27 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## oracle-sweep — deferred hardening (2026-07-16)
+
+- **(OS-14.2) Derive OTS's Form 8995 line 12 from OTS's OWN Schedule-D output — Minor, owned by
+  post-oracle-sweep / future hardening.** `scripts/oracle/ots_direct.py::evaluate` **hand-feeds** Form 8995
+  line 12 (`qbi_cap_l12 = round(net_capital_gain)`, the driver's own §1(h) figure — NOT derived by OTS)
+  because OTS's 8995 solver reads a 1040 *output* file that carries a taxable income, not a net capital
+  gain. Consequence: on the QBI-limited-by-net-capital-gain path OTS **cannot independently catch an error**
+  in line 12 — if btctax's notion of net capital gain were wrong, the same wrong number is handed to OTS and
+  it would agree. PSL Tax-Calculator (which derives line 12 from `p23250`/`p22250`/`e00650`) is the only
+  fully independent witness there, so it is ONE witness, not two — the two-oracle claim is thinner on the
+  QBI path than everywhere else. `qbi_cap_l12` is therefore emitted (T8) and asserted (T5/T6) as
+  **single-witness/WEAK**, not advertised as an independent check. **The close:** derive OTS's line 12 from
+  OTS's own Schedule-D solver output (the D-line proceeds/cost → §1(h) net capital gain) rather than the
+  driver's hand-computed figure, restoring OTS as a genuinely independent second witness. Out of the
+  oracle-sweep plan's scope (the plan ships the WEAK leaf as-is). — OPEN, owned by **post-oracle-sweep /
+  future hardening**. — `scripts/oracle/ots_direct.py` `evaluate` (8995 L12 feed);
+  `SPEC_oracle_sweep.md` §6.4 "L12 single-witness closure (r1 I-5)"; plan §6.1 table "8995 L12" row (§14.2
+  closure).
+
+---
+
 ## input-form PLAN 3 (TUI) — whole-branch review Minors (2026-07-15)
 
 The Fable plan-3 whole-branch review (`design/input-form/reviews/WHOLE-BRANCH-P3-fable-r1.md`, 0C/4I) — the
