@@ -210,8 +210,15 @@ def taxcalc_run(households):
     btctax's `se_w2_ss_wages` input means (the filer's OWN box-3 wages) and what we hand OTS on
     Schedule SE line 8a. All three engines are answering the same question.
 
-    We do NOT take its `combined`/`iitax` totals: those bundle payroll tax on W-2 wages, which
-    1040 line 24 does not.
+    For the 1040 line 24 equivalent we take `c09200` — income tax (incl. AMT) after the
+    nonrefundable credits, PLUS the Schedule 2 "other taxes" (SE tax, NIIT, Additional
+    Medicare), before refundable credits — which for these creditless households IS line 24.
+    We do NOT take `combined` (it ADDS the W-2 payroll tax that line 24 excludes), nor `iitax`
+    (taxcalc books SE tax and Additional Medicare as *payroll*, so `iitax` OMITS them though
+    line 24 includes them). taxcalc exposes only the EXACT totals `setax`/`ptax_amc` — no
+    OASDI/Medicare or 8959 Part I/II leg split, and no granular 8995-line-12 variable — so the
+    paper-level cross-foot legs (Sch SE L12, 8959 L18) and the 8995 L12 cap are left ABSENT
+    here; those lines are OTS-single-witness (SPEC §6.4 `Option` rule).
     """
     rows = []
     for n, i in enumerate(households):
@@ -255,6 +262,32 @@ def taxcalc_run(households):
             "se_tax": float(calc.array("setax")[n]),
             "niit": float(calc.array("niit")[n]),
             "additional_medicare_tax": float(calc.array("ptax_amc")[n]),
+            # ── T9 · deeper lines + provenance leaves taxcalc CAN express ──────────────
+            # Deduction actually subtracted (Form 1040 L12): taxcalc zeroes `standard`
+            # for itemizers and `c04470` for non-itemizers, so this is whichever it took.
+            "deduction_taken": (
+                float(calc.array("c04470")[n])
+                if calc.array("c04470")[n] > 0
+                else float(calc.array("standard")[n])
+            ),
+            "salt_capped": float(calc.array("c18300")[n]),  # Sch A L5e = min(5d, $10k cap)
+            "sch_d_to_l7": float(calc.array("c01000")[n]),  # Sch D L21 → 1040 L7 (§1211-limited)
+            "total_tax": float(calc.array("c09200")[n]),    # 1040 L24 equiv (see docstring)
+            # provenance leaves
+            "qual_div_l3a": float(calc.array("e00650")[n]),  # 1040 L3a qualified dividends
+            "net_ltcg_qd_exclusive": max(  # §1(h) subterm max(0, min(LTCG, LTCG+STCG)) — QD-EXCLUSIVE (r5-N2)
+                0.0,
+                min(
+                    float(calc.array("p23250")[n]),
+                    float(calc.array("p23250")[n]) + float(calc.array("p22250")[n]),
+                ),
+            ),
+            # ★ se_l10_oasdi / se_l11_medicare / f8959_l7 / f8959_l13 / qbi_cap_l12 are
+            #   DELIBERATELY ABSENT (⇒ serde(default) None): taxcalc exposes only the EXACT
+            #   totals `setax` / `ptax_amc` — no OASDI/Medicare or 8959 Part I/II leg split —
+            #   and no granular 8995-L12 variable (its `net_cg` cap is an inline local, never
+            #   a records variable). Those paper-level cross-foot legs are OTS-single-witness
+            #   (SPEC §6.4 `Option` rule); fabricating a taxcalc value would be a false oracle.
         }
         for n in range(len(households))
     ]
