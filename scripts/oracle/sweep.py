@@ -102,9 +102,12 @@ QBI_8995_CEILING = {"Single": 191_950, "Married/Joint": 383_900}
 
 # ── The sweep-side known-defect registry (SPEC §10 suppression) — EMPTY today ──────────────────────
 # Each entry: {"line": "1040.line16", "btctax_value": <int whole dollars>, "fu_id": "<FU-…>",
-#              "match": <callable(inputs_dict) -> bool>}. When a divergence's line + on-paper value
-# match an entry, it is a SUPPRESSED known defect (labelled, passed to `--check` via `--known-defect`),
-# NOT an undeclared divergence. Populate this ONLY after a bug is adjudicated, filed, and pinned.
+#              "match": <callable(inputs_dict) -> bool>}. When a scenario matches an entry, the pin is
+# routed to the harness `--check` via `--known-defect` (see `_known_defect_arg`), and the harness
+# ADJUDICATES it in Rust (I4): a matching pin comes back `reconciled` with class `known-defect` (a
+# SUPPRESSED known defect — logged, not undeclared); a STALE pin comes back red and IS reported. Only
+# `1040.line16` is supportable (the sole class/stacking line the harness pins). Populate this ONLY after
+# a bug is adjudicated, filed, and pinned; EMPTY today because T11 re-baked the corpus green.
 KNOWN_DEFECTS: list[dict] = []
 
 
@@ -258,7 +261,11 @@ def generate(seed: int, count: int) -> list[dict]:
 # ── The per-scenario admission + live diff (SPEC §6 / §9) ──────────────────────────────────────────
 def _harness_check(household: dict, known_defect: str | None = None) -> dict:
     """Drive the §9 harness `--check`: btctax's on-paper values + the reproduction + per-line
-    classification, ALL in Rust (I4). Returns the parsed verdict object."""
+    classification, ALL in Rust (I4). When `known_defect` is given (`1040.line16=<value>@<fu-id>`) the
+    harness adjudicates the §10 pin ITSELF — reconciled with class `known-defect` while btctax still
+    prints the pinned wrong value, red for a stale pin. Returns the parsed verdict object, or
+    `{"malformed": …}` on exit-code 2 (a stdin the harness could not parse); the CALLER decides whether
+    that is fatal."""
     args = [str(gen_goldens.HARNESS_BIN), "--check"]
     if known_defect:
         args += ["--known-defect", known_defect]
@@ -270,13 +277,37 @@ def _harness_check(household: dict, known_defect: str | None = None) -> dict:
     return json.loads(proc.stdout)
 
 
-def _classify_known(line: str, on_paper: str, inputs: dict) -> dict | None:
-    """Return the matching KNOWN_DEFECTS entry (SPEC §10) for an unreconciled line, or None if the
-    divergence is UNDECLARED. Exact whole-dollar integer equality only (no rounding — I4-safe)."""
+def _known_defect_arg(inputs: dict) -> str | None:
+    """The `--known-defect 1040.line16=<value>@<fu-id>` argument for a scenario matching an already-filed
+    §10 pin (SPEC §10 suppression), or None. This only SELECTS which pin applies — the harness `--check`
+    ADJUDICATES it in Rust (I4). Only `1040.line16` is supportable (the sole class/`stacking_ok` line the
+    harness pins); a non-L16 `KNOWN_DEFECTS` entry is a configuration error (its pin lives in the golden
+    test at promotion, not on `--check`) and fails loud."""
     for kd in KNOWN_DEFECTS:
-        if kd["line"] == line and str(kd["btctax_value"]) == str(on_paper) and kd["match"](inputs):
-            return kd
+        if kd["match"](inputs):
+            if kd["line"] != "1040.line16":
+                raise RuntimeError(
+                    f"KNOWN_DEFECTS entry {kd['fu_id']} is on {kd['line']}, but the sweep can only route a "
+                    "1040.line16 pin through --check; a non-L16 pin is declared in the golden test."
+                )
+            return f"{kd['line']}={kd['btctax_value']}@{kd['fu_id']}"
     return None
+
+
+def _verify_harness_freshness() -> None:
+    """Build-freshness gate — prove the harness binary is T7-m1-fresh (emits `reproduction_ok`) BEFORE
+    spending oracle time. A binary built before T7-m1 lacks the field; defaulting a missing key to a pass
+    would silently disable the structural witness in a DISCOVERY tool, so we fail loud and early with a
+    rebuild instruction instead. Probes `--check` on the refusal-free floor anchor."""
+    matrix_path = Path(__file__).resolve().parents[2] / "crates/btctax-core/tests/goldens/full_return_goldens.json"
+    matrix = json.loads(matrix_path.read_text())
+    probe = next(h for h in matrix["households"] if h["name"] == "single_w2_only_standard")
+    chk = _harness_check(probe)
+    if chk.get("malformed") or "reproduction_ok" not in chk:
+        sys.exit(
+            f"{gen_goldens.HARNESS_BIN} is STALE — its --check output carries no `reproduction_ok` "
+            "(built before T7-m1). Rebuild it: `cargo build -p btctax-oracle-harness`."
+        )
 
 
 def _report_divergence(scenario: dict, seed: int, index: int, verdict: dict, injected: bool) -> None:
@@ -315,6 +346,7 @@ def run_sweep(seed: int, count: int, inject: bool, verbose: bool) -> int:
         sys.exit("set OTS_DIR to an unpacked OpenTaxSolver2024 tree (see ots_direct.py).")
     if not gen_goldens.HARNESS_BIN.exists():
         sys.exit(f"{gen_goldens.HARNESS_BIN} not found — build it: `cargo build -p btctax-oracle-harness`.")
+    _verify_harness_freshness()  # fail loud NOW if the binary predates T7-m1 (no `reproduction_ok`)
 
     scenarios = generate(seed, count)
     all_inputs = [s["inputs"] for s in scenarios]
@@ -376,14 +408,33 @@ def run_sweep(seed: int, count: int, inject: bool, verbose: bool) -> int:
             "expected_ots": expected_ots,
             "expected_taxcalc": expected_taxcalc,
         }
-        chk = _harness_check(household)
-        if chk.get("refused"):  # a race with the default-mode gate (should not happen) — skip
-            admitted -= 1
-            skipped += 1
-            continue
+        # Route any already-filed §10 known-defect pin THROUGH the harness so it is adjudicated in Rust
+        # (I4) — never on the injected self-test (its perturbation is not a real, filed defect).
+        pin = None if injected else _known_defect_arg(inputs)
+        chk = _harness_check(household, known_defect=pin)
+
+        # ★ A discovery tool must NEVER count a shape it could not evaluate as clean. A `--check` that
+        # malforms or refuses an ALREADY-ADMITTED scenario is inconsistent with the default-mode gate that
+        # just admitted it — a harness build/logic bug — and a missing `reproduction_ok` means the binary
+        # is stale (T7-m1 not built). All three FAIL LOUD, naming the scenario, rather than silently pass.
+        if chk.get("malformed"):
+            raise RuntimeError(
+                f"oracle_harness --check rejected admitted scenario {scenario['name']!r} "
+                f"(inputs {json.dumps(inputs)}): {chk['stderr']}"
+            )
+        if chk.get("refused"):
+            raise RuntimeError(
+                f"oracle_harness --check REFUSED admitted scenario {scenario['name']!r} — inconsistent "
+                "with the default-mode admission gate that admitted it (a harness build/logic bug)."
+            )
+        if "reproduction_ok" not in chk:
+            raise RuntimeError(
+                f"oracle_harness --check emitted no `reproduction_ok` for {scenario['name']!r} — the "
+                "binary is STALE (pre-T7-m1). Rebuild: `cargo build -p btctax-oracle-harness`."
+            )
 
         found_here = False
-        if not chk.get("reproduction_ok", True):
+        if not chk["reproduction_ok"]:
             # The Part-1 structural witness failed (T7-m1): btctax's own table_l16 did not reproduce its
             # own regular tax — a real reproduction/Table-semantics signal.
             print(f"\n================ DIVERGENCE (seed {seed}, index {idx}) — reproduction_ok=FALSE ================")
@@ -393,13 +444,15 @@ def run_sweep(seed: int, count: int, inject: bool, verbose: bool) -> int:
             undeclared += 1
             found_here = True
 
-        for v in chk.get("verdicts", []):
-            if v.get("reconciled"):
-                continue
-            known = None if injected else _classify_known(v["line"], v.get("on_paper"), inputs)
-            if known:
+        for v in chk["verdicts"]:
+            if v.get("class") == "known-defect":
+                # The harness adjudicated an already-filed §10 pin (SPEC §10 suppression): reconciled while
+                # btctax still prints the pinned wrong value. Logged, not counted undeclared. (A STALE pin
+                # comes back red/`diverge` below and IS reported — the loud escape hatch, never silent.)
                 suppressed += 1
-                print(f"[known-defect {idx}] {v['line']} → {known['fu_id']} (already filed, suppressed)")
+                print(f"[known-defect {idx}] {v['line']} suppressed by pin {pin} (harness-adjudicated, Rust)")
+                continue
+            if v.get("reconciled"):
                 continue
             _report_divergence(scenario, seed, idx, v, injected)
             found_here = True

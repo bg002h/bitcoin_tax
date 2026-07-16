@@ -240,3 +240,30 @@ fn known_defect_pin_suppresses_an_l16_divergence_and_a_stale_pin_stays_red() {
     );
     assert_eq!(l16_of(&stale)["reconciled"], serde_json::json!(false), "a stale pin must fail");
 }
+
+/// T7-m2 (untested-guard): `--known-defect` rejects a non-L16 line and every malformed spec with a
+/// non-zero exit (before any stdin is consumed), so a typo can never silently disable a pin. Only L16
+/// is a class/`stacking_ok` line; a non-L16 pin belongs in the golden test at promotion.
+#[test]
+fn known_defect_rejects_non_l16_and_malformed_specs() {
+    for bad in [
+        "1040.line24=5@FU-X",         // not the class/stacking line
+        "1040.line16=notanumber@FU-X", // value is not a whole-dollar integer
+        "1040.line16=5",              // missing @<fu-id>
+        "1040.line16=5@",             // empty fu-id
+        "garbage",                    // no `=`
+    ] {
+        let out = Command::new(HARNESS)
+            .args(["--check", "--known-defect", bad])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("the harness spawns")
+            .wait_with_output()
+            .expect("the harness runs");
+        assert_eq!(out.status.code(), Some(2), "malformed --known-defect {bad:?} must exit 2");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("known-defect"), "stderr must name the flag for {bad:?}: {err}");
+    }
+}
