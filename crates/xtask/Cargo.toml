@@ -19,3 +19,6 @@ btctax-update-prices = { path = "../btctax-update-prices", version = "0.6.1" }
 btctax-forms = { path = "../btctax-forms", version = "0.6.1" }
 clap = "4.5"          # for `clap::Command` + the `CommandFactory` trait (Cli::command())
 clap_mangen = "0.2"   # roff man-page generator (clap 4.x-compatible); generator-only
+# `xtask examples` builds synthetic vaults in a tempdir and runs the real `btctax` binary to capture
+# verbatim I/O into a committed golden. dev-only tooling (publish = false), so no shipped-crate impact.
+tempfile = "3"

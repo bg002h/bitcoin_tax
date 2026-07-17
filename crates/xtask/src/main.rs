@@ -8,6 +8,7 @@
 mod check_isolation;
 mod docs;
 mod dump_fields;
+mod examples;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -23,6 +24,9 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+        }
+        Some("examples") => {
+            examples::run();
         }
         Some("check-isolation") => {
             if let Err(e) = check_isolation::run() {
@@ -42,7 +46,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "usage: cargo run -p xtask -- <docs [--pdf] | check-isolation | dump-fields <pdf>>"
+                "usage: cargo run -p xtask -- <docs [--pdf] | examples | check-isolation | dump-fields <pdf>>"
             );
             std::process::exit(2);
         }
