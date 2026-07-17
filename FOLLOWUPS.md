@@ -1993,9 +1993,13 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
 - **UX-P0-1 (Important — PHASE-GATING) — the CLI has no deterministic clock seam; wall-clock `now` leaks
   into stdout.** Owning phase: **P0** (gates all goldens). The single read at
   `crates/btctax-cli/src/main.rs:66` (`OffsetDateTime::now_utc()`) becomes each decision's stored
-  `utc_timestamp`, which surfaces in `verify` (MethodElection `recorded` date, `render.rs:2258`) and the
-  `reconcile bulk-void` / `bulk-resolve-conflict` previews (`session.rs:1134,1183` → `main.rs:2005`) — all
-  in `btctax-cli`, not `btctax-core`. This blocks golden-diff of any decision-bearing journey (exactly the
+  `utc_timestamp`, which surfaces in the **clock-derived** read surfaces: `verify` (MethodElection
+  `recorded` date, `render.rs:2258`), the `reconcile bulk-void` preview (`session.rs:1134` →
+  `main.rs:2005`, over `voidable_decisions`), and the `config --set-forward-method` made-date
+  (`cmd/reconcile.rs:968` ← `now` from `main.rs:470`) — all in `btctax-cli`, not `btctax-core`. **NOTE
+  (corrected r0-review I4):** `reconcile bulk-resolve-conflict` (`session.rs:1097`) and
+  `match-self-transfers` (`session.rs:1183`) are **CSV-derived / deterministic** and must NOT be used as
+  seam-proof surfaces. This blocks golden-diff of any decision-bearing journey (exactly the
   bug-rich surface). Fix = a CLI-only `BTCTAX_NOW` (RFC3339) seam, fallback `now_utc()` when unset,
   malformed⇒exit 2, unconditional stderr banner, integrity KAT + man-page misuse language, gated by the
   (i)/(ii)/(iii) determinism-prerequisite fence. **Burn down in P0 before the first golden is recorded;
@@ -2011,3 +2015,11 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   key-backup paths → fix a cwd + relative-path invocation convention. (c) Front-matter states the
   pinned-env convention (`BTCTAX_NOW`, `BTCTAX_PASSPHRASE`, `BTCTAX_PRICE_CACHE`→nonexistent) + one honest
   sentence that captures use `BTCTAX_PASSPHRASE` where a real user sees an interactive prompt.
+- **UX-P1-2 (Minor — pre-existing product doc bug, surfaced by the SPEC r0 review; §3.1-fence class).**
+  Owning phase: **P1**. `export-irs-pdf`'s clap/man help still says the command is "REFUSED for a tax year
+  that has FULL-RETURN inputs … Transcribe the report's figures by hand until the full-return fillers
+  ship" (`cli.rs` doc comment ~`:182`), but the runtime now dispatches to the full-return packet
+  (`admin.rs:216-227`). J6 demonstrates the full-return export, so the shipped doc set would contain a man
+  page contradicting a transcript. Wording fix only (fails the (i)/(ii)/(iii) fence → NOT an inline edit
+  in the docs cycle; file + own in P1). Bundle with **N3**: `cli.rs:197-198`'s doc comment writes
+  "form-8283"/"form-1040" while the actual `--forms` clap values are `form8283`/`form1040`.
