@@ -324,11 +324,14 @@ fixtures.rs` builders where they already produce a CSV.
   which already depends on btctax-core (reaching `btctax_core::tax::testonly::kitchen_sink_household()`,
   `testonly.rs:165`) and can drive the binary via `CARGO_BIN_EXE_btctax`. It imports the committed
   `fullreturn_inputs.toml` (`income import --year 2024 --file …`) then reads it back (`income show --year
-  2024`) and asserts the captured `ReturnInputs` equals `kitchen_sink_household().0` — via direct
-  `serde` equality if `ReturnInputs: Deserialize` from the committed TOML, else via output-equality vs an
-  `income show` on a vault built from the library vector (finalize the comparison surface at execution).
-  Also assert the `business.csv` amounts against the same vector. So the doc's "the non-donation figures
-  remain the oracle vector" claim cannot silently drift from a typo. Commit.
+  2024`) and asserts the captured `ReturnInputs` equals `kitchen_sink_household().0`. **Primary path:
+  `toml::from_str::<ReturnInputs>(committed_toml) == kitchen_sink_household().0`** (`ReturnInputs` derives
+  `Deserialize + PartialEq + Eq`, `return_inputs.rs:370`). **Do NOT compare the `income show` JSON against
+  the raw vector (M8)** — `show` masks PII (`mask_pii`, `cmd/tax.rs:149-162`) while the vector has real
+  SSNs, so that comparison is born-RED; a show-vs-show fallback (if ever needed) must serialize the vector
+  via `toml::Value::try_from`, not `toml::to_string` (ValueAfterTable, `cmd/tax.rs:177`). Also assert the
+  `business.csv` amounts against the same vector. So the doc's "the non-donation figures remain the oracle
+  vector" claim cannot silently drift from a typo. Commit.
 
 ### Task 1.3: the six journeys (SPEC §5) + the whole-file golden
 **Files:** Modify `crates/xtask/src/examples/mod.rs` (journey scripts J1–J6); Create golden
@@ -498,6 +501,9 @@ bug-hunt surface).
 | Whole branch | `whole-branch-fable-review.md` | Fable |
 
 ## Status
+**r2 GREEN (2026-07-16) — Fable r2 re-review 0C/0I, ready to execute** (`reviews/plan-r2-fable-rereview.md`);
+its one non-gating Minor (M8: use TOML-parse-vs-vector, not PII-masked `income show`) folded into Task 1.2.
+
 **r2 (2026-07-16) — folded the Fable r1 re-review** (`reviews/plan-r1-fable-rereview.md`, 0C/1I/1Mi):
 **I9** — T-P0.6's fixture was single-lot (`coinbase_buy_sell_send`), so `optimize accept` skipped as
 "already optimal" identically in both runs (born-RED). Swapped to a new `coinbase_two_lot_tax_saving`
