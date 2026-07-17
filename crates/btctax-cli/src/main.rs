@@ -13,6 +13,7 @@ use btctax_core::{
 use btctax_store::Passphrase;
 use clap::Parser;
 use std::process::ExitCode;
+use time::format_description::well_known::Rfc3339;
 use time::{OffsetDateTime, UtcOffset};
 
 fn main() -> ExitCode {
@@ -60,10 +61,35 @@ fn passphrase(confirm: bool) -> Result<Passphrase, CliError> {
     Ok(Passphrase::new(p))
 }
 
+/// Resolve "now". `BTCTAX_NOW` (RFC3339) pins the clock for reproducible docs/testing; unset ⇒ the
+/// system clock (behavior unchanged). Malformed / empty / non-UTF-8 ⇒ a hard usage error (exit 2) — a
+/// typo must never silently yield wall-clock nondeterminism nor a wrong made-date. When active, an
+/// unconditional stderr banner discloses that decision timestamps are simulated. Backdating `BTCTAX_NOW`
+/// does NOT make an identification contemporaneous under Treas. Reg. §1.1012-1(j) — the vault's recorded
+/// timestamp is self-reported, not evidence of the fact. (SPEC §3.2 R-P0.1..6.)
+fn resolve_now() -> Result<OffsetDateTime, CliError> {
+    match std::env::var_os("BTCTAX_NOW") {
+        None => Ok(OffsetDateTime::now_utc()),
+        Some(os) => {
+            let s = os
+                .to_str()
+                .ok_or_else(|| CliError::Usage("BTCTAX_NOW is set but not valid UTF-8".into()))?;
+            let parsed = OffsetDateTime::parse(s, &Rfc3339).map_err(|e| {
+                CliError::Usage(format!(
+                    "BTCTAX_NOW is set but not a valid RFC3339 timestamp ({s:?}): {e}. \
+                     Expected e.g. 2026-02-01T12:00:00Z."
+                ))
+            })?;
+            eprintln!("warning: BTCTAX_NOW override active — decision timestamps are simulated");
+            Ok(parsed)
+        }
+    }
+}
+
 fn run() -> Result<ExitCode, CliError> {
     let cli = Cli::parse();
     let vault = cli.vault.as_path();
-    let now = OffsetDateTime::now_utc();
+    let now = resolve_now()?;
 
     match cli.command {
         Command::Init { key_backup, repair } => {
