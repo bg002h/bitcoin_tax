@@ -1,7 +1,11 @@
 # Usage-examples docs — CONTINUITY (resume point)
 
-*Written 2026-07-16. **This is a pre-brainstorm scaffold**, not a spec. Recon is done and persisted;
-the next phase is BRAINSTORM. Safe to clear context here — everything needed is on disk.*
+*Written 2026-07-16. **UPDATE 2026-07-16: BRAINSTORM CONVERGED.** All 8 open questions are resolved and
+the design of record is `BRAINSTORM_usage_examples.md`; the one determinism blocker was ruled on by a
+Fable architect (`reviews/fable-clock-seam-ruling.md`, Option A = `BTCTAX_NOW` seam as Phase 0). **Next
+gate: author `SPEC_usage_examples.md` → independent Fable review to 0C/0I → user review → IMPLEMENTATION
+PLAN.** The §"Open questions" section below is now historical — see BRAINSTORM for the answers. RECON.md
+remains the verbatim method reference. Safe to clear context here — everything needed is on disk.*
 
 ## The goal (user's ask, 2026-07-16)
 

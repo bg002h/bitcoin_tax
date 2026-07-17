@@ -1980,3 +1980,34 @@ clean). Burn down opportunistically; none holds any gate.
 
 (Also open, filed T8, out of THIS plan's scope: **OS-14.2** — derive OTS's 8995-L12 from OTS's own Schedule-D
 output to close the QBI-path single-witness/WEAK gap. Correctly labeled WEAK at every consumer.)
+
+---
+
+## USAGE-EXAMPLES cycle (owning phase per entry)
+
+Filed 2026-07-16 during the usage-examples brainstorm (design of record: `design/usage-examples/
+BRAINSTORM_usage_examples.md`). UX-P0-1 was surfaced by the determinism recon and ruled on by an
+independent Fable architect (`design/usage-examples/reviews/fable-clock-seam-ruling.md`). Owning phases
+are hard: a phase-owned item burns down in/before its owning phase, never batched to the end.
+
+- **UX-P0-1 (Important — PHASE-GATING) — the CLI has no deterministic clock seam; wall-clock `now` leaks
+  into stdout.** Owning phase: **P0** (gates all goldens). The single read at
+  `crates/btctax-cli/src/main.rs:66` (`OffsetDateTime::now_utc()`) becomes each decision's stored
+  `utc_timestamp`, which surfaces in `verify` (MethodElection `recorded` date, `render.rs:2258`) and the
+  `reconcile bulk-void` / `bulk-resolve-conflict` previews (`session.rs:1134,1183` → `main.rs:2005`) — all
+  in `btctax-cli`, not `btctax-core`. This blocks golden-diff of any decision-bearing journey (exactly the
+  bug-rich surface). Fix = a CLI-only `BTCTAX_NOW` (RFC3339) seam, fallback `now_utc()` when unset,
+  malformed⇒exit 2, unconditional stderr banner, integrity KAT + man-page misuse language, gated by the
+  (i)/(ii)/(iii) determinism-prerequisite fence. **Burn down in P0 before the first golden is recorded;
+  NOT deferrable past P0.**
+- **UX-P3-1 (Important) — the TUI has ~30 wall-clock reads incl. an on-screen timestamped export-dir
+  path.** Owning phase: **P3** (Artifact-2 / TUI-doc design). `btctax-tui/src/lib.rs:247,256` (`:256` →
+  `export_dir_for` at `export.rs:30`, rendered on screen) + `btctax-tui-edit` ~28 reads. Blocks
+  deterministic TUI text-capture; needs a shared clock helper — its own P3 prerequisite. Do NOT stretch
+  P0's CLI seam to cover it. Burn down in/before P3.
+- **UX-P1-1 (Minor) — capture-convention discipline for the CLI goldens.** Owning phase: **P1**. (a) Exit
+  codes are output — `verify` returns 1 on hard blockers (`main.rs:89-91`); goldens + the twice-run
+  hygiene test must assert exit codes, not just stdout. (b) `init`/`import` echo `vault.display()` /
+  key-backup paths → fix a cwd + relative-path invocation convention. (c) Front-matter states the
+  pinned-env convention (`BTCTAX_NOW`, `BTCTAX_PASSPHRASE`, `BTCTAX_PRICE_CACHE`→nonexistent) + one honest
+  sentence that captures use `BTCTAX_PASSPHRASE` where a real user sees an interactive prompt.
