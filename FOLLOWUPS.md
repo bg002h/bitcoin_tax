@@ -2023,3 +2023,11 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   page contradicting a transcript. Wording fix only (fails the (i)/(ii)/(iii) fence → NOT an inline edit
   in the docs cycle; file + own in P1). Bundle with **N3**: `cli.rs:197-198`'s doc comment writes
   "form-8283"/"form-1040" while the actual `--forms` clap values are `form8283`/`form1040`.
+- **UX-P0-3 (Minor — pre-existing product drift, surfaced by running `make check` during P0 execution;
+  already FIXED).** Owning phase: **P0** (fixed in-branch). The v0.6.1 release (`57e468c`) bumped crate
+  versions 0.6.0→0.6.1 but did **not** regenerate the man pages (last regenerated at v0.6.0, `4c9b1c2`),
+  so committed `docs/man/btctax-update-prices.1` said `v0.6.0` while the crate is `0.6.1` →
+  `gen_docs_is_deterministic` (`docs.rs:353`) is RED on `main`. Fixed by `cargo run -p xtask -- docs`
+  (one line: `v0.6.0`→`v0.6.1`). **Process finding:** the release ritual must regenerate man pages on any
+  version bump (the man pages embed `CARGO_PKG_VERSION`), same as the golden-regen ritual — folded into
+  the plan's release "Version bump" step so the v0.7.0 bump can't repeat it.

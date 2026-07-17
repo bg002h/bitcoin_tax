@@ -475,7 +475,9 @@ bug-hunt surface).
 - [ ] **Version bump** to **v0.7.0** across the workspace (the seam is additive; lockstep per prior
   releases; no users yet). Update `crates/*/Cargo.toml` versions + `Cargo.lock`. **The bump reds
   `regen==committed` by design** (the golden front-matter carries the `btctax-cli` version, SPEC §7) —
-  **regenerate both goldens (`docs/examples/`, `docs/examples-tui/`) in the SAME commit as the bump** (M5).
+  **regenerate both goldens (`docs/examples/`, `docs/examples-tui/`) AND the man pages
+  (`cargo run -p xtask -- docs`, since they embed `CARGO_PKG_VERSION`) in the SAME commit as the bump**
+  (M5 + UX-P0-3 — the v0.6.1 release skipped the man-page regen and left the suite red; do not repeat it).
 - [ ] **Tag** `v0.7.0` + **GitHub release** (notes: the BTCTAX_NOW seam + the two usage-example docs +
   the UX-P1-2 findings).
 - [ ] **Attach the release PDFs (I8, SPEC §2 "built in CI, release-attached"):** build `make examples` +
