@@ -50,8 +50,9 @@ TUI clock helper (P3); an adversarial workaround-audit files discovered bugs (P4
 - Modify: `crates/btctax-cli/src/main.rs` (the `let now = OffsetDateTime::now_utc();` at `:66`, and add a
   private `resolve_now()` fn near `passphrase()` at `:49`).
 - Test: `crates/btctax-cli/tests/btctax_now_seam.rs` (new).
-- Doc: `crates/btctax-cli/src/cli.rs` root doc-comment (the `btctax.1` DESCRIPTION/ENVIRONMENT source) +
-  `crates/xtask/src/docs.rs` `render_root` ENVIRONMENT/FILES section (man-page misuse language).
+- *(Man-page text is NOT touched here — it lives in `crates/xtask/src/docs.rs` hand-authored consts
+  (`render_root`, `docs.rs:144-159`), and editing it before its Task 0.2 regen would red
+  `gen_docs_is_deterministic`. Task 0.2 owns all man-page changes. — I1)*
 
 **Interfaces:**
 - Produces: `fn resolve_now() -> Result<time::OffsetDateTime, CliError>` — reads `BTCTAX_NOW`; unset ⇒
@@ -77,6 +78,7 @@ fn run_in(cwd: &Path, extra_env: &[(&str, &str)], args: &[&str]) -> (i32, String
     c.current_dir(cwd)
         .env("BTCTAX_PASSPHRASE", "pw")
         .env("BTCTAX_PRICE_CACHE", cwd.join("no-such-cache.csv"))
+        .env("HOME", cwd) // scrub HOME to a fixed path (§3.3 uniform contract — M6)
         .env("TZ", "UTC").env("LC_ALL", "C").env("LANG", "C")
         .args(args);
     for (k, v) in extra_env { c.env(k, v); }
@@ -149,7 +151,8 @@ fn unset_seam_behaves_normally() {
     let (code, out, err) = run_in(dir.path(), &[], &["--vault", "v.pgp", "verify"]);
     assert_eq!(code, 0);
     assert!(!err.contains("override active"));
-    assert!(out.contains("recorded"), "verify still renders the election");
+    // tighten (M2): "recorded" alone also matches "Lot selections recorded: 0"; assert the election's date
+    assert!(out.contains("recorded 2025-05-01"), "verify still renders the election's recorded date");
 }
 ```
 
@@ -199,41 +202,67 @@ fn resolve_now() -> Result<OffsetDateTime, CliError> {
 ### Task 0.2: integrity KAT + man-page misuse language
 
 **Files:**
-- Test: `crates/btctax-cli/tests/btctax_now_seam.rs` (append T-P0.6).
-- Modify: `crates/xtask/src/docs.rs` (`render_root` — add an ENVIRONMENT paragraph for `BTCTAX_NOW`) and
-  regenerate `docs/man/btctax.1` via `cargo run -p xtask -- docs`.
+- Test: `crates/btctax-cli/tests/btctax_now_seam.rs` (append T-P0.6; add `mod fixtures;` — reuse
+  `crates/btctax-cli/tests/fixtures.rs`, precedent `end_to_end.rs:1`).
+- Modify: `crates/xtask/src/docs.rs` — the hand-authored root man-page consts (`ROOT_DESCRIPTION` /
+  add a `ROOT_ENVIRONMENT`; `render_root` at `docs.rs:144-159`); regenerate `docs/man/btctax.1` via
+  `cargo run -p xtask -- docs` **in this same commit** (so `gen_docs_is_deterministic` stays green — I1).
 
-**Interfaces:** Consumes the P0 seam. Produces the committed `docs/man/btctax.1` ENVIRONMENT text (gated by
-`gen_docs_is_deterministic`).
+**Interfaces:** Consumes the P0 seam + `fixtures::coinbase_buy_sell_send`. Produces the committed
+`docs/man/btctax.1` ENVIRONMENT text (gated by `gen_docs_is_deterministic`, `docs.rs:353`).
 
-- [ ] **Step 1: Write the failing integrity KAT** (append to the seam test file)
+- [ ] **Step 1: Write the born-passing disclosure KAT** — a **real** CLI-level test (not a stub). T-P0.6
+  is a *characterization* KAT: the property (made-date ≤ sale ⇒ contemporaneous) already exists after the
+  Task 0.1 seam + pre-existing core logic, so there is no "Run → FAIL" step; instead it is disclosed by a
+  born-passing assertion whose negation is checked by a manual mutation (Step 3).
 
 ```rust
-#[test] // T-P0.6 — the KAT IS the disclosure: backdating the clock ≤ a (non-broker, pre-2027) sale
-        // yields a Contemporaneous classification. Uses a 2025 sale so ForbiddenBroker2027
-        // (optimize.rs:476-480) never precedes ContemporaneousNow.
-fn backdated_now_yields_contemporaneous_classification() {
-    // Build a vault with a 2025 disposition, then `optimize accept` under a BTCTAX_NOW backdated to
-    // before the sale; the accepted-selection output must show the contemporaneous (not needs-attestation)
-    // wording. Exact vault construction reuses fixtures::coinbase_buy_sell_send via the generator harness;
-    // if the CLI path is heavy, assert the property at the library layer on `persistability` with
-    // made_date <= sale_date and a non-broker wallet. (Finalize the concrete surface at execution;
-    // the property under test is fixed: made <= sale ⇒ ContemporaneousNow.)
-    // Placeholder-free requirement: this test MUST assert on real output/return, not compile-only.
+#[path = "fixtures.rs"] mod fixtures; // reuse the synthetic Coinbase builders (end_to_end.rs precedent)
+
+#[test] // T-P0.6 — the KAT IS the disclosure that BTCTAX_NOW can move the attestation classification.
+        // 2025 sale + a non-broker wallet so ForbiddenBroker2027 (optimize.rs:476-480) never precedes
+        // ContemporaneousNow. Backdated made-date (≤ sale) ⇒ contemporaneous; postdated (> sale) ⇒
+        // needs-attestation. The two runs MUST differ — proving the seam reaches persistability.
+fn backdated_vs_postdated_now_moves_the_attestation_classification() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path();
+    let (c, _o, e) = run_in(cwd, &[], &["--vault", "v.pgp", "init", "--key-backup", "k.asc"]);
+    assert_eq!(c, 0, "{e}");
+    // coinbase_buy_sell_send has a 2025 Sell (the disposition to select lots for).
+    let csv = fixtures::coinbase_buy_sell_send(cwd);
+    let (c, _o, e) = run_in(cwd, &[], &["--vault", "v.pgp", "import", csv.to_str().unwrap()]);
+    assert_eq!(c, 0, "{e}");
+    // `optimize accept` records a selection whose made-date defaults to BTCTAX_NOW; its rendered
+    // persistability label is the observable. (Exact accept args — --tax-year 2025 [--disposal <ref>] —
+    // finalized against the imported disposition at execution; the disposition ref is discovered from
+    // `report`/`optimize run` stdout under the same pinned env.)
+    let accept = ["--vault","v.pgp","optimize","accept","--tax-year","2025"];
+    let (_c1, back, _e1) = run_in(cwd, &[("BTCTAX_NOW","2025-01-01T00:00:00Z")], &accept); // ≤ sale
+    // fresh vault for the postdated run so the second accept isn't a no-op on an already-accepted year
+    let dir2 = tempfile::tempdir().unwrap(); let cwd2 = dir2.path();
+    run_in(cwd2, &[], &["--vault","v.pgp","init","--key-backup","k.asc"]);
+    let csv2 = fixtures::coinbase_buy_sell_send(cwd2);
+    run_in(cwd2, &[], &["--vault","v.pgp","import", csv2.to_str().unwrap()]);
+    let (_c2, post, _e2) = run_in(cwd2, &[("BTCTAX_NOW","2026-06-01T00:00:00Z")], &accept); // > sale
+    assert_ne!(back, post,
+        "backdated vs postdated BTCTAX_NOW must change the attestation classification wording;\n\
+         backdated:\n{back}\npostdated:\n{post}");
 }
 ```
 
-  *Execution note:* pick the cheapest surface that actually exercises the seam→persistability path (library
-  KAT on `persistability(made, sale, wallet)` preferred if the CLI accept flow needs a disposition-bearing
-  vault). Do NOT land a compile-only stub — a fix isn't done until the mutation dies (memory:
-  untested-guard-pattern).
-
-- [ ] **Step 2: Run → FAIL.** **Step 3: Implement/choose the surface. Step 4: Run → PASS.**
-- [ ] **Step 5: Add man-page ENVIRONMENT language** in `render_root` (docs.rs), e.g.:
-  `BTCTAX_NOW — pins the clock (RFC3339) for reproducible testing/documentation. Backdating a decision
+- [ ] **Step 2: Run → PASS** (born-passing disclosure KAT) — `cargo test -p btctax-cli --test btctax_now_seam` → PASS.
+- [ ] **Step 3: Mutation-check** — temporarily invert the assert to `assert_eq!(back, post, …)`; run →
+  RED (proving the two classifications genuinely differ, i.e. the seam reaches persistability); revert.
+  *(If `optimize accept` on this fixture needs a `--disposal <ref>` or a prior `optimize run`, discover the
+  ref from `optimize run`/`report` stdout under the pinned env and thread it in — do NOT leave the args
+  as a guess.)*
+- [ ] **Step 4: Add man-page ENVIRONMENT language** — in `docs.rs` add/extend a root const (e.g.
+  `ROOT_ENVIRONMENT`) wired into `render_root`:
+  `BTCTAX_NOW — pins the clock (RFC3339) for reproducible testing and documentation. Backdating a decision
   record does not make an identification contemporaneous under Treas. Reg. §1.1012-1(j).`
-- [ ] **Step 6: Regenerate + verify docs** — `cargo run -p xtask -- docs && cargo test -p xtask docs` → PASS.
-- [ ] **Step 7: Commit** — `git commit -am "test(cli): BTCTAX_NOW integrity KAT + man-page misuse language (P0)"`.
+  (and note `BTCTAX_PASSPHRASE` / `BTCTAX_PRICE_CACHE` alongside if not already present).
+- [ ] **Step 5: Regenerate + verify docs (same commit)** — `cargo run -p xtask -- docs && cargo test -p xtask docs` → PASS.
+- [ ] **Step 6: Commit** — `git commit -am "test(cli): BTCTAX_NOW integrity KAT + man-page misuse language (P0)"`.
 
 ### Task 0.3: P0 review gate
 - [ ] Dispatch an independent **Fable** review of the P0 diff (seam + tests + man text) against SPEC §3.2
@@ -250,27 +279,46 @@ in-tree via a `regen==committed` test in the SAME commit; determinism proofs pas
 ### Task 1.1: `xtask examples` scaffold + the run/show capture helpers
 **Files:** Create `crates/xtask/src/examples/mod.rs` (+ wire into `crates/xtask/src/main.rs` subcommand
 dispatch and `crates/xtask/src/docs.rs` neighbors); Test: `crates/xtask/src/examples/mod.rs` `#[cfg(test)]`.
-**Interfaces:** Produces `fn generate(bin_dir: &Path) -> String` (returns the whole golden text) and
+**New deps (N2):** add `tempfile` to `crates/xtask/Cargo.toml` `[dev-dependencies]` (generator vaults). No
+`btctax-core` dep needed here (census option 1 is built as a `btctax-forms` test-support module — Task 2.1).
+**Interfaces:** Produces `fn generate(bin: &Path) -> String` (returns the whole golden text) and
 `struct Journey { name, steps: Vec<Step> }`; `run(cmd)` executes the pinned binary and emits `$ cmd` +
-stdout + exit-code fences; `prose(md)` interleaves narration.
-- [ ] Step 1: failing test — `generate` over a trivial one-command journey (`--help`) returns text
-  containing `` $ btctax --help `` and the captured output; deterministic across two calls.
-- [ ] Step 2: run → FAIL. Step 3: implement the capture harness (env pins from Global Constraints;
-  `CARGO_BIN_EXE`/`--bin-dir` resolution; capture stdout+exit; version from `btctax-cli/Cargo.toml` into
-  front-matter). Step 4: run → PASS. Step 5: commit.
+stdout + exit-code fences; **`run_with_stderr(cmd, label)` emits `$ cmd` + stdout + a labelled `stderr:`
+fence** (I5 — export journeys emit the NO-AUTHORISATION notice, `main.rs:625-634`, and the R-P0.4 banner);
+`prose(md)` interleaves narration.
+- **Binary resolution (I3 — `CARGO_BIN_EXE_btctax` is NOT set for xtask):** `generate` takes an explicit
+  built-binary path; the xtask subcommand + the Task 1.4 test resolve it by running
+  `Command::new(env!("CARGO")).args(["build","-p","btctax-cli","--bin","btctax"])` (nested-cargo-in-test,
+  the trybuild pattern) then using `{CARGO_TARGET_DIR or ./target}/debug/btctax` — so the golden is never
+  compared against a **stale** binary (which would false-green the drift gate).
+- [ ] Step 1: failing test — `generate(&built_btctax())` over a trivial one-command journey (`--help`)
+  returns text containing `` $ btctax --help `` and the captured output; deterministic across two calls;
+  a `run_with_stderr` step emits a `stderr:` fence.
+- [ ] Step 2: run → FAIL. Step 3: implement the capture harness (env pins from Global Constraints incl.
+  scrubbed HOME; the nested-cargo binary resolution above; capture stdout+exit + optional labelled stderr;
+  **front-matter** = the pinned-env convention + an honest one-line "captures use `BTCTAX_PASSPHRASE`
+  where a real user is prompted" sentence + the `btctax-cli` crate version from
+  `crates/btctax-cli/Cargo.toml`). Step 4: run → PASS. Step 5: commit.
 
 ### Task 1.2: the synthetic corpora (SPEC §4.2)
-**Files:** Create `crates/xtask/tests/fixtures/examples/{self_transfer,income_missing_fmv,business,multilot,fullreturn_inputs.toml,donation}.csv` (committed synthetic); reuse `btctax-cli/tests/fixtures.rs`
-builders where they already produce a CSV.
+**Files:** Create committed synthetic inputs under `crates/xtask/tests/fixtures/examples/`:
+`self_transfer.csv`, `income_missing_fmv.csv`, `business.csv`, `multilot.csv`, `donation.csv`, and
+`fullreturn_inputs.toml` (N1 — the TOML is a separate path, not a `.csv`). Reuse `btctax-cli/tests/
+fixtures.rs` builders where they already produce a CSV.
 **Interfaces:** Produces the committed CSV/TOML inputs each journey imports.
 - [ ] Author **C-self-transfer**, **C-income-csv**, **C-business**, **C-multilot**, and **C-fullreturn**
   (kitchen-sink ReturnInputs TOML + a donation CSV so Sch A L12 > $500 — SPEC §4.2/§6.1). Each is a
   committed synthetic file. Step: add a `cargo test` asserting each imports without a hard blocker (except
-  where the journey deliberately drives a blocker). Commit.
+  where the journey deliberately drives a blocker).
+- [ ] **Oracle-consistency test (I6):** parse `fullreturn_inputs.toml` → assert the resulting
+  `ReturnInputs == btctax_core::tax::testonly::kitchen_sink_household().0` (the `.0`, `testonly.rs:165`),
+  and assert the `business.csv` amounts against the same vector — so the doc's "the non-donation figures
+  remain the oracle vector" claim cannot silently drift from a typo. Commit.
 
 ### Task 1.3: the six journeys (SPEC §5) + the whole-file golden
 **Files:** Modify `crates/xtask/src/examples/mod.rs` (journey scripts J1–J6); Create golden
-`docs/examples/examples.md`; flip its `.gitignore` untrack in the SAME commit.
+`docs/examples/examples.md`. *(M1: no `.gitignore` change — nothing ignores `docs/examples/`; only
+`docs/pdf/` is ignored. Verify with `git check-ignore docs/examples/examples.md` → exit 1.)*
 **Interfaces:** Consumes Task 1.1 harness + Task 1.2 corpora. Produces `docs/examples/examples.md`.
 - [ ] Step 1: encode J1–J6 exactly per SPEC §5 (corrected commands: `init --key-backup`, kebab `--forms`,
   per-journey `BTCTAX_NOW`, J6 donation leg + `income import --file`). Step 2: `cargo run -p xtask --
@@ -279,11 +327,18 @@ builders where they already produce a CSV.
 
 ### Task 1.4: the born-green `regen==committed` test + determinism proofs (SPEC §7)
 **Files:** Test: `crates/xtask/tests/examples_golden.rs`.
-**Interfaces:** Consumes `examples::generate`.
-- [ ] `examples_golden_matches_committed` — `generate(bin_dir) == fs::read_to_string("docs/examples/examples.md")`
-  byte-for-byte (modeled on `gen_docs_is_deterministic`, docs.rs:352-368). `examples_generate_is_deterministic`
-  — two `generate` calls byte-identical. Cross-HOME proof (run under two HOME values). Land in the SAME
-  commit as the golden. Run → PASS. Commit.
+**Interfaces:** Consumes `examples::generate` + the nested-cargo binary resolution (Task 1.1, I3).
+- **`#[cfg(unix)]`-gate these tests (I4).** Journey stdout embeds joined paths via `.display()`
+  (`export-irs-pdf`, `main.rs:609-648`): `./irs/f8949.pdf` on Unix vs `./irs\f8949.pdf` on Windows, so a
+  byte-exact golden **cannot** pass the windows-latest leg of `cargo test --workspace --locked`. Gate the
+  regen/determinism tests (and Task 1.1's binary-spawning unit test) `#[cfg(unix)]` with a comment naming
+  the path-separator divergence; the ubuntu CI `examples` job + the unix test legs are the gate.
+- [ ] `examples_golden_matches_committed` — `generate(&built_btctax()) == fs::read_to_string("docs/examples/examples.md")`
+  byte-for-byte (modeled on the committed-match half of `gen_docs_is_deterministic`, docs.rs:352-368).
+  `examples_generate_is_deterministic` — two `generate` calls byte-identical. **Cross-HOME proof** (two
+  HOME values → identical). **Price-cache proof (M4, SPEC §7):** regen with `BTCTAX_PRICE_CACHE` pointing
+  at a *present* dummy cache vs. absent → identical (prices come from the bundled CSV; a stray cache must
+  not bleed in). Land in the SAME commit as the golden. Run → PASS. Commit.
 
 ### Task 1.5: groff render target (SPEC §7)
 **Files:** Modify `Makefile` (add `examples` target: wrap the golden verbatim blocks in roff `.nf/.fi`,
@@ -302,20 +357,27 @@ builders where they already produce a CSV.
 **Gate:** born-green (golden already gated in-tree from P1); a perturb-one-byte→RED proof observed; Fable 0C/0I.
 
 ### Task 2.1: forms-coverage census (HARD)
-**Files:** Test: `crates/xtask/tests/forms_census.rs` (or a `btctax-forms` test-support module).
-**Interfaces:** Consumes `btctax_forms::fill_full_return` (enumeration mechanism per SPEC §6.2:
-all-arms-`Some` fixture asserting `count == 14`, cross-checked vs the §6.1 literal).
-- [ ] Step 1: `census_key_set_is_exactly_14` — build an all-arms `PrintedForms`, push through
-  `fill_full_return`, collect `NamedForm.name`, assert set == the 14 literal keys (§6.1). Step 2:
-  `every_census_form_demonstrated_in_j6` — enumerate the J6 packet manifest (`{seq}_{name}.pdf`,
-  **J6 only**, exact `{name}`-component match) and assert all 14 present; FAIL loud on any gap. Step 3:
-  implement; run → PASS. Commit.
+**Files:** Test: a **`btctax-forms` test-support module** (`crates/btctax-forms/tests/census.rs`) — keeps
+the `PrintedReturn`/`ReturnHeader`/`FilingStatus`/`PrintedForms` construction in the crate that owns those
+types (N2 — avoids an xtask→btctax-core dep).
+**Interfaces:** Consumes `btctax_forms::fill_full_return(&PrintedReturn, year)` (N3 — the fn takes a
+`&PrintedReturn`, NOT a bare `PrintedForms`; the fixture wraps an all-arms `PrintedForms` in a
+`PrintedReturn` with a synthetic `ReturnHeader` + `FilingStatus`). Enumeration per SPEC §6.2.
+- [ ] Step 1: `census_key_set_is_exactly_14` — build a `PrintedReturn` whose `forms: PrintedForms{…}` has
+  every optional arm `Some` **and satisfies the three non-Option gates** (`sch_d.must_file`, `f8959`
+  internal `must_file`, `f8283` filler `Some` — SPEC §6.2 note), push through `fill_full_return`, collect
+  `NamedForm.name`, assert the set == the 14 literal keys (§6.1) — a shortfall reds here, not silently.
+- [ ] Step 2: `every_census_form_demonstrated_in_j6` — **source the J6 manifest by parsing the committed
+  golden's J6 "Full-return packet" stdout block** (`export-irs-pdf` prints each `{seq}_{name}.pdf` line +
+  `manifest.txt`, `main.rs:640-648`) — no binary run needed (M3). Match on exact `{name}`-component
+  equality (**J6 only**; never a corpus-wide scan — 3 slice stems collide). Assert all 14 present; FAIL
+  loud on any gap. Step 3: implement; run → PASS. **Stage (no commit — the P2 atom commits in Task 2.3, I7).**
 
 ### Task 2.2: subcommand-coverage report (SOFT)
 **Files:** `crates/xtask/src/examples/mod.rs` (a `subcommand_coverage_report()` walking `Cli::command()`
 like `manpage_covers_every_subcommand`, docs.rs:261).
 - [ ] Produce a printed/uploaded report of which subcommands lack a worked example; **non-blocking**.
-  Commit.
+  **Stage (no commit — the P2 atom commits in Task 2.3, I7).**
 
 ### Task 2.3: the CI `examples` job (SPEC §9)
 **Files:** Modify `.github/workflows/ci.yml` (new `examples` job sibling to `test`).
@@ -360,8 +422,10 @@ style overlay.
 existing `handle_key(app, press(...))`/`type_str` harness (esp. the edit reconcile flow — the primary
 bug-hunt surface).
 - [ ] Drive the tabs + a `btctax-tui-edit` reconcile flow under pinned `BTCTAX_NOW`+`BTCTAX_PASSPHRASE`;
-  commit goldens with a `regen==committed` test (mirror Task 1.4). Add a groff render target for the
-  separate TUI PDF. Extend the CI `examples` job diff to `docs/examples-tui`. Commit.
+  commit goldens with a `regen==committed` test (mirror Task 1.4). **If any captured frame renders a
+  filesystem path (e.g. the export-confirm modal's dir), apply the same `#[cfg(unix)]` gate as I4** (path
+  separators diverge on Windows). Add a groff render target for the separate TUI PDF. Extend the CI
+  `examples` job diff to `docs/examples-tui`. Commit.
 
 ### Task 3.4: P3 review gate
 - [ ] Independent **Fable** review → `reviews/p3-fable-review.md` → fold to 0C/0I → re-review. Resolve
@@ -391,12 +455,18 @@ bug-hunt surface).
 
 - [ ] **Merge** `feat/usage-examples` → `main` (only after whole-diff review is green).
 - [ ] **Version bump** to **v0.7.0** across the workspace (the seam is additive; lockstep per prior
-  releases; no users yet). Update `crates/*/Cargo.toml` versions + `Cargo.lock`.
+  releases; no users yet). Update `crates/*/Cargo.toml` versions + `Cargo.lock`. **The bump reds
+  `regen==committed` by design** (the golden front-matter carries the `btctax-cli` version, SPEC §7) —
+  **regenerate both goldens (`docs/examples/`, `docs/examples-tui/`) in the SAME commit as the bump** (M5).
 - [ ] **Tag** `v0.7.0` + **GitHub release** (notes: the BTCTAX_NOW seam + the two usage-example docs +
   the UX-P1-2 findings).
-- [ ] **crates.io publish** — requires a user-provided temp token (pause here for it). Publish in
-  dependency order; per memory: `cargo publish --workspace` can internal-error at the tail → resume with
-  `-p <crate>`; verify the index with `grep -c`. Remind the user to revoke the token after.
+- [ ] **Attach the release PDFs (I8, SPEC §2 "built in CI, release-attached"):** build `make examples` +
+  the TUI PDF target, then `gh release upload v0.7.0 docs/pdf/btctax-examples.pdf docs/pdf/btctax-tui-examples.pdf`.
+- [ ] **crates.io publish** — the user holds a valid temp token (confirmed 2026-07-16), so **no pause**;
+  publish in dependency order. Per memory ([[crate-publishing-state]]): `cargo publish --workspace` can
+  internal-error at the tail → resume with `-p <crate>`; publishing already-published crates aborts;
+  verify the index with `grep -c` (not `grep|head`). **Remind the user to revoke the token after** the
+  publish is confirmed.
 
 ---
 
@@ -412,10 +482,17 @@ bug-hunt surface).
 | P3 | `p3-fable-review.md` | Fable |
 | Whole branch | `whole-branch-fable-review.md` | Fable |
 
+## Status
+**r1 (2026-07-16) — folded the independent Fable r0 review** (`reviews/plan-r0-fable-review.md`,
+0C/8I/6Mi/3N): all 8 Important + Minors/Nits addressed. Key folds: T-P0.6 rewritten from an empty-body
+stub into a real backdated/postdated `optimize accept` KAT with a mutation-check (I2); xtask binary
+resolution pinned to nested-`cargo build` (I3); golden tests `#[cfg(unix)]`-gated for the Windows
+path-separator divergence (I4); stderr-mode + front-matter added (I5); C-fullreturn oracle-equality test
+(I6); P2 one-commit atom + release PDF-attach + regen-on-bump (I7/I8/M5). Awaiting Fable re-review.
+
 ## Self-review (author, against the spec)
 - **Spec coverage:** P0↔§3.2; P1↔§4/§5/§7; P2↔§6/§9; P3↔§3.4/§8; P4↔§10; merge/tag/release↔spec tail. ✓
-- **Placeholder scan:** the only deferred concretions are the exhaustive per-journey command strings
-  (they ARE the doc content, authored at P1 execution) and the T-P0.6 surface choice (constrained to
-  "made ≤ sale ⇒ Contemporaneous", non-broker/pre-2027) — both bounded, neither a vague TODO.
+- **Placeholder scan:** the only deferred concretion is the exhaustive per-journey command strings (they
+  ARE the doc content, authored at P1 execution); T-P0.6 is now a concrete KAT (I2 fold), no vague TODO.
 - **Type consistency:** `resolve_now`, `generate`, `capture`, the 14-key census set, and the clock-derived
   surface list are used consistently across tasks and match the spec.
