@@ -81,7 +81,12 @@ fn banner_on_stderr_when_set_never_on_stdout_absent_when_unset() {
         &[("BTCTAX_NOW", "2025-05-02T00:00:00Z")],
         &["--vault", "v.pgp", "verify"],
     );
-    assert!(err.contains("BTCTAX_NOW override active"), "banner must be on stderr; got: {err}");
+    // Pin the FULL R-P0.4 line (review Minor #2), not just a substring — the integrity-disclosure tail
+    // is part of the mandated banner.
+    assert!(
+        err.contains("warning: BTCTAX_NOW override active — decision timestamps are simulated"),
+        "the full R-P0.4 banner must be on stderr; got: {err}"
+    );
     assert!(!out.contains("BTCTAX_NOW override active"), "banner must NOT be on stdout");
     // unset: no banner
     let (_c, _out, err2) = run_in(dir.path(), &[], &["--vault", "v.pgp", "verify"]);
@@ -169,6 +174,16 @@ fn backdated_vs_postdated_now_moves_the_attestation_classification() {
     }
     let back = accept_under("2025-01-01T00:00:00Z"); // <= 2025-06-01 sale => ContemporaneousNow (persisted)
     let post = accept_under("2026-06-01T00:00:00Z"); // >  2025-06-01 sale => NeedsAttestation (skipped)
+    // Pin DIRECTION, not just difference (review Minor #1): backdated ⇒ persisted [Contemporaneous];
+    // postdated ⇒ skipped (attest-gated). A direction-flip of the made≤sale lever must not survive.
+    assert!(
+        back.contains("[Contemporaneous]") && back.contains("1 persisted"),
+        "backdated (made <= sale) must persist as [Contemporaneous]:\n{back}"
+    );
+    assert!(
+        post.contains("0 persisted") && post.contains("already executed"),
+        "postdated (made > sale) must be skipped (needs attestation), not persisted:\n{post}"
+    );
     assert_ne!(
         back, post,
         "backdated vs postdated BTCTAX_NOW must change the attestation classification wording;\n\

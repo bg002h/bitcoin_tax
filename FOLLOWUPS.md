@@ -2003,7 +2003,9 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   bug-rich surface). Fix = a CLI-only `BTCTAX_NOW` (RFC3339) seam, fallback `now_utc()` when unset,
   malformed⇒exit 2, unconditional stderr banner, integrity KAT + man-page misuse language, gated by the
   (i)/(ii)/(iii) determinism-prerequisite fence. **Burn down in P0 before the first golden is recorded;
-  NOT deferrable past P0.**
+  NOT deferrable past P0.** — **RESOLVED** (2026-07-16): seam shipped (`e5a182f` Task 0.1 + `27b43f7`
+  Task 0.2, integrity KAT + man-page misuse language); independent Fable P0 review GREEN 0C/0I
+  (`reviews/p0-fable-review.md`); full suite green (1940).
 - **UX-P3-1 (Important) — the TUI has ~30 wall-clock reads incl. an on-screen timestamped export-dir
   path.** Owning phase: **P3** (Artifact-2 / TUI-doc design). `btctax-tui/src/lib.rs:247,256` (`:256` →
   `export_dir_for` at `export.rs:30`, rendered on screen) + `btctax-tui-edit` ~28 reads. Blocks
