@@ -204,11 +204,17 @@ fn resolve_now() -> Result<OffsetDateTime, CliError> {
 **Files:**
 - Test: `crates/btctax-cli/tests/btctax_now_seam.rs` (append T-P0.6; add `mod fixtures;` — reuse
   `crates/btctax-cli/tests/fixtures.rs`, precedent `end_to_end.rs:1`).
+- Modify: `crates/btctax-cli/tests/fixtures.rs` — add `coinbase_two_lot_tax_saving(dir)` (**I9**), the
+  exact shape of the existing test helper `write_tax_saving_csv` (`optimize_run.rs:85-98`): a Coinbase CSV
+  with an LT lot (1 BTC @ $30k, 2023-01-01), an ST lot (1 BTC @ $80k, 2025-01-02), and a 1-BTC Sell @ $50k
+  on 2025-06-01. FIFO picks the LT lot (a gain); HIFO picks the ST lot (a loss) — so the optimizer proposes
+  a **changed** selection (not a no-change skip), which is what makes `optimize accept` reach the
+  persistability gate. (Also J5's C-multilot corpus, Task 1.2 — DRY.)
 - Modify: `crates/xtask/src/docs.rs` — the hand-authored root man-page consts (`ROOT_DESCRIPTION` /
   add a `ROOT_ENVIRONMENT`; `render_root` at `docs.rs:144-159`); regenerate `docs/man/btctax.1` via
   `cargo run -p xtask -- docs` **in this same commit** (so `gen_docs_is_deterministic` stays green — I1).
 
-**Interfaces:** Consumes the P0 seam + `fixtures::coinbase_buy_sell_send`. Produces the committed
+**Interfaces:** Consumes the P0 seam + `fixtures::coinbase_two_lot_tax_saving`. Produces the committed
 `docs/man/btctax.1` ENVIRONMENT text (gated by `gen_docs_is_deterministic`, `docs.rs:353`).
 
 - [ ] **Step 1: Write the born-passing disclosure KAT** — a **real** CLI-level test (not a stub). T-P0.6
@@ -220,30 +226,31 @@ fn resolve_now() -> Result<OffsetDateTime, CliError> {
 #[path = "fixtures.rs"] mod fixtures; // reuse the synthetic Coinbase builders (end_to_end.rs precedent)
 
 #[test] // T-P0.6 — the KAT IS the disclosure that BTCTAX_NOW can move the attestation classification.
-        // 2025 sale + a non-broker wallet so ForbiddenBroker2027 (optimize.rs:476-480) never precedes
-        // ContemporaneousNow. Backdated made-date (≤ sale) ⇒ contemporaneous; postdated (> sale) ⇒
-        // needs-attestation. The two runs MUST differ — proving the seam reaches persistability.
+        // The Coinbase wallet IS a broker (WalletId::Exchange, optimize.rs:451-453); the KAT relies on
+        // SPEC §3.2's "pre-2027 sale date" arm — the 2025-06-01 sale means ForbiddenBroker2027 (year>=2027,
+        // optimize.rs:476-478) never fires, so the made<=sale lever governs: backdated made-date (<= sale)
+        // ⇒ ContemporaneousNow; postdated (> sale) ⇒ NeedsAttestation. A CHANGED-row fixture is required
+        // (I9) — a single-lot vault skips as "already optimal" identically in both runs.
 fn backdated_vs_postdated_now_moves_the_attestation_classification() {
-    let dir = tempfile::tempdir().unwrap();
-    let cwd = dir.path();
-    let (c, _o, e) = run_in(cwd, &[], &["--vault", "v.pgp", "init", "--key-backup", "k.asc"]);
-    assert_eq!(c, 0, "{e}");
-    // coinbase_buy_sell_send has a 2025 Sell (the disposition to select lots for).
-    let csv = fixtures::coinbase_buy_sell_send(cwd);
-    let (c, _o, e) = run_in(cwd, &[], &["--vault", "v.pgp", "import", csv.to_str().unwrap()]);
-    assert_eq!(c, 0, "{e}");
-    // `optimize accept` records a selection whose made-date defaults to BTCTAX_NOW; its rendered
-    // persistability label is the observable. (Exact accept args — --tax-year 2025 [--disposal <ref>] —
-    // finalized against the imported disposition at execution; the disposition ref is discovered from
-    // `report`/`optimize run` stdout under the same pinned env.)
-    let accept = ["--vault","v.pgp","optimize","accept","--tax-year","2025"];
-    let (_c1, back, _e1) = run_in(cwd, &[("BTCTAX_NOW","2025-01-01T00:00:00Z")], &accept); // ≤ sale
-    // fresh vault for the postdated run so the second accept isn't a no-op on an already-accepted year
-    let dir2 = tempfile::tempdir().unwrap(); let cwd2 = dir2.path();
-    run_in(cwd2, &[], &["--vault","v.pgp","init","--key-backup","k.asc"]);
-    let csv2 = fixtures::coinbase_buy_sell_send(cwd2);
-    run_in(cwd2, &[], &["--vault","v.pgp","import", csv2.to_str().unwrap()]);
-    let (_c2, post, _e2) = run_in(cwd2, &[("BTCTAX_NOW","2026-06-01T00:00:00Z")], &accept); // > sale
+    // build a two-lot changed-selection vault (HIFO != FIFO), record a selection under a pinned clock
+    fn accept_under(now: &str) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path();
+        let (c, _o, e) = run_in(cwd, &[], &["--vault", "v.pgp", "init", "--key-backup", "k.asc"]);
+        assert_eq!(c, 0, "init: {e}");
+        let csv = fixtures::coinbase_two_lot_tax_saving(cwd); // I9: LT+ST lots, 2025-06-01 sell
+        let (c, _o, e) = run_in(cwd, &[], &["--vault", "v.pgp", "import", csv.to_str().unwrap()]);
+        assert_eq!(c, 0, "import: {e}");
+        // `optimize accept --tax-year 2025` recomputes the year internally (accept_with_tables →
+        // optimize_year, cmd/optimize.rs:198-208) — no prior `optimize run` and no --disposal needed
+        // (Optimize::Accept.disposal is Option, cli.rs:315-326). Its made-date defaults to BTCTAX_NOW;
+        // the rendered persistability label is the observable.
+        let (_c, out, _e) = run_in(cwd, &[("BTCTAX_NOW", now)],
+            &["--vault", "v.pgp", "optimize", "accept", "--tax-year", "2025"]);
+        out
+    }
+    let back = accept_under("2025-01-01T00:00:00Z"); // <= 2025-06-01 sale ⇒ ContemporaneousNow
+    let post = accept_under("2026-06-01T00:00:00Z"); // >  2025-06-01 sale ⇒ NeedsAttestation
     assert_ne!(back, post,
         "backdated vs postdated BTCTAX_NOW must change the attestation classification wording;\n\
          backdated:\n{back}\npostdated:\n{post}");
@@ -253,9 +260,10 @@ fn backdated_vs_postdated_now_moves_the_attestation_classification() {
 - [ ] **Step 2: Run → PASS** (born-passing disclosure KAT) — `cargo test -p btctax-cli --test btctax_now_seam` → PASS.
 - [ ] **Step 3: Mutation-check** — temporarily invert the assert to `assert_eq!(back, post, …)`; run →
   RED (proving the two classifications genuinely differ, i.e. the seam reaches persistability); revert.
-  *(If `optimize accept` on this fixture needs a `--disposal <ref>` or a prior `optimize run`, discover the
-  ref from `optimize run`/`report` stdout under the pinned env and thread it in — do NOT leave the args
-  as a guess.)*
+  *(Verified at plan time: `optimize accept --tax-year 2025` needs no `--disposal` and no prior `optimize
+  run` — `accept_with_tables` recomputes via `optimize_year`, cmd/optimize.rs:198-208. If the observed
+  output is identical, the fixture isn't a changed-row scenario — re-check `coinbase_two_lot_tax_saving`
+  against the `write_tax_saving_csv` shape, do NOT relax the assert.)*
 - [ ] **Step 4: Add man-page ENVIRONMENT language** — in `docs.rs` add/extend a root const (e.g.
   `ROOT_ENVIRONMENT`) wired into `render_root`:
   `BTCTAX_NOW — pins the clock (RFC3339) for reproducible testing and documentation. Backdating a decision
@@ -310,9 +318,16 @@ fixtures.rs` builders where they already produce a CSV.
   (kitchen-sink ReturnInputs TOML + a donation CSV so Sch A L12 > $500 — SPEC §4.2/§6.1). Each is a
   committed synthetic file. Step: add a `cargo test` asserting each imports without a hard blocker (except
   where the journey deliberately drives a blocker).
-- [ ] **Oracle-consistency test (I6):** parse `fullreturn_inputs.toml` → assert the resulting
-  `ReturnInputs == btctax_core::tax::testonly::kitchen_sink_household().0` (the `.0`, `testonly.rs:165`),
-  and assert the `business.csv` amounts against the same vector — so the doc's "the non-donation figures
+- [ ] **Oracle-consistency test (I6; home crate = `btctax-cli`, M7):** the TOML parser
+  (`parse_return_inputs_toml`, `cmd/tax.rs:114`) is private to btctax-cli and xtask must not gain a
+  btctax-core dep, so this test lives as a **btctax-cli integration test** (`crates/btctax-cli/tests/`),
+  which already depends on btctax-core (reaching `btctax_core::tax::testonly::kitchen_sink_household()`,
+  `testonly.rs:165`) and can drive the binary via `CARGO_BIN_EXE_btctax`. It imports the committed
+  `fullreturn_inputs.toml` (`income import --year 2024 --file …`) then reads it back (`income show --year
+  2024`) and asserts the captured `ReturnInputs` equals `kitchen_sink_household().0` — via direct
+  `serde` equality if `ReturnInputs: Deserialize` from the committed TOML, else via output-equality vs an
+  `income show` on a vault built from the library vector (finalize the comparison surface at execution).
+  Also assert the `business.csv` amounts against the same vector. So the doc's "the non-donation figures
   remain the oracle vector" claim cannot silently drift from a typo. Commit.
 
 ### Task 1.3: the six journeys (SPEC §5) + the whole-file golden
@@ -483,12 +498,19 @@ bug-hunt surface).
 | Whole branch | `whole-branch-fable-review.md` | Fable |
 
 ## Status
+**r2 (2026-07-16) — folded the Fable r1 re-review** (`reviews/plan-r1-fable-rereview.md`, 0C/1I/1Mi):
+**I9** — T-P0.6's fixture was single-lot (`coinbase_buy_sell_send`), so `optimize accept` skipped as
+"already optimal" identically in both runs (born-RED). Swapped to a new `coinbase_two_lot_tax_saving`
+builder (the `write_tax_saving_csv` LT+ST shape, HIFO≠FIFO) and corrected the comment (Coinbase IS a
+broker → the KAT relies on the pre-2027-sale arm, not "non-broker"). **M7** — named the oracle-equality
+test's home crate (btctax-cli integration test, through the binary). Awaiting r2 re-review.
+
 **r1 (2026-07-16) — folded the independent Fable r0 review** (`reviews/plan-r0-fable-review.md`,
 0C/8I/6Mi/3N): all 8 Important + Minors/Nits addressed. Key folds: T-P0.6 rewritten from an empty-body
 stub into a real backdated/postdated `optimize accept` KAT with a mutation-check (I2); xtask binary
 resolution pinned to nested-`cargo build` (I3); golden tests `#[cfg(unix)]`-gated for the Windows
 path-separator divergence (I4); stderr-mode + front-matter added (I5); C-fullreturn oracle-equality test
-(I6); P2 one-commit atom + release PDF-attach + regen-on-bump (I7/I8/M5). Awaiting Fable re-review.
+(I6); P2 one-commit atom + release PDF-attach + regen-on-bump (I7/I8/M5).
 
 ## Self-review (author, against the spec)
 - **Spec coverage:** P0↔§3.2; P1↔§4/§5/§7; P2↔§6/§9; P3↔§3.4/§8; P4↔§10; merge/tag/release↔spec tail. ✓
