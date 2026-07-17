@@ -5,6 +5,8 @@
 use std::path::Path;
 use std::process::Command;
 
+mod fixtures; // reuse the synthetic Coinbase builders (end_to_end.rs precedent)
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_btctax")
 }
@@ -113,4 +115,63 @@ fn unset_seam_behaves_normally() {
     assert_eq!(code, 0, "verify should succeed; stderr: {err}");
     assert!(!err.contains("override active"));
     assert!(out.contains("recorded 2025-05-01"), "verify still renders the election's recorded date");
+}
+
+#[test] // T-P0.6 — the KAT IS the disclosure that BTCTAX_NOW can move the attestation classification.
+        // The Coinbase wallet IS a broker (WalletId::Exchange); the KAT relies on SPEC §3.2's "pre-2027
+        // sale date" arm — the 2025-06-01 sale means ForbiddenBroker2027 (year>=2027) never fires, so the
+        // made<=sale lever governs: backdated made-date (<= sale) => ContemporaneousNow; postdated (> sale)
+        // => NeedsAttestation. A CHANGED-row fixture is required (a single-lot vault skips as "already
+        // optimal" identically in both runs). The two runs MUST differ — proving the seam reaches
+        // persistability. There is no "Run => FAIL" step (the property already exists post-seam); the
+        // negation is checked by the manual mutation in the plan's Task 0.2 Step 3.
+fn backdated_vs_postdated_now_moves_the_attestation_classification() {
+    // Build a two-lot changed-selection vault and record a lot selection under a pinned clock. The app's
+    // no-election default is HIFO (already tax-optimal → nothing to propose), so we pin an explicit FIFO
+    // baseline election first; then the optimizer proposes HIFO (a real change) and `optimize accept`
+    // persists a LotSelection, reaching the persistability gate. Every setup step's exit code is asserted
+    // so a setup failure fails loudly instead of yielding empty output.
+    fn accept_under(now: &str) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path();
+        let (c, _o, e) = run_in(cwd, &[], &["--vault", "v.pgp", "init", "--key-backup", "k.asc"]);
+        assert_eq!(c, 0, "init: {e}");
+        let csv = fixtures::coinbase_two_lot_tax_saving(cwd); // LT+ST lots, 2025-06-01 sell
+        let (c, _o, e) = run_in(cwd, &[], &["--vault", "v.pgp", "import", csv.to_str().unwrap()]);
+        assert_eq!(c, 0, "import: {e}");
+        let (c, _o, e) = run_in(
+            cwd,
+            &[],
+            &[
+                "--vault", "v.pgp", "tax-profile", "--year", "2025", "--filing-status", "single",
+                "--ordinary-taxable-income", "100000", "--magi-excluding-crypto", "100000",
+                "--qualified-dividends", "0",
+            ],
+        );
+        assert_eq!(c, 0, "tax-profile: {e}");
+        // Pin a FIFO baseline (made == effective, not backdated) so HIFO is a proposed CHANGE.
+        let (c, _o, e) = run_in(
+            cwd,
+            &[("BTCTAX_NOW", "2025-01-01T00:00:00Z")],
+            &["--vault", "v.pgp", "config", "--set-forward-method", "fifo", "--effective-from", "2025-01-01"],
+        );
+        assert_eq!(c, 0, "config: {e}");
+        // `optimize accept --tax-year 2025` recomputes the year internally (no prior `optimize run` and no
+        // --disposal needed); the persisted selection's made-date defaults to BTCTAX_NOW; the rendered
+        // persistability label is the observable.
+        let (c, out, e) = run_in(
+            cwd,
+            &[("BTCTAX_NOW", now)],
+            &["--vault", "v.pgp", "optimize", "accept", "--tax-year", "2025"],
+        );
+        assert_eq!(c, 0, "accept: {e}");
+        out
+    }
+    let back = accept_under("2025-01-01T00:00:00Z"); // <= 2025-06-01 sale => ContemporaneousNow (persisted)
+    let post = accept_under("2026-06-01T00:00:00Z"); // >  2025-06-01 sale => NeedsAttestation (skipped)
+    assert_ne!(
+        back, post,
+        "backdated vs postdated BTCTAX_NOW must change the attestation classification wording;\n\
+         backdated:\n{back}\npostdated:\n{post}"
+    );
 }

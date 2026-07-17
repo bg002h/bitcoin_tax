@@ -98,6 +98,30 @@ pub fn income_fmv_missing_batch(n: usize) -> Vec<btctax_core::LedgerEvent> {
         .collect()
 }
 
+/// A two-lot **tax-saving** Coinbase CSV (an LT lot + a higher-basis ST lot + one sell) — a genuine
+/// CHANGED-selection scenario where HIFO ≠ FIFO, so `optimize` proposes a non-trivial pick (never the
+/// "already optimal" no-change skip). Mirrors the `write_tax_saving_csv` helper in `optimize_run.rs`.
+///
+/// Lot A (LT): 1 BTC @ $30,000, 2023-01-01.  Lot B (ST): 1 BTC @ $80,000, 2025-01-02.
+/// Sell: 1 BTC @ $50,000, 2025-06-01.
+///   FIFO → Lot A → +$20,000 LT gain;  HIFO → Lot B → −$30,000 ST loss (the optimizer's pick).
+/// Used by the P0 T-P0.6 integrity KAT (a 2025 sale keeps `ForbiddenBroker2027` dead so the made≤sale
+/// contemporaneity lever governs) and reused as J5's C-multilot corpus.
+#[allow(dead_code)]
+pub fn coinbase_two_lot_tax_saving(dir: &Path) -> PathBuf {
+    let p = dir.join("coinbase_two_lot_tax_saving.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+opt-buy-lt,2023-01-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,30000.00,30000.00,30000.00,0.00,,,\r\n\
+opt-buy-st,2025-01-02 12:00:00 UTC,Buy,BTC,1.00000000,USD,80000.00,80000.00,80000.00,0.00,,,\r\n\
+opt-sell,2025-06-01 12:00:00 UTC,Sell,BTC,1.00000000,USD,50000.00,50000.00,50000.00,0.00,,,\r\n",
+    )
+    .unwrap();
+    p
+}
+
 /// A Coinbase CSV with a single Buy only (self-contained USD; no price-dataset dependency).
 #[allow(dead_code)] // used in init_import.rs; appears unused in verify_report.rs compilation unit
 pub fn coinbase_single_buy(dir: &Path) -> PathBuf {

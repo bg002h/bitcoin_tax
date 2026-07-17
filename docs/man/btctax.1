@@ -86,6 +86,21 @@ Full\-return (v1) input surface: import, show, or clear the per\-year full\-retu
 .TP
 btctax\-tax\-profile(1)
 Set or show the per\-tax\-year tax profile (filing status, income, MAGI, etc.)
+.SH ENVIRONMENT
+.TP
+.B BTCTAX_PASSPHRASE
+The vault passphrase for non-interactive/scripted use; otherwise btctax prompts securely.
+.TP
+.B BTCTAX_NOW
+Pins the wall clock (RFC3339, e.g. \fB2026-02-01T12:00:00Z\fR) for reproducible testing and
+documentation. When set, decision made-dates are simulated and an unconditional warning is printed to
+stderr. A malformed or empty value is a hard error (exit 2). Backdating a decision record does NOT make
+an identification contemporaneous under Treas. Reg. \(sc 1.1012-1(j): the vault's recorded timestamp is
+self-reported, not evidence of the fact.
+.TP
+.B BTCTAX_PRICE_CACHE
+Overrides the local daily-close price-cache path (default: a data-dir path under btctax/). Absent or
+non-existent is byte-identical to the bundled dataset alone.
 .SH FILES
 .TP
 .B vault.pgp

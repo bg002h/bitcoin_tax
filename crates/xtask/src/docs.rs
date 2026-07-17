@@ -153,10 +153,28 @@ fn render_root(root: &clap::Command) -> Vec<u8> {
     buf.extend_from_slice(ROOT_DESCRIPTION.as_bytes());
     man.render_options_section(&mut buf).unwrap();
     man.render_subcommands_section(&mut buf).unwrap();
+    buf.extend_from_slice(ROOT_ENVIRONMENT.as_bytes());
     buf.extend_from_slice(ROOT_FILES.as_bytes());
     buf.extend_from_slice(ROOT_EXAMPLES.as_bytes());
     buf
 }
+
+const ROOT_ENVIRONMENT: &str = r#".SH ENVIRONMENT
+.TP
+.B BTCTAX_PASSPHRASE
+The vault passphrase for non-interactive/scripted use; otherwise btctax prompts securely.
+.TP
+.B BTCTAX_NOW
+Pins the wall clock (RFC3339, e.g. \fB2026-02-01T12:00:00Z\fR) for reproducible testing and
+documentation. When set, decision made-dates are simulated and an unconditional warning is printed to
+stderr. A malformed or empty value is a hard error (exit 2). Backdating a decision record does NOT make
+an identification contemporaneous under Treas. Reg. \(sc 1.1012-1(j): the vault's recorded timestamp is
+self-reported, not evidence of the fact.
+.TP
+.B BTCTAX_PRICE_CACHE
+Overrides the local daily-close price-cache path (default: a data-dir path under btctax/). Absent or
+non-existent is byte-identical to the bundled dataset alone.
+"#;
 
 const ROOT_DESCRIPTION: &str = r#".SH DESCRIPTION
 .B btctax
