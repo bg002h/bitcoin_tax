@@ -380,6 +380,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "btctax-oracle-harness"
+version = "0.6.0"
+dependencies = [
+ "btctax-core",
+ "btctax-forms",
+ "serde_json",
+]
+
+[[package]]
 name = "btctax-store"
 version = "0.6.0"
 dependencies = [

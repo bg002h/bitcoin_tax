@@ -203,7 +203,7 @@ def run_form(
     return _parse(text), out_path
 
 
-def evaluate(h: dict) -> dict[str, float]:
+def evaluate(h: dict) -> dict[str, float | None]:
     """Compute one household's federal return by driving OTS end to end."""
     status = h.get("filing_status", "Single")
     w2 = h.get("w2_income", 0)
@@ -214,6 +214,18 @@ def evaluate(h: dict) -> dict[str, float]:
     work = Path(tempfile.mkdtemp(prefix="ots-"))
     try:
         se_tax = half_se = addl_medicare = 0.0
+        # C1 cross-foot legs (§6.1 → §6.2) — captured from the SE / 8959 solvers when they run,
+        # left None otherwise so §6.4's Option rule leaves them unwitnessed (T8 emits, T9 leaves
+        # taxcalc's None). qbi_cap_l12 is likewise None unless a Form 8995 is run.
+        se_l10_oasdi = se_l11_medicare = None
+        f8959_l7 = f8959_l13 = None
+        qbi_cap_l12 = None
+        # §1(h) net-capital-gain subterms. The QD-EXCLUSIVE leaf is the §1222(11) long-term gain
+        # that survives cross-netting against short-term, floored at zero (r5-N2 — this is NOT the
+        # QD-inclusive net_capital_gain); the QBI cap (8995 L12) adds qualified dividends on top
+        # (§199A(a)(1)(B) / §1(h)).
+        net_ltcg_qd_exclusive = max(0.0, min(float(ltcg), float(ltcg) + float(stcg)))
+        net_capital_gain = h.get("qualified_dividends", 0) + net_ltcg_qd_exclusive
 
         if se_profit:
             # Schedule SE. Line 8a is the filer's OWN social security wages: these fill the
@@ -229,6 +241,8 @@ def evaluate(h: dict) -> dict[str, float]:
                 work,
             )
             se_tax, half_se = se.get("L12", 0.0), se.get("L13", 0.0)
+            se_l10_oasdi = se.get("L10")     # OASDI leg — Sch SE L10 (0 once wages fill the band)
+            se_l11_medicare = se.get("L11")  # Medicare leg — Sch SE L11
 
             f8959, _ = run_form(
                 "f8959",
@@ -238,11 +252,15 @@ def evaluate(h: dict) -> dict[str, float]:
                 work,
             )
             addl_medicare = f8959.get("L18", 0.0)
+            f8959_l7 = f8959.get("L7")       # 8959 Part I leg (Additional Medicare on wages)
+            f8959_l13 = f8959.get("L13")     # 8959 Part II leg (Additional Medicare on SE income)
         elif w2:
             f8959, _ = run_form(
                 "f8959", "Form_8959", "Form_8959", {"Status": status, "L1": w2}, work
             )
             addl_medicare = f8959.get("L18", 0.0)
+            f8959_l7 = f8959.get("L7")       # 8959 Part I leg (Additional Medicare on wages)
+            f8959_l13 = f8959.get("L13")     # 8959 Part II leg (no SE income → 0)
 
         # The 1040 carries Schedule D itself, and runs the qualified dividends & capital gain
         # worksheet. Gains go in as 8949-shaped TRANSACTIONS, not as a net number — see
@@ -288,10 +306,13 @@ def evaluate(h: dict) -> dict[str, float]:
             # It went unnoticed for a while because every other QBI household in the matrix has no
             # capital gain, so line 12 was zero and OTS agreed by accident. §1222(11): the net capital
             # gain is the long-term gain that survives cross-netting against short-term, floored at
-            # zero, plus qualified dividends.
-            net_capital_gain = h.get("qualified_dividends", 0) + max(
-                0.0, min(float(ltcg), float(ltcg) + float(stcg))
-            )
+            # zero, plus qualified dividends — computed as `net_capital_gain` at the top of evaluate.
+            #
+            # ★ `qbi_cap_l12` is OTS single-witness / WEAK (I1): it is DRIVER-HAND-FED here (not
+            # derived by OTS from its own Schedule D output), so OTS cannot independently catch an
+            # error in it. The §14.2 closure — derive L12 from OTS's Sch-D output — is filed as a
+            # follow-up (post-oracle-sweep hardening).
+            qbi_cap_l12 = round(net_capital_gain)
             f8995, _ = run_form(
                 "f8995",
                 "Form_8995",
@@ -300,7 +321,7 @@ def evaluate(h: dict) -> dict[str, float]:
                     "FileName1040": p1_out.name,
                     "L1_i_a:": "Crypto",
                     "L1_i_c": round(se_profit - half_se),
-                    "L12": round(net_capital_gain),
+                    "L12": qbi_cap_l12,
                 },
                 work,
             )
@@ -321,9 +342,19 @@ def evaluate(h: dict) -> dict[str, float]:
             else p1
         )
 
+        # ★ §1211 fix (r2-I3 / r3-M3). OTS's own 1040 line 7 is the §1211-LIMITED signed
+        # Schedule-D net: a net loss is floored at −3,000 and REDUCES net investment income,
+        # exactly as btctax applies it (other_taxes.rs:219-222,308). Feed THAT to Form 8960 L5a.
+        # The old `max(ltcg,0)+max(stcg,0)` dropped the limitation entirely, overstating OTS's NII
+        # by up to $3,000 on a capped-loss × NIIT-firing cell → OTS's NIIT wrong by construction
+        # (T11 would then file a FALSE btctax bug + pin btctax's correct value as a known defect).
+        # The same §1211-limited figure widens the 8960 TRIGGER gate below, so a net-STCG-only
+        # cell over the threshold no longer gets a false niit = 0 (the old `max(ltcg,0)` never saw
+        # short-term gains). L13 stays pass-1 cents-MAGI → NIIT is a paper-level ±cents epsilon.
+        sch_d_net = final.get("L7", 0.0)
         niit = 0.0
         investment = (
-            h.get("taxable_interest", 0) + h.get("ordinary_dividends", 0) + max(ltcg, 0)
+            h.get("taxable_interest", 0) + h.get("ordinary_dividends", 0) + max(sch_d_net, 0.0)
         )
         if investment:
             f8960, _ = run_form(
@@ -338,12 +369,25 @@ def evaluate(h: dict) -> dict[str, float]:
                     "Sec1141_10g": "No",
                     "L1": h.get("taxable_interest", 0),
                     "L2": h.get("ordinary_dividends", 0),
-                    "L5a": max(ltcg, 0) + max(stcg, 0),
+                    "L5a": sch_d_net,
                     "L13": p1.get("L11", 0.0),
                 },
                 work,
             )
             niit = f8960.get("L17", 0.0)
+
+        salt_capped = None
+        if h.get("standard_or_itemized") == "Itemized":
+            # OTS's US_1040 solver runs Schedule A internally and PRINTS the §164(b)(5)-capped
+            # line 5e as `A5e` (A5a/A5b ride the US_1040 input in the itemized block above), so
+            # read OTS's own figure. Fall back to the driver-DERIVED min(5a + 5b, 10000) only if a
+            # future template stops printing A5e (r2-N2).
+            salt_capped = final.get("A5e")
+            if salt_capped is None:
+                salt_capped = min(
+                    float(h.get("state_income_tax", 0)) + float(h.get("real_estate_tax", 0)),
+                    10000.0,
+                )
 
         return {
             "adjusted_gross_income": final.get("L11", 0.0),
@@ -356,6 +400,17 @@ def evaluate(h: dict) -> dict[str, float]:
             # OTS's L24 already carries SE tax and additional medicare (we fed it S2_4/S2_11);
             # it does not carry NIIT, which we add, matching 1040 line 24's Schedule 2 total.
             "total_tax": final.get("L24", 0.0) + niit,
+            # ── T8: deeper lines + provenance leaves + C1 cross-foot legs (§6.1 → §6.2) ──
+            "deduction_taken": final.get("L12", 0.0),         # 1040 L12 — standard or itemized
+            "sch_d_to_l7": sch_d_net,                         # 1040 L7 — SIGNED, §1211-limited
+            "salt_capped": salt_capped,                       # Sch A L5e (None when standard)
+            "qbi_cap_l12": qbi_cap_l12,                       # 8995 L12 — OTS single-witness/WEAK (I1)
+            "qual_div_l3a": h.get("qualified_dividends", 0),  # 1040 L3a provenance leaf
+            "net_ltcg_qd_exclusive": net_ltcg_qd_exclusive,   # §1(h) QD-EXCLUSIVE subterm (r5-N2)
+            "se_l10_oasdi": se_l10_oasdi,                     # Sch SE L10 (OASDI leg)
+            "se_l11_medicare": se_l11_medicare,               # Sch SE L11 (Medicare leg)
+            "f8959_l7": f8959_l7,                             # 8959 L7 (Part I leg)
+            "f8959_l13": f8959_l13,                           # 8959 L13 (Part II SE leg)
         }
     finally:
         shutil.rmtree(work, ignore_errors=True)

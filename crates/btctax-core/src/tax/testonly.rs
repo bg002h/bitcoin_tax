@@ -406,6 +406,18 @@ pub struct ExpectedOts {
     pub niit: f64,
     pub additional_medicare_tax: f64,
     pub total_tax: f64,
+    #[serde(default)] pub deduction_taken: Option<f64>,       // 1040 L12
+    #[serde(default)] pub salt_capped: Option<f64>,           // Sch A L5e
+    #[serde(default)] pub sch_d_to_l7: Option<f64>,           // 1040 L7 (signed)
+    #[serde(default)] pub qbi_cap_l12: Option<f64>,           // 8995 L12 — OTS single-witness/WEAK (I1): driver-hand-fed, NOT an independent check; §14.2 closure = follow-up
+    // provenance leaves for the §6.2(b) predicate (Table_btctax inputs):
+    #[serde(default)] pub qual_div_l3a: Option<f64>,          // 1040 L3a
+    #[serde(default)] pub net_ltcg_qd_exclusive: Option<f64>, // §1(h) term, QD-EXCLUSIVE (r5-N2)
+    // C1 cross-foot legs — OTS only (taxcalc has no split):
+    #[serde(default)] pub se_l10_oasdi: Option<f64>,          // Sch SE L10 (OASDI leg)
+    #[serde(default)] pub se_l11_medicare: Option<f64>,       // Sch SE L11 (Medicare leg)
+    #[serde(default)] pub f8959_l7: Option<f64>,              // 8959 L7 leg
+    #[serde(default)] pub f8959_l13: Option<f64>,             // 8959 L13 leg
 }
 
 /// The second oracle's outputs. Only the lines whose definitions are unambiguous across engines: we do
@@ -420,6 +432,14 @@ pub struct ExpectedTaxcalc {
     pub se_tax: f64,
     pub niit: f64,
     pub additional_medicare_tax: f64,
+    #[serde(default)] pub deduction_taken: Option<f64>,       // 1040 L12
+    #[serde(default)] pub salt_capped: Option<f64>,           // Sch A L5e
+    #[serde(default)] pub sch_d_to_l7: Option<f64>,           // 1040 L7 (signed)
+    #[serde(default)] pub qbi_cap_l12: Option<f64>,           // 8995 L12 — OTS single-witness/WEAK (I1): driver-hand-fed, NOT an independent check; §14.2 closure = follow-up
+    // provenance leaves for the §6.2(b) predicate (Table_btctax inputs):
+    #[serde(default)] pub qual_div_l3a: Option<f64>,          // 1040 L3a
+    #[serde(default)] pub net_ltcg_qd_exclusive: Option<f64>, // §1(h) term, QD-EXCLUSIVE (r5-N2)
+    #[serde(default)] pub total_tax: Option<f64>,             // OTS's is required f64; taxcalc's is optional — §6.4 M-4
 }
 
 #[derive(Debug, Deserialize)]
@@ -478,7 +498,16 @@ pub fn not_a_dependent() -> HouseholdHeader {
 /// btctax gets to Schedule D at all), and its `self_employment_income` is business crypto — a Schedule C
 /// trade or business, which is the only way btctax produces SE tax.
 pub fn build_golden_household(h: &GoldenHousehold) -> (ReturnInputs, LedgerState) {
-    let i = &h.inputs;
+    build_golden_return(&h.inputs)
+}
+
+/// Build btctax's `(ReturnInputs, LedgerState)` from the oracle [`GoldenInputs`] **alone** — the core of
+/// [`build_golden_household`], factored out (T7) so the §9 oracle-sweep harness can assemble the SAME
+/// return from a bare `GoldenInputs` read off stdin. The harness has no oracle-expectation fields with
+/// which to fill a whole `GoldenHousehold`, and `build_golden_household` never read anything but
+/// `h.inputs` — so `build_golden_household(h)` is now exactly `build_golden_return(&h.inputs)`, and the
+/// two produce an IDENTICAL return by construction.
+pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
     let status = match i.filing_status.as_str() {
         "Single" => FilingStatus::Single,
         "Married/Joint" => FilingStatus::Mfj,
@@ -622,4 +651,45 @@ pub fn build_golden_household(h: &GoldenHousehold) -> (ReturnInputs, LedgerState
     }
 
     (ri, state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn goldens_carry_the_deeper_and_provenance_leaves() {
+        // Post-T11 the baked corpus CARRIES the deeper-line + provenance leaves on every household — the
+        // deeper differential and the per-oracle provenance classes depend on them; a re-bake that dropped
+        // them would silently make those checks inert. (`qbi_cap_l12` + the C1 SE legs are per-form, so
+        // they bake only on the relevant households — checked on an SE household below — not on the
+        // W-2-only floor case.)
+        let hs = golden_households(); // parses GOLDEN_RETURNS_JSON
+        let floor = &hs[0]; // single_w2_only_standard
+        assert!(floor.expected_ots.net_ltcg_qd_exclusive.is_some());
+        assert!(floor.expected_ots.qual_div_l3a.is_some());
+        assert!(floor.expected_ots.deduction_taken.is_some());
+        assert!(floor.expected_taxcalc.total_tax.is_some());
+        assert!(floor.expected_taxcalc.net_ltcg_qd_exclusive.is_some());
+
+        let se = hs
+            .iter()
+            .find(|h| h.name == "single_crypto_business_se")
+            .expect("the SE anchor is in the matrix");
+        assert!(se.expected_ots.qbi_cap_l12.is_some());
+        assert!(se.expected_ots.se_l10_oasdi.is_some());
+        assert!(se.expected_ots.se_l11_medicare.is_some());
+
+        // …and the `#[serde(default)]` optionals STILL default to None when a record OMITS them (a
+        // hand-written or older JSON must keep parsing) — the schema tolerance the original test guarded.
+        let minimal: ExpectedOts = serde_json::from_str(
+            r#"{"adjusted_gross_income":0.0,"taxable_income":0.0,"qbi_deduction":0.0,
+                "income_tax_before_credits":0.0,"se_tax":0.0,"niit":0.0,
+                "additional_medicare_tax":0.0,"total_tax":0.0}"#,
+        )
+        .expect("a record without the optional deeper leaves still parses");
+        assert!(minimal.net_ltcg_qd_exclusive.is_none());
+        assert!(minimal.qbi_cap_l12.is_none());
+        assert!(minimal.se_l10_oasdi.is_none());
+    }
 }

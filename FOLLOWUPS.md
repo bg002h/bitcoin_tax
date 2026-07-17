@@ -4,6 +4,27 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## oracle-sweep — deferred hardening (2026-07-16)
+
+- **(OS-14.2) Derive OTS's Form 8995 line 12 from OTS's OWN Schedule-D output — Minor, owned by
+  post-oracle-sweep / future hardening.** `scripts/oracle/ots_direct.py::evaluate` **hand-feeds** Form 8995
+  line 12 (`qbi_cap_l12 = round(net_capital_gain)`, the driver's own §1(h) figure — NOT derived by OTS)
+  because OTS's 8995 solver reads a 1040 *output* file that carries a taxable income, not a net capital
+  gain. Consequence: on the QBI-limited-by-net-capital-gain path OTS **cannot independently catch an error**
+  in line 12 — if btctax's notion of net capital gain were wrong, the same wrong number is handed to OTS and
+  it would agree. PSL Tax-Calculator (which derives line 12 from `p23250`/`p22250`/`e00650`) is the only
+  fully independent witness there, so it is ONE witness, not two — the two-oracle claim is thinner on the
+  QBI path than everywhere else. `qbi_cap_l12` is therefore emitted (T8) and asserted (T5/T6) as
+  **single-witness/WEAK**, not advertised as an independent check. **The close:** derive OTS's line 12 from
+  OTS's own Schedule-D solver output (the D-line proceeds/cost → §1(h) net capital gain) rather than the
+  driver's hand-computed figure, restoring OTS as a genuinely independent second witness. Out of the
+  oracle-sweep plan's scope (the plan ships the WEAK leaf as-is). — OPEN, owned by **post-oracle-sweep /
+  future hardening**. — `scripts/oracle/ots_direct.py` `evaluate` (8995 L12 feed);
+  `SPEC_oracle_sweep.md` §6.4 "L12 single-witness closure (r1 I-5)"; plan §6.1 table "8995 L12" row (§14.2
+  closure).
+
+---
+
 ## input-form PLAN 3 (TUI) — whole-branch review Minors (2026-07-15)
 
 The Fable plan-3 whole-branch review (`design/input-form/reviews/WHOLE-BRANCH-P3-fable-r1.md`, 0C/4I) — the
@@ -1925,3 +1946,37 @@ new Minors are non-blocking and deferred here.
   taxable-disposal selections only. *Recommend* documenting the scope boundary in the proposal footer (mirroring
   the R0-M2 vertex-granularity caveat); relates to A's open `disposal_compliance`-omits-SelfTransfers item. —
   OPEN (non-blocking; document the scope boundary vs spec §A.3).
+
+---
+
+## ORACLE-SWEEP whole-branch residue (owning phase: ownerless residue; batch post-ship)
+
+Filed 2026-07-16 at the `feat/oracle-sweep` whole-branch review (Fable, Ready-to-merge YES, 0C/0I). All Minor/Nit,
+none weakens a comparison or hides a defect (whole-branch review verified: frozen files untouched, hermetic ~8s
+gate, no caught-bug pins, three consumers non-drifted, corpus regenerates byte-identically, fresh-seed live sweep
+clean). Burn down opportunistically; none holds any gate.
+
+- **OS-WB-1 (Minor) — deeper-line teeth prove only the OTS witness.** All §12 teeth KATs perturb the OTS leaf;
+  deleting the `if let Some(tc)` taxcalc block for deduction/SALT/Sch-D→L7 (`golden_packet.rs:496,513,524`;
+  `golden_returns.rs:394-404`) reddens nothing. Every line keeps a proven-biting OTS witness, so no comparison
+  goes blind — only the redundant second (taxcalc) witness is unproven. Fix: one taxcalc-leaf perturbation case
+  per level.
+- **OS-WB-2 (Minor) — read-back fault-injection re-implements the L16 compare inline** rather than driving
+  `diff_household` over a swapped map (`golden_packet.rs` `readback_reads_the_pdf_not_the_struct`). Spec-blessed
+  map-swap shape; a follow-up could parametrize `diff_household` over the 1040 map to close the residual.
+- **OS-WB-3 (Minor) — `check_determinism.py::compare` has no top-level catch-all** — checks `households` +
+  `_provenance` only; a future new top-level corpus key could drift unnoticed. One `set(na)==set(nb)` + equality
+  line closes it.
+- **OS-WB-4 (Nit) — `Sign::Unsigned` (`common/mod.rs:187`) accepts a leading minus** that `paper_money` rejects;
+  an assert would mirror the parse discipline (currently only unit-test-exercised).
+- **OS-WB-5 (Nit) — doc/comment cosmetics:** stale comment `golden_packet.rs:341` ("provenance leaves are None
+  until T11" inside Part-2, contradicted by the correct "LIVE at T11" six lines below); `corpus.py:311` says
+  "5 income axes" (injection list has 4); anchor-error attribution wording; `sweep.py::_verify_harness_freshness`
+  attributes exit-2 solely to a stale binary (could also be schema drift).
+- **OS-WB-6 (Nit) — harness generic `paper` closure (`main.rs:216`) parses a leading minus on any line;** the
+  paper level is strict per the sign table. Not a masking risk (a wrong sign diverges from the oracle target).
+  Add a one-line comment on the deliberate asymmetry when T6-m2's `on_paper_signed`-for-negative-AGI-L11 switch
+  is revisited.
+
+(Also open, filed T8, out of THIS plan's scope: **OS-14.2** — derive OTS's 8995-L12 from OTS's own Schedule-D
+output to close the QBI-path single-witness/WEAK gap. Correctly labeled WEAK at every consumer.)
