@@ -86,3 +86,32 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
       - name: PII generic-shape scan
         run: bash scripts/pii-scan-generic.sh
+
+  # The CLI worked-examples doc (SPEC §9). ADVISORY for now — not yet a required check (promotion is a
+  # GitHub-settings action, §14). Ubuntu-only: the byte-exact golden is `#[cfg(unix)]` (I4 — journey stdout
+  # embeds joined paths whose separator differs on Windows). The generator is HERMETIC (it pins
+  # HOME/TZ/BTCTAX_PRICE_CACHE/BTCTAX_NOW per captured command — proven by
+  # `examples_generate_is_hermetic_across_ambient_env`), so this job needs no ambient env pinning.
+  examples:
+    name: examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - name: Install groff (the -T pdf render device)
+        run: sudo apt-get update && sudo apt-get install -y groff
+      - name: Regenerate the golden and assert it is committed (drift gate)
+        # cargo build progress goes to stderr, so the redirect captures ONLY the generator's stdout.
+        run: |
+          cargo run --locked -p xtask -- examples > docs/examples/examples.md
+          git diff --exit-code -- docs/examples/examples.md \
+            || { echo "::error::docs/examples/examples.md is STALE — run 'cargo run -p xtask -- examples > docs/examples/examples.md'"; exit 1; }
+      - name: Forms-coverage census (HARD — every census form emits and is demonstrated in J6)
+        run: cargo test -p btctax-forms --test census --locked
+      - name: Subcommand-coverage report (SOFT — advisory, never fails the job)
+        run: cargo run --locked -p xtask -- subcommand-coverage
+      - name: Prove the examples PDF builds
+        run: make examples

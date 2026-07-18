@@ -529,6 +529,90 @@ pub fn run() {
     print!("{}", generate(&bin));
 }
 
+/// Collect every LEAF subcommand path of the CLI (a command with no subcommands), skipping clap's `help`
+/// pseudo-command. `["reconcile", "reclassify-outflow"]`, `["income", "import"]`, `["what-if", "sell"]`, …
+fn leaf_subcommands() -> Vec<Vec<String>> {
+    use btctax_cli::cli::Cli;
+    use clap::CommandFactory;
+    fn walk(cmd: &clap::Command, path: &[String], out: &mut Vec<Vec<String>>) {
+        let subs: Vec<&clap::Command> =
+            cmd.get_subcommands().filter(|s| s.get_name() != "help").collect();
+        if subs.is_empty() {
+            if !path.is_empty() {
+                out.push(path.to_vec());
+            }
+            return;
+        }
+        for sub in subs {
+            let mut p = path.to_vec();
+            p.push(sub.get_name().to_string());
+            walk(sub, &p, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(&Cli::command(), &[], &mut out);
+    out.sort();
+    out
+}
+
+/// Whether some `$ btctax …` line in the golden runs the leaf `path` — its subcommand-name tokens appear
+/// IN ORDER among the line's tokens (global flags like `--vault v.pgp` interspersed are skipped).
+fn is_demonstrated(golden: &str, path: &[String]) -> bool {
+    golden
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("$ btctax"))
+        .any(|rest| {
+            let toks: Vec<&str> = rest.split_whitespace().collect();
+            let mut i = 0;
+            for p in path {
+                match toks.get(i..).and_then(|s| s.iter().position(|t| t == p)) {
+                    Some(off) => i += off + 1,
+                    None => return false,
+                }
+            }
+            true
+        })
+}
+
+/// The SOFT subcommand-coverage report (SPEC §6.3): which leaf subcommands have NO worked example in the
+/// committed golden. Non-blocking — administrative/rare commands (`backup-key`, `init --repair`, …) need
+/// no contrived example; this is a maintainer's map, printed/uploaded, never a gate.
+pub fn subcommand_coverage_report() -> String {
+    let golden = std::fs::read_to_string(workspace_root().join("docs/examples/examples.md"))
+        .unwrap_or_default();
+    let leaves = leaf_subcommands();
+    let (mut covered, mut uncovered) = (0usize, Vec::new());
+    for path in &leaves {
+        if is_demonstrated(&golden, path) {
+            covered += 1;
+        } else {
+            uncovered.push(path.join(" "));
+        }
+    }
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Subcommand coverage (SOFT — SPEC §6.3): {covered}/{} leaf subcommands have a worked example.",
+        leaves.len()
+    );
+    if uncovered.is_empty() {
+        out.push_str("  every leaf subcommand is demonstrated.\n");
+    } else {
+        out.push_str(
+            "  not demonstrated (no worked example — administrative/rare commands need none):\n",
+        );
+        for n in &uncovered {
+            let _ = writeln!(out, "    - btctax {n}");
+        }
+    }
+    out
+}
+
+/// `cargo run -p xtask -- subcommand-coverage` — print the SOFT coverage report (SPEC §6.3, Task 2.2).
+pub fn run_coverage() {
+    print!("{}", subcommand_coverage_report());
+}
+
 #[cfg(test)]
 #[cfg(unix)] // journey stdout can embed joined paths; byte-exact goldens are gated on unix (I4)
 mod tests {
@@ -625,6 +709,24 @@ mod tests {
             baseline, perturbed,
             "the golden must not depend on ambient HOME, a PRESENT price cache, or a stray BTCTAX_NOW \
              (SPEC §7 hermeticity)"
+        );
+    }
+
+    /// The SOFT subcommand-coverage report (SPEC §6.3) walks the CLI + scans the golden without panicking
+    /// and returns a well-formed summary. Non-gating content (the report is advisory), but the walk/scan
+    /// must stay sound. No binary build — reads the committed golden + `Cli::command()`.
+    #[test]
+    fn subcommand_coverage_report_is_well_formed() {
+        assert!(!leaf_subcommands().is_empty(), "the CLI must have leaf subcommands to report on");
+        let report = subcommand_coverage_report();
+        assert!(
+            report.starts_with("Subcommand coverage (SOFT"),
+            "the report must open with its summary line; got: {report:?}"
+        );
+        // The demonstrated journeys cover a real fraction — a 0/N report would mean the scan is broken.
+        assert!(
+            report.contains("have a worked example."),
+            "the report must state the covered count"
         );
     }
 }

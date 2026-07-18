@@ -28,6 +28,9 @@ fn main() {
         Some("examples") => {
             examples::run();
         }
+        Some("subcommand-coverage") => {
+            examples::run_coverage();
+        }
         Some("check-isolation") => {
             if let Err(e) = check_isolation::run() {
                 eprintln!("xtask check-isolation: {e}");
@@ -46,7 +49,8 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "usage: cargo run -p xtask -- <docs [--pdf] | examples | check-isolation | dump-fields <pdf>>"
+                "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
+                 check-isolation | dump-fields <pdf>>"
             );
             std::process::exit(2);
         }
