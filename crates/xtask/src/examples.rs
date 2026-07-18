@@ -142,8 +142,12 @@ fn plain<'a>(args: &'a [&'a str]) -> Cmd<'a> {
     Cmd { args, now: None, show_stderr: false }
 }
 
-// ── Committed synthetic corpora (include_str! from crates/xtask/corpora/) ────────────────────────
-const J1_CSV: &str = include_str!("../corpora/j1_coinbase.csv");
+// ── Synthetic corpora (embedded as consts with explicit CRLF — committed .csv files are force-LF'd by
+//    .gitattributes and would break the Coinbase parser, so we follow the fixtures.rs pattern) ─────
+const J1_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-buy,2025-03-01 12:00:00 UTC,Buy,BTC,0.10000000,USD,84000.00,8400.00,8450.00,50.00,,,\r\n\
+cb-sell,2025-06-15 12:00:00 UTC,Sell,BTC,0.02000000,USD,67500.00,1350.00,1340.00,10.00,,,\r\n";
 
 /// Generate the whole-file golden by running `bin` across every journey. Pure function of
 /// `(repo tree, binary, synthetic inputs)`.
