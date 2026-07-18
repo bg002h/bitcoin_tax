@@ -28,6 +28,11 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      # The committed .cargo/config.toml forces `-fuse-ld=lld` on Linux; runners don't ship it reliably,
+      # so a cold-cache link (proc-macro build scripts) fails "cannot find ld". Install it on the Linux leg.
+      - name: Install lld (Linux — .cargo/config forces -fuse-ld=lld)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y lld
       - run: cargo test --workspace --locked
 
   clippy:
@@ -40,6 +45,8 @@ jobs:
           toolchain: stable
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - name: Install lld (.cargo/config forces -fuse-ld=lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   fmt:
@@ -64,6 +71,8 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
         with:
           key: msrv-1.88
+      - name: Install lld (.cargo/config forces -fuse-ld=lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
       - run: cargo check --workspace --locked
 
   # #41 Part C: the tax binaries must link NO HTTP client — network code lives ONLY in
@@ -77,6 +86,8 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - name: Install lld (.cargo/config forces -fuse-ld=lld)
+        run: sudo apt-get update && sudo apt-get install -y lld
       - run: cargo run -p xtask -- check-isolation
 
   pii-scan:
@@ -101,8 +112,8 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
-      - name: Install groff (the -T pdf render device)
-        run: sudo apt-get update && sudo apt-get install -y groff
+      - name: Install groff (the -T pdf render device) + lld (.cargo/config forces -fuse-ld=lld)
+        run: sudo apt-get update && sudo apt-get install -y groff lld
       - name: Regenerate the golden and assert it is committed (drift gate)
         # cargo build progress goes to stderr, so the redirect captures ONLY the generator's stdout.
         run: |
