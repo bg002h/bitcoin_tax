@@ -1,0 +1,43 @@
+── glyphs ──
+  0│┌ btctax-tui —  ───────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  1││ Holdings │ Disposals │ Income │ Tax │ Forms │ Compliance                                                             │
+  2│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  3│┌ Holdings ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  4││no holdings                                                                                                           │
+  5││                                                                                                                      │
+  6││                                                                                                                      │
+  7││                                                                                                                      │
+  8││                                                                                                                      │
+  9││                                                                                                                      │
+ 10││                                                                                                                      │
+ 11││                                                                                                                      │
+ 12││                                                                                                                      │
+ 13││                           ┌ Export form CSVs for 2025 ───────────────────────────────────┐                           │
+ 14││                           │  Output directory:                                           │                           │
+ 15││                           │  ./btctax-export-20240601-120000Z                            │                           │
+ 16││                           │                                                              │                           │
+ 17││                           │  Files to write:                                             │                           │
+ 18││                           │    form8949.csv                                              │                           │
+ 19││                           │    schedule_d.csv                                            │                           │
+ 20││                           │    form8283.csv                                              │                           │
+ 21││                           │  The vault is never written.                                 │                           │
+ 22││                           │  Exported files contain your tax data and are                │                           │
+ 23││                           │  owner-only (0o600 on Unix).                                 │                           │
+ 24││                           │                                                              │                           │
+ 25││                           │  [Enter] Confirm     [Esc] Cancel — writes nothing           │                           │
+ 26││                           └──────────────────────────────────────────────────────────────┘                           │
+ 27││                                                                                                                      │
+ 28││                                                                                                                      │
+ 29││                                                                                                                      │
+ 30││                                                                                                                      │
+ 31││                                                                                                                      │
+ 32││                                                                                                                      │
+ 33││                                                                                                                      │
+ 34││                                                                                                                      │
+ 35││                                                                                                                      │
+ 36││                                                                                                                      │
+ 37││                                                                                                                      │
+ 38│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ 39│Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   g/G: top/bottom   w: what-if   e: export
+── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
+  1│ 2..10 fg=Yellow mod=BOLD

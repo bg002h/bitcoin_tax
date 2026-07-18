@@ -865,6 +865,11 @@ mod tests {
                 .to_string_lossy()
                 .to_string();
             let is_export = filename == "export.rs";
+            // A `tests.rs` is a WHOLE-FILE test module (`#[cfg(test)] mod tests;` in its parent), so it
+            // carries no `#[cfg(test)]` line of its own and `scan_non_test` would treat all of it as
+            // production. It is entirely test code — exempt it from the write-class ("non-test code" only)
+            // rule so a golden-regen helper may write fixtures. Production writes stay export.rs-only.
+            let is_whole_file_test = filename == "tests.rs";
 
             // Check everywhere_tokens in non-test region of ALL files.
             // (export.rs is allowed to use write-class tokens but NOT the everywhere tokens.)
@@ -880,8 +885,8 @@ mod tests {
                 }
             }
 
-            // Check write-class tokens in non-test region of non-export files.
-            if !is_export {
+            // Check write-class tokens in non-test region of non-export, non-whole-file-test files.
+            if !is_export && !is_whole_file_test {
                 let hits = scan_non_test(path, write_class_tokens);
                 for (tok, lineno) in hits {
                     violations.push(format!(

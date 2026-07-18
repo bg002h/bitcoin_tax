@@ -115,3 +115,8 @@ jobs:
         run: cargo run --locked -p xtask -- subcommand-coverage
       - name: Prove the examples PDF builds
         run: make examples
+      - name: Prove the TUI screens PDF builds
+        # The style-aware TUI goldens (docs/examples-tui/*.txt) are staleness-gated in the `test` job by the
+        # crates' `*_goldens_match_committed` tests (they regenerate + compare in-process), so no git-diff
+        # widening is needed here (P2 review N-2); this step only proves the separate TUI PDF renders.
+        run: make examples-tui

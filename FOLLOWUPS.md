@@ -2115,6 +2115,15 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   reproducibility notice, not part of a command's result." Meaning is unambiguous in context; recorded so
   it is tightened at the next mandatory golden regen (the v0.7.0 version-pin bump) rather than forcing an
   extra review round now.
+- **UX-P3-2 (Nit — P3, deferred).** Owning phase: post-v0.7.0 docs. The TUI PDF render (`make examples-tui`,
+  `docs/examples-tui/tui-wrap.awk`) is MONOCHROME — it renders the goldens' glyph grid and drops the
+  per-cell style overlay (colors), and maps box-drawing glyphs to ASCII (gropdf lacks them). SPEC §8 wants
+  "color from the style map"; the `.txt` goldens carry the full fg/bg/modifier, so a colorized groff render
+  (roff color escapes driven by the style runs) is a future enhancement. The GATED artifact (the `.txt`
+  goldens) already captures color; only the convenience PDF is monochrome.
+- **N-2 (P2 review) — RESOLVED in P3.** The TUI goldens (`docs/examples-tui/*.txt`) are staleness-gated
+  in-process by the crates' `*_goldens_match_committed` tests (which the `test` job runs), so no git-diff
+  widening of the CI `examples` job was needed; that job instead gained a `make examples-tui` PDF-build proof.
 
 - **UX-P2-1 (Minor — P2 review M-2; future-drift, not a current bug).** Owning phase: **P4 residue**. The
   SOFT subcommand-coverage matcher `is_demonstrated` (`examples.rs`) is an in-order SUBSEQUENCE match, so a

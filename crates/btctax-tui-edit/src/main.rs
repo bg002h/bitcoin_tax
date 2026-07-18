@@ -13846,6 +13846,106 @@ mod tests {
         );
     }
 
+    /// SPEC §3.4 clock-seam guard (btctax-tui-edit): a reconcile decision persisted through the editor is
+    /// stamped with the INJECTED clock's instant, not a fresh `now_utc()`. Drives the self-transfer
+    /// classify to persist under `app.clock = Pinned(2024-06-01T12:00:00Z)` and asserts an appended event
+    /// carries exactly that instant. This is the guard for the 23 editor `now_utc()` reads routing through
+    /// `app.clock.now()` — reverting any one back to `now_utc()` reds this (the wall clock is not 2024).
+    #[test]
+    fn persisted_decision_made_date_is_the_injected_clock() {
+        use btctax_core::persistence::load_all_ordered;
+        use btctax_tui::clock::Clock;
+        use time::macros::datetime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-clock-seam-pass";
+        seed_transfer_in_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        let pinned = datetime!(2024 - 06 - 01 12:00:00 UTC);
+        app.clock = Clock::Pinned(pinned);
+
+        // Same drive as the default-basis KAT: c → Enter → Tab,Tab → Enter → Enter (empty form → modal).
+        handle_key(&mut app, press(KeyCode::Char('c')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        handle_key(&mut app, press(KeyCode::Tab));
+        handle_key(&mut app, press(KeyCode::Tab));
+        handle_key(&mut app, press(KeyCode::Enter));
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(app.classify_inbound_modal.is_some(), "the confirm modal must open");
+        // Confirm → persist. The decision's made-date is captured here via `app.clock.now()`.
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(app.classify_inbound_modal.is_none(), "modal closes after confirm");
+
+        // RawEventRow stores utc_timestamp as an RFC3339 string (persistence.rs:162); compare in that form.
+        let pinned_str = pinned
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap();
+        let events = load_all_ordered(app.session.as_ref().unwrap().conn()).unwrap();
+        assert!(
+            events.iter().any(|e| e.utc_timestamp == pinned_str),
+            "the persisted decision must be stamped with the injected clock ({pinned_str}); \
+             an appended event at that instant is absent — a clock-seam read leaked to the wall clock"
+        );
+    }
+
+    // ── P3 style-aware TUI golden (SPEC §8) — the editor's Browse screen ──────
+    // `#[cfg(unix)]` (I4): the Browse title renders a joined vault path. Fixed path + synthetic snapshot
+    // + a pinned clock ⇒ a pure function of (code, synthetic state). Complements the clock-seam guard
+    // above (which covers the reconcile decision made-dates) and the btctax-tui viewer goldens.
+
+    #[cfg(unix)]
+    fn tui_edit_golden_dir() -> std::path::PathBuf {
+        std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/examples-tui"))
+    }
+
+    /// `(stem, captured frame)` for btctax-tui-edit: the Browse screen (editor chrome — tabs, title,
+    /// footer, empty-state) captured style-aware under a pinned clock.
+    #[cfg(unix)]
+    fn btctax_tui_edit_goldens() -> Vec<(&'static str, String)> {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = browse_app_with_empty_snapshot();
+        app.clock = btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2024 - 06 - 01 12:00:00 UTC));
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
+        let frame = btctax_tui::capture::to_golden(&terminal.backend().buffer().clone());
+        vec![("edit-browse", frame)]
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn btctax_tui_edit_goldens_match_committed() {
+        for (stem, captured) in btctax_tui_edit_goldens() {
+            let path = tui_edit_golden_dir().join(format!("btctax-tui-{stem}.txt"));
+            let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "committed {} missing ({e}); regenerate with \
+                     `cargo test -p btctax-tui-edit emit_btctax_tui_edit_goldens -- --ignored`",
+                    path.display()
+                )
+            });
+            assert_eq!(
+                captured, committed,
+                "docs/examples-tui/btctax-tui-{stem}.txt is STALE; regenerate via the ignored \
+                 emit_btctax_tui_edit_goldens test"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "regeneration helper: rewrites docs/examples-tui/btctax-tui-edit-*.txt"]
+    fn emit_btctax_tui_edit_goldens() {
+        let dir = tui_edit_golden_dir();
+        std::fs::create_dir_all(&dir).expect("create docs/examples-tui");
+        for (stem, captured) in btctax_tui_edit_goldens() {
+            std::fs::write(dir.join(format!("btctax-tui-{stem}.txt")), captured).expect("write golden");
+        }
+    }
+
     // ── KAT-E2E-FMV-MISSING — classify-inbound Income without FMV ────────────
 
     #[test]

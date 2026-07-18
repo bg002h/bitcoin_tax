@@ -1,6 +1,6 @@
 # btctax — developer convenience targets.
 
-.PHONY: check test lint docs docs-man examples bundles help
+.PHONY: check test lint docs docs-man examples examples-tui bundles help
 
 ## check: the validation gate — the full test suite AND clippy, run CONCURRENTLY (~6s warm)
 ##
@@ -61,6 +61,19 @@ examples:
 	@head -c4 docs/pdf/btctax-examples.pdf | grep -q '%PDF' \
 	  && echo "wrote docs/pdf/btctax-examples.pdf" \
 	  || { echo "examples: groff did not emit a PDF (is groff installed with the pdf device?)"; exit 1; }
+
+## examples-tui: render the style-aware TUI goldens (docs/examples-tui/*.txt) to a SEPARATE PDF via groff.
+## Convenience render (glyph grids, monochrome — the .txt goldens are the gated artifact, test-gated by
+## the crates' `*_goldens_match_committed` tests; NOT byte-gated here). git-ignored. Needs `groff`.
+examples-tui:
+	@mkdir -p docs/pdf
+	@{ echo ".TH BTCTAX-TUI 7 \"\" \"btctax\" \"TUI Screens\""; \
+	   for f in docs/examples-tui/*.txt; do \
+	     awk -v name="$$(basename $$f .txt)" -f docs/examples-tui/tui-wrap.awk "$$f"; \
+	   done; } | groff -k -man -T pdf > docs/pdf/btctax-tui-screens.pdf
+	@head -c4 docs/pdf/btctax-tui-screens.pdf | grep -q '%PDF' \
+	  && echo "wrote docs/pdf/btctax-tui-screens.pdf" \
+	  || { echo "examples-tui: groff did not emit a PDF"; exit 1; }
 
 ## help: list targets
 help:

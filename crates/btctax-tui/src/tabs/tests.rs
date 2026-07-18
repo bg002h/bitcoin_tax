@@ -803,6 +803,91 @@ fn export_modal_dir_name_uses_the_injected_clock() {
     assert_eq!(buf, buf2, "a pinned-clock render must be byte-identical across runs");
 }
 
+// ══════════════════ P3 style-aware TUI goldens (SPEC §8) ══════════════════════════════════════════
+//
+// Committed under `docs/examples-tui/`, gated `regen == committed` (mirrors the CLI golden, Task 1.4).
+// `#[cfg(unix)]` (like I4): the export-modal frame renders a joined path (`./btctax-export-…`) whose
+// separator diverges on Windows. Every frame is captured under a PINNED clock + a fixed (empty) vault
+// path, so the goldens are a pure function of (code, synthetic state).
+
+/// The pinned wall-clock every TUI golden renders under (matches the CLI docs pipeline's fixed instant).
+#[cfg(unix)]
+fn golden_clock() -> crate::clock::Clock {
+    crate::clock::Clock::Pinned(time::macros::datetime!(2024 - 06 - 01 12:00:00 UTC))
+}
+
+#[cfg(unix)]
+fn tui_golden_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/examples-tui"))
+}
+
+/// The btctax-tui goldens: `(file stem, captured frame)`. A one-lot Holdings tab (style-aware capture of a
+/// real table) + the export-confirm modal (the viewer clock seam — its dir name is the pinned instant).
+#[cfg(unix)]
+fn btctax_tui_goldens() -> Vec<(&'static str, String)> {
+    let holdings = {
+        let lot = Lot {
+            lot_id: make_lot_id("h1"),
+            wallet: make_wallet(),
+            acquired_at: make_date(2024, 1, 15),
+            original_sat: 100_000_000,
+            remaining_sat: 100_000_000,
+            usd_basis: Decimal::new(6_000_000, 2), // 60000.00
+            basis_source: BasisSource::ExchangeProvided,
+            dual_loss_basis: None,
+            donor_acquired_at: None,
+            basis_pending: false,
+            pseudo: false,
+        };
+        let mut state = LedgerState::default();
+        state.lots.push(lot);
+        let mut app = make_app(state, 2025);
+        app.clock = golden_clock();
+        crate::capture::to_golden(&render_holdings(&mut app))
+    };
+    let export_modal = {
+        let mut app = make_app(LedgerState::default(), 2025);
+        app.clock = golden_clock();
+        crate::handle_key(&mut app, press(KeyCode::Char('e')));
+        assert!(app.export_modal.is_some(), "the export modal must open for the golden");
+        crate::capture::to_golden(&render_viewer(&mut app))
+    };
+    vec![("viewer-holdings", holdings), ("viewer-export-modal", export_modal)]
+}
+
+/// The committed btctax-tui goldens match a fresh capture, byte-for-byte (reds when stale).
+#[cfg(unix)]
+#[test]
+fn btctax_tui_goldens_match_committed() {
+    for (stem, captured) in btctax_tui_goldens() {
+        let path = tui_golden_dir().join(format!("btctax-tui-{stem}.txt"));
+        let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "committed {} missing ({e}); regenerate with \
+                 `cargo test -p btctax-tui --lib emit_btctax_tui_goldens -- --ignored`",
+                path.display()
+            )
+        });
+        assert_eq!(
+            captured, committed,
+            "docs/examples-tui/btctax-tui-{stem}.txt is STALE; regenerate via the ignored \
+             emit_btctax_tui_goldens test"
+        );
+    }
+}
+
+/// Regeneration helper (`#[ignore]`) — rewrites the committed btctax-tui goldens from a fresh capture.
+#[cfg(unix)]
+#[test]
+#[ignore = "regeneration helper: rewrites docs/examples-tui/btctax-tui-*.txt"]
+fn emit_btctax_tui_goldens() {
+    let dir = tui_golden_dir();
+    std::fs::create_dir_all(&dir).expect("create docs/examples-tui");
+    for (stem, captured) in btctax_tui_goldens() {
+        std::fs::write(dir.join(format!("btctax-tui-{stem}.txt")), captured).expect("write golden");
+    }
+}
+
 /// 15. `[`/`]` year change via handle_key updates the filtered rows rendered by a year-scoped tab.
 ///     Covers the brief requirement "changes selected_year AND updates the filtered rows".
 #[test]
