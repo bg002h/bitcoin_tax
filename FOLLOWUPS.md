@@ -2075,8 +2075,8 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
 
 - **UX-P1-5 (Minor — fence-barred; surfaced by the P1 Fable review M-2).** Owning phase: **P1** (file; do
   not inline-fix — product JSON/serde). `income show` renders a date of birth as the raw serde
-  `(year, ordinal-day)` tuple: `"date_of_birth": [2012, 106]` (`examples.md:474-477`) — a filer cannot read
-  "day 106 of 2012" as 2012-04-15. Same class as UX-P1-4 (a presentation wart captured verbatim in the
+  `(year, ordinal-day)` tuple: `"date_of_birth": [2012, 106]` (in J6's `income show` block of the golden) —
+  a filer cannot read "day 106 of 2012" as 2012-04-15. Same class as UX-P1-4 (a presentation wart captured verbatim in the
   golden). The committed TOML fixture a user is invited to imitate carries the same `date_of_birth = [2012,
   106]`. Fix (pre-v0.7.0 wording/UX cleanup): render `time::Date` as `MM/DD/YYYY` in `income show` (and,
   optionally, accept that form on `income import`). Not a correctness bug; a display wart.

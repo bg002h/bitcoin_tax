@@ -162,9 +162,12 @@ fn front_matter(md: &mut String) {
          recorded) a fixed `BTCTAX_NOW`. A real user is prompted for the passphrase interactively rather\n\
          than passing `BTCTAX_PASSPHRASE`.\n\n\
          Each block shows the verbatim command after `$ ` and its real stdout. A non-zero exit is shown\n\
-         as a trailing `[exit N]` line (present only when it is non-zero); anything a command writes to\n\
-         **stderr** — advisories, the not-authorised notice, a pinned-step clock banner — is never\n\
-         dropped, but appears in a separately labelled `stderr:` block rather than inline with stdout.\n\n",
+         as a trailing `[exit N]` line (present only when it is non-zero). A command's **stderr** is\n\
+         captured SELECTIVELY: where it carries substantive output — an advisory, the not-authorised\n\
+         filing notice, a Form 8283 caveat — it is shown in a separately labelled `stderr:` block, never\n\
+         merged into stdout. What is NOT shown is the fixed integrity banner that a pinned `BTCTAX_NOW`\n\
+         prints to stderr on the clock-pinned steps: it is determinism scaffolding, not btctax output,\n\
+         and is deliberately elided (disclosed here so the omission is never silent).\n\n",
     );
 }
 

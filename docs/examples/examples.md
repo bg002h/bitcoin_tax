@@ -13,9 +13,12 @@ recorded) a fixed `BTCTAX_NOW`. A real user is prompted for the passphrase inter
 than passing `BTCTAX_PASSPHRASE`.
 
 Each block shows the verbatim command after `$ ` and its real stdout. A non-zero exit is shown
-as a trailing `[exit N]` line (present only when it is non-zero); anything a command writes to
-**stderr** — advisories, the not-authorised notice, a pinned-step clock banner — is never
-dropped, but appears in a separately labelled `stderr:` block rather than inline with stdout.
+as a trailing `[exit N]` line (present only when it is non-zero). A command's **stderr** is
+captured SELECTIVELY: where it carries substantive output — an advisory, the not-authorised
+filing notice, a Form 8283 caveat — it is shown in a separately labelled `stderr:` block, never
+merged into stdout. What is NOT shown is the fixed integrity banner that a pinned `BTCTAX_NOW`
+prints to stderr on the clock-pinned steps: it is determinism scaffolding, not btctax output,
+and is deliberately elided (disclosed here so the omission is never silent).
 
 ## btctax at a glance
 

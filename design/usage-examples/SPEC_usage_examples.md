@@ -472,10 +472,12 @@ all four.*
   is dense through 2026-06, so an import on any *supported* year (2017/2024/2025) auto-resolves FMV — an
   import-produced missing-FMV requires an unsupported year, which is the §12 S4 tripwire shape (a
   demonstration closable only by an unsupported year ⇒ record, don't force). J4 therefore shows the
-  business/SE reclassification on auto-resolved income and reduces missing-FMV to a prose aside. The
-  *manual* pricing verb `classify-inbound-income --fmv` (valid against an unclassified income Receive, J3's
-  corpus shape) remains **undemonstrated anywhere** — filed as **UX-P1-7** for a future journey; not a P1
-  blocker.
+  business/SE reclassification on auto-resolved income and reduces missing-FMV to a prose aside. As a
+  consequence J4 also moves off the spec's **year 2024** (chosen "for kitchen-sink oracle-consistency")
+  to **2025** dates — the auto-resolve needs an on-dataset supported year, and J4 no longer shares the
+  kitchen-sink oracle (only J6 does), so the year alignment it was for no longer applies. The *manual*
+  pricing verb `classify-inbound-income --fmv` (valid against an unclassified income Receive, J3's corpus
+  shape) remains **undemonstrated anywhere** — filed as **UX-P1-7** for a future journey; not a P1 blocker.
 - **(b) J5 — only the Contemporaneous attestation branch is demonstrated; the made-after-sale branch stays
   prose.** §5 J5 asked for *both* branches, predicting a postdated `optimize accept` ⇒ `NeedsAttestation`.
   **Reality (verified against the binary):** a *first-time* post-sale accept prints `skipped … re-run …
