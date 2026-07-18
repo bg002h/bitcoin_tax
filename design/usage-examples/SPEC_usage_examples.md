@@ -465,11 +465,12 @@ item is not deferrable past its owning phase.
 
 ## §15. r2 amendments — journey-content descopes (folding the P1 Fable review, finding I-2)
 
-*Recorded 2026-07-18, folding `reviews/p1-fable-review.md` I-2. During P1 implementation four §4.2/§5/§6.1
-journey-content mandates could not be delivered as spec'd; each is amended here with its discovered-reality
-rationale so the shipped doc no longer contradicts a green, unamended spec. The oracle-equality guarantee
-(the committed fixture == `kitchen_sink_household().0`, pinned by `fullreturn_oracle.rs`) is untouched by
-all four.*
+*Recorded 2026-07-18. (a)–(d) fold `reviews/p1-fable-review.md` I-2; **(e)–(f) fold the whole-branch review
+`reviews/whole-branch-fable-review.md` I-1** — a fifth and sixth deviation the P1 pass missed. Each of the
+SIX §4.1/§4.2/§5/§6.1 journey-content mandates below could not be delivered as spec'd; each is amended here
+with its discovered-reality rationale so the shipped doc no longer contradicts a green, unamended spec. The
+oracle-equality guarantee (the committed fixture == `kitchen_sink_household().0`, pinned by
+`fullreturn_oracle.rs`) is untouched by all of them.*
 
 - **(a) J4 — the import-produced *missing-FMV* demonstration is dropped; `classify-inbound-income --fmv`
   is not yet demonstrated.** §5 J4 / §4.2 C-income-csv called for a CSV that imports to *missing-FMV*
@@ -510,8 +511,24 @@ all four.*
   J3 uses the single-exchange `classify-inbound-self-transfer` path — **within** §5 J3's stated either-or,
   so the demonstrated verb is spec-compliant — but the matched-pair `match-self-transfers` workflow is
   consequently undemonstrated. Filed as **UX-P1-8** for a future journey; not a P1 blocker.
+- **(e) J2 — the `select-lots` + `report` steps are dropped; §4.1 corpus re-authored.** §5 J2 mandated
+  "§170(e) donation **+ lot-selection**" with `… reconcile select-lots <disp> --from … → report
+  --tax-year 2025 → export-irs-pdf …`. As shipped, J2 is init → import → reclassify-outflow →
+  set-donation-details → verify → export-irs-pdf — **no `select-lots`, no `report`**. Reality: J2 donates
+  the FULL 2-BTC balance across both lots, so `select-lots` is **degenerate** — there is no lot choice left
+  to demonstrate. The branch's actual lot-selection demonstration is **J5** (`optimize run`/`accept`, a
+  genuine HIFO-vs-FIFO changed selection). `select-lots` is therefore **undemonstrated anywhere** in the
+  golden — filed as **UX-P1-10** (a future journey; the SOFT coverage report already lists it). §4.1's
+  "reuse `coinbase_two_lot_donation` as-is" also could not hold: the §4.1 builders are library
+  `Vec<LedgerEvent>` constructors a CLI journey cannot import (the SAME root cause as (c)'s "no CLI path to
+  inject a LedgerState"), so J2 imports a freshly-authored CRLF-const CSV instead. Figures unaffected.
+- **(f) J1 — the Send→pending-TransferOut leg is dropped; §4.1 corpus re-authored.** §4.1's
+  `coinbase_buy_sell_send` (reuse as-is for J1) carries a `Send` leg (a pending outbound transfer). Shipped
+  J1 is a clean buy→sell→report→export happy path with no Send leg (the single-buyer story is clearer
+  without an unreconciled outbound), on a re-authored CSV for the same import-vs-builder reason as (e).
 
 ---
 
-*End SPEC r1 — Fable re-review GREEN (0C/0I). §15 added at r2 (P1 fold, 2026-07-18) — pending the P1
-re-review.*
+*End SPEC r1 — Fable re-review GREEN (0C/0I). §15 added at r2 (P1 fold) + extended (e)/(f) at the
+whole-branch fold (2026-07-18); the P1 re-review-2 and the whole-branch re-review have since closed GREEN
+(0C/0I).*

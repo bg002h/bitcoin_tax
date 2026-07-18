@@ -1,7 +1,7 @@
 //! I6 / M7 — the full-return oracle.
 //!
 //! J6 (the worked example that emits all 14 census forms) imports its non-crypto figures from a COMMITTED
-//! TOML fixture, `crates/xtask/tests/fixtures/examples/fullreturn_inputs.toml`. That fixture MUST be the
+//! TOML fixture, `crates/btctax-cli/tests/fixtures/examples/fullreturn_inputs.toml`. That fixture MUST be the
 //! `btctax_core::tax::testonly::kitchen_sink_household()` oracle vector, verbatim — otherwise the doc
 //! quietly grows a second, drifting source of truth for the same numbers.
 //!

@@ -2097,6 +2097,12 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
 - **UX-P1-8 (Minor — docs coverage gap; from SPEC §15 r2 (d)).** Owning phase: **post-v0.7.0 docs**. The
   matched-pair `reconcile match-self-transfers` workflow is undemonstrated (J3 uses the single-exchange
   `classify-inbound-self-transfer` path). Add a future two-exchange journey. Not a P1 blocker.
+- **UX-P1-10 (Minor — docs coverage gap; from SPEC §15 (e), whole-branch review I-1).** Owning phase:
+  **post-v0.7.0 docs**. `reconcile select-lots` — the demonstrand of §5's J2 "lot-selection" row — is
+  undemonstrated ANYWHERE in the golden (the SOFT coverage report lists it among the 29 undemonstrated
+  leaves). J2 donates its full 2-BTC balance, so `select-lots` is degenerate there (no lot choice left);
+  J5's `optimize accept` is the branch's actual lot-selection demonstration. Add a future journey that
+  makes a genuine per-disposal `select-lots` identification. Not a release blocker.
 - **P1 plan-conformance drift record (P1 review M-6; no code change).** Recorded so the plan's Task shapes
   aren't silently contradicted: (a) the three gate tests live as `#[cfg(test)]` unit tests in
   `crates/xtask/src/examples.rs`, not the plan's `crates/xtask/tests/examples_golden.rs` — xtask is bin-only
@@ -2146,3 +2152,110 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   `crates/xtask/src/examples.rs` (P1's actual bin-only layout) — citation drift only. M-1 (silent 0/N on a
   missing golden) and N-1/M-3 (nested-build `--locked` + `Stdio::null()`) were FOLDED in the P2 gate commit,
   not deferred.
+
+- **UX-P1-6 extension (2026-07-18, P4 workaround-audit).** The unconditional non-first-property-row
+  `needs_review` ALSO fires on the **Section A** path: a sub-$5,000 donation spanning ≥ 2 lots warns
+  "needs REVIEW … Run `btctax reconcile set-donation-details …`" on every export even AFTER
+  set-donation-details is fully completed (the advice loops) — and Section A requires no appraiser
+  declaration at all, sharpening the misleadingness. A single-lot Section A donation with complete
+  details clears clean (root cause pinned to the same rule). Fold into the UX-P1-6 wording fix.
+
+## P4 workaround-audit findings (2026-07-18; design of record: `design/usage-examples/reviews/tutorial-workaround-audit.md`)
+
+All fixes below are §3.1-fence-barred from the docs cycle (behavior/wording changes). Owning phases:
+UX-P4-2 joins the **pre-v0.7.0 product-wording cleanup** batch (one stale string; ships with the
+release's man-page regen); everything else is owned by the **first post-v0.7.0 product cycle**
+(UX-P4-1 first among them). Any fix that changes captured output must regen the goldens (the gate
+will red until it does).
+
+- **UX-P4-1 (Important — pseudo-mode loud-flag gap).** Owning phase: **post-v0.7.0 product cycle
+  (top priority)**. With `reconcile pseudo on` and a synthetic default contributing, `report
+  --tax-year` prints a clean, authoritative-looking tax summary with **no `[PSEUDO]` marker or
+  banner** — repro: a vault whose sale consumes a pseudo-classified lot reports
+  `TOTAL federal tax … 4041.50` where the entire LT gain rides on the deliberately-fictional
+  $0-basis/LT-default lot. Bare `report` DOES flag the lot + disposal rows `[PSEUDO]`; `verify`
+  discloses `[PseudoReconcileActive]`; export is blocked behind the attest phrase — the one silent
+  surface is the primary number-bearing one, violating the mode's own "loudly-flagged on-screen
+  estimate" contract (the answered-ness class). Fix: an unconditional pseudo banner (and/or
+  `[PSEUDO]`-suffixed totals) on `report --tax-year` whenever the projection is pseudo-contributed.
+- **UX-P4-2 (Important — TUI modal states a rate-determining default backwards).** Owning phase:
+  **pre-v0.7.0 product-wording cleanup**. The classify-inbound self-transfer confirm modal renders
+  `acquired_at: (empty = default = receipt date, short-term)` (`btctax-tui-edit/src/draw_edit.rs:927`),
+  but the engine persists `long_term_default_acquired` = **1 year + 1 day before receipt → LONG-TERM**
+  (`btctax-core/src/project/fold.rs:1024`), as the CLI help + `SelfTransferInboundDefaultedAcquired`
+  advisory correctly disclose. Verified end-to-end: confirming on a 2025-05-23 receipt persists
+  `Acquired 2024-05-22` (Holdings tab). The modal is the informed-consent point for the vault write;
+  its statement of the holding-period default is the opposite of what persists. Fix: one string.
+- **UX-P4-3 (Minor — record-then-conflict false success + inconsistent remedy hints).** Owning
+  phase: post-v0.7.0. The classify/reclassify verbs accept a typo'd ref, a wrong-type ref, or a
+  duplicate re-decide with `Recorded decision decision|N` (exit 0); the error surfaces only on the
+  next `verify` as a `DecisionConflict` HARD blocker. `reconcile void decision|99` (nonexistent)
+  also "succeeds" and becomes its own hard blocker (`void targets unknown event`) cleared only by
+  voiding the void. Hint text is inconsistent across variants (some carry "void the decision to
+  clear this blocker"; the void-of-unknown carries none; the unknown-event ReclassifyIncome hint
+  suggests the wrong verb for a typo). `set-donation-details` already validates at record time —
+  proving feasibility. Fix: validate the target ref/type/duplicate at record time (warn or refuse),
+  and unify DecisionConflict remedy hints. Conservative posture is intact (verify gates) — the cost
+  is a false success + a void round-trip, not a wrong number.
+- **UX-P4-4 (Minor — value-validation gaps; extends UX-P1-3's input-contract class).** Owning
+  phase: post-v0.7.0. (a) NEGATIVE basis accepted on both surfaces — CLI
+  `classify-inbound-self-transfer --basis=-5000.00` (the `=` form bypasses clap's `-`-prefix error)
+  and the TUI form (rejects `abc` as `bad USD`, permits `-5000`) — and it flows into gain math
+  (`basis -5000.00 → gain 26799.23` > proceeds, verified via what-if). (b) `--acquired` AFTER the
+  receive date accepted silently (factually impossible for a self-transfer-in; the lot is then also
+  invisible to what-if sales before that date). (c) `set-donation-details --donee-ein banana
+  --appraiser-tin fruit` → saved; lands on Form 8283. Fix: reject negative USD, acquired > receipt,
+  and non-TIN-shaped EIN/TIN at record time.
+- **UX-P4-5 (Minor — `--forms` silently ignored on a full-return year).** Owning phase:
+  post-v0.7.0. With full-return inputs present, `export-irs-pdf --tax-year 2024 --forms f8949`
+  writes the whole 14-form packet with no notice that the explicit slice request was disregarded.
+  Distinct from UX-P1-2 (whose stale help describes a THIRD behavior — refusal) and UX-P1-4 (the
+  empty header). Fix: honor `--forms` on a full-return year, or refuse/warn that it is ignored.
+- **UX-P4-6 (Minor — bare `report` renders a fully-pending vault as empty).** Owning phase:
+  post-v0.7.0. With the whole balance inside a pending outbound transfer, `report` prints
+  `Holdings: none / Lots: none / Disposals: none` — indistinguishable from an empty vault, no
+  pending line, no pointer — while `verify` shows `pending 200000000` / `Pending reconciliation: 1`.
+  Fix: a `Pending: N sat (M unreconciled transfer(s) — see verify)` line in the holdings view.
+- **UX-P4-7 (Minor — raw Debug dumps in decision summaries).** Owning phase: post-v0.7.0. The CLI
+  `bulk-void` preview and the TUI void list + bulk-void preview render
+  `… as SelfTransferMine { basis: Some(19000.00), acquired_at: Some(2026-01-01) }`
+  (`btctax-tui-edit/src/main.rs:3742` formats the payload with `{:?}`; the TUI column truncates it
+  mid-field: `{ basis: Non`). The repair surface — where every UX-P4-3 mistake sends the user — is
+  the least legible one. Fix: a human summary formatter (`basis $19,000.00, acquired 2026-01-01`).
+- **UX-P4-8 (Minor — bare io errors without path or hint).** Owning phase: post-v0.7.0. A missing
+  or wrong `--vault` yields `error: io: No such file or directory (os error 2)` — no path, no
+  "check --vault / run `btctax init`"; an `--out` colliding with an existing file yields
+  `error: io: File exists (os error 17)` — no path. In-house precedent exists: `import` names the
+  file (`io reading nope.csv: …`). Fix: attach the path + a one-clause hint at the vault-open and
+  export-out call sites.
+- **UX-P4-9 (Minor — false "no lots available" on mere insufficiency).** Owning phase:
+  post-v0.7.0. `what-if sell --sell 0.6` with 0.5 BTC held → `no lots available to sell from that
+  wallet as of that date` — "no" is false, the available balance is not shown, and genuine-zero vs
+  insufficient collapse into one message. Fix: `only X BTC available in <wallet> as of <date>
+  (requested Y)`.
+- **UX-P4-10 (Nit — `report --tax-year` exits 0 on NOT COMPUTABLE).** Owning phase: post-v0.7.0.
+  The refusal is loud in text but invisible to scripts; `verify` exits 1 on hard blockers, `report`
+  never does. Decide + document an exit-code contract (nonzero on NOT COMPUTABLE, or an explicit
+  "informational, always 0" statement in the man page).
+- **UX-P4-11 (Minor — event-ref discoverability is a workaround, not an affordance).** Owning
+  phase: post-v0.7.0. No `list`-refs verb exists; the sanctioned discovery path is export-snapshot
+  CSV columns (`set-donation-details --help` and `select-lots --help` both say so) or stripping the
+  trailing `#0` split-suffix from `report`'s lot ids; the Income section prints no refs at all
+  (J4's refs embed a ms-timestamp a user cannot construct by hand). Concrete trap, reproduced:
+  pasting the tool's own displayed lot id (`…#0#0`) into `reclassify-income` records a decision
+  that then hard-blocks as "targets unknown event" (UX-P4-3 compounds it). Fix: print event refs
+  beside income/disposal rows in `report` (or add `btctax events list`), and say "lot id = event
+  ref + `#split`" wherever a lot id is shown.
+- **UX-P4-12 (Nit — grouped wording/affordance papercuts).** Owning phase: post-v0.7.0 (fold
+  opportunistically into any adjacent wording cleanup). Itemized: (a) bad `--kind` → `bad income
+  kind "lemonade"` with no valid-values list (contrast `--as-kind`'s clap enum listing); (b)
+  `reconcile classify-inbound-income` / `set-fmv` args have BLANK help and no units (contrast the
+  exemplary `what-if sell --help`, which disambiguates sats/BTC); (c) `config` SETS the forward
+  method but won't SHOW it — read-back only in `verify`'s Standing-orders block; (d) the
+  `tax-profile --year` set-error never mentions `--show`; (e) internal enum names on screen:
+  `TreatmentC`, `Hifo`, `:: non_compliant`; (f) "press 'v'" TUI keybinding language inside CLI
+  `verify` advisory text; (g) `set-donation-details` before `reclassify-outflow` points at
+  removals.csv (circular — the removal isn't there either) instead of the missing prior step; (h)
+  TUI footer dev-speak `q: swallowed` (wraps mid-word at 120 cols); (i) the TUI editor defaults to
+  year 2025, whose full-return commit then refuses ("2024 only") — a late gate on the default year,
+  and the opposite gate placement from the CLI (which stores 2025 inputs and gates at export).
