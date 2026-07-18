@@ -175,6 +175,10 @@ pub(crate) struct App {
     /// calls ONLY the non-persisting `btctax_core::whatif::{sell,harvest}` (clone-fold-discard) and
     /// reads `snapshot` — it NEVER touches the vault, `conn()`, or any writer.
     pub whatif: Option<crate::whatif_panel::WhatIfPanel>,
+    /// The injected clock (SPEC §3.4). `Wall` in production (resolved from `BTCTAX_NOW` at startup, set by
+    /// `run_viewer`); a golden-capture harness sets `Clock::Pinned` for a deterministic frame. Every
+    /// wall-clock read in a render/decision path routes through this, never `now_utc()` directly.
+    pub clock: crate::clock::Clock,
 }
 
 impl App {
@@ -200,6 +204,7 @@ impl App {
             export_modal: None,
             export_status: None,
             whatif: None,
+            clock: crate::clock::Clock::Wall,
         }
     }
 

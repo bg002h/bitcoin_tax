@@ -1548,7 +1548,7 @@ fn handle_classify_inbound_modal_key(app: &mut EditorApp, key: KeyEvent) {
             let (payload, target_event, as_) = modal;
 
             // Capture now at Enter-press (not inside persist fn) for determinism.
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -2123,7 +2123,7 @@ fn handle_reclassify_outflow_modal_key(app: &mut EditorApp, key: KeyEvent) {
             let (payload, target_event, kind_str) = modal_data;
 
             // Capture now at Enter-press (not inside persist fn) for determinism.
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -2471,7 +2471,7 @@ fn handle_reclassify_income_modal_key(app: &mut EditorApp, key: KeyEvent) {
             };
             let (payload, target_event, new_business, new_kind) = modal_data;
 
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -2543,7 +2543,7 @@ fn handle_set_fmv_modal_key(app: &mut EditorApp, key: KeyEvent) {
             };
             let (payload, target_event, usd_fmv) = modal_data;
 
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -2606,7 +2606,7 @@ fn open_method_election_flow(app: &mut EditorApp) {
         return;
     }
     // Today's date = the election's default effective date (also the "resolved as of" date shown).
-    let today = time::OffsetDateTime::now_utc()
+    let today = app.clock.now()
         .to_offset(time::UtcOffset::UTC)
         .date();
     let rows = match app.session.as_ref() {
@@ -2739,7 +2739,7 @@ fn handle_method_election_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Some(m) => (m.wallet.clone(), m.method),
                 None => return,
             };
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
             // effective_from defaults to the made-date (satisfies effective_from >= made-date).
             let effective_from = now.to_offset(time::UtcOffset::UTC).date();
             let payload = EventPayload::MethodElection(MethodElection {
@@ -3082,7 +3082,7 @@ fn handle_void_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 None => return,
             };
 
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -3933,7 +3933,7 @@ fn handle_select_lots_modal_key(app: &mut EditorApp, key: KeyEvent) {
                     disposal_event: disposal_event.clone(),
                     lots: picks,
                 });
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -5230,7 +5230,7 @@ fn handle_link_transfer_modal_key(app: &mut EditorApp, key: KeyEvent) {
                     out_event: out_event.clone(),
                     in_event_or_wallet: target,
                 });
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -5799,7 +5799,7 @@ fn handle_classify_raw_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 target: target.clone(),
                 as_: Box::new(built),
             });
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -6120,7 +6120,7 @@ fn handle_attest_typed_word_key(app: &mut EditorApp, key: KeyEvent) {
     }
 
     // Correct word — call persist.
-    let now = time::OffsetDateTime::now_utc();
+    let now = app.clock.now();
     let save_result = match app.session.as_mut() {
         Some(s) => edit::persist::persist_safe_harbor_attest(s, prior_id, prior_alloc, now),
         None => return,
@@ -6380,7 +6380,7 @@ fn handle_safe_harbor_allocate_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Some(m) => (m.lots.clone(), m.method, m.pre2025_method),
                 None => return,
             };
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -6865,7 +6865,7 @@ fn handle_bulk_link_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Some(m) => (m.out_events.clone(), m.dest.clone()),
                 None => return,
             };
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -7236,7 +7236,7 @@ fn handle_bulk_sti_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Some(m) => m.in_events.clone(),
                 None => return,
             };
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -7309,7 +7309,7 @@ fn open_pseudo_approve_flow(app: &mut EditorApp) {
 fn handle_pseudo_approve_modal_key(app: &mut EditorApp, key: KeyEvent) {
     match key.code {
         KeyCode::Enter => {
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
             // Compute the decision payloads from the immutable snapshot (drops the borrow before persist).
             let payloads: Vec<btctax_core::EventPayload> =
                 match (app.snapshot.as_ref(), app.session.as_ref()) {
@@ -7762,7 +7762,7 @@ fn handle_bulk_income_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Some(m) => m.payloads.clone(),
                 None => return,
             };
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -8046,7 +8046,7 @@ fn handle_bulk_resolve_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Some(m) => (m.conflict_events.clone(), m.kind),
                 None => return,
             };
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -8277,7 +8277,7 @@ fn handle_bulk_void_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Some(m) => (m.targets.clone(), m.count, m.lot_selection_count),
                 None => return,
             };
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -8620,7 +8620,7 @@ fn handle_bulk_reclassify_outflow_modal_key(app: &mut EditorApp, key: KeyEvent) 
                 Some(m) => (m.rows.clone(), m.kind),
                 None => return,
             };
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -8808,7 +8808,7 @@ fn handle_match_self_transfers_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Some(m) => (m.in_event.clone(), m.out_event.clone(), m.action),
                 None => return,
             };
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -9109,7 +9109,7 @@ fn handle_resolve_conflict_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Some(m) => (m.conflict_event.clone(), m.kind),
                 None => return,
             };
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
 
             let save_result = {
                 let session = match app.session.as_mut() {
@@ -9215,7 +9215,7 @@ fn open_optimize_accept_flow(app: &mut EditorApp) {
         return;
     }
     let year = app.selected_year;
-    let now = time::OffsetDateTime::now_utc();
+    let now = app.clock.now();
 
     // READ-ONLY recompute via the additive btctax-cli helper.
     let proposal = {
@@ -9450,7 +9450,7 @@ fn handle_optimize_accept_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 };
             let pick_count = picks.len();
             let attested = attestation.is_some();
-            let now = time::OffsetDateTime::now_utc();
+            let now = app.clock.now();
             let made = btctax_core::conventions::tax_date(now, time::UtcOffset::UTC);
 
             let save_result = {
@@ -9740,8 +9740,10 @@ fn reset_selections(app: &mut EditorApp) {
 fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     vault_path: PathBuf,
+    clock: btctax_tui::clock::Clock,
 ) -> io::Result<()> {
     let mut app = EditorApp::new(vault_path);
+    app.clock = clock; // SPEC §3.4 — resolved from BTCTAX_NOW in main(), before raw mode
 
     // `BTCTAX_PASSPHRASE` fast-path: open immediately without displaying the unlock prompt.
     app.try_env_passphrase();
@@ -9770,6 +9772,20 @@ fn main() -> io::Result<()> {
 
     let vault_path = parse_vault_path();
 
+    // Resolve the deterministic clock (SPEC §3.4) BEFORE raw mode: a malformed BTCTAX_NOW exits 2 like the
+    // CLI, and an active override prints the stderr banner now (the alt-screen would hide it under raw
+    // mode). Unset ⇒ Clock::Wall ⇒ byte-identical to the pre-seam behavior.
+    let clock = match btctax_tui::clock::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }
+    };
+    if matches!(clock, btctax_tui::clock::Clock::Pinned(_)) {
+        eprintln!("{}", btctax_tui::clock::OVERRIDE_BANNER);
+    }
+
     enable_raw_mode()?;
     // RAII guard: Drop calls restore_terminal() regardless of how this scope exits.
     let _guard = TerminalGuard::new();
@@ -9779,7 +9795,7 @@ fn main() -> io::Result<()> {
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run(&mut terminal, vault_path);
+    let result = run(&mut terminal, vault_path, clock);
 
     // Explicit call is redundant (guard's Drop covers it) but kept for clarity;
     // restore_terminal() is idempotent.

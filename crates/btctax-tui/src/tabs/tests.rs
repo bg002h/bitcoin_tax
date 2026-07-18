@@ -780,6 +780,29 @@ fn up_down_via_handle_key_moves_selection() {
     );
 }
 
+/// SPEC §3.4 clock seam: the export-confirm modal renders the INJECTED clock's timestamp in the export
+/// directory name, not a fresh `now_utc()`. With `app.clock = Pinned(2024-06-01T12:00:00Z)`, pressing `e`
+/// opens a modal showing `btctax-export-20240601-120000Z` — deterministic and byte-stable across renders.
+/// (Before the seam both `handle_key` clock reads were `OffsetDateTime::now_utc()`, so this rendered the
+/// wall clock and could not be pinned — this test is the guard that the routing stays in place.)
+#[test]
+fn export_modal_dir_name_uses_the_injected_clock() {
+    use crate::clock::Clock;
+    use time::macros::datetime;
+    let mut app = make_app(LedgerState::default(), 2025);
+    app.clock = Clock::Pinned(datetime!(2024 - 06 - 01 12:00:00 UTC));
+    crate::handle_key(&mut app, press(KeyCode::Char('e')));
+    assert!(app.export_modal.is_some(), "pressing `e` with a snapshot must open the export modal");
+    let buf = render_viewer(&mut app);
+    assert!(
+        buffer_has(&buf, "btctax-export-20240601-120000Z"),
+        "the export-confirm modal must render the PINNED clock's dir name (SPEC §3.4 seam)"
+    );
+    // Pinned ⇒ deterministic: a second render is byte-identical.
+    let buf2 = render_viewer(&mut app);
+    assert_eq!(buf, buf2, "a pinned-clock render must be byte-identical across runs");
+}
+
 /// 15. `[`/`]` year change via handle_key updates the filtered rows rendered by a year-scoped tab.
 ///     Covers the brief requirement "changes selected_year AND updates the filtered rows".
 #[test]

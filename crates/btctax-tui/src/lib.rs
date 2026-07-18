@@ -31,6 +31,7 @@
 
 /// Application state: `Screen`, `Tab`, `Snapshot` (pub), `App` (pub(crate)).
 pub mod app;
+pub mod clock;
 /// Terminal rendering (pub for `draw_unlock_screen`; `draw::draw` is pub(crate)).
 pub mod draw;
 /// Form CSV export (crate-internal; `ExportConfirmState` not in external surface).
@@ -54,7 +55,6 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
-use time::OffsetDateTime;
 
 // ── Terminal lifecycle ────────────────────────────────────────────────────────
 
@@ -244,7 +244,7 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
                 // [M5 whatif_panel_w_noop_before_snapshot] — the panel needs the read-only snapshot.
                 KeyCode::Char('w') => {
                     if let Some(snap) = app.snapshot.as_ref() {
-                        let now = OffsetDateTime::now_utc();
+                        let now = app.clock.now();
                         app.whatif =
                             Some(whatif_panel::WhatIfPanel::new(snap, app.selected_year, now));
                     }
@@ -253,7 +253,7 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) {
                 // No-op when no snapshot is loaded [KAT-E8].
                 KeyCode::Char('e') => {
                     if let Some(snap) = app.snapshot.as_ref() {
-                        let export_now = OffsetDateTime::now_utc();
+                        let export_now = app.clock.now();
                         let out_dir = export::export_dir_for(&app.vault_path, export_now);
                         let files = export::compute_files(snap, app.selected_year);
                         // [sub-3 / R0-C1] When the ledger is PSEUDO-ACTIVE the modal becomes a
@@ -637,8 +637,10 @@ fn reset_selections(app: &mut App) {
 fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     vault_path: PathBuf,
+    clock: clock::Clock,
 ) -> io::Result<()> {
     let mut app = App::new(vault_path);
+    app.clock = clock; // SPEC §3.4 — resolved from BTCTAX_NOW in run_viewer, before raw mode
 
     // `BTCTAX_PASSPHRASE` fast-path: open immediately without displaying the unlock prompt.
     // Mirrors the CLI's non-interactive behaviour.
@@ -669,6 +671,20 @@ pub fn run_viewer() -> io::Result<()> {
 
     let vault_path = parse_vault_path();
 
+    // Resolve the deterministic clock (SPEC §3.4) BEFORE raw mode: a malformed BTCTAX_NOW exits 2 like the
+    // CLI, and an active override prints the stderr banner now (the alt-screen would hide it once raw mode
+    // is on). Unset ⇒ Clock::Wall ⇒ byte-identical to the pre-seam behavior.
+    let clock = match clock::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }
+    };
+    if matches!(clock, clock::Clock::Pinned(_)) {
+        eprintln!("{}", clock::OVERRIDE_BANNER);
+    }
+
     enable_raw_mode()?;
     // Guard created immediately after raw mode is enabled.
     // Its Drop calls restore_terminal() on ANY exit from this scope:
@@ -680,7 +696,7 @@ pub fn run_viewer() -> io::Result<()> {
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run(&mut terminal, vault_path);
+    let result = run(&mut terminal, vault_path, clock);
 
     // Explicit call is now redundant (the guard's Drop covers it) but kept for clarity.
     // restore_terminal() is idempotent — calling it twice is safe [R0-M4].

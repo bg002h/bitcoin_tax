@@ -278,6 +278,10 @@ pub struct EditorApp {
     /// Cleared on the next non-modal key press (mirrors the viewer's `export_status`
     /// semantics, app.rs:140 [R0-N5]).
     pub status: Option<String>,
+    /// The injected clock (SPEC §3.4). `Wall` in production (resolved from `BTCTAX_NOW` at startup by
+    /// `main`, before raw mode); a golden-capture harness sets `Clock::Pinned`. Every decision made-date /
+    /// rendered-recompute clock read routes through `app.clock.now()`, never `now_utc()` directly.
+    pub clock: btctax_tui::clock::Clock,
 }
 
 impl EditorApp {
@@ -350,6 +354,7 @@ impl EditorApp {
             attest_save_failed: false,
             rollback_failed: false,
             status: None,
+            clock: btctax_tui::clock::Clock::Wall,
         }
     }
 
