@@ -89,10 +89,27 @@ fn capture(bin: &Path, cwd: &Path, cmd: &Cmd) -> (String, String, i32) {
     )
 }
 
+/// Shell-quote an argument for display so the captured command is copy-pasteable (event refs carry `|`,
+/// `#`, `:`; donee/appraiser names carry spaces). Bare only for a conservative safe set.
+fn shell_quote(arg: &str) -> String {
+    let safe = !arg.is_empty()
+        && arg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '=' | ',' | '-' | '@' | '+'));
+    if safe {
+        arg.to_string()
+    } else {
+        format!("\"{}\"", arg.replace('"', "\\\""))
+    }
+}
+
 /// Emit one `$ btctax …` block (command + verbatim stdout + exit-code marker, + labelled stderr when
 /// `show_stderr`) into `md`.
 fn emit(md: &mut String, bin: &Path, cwd: &Path, cmd: &Cmd) {
-    let shown = format!("btctax {}", cmd.args.join(" "));
+    let shown = format!(
+        "btctax {}",
+        cmd.args.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" ")
+    );
     let (stdout, stderr, code) = capture(bin, cwd, cmd);
     md.push_str("```console\n");
     let _ = writeln!(md, "$ {shown}");
@@ -149,6 +166,13 @@ ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at 
 cb-buy,2025-03-01 12:00:00 UTC,Buy,BTC,0.10000000,USD,84000.00,8400.00,8450.00,50.00,,,\r\n\
 cb-sell,2025-06-15 12:00:00 UTC,Sell,BTC,0.02000000,USD,67500.00,1350.00,1340.00,10.00,,,\r\n";
 
+/// J2 corpus: an LT lot (2023) + an ST lot (2025) + a 2025 Send of 2 BTC donated to charity.
+const J2_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-buy-lt,2023-06-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,5000.00,5000.00,5000.00,0.00,,,\r\n\
+cb-buy-st,2025-03-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,2000.00,2000.00,2000.00,0.00,,,\r\n\
+cb-donate,2025-09-01 12:00:00 UTC,Send,BTC,2.00000000,USD,108996.17,,,,,,bc1qcharity\r\n";
+
 /// Generate the whole-file golden by running `bin` across every journey. Pure function of
 /// `(repo tree, binary, synthetic inputs)`.
 pub fn generate(bin: &Path) -> String {
@@ -160,8 +184,53 @@ pub fn generate(bin: &Path) -> String {
     emit(&mut md, bin, dir.path(), &plain(&["--help"]));
 
     journey_j1(&mut md, bin);
+    journey_j2(&mut md, bin);
 
     md
+}
+
+/// J2 — a §170(e) charitable donation of appreciated BTC (Form 8283).
+fn journey_j2(md: &mut String, bin: &Path) {
+    md.push_str(
+        "\n## J2 — donating appreciated Bitcoin (§170(e) / Form 8283)\n\n\
+         Bob donates 2 BTC (a long-term lot + a short-term lot) to a public charity. Import, then\n\
+         reclassify the outbound transfer as a donation. `--amount` is the **USD fair market value** of\n\
+         the gift (here 2 × the $108,996.17 close = $217,992.34):\n\n",
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J2_CSV);
+    let donation = "import|coinbase|out|cb-donate";
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]));
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]));
+    emit(
+        md, bin, cwd,
+        &plain(&["--vault", "v.pgp", "reconcile", "reclassify-outflow", donation, "--as-kind", "donate", "--amount", "217992.34", "--donee", "Habitat for Humanity"]),
+    );
+    md.push_str("\nRecord the Form 8283 Section-B appraiser + donee details:\n\n");
+    emit(
+        md, bin, cwd,
+        &plain(&[
+            "--vault", "v.pgp", "reconcile", "set-donation-details", donation,
+            "--donee-name", "Habitat for Humanity", "--donee-ein", "53-0242739",
+            "--appraiser-name", "Jane Appraiser", "--appraiser-tin", "12-3456789",
+            "--appraisal-date", "2025-09-15",
+        ]),
+    );
+    md.push_str(
+        "\n`verify` recomputes the §170(e) deduction (long-term lot → FMV; short-term lot →\n\
+         min(FMV, basis)) and flags the qualified-appraisal requirement for a >$5,000 crypto gift:\n\n",
+    );
+    emit(md, bin, cwd, &Cmd { args: &["--vault", "v.pgp", "verify"], now: None, show_stderr: false });
+    md.push_str("\nFill Form 8283:\n\n");
+    emit(
+        md, bin, cwd,
+        &Cmd {
+            args: &["--vault", "v.pgp", "export-irs-pdf", "--out", "irs", "--tax-year", "2025", "--forms", "form8283"],
+            now: None,
+            show_stderr: true,
+        },
+    );
 }
 
 /// J1 — single-buyer happy path: init → import → verify → set a tax profile → report → export.

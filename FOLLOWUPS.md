@@ -2033,3 +2033,13 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   (one line: `v0.6.0`→`v0.6.1`). **Process finding:** the release ritual must regenerate man pages on any
   version bump (the man pages embed `CARGO_PKG_VERSION`), same as the golden-regen ritual — folded into
   the plan's release "Version bump" step so the v0.7.0 bump can't repeat it.
+- **UX-P1-3 (Minor — UX papercut, surfaced authoring J2 §170(e) donation; bug-hunt payoff).** Owning
+  phase: **P1** (file; do not inline-fix — engine/UX). `reconcile reclassify-outflow … --as-kind donate
+  --amount <X>`: `--amount` is the **USD proceeds/FMV** (→ `ro.principal_proceeds_or_fmv` →
+  `Op::Donate.fmv`, `project/resolve.rs:332-338`), but the clap def is a bare `amount: String` with **no
+  doc comment** (`cli.rs:539-540`) and the name is ambiguous (sats? BTC? USD?). Passing the satoshi count
+  (`200000000`) is silently accepted and yields a **$100,002,000** §170(e) deduction (1 BTC's sat count
+  read as USD) with **no warning** — a footgun for a figure that lands on Form 8283/Schedule A. Fix (P4/
+  later): a `--amount` doc comment naming the unit (USD FMV) + a sanity guard (an FMV wildly exceeding
+  `sat/1e8 × recent-close` warns). NOT a correctness bug in the engine (the math is right *given* the
+  input); it is an input-contract/affordance gap.
