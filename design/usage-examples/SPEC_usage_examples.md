@@ -519,9 +519,14 @@ oracle-equality guarantee (the committed fixture == `kitchen_sink_household().0`
   to demonstrate. The branch's actual lot-selection demonstration is **J5** (`optimize run`/`accept`, a
   genuine HIFO-vs-FIFO changed selection). `select-lots` is therefore **undemonstrated anywhere** in the
   golden — filed as **UX-P1-10** (a future journey; the SOFT coverage report already lists it). §4.1's
-  "reuse `coinbase_two_lot_donation` as-is" also could not hold: the §4.1 builders are library
-  `Vec<LedgerEvent>` constructors a CLI journey cannot import (the SAME root cause as (c)'s "no CLI path to
-  inject a LedgerState"), so J2 imports a freshly-authored CRLF-const CSV instead. Figures unaffected.
+  "reuse `coinbase_two_lot_donation` as-is" also could not hold, but NOT for (c)'s reason: the §4.1
+  builders (`coinbase_buy_sell_send`, `coinbase_two_lot_donation`, `fixtures.rs:8/:50`) are btctax-cli
+  **test-tree CSV writers** (`crates/btctax-cli/tests/fixtures.rs` — `std::fs::write` a CSV into a tempdir;
+  only `income_fmv_missing_batch`, §4.1 line 5, returns `Vec<LedgerEvent>`), and test-tree code is not a
+  linkable API — the xtask examples generator, a separate crate, cannot call it. So each journey embeds its
+  own CRLF-const CSV (which the `.gitattributes` LF-normalization trap forces anyway, per the P1 learnings).
+  Figures unaffected. *(Corrects M-R1: the whole-branch review's own I-1 rationale mis-cited these builders
+  as `Vec<LedgerEvent>` constructors — they are CSV writers; the reuse-blocker is test-tree linkage.)*
 - **(f) J1 — the Send→pending-TransferOut leg is dropped; §4.1 corpus re-authored.** §4.1's
   `coinbase_buy_sell_send` (reuse as-is for J1) carries a `Send` leg (a pending outbound transfer). Shipped
   J1 is a clean buy→sell→report→export happy path with no Send leg (the single-buyer story is clearer
