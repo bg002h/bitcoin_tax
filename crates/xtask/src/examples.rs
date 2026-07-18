@@ -132,23 +132,70 @@ fn front_matter(md: &mut String) {
     );
 }
 
+/// Write a committed synthetic corpus into `cwd/name` (so a journey's `import` sees a real file).
+fn write_corpus(cwd: &Path, name: &str, content: &str) {
+    std::fs::write(cwd.join(name), content).expect("write corpus");
+}
+
+/// A no-`now` non-stderr command (the common case).
+fn plain<'a>(args: &'a [&'a str]) -> Cmd<'a> {
+    Cmd { args, now: None, show_stderr: false }
+}
+
+// ── Committed synthetic corpora (include_str! from crates/xtask/corpora/) ────────────────────────
+const J1_CSV: &str = include_str!("../corpora/j1_coinbase.csv");
+
 /// Generate the whole-file golden by running `bin` across every journey. Pure function of
 /// `(repo tree, binary, synthetic inputs)`.
 pub fn generate(bin: &Path) -> String {
     let mut md = String::new();
     front_matter(&mut md);
 
-    // Scaffold demo journey (Task 1.1): the top-level help surface. Journeys J1–J6 land in Task 1.3.
     md.push_str("## btctax at a glance\n\nThe top-level command surface:\n\n");
     let dir = tempfile::tempdir().expect("tempdir");
-    emit(
-        &mut md,
-        bin,
-        dir.path(),
-        &Cmd { args: &["--help"], now: None, show_stderr: false },
-    );
+    emit(&mut md, bin, dir.path(), &plain(&["--help"]));
+
+    journey_j1(&mut md, bin);
 
     md
+}
+
+/// J1 — single-buyer happy path: init → import → verify → set a tax profile → report → export.
+fn journey_j1(md: &mut String, bin: &Path) {
+    md.push_str(
+        "\n## J1 — a single buyer, start to finish\n\n\
+         Alice buys 0.1 BTC, sells 0.02, and wants her 2025 numbers. Create an encrypted vault (a key\n\
+         backup is mandatory), import the exchange CSV, and check the ledger balances:\n\n",
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J1_CSV);
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]));
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]));
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"]));
+    md.push_str(
+        "\nThe year's tax is *not computable* until a tax profile is set (btctax refuses to guess your\n\
+         bracket). Set one, then the report computes:\n\n",
+    );
+    emit(
+        md, bin, cwd,
+        &plain(&[
+            "--vault", "v.pgp", "tax-profile", "--year", "2025", "--filing-status", "single",
+            "--ordinary-taxable-income", "100000", "--magi-excluding-crypto", "100000",
+            "--qualified-dividends", "0",
+        ]),
+    );
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "report", "--tax-year", "2025"]));
+    md.push_str("\nExport the reconciled snapshot (CSVs + a decrypted SQLite) and fill the IRS forms:\n\n");
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "export-snapshot", "--out", "snapshot", "--tax-year", "2025"]));
+    emit(
+        md, bin, cwd,
+        &Cmd {
+            args: &["--vault", "v.pgp", "export-irs-pdf", "--out", "irs", "--tax-year", "2025", "--forms", "f8949,schedule-d"],
+            now: None,
+            show_stderr: true, // the NOT-AUTHORISED notice + 1099-DA caveat are on stderr and matter
+        },
+    );
 }
 
 /// Regenerate the committed golden to stdout (`cargo run -p xtask -- examples`).
