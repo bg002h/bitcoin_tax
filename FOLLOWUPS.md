@@ -2043,3 +2043,15 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   later): a `--amount` doc comment naming the unit (USD FMV) + a sanity guard (an FMV wildly exceeding
   `sat/1e8 × recent-close` warns). NOT a correctness bug in the engine (the math is right *given* the
   input); it is an input-contract/affordance gap.
+
+- **UX-P1-4 (Minor — UX papercut, surfaced authoring J6 full-return export; bug-hunt payoff).** Owning
+  phase: **P1** (file; do not inline-fix — engine/UX). On the **full-return** `export-irs-pdf` path the
+  handler unconditionally prints the crypto-slice header `Filled IRS forms for tax year {y} →\n  {list}`,
+  but the five slice paths (`f8949_path`, `schedule_d_path`, `schedule_se_path`, `form_8283_path`,
+  `form_1040_path`) are all `None` there (the packet lands in `full_return_paths`), so the list is EMPTY —
+  the output is a bare `Filled IRS forms for tax year 2024 →` followed by a blank indented line, THEN the
+  real `Full-return packet — 14 form(s):` block (`main.rs:626-672`). Redundant/confusing noise before the
+  authoritative listing. Fix (P1/later): gate the "Filled IRS forms →" header on `!written.is_empty()` (or
+  merge the two headings) so the full-return path prints only the packet block. NOT a correctness bug (the
+  packet + manifest are written correctly); it is a presentation wart, now captured verbatim in the J6
+  golden.

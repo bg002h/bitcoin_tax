@@ -192,6 +192,27 @@ const J4_CSV: &str = "Date,Sent Amount,Sent Currency,Received Amount,Received Cu
 2025-04-15 12:00:00 UTC,,,0.05000000,BTC,,income\r\n\
 2025-05-20 12:00:00 UTC,,,0.03000000,BTC,,income\r\n";
 
+/// J6 River corpus: one small 2024 business mining-income deposit (FMV from the bundled dataset).
+/// Reclassified as a business (below) it becomes Schedule C gross receipts ⇒ Schedule SE self-employment
+/// tax. Kept modest deliberately: the kitchen-sink household clears the AMT-screen worksheet by a thin
+/// margin (regular tax > 26% tentative), so J6's crypto is sized to stay on the computable side.
+const J6_RIVER_CSV: &str = "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Tag\r\n\
+2024-03-15 12:00:00 UTC,,,0.05000000,BTC,,income\r\n";
+
+/// J6 Coinbase corpus: a cheap 2020 long-term lot, a small 2024 long-term sale (Schedule D Part II / Form
+/// 8949), and a 2024 charitable Send of 0.1 BTC (§170(e) donation ⇒ Form 8283; FMV $6,000 > $5,000 ⇒
+/// Section B + qualified-appraisal note). Amounts kept small so the return stays under the AMT screen.
+const J6_COINBASE_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-buy,2020-01-01 12:00:00 UTC,Buy,BTC,0.30000000,USD,30000.00,9000.00,9000.00,0.00,,,\r\n\
+cb-sell,2024-05-01 12:00:00 UTC,Sell,BTC,0.05000000,USD,63000.00,3150.00,3130.00,20.00,,,\r\n\
+cb-donate,2024-09-01 12:00:00 UTC,Send,BTC,0.10000000,USD,60000.00,,,,,,bc1qcharity\r\n";
+
+/// The committed full-return ReturnInputs (the `kitchen_sink_household()` oracle, TOML-serialized —
+/// `crates/btctax-cli/tests/fullreturn_oracle.rs` pins it == the oracle vector). J6 imports it via
+/// `income import`, so the doc's non-crypto figures ARE the core fixture, byte-for-byte.
+const J6_FULLRETURN_TOML: &str = include_str!("../tests/fixtures/examples/fullreturn_inputs.toml");
+
 /// Generate the whole-file golden by running `bin` across every journey. Pure function of
 /// `(repo tree, binary, synthetic inputs)`.
 pub fn generate(bin: &Path) -> String {
@@ -207,6 +228,7 @@ pub fn generate(bin: &Path) -> String {
     journey_j3(&mut md, bin);
     journey_j4(&mut md, bin);
     journey_j5(&mut md, bin);
+    journey_j6(&mut md, bin);
 
     md
 }
@@ -394,6 +416,71 @@ fn journey_j1(md: &mut String, bin: &Path) {
             args: &["--vault", "v.pgp", "export-irs-pdf", "--out", "irs", "--tax-year", "2025", "--forms", "f8949,schedule-d"],
             now: None,
             show_stderr: true, // the NOT-AUTHORISED notice + 1099-DA caveat are on stderr and matter
+        },
+    );
+}
+
+/// J6 — a COMPLETE Form 1040: crypto activity (mining income, a sale, a donation) combined with a full
+/// non-crypto household imported from a TOML, exporting all fourteen forms of the return in one packet.
+fn journey_j6(md: &mut String, bin: &Path) {
+    md.push_str(
+        "\n## J6 — a complete return (the full 1040 packet)\n\n\
+         Frank has a full tax life, not just crypto: wages, interest, dividends, a mortgage, and a\n\
+         dependent — plus Bitcoin mining income, a sale, and a charitable gift of appreciated coin. The\n\
+         non-crypto figures live in an offline TOML (see `income import`); btctax merges them with the\n\
+         reconciled ledger and fills the **entire** federal return. This is the TY2024 full-return path.\n\n\
+         First the crypto side. Import the River mining export and the Coinbase export (a 2020 lot, a\n\
+         2024 sale, and a 2024 donation), then make the ledger filing-ready:\n\n",
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "river.csv", J6_RIVER_CSV);
+    write_corpus(cwd, "coinbase.csv", J6_COINBASE_CSV);
+    write_corpus(cwd, "fullreturn.toml", J6_FULLRETURN_TOML);
+    // Deterministic refs: the income id embeds the ms-timestamp of 2024-03-15T12:00:00Z; the donation is
+    // the Coinbase Send `cb-donate`.
+    let income = "import|river|in|1710504000000|income|5000000#0";
+    let donation = "import|coinbase|out|cb-donate";
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]));
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "coinbase.csv", "river.csv"]));
+    md.push_str("\nThe mining income is a trade or business (moves it onto Schedule C ⇒ Schedule SE):\n\n");
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "reconcile", "reclassify-income", income, "--business", "true", "--kind", "mining"]));
+    md.push_str("\nThe outbound 1 BTC is a §170(e) charitable donation (⇒ Form 8283):\n\n");
+    emit(
+        md, bin, cwd,
+        &plain(&["--vault", "v.pgp", "reconcile", "reclassify-outflow", donation, "--as-kind", "donate", "--amount", "6000.00", "--donee", "Habitat for Humanity"]),
+    );
+    emit(
+        md, bin, cwd,
+        &plain(&[
+            "--vault", "v.pgp", "reconcile", "set-donation-details", donation,
+            "--donee-name", "Habitat for Humanity", "--donee-ein", "53-0242739",
+            "--appraiser-name", "Jane Appraiser", "--appraiser-tin", "12-3456789",
+            "--appraiser-qualifications", "ASA-accredited digital-asset appraiser, 8 yrs",
+            "--appraisal-date", "2024-09-15",
+        ]),
+    );
+    md.push_str("\nCheck the ledger balances and the §170(e) deduction is computed:\n\n");
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"]));
+    md.push_str(
+        "\nNow the non-crypto side. `income import` reads the offline TOML — wages, interest (Schedule B),\n\
+         dividends, the itemized deductions (Schedule A), and the fail-loud yes/no questions the return\n\
+         requires. Unknown keys are rejected, never silently dropped:\n\n",
+    );
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "income", "import", "--year", "2024", "--file", "fullreturn.toml"]));
+    md.push_str("\n`income show` echoes the stored inputs with every SSN and IP-PIN redacted (they never reach a pipe or your scrollback):\n\n");
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "income", "show", "--year", "2024"]));
+    md.push_str(
+        "\nExport the whole return. With full-return inputs present btctax fills the entire packet — the\n\
+         1040 and every schedule and attachment it cites, in IRS Attachment-Sequence stapling order,\n\
+         plus a `manifest.txt`:\n\n",
+    );
+    emit(
+        md, bin, cwd,
+        &Cmd {
+            args: &["--vault", "v.pgp", "export-irs-pdf", "--out", "irs", "--tax-year", "2024"],
+            now: None,
+            show_stderr: true, // the NOT-AUTHORISED notice + the Form 8283 Section-B signature caveat
         },
     );
 }
