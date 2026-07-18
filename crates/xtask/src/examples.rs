@@ -187,6 +187,11 @@ opt-buy-lt,2023-01-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,30000.00,30000.00,3000
 opt-buy-st,2025-01-02 12:00:00 UTC,Buy,BTC,1.00000000,USD,80000.00,80000.00,80000.00,0.00,,,\r\n\
 opt-sell,2025-06-01 12:00:00 UTC,Sell,BTC,1.00000000,USD,50000.00,50000.00,50000.00,0.00,,,\r\n";
 
+/// J4 corpus: two River staking-income deposits in 2025 (FMV resolved from the bundled dataset).
+const J4_CSV: &str = "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Tag\r\n\
+2025-04-15 12:00:00 UTC,,,0.05000000,BTC,,income\r\n\
+2025-05-20 12:00:00 UTC,,,0.03000000,BTC,,income\r\n";
+
 /// Generate the whole-file golden by running `bin` across every journey. Pure function of
 /// `(repo tree, binary, synthetic inputs)`.
 pub fn generate(bin: &Path) -> String {
@@ -200,9 +205,44 @@ pub fn generate(bin: &Path) -> String {
     journey_j1(&mut md, bin);
     journey_j2(&mut md, bin);
     journey_j3(&mut md, bin);
+    journey_j4(&mut md, bin);
     journey_j5(&mut md, bin);
 
     md
+}
+
+/// J4 — crypto income, and reclassifying it as a trade or business (Schedule SE self-employment tax).
+fn journey_j4(md: &mut String, bin: &Path) {
+    md.push_str(
+        "\n## J4 — mining/staking income and self-employment tax\n\n\
+         Erin receives staking rewards on River. Imported, they are ordinary income at fair market\n\
+         value on the day received (btctax reads the FMV from its bundled daily-close dataset; an\n\
+         off-dataset day would instead flag a *missing-FMV* blocker to resolve by hand). Set a profile\n\
+         and see the ordinary income:\n\n",
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "river.csv", J4_CSV);
+    // deterministic income refs (the id embeds the ms-timestamp of the received date, not wall-clock)
+    let r1 = "import|river|in|1744718400000|income|5000000#0";
+    let r2 = "import|river|in|1747742400000|income|3000000#0";
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]));
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "river.csv"]));
+    emit(
+        md, bin, cwd,
+        &plain(&[
+            "--vault", "v.pgp", "tax-profile", "--year", "2025", "--filing-status", "single",
+            "--ordinary-taxable-income", "100000", "--magi-excluding-crypto", "100000",
+            "--qualified-dividends", "0",
+        ]),
+    );
+    md.push_str(
+        "\nAdapters import income as *not* a business by default. If mining/staking is a trade or\n\
+         business, reclassify each receipt — that moves it onto Schedule SE (self-employment tax):\n\n",
+    );
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "reconcile", "reclassify-income", r1, "--business", "true", "--kind", "mining"]));
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "reconcile", "reclassify-income", r2, "--business", "true", "--kind", "mining"]));
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "report", "--tax-year", "2025"]));
 }
 
 /// J5 — lot-selection optimization + attestation, and a what-if planning query. Showcases the
