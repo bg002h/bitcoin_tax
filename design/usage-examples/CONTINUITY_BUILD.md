@@ -8,11 +8,17 @@ and pushed to `origin`. Safe to clear context here.*
 
 > Resume the autonomous usage-examples build on branch `feat/usage-examples`. Read
 > `design/usage-examples/CONTINUITY_BUILD.md` then `design/usage-examples/IMPLEMENTATION_PLAN_usage_examples.md`.
-> P0 + 5 of 6 journeys are done and green; **next is J6** (the full TY2024 return = all 14 census forms),
-> then Task 1.4–1.6, P2, P3, P4, and the v0.7.0 release. Proceed straight through, keeping the standing
-> discipline: each phase gets an independent **Fable** review to 0 Critical / 0 Important (persist verbatim
-> under `reviews/` before folding; re-review after every fold). The crates.io token is held (release step
-> does not pause). Bugs the authoring surfaces → FOLLOWUPS (don't inline-edit the engine).
+> **P0 and P1 are DONE + GREEN + pushed (2026-07-18)** — all 6 journeys (J6 = the full 14-form TY2024
+> return), the committed golden + gate tests, `make examples`, and the J6 oracle test; Fable P1
+> review→fold→re-review→re-review-2 all 0C/0I (reviews/p1-fable-{review,rereview,rereview-2}.md); SPEC §15
+> records 4 descopes. **NEXT = P2** (Task 2.1 forms-census + 2.2 subcommand report + 2.3 CI `examples` job,
+> land 2.1+2.2+2.3 in ONE commit per I7 with a perturb-one-byte→RED proof in the msg; 2.4 Fable review),
+> then P3 (TUI), P4 (audit + whole-branch review), and the v0.7.0 release. Proceed straight through, keeping
+> the standing discipline: each phase gets an independent **Fable** review to 0 Critical / 0 Important
+> (persist verbatim under `reviews/` before folding; re-review after every fold). Push the feature branch
+> after each phase closes green (per-phase checkpoint; `main` untouched until release). The crates.io token
+> is held (release step does not pause). Bugs the authoring surfaces → FOLLOWUPS (don't inline-edit the
+> engine — the §3.1 fence bars message rewordings from the docs cycle).
 
 ## The mandate
 
