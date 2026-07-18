@@ -194,7 +194,7 @@ stderr:
 note: Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. the line-21 loss limit) are OUT OF SCOPE and left blank — complete them by hand if they apply.
 note: Form 8283 — btctax filled the donee/appraiser IDENTITY + per-donation property rows (Section B, with the "k Digital assets" box checked). Every other-party declaration is left BLANK: the Part III taxpayer signature, the Part IV appraiser signature/date, and the Part V donee acknowledgment are NOT btctax's to fill.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (qualified-appraiser declaration) and Part V (donee acknowledgment).
-⚠ at least one Form 8283 row needs REVIEW — complete any missing donee/appraiser detail with `btctax reconcile set-donation-details …`; a gift spanning MULTIPLE lots also flags its extra property row(s), which are completed on the paper form.
+⚠ at least one Form 8283 row needs REVIEW — complete any missing donee/appraiser detail with `btctax reconcile set-donation-details …`; a gift spanning MULTIPLE lots also flags its extra property row(s), which are completed on the paper form. NOT filing-ready as written.
 ```
 
 ## J3 — reconciling a self-transfer (unknown-basis inbound)

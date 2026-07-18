@@ -2291,3 +2291,15 @@ vault-open/export-out call sites), UX-P4-9 (insufficient-balance needs the core 
 amount — an error-model change), UX-P4-10 (exit-code contract), UX-P4-11 (a new `events list` verb),
 UX-P4-12(b)–(i) (blank arg help/units, `config` read-back, enum-name display, TUI keybinding language in a
 CLI advisory, the circular set-donation-details hint, TUI footer dev-speak, the TUI year-gate placement).
+
+**Wording-cleanup review residue (2026-07-18, all NON-gating — the review was 0C/0I):**
+- **M-1 (Minor) — DISCLOSED + accepted.** The UX-P1-5 fix routes `income show` through `serde_json::to_value`
+  to host the DOB transform, which re-orders every object's keys ALPHABETICALLY (BTreeMap-backed `Value`;
+  no `preserve_order`) instead of the struct's declared field order — the real cause of the large J6 golden
+  hunk. Value-identical, deterministic, display-only, never parsed. Accepted (disclosed at `cmd/tax.rs` +
+  here). Field-order restoration (`serde_json` `preserve_order`, weighing the `indexmap` transitive cost) is
+  a **post-v0.7.0** candidate.
+- **N-1 (Nit) — FIXED.** The `draw_edit.rs` UX-P4-2 comment's decaying `cli.rs:526-527` line citation was
+  replaced with a symbol reference.
+- **N-2 (Nit) — FIXED.** The slice-path 8283 advisory gained the "NOT filing-ready as written." tail for
+  symmetry with the full-return advisory (J2 golden regenerated).

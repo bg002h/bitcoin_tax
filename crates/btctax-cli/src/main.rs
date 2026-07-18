@@ -775,7 +775,8 @@ fn run() -> Result<ExitCode, CliError> {
                     eprintln!(
                         "⚠ at least one Form 8283 row needs REVIEW — complete any missing donee/appraiser \
                          detail with `btctax reconcile set-donation-details …`; a gift spanning MULTIPLE \
-                         lots also flags its extra property row(s), which are completed on the paper form."
+                         lots also flags its extra property row(s), which are completed on the paper form. \
+                         NOT filing-ready as written."
                     );
                 }
             }

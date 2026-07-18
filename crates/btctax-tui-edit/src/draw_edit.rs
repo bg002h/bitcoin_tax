@@ -925,8 +925,10 @@ fn draw_classify_inbound_modal(frame: &mut Frame, area: Rect, modal: &ClassifyIn
             let date_str = acquired_at
                 .map(|d| d.to_string())
                 // The engine defaults to `long_term_default_acquired` = 1 yr + 1 day before receipt →
-                // LONG-TERM (fold.rs; cli.rs:526-527). The modal is the informed-consent point, so it must
-                // state the rate-determining default correctly (was backwards: "receipt date, short-term").
+                // LONG-TERM (btctax_core `long_term_default_acquired`, applied in the reconcile fold; the
+                // `reconcile classify-inbound-self-transfer --acquired` help states the same). The modal is
+                // the informed-consent point, so it must state the rate-determining default correctly
+                // (was backwards: "receipt date, short-term").
                 .unwrap_or_else(|| "(empty = default = 1 yr + 1 day before receipt \u{2192} long-term)".to_string());
             let zero_basis_note = if basis.is_none() {
                 "\n\n  NOTE: basis defaults to $0 (non-gating advisory) — supply real cost if you have it."

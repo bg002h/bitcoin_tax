@@ -187,6 +187,11 @@ pub fn show_return_inputs(
             key: format!("return_inputs[{year}]"),
             value: e.to_string(),
         };
+        // DISCLOSED SIDE EFFECT (M-1): routing through `to_value` to host the DOB transform re-orders every
+        // object's keys ALPHABETICALLY (serde_json `Value` is BTreeMap-backed; no `preserve_order` in this
+        // workspace) instead of the struct's declared order. Accepted: `income show` is display-only and
+        // never parsed (M8). Restoring the curated field order (`serde_json` `preserve_order`, weighing the
+        // `indexmap` cost) is a post-v0.7.0 candidate — see the FOLLOWUPS wording-cleanup fold note.
         let mut val = serde_json::to_value(mask_pii(&ri)).map_err(mkerr)?;
         format_dobs_readable(&mut val); // UX-P1-5: render date_of_birth as MM/DD/YYYY, not raw [year, ordinal]
         serde_json::to_string_pretty(&val).map_err(mkerr)
