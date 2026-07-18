@@ -173,6 +173,12 @@ cb-buy-lt,2023-06-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,5000.00,5000.00,5000.00
 cb-buy-st,2025-03-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,2000.00,2000.00,2000.00,0.00,,,\r\n\
 cb-donate,2025-09-01 12:00:00 UTC,Send,BTC,2.00000000,USD,108996.17,,,,,,bc1qcharity\r\n";
 
+/// J3 corpus: a Buy + a Receive (an inbound transfer with unknown basis → a hard blocker until classified).
+const J3_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-buy,2025-02-01 12:00:00 UTC,Buy,BTC,0.50000000,USD,95000.00,47500.00,47550.00,50.00,,,\r\n\
+cb-recv,2025-08-01 12:00:00 UTC,Receive,BTC,0.20000000,USD,110000.00,,,,,,\r\n";
+
 /// Generate the whole-file golden by running `bin` across every journey. Pure function of
 /// `(repo tree, binary, synthetic inputs)`.
 pub fn generate(bin: &Path) -> String {
@@ -185,8 +191,38 @@ pub fn generate(bin: &Path) -> String {
 
     journey_j1(&mut md, bin);
     journey_j2(&mut md, bin);
+    journey_j3(&mut md, bin);
 
     md
+}
+
+/// J3 — an inbound self-transfer: an unknown-basis deposit is a hard blocker until you classify it.
+fn journey_j3(md: &mut String, bin: &Path) {
+    md.push_str(
+        "\n## J3 — reconciling a self-transfer (unknown-basis inbound)\n\n\
+         Carol moves 0.2 BTC into her exchange from her own cold storage. btctax will not guess its\n\
+         basis — an unclassified inbound transfer is a **hard blocker** that gates the tax computation:\n\n",
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J3_CSV);
+    let inbound = "import|coinbase|in|cb-recv";
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]));
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]));
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"])); // exits 1: the hard blocker
+    md.push_str(
+        "\nClassify it as your own coins returning — non-taxable, carrying the original basis and\n\
+         acquisition date (for the holding period). The blocker clears and the ledger balances:\n\n",
+    );
+    emit(
+        md, bin, cwd,
+        &Cmd {
+            args: &["--vault", "v.pgp", "reconcile", "classify-inbound-self-transfer", inbound, "--basis", "19000.00", "--acquired", "2024-11-01"],
+            now: Some("2025-08-02T00:00:00Z"), // decision made-date pinned (banner → stderr, not captured)
+            show_stderr: false,
+        },
+    );
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"]));
 }
 
 /// J2 — a §170(e) charitable donation of appreciated BTC (Form 8283).
