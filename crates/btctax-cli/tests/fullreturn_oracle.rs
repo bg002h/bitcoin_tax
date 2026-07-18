@@ -16,11 +16,11 @@
 use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::tax::testonly::kitchen_sink_household;
 
-/// The committed fixture J6 imports (`income import --year 2024 --file …`). Read at COMPILE time from the
-/// xtask corpus dir, so this test and the generator share one set of bytes (cross-crate `include_str!`;
-/// xtask must not gain a btctax-core dep, so the equality assertion lives here instead — Task 1.2, N2).
-const FIXTURE: &str =
-    include_str!("../../xtask/tests/fixtures/examples/fullreturn_inputs.toml");
+/// The committed fixture J6 imports (`income import --year 2024 --file …`), read at COMPILE time. It lives
+/// here in `btctax-cli/tests/` (not xtask) so the PUBLISHED crate's test is self-contained — the xtask
+/// generator holds the cross-crate `include_str!` instead, since xtask is `publish = false` (M-5). The
+/// equality assertion lives here (not xtask) because xtask must not gain a btctax-core dep (Task 1.2, N2).
+const FIXTURE: &str = include_str!("fixtures/examples/fullreturn_inputs.toml");
 
 #[test]
 fn fullreturn_fixture_is_the_kitchen_sink_oracle() {
@@ -63,7 +63,7 @@ fn emit_fullreturn_fixture() {
     let text = format!("{FIXTURE_BANNER}{}", toml::to_string(&value).expect("toml::Value → TOML text"));
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../xtask/tests/fixtures/examples/fullreturn_inputs.toml"
+        "/tests/fixtures/examples/fullreturn_inputs.toml"
     );
     std::fs::write(path, text).expect("write the committed fixture");
     eprintln!("wrote {path}");

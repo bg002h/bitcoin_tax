@@ -2072,3 +2072,39 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
     release-gating consideration, NOT a P1 deliverable.
   - **UX-P1-3 — already re-owned** ("Fix (P4/later)"); a `--amount` guard is a behavior change (fence-barred
     from the docs cycle). Parked correctly.
+
+- **UX-P1-5 (Minor — fence-barred; surfaced by the P1 Fable review M-2).** Owning phase: **P1** (file; do
+  not inline-fix — product JSON/serde). `income show` renders a date of birth as the raw serde
+  `(year, ordinal-day)` tuple: `"date_of_birth": [2012, 106]` (`examples.md:474-477`) — a filer cannot read
+  "day 106 of 2012" as 2012-04-15. Same class as UX-P1-4 (a presentation wart captured verbatim in the
+  golden). The committed TOML fixture a user is invited to imitate carries the same `date_of_birth = [2012,
+  106]`. Fix (pre-v0.7.0 wording/UX cleanup): render `time::Date` as `MM/DD/YYYY` in `income show` (and,
+  optionally, accept that form on `income import`). Not a correctness bug; a display wart.
+- **UX-P1-6 (Minor — fence-barred; surfaced folding the P1 review M-3 on J2).** Owning phase: **P1** (file;
+  do not inline-fix — product message). For a Section B donation that spans **≥ 2 lots**, every non-first
+  Form 8283 property row is UNCONDITIONALLY `needs_review` (`forms.rs:426` — subsequent rows carry no
+  appraiser/donee identity block), so the export's stderr advice "at least one donation needs REVIEW … Run
+  `btctax reconcile set-donation-details …` to complete it" is **misleading**: re-running set-donation-
+  details (even fully, as J2 now does with `--appraiser-qualifications`) can never clear it — the extra row
+  is completed on the paper form, not in the vault. J2 now frames this in prose; the tool's message should
+  distinguish "your inputs are incomplete" (actionable) from "additional property rows need manual
+  completion" (inherent). Fix: pre-v0.7.0 wording cleanup.
+- **UX-P1-7 (Minor — docs coverage gap; from SPEC §15 r2 (a)).** Owning phase: **post-v0.7.0 docs**. The
+  manual inbound-income pricing verb `reconcile classify-inbound-income <ref> --kind … --fmv …` is
+  demonstrated **nowhere** in the worked examples (J4 uses auto-resolved River income; the missing-FMV auto
+  path needs an unsupported year — §12 S4). Add a future journey that classifies an unclassified income
+  Receive with a manual `--fmv`. Not a P1 blocker; recorded so the gap isn't silent.
+- **UX-P1-8 (Minor — docs coverage gap; from SPEC §15 r2 (d)).** Owning phase: **post-v0.7.0 docs**. The
+  matched-pair `reconcile match-self-transfers` workflow is undemonstrated (J3 uses the single-exchange
+  `classify-inbound-self-transfer` path). Add a future two-exchange journey. Not a P1 blocker.
+- **P1 plan-conformance drift record (P1 review M-6; no code change).** Recorded so the plan's Task shapes
+  aren't silently contradicted: (a) the three gate tests live as `#[cfg(test)]` unit tests in
+  `crates/xtask/src/examples.rs`, not the plan's `crates/xtask/tests/examples_golden.rs` — xtask is bin-only
+  (no lib target); functionally equivalent, both run under `make check`. (b) the §4.2 CSV corpora are
+  embedded CRLF `const`s, not committed `.csv` files — `.gitattributes` `* text=auto eol=lf` would LF-
+  normalize a committed CSV and break the Coinbase parser (follows `fixtures.rs`). (c) Task 1.2's "a
+  `cargo test` asserting each corpus imports without a hard blocker" is covered transitively by the golden
+  gate (each journey's real import is captured), not a dedicated test. (d) `tempfile` is a regular (not dev)
+  dependency of xtask because the non-test `run()`/`generate()` path needs it — fine, xtask is
+  `publish = false`. The J6 fixture lives in `btctax-cli/tests/fixtures/` (the published crate, self-
+  contained), with xtask holding the cross-crate `include_str!` (M-5 fold).

@@ -458,5 +458,53 @@ item is not deferrable past its owning phase.
 
 ---
 
-*End SPEC r1 — Fable re-review GREEN (0C/0I), non-blocking Minors/Nits folded. Next: user review →
-IMPLEMENTATION PLAN (`writing-plans`).*
+## §15. r2 amendments — journey-content descopes (folding the P1 Fable review, finding I-2)
+
+*Recorded 2026-07-18, folding `reviews/p1-fable-review.md` I-2. During P1 implementation four §4.2/§5/§6.1
+journey-content mandates could not be delivered as spec'd; each is amended here with its discovered-reality
+rationale so the shipped doc no longer contradicts a green, unamended spec. The oracle-equality guarantee
+(the committed fixture == `kitchen_sink_household().0`, pinned by `fullreturn_oracle.rs`) is untouched by
+all four.*
+
+- **(a) J4 — the import-produced *missing-FMV* demonstration is dropped; `classify-inbound-income --fmv`
+  is not yet demonstrated.** §5 J4 / §4.2 C-income-csv called for a CSV that imports to *missing-FMV*
+  income, then priced via `classify-inbound-income … --fmv …`. **Reality:** the bundled daily-close dataset
+  is dense through 2026-06, so an import on any *supported* year (2017/2024/2025) auto-resolves FMV — an
+  import-produced missing-FMV requires an unsupported year, which is the §12 S4 tripwire shape (a
+  demonstration closable only by an unsupported year ⇒ record, don't force). J4 therefore shows the
+  business/SE reclassification on auto-resolved income and reduces missing-FMV to a prose aside. The
+  *manual* pricing verb `classify-inbound-income --fmv` (valid against an unclassified income Receive, J3's
+  corpus shape) remains **undemonstrated anywhere** — filed as **UX-P1-7** for a future journey; not a P1
+  blocker.
+- **(b) J5 — only the Contemporaneous attestation branch is demonstrated; the made-after-sale branch stays
+  prose.** §5 J5 asked for *both* branches, predicting a postdated `optimize accept` ⇒ `NeedsAttestation`.
+  **Reality (verified against the binary):** a *first-time* post-sale accept prints `skipped … re-run …
+  --attest "<genuine contemporaneous ID>"` (not a persisted `NeedsAttestation`), and a *re-accept* of an
+  already-contemporaneously-accepted disposal (J5's state after its main accept) reports `already optimal
+  under current identification` — the clock is irrelevant there. Cleanly demonstrating the made-after-sale
+  branch needs a **separate, never-accepted** disposal; J5 keeps it in prose (which the review confirmed is
+  factually accurate). The spec's `NeedsAttestation` prediction is **corrected** to the skip/`--attest`
+  behavior above.
+- **(c) J6 — its crypto side is built from a small synthetic ledger, not `kitchen_sink_household().1`, and
+  the §4.2 "non-donation figures remain the oracle vector" caveat is DROPPED.** §4.2 C-fullreturn / §6.1
+  sourced `schedule_d`/`f8949` and `f1040sc`/`schedule_se`/`f8995` from kitchen_sink's own `LedgerState`
+  (1 BTC mining @ $20k + a $20k-gain LT sale) and mandated a doc caveat that the composite deviates from
+  the oracle vector "by exactly the added donation delta." **Reality:** there is **no CLI path to inject a
+  `LedgerState`** — a journey can only build a ledger through `import`+`reconcile` — and a
+  kitchen-sink-faithful ledger sits only ~$1.7–3.3k under the 2024 Form-6251 AMT screen, so adding any
+  donation deduction trips `AmtScreenTriggered` and *refuses the export* (see the review's V-1). J6 there­
+  fore uses a deliberately small crypto ledger (mining ≈ $3,438; LT gain ≈ $1,630; a $6,000 donation) with
+  ≈ $17k of AMT headroom. The spec'd caveat sentence is therefore **false as written** (the non-donation
+  crypto figures are *not* the oracle vector) and is **removed**, not printed. §6.1's per-form source
+  attributions are amended: **J6 sources the crypto forms from its own synthetic ledger**; only the
+  non-crypto forms + the ReturnInputs come from kitchen_sink. The `.0` oracle-equality test still holds.
+- **(d) J3 — a single-exchange Receive, not the spec'd two-exchange CSV pair; `match-self-transfers` stays
+  undemonstrated.** §4.2 C-self-transfer envisioned a two-exchange pair to enable `match-self-transfers`.
+  J3 uses the single-exchange `classify-inbound-self-transfer` path — **within** §5 J3's stated either-or,
+  so the demonstrated verb is spec-compliant — but the matched-pair `match-self-transfers` workflow is
+  consequently undemonstrated. Filed as **UX-P1-8** for a future journey; not a P1 blocker.
+
+---
+
+*End SPEC r1 — Fable re-review GREEN (0C/0I). §15 added at r2 (P1 fold, 2026-07-18) — pending the P1
+re-review.*

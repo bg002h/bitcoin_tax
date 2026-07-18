@@ -12,6 +12,11 @@ All examples run under a pinned, deterministic environment: `BTCTAX_PASSPHRASE=p
 recorded) a fixed `BTCTAX_NOW`. A real user is prompted for the passphrase interactively rather
 than passing `BTCTAX_PASSPHRASE`.
 
+Each block shows the verbatim command after `$ ` and its real stdout. A non-zero exit is shown
+as a trailing `[exit N]` line (present only when it is non-zero); anything a command writes to
+**stderr** — advisories, the not-authorised notice, a pinned-step clock banner — is never
+dropped, but appears in a separately labelled `stderr:` block rather than inline with stdout.
+
 ## btctax at a glance
 
 The top-level command surface:
@@ -143,7 +148,7 @@ Recorded decision decision|1
 Record the Form 8283 Section-B appraiser + donee details:
 
 ```console
-$ btctax --vault v.pgp reconcile set-donation-details "import|coinbase|out|cb-donate" --donee-name "Habitat for Humanity" --donee-ein 53-0242739 --appraiser-name "Jane Appraiser" --appraiser-tin 12-3456789 --appraisal-date 2025-09-15
+$ btctax --vault v.pgp reconcile set-donation-details "import|coinbase|out|cb-donate" --donee-name "Habitat for Humanity" --donee-ein 53-0242739 --appraiser-name "Jane Appraiser" --appraiser-tin 12-3456789 --appraiser-qualifications "ASA-accredited digital-asset appraiser, 8 yrs" --appraisal-date 2025-09-15
 Donation details saved for import|coinbase|out|cb-donate.
 ```
 
@@ -166,7 +171,11 @@ Per-disposal compliance (post-2025): 1
   import|coinbase|out|cb-donate @ 2025-09-01 :: non_compliant
 ```
 
-Fill Form 8283:
+Fill Form 8283. Because this gift spans two lots, the Section B form carries two property rows;
+btctax fills the appraiser + donee declaration on the first and flags the second for you to
+complete on the paper form — that is the `needs REVIEW` note on stderr below (the appraiser
+details ARE recorded; the flag is about the extra property row, not your input). A single-lot
+gift — see J6 — clears with no such note:
 
 ```console
 $ btctax --vault v.pgp export-irs-pdf --out irs --tax-year 2025 --forms form8283
@@ -262,11 +271,11 @@ Adapters import income as *not* a business by default. If mining/staking is a tr
 business, reclassify each receipt — that moves it onto Schedule SE (self-employment tax):
 
 ```console
-$ btctax --vault v.pgp reconcile reclassify-income "import|river|in|1744718400000|income|5000000#0" --business true --kind mining
+$ btctax --vault v.pgp reconcile reclassify-income "import|river|in|1744718400000|income|5000000#0" --business true --kind staking
 Recorded decision decision|1
 ```
 ```console
-$ btctax --vault v.pgp reconcile reclassify-income "import|river|in|1747742400000|income|3000000#0" --business true --kind mining
+$ btctax --vault v.pgp reconcile reclassify-income "import|river|in|1747742400000|income|3000000#0" --business true --kind staking
 Recorded decision decision|2
 ```
 ```console
@@ -396,7 +405,7 @@ $ btctax --vault v.pgp reconcile reclassify-income "import|river|in|171050400000
 Recorded decision decision|1
 ```
 
-The outbound 1 BTC is a §170(e) charitable donation (⇒ Form 8283):
+The outbound 0.1 BTC is a §170(e) charitable donation (⇒ Form 8283):
 
 ```console
 $ btctax --vault v.pgp reconcile reclassify-outflow "import|coinbase|out|cb-donate" --as-kind donate --amount 6000.00 --donee "Habitat for Humanity"

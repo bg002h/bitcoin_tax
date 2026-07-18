@@ -47,15 +47,22 @@ pub fn built_btctax() -> PathBuf {
 fn btctax_cli_version() -> String {
     let toml = std::fs::read_to_string(workspace_root().join("crates/btctax-cli/Cargo.toml"))
         .expect("read btctax-cli/Cargo.toml");
+    // Scan ONLY the `[package]` table (the first table) and require `version =` (with the `=`), so a
+    // re-ordered manifest can't match a dependency's `version = "…"` first (N-3).
     for line in toml.lines() {
         let t = line.trim();
+        if t.starts_with('[') && t != "[package]" {
+            break; // left the [package] table
+        }
         if let Some(rest) = t.strip_prefix("version") {
-            if let Some(v) = rest.split('"').nth(1) {
-                return v.to_string();
+            if let Some(rest) = rest.trim_start().strip_prefix('=') {
+                if let Some(v) = rest.split('"').nth(1) {
+                    return v.to_string();
+                }
             }
         }
     }
-    panic!("no version in btctax-cli/Cargo.toml");
+    panic!("no [package] version in btctax-cli/Cargo.toml");
 }
 
 /// One captured command in a journey. `display` is what the reader sees after `$ `; `args` is what the
@@ -73,7 +80,11 @@ fn capture(bin: &Path, cwd: &Path, cmd: &Cmd) -> (String, String, i32) {
     c.current_dir(cwd)
         .env("BTCTAX_PASSPHRASE", PASSPHRASE)
         .env("BTCTAX_PRICE_CACHE", cwd.join("no-such-price-cache.csv"))
-        .env("HOME", cwd);
+        .env("HOME", cwd)
+        // Clear any ambient BTCTAX_NOW so an unpinned step reads none (a dev who exports BTCTAX_NOW in
+        // their shell — this project *teaches* the variable — would otherwise leak its stderr banner into
+        // `show_stderr` blocks and false-RED the golden). Re-set below only for pinned steps (M-1).
+        .env_remove("BTCTAX_NOW");
     for (k, v) in PINNED_ENV {
         c.env(k, v);
     }
@@ -91,6 +102,10 @@ fn capture(bin: &Path, cwd: &Path, cmd: &Cmd) -> (String, String, i32) {
 
 /// Shell-quote an argument for display so the captured command is copy-pasteable (event refs carry `|`,
 /// `#`, `:`; donee/appraiser names carry spaces). Bare only for a conservative safe set.
+///
+/// LIMITATION (N-2): the quoted form only escapes `"`; an argument containing `$`, `` ` ``, `\`, or `!`
+/// would display as a command a shell re-interprets (non-copy-pasteable). No current journey argument
+/// contains one — a future journey that introduces one must extend this (or the golden will mislead).
 fn shell_quote(arg: &str) -> String {
     let safe = !arg.is_empty()
         && arg
@@ -145,7 +160,11 @@ fn front_matter(md: &mut String) {
          All examples run under a pinned, deterministic environment: `BTCTAX_PASSPHRASE=pw`, `TZ=UTC`,\n\
          `LC_ALL=C`, a nonexistent `BTCTAX_PRICE_CACHE`, a scrubbed `HOME`, and (where a decision is\n\
          recorded) a fixed `BTCTAX_NOW`. A real user is prompted for the passphrase interactively rather\n\
-         than passing `BTCTAX_PASSPHRASE`.\n\n",
+         than passing `BTCTAX_PASSPHRASE`.\n\n\
+         Each block shows the verbatim command after `$ ` and its real stdout. A non-zero exit is shown\n\
+         as a trailing `[exit N]` line (present only when it is non-zero); anything a command writes to\n\
+         **stderr** — advisories, the not-authorised notice, a pinned-step clock banner — is never\n\
+         dropped, but appears in a separately labelled `stderr:` block rather than inline with stdout.\n\n",
     );
 }
 
@@ -194,8 +213,12 @@ const J4_CSV: &str = "Date,Sent Amount,Sent Currency,Received Amount,Received Cu
 
 /// J6 River corpus: one small 2024 business mining-income deposit (FMV from the bundled dataset).
 /// Reclassified as a business (below) it becomes Schedule C gross receipts ⇒ Schedule SE self-employment
-/// tax. Kept modest deliberately: the kitchen-sink household clears the AMT-screen worksheet by a thin
-/// margin (regular tax > 26% tentative), so J6's crypto is sized to stay on the computable side.
+/// tax. Kept modest deliberately: the kitchen-sink household clears the 2024 Form-6251 AMT-screen
+/// worksheet by only a thin margin (regular tax > 26% tentative min), and the screen adds back every
+/// itemized deduction — so a large charitable *deduction* drops regular tax under the tentative min and
+/// trips `AmtScreenTriggered` (v1 refuses the return). As sized, J6 keeps ≈ $17k of deduction headroom
+/// (the $6,000 donation consumes ≈ $1.4k of it); a corpus editor who enlarges the sale, income, or
+/// donation must keep the household on the computable side of that screen.
 const J6_RIVER_CSV: &str = "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Tag\r\n\
 2024-03-15 12:00:00 UTC,,,0.05000000,BTC,,income\r\n";
 
@@ -210,8 +233,11 @@ cb-donate,2024-09-01 12:00:00 UTC,Send,BTC,0.10000000,USD,60000.00,,,,,,bc1qchar
 
 /// The committed full-return ReturnInputs (the `kitchen_sink_household()` oracle, TOML-serialized —
 /// `crates/btctax-cli/tests/fullreturn_oracle.rs` pins it == the oracle vector). J6 imports it via
-/// `income import`, so the doc's non-crypto figures ARE the core fixture, byte-for-byte.
-const J6_FULLRETURN_TOML: &str = include_str!("../tests/fixtures/examples/fullreturn_inputs.toml");
+/// `income import`, so the doc's non-crypto figures ARE the core fixture, byte-for-byte. The fixture lives
+/// in `btctax-cli` (the PUBLISHED crate, self-contained) — xtask is `publish = false`, so it is the one
+/// allowed to hold this cross-crate `include_str!` (M-5).
+const J6_FULLRETURN_TOML: &str =
+    include_str!("../../btctax-cli/tests/fixtures/examples/fullreturn_inputs.toml");
 
 /// Generate the whole-file golden by running `bin` across every journey. Pure function of
 /// `(repo tree, binary, synthetic inputs)`.
@@ -262,13 +288,15 @@ fn journey_j4(md: &mut String, bin: &Path) {
         "\nAdapters import income as *not* a business by default. If mining/staking is a trade or\n\
          business, reclassify each receipt — that moves it onto Schedule SE (self-employment tax):\n\n",
     );
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "reconcile", "reclassify-income", r1, "--business", "true", "--kind", "mining"]));
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "reconcile", "reclassify-income", r2, "--business", "true", "--kind", "mining"]));
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "reconcile", "reclassify-income", r1, "--business", "true", "--kind", "staking"]));
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "reconcile", "reclassify-income", r2, "--business", "true", "--kind", "staking"]));
     emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "report", "--tax-year", "2025"]));
 }
 
 /// J5 — lot-selection optimization + attestation, and a what-if planning query. Showcases the
-/// `made ≤ sale → Contemporaneous` lever that the `BTCTAX_NOW` seam pins.
+/// `made ≤ sale → Contemporaneous` lever that the `BTCTAX_NOW` seam pins; the `made > sale → attest`
+/// branch is described in prose (demonstrating it needs a first-time post-sale accept on a separate
+/// disposal — a re-accept here just reports "already optimal"; recorded in SPEC r2, descope (b)).
 fn journey_j5(md: &mut String, bin: &Path) {
     md.push_str(
         "\n## J5 — optimizing lot selection (and the contemporaneity clock)\n\n\
@@ -363,6 +391,7 @@ fn journey_j2(md: &mut String, bin: &Path) {
             "--vault", "v.pgp", "reconcile", "set-donation-details", donation,
             "--donee-name", "Habitat for Humanity", "--donee-ein", "53-0242739",
             "--appraiser-name", "Jane Appraiser", "--appraiser-tin", "12-3456789",
+            "--appraiser-qualifications", "ASA-accredited digital-asset appraiser, 8 yrs",
             "--appraisal-date", "2025-09-15",
         ]),
     );
@@ -371,7 +400,13 @@ fn journey_j2(md: &mut String, bin: &Path) {
          min(FMV, basis)) and flags the qualified-appraisal requirement for a >$5,000 crypto gift:\n\n",
     );
     emit(md, bin, cwd, &Cmd { args: &["--vault", "v.pgp", "verify"], now: None, show_stderr: false });
-    md.push_str("\nFill Form 8283:\n\n");
+    md.push_str(
+        "\nFill Form 8283. Because this gift spans two lots, the Section B form carries two property rows;\n\
+         btctax fills the appraiser + donee declaration on the first and flags the second for you to\n\
+         complete on the paper form — that is the `needs REVIEW` note on stderr below (the appraiser\n\
+         details ARE recorded; the flag is about the extra property row, not your input). A single-lot\n\
+         gift — see J6 — clears with no such note:\n\n",
+    );
     emit(
         md, bin, cwd,
         &Cmd {
@@ -445,7 +480,7 @@ fn journey_j6(md: &mut String, bin: &Path) {
     emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "coinbase.csv", "river.csv"]));
     md.push_str("\nThe mining income is a trade or business (moves it onto Schedule C ⇒ Schedule SE):\n\n");
     emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "reconcile", "reclassify-income", income, "--business", "true", "--kind", "mining"]));
-    md.push_str("\nThe outbound 1 BTC is a §170(e) charitable donation (⇒ Form 8283):\n\n");
+    md.push_str("\nThe outbound 0.1 BTC is a §170(e) charitable donation (⇒ Form 8283):\n\n");
     emit(
         md, bin, cwd,
         &plain(&["--vault", "v.pgp", "reconcile", "reclassify-outflow", donation, "--as-kind", "donate", "--amount", "6000.00", "--donee", "Habitat for Humanity"]),
@@ -537,12 +572,32 @@ mod tests {
         );
     }
 
-    /// Hermeticity (SPEC §7, M4): the generator pins `HOME` and `BTCTAX_PRICE_CACHE` per captured command,
-    /// so an ambient real `HOME` or a PRESENT price cache cannot bleed into the golden. Proven by
-    /// regenerating under a junk `HOME` + a present dummy cache and asserting byte-identity with the
-    /// baseline — covering both the cross-HOME proof and the price-cache-present-vs-absent proof.
+    /// Captures a set of env vars and restores them on Drop — so a panic inside `generate()` cannot leave
+    /// the process env dirty for a sibling test under threaded `cargo test` (N-1). Held with BUILD_ENV_LOCK.
+    struct EnvRestore(Vec<(&'static str, Option<std::ffi::OsString>)>);
+    impl EnvRestore {
+        fn capture(keys: &[&'static str]) -> Self {
+            EnvRestore(keys.iter().map(|k| (*k, std::env::var_os(k))).collect())
+        }
+    }
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (k, v) in &self.0 {
+                match v {
+                    Some(v) => std::env::set_var(k, v),
+                    None => std::env::remove_var(k),
+                }
+            }
+        }
+    }
+
+    /// Hermeticity (SPEC §7, M4): the generator pins `HOME`, `BTCTAX_PRICE_CACHE`, and `BTCTAX_NOW` per
+    /// captured command, so ambient values — a real `HOME`, a PRESENT price cache, or a stray `BTCTAX_NOW`
+    /// (M-1) — cannot bleed into the golden. Proven by regenerating under a junk `HOME` + a present dummy
+    /// cache + a bogus `BTCTAX_NOW` and asserting byte-identity with the baseline. This is also the guard
+    /// that would red if `capture()` stopped clearing an unpinned step's `BTCTAX_NOW`.
     #[test]
-    fn examples_generate_is_hermetic_across_home_and_price_cache() {
+    fn examples_generate_is_hermetic_across_ambient_env() {
         let _guard = BUILD_ENV_LOCK.lock().unwrap();
         let bin = built_btctax(); // build BEFORE mutating HOME (cargo reads $HOME/.cargo)
         let baseline = generate(&bin);
@@ -553,24 +608,20 @@ mod tests {
         let junk_home = tmp.path().join("junk-home");
         std::fs::create_dir_all(&junk_home).expect("mkdir junk home");
 
-        let (home0, cache0) =
-            (std::env::var_os("HOME"), std::env::var_os("BTCTAX_PRICE_CACHE"));
-        std::env::set_var("HOME", &junk_home);
-        std::env::set_var("BTCTAX_PRICE_CACHE", &present_cache);
-        let perturbed = generate(&bin);
-        // Restore BEFORE asserting, so a failure can't leave the process env dirty for a later test.
-        match home0 {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-        match cache0 {
-            Some(v) => std::env::set_var("BTCTAX_PRICE_CACHE", v),
-            None => std::env::remove_var("BTCTAX_PRICE_CACHE"),
-        }
+        let perturbed = {
+            let _restore = EnvRestore::capture(&["HOME", "BTCTAX_PRICE_CACHE", "BTCTAX_NOW"]);
+            std::env::set_var("HOME", &junk_home);
+            std::env::set_var("BTCTAX_PRICE_CACHE", &present_cache);
+            std::env::set_var("BTCTAX_NOW", "2099-01-01T00:00:00Z"); // must NOT reach an unpinned step
+            // `_restore` drops at the end of this block — after `generate()` returns and before the assert
+            // (and on any panic inside `generate()`), so the process env is never left dirty for a sibling.
+            generate(&bin)
+        };
 
         assert_eq!(
             baseline, perturbed,
-            "the golden must not depend on ambient HOME or a PRESENT price cache (SPEC §7 hermeticity)"
+            "the golden must not depend on ambient HOME, a PRESENT price cache, or a stray BTCTAX_NOW \
+             (SPEC §7 hermeticity)"
         );
     }
 }
