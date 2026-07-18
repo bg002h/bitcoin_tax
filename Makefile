@@ -1,6 +1,6 @@
 # btctax — developer convenience targets.
 
-.PHONY: check test lint docs docs-man bundles help
+.PHONY: check test lint docs docs-man examples bundles help
 
 ## check: the validation gate — the full test suite AND clippy, run CONCURRENTLY (~6s warm)
 ##
@@ -51,6 +51,16 @@ bundles: docs
 ## docs-man: regenerate only the committed man pages docs/man/*.1 (no groff needed)
 docs-man:
 	cargo run -p xtask -- docs
+
+## examples: render the worked-examples golden (docs/examples/examples.md) to a PDF via groff.
+## Convenience render only — the Markdown golden is the gated artifact; the PDF is NOT byte-gated
+## and is git-ignored (docs/pdf/). Needs `groff` with the pdf device.
+examples:
+	@mkdir -p docs/pdf
+	@awk -f docs/examples/man-wrap.awk docs/examples/examples.md | groff -k -man -T pdf > docs/pdf/btctax-examples.pdf
+	@head -c4 docs/pdf/btctax-examples.pdf | grep -q '%PDF' \
+	  && echo "wrote docs/pdf/btctax-examples.pdf" \
+	  || { echo "examples: groff did not emit a PDF (is groff installed with the pdf device?)"; exit 1; }
 
 ## help: list targets
 help:
