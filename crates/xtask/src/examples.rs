@@ -179,6 +179,14 @@ ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at 
 cb-buy,2025-02-01 12:00:00 UTC,Buy,BTC,0.50000000,USD,95000.00,47500.00,47550.00,50.00,,,\r\n\
 cb-recv,2025-08-01 12:00:00 UTC,Receive,BTC,0.20000000,USD,110000.00,,,,,,\r\n";
 
+/// J5 corpus: an LT lot + a higher-basis ST lot + a 2025 sell — a genuine changed-selection scenario
+/// (HIFO ≠ FIFO) so the optimizer has a tax-saving pick to propose.
+const J5_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+opt-buy-lt,2023-01-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,30000.00,30000.00,30000.00,0.00,,,\r\n\
+opt-buy-st,2025-01-02 12:00:00 UTC,Buy,BTC,1.00000000,USD,80000.00,80000.00,80000.00,0.00,,,\r\n\
+opt-sell,2025-06-01 12:00:00 UTC,Sell,BTC,1.00000000,USD,50000.00,50000.00,50000.00,0.00,,,\r\n";
+
 /// Generate the whole-file golden by running `bin` across every journey. Pure function of
 /// `(repo tree, binary, synthetic inputs)`.
 pub fn generate(bin: &Path) -> String {
@@ -192,8 +200,51 @@ pub fn generate(bin: &Path) -> String {
     journey_j1(&mut md, bin);
     journey_j2(&mut md, bin);
     journey_j3(&mut md, bin);
+    journey_j5(&mut md, bin);
 
     md
+}
+
+/// J5 — lot-selection optimization + attestation, and a what-if planning query. Showcases the
+/// `made ≤ sale → Contemporaneous` lever that the `BTCTAX_NOW` seam pins.
+fn journey_j5(md: &mut String, bin: &Path) {
+    md.push_str(
+        "\n## J5 — optimizing lot selection (and the contemporaneity clock)\n\n\
+         Dana holds two lots (a cheap long-term one and an expensive short-term one) and has a standing\n\
+         FIFO election. After a sale, `optimize` finds the lot identification that minimizes tax — here\n\
+         picking the short-term lot to realize a loss. Set the profile + the FIFO baseline first:\n\n",
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J5_CSV);
+    let now = "2025-01-01T00:00:00Z"; // before the 2025-06-01 sale → a contemporaneous identification
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]));
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]));
+    emit(
+        md, bin, cwd,
+        &plain(&[
+            "--vault", "v.pgp", "tax-profile", "--year", "2025", "--filing-status", "single",
+            "--ordinary-taxable-income", "100000", "--magi-excluding-crypto", "100000",
+            "--qualified-dividends", "0",
+        ]),
+    );
+    emit(
+        md, bin, cwd,
+        &Cmd { args: &["--vault", "v.pgp", "config", "--set-forward-method", "fifo", "--effective-from", "2025-01-01"], now: Some(now), show_stderr: false },
+    );
+    md.push_str("\n`optimize run` is read-only — it proposes, files nothing:\n\n");
+    emit(md, bin, cwd, &Cmd { args: &["--vault", "v.pgp", "optimize", "run", "--tax-year", "2025"], now: Some(now), show_stderr: false });
+    md.push_str(
+        "\nAccept it. Because the identification is made *before* the sale date, it is persisted as\n\
+         **Contemporaneous** (an identification made after the sale would instead require an\n\
+         attestation — this is exactly what the pinned clock governs, Treas. Reg. §1.1012-1(j)):\n\n",
+    );
+    emit(md, bin, cwd, &Cmd { args: &["--vault", "v.pgp", "optimize", "accept", "--tax-year", "2025"], now: Some(now), show_stderr: false });
+    md.push_str("\nAnd a forward-looking what-if — the marginal tax of a hypothetical future sale:\n\n");
+    emit(
+        md, bin, cwd,
+        &plain(&["--vault", "v.pgp", "what-if", "sell", "--sell", "0.5", "--wallet", "exchange:coinbase:default", "--at", "2025-07-01"]),
+    );
 }
 
 /// J3 — an inbound self-transfer: an unknown-basis deposit is a hard blocker until you classify it.
