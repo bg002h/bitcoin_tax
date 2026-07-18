@@ -171,7 +171,8 @@ fn front_matter(md: &mut String) {
          captured SELECTIVELY: where it carries substantive output — an advisory, the not-authorised\n\
          filing notice, a Form 8283 caveat — it is shown in a separately labelled `stderr:` block, never\n\
          merged into stdout. What is NOT shown is the fixed integrity banner that a pinned `BTCTAX_NOW`\n\
-         prints to stderr on the clock-pinned steps: it is determinism scaffolding, not btctax output,\n\
+         prints to stderr on the clock-pinned steps: that banner is the seam's own reproducibility\n\
+         notice, not part of a command's result,\n\
          and is deliberately elided (disclosed here so the omission is never silent).\n\n",
     );
 }

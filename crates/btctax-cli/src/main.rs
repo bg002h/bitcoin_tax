@@ -634,16 +634,21 @@ fn run() -> Result<ExitCode, CliError> {
             .flatten()
             .map(|p| p.display().to_string())
             .collect();
-            println!(
-                "Filled IRS forms for tax year {}{} →\n  {}",
-                report.tax_year,
-                if report.watermarked {
-                    "  (DRAFT — estimate, watermarked)"
-                } else {
-                    ""
-                },
-                written.join("\n  ")
-            );
+            // UX-P1-4: only the crypto-SLICE path fills these five; on the FULL-RETURN path they are all
+            // None, so this header would print with an empty list before the authoritative "Full-return
+            // packet —" block below. Print it only when there is a slice list to show.
+            if !written.is_empty() {
+                println!(
+                    "Filled IRS forms for tax year {}{} →\n  {}",
+                    report.tax_year,
+                    if report.watermarked {
+                        "  (DRAFT — estimate, watermarked)"
+                    } else {
+                        ""
+                    },
+                    written.join("\n  ")
+                );
+            }
             // ★ NO-AUTHORISATION NOTICE. Printed on EVERY form export, unconditionally — this is
             // the one moment the user is holding fillable IRS forms this tool produced, and it is
             // where the disclaimer has to land. See NOTICE / `btctax limitations`. It disclaims
@@ -675,8 +680,10 @@ fn run() -> Result<ExitCode, CliError> {
                 }
                 if report.form_8283_needs_review {
                     eprintln!(
-                        "⚠ the packet's Form 8283 has row(s) needing manual review (donee / appraiser \
-                         declaration incomplete) — it is NOT filing-ready as written."
+                        "⚠ the packet's Form 8283 has row(s) needing manual review — complete any missing \
+                         donee/appraiser detail with `btctax reconcile set-donation-details …`; a gift \
+                         spanning MULTIPLE lots also flags its extra property row(s), completed on the \
+                         paper form. NOT filing-ready as written."
                     );
                 }
                 if report.form_8283_section_b == Some(true) {
@@ -766,8 +773,9 @@ fn run() -> Result<ExitCode, CliError> {
                 }
                 if report.form_8283_needs_review {
                     eprintln!(
-                        "⚠ at least one donation needs REVIEW — its appraiser/donee declaration is \
-                         incomplete. Run `btctax reconcile set-donation-details …` to complete it."
+                        "⚠ at least one Form 8283 row needs REVIEW — complete any missing donee/appraiser \
+                         detail with `btctax reconcile set-donation-details …`; a gift spanning MULTIPLE \
+                         lots also flags its extra property row(s), which are completed on the paper form."
                     );
                 }
             }

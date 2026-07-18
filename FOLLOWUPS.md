@@ -2259,3 +2259,35 @@ will red until it does).
   TUI footer dev-speak `q: swallowed` (wraps mid-word at 120 cols); (i) the TUI editor defaults to
   year 2025, whose full-return commit then refuses ("2024 only") — a late gate on the default year,
   and the opposite gate placement from the CLI (which stores 2025 inputs and gates at export).
+
+## Pre-v0.7.0 product-wording cleanup — FOLDED (2026-07-18, user-authorized before the release)
+
+A deliberate, reviewed product-fix cycle (distinct from the fence-barred docs work; the user chose "fix
+the wording batch first" over shipping v0.7.0 with the stale strings open). The gating + coherence + the
+cheap error-message items are FIXED and their goldens/man pages regenerated; the rest — error-model /
+affordance / feature changes, none of which appears in any shipped golden — are RE-OWNED to post-v0.7.0.
+
+**FIXED in this cycle (goldens regenerated, `make check` green):**
+- **UX-P4-2** (Important, M-1's release condition) — the TUI classify self-transfer modal now states the
+  default acquired-date correctly ("1 yr + 1 day before receipt → long-term", was "receipt date,
+  short-term"); `draw_edit.rs`. Classify-confirm-modal golden regenerated.
+- **UX-P1-2 / N3** — the `export-irs-pdf` help now describes the full-return dispatch (was "REFUSED for
+  full-return years … transcribe by hand"), and the `--forms` values are named correctly (`form8283`/
+  `form1040`, not `form-8283`/`form-1040`); `cli.rs`. Man page regenerated.
+- **UX-P1-4** — the empty "Filled IRS forms →" header is suppressed on the full-return path (gated on a
+  non-empty slice list); `main.rs`. J6 golden regenerated.
+- **UX-P1-5** — `income show` renders each date of birth as `MM/DD/YYYY` (was the raw `[year, ordinal]`
+  serde array), display-only; `cmd/tax.rs`. J6 golden regenerated.
+- **UX-P1-6** (+ Section-A/multi-lot extension) — the Form 8283 "needs REVIEW" advice now distinguishes a
+  missing detail (`set-donation-details`) from a multi-lot gift's extra property rows (completed on the
+  paper form); `main.rs` (both export paths). J2 golden regenerated.
+- **UX-P1-9** — the front-matter stderr-elision clause reworded ("the seam's own reproducibility notice,
+  not part of a command's result"); `examples.rs`. CLI golden regenerated.
+- **UX-P4-12(a)** — `parse_income_kind`'s bad-kind error now lists the valid kinds; `eventref.rs`.
+
+**RE-OWNED to post-v0.7.0** (behavior/error-model/affordance/feature — NOT pure wording, and none is in a
+shipped golden, so deferring leaves no stale string in v0.7.0): UX-P4-8 (io errors need path context at the
+vault-open/export-out call sites), UX-P4-9 (insufficient-balance needs the core to carry the available
+amount — an error-model change), UX-P4-10 (exit-code contract), UX-P4-11 (a new `events list` verb),
+UX-P4-12(b)–(i) (blank arg help/units, `config` read-back, enum-name display, TUI keybinding language in a
+CLI advisory, the circular set-donation-details hint, TUI footer dev-speak, the TUI year-gate placement).

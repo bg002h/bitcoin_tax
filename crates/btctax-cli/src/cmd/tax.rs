@@ -183,12 +183,45 @@ pub fn show_return_inputs(
 ) -> Result<Option<String>, CliError> {
     let ri = return_inputs::get(Session::open(vault, pp)?.conn(), year)?;
     ri.map(|ri| {
-        serde_json::to_string_pretty(&mask_pii(&ri)).map_err(|e| CliError::BadConfigValue {
+        let mkerr = |e: serde_json::Error| CliError::BadConfigValue {
             key: format!("return_inputs[{year}]"),
             value: e.to_string(),
-        })
+        };
+        let mut val = serde_json::to_value(mask_pii(&ri)).map_err(mkerr)?;
+        format_dobs_readable(&mut val); // UX-P1-5: render date_of_birth as MM/DD/YYYY, not raw [year, ordinal]
+        serde_json::to_string_pretty(&val).map_err(mkerr)
     })
     .transpose()
+}
+
+/// UX-P1-5: `income show`'s JSON serializes each `time::Date` as a raw `[year, ordinal-day]` array (e.g.
+/// `[2012, 106]`), which no filer reads as a calendar date. Rewrite every `date_of_birth` value in the
+/// DISPLAY tree to a human `MM/DD/YYYY` string. Display-only — the STORED serialization is untouched
+/// (`income show` is for viewing, never parsed back — M8).
+fn format_dobs_readable(v: &mut serde_json::Value) {
+    use time::macros::format_description;
+    match v {
+        serde_json::Value::Object(map) => {
+            for (k, val) in map.iter_mut() {
+                if k == "date_of_birth" {
+                    // Extract MM/DD/YYYY (the closure's immutable borrow of `val` ends before the write).
+                    let readable = val.as_array().filter(|a| a.len() == 2).and_then(|a| {
+                        let y = a[0].as_i64()? as i32;
+                        let o = a[1].as_u64()? as u16;
+                        let d = time::Date::from_ordinal_date(y, o).ok()?;
+                        d.format(&format_description!("[month]/[day]/[year]")).ok()
+                    });
+                    if let Some(s) = readable {
+                        *val = serde_json::Value::String(s);
+                        continue;
+                    }
+                }
+                format_dobs_readable(val);
+            }
+        }
+        serde_json::Value::Array(arr) => arr.iter_mut().for_each(format_dobs_readable),
+        _ => {}
+    }
 }
 
 /// The full `report --tax-year` bundle, in print order. A NAMED STRUCT (was a 7-tuple) so a new field can

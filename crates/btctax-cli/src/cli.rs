@@ -168,14 +168,14 @@ pub enum Command {
     /// worksheet, incl. the line-21 loss limit) are OUT OF SCOPE. Rows on an exchange that MAY carry
     /// 1099-DA broker reporting are flagged on stderr (btctax files them all under Box I/L and says so).
     ///
-    /// REFUSED for a tax year that has FULL-RETURN inputs (`income import`). These fillers are the
-    /// crypto-slice pipeline: Schedule D carries only the ledger's crypto totals — it has no line 13
-    /// (1099-DIV box-2a capital-gain distributions) and no lines 6/14 (capital-loss carryovers), both
-    /// of which the computed return DOES include in 1040 line 7 — and the 1040 fill covers only the
-    /// capital-gain cluster. For a crypto-only year those forms are complete and correct; for a full
-    /// return they would be complete-LOOKING forms with income missing, so v1 fails closed rather than
-    /// hand you a plausible wrong form. Transcribe the report's figures by hand until the full-return
-    /// fillers ship. See `btctax limitations`.
+    /// A tax year that has FULL-RETURN inputs (`income import`) DISPATCHES to the complete return packet —
+    /// the 1040 and every schedule/attachment it cites, in Attachment-Sequence order, plus a manifest
+    /// (`--forms` is ignored on that path). A crypto-only year (no `income import`) instead fills the
+    /// crypto SLICE: Schedule D carries only the ledger's crypto totals — it has no line 13 (1099-DIV
+    /// box-2a capital-gain distributions) and no lines 6/14 (capital-loss carryovers), and the 1040 fill
+    /// covers only the capital-gain cluster. For a crypto-only year those slice forms are complete and
+    /// correct; a full-return year needs the full packet, which is why the two paths are dispatched
+    /// separately (and write non-overlapping filenames). See `btctax limitations`.
     ///
     /// PSEUDO-RECONCILED ledgers: the same attestation gate as export-snapshot applies, AND every
     /// page is stamped with a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` watermark.
@@ -193,10 +193,11 @@ pub enum Command {
         /// Digital-Asset question.
         #[arg(long)]
         tax_year: i32,
-        /// Restrict the packet to specific forms (repeat or comma-separate). Default = every
-        /// applicable form (f8949 + schedule-d always; schedule-se when SE income ≥ the $400 floor;
-        /// form-8283 when there are donations; form-1040 when there is reportable digital-asset
-        /// activity). A named form is still skipped when it does not apply.
+        /// Restrict the crypto-slice packet to specific forms (repeat or comma-separate). Values:
+        /// `f8949`, `schedule-d`, `schedule-se`, `form8283`, `form1040`. Default = every applicable form
+        /// (f8949 + schedule-d always; schedule-se when SE income ≥ the $400 floor; form8283 when there
+        /// are donations; form1040 when there is reportable digital-asset activity). A named form is still
+        /// skipped when it does not apply. Ignored on a full-return year (that path fills the whole packet).
         #[arg(long, value_enum, value_delimiter = ',')]
         forms: Vec<FormArg>,
         /// Attestation phrase required to export while the ledger is PSEUDO-RECONCILED (a synthetic

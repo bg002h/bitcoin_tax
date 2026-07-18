@@ -924,7 +924,10 @@ fn draw_classify_inbound_modal(frame: &mut Frame, area: Rect, modal: &ClassifyIn
                 .unwrap_or_else(|| "(empty = default $0, conservative)".to_string());
             let date_str = acquired_at
                 .map(|d| d.to_string())
-                .unwrap_or_else(|| "(empty = default = receipt date, short-term)".to_string());
+                // The engine defaults to `long_term_default_acquired` = 1 yr + 1 day before receipt →
+                // LONG-TERM (fold.rs; cli.rs:526-527). The modal is the informed-consent point, so it must
+                // state the rate-determining default correctly (was backwards: "receipt date, short-term").
+                .unwrap_or_else(|| "(empty = default = 1 yr + 1 day before receipt \u{2192} long-term)".to_string());
             let zero_basis_note = if basis.is_none() {
                 "\n\n  NOTE: basis defaults to $0 (non-gating advisory) — supply real cost if you have it."
             } else {

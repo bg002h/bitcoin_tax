@@ -127,7 +127,9 @@ pub fn parse_income_kind(s: &str) -> Result<IncomeKind, CliError> {
         "interest" => Ok(IncomeKind::Interest),
         "airdrop" => Ok(IncomeKind::Airdrop),
         "reward" => Ok(IncomeKind::Reward),
-        _ => Err(CliError::Usage(format!("bad income kind {s:?}"))),
+        _ => Err(CliError::Usage(format!(
+            "bad income kind {s:?} — expected one of: mining, staking, interest, airdrop, reward"
+        ))),
     }
 }
 

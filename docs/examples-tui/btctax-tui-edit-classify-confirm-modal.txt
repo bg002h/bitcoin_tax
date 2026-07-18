@@ -18,14 +18,14 @@
  16││                        ││  as: SelfTransferMine (my own coins — non-taxable)               ││                        │
  17││                        ││                                                                  ││                        │
  18││                        ││    basis:       (empty = default $0, conservative)               ││                        │
- 19││                        ││    acquired_at: (empty = default = receipt date, short-term)     ││                        │
- 20││                        ││                                                                  ││                        │
- 21││                        ││  NOTE: basis defaults to $0 (non-gating advisory) — supply real  ││                        │
- 22││                        ││cost if you have it.                                              ││                        │
- 23││                        ││                                                                  ││                        │
- 24││                        ││Appended as a decision event (append-only log).                   ││                        │
- 25││                        ││Saved immediately via the vault's atomic write path.              ││                        │
- 26││                        ││                                                                  ││                        │
+ 19││                        ││    acquired_at: (empty = default = 1 yr + 1 day before receipt → ││                        │
+ 20││                        ││long-term)                                                        ││                        │
+ 21││                        ││                                                                  ││                        │
+ 22││                        ││  NOTE: basis defaults to $0 (non-gating advisory) — supply real  ││                        │
+ 23││                        ││cost if you have it.                                              ││                        │
+ 24││                        ││                                                                  ││                        │
+ 25││                        ││Appended as a decision event (append-only log).                   ││                        │
+ 26││                        ││Saved immediately via the vault's atomic write path.              ││                        │
  27││                        └└──────────────────────────────────────────────────────────────────┘┘                        │
  28││                                                                                                                      │
  29││                                                                                                                      │
