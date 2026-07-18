@@ -2108,3 +2108,10 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   dependency of xtask because the non-test `run()`/`generate()` path needs it — fine, xtask is
   `publish = false`. The J6 fixture lives in `btctax-cli/tests/fixtures/` (the published crate, self-
   contained), with xtask holding the cross-crate `include_str!` (M-5 fold).
+- **UX-P1-9 (Nit — non-gating; P1 re-review-2 N-C).** Owning phase: **fold at the release-bump golden
+  regen** (the front matter is a docs-cycle artifact, not fence-barred). The front-matter stderr clause
+  says the elided `BTCTAX_NOW` banner is "determinism scaffolding, not btctax output" — loose: the binary
+  DOES print the banner (the sentence itself concedes "prints to stderr"). Reword to e.g. "the seam's own
+  reproducibility notice, not part of a command's result." Meaning is unambiguous in context; recorded so
+  it is tightened at the next mandatory golden regen (the v0.7.0 version-pin bump) rather than forcing an
+  extra review round now.
