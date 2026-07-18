@@ -2055,3 +2055,20 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   merge the two headings) so the full-return path prints only the packet block. NOT a correctness bug (the
   packet + manifest are written correctly); it is a presentation wart, now captured verbatim in the J6
   golden.
+
+- **UX-P1 reconciliation (2026-07-18, entering the P1 review gate).**
+  - **UX-P1-1 — DISCHARGED by the P1 implementation.** (a) Exit codes ARE captured: `emit()` writes an
+    `[exit N]` marker on any non-zero code (`examples.rs`), the whole golden is byte-gated by
+    `examples_golden_matches_committed`, and the double-run hygiene test pins determinism — so an exit-code
+    change reds the gate. (b) `init`/`import` run under a cwd + relative-path convention (relative `--vault
+    v.pgp`/`--out irs`, `HOME=cwd`), so echoed paths are deterministic. (c) `front_matter()` states the
+    pinned-env convention + the honest interactive-passphrase sentence. Nothing left to fix.
+  - **UX-P1-2 / N3 and UX-P1-4 — CONFIRMED fence-barred; the FIXES are re-owned OUT of the docs cycle.**
+    Per SPEC §3.1 the fence explicitly lists "rewording a message" as failing the trichotomy → routed to
+    FOLLOWUPS, never an inline docs-cycle edit. P1's ownership was to SURFACE them (done; J6 concretizes the
+    UX-P1-2 man-page-vs-reality contradiction and captures the UX-P1-4 empty header verbatim). The wording
+    fixes are re-owned to a **pre-v0.7.0 product-wording cleanup** (a separate reviewed change, landing with
+    the release's man-page regen so the shipped doc set is coherent) — flagged to the P1 Fable review as a
+    release-gating consideration, NOT a P1 deliverable.
+  - **UX-P1-3 — already re-owned** ("Fix (P4/later)"); a `--amount` guard is a behavior change (fence-barred
+    from the docs cycle). Parked correctly.
