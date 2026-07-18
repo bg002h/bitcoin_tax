@@ -32,7 +32,12 @@ pub fn built_btctax() -> PathBuf {
     let ws = workspace_root();
     let status = Command::new(&cargo)
         .current_dir(&ws)
-        .args(["build", "-p", "btctax-cli", "--bin", "btctax"])
+        // `--locked` matches the outer `cargo run --locked` the CI job uses (N-1, hygiene). `Stdio::null()`
+        // on stdout is belt-and-suspenders (M-3): the generator's own stdout IS the golden under the CI
+        // `> docs/examples/examples.md` redirect, and this nested build inherits that stdout — cargo writes
+        // progress to stderr, but nulling stdout makes a corrupt golden structurally impossible.
+        .args(["build", "--locked", "-p", "btctax-cli", "--bin", "btctax"])
+        .stdout(std::process::Stdio::null())
         .status()
         .expect("spawn `cargo build -p btctax-cli`");
     assert!(status.success(), "cargo build -p btctax-cli --bin btctax failed");
@@ -578,8 +583,16 @@ fn is_demonstrated(golden: &str, path: &[String]) -> bool {
 /// committed golden. Non-blocking — administrative/rare commands (`backup-key`, `init --repair`, …) need
 /// no contrived example; this is a maintainer's map, printed/uploaded, never a gate.
 pub fn subcommand_coverage_report() -> String {
-    let golden = std::fs::read_to_string(workspace_root().join("docs/examples/examples.md"))
-        .unwrap_or_default();
+    // Fail LOUD on a missing golden — a silent `.unwrap_or_default()` would print a confident "0/N …
+    // demonstrated" (the golden scan finding nothing because there is no golden), a misleading map (M-1).
+    let path = workspace_root().join("docs/examples/examples.md");
+    let golden = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "subcommand-coverage: cannot read {} ({e}) — regenerate it first: \
+             `cargo run -p xtask -- examples > docs/examples/examples.md`",
+            path.display()
+        )
+    });
     let leaves = leaf_subcommands();
     let (mut covered, mut uncovered) = (0usize, Vec::new());
     for path in &leaves {
@@ -723,10 +736,11 @@ mod tests {
             report.starts_with("Subcommand coverage (SOFT"),
             "the report must open with its summary line; got: {report:?}"
         );
-        // The demonstrated journeys cover a real fraction — a 0/N report would mean the scan is broken.
+        // A 0/N split means the golden scan is broken (missing golden now panics upstream, but a matcher
+        // regression could still zero the count) — enforce it, don't just claim it in a comment (M-1).
         assert!(
-            report.contains("have a worked example."),
-            "the report must state the covered count"
+            !report.contains("): 0/"),
+            "the covered count must be non-zero — 0/N ⇒ the golden scan is broken: {report}"
         );
     }
 }

@@ -2115,3 +2115,19 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   reproducibility notice, not part of a command's result." Meaning is unambiguous in context; recorded so
   it is tightened at the next mandatory golden regen (the v0.7.0 version-pin bump) rather than forcing an
   extra review round now.
+
+- **UX-P2-1 (Minor — P2 review M-2; future-drift, not a current bug).** Owning phase: **P4 residue**. The
+  SOFT subcommand-coverage matcher `is_demonstrated` (`examples.rs`) is an in-order SUBSEQUENCE match, so a
+  single-token leaf can be satisfied by a longer path that contains it — top-level `["import"]` matches the
+  line `$ btctax income import …`. Today all 17 covered leaves are independently, genuinely demonstrated
+  (P2 review verified line-by-line), so the count is honest; the risk is future drift (drop bare `import`,
+  keep `income import`, and the report still claims top-level `import` covered). SOFT/non-blocking. Fix:
+  require `path[0]` to be the first non-`-`-prefixed subcommand token (skipping the `--vault v.pgp` global
+  flag + value). Deferred — the fix is non-trivial and the current report is correct.
+- **P2 review nits (recorded).** **N-2 (owning phase P3):** `ci.yml`'s drift gate diffs only
+  `docs/examples/examples.md`; SPEC §9 writes `git diff … docs/examples docs/examples-tui` — equivalent
+  today (no TUI golden yet), but **P3 must widen the CI diff to `docs/examples-tui/` when the TUI golden
+  lands**. **N-3 (no code):** plan Task 2.2 cites `crates/xtask/src/examples/mod.rs`; the code is at
+  `crates/xtask/src/examples.rs` (P1's actual bin-only layout) — citation drift only. M-1 (silent 0/N on a
+  missing golden) and N-1/M-3 (nested-build `--locked` + `Stdio::null()`) were FOLDED in the P2 gate commit,
+  not deferred.
