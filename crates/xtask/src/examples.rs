@@ -495,9 +495,17 @@ pub fn run() {
 #[cfg(unix)] // journey stdout can embed joined paths; byte-exact goldens are gated on unix (I4)
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Serializes the tests that (a) shell out to `cargo build` via [`built_btctax`] and/or (b) mutate
+    /// process-global env (`HOME`, `BTCTAX_PRICE_CACHE`). Under nextest each test is its own process so
+    /// this is uncontended; under threaded `cargo test` it prevents a HOME-mutating test from corrupting a
+    /// sibling's concurrent `cargo build` (cargo reads `$HOME/.cargo` when `CARGO_HOME` is unset).
+    static BUILD_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn generate_is_deterministic_and_captures_help() {
+        let _guard = BUILD_ENV_LOCK.lock().unwrap();
         let bin = built_btctax();
         let a = generate(&bin);
         let b = generate(&bin);
@@ -505,5 +513,64 @@ mod tests {
         assert!(a.contains("$ btctax --help"), "must show the verbatim command");
         assert!(a.contains("Usage: btctax"), "must capture the real help output");
         assert!(a.contains(&format!("btctax-version: {}", btctax_cli_version())), "front-matter version");
+    }
+
+    /// The committed golden matches a fresh generation, byte-for-byte — reds when `docs/examples/examples.md`
+    /// is STALE (a code/output change that wasn't regenerated). This is the in-tree half of the CI
+    /// `git diff --exit-code docs/examples` gate (Task 2.3); it fires on every `make check`.
+    #[test]
+    fn examples_golden_matches_committed() {
+        let _guard = BUILD_ENV_LOCK.lock().unwrap();
+        let generated = generate(&built_btctax());
+        let path = workspace_root().join("docs/examples/examples.md");
+        let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "committed {} missing ({e}); regenerate with \
+                 `cargo run -p xtask -- examples > docs/examples/examples.md`",
+                path.display()
+            )
+        });
+        assert_eq!(
+            generated, committed,
+            "docs/examples/examples.md is STALE; regenerate with \
+             `cargo run -p xtask -- examples > docs/examples/examples.md`"
+        );
+    }
+
+    /// Hermeticity (SPEC §7, M4): the generator pins `HOME` and `BTCTAX_PRICE_CACHE` per captured command,
+    /// so an ambient real `HOME` or a PRESENT price cache cannot bleed into the golden. Proven by
+    /// regenerating under a junk `HOME` + a present dummy cache and asserting byte-identity with the
+    /// baseline — covering both the cross-HOME proof and the price-cache-present-vs-absent proof.
+    #[test]
+    fn examples_generate_is_hermetic_across_home_and_price_cache() {
+        let _guard = BUILD_ENV_LOCK.lock().unwrap();
+        let bin = built_btctax(); // build BEFORE mutating HOME (cargo reads $HOME/.cargo)
+        let baseline = generate(&bin);
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let present_cache = tmp.path().join("present-cache.csv");
+        std::fs::write(&present_cache, "date,usd\n2024-01-01,42000.00\n").expect("write dummy cache");
+        let junk_home = tmp.path().join("junk-home");
+        std::fs::create_dir_all(&junk_home).expect("mkdir junk home");
+
+        let (home0, cache0) =
+            (std::env::var_os("HOME"), std::env::var_os("BTCTAX_PRICE_CACHE"));
+        std::env::set_var("HOME", &junk_home);
+        std::env::set_var("BTCTAX_PRICE_CACHE", &present_cache);
+        let perturbed = generate(&bin);
+        // Restore BEFORE asserting, so a failure can't leave the process env dirty for a later test.
+        match home0 {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        match cache0 {
+            Some(v) => std::env::set_var("BTCTAX_PRICE_CACHE", v),
+            None => std::env::remove_var("BTCTAX_PRICE_CACHE"),
+        }
+
+        assert_eq!(
+            baseline, perturbed,
+            "the golden must not depend on ambient HOME or a PRESENT price cache (SPEC §7 hermeticity)"
+        );
     }
 }
