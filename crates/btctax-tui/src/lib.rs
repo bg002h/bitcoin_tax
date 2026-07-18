@@ -31,6 +31,7 @@
 
 /// Application state: `Screen`, `Tab`, `Snapshot` (pub), `App` (pub(crate)).
 pub mod app;
+pub mod capture;
 pub mod clock;
 /// Terminal rendering (pub for `draw_unlock_screen`; `draw::draw` is pub(crate)).
 pub mod draw;
