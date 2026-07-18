@@ -357,8 +357,12 @@ same PR (release ritual, like re-pinning). The census MAY key coverage on `(form
   `fg`/`bg`/`modifier` (no `style()` getter). Serialize as (a) a glyph grid + (b) a compact style map
   (format pinned in P3 — candidate: a per-cell run-length style overlay keyed to the grid).
 - **TUI seam prerequisite** — the §3.4 shared clock helper lands in P3 before any TUI golden is recorded.
-- **Golden + render** — committed text goldens under `docs/examples-tui/`; groff render with color from the
-  style map into a **separate** PDF.
+- **Golden + render** — committed text goldens under `docs/examples-tui/`; groff render into a **separate**
+  PDF. *(r2 amendment, 2026-07-18, folding the P3 review M-2:* the shipped `make examples-tui` render is
+  **monochrome** — the goldens' glyph grid, box-drawing mapped to ASCII. The `.txt` goldens carry the full
+  per-cell `fg`/`bg`/`modifier` (they are the gated artifact); a **colorized** groff render driven by the
+  style overlay is an explicitly DEFERRED enhancement (FOLLOWUPS **UX-P3-2**), not a P3 deliverable — the
+  PDF is a git-ignored convenience render with no consumers.*)
 - **This is the primary bug-hunt surface** — driving the edit reconcile flow is the btctax analogue of the
   mnemonic `(none)`/reveal-toggle discoveries.
 
@@ -452,9 +456,10 @@ item is not deferrable past its owning phase.
 6. **TY2025 full form set** — confirmed: TY2025 bundles only 5 maps (f1040/f8949/schedule_d/schedule_se/f8283);
    the all-forms census journey (J6) uses **TY2024** (all 14). No open question — recorded for the
    new-supported-year ritual (§6.4).
-7. **Style-map serialization format** — decide the committed representation (grid + RLE style overlay vs.
-   per-cell tuples) balancing diff-legibility and groff-render fidelity. Note ratatui 0.29 `Cell` also
-   carries `underline_color` and `skip` beyond `(fg, bg, modifier)` — decide whether to capture them (P3).
+7. *(DECIDED in P3 — `capture.rs` uses a glyph grid + a per-row RLE style overlay. `underline_color`/`skip`
+   are NOT captured: neither varies in the current TUI (the only underline is `Modifier::UNDERLINED`, which
+   IS captured); re-open if a screen adopts a per-cell `underline_color`/`skip`. Recorded in `capture.rs`
+   module docs, M-1.)*
 
 ---
 

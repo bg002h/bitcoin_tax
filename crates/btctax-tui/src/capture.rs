@@ -9,6 +9,17 @@
 //!    `NNN│ start..end <sig>` where `<sig>` names only the non-default `fg`/`bg`/`modifier` (a run of the
 //!    terminal default — `fg=Reset bg=Reset`, no modifier — is omitted). A color change flips ONE run
 //!    line, so diffs stay localized, and the overlay carries the full color info the PDF render needs.
+//!
+//! **§14 gap 7 decision (M-1):** the signature is `(symbol, fg, bg, modifier)` and deliberately DROPS
+//! `Cell.underline_color` and `Cell.skip`. Rationale: neither varies in the current TUI — the only
+//! underline is `sort.rs`'s column cursor via `Modifier::UNDERLINED` (which IS captured), no code sets a
+//! distinct `underline_color`, and `skip` is uniform in a `TestBackend` buffer. Re-open (add them to the
+//! signature) the moment any screen sets a per-cell `underline_color` or `skip`, or their regressions
+//! become invisible to the goldens.
+//!
+//! **Stability (N-3):** `color_str` relies on ratatui `Color`'s derived `Debug`. Under the locked ratatui
+//! 0.29 this is fixed; a future format change would red EVERY golden at regen (loud, never silent), so it
+//! is a diagnosable regen-time failure, not a correctness hazard.
 
 use ratatui::buffer::{Buffer, Cell};
 use ratatui::style::{Color, Modifier};

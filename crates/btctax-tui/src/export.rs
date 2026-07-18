@@ -869,7 +869,14 @@ mod tests {
             // carries no `#[cfg(test)]` line of its own and `scan_non_test` would treat all of it as
             // production. It is entirely test code — exempt it from the write-class ("non-test code" only)
             // rule so a golden-regen helper may write fixtures. Production writes stay export.rs-only.
-            let is_whole_file_test = filename == "tests.rs";
+            // HARDENING (N-1): exempt ONLY when the sibling `mod.rs` actually declares it under
+            // `#[cfg(test)]` — a hypothetical PRODUCTION `tests.rs` (declared `pub mod tests;`) is NOT
+            // exempt and keeps the write-class rule.
+            let is_whole_file_test = filename == "tests.rs"
+                && path
+                    .parent()
+                    .and_then(|d| std::fs::read_to_string(d.join("mod.rs")).ok())
+                    .is_some_and(|m| m.contains("#[cfg(test)]") && m.contains("mod tests"));
 
             // Check everywhere_tokens in non-test region of ALL files.
             // (export.rs is allowed to use write-class tokens but NOT the everywhere tokens.)
@@ -950,6 +957,51 @@ mod tests {
             violations.is_empty(),
             "Source gate violations found:\n{}",
             violations.join("\n")
+        );
+    }
+
+    /// SPEC §3.4 STRUCTURAL guard: NO production wall-clock read may remain in btctax-tui — every
+    /// render/decision path routes through the injected `Clock`, and `clock.rs` (`Clock::Wall`) is the SOLE
+    /// legitimate `now_utc()`. The per-site tests verify one site each; THIS reds if ANY production site
+    /// reverts to `now_utc()`, making the "route EVERY read" invariant structural (the mutation class the
+    /// P3 review flagged — 22/23 editor sites were silently revertable). Line-scan like the e10 gate: skip
+    /// the test region (after `#[cfg(test)]`) and line comments (a `///` mention of `now_utc()` is fine).
+    #[test]
+    fn no_direct_now_utc_in_production() {
+        let src = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut hits: Vec<String> = Vec::new();
+        fn walk(dir: &std::path::Path, hits: &mut Vec<String>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, hits);
+                    continue;
+                }
+                if p.extension().is_none_or(|x| x != "rs") {
+                    continue;
+                }
+                if p.file_name().is_some_and(|n| n == "clock.rs") {
+                    continue; // Clock::Wall's own read is the seam's floor
+                }
+                let text = std::fs::read_to_string(&p).unwrap();
+                let mut in_test = false;
+                for (i, line) in text.lines().enumerate() {
+                    if line.trim_start().starts_with("#[cfg(test)]") {
+                        in_test = true;
+                    }
+                    if in_test {
+                        continue;
+                    }
+                    if line.split("//").next().unwrap_or("").contains("now_utc(") {
+                        hits.push(format!("{}:{}", p.display(), i + 1));
+                    }
+                }
+            }
+        }
+        walk(&src, &mut hits);
+        assert!(
+            hits.is_empty(),
+            "production `now_utc()` found — route it through the injected Clock (SPEC §3.4): {hits:?}"
         );
     }
 }

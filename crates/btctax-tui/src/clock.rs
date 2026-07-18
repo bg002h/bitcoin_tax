@@ -81,12 +81,40 @@ mod tests {
         assert_eq!(c.now(), t);
     }
 
+    /// Serializes the `from_env` tests (they mutate the process-global `BTCTAX_NOW`); save/restore around
+    /// each so the mutation never leaks. `set_var` is safe on edition 2021.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn with_btctax_now<T>(val: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("BTCTAX_NOW");
+        match val {
+            Some(v) => std::env::set_var("BTCTAX_NOW", v),
+            None => std::env::remove_var("BTCTAX_NOW"),
+        }
+        let r = f();
+        match saved {
+            Some(v) => std::env::set_var("BTCTAX_NOW", v),
+            None => std::env::remove_var("BTCTAX_NOW"),
+        }
+        r
+    }
+
     #[test]
-    fn from_env_rejects_malformed_but_the_helper_itself_reads_the_process_env() {
-        // Pure parse coverage (no process-env mutation — that races other tests): a valid RFC3339 string
-        // parses to Pinned, garbage errors. `from_env` wires these to `BTCTAX_NOW`.
-        assert!(OffsetDateTime::parse("2024-06-01T12:00:00Z", &Rfc3339).is_ok());
-        assert!(OffsetDateTime::parse("not-a-time", &Rfc3339).is_err());
-        assert!(OffsetDateTime::parse("", &Rfc3339).is_err());
+    fn from_env_unset_is_wall() {
+        assert_eq!(with_btctax_now(None, from_env).unwrap(), Clock::Wall);
+    }
+
+    #[test]
+    fn from_env_valid_rfc3339_is_pinned() {
+        let c = with_btctax_now(Some("2024-06-01T12:00:00Z"), from_env).unwrap();
+        assert_eq!(c, Clock::Pinned(datetime!(2024 - 06 - 01 12:00:00 UTC)));
+    }
+
+    #[test]
+    fn from_env_malformed_and_empty_are_err() {
+        // The CLI `resolve_now` contract: a set-but-unparseable value is a hard error (the caller exits 2).
+        assert!(with_btctax_now(Some("garbage"), from_env).is_err());
+        assert!(with_btctax_now(Some("2024-06-01"), from_env).is_err()); // date only, not RFC3339
+        assert!(with_btctax_now(Some(""), from_env).is_err());
     }
 }

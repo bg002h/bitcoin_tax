@@ -13849,8 +13849,9 @@ mod tests {
     /// SPEC §3.4 clock-seam guard (btctax-tui-edit): a reconcile decision persisted through the editor is
     /// stamped with the INJECTED clock's instant, not a fresh `now_utc()`. Drives the self-transfer
     /// classify to persist under `app.clock = Pinned(2024-06-01T12:00:00Z)` and asserts an appended event
-    /// carries exactly that instant. This is the guard for the 23 editor `now_utc()` reads routing through
-    /// `app.clock.now()` — reverting any one back to `now_utc()` reds this (the wall clock is not 2024).
+    /// carries exactly that instant. This proves the routing END-TO-END for the classify-inbound site
+    /// specifically (reverting THAT site's read to `now_utc()` reds this). The invariant that EVERY editor
+    /// site stays routed is held STRUCTURALLY by `no_direct_now_utc_in_production` below — not by this test.
     #[test]
     fn persisted_decision_made_date_is_the_injected_clock() {
         use btctax_core::persistence::load_all_ordered;
@@ -13891,6 +13892,46 @@ mod tests {
         );
     }
 
+    /// SPEC §3.4 STRUCTURAL guard: NO production wall-clock read may remain in btctax-tui-edit — every
+    /// editor decision made-date routes through `app.clock.now()`. THIS reds if ANY of the 23 sites reverts
+    /// to `now_utc()`, making the invariant structural (the P3 review mutation-proved 22/23 were silently
+    /// revertable under the single per-site guard). Line-scan: skip the test region + line comments.
+    #[test]
+    fn no_direct_now_utc_in_production() {
+        let src = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut hits: Vec<String> = Vec::new();
+        fn walk(dir: &std::path::Path, hits: &mut Vec<String>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, hits);
+                    continue;
+                }
+                if p.extension().is_none_or(|x| x != "rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&p).unwrap();
+                let mut in_test = false;
+                for (i, line) in text.lines().enumerate() {
+                    if line.trim_start().starts_with("#[cfg(test)]") {
+                        in_test = true;
+                    }
+                    if in_test {
+                        continue;
+                    }
+                    if line.split("//").next().unwrap_or("").contains("now_utc(") {
+                        hits.push(format!("{}:{}", p.display(), i + 1));
+                    }
+                }
+            }
+        }
+        walk(&src, &mut hits);
+        assert!(
+            hits.is_empty(),
+            "production `now_utc()` found — route it through app.clock.now() (SPEC §3.4): {hits:?}"
+        );
+    }
+
     // ── P3 style-aware TUI golden (SPEC §8) — the editor's Browse screen ──────
     // `#[cfg(unix)]` (I4): the Browse title renders a joined vault path. Fixed path + synthetic snapshot
     // + a pinned clock ⇒ a pure function of (code, synthetic state). Complements the clock-seam guard
@@ -13901,18 +13942,54 @@ mod tests {
         std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/examples-tui"))
     }
 
-    /// `(stem, captured frame)` for btctax-tui-edit: the Browse screen (editor chrome — tabs, title,
-    /// footer, empty-state) captured style-aware under a pinned clock.
+    /// Render `app` to a style-aware golden frame at 120x40.
     #[cfg(unix)]
-    fn btctax_tui_edit_goldens() -> Vec<(&'static str, String)> {
+    fn capture_edit_frame(app: &mut EditorApp) -> String {
         use ratatui::{backend::TestBackend, Terminal};
-        let mut app = browse_app_with_empty_snapshot();
-        app.clock = btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2024 - 06 - 01 12:00:00 UTC));
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw_edit::draw(f, &mut app)).unwrap();
-        let frame = btctax_tui::capture::to_golden(&terminal.backend().buffer().clone());
-        vec![("edit-browse", frame)]
+        terminal.draw(|f| draw_edit::draw(f, app)).unwrap();
+        btctax_tui::capture::to_golden(&terminal.backend().buffer().clone())
+    }
+
+    /// `(stem, captured frame)` for btctax-tui-edit, each under a pinned clock:
+    /// - `edit-browse`: the Browse chrome (tabs/title/footer/empty-state);
+    /// - `edit-classify-confirm-modal`: **the reconcile-flow bug-hunt surface** (SPEC §8 / P4 §10) — the
+    ///   classify-inbound confirm modal for a seeded unknown-basis inbound, driven headlessly to the
+    ///   pre-persist confirm step. The real seeded vault sits at a random tempdir path, so `vault_path` is
+    ///   overridden to a fixed display string BEFORE capture (the title is the only path surface; the
+    ///   event ref is the fixed `SourceRef("test-ti-1")`), keeping the frame a pure function of code+state.
+    #[cfg(unix)]
+    fn btctax_tui_edit_goldens() -> Vec<(&'static str, String)> {
+        let pinned = btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2024 - 06 - 01 12:00:00 UTC));
+
+        let browse = {
+            let mut app = browse_app_with_empty_snapshot();
+            app.clock = pinned;
+            capture_edit_frame(&mut app)
+        };
+
+        let classify_modal = {
+            let dir = tempfile::tempdir().unwrap();
+            let vault = dir.path().join("vault.pgp");
+            let key = dir.path().join("key.asc");
+            seed_transfer_in_vault(&vault, &key, "golden-classify-pass");
+            let mut app = open_app(&vault, "golden-classify-pass");
+            app.clock = pinned;
+            // Drive to the confirm modal (same sequence as the clock guard); do NOT persist.
+            handle_key(&mut app, press(KeyCode::Char('c')));
+            handle_key(&mut app, press(KeyCode::Enter));
+            handle_key(&mut app, press(KeyCode::Tab));
+            handle_key(&mut app, press(KeyCode::Tab));
+            handle_key(&mut app, press(KeyCode::Enter));
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(app.classify_inbound_modal.is_some(), "the confirm modal must be open for the golden");
+            // Pin the ONLY path surface (the title) so the tempdir vault path can't leak into the frame.
+            app.vault_path = std::path::PathBuf::from("/edit/vault.pgp");
+            capture_edit_frame(&mut app)
+        };
+
+        vec![("edit-browse", browse), ("edit-classify-confirm-modal", classify_modal)]
     }
 
     #[cfg(unix)]
