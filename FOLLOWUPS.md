@@ -2124,6 +2124,12 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
 - **N-2 (P2 review) — RESOLVED in P3.** The TUI goldens (`docs/examples-tui/*.txt`) are staleness-gated
   in-process by the crates' `*_goldens_match_committed` tests (which the `test` job runs), so no git-diff
   widening of the CI `examples` job was needed; that job instead gained a `make examples-tui` PDF-build proof.
+- **N-R1 (Nit — P3 re-review residue; non-gating).** Owning phase: post-v0.7.0. The `no_direct_now_utc_in_
+  production` structural scans set `in_test` STICKILY (once a `#[cfg(test)]` line is seen, the rest of the
+  file is skipped), so production `now_utc()` placed AFTER a test module in the same file would be missed.
+  Harmless today — Rust convention places `#[cfg(test)] mod tests` at the END of every file, and no TUI
+  file has production code after a test module. Hardening: scan only the test module's brace-delimited span,
+  or reset `in_test` at the module's close. Recorded so the assumption is explicit.
 
 - **UX-P2-1 (Minor — P2 review M-2; future-drift, not a current bug).** Owning phase: **P4 residue**. The
   SOFT subcommand-coverage matcher `is_demonstrated` (`examples.rs`) is an in-order SUBSEQUENCE match, so a
