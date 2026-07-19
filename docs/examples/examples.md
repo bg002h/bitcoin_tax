@@ -152,7 +152,7 @@ Recorded decision decision|1
 Record the Form 8283 Section-B appraiser + donee details:
 
 ```console
-$ btctax --vault v.pgp reconcile set-donation-details "import|coinbase|out|cb-donate" --donee-name "Habitat for Humanity" --donee-ein 53-0242739 --appraiser-name "Jane Appraiser" --appraiser-tin 12-3456789 --appraiser-qualifications "ASA-accredited digital-asset appraiser, 8 yrs" --appraisal-date 2025-09-15
+$ btctax --vault v.pgp reconcile set-donation-details "import|coinbase|out|cb-donate" --donee-name "Habitat for Humanity" --donee-ein 98-7654321 --appraiser-name "Jane Appraiser" --appraiser-tin 12-3456789 --appraiser-qualifications "ASA-accredited digital-asset appraiser, 8 yrs" --appraisal-date 2025-09-15
 Donation details saved for import|coinbase|out|cb-donate.
 ```
 
@@ -416,7 +416,7 @@ $ btctax --vault v.pgp reconcile reclassify-outflow "import|coinbase|out|cb-dona
 Recorded decision decision|2
 ```
 ```console
-$ btctax --vault v.pgp reconcile set-donation-details "import|coinbase|out|cb-donate" --donee-name "Habitat for Humanity" --donee-ein 53-0242739 --appraiser-name "Jane Appraiser" --appraiser-tin 12-3456789 --appraiser-qualifications "ASA-accredited digital-asset appraiser, 8 yrs" --appraisal-date 2024-09-15
+$ btctax --vault v.pgp reconcile set-donation-details "import|coinbase|out|cb-donate" --donee-name "Habitat for Humanity" --donee-ein 98-7654321 --appraiser-name "Jane Appraiser" --appraiser-tin 12-3456789 --appraiser-qualifications "ASA-accredited digital-asset appraiser, 8 yrs" --appraisal-date 2024-09-15
 Donation details saved for import|coinbase|out|cb-donate.
 ```
 
