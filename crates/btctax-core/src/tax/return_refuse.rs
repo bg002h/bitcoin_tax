@@ -939,7 +939,7 @@ mod tests {
     fn every_live_unanswered_declaration_refuses_with_its_own_reason() {
         for q in FORM_QUESTIONS {
             let mut r = scenario_for(q.id); // nothing answered yet
-            // Answer every OTHER live question, leaving q blank (None, from Default).
+                                            // Answer every OTHER live question, leaving q blank (None, from Default).
             for other in FORM_QUESTIONS {
                 if other.id != q.id && (other.live)(&r) {
                     (other.set)(&mut r, false);
@@ -1107,7 +1107,8 @@ mod tests {
         claimable.header.can_be_claimed_as_dependent_taxpayer = Some(true);
         let mut not_claimable = ri();
         not_claimable.header.can_be_claimed_as_dependent_taxpayer = Some(false);
-        let sd = |r: &ReturnInputs| crate::tax::return_1040::standard_deduction(r, &p, 2024, Usd::ZERO);
+        let sd =
+            |r: &ReturnInputs| crate::tax::return_1040::standard_deduction(r, &p, 2024, Usd::ZERO);
         assert_eq!(
             sd(&unknown),
             sd(&claimable),
@@ -1626,12 +1627,21 @@ mod tests {
         // (a) the estimated-payments leg refuses…
         let mut r = ri();
         r.schedule_a = sched(dec!(5000));
-        let refusal = screen_inputs(&r, &tbl(), &params()).expect("estimated-payments SALT must refuse");
+        let refusal =
+            screen_inputs(&r, &tbl(), &params()).expect("estimated-payments SALT must refuse");
         assert_eq!(refusal.reason, RefuseReason::SalesTaxElectionWithoutAmount);
         // ★ MINOR-2 — the detail NAMES both exits: `income import` (to enter the amount — `answer` can't
         // capture a dollar figure) and `income answer` (to flip the skippable election off).
-        assert!(refusal.detail.contains("income import"), "{}", refusal.detail);
-        assert!(refusal.detail.contains("income answer"), "{}", refusal.detail);
+        assert!(
+            refusal.detail.contains("income import"),
+            "{}",
+            refusal.detail
+        );
+        assert!(
+            refusal.detail.contains("income answer"),
+            "{}",
+            refusal.detail
+        );
 
         // ★ MINOR-1 — the W-2 box-17/19 withholding leg, ALONE (no estimated payments). This is the most
         // common filer shape, and it kills the mutation "drop the W-2 Σ from the income-tax-SALT set": with
@@ -1651,12 +1661,18 @@ mod tests {
 
         // With a sales-tax amount → no collapse, no refusal.
         r.schedule_a.as_mut().unwrap().salt_sales_tax_amount = dec!(3000);
-        assert_ne!(reason(&r), Some(RefuseReason::SalesTaxElectionWithoutAmount));
+        assert_ne!(
+            reason(&r),
+            Some(RefuseReason::SalesTaxElectionWithoutAmount)
+        );
 
         // Election on, $0 amount, but NO income-tax SALT to lose → nothing collapses, so NOT this refusal.
         let mut r2 = ri();
         r2.schedule_a = sched(Usd::ZERO);
-        assert_ne!(reason(&r2), Some(RefuseReason::SalesTaxElectionWithoutAmount));
+        assert_ne!(
+            reason(&r2),
+            Some(RefuseReason::SalesTaxElectionWithoutAmount)
+        );
     }
 
     /// ★ P9 §3.2 (r1 I-6, named r3 M-2) — Schedule B 7a "Yes" with a BLANK 7b (country names) refuses. Its

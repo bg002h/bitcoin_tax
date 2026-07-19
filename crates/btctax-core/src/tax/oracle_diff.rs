@@ -290,16 +290,31 @@ mod tests {
     #[test]
     fn consulted_table_tracks_the_worksheet_operands() {
         // TI 112_400, QD 8_000, net-LTCG(qd-excl) 25_000 ⇒ remainder 79_400 < ceiling ⇒ true.
-        assert!(consulted_table(FilingStatus::Single, usd(112_400.0), usd(8_000.0), usd(25_000.0)));
+        assert!(consulted_table(
+            FilingStatus::Single,
+            usd(112_400.0),
+            usd(8_000.0),
+            usd(25_000.0)
+        ));
         // TI 253_943, no preferential ⇒ remainder = TI ≥ ceiling ⇒ false.
-        assert!(!consulted_table(FilingStatus::Mfj, usd(253_943.0), usd(0.0), usd(0.0)));
+        assert!(!consulted_table(
+            FilingStatus::Mfj,
+            usd(253_943.0),
+            usd(0.0),
+            usd(0.0)
+        ));
     }
 
     // taxcalc methodology class fires on single_qdcgt_both_slices (remainder below ceiling), the anchor
     // the old "TI < $100k" gloss wrongly excluded (r3-I1).
     #[test]
     fn methodology_class_fires_on_qdcgt_both_slices() {
-        let ops = L16Operands { status: FilingStatus::Single, ti: usd(112_400.0), qd_l3a: usd(8_000.0), net_ltcg_qd_excl: usd(25_000.0) };
+        let ops = L16Operands {
+            status: FilingStatus::Single,
+            ti: usd(112_400.0),
+            qd_l3a: usd(8_000.0),
+            net_ltcg_qd_excl: usd(25_000.0),
+        };
         assert!(taxcalc_methodology_class(&ops));
     }
 
@@ -308,7 +323,12 @@ mod tests {
     #[test]
     fn taxcalc_provenance_cannot_fire_below_ceiling() {
         // single_crypto_business_se: taxcalc TI 70_008.908, L16 10_454.96 (baked); Table_btctax bins to 10_459.
-        let ops = L16Operands { status: FilingStatus::Single, ti: usd(70_008.908), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
+        let ops = L16Operands {
+            status: FilingStatus::Single,
+            ti: usd(70_008.908),
+            qd_l3a: usd(0.0),
+            net_ltcg_qd_excl: usd(0.0),
+        };
         assert!(!provenance_class_fires(Some(&ops), &ops, 10_454.96));
     }
 
@@ -316,7 +336,12 @@ mod tests {
     // oracle L16 that btctax's own lookup does NOT reproduce on the oracle's operands.
     #[test]
     fn provenance_class_keeps_teeth_against_a_semantics_mismatch() {
-        let ops = L16Operands { status: FilingStatus::Mfj, ti: usd(253_942.94), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
+        let ops = L16Operands {
+            status: FilingStatus::Mfj,
+            ti: usd(253_942.94),
+            qd_l3a: usd(0.0),
+            net_ltcg_qd_excl: usd(0.0),
+        };
         assert!(!provenance_class_fires(Some(&ops), &ops, 99_999.0)); // 99,999 ≠ Table_btctax(253,942.94)
     }
 
@@ -326,7 +351,12 @@ mod tests {
     // conjunct-2 drop (which would leave c1 alone = true).
     #[test]
     fn provenance_conjunct2_blocks_over_absorption_on_identical_leaves() {
-        let ops = L16Operands { status: FilingStatus::Mfj, ti: usd(253_942.94), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
+        let ops = L16Operands {
+            status: FilingStatus::Mfj,
+            ti: usd(253_942.94),
+            qd_l3a: usd(0.0),
+            net_ltcg_qd_excl: usd(0.0),
+        };
         assert!(!provenance_class_fires(Some(&ops), &ops, 47_031.31));
     }
 
@@ -335,9 +365,23 @@ mod tests {
     // bins to 10_459 ≠ 47_031 ⇒ c2 true) ⇒ fires. Kills an always-`false` predicate.
     #[test]
     fn provenance_class_fires_on_distinct_operands() {
-        let oracle_ops = L16Operands { status: FilingStatus::Mfj, ti: usd(253_942.94), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
-        let reproduced_ops = L16Operands { status: FilingStatus::Single, ti: usd(70_008.908), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
-        assert!(provenance_class_fires(Some(&oracle_ops), &reproduced_ops, 47_031.31));
+        let oracle_ops = L16Operands {
+            status: FilingStatus::Mfj,
+            ti: usd(253_942.94),
+            qd_l3a: usd(0.0),
+            net_ltcg_qd_excl: usd(0.0),
+        };
+        let reproduced_ops = L16Operands {
+            status: FilingStatus::Single,
+            ti: usd(70_008.908),
+            qd_l3a: usd(0.0),
+            net_ltcg_qd_excl: usd(0.0),
+        };
+        assert!(provenance_class_fires(
+            Some(&oracle_ops),
+            &reproduced_ops,
+            47_031.31
+        ));
     }
 
     // ★ M4 (the NAMED mutation target): with the oracle's L16 leaves not yet baked (pre-T11), the
@@ -345,7 +389,12 @@ mod tests {
     // anti-world guard is dead weight for the entire pre-T11 period.
     #[test]
     fn provenance_class_cannot_fire_without_baked_oracle_leaves() {
-        let ops = L16Operands { status: FilingStatus::Single, ti: usd(112_400.0), qd_l3a: usd(8_000.0), net_ltcg_qd_excl: usd(25_000.0) };
+        let ops = L16Operands {
+            status: FilingStatus::Single,
+            ti: usd(112_400.0),
+            qd_l3a: usd(8_000.0),
+            net_ltcg_qd_excl: usd(25_000.0),
+        };
         assert!(!provenance_class_fires(None, &ops, 17_477.0)); // oracle_ops absent ⇒ false
     }
 
@@ -354,17 +403,43 @@ mod tests {
     // btctax L16 = 10_459 = OTS Tax-Table; taxcalc = 10_454.96 via the continuous schedule.)
     #[test]
     fn stacking_ok_absorbs_a_below_ceiling_methodology_dissent() {
-        let ops = L16Operands { status: FilingStatus::Single, ti: usd(70_008.908), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
-        assert!(stacking_ok(usd(10_459.0), 10_459.0, Some(10_454.96), None, None, &ops, None));
+        let ops = L16Operands {
+            status: FilingStatus::Single,
+            ti: usd(70_008.908),
+            qd_l3a: usd(0.0),
+            net_ltcg_qd_excl: usd(0.0),
+        };
+        assert!(stacking_ok(
+            usd(10_459.0),
+            10_459.0,
+            Some(10_454.96),
+            None,
+            None,
+            &ops,
+            None
+        ));
     }
 
     // stacking_ok — above the ceiling (methodology cannot fire) with no baked provenance leaves and no
     // pin, btctax alone against BOTH oracles is REJECTED (the anti-world guard, incl. the M4 None arm).
     #[test]
     fn stacking_ok_rejects_btctax_alone_against_both() {
-        let ops = L16Operands { status: FilingStatus::Mfj, ti: usd(253_942.94), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
+        let ops = L16Operands {
+            status: FilingStatus::Mfj,
+            ti: usd(253_942.94),
+            qd_l3a: usd(0.0),
+            net_ltcg_qd_excl: usd(0.0),
+        };
         // btctax 47_030 (a hypothetical wrong value) vs OTS/taxcalc 47_031 — no class, no pin ⇒ fails.
-        assert!(!stacking_ok(usd(47_030.0), 47_031.31, Some(47_031.31), None, None, &ops, None));
+        assert!(!stacking_ok(
+            usd(47_030.0),
+            47_031.31,
+            Some(47_031.31),
+            None,
+            None,
+            &ops,
+            None
+        ));
     }
 
     // stacking_ok — the §10 KnownDefect pin is AUTHORITATIVE: it holds btctax's caught-wrong value while
@@ -373,24 +448,63 @@ mod tests {
     // the pin still declared, or the pin lingers green re-armed to silently re-absorb a same-value regression.
     #[test]
     fn stacking_ok_known_defect_pin_holds_then_goes_stale() {
-        let ops = L16Operands { status: FilingStatus::Mfj, ti: usd(253_942.94), qd_l3a: usd(0.0), net_ltcg_qd_excl: usd(0.0) };
-        let kd = KnownDefect { fu_id: "FU-EXAMPLE", btctax_value: usd(47_030.0) };
+        let ops = L16Operands {
+            status: FilingStatus::Mfj,
+            ti: usd(253_942.94),
+            qd_l3a: usd(0.0),
+            net_ltcg_qd_excl: usd(0.0),
+        };
+        let kd = KnownDefect {
+            fu_id: "FU-EXAMPLE",
+            btctax_value: usd(47_030.0),
+        };
         // Held: btctax still prints the pinned wrong 47_030 against both oracles' 47_031.
-        assert!(stacking_ok(usd(47_030.0), 47_031.31, Some(47_031.31), None, None, &ops, Some(&kd)));
+        assert!(stacking_ok(
+            usd(47_030.0),
+            47_031.31,
+            Some(47_031.31),
+            None,
+            None,
+            &ops,
+            Some(&kd)
+        ));
         // Stale (value moved to another wrong value): fails, forcing removal.
-        assert!(!stacking_ok(usd(47_029.0), 47_031.31, Some(47_031.31), None, None, &ops, Some(&kd)));
+        assert!(!stacking_ok(
+            usd(47_029.0),
+            47_031.31,
+            Some(47_031.31),
+            None,
+            None,
+            &ops,
+            Some(&kd)
+        ));
         // Stale (bug FIXED): btctax now agrees with both oracles (47_031), but the pin (old wrong 47_030)
         // is still declared — the authoritative pin FAILS, forcing the entry's deletion.
-        assert!(!stacking_ok(usd(47_031.0), 47_031.31, Some(47_031.31), None, None, &ops, Some(&kd)));
+        assert!(!stacking_ok(
+            usd(47_031.0),
+            47_031.31,
+            Some(47_031.31),
+            None,
+            None,
+            &ops,
+            Some(&kd)
+        ));
     }
 
     // LivenessLedger: a declared-but-neither-fired-nor-pinned class is "dead".
     #[test]
     fn liveness_flags_a_dead_class() {
         let mut l = LivenessLedger::default();
-        l.declare_pinned("ots_provenance");        // held by a §5.1 pinned cell
+        l.declare_pinned("ots_provenance"); // held by a §5.1 pinned cell
         l.record_fire("taxcalc_methodology");
         // "taxcalc_provenance" declared below but neither fired nor pinned ⇒ dead.
-        assert_eq!(l.dead(&["taxcalc_methodology","ots_provenance","taxcalc_provenance"]), vec!["taxcalc_provenance"]);
+        assert_eq!(
+            l.dead(&[
+                "taxcalc_methodology",
+                "ots_provenance",
+                "taxcalc_provenance"
+            ]),
+            vec!["taxcalc_provenance"]
+        );
     }
 }

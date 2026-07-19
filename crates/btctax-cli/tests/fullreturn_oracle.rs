@@ -24,8 +24,8 @@ const FIXTURE: &str = include_str!("fixtures/examples/fullreturn_inputs.toml");
 
 #[test]
 fn fullreturn_fixture_is_the_kitchen_sink_oracle() {
-    let parsed: ReturnInputs =
-        toml::from_str(FIXTURE).expect("the committed fullreturn_inputs.toml parses as ReturnInputs");
+    let parsed: ReturnInputs = toml::from_str(FIXTURE)
+        .expect("the committed fullreturn_inputs.toml parses as ReturnInputs");
     assert_eq!(
         parsed,
         kitchen_sink_household().0,
@@ -60,7 +60,10 @@ fn emit_fullreturn_fixture() {
     // `to_string` (not `to_string_pretty`): compact inline arrays (`date_of_birth = [2012, 106]`,
     // `box12 = []`) instead of the pretty serializer's multi-line arrays — less diff noise, same bytes
     // on every regen. NOT `toml::to_string(&ri)` (that fails ValueAfterTable) — serialize the Value.
-    let text = format!("{FIXTURE_BANNER}{}", toml::to_string(&value).expect("toml::Value → TOML text"));
+    let text = format!(
+        "{FIXTURE_BANNER}{}",
+        toml::to_string(&value).expect("toml::Value → TOML text")
+    );
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/examples/fullreturn_inputs.toml"

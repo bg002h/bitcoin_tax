@@ -499,8 +499,15 @@ mod tests {
     fn form_8995_printed_chain_reit_only() {
         // $10,000 REIT dividends; TI-before-QBI $100,000; net capital gain $20,000.
         // line 9 = 20% × 10,000 = 2,000. line 13 = 80,000 → line 14 = 16,000. line 15 = min = 2,000.
-        let l =
-            form_8995_lines("", Usd::ZERO, dec!(10000), Usd::ZERO, dec!(100000), dec!(20000)).unwrap();
+        let l = form_8995_lines(
+            "",
+            Usd::ZERO,
+            dec!(10000),
+            Usd::ZERO,
+            dec!(100000),
+            dec!(20000),
+        )
+        .unwrap();
         assert_eq!(l.line2, Usd::ZERO);
         assert_eq!(l.line4, Usd::ZERO);
         assert_eq!(l.line5, Usd::ZERO);
@@ -522,8 +529,15 @@ mod tests {
     #[test]
     fn form_8995_printed_chain_income_limit_binds() {
         // TI-before-QBI 12,000 all of which is capital gain → line 13 = 0 → line 14 = 0 → no deduction.
-        let l =
-            form_8995_lines("", Usd::ZERO, dec!(10000), Usd::ZERO, dec!(12000), dec!(12000)).unwrap();
+        let l = form_8995_lines(
+            "",
+            Usd::ZERO,
+            dec!(10000),
+            Usd::ZERO,
+            dec!(12000),
+            dec!(12000),
+        )
+        .unwrap();
         assert_eq!(l.line10, dec!(2000)); // the component is there…
         assert_eq!(l.line13, Usd::ZERO);
         assert_eq!(l.line14, Usd::ZERO);
@@ -538,8 +552,15 @@ mod tests {
     #[test]
     fn form_8995_loss_carryforward_lines_are_positive_magnitudes() {
         // Prior-year REIT/PTP loss carryforward $15,000 against only $10,000 of REIT dividends.
-        let l =
-            form_8995_lines("", Usd::ZERO, dec!(10000), dec!(15000), dec!(100000), Usd::ZERO).unwrap();
+        let l = form_8995_lines(
+            "",
+            Usd::ZERO,
+            dec!(10000),
+            dec!(15000),
+            dec!(100000),
+            Usd::ZERO,
+        )
+        .unwrap();
         assert_eq!(l.line6, dec!(10000));
         assert_eq!(l.line7, dec!(15000)); // POSITIVE magnitude, not −15,000
         assert_eq!(l.line8, Usd::ZERO); // 10,000 − 15,000, floored: no REIT income survives
@@ -564,7 +585,15 @@ mod tests {
         );
         // …but a bare carryforward, with no REIT income this year, DOES produce the form (it must
         // carry the loss forward on line 17, or the carryforward is silently lost).
-        let l = form_8995_lines("", Usd::ZERO, Usd::ZERO, dec!(5000), dec!(100000), Usd::ZERO).unwrap();
+        let l = form_8995_lines(
+            "",
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(5000),
+            dec!(100000),
+            Usd::ZERO,
+        )
+        .unwrap();
         assert_eq!(l.line17, dec!(5000));
     }
 

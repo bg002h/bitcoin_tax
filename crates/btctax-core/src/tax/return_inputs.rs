@@ -489,10 +489,16 @@ mod tests {
     #[test]
     fn p9_answeredness_fields_default_to_unanswered() {
         let p = Person::default();
-        assert_eq!(p.blind, None, "§63(f) blindness is a tri-state; unasked is None, not false");
+        assert_eq!(
+            p.blind, None,
+            "§63(f) blindness is a tri-state; unasked is None, not false"
+        );
 
         let a = ScheduleAInputs::default();
-        assert_eq!(a.salt_use_sales_tax, None, "§164(b)(5) election is a tri-state; unasked is None");
+        assert_eq!(
+            a.salt_use_sales_tax, None,
+            "§164(b)(5) election is a tri-state; unasked is None"
+        );
         assert_eq!(
             a.mortgage_all_used_to_buy_build_improve, None,
             "§163(h)(3)(F) mixed-use question is a NEW declaration; unasked is None"

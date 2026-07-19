@@ -38,7 +38,11 @@ fn run_in(cwd: &Path, extra_env: &[(&str, &str)], args: &[&str]) -> (i32, String
 /// and `verify` prints that `recorded` date — a clock-derived surface (SPEC §3.2).
 fn vault_with_election(now: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
-    let (c, _o, e) = run_in(dir.path(), &[], &["--vault", "v.pgp", "init", "--key-backup", "k.asc"]);
+    let (c, _o, e) = run_in(
+        dir.path(),
+        &[],
+        &["--vault", "v.pgp", "init", "--key-backup", "k.asc"],
+    );
     assert_eq!(c, 0, "init failed: {e}");
     let (c, _o, e) = run_in(
         dir.path(),
@@ -58,7 +62,10 @@ fn malformed_btctax_now_is_exit_2_naming_the_var() {
         &["--vault", "v.pgp", "init", "--key-backup", "k.asc"],
     );
     assert_eq!(code, 2, "malformed BTCTAX_NOW must exit 2; stderr: {err}");
-    assert!(err.contains("BTCTAX_NOW"), "error must name the variable; got: {err}");
+    assert!(
+        err.contains("BTCTAX_NOW"),
+        "error must name the variable; got: {err}"
+    );
 }
 
 #[test] // T-P0.3 (empty)
@@ -70,7 +77,10 @@ fn empty_btctax_now_is_exit_2() {
         &["--vault", "v.pgp", "init", "--key-backup", "k.asc"],
     );
     assert_eq!(code, 2, "empty BTCTAX_NOW must exit 2; stderr: {err}");
-    assert!(err.contains("BTCTAX_NOW"), "error must name the variable; got: {err}");
+    assert!(
+        err.contains("BTCTAX_NOW"),
+        "error must name the variable; got: {err}"
+    );
 }
 
 #[test] // T-P0.4
@@ -87,10 +97,16 @@ fn banner_on_stderr_when_set_never_on_stdout_absent_when_unset() {
         err.contains("warning: BTCTAX_NOW override active — decision timestamps are simulated"),
         "the full R-P0.4 banner must be on stderr; got: {err}"
     );
-    assert!(!out.contains("BTCTAX_NOW override active"), "banner must NOT be on stdout");
+    assert!(
+        !out.contains("BTCTAX_NOW override active"),
+        "banner must NOT be on stdout"
+    );
     // unset: no banner
     let (_c, _out, err2) = run_in(dir.path(), &[], &["--vault", "v.pgp", "verify"]);
-    assert!(!err2.contains("BTCTAX_NOW override active"), "no banner when unset; got: {err2}");
+    assert!(
+        !err2.contains("BTCTAX_NOW override active"),
+        "no banner when unset; got: {err2}"
+    );
 }
 
 #[test] // T-P0.2 + T-P0.5
@@ -102,14 +118,21 @@ fn recorded_date_roundtrips_through_binary_and_is_twice_run_identical() {
         &[("BTCTAX_NOW", "2025-05-01T00:00:00Z")],
         &["--vault", "v.pgp", "verify"],
     );
-    assert!(out.contains("2025-05-01"), "recorded date must reflect BTCTAX_NOW; got: {out}");
+    assert!(
+        out.contains("2025-05-01"),
+        "recorded date must reflect BTCTAX_NOW; got: {out}"
+    );
     // T-P0.5: byte-identical stdout AND exit code across two runs
     let (code2, out2, _e2) = run_in(
         dir.path(),
         &[("BTCTAX_NOW", "2025-05-01T00:00:00Z")],
         &["--vault", "v.pgp", "verify"],
     );
-    assert_eq!((code, out), (code2, out2), "twice-run must be byte-identical");
+    assert_eq!(
+        (code, out),
+        (code2, out2),
+        "twice-run must be byte-identical"
+    );
 }
 
 #[test] // T-P0.1
@@ -119,7 +142,10 @@ fn unset_seam_behaves_normally() {
     let (code, out, err) = run_in(dir.path(), &[], &["--vault", "v.pgp", "verify"]);
     assert_eq!(code, 0, "verify should succeed; stderr: {err}");
     assert!(!err.contains("override active"));
-    assert!(out.contains("recorded 2025-05-01"), "verify still renders the election's recorded date");
+    assert!(
+        out.contains("recorded 2025-05-01"),
+        "verify still renders the election's recorded date"
+    );
 }
 
 #[test] // T-P0.6 — the KAT IS the disclosure that BTCTAX_NOW can move the attestation classification.
@@ -139,18 +165,36 @@ fn backdated_vs_postdated_now_moves_the_attestation_classification() {
     fn accept_under(now: &str) -> String {
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path();
-        let (c, _o, e) = run_in(cwd, &[], &["--vault", "v.pgp", "init", "--key-backup", "k.asc"]);
+        let (c, _o, e) = run_in(
+            cwd,
+            &[],
+            &["--vault", "v.pgp", "init", "--key-backup", "k.asc"],
+        );
         assert_eq!(c, 0, "init: {e}");
         let csv = fixtures::coinbase_two_lot_tax_saving(cwd); // LT+ST lots, 2025-06-01 sell
-        let (c, _o, e) = run_in(cwd, &[], &["--vault", "v.pgp", "import", csv.to_str().unwrap()]);
+        let (c, _o, e) = run_in(
+            cwd,
+            &[],
+            &["--vault", "v.pgp", "import", csv.to_str().unwrap()],
+        );
         assert_eq!(c, 0, "import: {e}");
         let (c, _o, e) = run_in(
             cwd,
             &[],
             &[
-                "--vault", "v.pgp", "tax-profile", "--year", "2025", "--filing-status", "single",
-                "--ordinary-taxable-income", "100000", "--magi-excluding-crypto", "100000",
-                "--qualified-dividends", "0",
+                "--vault",
+                "v.pgp",
+                "tax-profile",
+                "--year",
+                "2025",
+                "--filing-status",
+                "single",
+                "--ordinary-taxable-income",
+                "100000",
+                "--magi-excluding-crypto",
+                "100000",
+                "--qualified-dividends",
+                "0",
             ],
         );
         assert_eq!(c, 0, "tax-profile: {e}");
@@ -158,7 +202,15 @@ fn backdated_vs_postdated_now_moves_the_attestation_classification() {
         let (c, _o, e) = run_in(
             cwd,
             &[("BTCTAX_NOW", "2025-01-01T00:00:00Z")],
-            &["--vault", "v.pgp", "config", "--set-forward-method", "fifo", "--effective-from", "2025-01-01"],
+            &[
+                "--vault",
+                "v.pgp",
+                "config",
+                "--set-forward-method",
+                "fifo",
+                "--effective-from",
+                "2025-01-01",
+            ],
         );
         assert_eq!(c, 0, "config: {e}");
         // `optimize accept --tax-year 2025` recomputes the year internally (no prior `optimize run` and no
@@ -167,15 +219,22 @@ fn backdated_vs_postdated_now_moves_the_attestation_classification() {
         let (c, out, e) = run_in(
             cwd,
             &[("BTCTAX_NOW", now)],
-            &["--vault", "v.pgp", "optimize", "accept", "--tax-year", "2025"],
+            &[
+                "--vault",
+                "v.pgp",
+                "optimize",
+                "accept",
+                "--tax-year",
+                "2025",
+            ],
         );
         assert_eq!(c, 0, "accept: {e}");
         out
     }
     let back = accept_under("2025-01-01T00:00:00Z"); // <= 2025-06-01 sale => ContemporaneousNow (persisted)
     let post = accept_under("2026-06-01T00:00:00Z"); // >  2025-06-01 sale => NeedsAttestation (skipped)
-    // Pin DIRECTION, not just difference (review Minor #1): backdated ⇒ persisted [Contemporaneous];
-    // postdated ⇒ skipped (attest-gated). A direction-flip of the made≤sale lever must not survive.
+                                                     // Pin DIRECTION, not just difference (review Minor #1): backdated ⇒ persisted [Contemporaneous];
+                                                     // postdated ⇒ skipped (attest-gated). A direction-flip of the made≤sale lever must not survive.
     assert!(
         back.contains("[Contemporaneous]") && back.contains("1 persisted"),
         "backdated (made <= sale) must persist as [Contemporaneous]:\n{back}"

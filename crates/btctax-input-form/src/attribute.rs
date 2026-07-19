@@ -178,14 +178,23 @@ mod tests {
     fn private_activity_bond_is_not_in_form() {
         let anchors = attribute(&RefuseReason::PrivateActivityBondAmt);
         assert_eq!(anchors.len(), 1, "exactly one anchor");
-        assert!(matches!(anchors[0], NotInForm { .. }), "a 1099 box is not a v1 form field: {anchors:?}");
+        assert!(
+            matches!(anchors[0], NotInForm { .. }),
+            "a 1099 box is not a v1 form field: {anchors:?}"
+        );
     }
 
     #[test]
     fn non_public_charity_has_the_charitable_section_and_a_not_in_form() {
         let anchors = attribute(&RefuseReason::NonPublicCharityContribution);
-        assert!(anchors.contains(&Section(SectionId::ScheduleACharitable)), "{anchors:?}");
-        assert!(anchors.iter().any(|a| matches!(a, NotInForm { .. })), "carryover-in leg is deferred: {anchors:?}");
+        assert!(
+            anchors.contains(&Section(SectionId::ScheduleACharitable)),
+            "{anchors:?}"
+        );
+        assert!(
+            anchors.iter().any(|a| matches!(a, NotInForm { .. })),
+            "carryover-in leg is deferred: {anchors:?}"
+        );
     }
 
     #[test]
@@ -212,7 +221,8 @@ mod tests {
             ],
         );
         // The Schedule-A leaf is the election's form identity — assert it appears (there is no other id to use).
-        assert!(attribute(&RefuseReason::SalesTaxElectionWithoutAmount).contains(&Field(FieldId::SaSaltUseSalesTax)));
+        assert!(attribute(&RefuseReason::SalesTaxElectionWithoutAmount)
+            .contains(&Field(FieldId::SaSaltUseSalesTax)));
     }
 
     /// The other SALT refusal (amount without the election) → the two Schedule-A fields, via the Sa* ids.
@@ -240,40 +250,85 @@ mod tests {
     /// The 6 unanswered-declaration refusals resolve to their Declaration field via `QuestionId`.
     #[test]
     fn unanswered_declarations_anchor_their_declaration_field() {
-        assert_eq!(attribute(&RefuseReason::DependentStatusUnanswered), vec![Field(FieldId::DeclDependentTaxpayer)]);
-        assert_eq!(attribute(&RefuseReason::DependentSpouseStatusUnanswered), vec![Field(FieldId::DeclDependentSpouse)]);
-        assert_eq!(attribute(&RefuseReason::MfsSpouseItemizeUnknown), vec![Field(FieldId::DeclMfsSpouseItemizes)]);
-        assert_eq!(attribute(&RefuseReason::HsaActivityUnanswered), vec![Field(FieldId::DeclHsaActivity)]);
-        assert_eq!(attribute(&RefuseReason::DualStatusAlienUnanswered), vec![Field(FieldId::DeclDualStatusAlien)]);
+        assert_eq!(
+            attribute(&RefuseReason::DependentStatusUnanswered),
+            vec![Field(FieldId::DeclDependentTaxpayer)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::DependentSpouseStatusUnanswered),
+            vec![Field(FieldId::DeclDependentSpouse)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::MfsSpouseItemizeUnknown),
+            vec![Field(FieldId::DeclMfsSpouseItemizes)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::HsaActivityUnanswered),
+            vec![Field(FieldId::DeclHsaActivity)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::DualStatusAlienUnanswered),
+            vec![Field(FieldId::DeclDualStatusAlien)]
+        );
     }
 
     /// The `Some(true)` value-refusals anchor the same Declaration field as their unanswered twin (§7 line 510).
     #[test]
     fn value_refusals_anchor_their_declaration_field() {
-        assert_eq!(attribute(&RefuseReason::ForeignTrust), vec![Field(FieldId::DeclForeignTrust)]);
-        assert_eq!(attribute(&RefuseReason::HsaActivityUnsupported), vec![Field(FieldId::DeclHsaActivity)]);
-        assert_eq!(attribute(&RefuseReason::DualStatusAlienUnsupported), vec![Field(FieldId::DeclDualStatusAlien)]);
-        assert_eq!(attribute(&RefuseReason::DependentSpouseUnsupported), vec![Field(FieldId::DeclDependentSpouse)]);
+        assert_eq!(
+            attribute(&RefuseReason::ForeignTrust),
+            vec![Field(FieldId::DeclForeignTrust)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::HsaActivityUnsupported),
+            vec![Field(FieldId::DeclHsaActivity)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::DualStatusAlienUnsupported),
+            vec![Field(FieldId::DeclDualStatusAlien)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::DependentSpouseUnsupported),
+            vec![Field(FieldId::DeclDependentSpouse)]
+        );
     }
 
     #[test]
     fn box12_and_w2_set_refusals_anchor_the_right_section() {
-        assert_eq!(attribute(&RefuseReason::UnsupportedBox12Code("K".into())), vec![Section(SectionId::W2Box12)]);
-        assert_eq!(attribute(&RefuseReason::ExcessElectiveDeferral), vec![Section(SectionId::W2s)]);
-        assert_eq!(attribute(&RefuseReason::AllocatedTips), vec![Section(SectionId::W2s)]);
-        assert_eq!(attribute(&RefuseReason::DependentCareBenefit), vec![Section(SectionId::W2s)]);
+        assert_eq!(
+            attribute(&RefuseReason::UnsupportedBox12Code("K".into())),
+            vec![Section(SectionId::W2Box12)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::ExcessElectiveDeferral),
+            vec![Section(SectionId::W2s)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::AllocatedTips),
+            vec![Section(SectionId::W2s)]
+        );
+        assert_eq!(
+            attribute(&RefuseReason::DependentCareBenefit),
+            vec![Section(SectionId::W2s)]
+        );
     }
 
     #[test]
     fn spouse_owner_has_the_w2_section_and_a_deferred_leg() {
         let anchors = attribute(&RefuseReason::SpouseOwnerWithoutJointReturn);
         assert_eq!(anchors[0], Section(SectionId::W2s));
-        assert!(anchors.iter().any(|a| matches!(a, NotInForm { .. })), "schedule_c.owner leg is deferred: {anchors:?}");
+        assert!(
+            anchors.iter().any(|a| matches!(a, NotInForm { .. })),
+            "schedule_c.owner leg is deferred: {anchors:?}"
+        );
     }
 
     #[test]
     fn foreign_country_missing_anchors_the_text_field() {
-        assert_eq!(attribute(&RefuseReason::ScheduleBForeignCountryMissing), vec![Field(FieldId::ForeignCountryNames)]);
+        assert_eq!(
+            attribute(&RefuseReason::ScheduleBForeignCountryMissing),
+            vec![Field(FieldId::ForeignCountryNames)]
+        );
     }
 
     /// The compute/absolute/deferred bucket (§7 line 521) is all `NotInForm`, plus the defensive-only pair.
@@ -297,7 +352,10 @@ mod tests {
         ] {
             let anchors = attribute(&r);
             assert_eq!(anchors.len(), 1, "{r:?} → exactly one anchor: {anchors:?}");
-            assert!(matches!(anchors[0], NotInForm { .. }), "{r:?} must be NotInForm: {anchors:?}");
+            assert!(
+                matches!(anchors[0], NotInForm { .. }),
+                "{r:?} must be NotInForm: {anchors:?}"
+            );
         }
     }
 

@@ -137,10 +137,14 @@ pub fn years(conn: &Connection) -> Result<Vec<i32>, CliError> {
 /// Return all stored inputs, sorted by year ascending.
 pub fn all(conn: &Connection) -> Result<BTreeMap<i32, ReturnInputs>, CliError> {
     init_table(conn)?;
-    let mut stmt = conn
-        .prepare("SELECT year, inputs_json, schema_version FROM return_inputs ORDER BY year")?;
+    let mut stmt =
+        conn.prepare("SELECT year, inputs_json, schema_version FROM return_inputs ORDER BY year")?;
     let rows = stmt.query_map([], |r| {
-        Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+        Ok((
+            r.get::<_, i32>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
     })?;
     let mut out = BTreeMap::new();
     for row in rows {
@@ -233,7 +237,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod p9_stale_row_refuses {
     //! ★ P9 §2.6 — there is NO migration. A stored row whose `schema_version` is not the current one
@@ -276,7 +279,10 @@ mod p9_stale_row_refuses {
     fn a_version_1_row_refuses_stale() {
         let conn = vault_with_row_at_version(2024, 1);
         assert!(
-            matches!(get(&conn, 2024), Err(CliError::StaleReturnInputs { found: 1, .. })),
+            matches!(
+                get(&conn, 2024),
+                Err(CliError::StaleReturnInputs { found: 1, .. })
+            ),
             "a v1 row must refuse as stale"
         );
     }
@@ -287,7 +293,10 @@ mod p9_stale_row_refuses {
     fn all_refuses_a_stale_row_identically_to_get() {
         let conn = vault_with_row_at_version(2024, 1);
         assert!(
-            matches!(all(&conn), Err(CliError::StaleReturnInputs { found: 1, .. })),
+            matches!(
+                all(&conn),
+                Err(CliError::StaleReturnInputs { found: 1, .. })
+            ),
             "`all()` must apply the same version gate as `get()`"
         );
     }
@@ -308,7 +317,10 @@ mod p9_stale_row_refuses {
     #[test]
     fn a_current_version_row_reads() {
         let conn = vault_with_row_at_version(2024, SCHEMA_VERSION);
-        assert!(get(&conn, 2024).unwrap().is_some(), "a current-version row must read");
+        assert!(
+            get(&conn, 2024).unwrap().is_some(),
+            "a current-version row must read"
+        );
     }
 
     /// The stale-row refusal's message names all THREE remedy commands, in order (§2.6 / r6 I-1): `clear`
@@ -316,13 +328,21 @@ mod p9_stale_row_refuses {
     /// rebuild clause from the `#[error(...)]` string ⇒ this fails.
     #[test]
     fn the_stale_message_names_the_full_three_command_remedy() {
-        let msg = CliError::StaleReturnInputs { year: 2024, found: 1, expected: 2 }.to_string();
+        let msg = CliError::StaleReturnInputs {
+            year: 2024,
+            found: 1,
+            expected: 2,
+        }
+        .to_string();
         assert!(msg.contains("income clear 2024"), "names clear");
         assert!(msg.contains("income import"), "names import");
         assert!(
             msg.contains("--write-carryover"),
             "names the rebuild — disclosure is not restoration (r6 I-1)"
         );
-        assert!(msg.contains("2023"), "the rebuild targets the PRIOR year (year-1)");
+        assert!(
+            msg.contains("2023"),
+            "the rebuild targets the PRIOR year (year-1)"
+        );
     }
 }

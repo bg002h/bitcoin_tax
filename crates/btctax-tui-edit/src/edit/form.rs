@@ -287,7 +287,9 @@ impl TaxInputsFormState {
             parked: false,
             stale_note: None,
             discard_offered: false,
-            active_source_label: active_source_label(&btctax_cli::input_form_store::ActiveSource::Neither),
+            active_source_label: active_source_label(
+                &btctax_cli::input_form_store::ActiveSource::Neither,
+            ),
             pending_remove: None,
             descent: None,
             modal: None,

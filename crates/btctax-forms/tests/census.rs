@@ -27,8 +27,20 @@ use time::macros::date;
 /// The §6.1 census key set — the 14 forms `fill_full_return` can emit — in ONE place. Schedule D/SE use
 /// bare `schedule_d`/`schedule_se`; the numbered schedules use `f1040s{1,2,3,a,b,c}`.
 const CENSUS_KEYS: [&str; 14] = [
-    "f1040", "f1040s1", "f1040s2", "f1040s3", "f1040sa", "f1040sb", "f1040sc", "schedule_d", "f8949",
-    "schedule_se", "f8995", "f8959", "f8960", "f8283",
+    "f1040",
+    "f1040s1",
+    "f1040s2",
+    "f1040s3",
+    "f1040sa",
+    "f1040sb",
+    "f1040sc",
+    "schedule_d",
+    "f8949",
+    "schedule_se",
+    "f8995",
+    "f8959",
+    "f8960",
+    "f8283",
 ];
 
 /// A minimal, well-formed Section-A Form 8283 row. The census only needs the `f8283` filler to return
@@ -61,14 +73,17 @@ fn all_arms_return() -> PrintedReturn {
     let table = ty2024_table();
     let ar = assemble_absolute(&ri, &state, &ty2024_params(), &table, 2024);
     let details: BTreeMap<_, _> = BTreeMap::new();
-    let mut pr =
-        assemble_printed_return(&ri, &state, &details, &ar, &table, 2024).expect("kitchen_sink assembles");
+    let mut pr = assemble_printed_return(&ri, &state, &details, &ar, &table, 2024)
+        .expect("kitchen_sink assembles");
     assert!(
         pr.forms.f8283.is_none(),
         "premise: kitchen_sink is 13/14 (no f8283) — if this fires the fixture assumption changed"
     );
     pr.forms.f8283 = form_8283_printed(&[injected_8283_row()]);
-    assert!(pr.forms.f8283.is_some(), "the injected f8283 arm must be Some");
+    assert!(
+        pr.forms.f8283.is_some(),
+        "the injected f8283 arm must be Some"
+    );
     pr
 }
 
@@ -93,7 +108,10 @@ fn census_key_set_is_exactly_14() {
 
 /// Read the committed golden (`docs/examples/examples.md`), two levels up from this crate.
 fn golden() -> String {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/examples/examples.md");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/examples/examples.md"
+    );
     std::fs::read_to_string(path).unwrap_or_else(|e| {
         panic!("read {path}: {e} — regenerate with `cargo run -p xtask -- examples > docs/examples/examples.md`")
     })
@@ -107,7 +125,10 @@ fn j6_packet_names(golden: &str) -> BTreeSet<String> {
     let j6_start = golden.find("## J6").expect("golden has a J6 section");
     let j6_body = &golden[j6_start..];
     // Bound to the J6 section (defensive against a future J7) — stop at the next "\n## " header.
-    let end = j6_body[2..].find("\n## ").map(|i| i + 2).unwrap_or(j6_body.len());
+    let end = j6_body[2..]
+        .find("\n## ")
+        .map(|i| i + 2)
+        .unwrap_or(j6_body.len());
     let j6 = &j6_body[..end];
     let pkt_start = j6
         .find("Full-return packet —")

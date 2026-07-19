@@ -11,6 +11,7 @@ use crate::conventions::Usd;
 use crate::event::{BasisSource, DisposeKind, IncomeKind};
 use crate::identity::{EventId, LotId, WalletId};
 use crate::state::{Disposal, DisposalLeg, IncomeRecord, LedgerState, Term};
+use crate::tax::questions::{QuestionId, FORM_QUESTIONS};
 use crate::tax::return_inputs::{
     CharitableClass, CharitableGift, Dependent, Form1099Div, Form1099G, Form1099Int,
     HouseholdHeader, Owner, Payments, Person, ReturnInputs, ScheduleAInputs, ScheduleCInputs, W2,
@@ -18,7 +19,6 @@ use crate::tax::return_inputs::{
 use crate::tax::tables::{
     AmtParams, FullReturnParams, LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable,
 };
-use crate::tax::questions::{QuestionId, FORM_QUESTIONS};
 use crate::tax::types::FilingStatus;
 use rust_decimal_macros::dec;
 
@@ -360,8 +360,7 @@ pub fn w2_only_household() -> (ReturnInputs, LedgerState) {
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
 /// The committed oracle answers. Regenerate with `scripts/oracle/gen_goldens.py` (see its header).
-pub const GOLDEN_RETURNS_JSON: &str =
-    include_str!("../../tests/goldens/full_return_goldens.json");
+pub const GOLDEN_RETURNS_JSON: &str = include_str!("../../tests/goldens/full_return_goldens.json");
 
 /// Parse the committed golden matrix.
 pub fn golden_households() -> Vec<GoldenHousehold> {
@@ -406,18 +405,28 @@ pub struct ExpectedOts {
     pub niit: f64,
     pub additional_medicare_tax: f64,
     pub total_tax: f64,
-    #[serde(default)] pub deduction_taken: Option<f64>,       // 1040 L12
-    #[serde(default)] pub salt_capped: Option<f64>,           // Sch A L5e
-    #[serde(default)] pub sch_d_to_l7: Option<f64>,           // 1040 L7 (signed)
-    #[serde(default)] pub qbi_cap_l12: Option<f64>,           // 8995 L12 — OTS single-witness/WEAK (I1): driver-hand-fed, NOT an independent check; §14.2 closure = follow-up
+    #[serde(default)]
+    pub deduction_taken: Option<f64>, // 1040 L12
+    #[serde(default)]
+    pub salt_capped: Option<f64>, // Sch A L5e
+    #[serde(default)]
+    pub sch_d_to_l7: Option<f64>, // 1040 L7 (signed)
+    #[serde(default)]
+    pub qbi_cap_l12: Option<f64>, // 8995 L12 — OTS single-witness/WEAK (I1): driver-hand-fed, NOT an independent check; §14.2 closure = follow-up
     // provenance leaves for the §6.2(b) predicate (Table_btctax inputs):
-    #[serde(default)] pub qual_div_l3a: Option<f64>,          // 1040 L3a
-    #[serde(default)] pub net_ltcg_qd_exclusive: Option<f64>, // §1(h) term, QD-EXCLUSIVE (r5-N2)
+    #[serde(default)]
+    pub qual_div_l3a: Option<f64>, // 1040 L3a
+    #[serde(default)]
+    pub net_ltcg_qd_exclusive: Option<f64>, // §1(h) term, QD-EXCLUSIVE (r5-N2)
     // C1 cross-foot legs — OTS only (taxcalc has no split):
-    #[serde(default)] pub se_l10_oasdi: Option<f64>,          // Sch SE L10 (OASDI leg)
-    #[serde(default)] pub se_l11_medicare: Option<f64>,       // Sch SE L11 (Medicare leg)
-    #[serde(default)] pub f8959_l7: Option<f64>,              // 8959 L7 leg
-    #[serde(default)] pub f8959_l13: Option<f64>,             // 8959 L13 leg
+    #[serde(default)]
+    pub se_l10_oasdi: Option<f64>, // Sch SE L10 (OASDI leg)
+    #[serde(default)]
+    pub se_l11_medicare: Option<f64>, // Sch SE L11 (Medicare leg)
+    #[serde(default)]
+    pub f8959_l7: Option<f64>, // 8959 L7 leg
+    #[serde(default)]
+    pub f8959_l13: Option<f64>, // 8959 L13 leg
 }
 
 /// The second oracle's outputs. Only the lines whose definitions are unambiguous across engines: we do
@@ -432,14 +441,21 @@ pub struct ExpectedTaxcalc {
     pub se_tax: f64,
     pub niit: f64,
     pub additional_medicare_tax: f64,
-    #[serde(default)] pub deduction_taken: Option<f64>,       // 1040 L12
-    #[serde(default)] pub salt_capped: Option<f64>,           // Sch A L5e
-    #[serde(default)] pub sch_d_to_l7: Option<f64>,           // 1040 L7 (signed)
-    #[serde(default)] pub qbi_cap_l12: Option<f64>,           // 8995 L12 — OTS single-witness/WEAK (I1): driver-hand-fed, NOT an independent check; §14.2 closure = follow-up
+    #[serde(default)]
+    pub deduction_taken: Option<f64>, // 1040 L12
+    #[serde(default)]
+    pub salt_capped: Option<f64>, // Sch A L5e
+    #[serde(default)]
+    pub sch_d_to_l7: Option<f64>, // 1040 L7 (signed)
+    #[serde(default)]
+    pub qbi_cap_l12: Option<f64>, // 8995 L12 — OTS single-witness/WEAK (I1): driver-hand-fed, NOT an independent check; §14.2 closure = follow-up
     // provenance leaves for the §6.2(b) predicate (Table_btctax inputs):
-    #[serde(default)] pub qual_div_l3a: Option<f64>,          // 1040 L3a
-    #[serde(default)] pub net_ltcg_qd_exclusive: Option<f64>, // §1(h) term, QD-EXCLUSIVE (r5-N2)
-    #[serde(default)] pub total_tax: Option<f64>,             // OTS's is required f64; taxcalc's is optional — §6.4 M-4
+    #[serde(default)]
+    pub qual_div_l3a: Option<f64>, // 1040 L3a
+    #[serde(default)]
+    pub net_ltcg_qd_exclusive: Option<f64>, // §1(h) term, QD-EXCLUSIVE (r5-N2)
+    #[serde(default)]
+    pub total_tax: Option<f64>, // OTS's is required f64; taxcalc's is optional — §6.4 M-4
 }
 
 #[derive(Debug, Deserialize)]

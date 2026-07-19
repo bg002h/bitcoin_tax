@@ -12,48 +12,109 @@ pub struct RowAddr(pub Vec<usize>);
 /// Stable section identity — the wire contract; NEVER a Vec index (spec §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SectionId {
-    ReturnOptions, Taxpayer, Spouse, Address, Dependents,
-    W2s, W2Box12, ScheduleA, ScheduleACharitable, Payments,
-    Declarations, Skippables,
+    ReturnOptions,
+    Taxpayer,
+    Spouse,
+    Address,
+    Dependents,
+    W2s,
+    W2Box12,
+    ScheduleA,
+    ScheduleACharitable,
+    Payments,
+    Declarations,
+    Skippables,
 }
 
 /// Stable field identity. One per leaf across the v1 sections (spec §5.8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FieldId {
     // ReturnOptions
-    FilingStatus, ItemizeElection,
+    FilingStatus,
+    ItemizeElection,
     // Taxpayer / Spouse (Person + header.ip_pin)
-    TpFirstName, TpLastName, TpSsn, TpOccupation, TpPresidentialFund, IpPin,
-    SpFirstName, SpLastName, SpSsn, SpOccupation, SpPresidentialFund,
+    TpFirstName,
+    TpLastName,
+    TpSsn,
+    TpOccupation,
+    TpPresidentialFund,
+    IpPin,
+    SpFirstName,
+    SpLastName,
+    SpSsn,
+    SpOccupation,
+    SpPresidentialFund,
     // Address
-    AddrStreet, AddrCity, AddrState, AddrZip,
+    AddrStreet,
+    AddrCity,
+    AddrState,
+    AddrZip,
     // Dependents (per row)
-    DepName, DepSsn, DepRelationship, DepDob,
+    DepName,
+    DepSsn,
+    DepRelationship,
+    DepDob,
     // W2 (per row)
-    W2Owner, W2Employer, Box1Wages, Box2FedWh, Box3SsWages, Box4SsWh,
-    Box5MedWages, Box6MedWh, Box7SsTips, Box17StateWh, Box19LocalTax,
-    Box8AllocTips, Box10DepCare,
+    W2Owner,
+    W2Employer,
+    Box1Wages,
+    Box2FedWh,
+    Box3SsWages,
+    Box4SsWh,
+    Box5MedWages,
+    Box6MedWh,
+    Box7SsTips,
+    Box17StateWh,
+    Box19LocalTax,
+    Box8AllocTips,
+    Box10DepCare,
     // W2 box 12 (per row)
-    Box12Code, Box12Amount,
+    Box12Code,
+    Box12Amount,
     // Schedule A
-    SaMedical, SaSaltRealEstate, SaSaltPersonalProp, SaSaltStateEst,
-    SaSaltPriorYear, SaSaltSalesTaxAmt, SaMortgage1098,
-    SaSaltUseSalesTax, SaMortgageAllUsed,
+    SaMedical,
+    SaSaltRealEstate,
+    SaSaltPersonalProp,
+    SaSaltStateEst,
+    SaSaltPriorYear,
+    SaSaltSalesTaxAmt,
+    SaMortgage1098,
+    SaSaltUseSalesTax,
+    SaMortgageAllUsed,
     // Schedule A charitable (per row)
-    CharClass, CharAmount,
+    CharClass,
+    CharAmount,
     // Payments
-    PayEstimated, PayExtension, PayOtherWh,
+    PayEstimated,
+    PayExtension,
+    PayOtherWh,
     // Declarations (from FORM_QUESTIONS) + the 7b country text
-    DeclDependentTaxpayer, DeclDependentSpouse, DeclMfsSpouseItemizes,
-    DeclForeignAccounts, DeclForeignTrust, DeclHsaActivity, DeclDualStatusAlien,
+    DeclDependentTaxpayer,
+    DeclDependentSpouse,
+    DeclMfsSpouseItemizes,
+    DeclForeignAccounts,
+    DeclForeignTrust,
+    DeclHsaActivity,
+    DeclDualStatusAlien,
     ForeignCountryNames,
     // Skippables (from SKIPPABLE_QUESTIONS); SALT election = SaSaltUseSalesTax in Schedule A above
-    BlindTaxpayer, BlindSpouse, DobTaxpayer, DobSpouse,
+    BlindTaxpayer,
+    BlindSpouse,
+    DobTaxpayer,
+    DobSpouse,
 }
 
 /// The value shape of a field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FieldKind { Money, Text, Bool, TriState, Date, Enum(&'static [&'static str]), Secret }
+pub enum FieldKind {
+    Money,
+    Text,
+    Bool,
+    TriState,
+    Date,
+    Enum(&'static [&'static str]),
+    Secret,
+}
 
 /// A field value crossing the seam (spec §4/§5.7). Owned (serde), so it is the web wire.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,14 +124,17 @@ pub enum FieldValue {
     Bool(bool),
     TriState(Option<bool>),
     Date(Option<Date>),
-    Choice(String),          // an Enum choice by its stable name
-    Secret(SecretView),      // OUTBOUND only (get) — presence, never digits
-    SecretEntry(String),     // INBOUND only (set) — masked Debug; get never returns it
+    Choice(String),      // an Enum choice by its stable name
+    Secret(SecretView),  // OUTBOUND only (get) — presence, never digits
+    SecretEntry(String), // INBOUND only (set) — masked Debug; get never returns it
 }
 
 /// A secret's presence, never its digits (spec §4/§5.5).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SecretView { Empty, Set { masked: String } }
+pub enum SecretView {
+    Empty,
+    Set { masked: String },
+}
 
 impl SecretView {
     /// ★ The single guarded producer of a `Set` view (spec §4/§5.5; folds review follow-up (b)). The two
@@ -90,7 +154,7 @@ impl SecretView {
 impl fmt::Debug for FieldValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FieldValue::SecretEntry(_) => write!(f, "SecretEntry(***)"),   // never leak digits
+            FieldValue::SecretEntry(_) => write!(f, "SecretEntry(***)"), // never leak digits
             FieldValue::Money(v) => write!(f, "Money({v})"),
             FieldValue::Text(s) => write!(f, "Text({s:?})"),
             FieldValue::Bool(b) => write!(f, "Bool({b})"),
@@ -151,24 +215,61 @@ pub enum SectionKind {
 /// An edit from a renderer (spec §5.7). Serde-serializable — the web wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Edit {
-    SetField { id: FieldId, addr: RowAddr, value: FieldValue },
-    ClearField { id: FieldId, addr: RowAddr },
-    AddRow { section: SectionId, parent: RowAddr },
-    RemoveRow { section: SectionId, addr: RowAddr },
-    CreateSection { section: SectionId },
-    DeleteSection { section: SectionId },
+    SetField {
+        id: FieldId,
+        addr: RowAddr,
+        value: FieldValue,
+    },
+    ClearField {
+        id: FieldId,
+        addr: RowAddr,
+    },
+    AddRow {
+        section: SectionId,
+        parent: RowAddr,
+    },
+    RemoveRow {
+        section: SectionId,
+        addr: RowAddr,
+    },
+    CreateSection {
+        section: SectionId,
+    },
+    DeleteSection {
+        section: SectionId,
+    },
 }
 
 /// Where a `RefuseReason` points in the form (spec §7).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Anchor { Field(FieldId), Section(SectionId), NotInForm { note: &'static str } }
+pub enum Anchor {
+    Field(FieldId),
+    Section(SectionId),
+    NotInForm { note: &'static str },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SetError { WrongKind, NoSuchRow, Immutable }
+pub enum SetError {
+    WrongKind,
+    NoSuchRow,
+    Immutable,
+}
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ParseError { NotANumber, Negative, BadDate, BadSsn, BadIpPin, NotAChoice }
+pub enum ParseError {
+    NotANumber,
+    Negative,
+    BadDate,
+    BadSsn,
+    BadIpPin,
+    NotAChoice,
+}
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ApplyError { NotChosenYet, WrongFirstEdit, SetError(SetError), NoSuchSection }
+pub enum ApplyError {
+    NotChosenYet,
+    WrongFirstEdit,
+    SetError(SetError),
+    NoSuchSection,
+}
 
 #[cfg(test)]
 mod tests {
@@ -191,10 +292,17 @@ mod tests {
     #[test]
     fn secret_view_is_presence_only_and_entry_masks_debug() {
         assert_eq!(
-            SecretView::Set { masked: "***-**-6789".into() },
-            SecretView::Set { masked: "***-**-6789".into() }
+            SecretView::Set {
+                masked: "***-**-6789".into()
+            },
+            SecretView::Set {
+                masked: "***-**-6789".into()
+            }
         );
         let entry = FieldValue::SecretEntry("123456789".into());
-        assert!(!format!("{entry:?}").contains("123456789"), "SecretEntry Debug must not leak digits");
+        assert!(
+            !format!("{entry:?}").contains("123456789"),
+            "SecretEntry Debug must not leak digits"
+        );
     }
 }

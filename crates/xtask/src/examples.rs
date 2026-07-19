@@ -40,7 +40,10 @@ pub fn built_btctax() -> PathBuf {
         .stdout(std::process::Stdio::null())
         .status()
         .expect("spawn `cargo build -p btctax-cli`");
-    assert!(status.success(), "cargo build -p btctax-cli --bin btctax failed");
+    assert!(
+        status.success(),
+        "cargo build -p btctax-cli --bin btctax failed"
+    );
     let target = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| ws.join("target"));
@@ -113,9 +116,9 @@ fn capture(bin: &Path, cwd: &Path, cmd: &Cmd) -> (String, String, i32) {
 /// contains one — a future journey that introduces one must extend this (or the golden will mislead).
 fn shell_quote(arg: &str) -> String {
     let safe = !arg.is_empty()
-        && arg
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '=' | ',' | '-' | '@' | '+'));
+        && arg.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '=' | ',' | '-' | '@' | '+')
+        });
     if safe {
         arg.to_string()
     } else {
@@ -128,7 +131,11 @@ fn shell_quote(arg: &str) -> String {
 fn emit(md: &mut String, bin: &Path, cwd: &Path, cmd: &Cmd) {
     let shown = format!(
         "btctax {}",
-        cmd.args.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" ")
+        cmd.args
+            .iter()
+            .map(|a| shell_quote(a))
+            .collect::<Vec<_>>()
+            .join(" ")
     );
     let (stdout, stderr, code) = capture(bin, cwd, cmd);
     md.push_str("```console\n");
@@ -184,7 +191,11 @@ fn write_corpus(cwd: &Path, name: &str, content: &str) {
 
 /// A no-`now` non-stderr command (the common case).
 fn plain<'a>(args: &'a [&'a str]) -> Cmd<'a> {
-    Cmd { args, now: None, show_stderr: false }
+    Cmd {
+        args,
+        now: None,
+        show_stderr: false,
+    }
 }
 
 // ── Synthetic corpora (embedded as consts with explicit CRLF — committed .csv files are force-LF'd by
@@ -216,7 +227,8 @@ opt-buy-st,2025-01-02 12:00:00 UTC,Buy,BTC,1.00000000,USD,80000.00,80000.00,8000
 opt-sell,2025-06-01 12:00:00 UTC,Sell,BTC,1.00000000,USD,50000.00,50000.00,50000.00,0.00,,,\r\n";
 
 /// J4 corpus: two River staking-income deposits in 2025 (FMV resolved from the bundled dataset).
-const J4_CSV: &str = "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Tag\r\n\
+const J4_CSV: &str =
+    "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Tag\r\n\
 2025-04-15 12:00:00 UTC,,,0.05000000,BTC,,income\r\n\
 2025-05-20 12:00:00 UTC,,,0.03000000,BTC,,income\r\n";
 
@@ -228,7 +240,8 @@ const J4_CSV: &str = "Date,Sent Amount,Sent Currency,Received Amount,Received Cu
 /// trips `AmtScreenTriggered` (v1 refuses the return). As sized, J6 keeps ≈ $17k of deduction headroom
 /// (the $6,000 donation consumes ≈ $1.4k of it); a corpus editor who enlarges the sale, income, or
 /// donation must keep the household on the computable side of that screen.
-const J6_RIVER_CSV: &str = "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Tag\r\n\
+const J6_RIVER_CSV: &str =
+    "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Tag\r\n\
 2024-03-15 12:00:00 UTC,,,0.05000000,BTC,,income\r\n";
 
 /// J6 Coinbase corpus: a cheap 2020 long-term lot, a small 2024 long-term sale (Schedule D Part II / Form
@@ -283,23 +296,80 @@ fn journey_j4(md: &mut String, bin: &Path) {
     // deterministic income refs (the id embeds the ms-timestamp of the received date, not wall-clock)
     let r1 = "import|river|in|1744718400000|income|5000000#0";
     let r2 = "import|river|in|1747742400000|income|3000000#0";
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]));
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "river.csv"]));
     emit(
-        md, bin, cwd,
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "river.csv"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
         &plain(&[
-            "--vault", "v.pgp", "tax-profile", "--year", "2025", "--filing-status", "single",
-            "--ordinary-taxable-income", "100000", "--magi-excluding-crypto", "100000",
-            "--qualified-dividends", "0",
+            "--vault",
+            "v.pgp",
+            "tax-profile",
+            "--year",
+            "2025",
+            "--filing-status",
+            "single",
+            "--ordinary-taxable-income",
+            "100000",
+            "--magi-excluding-crypto",
+            "100000",
+            "--qualified-dividends",
+            "0",
         ]),
     );
     md.push_str(
         "\nAdapters import income as *not* a business by default. If mining/staking is a trade or\n\
          business, reclassify each receipt — that moves it onto Schedule SE (self-employment tax):\n\n",
     );
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "reconcile", "reclassify-income", r1, "--business", "true", "--kind", "staking"]));
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "reconcile", "reclassify-income", r2, "--business", "true", "--kind", "staking"]));
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "report", "--tax-year", "2025"]));
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&[
+            "--vault",
+            "v.pgp",
+            "reconcile",
+            "reclassify-income",
+            r1,
+            "--business",
+            "true",
+            "--kind",
+            "staking",
+        ]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&[
+            "--vault",
+            "v.pgp",
+            "reconcile",
+            "reclassify-income",
+            r2,
+            "--business",
+            "true",
+            "--kind",
+            "staking",
+        ]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "report", "--tax-year", "2025"]),
+    );
 }
 
 /// J5 — lot-selection optimization + attestation, and a what-if planning query. Showcases the
@@ -317,32 +387,108 @@ fn journey_j5(md: &mut String, bin: &Path) {
     let cwd = dir.path();
     write_corpus(cwd, "coinbase.csv", J5_CSV);
     let now = "2025-01-01T00:00:00Z"; // before the 2025-06-01 sale → a contemporaneous identification
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]));
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]));
     emit(
-        md, bin, cwd,
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
         &plain(&[
-            "--vault", "v.pgp", "tax-profile", "--year", "2025", "--filing-status", "single",
-            "--ordinary-taxable-income", "100000", "--magi-excluding-crypto", "100000",
-            "--qualified-dividends", "0",
+            "--vault",
+            "v.pgp",
+            "tax-profile",
+            "--year",
+            "2025",
+            "--filing-status",
+            "single",
+            "--ordinary-taxable-income",
+            "100000",
+            "--magi-excluding-crypto",
+            "100000",
+            "--qualified-dividends",
+            "0",
         ]),
     );
     emit(
-        md, bin, cwd,
-        &Cmd { args: &["--vault", "v.pgp", "config", "--set-forward-method", "fifo", "--effective-from", "2025-01-01"], now: Some(now), show_stderr: false },
+        md,
+        bin,
+        cwd,
+        &Cmd {
+            args: &[
+                "--vault",
+                "v.pgp",
+                "config",
+                "--set-forward-method",
+                "fifo",
+                "--effective-from",
+                "2025-01-01",
+            ],
+            now: Some(now),
+            show_stderr: false,
+        },
     );
     md.push_str("\n`optimize run` is read-only — it proposes, files nothing:\n\n");
-    emit(md, bin, cwd, &Cmd { args: &["--vault", "v.pgp", "optimize", "run", "--tax-year", "2025"], now: Some(now), show_stderr: false });
+    emit(
+        md,
+        bin,
+        cwd,
+        &Cmd {
+            args: &["--vault", "v.pgp", "optimize", "run", "--tax-year", "2025"],
+            now: Some(now),
+            show_stderr: false,
+        },
+    );
     md.push_str(
         "\nAccept it. Because the identification is made *before* the sale date, it is persisted as\n\
          **Contemporaneous** (an identification made after the sale would instead require an\n\
          attestation — this is exactly what the pinned clock governs, Treas. Reg. §1.1012-1(j)):\n\n",
     );
-    emit(md, bin, cwd, &Cmd { args: &["--vault", "v.pgp", "optimize", "accept", "--tax-year", "2025"], now: Some(now), show_stderr: false });
-    md.push_str("\nAnd a forward-looking what-if — the marginal tax of a hypothetical future sale:\n\n");
     emit(
-        md, bin, cwd,
-        &plain(&["--vault", "v.pgp", "what-if", "sell", "--sell", "0.5", "--wallet", "exchange:coinbase:default", "--at", "2025-07-01"]),
+        md,
+        bin,
+        cwd,
+        &Cmd {
+            args: &[
+                "--vault",
+                "v.pgp",
+                "optimize",
+                "accept",
+                "--tax-year",
+                "2025",
+            ],
+            now: Some(now),
+            show_stderr: false,
+        },
+    );
+    md.push_str(
+        "\nAnd a forward-looking what-if — the marginal tax of a hypothetical future sale:\n\n",
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&[
+            "--vault",
+            "v.pgp",
+            "what-if",
+            "sell",
+            "--sell",
+            "0.5",
+            "--wallet",
+            "exchange:coinbase:default",
+            "--at",
+            "2025-07-01",
+        ]),
     );
 }
 
@@ -357,17 +503,39 @@ fn journey_j3(md: &mut String, bin: &Path) {
     let cwd = dir.path();
     write_corpus(cwd, "coinbase.csv", J3_CSV);
     let inbound = "import|coinbase|in|cb-recv";
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]));
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]));
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
     emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"])); // exits 1: the hard blocker
     md.push_str(
         "\nClassify it as your own coins returning — non-taxable, carrying the original basis and\n\
          acquisition date (for the holding period). The blocker clears and the ledger balances:\n\n",
     );
     emit(
-        md, bin, cwd,
+        md,
+        bin,
+        cwd,
         &Cmd {
-            args: &["--vault", "v.pgp", "reconcile", "classify-inbound-self-transfer", inbound, "--basis", "19000.00", "--acquired", "2024-11-01"],
+            args: &[
+                "--vault",
+                "v.pgp",
+                "reconcile",
+                "classify-inbound-self-transfer",
+                inbound,
+                "--basis",
+                "19000.00",
+                "--acquired",
+                "2024-11-01",
+            ],
             now: Some("2025-08-02T00:00:00Z"), // decision made-date pinned (banner → stderr, not captured)
             show_stderr: false,
         },
@@ -387,28 +555,75 @@ fn journey_j2(md: &mut String, bin: &Path) {
     let cwd = dir.path();
     write_corpus(cwd, "coinbase.csv", J2_CSV);
     let donation = "import|coinbase|out|cb-donate";
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]));
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]));
     emit(
-        md, bin, cwd,
-        &plain(&["--vault", "v.pgp", "reconcile", "reclassify-outflow", donation, "--as-kind", "donate", "--amount", "217992.34", "--donee", "Habitat for Humanity"]),
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&[
+            "--vault",
+            "v.pgp",
+            "reconcile",
+            "reclassify-outflow",
+            donation,
+            "--as-kind",
+            "donate",
+            "--amount",
+            "217992.34",
+            "--donee",
+            "Habitat for Humanity",
+        ]),
     );
     md.push_str("\nRecord the Form 8283 Section-B appraiser + donee details:\n\n");
     emit(
-        md, bin, cwd,
+        md,
+        bin,
+        cwd,
         &plain(&[
-            "--vault", "v.pgp", "reconcile", "set-donation-details", donation,
-            "--donee-name", "Habitat for Humanity", "--donee-ein", "53-0242739",
-            "--appraiser-name", "Jane Appraiser", "--appraiser-tin", "12-3456789",
-            "--appraiser-qualifications", "ASA-accredited digital-asset appraiser, 8 yrs",
-            "--appraisal-date", "2025-09-15",
+            "--vault",
+            "v.pgp",
+            "reconcile",
+            "set-donation-details",
+            donation,
+            "--donee-name",
+            "Habitat for Humanity",
+            "--donee-ein",
+            "53-0242739",
+            "--appraiser-name",
+            "Jane Appraiser",
+            "--appraiser-tin",
+            "12-3456789",
+            "--appraiser-qualifications",
+            "ASA-accredited digital-asset appraiser, 8 yrs",
+            "--appraisal-date",
+            "2025-09-15",
         ]),
     );
     md.push_str(
         "\n`verify` recomputes the §170(e) deduction (long-term lot → FMV; short-term lot →\n\
          min(FMV, basis)) and flags the qualified-appraisal requirement for a >$5,000 crypto gift:\n\n",
     );
-    emit(md, bin, cwd, &Cmd { args: &["--vault", "v.pgp", "verify"], now: None, show_stderr: false });
+    emit(
+        md,
+        bin,
+        cwd,
+        &Cmd {
+            args: &["--vault", "v.pgp", "verify"],
+            now: None,
+            show_stderr: false,
+        },
+    );
     md.push_str(
         "\nFill Form 8283. Because this gift spans two lots, the Section B form carries two property rows;\n\
          btctax fills the appraiser + donee declaration on the first and flags the second for you to\n\
@@ -417,9 +632,21 @@ fn journey_j2(md: &mut String, bin: &Path) {
          gift — see J6 — clears with no such note:\n\n",
     );
     emit(
-        md, bin, cwd,
+        md,
+        bin,
+        cwd,
         &Cmd {
-            args: &["--vault", "v.pgp", "export-irs-pdf", "--out", "irs", "--tax-year", "2025", "--forms", "form8283"],
+            args: &[
+                "--vault",
+                "v.pgp",
+                "export-irs-pdf",
+                "--out",
+                "irs",
+                "--tax-year",
+                "2025",
+                "--forms",
+                "form8283",
+            ],
             now: None,
             show_stderr: true,
         },
@@ -436,28 +663,82 @@ fn journey_j1(md: &mut String, bin: &Path) {
     let dir = tempfile::tempdir().expect("tempdir");
     let cwd = dir.path();
     write_corpus(cwd, "coinbase.csv", J1_CSV);
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]));
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]));
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
     emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"]));
     md.push_str(
         "\nThe year's tax is *not computable* until a tax profile is set (btctax refuses to guess your\n\
          bracket). Set one, then the report computes:\n\n",
     );
     emit(
-        md, bin, cwd,
+        md,
+        bin,
+        cwd,
         &plain(&[
-            "--vault", "v.pgp", "tax-profile", "--year", "2025", "--filing-status", "single",
-            "--ordinary-taxable-income", "100000", "--magi-excluding-crypto", "100000",
-            "--qualified-dividends", "0",
+            "--vault",
+            "v.pgp",
+            "tax-profile",
+            "--year",
+            "2025",
+            "--filing-status",
+            "single",
+            "--ordinary-taxable-income",
+            "100000",
+            "--magi-excluding-crypto",
+            "100000",
+            "--qualified-dividends",
+            "0",
         ]),
     );
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "report", "--tax-year", "2025"]));
-    md.push_str("\nExport the reconciled snapshot (CSVs + a decrypted SQLite) and fill the IRS forms:\n\n");
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "export-snapshot", "--out", "snapshot", "--tax-year", "2025"]));
     emit(
-        md, bin, cwd,
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "report", "--tax-year", "2025"]),
+    );
+    md.push_str(
+        "\nExport the reconciled snapshot (CSVs + a decrypted SQLite) and fill the IRS forms:\n\n",
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&[
+            "--vault",
+            "v.pgp",
+            "export-snapshot",
+            "--out",
+            "snapshot",
+            "--tax-year",
+            "2025",
+        ]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
         &Cmd {
-            args: &["--vault", "v.pgp", "export-irs-pdf", "--out", "irs", "--tax-year", "2025", "--forms", "f8949,schedule-d"],
+            args: &[
+                "--vault",
+                "v.pgp",
+                "export-irs-pdf",
+                "--out",
+                "irs",
+                "--tax-year",
+                "2025",
+                "--forms",
+                "f8949,schedule-d",
+            ],
             now: None,
             show_stderr: true, // the NOT-AUTHORISED notice + 1099-DA caveat are on stderr and matter
         },
@@ -485,23 +766,78 @@ fn journey_j6(md: &mut String, bin: &Path) {
     // the Coinbase Send `cb-donate`.
     let income = "import|river|in|1710504000000|income|5000000#0";
     let donation = "import|coinbase|out|cb-donate";
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]));
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "import", "coinbase.csv", "river.csv"]));
-    md.push_str("\nThe mining income is a trade or business (moves it onto Schedule C ⇒ Schedule SE):\n\n");
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "reconcile", "reclassify-income", income, "--business", "true", "--kind", "mining"]));
-    md.push_str("\nThe outbound 0.1 BTC is a §170(e) charitable donation (⇒ Form 8283):\n\n");
     emit(
-        md, bin, cwd,
-        &plain(&["--vault", "v.pgp", "reconcile", "reclassify-outflow", donation, "--as-kind", "donate", "--amount", "6000.00", "--donee", "Habitat for Humanity"]),
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
     );
     emit(
-        md, bin, cwd,
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "coinbase.csv", "river.csv"]),
+    );
+    md.push_str(
+        "\nThe mining income is a trade or business (moves it onto Schedule C ⇒ Schedule SE):\n\n",
+    );
+    emit(
+        md,
+        bin,
+        cwd,
         &plain(&[
-            "--vault", "v.pgp", "reconcile", "set-donation-details", donation,
-            "--donee-name", "Habitat for Humanity", "--donee-ein", "53-0242739",
-            "--appraiser-name", "Jane Appraiser", "--appraiser-tin", "12-3456789",
-            "--appraiser-qualifications", "ASA-accredited digital-asset appraiser, 8 yrs",
-            "--appraisal-date", "2024-09-15",
+            "--vault",
+            "v.pgp",
+            "reconcile",
+            "reclassify-income",
+            income,
+            "--business",
+            "true",
+            "--kind",
+            "mining",
+        ]),
+    );
+    md.push_str("\nThe outbound 0.1 BTC is a §170(e) charitable donation (⇒ Form 8283):\n\n");
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&[
+            "--vault",
+            "v.pgp",
+            "reconcile",
+            "reclassify-outflow",
+            donation,
+            "--as-kind",
+            "donate",
+            "--amount",
+            "6000.00",
+            "--donee",
+            "Habitat for Humanity",
+        ]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&[
+            "--vault",
+            "v.pgp",
+            "reconcile",
+            "set-donation-details",
+            donation,
+            "--donee-name",
+            "Habitat for Humanity",
+            "--donee-ein",
+            "53-0242739",
+            "--appraiser-name",
+            "Jane Appraiser",
+            "--appraiser-tin",
+            "12-3456789",
+            "--appraiser-qualifications",
+            "ASA-accredited digital-asset appraiser, 8 yrs",
+            "--appraisal-date",
+            "2024-09-15",
         ]),
     );
     md.push_str("\nCheck the ledger balances and the §170(e) deduction is computed:\n\n");
@@ -511,18 +847,47 @@ fn journey_j6(md: &mut String, bin: &Path) {
          dividends, the itemized deductions (Schedule A), and the fail-loud yes/no questions the return\n\
          requires. Unknown keys are rejected, never silently dropped:\n\n",
     );
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "income", "import", "--year", "2024", "--file", "fullreturn.toml"]));
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&[
+            "--vault",
+            "v.pgp",
+            "income",
+            "import",
+            "--year",
+            "2024",
+            "--file",
+            "fullreturn.toml",
+        ]),
+    );
     md.push_str("\n`income show` echoes the stored inputs with every SSN and IP-PIN redacted (they never reach a pipe or your scrollback):\n\n");
-    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "income", "show", "--year", "2024"]));
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "income", "show", "--year", "2024"]),
+    );
     md.push_str(
         "\nExport the whole return. With full-return inputs present btctax fills the entire packet — the\n\
          1040 and every schedule and attachment it cites, in IRS Attachment-Sequence stapling order,\n\
          plus a `manifest.txt`:\n\n",
     );
     emit(
-        md, bin, cwd,
+        md,
+        bin,
+        cwd,
         &Cmd {
-            args: &["--vault", "v.pgp", "export-irs-pdf", "--out", "irs", "--tax-year", "2024"],
+            args: &[
+                "--vault",
+                "v.pgp",
+                "export-irs-pdf",
+                "--out",
+                "irs",
+                "--tax-year",
+                "2024",
+            ],
             now: None,
             show_stderr: true, // the NOT-AUTHORISED notice + the Form 8283 Section-B signature caveat
         },
@@ -541,8 +906,10 @@ fn leaf_subcommands() -> Vec<Vec<String>> {
     use btctax_cli::cli::Cli;
     use clap::CommandFactory;
     fn walk(cmd: &clap::Command, path: &[String], out: &mut Vec<Vec<String>>) {
-        let subs: Vec<&clap::Command> =
-            cmd.get_subcommands().filter(|s| s.get_name() != "help").collect();
+        let subs: Vec<&clap::Command> = cmd
+            .get_subcommands()
+            .filter(|s| s.get_name() != "help")
+            .collect();
         if subs.is_empty() {
             if !path.is_empty() {
                 out.push(path.to_vec());
@@ -646,9 +1013,18 @@ mod tests {
         let a = generate(&bin);
         let b = generate(&bin);
         assert_eq!(a, b, "generate() must be byte-deterministic");
-        assert!(a.contains("$ btctax --help"), "must show the verbatim command");
-        assert!(a.contains("Usage: btctax"), "must capture the real help output");
-        assert!(a.contains(&format!("btctax-version: {}", btctax_cli_version())), "front-matter version");
+        assert!(
+            a.contains("$ btctax --help"),
+            "must show the verbatim command"
+        );
+        assert!(
+            a.contains("Usage: btctax"),
+            "must capture the real help output"
+        );
+        assert!(
+            a.contains(&format!("btctax-version: {}", btctax_cli_version())),
+            "front-matter version"
+        );
     }
 
     /// The committed golden matches a fresh generation, byte-for-byte — reds when `docs/examples/examples.md`
@@ -705,7 +1081,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().expect("tempdir");
         let present_cache = tmp.path().join("present-cache.csv");
-        std::fs::write(&present_cache, "date,usd\n2024-01-01,42000.00\n").expect("write dummy cache");
+        std::fs::write(&present_cache, "date,usd\n2024-01-01,42000.00\n")
+            .expect("write dummy cache");
         let junk_home = tmp.path().join("junk-home");
         std::fs::create_dir_all(&junk_home).expect("mkdir junk home");
 
@@ -714,8 +1091,8 @@ mod tests {
             std::env::set_var("HOME", &junk_home);
             std::env::set_var("BTCTAX_PRICE_CACHE", &present_cache);
             std::env::set_var("BTCTAX_NOW", "2099-01-01T00:00:00Z"); // must NOT reach an unpinned step
-            // `_restore` drops at the end of this block — after `generate()` returns and before the assert
-            // (and on any panic inside `generate()`), so the process env is never left dirty for a sibling.
+                                                                     // `_restore` drops at the end of this block — after `generate()` returns and before the assert
+                                                                     // (and on any panic inside `generate()`), so the process env is never left dirty for a sibling.
             generate(&bin)
         };
 
@@ -731,7 +1108,10 @@ mod tests {
     /// must stay sound. No binary build — reads the committed golden + `Cli::command()`.
     #[test]
     fn subcommand_coverage_report_is_well_formed() {
-        assert!(!leaf_subcommands().is_empty(), "the CLI must have leaf subcommands to report on");
+        assert!(
+            !leaf_subcommands().is_empty(),
+            "the CLI must have leaf subcommands to report on"
+        );
         let report = subcommand_coverage_report();
         assert!(
             report.starts_with("Subcommand coverage (SOFT"),

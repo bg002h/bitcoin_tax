@@ -159,7 +159,10 @@ pub fn is_text_kind(k: FieldKind) -> bool {
 
 /// A cycle-in-place kind: `Enter`/`Space` cycles/toggles and applies on the keypress.
 pub fn is_cycle_kind(k: FieldKind) -> bool {
-    matches!(k, FieldKind::Enum(_) | FieldKind::TriState | FieldKind::Bool)
+    matches!(
+        k,
+        FieldKind::Enum(_) | FieldKind::TriState | FieldKind::Bool
+    )
 }
 
 /// A no-echo secret-entry kind (SSN / IP-PIN): `Enter` opens the buffer, keystrokes are MASKED to bullets
@@ -692,8 +695,9 @@ pub fn commit_summary(ri: &ReturnInputs, shadows: bool) -> String {
     } else {
         "no"
     };
-    let mut s =
-        format!("filing status: {fs}\n{w2s} W-2(s)  ·  Schedule A: {sched_a}  ·  {deps} dependent(s)");
+    let mut s = format!(
+        "filing status: {fs}\n{w2s} W-2(s)  ·  Schedule A: {sched_a}  ·  {deps} dependent(s)"
+    );
     if shadows {
         s.push_str(
             "\n\na tax-profile estimate exists for this year — it stays saved and unused once this full \
@@ -1137,7 +1141,11 @@ mod tests {
         assert_eq!(navigable_count(&form), 0);
         assert!(add_row(&mut form));
         assert!(add_row(&mut form));
-        assert_eq!(navigable_count(&form), 2, "the row list navigates ROWS, not fields");
+        assert_eq!(
+            navigable_count(&form),
+            2,
+            "the row list navigates ROWS, not fields"
+        );
         assert!(matches!(active_pane(&form), Pane::RowList(2)));
 
         // Schedule A absent → the [create] pane navigates NOTHING.

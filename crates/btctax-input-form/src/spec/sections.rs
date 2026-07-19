@@ -11,7 +11,7 @@
 //! depend on that single source.
 
 use crate::seam::{
-    Field, FieldId, FieldKind, FieldValue, Section, SectionId, SectionKind, SecretView, SetError,
+    Field, FieldId, FieldKind, FieldValue, SecretView, Section, SectionId, SectionKind, SetError,
 };
 use btctax_core::conventions::Usd;
 use btctax_core::tax::questions::{FORM_QUESTIONS, SKIPPABLE_QUESTIONS};
@@ -63,7 +63,9 @@ macro_rules! w2_money {
             live: |_| true,
             get: |ri, a| ri.w2s.get(a.0[0]).map(|w| FieldValue::Money(w.$field)),
             set: |ri, a, v| {
-                let FieldValue::Money(m) = v else { return Err(SetError::WrongKind) };
+                let FieldValue::Money(m) = v else {
+                    return Err(SetError::WrongKind);
+                };
                 ri.w2s.get_mut(a.0[0]).ok_or(SetError::NoSuchRow)?.$field = m;
                 Ok(())
             },
@@ -83,7 +85,9 @@ macro_rules! scha_money {
             live: |_| true,
             get: |ri, _| ri.schedule_a.as_ref().map(|a| FieldValue::Money(a.$field)),
             set: |ri, _, v| {
-                let FieldValue::Money(m) = v else { return Err(SetError::WrongKind) };
+                let FieldValue::Money(m) = v else {
+                    return Err(SetError::WrongKind);
+                };
                 ri.schedule_a.as_mut().ok_or(SetError::NoSuchRow)?.$field = m;
                 Ok(())
             },
@@ -356,7 +360,9 @@ const ADDRESS_FIELDS: &[Field] = &[
         live: |_| true,
         get: |ri, _| Some(FieldValue::Text(ri.header.address_street.clone())),
         set: |ri, _, v| {
-            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            let FieldValue::Text(s) = v else {
+                return Err(SetError::WrongKind);
+            };
             ri.header.address_street = s;
             Ok(())
         },
@@ -370,7 +376,9 @@ const ADDRESS_FIELDS: &[Field] = &[
         live: |_| true,
         get: |ri, _| Some(FieldValue::Text(ri.header.address_city.clone())),
         set: |ri, _, v| {
-            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            let FieldValue::Text(s) = v else {
+                return Err(SetError::WrongKind);
+            };
             ri.header.address_city = s;
             Ok(())
         },
@@ -384,7 +392,9 @@ const ADDRESS_FIELDS: &[Field] = &[
         live: |_| true,
         get: |ri, _| Some(FieldValue::Text(ri.header.address_state.clone())),
         set: |ri, _, v| {
-            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            let FieldValue::Text(s) = v else {
+                return Err(SetError::WrongKind);
+            };
             ri.header.address_state = s;
             Ok(())
         },
@@ -398,7 +408,9 @@ const ADDRESS_FIELDS: &[Field] = &[
         live: |_| true,
         get: |ri, _| Some(FieldValue::Text(ri.header.address_zip.clone())),
         set: |ri, _, v| {
-            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            let FieldValue::Text(s) = v else {
+                return Err(SetError::WrongKind);
+            };
             ri.header.address_zip = s;
             Ok(())
         },
@@ -422,10 +434,21 @@ const DEPENDENT_FIELDS: &[Field] = &[
         help: "The dependent's full name (1040 dependents grid).",
         kind: FieldKind::Text,
         live: |_| true,
-        get: |ri, a| ri.header.dependents.get(a.0[0]).map(|d| FieldValue::Text(d.name.clone())),
+        get: |ri, a| {
+            ri.header
+                .dependents
+                .get(a.0[0])
+                .map(|d| FieldValue::Text(d.name.clone()))
+        },
         set: |ri, a, v| {
-            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
-            ri.header.dependents.get_mut(a.0[0]).ok_or(SetError::NoSuchRow)?.name = s;
+            let FieldValue::Text(s) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.header
+                .dependents
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .name = s;
             Ok(())
         },
     },
@@ -437,11 +460,20 @@ const DEPENDENT_FIELDS: &[Field] = &[
         kind: FieldKind::Secret,
         live: |_| true,
         get: |ri, a| {
-            ri.header.dependents.get(a.0[0]).map(|d| FieldValue::Secret(mask_ssn(&d.ssn)))
+            ri.header
+                .dependents
+                .get(a.0[0])
+                .map(|d| FieldValue::Secret(mask_ssn(&d.ssn)))
         },
         set: |ri, a, v| {
-            let FieldValue::SecretEntry(s) = v else { return Err(SetError::WrongKind) };
-            ri.header.dependents.get_mut(a.0[0]).ok_or(SetError::NoSuchRow)?.ssn = s;
+            let FieldValue::SecretEntry(s) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.header
+                .dependents
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .ssn = s;
             Ok(())
         },
     },
@@ -453,11 +485,20 @@ const DEPENDENT_FIELDS: &[Field] = &[
         kind: FieldKind::Text,
         live: |_| true,
         get: |ri, a| {
-            ri.header.dependents.get(a.0[0]).map(|d| FieldValue::Text(d.relationship.clone()))
+            ri.header
+                .dependents
+                .get(a.0[0])
+                .map(|d| FieldValue::Text(d.relationship.clone()))
         },
         set: |ri, a, v| {
-            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
-            ri.header.dependents.get_mut(a.0[0]).ok_or(SetError::NoSuchRow)?.relationship = s;
+            let FieldValue::Text(s) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.header
+                .dependents
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .relationship = s;
             Ok(())
         },
     },
@@ -468,10 +509,21 @@ const DEPENDENT_FIELDS: &[Field] = &[
         help: "The dependent's date of birth.",
         kind: FieldKind::Date,
         live: |_| true,
-        get: |ri, a| ri.header.dependents.get(a.0[0]).map(|d| FieldValue::Date(d.date_of_birth)),
+        get: |ri, a| {
+            ri.header
+                .dependents
+                .get(a.0[0])
+                .map(|d| FieldValue::Date(d.date_of_birth))
+        },
         set: |ri, a, v| {
-            let FieldValue::Date(d) = v else { return Err(SetError::WrongKind) };
-            ri.header.dependents.get_mut(a.0[0]).ok_or(SetError::NoSuchRow)?.date_of_birth = d;
+            let FieldValue::Date(d) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.header
+                .dependents
+                .get_mut(a.0[0])
+                .ok_or(SetError::NoSuchRow)?
+                .date_of_birth = d;
             Ok(())
         },
     },
@@ -630,7 +682,10 @@ pub(crate) const W2_BOX12: Section = Section {
             // Nested: an absent parent W-2 (`a.0[0]` out of range) → `NoSuchRow`, not a silent no-op (I-4).
             let w = ri.w2s.get_mut(a.0[0]).ok_or(SetError::NoSuchRow)?;
             // `Box12Entry` has no `Default` (a blank code + zero dollars is the empty new row).
-            w.box12.push(Box12Entry { code: String::new(), amount: Usd::ZERO });
+            w.box12.push(Box12Entry {
+                code: String::new(),
+                amount: Usd::ZERO,
+            });
             Ok(())
         },
         remove: |ri, a| {
@@ -649,13 +704,48 @@ pub(crate) const W2_BOX12: Section = Section {
 // ── 8. ScheduleA (OptionalSingleton) — 7 money leaves + the 2 registry-driven tri-states ────────────────────
 
 const SCHEDULE_A_FIELDS: &[Field] = &[
-    scha_money!(FieldId::SaMedical, "Medical expenses", "Sch A line 1 — medical/dental (§213 7.5% floor).", medical),
-    scha_money!(FieldId::SaSaltRealEstate, "Real-estate taxes", "Sch A line 5b — real-estate taxes.", salt_real_estate),
-    scha_money!(FieldId::SaSaltPersonalProp, "Personal-property taxes", "Sch A line 5c — personal-property taxes.", salt_personal_property),
-    scha_money!(FieldId::SaSaltStateEst, "State estimated payments", "State/local income-tax estimated payments (income-tax path, line 5a).", salt_state_estimated_payments),
-    scha_money!(FieldId::SaSaltPriorYear, "Prior-year balance paid", "State/local income tax — prior-year balance paid this year (income-tax path).", salt_prior_year_balance_paid),
-    scha_money!(FieldId::SaSaltSalesTaxAmt, "General sales-tax amount", "Sch A line 5a sales-tax amount — used iff the §164(b)(5) sales-tax election is Yes.", salt_sales_tax_amount),
-    scha_money!(FieldId::SaMortgage1098, "Home-mortgage interest (1098)", "Sch A line 8a — mortgage interest reported on Form 1098.", mortgage_interest_1098),
+    scha_money!(
+        FieldId::SaMedical,
+        "Medical expenses",
+        "Sch A line 1 — medical/dental (§213 7.5% floor).",
+        medical
+    ),
+    scha_money!(
+        FieldId::SaSaltRealEstate,
+        "Real-estate taxes",
+        "Sch A line 5b — real-estate taxes.",
+        salt_real_estate
+    ),
+    scha_money!(
+        FieldId::SaSaltPersonalProp,
+        "Personal-property taxes",
+        "Sch A line 5c — personal-property taxes.",
+        salt_personal_property
+    ),
+    scha_money!(
+        FieldId::SaSaltStateEst,
+        "State estimated payments",
+        "State/local income-tax estimated payments (income-tax path, line 5a).",
+        salt_state_estimated_payments
+    ),
+    scha_money!(
+        FieldId::SaSaltPriorYear,
+        "Prior-year balance paid",
+        "State/local income tax — prior-year balance paid this year (income-tax path).",
+        salt_prior_year_balance_paid
+    ),
+    scha_money!(
+        FieldId::SaSaltSalesTaxAmt,
+        "General sales-tax amount",
+        "Sch A line 5a sales-tax amount — used iff the §164(b)(5) sales-tax election is Yes.",
+        salt_sales_tax_amount
+    ),
+    scha_money!(
+        FieldId::SaMortgage1098,
+        "Home-mortgage interest (1098)",
+        "Sch A line 8a — mortgage interest reported on Form 1098.",
+        mortgage_interest_1098
+    ),
     // ★ Registry-driven — DELEGATES to `SKIPPABLE_QUESTIONS::SalesTaxElection` (index 2). live = schedule_a.is_some().
     skippable_tristate!(2, FieldId::SaSaltUseSalesTax, |ri| {
         if let Some(a) = ri.schedule_a.as_mut() {
@@ -773,7 +863,10 @@ pub(crate) const SCHEDULE_A_CHARITABLE: Section = Section {
             let sa = ri.schedule_a.as_mut().ok_or(SetError::NoSuchRow)?;
             // `CharitableGift`/`CharitableClass` have no `Default`; a cash gift to a 50%-org is the
             // most common class and a safe starting point (the filer then picks the real class).
-            sa.charitable.push(CharitableGift { class: CharitableClass::Cash60, amount: Usd::ZERO });
+            sa.charitable.push(CharitableGift {
+                class: CharitableClass::Cash60,
+                amount: Usd::ZERO,
+            });
             Ok(())
         },
         remove: |ri, a| {
@@ -801,7 +894,9 @@ const PAYMENTS_FIELDS: &[Field] = &[
         live: |_| true,
         get: |ri, _| Some(FieldValue::Money(ri.payments.estimated_tax_payments)),
         set: |ri, _, v| {
-            let FieldValue::Money(m) = v else { return Err(SetError::WrongKind) };
+            let FieldValue::Money(m) = v else {
+                return Err(SetError::WrongKind);
+            };
             ri.payments.estimated_tax_payments = m;
             Ok(())
         },
@@ -815,7 +910,9 @@ const PAYMENTS_FIELDS: &[Field] = &[
         live: |_| true,
         get: |ri, _| Some(FieldValue::Money(ri.payments.extension_payment)),
         set: |ri, _, v| {
-            let FieldValue::Money(m) = v else { return Err(SetError::WrongKind) };
+            let FieldValue::Money(m) = v else {
+                return Err(SetError::WrongKind);
+            };
             ri.payments.extension_payment = m;
             Ok(())
         },
@@ -824,12 +921,15 @@ const PAYMENTS_FIELDS: &[Field] = &[
         id: FieldId::PayOtherWh,
         clear: None,
         label: "Other withholding",
-        help: "Other federal income tax withheld (e.g. Form 1099 backup withholding) → 1040 line 25c.",
+        help:
+            "Other federal income tax withheld (e.g. Form 1099 backup withholding) → 1040 line 25c.",
         kind: FieldKind::Money,
         live: |_| true,
         get: |ri, _| Some(FieldValue::Money(ri.payments.other_withholding)),
         set: |ri, _, v| {
-            let FieldValue::Money(m) = v else { return Err(SetError::WrongKind) };
+            let FieldValue::Money(m) = v else {
+                return Err(SetError::WrongKind);
+            };
             ri.payments.other_withholding = m;
             Ok(())
         },
@@ -847,7 +947,7 @@ pub(crate) const PAYMENTS: Section = Section {
 mod tests {
     use super::super::{fresh_single, section};
     use crate::seam::{
-        FieldId, FieldKind, FieldValue, RowAddr, SectionId, SectionKind, SecretView, SetError,
+        FieldId, FieldKind, FieldValue, RowAddr, SecretView, SectionId, SectionKind, SetError,
     };
     use btctax_core::tax::return_inputs::ItemizeElection;
     use btctax_core::tax::types::FilingStatus;
@@ -857,19 +957,36 @@ mod tests {
     fn w2_repeating_with_nested_box12_reads_and_writes() {
         let mut ri = fresh_single();
         let w2s = section(SectionId::W2s);
-        let SectionKind::Repeating { add, len, .. } = w2s.kind else { panic!() };
+        let SectionKind::Repeating { add, len, .. } = w2s.kind else {
+            panic!()
+        };
         (add)(&mut ri, &RowAddr::default()).unwrap();
         assert_eq!((len)(&ri, &RowAddr::default()), 1);
-        let box1 = w2s.fields.iter().find(|f| f.id == FieldId::Box1Wages).unwrap();
+        let box1 = w2s
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::Box1Wages)
+            .unwrap();
         (box1.set)(&mut ri, &RowAddr(vec![0]), FieldValue::Money(dec!(50000))).unwrap();
         assert_eq!(ri.w2s[0].box1_wages, dec!(50000));
         // nested box12
         let b12 = section(SectionId::W2Box12);
-        let SectionKind::Repeating { add: add12, .. } = b12.kind else { panic!() };
+        let SectionKind::Repeating { add: add12, .. } = b12.kind else {
+            panic!()
+        };
         (add12)(&mut ri, &RowAddr(vec![0])).unwrap(); // parent = w2 index 0
         assert_eq!(ri.w2s[0].box12.len(), 1);
-        let amt = b12.fields.iter().find(|f| f.id == FieldId::Box12Amount).unwrap();
-        (amt.set)(&mut ri, &RowAddr(vec![0, 0]), FieldValue::Money(dec!(23000))).unwrap();
+        let amt = b12
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::Box12Amount)
+            .unwrap();
+        (amt.set)(
+            &mut ri,
+            &RowAddr(vec![0, 0]),
+            FieldValue::Money(dec!(23000)),
+        )
+        .unwrap();
         assert_eq!(ri.w2s[0].box12[0].amount, dec!(23000));
     }
 
@@ -878,12 +995,23 @@ mod tests {
         let mut ri = fresh_single();
         ri.itemize_election = ItemizeElection::ForceItemize;
         let sa = section(SectionId::ScheduleA);
-        let SectionKind::OptionalSingleton { create, delete, present } = sa.kind else { panic!() };
+        let SectionKind::OptionalSingleton {
+            create,
+            delete,
+            present,
+        } = sa.kind
+        else {
+            panic!()
+        };
         (create)(&mut ri);
         assert!((present)(&ri));
         (delete)(&mut ri);
         assert!(!(present)(&ri));
-        assert_eq!(ri.itemize_election, ItemizeElection::Auto, "I-10: delete resets ForceItemize");
+        assert_eq!(
+            ri.itemize_election,
+            ItemizeElection::Auto,
+            "I-10: delete resets ForceItemize"
+        );
     }
 
     #[test]
@@ -891,13 +1019,25 @@ mod tests {
         // ★ I-5 (spec §5.8): the election is live ONLY with a Schedule A. This pins the liveness metadata so
         // a mutation back to `|_| true` cannot silently re-open the $0-deduction ForceItemize hazard.
         let opts = section(SectionId::ReturnOptions);
-        let f = opts.fields.iter().find(|f| f.id == FieldId::ItemizeElection).unwrap();
+        let f = opts
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::ItemizeElection)
+            .unwrap();
         let mut ri = fresh_single();
-        assert!(!(f.live)(&ri), "I-5: ItemizeElection not live without a Schedule A");
+        assert!(
+            !(f.live)(&ri),
+            "I-5: ItemizeElection not live without a Schedule A"
+        );
         let sa = section(SectionId::ScheduleA);
-        let SectionKind::OptionalSingleton { create, .. } = sa.kind else { panic!() };
+        let SectionKind::OptionalSingleton { create, .. } = sa.kind else {
+            panic!()
+        };
         (create)(&mut ri);
-        assert!((f.live)(&ri), "I-5: ItemizeElection live once a Schedule A exists");
+        assert!(
+            (f.live)(&ri),
+            "I-5: ItemizeElection live once a Schedule A exists"
+        );
     }
 
     #[test]
@@ -905,26 +1045,59 @@ mod tests {
         let mut ri = fresh_single();
         // ReturnOptions singleton: FilingStatus enum roundtrip + wrong-choice rejection.
         let ro = section(SectionId::ReturnOptions);
-        let fs = ro.fields.iter().find(|f| f.id == FieldId::FilingStatus).unwrap();
-        assert_eq!((fs.get)(&ri, &RowAddr::default()), Some(FieldValue::Choice("Single".into())));
-        (fs.set)(&mut ri, &RowAddr::default(), FieldValue::Choice("Mfj".into())).unwrap();
+        let fs = ro
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::FilingStatus)
+            .unwrap();
+        assert_eq!(
+            (fs.get)(&ri, &RowAddr::default()),
+            Some(FieldValue::Choice("Single".into()))
+        );
+        (fs.set)(
+            &mut ri,
+            &RowAddr::default(),
+            FieldValue::Choice("Mfj".into()),
+        )
+        .unwrap();
         assert_eq!(ri.filing_status, FilingStatus::Mfj);
         assert_eq!(
-            (fs.set)(&mut ri, &RowAddr::default(), FieldValue::Choice("Nope".into())),
+            (fs.set)(
+                &mut ri,
+                &RowAddr::default(),
+                FieldValue::Choice("Nope".into())
+            ),
             Err(SetError::WrongKind)
         );
 
         // Payments singleton money.
         let pay = section(SectionId::Payments);
-        let est = pay.fields.iter().find(|f| f.id == FieldId::PayEstimated).unwrap();
+        let est = pay
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::PayEstimated)
+            .unwrap();
         (est.set)(&mut ri, &RowAddr::default(), FieldValue::Money(dec!(1200))).unwrap();
         assert_eq!(ri.payments.estimated_tax_payments, dec!(1200));
 
         // Spouse optional-singleton: get None + set NoSuchRow until created.
         let sp = section(SectionId::Spouse);
-        let SectionKind::OptionalSingleton { create, present, .. } = sp.kind else { panic!() };
-        let sp_first = sp.fields.iter().find(|f| f.id == FieldId::SpFirstName).unwrap();
-        assert_eq!((sp_first.get)(&ri, &RowAddr::default()), None, "Sp* get is None without a spouse");
+        let SectionKind::OptionalSingleton {
+            create, present, ..
+        } = sp.kind
+        else {
+            panic!()
+        };
+        let sp_first = sp
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::SpFirstName)
+            .unwrap();
+        assert_eq!(
+            (sp_first.get)(&ri, &RowAddr::default()),
+            None,
+            "Sp* get is None without a spouse"
+        );
         assert_eq!(
             (sp_first.set)(&mut ri, &RowAddr::default(), FieldValue::Text("Pat".into())),
             Err(SetError::NoSuchRow),
@@ -934,7 +1107,10 @@ mod tests {
         (create)(&mut ri);
         assert!((present)(&ri));
         (sp_first.set)(&mut ri, &RowAddr::default(), FieldValue::Text("Pat".into())).unwrap();
-        assert_eq!((sp_first.get)(&ri, &RowAddr::default()), Some(FieldValue::Text("Pat".into())));
+        assert_eq!(
+            (sp_first.get)(&ri, &RowAddr::default()),
+            Some(FieldValue::Text("Pat".into()))
+        );
     }
 
     #[test]
@@ -943,9 +1119,17 @@ mod tests {
         let tp = section(SectionId::Taxpayer);
         let ssn = tp.fields.iter().find(|f| f.id == FieldId::TpSsn).unwrap();
         // Empty storage → Empty view.
-        assert_eq!((ssn.get)(&ri, &RowAddr::default()), Some(FieldValue::Secret(SecretView::Empty)));
+        assert_eq!(
+            (ssn.get)(&ri, &RowAddr::default()),
+            Some(FieldValue::Secret(SecretView::Empty))
+        );
         // Raw entry is stored verbatim (canonicalization is Task 8's parse); get masks it.
-        (ssn.set)(&mut ri, &RowAddr::default(), FieldValue::SecretEntry("123456789".into())).unwrap();
+        (ssn.set)(
+            &mut ri,
+            &RowAddr::default(),
+            FieldValue::SecretEntry("123456789".into()),
+        )
+        .unwrap();
         assert_eq!(ri.header.taxpayer.ssn, "123456789");
         let FieldValue::Secret(SecretView::Set { masked }) =
             (ssn.get)(&ri, &RowAddr::default()).unwrap()
@@ -953,7 +1137,10 @@ mod tests {
             panic!("expected a Set secret view")
         };
         assert_eq!(masked, "***-**-6789");
-        assert!(!masked.contains("12345"), "masked must not leak leading digits");
+        assert!(
+            !masked.contains("12345"),
+            "masked must not leak leading digits"
+        );
         // A Secret set rejects a non-SecretEntry value.
         assert_eq!(
             (ssn.set)(&mut ri, &RowAddr::default(), FieldValue::Text("x".into())),
@@ -966,7 +1153,12 @@ mod tests {
             (ippin.get)(&ri, &RowAddr::default()),
             Some(FieldValue::Secret(SecretView::Empty))
         );
-        (ippin.set)(&mut ri, &RowAddr::default(), FieldValue::SecretEntry("112233".into())).unwrap();
+        (ippin.set)(
+            &mut ri,
+            &RowAddr::default(),
+            FieldValue::SecretEntry("112233".into()),
+        )
+        .unwrap();
         assert_eq!(ri.header.ip_pin.as_deref(), Some("112233"));
         let FieldValue::Secret(SecretView::Set { masked }) =
             (ippin.get)(&ri, &RowAddr::default()).unwrap()
@@ -977,21 +1169,40 @@ mod tests {
         // anti-fraud discipline of `IpPin(******)`, NOT the SSN's last-4 reveal.
         assert_eq!(masked, "******");
         for d in ['1', '2', '3'] {
-            assert!(!masked.contains(d), "IP-PIN mask must not leak digit {d}: {masked}");
+            assert!(
+                !masked.contains(d),
+                "IP-PIN mask must not leak digit {d}: {masked}"
+            );
         }
 
         // ★ I-2: an empty entry (and thus `ClearField`) maps the IP PIN to `None`, never `Some("")`.
-        (ippin.set)(&mut ri, &RowAddr::default(), FieldValue::SecretEntry(String::new())).unwrap();
-        assert_eq!(ri.header.ip_pin, None, "empty IP-PIN entry must clear to None, not Some(\"\")");
+        (ippin.set)(
+            &mut ri,
+            &RowAddr::default(),
+            FieldValue::SecretEntry(String::new()),
+        )
+        .unwrap();
+        assert_eq!(
+            ri.header.ip_pin, None,
+            "empty IP-PIN entry must clear to None, not Some(\"\")"
+        );
 
         // ★ I-3: a short/non-canonical SSN entry is FULLY masked (no partial reveal — folds follow-up (k)).
-        (ssn.set)(&mut ri, &RowAddr::default(), FieldValue::SecretEntry("12".into())).unwrap();
+        (ssn.set)(
+            &mut ri,
+            &RowAddr::default(),
+            FieldValue::SecretEntry("12".into()),
+        )
+        .unwrap();
         let FieldValue::Secret(SecretView::Set { masked }) =
             (ssn.get)(&ri, &RowAddr::default()).unwrap()
         else {
             panic!("expected a Set secret view")
         };
-        assert_eq!(masked, "***-**-****", "a non-9-digit SSN entry is fully masked");
+        assert_eq!(
+            masked, "***-**-****",
+            "a non-9-digit SSN entry is fully masked"
+        );
     }
 
     #[test]
@@ -1000,20 +1211,46 @@ mod tests {
             QuestionId, SkippableId, FORM_QUESTIONS, SKIPPABLE_QUESTIONS,
         };
         let sa = section(SectionId::ScheduleA);
-        let salt = sa.fields.iter().find(|f| f.id == FieldId::SaSaltUseSalesTax).unwrap();
-        let mortgage = sa.fields.iter().find(|f| f.id == FieldId::SaMortgageAllUsed).unwrap();
+        let salt = sa
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::SaSaltUseSalesTax)
+            .unwrap();
+        let mortgage = sa
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::SaMortgageAllUsed)
+            .unwrap();
         assert_eq!(salt.kind, FieldKind::TriState);
         assert_eq!(mortgage.kind, FieldKind::TriState);
 
         // SALT delegates to SKIPPABLE_QUESTIONS::SalesTaxElection.
-        let salt_entry =
-            SKIPPABLE_QUESTIONS.iter().find(|e| e.id == SkippableId::SalesTaxElection).unwrap();
+        let salt_entry = SKIPPABLE_QUESTIONS
+            .iter()
+            .find(|e| e.id == SkippableId::SalesTaxElection)
+            .unwrap();
         let mut ri = fresh_single();
         ri.schedule_a = Some(Default::default());
-        (salt.set)(&mut ri, &RowAddr::default(), FieldValue::TriState(Some(true))).unwrap();
-        assert_eq!((salt_entry.get_bool)(&ri), Some(true), "SALT set delegates to the registry");
-        assert_eq!((salt.get)(&ri, &RowAddr::default()), Some(FieldValue::TriState(Some(true))));
-        assert_eq!((salt.live)(&ri), (salt_entry.live)(&ri), "SALT live comes from the registry");
+        (salt.set)(
+            &mut ri,
+            &RowAddr::default(),
+            FieldValue::TriState(Some(true)),
+        )
+        .unwrap();
+        assert_eq!(
+            (salt_entry.get_bool)(&ri),
+            Some(true),
+            "SALT set delegates to the registry"
+        );
+        assert_eq!(
+            (salt.get)(&ri, &RowAddr::default()),
+            Some(FieldValue::TriState(Some(true)))
+        );
+        assert_eq!(
+            (salt.live)(&ri),
+            (salt_entry.live)(&ri),
+            "SALT live comes from the registry"
+        );
 
         // Mortgage delegates to FORM_QUESTIONS::MortgageAllUsedToBuyBuildImprove.
         let m_entry = FORM_QUESTIONS
@@ -1022,7 +1259,10 @@ mod tests {
             .unwrap();
         ri.schedule_a.as_mut().unwrap().mortgage_interest_1098 = dec!(1); // make the mortgage question live
         (m_entry.set)(&mut ri, true);
-        assert_eq!((mortgage.get)(&ri, &RowAddr::default()), Some(FieldValue::TriState(Some(true))));
+        assert_eq!(
+            (mortgage.get)(&ri, &RowAddr::default()),
+            Some(FieldValue::TriState(Some(true)))
+        );
         assert_eq!(
             (mortgage.live)(&ri),
             (m_entry.live)(&ri),

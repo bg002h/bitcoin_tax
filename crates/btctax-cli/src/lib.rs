@@ -70,7 +70,11 @@ pub enum CliError {
          computed carryover, `btctax report --tax-year {prior} --write-carryover` to rebuild it.",
         prior = year - 1
     )]
-    StaleReturnInputs { year: i32, found: i64, expected: i64 },
+    StaleReturnInputs {
+        year: i32,
+        found: i64,
+        expected: i64,
+    },
     /// §6.3 / C-1: a PARKED input-form draft is at a schema version this build does not read, and this
     /// build does not migrate it. Unlike a stale WIP draft (regenerable → discarded), a parked draft may
     /// hold irreplaceable carryover that exists ONLY in the draft — there is no committed row to re-import
@@ -83,7 +87,11 @@ pub enum CliError {
          an upgrade changed the input format. Its data lives only in the draft — do not discard it. \
          Re-run on the app version that wrote it, or export it there first."
     )]
-    StaleParkedDraft { year: i32, found: i64, expected: i64 },
+    StaleParkedDraft {
+        year: i32,
+        found: i64,
+        expected: i64,
+    },
     /// §6.2 draft-coherence: an authoritative committed-row write (`income import` / `income answer` /
     /// carryover write-back / `income clear`) was attempted for a year whose input-form draft is PARKED.
     /// A parked draft is the SOLE copy of a screened return (C-1) — clobbering it via the committed row

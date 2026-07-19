@@ -4,10 +4,12 @@
 //! header/W-2/Schedule-A/... sections and re-orders `form_spec()` into the §5.8 render order.
 #[macro_use]
 mod registries;
-mod sections;
 #[cfg(test)]
-mod coverage; // Task 6 — the drift-proofing coverage KAT (spec §5.6).
-pub use registries::{field_to_question, field_to_skippable, question_to_field, skippable_to_field};
+mod coverage;
+mod sections; // Task 6 — the drift-proofing coverage KAT (spec §5.6).
+pub use registries::{
+    field_to_question, field_to_skippable, question_to_field, skippable_to_field,
+};
 
 use crate::seam::Section;
 
@@ -72,7 +74,10 @@ mod tests {
 
         // The mortgage declaration is a Schedule-A Field (Task 5), NOT a Declarations Field.
         assert!(
-            !decls.fields.iter().any(|f| f.id == FieldId::SaMortgageAllUsed),
+            !decls
+                .fields
+                .iter()
+                .any(|f| f.id == FieldId::SaMortgageAllUsed),
             "the mortgage declaration is Schedule-A-owned, not a Declarations Field"
         );
 
@@ -81,28 +86,49 @@ mod tests {
         for q in FORM_QUESTIONS {
             if question_to_field(q.id) == FieldId::SaMortgageAllUsed {
                 assert!(
-                    !decls.fields.iter().any(|f| field_to_question(f.id) == Some(q.id)),
+                    !decls
+                        .fields
+                        .iter()
+                        .any(|f| field_to_question(f.id) == Some(q.id)),
                     "the deduped mortgage declaration must not appear in this section"
                 );
                 continue;
             }
             decl_count += 1;
             assert_eq!(
-                decls.fields.iter().filter(|f| field_to_question(f.id) == Some(q.id)).count(),
+                decls
+                    .fields
+                    .iter()
+                    .filter(|f| field_to_question(f.id) == Some(q.id))
+                    .count(),
                 1,
                 "declaration {:?} must map to exactly one Declarations Field",
                 q.id
             );
         }
-        assert_eq!(decl_count, 7, "7 declarations are Decl* fields (the 8th is the mortgage dedup)");
+        assert_eq!(
+            decl_count, 7,
+            "7 declarations are Decl* fields (the 8th is the mortgage dedup)"
+        );
 
         // 7 delegating Decl* fields + the foreign_country_names Text field.
-        assert_eq!(decls.fields.len(), 8, "7 declarations + foreign_country_names");
-        assert!(decls.fields.iter().any(|f| f.id == FieldId::ForeignCountryNames));
+        assert_eq!(
+            decls.fields.len(),
+            8,
+            "7 declarations + foreign_country_names"
+        );
+        assert!(decls
+            .fields
+            .iter()
+            .any(|f| f.id == FieldId::ForeignCountryNames));
 
         // TOTAL, both directions, over all 8 QuestionIds — the mortgage one resolves to SaMortgageAllUsed.
         for q in QuestionId::ALL {
-            assert_eq!(field_to_question(question_to_field(*q)), Some(*q), "round-trip {q:?}");
+            assert_eq!(
+                field_to_question(question_to_field(*q)),
+                Some(*q),
+                "round-trip {q:?}"
+            );
         }
         assert_eq!(
             question_to_field(QuestionId::MortgageAllUsedToBuyBuildImprove),
@@ -112,35 +138,69 @@ mod tests {
         // Brief's positive get-delegation check.
         let mut ri = fresh_single();
         ri.foreign_accounts = Some(true);
-        let fa = decls.fields.iter().find(|f| f.id == FieldId::DeclForeignAccounts).unwrap();
-        assert_eq!((fa.get)(&ri, &RowAddr::default()), Some(FieldValue::TriState(Some(true))));
+        let fa = decls
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::DeclForeignAccounts)
+            .unwrap();
+        assert_eq!(
+            (fa.get)(&ri, &RowAddr::default()),
+            Some(FieldValue::TriState(Some(true)))
+        );
 
         // Each Decl* Field's live/get/set actually delegate to its registry entry (pins the registry index).
-        for f in decls.fields.iter().filter(|f| field_to_question(f.id).is_some()) {
+        for f in decls
+            .fields
+            .iter()
+            .filter(|f| field_to_question(f.id).is_some())
+        {
             let q = field_to_question(f.id).unwrap();
             let entry = FORM_QUESTIONS.iter().find(|e| e.id == q).unwrap();
 
             // live: compare on a Single and an Mfs return (MfsSpouseItemizes' liveness differs there, so a
             // mis-wired index is caught, not just constant-true entries).
             for fs in [FilingStatus::Single, FilingStatus::Mfs] {
-                let ri = ReturnInputs { filing_status: fs, ..Default::default() };
-                assert_eq!((f.live)(&ri), (entry.live)(&ri), "live delegation {:?} @ {fs:?}", f.id);
+                let ri = ReturnInputs {
+                    filing_status: fs,
+                    ..Default::default()
+                };
+                assert_eq!(
+                    (f.live)(&ri),
+                    (entry.live)(&ri),
+                    "live delegation {:?} @ {fs:?}",
+                    f.id
+                );
             }
             // ★ I-4: the delegating get/set now gate on `live`, so seed a return on which EVERY Decl* is
             // live (Mfs makes `MfsSpouseItemizes` live; a spouse `Person` makes `DependentSpouse` live).
             let live_ri = || {
-                let mut ri = ReturnInputs { filing_status: FilingStatus::Mfs, ..Default::default() };
+                let mut ri = ReturnInputs {
+                    filing_status: FilingStatus::Mfs,
+                    ..Default::default()
+                };
                 ri.header.spouse = Some(Person::default());
                 ri
             };
-            assert!((entry.live)(&live_ri()), "test fixture must be live for {:?}", f.id);
+            assert!(
+                (entry.live)(&live_ri()),
+                "test fixture must be live for {:?}",
+                f.id
+            );
             // get delegates: a value written through the registry setter is read back by the Field getter.
             let mut ri = live_ri();
             (entry.set)(&mut ri, true);
-            assert_eq!((f.get)(&ri, &RowAddr::default()), Some(FieldValue::TriState(Some(true))));
+            assert_eq!(
+                (f.get)(&ri, &RowAddr::default()),
+                Some(FieldValue::TriState(Some(true)))
+            );
             // set delegates: a value written through the Field setter is read back by the registry getter.
             let mut ri2 = live_ri();
-            (f.set)(&mut ri2, &RowAddr::default(), FieldValue::TriState(Some(false))).unwrap();
+            (f.set)(
+                &mut ri2,
+                &RowAddr::default(),
+                FieldValue::TriState(Some(false)),
+            )
+            .unwrap();
             assert_eq!((entry.get)(&ri2), Some(false), "set delegation {:?}", f.id);
             // wrong FieldValue kind is rejected.
             assert_eq!(
@@ -153,12 +213,21 @@ mod tests {
             if !(entry.live)(&fresh_single()) {
                 let mut dead = fresh_single();
                 assert_eq!(
-                    (f.set)(&mut dead, &RowAddr::default(), FieldValue::TriState(Some(true))),
+                    (f.set)(
+                        &mut dead,
+                        &RowAddr::default(),
+                        FieldValue::TriState(Some(true))
+                    ),
                     Err(SetError::NoSuchRow),
                     "set on non-live {:?} must refuse",
                     f.id
                 );
-                assert_eq!((f.get)(&dead, &RowAddr::default()), None, "get on non-live {:?} is None", f.id);
+                assert_eq!(
+                    (f.get)(&dead, &RowAddr::default()),
+                    None,
+                    "get on non-live {:?} is None",
+                    f.id
+                );
             }
         }
     }
@@ -173,24 +242,41 @@ mod tests {
 
         // SALT election is a Schedule-A Field (Task 5), NOT a Skippables Field.
         assert!(
-            !skips.fields.iter().any(|f| f.id == FieldId::SaSaltUseSalesTax),
+            !skips
+                .fields
+                .iter()
+                .any(|f| f.id == FieldId::SaSaltUseSalesTax),
             "the SALT election is Schedule-A-owned, not a Skippables Field"
         );
 
         // Exactly the four non-SALT skippables.
         let ids: Vec<FieldId> = skips.fields.iter().map(|f| f.id).collect();
         assert_eq!(ids.len(), 4, "blind ×2 + DOB ×2");
-        for expected in
-            [FieldId::BlindTaxpayer, FieldId::BlindSpouse, FieldId::DobTaxpayer, FieldId::DobSpouse]
-        {
-            assert!(ids.contains(&expected), "missing skippable field {expected:?}");
+        for expected in [
+            FieldId::BlindTaxpayer,
+            FieldId::BlindSpouse,
+            FieldId::DobTaxpayer,
+            FieldId::DobSpouse,
+        ] {
+            assert!(
+                ids.contains(&expected),
+                "missing skippable field {expected:?}"
+            );
         }
 
         // TOTAL, both directions, over all 5 SkippableIds — SALT resolves to SaSaltUseSalesTax.
         for s in SKIPPABLE_QUESTIONS {
-            assert_eq!(field_to_skippable(skippable_to_field(s.id)), Some(s.id), "round-trip {:?}", s.id);
+            assert_eq!(
+                field_to_skippable(skippable_to_field(s.id)),
+                Some(s.id),
+                "round-trip {:?}",
+                s.id
+            );
         }
-        assert_eq!(skippable_to_field(SkippableId::SalesTaxElection), FieldId::SaSaltUseSalesTax);
+        assert_eq!(
+            skippable_to_field(SkippableId::SalesTaxElection),
+            FieldId::SaSaltUseSalesTax
+        );
 
         // Each Field's live/get/set delegate to its SKIPPABLE_QUESTIONS entry, by kind.
         for f in skips.fields.iter() {
@@ -207,10 +293,23 @@ mod tests {
                     let mut ri = fresh_single();
                     seed(&mut ri);
                     (entry.set_bool)(&mut ri, true);
-                    assert_eq!((f.get)(&ri, &RowAddr::default()), Some(FieldValue::TriState(Some(true))));
+                    assert_eq!(
+                        (f.get)(&ri, &RowAddr::default()),
+                        Some(FieldValue::TriState(Some(true)))
+                    );
                     let mut ri2 = ri.clone();
-                    (f.set)(&mut ri2, &RowAddr::default(), FieldValue::TriState(Some(false))).unwrap();
-                    assert_eq!((entry.get_bool)(&ri2), Some(false), "set delegation {:?}", f.id);
+                    (f.set)(
+                        &mut ri2,
+                        &RowAddr::default(),
+                        FieldValue::TriState(Some(false)),
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        (entry.get_bool)(&ri2),
+                        Some(false),
+                        "set delegation {:?}",
+                        f.id
+                    );
                     assert_eq!(
                         (f.set)(&mut ri2, &RowAddr::default(), FieldValue::Date(None)),
                         Err(SetError::WrongKind)
@@ -221,11 +320,19 @@ mod tests {
                     seed(&mut ri);
                     let d = date!(1990 - 01 - 02);
                     (entry.set_date)(&mut ri, d);
-                    assert_eq!((f.get)(&ri, &RowAddr::default()), Some(FieldValue::Date(Some(d))));
+                    assert_eq!(
+                        (f.get)(&ri, &RowAddr::default()),
+                        Some(FieldValue::Date(Some(d)))
+                    );
                     let mut ri2 = ri.clone();
                     let d2 = date!(1985 - 05 - 05);
                     (f.set)(&mut ri2, &RowAddr::default(), FieldValue::Date(Some(d2))).unwrap();
-                    assert_eq!((entry.get_date)(&ri2), Some(d2), "set delegation {:?}", f.id);
+                    assert_eq!(
+                        (entry.get_date)(&ri2),
+                        Some(d2),
+                        "set delegation {:?}",
+                        f.id
+                    );
                     assert_eq!(
                         (f.set)(&mut ri2, &RowAddr::default(), FieldValue::TriState(None)),
                         Err(SetError::WrongKind)
@@ -235,10 +342,20 @@ mod tests {
         }
 
         // The spouse-gated liveness edge: BlindSpouse is live only when a spouse Person is present.
-        let blind_spouse = skips.fields.iter().find(|f| f.id == FieldId::BlindSpouse).unwrap();
+        let blind_spouse = skips
+            .fields
+            .iter()
+            .find(|f| f.id == FieldId::BlindSpouse)
+            .unwrap();
         let mut ri = fresh_single();
-        assert!(!(blind_spouse.live)(&ri), "BlindSpouse is not live without a spouse");
+        assert!(
+            !(blind_spouse.live)(&ri),
+            "BlindSpouse is not live without a spouse"
+        );
         ri.header.spouse = Some(Person::default());
-        assert!((blind_spouse.live)(&ri), "BlindSpouse is live with a spouse present");
+        assert!(
+            (blind_spouse.live)(&ri),
+            "BlindSpouse is live with a spouse present"
+        );
     }
 }

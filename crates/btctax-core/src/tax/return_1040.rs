@@ -2219,9 +2219,17 @@ mod tests {
             ..Default::default()
         });
         let parts = schedule_a_parts(&r, dec!(100000), &no_charity(), &ty2024_params()).unwrap();
-        assert_eq!(parts.mortgage_8a, Usd::ZERO, "8a zeroed — v1 cannot allocate");
+        assert_eq!(
+            parts.mortgage_8a,
+            Usd::ZERO,
+            "8a zeroed — v1 cannot allocate"
+        );
         assert!(parts.mortgage_mixed_use_box, "the line-8 box is checked");
-        assert_eq!(parts.total_17, Usd::ZERO, "no other Schedule A items ⇒ total is $0");
+        assert_eq!(
+            parts.total_17,
+            Usd::ZERO,
+            "no other Schedule A items ⇒ total is $0"
+        );
         assert_eq!(
             mixed_use_mortgage_forgone(&r),
             Some(dec!(12000)),

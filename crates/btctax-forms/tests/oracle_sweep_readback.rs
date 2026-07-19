@@ -74,7 +74,10 @@ fn leading_reads_the_sign_verbatim() {
 #[test]
 fn paren_magnitude_negates_the_magnitude() {
     let c = cells(&[("mag", "3000"), ("zero", "0")]);
-    assert_eq!(on_paper_signed(&c, "mag", Sign::ParenMagnitude), Some(-3000));
+    assert_eq!(
+        on_paper_signed(&c, "mag", Sign::ParenMagnitude),
+        Some(-3000)
+    );
     // Zero is its own negation — a paren box that happens to carry 0 reads back as 0, not −0.
     assert_eq!(on_paper_signed(&c, "zero", Sign::ParenMagnitude), Some(0));
 }

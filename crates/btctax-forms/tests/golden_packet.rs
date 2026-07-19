@@ -48,8 +48,8 @@
 
 use btctax_core::conventions::{round_dollar, Usd};
 use btctax_core::tax::oracle_diff::{
-    provenance_class_fires, round_leaf, stacking_ok, sum_round, table_l16, taxcalc_methodology_class,
-    L16Operands, LivenessLedger,
+    provenance_class_fires, round_leaf, stacking_ok, sum_round, table_l16,
+    taxcalc_methodology_class, L16Operands, LivenessLedger,
 };
 use btctax_core::tax::return_1040::assemble_absolute;
 use btctax_core::tax::testonly::{
@@ -97,9 +97,9 @@ fn oracle_ops(
 /// A PRESENT unsigned money cell, as the SIGNED integer it prints (whole dollars, SPEC §3.1). Panics if
 /// the cell is absent (a line the differential compares must be on the paper) or unparseable.
 fn paper_money(cells: &BTreeMap<String, String>, key: &str) -> Usd {
-    let raw = cells
-        .get(key)
-        .unwrap_or_else(|| panic!("paper_money: the compared cell {key:?} is absent from the paper"));
+    let raw = cells.get(key).unwrap_or_else(|| {
+        panic!("paper_money: the compared cell {key:?} is absent from the paper")
+    });
     // `parse::<i64>()` would silently accept a leading minus, so a SIGNED line misrouted here would pass
     // unnoticed. Fail loud: an unsigned reader must never read a signed cell (use `on_paper_signed`).
     assert!(
@@ -107,9 +107,9 @@ fn paper_money(cells: &BTreeMap<String, String>, key: &str) -> Usd {
         "paper_money: cell {key:?} carries a leading minus ({raw:?}) — read a signed line with \
          on_paper_signed, not paper_money"
     );
-    let n: i64 = raw
-        .parse()
-        .unwrap_or_else(|_| panic!("paper_money: cell {key:?} is present but not an integer: {raw:?}"));
+    let n: i64 = raw.parse().unwrap_or_else(|_| {
+        panic!("paper_money: cell {key:?} is present but not an integer: {raw:?}")
+    });
     usd(n as f64)
 }
 
@@ -264,8 +264,9 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
     // Read every form we touch, once. Absent forms read as `None` (not on this return).
     let read = |name: &str, map: &str| -> Option<BTreeMap<String, String>> {
         a.forms.iter().find(|f| f.name == name).map(|f| {
-            extract_lines(&f.bytes, map)
-                .unwrap_or_else(|err| panic!("{}: the filled {name} must transcribe — {err}", h.name))
+            extract_lines(&f.bytes, map).unwrap_or_else(|err| {
+                panic!("{}: the filled {name} must transcribe — {err}", h.name)
+            })
         })
     };
     let f1040 = read("f1040", F1040_MAP_2024).expect("every return has a 1040");
@@ -297,8 +298,18 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
         &h.why,
         paper_money(&f1040, "line15"),
         round_dollar(a.ar.taxable_income),
-        ti_crossfoot(e.adjusted_gross_income, e.deduction_taken, e.qbi_deduction, e.taxable_income),
-        ti_crossfoot(t.adjusted_gross_income, t.deduction_taken, t.qbi_deduction, t.taxable_income),
+        ti_crossfoot(
+            e.adjusted_gross_income,
+            e.deduction_taken,
+            e.qbi_deduction,
+            e.taxable_income,
+        ),
+        ti_crossfoot(
+            t.adjusted_gross_income,
+            t.deduction_taken,
+            t.qbi_deduction,
+            t.taxable_income,
+        ),
     );
     // QBI deduction (1040 L13 / 8995 L15). Line 13 is on every return (0 when there is no QBI), so read
     // it under AbsentIsZero — present-"0" or absent both mean $0.
@@ -410,12 +421,12 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
     //    else the formula would understate the total. ─────────────────────────────────────────────────
     let _ = cell_or_zero(&f1040, "line17", Blank::PresentZero); // Sch 2 L3 (AMT / excess APTC)
     let _ = cell_or_zero(&f1040, "line21", Blank::PresentZero); // L19 + L20 (nonrefundable credits)
-    // The L16 leg is btctax's OWN printed L16 (`l16_paper`, read off the form above) — the value btctax
-    // actually summed into L24 — NOT the oracle's L16. The L16 VALUE is separately adjudicated by the
-    // two-part comparison above (with its provenance/methodology class), so L24 witnesses btctax's
-    // cross-foot arithmetic + the SE-L12 / 8959-L18 / NIIT legs against OTS, and stays green on the §5.1
-    // pinned OTS-provenance cell (whose L16 legitimately differs from OTS's by the Tax-Table bin the L16
-    // class absorbs) while still reddening on any real btctax cross-foot / Sch-2-leg / L16 bug.
+                                                                // The L16 leg is btctax's OWN printed L16 (`l16_paper`, read off the form above) — the value btctax
+                                                                // actually summed into L24 — NOT the oracle's L16. The L16 VALUE is separately adjudicated by the
+                                                                // two-part comparison above (with its provenance/methodology class), so L24 witnesses btctax's
+                                                                // cross-foot arithmetic + the SE-L12 / 8959-L18 / NIIT legs against OTS, and stays green on the §5.1
+                                                                // pinned OTS-provenance cell (whose L16 legitimately differs from OTS's by the Tax-Table bin the L16
+                                                                // class absorbs) while still reddening on any real btctax cross-foot / Sch-2-leg / L16 bug.
     check_ots(
         wrong,
         &h.name,
@@ -436,8 +447,7 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
                 "Sch SE L12 (SE tax)",
                 &h.why,
                 paper_money(se, "line12"),
-                a.pr
-                    .forms
+                a.pr.forms
                     .sch_se
                     .as_ref()
                     .expect("an SE household has a printed Schedule SE")
@@ -473,8 +483,7 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
             "8960 L17 (NIIT)",
             &h.why,
             paper_money(f, "line17"),
-            a.pr
-                .forms
+            a.pr.forms
                 .f8960
                 .as_ref()
                 .expect("a NIIT household has a printed Form 8960")
@@ -491,27 +500,58 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
         let paper = paper_money(&f1040, "line12");
         let internal = round_dollar(a.ar.deduction);
         if let Some(o) = e.deduction_taken {
-            check_ots(wrong, &h.name, "deduction (L12) [OTS]", &h.why, paper, internal, round_leaf(o));
+            check_ots(
+                wrong,
+                &h.name,
+                "deduction (L12) [OTS]",
+                &h.why,
+                paper,
+                internal,
+                round_leaf(o),
+            );
         }
         if let Some(tc) = t.deduction_taken {
-            check_ots(wrong, &h.name, "deduction (L12) [taxcalc]", &h.why, paper, internal, round_leaf(tc));
+            check_ots(
+                wrong,
+                &h.name,
+                "deduction (L12) [taxcalc]",
+                &h.why,
+                paper,
+                internal,
+                round_leaf(tc),
+            );
         }
     }
     // SALT cap (Schedule A L5e) — both oracles; only when Schedule A files.
     if let Some(sa) = &sch_a {
         let paper = paper_money(sa, "line5e");
-        let internal = a
-            .pr
-            .forms
-            .sch_a
-            .as_ref()
-            .expect("a Schedule-A household has a printed Schedule A")
-            .line5e;
+        let internal =
+            a.pr.forms
+                .sch_a
+                .as_ref()
+                .expect("a Schedule-A household has a printed Schedule A")
+                .line5e;
         if let Some(o) = e.salt_capped {
-            check_ots(wrong, &h.name, "SALT (Sch A L5e) [OTS]", &h.why, paper, internal, round_leaf(o));
+            check_ots(
+                wrong,
+                &h.name,
+                "SALT (Sch A L5e) [OTS]",
+                &h.why,
+                paper,
+                internal,
+                round_leaf(o),
+            );
         }
         if let Some(tc) = t.salt_capped {
-            check_ots(wrong, &h.name, "SALT (Sch A L5e) [taxcalc]", &h.why, paper, internal, round_leaf(tc));
+            check_ots(
+                wrong,
+                &h.name,
+                "SALT (Sch A L5e) [taxcalc]",
+                &h.why,
+                paper,
+                internal,
+                round_leaf(tc),
+            );
         }
     }
     // Schedule D → 1040 L7 — SIGNED (leading minus, §6.3); both oracles; only when line 7 is present.
@@ -519,25 +559,48 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
         let paper = usd(paper_signed as f64);
         let internal = round_dollar(a.ar.capital_gain);
         if let Some(o) = e.sch_d_to_l7 {
-            check_ots(wrong, &h.name, "Sch D → L7 [OTS]", &h.why, paper, internal, round_leaf(o));
+            check_ots(
+                wrong,
+                &h.name,
+                "Sch D → L7 [OTS]",
+                &h.why,
+                paper,
+                internal,
+                round_leaf(o),
+            );
         }
         if let Some(tc) = t.sch_d_to_l7 {
-            check_ots(wrong, &h.name, "Sch D → L7 [taxcalc]", &h.why, paper, internal, round_leaf(tc));
+            check_ots(
+                wrong,
+                &h.name,
+                "Sch D → L7 [taxcalc]",
+                &h.why,
+                paper,
+                internal,
+                round_leaf(tc),
+            );
         }
     }
     // 8995 line 12 (net capital gain cap) — OTS single-witness / WEAK (driver-hand-fed; §14.2 closure is
     // a follow-up); only when Form 8995 files.
     if let Some(f) = &f8995 {
         let paper = paper_money(f, "line12");
-        let internal = a
-            .pr
-            .forms
-            .f8995
-            .as_ref()
-            .expect("an 8995 household has a printed Form 8995")
-            .line12;
+        let internal =
+            a.pr.forms
+                .f8995
+                .as_ref()
+                .expect("an 8995 household has a printed Form 8995")
+                .line12;
         if let Some(o) = e.qbi_cap_l12 {
-            check_ots(wrong, &h.name, "8995 L12 net-cap-gain (WEAK)", &h.why, paper, internal, round_leaf(o));
+            check_ots(
+                wrong,
+                &h.name,
+                "8995 L12 net-cap-gain (WEAK)",
+                &h.why,
+                paper,
+                internal,
+                round_leaf(o),
+            );
         }
     }
 
@@ -770,12 +833,20 @@ fn the_paper_differential_engages_every_divergence_class() {
         if l16 != round_leaf(t.income_tax_before_credits) {
             if taxcalc_methodology_class(&ops) {
                 liveness.record_fire("taxcalc_methodology");
-            } else if provenance_class_fires(taxcalc_ops.as_ref(), &ops, t.income_tax_before_credits) {
+            } else if provenance_class_fires(
+                taxcalc_ops.as_ref(),
+                &ops,
+                t.income_tax_before_credits,
+            ) {
                 liveness.record_fire("taxcalc_provenance");
             }
         }
     }
-    let dead = liveness.dead(&["taxcalc_methodology", "ots_provenance", "taxcalc_provenance"]);
+    let dead = liveness.dead(&[
+        "taxcalc_methodology",
+        "ots_provenance",
+        "taxcalc_provenance",
+    ]);
     assert!(
         dead.is_empty(),
         "declared divergence class(es) never fired and are not pinned: {dead:?}. The Table anchors hold \
@@ -853,8 +924,11 @@ fn derive_form_set(i: &GoldenInputs) -> BTreeSet<&'static str> {
     // Form 8960 (NIIT) — net investment income AND MAGI over the threshold.
     let net_cap_gain = (i.short_term_capital_gains + i.long_term_capital_gains).max(0.0);
     let nii = i.taxable_interest + i.ordinary_dividends + net_cap_gain;
-    let magi =
-        i.w2_income + i.taxable_interest + i.ordinary_dividends + net_cap_gain + i.self_employment_income;
+    let magi = i.w2_income
+        + i.taxable_interest
+        + i.ordinary_dividends
+        + net_cap_gain
+        + i.self_employment_income;
     let f8960 = nii > 0.0 && magi > threshold;
     if f8960 {
         set.insert("f8960");
@@ -876,33 +950,83 @@ fn derived_form_set_reproduces_the_twelve_anchors() {
     let pinned: BTreeMap<&str, &[&str]> = BTreeMap::from([
         ("single_w2_only_standard", &["f1040"][..]),
         ("mfj_two_w2_standard", &["f1040"][..]),
-        ("single_w2_plus_crypto_ltcg", &["f1040", "schedule_d", "f8949"][..]),
-        ("single_short_term_crypto_gain", &["f1040", "schedule_d", "f8949"][..]),
-        ("single_capital_loss_capped", &["f1040", "schedule_d", "f8949"][..]),
+        (
+            "single_w2_plus_crypto_ltcg",
+            &["f1040", "schedule_d", "f8949"][..],
+        ),
+        (
+            "single_short_term_crypto_gain",
+            &["f1040", "schedule_d", "f8949"][..],
+        ),
+        (
+            "single_capital_loss_capped",
+            &["f1040", "schedule_d", "f8949"][..],
+        ),
         (
             "single_qdcgt_both_slices",
             &["f1040", "f1040sb", "schedule_d", "f8949"][..],
         ),
         (
             "mfj_itemized_over_100k",
-            &["f1040", "f1040s2", "f1040sa", "f1040sb", "schedule_d", "f8949", "f8960"][..],
+            &[
+                "f1040",
+                "f1040s2",
+                "f1040sa",
+                "f1040sb",
+                "schedule_d",
+                "f8949",
+                "f8960",
+            ][..],
         ),
         (
             "mfj_high_income_niit_and_addl_medicare",
-            &["f1040", "f1040s2", "f1040sb", "schedule_d", "f8949", "f8959", "f8960"][..],
+            &[
+                "f1040",
+                "f1040s2",
+                "f1040sb",
+                "schedule_d",
+                "f8949",
+                "f8959",
+                "f8960",
+            ][..],
         ),
         ("mfj_itemized_salt_over_the_cap", &["f1040", "f1040sa"][..]),
         (
             "single_crypto_business_se",
-            &["f1040", "f1040s1", "f1040s2", "f1040sc", "schedule_se", "f8995"][..],
+            &[
+                "f1040",
+                "f1040s1",
+                "f1040s2",
+                "f1040sc",
+                "schedule_se",
+                "f8995",
+            ][..],
         ),
         (
             "single_miner_qbi_limited_by_net_capital_gain",
-            &["f1040", "f1040s1", "f1040s2", "f1040sb", "f1040sc", "schedule_d", "f8949", "schedule_se", "f8995"][..],
+            &[
+                "f1040",
+                "f1040s1",
+                "f1040s2",
+                "f1040sb",
+                "f1040sc",
+                "schedule_d",
+                "f8949",
+                "schedule_se",
+                "f8995",
+            ][..],
         ),
         (
             "mfj_se_over_the_addl_medicare_threshold",
-            &["f1040", "f1040s1", "f1040s2", "f1040sc", "schedule_se", "f8995", "f8959"][..],
+            &[
+                "f1040",
+                "f1040s1",
+                "f1040s2",
+                "f1040sc",
+                "schedule_se",
+                "f8995",
+                "f8959",
+            ][..],
         ),
     ]);
 
@@ -992,7 +1116,10 @@ fn anchors_and_pinned() -> Vec<GoldenHousehold> {
 fn assert_packets_carry_the_derived_forms(households: &[GoldenHousehold]) {
     let mut wrong = Vec::new();
     for h in households {
-        let want: BTreeSet<String> = derive_form_set(&h.inputs).iter().map(|s| s.to_string()).collect();
+        let want: BTreeSet<String> = derive_form_set(&h.inputs)
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let got: BTreeSet<String> = packet(h).iter().map(|f| f.name.clone()).collect();
         let missing: Vec<_> = want.difference(&got).collect();
         let spurious: Vec<_> = got.difference(&want).collect();
@@ -1414,7 +1541,8 @@ fn readback_reads_the_pdf_not_the_struct() {
         swapped_map, F1040_MAP_2024,
         "the swap must actually rewrite the map — else the L16 field name drifted"
     );
-    let injected = extract_lines(bytes, &swapped_map).expect("the swapped map must still transcribe");
+    let injected =
+        extract_lines(bytes, &swapped_map).expect("the swapped map must still transcribe");
     let injected_l16 = paper_money(&injected, "line16");
     assert_ne!(
         injected_l16, honest_l16,

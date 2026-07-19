@@ -13,7 +13,9 @@
 //! questions / all 5 skippables (the two deduped ids resolve to their Schedule-A `FieldId`), so Task 9's
 //! attribution resolves every one.
 
-use crate::seam::{Field, FieldId, FieldKind, FieldValue, Section, SectionId, SectionKind, SetError};
+use crate::seam::{
+    Field, FieldId, FieldKind, FieldValue, Section, SectionId, SectionKind, SetError,
+};
 use btctax_core::tax::questions::{QuestionId, SkippableId, FORM_QUESTIONS, SKIPPABLE_QUESTIONS};
 
 // ── The delegating-Field generators ──────────────────────────────────────────────────────────────────────
@@ -74,13 +76,17 @@ macro_rules! skippable_tristate {
                 if !(SKIPPABLE_QUESTIONS[$idx].live)(ri) {
                     return None;
                 }
-                Some(FieldValue::TriState((SKIPPABLE_QUESTIONS[$idx].get_bool)(ri)))
+                Some(FieldValue::TriState((SKIPPABLE_QUESTIONS[$idx].get_bool)(
+                    ri,
+                )))
             },
             set: |ri, _, v| {
                 if !(SKIPPABLE_QUESTIONS[$idx].live)(ri) {
                     return Err(SetError::NoSuchRow);
                 }
-                let FieldValue::TriState(Some(b)) = v else { return Err(SetError::WrongKind) };
+                let FieldValue::TriState(Some(b)) = v else {
+                    return Err(SetError::WrongKind);
+                };
                 (SKIPPABLE_QUESTIONS[$idx].set_bool)(ri, b);
                 Ok(())
             },
@@ -108,7 +114,9 @@ macro_rules! skippable_date {
                 if !(SKIPPABLE_QUESTIONS[$idx].live)(ri) {
                     return Err(SetError::NoSuchRow);
                 }
-                let FieldValue::Date(Some(d)) = v else { return Err(SetError::WrongKind) };
+                let FieldValue::Date(Some(d)) = v else {
+                    return Err(SetError::WrongKind);
+                };
                 (SKIPPABLE_QUESTIONS[$idx].set_date)(ri, d);
                 Ok(())
             },

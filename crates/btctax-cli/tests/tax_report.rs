@@ -584,7 +584,11 @@ fn report_tax_year_with_return_inputs_for_unsupported_year_refuses_with_income_c
     cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
 
     let toml = dir.path().join("inputs.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n").unwrap();
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n",
+    )
+    .unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap_err();
@@ -1688,7 +1692,11 @@ fn import_preserves_a_computed_carryover() {
 
     // Re-import 2025 from a TOML that carries NO carryover — the computed one must SURVIVE.
     let toml = csv_dir.path().join("2025.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n").unwrap();
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n",
+    )
+    .unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml).unwrap();
     let after = {
         let s = Session::open(&vault, &pp()).unwrap();
@@ -1727,7 +1735,7 @@ fn full_return_report_surfaces_conservative_omission_advisories() {
                 box5_medicare_wages: dec!(40000),
                 ..Default::default()
             }],
-            foreign_accounts: Some(true), // → FBAR disclosure
+            foreign_accounts: Some(true),           // → FBAR disclosure
             foreign_country_names: "Canada".into(), // 7b — required now that 7a is "Yes" (P9 §3.2)
             foreign_trust: Some(false),
             ..Default::default()
@@ -1818,7 +1826,8 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
 
     // (e) The year computes again — and the answer is on file as an ANSWER (`Some(false)`), not as the
     //     absence that the same `false` used to mean.
-    let TaxYearReport { outcome, .. } = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
+    let TaxYearReport { outcome, .. } =
+        cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
     assert!(
         matches!(outcome, btctax_core::TaxOutcome::Computed(_)),
         "after answering, the year must compute: {outcome:?}"
@@ -1853,7 +1862,10 @@ fn income_answer_refuses_a_year_with_no_return() {
         format!("{err}").contains("income import"),
         "the refusal must say how to create the return: {err}"
     );
-    assert!(screen.is_empty(), "it must not ask anything before refusing");
+    assert!(
+        screen.is_empty(),
+        "it must not ask anything before refusing"
+    );
 }
 
 // ── P9 §2.6 — the stale-row REMEDY chain (IMPL r1 I-2) ───────────────────────────────────────────
@@ -1942,7 +1954,11 @@ fn clear_then_import_recovers_a_stale_row_to_v2() {
         "clear works on a stale row (it never deserializes)"
     );
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap(); // no existing row now ⇒ succeeds
-    assert_eq!(row_version(&vault, 2024), 2, "the recovered row is stamped v2");
+    assert_eq!(
+        row_version(&vault, 2024),
+        2,
+        "the recovered row is stamped v2"
+    );
 }
 
 /// ★ IMPL r1 I-2, test (c). THE FULL CHAIN restores what `clear` discards. Seed 2024, write a Computed
@@ -2000,7 +2016,9 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
     cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
     let carry_before = {
         let s = Session::open(&vault, &pp()).unwrap();
-        let n = btctax_cli::return_inputs::get(s.conn(), 2025).unwrap().unwrap();
+        let n = btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap();
         assert!(
             n.charitable_carryover_in
                 .iter()

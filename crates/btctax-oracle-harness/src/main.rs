@@ -52,7 +52,6 @@ use btctax_core::tax::oracle_diff::{
     round_leaf, stacking_ok, sum_round, table_l16, taxcalc_methodology_class, usd, KnownDefect,
     L16Operands,
 };
-use btctax_core::tax::FilingStatus;
 use btctax_core::tax::packet::{assemble_printed_return, PrintedReturn};
 use btctax_core::tax::return_1040::{
     assemble_absolute, screen_absolute, screen_compute_dependent, AbsoluteReturn,
@@ -61,6 +60,7 @@ use btctax_core::tax::return_refuse::screen_inputs;
 use btctax_core::tax::testonly::{
     build_golden_return, ty2024_params, ty2024_table, GoldenHousehold, GoldenInputs,
 };
+use btctax_core::tax::FilingStatus;
 use btctax_forms::testonly::{
     extract_lines, F1040_MAP_2024, F8283_MAP_2024, F8949_MAP_2024, F8959_MAP_2024, F8960_MAP_2024,
     F8995_MAP_2024, SCHEDULE_1_MAP_2024, SCHEDULE_2_MAP_2024, SCHEDULE_3_MAP_2024,
@@ -116,9 +116,9 @@ fn parse_known_defect(args: &[String]) -> Result<Option<KnownDefect>, String> {
     let spec = args
         .get(pos + 1)
         .ok_or("--known-defect needs an argument: <line>=<value>@<fu-id>")?;
-    let (line, rest) = spec
-        .split_once('=')
-        .ok_or_else(|| format!("malformed --known-defect {spec:?}: expected <line>=<value>@<fu-id>"))?;
+    let (line, rest) = spec.split_once('=').ok_or_else(|| {
+        format!("malformed --known-defect {spec:?}: expected <line>=<value>@<fu-id>")
+    })?;
     if line != "1040.line16" {
         return Err(format!(
             "--known-defect only supports 1040.line16 (the only class/stacking line); got {line:?}. \
@@ -207,47 +207,83 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
     let t = &h.expected_taxcalc;
     // The oracles' OWN L16 operands (baked provenance leaves) — so the per-oracle provenance classes can
     // absorb the §5.1 pinned cells' L16 dissent (bin-edge ⇒ OTS, cents-flip ⇒ taxcalc). `None` pre-bake.
-    let ots_ops = oracle_ops(pr.filing_status, e.taxable_income, e.qual_div_l3a, e.net_ltcg_qd_exclusive);
-    let taxcalc_ops = oracle_ops(pr.filing_status, t.taxable_income, t.qual_div_l3a, t.net_ltcg_qd_exclusive);
+    let ots_ops = oracle_ops(
+        pr.filing_status,
+        e.taxable_income,
+        e.qual_div_l3a,
+        e.net_ltcg_qd_exclusive,
+    );
+    let taxcalc_ops = oracle_ops(
+        pr.filing_status,
+        t.taxable_income,
+        t.qual_div_l3a,
+        t.net_ltcg_qd_exclusive,
+    );
     let mut verdicts: Vec<Value> = Vec::new();
 
     // Paper reader off the flattened line map (whole dollars, SPEC §3.1). `None` ⇒ the line is not on
     // this return; a present-but-unparseable cell is a filler/map bug and panics loudly.
     let paper = |key: &str| -> Option<i64> {
         lines.get(key).map(|raw| {
-            raw.parse::<i64>()
-                .unwrap_or_else(|_| panic!("oracle_harness --check: cell {key:?} is not an integer: {raw:?}"))
+            raw.parse::<i64>().unwrap_or_else(|_| {
+                panic!("oracle_harness --check: cell {key:?} is not an integer: {raw:?}")
+            })
         })
     };
 
     // ── AGI L11 / taxable income L15 / QBI deduction L13 — held against BOTH oracles (exact-vs-both). ──
     verdicts.push(verdict_both(
-        "1040.line11", "AGI (1040 L11)",
-        paper("1040.line11"), round_dollar(ar.agi), e.adjusted_gross_income, t.adjusted_gross_income,
+        "1040.line11",
+        "AGI (1040 L11)",
+        paper("1040.line11"),
+        round_dollar(ar.agi),
+        e.adjusted_gross_income,
+        t.adjusted_gross_income,
     ));
     // Taxable income (L15) — the C1 CROSS-FOOT (AGI − deduction − QBI, each line-rounded from the oracle's
     // own leaves), floored at 0: matches btctax's whole-dollar L15 and dissolves the 8995-chain
     // rounding-order residual. Both oracles stay exact witnesses.
     verdicts.push(verdict_both_targets(
-        "1040.line15", "taxable income (L15)",
-        paper("1040.line15"), round_dollar(ar.taxable_income),
-        ti_crossfoot(e.adjusted_gross_income, e.deduction_taken, e.qbi_deduction, e.taxable_income),
-        ti_crossfoot(t.adjusted_gross_income, t.deduction_taken, t.qbi_deduction, t.taxable_income),
+        "1040.line15",
+        "taxable income (L15)",
+        paper("1040.line15"),
+        round_dollar(ar.taxable_income),
+        ti_crossfoot(
+            e.adjusted_gross_income,
+            e.deduction_taken,
+            e.qbi_deduction,
+            e.taxable_income,
+        ),
+        ti_crossfoot(
+            t.adjusted_gross_income,
+            t.deduction_taken,
+            t.qbi_deduction,
+            t.taxable_income,
+        ),
     ));
     // L13 is on every return (0 when there is no QBI): absent-or-present-"0" both mean $0.
     verdicts.push(verdict_both(
-        "1040.line13", "QBI deduction (L13)",
-        Some(paper("1040.line13").unwrap_or(0)), round_dollar(ar.qbi_deduction),
-        e.qbi_deduction, t.qbi_deduction,
+        "1040.line13",
+        "QBI deduction (L13)",
+        Some(paper("1040.line13").unwrap_or(0)),
+        round_dollar(ar.qbi_deduction),
+        e.qbi_deduction,
+        t.qbi_deduction,
     ));
 
     // ── Tax L16 — the §6.2 two-part: `stacking_ok` absorbs taxcalc's Tax-Table-vs-schedule dissent only
     //    through the methodology class; btctax alone against BOTH oracles with no class FAILS. ──────────
     verdicts.push(verdict_l16(
-        "1040.line16", "tax (L16)",
-        paper("1040.line16"), round_dollar(ar.regular_tax),
-        e.income_tax_before_credits, t.income_tax_before_credits,
-        ots_ops.as_ref(), taxcalc_ops.as_ref(), &reproduced, known_defect,
+        "1040.line16",
+        "tax (L16)",
+        paper("1040.line16"),
+        round_dollar(ar.regular_tax),
+        e.income_tax_before_credits,
+        t.income_tax_before_credits,
+        ots_ops.as_ref(),
+        taxcalc_ops.as_ref(),
+        &reproduced,
+        known_defect,
     ));
 
     // ── The C1 cross-foot reproductions, hoisted so L24 INHERITS them (pre-T11 the legs are `None`, so
@@ -267,14 +303,23 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
     // L16 leg = btctax's OWN FILED L16 (the value summed into printed L24), not the oracle's L16 — the L16
     // VALUE is adjudicated separately by verdict_l16 (with its provenance/methodology class). Keeps L24
     // reconciled on the §5.1 pinned cells while still catching a real cross-foot / Sch-2-leg / L16 bug.
-    let l24_target =
-        pr.forms.f1040.line16 + se_l12_ots + f8959_l18_ots + round_leaf(e.niit);
+    let l24_target = pr.forms.f1040.line16 + se_l12_ots + f8959_l18_ots + round_leaf(e.niit);
     let mut l24 = verdict_ots(
-        "1040.line24", "TOTAL TAX (L24)", paper("1040.line24"), pr.forms.f1040.line24, l24_target,
+        "1040.line24",
+        "TOTAL TAX (L24)",
+        paper("1040.line24"),
+        pr.forms.f1040.line24,
+        l24_target,
     );
     if let Value::Object(m) = &mut l24 {
-        m.insert("precondition_line17".into(), json!(paper("1040.line17").unwrap_or(0)));
-        m.insert("precondition_line21".into(), json!(paper("1040.line21").unwrap_or(0)));
+        m.insert(
+            "precondition_line17".into(),
+            json!(paper("1040.line17").unwrap_or(0)),
+        );
+        m.insert(
+            "precondition_line21".into(),
+            json!(paper("1040.line21").unwrap_or(0)),
+        );
     }
     verdicts.push(l24);
 
@@ -287,13 +332,25 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
                 .as_ref()
                 .expect("an SE household has a printed Schedule SE")
                 .line12;
-            verdicts.push(verdict_ots("schedule_se.line12", "Sch SE L12 (SE tax)", Some(p), internal, se_l12_ots));
+            verdicts.push(verdict_ots(
+                "schedule_se.line12",
+                "Sch SE L12 (SE tax)",
+                Some(p),
+                internal,
+                se_l12_ots,
+            ));
         }
     }
 
     // ── Form 8959 line 18 — the cross-foot reproduction. OTS single-witness. ──────────────────────────
     if let Some(p) = paper("8959.line18") {
-        verdicts.push(verdict_ots("8959.line18", "8959 L18 (Add'l Medicare)", Some(p), pr.forms.f8959.line18, f8959_l18_ots));
+        verdicts.push(verdict_ots(
+            "8959.line18",
+            "8959 L18 (Add'l Medicare)",
+            Some(p),
+            pr.forms.f8959.line18,
+            f8959_l18_ots,
+        ));
     }
 
     // ── Form 8960 line 17 — NIIT. `round_leaf(oracle_niit)`, OTS single-witness (±cents epsilon by
@@ -305,7 +362,13 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
             .as_ref()
             .expect("a NIIT household has a printed Form 8960")
             .line17;
-        verdicts.push(verdict_ots("8960.line17", "8960 L17 (NIIT)", Some(p), internal, round_leaf(e.niit)));
+        verdicts.push(verdict_ots(
+            "8960.line17",
+            "8960 L17 (NIIT)",
+            Some(p),
+            internal,
+            round_leaf(e.niit),
+        ));
     }
 
     // ── Deeper-line rows — oracle-compared only when their `Option` leaf bakes (T11). Each is a no-op on
@@ -314,10 +377,22 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
     if let Some(p) = paper("1040.line12") {
         let internal = round_dollar(ar.deduction);
         if let Some(o) = e.deduction_taken {
-            verdicts.push(verdict_ots("1040.line12", "deduction (L12) [OTS]", Some(p), internal, round_leaf(o)));
+            verdicts.push(verdict_ots(
+                "1040.line12",
+                "deduction (L12) [OTS]",
+                Some(p),
+                internal,
+                round_leaf(o),
+            ));
         }
         if let Some(tc) = t.deduction_taken {
-            verdicts.push(verdict_ots("1040.line12", "deduction (L12) [taxcalc]", Some(p), internal, round_leaf(tc)));
+            verdicts.push(verdict_ots(
+                "1040.line12",
+                "deduction (L12) [taxcalc]",
+                Some(p),
+                internal,
+                round_leaf(tc),
+            ));
         }
     }
     // SALT cap (Schedule A L5e) — both oracles; only when Schedule A files.
@@ -329,20 +404,44 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
             .expect("a Schedule-A household has a printed Schedule A")
             .line5e;
         if let Some(o) = e.salt_capped {
-            verdicts.push(verdict_ots("1040sa.line5e", "SALT (Sch A L5e) [OTS]", Some(p), internal, round_leaf(o)));
+            verdicts.push(verdict_ots(
+                "1040sa.line5e",
+                "SALT (Sch A L5e) [OTS]",
+                Some(p),
+                internal,
+                round_leaf(o),
+            ));
         }
         if let Some(tc) = t.salt_capped {
-            verdicts.push(verdict_ots("1040sa.line5e", "SALT (Sch A L5e) [taxcalc]", Some(p), internal, round_leaf(tc)));
+            verdicts.push(verdict_ots(
+                "1040sa.line5e",
+                "SALT (Sch A L5e) [taxcalc]",
+                Some(p),
+                internal,
+                round_leaf(tc),
+            ));
         }
     }
     // Schedule D → 1040 L7 (SIGNED, leading minus) — both oracles; only when line 7 is present.
     if let Some(p) = paper("1040.line7a") {
         let internal = round_dollar(ar.capital_gain);
         if let Some(o) = e.sch_d_to_l7 {
-            verdicts.push(verdict_ots("1040.line7a", "Sch D -> L7 [OTS]", Some(p), internal, round_leaf(o)));
+            verdicts.push(verdict_ots(
+                "1040.line7a",
+                "Sch D -> L7 [OTS]",
+                Some(p),
+                internal,
+                round_leaf(o),
+            ));
         }
         if let Some(tc) = t.sch_d_to_l7 {
-            verdicts.push(verdict_ots("1040.line7a", "Sch D -> L7 [taxcalc]", Some(p), internal, round_leaf(tc)));
+            verdicts.push(verdict_ots(
+                "1040.line7a",
+                "Sch D -> L7 [taxcalc]",
+                Some(p),
+                internal,
+                round_leaf(tc),
+            ));
         }
     }
     // 8995 line 12 (net capital gain cap) — OTS single-witness / WEAK; only when Form 8995 files.
@@ -354,13 +453,17 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
             .expect("an 8995 household has a printed Form 8995")
             .line12;
         if let Some(o) = e.qbi_cap_l12 {
-            verdicts.push(verdict_ots("8995.line12", "8995 L12 net-cap-gain (WEAK)", Some(p), internal, round_leaf(o)));
+            verdicts.push(verdict_ots(
+                "8995.line12",
+                "8995 L12 net-cap-gain (WEAK)",
+                Some(p),
+                internal,
+                round_leaf(o),
+            ));
         }
     }
 
-    let all_reconciled = verdicts
-        .iter()
-        .all(|v| v["reconciled"] == json!(true));
+    let all_reconciled = verdicts.iter().all(|v| v["reconciled"] == json!(true));
 
     json!({
         "refused": false,
@@ -380,20 +483,52 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
 
 /// A line held against BOTH oracles (`round_leaf` both sides) — AGI / QBI deduction. Reconciled iff the
 /// on-paper whole dollars equal each oracle's `round_leaf`. No class absorbs a dissent here.
-fn verdict_both(line: &str, label: &str, on_paper: Option<i64>, internal: Usd, ots: f64, taxcalc: f64) -> Value {
+fn verdict_both(
+    line: &str,
+    label: &str,
+    on_paper: Option<i64>,
+    internal: Usd,
+    ots: f64,
+    taxcalc: f64,
+) -> Value {
     let o = round_leaf(ots);
     let tc = round_leaf(taxcalc);
     let p = on_paper.map(Usd::from);
     let reconciled = p == Some(o) && p == Some(tc);
-    verdict(line, label, on_paper, internal, Some(o), Some(tc), reconciled, if reconciled { "agree-both" } else { "diverge" })
+    verdict(
+        line,
+        label,
+        on_paper,
+        internal,
+        Some(o),
+        Some(tc),
+        reconciled,
+        if reconciled { "agree-both" } else { "diverge" },
+    )
 }
 
 /// A line held against BOTH oracles at PRE-COMPUTED whole-dollar targets (not `round_leaf` of a total) —
 /// used for 1040 L15, whose target is the C1 cross-foot [`ti_crossfoot`].
-fn verdict_both_targets(line: &str, label: &str, on_paper: Option<i64>, internal: Usd, ots: Usd, taxcalc: Usd) -> Value {
+fn verdict_both_targets(
+    line: &str,
+    label: &str,
+    on_paper: Option<i64>,
+    internal: Usd,
+    ots: Usd,
+    taxcalc: Usd,
+) -> Value {
     let p = on_paper.map(Usd::from);
     let reconciled = p == Some(ots) && p == Some(taxcalc);
-    verdict(line, label, on_paper, internal, Some(ots), Some(taxcalc), reconciled, if reconciled { "agree-both" } else { "diverge" })
+    verdict(
+        line,
+        label,
+        on_paper,
+        internal,
+        Some(ots),
+        Some(taxcalc),
+        reconciled,
+        if reconciled { "agree-both" } else { "diverge" },
+    )
 }
 
 /// Reproduce btctax's whole-dollar 1040 L15 from an oracle's OWN line-rounded component leaves (C1 table):
@@ -409,7 +544,12 @@ fn ti_crossfoot(agi: f64, deduction_taken: Option<f64>, qbi_deduction: f64, tota
 
 /// An oracle's OWN §1(h) L16 operands, from its baked provenance leaves — `Some` post-T11 so the
 /// per-oracle provenance class can witness the §5.1 pinned cells; `None` while a leaf is unbaked.
-fn oracle_ops(status: FilingStatus, taxable_income: f64, qual_div_l3a: Option<f64>, net_ltcg_qd_exclusive: Option<f64>) -> Option<L16Operands> {
+fn oracle_ops(
+    status: FilingStatus,
+    taxable_income: f64,
+    qual_div_l3a: Option<f64>,
+    net_ltcg_qd_exclusive: Option<f64>,
+) -> Option<L16Operands> {
     match (qual_div_l3a, net_ltcg_qd_exclusive) {
         (Some(qd), Some(ltcg)) => Some(L16Operands {
             status,
@@ -441,36 +581,90 @@ fn verdict_l16(
     let o = round_leaf(ots16);
     let tc = round_leaf(tc16);
     let Some(pi) = on_paper else {
-        return verdict(line, label, on_paper, internal, Some(o), Some(tc), false, "absent");
+        return verdict(
+            line,
+            label,
+            on_paper,
+            internal,
+            Some(o),
+            Some(tc),
+            false,
+            "absent",
+        );
     };
     let p = Usd::from(pi);
     // T7-m2: `known_defect` is threaded through (was hardwired `None`) — a declared §10 pin is
     // authoritative, so a suppressed known defect reconciles while btctax still prints its wrong value.
-    let reconciled = stacking_ok(p, ots16, Some(tc16), ots_ops, taxcalc_ops, reproduced, known_defect);
+    let reconciled = stacking_ok(
+        p,
+        ots16,
+        Some(tc16),
+        ots_ops,
+        taxcalc_ops,
+        reproduced,
+        known_defect,
+    );
     let class = if reconciled && known_defect.is_some_and(|kd| p == kd.btctax_value) {
         "known-defect"
     } else if p == o && p == tc {
         "agree-both"
     } else if reconciled {
-        if taxcalc_methodology_class(reproduced) { "methodology-taxcalc" } else { "provenance" }
+        if taxcalc_methodology_class(reproduced) {
+            "methodology-taxcalc"
+        } else {
+            "provenance"
+        }
     } else {
         "diverge"
     };
-    verdict(line, label, on_paper, internal, Some(o), Some(tc), reconciled, class)
+    verdict(
+        line,
+        label,
+        on_paper,
+        internal,
+        Some(o),
+        Some(tc),
+        reconciled,
+        class,
+    )
 }
 
 /// A line witnessed by OTS alone (a cross-foot or a WEAK/NIIT leaf; taxcalc exposes no comparable
 /// figure). `target` is the already-reproduced OTS figure (a `Usd`). Reconciled iff the paper matches.
-fn verdict_ots(line: &str, label: &str, on_paper: Option<i64>, internal: Usd, target: Usd) -> Value {
+fn verdict_ots(
+    line: &str,
+    label: &str,
+    on_paper: Option<i64>,
+    internal: Usd,
+    target: Usd,
+) -> Value {
     let p = on_paper.map(Usd::from);
     let reconciled = p == Some(target);
-    verdict(line, label, on_paper, internal, Some(target), None, reconciled, if reconciled { "agree-ots" } else { "diverge" })
+    verdict(
+        line,
+        label,
+        on_paper,
+        internal,
+        Some(target),
+        None,
+        reconciled,
+        if reconciled { "agree-ots" } else { "diverge" },
+    )
 }
 
 /// Assemble one verdict object. Money is emitted as exact whole-dollar TEXT (never a float), so the
 /// Python sweep compares strings and never re-rounds.
 #[allow(clippy::too_many_arguments)]
-fn verdict(line: &str, label: &str, on_paper: Option<i64>, internal: Usd, ots: Option<Usd>, taxcalc: Option<Usd>, reconciled: bool, class: &str) -> Value {
+fn verdict(
+    line: &str,
+    label: &str,
+    on_paper: Option<i64>,
+    internal: Usd,
+    ots: Option<Usd>,
+    taxcalc: Option<Usd>,
+    reconciled: bool,
+    class: &str,
+) -> Value {
     json!({
         "line": line,
         "label": label,

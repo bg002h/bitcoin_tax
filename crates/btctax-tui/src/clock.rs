@@ -70,7 +70,10 @@ mod tests {
         assert_eq!(Clock::default(), Clock::Wall);
         let a = Clock::Wall.now();
         let b = Clock::Wall.now();
-        assert!(b >= a, "Wall advances monotonically (or is equal within a tick)");
+        assert!(
+            b >= a,
+            "Wall advances monotonically (or is equal within a tick)"
+        );
     }
 
     #[test]

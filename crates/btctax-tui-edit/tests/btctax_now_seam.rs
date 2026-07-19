@@ -20,7 +20,10 @@ fn run_with_btctax_now(now: &str) -> (i32, String) {
 fn malformed_btctax_now_exits_2_naming_the_var() {
     let (code, err) = run_with_btctax_now("not-a-date");
     assert_eq!(code, 2, "malformed BTCTAX_NOW must exit 2; stderr: {err}");
-    assert!(err.contains("BTCTAX_NOW"), "the error must name the variable; got: {err}");
+    assert!(
+        err.contains("BTCTAX_NOW"),
+        "the error must name the variable; got: {err}"
+    );
 }
 
 #[test]

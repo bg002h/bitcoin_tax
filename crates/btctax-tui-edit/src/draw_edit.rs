@@ -36,7 +36,7 @@ use crate::editor::{EditorApp, EditorScreen};
 use btctax_core::tax::return_inputs::ReturnInputs;
 use btctax_core::{DisposeKind, InboundClass, OutflowClass, Persistability};
 use btctax_input_form::{
-    FieldKind, FieldValue, RowAddr, Section, SectionId, SectionKind, SecretView,
+    FieldKind, FieldValue, RowAddr, SecretView, Section, SectionId, SectionKind,
 };
 use btctax_tui::app::Tab;
 use ratatui::{
@@ -929,7 +929,9 @@ fn draw_classify_inbound_modal(frame: &mut Frame, area: Rect, modal: &ClassifyIn
                 // `reconcile classify-inbound-self-transfer --acquired` help states the same). The modal is
                 // the informed-consent point, so it must state the rate-determining default correctly
                 // (was backwards: "receipt date, short-term").
-                .unwrap_or_else(|| "(empty = default = 1 yr + 1 day before receipt \u{2192} long-term)".to_string());
+                .unwrap_or_else(|| {
+                    "(empty = default = 1 yr + 1 day before receipt \u{2192} long-term)".to_string()
+                });
             let zero_basis_note = if basis.is_none() {
                 "\n\n  NOTE: basis defaults to $0 (non-gating advisory) — supply real cost if you have it."
             } else {
@@ -2080,7 +2082,10 @@ fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormStat
             "park",
         ),
         TaxInputsModalKind::DiscardParked => (
-            format!("  Discard the parked draft for {} — WRITES THE VAULT", m.year),
+            format!(
+                "  Discard the parked draft for {} — WRITES THE VAULT",
+                m.year
+            ),
             format!(" Discard parked draft for {} ", m.year),
             "discard",
         ),
@@ -2088,9 +2093,7 @@ fn draw_tax_inputs_modal(frame: &mut Frame, area: Rect, form: &TaxInputsFormStat
     let mut lines: Vec<Line> = vec![
         Line::from(Span::styled(
             header,
-            Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
     ];
@@ -2128,9 +2131,7 @@ fn draw_tax_inputs_remove_modal(frame: &mut Frame, area: Rect, form: &TaxInputsF
     let lines = vec![
         Line::from(Span::styled(
             format!("  {}", pr.label),
-            Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
@@ -2160,9 +2161,7 @@ fn draw_tax_inputs_discard(
     let mut v = vec![
         Line::from(Span::styled(
             format!("Stale parked draft for {}", form.year),
-            Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
     ];
@@ -2211,7 +2210,10 @@ fn draw_tax_inputs_status(
                 .find(|s| s.id == id)
                 .map(|s| s.title)
                 .unwrap_or("a section");
-            (format!("1 issue: {title}"), Style::default().fg(Color::Yellow))
+            (
+                format!("1 issue: {title}"),
+                Style::default().fg(Color::Yellow),
+            )
         }
         None => (
             "screens clean, except what report computes".to_string(),
@@ -2303,7 +2305,11 @@ fn field_pane_lines(
                     let marker = if is_focus { '>' } else { ' ' };
                     let style = if is_focus { focus } else { Style::default() };
                     lines.push(Line::from(Span::styled(
-                        format!("{marker} #{}{}", i + 1, nested_row_preview(nested, ri, addr, i)),
+                        format!(
+                            "{marker} #{}{}",
+                            i + 1,
+                            nested_row_preview(nested, ri, addr, i)
+                        ),
                         style,
                     )));
                 }
@@ -2387,10 +2393,7 @@ fn field_pane_lines(
     push_nested_drill_entry(&mut lines, form, section, ri);
     if matches!(section.kind, SectionKind::OptionalSingleton { .. }) {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "  [x] delete this section",
-            dark,
-        )));
+        lines.push(Line::from(Span::styled("  [x] delete this section", dark)));
     }
     push_error(&mut lines, error);
     (section.title.to_string(), lines)
@@ -2425,7 +2428,11 @@ fn push_nested_drill_entry(
 
 /// The label + current row count for a nested group's synthetic drill entry, counted via the group's
 /// `Repeating::len` accessor at its parent address (`[w2_i]` for box-12, `[]` for charitable).
-fn nested_drill_summary(child: SectionId, ri: &ReturnInputs, parent_addr: &RowAddr) -> (&'static str, usize) {
+fn nested_drill_summary(
+    child: SectionId,
+    ri: &ReturnInputs,
+    parent_addr: &RowAddr,
+) -> (&'static str, usize) {
     let count = match crate::edit::tax_inputs::nested_section(child).kind {
         SectionKind::Repeating { len, .. } => len(ri, parent_addr),
         _ => 0,
@@ -6028,7 +6035,10 @@ mod tests {
             .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
-        assert!(r.contains("Filing status"), "the fresh screen shows the filing-status choice");
+        assert!(
+            r.contains("Filing status"),
+            "the fresh screen shows the filing-status choice"
+        );
         assert!(
             !r.contains("W-2"),
             "no other section is offered until filing status is chosen (NI-2)"
@@ -6224,7 +6234,10 @@ mod tests {
             "Declarations",
             "Skippables",
         ] {
-            assert!(r.contains(title), "left pane must list the section {title:?}");
+            assert!(
+                r.contains(title),
+                "left pane must list the section {title:?}"
+            );
         }
         // Spouse is HIDDEN on Single; the nested charitable section is not a top-level entry.
         assert!(!r.contains("Spouse"), "Spouse is hidden on a Single return");
@@ -6247,7 +6260,12 @@ mod tests {
             "Skippables",
         ];
         for w in order.windows(2) {
-            assert!(pos(w[0]) < pos(w[1]), "section order: {:?} must precede {:?}", w[0], w[1]);
+            assert!(
+                pos(w[0]) < pos(w[1]),
+                "section order: {:?} must precede {:?}",
+                w[0],
+                w[1]
+            );
         }
 
         // Per-section status glyph: ReturnOptions is complete (its one live field is set) → ✓; an
@@ -6256,11 +6274,20 @@ mod tests {
         assert!(r.contains('…'), "an incomplete section shows the … glyph");
 
         // Right pane: the selected section (ReturnOptions, idx 0) shows its field as `label  [value]`.
-        assert!(r.contains("[Single]"), "the filing-status value renders as the chosen enum");
+        assert!(
+            r.contains("[Single]"),
+            "the filing-status value renders as the chosen enum"
+        );
 
         // Bottom: the active-source line + a key legend naming section navigation.
-        assert!(r.contains("active source"), "status line shows the active source");
-        assert!(r.contains("section"), "the key legend mentions section navigation");
+        assert!(
+            r.contains("active source"),
+            "status line shows the active source"
+        );
+        assert!(
+            r.contains("section"),
+            "the key legend mentions section navigation"
+        );
     }
 
     /// Task 8: the status line renders the CACHED active-source label (`full return` / `tax-profile` /
@@ -6341,7 +6368,10 @@ mod tests {
             .unwrap();
         let r = flatten(terminal.backend().buffer());
         assert!(r.contains("#1"), "the row list shows the first row's index");
-        assert!(r.contains("#2"), "the row list shows the second row's index");
+        assert!(
+            r.contains("#2"),
+            "the row list shows the second row's index"
+        );
         assert!(
             r.contains("[a] add") && r.contains("[d] remove"),
             "the row list shows the add/remove legend"
@@ -6453,7 +6483,10 @@ mod tests {
             .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
-        assert!(r.contains("remove W-2 #1?"), "the confirm names the exact row");
+        assert!(
+            r.contains("remove W-2 #1?"),
+            "the confirm names the exact row"
+        );
         assert!(
             r.contains("[Enter] remove") && r.contains("[Esc] cancel"),
             "the confirm shows its legend"
@@ -6543,7 +6576,10 @@ mod tests {
             .draw(|f| draw_tax_inputs_form(f, area, &form, None))
             .unwrap();
         let r = flatten(terminal.backend().buffer());
-        assert!(r.contains("[Mfj]"), "the filing-status value renders as Mfj");
+        assert!(
+            r.contains("[Mfj]"),
+            "the filing-status value renders as Mfj"
+        );
         assert!(
             r.contains("Spouse"),
             "MFJ offers the Spouse section (hidden on Single)"

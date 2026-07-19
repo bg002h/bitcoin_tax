@@ -84,9 +84,13 @@ fn extract_lines_descends_into_nested_groups() {
 /// fixture answers **Yes**, so `da_no` must not appear at all.
 #[test]
 fn extract_lines_omits_the_off_half_of_a_checkbox_pair() {
-    let pdf =
-        btctax_forms::fill_form_1040_full(&f1040(), &kitchen_sink_header(), FilingStatus::Single, 2024)
-            .unwrap();
+    let pdf = btctax_forms::fill_form_1040_full(
+        &f1040(),
+        &kitchen_sink_header(),
+        FilingStatus::Single,
+        2024,
+    )
+    .unwrap();
 
     let got = extract_lines(&pdf, F1040_MAP_2024).unwrap();
     assert_eq!(
@@ -112,7 +116,10 @@ fn extract_lines_omits_the_off_half_of_a_checkbox_pair() {
 #[test]
 fn extract_lines_indexes_table_rows_and_omits_the_unused_ones() {
     let lines = sch_b(
-        vec![row("ORACLE BANK", dec!(1200)), row("SECOND BANK", dec!(300))],
+        vec![
+            row("ORACLE BANK", dec!(1200)),
+            row("SECOND BANK", dec!(300)),
+        ],
         vec![],
         false,
         false,
@@ -234,8 +241,8 @@ fn sch_b(part1: Vec<ScheduleBRow>, part2: Vec<ScheduleBRow>, fa: bool, ft: bool)
 /// the *taxpayer's* — a business TIN matching no Schedule C in the same packet.
 #[test]
 fn form_8995_row_1i_carries_the_proprietors_tin_not_the_taxpayers() {
-    use btctax_core::tax::return_inputs::{Owner, Person, ScheduleCInputs};
     use btctax_core::tax::packet::ReturnHeader;
+    use btctax_core::tax::return_inputs::{Owner, Person, ScheduleCInputs};
 
     let mut ri = btctax_core::tax::return_inputs::ReturnInputs {
         filing_status: FilingStatus::Mfj,
@@ -326,8 +333,8 @@ fn form_8995_refuses_to_file_a_qbi_total_for_an_unnamed_business() {
 #[test]
 fn form_8995_with_only_reit_dividends_leaves_part_i_blank() {
     let lines = btctax_core::tax::qbi::form_8995_lines(
-        "",         // no trade or business…
-        Usd::ZERO,  // …and no business QBI
+        "",          // no trade or business…
+        Usd::ZERO,   // …and no business QBI
         dec!(10000), // just REIT dividends
         Usd::ZERO,
         dec!(100000),

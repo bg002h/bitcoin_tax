@@ -22,9 +22,9 @@
 
 use crate::tax::questions::QuestionId;
 use crate::tax::return_inputs::{
-    Box12Entry, CharitableCarryItem, CharitableGift, Dependent, Form1099Div, Form1099G, Form1099Int,
-    HouseholdHeader, Payments, Person, QbiInputs, ReturnInputs, Schedule1Inputs, ScheduleAInputs,
-    ScheduleCInputs, W2,
+    Box12Entry, CharitableCarryItem, CharitableGift, Dependent, Form1099Div, Form1099G,
+    Form1099Int, HouseholdHeader, Payments, Person, QbiInputs, ReturnInputs, Schedule1Inputs,
+    ScheduleAInputs, ScheduleCInputs, W2,
 };
 use crate::tax::types::Carryforward;
 
@@ -328,10 +328,7 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
 }
 
 fn classify_charitable_gift(c: &mut Census, g: &CharitableGift) {
-    let CharitableGift {
-        class,
-        amount: _,
-    } = g;
+    let CharitableGift { class, amount: _ } = g;
     c.exempt(
         class,
         Class::DataDerived,
@@ -439,7 +436,10 @@ mod tests {
              taxpayer.blind, …)"
         );
         for (_class, reason) in &census.exemptions {
-            assert!(!reason.trim().is_empty(), "every exemption states WHY it is lawful");
+            assert!(
+                !reason.trim().is_empty(),
+                "every exemption states WHY it is lawful"
+            );
         }
     }
 }

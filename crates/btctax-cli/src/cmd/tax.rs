@@ -114,8 +114,8 @@ pub fn import_return_inputs(
 fn parse_return_inputs_toml(text: &str) -> Result<ReturnInputs, CliError> {
     // Parse to the TOML tree FIRST (toml's streaming deserializer + serde_ignored mishandles arrays of
     // tables), then run `serde_ignored` over the in-memory `Value` to collect every unknown path.
-    let value: toml::Value =
-        toml::from_str(text).map_err(|e| CliError::Usage(format!("invalid ReturnInputs TOML: {e}")))?;
+    let value: toml::Value = toml::from_str(text)
+        .map_err(|e| CliError::Usage(format!("invalid ReturnInputs TOML: {e}")))?;
     let mut ignored: Vec<String> = Vec::new();
     let ri: ReturnInputs = serde_ignored::deserialize(value, |path| ignored.push(path.to_string()))
         .map_err(|e| CliError::Usage(format!("invalid ReturnInputs TOML: {e}")))?;
@@ -665,7 +665,10 @@ mod tests {
         "#;
         let err = parse_return_inputs_toml(text).unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("hsa_present"), "must name the renamed key: {msg}");
+        assert!(
+            msg.contains("hsa_present"),
+            "must name the renamed key: {msg}"
+        );
         assert!(
             msg.contains("box13_retirement_plan"),
             "must name the deleted dead field so a transcribed W-2 box 13 can't silently vanish: {msg}"

@@ -85,7 +85,9 @@ pub fn parse_date(line: &str) -> Result<Option<time::Date>, String> {
         return Ok(None);
     }
     let fmt = time::macros::format_description!("[year]-[month]-[day]");
-    time::Date::parse(t, fmt).map(Some).map_err(|e| e.to_string())
+    time::Date::parse(t, fmt)
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 /// `income answer --year N` — ask every live question, then store.
@@ -133,7 +135,8 @@ pub fn answer_return_inputs(
                     let mut line = String::new();
                     if input.read_line(&mut line)? == 0 {
                         return Err(CliError::Usage(
-                            "input ended before every question was answered — nothing was stored".into(),
+                            "input ended before every question was answered — nothing was stored"
+                                .into(),
                         ));
                     }
                     match parse_yes_no(&line, cur) {
@@ -237,7 +240,10 @@ mod tests {
 
     /// The registry `QuestionId`s asked for a return, in order.
     fn declaration_ids(ri: &ReturnInputs) -> Vec<QuestionId> {
-        live_questions(ri).iter().filter_map(Ask::declaration_id).collect()
+        live_questions(ri)
+            .iter()
+            .filter_map(Ask::declaration_id)
+            .collect()
     }
     fn has_spouse_dob(ri: &ReturnInputs) -> bool {
         live_questions(ri)
@@ -318,7 +324,7 @@ mod tests {
         for ask in live_questions(&ri) {
             match ask {
                 Ask::Declaration(q) => (q.set)(&mut ri, false), // answer "no"
-                Ask::Skippable(_) => {}                          // skippable by design
+                Ask::Skippable(_) => {}                         // skippable by design
             }
         }
         assert!(
@@ -380,7 +386,10 @@ mod tests {
         use btctax_core::tax::return_inputs::ScheduleAInputs;
         // The core registry entry for `id` — the source of truth `income answer` now derives from.
         fn reg(id: SkippableId) -> &'static SkippableQuestion {
-            SKIPPABLE_QUESTIONS.iter().find(|s| s.id == id).expect("id is a registry entry")
+            SKIPPABLE_QUESTIONS
+                .iter()
+                .find(|s| s.id == id)
+                .expect("id is a registry entry")
         }
         fn has(ri: &ReturnInputs, want: SkippableId) -> bool {
             live_questions(ri)
@@ -389,8 +398,14 @@ mod tests {
         }
         // Taxpayer blindness is always live; spouse-blind and SALT only when their gate is met.
         assert!(has(&single(), SkippableId::BlindTaxpayer));
-        assert!(!has(&single(), SkippableId::BlindSpouse), "no spouse ⇒ no spouse-blind");
-        assert!(!has(&single(), SkippableId::SalesTaxElection), "no Sch A ⇒ no SALT");
+        assert!(
+            !has(&single(), SkippableId::BlindSpouse),
+            "no spouse ⇒ no spouse-blind"
+        );
+        assert!(
+            !has(&single(), SkippableId::SalesTaxElection),
+            "no Sch A ⇒ no SALT"
+        );
 
         assert!(has(&with_spouse(single()), SkippableId::BlindSpouse));
 
@@ -441,7 +456,11 @@ mod tests {
         assert_eq!(parse_yes_no("y", None), Some(true));
         assert_eq!(parse_yes_no("N", None), Some(false));
         assert_eq!(parse_yes_no("Yes", None), Some(true));
-        assert_eq!(parse_yes_no("maybe", None), None, "garbage is not an answer");
+        assert_eq!(
+            parse_yes_no("maybe", None),
+            None,
+            "garbage is not an answer"
+        );
         // ...and garbage must not silently take the stored default either.
         assert_eq!(parse_yes_no("maybe", Some(true)), None);
     }

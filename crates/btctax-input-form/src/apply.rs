@@ -228,7 +228,13 @@ mod tests {
         assert_eq!(ri.w2s.len(), 0);
         // filing_status can never be cleared (Enum, no empty state)
         assert_eq!(
-            apply(&mut w, Edit::ClearField { id: FieldId::FilingStatus, addr: RowAddr::default() }),
+            apply(
+                &mut w,
+                Edit::ClearField {
+                    id: FieldId::FilingStatus,
+                    addr: RowAddr::default()
+                }
+            ),
             Err(ApplyError::SetError(SetError::Immutable))
         );
     }
@@ -244,10 +250,20 @@ mod tests {
                 addr: RowAddr(vec![0]),
                 value: FieldValue::Money(dec!(5)),
             },
-            Edit::ClearField { id: FieldId::TpFirstName, addr: RowAddr::default() },
-            Edit::AddRow { section: SectionId::W2s, parent: RowAddr::default() },
-            Edit::CreateSection { section: SectionId::Spouse },
-            Edit::DeleteSection { section: SectionId::ScheduleA },
+            Edit::ClearField {
+                id: FieldId::TpFirstName,
+                addr: RowAddr::default(),
+            },
+            Edit::AddRow {
+                section: SectionId::W2s,
+                parent: RowAddr::default(),
+            },
+            Edit::CreateSection {
+                section: SectionId::Spouse,
+            },
+            Edit::DeleteSection {
+                section: SectionId::ScheduleA,
+            },
             // A filing-status edit whose value is NOT a Choice is not the accepted shape either.
             Edit::SetField {
                 id: FieldId::FilingStatus,
@@ -262,7 +278,10 @@ mod tests {
                 Err(ApplyError::WrongFirstEdit),
                 "must refuse on None: {e:?}"
             );
-            assert!(w.is_none(), "nothing may materialize on a refused first edit: {e:?}");
+            assert!(
+                w.is_none(),
+                "nothing may materialize on a refused first edit: {e:?}"
+            );
         }
         // The choice materializes exactly that status over an otherwise-pure default.
         for (name, fs) in [
@@ -282,8 +301,15 @@ mod tests {
                 },
             )
             .unwrap();
-            let expected = ReturnInputs { filing_status: fs, ..Default::default() };
-            assert_eq!(w.as_ref().unwrap(), &expected, "{name}: pure default + that status only");
+            let expected = ReturnInputs {
+                filing_status: fs,
+                ..Default::default()
+            };
+            assert_eq!(
+                w.as_ref().unwrap(),
+                &expected,
+                "{name}: pure default + that status only"
+            );
             assert!(w.as_ref().unwrap().w2s.is_empty());
             assert!(w.as_ref().unwrap().schedule_a.is_none());
         }
@@ -305,7 +331,10 @@ mod tests {
             ),
             Err(ApplyError::SetError(SetError::WrongKind)),
         );
-        assert!(w.is_none(), "no return may materialize from an unparseable filing-status choice");
+        assert!(
+            w.is_none(),
+            "no return may materialize from an unparseable filing-status choice"
+        );
     }
 
     /// I-10 (spec §10): a `ForceItemize` + `DeleteSection(ScheduleA)` leaves `itemize_election == Auto` — a
@@ -314,7 +343,13 @@ mod tests {
     fn delete_schedule_a_resets_forced_itemize_i10() {
         let mut w: Working = None;
         materialize(&mut w, FilingStatus::Single);
-        apply(&mut w, Edit::CreateSection { section: SectionId::ScheduleA }).unwrap();
+        apply(
+            &mut w,
+            Edit::CreateSection {
+                section: SectionId::ScheduleA,
+            },
+        )
+        .unwrap();
         apply(
             &mut w,
             Edit::SetField {
@@ -324,11 +359,24 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(w.as_ref().unwrap().itemize_election, ItemizeElection::ForceItemize);
+        assert_eq!(
+            w.as_ref().unwrap().itemize_election,
+            ItemizeElection::ForceItemize
+        );
         assert!(w.as_ref().unwrap().schedule_a.is_some());
 
-        apply(&mut w, Edit::DeleteSection { section: SectionId::ScheduleA }).unwrap();
-        assert_eq!(w.as_ref().unwrap().itemize_election, ItemizeElection::Auto, "I-10 reset");
+        apply(
+            &mut w,
+            Edit::DeleteSection {
+                section: SectionId::ScheduleA,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            w.as_ref().unwrap().itemize_election,
+            ItemizeElection::Auto,
+            "I-10 reset"
+        );
         assert!(w.as_ref().unwrap().schedule_a.is_none());
     }
 
@@ -340,7 +388,14 @@ mod tests {
         materialize(&mut w, FilingStatus::Single);
 
         // W2 row (depth 1).
-        apply(&mut w, Edit::AddRow { section: SectionId::W2s, parent: RowAddr::default() }).unwrap();
+        apply(
+            &mut w,
+            Edit::AddRow {
+                section: SectionId::W2s,
+                parent: RowAddr::default(),
+            },
+        )
+        .unwrap();
         assert_eq!(w.as_ref().unwrap().w2s.len(), 1);
         apply(
             &mut w,
@@ -354,7 +409,14 @@ mod tests {
         assert_eq!(w.as_ref().unwrap().w2s[0].box1_wages, dec!(50000));
 
         // Nested box-12 row (depth 2), parent = [0].
-        apply(&mut w, Edit::AddRow { section: SectionId::W2Box12, parent: RowAddr(vec![0]) }).unwrap();
+        apply(
+            &mut w,
+            Edit::AddRow {
+                section: SectionId::W2Box12,
+                parent: RowAddr(vec![0]),
+            },
+        )
+        .unwrap();
         assert_eq!(w.as_ref().unwrap().w2s[0].box12.len(), 1);
         apply(
             &mut w,
@@ -368,14 +430,33 @@ mod tests {
         assert_eq!(w.as_ref().unwrap().w2s[0].box12[0].amount, dec!(23000));
 
         // RemoveRow box-12 at [0,0], then the W2 at [0].
-        apply(&mut w, Edit::RemoveRow { section: SectionId::W2Box12, addr: RowAddr(vec![0, 0]) })
-            .unwrap();
+        apply(
+            &mut w,
+            Edit::RemoveRow {
+                section: SectionId::W2Box12,
+                addr: RowAddr(vec![0, 0]),
+            },
+        )
+        .unwrap();
         assert!(w.as_ref().unwrap().w2s[0].box12.is_empty());
-        apply(&mut w, Edit::RemoveRow { section: SectionId::W2s, addr: RowAddr(vec![0]) }).unwrap();
+        apply(
+            &mut w,
+            Edit::RemoveRow {
+                section: SectionId::W2s,
+                addr: RowAddr(vec![0]),
+            },
+        )
+        .unwrap();
         assert!(w.as_ref().unwrap().w2s.is_empty());
 
         // Spouse optional-singleton create → set → delete.
-        apply(&mut w, Edit::CreateSection { section: SectionId::Spouse }).unwrap();
+        apply(
+            &mut w,
+            Edit::CreateSection {
+                section: SectionId::Spouse,
+            },
+        )
+        .unwrap();
         assert!(w.as_ref().unwrap().header.spouse.is_some());
         apply(
             &mut w,
@@ -386,14 +467,41 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(w.as_ref().unwrap().header.spouse.as_ref().unwrap().first_name, "Pat");
-        apply(&mut w, Edit::DeleteSection { section: SectionId::Spouse }).unwrap();
+        assert_eq!(
+            w.as_ref()
+                .unwrap()
+                .header
+                .spouse
+                .as_ref()
+                .unwrap()
+                .first_name,
+            "Pat"
+        );
+        apply(
+            &mut w,
+            Edit::DeleteSection {
+                section: SectionId::Spouse,
+            },
+        )
+        .unwrap();
         assert!(w.as_ref().unwrap().header.spouse.is_none());
 
         // Schedule A optional-singleton create → delete.
-        apply(&mut w, Edit::CreateSection { section: SectionId::ScheduleA }).unwrap();
+        apply(
+            &mut w,
+            Edit::CreateSection {
+                section: SectionId::ScheduleA,
+            },
+        )
+        .unwrap();
         assert!(w.as_ref().unwrap().schedule_a.is_some());
-        apply(&mut w, Edit::DeleteSection { section: SectionId::ScheduleA }).unwrap();
+        apply(
+            &mut w,
+            Edit::DeleteSection {
+                section: SectionId::ScheduleA,
+            },
+        )
+        .unwrap();
         assert!(w.as_ref().unwrap().schedule_a.is_none());
     }
 
@@ -417,7 +525,14 @@ mod tests {
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
         // A box-12 leaf needs depth 2; a depth-1 addr is too short.
-        apply(&mut w, Edit::AddRow { section: SectionId::W2s, parent: RowAddr::default() }).unwrap();
+        apply(
+            &mut w,
+            Edit::AddRow {
+                section: SectionId::W2s,
+                parent: RowAddr::default(),
+            },
+        )
+        .unwrap();
         assert_eq!(
             apply(
                 &mut w,
@@ -431,17 +546,35 @@ mod tests {
         );
         // AddRow box-12 with an EMPTY parent would panic in the accessor (`a.0[0]`); the guard prevents it.
         assert_eq!(
-            apply(&mut w, Edit::AddRow { section: SectionId::W2Box12, parent: RowAddr(vec![]) }),
+            apply(
+                &mut w,
+                Edit::AddRow {
+                    section: SectionId::W2Box12,
+                    parent: RowAddr(vec![])
+                }
+            ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
         // RemoveRow box-12 with a depth-1 addr is too short.
         assert_eq!(
-            apply(&mut w, Edit::RemoveRow { section: SectionId::W2Box12, addr: RowAddr(vec![0]) }),
+            apply(
+                &mut w,
+                Edit::RemoveRow {
+                    section: SectionId::W2Box12,
+                    addr: RowAddr(vec![0])
+                }
+            ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
         // ClearField on a W2 leaf with a short addr is likewise a clean error.
         assert_eq!(
-            apply(&mut w, Edit::ClearField { id: FieldId::Box1Wages, addr: RowAddr(vec![]) }),
+            apply(
+                &mut w,
+                Edit::ClearField {
+                    id: FieldId::Box1Wages,
+                    addr: RowAddr(vec![])
+                }
+            ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
     }
@@ -457,7 +590,13 @@ mod tests {
 
         // Enum → Immutable (filing_status can never be un-answered).
         assert_eq!(
-            apply(&mut w, Edit::ClearField { id: FieldId::FilingStatus, addr: RowAddr::default() }),
+            apply(
+                &mut w,
+                Edit::ClearField {
+                    id: FieldId::FilingStatus,
+                    addr: RowAddr::default()
+                }
+            ),
             Err(ApplyError::SetError(SetError::Immutable)),
         );
 
@@ -473,9 +612,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().foreign_accounts, Some(true));
-        apply(&mut w, Edit::ClearField { id: FieldId::DeclForeignAccounts, addr: RowAddr::default() })
-            .unwrap();
-        assert_eq!(w.as_ref().unwrap().foreign_accounts, None, "I-1: TriState un-answers to None");
+        apply(
+            &mut w,
+            Edit::ClearField {
+                id: FieldId::DeclForeignAccounts,
+                addr: RowAddr::default(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            w.as_ref().unwrap().foreign_accounts,
+            None,
+            "I-1: TriState un-answers to None"
+        );
 
         // ★ I-1: a registry-delegating Date (DobTaxpayer) un-answers to `None` likewise.
         apply(
@@ -491,8 +640,19 @@ mod tests {
             w.as_ref().unwrap().header.taxpayer.date_of_birth,
             Some(date!(1980 - 03 - 04))
         );
-        apply(&mut w, Edit::ClearField { id: FieldId::DobTaxpayer, addr: RowAddr::default() }).unwrap();
-        assert_eq!(w.as_ref().unwrap().header.taxpayer.date_of_birth, None, "I-1: Date un-answers to None");
+        apply(
+            &mut w,
+            Edit::ClearField {
+                id: FieldId::DobTaxpayer,
+                addr: RowAddr::default(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            w.as_ref().unwrap().header.taxpayer.date_of_birth,
+            None,
+            "I-1: Date un-answers to None"
+        );
 
         // ★ I-2: the IpPin Secret (an `Option<String>`) clears to `None`, NOT `Some("")` (the export-brick).
         apply(
@@ -505,12 +665,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(w.as_ref().unwrap().header.ip_pin.as_deref(), Some("112233"));
-        apply(&mut w, Edit::ClearField { id: FieldId::IpPin, addr: RowAddr::default() }).unwrap();
-        assert_eq!(w.as_ref().unwrap().header.ip_pin, None, "I-2: IpPin clears to None, not Some(\"\")");
+        apply(
+            &mut w,
+            Edit::ClearField {
+                id: FieldId::IpPin,
+                addr: RowAddr::default(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            w.as_ref().unwrap().header.ip_pin,
+            None,
+            "I-2: IpPin clears to None, not Some(\"\")"
+        );
 
         // A PLAIN Date leaf (DepDob) DOES clear to None cleanly.
-        apply(&mut w, Edit::AddRow { section: SectionId::Dependents, parent: RowAddr::default() })
-            .unwrap();
+        apply(
+            &mut w,
+            Edit::AddRow {
+                section: SectionId::Dependents,
+                parent: RowAddr::default(),
+            },
+        )
+        .unwrap();
         apply(
             &mut w,
             Edit::SetField {
@@ -524,11 +701,25 @@ mod tests {
             w.as_ref().unwrap().header.dependents[0].date_of_birth,
             Some(date!(2015 - 06 - 01))
         );
-        apply(&mut w, Edit::ClearField { id: FieldId::DepDob, addr: RowAddr(vec![0]) }).unwrap();
+        apply(
+            &mut w,
+            Edit::ClearField {
+                id: FieldId::DepDob,
+                addr: RowAddr(vec![0]),
+            },
+        )
+        .unwrap();
         assert_eq!(w.as_ref().unwrap().header.dependents[0].date_of_birth, None);
 
         // Plain Money clears to $0.
-        apply(&mut w, Edit::AddRow { section: SectionId::W2s, parent: RowAddr::default() }).unwrap();
+        apply(
+            &mut w,
+            Edit::AddRow {
+                section: SectionId::W2s,
+                parent: RowAddr::default(),
+            },
+        )
+        .unwrap();
         apply(
             &mut w,
             Edit::SetField {
@@ -538,7 +729,14 @@ mod tests {
             },
         )
         .unwrap();
-        apply(&mut w, Edit::ClearField { id: FieldId::Box1Wages, addr: RowAddr(vec![0]) }).unwrap();
+        apply(
+            &mut w,
+            Edit::ClearField {
+                id: FieldId::Box1Wages,
+                addr: RowAddr(vec![0]),
+            },
+        )
+        .unwrap();
         assert_eq!(w.as_ref().unwrap().w2s[0].box1_wages, dec!(0));
 
         // Plain Text clears to "".
@@ -551,8 +749,14 @@ mod tests {
             },
         )
         .unwrap();
-        apply(&mut w, Edit::ClearField { id: FieldId::TpFirstName, addr: RowAddr::default() })
-            .unwrap();
+        apply(
+            &mut w,
+            Edit::ClearField {
+                id: FieldId::TpFirstName,
+                addr: RowAddr::default(),
+            },
+        )
+        .unwrap();
         assert_eq!(w.as_ref().unwrap().header.taxpayer.first_name, "");
 
         // Bool clears to false.
@@ -565,8 +769,14 @@ mod tests {
             },
         )
         .unwrap();
-        apply(&mut w, Edit::ClearField { id: FieldId::TpPresidentialFund, addr: RowAddr::default() })
-            .unwrap();
+        apply(
+            &mut w,
+            Edit::ClearField {
+                id: FieldId::TpPresidentialFund,
+                addr: RowAddr::default(),
+            },
+        )
+        .unwrap();
         assert!(!w.as_ref().unwrap().header.presidential_fund_taxpayer);
 
         // Secret clears to empty.
@@ -579,7 +789,14 @@ mod tests {
             },
         )
         .unwrap();
-        apply(&mut w, Edit::ClearField { id: FieldId::TpSsn, addr: RowAddr::default() }).unwrap();
+        apply(
+            &mut w,
+            Edit::ClearField {
+                id: FieldId::TpSsn,
+                addr: RowAddr::default(),
+            },
+        )
+        .unwrap();
         assert_eq!(w.as_ref().unwrap().header.taxpayer.ssn, "");
     }
 
@@ -591,12 +808,23 @@ mod tests {
         materialize(&mut w, FilingStatus::Single);
         // An AddRow on a non-repeating section is a clean refusal.
         assert_eq!(
-            apply(&mut w, Edit::AddRow { section: SectionId::Taxpayer, parent: RowAddr::default() }),
+            apply(
+                &mut w,
+                Edit::AddRow {
+                    section: SectionId::Taxpayer,
+                    parent: RowAddr::default()
+                }
+            ),
             Err(ApplyError::NoSuchSection),
         );
         // CreateSection on a non-optional section is a clean refusal.
         assert_eq!(
-            apply(&mut w, Edit::CreateSection { section: SectionId::Payments }),
+            apply(
+                &mut w,
+                Edit::CreateSection {
+                    section: SectionId::Payments
+                }
+            ),
             Err(ApplyError::NoSuchSection),
         );
     }
@@ -607,7 +835,13 @@ mod tests {
     fn delegating_clear_unanswers_schedule_a_and_blind_taxpayer_i1() {
         let mut w: Working = None;
         materialize(&mut w, FilingStatus::Single);
-        apply(&mut w, Edit::CreateSection { section: SectionId::ScheduleA }).unwrap();
+        apply(
+            &mut w,
+            Edit::CreateSection {
+                section: SectionId::ScheduleA,
+            },
+        )
+        .unwrap();
         // Prime mortgage interest so SaMortgageAllUsed is live (its set/clear gate on `mortgage_question_live`).
         apply(
             &mut w,
@@ -621,14 +855,31 @@ mod tests {
         for id in [FieldId::SaSaltUseSalesTax, FieldId::SaMortgageAllUsed] {
             apply(
                 &mut w,
-                Edit::SetField { id, addr: RowAddr::default(), value: FieldValue::TriState(Some(true)) },
+                Edit::SetField {
+                    id,
+                    addr: RowAddr::default(),
+                    value: FieldValue::TriState(Some(true)),
+                },
             )
             .unwrap();
-            apply(&mut w, Edit::ClearField { id, addr: RowAddr::default() }).unwrap();
+            apply(
+                &mut w,
+                Edit::ClearField {
+                    id,
+                    addr: RowAddr::default(),
+                },
+            )
+            .unwrap();
         }
         let sa = w.as_ref().unwrap().schedule_a.as_ref().unwrap();
-        assert_eq!(sa.salt_use_sales_tax, None, "I-1: SaSaltUseSalesTax un-answers to None");
-        assert_eq!(sa.mortgage_all_used_to_buy_build_improve, None, "I-1: SaMortgageAllUsed un-answers to None");
+        assert_eq!(
+            sa.salt_use_sales_tax, None,
+            "I-1: SaSaltUseSalesTax un-answers to None"
+        );
+        assert_eq!(
+            sa.mortgage_all_used_to_buy_build_improve, None,
+            "I-1: SaMortgageAllUsed un-answers to None"
+        );
 
         // A skippable tri-state (BlindTaxpayer, always live) likewise.
         apply(
@@ -640,8 +891,19 @@ mod tests {
             },
         )
         .unwrap();
-        apply(&mut w, Edit::ClearField { id: FieldId::BlindTaxpayer, addr: RowAddr::default() }).unwrap();
-        assert_eq!(w.as_ref().unwrap().header.taxpayer.blind, None, "I-1: BlindTaxpayer un-answers to None");
+        apply(
+            &mut w,
+            Edit::ClearField {
+                id: FieldId::BlindTaxpayer,
+                addr: RowAddr::default(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            w.as_ref().unwrap().header.taxpayer.blind,
+            None,
+            "I-1: BlindTaxpayer un-answers to None"
+        );
     }
 
     /// ★ I-4: a presence-gated delegating `SetField` on an absent parent must REFUSE (`NoSuchRow`), never
@@ -678,17 +940,41 @@ mod tests {
         );
         // A clear on the same absent parents also refuses (not a silent Ok).
         assert_eq!(
-            apply(&mut w, Edit::ClearField { id: FieldId::BlindSpouse, addr: RowAddr::default() }),
+            apply(
+                &mut w,
+                Edit::ClearField {
+                    id: FieldId::BlindSpouse,
+                    addr: RowAddr::default()
+                }
+            ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
         assert_eq!(
-            apply(&mut w, Edit::ClearField { id: FieldId::SaSaltUseSalesTax, addr: RowAddr::default() }),
+            apply(
+                &mut w,
+                Edit::ClearField {
+                    id: FieldId::SaSaltUseSalesTax,
+                    addr: RowAddr::default()
+                }
+            ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
 
         // With the parents present, the same edits succeed and stick.
-        apply(&mut w, Edit::CreateSection { section: SectionId::Spouse }).unwrap();
-        apply(&mut w, Edit::CreateSection { section: SectionId::ScheduleA }).unwrap();
+        apply(
+            &mut w,
+            Edit::CreateSection {
+                section: SectionId::Spouse,
+            },
+        )
+        .unwrap();
+        apply(
+            &mut w,
+            Edit::CreateSection {
+                section: SectionId::ScheduleA,
+            },
+        )
+        .unwrap();
         apply(
             &mut w,
             Edit::SetField {
@@ -698,7 +984,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(w.as_ref().unwrap().header.spouse.as_ref().unwrap().blind, Some(true));
+        assert_eq!(
+            w.as_ref().unwrap().header.spouse.as_ref().unwrap().blind,
+            Some(true)
+        );
         apply(
             &mut w,
             Edit::SetField {
@@ -708,7 +997,15 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(w.as_ref().unwrap().schedule_a.as_ref().unwrap().salt_use_sales_tax, Some(false));
+        assert_eq!(
+            w.as_ref()
+                .unwrap()
+                .schedule_a
+                .as_ref()
+                .unwrap()
+                .salt_use_sales_tax,
+            Some(false)
+        );
     }
 
     /// ★ I-4: `AddRow`/`RemoveRow` report an absent parent / out-of-range row rather than silently no-op'ing.
@@ -719,29 +1016,64 @@ mod tests {
 
         // AddRow box-12 with parent [0] but no W-2 at index 0 → NoSuchRow (was a silent Ok no-op).
         assert_eq!(
-            apply(&mut w, Edit::AddRow { section: SectionId::W2Box12, parent: RowAddr(vec![0]) }),
+            apply(
+                &mut w,
+                Edit::AddRow {
+                    section: SectionId::W2Box12,
+                    parent: RowAddr(vec![0])
+                }
+            ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
         // AddRow charitable with no schedule_a → NoSuchRow.
         assert_eq!(
             apply(
                 &mut w,
-                Edit::AddRow { section: SectionId::ScheduleACharitable, parent: RowAddr::default() }
+                Edit::AddRow {
+                    section: SectionId::ScheduleACharitable,
+                    parent: RowAddr::default()
+                }
             ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
         // RemoveRow of a W-2 that isn't there → NoSuchRow.
         assert_eq!(
-            apply(&mut w, Edit::RemoveRow { section: SectionId::W2s, addr: RowAddr(vec![3]) }),
+            apply(
+                &mut w,
+                Edit::RemoveRow {
+                    section: SectionId::W2s,
+                    addr: RowAddr(vec![3])
+                }
+            ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
 
         // With a W-2 present, AddRow box-12 succeeds; removing an out-of-range box-12 still refuses.
-        apply(&mut w, Edit::AddRow { section: SectionId::W2s, parent: RowAddr::default() }).unwrap();
-        apply(&mut w, Edit::AddRow { section: SectionId::W2Box12, parent: RowAddr(vec![0]) }).unwrap();
+        apply(
+            &mut w,
+            Edit::AddRow {
+                section: SectionId::W2s,
+                parent: RowAddr::default(),
+            },
+        )
+        .unwrap();
+        apply(
+            &mut w,
+            Edit::AddRow {
+                section: SectionId::W2Box12,
+                parent: RowAddr(vec![0]),
+            },
+        )
+        .unwrap();
         assert_eq!(w.as_ref().unwrap().w2s[0].box12.len(), 1);
         assert_eq!(
-            apply(&mut w, Edit::RemoveRow { section: SectionId::W2Box12, addr: RowAddr(vec![0, 5]) }),
+            apply(
+                &mut w,
+                Edit::RemoveRow {
+                    section: SectionId::W2Box12,
+                    addr: RowAddr(vec![0, 5])
+                }
+            ),
             Err(ApplyError::SetError(SetError::NoSuchRow)),
         );
     }
@@ -752,7 +1084,14 @@ mod tests {
     fn overlong_rowaddr_is_rejected_m2() {
         let mut w: Working = None;
         materialize(&mut w, FilingStatus::Single);
-        apply(&mut w, Edit::AddRow { section: SectionId::W2s, parent: RowAddr::default() }).unwrap();
+        apply(
+            &mut w,
+            Edit::AddRow {
+                section: SectionId::W2s,
+                parent: RowAddr::default(),
+            },
+        )
+        .unwrap();
 
         // Box1Wages needs depth 1; a depth-3 addr is over-long → NoSuchRow.
         assert_eq!(

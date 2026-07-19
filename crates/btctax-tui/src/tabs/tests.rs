@@ -792,7 +792,10 @@ fn export_modal_dir_name_uses_the_injected_clock() {
     let mut app = make_app(LedgerState::default(), 2025);
     app.clock = Clock::Pinned(datetime!(2024 - 06 - 01 12:00:00 UTC));
     crate::handle_key(&mut app, press(KeyCode::Char('e')));
-    assert!(app.export_modal.is_some(), "pressing `e` with a snapshot must open the export modal");
+    assert!(
+        app.export_modal.is_some(),
+        "pressing `e` with a snapshot must open the export modal"
+    );
     let buf = render_viewer(&mut app);
     assert!(
         buffer_has(&buf, "btctax-export-20240601-120000Z"),
@@ -800,7 +803,10 @@ fn export_modal_dir_name_uses_the_injected_clock() {
     );
     // Pinned ⇒ deterministic: a second render is byte-identical.
     let buf2 = render_viewer(&mut app);
-    assert_eq!(buf, buf2, "a pinned-clock render must be byte-identical across runs");
+    assert_eq!(
+        buf, buf2,
+        "a pinned-clock render must be byte-identical across runs"
+    );
 }
 
 // ══════════════════ P3 style-aware TUI goldens (SPEC §8) ══════════════════════════════════════════
@@ -818,7 +824,10 @@ fn golden_clock() -> crate::clock::Clock {
 
 #[cfg(unix)]
 fn tui_golden_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/examples-tui"))
+    std::path::PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/examples-tui"
+    ))
 }
 
 /// The btctax-tui goldens: `(file stem, captured frame)`. A one-lot Holdings tab (style-aware capture of a
@@ -849,10 +858,16 @@ fn btctax_tui_goldens() -> Vec<(&'static str, String)> {
         let mut app = make_app(LedgerState::default(), 2025);
         app.clock = golden_clock();
         crate::handle_key(&mut app, press(KeyCode::Char('e')));
-        assert!(app.export_modal.is_some(), "the export modal must open for the golden");
+        assert!(
+            app.export_modal.is_some(),
+            "the export modal must open for the golden"
+        );
         crate::capture::to_golden(&render_viewer(&mut app))
     };
-    vec![("viewer-holdings", holdings), ("viewer-export-modal", export_modal)]
+    vec![
+        ("viewer-holdings", holdings),
+        ("viewer-export-modal", export_modal),
+    ]
 }
 
 /// The committed btctax-tui goldens match a fresh capture, byte-for-byte (reds when stale).

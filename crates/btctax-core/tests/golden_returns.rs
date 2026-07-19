@@ -29,8 +29,8 @@ use std::collections::BTreeMap;
 
 use btctax_core::conventions::{round_dollar, Usd};
 use btctax_core::tax::oracle_diff::{
-    provenance_class_fires, round_leaf, stacking_ok, sum_round, table_l16, taxcalc_methodology_class,
-    L16Operands, LivenessLedger,
+    provenance_class_fires, round_leaf, stacking_ok, sum_round, table_l16,
+    taxcalc_methodology_class, L16Operands, LivenessLedger,
 };
 use btctax_core::tax::packet::assemble_printed_forms;
 use btctax_core::tax::return_1040::assemble_absolute;
@@ -108,7 +108,11 @@ fn every_golden_household_matches_the_independent_oracles() {
     // is an unread claim about the tax code and is deleted. (T13 satisfies the §12 obligation by REFERENCE.)
     // The other §12 KATs live at the paper level (`golden_packet.rs`): deeper-line teeth, read-back
     // fault-injection, anchor-derivation; determinism is the offline `scripts/oracle/check_determinism.py`.
-    let dead = liveness.dead(&["taxcalc_methodology", "ots_provenance", "taxcalc_provenance"]);
+    let dead = liveness.dead(&[
+        "taxcalc_methodology",
+        "ots_provenance",
+        "taxcalc_provenance",
+    ]);
     assert!(
         dead.is_empty(),
         "declared divergence class(es) never fired and are not pinned: {dead:?}. Each names a lawful \
@@ -139,7 +143,8 @@ fn every_golden_household_matches_the_independent_oracles() {
 fn ti_crossfoot(agi: f64, deduction_taken: Option<f64>, qbi_deduction: f64) -> Option<Usd> {
     // 1040 L15 is floored at 0 ("if zero or less, enter -0-") — the oracle's AGI − deduction can go
     // negative (a low-income filer whose deduction exceeds AGI), where btctax prints 0.
-    deduction_taken.map(|ded| (round_leaf(agi) - round_leaf(ded) - round_leaf(qbi_deduction)).max(Usd::ZERO))
+    deduction_taken
+        .map(|ded| (round_leaf(agi) - round_leaf(ded) - round_leaf(qbi_deduction)).max(Usd::ZERO))
 }
 
 /// An oracle's OWN §1(h) line-16 operands, assembled from its baked provenance leaves (`qual_div_l3a`,
@@ -248,10 +253,10 @@ fn adjudicate_household(
     // witnesses (no tolerance); pre-T11 the deduction leaf is `None`, so this falls back to the HEAD shape
     // `round_leaf(oracle taxable_income)`.
     let ti_ours = round_dollar(ar.taxable_income);
-    let ti_ots =
-        ti_crossfoot(e.adjusted_gross_income, e.deduction_taken, e.qbi_deduction).unwrap_or_else(|| round_leaf(e.taxable_income));
-    let ti_tc =
-        ti_crossfoot(t.adjusted_gross_income, t.deduction_taken, t.qbi_deduction).unwrap_or_else(|| round_leaf(t.taxable_income));
+    let ti_ots = ti_crossfoot(e.adjusted_gross_income, e.deduction_taken, e.qbi_deduction)
+        .unwrap_or_else(|| round_leaf(e.taxable_income));
+    let ti_tc = ti_crossfoot(t.adjusted_gross_income, t.deduction_taken, t.qbi_deduction)
+        .unwrap_or_else(|| round_leaf(t.taxable_income));
     if !(ti_ours == ti_ots && ti_ours == ti_tc) {
         diffs.push(format!(
             "  {:<42} {:<22} btctax {:>10}  OTS {:>10}  taxcalc {:>10}   ({})",
@@ -315,7 +320,8 @@ fn adjudicate_household(
             if l16_ours != round_leaf(l16_taxcalc) {
                 if taxcalc_methodology_class(&reproduced_ops) {
                     liveness.record_fire("taxcalc_methodology");
-                } else if provenance_class_fires(taxcalc_ops.as_ref(), &reproduced_ops, l16_taxcalc) {
+                } else if provenance_class_fires(taxcalc_ops.as_ref(), &reproduced_ops, l16_taxcalc)
+                {
                     liveness.record_fire("taxcalc_provenance");
                 }
             }
@@ -376,7 +382,12 @@ fn adjudicate_household(
             e.deduction_taken,
             t.deduction_taken,
         ),
-        ("Sch D → 1040 L7", ar.capital_gain, e.sch_d_to_l7, t.sch_d_to_l7),
+        (
+            "Sch D → 1040 L7",
+            ar.capital_gain,
+            e.sch_d_to_l7,
+            t.sch_d_to_l7,
+        ),
     ];
     for (line, ours, ots_leaf, taxcalc_leaf) in deeper {
         let ours = round_dollar(ours);
@@ -533,7 +544,9 @@ fn deeper_lines_have_teeth_at_the_compute_level() {
         let mut h = golden_households()
             .into_iter()
             .find(|h| h.name == name)
-            .unwrap_or_else(|| panic!("§12 compute-teeth witness {name:?} is not in the baked corpus"));
+            .unwrap_or_else(|| {
+                panic!("§12 compute-teeth witness {name:?} is not in the baked corpus")
+            });
         // Clean before perturbation (the corpus is green), so the disagreement below is provably caused by
         // the perturbation. A fresh ledger each run — liveness is irrelevant here.
         let clean = adjudicate_household(&h, &params, &table, &mut LivenessLedger::default());

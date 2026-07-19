@@ -368,15 +368,25 @@ mod tests {
         use crate::tax::types::FilingStatus;
         assert_eq!(SKIPPABLE_QUESTIONS.len(), 5, "blind ×2, SALT, DOB ×2");
         // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
-        let salt = SKIPPABLE_QUESTIONS.iter().find(|s| s.id == SkippableId::SalesTaxElection).unwrap();
-        let mut ri = ReturnInputs { filing_status: FilingStatus::Single, ..Default::default() };
+        let salt = SKIPPABLE_QUESTIONS
+            .iter()
+            .find(|s| s.id == SkippableId::SalesTaxElection)
+            .unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
         assert!(!(salt.live)(&ri));
         ri.schedule_a = Some(Default::default());
         assert!((salt.live)(&ri));
         // The skippables are NOT in FORM_QUESTIONS (merging would brick screen_inputs on a None-legal skippable).
         for s in SKIPPABLE_QUESTIONS {
-            assert!(!FORM_QUESTIONS.iter().any(|q| format!("{:?}", q.id) == format!("{:?}", s.id)),
-                    "a skippable must not also be a mandatory FORM_QUESTIONS declaration");
+            assert!(
+                !FORM_QUESTIONS
+                    .iter()
+                    .any(|q| format!("{:?}", q.id) == format!("{:?}", s.id)),
+                "a skippable must not also be a mandatory FORM_QUESTIONS declaration"
+            );
         }
     }
 }

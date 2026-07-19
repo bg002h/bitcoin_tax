@@ -31,7 +31,9 @@ fn run(args: &[&str], stdin_json: &str) -> serde_json::Value {
         .expect("stdin is piped")
         .write_all(stdin_json.as_bytes())
         .expect("write the scenario to the harness");
-    let out = child.wait_with_output().expect("the harness runs to completion");
+    let out = child
+        .wait_with_output()
+        .expect("the harness runs to completion");
     assert!(
         out.status.success(),
         "the harness exited non-zero (args {args:?}):\nstderr: {}",
@@ -105,7 +107,10 @@ fn the_amt_screen_anchor_is_reported_refused_in_default_mode() {
         serde_json::json!(true),
         "{name} trips btctax's Form 6251 AMT screen — the harness must report the D-2 refusal"
     );
-    assert!(out.get("lines").is_none(), "a refused scenario carries no lines");
+    assert!(
+        out.get("lines").is_none(),
+        "a refused scenario carries no lines"
+    );
 }
 
 /// Drive `--check` over `households` and assert every ADMITTED one reconciles on every compared line
@@ -115,7 +120,10 @@ fn sweep_check_reconciliation(households: &[serde_json::Value]) {
     let mut refused: Vec<String> = Vec::new();
     let mut admitted = 0;
     for household in households {
-        let name = household["name"].as_str().unwrap_or("<unnamed>").to_string();
+        let name = household["name"]
+            .as_str()
+            .unwrap_or("<unnamed>")
+            .to_string();
         let out = run(&["--check"], &serde_json::to_string(household).unwrap());
         if out["refused"] == serde_json::json!(true) {
             refused.push(name);
@@ -137,7 +145,10 @@ fn sweep_check_reconciliation(households: &[serde_json::Value]) {
             "{name}: table_l16(btctax operands) must reproduce btctax's own regular tax"
         );
     }
-    assert!(admitted >= 10, "most anchors are admitted and swept, got {admitted}");
+    assert!(
+        admitted >= 10,
+        "most anchors are admitted and swept, got {admitted}"
+    );
     assert_eq!(
         refused, EXPECTED_REFUSED,
         "exactly the known AMT-screen anchor should be refused; a change here means the AMT screen's \
@@ -222,23 +233,43 @@ fn known_defect_pin_suppresses_an_l16_divergence_and_a_stale_pin_stays_red() {
     // — here below ceiling the methodology class would absorb a taxcalc-only dissent, but OTS is ALSO
     // wrong, so OTS's provenance conjunct-1 fails and the line stays red).
     let bare = run(&["--check"], &hj);
-    assert_eq!(bare["all_reconciled"], serde_json::json!(false), "injected divergence must surface");
+    assert_eq!(
+        bare["all_reconciled"],
+        serde_json::json!(false),
+        "injected divergence must surface"
+    );
     assert_eq!(l16_of(&bare)["reconciled"], serde_json::json!(false));
 
     // Pin at btctax's ACTUAL value ⇒ the known defect is suppressed (reconciled, labelled `known-defect`).
     let pinned = run(
-        &["--check", "--known-defect", &format!("1040.line16={on_paper}@FU-SMOKE")],
+        &[
+            "--check",
+            "--known-defect",
+            &format!("1040.line16={on_paper}@FU-SMOKE"),
+        ],
         &hj,
     );
-    assert_eq!(l16_of(&pinned)["reconciled"], serde_json::json!(true), "the pin holds");
+    assert_eq!(
+        l16_of(&pinned)["reconciled"],
+        serde_json::json!(true),
+        "the pin holds"
+    );
     assert_eq!(l16_of(&pinned)["class"], serde_json::json!("known-defect"));
 
     // STALE pin (btctax's value is not what was pinned) ⇒ stays red, forcing the entry's removal.
     let stale = run(
-        &["--check", "--known-defect", &format!("1040.line16={}@FU-SMOKE", on_paper + 1)],
+        &[
+            "--check",
+            "--known-defect",
+            &format!("1040.line16={}@FU-SMOKE", on_paper + 1),
+        ],
         &hj,
     );
-    assert_eq!(l16_of(&stale)["reconciled"], serde_json::json!(false), "a stale pin must fail");
+    assert_eq!(
+        l16_of(&stale)["reconciled"],
+        serde_json::json!(false),
+        "a stale pin must fail"
+    );
 }
 
 /// T7-m2 (untested-guard): `--known-defect` rejects a non-L16 line and every malformed spec with a
@@ -247,11 +278,11 @@ fn known_defect_pin_suppresses_an_l16_divergence_and_a_stale_pin_stays_red() {
 #[test]
 fn known_defect_rejects_non_l16_and_malformed_specs() {
     for bad in [
-        "1040.line24=5@FU-X",         // not the class/stacking line
+        "1040.line24=5@FU-X",          // not the class/stacking line
         "1040.line16=notanumber@FU-X", // value is not a whole-dollar integer
-        "1040.line16=5",              // missing @<fu-id>
-        "1040.line16=5@",             // empty fu-id
-        "garbage",                    // no `=`
+        "1040.line16=5",               // missing @<fu-id>
+        "1040.line16=5@",              // empty fu-id
+        "garbage",                     // no `=`
     ] {
         let out = Command::new(HARNESS)
             .args(["--check", "--known-defect", bad])
@@ -262,8 +293,15 @@ fn known_defect_rejects_non_l16_and_malformed_specs() {
             .expect("the harness spawns")
             .wait_with_output()
             .expect("the harness runs");
-        assert_eq!(out.status.code(), Some(2), "malformed --known-defect {bad:?} must exit 2");
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "malformed --known-defect {bad:?} must exit 2"
+        );
         let err = String::from_utf8_lossy(&out.stderr);
-        assert!(err.contains("known-defect"), "stderr must name the flag for {bad:?}: {err}");
+        assert!(
+            err.contains("known-defect"),
+            "stderr must name the flag for {bad:?}: {err}"
+        );
     }
 }

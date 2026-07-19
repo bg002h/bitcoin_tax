@@ -72,7 +72,10 @@ pub enum Advisory {
     /// `Some(false)` — the filer ANSWERED, and answered the way that costs them money. `itemized` records
     /// which deduction the return actually took, so the text does not describe a form the filer did not file
     /// (r5 M-1).
-    MixedUseMortgageNotAllocated { forgone_interest: Usd, itemized: bool },
+    MixedUseMortgageNotAllocated {
+        forgone_interest: Usd,
+        itemized: bool,
+    },
     /// ★ §63(f) (P9 §2.2 / §3.4): a person's blindness was never declared, so the additional standard
     /// deduction for blindness was NOT granted. Fires on `blind.is_none()` (never asked) — never on
     /// `Some(false)`. `persons` counts the taxpayer's box plus, ON MFJ ONLY, the spouse's (an absent MFJ
@@ -308,11 +311,7 @@ pub fn advisories(
     // STACKS. Fires on `blind.is_none()` (never asked), never on `Some(false)`, counting the spouse box only
     // on MFJ (an ABSENT MFJ spouse forfeits too; MFS never counts the spouse — mirrors `AgedBlindBoxes`).
     let taxpayer_no_blind = ri.header.taxpayer.blind.is_none();
-    let spouse_blind_on_file = ri
-        .header
-        .spouse
-        .as_ref()
-        .is_some_and(|s| s.blind.is_some());
+    let spouse_blind_on_file = ri.header.spouse.as_ref().is_some_and(|s| s.blind.is_some());
     let spouse_no_blind = ri.filing_status == FilingStatus::Mfj && !spouse_blind_on_file;
     let blind_persons = usize::from(taxpayer_no_blind) + usize::from(spouse_no_blind);
     if blind_persons > 0 {
@@ -778,9 +777,15 @@ mod tests {
             .iter()
             .any(|a| matches!(a, Advisory::MixedUseMortgageNotAllocated { .. }))
         };
-        assert!(quiet(&mixed_use_ri(Some(true), dec!(20000))), "acquisition-only");
+        assert!(
+            quiet(&mixed_use_ri(Some(true), dec!(20000))),
+            "acquisition-only"
+        );
         assert!(quiet(&mixed_use_ri(None, dec!(20000))), "unanswered");
-        assert!(quiet(&mixed_use_ri(Some(false), Usd::ZERO)), "no interest ⇒ not live");
+        assert!(
+            quiet(&mixed_use_ri(Some(false), Usd::ZERO)),
+            "no interest ⇒ not live"
+        );
         let no_sched_a = ReturnInputs {
             filing_status: FilingStatus::Single,
             ..Default::default()
@@ -834,7 +839,10 @@ mod tests {
             ..Default::default()
         };
         mfj.header.taxpayer.date_of_birth = Some(dob);
-        assert!(has_blind(&mfj, dec!(1550), 2), "MFJ absent spouse forfeits too");
+        assert!(
+            has_blind(&mfj, dec!(1550), 2),
+            "MFJ absent spouse forfeits too"
+        );
 
         // MFS never counts the spouse box, even with a spouse Person present → persons = 1.
         let mut mfs = ReturnInputs {
@@ -843,7 +851,10 @@ mod tests {
         };
         mfs.header.taxpayer.date_of_birth = Some(dob);
         mfs.header.spouse = Some(Default::default());
-        assert!(has_blind(&mfs, dec!(1550), 1), "MFS: spouse box is not this filer's");
+        assert!(
+            has_blind(&mfs, dec!(1550), 1),
+            "MFS: spouse box is not this filer's"
+        );
     }
 
     /// ★ §2.2/§3.4 (r5 Nit-3) — the §164(b)(5) sales-tax election was never asked. Fires on `None` ∧ a
@@ -891,7 +902,10 @@ mod tests {
         .message();
         assert!(itemized.contains("Schedule A"), "{itemized}");
         assert!(itemized.contains("line 8a"), "{itemized}");
-        assert!(itemized.contains("up to $20,000"), "the ceiling, comma-grouped: {itemized}");
+        assert!(
+            itemized.contains("up to $20,000"),
+            "the ceiling, comma-grouped: {itemized}"
+        );
         assert!(itemized.contains("OVERSTATED"), "{itemized}");
 
         let standard = Advisory::MixedUseMortgageNotAllocated {
@@ -922,7 +936,10 @@ mod tests {
         assert!(blind.contains("OVERSTATED"), "{blind}");
 
         let salt = Advisory::SalesTaxElectionNotAsked { itemized: true }.message();
-        assert!(salt.contains("§164(b)(5)") || salt.contains("sales tax"), "{salt}");
+        assert!(
+            salt.contains("§164(b)(5)") || salt.contains("sales tax"),
+            "{salt}"
+        );
         assert!(salt.contains("OVERSTATED"), "{salt}");
         assert!(salt.contains("income answer"), "names the exit: {salt}");
     }

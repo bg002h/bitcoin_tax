@@ -112,14 +112,30 @@ mod tests {
     #[test]
     fn glyphs_and_style_runs_are_deterministic_and_style_aware() {
         let mut buf = Buffer::empty(Rect::new(0, 0, 6, 2));
-        buf.set_string(0, 0, "Hi", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+        buf.set_string(
+            0,
+            0,
+            "Hi",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
         buf.set_string(0, 1, "xy", Style::default().bg(Color::Cyan));
         let a = to_golden(&buf);
         let b = to_golden(&buf);
         assert_eq!(a, b, "capture must be byte-deterministic");
-        assert!(a.contains("  0│Hi"), "glyph grid shows the row text (trailing spaces trimmed):\n{a}");
-        assert!(a.contains("  0│ 0..2 fg=Yellow mod=BOLD"), "styled run for the Hi cells:\n{a}");
-        assert!(a.contains("  1│ 0..2 bg=Cyan"), "styled run for the xy cells:\n{a}");
+        assert!(
+            a.contains("  0│Hi"),
+            "glyph grid shows the row text (trailing spaces trimmed):\n{a}"
+        );
+        assert!(
+            a.contains("  0│ 0..2 fg=Yellow mod=BOLD"),
+            "styled run for the Hi cells:\n{a}"
+        );
+        assert!(
+            a.contains("  1│ 0..2 bg=Cyan"),
+            "styled run for the xy cells:\n{a}"
+        );
     }
 
     #[test]

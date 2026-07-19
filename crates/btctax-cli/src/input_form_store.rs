@@ -35,17 +35,28 @@ pub(crate) fn get_draft_row(conn: &Connection, year: i32) -> Result<Option<Draft
     let row = conn.query_row(
         "SELECT inputs_json, schema_version, parked FROM return_inputs_draft WHERE year=?1",
         [year],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        },
     );
     match row {
         Ok((json, version, parked)) => {
             // ★ I-A: CliError has NO From<serde_json::Error> — map explicitly like return_inputs.rs:66-69
             // (a bad blob is a typed error, not a `?`-panic). Do NOT use `?` on serde here.
-            let ri: ReturnInputs = serde_json::from_str(&json).map_err(|e| CliError::BadConfigValue {
-                key: format!("return_inputs_draft[{year}]"),
-                value: format!("invalid JSON: {e}"),
-            })?;
-            Ok(Some(DraftRow { ri, version, parked: parked != 0 }))
+            let ri: ReturnInputs =
+                serde_json::from_str(&json).map_err(|e| CliError::BadConfigValue {
+                    key: format!("return_inputs_draft[{year}]"),
+                    value: format!("invalid JSON: {e}"),
+                })?;
+            Ok(Some(DraftRow {
+                ri,
+                version,
+                parked: parked != 0,
+            }))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
@@ -80,7 +91,11 @@ pub(crate) fn delete_draft(conn: &Connection, year: i32) -> Result<bool, CliErro
 pub fn draft_exists(conn: &Connection, year: i32) -> Result<bool, CliError> {
     init_draft_table(conn)?;
     Ok(conn
-        .query_row("SELECT 1 FROM return_inputs_draft WHERE year=?1", [year], |_| Ok(()))
+        .query_row(
+            "SELECT 1 FROM return_inputs_draft WHERE year=?1",
+            [year],
+            |_| Ok(()),
+        )
         .is_ok())
 }
 
@@ -468,24 +483,38 @@ mod tests {
         assert!(matches!(loaded, Loaded::Fresh));
         assert!(note.is_none(), "no stale discard on a fresh year");
         // Committed only
-        let cri = ReturnInputs { filing_status: FilingStatus::HoH, ..Default::default() };
+        let cri = ReturnInputs {
+            filing_status: FilingStatus::HoH,
+            ..Default::default()
+        };
         crate::return_inputs::set(&conn, 2024, &cri).unwrap();
         let (loaded, note) = load(&conn, 2024).unwrap();
         assert!(matches!(loaded, Loaded::Committed(r) if r.filing_status == FilingStatus::HoH));
         assert!(note.is_none(), "no stale discard on the committed path");
         // Draft shadows committed
-        let dri = ReturnInputs { filing_status: FilingStatus::Mfj, ..Default::default() };
+        let dri = ReturnInputs {
+            filing_status: FilingStatus::Mfj,
+            ..Default::default()
+        };
         set_draft_row(&conn, 2024, &dri, false).unwrap();
         let (loaded, note) = load(&conn, 2024).unwrap();
-        assert!(matches!(loaded, Loaded::Draft { ri, parked: false } if ri.filing_status == FilingStatus::Mfj));
-        assert!(note.is_none(), "no stale discard on a version-current draft");
+        assert!(
+            matches!(loaded, Loaded::Draft { ri, parked: false } if ri.filing_status == FilingStatus::Mfj)
+        );
+        assert!(
+            note.is_none(),
+            "no stale discard on a version-current draft"
+        );
     }
 
     #[test]
     fn load_discards_stale_wip_but_refuses_stale_parked() {
         let conn = Connection::open_in_memory().unwrap();
         init_draft_table(&conn).unwrap();
-        let ri = ReturnInputs { filing_status: FilingStatus::Single, ..Default::default() };
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
         let j = serde_json::to_string(&ri).unwrap();
         // stale WIP (parked=0) at an old version → discarded, falls through to Fresh, row is GONE,
         // and the discard fact is RETURNED as a StaleNote (I-1: never eprintln!'d from this store fn).
@@ -494,14 +523,31 @@ mod tests {
         assert!(matches!(loaded, Loaded::Fresh));
         assert_eq!(
             note,
-            Some(StaleNote { year: 2024, found: 0, expected: SCHEMA_VERSION }),
+            Some(StaleNote {
+                year: 2024,
+                found: 0,
+                expected: SCHEMA_VERSION
+            }),
             "the stale-WIP discard returns the note (not an eprintln!)"
         );
-        assert!(!draft_exists(&conn, 2024).unwrap(), "stale WIP is discarded");
+        assert!(
+            !draft_exists(&conn, 2024).unwrap(),
+            "stale WIP is discarded"
+        );
         // stale PARKED (parked=1) → REFUSE, row PRESERVED
         conn.execute("INSERT INTO return_inputs_draft(year,inputs_json,schema_version,parked) VALUES(2025,?1,0,1)", [&j]).unwrap();
-        assert!(matches!(load(&conn, 2025), Err(CliError::StaleParkedDraft { year: 2025, found: 0, .. })));
-        assert!(draft_exists(&conn, 2025).unwrap(), "stale parked is preserved, not discarded");
+        assert!(matches!(
+            load(&conn, 2025),
+            Err(CliError::StaleParkedDraft {
+                year: 2025,
+                found: 0,
+                ..
+            })
+        ));
+        assert!(
+            draft_exists(&conn, 2025).unwrap(),
+            "stale parked is preserved, not discarded"
+        );
     }
 
     /// The canonical screen-clean return: a minimal Single filer that is not a dependent and has answered
@@ -639,7 +685,10 @@ mod tests {
         // parked draft → refused, preserved, message names both exits
         set_draft_row(&conn, 2025, &ri, true).unwrap();
         let err = coherence_clear_or_refuse(&conn, 2025).unwrap_err();
-        assert!(matches!(err, CliError::ParkedDraftBlocksWrite { year: 2025 }));
+        assert!(matches!(
+            err,
+            CliError::ParkedDraftBlocksWrite { year: 2025 }
+        ));
         let msg = err.to_string();
         assert!(
             msg.contains("use full return") && msg.contains("discard parked draft"),
@@ -715,7 +764,10 @@ mod tests {
             magi_excluding_crypto: dec!(130000),
             qualified_dividends_and_other_pref_income: dec!(0),
             other_net_capital_gain: dec!(0),
-            capital_loss_carryforward_in: Carryforward { short: dec!(0), long: dec!(0) },
+            capital_loss_carryforward_in: Carryforward {
+                short: dec!(0),
+                long: dec!(0),
+            },
             w2_ss_wages: dec!(0),
             w2_medicare_wages: dec!(0),
             schedule_c_expenses: dec!(0),
@@ -727,23 +779,38 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         crate::return_inputs::init_table(&conn).unwrap();
         crate::tax_profile::init_table(&conn).unwrap();
-        assert!(matches!(active_source(&conn, 2024).unwrap(), ActiveSource::Neither));
+        assert!(matches!(
+            active_source(&conn, 2024).unwrap(),
+            ActiveSource::Neither
+        ));
         crate::tax_profile::set(&conn, 2024, &sample_profile()).unwrap();
-        assert!(matches!(active_source(&conn, 2024).unwrap(), ActiveSource::TaxProfile));
+        assert!(matches!(
+            active_source(&conn, 2024).unwrap(),
+            ActiveSource::TaxProfile
+        ));
         assert!(shadows_profile(&conn, 2024).unwrap());
         // committed return_inputs wins
         crate::return_inputs::set(&conn, 2024, &ReturnInputs::default()).unwrap();
-        assert!(matches!(active_source(&conn, 2024).unwrap(), ActiveSource::FullReturn));
+        assert!(matches!(
+            active_source(&conn, 2024).unwrap(),
+            ActiveSource::FullReturn
+        ));
     }
 
     #[test]
     fn discard_parked_draft_only_deletes_a_parked_row() {
         let (_dir, path, pp) = tmp_vault();
         let mut sess = Session::open(&path, &pp).unwrap();
-        let ri = ReturnInputs { filing_status: FilingStatus::Single, ..Default::default() };
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
         // a WIP draft is NOT discardable via this path
         set_draft_row(sess.conn(), 2024, &ri, false).unwrap();
-        assert!(discard_parked_draft(&mut sess, 2024).is_err(), "won't delete a WIP behind 'discard parked'");
+        assert!(
+            discard_parked_draft(&mut sess, 2024).is_err(),
+            "won't delete a WIP behind 'discard parked'"
+        );
         assert!(draft_exists(sess.conn(), 2024).unwrap());
         // a parked draft IS discardable
         set_draft_row(sess.conn(), 2024, &ri, true).unwrap();
@@ -755,7 +822,10 @@ mod tests {
     fn draft_row_set_get_delete_roundtrip_with_parked() {
         let conn = Connection::open_in_memory().unwrap();
         init_draft_table(&conn).unwrap();
-        let ri = ReturnInputs { filing_status: FilingStatus::Mfj, ..Default::default() };
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Mfj,
+            ..Default::default()
+        };
         // WIP row
         set_draft_row(&conn, 2024, &ri, false).unwrap();
         let got = get_draft_row(&conn, 2024).unwrap().unwrap();

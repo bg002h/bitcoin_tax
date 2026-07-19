@@ -21,9 +21,12 @@
 //! test. No accessor in this crate walks `Value`.
 
 use super::form_spec;
-use crate::seam::{Field, FieldId, FieldKind, FieldValue, RowAddr, SectionId, SecretView, SetError};
+use crate::seam::{
+    Field, FieldId, FieldKind, FieldValue, RowAddr, SecretView, SectionId, SetError,
+};
 use btctax_core::tax::return_inputs::{
-    Box12Entry, CharitableClass, CharitableGift, Dependent, Person, ReturnInputs, ScheduleAInputs, W2,
+    Box12Entry, CharitableClass, CharitableGift, Dependent, Person, ReturnInputs, ScheduleAInputs,
+    W2,
 };
 use btctax_core::tax::types::FilingStatus;
 use rust_decimal_macros::dec;
@@ -40,7 +43,11 @@ fn walk(v: &Value, prefix: &str, out: &mut BTreeMap<String, Value>) {
     match v {
         Value::Object(map) => {
             for (k, child) in map {
-                let p = if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") };
+                let p = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{prefix}.{k}")
+                };
                 walk(child, &p, out);
             }
         }
@@ -60,7 +67,11 @@ fn walk(v: &Value, prefix: &str, out: &mut BTreeMap<String, Value>) {
 /// The full leaf-path map of a `ReturnInputs`.
 fn leaf_map(ri: &ReturnInputs) -> BTreeMap<String, Value> {
     let mut out = BTreeMap::new();
-    walk(&serde_json::to_value(ri).expect("ReturnInputs serializes"), "", &mut out);
+    walk(
+        &serde_json::to_value(ri).expect("ReturnInputs serializes"),
+        "",
+        &mut out,
+    );
     out
 }
 
@@ -75,18 +86,27 @@ fn leaf_map(ri: &ReturnInputs) -> BTreeMap<String, Value> {
 /// live, and `mortgage_interest_1098 = 1` makes `SaMortgageAllUsed` live. Both primer values are non-default
 /// but still differ from their own field's sentinel, so their diff stays exact.
 fn maximal_fixture() -> ReturnInputs {
-    let mut ri = ReturnInputs { filing_status: FilingStatus::Mfs, ..Default::default() };
+    let mut ri = ReturnInputs {
+        filing_status: FilingStatus::Mfs,
+        ..Default::default()
+    };
     ri.header.spouse = Some(Person::default());
     ri.header.ip_pin = Some("000000".to_string());
     ri.header.dependents = vec![Dependent::default()];
     ri.w2s = vec![W2 {
         // `Box12Entry` has no `Default`; a blank code + zero dollars is the empty new row (per sections.rs).
-        box12: vec![Box12Entry { code: String::new(), amount: dec!(0) }],
+        box12: vec![Box12Entry {
+            code: String::new(),
+            amount: dec!(0),
+        }],
         ..Default::default()
     }];
     ri.schedule_a = Some(ScheduleAInputs {
         // `CharitableGift` has no `Default`; Cash60/zero is the sections.rs `add` starting point.
-        charitable: vec![CharitableGift { class: CharitableClass::Cash60, amount: dec!(0) }],
+        charitable: vec![CharitableGift {
+            class: CharitableClass::Cash60,
+            amount: dec!(0),
+        }],
         mortgage_interest_1098: dec!(1), // liveness primer for SaMortgageAllUsed (see doc above)
         ..Default::default()
     });
@@ -106,10 +126,10 @@ fn sentinel(f: &Field) -> FieldValue {
         FieldKind::Secret => FieldValue::SecretEntry("123456789".to_string()),
         FieldKind::Enum(_) => {
             let choice = match f.id {
-                FieldId::FilingStatus => "Single",      // fixture is Mfs
+                FieldId::FilingStatus => "Single",          // fixture is Mfs
                 FieldId::ItemizeElection => "ForceItemize", // fixture is Auto
-                FieldId::W2Owner => "Spouse",           // fixture default is Taxpayer
-                FieldId::CharClass => "OrdinaryProp50", // fixture is Cash60
+                FieldId::W2Owner => "Spouse",               // fixture default is Taxpayer
+                FieldId::CharClass => "OrdinaryProp50",     // fixture is Cash60
                 other => panic!("no Enum sentinel for {other:?} — add a distinct real choice"),
             };
             FieldValue::Choice(choice.to_string())
@@ -153,8 +173,9 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
 
             let s = sentinel(field);
             let mut ri = fixture.clone();
-            (field.set)(&mut ri, &addr, s.clone())
-                .unwrap_or_else(|e| panic!("set failed for {:?} in {:?}: {e:?}", field.id, section.id));
+            (field.set)(&mut ri, &addr, s.clone()).unwrap_or_else(|e| {
+                panic!("set failed for {:?} in {:?}: {e:?}", field.id, section.id)
+            });
 
             // ── ★ I-6 (spec §10): the get→set round-trip. A non-Secret field must read back EXACTLY what
             // was written — catching a `get` that reads a DIFFERENT leaf than `set` writes (untested for ~40
@@ -187,8 +208,11 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
 
             let after = leaf_map(&ri);
             let all_keys: BTreeSet<&String> = before.keys().chain(after.keys()).collect();
-            let changed: Vec<String> =
-                all_keys.into_iter().filter(|k| before.get(*k) != after.get(*k)).cloned().collect();
+            let changed: Vec<String> = all_keys
+                .into_iter()
+                .filter(|k| before.get(*k) != after.get(*k))
+                .cloned()
+                .collect();
             assert_eq!(
                 changed.len(),
                 1,
@@ -199,7 +223,10 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
             );
             let path = changed.into_iter().next().unwrap();
             if let Some(prev) = covered.insert(path.clone(), field.id) {
-                panic!("leaf `{path}` is double-covered — by {prev:?} and {:?}", field.id);
+                panic!(
+                    "leaf `{path}` is double-covered — by {prev:?} and {:?}",
+                    field.id
+                );
             }
         }
     }
@@ -226,20 +253,26 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     let is_exempt = |path: &str| {
         EXEMPT_LEAVES.contains(&path)
             || EXEMPT_PREFIXES.iter().any(|p| {
-                path == *p || path.starts_with(&format!("{p}.")) || path.starts_with(&format!("{p}["))
+                path == *p
+                    || path.starts_with(&format!("{p}."))
+                    || path.starts_with(&format!("{p}["))
             })
     };
 
     // ── 3. THE ASSERTION: {all in-scope leaves} == {covered} ∪ {exempt}, and nothing is both. ──
-    let uncovered: Vec<&String> =
-        before.keys().filter(|p| !covered.contains_key(*p) && !is_exempt(p)).collect();
+    let uncovered: Vec<&String> = before
+        .keys()
+        .filter(|p| !covered.contains_key(*p) && !is_exempt(p))
+        .collect();
     assert!(
         uncovered.is_empty(),
         "these IN-SCOPE leaves are covered by NO Field and are NOT in EXEMPT — add a Field (or exempt it \
          deliberately in §5.8): {uncovered:#?}"
     );
-    let covered_and_exempt: Vec<&String> =
-        before.keys().filter(|p| covered.contains_key(*p) && is_exempt(p)).collect();
+    let covered_and_exempt: Vec<&String> = before
+        .keys()
+        .filter(|p| covered.contains_key(*p) && is_exempt(p))
+        .collect();
     assert!(
         covered_and_exempt.is_empty(),
         "these leaves are BOTH covered by a Field AND listed EXEMPT — resolve the contradiction: \
@@ -248,19 +281,37 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
 
     // A covered path that is NOT a fixture leaf means a Field wrote somewhere the maximal fixture never
     // realized — a fixture/accessor mismatch. (Belt-and-suspenders; must be empty.)
-    let phantom: Vec<&String> = covered.keys().filter(|p| !before.contains_key(*p)).collect();
-    assert!(phantom.is_empty(), "Fields touched non-fixture (phantom) leaves: {phantom:#?}");
+    let phantom: Vec<&String> = covered
+        .keys()
+        .filter(|p| !before.contains_key(*p))
+        .collect();
+    assert!(
+        phantom.is_empty(),
+        "Fields touched non-fixture (phantom) leaves: {phantom:#?}"
+    );
 
     // Every FieldKind must have been exercised (requirement 4) — including Bool, Date, and Secret.
-    for k in ["Money", "Text", "Bool", "TriState", "Date", "Enum", "Secret"] {
-        assert!(seen_kinds.contains(k), "FieldKind {k} was never exercised by the KAT");
+    for k in [
+        "Money", "Text", "Bool", "TriState", "Date", "Enum", "Secret",
+    ] {
+        assert!(
+            seen_kinds.contains(k),
+            "FieldKind {k} was never exercised by the KAT"
+        );
     }
 
     // Count tripwires — pin the 62-leaf / 62-Field identity so a silent drop is loud even if some other
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
-    assert_eq!(field_count, 62, "expected 62 Fields (one per §5.8 in-scope leaf)");
-    assert_eq!(covered.len(), 62, "expected 62 distinctly-covered in-scope leaves");
+    assert_eq!(
+        field_count, 62,
+        "expected 62 Fields (one per §5.8 in-scope leaf)"
+    );
+    assert_eq!(
+        covered.len(),
+        62,
+        "expected 62 distinctly-covered in-scope leaves"
+    );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
     // The cardinality asserts above cannot see a coherent Field↔leaf SWAP between two same-typed leaves
@@ -269,8 +320,10 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // ground truth — a transposition or a re-pointed accessor names itself in the assert diff.
     // Compared in the `leaf-path → FieldId` direction (`String` is `Ord`, so no seam `Ord` on `FieldId`);
     // `covered` already IS the observed map. The pinned literal is inverted into the same shape.
-    let expected: BTreeMap<String, FieldId> =
-        EXPECTED_LEAF_PATHS.iter().map(|(id, p)| ((*p).to_string(), *id)).collect();
+    let expected: BTreeMap<String, FieldId> = EXPECTED_LEAF_PATHS
+        .iter()
+        .map(|(id, p)| ((*p).to_string(), *id))
+        .collect();
     assert_eq!(
         covered, expected,
         "the observed leaf-path → FieldId map drifted from the pinned expectation — a Field writes a \
@@ -279,13 +332,16 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
 
     // ── 6. ★ I-6 (spec §10): a wrong-`FieldValue`-kind `set` on a representative field per kind → WrongKind. ──
     let wrong_kind: &[(FieldId, FieldValue)] = &[
-        (FieldId::Box1Wages, FieldValue::Text("x".to_string())),         // Money
-        (FieldId::TpFirstName, FieldValue::Money(dec!(1))),              // Text
-        (FieldId::TpPresidentialFund, FieldValue::Text("x".to_string())), // Bool
-        (FieldId::DeclForeignAccounts, FieldValue::Money(dec!(1))),      // TriState (delegating, always live)
-        (FieldId::DepDob, FieldValue::Money(dec!(1))),                   // Date
-        (FieldId::FilingStatus, FieldValue::Money(dec!(1))),             // Enum
-        (FieldId::TpSsn, FieldValue::Text("x".to_string())),            // Secret
+        (FieldId::Box1Wages, FieldValue::Text("x".to_string())), // Money
+        (FieldId::TpFirstName, FieldValue::Money(dec!(1))),      // Text
+        (
+            FieldId::TpPresidentialFund,
+            FieldValue::Text("x".to_string()),
+        ), // Bool
+        (FieldId::DeclForeignAccounts, FieldValue::Money(dec!(1))), // TriState (delegating, always live)
+        (FieldId::DepDob, FieldValue::Money(dec!(1))),              // Date
+        (FieldId::FilingStatus, FieldValue::Money(dec!(1))),        // Enum
+        (FieldId::TpSsn, FieldValue::Text("x".to_string())),        // Secret
     ];
     for (id, bad) in wrong_kind {
         let (field, addr) = locate(*id);
@@ -319,20 +375,29 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (FieldId::TpLastName, "header.taxpayer.last_name"),
     (FieldId::TpSsn, "header.taxpayer.ssn"),
     (FieldId::TpOccupation, "header.taxpayer.occupation"),
-    (FieldId::TpPresidentialFund, "header.presidential_fund_taxpayer"),
+    (
+        FieldId::TpPresidentialFund,
+        "header.presidential_fund_taxpayer",
+    ),
     (FieldId::IpPin, "header.ip_pin"),
     (FieldId::SpFirstName, "header.spouse.first_name"),
     (FieldId::SpLastName, "header.spouse.last_name"),
     (FieldId::SpSsn, "header.spouse.ssn"),
     (FieldId::SpOccupation, "header.spouse.occupation"),
-    (FieldId::SpPresidentialFund, "header.presidential_fund_spouse"),
+    (
+        FieldId::SpPresidentialFund,
+        "header.presidential_fund_spouse",
+    ),
     (FieldId::AddrStreet, "header.address_street"),
     (FieldId::AddrCity, "header.address_city"),
     (FieldId::AddrState, "header.address_state"),
     (FieldId::AddrZip, "header.address_zip"),
     (FieldId::DepName, "header.dependents[0].name"),
     (FieldId::DepSsn, "header.dependents[0].ssn"),
-    (FieldId::DepRelationship, "header.dependents[0].relationship"),
+    (
+        FieldId::DepRelationship,
+        "header.dependents[0].relationship",
+    ),
     (FieldId::DepDob, "header.dependents[0].date_of_birth"),
     (FieldId::W2Owner, "w2s[0].owner"),
     (FieldId::W2Employer, "w2s[0].employer"),
@@ -351,20 +416,41 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (FieldId::Box12Amount, "w2s[0].box12[0].amount"),
     (FieldId::SaMedical, "schedule_a.medical"),
     (FieldId::SaSaltRealEstate, "schedule_a.salt_real_estate"),
-    (FieldId::SaSaltPersonalProp, "schedule_a.salt_personal_property"),
-    (FieldId::SaSaltStateEst, "schedule_a.salt_state_estimated_payments"),
-    (FieldId::SaSaltPriorYear, "schedule_a.salt_prior_year_balance_paid"),
-    (FieldId::SaSaltSalesTaxAmt, "schedule_a.salt_sales_tax_amount"),
+    (
+        FieldId::SaSaltPersonalProp,
+        "schedule_a.salt_personal_property",
+    ),
+    (
+        FieldId::SaSaltStateEst,
+        "schedule_a.salt_state_estimated_payments",
+    ),
+    (
+        FieldId::SaSaltPriorYear,
+        "schedule_a.salt_prior_year_balance_paid",
+    ),
+    (
+        FieldId::SaSaltSalesTaxAmt,
+        "schedule_a.salt_sales_tax_amount",
+    ),
     (FieldId::SaMortgage1098, "schedule_a.mortgage_interest_1098"),
     (FieldId::SaSaltUseSalesTax, "schedule_a.salt_use_sales_tax"),
-    (FieldId::SaMortgageAllUsed, "schedule_a.mortgage_all_used_to_buy_build_improve"),
+    (
+        FieldId::SaMortgageAllUsed,
+        "schedule_a.mortgage_all_used_to_buy_build_improve",
+    ),
     (FieldId::CharClass, "schedule_a.charitable[0].class"),
     (FieldId::CharAmount, "schedule_a.charitable[0].amount"),
     (FieldId::PayEstimated, "payments.estimated_tax_payments"),
     (FieldId::PayExtension, "payments.extension_payment"),
     (FieldId::PayOtherWh, "payments.other_withholding"),
-    (FieldId::DeclDependentTaxpayer, "header.can_be_claimed_as_dependent_taxpayer"),
-    (FieldId::DeclDependentSpouse, "header.can_be_claimed_as_dependent_spouse"),
+    (
+        FieldId::DeclDependentTaxpayer,
+        "header.can_be_claimed_as_dependent_taxpayer",
+    ),
+    (
+        FieldId::DeclDependentSpouse,
+        "header.can_be_claimed_as_dependent_spouse",
+    ),
     (FieldId::DeclMfsSpouseItemizes, "mfs_spouse_itemizes"),
     (FieldId::DeclForeignAccounts, "foreign_accounts"),
     (FieldId::DeclForeignTrust, "foreign_trust"),
