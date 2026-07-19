@@ -2081,3 +2081,99 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
         "the full remedy chain (clear + import + write-carryover) restores 2025's Computed carryover"
     );
 }
+
+/// UX-P4-1 surface 4 fixture: a TY2024 `ReturnInputs` vault (wages + a $40k charitable overflow → a real
+/// carryover-out) whose ledger ALSO carries an unknown-basis 2024 Receive (`hb-recv`) — the pseudo trigger
+/// (pseudo ON ⇒ a synthetic $0 lot ⇒ `pseudo_active()`; pseudo OFF ⇒ a Hard blocker ⇒ NotComputable delta).
+/// A TY2025 row is present so "persists nothing" is a concrete before/after byte-compare.
+fn fr2024_writeback_vault_with_pseudo_trigger() -> (tempfile::TempDir, PathBuf) {
+    use btctax_core::tax::return_inputs::{
+        CharitableClass, CharitableGift, Owner, ReturnInputs, ScheduleAInputs, W2,
+    };
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_buy_receive_2024(csv_dir.path()); // 2023 Buy + a 2024 unknown-basis Receive
+    let (dir, vault) = make_vault_with(&csv);
+    let mut s = Session::open(&vault, &pp()).unwrap();
+    btctax_cli::return_inputs::set(
+        s.conn(),
+        2024,
+        &btctax_core::tax::testonly::answered(ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box1_wages: dec!(50000),
+                box3_ss_wages: dec!(50000),
+                box5_medicare_wages: dec!(50000),
+                ..Default::default()
+            }],
+            schedule_a: Some(ScheduleAInputs {
+                charitable: vec![CharitableGift {
+                    class: CharitableClass::Cash60,
+                    amount: dec!(40000),
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+    btctax_cli::return_inputs::set(
+        s.conn(),
+        2025,
+        &btctax_core::tax::testonly::answered(ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+    s.save().unwrap();
+    (dir, vault)
+}
+
+fn get_2025_row(vault: &Path) -> Option<btctax_core::tax::return_inputs::ReturnInputs> {
+    let s = Session::open(vault, &pp()).unwrap();
+    btctax_cli::return_inputs::get(s.conn(), 2025).unwrap()
+}
+
+/// UX-P4-1 surface 4 clause 4a (SPEC §3.1) [T-C1]: `--write-carryover` on a PSEUDO-ACTIVE ledger REFUSES
+/// fail-closed and persists NOTHING — else a deliberately-synthetic carryover launders into year+1's real
+/// inputs, where next year's banner cannot fire. (★ fault-inject: drop the `pseudo_active()` gate in
+/// `write_back_carryover` and this goes RED — the write would succeed.)
+#[test]
+fn write_carryover_refuses_on_a_pseudo_active_ledger_and_persists_nothing() {
+    let (_dir, vault) = fr2024_writeback_vault_with_pseudo_trigger();
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+    let before = get_2025_row(&vault);
+    let err = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap_err();
+    assert!(
+        format!("{err:?}").contains("pseudo-reconcile mode is contributing synthetic"),
+        "expected the fail-closed pseudo refuse, got: {err:?}"
+    );
+    assert_eq!(
+        before,
+        get_2025_row(&vault),
+        "a refused write-back must leave year+1 inputs byte-identical"
+    );
+}
+
+/// UX-P4-1 surface 4 clause 4b (SPEC §3.1) [G2-NEW-4]: `--write-carryover` on a NOT-COMPUTABLE (Hard-blocked,
+/// non-pseudo) ledger REFUSES and persists NOTHING — the same laundering class minus the pseudo mechanism.
+/// (★ fault-inject: drop the NotComputable gate and this goes RED.)
+#[test]
+fn write_carryover_refuses_on_a_not_computable_ledger_and_persists_nothing() {
+    let (_dir, vault) = fr2024_writeback_vault_with_pseudo_trigger();
+    // pseudo OFF (default): the unknown-basis 2024 Receive is a Hard blocker ⇒ NotComputable crypto-delta.
+    let before = get_2025_row(&vault);
+    let err = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap_err();
+    assert!(
+        format!("{err:?}").contains("NOT COMPUTABLE"),
+        "expected the fail-closed NotComputable refuse, got: {err:?}"
+    );
+    assert_eq!(
+        before,
+        get_2025_row(&vault),
+        "a refused write-back must leave year+1 inputs byte-identical"
+    );
+}

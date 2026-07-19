@@ -471,7 +471,7 @@ pub fn write_back_carryover(
     // draft here — before the year+1 read below, which early-returns on an absent row (a parked year has
     // none) and would otherwise shadow the parked-refuse remedy.
     crate::input_form_store::coherence_clear_or_refuse(s.conn(), year + 1)?;
-    let (_events, state, cfg) = s.load_events_and_project()?;
+    let (events, state, cfg) = s.load_events_and_project()?;
     let tables = BundledTaxTables::load();
     let fr_tables = BundledFullReturnTables::load();
     let (Some(params), Some(table)) = (fr_tables.full_return_for(year), tables.table_for(year))
@@ -481,7 +481,7 @@ pub fn write_back_carryover(
         )));
     };
     // Must be a ReturnInputs-provenance year with both refuse screens passed (fail-closed).
-    let provenance = match crate::resolve::resolve_and_screen(
+    let (profile, provenance) = match crate::resolve::resolve_and_screen(
         s.conn(),
         &state,
         year,
@@ -492,12 +492,44 @@ pub fn write_back_carryover(
         crate::resolve::ProfileOutcome::Uncomputable { detail } => {
             return Err(CliError::Usage(detail))
         }
-        crate::resolve::ProfileOutcome::Ready { provenance, .. } => provenance,
+        crate::resolve::ProfileOutcome::Ready {
+            profile,
+            provenance,
+        } => (profile, provenance),
     };
     if provenance != crate::resolve::Provenance::ReturnInputs {
         return Err(CliError::Usage(format!(
             "carryover write-back needs full-return inputs for {year} (`income import`); the resolved \
              profile source is {provenance:?}"
+        )));
+    }
+    // UX-P4-1 surface 4 (SPEC §3.1 clause 4) [T-C1 + G2-NEW-4]: NEVER persist a carryover derived from a
+    // pseudo-tainted OR hard-blocked ledger into year+1's stored inputs. Next year `pseudo_active()` is
+    // false and the UX-P4-1 banner correctly does not fire — so an unflagged, deliberately-fictional (or
+    // unanswerable) figure would ride into a real input. Fail-closed, consistent with the export gate.
+    // (4a) At this gate the `PseudoPlaceholder` disjunct is structurally inert (provenance is ReturnInputs,
+    // just checked), so `pseudo_active()` is the operative half of the §3.1 predicate.
+    if state.pseudo_active() {
+        return Err(CliError::Usage(format!(
+            "carryover write-back REFUSED for {year}: pseudo-reconcile mode is contributing synthetic \
+             default(s), so the derived carryover is an ESTIMATE — persisting it as {next}'s real input \
+             would launder a deliberately-synthetic figure. Resolve the pseudo entries (or turn the mode \
+             off) first.",
+            next = year + 1
+        )));
+    }
+    // (4b) A `NotComputable` crypto-delta means the ledger carries Hard blockers the engine refuses to
+    // answer for; a carryover assembled over that state must not be persisted (the same laundering class
+    // minus the pseudo mechanism).
+    if let btctax_core::TaxOutcome::NotComputable(b) =
+        compute_tax_year(&events, &state, year, profile.as_ref(), &tables)
+    {
+        return Err(CliError::Usage(format!(
+            "carryover write-back REFUSED for {year}: the crypto-delta ledger is NOT COMPUTABLE [{:?}]: {} \
+             — a carryover from an unanswerable ledger must not be written into {next}'s inputs.",
+            b.kind,
+            b.detail,
+            next = year + 1
         )));
     }
     let ri = crate::return_inputs::get(s.conn(), year)?
