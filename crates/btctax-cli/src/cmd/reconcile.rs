@@ -118,6 +118,24 @@ pub fn reclassify_outflow(
 ) -> Result<EventId, CliError> {
     let transfer_out_event = parse_event_id(out_ref)?;
     let mut session = Session::open(vault_path, pp)?;
+
+    // UX-P4-4(d): a price-based sanity check on `--amount` (the USD FMV / proceeds). Emit the advisory
+    // (if any) to stderr — non-fatal; the amount is recorded as entered either way. Resolve the
+    // outflow's sats + date from its TransferOut event and the market value from the event-date close.
+    {
+        let events = load_all(session.conn())?;
+        if let Some(ev) = events.iter().find(|e| e.id == transfer_out_event) {
+            if let EventPayload::TransferOut(out) = &ev.payload {
+                let date = tax_date(ev.utc_timestamp, ev.original_tz);
+                let market_value = btctax_core::price::fmv_of(session.prices(), date, out.sat);
+                let btc = Usd::from(out.sat) / Usd::from(100_000_000);
+                if let Some(line) = amount_fmv_advisory(principal, market_value, btc, date) {
+                    eprintln!("{line}");
+                }
+            }
+        }
+    }
+
     let payload = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
         transfer_out_event,
         as_: class,
@@ -126,6 +144,38 @@ pub fn reclassify_outflow(
         donee,
     });
     append_and_save(&mut session, payload, now)
+}
+
+/// UX-P4-4(d): the stderr line (if any) for the `--amount` FMV sanity check. `market_value` is
+/// `fmv_of(prices, event_date, out_sats)` — the USD value of the disposed BTC at the event-date
+/// close (`None` when that date has no price). The FMV of donated BTC is its value AT the
+/// contribution date (26 CFR 1.170A-1(c)(2)), so the yardstick is that close, NOT cost basis — a
+/// $0/low-basis long-held gift is the common case, and a basis threshold would false-warn on it.
+///
+/// - `amount` exceeding **100x** a positive market value is almost certainly the sats count typed
+///   into a dollars field (`sat ≈ 1e8·BTC` vs. `value ≈ BTC·close`, a ratio ≈ `1e8/close`): WARN.
+/// - a plausible amount (≤ 100x), or a dust market value that rounds to $0 (no meaningful ratio):
+///   no line.
+/// - no price for the date: the check cannot run — emit a NOTE, so the guard never dies silently.
+///
+/// Pure (all I/O — price lookup, stderr — is the caller's) so the decision is unit-testable.
+fn amount_fmv_advisory(
+    amount: Usd,
+    market_value: Option<Usd>,
+    btc: Usd,
+    date: TaxDate,
+) -> Option<String> {
+    match market_value {
+        Some(mv) if mv > Usd::ZERO && amount > mv * Usd::from(100) => Some(format!(
+            "warning: --amount ${amount} is more than 100x the ${mv} market value of {btc} BTC at \
+             the {date} close — did you enter the sats amount as dollars? --amount is the USD FMV; \
+             recording it as entered (not fatal)."
+        )),
+        Some(_) => None, // plausible amount, or dust whose market value rounds to $0
+        None => Some(format!(
+            "note: no BTC price for {date}; skipping the --amount FMV sanity check."
+        )),
+    }
 }
 
 /// FR3: set a manual FMV on an event (`ManualEntry`), clearing its `fmv_missing` blocker.
@@ -1265,6 +1315,85 @@ mod tests {
 
     fn pp() -> Passphrase {
         Passphrase::new("test-pass".into())
+    }
+
+    // ── UX-P4-4(d): the --amount FMV sanity advisory (pure decision; mutation-proven) ──
+
+    /// A `--amount` entered as the sats count (5_000_000 for 0.05 BTC) dwarfs 100x the ~$3,044
+    /// market value → a non-fatal warning that names --amount and the sats mistake.
+    #[test]
+    fn amount_fmv_advisory_warns_on_sats_as_dollars() {
+        let line = amount_fmv_advisory(
+            dec!(5000000),
+            Some(dec!(3044.48)),
+            dec!(0.05),
+            date!(2024 - 07 - 03),
+        )
+        .expect("a sats-as-dollars amount must warn");
+        assert!(
+            line.contains("warning")
+                && line.contains("--amount")
+                && line.to_lowercase().contains("sats"),
+            "warning must name --amount + the sats mistake: {line}"
+        );
+    }
+
+    /// A legitimate FMV — even a few multiples above the market value — does NOT warn.
+    #[test]
+    fn amount_fmv_advisory_silent_on_plausible_amount() {
+        assert!(amount_fmv_advisory(
+            dec!(3044.48),
+            Some(dec!(3044.48)),
+            dec!(0.05),
+            date!(2024 - 07 - 03)
+        )
+        .is_none());
+        assert!(amount_fmv_advisory(
+            dec!(9000),
+            Some(dec!(3044.48)),
+            dec!(0.05),
+            date!(2024 - 07 - 03)
+        )
+        .is_none());
+    }
+
+    /// The threshold is a STRICT 100x: exactly 100x is silent, a cent over warns.
+    #[test]
+    fn amount_fmv_advisory_boundary_is_strict_100x() {
+        let mv = dec!(3000);
+        assert!(
+            amount_fmv_advisory(dec!(300000), Some(mv), dec!(0.05), date!(2024 - 07 - 03))
+                .is_none(),
+            "exactly 100x must not warn"
+        );
+        assert!(
+            amount_fmv_advisory(dec!(300000.01), Some(mv), dec!(0.05), date!(2024 - 07 - 03))
+                .is_some(),
+            "just over 100x must warn"
+        );
+    }
+
+    /// A dust market value that rounds to $0 yields no meaningful ratio → no warning.
+    #[test]
+    fn amount_fmv_advisory_skips_dust_that_rounds_to_zero() {
+        assert!(amount_fmv_advisory(
+            dec!(100),
+            Some(dec!(0)),
+            dec!(0.00000001),
+            date!(2024 - 07 - 03)
+        )
+        .is_none());
+    }
+
+    /// No price for the date ⇒ the check cannot run: emit a NOTE (never silent), not a warning.
+    #[test]
+    fn amount_fmv_advisory_notes_missing_price() {
+        let line = amount_fmv_advisory(dec!(3000), None, dec!(0.05), date!(2024 - 07 - 03))
+            .expect("no-price must produce a note");
+        assert!(
+            line.contains("no BTC price") && !line.contains("warning"),
+            "no-price must be a note, not a warning: {line}"
+        );
     }
 
     /// Build a minimal `DonationDetails` for tests (synthetic — no real PII).

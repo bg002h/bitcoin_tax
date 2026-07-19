@@ -173,6 +173,62 @@ fn reclassify_outflow_to_sell_creates_a_disposal() {
     assert_eq!(state.disposals.len(), 2); // the fixture Sell + the reclassified Send
 }
 
+/// UX-P4-4(d) wiring: driving the REAL binary (so stderr is observable), a `--amount` entered as
+/// the sats count draws the price-based FMV sanity WARNING on stderr — non-fatal, the reclassify
+/// still exits 0 — while a plausible USD amount is silent. The fixture Send is 0.03 BTC on
+/// 2025-06-20 (bundled close ~$105,167 → market value ~$3,155; the 100x threshold ≈ $315,501, so
+/// 3_000_000 warns and 2_000 does not). (★ fault-inject: revert the (d) advisory call and the
+/// first assert goes RED.)
+#[test]
+fn reclassify_outflow_amount_as_sats_warns_on_stderr() {
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let run = |amount: &str| -> (Option<i32>, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let (vault, out_ref) = vault_with_pending(dir.path());
+        let out = std::process::Command::new(bin)
+            .args([
+                "--vault",
+                vault.to_str().unwrap(),
+                "reconcile",
+                "reclassify-outflow",
+                &out_ref,
+                "--as-kind",
+                "sell",
+                "--amount",
+                amount,
+            ])
+            .env("BTCTAX_PASSPHRASE", "pw")
+            .output()
+            .expect("btctax binary must execute");
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+
+    // sats-as-dollars (3_000_000 >> 100x the ~$3,155 market value) → warning, but exit 0.
+    let (code, stderr) = run("3000000");
+    assert_eq!(
+        code,
+        Some(0),
+        "reclassify must still succeed; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("warning")
+            && stderr.to_lowercase().contains("sats")
+            && stderr.contains("--amount"),
+        "a sats-as-dollars --amount must warn on stderr: {stderr}"
+    );
+
+    // a plausible USD amount → silent (no warning line).
+    let (code2, stderr2) = run("2000");
+    assert_eq!(code2, Some(0), "reclassify must succeed; stderr: {stderr2}");
+    assert!(
+        !stderr2.contains("warning"),
+        "a plausible --amount must not warn: {stderr2}"
+    );
+}
+
 #[test]
 fn reclassify_outflow_to_gift_creates_a_removal() {
     let dir = tempfile::tempdir().unwrap();
