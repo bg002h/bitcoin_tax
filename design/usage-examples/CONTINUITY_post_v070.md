@@ -56,8 +56,16 @@ UX-P1-3/7/8/10, UX-P2-1, UX-P3-2, N-R1, M-1. Full list + status in the **system 
   - Reviews persisted: `reviews/ux-p4-4-impl-fable-review-r{1,2,3}.md`. Minors/Nits folded or filed
     (`002ee48`,`24f2d05`; FOLLOWUPS "UX-P4-4 impl review r1/r2 residue"). SPEC §3.3(c) amended to the as-built.
 
-## NEXT STEP — #18 `events list`, then #14–23 (per the PLAN's phase order)
-- **#18 `events list` (UX-P4-11)** must come BEFORE **#14 UX-P4-3** (P4-3's refuse-hint names the verb).
+- **#18 UX-P4-11 `events list` — COMPLETE + reviewed to GREEN (r1 0C/2I → r2 0C/0I), PUSHED**
+  (`8ddeb46..c23c8ee`). New read-only `events list`: the decidable universe (transfer-in/out,
+  unclassified, import-conflict, income) with {ref, kind, date, amount, decided-status}, event-sequence
+  order. `cmd::inspect::events_list` (persisted-decision reverse-map incl. TransferLink BOTH legs [r1-I1];
+  pseudo-decidable by construction) + `render::{EventRow,render_events_list}` (ref-first, `[decidable]` /
+  `[decided: decision|N]`) + clap `Command::Events` + man pages. Reviews r{1,2}. Residue filed (M1 owned by
+  #14/Step-1c; M2 SPEC §3.6 amended for the universe scope; M3/N*). Mutation-proven KATs incl. the
+  link-both-legs + void→re-decide loops.
+
+## NEXT STEP — #14 UX-P4-3, then #15–23 (per the PLAN's phase order)
 - **#14 UX-P4-3** needs a **pseudo-OFF shadow-projection helper that MIRRORS the resolver's own `applied`
   map** (reuse resolve.rs's pass-1c/1d/1e construction; `applied` has 2 real writers under pseudo-OFF:
   SupersedeImport `resolve.rs:513` + ClassifyRaw pass-1c `:543-560` — enumerate-the-writers is fragile, mirror
@@ -79,8 +87,9 @@ UX-P1-3/7/8/10, UX-P2-1, UX-P3-2, N-R1, M-1. Full list + status in the **system 
 
 ## HOW TO RESUME (command to issue after /clear)
 > Resume the post-v0.7.0 product cycle: read `design/usage-examples/CONTINUITY_post_v070.md` and
-> `STANDARD_WORKFLOW.md`, then continue at "NEXT STEP" — UX-P4-4 is COMPLETE + pushed. Next is #18
-> `events list` (UX-P4-11), which must precede #14 UX-P4-3; then #14–23 per the PLAN phase order. Each
-> item: TDD + mutation-proven → independent Fable review to 0C/0I → push. Fable for reviews only.
+> `STANDARD_WORKFLOW.md`, then continue at "NEXT STEP" — UX-P4-4 and #18 `events list` are COMPLETE +
+> pushed. Next is #14 UX-P4-3 (validator-mirrors-resolver duplicate/existence refusal; its refuse-hint
+> names the now-shipped `events list`); then #15–23 per the PLAN phase order. Each item: TDD +
+> mutation-proven → independent Fable review to 0C/0I → push. Fable for reviews only.
 
 (The memory note [[post-v070-product-cycle]] auto-loads and points here.)
