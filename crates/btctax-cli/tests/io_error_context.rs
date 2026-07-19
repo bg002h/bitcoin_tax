@@ -62,6 +62,41 @@ fn export_out_collision_names_path() {
     );
 }
 
+/// UX-P4-8 (fold r2-I1): a SUBPATH collision under a valid `--out` — here `out/lots.csv` already
+/// exists as a directory, so `write_csv_exports`' `open_owner_only` fails AFTER the store's snapshot
+/// write — still names the out path. This failure arrives as `CliError::Store(StoreError::Io)` (not
+/// `CliError::Io`), the exact class the r1 wrap silently passed through.
+#[test]
+fn export_out_subpath_collision_names_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(
+        &vault,
+        &pp(),
+        &[fixtures::coinbase_buy_sell_send(dir.path())],
+    )
+    .unwrap();
+
+    // A valid out dir (the store snapshot succeeds), but `out/lots.csv` is a DIRECTORY → the CSV
+    // writer's `open_owner_only(out/lots.csv)` fails with `IsADirectory`.
+    let out = dir.path().join("export");
+    std::fs::create_dir(&out).unwrap();
+    std::fs::create_dir(out.join("lots.csv")).unwrap();
+
+    let err = cmd::admin::export_snapshot(&vault, &pp(), &out, None, None)
+        .expect_err("a lots.csv-as-directory subpath collision must error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains(&out.display().to_string()),
+        "names the --out path even for a Store(Io) subpath failure: {msg}"
+    );
+    assert!(
+        msg.contains("does not already exist"),
+        "carries the export-out hint: {msg}"
+    );
+}
+
 /// UX-P4-8 (fold I2): a `backup-key --out` that cannot be written (here: `--out` is an existing
 /// directory) names the out path, not a bare `io: Is a directory`.
 #[test]

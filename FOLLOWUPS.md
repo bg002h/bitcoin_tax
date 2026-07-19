@@ -2436,3 +2436,19 @@ r1 raised 2 Important, both FOLDED (re-review r2 pending):
   reuse of `render::no_lots_message` (optimize's "no feasible selection" ≠ whatif's "insufficient
   balance"), so it needs its own small analysis. Also `main.rs:2029` still Debug-prints `MethodElection
   {:?}` — a single fieldless token, NOT the truncating-struct class UX-P4-7 targets; leave as-is.
+
+**UX-P4-7/8/9 (#15 Phase 2) impl re-review r2 residue (2026-07-19, `reviews/ux-p4-789-impl-fable-review-r2.md`):**
+r2 verified I1+I2+M2+N2 RESOLVED, but the M1 comment fix exposed a NEW Important — FOLDED:
+- **r2-I1 (Important)** — the `write_csv_exports` `--out` wrap used `cli_io_with_path`, which matched
+  only `CliError::Io`; but a SUBPATH collision (`out_dir/lots.csv` as a directory → `open_owner_only`
+  fails) arrives as `CliError::Store(StoreError::Io)` and passed through PATHLESS (reviewer proved it
+  live). FOLDED: `cli_io_with_path` now enriches BOTH `Io` and `Store(Io)`; pinned by
+  `export_out_subpath_collision_names_path` (mutation-proven); the misleading `admin.rs` comment
+  corrected. **r2-N2** (self-referential hint pin in the `mkdir_out` unit test) folded: the unit test now
+  asserts the literal hint substring.
+- **r2-N1 (Nit, later cycle)** — `map_open_error` (`unlock.rs`) keeps two now-dead NotFound arms
+  (`Store(Io)` / `Io`), since `Session::open` maps every vault-open Io to `PathIo`. Harmless defensive
+  residue (keeps the pin green if the enrichment were ever reverted); leave or collapse in a later pass.
+- **r2-N3 (Nit → later polish cycle)** — `init --key-backup <path>` (`cli.rs`) writes a key to a
+  user-named path and is pathless on collision — same UX shape but NOT an `--out` (outside UX-P4-8's
+  class term). Sweep it with the N1/N3 residue when the later legibility polish cycle runs.

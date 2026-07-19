@@ -115,9 +115,11 @@ pub fn export_snapshot(
         None => None,
     };
     let donation_details = session.donation_details()?;
-    // UX-P4-8: name the --out path when `write_csv_exports` fails to CREATE/OPEN a file under out_dir
-    // (its `mkdir_owner_only`/`open_owner_only` `io::Error`s). NOTE: a mid-write `csv::Error` is
-    // deliberately NOT enriched (it is a `CliError::Csv`, passed through) — it is not a path problem.
+    // UX-P4-8: name the --out path for any I/O failure writing under out_dir — a `mkdir_owner_only`/
+    // `open_owner_only` failure (a SUBPATH collision such as `out_dir/lots.csv` being a directory)
+    // arrives as `CliError::Store(StoreError::Io)`, a mid-write `flush`/`writeln` as `CliError::Io`;
+    // `cli_io_with_path` enriches BOTH. A `csv::Error` (serialization, not a path problem) passes
+    // through.
     write_csv_exports(
         out_dir,
         &state,
@@ -598,9 +600,11 @@ mod tests {
         }
         let msg = err.to_string();
         assert!(msg.contains("collide"), "Display names the path: {msg}");
+        // Literal (not self-referential to the const, which `contains("")` would trivially satisfy if
+        // the const were emptied) — pins the hint's CONTENT (fold r2-N2).
         assert!(
-            msg.contains(crate::EXPORT_OUT_HINT),
-            "Display carries the hint: {msg}"
+            msg.contains("does not already exist as a file"),
+            "Display carries the hint content: {msg}"
         );
     }
 }

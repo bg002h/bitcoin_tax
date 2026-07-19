@@ -164,15 +164,21 @@ pub fn store_io_with_path(
     }
 }
 
-/// Re-wrap a `CliError::Io` with the offending PATH + a one-clause hint (UX-P4-8). Any non-`Io`
-/// `CliError` (a `Csv` write error, an attestation refusal, …) passes through unchanged.
+/// Re-wrap a pathless I/O failure with the offending PATH + a one-clause hint (UX-P4-8). Enriches
+/// BOTH shapes an export write can produce: a raw `CliError::Io` (a `write`/`flush` mid-write) AND a
+/// `CliError::Store(StoreError::Io)` (a `mkdir_owner_only`/`open_owner_only` under `out_dir` — e.g. a
+/// SUBPATH collision like `out_dir/lots.csv` already existing as a directory, which `?`-converts
+/// through `From<StoreError>`). A `CliError::Csv` (a serialization error, not a path problem) and
+/// every other variant pass through unchanged.
 pub fn cli_io_with_path(e: CliError, path: &std::path::Path, hint: &str) -> CliError {
     match e {
-        CliError::Io(source) => CliError::PathIo {
-            path: path.display().to_string(),
-            hint: hint.to_string(),
-            source,
-        },
+        CliError::Io(source) | CliError::Store(btctax_store::StoreError::Io(source)) => {
+            CliError::PathIo {
+                path: path.display().to_string(),
+                hint: hint.to_string(),
+                source,
+            }
+        }
         other => other,
     }
 }
