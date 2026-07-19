@@ -2369,6 +2369,9 @@ rows are in ledger/import order, not by date). Filed (non-gating):
   explicitly indicative for every kind; prefer the live override when one is present.
 - **N1 (Nit)** — `render::fmt_btc` drops the sign for sat ∈ (−1e8, 0) (`-0.5` → "0.50000000"); unreachable
   for persisted payloads (adapters `.abs()` at build time), display-robustness only.
-- **N2 (Nit)** — in an already-blocked vault the `decided` map is later-wins while the resolver is
-  first-wins for ClassifyInbound; the shown ref is usually the correct void target anyway. Dissolves if
-  decided-status ever moves to resolver-derived (see M1).
+- **N2 (Nit)** — in an already-blocked vault the `decided` map diverges from the resolver in the same
+  class as M1: it is later-wins while the resolver is first-wins for ClassifyInbound; and it marks a
+  target `[decided]` for a decision the resolver does NOT actually consume — the `TransferLink` in-leg
+  when the link is inert (a duplicate in-event, or a no-wallet/type-invalid link the resolver excludes).
+  The shown ref is usually the correct void target anyway. All of it dissolves if decided-status ever
+  moves to resolver-derived (see M1); only reachable in an already-hard-blocked vault. (review r2 N1.)
