@@ -106,14 +106,22 @@ UX-P1-3/7/8/10, UX-P2-1, UX-P3-2, N-R1, M-1. Full list + status in the **system 
     dual KAT). Reviews r{1,2}. Residue: N1 (no vault-level pending test) + N2 (assert refusal reason) —
     optional Nits filed. Full CI surface green (2046 nextest+clippy, fmt, pii, isolation, msrv@1.88).
 
-## NEXT STEP — #17, then #18–23 (per the PLAN's phase order)
-- **#17 (Phase 4 Affordances: UX-P4-5 + UX-P4-12 b–i)** — SCOPED (4a): UX-P4-5 warn `--forms` ignored on
-  a full-return year — the dispatch (`admin.rs:237` `export_full_return`) drops the `forms` slice; add a
-  `forms_ignored` flag on `IrsPdfReport` that main.rs surfaces on stderr (mirrors `unresolved_hard`);
-  packet bytes unchanged. 4b = UX-P4-12(b–i) papercuts (FOLLOWUPS ~2255): (b) blank help/units on
-  classify-inbound-income/set-fmv, (c) config shows forward method, (d) tax-profile set-error names
-  --show, (e) internal enum names on screen, (f) TUI keybind language in CLI verify, (g) circular
-  set-donation-details pointer, (h) TUI footer dev-speak, (i) TUI editor default-year gate placement.
+- **#17 (Phase 4 Affordances) — COMPLETE + reviewed to GREEN (r1 0C/4I → r2 0C/2I → r3 0C/0I), PUSHED**
+  (`b101fef..8204375`). UX-P4-5 (`--forms`-ignored stderr warn) + UX-P4-12(b–h): (b) units/kind on
+  classify-inbound-income/set-fmv, (c) config forward-method read-back via the SHARED
+  `project::in_force_methods` resolver [big r2/r3 rework — HIFO default, engine key], (d) tax-profile
+  set-error names --show, (e) config human labels + 2 missed Hifo sites, (f) surface-neutral void remedy,
+  (g) valid reclassify-outflow --as-kind donate hint, (h) dropped "q: swallowed" footers. Each TDD +
+  mutation-proven. Reviews r{1,2,3}. Residue = pathless-io + legibility Nits filed.
+  **(i) DEFERRED (verdict SOUND)** — "align TUI default-year gate to CLI store-then-gate" conflicts with
+  the reviewed I-11 poisoning-guard (`input_form_store::commit`); needs a design decision (re-enter
+  spec/plan, §D). ⚠️ USER INPUT NEEDED — see FOLLOWUPS UX-P4-12(i) RESOLUTION (3 options).
+
+## NEXT STEP — #19, then #20–23 (per the PLAN's phase order)
+- **#19 (Phase 5 Display: M-1)** — enable `serde_json` `preserve_order` for `income show`; workspace-global
+  flip (spec §4 M-1 — audit verified safe: fingerprints hand-rolled bytes; typed serde field-ordered;
+  `Value` sites = income-show display + input-form coverage tooling + update-prices parse; btctax-forms
+  serde_json-free). Pin the blast-radius enumeration in a KAT; regen J6 golden; verify net-isolation + msrv.
   #19 (P4-12 papercuts), #20 (M-1 serde preserve_order), #21 (docs journeys + P2-1), #22 (P3-2/N-R1 polish),
   #23 (phase-8 whole-branch close: full-CI-surface green, regen ALL goldens, FOLLOWUPS burndown, whole-branch
   Fable review, then it's mergeable). Each item's spec is in SPEC §3–§6.
