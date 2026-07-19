@@ -2266,6 +2266,24 @@ will red until it does).
   year 2025, whose full-return commit then refuses ("2024 only") — a late gate on the default year,
   and the opposite gate placement from the CLI (which stores 2025 inputs and gates at export).
 
+  **RESOLUTION (#17 Phase 4, 2026-07-19):** (a) DONE pre-v0.7.0. (b) DONE `4dd51e1` (units + kind
+  values on classify-inbound-income/set-fmv). (c) DONE `10331e9` (`config` echoes the forward-method
+  standing order). (d) DONE `981f45d` (tax-profile set-error names `--show`). (e) DONE `fd60f1d`
+  (config human labels — TreatmentC/Hifo gone; the `non_compliant` tag is a documented vocabulary,
+  left as-is). (f) DONE `981f45d` (surface-neutral void remedy). (g) DONE `981f45d` (points at the
+  reclassify-outflow prior step). (h) DONE `f80426c` (dropped "q: swallowed").
+  **(i) DEFERRED — needs a design decision (re-enter spec/plan, §D).** The spec/plan choice "align to
+  the CLI's store-then-gate-at-export" CONFLICTS with the reviewed **I-11 guard** in
+  `input_form_store::commit` (`crates/btctax-cli/src/input_form_store.rs:287-294`), which deliberately
+  writes NOTHING for a table-less year because a committed row there "poisons it at resolve." The CLI
+  (`cmd/tax.rs:101` `return_inputs::set`, no gate) accepts that poisoning and relies on the export
+  gate; the TUI's I-11 does not. Aligning the TUI = REMOVING/relaxing a reviewed poisoning-guard — a
+  material design change, not a mechanical papercut, so it must NOT be smuggled in autonomously.
+  Owning phase: a dedicated brainstorm/spec pass (decide: relax I-11 to match the CLI, OR keep I-11
+  and instead surface the "no full-return tables (2024 only)" status EARLY at form-open — the safe,
+  export-behavior-preserving alternative — OR make the CLI import gate like the TUI). Any choice must
+  honor `[T-U-P4-12]` (must not change which year's packet is exported).
+
 ## Pre-v0.7.0 product-wording cleanup — FOLDED (2026-07-18, user-authorized before the release)
 
 A deliberate, reviewed product-fix cycle (distinct from the fence-barred docs work; the user chose "fix
