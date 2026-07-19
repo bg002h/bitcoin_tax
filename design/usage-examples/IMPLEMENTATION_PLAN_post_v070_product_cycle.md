@@ -1,8 +1,10 @@
 # IMPLEMENTATION PLAN — post-v0.7.0 product cycle
 
-**Status:** DRAFT (provisional against SPEC r4; finalize when the SPEC is green). Independent Fable review
-to 0C/0I required before phase-1 code.
-**Spec of record:** `SPEC_post_v070_product_cycle.md` (r4+). **Branch:** `feat/post-v070-product-cycle`.
+**Status:** **r2** — folds the r1 Fable review (0C/3I `reviews/plan-post-v070-fable-review-r1.md`): I-1
+(shadow helper is UX-P4-3-ONLY; UX-P4-1 reads live pseudo-ON state), I-2 (pseudo-divergent equivalence KAT),
+I-3 (the delegated ad-hoc-trio sign decision) + the two Minors (exit-0 KATs, N-R1 two scan copies). Against
+the GREEN SPEC. Re-review pending before phase-1 code.
+**Spec of record:** `SPEC_post_v070_product_cycle.md` (GREEN). **Branch:** `feat/post-v070-product-cycle`.
 
 This plan translates the spec's §7 phasing into concrete TDD steps. It does not re-argue design — the spec
 (§3–§6, reviewed across r1–r4) is the contract; this is the build order, the file/function hooks (from spec
@@ -30,12 +32,21 @@ This plan translates the spec's §7 phasing into concrete TDD steps. It does not
 
 ## Phase 1 — Correctness cluster (gates everything else)
 
-**Shared prerequisite — a pseudo-OFF shadow projection helper.** Both UX-P4-1's predicate and UX-P4-3's
-validator need "what the resolver sees with `pseudo_reconcile` forced OFF." Build ONE helper that runs the
-resolver's own pass-1c/1d/1e construction (reusing `resolve.rs`, NOT a hand-rebuilt subset — spec §3.2
-`[R3-I1]`) with pseudo off, exposing the effective `applied` map + the projected state. This is the
-mirror-the-resolver mechanism the spec mandates. KAT: the helper's `applied` for a fixture equals the
-resolver's own for the same ledger with pseudo off (a shadow-equivalence test).
+**Shared prerequisite — a pseudo-OFF shadow projection helper (for UX-P4-3 ONLY) `[PLAN-I1]`.** UX-P4-3's
+*validator* needs "what the resolver sees with `pseudo_reconcile` forced OFF." **UX-P4-1's predicate does
+NOT** — it reads the LIVE pseudo-ON state/provenance (`pseudo_active() OR PseudoPlaceholder`); a pseudo-OFF
+view has `count == 0` and can never yield `PseudoPlaceholder` (`cli/resolve.rs:121-128` is pseudo-on-gated),
+so wiring 1b to the helper would make the banner structurally silent and **reinstate the [T-C1]/[T-C2]
+Criticals**. Therefore: **1b reads the live projected state; the helper is a 1c-only dependency.** Build ONE
+helper that reuses the resolver's own conflict/classify-pass construction (NOT a hand-rebuilt subset — spec
+§3.2 `[R3-I1]`) with `pseudo_reconcile` forced off, exposing the effective `applied` map + projected state.
+**NOTE `[PLAN-min]`:** `applied` is currently local to core `resolve()` — this is a **scoped new core API**
+(expose the map, or a `validate_target(ref) -> Effect` shim), not merely a CLI change.
+**Equivalence KAT — must be pseudo-DIVERGENT, not vacuous `[PLAN-I2]`:** on a fixture whose ON vs OFF
+`applied` genuinely DIFFER (a pseudo default that accept-first `resolve.rs:521-522` / Phase-A `:949` adds
+under ON), assert the helper's OFF `applied` OMITS those pseudo-gated writes and equals the resolver's own
+pseudo-OFF `applied`. A mutation that wrongly reads the stored pseudo cfg (via `session.project()`, the path
+§3.2 forbids) must RED it — else the KAT witnesses nothing.
 
 **Step 1a — UX-P4-11 `events list` (FIRST — UX-P4-3's refuse hint names it).**
 - New read-only subcommand `events list` (clap def in `cli.rs`; dispatch in `main.rs`; render in
@@ -81,6 +92,11 @@ resolver's own for the same ledger with pseudo off (a shadow-equivalence test).
 **Step 1d — UX-P4-4 + UX-P1-3 value validation.**
 - Per-flag sign guards at the sites in the spec §3.3(a) table (guard per-flag, never in `parse_usd_arg`/
   `parse_sell_arg`); `--sell=-1` refused; tax-profile already-guarded fields left as-is.
+- **Ad-hoc trio decision (SPEC §3.3(a) delegated "Decide in the PLAN") `[PLAN-I3]`:** `--carryforward-in`
+  refuses < 0 (it is a carryforward loss *magnitude*); `--income` and `--magi` **ALLOW** negative — a
+  negative AGI/MAGI is legitimate (NOL years), so a blanket refuse would be a §1 false-refuse. All three are
+  planning-only (no filed-form contact). KAT: `--carryforward-in=-1` refused; `--income=-5000` / `--magi=-5000`
+  accepted (and flow into the marginal computation unchanged).
 - `--acquired`/`--donor-acquired` > receipt refused with a receipt-date+tz message (spec §3.3b).
 - EIN/TIN shape at the `set_donation_details` choke point (`reconcile.rs:1162`) — appraiser-tin EIN|SSN,
   donee-ein EIN + hyphenless-normalize + refuse-SSN, ptin `P\d{8}` (spec §3.3c). Covers the TUI-edit form.
@@ -105,7 +121,9 @@ resolver's own for the same ledger with pseudo off (a shadow-equivalence test).
 - **3a UX-P4-6:** pending line in the holdings view (BTC unit) from `stats.sigma_pending`. KAT.
 - **3b UX-P4-10:** exit 1 on `NotComputable` (`main.rs:140-182`); man-page contract; stale doc-comment
   `tax_report.rs:780`; the write-carryover interaction already handled by 1b clause 4b. KAT asserts the
-  process exit code.
+  process exit code, **including the two deliberate exit-0 non-triggers (SPEC §3.5):** a dual-report whose
+  absolute total is refused but whose delta computed → exit 0; a pseudo-active report WITHOUT
+  `--write-carryover` → exit 0 (the banner is the signal).
 - Review, commit, push.
 
 ## Phase 4 — Affordances (UX-P4-5, UX-P4-12 b–i)
@@ -127,8 +145,9 @@ resolver's own for the same ledger with pseudo off (a shadow-equivalence test).
 
 ## Phase 7 — Polish (UX-P3-2, N-R1)
 
-- Colorized TUI PDF (roff color from the style runs); de-stick the `no_direct_now_utc` scan (KAT: a
-  production `now_utc()` after a test module is caught). Review, commit, push.
+- Colorized TUI PDF (roff color from the style runs); de-stick the `no_direct_now_utc` scan in **both**
+  copies (tui `export.rs:970` + tui-edit `main.rs:13975` `[PLAN-min]`) (KAT: a production `now_utc()` after
+  a test module is caught, in each). Review, commit, push.
 
 ## Phase 8 — Close
 
