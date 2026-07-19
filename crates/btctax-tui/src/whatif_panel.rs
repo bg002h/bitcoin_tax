@@ -447,9 +447,12 @@ fn refusal_message(e: &WhatIfError) -> String {
         WhatIfError::PreTransitionYear(y) => {
             format!("{y} is pre-2025: a pre-2025 sale restates a closed year \u{2014} not a plan")
         }
-        WhatIfError::NoLots => {
-            "no lots available to sell from that wallet as of that date".to_string()
-        }
+        WhatIfError::NoLots {
+            wallet,
+            at,
+            available,
+            requested,
+        } => btctax_cli::render::no_lots_message(wallet, *at, *available, *requested),
         WhatIfError::Evaluate(EvaluateError::ProceedsRequired) => {
             "a price is required for a future/off-dataset date with no bundled price \u{2014} \
              enter a USD/BTC price"
@@ -681,7 +684,13 @@ mod tests {
         panel.compute(&snap, 2025);
         assert!(panel.output.is_none());
         let err = panel.error.as_deref().expect("error set");
-        assert!(err.contains("no lots"), "refusal: {err}");
+        // UX-P4-9: an empty pool is the honest "no BTC" case, and the panel mirrors the CLI —
+        // naming the wallet + as-of date (not the old false "no lots available" wording).
+        assert!(
+            err.contains("no BTC available in self:cold as of 2025-08-01"),
+            "refusal: {err}"
+        );
+        assert!(!err.contains("no lots available"), "refusal: {err}");
         assert!(panel.render_body().contains("Refused:"));
     }
 

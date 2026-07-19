@@ -167,9 +167,14 @@ pub fn map_whatif_err(e: WhatIfError) -> CliError {
         WhatIfError::PreTransitionYear(y) => CliError::Usage(format!(
             "{y} is pre-2025: a pre-2025 sale restates a closed year — not a plan"
         )),
-        WhatIfError::NoLots => {
-            CliError::Usage("no lots available to sell from that wallet as of that date".into())
-        }
+        WhatIfError::NoLots {
+            wallet,
+            at,
+            available,
+            requested,
+        } => CliError::Usage(crate::render::no_lots_message(
+            &wallet, at, available, requested,
+        )),
         WhatIfError::Evaluate(EvaluateError::ProceedsRequired) => CliError::Usage(
             "--price <usd-per-btc> is required for a future/off-dataset date with no bundled price"
                 .into(),
@@ -273,6 +278,58 @@ mod tests {
                 "cmd wrapper must agree with FromStr on failure: {s:?}"
             );
         }
+    }
+
+    /// UX-P4-9: an INSUFFICIENT pool (lots exist but do not cover the sale) names the available
+    /// balance, the wallet, the as-of date, and the requested amount — NOT the false "no lots
+    /// available" wording (which reads as an empty wallet).
+    #[test]
+    fn no_lots_message_insufficient_names_available_wallet_date_requested() {
+        use time::macros::date;
+        let err = map_whatif_err(WhatIfError::NoLots {
+            wallet: WalletId::SelfCustody {
+                label: "cold".into(),
+            },
+            at: date!(2025 - 08 - 01),
+            available: 50_000_000, // 0.5 BTC held
+            requested: 60_000_000, // 0.6 BTC requested
+        });
+        let msg = err.to_string();
+        assert!(msg.contains("only 0.50000000 BTC available"), "{msg}");
+        assert!(msg.contains("self:cold"), "names the wallet: {msg}");
+        assert!(msg.contains("2025-08-01"), "names the as-of date: {msg}");
+        assert!(
+            msg.contains("(requested 0.60000000 BTC)"),
+            "names the request: {msg}"
+        );
+        assert!(
+            !msg.contains("no lots available"),
+            "the false 'no lots available' wording is gone when lots DO exist: {msg}"
+        );
+    }
+
+    /// UX-P4-9: a GENUINELY EMPTY pool (available == 0) says "no BTC available" — the honest
+    /// zero case, distinct from mere insufficiency, and never "only 0 BTC".
+    #[test]
+    fn no_lots_message_empty_pool_says_no_btc() {
+        use time::macros::date;
+        let err = map_whatif_err(WhatIfError::NoLots {
+            wallet: WalletId::SelfCustody {
+                label: "hot".into(),
+            },
+            at: date!(2025 - 08 - 01),
+            available: 0,
+            requested: 60_000_000,
+        });
+        let msg = err.to_string();
+        assert!(
+            msg.contains("no BTC available in self:hot as of 2025-08-01"),
+            "empty pool names the wallet + date: {msg}"
+        );
+        assert!(
+            !msg.contains("only"),
+            "an empty pool must not say 'only <X>': {msg}"
+        );
     }
 
     /// The ad-hoc long-term carryforward-in flows into the profile (short stays $0).

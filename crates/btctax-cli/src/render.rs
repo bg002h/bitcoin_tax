@@ -2,7 +2,7 @@
 //! over engine data — the CLI displays; the engine computes (NFR4/NFR5).
 use crate::config::CliConfig;
 use btctax_adapters::FileReport;
-use btctax_core::conventions::{tax_date, Usd, TRANSITION_DATE};
+use btctax_core::conventions::{tax_date, Sat, Usd, TRANSITION_DATE};
 use btctax_core::persistence::ImportReport;
 use btctax_core::DonationDetails;
 use btctax_core::{
@@ -198,6 +198,26 @@ pub fn wallet_label(w: &WalletId) -> String {
     match w {
         WalletId::Exchange { provider, account } => format!("exchange:{provider}:{account}"),
         WalletId::SelfCustody { label } => format!("self:{label}"),
+    }
+}
+
+/// UX-P4-9: the shared "insufficient balance" message for a `what-if sell`/`harvest` whose wallet
+/// pool cannot cover the sale. Names the AVAILABLE balance, the wallet, and the as-of date so the
+/// refusal is legible; `available == 0` is the honest "no BTC" case (an empty wallet), distinct from
+/// mere insufficiency (lots exist but fall short). Used by BOTH the CLI (`cmd::whatif::map_whatif_err`)
+/// and the interactive TUI panel (`btctax_tui::whatif_panel::refusal_message`) so the two surfaces
+/// read identically. SCREEN-ONLY.
+pub fn no_lots_message(wallet: &WalletId, at: TaxDate, available: Sat, requested: Sat) -> String {
+    if available == 0 {
+        format!("no BTC available in {} as of {}", wallet_label(wallet), at)
+    } else {
+        format!(
+            "only {} BTC available in {} as of {} (requested {} BTC)",
+            fmt_btc(available),
+            wallet_label(wallet),
+            at,
+            fmt_btc(requested),
+        )
     }
 }
 

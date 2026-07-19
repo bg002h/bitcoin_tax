@@ -656,7 +656,9 @@ fn sell_refuses_missing_table() {
     assert!(matches!(err, WhatIfError::YearNotComputable(_)));
 }
 
-/// Selling more than the as-of pool holds ⇒ `NoLots`.
+/// Selling more than the as-of pool holds ⇒ `NoLots`, and the error CARRIES the available balance
+/// (the pool's held sats), the requested amount, and the wallet/date — so the CLI can name them
+/// (UX-P4-9), instead of the false "no lots available" when lots DO exist but are insufficient.
 #[test]
 fn sell_refuses_no_lots() {
     let events = vec![buy(
@@ -675,7 +677,50 @@ fn sell_refuses_no_lots() {
         &req(2 * LOT, date!(2025 - 08 - 01), Some(dec!(10000))), // pool holds only 1 BTC
     )
     .expect_err("insufficient pool ⇒ NoLots");
-    assert_eq!(err, WhatIfError::NoLots);
+    match err {
+        WhatIfError::NoLots {
+            wallet,
+            at,
+            available,
+            requested,
+        } => {
+            assert_eq!(available, LOT, "available = the pool's held sats (1 BTC)");
+            assert_eq!(requested, 2 * LOT, "requested = the sell amount (2 BTC)");
+            assert_eq!(wallet, cold(), "the wallet the sale drew from");
+            assert_eq!(at, date!(2025 - 08 - 01), "the as-of date");
+        }
+        other => panic!("expected NoLots with fields, got {other:?}"),
+    }
+}
+
+/// A GENUINELY EMPTY pool (no lots at all) ⇒ `NoLots` with `available == 0` — the CLI distinguishes
+/// this "no BTC" case from mere insufficiency (UX-P4-9).
+#[test]
+fn sell_no_lots_empty_pool_reports_zero_available() {
+    let events: Vec<btctax_core::LedgerEvent> = vec![]; // nothing acquired
+    let err = sell(
+        &events,
+        &StaticPrices::default(),
+        &cfg(),
+        Some(&profile(dec!(0), dec!(0))),
+        &synth(2025),
+        &req(LOT, date!(2025 - 08 - 01), Some(dec!(10000))),
+    )
+    .expect_err("empty pool ⇒ NoLots");
+    match err {
+        WhatIfError::NoLots {
+            available,
+            requested,
+            ..
+        } => {
+            assert_eq!(
+                available, 0,
+                "empty pool ⇒ available = 0 (the 'no BTC' case)"
+            );
+            assert_eq!(requested, LOT);
+        }
+        other => panic!("expected NoLots with fields, got {other:?}"),
+    }
 }
 
 /// A Hard blocker ANYWHERE in the projection ⇒ `YearNotComputable` (inherited from the engine gate). An

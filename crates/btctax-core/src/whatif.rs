@@ -133,8 +133,15 @@ pub enum WhatIfError {
     YearNotComputable(Blocker),
     /// A synthetic disposal needs an explicit `--price` (no dataset FMV for a future/off-dataset date).
     Evaluate(EvaluateError),
-    /// The wallet's as-of pool cannot cover `sell_sat`.
-    NoLots,
+    /// The wallet's as-of pool cannot cover `sell_sat`. Carries the AVAILABLE balance (the pool's
+    /// held sats — `0` for a genuinely empty wallet) and the `requested` amount, plus the `wallet`
+    /// and as-of date, so the CLI can name them (UX-P4-9) rather than the false "no lots available".
+    NoLots {
+        wallet: WalletId,
+        at: TaxDate,
+        available: Sat,
+        requested: Sat,
+    },
     /// The date is pre-2025 — a restatement of a closed year, not a plan.
     PreTransitionYear(i32),
     /// A `harvest` target amount is ill-posed (a `Gain(X)`/`Tax(X)` with X < 0 ⇒ an EMPTY prefix
@@ -231,8 +238,14 @@ pub fn sell(
         })
         .collect();
     lots.sort_by(|a, b| a.lot_id.cmp(&b.lot_id));
-    if lots.iter().map(|l| l.remaining_sat).sum::<Sat>() < req.sell_sat {
-        return Err(WhatIfError::NoLots);
+    let available: Sat = lots.iter().map(|l| l.remaining_sat).sum();
+    if available < req.sell_sat {
+        return Err(WhatIfError::NoLots {
+            wallet: req.wallet.clone(),
+            at: req.at,
+            available,
+            requested: req.sell_sat,
+        });
     }
 
     // Proceeds: explicit per-BTC price → total; else the dataset FMV is resolved downstream. Fail fast
@@ -527,7 +540,7 @@ impl HarvestStatus {
     /// both the `Ok` answers and the `Err` refusals). Never returns `Found`/`NotBinding`/`AlreadyBreached`.
     pub fn of_refusal(e: &WhatIfError) -> HarvestStatus {
         match e {
-            WhatIfError::NoLots => HarvestStatus::NoLots,
+            WhatIfError::NoLots { .. } => HarvestStatus::NoLots,
             WhatIfError::Evaluate(_) => HarvestStatus::ProceedsRequired,
             WhatIfError::PreTransitionYear(_) => HarvestStatus::PreTransitionYear,
             WhatIfError::YearNotComputable(b) => HarvestStatus::YearNotComputable(b.clone()),
