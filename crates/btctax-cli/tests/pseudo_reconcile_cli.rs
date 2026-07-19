@@ -686,3 +686,70 @@ fn approve_promotes_pseudo_fmv_to_manualfmv() {
         "an approved (now real) income FMV is no longer flagged pseudo"
     );
 }
+
+/// UX-P4-1 surface 1 (CLI delta report): under pseudo mode a synthetic-contributed `report --tax-year`
+/// carries the channel-aware banner AND a `[PSEUDO]` suffix on the authoritative TOTAL line — so neither a
+/// human nor a single-line scraper reads the number without the flag. (★ fault-inject target: drop the
+/// `push_str(pseudo.banner())` or the suffix `{}` in `render_tax_outcome` and this goes RED.)
+#[test]
+fn pseudo_report_tax_year_carries_banner_and_total_suffix_synthetic_channel() {
+    let (_dir, vault) = make_vault(&taint_events());
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+
+    let report = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    // A pseudo $0-basis synthetic lot feeds the number ⇒ the Synthetic channel (count > 0 wins).
+    assert_eq!(
+        report.pseudo_contributed,
+        render::PseudoDisclosure::Synthetic,
+        "a synthetic-lot-consuming report must be the Synthetic channel"
+    );
+    // The outcome must actually compute (pseudo clears the would-be Hard basis blocker) so a TOTAL renders.
+    assert!(
+        matches!(report.outcome, btctax_core::TaxOutcome::Computed(_)),
+        "pseudo mode must let the year compute so there IS a TOTAL to flag"
+    );
+
+    let rendered = render::render_tax_outcome(
+        2025,
+        &report.outcome,
+        report.advisory.as_deref(),
+        report.pseudo_contributed,
+    );
+    assert!(
+        rendered.contains("pseudo-reconciled (deliberately-synthetic) entries"),
+        "the synthetic banner must lead the render:\n{rendered}"
+    );
+    let total_line = rendered
+        .lines()
+        .find(|l| l.contains("TOTAL federal tax attributable"))
+        .expect("a computed report has a TOTAL line");
+    assert!(
+        total_line.contains("[PSEUDO]"),
+        "the authoritative TOTAL line must carry the [PSEUDO] suffix: {total_line}"
+    );
+}
+
+/// UX-P4-1: the `PseudoDisclosure` helper is channel-correct — `None` is silent, both active channels
+/// suffix identically, and each banner is TRUE only for its channel (the placeholder text must NOT claim
+/// `[PSEUDO]` rows or a verify advisory exist — neither does on that channel; SPEC r2-NEW-2).
+#[test]
+fn pseudo_disclosure_helper_text_is_channel_correct() {
+    use render::PseudoDisclosure as PD;
+    assert_eq!(PD::None.banner(), "");
+    assert_eq!(PD::None.suffix(), "");
+    assert!(!PD::None.contributed());
+
+    assert_eq!(PD::Synthetic.suffix(), " [PSEUDO]");
+    assert_eq!(PD::Placeholder.suffix(), " [PSEUDO]");
+    assert!(PD::Synthetic.contributed() && PD::Placeholder.contributed());
+
+    // Synthetic: points at the [PSEUDO] rows + the verify advisory (both live on that channel).
+    assert!(PD::Synthetic.banner().contains("pseudo-reconciled (deliberately-synthetic) entries"));
+    assert!(PD::Synthetic.banner().contains("[PseudoReconcileActive] advisory"));
+    // Placeholder: names the $0-placeholder remedy (set-profile / import / turn-off) with the REAL flag …
+    assert!(PD::Placeholder.banner().contains("synthetic $0 placeholder profile"));
+    assert!(PD::Placeholder.banner().contains("btctax tax-profile --year <Y>"));
+    // … and does NOT falsely claim [PSEUDO] rows or the count-gated advisory exist on this channel.
+    assert!(!PD::Placeholder.banner().contains("[PSEUDO]' rows"));
+    assert!(!PD::Placeholder.banner().contains("[PseudoReconcileActive]"));
+}

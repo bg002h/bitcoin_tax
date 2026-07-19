@@ -164,7 +164,7 @@ fn report_tax_year_renders_golden() {
         schedule_d: sched_d,
         ..
     } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
-    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
+    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref(), render::PseudoDisclosure::None);
 
     assert!(
         rendered.contains("TOTAL federal tax attributable to crypto (delta): 1747.50"),
@@ -290,7 +290,7 @@ fn report_tax_year_renders_schedule_se_for_business_mining() {
     } else {
         panic!("computable (blocker resolved by classify)");
     }
-    let it = render::render_tax_outcome(2025, &outcome, None);
+    let it = render::render_tax_outcome(2025, &outcome, None, render::PseudoDisclosure::None);
     assert!(
         !it.contains("14129.55"),
         "SE tax must NOT appear in the income-tax report total (standalone, D5):\n{it}"
@@ -466,7 +466,7 @@ fn report_tax_year_footer_discloses_1211_loss_and_interest_nii_included() {
     let TaxYearReport {
         outcome, advisory, ..
     } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
-    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
+    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref(), render::PseudoDisclosure::None);
 
     // B-M1 negatives (wrong-direction language must be absent):
     assert!(
@@ -515,7 +515,7 @@ fn report_tax_year_components_reconcile_to_total() {
     let TaxYearReport {
         outcome, advisory, ..
     } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
-    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
+    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref(), render::PseudoDisclosure::None);
 
     // B-F1: all dollar figures are now fmt_money-formatted to exactly 2dp; assert the 2dp forms.
     assert!(
@@ -561,7 +561,7 @@ fn report_tax_year_without_profile_says_not_computable() {
     let TaxYearReport {
         outcome, advisory, ..
     } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
-    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
+    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref(), render::PseudoDisclosure::None);
 
     assert!(
         rendered.contains("NOT COMPUTABLE [TaxProfileMissing]"),
@@ -719,7 +719,7 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
         schedule_d: sched_d,
         ..
     } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
-    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref());
+    let rendered = render::render_tax_outcome(2025, &outcome, advisory.as_deref(), render::PseudoDisclosure::None);
 
     assert!(
         rendered.contains("NOT COMPUTABLE [TaxYearNotComputable]"),
@@ -838,7 +838,7 @@ st-sell,2026-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
     let TaxYearReport {
         outcome, advisory, ..
     } = cmd::tax::report_tax_year(&vault, &pp(), 2027, dec!(0)).unwrap();
-    let rendered = render::render_tax_outcome(2027, &outcome, advisory.as_deref());
+    let rendered = render::render_tax_outcome(2027, &outcome, advisory.as_deref(), render::PseudoDisclosure::None);
 
     // Advisory must contain the mismatch message.
     assert!(

@@ -248,6 +248,11 @@ pub struct TaxYearReport {
     /// The §6 dual-report block (absolute filed return + crypto delta + the P5 advisories). `Some` only
     /// for a `ReturnInputs`-provenance year; `None` on the delta-only path.
     pub dual_report: Option<String>,
+    /// UX-P4-1: the pseudo-disclosure channel for this year's figures — the full §3.1 predicate
+    /// (`pseudo_active() OR PseudoPlaceholder`, Synthetic-wins). Drives the banner + `[PSEUDO]` suffix on
+    /// every number-bearing surface (delta report, dual-report absolute totals, TUI Tax tab) and the
+    /// fail-closed `--write-carryover` gate; `None` when the figures are not pseudo-contributed.
+    pub pseudo_contributed: crate::render::PseudoDisclosure,
 }
 
 /// Task 9 (B.5) + Task 10 (M4) + P2-D Task 2 + Chunk-1 D2 + Chunk-3a: load events + project once,
@@ -296,6 +301,19 @@ pub fn report_tax_year(
         } => (profile, provenance),
     };
     let outcome = compute_tax_year(&events, &state, year, profile.as_ref(), &tables);
+
+    // UX-P4-1: the pseudo-disclosure channel for the figures below. `Synthetic` (a pseudo synthetic
+    // lot/FMV feeds the number) wins over `Placeholder` (computed on the all-$0 placeholder profile) — the
+    // two are mutually exclusive by precedence though the states can co-occur (SPEC §3.1). Read from the
+    // LIVE pseudo-ON projected state + provenance (NOT a pseudo-OFF view — that would zero the count and
+    // silence the banner, reinstating the answered-ness false-negative).
+    let pseudo_contributed = if state.pseudo_active() {
+        crate::render::PseudoDisclosure::Synthetic
+    } else if provenance == crate::resolve::Provenance::PseudoPlaceholder {
+        crate::render::PseudoDisclosure::Placeholder
+    } else {
+        crate::render::PseudoDisclosure::None
+    };
 
     // §6 DUAL REPORT (SPEC §6 / §5 stages 1–9): the absolute filed return, side-by-side with the crypto
     // delta above. Only meaningful for a `ReturnInputs`-provenance year — the input-screen + compute-
@@ -434,6 +452,7 @@ pub fn report_tax_year(
         schedule_se,
         donation_appraisal: donation_appraisal_advisory,
         dual_report,
+        pseudo_contributed,
     })
 }
 

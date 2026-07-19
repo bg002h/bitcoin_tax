@@ -1009,19 +1009,76 @@ fn write_schedule_d_csv(
     Ok(())
 }
 
+/// UX-P4-1: the pseudo-disclosure channel for a tax-year figure — which, if any, deliberately-synthetic
+/// input the number rides on. Carries the FULL §3.1 predicate (`pseudo_active() OR PseudoPlaceholder`) so a
+/// caller cannot thread a single disjunct and silently drop the other (SPEC r2-N3). The two active channels
+/// are mutually exclusive by PRECEDENCE — `Synthetic` (a pseudo synthetic lot/FMV; `pseudo_active()`, i.e.
+/// `pseudo_synthetic_count > 0`) is chosen ahead of `Placeholder` (computed on the all-$0 pseudo placeholder
+/// profile; mode on, nothing stored, `count == 0`) — even though the underlying states can co-occur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PseudoDisclosure {
+    /// Not pseudo-contributed — no banner, no suffix.
+    None,
+    /// A pseudo synthetic lot/FMV feeds the figure (`pseudo_active()`).
+    Synthetic,
+    /// Computed on the all-$0 pseudo placeholder profile (mode on, nothing stored, `count == 0`).
+    Placeholder,
+}
+
+impl PseudoDisclosure {
+    /// True iff the figure is pseudo-contributed (either active channel).
+    pub fn contributed(self) -> bool {
+        self != PseudoDisclosure::None
+    }
+    /// The ` [PSEUDO]` suffix for a headline total line (leading space kept so a last-field scraper reads
+    /// `[PSEUDO]` and fails loud), or `""` when not contributed.
+    pub fn suffix(self) -> &'static str {
+        if self.contributed() {
+            " [PSEUDO]"
+        } else {
+            ""
+        }
+    }
+    /// The channel-aware top banner (with a trailing newline), or `""` when not contributed. Each clause is
+    /// true for its channel; the remedy pointers are live only for the channel that fires them (SPEC §3.1).
+    pub fn banner(self) -> &'static str {
+        match self {
+            PseudoDisclosure::None => "",
+            PseudoDisclosure::Synthetic => {
+                "⚠ [PSEUDO] This vault has pseudo-reconciled (deliberately-synthetic) entries; figures shown \
+                 are an ESTIMATE, not filing-ready. See '[PSEUDO]' rows in 'btctax report' and the \
+                 [PseudoReconcileActive] advisory in 'btctax verify'; resolve them before filing.\n"
+            }
+            PseudoDisclosure::Placeholder => {
+                "⚠ [PSEUDO] These figures are estimated on a synthetic $0 placeholder profile — no tax \
+                 profile or full-return inputs are stored for this year. This is an ESTIMATE, not \
+                 filing-ready. Set a tax profile ('btctax tax-profile --year <Y> …' — setting is the \
+                 default; '--show' inverts), import inputs ('btctax income import'), or turn pseudo mode off \
+                 ('btctax reconcile pseudo off').\n"
+            }
+        }
+    }
+}
+
 /// Task 9 (B.5) + Task 10 (M4): render the `TaxOutcome` for `report --tax-year <y>`. Exact Decimal
 /// Display; no float (NFR5). B-M2 fold: surfaces the ordinary-rate attributable delta so the three
 /// printed attributable components visibly reconcile to `total_federal_tax_attributable`.
 ///
 /// `advisory` is the optional M4 carryforward-consistency warning string (Task 10). When `Some`,
 /// it is printed as a non-gating advisory line that does not affect the exit code.
+///
+/// `pseudo` (UX-P4-1): the disclosure channel. When contributed, an unconditional top banner is emitted and
+/// the TOTAL line is ` [PSEUDO]`-suffixed — so neither a human nor a single-line scraper reads the
+/// authoritative number without the flag.
 pub fn render_tax_outcome(
     year: i32,
     out: &btctax_core::TaxOutcome,
     advisory: Option<&str>,
+    pseudo: PseudoDisclosure,
 ) -> String {
     use btctax_core::TaxOutcome::*;
     let mut s = String::new();
+    s.push_str(pseudo.banner());
     let _ = writeln!(s, "Federal tax attributable to crypto — tax year {year}");
     match out {
         NotComputable(b) => {
@@ -1055,9 +1112,10 @@ pub fn render_tax_outcome(
             );
             let _ = writeln!(
                 s,
-                "  TOTAL federal tax attributable to crypto (delta): {}   \
+                "  TOTAL federal tax attributable to crypto (delta): {}{}   \
                 (= ordinary-rate + LTCG + NIIT attributable)",
-                fmt_money(r.total_federal_tax_attributable)
+                fmt_money(r.total_federal_tax_attributable),
+                pseudo.suffix()
             );
             let _ = writeln!(
                 s,

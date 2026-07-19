@@ -148,10 +148,11 @@ fn run() -> Result<ExitCode, CliError> {
                     schedule_se,
                     donation_appraisal,
                     dual_report,
+                    pseudo_contributed,
                 } = cmd::tax::report_tax_year(vault, &pp, y, ptg_raw)?;
                 print!(
                     "{}",
-                    render::render_tax_outcome(y, &outcome, advisory.as_deref())
+                    render::render_tax_outcome(y, &outcome, advisory.as_deref(), pseudo_contributed)
                 );
                 print!("{}", render::render_schedule_d(y, &sched_d, &outcome));
                 // §6 DUAL REPORT: the absolute filed 1040 return, side-by-side with the crypto delta above
