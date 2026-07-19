@@ -2309,3 +2309,23 @@ CLI advisory, the circular set-donation-details hint, TUI footer dev-speak, the 
   replaced with a symbol reference.
 - **N-2 (Nit) — FIXED.** The slice-path 8283 advisory gained the "NOT filing-ready as written." tail for
   symmetry with the full-return advisory (J2 golden regenerated).
+
+**UX-P4-4 impl review r1 residue (2026-07-19, `reviews/ux-p4-4-impl-fable-review-r1.md`):**
+The 3 Important findings were FOLDED to green (I1: TUI negative-money guards; I2: TUI
+acquired-after-receipt guard; I3: mandated `--sell=-1` + ad-hoc trio + per-flag wiring KATs).
+Minors/Nits fixed inline: **M1** (SPEC amended — bare-9 `--appraiser-tin` acceptance + the
+`donation_details::set` choke-point correction now recorded in §3.3(c)); **M2** (pin-cite
+`1.170A-1(c)(2)`→`(c)(1)` in `cli.rs`/`reconcile.rs`/SPEC + man regen); **M3** (`tz_label` non-UTC
+unit test added); **N3** ((d) warn line "USD FMV"→"USD proceeds/FMV"). Filed (owning phase =
+post-release UX / ownerless residue — none gates, none is in a shipped golden):
+- **M4 (Minor)** — a donation-detail TIN/EIN/PTIN refusal surfaced in the TUI edit form names the CLI
+  flag (`--appraiser-tin …`), because the message comes from the shared `donation_details::set` choke
+  point. Recoverable (the FieldForm stays open). Fix: thread a field-label context into
+  `validate_and_normalize`, or accept the mismatch (the flag name still identifies the field).
+- **N1 (Nit)** — `donation_details.rs`'s "§6695A PTIN" comment shorthand: §6695A is the appraiser
+  *penalty* section; the PTIN authority is §6109(a)(4)/Reg. §1.6109-2. Pre-existing repo shorthand
+  (`donation.rs`); comment-only — keep it out of user-facing text.
+- **N2 (Nit)** — `is_ptin_shape` refuses a lowercase `p` (spec-literal `P\d{8}`); uppercasing before
+  the check would be friendlier.
+- **N4 (Nit)** — a seconds-only tz offset (e.g. `+00:00:30`) renders as `UTC` in the receipt-date
+  message (documented minute-resolution behavior; pathological input; message-only).

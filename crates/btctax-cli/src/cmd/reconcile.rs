@@ -149,7 +149,7 @@ pub fn reclassify_outflow(
 /// UX-P4-4(d): the stderr line (if any) for the `--amount` FMV sanity check. `market_value` is
 /// `fmv_of(prices, event_date, out_sats)` — the USD value of the disposed BTC at the event-date
 /// close (`None` when that date has no price). The FMV of donated BTC is its value AT the
-/// contribution date (26 CFR 1.170A-1(c)(2)), so the yardstick is that close, NOT cost basis — a
+/// contribution date (26 CFR 1.170A-1(c)(1)), so the yardstick is that close, NOT cost basis — a
 /// $0/low-basis long-held gift is the common case, and a basis threshold would false-warn on it.
 ///
 /// - `amount` exceeding **100x** a positive market value is almost certainly the sats count typed
@@ -168,8 +168,8 @@ fn amount_fmv_advisory(
     match market_value {
         Some(mv) if mv > Usd::ZERO && amount > mv * Usd::from(100) => Some(format!(
             "warning: --amount ${amount} is more than 100x the ${mv} market value of {btc} BTC at \
-             the {date} close — did you enter the sats amount as dollars? --amount is the USD FMV; \
-             recording it as entered (not fatal)."
+             the {date} close — did you enter the sats amount as dollars? --amount is the USD \
+             proceeds/FMV; recording it as entered (not fatal)."
         )),
         Some(_) => None, // plausible amount, or dust whose market value rounds to $0
         None => Some(format!(
@@ -1394,6 +1394,18 @@ mod tests {
             line.contains("no BTC price") && !line.contains("warning"),
             "no-price must be a note, not a warning: {line}"
         );
+    }
+
+    /// UX-P4-4(b) review r1 M3: `tz_label` renders UTC and signed non-UTC offsets — including the
+    /// subtle `h==0, m<0` (UTC−00:30) sign arm and non-zero minutes — so a sign-handling regression
+    /// in the receipt-date refusal message reds here.
+    #[test]
+    fn tz_label_renders_utc_and_signed_offsets() {
+        use time::macros::offset;
+        assert_eq!(tz_label(UtcOffset::UTC), "UTC");
+        assert_eq!(tz_label(offset!(-05:00)), "UTC-05:00");
+        assert_eq!(tz_label(offset!(+05:45)), "UTC+05:45");
+        assert_eq!(tz_label(offset!(-00:30)), "UTC-00:30");
     }
 
     /// Build a minimal `DonationDetails` for tests (synthetic — no real PII).

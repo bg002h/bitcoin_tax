@@ -202,10 +202,16 @@ receive/receipt date (impossible). The two dates come from different sources and
 refusal message must **print the receipt date and its tz basis**. Same-day allowed. (PLAN may substitute
 allow-plus-one-day-with-advisory — reviewer's call.)
 
-**(c) EIN/TIN shapes `[G-I6, T-I3, T-M3]`.** Validate at the `set_donation_details` **choke point**
-(`reconcile.rs:1162`), covering the TUI-edit form (`form.rs:1328-1420`).
-- `--appraiser-tin`: accept **EIN-shape OR SSN-shape** (26 CFR 301.6109-1(a)(1)(i): a TIN is SSN/ITIN/ATIN/
-  **EIN**; `cli.rs:653`). ITIN `9xx-xx-xxxx` passes SSN-shape; masked `***-**-1234` refused.
+**(c) EIN/TIN shapes `[G-I6, T-I3, T-M3]`.** Validate at the **shared side-table write choke point**
+`donation_details::set` — the single point BOTH the CLI (`set_donation_details`) and the TUI-edit form
+(`persist_donation_details`) converge on. *(As-built correction, review r1: the earlier cite
+`reconcile.rs:1162` (`set_donation_details`) is CLI-only — the TUI persists via `persist_donation_details`
+→ `donation_details::set`, bypassing it; `set` is the true choke point that covers both surfaces.)*
+- `--appraiser-tin`: accept **EIN-shape OR SSN-shape OR a bare 9-digit** (26 CFR 301.6109-1(a)(1)(i): a TIN
+  is SSN/ITIN/ATIN/**EIN**; `cli.rs:653`). ITIN `9xx-xx-xxxx` passes SSN-shape; masked `***-**-1234` refused.
+  *(As-built, review r1 M1: bare 9-digit is accepted for the same `[T2-N2]` anti-hardening reason as
+  `--donee-ein` below — refusing an unformatted real TIN would be a false-refuse; the in-repo fixtures use
+  bare-9 appraiser TINs. Accepts strictly more, refuses nothing the literal rule accepts.)*
 - `--donee-ein`: EIN-shape; **normalize** hyphenless 9-digit (`123456789` → valid EIN); refuse SSN-shape
   (an individual is not a §170(c) donee); optional (`cli.rs:646`) → refuse message says "omit `--donee-ein`
   if the donee has none". **Note the inherent ambiguity `[T2-N2]`:** a hyphenless 9-digit necessarily also
@@ -215,7 +221,7 @@ allow-plus-one-day-with-advisory — reviewer's call.)
 
 **(d) `--amount` unit + FMV warn `[G-I7, T-I4, T2-N1]`.** Add a `--amount` doc comment (unit = USD FMV). WARN
 (stderr, non-fatal) when `FMV > 100 × (outflow_sats / 1e8) × close-at-the-outflow-date` — **price-based**
-(the FMV of donated BTC is value **at the contribution date**, 26 CFR §1.170A-1(c)(2); use the event-date
+(the FMV of donated BTC is value **at the contribution date**, 26 CFR §1.170A-1(c)(1); use the event-date
 close, not a "recent" close `[T2-N1]`). A $0/low-basis long-held-BTC gift is the *common* case, so a
 cost-basis threshold would false-warn every time — repudiated. **No-price fallback: skip the warn** (state
 explicitly — silent death of the guard is the failure mode). Refuse would be wrong.

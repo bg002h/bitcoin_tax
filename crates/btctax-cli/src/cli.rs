@@ -540,7 +540,7 @@ pub enum Reconcile {
         as_kind: OutKindArg,
         /// USD fair-market value of the disposed BTC at the transfer date — dollars, NOT sats.
         /// For a sell/spend this is the gross proceeds; for a gift/donation it is the FMV at the
-        /// contribution date (26 CFR 1.170A-1(c)(2)). Entering the sats amount here is a common
+        /// contribution date (26 CFR 1.170A-1(c)(1)). Entering the sats amount here is a common
         /// error and draws a non-fatal warning when it exceeds 100x the market value.
         #[arg(long)]
         amount: String,
