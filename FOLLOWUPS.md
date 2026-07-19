@@ -2010,7 +2010,13 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   path.** Owning phase: **P3** (Artifact-2 / TUI-doc design). `btctax-tui/src/lib.rs:247,256` (`:256` →
   `export_dir_for` at `export.rs:30`, rendered on screen) + `btctax-tui-edit` ~28 reads. Blocks
   deterministic TUI text-capture; needs a shared clock helper — its own P3 prerequisite. Do NOT stretch
-  P0's CLI seam to cover it. Burn down in/before P3.
+  P0's CLI seam to cover it. Burn down in/before P3. — **DISCHARGED** (2026-07-18, ledger reconciliation):
+  P3 built the shared clock helper (`btctax_tui::clock::Clock {Wall, Pinned}`) + the style-aware capture
+  harness (`capture.rs`), and routed the `btctax-tui` reads (`export_dir_for`/`lib.rs`) and the ~23
+  `btctax-tui-edit` wall-clock sites through the injected clock. Held structurally by the
+  `persisted_decision_made_date_is_the_injected_clock` guard + the `no_direct_now_utc_in_production`
+  scans (export.rs, tui-edit/main.rs), with byte-gated TUI goldens (browse + classify-confirm-modal).
+  Independent Fable P3 review GREEN 0C/0I (I-3 mutation-proven fold). Nothing left to fix.
 - **UX-P1-1 (Minor) — capture-convention discipline for the CLI goldens.** Owning phase: **P1**. (a) Exit
   codes are output — `verify` returns 1 on hard blockers (`main.rs:89-91`); goldens + the twice-run
   hygiene test must assert exit codes, not just stdout. (b) `init`/`import` echo `vault.display()` /
