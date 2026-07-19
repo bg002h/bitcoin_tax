@@ -77,8 +77,28 @@ UX-P1-3/7/8/10, UX-P2-1, UX-P3-2, N-R1, M-1. Full list + status in the **system 
   SupersedeImport [R3-I1] + classify-raw-refuse arms; the two `applied` writers separately pinned). r1/r2/r3
   verified `would_conflict` definitionally correct. Reviews r{1,2,3}. Residue N1 (docs/#21), N3 (later cycle).
 
-## NEXT STEP — #15, then #16–23 (per the PLAN's phase order)
-- **#15** (P4-7/8/9 legible errors), #16 (P4-6/10 report surfaces + exit code), #17 (P4-5 --forms warn),
+- **#15 UX-P4-7/8/9 (Phase 2 Legibility) — COMPLETE + reviewed to GREEN (r1 0C/2I → r2 0C/1I → r3
+  0C/0I), PUSHED** (`34e9945..288d669`). Three sub-steps, each TDD + mutation-proven:
+  - **2c UX-P4-9** (`34e9945`): `WhatIfError::NoLots{wallet,at,available,requested}` + one shared
+    `render::no_lots_message` (CLI `map_whatif_err` + TUI `whatif_panel::refusal_message`) naming the
+    available balance/wallet/date/requested, empty-pool "no BTC" vs insufficiency. Reuses 8dp `fmt_btc`.
+  - **2b UX-P4-8** (`66b4bad`): `CliError::PathIo{path,hint,source}` + `store_io_with_path`/
+    `cli_io_with_path` at vault-open (`Session::open`) + export `--out` (`export_snapshot`). Folded r1-I2
+    (missed siblings → `admin::mkdir_out` choke point for `export-irs-pdf`/`export-full-return` +
+    `backup_key` wrap) and r2-I1 (`cli_io_with_path` now enriches `Store(Io)` subpath collisions too).
+  - **2a UX-P4-7** (`fa4badc`): shared `render::describe_inbound_class`/`describe_outflow_class` replace
+    `{:?}` in CLI `bulk_void_payload_summary` + TUI `summarize_void_payload`. Screen-only [R0-I4].
+  - Folded r1-I1 (my `Session::open` PathIo change had orphaned the TUI unlock screen's "no vault at"
+    message — restored `map_open_error` arm). Reviews r{1,2,3}. Residue = one "pathless user-path I/O"
+    class (r1-N3 optimize NoLots, r2-N3 init --key-backup, r3-M1 PDF subpath, r3-N1/N2) filed for a later
+    legibility-polish cycle. Full CI surface green (2039 nextest+clippy, fmt, pii, isolation, msrv@1.88).
+
+## NEXT STEP — #16, then #17–23 (per the PLAN's phase order)
+- **#16 (P4-6/10 report surfaces + exit code)** — SCOPED: UX-P4-6 holdings pending line from
+  `state.stats.sigma_pending` (BTC unit, `fmt_btc`) in `render::render_report`; UX-P4-10 exit 1 on
+  `TaxOutcome::NotComputable` in the main.rs Report arm (currently falls to `Ok(SUCCESS)` @947; verify's
+  exit-1 pattern @116), two exit-0 non-triggers (dual-report abs refused / pseudo), man page + stale
+  `tax_report.rs:828/911/948` doc-comments. #17 (P4-5 --forms warn),
   #19 (P4-12 papercuts), #20 (M-1 serde preserve_order), #21 (docs journeys + P2-1), #22 (P3-2/N-R1 polish),
   #23 (phase-8 whole-branch close: full-CI-surface green, regen ALL goldens, FOLLOWUPS burndown, whole-branch
   Fable review, then it's mergeable). Each item's spec is in SPEC §3–§6.
