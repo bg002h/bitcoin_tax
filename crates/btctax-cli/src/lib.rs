@@ -123,6 +123,58 @@ pub enum CliError {
         ATTEST_PHRASE
     )]
     AttestationFailed,
+    /// UX-P4-8: an I/O failure at a user-named path — a `--vault` that is missing/unreadable, or an
+    /// `--out` that collides / cannot be created. Carries the offending PATH and a one-clause remedy
+    /// hint that the bare `io::Error` (surfaced pathlessly through `Store::Io` / `Io`) lacks. Mirrors
+    /// the adapters' `AdapterError::Io { path, source }` so every path-bearing io error reads alike.
+    #[error("io {path}: {source} ({hint})")]
+    PathIo {
+        path: String,
+        hint: String,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// UX-P4-8 hint: shown when a `--vault` cannot be opened (missing/unreadable path).
+pub const VAULT_OPEN_HINT: &str =
+    "check the --vault path, or run `btctax init` to create a new vault";
+
+/// UX-P4-8 hint: shown when an export `--out` directory cannot be created (a colliding file, a
+/// missing parent, or a permission problem).
+pub const EXPORT_OUT_HINT: &str =
+    "choose an --out path that does not already exist as a file and whose parent is writable";
+
+/// Re-wrap a `StoreError` I/O failure with the offending PATH + a one-clause hint (UX-P4-8). ONLY the
+/// pathless `StoreError::Io` is enriched; every other variant (`WrongPassphrase`, `Locked`,
+/// `HalfCreatedVault`, …) passes through unchanged — each already carries its own precise meaning and
+/// must NOT be masked behind a generic path/hint.
+pub fn store_io_with_path(
+    e: btctax_store::StoreError,
+    path: &std::path::Path,
+    hint: &str,
+) -> CliError {
+    match e {
+        btctax_store::StoreError::Io(source) => CliError::PathIo {
+            path: path.display().to_string(),
+            hint: hint.to_string(),
+            source,
+        },
+        other => CliError::Store(other),
+    }
+}
+
+/// Re-wrap a `CliError::Io` with the offending PATH + a one-clause hint (UX-P4-8). Any non-`Io`
+/// `CliError` (a `Csv` write error, an attestation refusal, …) passes through unchanged.
+pub fn cli_io_with_path(e: CliError, path: &std::path::Path, hint: &str) -> CliError {
+    match e {
+        CliError::Io(source) => CliError::PathIo {
+            path: path.display().to_string(),
+            hint: hint.to_string(),
+            source,
+        },
+        other => other,
+    }
 }
 
 /// The exact phrase a user must affirm to export a form/data file while the ledger is pseudo-reconciled

@@ -79,11 +79,16 @@ pub fn export_snapshot(
     if state.pseudo_active() {
         require_attestation(attest)?;
     }
-    let sqlite = session.vault().export_snapshot(out_dir)?; // writes out_dir/snapshot.sqlite
-                                                            // P2-D: standalone Schedule SE §1401 figure for the year-scoped export. Needs the year's filing
-                                                            // status (profile) + the year's ss_wage_base (bundled table); `None` when either is absent or
-                                                            // there is no business SE income. The "present but no table" note is a text-report concern
-                                                            // (render_schedule_se) — the CSV carries the computed figure only.
+    // UX-P4-8: name the --out path (and hint) when the export directory cannot be created (a
+    // colliding file / missing parent / permission problem), instead of a bare `io: File exists`.
+    let sqlite = session
+        .vault()
+        .export_snapshot(out_dir)
+        .map_err(|e| crate::store_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?; // writes out_dir/snapshot.sqlite
+                                                                                      // P2-D: standalone Schedule SE §1401 figure for the year-scoped export. Needs the year's filing
+                                                                                      // status (profile) + the year's ss_wage_base (bundled table); `None` when either is absent or
+                                                                                      // there is no business SE income. The "present but no table" note is a text-report concern
+                                                                                      // (render_schedule_se) — the CSV carries the computed figure only.
     let se_result = match tax_year {
         Some(y) => {
             let tables = BundledTaxTables::load();
@@ -110,13 +115,16 @@ pub fn export_snapshot(
         None => None,
     };
     let donation_details = session.donation_details()?;
+    // UX-P4-8: same path context for any CSV write that fails after the snapshot (e.g. a mid-write
+    // I/O error) — the CSV writers `?` on pathless `io::Error`.
     write_csv_exports(
         out_dir,
         &state,
         tax_year,
         se_result.as_ref(),
         &donation_details,
-    )?;
+    )
+    .map_err(|e| crate::cli_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?;
     // [R0-I1] Count UNRESOLVED Hard blockers only. Any Hard blocker gates every year, so the count
     // alone (no per-year `compute_tax_year` call, no profile/tables dependency) drives the main.rs
     // stderr "INFORMATIONAL, not final" disclosure. Advisory blockers never count.

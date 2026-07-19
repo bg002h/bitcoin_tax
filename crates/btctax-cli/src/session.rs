@@ -386,10 +386,13 @@ impl Session {
         })
     }
 
-    /// Open an existing vault (acquires the store single-instance lock; NFR7).
+    /// Open an existing vault (acquires the store single-instance lock; NFR7). A pathless I/O failure
+    /// (missing/unreadable `--vault`) is enriched with the path + a one-clause hint (UX-P4-8).
     pub fn open(vault_path: &Path, pp: &Passphrase) -> Result<Session, CliError> {
+        let vault = Vault::open(vault_path, pp)
+            .map_err(|e| crate::store_io_with_path(e, vault_path, crate::VAULT_OPEN_HINT))?;
         Ok(Session {
-            vault: Vault::open(vault_path, pp)?,
+            vault,
             prices: default_prices()?,
         })
     }
