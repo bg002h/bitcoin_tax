@@ -65,30 +65,20 @@ UX-P1-3/7/8/10, UX-P2-1, UX-P3-2, N-R1, M-1. Full list + status in the **system 
   #14/Step-1c; M2 SPEC §3.6 amended for the universe scope; M3/N*). Mutation-proven KATs incl. the
   link-both-legs + void→re-decide loops.
 
-- **#14 UX-P4-3 — BUILT + folded through r2, COMMITTED LOCALLY (`990f786..2c0940d`), ⚠️ NOT PUSHED, r3
-  review IN FLIGHT.** Record-time decision validation that MIRRORS the resolver DEFINITIONALLY: new core
+- **#14 UX-P4-3 — COMPLETE + reviewed to GREEN (r1 0C/2I → r2 0C/1I → r3 0C/0I), PUSHED**
+  (`990f786..4bfd382`). Record-time decision validation that MIRRORS the resolver DEFINITIONALLY: new core
   **`btctax_core::would_conflict`** (`project/mod.rs`) runs the REAL projection on `events` + the candidate
   (next decision seq, pseudo forced OFF) and diffs the DecisionConflict set — so every per-verb rule
   (first-wins dup incl. classify-raw; set-fmv duplicate-EXEMPT-but-type-checked; wrong-type/unknown against
   the EFFECTIVE `applied`; void non-revocable/unknown + explicit already-voided) falls out for free. Wired
-  via `guard_decision_conflict` at all 6 single-verb appends (fail-closed; bulk `apply_*` OUT). The §3.2
-  "unify hints" done at the source: one surface-neutral `CONFLICT_HINT` const in `resolve.rs` naming
-  `events list`. 16 KATs in `tests/record_time_validation.rs` (both directions mutation-proven, incl. the
-  accept-governed SupersedeImport [R3-I1] + classify-raw-refuse arms). Reviews r1 (0C/2I) → fold → r2
-  (0C/1I) → fold → **r3 dispatched (verdict PENDING — read `reviews/ux-p4-3-impl-fable-review-r3.md`)**.
-  r1/r2 verified `would_conflict` is definitionally correct. Full CI green at each fold (make check 2021).
+  via `guard_decision_conflict` at all 6 single-verb appends (fail-closed; bulk `apply_*` OUT). §3.2 "unify
+  hints" done at the source: one surface-neutral `CONFLICT_HINT` const in `resolve.rs` naming `events list`.
+  16 KATs in `tests/record_time_validation.rs` (both directions mutation-proven, incl. accept-governed
+  SupersedeImport [R3-I1] + classify-raw-refuse arms; the two `applied` writers separately pinned). r1/r2/r3
+  verified `would_conflict` definitionally correct. Reviews r{1,2,3}. Residue N1 (docs/#21), N3 (later cycle).
 
-## NEXT STEP — resolve #14's r3 gate, PUSH, then #15–23 (per the PLAN's phase order)
-1. **FIRST: resolve #14's r3 review.** Read `design/usage-examples/reviews/ux-p4-3-impl-fable-review-r3.md`:
-   - **If it exists + GREEN (0C/0I)** → the item is done: `git push origin feat/post-v070-product-cycle`
-     (pushes `990f786..2c0940d`), then update this doc + [[post-v070-product-cycle]] to mark #14 ✅ PUSHED,
-     and proceed to #15.
-   - **If it has blocking (Critical/Important) findings** → fold each (TDD + mutation-proven), persist the
-     review verbatim first, re-review to 0C/0I, THEN push. (r1/r2 pattern: findings so far were
-     test-and-message-level; `would_conflict`'s construction is verified sound — don't re-litigate it.)
-   - **If the file is missing** (the r3 subagent died) → re-dispatch the r3 review (model:"fable",
-     general-purpose) over `git diff 666a868..HEAD`; recipe in the r2 review + this doc's review sections.
-2. **Then #15** (P4-7/8/9 legible errors), #16 (P4-6/10 report surfaces + exit code), #17 (P4-5 --forms warn),
+## NEXT STEP — #15, then #16–23 (per the PLAN's phase order)
+- **#15** (P4-7/8/9 legible errors), #16 (P4-6/10 report surfaces + exit code), #17 (P4-5 --forms warn),
   #19 (P4-12 papercuts), #20 (M-1 serde preserve_order), #21 (docs journeys + P2-1), #22 (P3-2/N-R1 polish),
   #23 (phase-8 whole-branch close: full-CI-surface green, regen ALL goldens, FOLLOWUPS burndown, whole-branch
   Fable review, then it's mergeable). Each item's spec is in SPEC §3–§6.
@@ -104,12 +94,9 @@ UX-P1-3/7/8/10, UX-P2-1, UX-P3-2, N-R1, M-1. Full list + status in the **system 
 
 ## HOW TO RESUME (command to issue after /clear)
 > Resume the post-v0.7.0 product cycle: read `design/usage-examples/CONTINUITY_post_v070.md` and
-> `STANDARD_WORKFLOW.md`, then continue at "NEXT STEP". UX-P4-4 and #18 `events list` are COMPLETE +
-> pushed. #14 UX-P4-3 is BUILT + folded-through-r2 + committed locally (990f786..2c0940d) but NOT pushed,
-> with its r3 Fable review in flight — so FIRST read `reviews/ux-p4-3-impl-fable-review-r3.md`: if GREEN
-> (0C/0I) push the branch and mark #14 done; if it has blocking findings fold them (TDD + mutation-proven)
-> → re-review to 0C/0I → push; if the file is missing re-dispatch the r3 review. THEN proceed to #15 and
-> onward per the PLAN phase order. Each item: TDD + mutation-proven → independent Fable review to 0C/0I →
-> push. Fable for reviews only.
+> `STANDARD_WORKFLOW.md`, then continue at "NEXT STEP". UX-P4-4, #18 `events list`, and #14 UX-P4-3 are all
+> COMPLETE + reviewed to GREEN + pushed. Next is #15 (P4-7/8/9 legible-error cluster), then #16–23 per the
+> PLAN phase order. Each item: TDD + mutation-proven → independent Fable review to 0C/0I → push. Fable for
+> reviews only.
 
 (The memory note [[post-v070-product-cycle]] auto-loads and points here.)
