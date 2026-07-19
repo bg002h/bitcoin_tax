@@ -2332,7 +2332,9 @@ post-release UX / ownerless residue — none gates, none is in a shipped golden)
 
 **UX-P4-4 impl review r2 residue (2026-07-19, `reviews/ux-p4-4-impl-fable-review-r2.md`):**
 The one Important (r2-I1: the two `what-if harvest` guard sites had no wiring rows) was FOLDED —
-`value_guard_wiring.rs` now covers all 16 guarded dispatch sites, both harvest rows mutation-proven.
+`value_guard_wiring.rs` now covers all **14** guarded dispatch sites (12 `parse_nonneg_usd_arg` + 2
+`parse_pos_sell_arg`; the "16" in the r2 note + commit `9647c7e` was arithmetic drift from r2's own
+count — corrected per review r3 N1), both harvest rows mutation-proven.
 Minors/Nits fixed inline: **M2(r2)** (the trio accept KAT now pins the effect — a low-vs-high
 `--income` run must yield a different plan, killing a parse-then-drop mutation); **N1(r2)** (the
 stale `1.170A-1(c)(2)` pin-cite in `CONTINUITY_post_v070.md` corrected to `(c)(1)`). Filed:
