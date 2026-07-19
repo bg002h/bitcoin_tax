@@ -1,10 +1,9 @@
 # SPEC — post-v0.7.0 product cycle (usage-examples bug-hunt burndown)
 
-**Status:** **r3** — folds the two r2 re-reviews (general 0C/4I
-`reviews/spec-post-v070-fable-review-r2.md`; tax-correctness 0C/1I
-`reviews/spec-post-v070-fable-taxcorrectness-r2.md`) on top of the r1 folds. Both r2 lenses confirmed the
-spine sound and all r1 Criticals/Importants resolved; r3 closes the second-order fold defects. Re-review
-pending. Fold provenance tagged inline: `[G-*]`/`[T-*]` = r1 findings; `[G2-*]`/`[T2-*]` = r2 findings.
+**Status:** **r4** — folds the r3 consolidated re-review (0C/1I
+`reviews/spec-post-v070-fable-review-r3.md`) on top of r1+r2. r3 confirmed the spine sound and all r2
+blockers resolved; r4 closes the one third-order Important (R3-I1) + its minors. Re-review pending. Fold
+provenance tagged inline: `[G-*]`/`[T-*]` = r1; `[G2-*]`/`[T2-*]` = r2; `[R3-*]` = r3 findings.
 **Branch:** `feat/post-v070-product-cycle`.
 
 ## 0. Why this cycle exists
@@ -66,8 +65,12 @@ the TUI Tax tab, and the `--write-carryover` *persistence* path.
 - **Placeholder channel** (`PseudoPlaceholder`, `count == 0`, no `[PSEUDO]` rows and no verify advisory to
   point at): `⚠ [PSEUDO] These figures are estimated on a synthetic $0 placeholder profile — no tax profile`
   `or full-return inputs are stored for this year. This is an ESTIMATE, not filing-ready. Set a tax profile`
-  `('btctax tax-profile --set …'), import inputs ('btctax income import'), or turn pseudo mode off.`
+  `('btctax tax-profile <year> …' — setting is the default; '--show' inverts), import inputs`
+  `('btctax income import'), or turn pseudo mode off ('btctax reconcile pseudo off').`
   Each clause is true for its channel; the remedy pointers are live for the channel that fires them.
+- **Channel precedence `[R3-min]`:** the two channels are **mutually exclusive** — the synthetic channel
+  requires `pseudo_synthetic_count > 0`, the placeholder channel requires `count == 0` — so no `count`
+  reading yields a false or ambiguous banner, and no precedence rule is needed.
 
 **The four surfaces (all phase-1 owned):**
 1. **CLI delta report** — thread `pseudo_contributed` into `TaxYearReport` (`tax.rs:429`) →
@@ -124,16 +127,21 @@ time (`reconcile.rs:1162-1188`).
 - **Refuse iff the resolver would adjudicate the append as a NEW `DecisionConflict`** `[G-I4]`, judged
   against the **live real (non-voided, non-synthetic) persisted** decisions — so **void-then-re-decide** and
   **first real classify of a pseudo-defaulted target** keep working `[G-I4, T-I2]`.
-- **Existence/type validated against the EFFECTIVE payload under live real decisions `[T2-I1]`** — the raw
-  event log **folded with void-folded real `ClassifyRaw` rewrites** (synthetics excluded), NOT the raw log
-  alone. The resolver keys on `applied.get(target).unwrap_or(&raw.payload)` (`resolve.rs:728-730/789-791`;
-  ManualFmv pass 1d `:575-577`), where `applied` is built from live real `ClassifyRaw` in pass 1c
-  (`resolve.rs:543-560`) *before* pseudo Phase A. A raw-log-only type check would falsely refuse a
-  `set-fmv`/`reclassify-income` on a target a real `ClassifyRaw` rewrote to Income — the sanctioned
-  **post-`pseudo approve` correction** (`pseudo approve` persists real zero-value `ClassifyRaw`
-  placeholders, `resolve.rs:223`; `set-fmv` then supplies the true FMV a correct income figure needs). Use
-  the shadow-projection (pseudo forced OFF) the mirror mandate already names — never the tainted projection
-  (`session.project()` uses stored pseudo cfg, `session.rs:556-562`).
+- **Existence/type validated against the resolver's own EFFECTIVE `applied` map, pseudo forced OFF
+  `[T2-I1, R3-I1]`.** Do NOT hand-rebuild a subset of `applied` — reuse the resolver's pass-1c/1d/1e
+  construction in a **shadow projection** with `pseudo_reconcile` forced off, so the view is
+  *definitionally* whatever the resolver sees (`applied.get(target).unwrap_or(&raw.payload)`,
+  `resolve.rs:728-730/789-791`; ManualFmv pass 1d `:575-577`). `applied` has **three real writers**, all
+  before pseudo Phase A: accepted-conflict `SupersedeImport` payloads (`resolve.rs:513`), live real
+  `ClassifyRaw` rewrites (pass 1c `:543-560`), and (for existence) the raw event log. An
+  enumerate-the-writers view is fragile — the r3 draft named only `ClassifyRaw` and was one channel short of
+  `SupersedeImport` `[R3-I1]`, which (i) false-refused `set-fmv`/`reclassify-income` on an accept-governed
+  Income target the resolver honors, and (ii) missed refusing `classify-raw` on an accept-governed target
+  the resolver adjudicates a NEW conflict (`applied.contains_key`, `:551`). Mirroring the resolver's
+  `applied` closes the whole class. It also covers the sanctioned **post-`pseudo approve` correction**
+  (approve persists real zero-value `ClassifyRaw` placeholders, `resolve.rs:223`; `set-fmv` supplies the true
+  FMV a correct income figure needs). Never the tainted projection (`session.project()` uses stored pseudo
+  cfg, `session.rs:556-562`).
 - **`set-fmv` is exempt from the DUPLICATE refusal ONLY `[G2-3, T-I1]`.** `ManualFmv` is deliberately
   last-wins with no conflict (`resolve.rs:564-568/593-597`) — re-pointing an FMV is a sanctioned correction.
   But `set-fmv` **still gets existence/type validation** like every verb (a `set-fmv <unknown/wrong-type ref>`
@@ -144,7 +152,8 @@ time (`reconcile.rs:1162-1188`).
   `resolve.rs:543-560`; CLI `reconcile classify-raw`) `[G2-6, T2-M1]`.
 - **`void`** additionally refuses non-revocable (`SupersedeImport`/`RejectImport`/`VoidDecisionEvent`,
   `resolve.rs:423-440`) / already-voided targets.
-- **Choke point `[T2-M1]`:** the single-verb append fns (`reconcile.rs:41/62/85/110/1136`). The bulk `apply_*`
+- **Choke point `[T2-M1, R3-M]`:** the single-verb append fns (`reconcile.rs:41/62/85/110/301/1136` — incl.
+  `classify_raw` `:301`). The bulk `apply_*`
   paths (`reconcile.rs:286/395/438`) append via their own loops with **plan-generated (not user-typed) refs**
   — deliberately OUT of scope for record-time validation (a validate-batch-then-append-batch shape risks
   intra-batch adjudication diverging from the resolver's ascending-seq first-wins); state this so the PLAN
@@ -154,12 +163,13 @@ time (`reconcile.rs:1162-1188`).
 - **Mandate: validator-mirrors-resolver** — shared helper or shadow-projection; if they disagree, the
   record-time layer is wrong `[T-I1]`.
 
-**Acceptance KAT (both directions):** refuse {unknown ref, wrong-type ref (raw-log AND ClassifyRaw'd
-cases), **`set-fmv <bad-ref>`** `[G2-3]`, first-wins duplicate, void-nonexistent, void-already-voided};
-accept {valid new decision, void-then-re-decide, first real classify over a pseudo default, second
-`set-fmv` on a valid target, **`set-fmv`/`reclassify-income` on a target whose Income type comes from a live
-real `ClassifyRaw`** `[T2-I1]`; the same target with that `ClassifyRaw` voided → refused wrong-type}.
-Mutation reds.
+**Acceptance KAT (both directions):** refuse {unknown ref, wrong-type ref (raw-log, ClassifyRaw'd, AND
+accept-governed `SupersedeImport` cases `[R3-I1]`), **`set-fmv <bad-ref>`** `[G2-3]`, first-wins duplicate,
+**`classify-raw` on an accept-governed target** `[R3-I1]`, void-nonexistent, void-already-voided}; accept
+{valid new decision, void-then-re-decide, first real classify over a pseudo default, second `set-fmv` on a
+valid target, **`set-fmv`/`reclassify-income` on a target whose Income type comes from a live real
+`ClassifyRaw`** `[T2-I1]` **or from an accepted `SupersedeImport` conflict** `[R3-I1]`; the same target with
+that decision voided → refused wrong-type}. Mutation reds.
 
 ### 3.3 UX-P4-4 + UX-P1-3 — value validation at record time (Important / Minor)
 
@@ -204,8 +214,10 @@ close, not a "recent" close `[T2-N1]`). A $0/low-basis long-held-BTC gift is the
 cost-basis threshold would false-warn every time — repudiated. **No-price fallback: skip the warn** (state
 explicitly — silent death of the guard is the failure mode). Refuse would be wrong.
 
-**Acceptance KATs:** negative basis refused on BOTH surfaces incl. the CLI `=` form; `--sell -1` refused;
-each other refusal fires with the specified message; EIN-shaped `--appraiser-tin` accepted; hyphenless donee
+**Acceptance KATs:** negative basis refused on BOTH surfaces incl. the CLI `=` form; **`--sell=-1`** refused
+with a message assert `[R3-nit]` (the `=` form — the space form `--sell -1` is clap-rejected pre-fix, so it
+cannot witness the guard under mutation); each other refusal fires with the specified message; EIN-shaped
+`--appraiser-tin` accepted; hyphenless donee
 EIN accepted; sats-as-USD `--amount` warns but a legitimate high-appreciation FMV does not; no-price path
 does not warn. Dollar invariant: an existing valid donation KAT's deduction unchanged. Mutation reds each.
 
