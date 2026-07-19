@@ -111,12 +111,24 @@ fn classify_inbound_self_transfer_defaults_creates_lot_and_fires_advisory() {
             .all(|b| b.kind != BlockerKind::UnknownBasisInbound),
         "UnknownBasisInbound must be cleared"
     );
+    let zero_basis = state
+        .blockers
+        .iter()
+        .find(|b| b.kind == BlockerKind::SelfTransferInboundZeroBasis)
+        .expect("the zero-basis advisory must fire when --basis is omitted");
+    // UX-P4-12(f): this advisory is surfaced by the CLI `verify`, so the void remedy names the CLI
+    // command and QUALIFIES the keybind as editor-only — not a bare "press 'v'" that means nothing
+    // in a terminal.
     assert!(
-        state
-            .blockers
-            .iter()
-            .any(|b| b.kind == BlockerKind::SelfTransferInboundZeroBasis),
-        "the zero-basis advisory must fire when --basis is omitted"
+        zero_basis.detail.contains("btctax reconcile void")
+            && zero_basis.detail.contains("in the TUI editor"),
+        "the void remedy is surface-neutral (CLI command + editor-qualified keybind): {}",
+        zero_basis.detail
+    );
+    assert!(
+        !zero_basis.detail.contains("(press 'v',"),
+        "no bare 'press v' TUI keybind leaks into CLI advisory text: {}",
+        zero_basis.detail
     );
 }
 

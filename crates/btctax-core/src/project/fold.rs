@@ -1028,9 +1028,9 @@ pub(crate) fn fold_event(
                     BlockerKind::SelfTransferInboundZeroBasis,
                     Some(eff.id.clone()),
                     "basis defaulted to $0 — likely overstates your eventual gain. To supply the real \
-                     cost, VOID this classification (press 'v', or run: btctax reconcile void) and \
-                     re-classify with --basis — classify-inbound is first-wins, so re-running without \
-                     voiding first would conflict, not update.",
+                     cost, VOID this classification (run `btctax reconcile void`, or press 'v' in the \
+                     TUI editor) and re-classify with --basis — classify-inbound is first-wins, so \
+                     re-running without voiding first would conflict, not update.",
                 );
             }
             if acquired_at.is_none() {
@@ -1042,8 +1042,8 @@ pub(crate) fn fold_event(
                     Some(eff.id.clone()),
                     "acquisition date defaulted to 1 year + 1 day before receipt — holding period assumed \
                      LONG-TERM. If these coins were held for a year or less, correct it with --acquired \
-                     (VOID this classification first: press 'v', or run btctax reconcile void — \
-                     classify-inbound is first-wins).",
+                     (VOID this classification first: run `btctax reconcile void`, or press 'v' in the \
+                     TUI editor — classify-inbound is first-wins).",
                 );
             }
             let lot = Lot {

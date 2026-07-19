@@ -259,3 +259,40 @@ fn resolve_all_screened_maps_a_corrupt_year_to_a_refusal_not_a_brick() {
         "the valid 2024 year must still resolve"
     );
 }
+
+/// UX-P4-12(d): a bare `tax-profile --year Y` (no `--show`, no `--filing-status`) is a usage error
+/// that POINTS at `--show` — so a user who meant to VIEW the profile isn't stranded on
+/// "filing-status is required" with no hint of the read path.
+#[test]
+fn tax_profile_set_error_points_at_show() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let out = std::process::Command::new(bin)
+        .args([
+            "--vault",
+            vault.to_str().unwrap(),
+            "tax-profile",
+            "--year",
+            "2025",
+        ])
+        .env("BTCTAX_PASSPHRASE", "pw")
+        .output()
+        .expect("btctax binary must execute");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "a bare set (no --show, no --filing-status) is a usage error"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--filing-status is required"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("--show"),
+        "the set-error points at --show for viewing: {stderr}"
+    );
+}

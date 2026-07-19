@@ -874,7 +874,11 @@ fn run() -> Result<ExitCode, CliError> {
             } else {
                 // Require all mandatory fields.
                 let fs = filing_status.ok_or_else(|| {
-                    CliError::Usage("--filing-status is required when setting a profile".into())
+                    CliError::Usage(
+                        "--filing-status is required when setting a profile (to VIEW the stored \
+                         profile instead, pass --show)"
+                            .into(),
+                    )
                 })?;
                 let oti = ordinary_taxable_income
                     .as_deref()
