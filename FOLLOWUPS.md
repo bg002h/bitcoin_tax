@@ -2329,3 +2329,20 @@ post-release UX / ownerless residue — none gates, none is in a shipped golden)
   the check would be friendlier.
 - **N4 (Nit)** — a seconds-only tz offset (e.g. `+00:00:30`) renders as `UTC` in the receipt-date
   message (documented minute-resolution behavior; pathological input; message-only).
+
+**UX-P4-4 impl review r2 residue (2026-07-19, `reviews/ux-p4-4-impl-fable-review-r2.md`):**
+The one Important (r2-I1: the two `what-if harvest` guard sites had no wiring rows) was FOLDED —
+`value_guard_wiring.rs` now covers all 16 guarded dispatch sites, both harvest rows mutation-proven.
+Minors/Nits fixed inline: **M2(r2)** (the trio accept KAT now pins the effect — a low-vs-high
+`--income` run must yield a different plan, killing a parse-then-drop mutation); **N1(r2)** (the
+stale `1.170A-1(c)(2)` pin-cite in `CONTINUITY_post_v070.md` corrected to `(c)(1)`). Filed:
+- **M1(r2) (Minor)** — the TUI `classify-raw` forms (`validate_classify_raw_acquire` `usd_cost`/
+  `fee_usd`, `validate_classify_raw_income` `usd_fmv`; `form.rs`) still parse with bare
+  `Usd::from_str` and build `Acquire`/`Income` directly (deliberately NOT via `InboundClass`,
+  R0-I1), so a negative-basis Acquire is recordable from the TUI raw path. OUT of the UX-P4-4 §3.3(a)
+  table (classify-raw is on neither surface's table; the CLI counterpart is an equally-unguarded
+  raw-JSON escape hatch — the surfaces are symmetric), so not a fold defect and non-gating — but it
+  is the same "negative basis reaches a filed form" class on a sibling record path. Owning phase =
+  post-release UX. If guarded later, guard BOTH the TUI raw forms and the CLI `classify-raw` payload
+  symmetrically. **N2(r2) (Nit)** — the receipt threading at the two TUI confirm sites is
+  compile-forced but not value-witnessed (item.date is the only TaxDate in scope; recorded only).

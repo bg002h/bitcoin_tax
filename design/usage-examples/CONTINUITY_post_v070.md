@@ -62,7 +62,7 @@ Per SPEC §3.3, three sub-parts remain (all record-time, at the same reconcile/d
   appraiser-tin ACCEPTED; `--donee-ein banana` refused; hyphenless donee EIN accepted.
 - **(d) `--amount` doc + FMV warn [SPEC §3.3(d)]:** add a `--amount` clap doc-comment (unit = USD FMV; then
   `make docs`). WARN (stderr, non-fatal) when `FMV > 100 × (outflow_sats/1e8) × close-at-the-outflow-date` —
-  price-based (26 CFR §1.170A-1(c)(2), event-date close), NOT cost-basis. No-price fallback: SKIP the warn
+  price-based (26 CFR §1.170A-1(c)(1), event-date close), NOT cost-basis. No-price fallback: SKIP the warn
   (state it). sats on the TransferOut event; prices via `session.prices()`. KAT: sats-as-USD `--amount` warns;
   a legit high-appreciation FMV does NOT; no-price path silent.
 - Then: **independent Fable review of the whole UX-P4-4** (all of a/b/c/d) → 0C/0I → mark #13 done → push.

@@ -46,8 +46,8 @@ b2,2024-03-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,40000.00,40000.00,40000.00,0.0
     vault
 }
 
-/// Drive `btctax --vault <vault> <args...>`; return (exit_code, stderr).
-fn run(vault: &Path, args: &[&str]) -> (i32, String) {
+/// Drive `btctax --vault <vault> <args...>`; return (exit_code, stdout, stderr).
+fn run(vault: &Path, args: &[&str]) -> (i32, String, String) {
     let out = std::process::Command::new(BIN)
         .arg("--vault")
         .arg(vault.to_str().unwrap())
@@ -57,13 +57,14 @@ fn run(vault: &Path, args: &[&str]) -> (i32, String) {
         .expect("btctax binary must execute");
     (
         out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     )
 }
 
 /// Assert `args` is REFUSED (non-zero exit) with a message naming `flag` AND `rule`.
 fn assert_refused(vault: &Path, args: &[&str], flag: &str, rule: &str) {
-    let (code, stderr) = run(vault, args);
+    let (code, _stdout, stderr) = run(vault, args);
     assert_ne!(code, 0, "{args:?} must be refused; stderr: {stderr}");
     assert!(
         stderr.contains(flag) && stderr.contains(rule),
@@ -220,6 +221,40 @@ fn record_time_value_guards_are_wired_across_the_dispatch_surface() {
         "--carryforward-in",
         ">= 0",
     );
+    // `what-if harvest` shares the same two guard sites (main.rs:409 --price, :435 --carryforward-in)
+    // but on a SEPARATE dispatch arm — a distinct call site that the sell rows above do not witness.
+    assert_refused(
+        &v,
+        &[
+            "what-if",
+            "harvest",
+            "--target",
+            "zero-ltcg",
+            "--wallet",
+            "self:cold",
+            "--price=-1",
+        ],
+        "--price",
+        ">= 0",
+    );
+    assert_refused(
+        &v,
+        &[
+            "what-if",
+            "harvest",
+            "--target",
+            "zero-ltcg",
+            "--wallet",
+            "self:cold",
+            "--filing-status",
+            "single",
+            "--income",
+            "50000",
+            "--carryforward-in=-1",
+        ],
+        "--carryforward-in",
+        ">= 0",
+    );
 }
 
 /// PLAN Step-1d ad-hoc trio ACCEPT side: a negative `--income` / `--magi` is a legitimate NOL-year
@@ -230,22 +265,30 @@ fn adhoc_negative_income_and_magi_are_accepted() {
     let dir = tempfile::tempdir().unwrap();
     let v = lot_vault(dir.path());
 
-    // negative --income accepted (and the plan renders → exit 0).
-    let (code, stderr) = run(
-        &v,
-        &[
-            "what-if",
-            "sell",
-            "--sell=10000000",
-            "--wallet",
-            "exchange:coinbase:default",
-            "--at",
-            "2025-06-01",
-            "--filing-status",
-            "single",
-            "--income=-5000",
-        ],
-    );
+    // Sell 0.1 BTC (long-term, low basis) — a whatif whose LTCG rate is ordinary-income-sensitive.
+    // The `=`-form `--income=<v>` is required for a negative value (the space form trips clap's
+    // `-`-prefix detection — the very reason the guards key on the parsed value, not clap).
+    let sell = |income: &str| -> (i32, String, String) {
+        let income_flag = format!("--income={income}");
+        run(
+            &v,
+            &[
+                "what-if",
+                "sell",
+                "--sell=10000000",
+                "--wallet",
+                "exchange:coinbase:default",
+                "--at",
+                "2025-06-01",
+                "--filing-status",
+                "single",
+                &income_flag,
+            ],
+        )
+    };
+
+    // negative --income accepted (and the plan renders → exit 0), NOT sign-refused.
+    let (code, out_neg, stderr) = sell("-5000");
     assert_eq!(
         code, 0,
         "negative --income must be accepted + computed; stderr: {stderr}"
@@ -255,8 +298,19 @@ fn adhoc_negative_income_and_magi_are_accepted() {
         "negative --income must NOT be sign-refused: {stderr}"
     );
 
+    // ...and it genuinely FLOWS INTO the computation (PLAN "flow into the marginal computation"):
+    // the same sale at a HIGH ordinary income yields a DIFFERENT plan (higher LTCG bracket / NIIT),
+    // so a mutation that parsed `--income` then dropped it (defaulted to 0) would red here.
+    let (code_hi, out_hi, _) = sell("400000");
+    assert_eq!(code_hi, 0);
+    assert_ne!(
+        out_neg, out_hi,
+        "the negative --income must change the plan vs a high income — it must flow into the \
+         marginal computation, not be parsed-then-dropped"
+    );
+
     // negative --magi accepted (with a valid --income).
-    let (code, stderr) = run(
+    let (code, _out, stderr) = run(
         &v,
         &[
             "what-if",
