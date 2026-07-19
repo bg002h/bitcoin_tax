@@ -2177,3 +2177,38 @@ fn write_carryover_refuses_on_a_not_computable_ledger_and_persists_nothing() {
         "a refused write-back must leave year+1 inputs byte-identical"
     );
 }
+
+/// UX-P4-1 surface 2 (SPEC §3.1) [T-I5]: on a pseudo-active `ReturnInputs`-provenance year, the §6
+/// dual-report's filer-transcribed absolute totals ("TOTAL TAX (L24)" and "Absolute TOTAL TAX") carry the
+/// `[PSEUDO]` suffix — so the most filing-authoritative scraped lines cannot be read clean. (★ fault-inject:
+/// drop either `pseudo.suffix()` in `render_dual_report` and this goes RED.)
+#[test]
+fn pseudo_dual_report_absolute_totals_carry_pseudo_suffix() {
+    let (_dir, vault) = fr2024_writeback_vault_with_pseudo_trigger();
+    cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
+    let report = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
+    assert_eq!(
+        report.pseudo_contributed,
+        render::PseudoDisclosure::Synthetic,
+        "a ReturnInputs year with a synthetic lot is the Synthetic channel"
+    );
+    let dual = report
+        .dual_report
+        .expect("a ReturnInputs-provenance year must render the §6 dual report");
+    let l24 = dual
+        .lines()
+        .find(|l| l.contains("TOTAL TAX (L24)"))
+        .expect("a computed dual report has the L24 line");
+    assert!(
+        l24.contains("[PSEUDO]"),
+        "the filed-return TOTAL TAX (L24) must be [PSEUDO]-suffixed under pseudo: {l24}"
+    );
+    let abs = dual
+        .lines()
+        .find(|l| l.contains("Absolute TOTAL TAX"))
+        .expect("the §6 block has an 'Absolute TOTAL TAX' line");
+    assert!(
+        abs.contains("[PSEUDO]"),
+        "the Absolute TOTAL TAX line must be [PSEUDO]-suffixed under pseudo: {abs}"
+    );
+}

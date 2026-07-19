@@ -62,7 +62,22 @@ pub(crate) fn render_tax_content(snap: &Snapshot, year: i32) -> String {
     let profile = snap.profiles.get(&year);
     let outcome = compute_tax_year(&snap.events, &snap.state, year, profile, &snap.tables);
 
+    // UX-P4-1 surface 3: the viewing TUI Tax tab is a number-bearing surface, so flag a pseudo-contributed
+    // figure here too (a banner + a `[PSEUDO]` suffix on the TOTAL). The count-only `pseudo_active()` signal
+    // is SOUND here — NOT a repeat of the CLI's PseudoPlaceholder false-negative: `build_snapshot` /
+    // `resolve_all_screened` enumerate only stored-profile / ReturnInputs years, so a placeholder-eligible
+    // year (pseudo on, nothing stored) never reaches `snap.profiles` — it renders NOT COMPUTABLE above,
+    // never a number. TRIP-WIRE: if the viewer ever resolves a bare year on demand (CLI placeholder parity),
+    // thread the full `pseudo_active() OR PseudoPlaceholder` predicate here.
+    let pseudo = snap.state.pseudo_active();
     let mut s = String::new();
+    if pseudo {
+        let _ = writeln!(
+            s,
+            "⚠ [PSEUDO] This vault has pseudo-reconciled (deliberately-synthetic) entries; figures shown \
+             are an ESTIMATE, not filing-ready. Resolve them before filing (see 'btctax verify')."
+        );
+    }
 
     match &outcome {
         TaxOutcome::NotComputable(b) => {
@@ -90,8 +105,9 @@ pub(crate) fn render_tax_content(snap: &Snapshot, year: i32) -> String {
             );
             let _ = writeln!(
                 s,
-                "  TOTAL federal tax attributable (delta): {:.2}  [= ord + LTCG + NIIT]",
-                r.total_federal_tax_attributable
+                "  TOTAL federal tax attributable (delta): {:.2}{}  [= ord + LTCG + NIIT]",
+                r.total_federal_tax_attributable,
+                if pseudo { " [PSEUDO]" } else { "" }
             );
             let _ = writeln!(
                 s,

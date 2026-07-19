@@ -1617,6 +1617,46 @@ fn make_se_snapshot(
     }
 }
 
+/// UX-P4-1 surface 3(a): a pseudo-active viewer Tax tab LEADS with the banner AND suffixes the TOTAL line —
+/// so the viewer is no longer a silent authoritative surface (SPEC C2/[T-C2]). (★ fault-inject: drop the
+/// banner `if pseudo` block or the TOTAL `[PSEUDO]` in tabs/tax.rs and this goes RED.)
+#[test]
+fn e7_pseudo_active_tax_tab_carries_banner_and_total_suffix() {
+    let mut snap = make_se_snapshot(50_000, 0, 0, 0);
+    snap.state.pseudo_synthetic_count = 1; // pseudo_active() ⇒ true (a synthetic contributes)
+    let content = super::tax::render_tax_content(&snap, 2025);
+    assert!(
+        content.contains("[PSEUDO] This vault has pseudo-reconciled"),
+        "the pseudo banner must lead the Tax tab:\n{content}"
+    );
+    let total = content
+        .lines()
+        .find(|l| l.contains("TOTAL federal tax attributable"))
+        .expect("a computed tab has a TOTAL line");
+    assert!(
+        total.contains("[PSEUDO]"),
+        "the TUI TOTAL line must carry the [PSEUDO] suffix under pseudo: {total}"
+    );
+}
+
+/// UX-P4-1 surface 3(f): the enumeration invariant that licenses the count-only signal — a year with NO
+/// stored profile renders NOT COMPUTABLE in the viewer (never a fictional number and never a `[PSEUDO]`
+/// figure), so the CLI's PseudoPlaceholder channel cannot reach this surface as an unflagged number.
+#[test]
+fn e7_no_profile_year_renders_not_computable_never_a_pseudo_number() {
+    let state = LedgerState::default(); // count == 0 — placeholder-eligible in the CLI
+    let snap = make_snapshot(state); // …but `profiles` is empty: no stored profile for 2025
+    let content = super::tax::render_tax_content(&snap, 2025);
+    assert!(
+        content.contains("NOT COMPUTABLE"),
+        "an unprofiled year must render NOT COMPUTABLE, never a number:\n{content}"
+    );
+    assert!(
+        !content.contains("[PSEUDO]"),
+        "the placeholder channel must NOT surface a [PSEUDO] figure in the viewer:\n{content}"
+    );
+}
+
 /// KAT-E7(a): disclosure lines present when schedule_c_expenses > 0 and w2_ss_wages > 0.
 ///
 /// Fixture: TY2025, mining $50,000, profile with schedule_c_expenses=$5,000, w2_ss_wages=$30,000.

@@ -1234,6 +1234,7 @@ pub fn render_dual_report(
     printed: &btctax_core::tax::packet::PrintedForms,
     delta: &btctax_core::TaxOutcome,
     provenance: crate::resolve::Provenance,
+    pseudo: PseudoDisclosure,
 ) -> String {
     let f = &printed.f1040;
     let mut s = String::new();
@@ -1284,7 +1285,12 @@ pub fn render_dual_report(
             fmt_money(printed.f8960.map_or(Usd::ZERO, |f| f.line17))
         );
     }
-    let _ = writeln!(s, "  TOTAL TAX (L24):          {}", fmt_money(f.line24));
+    let _ = writeln!(
+        s,
+        "  TOTAL TAX (L24):          {}{}",
+        fmt_money(f.line24),
+        pseudo.suffix()
+    );
     let _ = writeln!(s, "  Total payments (L33):     {}", fmt_money(f.line33));
     if f.line34 > Usd::ZERO {
         let _ = writeln!(s, "  → REFUND (L35a):          {}", fmt_money(f.line34));
@@ -1302,8 +1308,9 @@ pub fn render_dual_report(
     );
     let _ = writeln!(
         s,
-        "  • Absolute TOTAL TAX (this filed return, WITH crypto): {}",
-        fmt_money(f.line24)
+        "  • Absolute TOTAL TAX (this filed return, WITH crypto): {}{}",
+        fmt_money(f.line24),
+        pseudo.suffix()
     );
     let _ = writeln!(
         s,

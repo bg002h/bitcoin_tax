@@ -351,7 +351,12 @@ pub fn report_tax_year(
                             &ri, &state, &details, &ar, table, year,
                         );
                         let mut block = crate::render::render_dual_report(
-                            year, &ar, &printed, &outcome, provenance,
+                            year,
+                            &ar,
+                            &printed,
+                            &outcome,
+                            provenance,
+                            pseudo_contributed,
                         );
                         let advs = btctax_core::tax::advisories::advisories_for(
                             &ri, &state, &ar, params, year,
