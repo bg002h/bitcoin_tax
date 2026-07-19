@@ -408,6 +408,14 @@ pub fn resolve(
     let by_id: BTreeMap<EventId, &LedgerEvent> = events.iter().map(|e| (e.id.clone(), e)).collect();
     let mut blockers: Vec<Blocker> = Vec::new();
 
+    // UX-P4-3: the ONE unified `DecisionConflict` remedy pointer (SPEC §3.2, names `events list` §3.6).
+    // Surface-neutral by design — it works at `verify` (the conflicting decision IS recorded; the list
+    // shows its `decision|N` to void) AND at record time (nothing was recorded; the list shows the
+    // valid refs). Duplicate details add "; void the prior decision to re-decide" (a prior decision
+    // exists on both surfaces). Deliberately NOT "void the decision to clear this blocker" — that
+    // misreads at record time, where nothing was appended.
+    const CONFLICT_HINT: &str = "see `btctax events list` for event refs + decision status";
+
     // ── Pseudo-reconcile mode (sub-project 2) ────────────────────────────────────────────────────
     // When on, synthesize DELIBERATELY-FICTIONAL default decisions at the map/`Eff` layer (never
     // persisted) to clear the Hard classification blockers. Real decisions are collected FIRST (below)
@@ -438,7 +446,10 @@ pub fn resolve(
                     blockers.push(Blocker {
                         kind: BlockerKind::DecisionConflict,
                         event: Some(e.id.clone()),
-                        detail: "void targets a non-revocable decision".into(),
+                        detail: format!(
+                            "void targets a non-revocable decision (accept/reject-conflict and \
+                             void are permanent) — {CONFLICT_HINT}"
+                        ),
                     });
                 }
                 Some(EventPayload::SafeHarborAllocation(_)) => {
@@ -455,7 +466,7 @@ pub fn resolve(
                     blockers.push(Blocker {
                         kind: BlockerKind::DecisionConflict,
                         event: Some(e.id.clone()),
-                        detail: "void targets unknown event".into(),
+                        detail: format!("void targets unknown event — {CONFLICT_HINT}"),
                     });
                 }
             }
@@ -552,7 +563,11 @@ pub fn resolve(
                 blockers.push(Blocker {
                     kind: BlockerKind::DecisionConflict,
                     event: Some(d.id.clone()),
-                    detail: "multiple classifications of one target".into(),
+                    detail: format!(
+                        "duplicate classify-raw: {} is already classified \
+                         — {CONFLICT_HINT}; void the prior decision to re-decide",
+                        cr.target.canonical()
+                    ),
                 });
             } else {
                 applied.insert(cr.target.clone(), (*cr.as_).clone());
@@ -583,8 +598,7 @@ pub fn resolve(
                         kind: BlockerKind::DecisionConflict,
                         event: Some(d.id.clone()),
                         detail: format!(
-                            "ManualFmv targets unknown event {} \
-                             — void the decision to clear this blocker",
+                            "ManualFmv targets unknown event {} — {CONFLICT_HINT}",
                             target.canonical()
                         ),
                     });
@@ -603,7 +617,7 @@ pub fn resolve(
                         detail: format!(
                             "ManualFmv targets non-Income event {} \
                              — for a TransferIn classified as income, set the FMV via \
-                             classify-inbound-income (its own `fmv` field); void this decision",
+                             classify-inbound-income (its own `fmv` field); {CONFLICT_HINT}",
                             target.canonical()
                         ),
                     });
@@ -683,8 +697,7 @@ pub fn resolve(
                             kind: BlockerKind::DecisionConflict,
                             event: Some(d.id.clone()),
                             detail: format!(
-                                "ClassifyInbound targets unknown event {} \
-                                 — void the decision to clear this blocker",
+                                "ClassifyInbound targets unknown event {} — {CONFLICT_HINT}",
                                 target.canonical()
                             ),
                         });
@@ -700,8 +713,11 @@ pub fn resolve(
                             blockers.push(Blocker {
                                 kind: BlockerKind::DecisionConflict,
                                 event: Some(d.id.clone()),
-                                detail: "duplicate ClassifyInbound for the same TransferIn event"
-                                    .into(),
+                                detail: format!(
+                                    "duplicate ClassifyInbound: {} is already classified \
+                                     — {CONFLICT_HINT}; void the prior decision to re-decide",
+                                    target.canonical()
+                                ),
                             });
                             // Second decision EXCLUDED; first-wins value stays in map.
                         } else {
@@ -715,7 +731,7 @@ pub fn resolve(
                             event: Some(d.id.clone()),
                             detail: format!(
                                 "ClassifyInbound targets non-TransferIn event {} \
-                                 — void the decision to clear this blocker",
+                                 — only a deposit (TransferIn) can be classified inbound; {CONFLICT_HINT}",
                                 target.canonical()
                             ),
                         });
@@ -735,8 +751,7 @@ pub fn resolve(
                             kind: BlockerKind::DecisionConflict,
                             event: Some(d.id.clone()),
                             detail: format!(
-                                "ReclassifyOutflow targets unknown event {} \
-                                 — void the decision to clear this blocker",
+                                "ReclassifyOutflow targets unknown event {} — {CONFLICT_HINT}",
                                 target.canonical()
                             ),
                         });
@@ -752,9 +767,11 @@ pub fn resolve(
                             blockers.push(Blocker {
                                 kind: BlockerKind::DecisionConflict,
                                 event: Some(d.id.clone()),
-                                detail:
-                                    "duplicate ReclassifyOutflow for the same TransferOut event"
-                                        .into(),
+                                detail: format!(
+                                    "duplicate ReclassifyOutflow: {} is already reclassified \
+                                     — {CONFLICT_HINT}; void the prior decision to re-decide",
+                                    target.canonical()
+                                ),
                             });
                             // Second decision EXCLUDED; first-wins value stays in map.
                         } else {
@@ -768,8 +785,7 @@ pub fn resolve(
                             event: Some(d.id.clone()),
                             detail: format!(
                                 "ReclassifyOutflow targets non-TransferOut event {} \
-                                 — for Income corrections use reclassify-income; \
-                                 void the decision to clear this blocker",
+                                 — for Income corrections use reclassify-income; {CONFLICT_HINT}",
                                 target.canonical()
                             ),
                         });
@@ -797,8 +813,7 @@ pub fn resolve(
                             event: Some(d.id.clone()),
                             detail: format!(
                                 "ReclassifyIncome targets unknown event {} \
-                                 — for TransferIn rows use classify-inbound-income; \
-                                 to re-decide, void the prior decision first",
+                                 — for TransferIn rows use classify-inbound-income; {CONFLICT_HINT}",
                                 target.canonical()
                             ),
                         });
@@ -811,9 +826,11 @@ pub fn resolve(
                             blockers.push(Blocker {
                                 kind: BlockerKind::DecisionConflict,
                                 event: Some(d.id.clone()),
-                                detail: "duplicate ReclassifyIncome for the same income event \
-                                         — to re-decide, void the prior decision first"
-                                    .into(),
+                                detail: format!(
+                                    "duplicate ReclassifyIncome: {} is already reclassified \
+                                     — {CONFLICT_HINT}; void the prior decision to re-decide",
+                                    target.canonical()
+                                ),
                             });
                             // Second decision EXCLUDED; first-wins value stays in map.
                         } else {
@@ -828,8 +845,7 @@ pub fn resolve(
                             event: Some(d.id.clone()),
                             detail: format!(
                                 "ReclassifyIncome targets non-Income event {} \
-                                 — for TransferIn rows use classify-inbound-income; \
-                                 to re-decide, void the prior decision first",
+                                 — for TransferIn rows use classify-inbound-income; {CONFLICT_HINT}",
                                 target.canonical()
                             ),
                         });
@@ -860,7 +876,7 @@ pub fn resolve(
                         event: Some(d.id.clone()),
                         detail: format!(
                             "SelfTransferPassthrough requires in_event {} to be a TransferIn and \
-                             out_event {} to be a TransferOut — void the decision to clear this blocker",
+                             out_event {} to be a TransferOut — {CONFLICT_HINT}",
                             in_target.canonical(),
                             out_target.canonical()
                         ),
@@ -874,10 +890,10 @@ pub fn resolve(
                     blockers.push(Blocker {
                         kind: BlockerKind::DecisionConflict,
                         event: Some(d.id.clone()),
-                        detail:
-                            "duplicate SelfTransferPassthrough claims a leg already in another passthrough \
-                             — to re-decide, void the prior decision first"
-                                .into(),
+                        detail: format!(
+                            "duplicate SelfTransferPassthrough claims a leg already in another \
+                             passthrough — {CONFLICT_HINT}; void the prior decision to re-decide"
+                        ),
                     });
                 } else {
                     passthrough_skip.insert(in_target.clone());

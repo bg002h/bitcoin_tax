@@ -2375,3 +2375,25 @@ rows are in ledger/import order, not by date). Filed (non-gating):
   when the link is inert (a duplicate in-event, or a no-wallet/type-invalid link the resolver excludes).
   The shown ref is usually the correct void target anyway. All of it dissolves if decided-status ever
   moves to resolver-derived (see M1); only reachable in an already-hard-blocked vault. (review r2 N1.)
+
+**UX-P4-3 (#14) impl review r1 residue (2026-07-19, `reviews/ux-p4-3-impl-fable-review-r1.md`):**
+The 2 Important findings were FOLDED to green (r1 verified the `would_conflict` construction is
+definitionally the resolver — no false-accept/refuse). I1: added the [G2-6] classify-raw-duplicate KAT
+(mutation-proves the previously-unwitnessed `classify_raw` guard — deleting it now reds) + the [R3-I1]
+accept-governed `SupersedeImport` KAT (Income conflict minted via `append_import_batch`, accepted →
+set-fmv accepted / classify-inbound refused wrong-type — the OTHER `applied` writer). I2: the
+DecisionConflict remedy hints are UNIFIED at the source (`resolve.rs` — one `CONFLICT_HINT` const naming
+`events list`, surface-neutral; duplicates add "void the prior decision to re-decide"; the record-time
+wrapper no longer double-adds a contradictory hint). Nits (non-gating, filed):
+- **N1 (Nit)** — `classify_inbound` loads all events twice (the UX-P4-4(b) receipt guard + the UX-P4-3
+  conflict guard) and runs two `project()`s; immaterial at real ledger sizes (the whole suite projects
+  constantly in ~3s). Only noted so a future BULK-wiring attempt doesn't copy the pattern into a loop.
+- **N2 (Nit, no action)** — documented, spec-conforming residual: under stored-pseudo-ON with an
+  UNRESOLVED ImportConflict, a real classify-raw on that target is accepted at record time (pseudo-OFF
+  shadow: `applied` lacks it) but the next pseudo-ON `verify` shows "duplicate classify-raw". Exactly
+  what §3.2 `[T2-I1,R3-I1]` mandates (pseudo-gated inserts absent under pseudo-OFF); the trap survives
+  only inside pseudo mode's advisory fiction, which never gates. Examined + intended.
+- **N3 (Nit, no action)** — `link_transfer` (duplicate-TransferLink) and `select_lots`
+  (duplicate-LotSelection) also raise DecisionConflict at verify with user-typed refs but are OUTSIDE
+  §3.2's six-fn choke list — correctly left unwired; a later cycle can decide whether they deserve the
+  same record-time treatment.

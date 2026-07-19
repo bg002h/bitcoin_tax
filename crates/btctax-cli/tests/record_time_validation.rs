@@ -333,6 +333,27 @@ fn income_payload() -> EventPayload {
     })
 }
 
+/// [G2-6] `classify-raw` is first-wins: a second classify-raw on the same target is a duplicate,
+/// refused. ★ This is the KAT that mutation-proves the `classify_raw` guard wiring — with the guard
+/// deleted from `classify_raw`, THIS is the red (review r1 I1: previously a proven survivor).
+#[test]
+fn duplicate_classify_raw_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, in_ref) = vault_with_receive(dir.path());
+    let json = serde_json::to_string(&income_payload()).unwrap();
+    cmd::reconcile::classify_raw(&vault, &pp(), &in_ref, &json, now()).unwrap();
+    let err = cmd::reconcile::classify_raw(&vault, &pp(), &in_ref, &json, now()).unwrap_err();
+    assert!(
+        err.to_string().to_lowercase().contains("duplicate")
+            && err.to_string().contains("events list"),
+        "{err}"
+    );
+    assert_eq!(
+        count(&vault, |p| matches!(p, EventPayload::ClassifyRaw(_))),
+        1
+    );
+}
+
 /// [T2-I1] The validator reads the resolver's EFFECTIVE `applied` payload, not the raw log: a TransferIn
 /// rewritten to Income by a live `ClassifyRaw` IS `reclassify-income`-able (accepted). A naive
 /// "raw-log type" validator would false-REFUSE this — the definitional shadow gets it right.
@@ -344,6 +365,65 @@ fn reclassify_income_on_a_classify_raw_income_target_is_accepted() {
     cmd::reconcile::classify_raw(&vault, &pp(), &in_ref, &json, now()).unwrap();
     cmd::reconcile::reclassify_income(&vault, &pp(), &in_ref, true, None, now())
         .expect("reclassify-income on a ClassifyRaw'd-Income target must be accepted");
+}
+
+/// [R3-I1] Accept-governed effective type via a REAL `SupersedeImport` — the OTHER `applied` writer
+/// (resolve.rs:513), the channel a naive "enumerate ClassifyRaw only" validator MISSED. Accepting an
+/// Income `ImportConflict` makes the target effective-Income: `set-fmv` on it is ACCEPTED, and
+/// `classify-inbound` on it is REFUSED wrong-type (effective Income, not the raw log's type). The
+/// definitional shadow honors the accept by construction.
+#[test]
+fn accept_governed_supersede_import_income_is_effective_income() {
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::LedgerEvent;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, in_ref) = vault_with_receive(dir.path()); // a raw TransferIn (id X)
+
+    // Mint an ImportConflict on X: append a competing import with X's OWN id but an Income payload
+    // (a different fingerprint → a conflict, not a dedup). This is the accept-governed `SupersedeImport`
+    // channel (resolve.rs:513) — the OTHER `applied` writer.
+    let x = btctax_cli::eventref::parse_event_id(&in_ref).unwrap();
+    let competing = LedgerEvent {
+        id: x.clone(),
+        utc_timestamp: time::macros::datetime!(2025 - 03 - 01 12:00:00 UTC),
+        original_tz: time::UtcOffset::UTC,
+        wallet: Some(btctax_core::WalletId::Exchange {
+            provider: "coinbase".into(),
+            account: "default".into(),
+        }),
+        payload: income_payload(),
+    };
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        append_import_batch(s.conn(), &[competing]).unwrap();
+        s.save().unwrap();
+    }
+    let conflict_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::load_all(s.conn())
+            .unwrap()
+            .iter()
+            .find_map(|e| match &e.payload {
+                EventPayload::ImportConflict(_) => Some(e.id.canonical()),
+                _ => None,
+            })
+            .expect("appending a same-id competing import must mint an ImportConflict")
+    };
+    // Accept the conflict → a real SupersedeImport that makes X effective-Income (resolve.rs:513).
+    cmd::reconcile::accept_conflict(&vault, &pp(), &conflict_ref, now()).unwrap();
+
+    // set-fmv on the accept-governed Income target → ACCEPTED (effective type is Income).
+    cmd::reconcile::set_fmv(&vault, &pp(), &in_ref, usd("50"), now())
+        .expect("set-fmv on an accept-governed Income target must be accepted");
+
+    // classify-inbound on it → REFUSED wrong-type: the EFFECTIVE payload is Income, not a TransferIn.
+    let err = cmd::reconcile::classify_inbound(&vault, &pp(), &in_ref, self_transfer(), now())
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("non-TransferIn"),
+        "classify-inbound on an accept-governed Income target is wrong-type: {err}"
+    );
 }
 
 /// [R4-M3] …and voiding that `ClassifyRaw` reverts the effective type back to TransferIn, so the same

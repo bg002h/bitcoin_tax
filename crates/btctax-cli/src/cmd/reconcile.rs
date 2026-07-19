@@ -52,9 +52,11 @@ fn guard_decision_conflict(
     let cfg = session.config()?.to_projection();
     if let Some(detail) = btctax_core::would_conflict(&events, session.prices(), &cfg, payload, now)
     {
+        // The resolver's `detail` is now surface-neutral and self-contained (it names `events list`
+        // and, for duplicates, the void remedy — UX-P4-3 hint unification), so the record-time layer
+        // only frames it as a refusal (nothing was appended); no second, contradictory hint.
         return Err(CliError::Usage(format!(
-            "cannot record this decision — {detail}. Run `btctax events list` to see event refs + \
-             their decision status; `btctax reconcile void decision|N` to change an existing decision."
+            "cannot record this decision — {detail}"
         )));
     }
     Ok(())
