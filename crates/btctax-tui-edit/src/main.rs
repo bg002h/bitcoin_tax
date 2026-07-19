@@ -14092,16 +14092,19 @@ mod tests {
     /// N-R1: the 1-based lines of PRODUCTION `now_utc(` reads in `text`, skipping each top-level
     /// `#[cfg(test)]` module's span — NOT the old STICKY `in_test` that, once a `#[cfg(test)]` was seen,
     /// blinded the scan to EVERYTHING after it (so a production read placed AFTER a test module went
-    /// unseen). The span is bounded by the module's DEDENTED close: a top-level `#[cfg(test)] mod … { }` is
-    /// closed by a `}` at column 0 (rustfmt-enforced — CI runs `cargo fmt --check`), while every interior
-    /// `}` is indented; brace-COUNTING is deliberately avoided because `{`/`}` in string/char literals
-    /// (`code.matches('{')`, a fixture string) would corrupt the depth. Line comments are stripped (a `///`
-    /// mention is fine). Assumes `#[cfg(test)]` annotates a braced `mod` (true here); scanning resumes at
-    /// the dedented close and re-enters on any later `#[cfg(test)]`.
+    /// unseen). A BRACED `#[cfg(test)] mod … { }` span is bounded by its DEDENTED close: a top-level
+    /// module is closed by a `}` at column 0 (rustfmt-enforced — CI runs `cargo fmt --check`), while every
+    /// interior `}` is indented; brace-COUNTING is deliberately avoided because `{`/`}` in string/char
+    /// literals (`code.matches('{')`, a fixture string) would corrupt the depth. An UNBRACED
+    /// `#[cfg(test)] mod X;` / `use …;` declaration (e.g. `tabs/mod.rs`) has NO inline body, so it must NOT
+    /// start a skip — else it would stick until the next column-0 `}` and silently swallow any production
+    /// item that follows (M-1 fold). Line comments are stripped (a `///` mention is fine). Scanning resumes
+    /// at the dedented close and re-enters on any later `#[cfg(test)]`.
     fn production_now_utc_lines(text: &str) -> Vec<usize> {
+        let lines: Vec<&str> = text.lines().collect();
         let mut hits = Vec::new();
         let mut in_test = false;
-        for (i, line) in text.lines().enumerate() {
+        for (i, line) in lines.iter().enumerate() {
             if in_test {
                 if line.starts_with('}') {
                     in_test = false; // dedented module close ⇒ resume production scanning
@@ -14109,7 +14112,17 @@ mod tests {
                 continue;
             }
             if line.trim_start().starts_with("#[cfg(test)]") {
-                in_test = true;
+                // Skip a braced `mod tests { … }`, but NOT an unbraced file-module / import declaration
+                // (no body to skip — sticking on it would silently drop later production reads).
+                let next = lines.get(i + 1).map(|l| l.trim_start()).unwrap_or("");
+                let unbraced_decl = (next.starts_with("mod ")
+                    || next.starts_with("pub mod ")
+                    || next.starts_with("use ")
+                    || next.starts_with("pub use "))
+                    && next.trim_end().ends_with(';');
+                if !unbraced_decl {
+                    in_test = true;
+                }
                 continue;
             }
             if line.split("//").next().unwrap_or("").contains("now_utc(") {
@@ -14142,6 +14155,25 @@ mod tests {
             production_now_utc_lines(&src),
             vec![6],
             "only the post-test-module production read (line 6) is a hit; the commented line 7 is not"
+        );
+    }
+
+    /// ★ N-R1 (M-1 fold): an UNBRACED `#[cfg(test)] mod X;` file-module declaration (as in `tabs/mod.rs`)
+    /// has no inline body — it must NOT start a skip span, else a production read placed after it is
+    /// silently missed. Mutation-check: drop the `unbraced_decl` guard (always `in_test = true`) and this
+    /// reds (line 3 goes unseen). Fixture lines are indented literals (see the sibling test's note).
+    #[test]
+    fn now_utc_scan_does_not_stick_on_an_unbraced_test_mod() {
+        let src = [
+            "#[cfg(test)]",
+            "mod tests;", // an UNBRACED file-module declaration — no body to skip
+            "fn prod() { let _ = now_utc(); }", // production AFTER it — must be CAUGHT (line 3)
+        ]
+        .join("\n");
+        assert_eq!(
+            production_now_utc_lines(&src),
+            vec![3],
+            "a production read after an unbraced `#[cfg(test)] mod X;` must not be swallowed"
         );
     }
 

@@ -57,9 +57,10 @@ docs-man:
 ## and is git-ignored (docs/pdf/). Needs `groff` with the pdf device.
 examples:
 	@mkdir -p docs/pdf
-	@awk -f docs/examples/man-wrap.awk docs/examples/examples.md | groff -k -man -T pdf > docs/pdf/btctax-examples.pdf
+	@awk -f docs/examples/man-wrap.awk docs/examples/examples.md \
+	  | groff -k -man -T pdf -dpaper=letterl -P-pletterl -rLL=10i -rPO=0.4i > docs/pdf/btctax-examples.pdf
 	@head -c4 docs/pdf/btctax-examples.pdf | grep -q '%PDF' \
-	  && echo "wrote docs/pdf/btctax-examples.pdf" \
+	  && echo "wrote docs/pdf/btctax-examples.pdf (landscape)" \
 	  || { echo "examples: groff did not emit a PDF (is groff installed with the pdf device?)"; exit 1; }
 
 ## examples-tui: render the style-aware TUI goldens (docs/examples-tui/*.txt) to a SEPARATE PDF via groff.
@@ -74,10 +75,11 @@ examples-tui:
 	   done; } > docs/pdf/.tui-screens.roff
 	@grep -qF '\m[' docs/pdf/.tui-screens.roff \
 	  || { echo "examples-tui: colorization missing — no \\m[] escapes (UX-P3-2 regressed)"; exit 1; }
-	@groff -k -man -T pdf docs/pdf/.tui-screens.roff > docs/pdf/btctax-tui-screens.pdf
+	@groff -k -man -T pdf -dpaper=letterl -P-pletterl -rLL=10i -rPO=0.4i \
+	   docs/pdf/.tui-screens.roff > docs/pdf/btctax-tui-screens.pdf
 	@rm -f docs/pdf/.tui-screens.roff
 	@head -c4 docs/pdf/btctax-tui-screens.pdf | grep -q '%PDF' \
-	  && echo "wrote docs/pdf/btctax-tui-screens.pdf (colorized)" \
+	  && echo "wrote docs/pdf/btctax-tui-screens.pdf (colorized, landscape)" \
 	  || { echo "examples-tui: groff did not emit a PDF"; exit 1; }
 
 ## help: list targets

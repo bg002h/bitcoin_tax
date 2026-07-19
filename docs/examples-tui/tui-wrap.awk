@@ -13,9 +13,10 @@
 # so `substr`/`length` are cell-accurate in any awk (byte == char). A FUTURE golden glyph outside this map
 # would shift color alignment for cells to its right (cosmetic only, non-gated) — add it to the map below.
 #
-# Modifier fidelity: any modifier containing BOLD -> bold font (`\f[CB]`). UNDERLINED / REVERSED are
-# approximated as bold (nofill roff in the constant-width family has no faithful underline / reverse-video);
-# background color is dropped. The gated `.txt` golden retains the full fg/bg/modifier truth.
+# Modifier fidelity: a modifier CONTAINING BOLD -> bold font (`\f[CB]`); so BOLD|UNDERLINED and
+# BOLD|REVERSED render bold (a hypothetical standalone UNDERLINED / REVERSED — none in the current goldens
+# — would render plain, as nofill roff in the constant-width family has no faithful underline / reverse-
+# video). Background color is dropped. The gated `.txt` golden retains the full fg/bg/modifier truth.
 
 BEGIN { print ".SH \"" name "\""; sec = ""; maxrow = -1 }
 
@@ -49,7 +50,9 @@ sec == "styles" {
         start = substr(range, 1, si - 1) + 0
         end = substr(range, si + 2) + 0
         bold = (mod ~ /BOLD/) ? 1 : 0
-        for (c = start; c <= end; c++) {
+        # capture.rs writes `start..end` 0-BASED, end-EXCLUSIVE (cells [start,end)); the glyph line's
+        # cell k is 1-based `substr` position k+1. So paint substr positions start+1 .. end.
+        for (c = start + 1; c <= end; c++) {
             if (fg != "") colfg[n SUBSEP c] = fg
             if (bold)     colb[n SUBSEP c] = 1
         }
@@ -60,11 +63,22 @@ sec == "styles" {
 END {
     print ".nf"
     print ".ft CR"
+    # A 40-row 120-col screen at the man default 10pt/12pt overflows a landscape page (612pt tall) onto a
+    # second page. 9pt with tight 10.5pt leading keeps each screen to ONE page (40 rows ≈ 420pt) and still
+    # leaves the 120-col row well within the 792pt-wide page. Restored after the grid.
+    print ".ps 9"
+    print ".vs 10.5p"
     for (n = 0; n <= maxrow; n++) {
         line = glyph[n]
         # Map every multi-byte glyph 1:1 to one ASCII char so cell columns == byte offsets (see header).
+        # SINGLE-glyph gsubs only — a bracket CLASS of multi-byte glyphs (`[┌┐…]`) degrades to a class of
+        # their constituent BYTES under a byte-oriented awk (mawk — CI's `/usr/bin/awk` on ubuntu), turning
+        # each corner into `+++` and corrupting glyphs that share a lead byte; a single-glyph pattern is the
+        # exact byte SEQUENCE and is safe in gawk and mawk alike.
         gsub(/─/, "-", line); gsub(/│/, "|", line)
-        gsub(/[┌┐└┘├┤┬┴┼]/, "+", line)
+        gsub(/┌/, "+", line); gsub(/┐/, "+", line); gsub(/└/, "+", line); gsub(/┘/, "+", line)
+        gsub(/├/, "+", line); gsub(/┤/, "+", line); gsub(/┬/, "+", line); gsub(/┴/, "+", line)
+        gsub(/┼/, "+", line)
         gsub(/—/, "-", line)
         gsub(/←/, "<", line); gsub(/↑/, "^", line); gsub(/→/, ">", line); gsub(/↓/, "v", line)
         gsub(/▲/, "^", line); gsub(/▼/, "v", line)
@@ -89,6 +103,8 @@ END {
         if (out ~ /^[.']/) out = "\\&" out # protect a leading roff control char
         print out
     }
+    print ".ps 10"
+    print ".vs 12p"
     print ".ft P"
     print ".fi"
 }
