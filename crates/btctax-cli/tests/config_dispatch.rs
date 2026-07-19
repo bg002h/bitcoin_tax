@@ -251,3 +251,46 @@ fn config_set_forward_method_exchange_scoped() {
         "rejected scoped-election attempts must append nothing"
     );
 }
+
+/// UX-P4-12(c): `config` (show) echoes the forward-method standing order that
+/// `config --set-forward-method` records — previously readable only in `verify`'s Standing-orders
+/// block. A fresh vault names the Fifo default; once an order exists, config shows it with its status.
+#[test]
+fn config_shows_forward_method_standing_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    let (code, fresh) = run_config(&vault, &[]);
+    assert_eq!(code, 0, "config show exits 0; stdout: {fresh}");
+    assert!(
+        fresh.contains("forward_method: Fifo (default"),
+        "a fresh vault names the Fifo default:\n{fresh}"
+    );
+
+    // Record a forward-looking standing order (far-future effective date ⇒ deterministically in force).
+    let (sc, _) = run_config(
+        &vault,
+        &[
+            "--set-forward-method",
+            "hifo",
+            "--effective-from",
+            "2099-01-01",
+        ],
+    );
+    assert_eq!(sc, 0, "recording a standing order must exit 0");
+
+    let (_c, after) = run_config(&vault, &[]);
+    assert!(
+        after.contains("forward_method: HIFO"),
+        "config echoes the recorded forward method:\n{after}"
+    );
+    assert!(
+        after.contains("in force"),
+        "…with its in-force status:\n{after}"
+    );
+    assert!(
+        !after.contains("forward_method: Fifo (default"),
+        "the default line is replaced once an order exists:\n{after}"
+    );
+}

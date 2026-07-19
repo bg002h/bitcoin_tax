@@ -549,6 +549,29 @@ fn run() -> Result<ExitCode, CliError> {
                 "fee_treatment: {:?}\npre2025_method: {:?} (attested: {})",
                 cfg.fee_treatment, cfg.pre2025_method, cfg.pre2025_method_attested
             );
+            // UX-P4-12(c): echo the forward-method standing order(s) that `config
+            // --set-forward-method` records — previously readable only in `verify`'s block. Shows
+            // every non-voided order WITH its status (so a set-but-backdated/ignored order is not
+            // hidden behind the Fifo default).
+            let (events, _state, _cfg) =
+                btctax_cli::Session::open(vault, &pp)?.load_events_and_project()?;
+            let voided = render::voided_targets(&events);
+            let orders: Vec<_> = render::method_election_lines(&events, &voided)
+                .into_iter()
+                .filter(|e| e.note != "voided")
+                .collect();
+            if orders.is_empty() {
+                println!("forward_method: Fifo (default — no standing order recorded)");
+            } else {
+                for e in &orders {
+                    println!(
+                        "forward_method: {} (standing order effective {}, {})",
+                        render::lot_method_display(e.method),
+                        e.effective_from,
+                        e.note
+                    );
+                }
+            }
         }
         Command::ExportSnapshot {
             out,

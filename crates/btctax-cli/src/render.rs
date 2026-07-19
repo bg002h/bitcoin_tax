@@ -486,7 +486,7 @@ pub fn filing_status_tag(fs: btctax_core::FilingStatus) -> &'static str {
 }
 
 /// Stable display tag for `LotMethod` (FIFO/LIFO/HIFO — uppercase, human-readable).
-fn lot_method_display(m: LotMethod) -> &'static str {
+pub fn lot_method_display(m: LotMethod) -> &'static str {
     match m {
         LotMethod::Fifo => "FIFO",
         LotMethod::Lifo => "LIFO",
@@ -502,6 +502,62 @@ pub struct ElectionLine {
     pub method: LotMethod,
     /// "in force" | "voided" | "backdated/ignored"
     pub note: &'static str,
+}
+
+/// The set of decision targets that a `VoidDecisionEvent` has voided (for election notes + selection
+/// counting). Shared by `verify` and `config` (UX-P4-12(c)).
+pub fn voided_targets(events: &[LedgerEvent]) -> BTreeSet<EventId> {
+    events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::VoidDecisionEvent(v) => Some(v.target_event_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The `MethodElection` standing-order history, sorted by `decision_seq` for a stable total order;
+/// each `note` marks in-force / voided / backdated. Shared by `verify`'s Standing-orders block and
+/// `config`'s forward-method read-back (UX-P4-12(c)).
+pub fn method_election_lines(
+    events: &[LedgerEvent],
+    voided: &BTreeSet<EventId>,
+) -> Vec<ElectionLine> {
+    let mut election_events: Vec<(u64, &LedgerEvent)> = events
+        .iter()
+        .filter_map(|e| {
+            if let EventId::Decision { seq } = e.id {
+                if matches!(e.payload, EventPayload::MethodElection(_)) {
+                    return Some((seq, e));
+                }
+            }
+            None
+        })
+        .collect();
+    election_events.sort_by_key(|(s, _)| *s);
+
+    election_events
+        .iter()
+        .map(|(_, e)| {
+            let EventPayload::MethodElection(me) = &e.payload else {
+                unreachable!("filtered to MethodElection above")
+            };
+            let recorded = tax_date(e.utc_timestamp, e.original_tz);
+            let note = if voided.contains(&e.id) {
+                "voided"
+            } else if me.effective_from < TRANSITION_DATE || me.effective_from < recorded {
+                "backdated/ignored"
+            } else {
+                "in force"
+            };
+            ElectionLine {
+                recorded,
+                effective_from: me.effective_from,
+                method: me.method,
+                note,
+            }
+        })
+        .collect()
 }
 
 /// Structured FR9 outcome (so tests assert on data, not stdout, and `main` keys the exit code).
@@ -599,50 +655,10 @@ pub fn build_verify(state: &LedgerState, events: &[LedgerEvent], cli: &CliConfig
         .count();
 
     // Build the voided set (for election notes and selection counting).
-    let voided: BTreeSet<EventId> = events
-        .iter()
-        .filter_map(|e| match &e.payload {
-            EventPayload::VoidDecisionEvent(v) => Some(v.target_event_id.clone()),
-            _ => None,
-        })
-        .collect();
+    let voided = voided_targets(events);
 
     // Build election history (NFR4: sorted by decision_seq for a stable total order).
-    let mut election_events: Vec<(u64, &LedgerEvent)> = events
-        .iter()
-        .filter_map(|e| {
-            if let EventId::Decision { seq } = e.id {
-                if matches!(e.payload, EventPayload::MethodElection(_)) {
-                    return Some((seq, e));
-                }
-            }
-            None
-        })
-        .collect();
-    election_events.sort_by_key(|(s, _)| *s);
-
-    let elections: Vec<ElectionLine> = election_events
-        .iter()
-        .map(|(_, e)| {
-            let EventPayload::MethodElection(me) = &e.payload else {
-                unreachable!("filtered to MethodElection above")
-            };
-            let recorded = tax_date(e.utc_timestamp, e.original_tz);
-            let note = if voided.contains(&e.id) {
-                "voided"
-            } else if me.effective_from < TRANSITION_DATE || me.effective_from < recorded {
-                "backdated/ignored"
-            } else {
-                "in force"
-            };
-            ElectionLine {
-                recorded,
-                effective_from: me.effective_from,
-                method: me.method,
-                note,
-            }
-        })
-        .collect();
+    let elections = method_election_lines(events, &voided);
 
     // Count non-voided LotSelection decisions.
     // Note: a `Decision`-id guard is intentionally omitted — `LotSelection` payloads are
