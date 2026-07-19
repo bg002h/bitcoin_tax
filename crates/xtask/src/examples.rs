@@ -930,14 +930,42 @@ fn leaf_subcommands() -> Vec<Vec<String>> {
 
 /// Whether some `$ btctax …` line in the golden runs the leaf `path` — its subcommand-name tokens appear
 /// IN ORDER among the line's tokens (global flags like `--vault v.pgp` interspersed are skipped).
+/// Global options that appear BEFORE the subcommand on a `$ btctax …` line and CONSUME a value — the
+/// `--vault v.pgp` pair every journey opens with. Anchoring skips both tokens so `path[0]` binds to the
+/// actual subcommand, never the flag's value (UX-P2-1).
+const GLOBAL_VALUE_OPTS: &[&str] = &["--vault"];
+
 fn is_demonstrated(golden: &str, path: &[String]) -> bool {
     golden
         .lines()
         .filter_map(|l| l.trim().strip_prefix("$ btctax"))
         .any(|rest| {
             let toks: Vec<&str> = rest.split_whitespace().collect();
-            let mut i = 0;
-            for p in path {
+            // UX-P2-1: advance past leading global options (a `-`-prefixed flag, plus its value when it
+            // takes one) to the FIRST subcommand token, so a global flag/value is never miscounted.
+            let mut start = 0;
+            while let Some(&t) = toks.get(start) {
+                if t.starts_with('-') {
+                    start += 1;
+                    if GLOBAL_VALUE_OPTS.contains(&t) {
+                        start += 1; // also skip the option's value (e.g. `v.pgp` after `--vault`)
+                    }
+                } else {
+                    break;
+                }
+            }
+            // `path[0]` MUST be exactly the first subcommand token (anchored — not a free subsequence), so a
+            // subcommand named only as an ARGUMENT deeper in the line does not falsely count as demonstrated.
+            let Some((first, rest_path)) = path.split_first() else {
+                return true; // an empty path is trivially demonstrated by any invocation
+            };
+            if toks.get(start).map(|t| &**t) != Some(first.as_str()) {
+                return false;
+            }
+            // The remaining path tokens (sub-subcommands) still subsequence-match after the anchor — a
+            // sub-verb can be separated from its parent by nothing, and args never precede it.
+            let mut i = start + 1;
+            for p in rest_path {
                 match toks.get(i..).and_then(|s| s.iter().position(|t| t == p)) {
                     Some(off) => i += off + 1,
                     None => return false,
@@ -992,6 +1020,51 @@ pub fn subcommand_coverage_report() -> String {
 /// `cargo run -p xtask -- subcommand-coverage` — print the SOFT coverage report (SPEC §6.3, Task 2.2).
 pub fn run_coverage() {
     print!("{}", subcommand_coverage_report());
+}
+
+// UX-P2-1: `is_demonstrated` is pure string logic — its tests run on every platform (NOT unix-gated like
+// the byte-exact golden tests below), so the coverage map cannot silently over-report on Windows/macOS.
+#[cfg(test)]
+mod matcher_tests {
+    use super::is_demonstrated;
+
+    fn path(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The real subcommand IS demonstrated even though a global `--vault v.pgp` option precedes it —
+    /// anchoring must SKIP the leading global option (and its value), not stop at it.
+    #[test]
+    fn anchors_past_the_global_vault_option() {
+        let golden = "$ btctax --vault v.pgp verify\n";
+        assert!(is_demonstrated(golden, &path(&["verify"])));
+        let golden2 = "$ btctax --vault v.pgp reconcile void abc123\n";
+        assert!(is_demonstrated(golden2, &path(&["reconcile", "void"])));
+    }
+
+    /// ★ UX-P2-1 core: a subcommand name that appears ONLY as an argument (never as the invoked
+    /// subcommand) must NOT be reported demonstrated. The old free-subsequence matcher counted
+    /// `path[0]` anywhere in the line, so a `reconcile void import` line falsely "demonstrated" the
+    /// top-level `import` leaf. Anchoring `path[0]` to the first non-`-` token kills that over-report.
+    #[test]
+    fn a_subcommand_named_only_as_an_argument_is_not_demonstrated() {
+        let golden = "$ btctax --vault v.pgp reconcile void import\n";
+        assert!(
+            !is_demonstrated(golden, &path(&["import"])),
+            "`import` as a bare argument to `reconcile void` must not count as demonstrating the \
+             `import` subcommand"
+        );
+        // …but the command actually invoked on that line still is.
+        assert!(is_demonstrated(golden, &path(&["reconcile", "void"])));
+    }
+
+    /// The `--vault` flag itself and its value token must never be mistaken for the subcommand.
+    #[test]
+    fn the_vault_flag_and_its_value_are_not_subcommands() {
+        let golden = "$ btctax --vault v.pgp verify\n";
+        assert!(!is_demonstrated(golden, &path(&["v.pgp"])));
+        assert!(!is_demonstrated(golden, &path(&["--vault"])));
+    }
 }
 
 #[cfg(test)]
