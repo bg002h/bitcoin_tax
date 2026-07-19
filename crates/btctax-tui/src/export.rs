@@ -984,17 +984,8 @@ mod tests {
                     continue; // Clock::Wall's own read is the seam's floor
                 }
                 let text = std::fs::read_to_string(&p).unwrap();
-                let mut in_test = false;
-                for (i, line) in text.lines().enumerate() {
-                    if line.trim_start().starts_with("#[cfg(test)]") {
-                        in_test = true;
-                    }
-                    if in_test {
-                        continue;
-                    }
-                    if line.split("//").next().unwrap_or("").contains("now_utc(") {
-                        hits.push(format!("{}:{}", p.display(), i + 1));
-                    }
+                for ln in production_now_utc_lines(&text) {
+                    hits.push(format!("{}:{}", p.display(), ln));
                 }
             }
         }
@@ -1002,6 +993,62 @@ mod tests {
         assert!(
             hits.is_empty(),
             "production `now_utc()` found — route it through the injected Clock (SPEC §3.4): {hits:?}"
+        );
+    }
+
+    /// N-R1: the 1-based lines of PRODUCTION `now_utc(` reads in `text`, skipping each top-level
+    /// `#[cfg(test)]` module's span — NOT the old STICKY `in_test` that, once a `#[cfg(test)]` was seen,
+    /// blinded the scan to EVERYTHING after it (so a production read placed AFTER a test module went
+    /// unseen). The span is bounded by the module's DEDENTED close: a top-level `#[cfg(test)] mod … { }` is
+    /// closed by a `}` at column 0 (rustfmt-enforced — CI runs `cargo fmt --check`), while every interior
+    /// `}` is indented; brace-COUNTING is deliberately avoided because `{`/`}` in string/char literals
+    /// (`code.matches('{')`, a fixture string) would corrupt the depth. Line comments are stripped (a `///`
+    /// mention is fine). Assumes `#[cfg(test)]` annotates a braced `mod` (true here); scanning resumes at
+    /// the dedented close and re-enters on any later `#[cfg(test)]`.
+    fn production_now_utc_lines(text: &str) -> Vec<usize> {
+        let mut hits = Vec::new();
+        let mut in_test = false;
+        for (i, line) in text.lines().enumerate() {
+            if in_test {
+                if line.starts_with('}') {
+                    in_test = false; // dedented module close ⇒ resume production scanning
+                }
+                continue;
+            }
+            if line.trim_start().starts_with("#[cfg(test)]") {
+                in_test = true;
+                continue;
+            }
+            if line.split("//").next().unwrap_or("").contains("now_utc(") {
+                hits.push(i + 1);
+            }
+        }
+        hits
+    }
+
+    /// ★ N-R1 (de-stick): a PRODUCTION `now_utc()` placed AFTER a `#[cfg(test)]` module must be CAUGHT —
+    /// the old sticky scan skipped everything after the first test module and would silently miss it.
+    /// A read INSIDE the test module is still skipped; a `//`-commented mention is ignored. Mutation-check:
+    /// revert `production_now_utc_lines` to a sticky `in_test` (drop the dedented-close reset) and this reds
+    /// (the post-module read goes unseen). The fixture is a `join`ed array of INDENTED source lines so this
+    /// crate's own `no_direct_now_utc_in_production` scan of THIS file does not mistake the fixture's
+    /// content (`#[cfg(test)]`, a column-0 `}`) for a real module boundary.
+    #[test]
+    fn now_utc_scan_desticks_past_a_test_module() {
+        let src = [
+            "fn prod_a() { let _ = clock.now(); }",
+            "#[cfg(test)]",
+            "mod tests {",
+            "    fn helper() { let _ = now_utc(); }", // inside the module — SKIPPED
+            "}",
+            "fn prod_b() { let _ = now_utc(); }", // production AFTER the module — CAUGHT (line 6)
+            "// a bare comment mentioning now_utc( must NOT count",
+        ]
+        .join("\n");
+        assert_eq!(
+            production_now_utc_lines(&src),
+            vec![6],
+            "only the post-test-module production read (line 6) is a hit; the commented line 7 is not"
         );
     }
 }
