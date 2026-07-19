@@ -6,8 +6,8 @@
 //! synthetic default is never persisted, so it must not read as decided).
 //!
 //! PRIVACY: synthetic Coinbase fixtures in tempdirs; no user file is read.
-use btctax_cli::{cmd, Session};
-use btctax_core::{EventPayload, InboundClass};
+use btctax_cli::{cmd, eventref, Session};
+use btctax_core::{EventPayload, InboundClass, TransferTarget};
 use btctax_store::Passphrase;
 use std::path::Path;
 
@@ -95,6 +95,141 @@ fn events_list_reports_decidable_events_and_decision_status() {
     // The still-undecided outbound stays decidable.
     let to = rows2.iter().find(|r| r.kind == "transfer-out").unwrap();
     assert!(to.decision_ref.is_none(), "the Send is still decidable");
+}
+
+/// Review r1 I1: a `TransferLink --to-event` decides BOTH legs — the outbound AND the inbound it
+/// relocates onto — so the in-leg must list as `[decided: decision|N]` with the LINK's ref, not
+/// `[decidable]`. (★ fault-inject: drop the TransferLink in-leg arm from the reverse-map → RED.)
+#[test]
+fn events_list_transfer_link_decides_both_legs() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    // Buy 0.05 (covers the send), Send 0.05, Receive 0.05 (matched pair for a clean relocate).
+    let csv = dir.path().join("cb.csv");
+    std::fs::write(
+        &csv,
+        format!(
+            "{HEADER}\
+cb-buy,2025-01-15 12:00:00 UTC,Buy,BTC,0.05000000,USD,84000.00,4200.00,4250.00,50.00,,,\r\n\
+cb-send,2025-06-20 12:00:00 UTC,Send,BTC,0.05000000,USD,105000.00,,,,,,bc1qdest\r\n\
+cb-recv,2025-06-21 12:00:00 UTC,Receive,BTC,0.05000000,USD,105000.00,,,,,bc1qsender,\r\n"
+        ),
+    )
+    .unwrap();
+    cmd::import::run(&vault, &pp(), &[csv]).unwrap();
+
+    let rows = cmd::inspect::events_list(&vault, &pp()).unwrap();
+    let out_ref = rows
+        .iter()
+        .find(|r| r.kind == "transfer-out")
+        .unwrap()
+        .reff
+        .clone();
+    let in_ref = rows
+        .iter()
+        .find(|r| r.kind == "transfer-in")
+        .unwrap()
+        .reff
+        .clone();
+
+    let in_id = eventref::parse_event_id(&in_ref).unwrap();
+    cmd::reconcile::link_transfer(
+        &vault,
+        &pp(),
+        &out_ref,
+        TransferTarget::InEvent(in_id),
+        now(),
+    )
+    .unwrap();
+
+    let rows2 = cmd::inspect::events_list(&vault, &pp()).unwrap();
+    let ti = rows2.iter().find(|r| r.kind == "transfer-in").unwrap();
+    let to = rows2.iter().find(|r| r.kind == "transfer-out").unwrap();
+    assert!(
+        ti.decision_ref
+            .as_deref()
+            .is_some_and(|d| d.starts_with("decision|")),
+        "the linked IN-leg must be decided (not decidable); got {:?}",
+        ti.decision_ref
+    );
+    assert!(
+        to.decision_ref.is_some(),
+        "the out-leg is decided by the link"
+    );
+    assert_eq!(
+        ti.decision_ref, to.decision_ref,
+        "both legs carry the SAME link decision ref"
+    );
+}
+
+/// Review r1 I2: the void→re-decide remedy loop. Voiding a decision returns its target to
+/// `[decidable]`; re-deciding shows the NEW decision ref. (★ fault-inject: break the `voided`
+/// filter → the row stays `[decided]` after the void → RED.)
+#[test]
+fn events_list_void_returns_to_decidable_then_redecide() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_buy_send_recv(dir.path());
+
+    let in_ref = cmd::inspect::events_list(&vault, &pp())
+        .unwrap()
+        .iter()
+        .find(|r| r.kind == "transfer-in")
+        .unwrap()
+        .reff
+        .clone();
+
+    // Decide → decided (decision|1).
+    let d1 = cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &in_ref,
+        InboundClass::SelfTransferMine {
+            basis: None,
+            acquired_at: None,
+        },
+        now(),
+    )
+    .unwrap();
+    let d1_ref = d1.canonical();
+    let ti = cmd::inspect::events_list(&vault, &pp()).unwrap();
+    let ti = ti.iter().find(|r| r.kind == "transfer-in").unwrap();
+    assert_eq!(
+        ti.decision_ref.as_deref(),
+        Some(d1_ref.as_str()),
+        "decided by d1"
+    );
+
+    // Void d1 → back to decidable.
+    cmd::reconcile::void(&vault, &pp(), &d1_ref, now()).unwrap();
+    let rows = cmd::inspect::events_list(&vault, &pp()).unwrap();
+    let ti = rows.iter().find(|r| r.kind == "transfer-in").unwrap();
+    assert!(
+        ti.decision_ref.is_none(),
+        "a voided decision must return the row to decidable; got {:?}",
+        ti.decision_ref
+    );
+
+    // Re-decide → the NEW decision ref (not the voided d1).
+    let d2 = cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &in_ref,
+        InboundClass::SelfTransferMine {
+            basis: None,
+            acquired_at: None,
+        },
+        now(),
+    )
+    .unwrap();
+    let rows = cmd::inspect::events_list(&vault, &pp()).unwrap();
+    let ti = rows.iter().find(|r| r.kind == "transfer-in").unwrap();
+    assert_eq!(
+        ti.decision_ref.as_deref(),
+        Some(d2.canonical().as_str()),
+        "re-decide must show the survivor, not the voided d1"
+    );
+    assert_ne!(ti.decision_ref.as_deref(), Some(d1_ref.as_str()));
 }
 
 /// (2) The UX-P4-11 trap: a ref printed by the REAL `events list` binary, pasted verbatim, is

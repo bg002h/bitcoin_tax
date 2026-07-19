@@ -10,14 +10,18 @@ use std::path::Path;
 /// its ref, kind, date, amount, and decision status, in event-sequence (insertion) order. Read-only.
 ///
 /// The decidable universe = imported `TransferIn` / `TransferOut` / `Unclassified` / `ImportConflict`
-/// / `Income` rows (an `Acquire`/`Dispose` is a fully-determined import — no reconcile verb retargets
-/// it). Decision status is derived ONLY from PERSISTED decisions (reverse-mapped from the raw log,
-/// minus voided ones): a pseudo-defaulted event mints no persisted decision, so it correctly lists as
-/// **decidable**. Ordering is the raw insertion order (`load_all_ordered`) — "event sequence" (§3.6).
+/// / `Income` rows — the reconciliation-CLASSIFICATION surface (the verbs UX-P4-3's refuse-hint
+/// names). An `Acquire` is a fully-determined import that no verb retargets; a `Dispose` is excluded
+/// deliberately — its only decision is specific-ID `select-lots` (`LotSelection`), a distinct flow
+/// whose refs come from the `disposals.csv` `event` column, out of this surface (§3.6 `[G-M3]`;
+/// review r1 M2). Decision status is derived ONLY from PERSISTED decisions (reverse-mapped from the
+/// raw log, minus voided ones): a pseudo-defaulted event mints no persisted decision, so it correctly
+/// lists as **decidable**. Ordering is the raw insertion order (`load_all_ordered`) — "event
+/// sequence" (§3.6).
 pub fn events_list(vault_path: &Path, pp: &Passphrase) -> Result<Vec<EventRow>, CliError> {
     use btctax_core::conventions::tax_date;
     use btctax_core::persistence::{load_all, load_all_ordered};
-    use btctax_core::{EventId, EventPayload, LedgerEvent, Sat};
+    use btctax_core::{EventId, EventPayload, LedgerEvent, Sat, TransferTarget};
     use std::collections::{BTreeSet, HashMap};
 
     let session = Session::open(vault_path, pp)?;
@@ -70,7 +74,13 @@ pub fn events_list(vault_path: &Path, pp: &Passphrase) -> Result<Vec<EventRow>, 
                 decided.insert(d.conflict_event.clone(), e.id.clone());
             }
             EventPayload::TransferLink(d) => {
+                // A link decides its outbound leg, AND — when `--to-event` was used — the inbound
+                // leg it relocates onto (resolve.rs consumes that TransferIn). A `--to-wallet` link
+                // has no in-event to decide. Mirrors the two-leg SelfTransferPassthrough below.
                 decided.insert(d.out_event.clone(), e.id.clone());
+                if let TransferTarget::InEvent(in_id) = &d.in_event_or_wallet {
+                    decided.insert(in_id.clone(), e.id.clone());
+                }
             }
             EventPayload::SelfTransferPassthrough(d) => {
                 decided.insert(d.in_event.clone(), e.id.clone());

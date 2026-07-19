@@ -500,7 +500,8 @@ pub enum WhatIf {
 pub enum Events {
     /// List every DECIDABLE event — the imported rows a `reconcile` verb can act on
     /// (transfer-in, transfer-out, unclassified, import-conflict, income) — with its
-    /// reference, kind, date, amount, and decision status. Read-only; writes nothing.
+    /// reference, kind, date, amount, and decision status. Rows are in ledger (import)
+    /// order, which is not necessarily by date. Read-only; writes nothing.
     ///
     /// Copy a listed `ref` verbatim into a reconcile verb, e.g.
     /// `btctax reconcile classify-inbound-self-transfer <ref>` or

@@ -2348,3 +2348,27 @@ stale `1.170A-1(c)(2)` pin-cite in `CONTINUITY_post_v070.md` corrected to `(c)(1
   post-release UX. If guarded later, guard BOTH the TUI raw forms and the CLI `classify-raw` payload
   symmetrically. **N2(r2) (Nit)** — the receipt threading at the two TUI confirm sites is
   compile-forced but not value-witnessed (item.date is the only TaxDate in scope; recorded only).
+
+**UX-P4-11 (#18 `events list`) impl review r1 residue (2026-07-19, `reviews/ux-p4-11-impl-fable-review-r1.md`):**
+The 2 Important findings were FOLDED to green (I1: `TransferLink --to-event` now decides BOTH legs in
+the reverse-map — the in-leg it relocates onto — with a matched-pair KAT; I2: a void→re-decide KAT that
+reds when the `voided` filter breaks). Recorded inline: **M2** (SPEC §3.6 amended — the row universe is
+the reconciliation-CLASSIFICATION surface; `Dispose`/`select-lots` deliberately excluded, refs via
+`disposals.csv`; the `inspect.rs` doc-comment softened accordingly); **N3** (the `List` help now states
+rows are in ledger/import order, not by date). Filed (non-gating):
+- **M1 (Minor, owning phase = Step-1c / #14)** — `events_list`'s voided-set honors EVERY
+  `VoidDecisionEvent`, but the resolver keeps a `SupersedeImport`/`RejectImport` IN FORCE when a void
+  targets it (the void is inert + raises the conflict, `resolve.rs:424-443`). So in a vault already
+  hard-blocked by such a void, an accept-conflict row wrongly flips back to `[decidable]`. Only reachable
+  in an already-blocked vault; Step-1c's record-time `void` refusal (refuse non-revocable/already-voided)
+  makes it unreachable going forward. Burn down with 1c: mirror the resolver's revocability rule OR derive
+  decided-status from resolver outputs.
+- **M3 (Minor)** — the Income `amount` column shows the imported `usd_fmv` (else close price), ignoring a
+  live `ManualFmv` override (the resolver's effective FMV, `resolve.rs:287-289`). So a just-`set-fmv`'d
+  income row displays the pre-correction figure next to its `[decided: <ManualFmv>]`. The `~$` marker is
+  explicitly indicative for every kind; prefer the live override when one is present.
+- **N1 (Nit)** — `render::fmt_btc` drops the sign for sat ∈ (−1e8, 0) (`-0.5` → "0.50000000"); unreachable
+  for persisted payloads (adapters `.abs()` at build time), display-robustness only.
+- **N2 (Nit)** — in an already-blocked vault the `decided` map is later-wins while the resolver is
+  first-wins for ClassifyInbound; the shown ref is usually the correct void target anyway. Dissolves if
+  decided-status ever moves to resolver-derived (see M1).

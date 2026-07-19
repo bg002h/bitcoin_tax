@@ -258,7 +258,11 @@ rendered report. Folds `[G-M2, T-M5]`:
 
 Add `btctax events list` (additive, low golden-churn); it moves into/before phase 1 because UX-P4-3's
 unified refuse-hint (3.2) names it `[G-I8]`. **Row universe `[G-M3]`:** every decidable event with columns
-{ref, kind, date, amount, decided-status}. **Pseudo-defaulted events MUST list as decidable** `[T-I2 rider]`
+{ref, kind, date, amount, decided-status}. *(As-built, review r1 M2: the universe is the reconciliation-
+CLASSIFICATION surface — `TransferIn` / `TransferOut` / `Unclassified` / `ImportConflict` / `Income`, the
+verbs 3.2's refuse-hint names. A `Dispose` is EXCLUDED: its only decision is specific-ID `select-lots`, a
+distinct flow whose refs come from the `disposals.csv` `event` column, not this surface. An `Acquire` is a
+determined import no verb retargets.)* **Pseudo-defaulted events MUST list as decidable** `[T-I2 rider]`
 (no persisted decision). If a `decision|N` ref is shown (the "void decision|N first" remedy needs it),
 include decided rows with their decision ref. Stable ordering (by event sequence). Add the man page +
 `make docs` regen (single-sourced from clap doc-comments — mechanical). No per-row refs in `report` this
