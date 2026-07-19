@@ -455,15 +455,91 @@ Imported full-return inputs for tax year 2024.
 ```console
 $ btctax --vault v.pgp income show --year 2024
 {
-  "capital_loss_carryforward_in": {
-    "long": "0",
-    "short": "0"
+  "filing_status": "Mfj",
+  "header": {
+    "taxpayer": {
+      "first_name": "John",
+      "last_name": "Doe",
+      "ssn": "***-**-6789",
+      "date_of_birth": null,
+      "blind": null,
+      "occupation": "Engineer"
+    },
+    "spouse": {
+      "first_name": "Jane",
+      "last_name": "Doe",
+      "ssn": "***-**-4321",
+      "date_of_birth": null,
+      "blind": null,
+      "occupation": "Architect"
+    },
+    "address_street": "100 Main St",
+    "address_city": "Springfield",
+    "address_state": "IL",
+    "address_zip": "62704",
+    "dependents": [
+      {
+        "name": "Sam Doe",
+        "ssn": "***-**-3333",
+        "relationship": "Son",
+        "date_of_birth": "04/15/2012"
+      }
+    ],
+    "can_be_claimed_as_dependent_taxpayer": false,
+    "can_be_claimed_as_dependent_spouse": false,
+    "presidential_fund_taxpayer": false,
+    "presidential_fund_spouse": false,
+    "ip_pin": null
   },
-  "charitable_carryover_in": [],
+  "w2s": [
+    {
+      "owner": "taxpayer",
+      "employer": "ACME",
+      "box1_wages": "200000",
+      "box2_fed_withheld": "40000",
+      "box3_ss_wages": "168600",
+      "box4_ss_withheld": "10453.20",
+      "box5_medicare_wages": "200000",
+      "box6_medicare_withheld": "2900",
+      "box7_ss_tips": "0",
+      "box17_state_tax_withheld": "9000",
+      "box19_local_tax": "0",
+      "box12": [],
+      "box8_allocated_tips": "0",
+      "box10_dependent_care": "0"
+    },
+    {
+      "owner": "spouse",
+      "employer": "GLOBEX",
+      "box1_wages": "90000",
+      "box2_fed_withheld": "15000",
+      "box3_ss_wages": "90000",
+      "box4_ss_withheld": "5580",
+      "box5_medicare_wages": "90000",
+      "box6_medicare_withheld": "1305",
+      "box7_ss_tips": "0",
+      "box17_state_tax_withheld": "4000",
+      "box19_local_tax": "0",
+      "box12": [],
+      "box8_allocated_tips": "0",
+      "box10_dependent_care": "0"
+    }
+  ],
+  "int_1099": [
+    {
+      "payer": "First Bank",
+      "box1_interest": "2000",
+      "box2_early_withdrawal_penalty": "0",
+      "box3_treasury_interest": "0",
+      "box4_fed_withheld": "100",
+      "box6_foreign_tax": "100",
+      "box8_tax_exempt_interest": "0",
+      "box9_private_activity_bond_amt": "0"
+    }
+  ],
   "div_1099": [
     {
-      "box12_exempt_interest_dividends": "0",
-      "box13_private_activity_amt": "0",
+      "payer": "Broker LLC",
       "box1a_ordinary": "3000",
       "box1b_qualified": "1000",
       "box2a_capgain_distr": "500",
@@ -473,143 +549,67 @@ $ btctax --vault v.pgp income show --year 2024
       "box4_fed_withheld": "0",
       "box5_section_199a": "1200",
       "box7_foreign_tax": "50",
-      "payer": "Broker LLC"
+      "box12_exempt_interest_dividends": "0",
+      "box13_private_activity_amt": "0"
     }
   ],
-  "dual_status_alien": false,
-  "filing_status": "Mfj",
-  "foreign_accounts": false,
-  "foreign_country_names": "",
-  "foreign_trust": false,
   "g_1099": [
     {
+      "payer": "State of IL",
       "box1_unemployment": "1000",
-      "box4_fed_withheld": "0",
-      "payer": "State of IL"
+      "box4_fed_withheld": "0"
     }
   ],
-  "header": {
-    "address_city": "Springfield",
-    "address_state": "IL",
-    "address_street": "100 Main St",
-    "address_zip": "62704",
-    "can_be_claimed_as_dependent_spouse": false,
-    "can_be_claimed_as_dependent_taxpayer": false,
-    "dependents": [
-      {
-        "date_of_birth": "04/15/2012",
-        "name": "Sam Doe",
-        "relationship": "Son",
-        "ssn": "***-**-3333"
-      }
-    ],
-    "ip_pin": null,
-    "presidential_fund_spouse": false,
-    "presidential_fund_taxpayer": false,
-    "spouse": {
-      "blind": null,
-      "date_of_birth": null,
-      "first_name": "Jane",
-      "last_name": "Doe",
-      "occupation": "Architect",
-      "ssn": "***-**-4321"
-    },
-    "taxpayer": {
-      "blind": null,
-      "date_of_birth": null,
-      "first_name": "John",
-      "last_name": "Doe",
-      "occupation": "Engineer",
-      "ssn": "***-**-6789"
-    }
+  "schedule_c": {
+    "owner": "taxpayer",
+    "business_description": "Bitcoin mining",
+    "naics_code": "518210",
+    "accounting_method": "cash",
+    "expenses": "1000"
   },
-  "int_1099": [
-    {
-      "box1_interest": "2000",
-      "box2_early_withdrawal_penalty": "0",
-      "box3_treasury_interest": "0",
-      "box4_fed_withheld": "100",
-      "box6_foreign_tax": "100",
-      "box8_tax_exempt_interest": "0",
-      "box9_private_activity_bond_amt": "0",
-      "payer": "First Bank"
-    }
-  ],
+  "schedule_a": {
+    "medical": "2000",
+    "salt_use_sales_tax": null,
+    "salt_sales_tax_amount": "0",
+    "salt_state_estimated_payments": "12000",
+    "salt_prior_year_balance_paid": "0",
+    "salt_real_estate": "6000",
+    "salt_personal_property": "0",
+    "mortgage_interest_1098": "22000",
+    "mortgage_all_used_to_buy_build_improve": true,
+    "charitable": [
+      {
+        "class": "cash60",
+        "amount": "5000"
+      }
+    ]
+  },
   "itemize_election": "auto",
   "mfs_spouse_itemizes": null,
+  "sch1": {
+    "state_refund_taxable": "0",
+    "student_loan_interest_paid": "0",
+    "ira_deduction_claimed": "0",
+    "hsa_activity": false
+  },
   "payments": {
     "estimated_tax_payments": "1000",
     "extension_payment": "500",
     "other_withholding": "0"
   },
+  "capital_loss_carryforward_in": {
+    "short": "0",
+    "long": "0"
+  },
+  "charitable_carryover_in": [],
   "qbi": {
     "reit_ptp_carryforward_in": "0",
     "reit_ptp_carryforward_in_provenance": "user"
   },
-  "sch1": {
-    "hsa_activity": false,
-    "ira_deduction_claimed": "0",
-    "state_refund_taxable": "0",
-    "student_loan_interest_paid": "0"
-  },
-  "schedule_a": {
-    "charitable": [
-      {
-        "amount": "5000",
-        "class": "cash60"
-      }
-    ],
-    "medical": "2000",
-    "mortgage_all_used_to_buy_build_improve": true,
-    "mortgage_interest_1098": "22000",
-    "salt_personal_property": "0",
-    "salt_prior_year_balance_paid": "0",
-    "salt_real_estate": "6000",
-    "salt_sales_tax_amount": "0",
-    "salt_state_estimated_payments": "12000",
-    "salt_use_sales_tax": null
-  },
-  "schedule_c": {
-    "accounting_method": "cash",
-    "business_description": "Bitcoin mining",
-    "expenses": "1000",
-    "naics_code": "518210",
-    "owner": "taxpayer"
-  },
-  "w2s": [
-    {
-      "box10_dependent_care": "0",
-      "box12": [],
-      "box17_state_tax_withheld": "9000",
-      "box19_local_tax": "0",
-      "box1_wages": "200000",
-      "box2_fed_withheld": "40000",
-      "box3_ss_wages": "168600",
-      "box4_ss_withheld": "10453.20",
-      "box5_medicare_wages": "200000",
-      "box6_medicare_withheld": "2900",
-      "box7_ss_tips": "0",
-      "box8_allocated_tips": "0",
-      "employer": "ACME",
-      "owner": "taxpayer"
-    },
-    {
-      "box10_dependent_care": "0",
-      "box12": [],
-      "box17_state_tax_withheld": "4000",
-      "box19_local_tax": "0",
-      "box1_wages": "90000",
-      "box2_fed_withheld": "15000",
-      "box3_ss_wages": "90000",
-      "box4_ss_withheld": "5580",
-      "box5_medicare_wages": "90000",
-      "box6_medicare_withheld": "1305",
-      "box7_ss_tips": "0",
-      "box8_allocated_tips": "0",
-      "employer": "GLOBEX",
-      "owner": "spouse"
-    }
-  ]
+  "foreign_accounts": false,
+  "foreign_trust": false,
+  "foreign_country_names": "",
+  "dual_status_alien": false
 }
 ```
 

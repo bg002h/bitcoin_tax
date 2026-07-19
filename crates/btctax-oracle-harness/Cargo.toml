@@ -20,9 +20,9 @@ btctax-core = { path = "../btctax-core", version = "0.7.0" }
 btctax-forms = { path = "../btctax-forms", version = "0.7.0" }
 # The stdin/stdout JSON contract. This is the dependency that must NOT reach the published library —
 # it lives here, in the unpublished harness, and nowhere downstream.
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 
 [dev-dependencies]
 # The smoke test reads the baked golden matrix (for the household's inputs + its baked OTS AGI) and
 # parses the harness's own JSON stdout.
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }

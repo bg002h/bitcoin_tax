@@ -205,6 +205,36 @@ fn income_import_then_show_redacts_pii_at_the_vault_level() {
         "cleartext SSN must never appear: {shown}"
     );
     assert!(shown.contains("82000")); // non-PII figures are shown verbatim
+                                      // M-1: with `serde_json` `preserve_order` enabled workspace-wide, `income show` renders fields in
+                                      // the ReturnInputs STRUCT's declared order (`filing_status` first), NOT alphabetically (where
+                                      // `capital_loss_carryforward_in` would precede it). A distinguishing pair: struct order puts
+                                      // filing_status first, alphabetical order puts capital_loss_carryforward_in first.
+    let fs = shown
+        .find("\"filing_status\"")
+        .expect("filing_status present");
+    let cl = shown
+        .find("\"capital_loss_carryforward_in\"")
+        .expect("capital_loss_carryforward_in present");
+    assert!(
+        fs < cl,
+        "preserve_order: curated struct order (filing_status before capital_loss_carryforward_in), \
+         not alphabetical:\n{shown}"
+    );
+}
+
+/// M-1: the workspace-wide `serde_json` `preserve_order` flip is ACTIVE — a `Value` serializes in
+/// INSERTION order, not sorted alphabetically. (Without the feature, this would emit
+/// `{"apple":2,"zebra":1}`.) Removing the feature from the serde_json deps reds this.
+#[test]
+fn serde_json_preserve_order_is_enabled_workspace_wide() {
+    let mut m = serde_json::Map::new();
+    m.insert("zebra".to_string(), serde_json::json!(1));
+    m.insert("apple".to_string(), serde_json::json!(2));
+    let s = serde_json::to_string(&serde_json::Value::Object(m)).unwrap();
+    assert_eq!(
+        s, r#"{"zebra":1,"apple":2}"#,
+        "preserve_order must keep insertion order, not sort keys"
+    );
 }
 
 /// [P2 review M-r3-4 / N3] `resolve_all_screened` maps a corrupt side-table row to a per-year refusal
