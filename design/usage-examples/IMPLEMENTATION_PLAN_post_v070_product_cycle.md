@@ -1,9 +1,11 @@
 # IMPLEMENTATION PLAN — post-v0.7.0 product cycle
 
-**Status:** **r2** — folds the r1 Fable review (0C/3I `reviews/plan-post-v070-fable-review-r1.md`): I-1
-(shadow helper is UX-P4-3-ONLY; UX-P4-1 reads live pseudo-ON state), I-2 (pseudo-divergent equivalence KAT),
-I-3 (the delegated ad-hoc-trio sign decision) + the two Minors (exit-0 KATs, N-R1 two scan copies). Against
-the GREEN SPEC. Re-review pending before phase-1 code.
+**Status:** **GREEN** (r3). r1 (0C/3I) → r2 (0C/1I: one stale cross-reference) → r3 fixes that one sentence.
+The r2 re-review verified I-1/I-2/I-3 + both Minors genuinely folded against source; r2's sole residual
+(the "Sequencing" note still said the helper precedes 1b) is corrected here, aligning all three sites — a
+pure consistency fix (grep-verified across preamble/step-1b/sequencing), no new content, so green without a
+further full review round (workflow §8 ceremony-scales-down). Reviews: `reviews/plan-post-v070-fable-review-r1.md`,
+`…-r2.md`. Against the GREEN SPEC.
 **Spec of record:** `SPEC_post_v070_product_cycle.md` (GREEN). **Branch:** `feat/post-v070-product-cycle`.
 
 This plan translates the spec's §7 phasing into concrete TDD steps. It does not re-argue design — the spec
@@ -161,7 +163,9 @@ pseudo-OFF `applied`. A mutation that wrongly reads the stored pseudo cfg (via `
 ## Sequencing / dependency notes
 
 - 1a (`events list`) precedes 1c (its refuse hint names the verb) — spec `[G-I8]`.
-- The 1a shared shadow-projection helper precedes 1b's predicate and 1c's validator.
+- The shared shadow-projection helper (phase-1 prerequisite) precedes **1c's validator ONLY — NOT 1b**:
+  UX-P4-1's predicate reads the live pseudo-ON projected state, so a pseudo-OFF view would silence the
+  banner and reinstate the [T-C1]/[T-C2] Criticals `[PLAN-I1]`.
 - Phases 2–7 are independent of each other; order is by value. If time-boxed, land phase 1 fully (the
   Important/correctness items), then descend.
 - Each phase pushes only after its own Fable review is green; `main` is untouched until phase 8 (merge is
