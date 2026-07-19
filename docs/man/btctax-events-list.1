@@ -1,0 +1,15 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-events-list 1  btctax "btctax manual"
+.SH NAME
+list \- List every DECIDABLE event — the imported rows a `reconcile` verb can act on (transfer\-in, transfer\-out, unclassified, import\-conflict, income) — with its reference, kind, date, amount, and decision status. Read\-only; writes nothing
+.SH SYNOPSIS
+\fBlist\fR [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+List every DECIDABLE event — the imported rows a `reconcile` verb can act on (transfer\-in, transfer\-out, unclassified, import\-conflict, income) — with its reference, kind, date, amount, and decision status. Read\-only; writes nothing.
+.PP
+Copy a listed `ref` verbatim into a reconcile verb, e.g. `btctax reconcile classify\-inbound\-self\-transfer <ref>` or `btctax reconcile reclassify\-outflow <ref> \-\-as\-kind sell \-\-amount <usd>`. A row shown as `decided: decision|N` already carries a decision; to change it, `btctax reconcile void decision|N` first, then re\-decide.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)

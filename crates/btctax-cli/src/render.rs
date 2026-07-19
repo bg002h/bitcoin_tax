@@ -3551,6 +3551,66 @@ mod form8283_csv_tests {
     }
 }
 
+/// UX-P4-11: one row of `events list` — a decidable event and its decision status. The `reff` is the
+/// canonical event reference (`EventId::canonical()`) a `reconcile` verb accepts verbatim.
+pub struct EventRow {
+    /// The canonical event ref (pasteable into a reconcile verb). Named `reff` — `ref` is reserved.
+    pub reff: String,
+    /// A stable human kind tag: transfer-in | transfer-out | unclassified | import-conflict | income.
+    pub kind: &'static str,
+    /// The event's tax-timezone calendar date.
+    pub date: TaxDate,
+    /// Principal sats, when the payload carries a structured amount (None for unclassified/conflict).
+    pub sat: Option<btctax_core::Sat>,
+    /// USD value at the event-date close (stored FMV for income; else priced), when resolvable.
+    pub usd: Option<Usd>,
+    /// `Some("decision|N")` when a live (non-voided) decision targets this event; `None` = still
+    /// decidable (a pseudo-defaulted event is decidable — its default is never persisted).
+    pub decision_ref: Option<String>,
+}
+
+/// Format sats as a BTC amount with 8 decimals (integer math — no float).
+fn fmt_btc(sat: btctax_core::Sat) -> String {
+    let whole = sat / 100_000_000;
+    let frac = (sat % 100_000_000).unsigned_abs();
+    format!("{whole}.{frac:08}")
+}
+
+/// UX-P4-11: render the `events list` table. Ref-first per row (so it is trivially copyable), then
+/// kind @ date, amount, and the bracketed decision status. Read-only display.
+pub fn render_events_list(rows: &[EventRow]) -> String {
+    let mut out = String::new();
+    if rows.is_empty() {
+        let _ = writeln!(out, "No decidable events.");
+        return out;
+    }
+    let decided = rows.iter().filter(|r| r.decision_ref.is_some()).count();
+    let _ = writeln!(
+        out,
+        "Decidable events — {} ({} decided, {} open):",
+        rows.len(),
+        decided,
+        rows.len() - decided
+    );
+    for r in rows {
+        let amount = match (r.sat, r.usd) {
+            (Some(s), Some(u)) => format!("{} BTC (~${})", fmt_btc(s), fmt_money(u)),
+            (Some(s), None) => format!("{} BTC", fmt_btc(s)),
+            (None, _) => "—".to_string(),
+        };
+        let status = match &r.decision_ref {
+            Some(d) => format!("[decided: {d}]"),
+            None => "[decidable]".to_string(),
+        };
+        let _ = writeln!(
+            out,
+            "  {}  {} @ {}  {}  {}",
+            r.reff, r.kind, r.date, amount, status
+        );
+    }
+    out
+}
+
 #[cfg(test)]
 mod advisory_wrap_tests {
     use super::*;
@@ -3576,6 +3636,65 @@ mod advisory_wrap_tests {
             out.lines()
                 .any(|l| l.starts_with("    ") && !l.trim().is_empty()),
             "a 300-char advisory must wrap onto continuation lines, got:\n{out}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod events_list_render_tests {
+    use super::*;
+    use time::macros::date;
+
+    fn row(reff: &str, kind: &'static str, decision_ref: Option<&str>) -> EventRow {
+        EventRow {
+            reff: reff.to_owned(),
+            kind,
+            date: date!(2025 - 03 - 01),
+            sat: Some(5_000_000),
+            usd: Some(rust_decimal_macros::dec!(4271.78)),
+            decision_ref: decision_ref.map(str::to_owned),
+        }
+    }
+
+    /// Empty → an explicit "none" line (never a blank rendering).
+    #[test]
+    fn empty_renders_a_none_line() {
+        assert_eq!(render_events_list(&[]), "No decidable events.\n");
+    }
+
+    /// Each row is ref-FIRST (trivially copyable), carries kind/date/BTC(+USD), and a bracketed status:
+    /// `[decidable]` when open, `[decided: decision|N]` when a decision targets it.
+    #[test]
+    fn rows_are_ref_first_with_bracketed_status() {
+        let out = render_events_list(&[
+            row("import|coinbase|in|cb-recv", "transfer-in", None),
+            row(
+                "import|coinbase|out|cb-send",
+                "transfer-out",
+                Some("decision|1"),
+            ),
+        ]);
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(
+            lines[0].contains("2 (1 decided, 1 open)"),
+            "header: {}",
+            lines[0]
+        );
+        // ref is the first whitespace token on each row (the paste contract).
+        assert_eq!(
+            lines[1].split_whitespace().next(),
+            Some("import|coinbase|in|cb-recv")
+        );
+        assert!(lines[1].contains("[decidable]"), "open row: {}", lines[1]);
+        assert!(
+            lines[1].contains("0.05000000 BTC") && lines[1].contains("4271.78"),
+            "amount: {}",
+            lines[1]
+        );
+        assert!(
+            lines[2].contains("[decided: decision|1]"),
+            "decided row: {}",
+            lines[2]
         );
     }
 }

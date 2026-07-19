@@ -2,8 +2,8 @@
 //! non-interactive use; otherwise a secure prompt), calls one library command, renders, and sets the
 //! exit code (non-zero on FR9 hard blockers / on any CliError). NO business logic lives here.
 use btctax_cli::cli::{
-    Cli, Command, FeeArg, IncomeCmd, MethodArg, Optimize, OutKindArg, Pseudo, PseudoKindArg,
-    Reconcile, SelfTransferActionArg, WhatIf,
+    Cli, Command, Events, FeeArg, IncomeCmd, MethodArg, Optimize, OutKindArg, Pseudo,
+    PseudoKindArg, Reconcile, SelfTransferActionArg, WhatIf,
 };
 use btctax_cli::{cmd, eventref, render, CliError};
 use btctax_core::{
@@ -115,6 +115,10 @@ fn run() -> Result<ExitCode, CliError> {
             if report.has_hard_blockers() {
                 return Ok(ExitCode::from(1));
             }
+        }
+        Command::Events(Events::List) => {
+            let rows = cmd::inspect::events_list(vault, &passphrase(false)?)?;
+            print!("{}", render::render_events_list(&rows));
         }
         Command::Report {
             year,

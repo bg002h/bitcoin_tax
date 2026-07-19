@@ -36,6 +36,7 @@ Commands:
   import           Import one or more export files (auto-groups Swan)
   verify           FR9 integrity check (non-zero exit on hard blockers)
   report           Show holdings + realized disposals/removals/income. With --tax-year: standalone TaxResult
+  events           Discover the reconciliation event references (`ref`s) you pass to the `reconcile` verbs
   limitations      Print the LIMITATIONS & supported-forms document: what a v1 full return covers, the credits it omits conservatively (your tax is overstated, never understated), what it refuses outright, and what it cannot represent. Read this before you file
   reconcile        Emit a reconciliation decision event
   config           Show or set projection config (TP8 fee treatment / pre-2025 lot method / forward method)

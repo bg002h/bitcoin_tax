@@ -71,6 +71,9 @@ pub enum Command {
         #[arg(long, default_value_t = false)]
         force: bool,
     },
+    /// Discover the reconciliation event references (`ref`s) you pass to the `reconcile` verbs.
+    #[command(subcommand)]
+    Events(Events),
     /// Print the LIMITATIONS & supported-forms document: what a v1 full return covers, the credits it
     /// omits conservatively (your tax is overstated, never understated), what it refuses outright, and
     /// what it cannot represent. Read this before you file.
@@ -490,6 +493,21 @@ pub enum WhatIf {
         #[arg(long)]
         carryforward_in: Option<String>,
     },
+}
+
+/// `events` subcommand tree (UX-P4-11): read-only ref discoverability.
+#[derive(Subcommand)]
+pub enum Events {
+    /// List every DECIDABLE event — the imported rows a `reconcile` verb can act on
+    /// (transfer-in, transfer-out, unclassified, import-conflict, income) — with its
+    /// reference, kind, date, amount, and decision status. Read-only; writes nothing.
+    ///
+    /// Copy a listed `ref` verbatim into a reconcile verb, e.g.
+    /// `btctax reconcile classify-inbound-self-transfer <ref>` or
+    /// `btctax reconcile reclassify-outflow <ref> --as-kind sell --amount <usd>`.
+    /// A row shown as `decided: decision|N` already carries a decision; to change it,
+    /// `btctax reconcile void decision|N` first, then re-decide.
+    List,
 }
 
 #[derive(Subcommand)]
