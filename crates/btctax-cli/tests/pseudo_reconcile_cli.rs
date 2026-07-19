@@ -744,11 +744,19 @@ fn pseudo_disclosure_helper_text_is_channel_correct() {
     assert!(PD::Synthetic.contributed() && PD::Placeholder.contributed());
 
     // Synthetic: points at the [PSEUDO] rows + the verify advisory (both live on that channel).
-    assert!(PD::Synthetic.banner().contains("pseudo-reconciled (deliberately-synthetic) entries"));
-    assert!(PD::Synthetic.banner().contains("[PseudoReconcileActive] advisory"));
+    assert!(PD::Synthetic
+        .banner()
+        .contains("pseudo-reconciled (deliberately-synthetic) entries"));
+    assert!(PD::Synthetic
+        .banner()
+        .contains("[PseudoReconcileActive] advisory"));
     // Placeholder: names the $0-placeholder remedy (set-profile / import / turn-off) with the REAL flag …
-    assert!(PD::Placeholder.banner().contains("synthetic $0 placeholder profile"));
-    assert!(PD::Placeholder.banner().contains("btctax tax-profile --year <Y>"));
+    assert!(PD::Placeholder
+        .banner()
+        .contains("synthetic $0 placeholder profile"));
+    assert!(PD::Placeholder
+        .banner()
+        .contains("btctax tax-profile --year <Y>"));
     // … and does NOT falsely claim [PSEUDO] rows or the count-gated advisory exist on this channel.
     assert!(!PD::Placeholder.banner().contains("[PSEUDO]' rows"));
     assert!(!PD::Placeholder.banner().contains("[PseudoReconcileActive]"));

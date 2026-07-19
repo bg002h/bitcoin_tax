@@ -101,7 +101,9 @@ pub fn parse_pos_sell_arg(s: &str, field: &str) -> Result<btctax_core::Sat, CliE
     let sat = btctax_core::whatif::parse_sell_arg(s)
         .map_err(|e| CliError::Usage(format!("bad {field} {s:?}: {e}")))?;
     if sat <= 0 {
-        return Err(CliError::Usage(format!("{field} must be > 0 sat (got {sat})")));
+        return Err(CliError::Usage(format!(
+            "{field} must be > 0 sat (got {sat})"
+        )));
     }
     Ok(sat)
 }
@@ -203,8 +205,14 @@ mod tests {
         assert!(parse_nonneg_usd_arg("-5000.00", "--basis").is_err());
         assert!(parse_nonneg_usd_arg("-0.01", "--fmv").is_err());
         assert_eq!(parse_nonneg_usd_arg("0", "--basis").unwrap(), dec!(0));
-        assert_eq!(parse_nonneg_usd_arg("42000.50", "--fmv").unwrap(), dec!(42000.50));
-        let err = format!("{:?}", parse_nonneg_usd_arg("-1", "--donor-basis").unwrap_err());
+        assert_eq!(
+            parse_nonneg_usd_arg("42000.50", "--fmv").unwrap(),
+            dec!(42000.50)
+        );
+        let err = format!(
+            "{:?}",
+            parse_nonneg_usd_arg("-1", "--donor-basis").unwrap_err()
+        );
         assert!(
             err.contains("--donor-basis") && err.contains(">= 0"),
             "the refusal must name the flag + the rule: {err}"

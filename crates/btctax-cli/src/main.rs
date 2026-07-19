@@ -152,7 +152,12 @@ fn run() -> Result<ExitCode, CliError> {
                 } = cmd::tax::report_tax_year(vault, &pp, y, ptg_raw)?;
                 print!(
                     "{}",
-                    render::render_tax_outcome(y, &outcome, advisory.as_deref(), pseudo_contributed)
+                    render::render_tax_outcome(
+                        y,
+                        &outcome,
+                        advisory.as_deref(),
+                        pseudo_contributed
+                    )
                 );
                 print!("{}", render::render_schedule_d(y, &sched_d, &outcome));
                 // §6 DUAL REPORT: the absolute filed 1040 return, side-by-side with the crypto delta above
@@ -1041,15 +1046,13 @@ fn dispatch_reconcile(
                 .transpose()?;
             cmd::reconcile::reclassify_outflow(vault, &pp, &out, class, principal, fee, donee, now)?
         }
-        Reconcile::SetFmv { event, fmv } => {
-            cmd::reconcile::set_fmv(
-                vault,
-                &pp,
-                &event,
-                eventref::parse_nonneg_usd_arg(&fmv, "--fmv")?,
-                now,
-            )?
-        }
+        Reconcile::SetFmv { event, fmv } => cmd::reconcile::set_fmv(
+            vault,
+            &pp,
+            &event,
+            eventref::parse_nonneg_usd_arg(&fmv, "--fmv")?,
+            now,
+        )?,
         Reconcile::Void { target } => cmd::reconcile::void(vault, &pp, &target, now)?,
         Reconcile::ClassifyRaw {
             target,
