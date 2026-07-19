@@ -1233,7 +1233,9 @@ fn open_tax_inputs_commit_modal(app: &mut EditorApp) {
 ///   `dirty`).
 /// - `Refused(refusal)` → jump focus to the attributed anchor (`focus_refusal`, SPEC §7); set
 ///   `form.error`/status to the refusal detail; close the modal but keep the flow open to fix it.
-/// - `NoTables` → status "year {year} has no full-return tables (2024 only)"; close the modal.
+/// - `NoTables` → the year's full-return tables are absent (v1: TY2024). The working return is NOT
+///   lost: flush it to the persistent DRAFT and set a status that says the inputs are SAVED and can be
+///   finalized once the year's tables publish (UX-P4-12(i)); close the modal, keep the flow open.
 /// - `Err(e)` → surface the save error; close the modal.
 fn commit_tax_inputs(app: &mut EditorApp) {
     use btctax_cli::input_form_store::CommitOutcome;
@@ -1305,10 +1307,28 @@ fn commit_tax_inputs(app: &mut EditorApp) {
             Some(msg)
         }
         Ok(CommitOutcome::NoTables) => {
+            // UX-P4-12(i): finalizing a full return needs the year's tables (v1: TY2024) — but the year
+            // is NOT lost. Persist the working return to the DRAFT (invisible to the engine, so a
+            // table-less year is never poisoned — the I-11 guard on the committed row is KEPT), then
+            // tell the filer their work is SAVED and can be finalized once the year's tables publish.
+            // (User decision 2026-07-19: people author returns all year, before the IRS publishes that
+            // year's tables — the draft is how that work is stored; only finalize waits for tables.)
+            let saved =
+                edit::persist::form_save_draft(app.session.as_mut().unwrap(), year, &ri).is_ok();
             if let Some(form) = app.tax_inputs_form.as_mut() {
                 form.modal = None;
             }
-            Some(format!("year {year} has no full-return tables (2024 only)"))
+            Some(if saved {
+                format!(
+                    "{year} has no full-return tables yet (v1 supports TY2024) — your inputs are SAVED \
+                     as a draft and persist across sessions; finalize once {year}'s tables are published."
+                )
+            } else {
+                format!(
+                    "{year} has no full-return tables yet (v1 supports TY2024); finalize once they are \
+                     published. (Saving the draft failed — retry to keep your inputs.)"
+                )
+            })
         }
         Err(e) => {
             if let Some(form) = app.tax_inputs_form.as_mut() {
@@ -10240,20 +10260,29 @@ mod tests {
             .as_ref()
             .expect("NoTables keeps the flow open");
         assert!(form.modal.is_none(), "NoTables closes the modal");
+        let status = app.status.as_deref().unwrap_or_default().to_string();
         assert!(
-            app.status
-                .as_deref()
-                .unwrap_or_default()
-                .contains("no full-return tables"),
-            "status names the 2024-only gate: {:?}",
-            app.status
+            status.contains("no full-return tables"),
+            "status names the tables gap: {status:?}"
+        );
+        // UX-P4-12(i): the refusal must REASSURE — the inputs are saved as a draft, finalizable later —
+        // not read as a bare rejection of the filer's all-year work.
+        assert!(
+            status.contains("SAVED as") && status.contains("draft") && status.contains("finalize"),
+            "status must say the inputs are saved as a draft + finalizable once tables publish: {status:?}"
         );
 
         drop(app);
         let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
         assert!(
             !btctax_cli::return_inputs::exists(sess.conn(), 2099).unwrap(),
-            "NoTables writes no committed row"
+            "NoTables writes no committed row (the I-11 poisoning guard is KEPT)"
+        );
+        // UX-P4-12(i): but the working return IS persisted as a DRAFT (invisible to the engine) — so
+        // "your inputs are saved" is truthful and the filer can resume/finalize next session.
+        assert!(
+            btctax_cli::input_form_store::draft_exists(sess.conn(), 2099).unwrap(),
+            "the table-less-year working return is saved as a persistent draft"
         );
     }
 

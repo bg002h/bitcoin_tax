@@ -2272,17 +2272,22 @@ will red until it does).
   (config human labels — TreatmentC/Hifo gone; the `non_compliant` tag is a documented vocabulary,
   left as-is). (f) DONE `981f45d` (surface-neutral void remedy). (g) DONE `981f45d` (points at the
   reclassify-outflow prior step). (h) DONE `f80426c` (dropped "q: swallowed").
-  **(i) DEFERRED — needs a design decision (re-enter spec/plan, §D).** The spec/plan choice "align to
-  the CLI's store-then-gate-at-export" CONFLICTS with the reviewed **I-11 guard** in
-  `input_form_store::commit` (`crates/btctax-cli/src/input_form_store.rs:287-294`), which deliberately
-  writes NOTHING for a table-less year because a committed row there "poisons it at resolve." The CLI
-  (`cmd/tax.rs:101` `return_inputs::set`, no gate) accepts that poisoning and relies on the export
-  gate; the TUI's I-11 does not. Aligning the TUI = REMOVING/relaxing a reviewed poisoning-guard — a
-  material design change, not a mechanical papercut, so it must NOT be smuggled in autonomously.
-  Owning phase: a dedicated brainstorm/spec pass (decide: relax I-11 to match the CLI, OR keep I-11
-  and instead surface the "no full-return tables (2024 only)" status EARLY at form-open — the safe,
-  export-behavior-preserving alternative — OR make the CLI import gate like the TUI). Any choice must
-  honor `[T-U-P4-12]` (must not change which year's packet is exported).
+  **(i) DONE (2026-07-19, user-decided — supersedes the SPEC §4(i) "align to CLI" default).** Investigation
+  revealed the papercut's premise was incomplete: the TUI editor ALREADY stores an in-progress return
+  for a table-less year — the `return_inputs_draft` side-table (INVISIBLE to `resolve.rs`, so no
+  poisoning) is autosaved as the filer edits, flushed on quit, and reloaded next session (draft SHADOWS
+  committed, §6.1). The reviewed **I-11 guard** blocks only the FINALIZE/commit (the engine-visible
+  committed row), which is conceptually correct (you can't finalize/compute a return in a year whose
+  tables don't exist). USER DECISION (see [[full-return-store-before-tables-policy]]): people author
+  returns all year before tables publish, so authoring must not be blocked — and it isn't (drafts).
+  The real defect was the blunt commit-refusal message reading as REJECTION. FIX (kept the I-11 guard,
+  no poisoning risk): `commit_tax_inputs`'s `NoTables` arm now PERSISTS the working return to the draft
+  and shows a reassuring status — "{year} has no full-return tables yet (v1 supports TY2024) — your
+  inputs are SAVED as a draft and persist across sessions; finalize once {year}'s tables are published."
+  Committed `tax_inputs_commit_non_2024_...` KAT pins: committed row still absent (guard KEPT) + draft
+  PERSISTS + status reassures; both halves mutation-proven. The SPEC §4(i) "default: align to the CLI"
+  is superseded by this user decision (keep the guard; fix the message) — `[T-U-P4-12]` trivially held
+  (no packet-export path touched).
 
   **r1 review fold (2026-07-19, `reviews/ux-p4-12-impl-fable-review-r1.md`, 0C/4I → folded):**
   - **I-1** (b `--fmv` help falsely claimed a daily-close fallback — omitting `--fmv` actually fires a

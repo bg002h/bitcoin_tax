@@ -285,6 +285,11 @@ as decidable.
 - **UX-P4-12(b–i)** — message/affordance papercuts (see FOLLOWUPS). (i) whichever default-year gate
   placement is chosen must **not change which year's packet is exported** `[T-U-P4-12]`. Pick it in the PLAN
   `[G-N3]` (default: align to the CLI's store-then-gate-at-export). KAT per output-changing sub-item.
+  **SUPERSEDED (2026-07-19, user decision):** the "align to the CLI" default is NOT taken — investigation
+  found the TUI already stores an in-progress return for a table-less year as a persistent DRAFT
+  (invisible to the engine, no poisoning); only FINALIZE is gated (correctly — the reviewed I-11 guard is
+  KEPT). (i) is resolved as a message/UX fix: the commit-refusal now persists the draft + reassures the
+  filer ("saved as a draft; finalize once tables publish"). See the FOLLOWUPS UX-P4-12(i) DONE block.
 - **M-1** — enable `serde_json` `preserve_order` for `income show`. Workspace-global flip `[G-M5, T-M4]`:
   audit — verified safe (fingerprints hand-rolled bytes `persistence.rs:25-55`; typed serde field-ordered;
   `Value` sites = `income show` display + input-form coverage tooling + update-prices API parse;
