@@ -222,9 +222,83 @@ fn income_import_then_show_redacts_pii_at_the_vault_level() {
     );
 }
 
+/// M-1 blast-radius tripwire (spec §4/§9.6, "pin that enumeration in the KAT"): the workspace-global
+/// `preserve_order` flip is SAFE only because every PRODUCTION `serde_json::Value` construction is
+/// DISPLAYED or PARSED, never serialized into PERSISTED/FINGERPRINTED bytes — those use typed serde
+/// (`serde_json::to_string(&<typed>)`, field-ordered regardless) and hand-rolled Decimal bytes. This
+/// scans `crates/*/src` (skipping `#[cfg(test)]`) for the Value-CONSTRUCTION-for-output patterns
+/// (`serde_json::to_value` / `json!`) and asserts they match the audited enumeration; a NEW site FAILS
+/// here, forcing an audit of whether it feeds stored bytes.
+///
+/// Known-safe sites: `btctax-cli/src/cmd/tax.rs` (`income show` display JSON, never parsed; M8);
+/// `btctax-oracle-harness/src/main.rs` (`json!` → stdout, displayed/re-parsed, never stored/hashed);
+/// `btctax-input-form/src/spec/coverage.rs` (coverage tooling, `#[cfg(test)]`-gated at its `mod`).
+/// (update-prices is parse-only — `from_str` — and constructs no output `Value`; btctax-forms/xtask
+/// are serde_json-free.)
+#[test]
+fn m1_preserve_order_value_output_sites_are_enumerated() {
+    use std::path::{Path, PathBuf};
+    // Files that construct a `Value` for OUTPUT and are audited display/parse-only (not stored/hashed).
+    const ALLOWED: &[&str] = &[
+        "btctax-cli/src/cmd/tax.rs",
+        "btctax-oracle-harness/src/main.rs",
+        "btctax-input-form/src/spec/coverage.rs",
+    ];
+    let crates_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let mut hits: Vec<String> = Vec::new();
+    fn walk(dir: &Path, hits: &mut Vec<String>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if p.file_name().is_some_and(|n| n == "src")
+                    || p.join("src").exists()
+                    || is_src_descendant(&p)
+                {
+                    walk(&p, hits);
+                }
+                continue;
+            }
+            if p.extension().is_none_or(|x| x != "rs") || !is_src_descendant(&p) {
+                continue;
+            }
+            let text = std::fs::read_to_string(&p).unwrap();
+            let mut in_test = false;
+            for (i, line) in text.lines().enumerate() {
+                if line.trim_start().starts_with("#[cfg(test)]") {
+                    in_test = true;
+                }
+                if in_test {
+                    continue;
+                }
+                let code = line.split("//").next().unwrap_or("");
+                if code.contains("serde_json::to_value") || code.contains("json!(") {
+                    hits.push(format!("{}:{}", p.display(), i + 1));
+                }
+            }
+        }
+    }
+    fn is_src_descendant(p: &Path) -> bool {
+        p.components().any(|c| c.as_os_str() == "src")
+    }
+    walk(&crates_dir, &mut hits);
+    for hit in &hits {
+        let norm = hit.replace('\\', "/");
+        assert!(
+            ALLOWED.iter().any(|a| norm.contains(a)),
+            "NEW production serde_json::Value output site: {hit}\n\
+             The M-1 preserve_order flip is safe ONLY for display/parse-only Value sites. Audit whether \
+             this one feeds PERSISTED or FINGERPRINTED bytes (it must NOT — those are typed serde / \
+             hand-rolled). If display/parse-only, add its file to ALLOWED + update the spec §9.6 enumeration."
+        );
+    }
+}
+
 /// M-1: the workspace-wide `serde_json` `preserve_order` flip is ACTIVE — a `Value` serializes in
 /// INSERTION order, not sorted alphabetically. (Without the feature, this would emit
-/// `{"apple":2,"zebra":1}`.) Removing the feature from the serde_json deps reds this.
+/// `{"apple":2,"zebra":1}`.) Removing the feature from ALL serde_json deps reds this.
 #[test]
 fn serde_json_preserve_order_is_enabled_workspace_wide() {
     let mut m = serde_json::Map::new();

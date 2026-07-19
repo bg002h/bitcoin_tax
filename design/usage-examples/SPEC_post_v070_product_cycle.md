@@ -368,5 +368,11 @@ already-guarded `main.rs:887/890/895/898/905/908`. EIN/TIN verbatim `main.rs:109
 `vault.rs:263-271`, `write_csv_exports` `render.rs:586/593/595/605-618`; precedent
 `AdapterError::Io{path,source}` `adapters/lib.rs:23-28`/`read.rs:63-66`.
 
-**§9.6 M-1.** fingerprints hand-rolled bytes `persistence.rs:25-55`; `Value` sites = `income show` + input-form
-coverage tooling + update-prices API parse; `btctax-forms` serde_json-free.
+**§9.6 M-1.** fingerprints hand-rolled bytes `persistence.rs:25-55`; persisted event bytes = TYPED serde
+(`persistence.rs:164-165` `to_string(&WalletId)`/`to_string(&EventPayload)`, field-ordered regardless).
+`Value`-OUTPUT sites (the true blast radius, corrected per impl-review r1 — the original list omitted the
+oracle-harness) = **income-show display** (`btctax-cli/src/cmd/tax.rs`, never parsed) + **oracle-harness
+`json!`→stdout** (`btctax-oracle-harness/src/main.rs`, displayed/re-parsed, never stored/hashed) +
+**input-form coverage tooling** (`btctax-input-form/src/spec/coverage.rs`, `#[cfg(test)]`-gated);
+update-prices is PARSE-only (`from_str`, constructs no output `Value`); `btctax-forms`/`xtask`
+serde_json-free. Pinned by the `m1_preserve_order_value_output_sites_are_enumerated` scan tripwire.
