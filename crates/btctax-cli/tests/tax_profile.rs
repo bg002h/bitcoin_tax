@@ -226,9 +226,12 @@ fn income_import_then_show_redacts_pii_at_the_vault_level() {
 /// `preserve_order` flip is SAFE only because every PRODUCTION `serde_json::Value` construction is
 /// DISPLAYED or PARSED, never serialized into PERSISTED/FINGERPRINTED bytes — those use typed serde
 /// (`serde_json::to_string(&<typed>)`, field-ordered regardless) and hand-rolled Decimal bytes. This
-/// scans `crates/*/src` (skipping `#[cfg(test)]`) for the Value-CONSTRUCTION-for-output patterns
-/// (`serde_json::to_value` / `json!`) and asserts they match the audited enumeration; a NEW site FAILS
-/// here, forcing an audit of whether it feeds stored bytes.
+/// scans EVERY line of `crates/*/src` for the Value-CONSTRUCTION-for-output patterns
+/// (`serde_json::to_value` / `json!` / `use serde_json::to_value`) and asserts each hit's file is in
+/// the audited enumeration; a NEW site FAILS here, forcing an audit of whether it feeds stored bytes.
+/// (No `#[cfg(test)]` skip — a sticky file-level flag would blind production code after a mid-file
+/// `mod tests`; scanning all lines is correct AND stricter, and no Value-output site is outside the
+/// list today, test or otherwise.)
 ///
 /// Known-safe sites: `btctax-cli/src/cmd/tax.rs` (`income show` display JSON, never parsed; M8);
 /// `btctax-oracle-harness/src/main.rs` (`json!` → stdout, displayed/re-parsed, never stored/hashed);
@@ -264,17 +267,18 @@ fn m1_preserve_order_value_output_sites_are_enumerated() {
             if p.extension().is_none_or(|x| x != "rs") || !is_src_descendant(&p) {
                 continue;
             }
+            // NOTE (r2-I1): we do NOT skip `#[cfg(test)]` regions — a file-level "in_test" flag is
+            // sticky and blinds production code that follows a mid-file `mod tests` (e.g. render.rs's
+            // `render_events_list` after its test mods). No production OR test Value-output site is
+            // outside ALLOWED today, so scanning every line is both correct and stricter — a future
+            // Value-output site anywhere (incl. a test mod in a non-allowed file) reds loudly.
             let text = std::fs::read_to_string(&p).unwrap();
-            let mut in_test = false;
             for (i, line) in text.lines().enumerate() {
-                if line.trim_start().starts_with("#[cfg(test)]") {
-                    in_test = true;
-                }
-                if in_test {
-                    continue;
-                }
                 let code = line.split("//").next().unwrap_or("");
-                if code.contains("serde_json::to_value") || code.contains("json!(") {
+                if code.contains("serde_json::to_value")
+                    || code.contains("json!(")
+                    || code.contains("use serde_json::to_value")
+                {
                     hits.push(format!("{}:{}", p.display(), i + 1));
                 }
             }
