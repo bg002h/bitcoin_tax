@@ -2397,3 +2397,20 @@ wrapper no longer double-adds a contradictory hint). Nits (non-gating, filed):
   (duplicate-LotSelection) also raise DecisionConflict at verify with user-typed refs but are OUTSIDE
   §3.2's six-fn choke list — correctly left unwired; a later cycle can decide whether they deserve the
   same record-time treatment.
+
+**UX-P4-3 (#14) impl review r2 residue (2026-07-19, `reviews/ux-p4-3-impl-fable-review-r2.md`):**
+r2 verified I2 fully closed. The one Important (r2-I1: the 4th mandated KAT — `classify-raw` on an
+accept-governed target refused `[R3-I1]` — absent, with a proven one-writer-short survivor) was FOLDED:
+the accept-governed KAT now also asserts classify-raw on the accept-governed target is REFUSED
+("already classified", nothing appended), pinning pass-1c's duplicate check against the SupersedeImport
+`applied` writer (resolve.rs:513). M1 folded (the classify-raw duplicate hint softened to "if the prior
+decision is revocable, void it to re-decide" — only that arm can blame a non-revocable SupersedeImport
+prior). N2 folded (the already-voided refusal phrasing aligned to the `CONFLICT_HINT` wording). Filed:
+- **N1 (Nit, owning phase = docs/#21)** — `cli.rs` reclassify-income help + `btctax-reconcile-reclassify-income.1`
+  still describe the record-then-surface-at-verify flow ("fires a Hard DecisionConflict blocker (decision
+  excluded)… to re-decide, void the prior decision first"); true of the engine, but the CLI verb now
+  refuses at record time. Not in §3.2's mandate; fold into the cycle's doc pass.
+- **N3 (Nit, later cycle)** — the non-§3.2 DecisionConflict emitters keep bare details (TransferLink
+  arms, the R0-I1 overlap "void the conflicting decision", LotSelection, allocation arms) — outside
+  §3.2's six-verb subject (consistent with r1 N3); a later cycle can sweep their hints + record-time
+  wiring together (see the events-list M1 already filed under UX-P4-11).

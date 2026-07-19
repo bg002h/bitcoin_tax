@@ -282,8 +282,8 @@ pub fn void(
             EventPayload::VoidDecisionEvent(v) if v.target_event_id == target_event_id)
     }) {
         return Err(CliError::Usage(format!(
-            "cannot record this decision — {} is already voided. Run `btctax events list` to see event \
-             refs + their decision status.",
+            "cannot record this decision — {} is already voided — see `btctax events list` for event \
+             refs + decision status",
             target_event_id.canonical()
         )));
     }

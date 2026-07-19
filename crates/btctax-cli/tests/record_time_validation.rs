@@ -424,6 +424,24 @@ fn accept_governed_supersede_import_income_is_effective_income() {
         err.to_string().contains("non-TransferIn"),
         "classify-inbound on an accept-governed Income target is wrong-type: {err}"
     );
+
+    // [R3-I1] classify-raw on it → REFUSED "already classified": the accept-governed `applied` entry
+    // (SupersedeImport, resolve.rs:513) is a first-wins occupant, so a classify-raw is a duplicate.
+    // This pins pass-1c's duplicate check AGAINST THE SupersedeImport WRITER — a one-writer-short
+    // pass-1c would silently ACCEPT it and OVERWRITE the user's permanent accept with no verify blocker.
+    let json = serde_json::to_string(&income_payload()).unwrap();
+    let err = cmd::reconcile::classify_raw(&vault, &pp(), &in_ref, &json, now()).unwrap_err();
+    assert!(
+        err.to_string()
+            .to_lowercase()
+            .contains("already classified"),
+        "classify-raw on an accept-governed target must be refused: {err}"
+    );
+    assert_eq!(
+        count(&vault, |p| matches!(p, EventPayload::ClassifyRaw(_))),
+        0,
+        "the refused classify-raw must not be appended (it would overwrite the accept)"
+    );
 }
 
 /// [R4-M3] …and voiding that `ClassifyRaw` reverts the effective type back to TransferIn, so the same

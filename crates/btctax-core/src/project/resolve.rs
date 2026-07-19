@@ -565,7 +565,7 @@ pub fn resolve(
                     event: Some(d.id.clone()),
                     detail: format!(
                         "duplicate classify-raw: {} is already classified \
-                         — {CONFLICT_HINT}; void the prior decision to re-decide",
+                         — {CONFLICT_HINT}; if the prior decision is revocable, void it to re-decide",
                         cr.target.canonical()
                     ),
                 });
