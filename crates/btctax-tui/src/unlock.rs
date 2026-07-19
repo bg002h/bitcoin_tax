@@ -650,6 +650,36 @@ mod tests {
         }
     }
 
+    /// UX-P4-1 surface 3 invariant [T2-M2 / C2]: the ENUMERATION invariant that licenses the viewer Tax
+    /// tab's count-only pseudo signal. With pseudo mode ON but NO stored profile for the year,
+    /// `resolve_all_screened` does NOT enumerate the year (it enumerates only `tax_profile ∪ return_inputs`
+    /// years), so the CLI's $0 placeholder profile NEVER reaches `snap.profiles` — the viewer renders NOT
+    /// COMPUTABLE, never a fictional number. A regression that made the viewer resolve a bare year on demand
+    /// (CLI placeholder parity) would put an unflagged $0 number here (count==0 ⇒ no banner — the C2 channel
+    /// reborn); the `NOT COMPUTABLE` assert below REDS that.
+    #[test]
+    fn build_snapshot_pseudo_on_unprofiled_year_stays_not_computable_in_the_viewer() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("enum-invariant-pass".into());
+        btctax_cli::cmd::init::run(&vault, &pp, &dir.path().join("k.asc")).unwrap();
+        btctax_cli::cmd::reconcile::pseudo_set_mode(&vault, &pp, true).unwrap();
+
+        let session = btctax_cli::Session::open(&vault, &pp).expect("open must succeed");
+        let (snapshot, _year) = build_snapshot(&session).expect("build_snapshot must succeed");
+        // 2025 has no stored profile ⇒ never enumerated ⇒ NOT COMPUTABLE (never a $0 placeholder number).
+        let content = crate::tabs::tax::render_tax_content(&snapshot, 2025);
+        assert!(
+            content.contains("NOT COMPUTABLE"),
+            "a pseudo-on year with no stored profile must render NOT COMPUTABLE in the viewer, not a \
+             placeholder number:\n{content}"
+        );
+        assert!(
+            !content.contains("[PSEUDO]"),
+            "the placeholder channel must NOT surface any [PSEUDO] figure in the viewer:\n{content}"
+        );
+    }
+
     // ── Wrapper-consistency KAT: attempt_open and open_session agree ─────────
     //
     // `attempt_open` is a thin wrapper over `open_session`; their outcome variants must

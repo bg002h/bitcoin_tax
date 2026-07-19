@@ -141,11 +141,34 @@ fn pseudo_mode_injects_placeholder_profile_clearing_tax_profile_missing() {
     // Turn pseudo mode ON, still NO profile ⇒ the placeholder is injected ⇒ Computed.
     cmd::reconcile::pseudo_set_mode(&vault, &pp(), true).unwrap();
     let TaxYearReport {
-        outcome: out_on, ..
+        outcome: out_on,
+        pseudo_contributed,
+        advisory,
+        ..
     } = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
     assert!(
         matches!(out_on, TaxOutcome::Computed(_)),
         "pseudo mode must inject a placeholder profile so the year computes: {out_on:?}"
+    );
+    // UX-P4-1 KAT (b) [G-I1]: this IS the PLACEHOLDER channel (count==0, no stored profile) — the
+    // OR-predicate's second disjunct. Deleting the `PseudoPlaceholder` arm in report_tax_year (or reading a
+    // pseudo-OFF view) must RED here: the figure would render clean while riding a fictional $0 profile.
+    assert_eq!(
+        pseudo_contributed,
+        render::PseudoDisclosure::Placeholder,
+        "pseudo-on + count==0 + no stored profile is the Placeholder channel"
+    );
+    let rendered =
+        render::render_tax_outcome(2025, &out_on, advisory.as_deref(), pseudo_contributed);
+    assert!(
+        rendered.contains("estimated on a synthetic $0 placeholder profile"),
+        "the placeholder-variant banner must lead the render:\n{rendered}"
+    );
+    assert!(
+        rendered
+            .lines()
+            .any(|l| l.contains("TOTAL federal tax attributable") && l.contains("[PSEUDO]")),
+        "the placeholder-channel TOTAL must also carry the [PSEUDO] suffix:\n{rendered}"
     );
 }
 
