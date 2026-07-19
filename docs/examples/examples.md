@@ -335,8 +335,9 @@ Tax profile for 2025 saved.
 ```console
 $ btctax --vault v.pgp config --set-forward-method fifo --effective-from 2025-01-01
 Recorded standing order (MethodElection) decision|1
-fee_treatment: TreatmentC
-pre2025_method: Hifo (attested: false)
+fee_treatment: non-taxable, basis carries (TP8 c)
+pre2025_method: HIFO (attested: false)
+forward_method: FIFO (standing order effective 2025-01-01, in force)
 ```
 
 `optimize run` is read-only — it proposes, files nothing:
