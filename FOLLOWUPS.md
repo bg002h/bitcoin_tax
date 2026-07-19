@@ -2095,20 +2095,27 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   is completed on the paper form, not in the vault. J2 now frames this in prose; the tool's message should
   distinguish "your inputs are incomplete" (actionable) from "additional property rows need manual
   completion" (inherent). Fix: pre-v0.7.0 wording cleanup.
-- **UX-P1-7 (Minor — docs coverage gap; from SPEC §15 r2 (a)).** Owning phase: **post-v0.7.0 docs**. The
-  manual inbound-income pricing verb `reconcile classify-inbound-income <ref> --kind … --fmv …` is
-  demonstrated **nowhere** in the worked examples (J4 uses auto-resolved River income; the missing-FMV auto
-  path needs an unsupported year — §12 S4). Add a future journey that classifies an unclassified income
-  Receive with a manual `--fmv`. Not a P1 blocker; recorded so the gap isn't silent.
-- **UX-P1-8 (Minor — docs coverage gap; from SPEC §15 r2 (d)).** Owning phase: **post-v0.7.0 docs**. The
-  matched-pair `reconcile match-self-transfers` workflow is undemonstrated (J3 uses the single-exchange
-  `classify-inbound-self-transfer` path). Add a future two-exchange journey. Not a P1 blocker.
-- **UX-P1-10 (Minor — docs coverage gap; from SPEC §15 (e), whole-branch review I-1).** Owning phase:
-  **post-v0.7.0 docs**. `reconcile select-lots` — the demonstrand of §5's J2 "lot-selection" row — is
-  undemonstrated ANYWHERE in the golden (the SOFT coverage report lists it among the 29 undemonstrated
-  leaves). J2 donates its full 2-BTC balance, so `select-lots` is degenerate there (no lot choice left);
-  J5's `optimize accept` is the branch's actual lot-selection demonstration. Add a future journey that
-  makes a genuine per-disposal `select-lots` identification. Not a release blocker.
+- **✅ UX-P1-7 DONE (`f043872`, #20 Phase 6; Fable-reviewed GREEN 0C/0I).** New journey **J7** classifies an
+  unknown-basis 2024 Coinbase Receive as staking income via `reconcile classify-inbound-income <ref> --kind
+  staking --fmv 3300.00` (the single-event path has no auto-valuation — the review reproduced that omitting
+  `--fmv` leaves a Hard FmvMissing blocker even for a bundled-dataset date), verify clears, report shows the
+  crypto ordinary income. Was: (Minor — docs coverage gap; SPEC §15 r2 (a)).
+- **✅ UX-P1-8 DONE (`f043872`, #20 Phase 6; Fable-reviewed GREEN).** New journey **J8** matches a
+  cross-exchange self-transfer: a River Withdrawal (out) + Coinbase Receive (in), no-arg `match-self-transfers`
+  PREVIEW → confirm `--in/--out` → RELOCATE (basis + HP carry), ledger BALANCED. Was: (Minor — docs coverage
+  gap; SPEC §15 r2 (d)).
+- **✅ UX-P1-10 DONE (`f043872`, #20 Phase 6; Fable-reviewed GREEN).** New journey **J9** makes a genuine
+  per-disposal `reconcile select-lots` — two lots + a 0.50 sale (< holdings) so the default splits both lots;
+  select-lots identifies the whole 0.50 against the cheap LT `lot-a`, recorded as contemporaneous per-disposal
+  compliance. Was: (Minor — docs coverage gap; SPEC §15 (e), whole-branch review I-1).
+  - **↳ N1 (Nit, non-gating; Phase-6 Fable review) — J9's before/after lot split is never DISPLAYED.** Owning
+    phase: **future docs cycle**. The refs live in `snapshot/disposals.csv` the reader opens; the generator by
+    design only emits btctax commands, so showing a file excerpt needs new machinery. Prose is truthful and
+    points at the file. If a future mechanism ever shows file excerpts, J9 is the first customer.
+  - **↳ N3 (Nit, non-gating; Phase-6 Fable review; PRE-EXISTING, outside #20's diff) — FmvMissing hint
+    wording.** Owning phase: **future legibility cycle**. The `[FmvMissing]` hint "no local price for this date
+    — run `btctax-update-prices`" fires even when the BUNDLED dataset has a close for that date (the hint refers
+    only to the cache). Reword to distinguish "no bundled/cached price" from "single-event path needs `--fmv`".
 - **P1 plan-conformance drift record (P1 review M-6; no code change).** Recorded so the plan's Task shapes
   aren't silently contradicted: (a) the three gate tests live as `#[cfg(test)]` unit tests in
   `crates/xtask/src/examples.rs`, not the plan's `crates/xtask/tests/examples_golden.rs` — xtask is bin-only
@@ -2143,14 +2150,16 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   file has production code after a test module. Hardening: scan only the test module's brace-delimited span,
   or reset `in_test` at the module's close. Recorded so the assumption is explicit.
 
-- **UX-P2-1 (Minor — P2 review M-2; future-drift, not a current bug).** Owning phase: **P4 residue**. The
-  SOFT subcommand-coverage matcher `is_demonstrated` (`examples.rs`) is an in-order SUBSEQUENCE match, so a
-  single-token leaf can be satisfied by a longer path that contains it — top-level `["import"]` matches the
-  line `$ btctax income import …`. Today all 17 covered leaves are independently, genuinely demonstrated
-  (P2 review verified line-by-line), so the count is honest; the risk is future drift (drop bare `import`,
-  keep `income import`, and the report still claims top-level `import` covered). SOFT/non-blocking. Fix:
-  require `path[0]` to be the first non-`-`-prefixed subcommand token (skipping the `--vault v.pgp` global
-  flag + value). Deferred — the fix is non-trivial and the current report is correct.
+- **✅ UX-P2-1 DONE (`81d220b`, #20 Phase 6; Fable-reviewed GREEN 0C/0I).** `is_demonstrated` now skips
+  leading global options (a `-`-prefixed flag + the value of value-taking `--vault`) and ANCHORS `path[0]`
+  to the first subcommand token (exact match, not a free subsequence); sub-verbs still subsequence-match
+  after the anchor. A subcommand named only as an argument (`reconcile void import`) or a flag value
+  (`v.pgp`) no longer over-reports. 3 platform-agnostic `matcher_tests` pin it (the two over-report cases
+  RED on the old matcher — the review re-killed that mutant). **↳ N4 residue (Nit, non-gating):** the
+  post-anchor tail is still a free subsequence, so a hypothetical `reconcile void <arg-named-like-a-sibling
+  -sub-verb>` line could over-report a sibling `reconcile <x>` leaf; no such collision exists in the current
+  golden (review checked all 47 leaves) and the code comment states the tail behavior. Owning phase: future
+  docs cycle if a collision ever arises. Was: (Minor — P2 review M-2; future-drift).
 - **P2 review nits (recorded).** **N-2 (owning phase P3):** `ci.yml`'s drift gate diffs only
   `docs/examples/examples.md`; SPEC §9 writes `git diff … docs/examples docs/examples-tui` — equivalent
   today (no TUI golden yet), but **P3 must widen the CI diff to `docs/examples-tui/` when the TUI golden
