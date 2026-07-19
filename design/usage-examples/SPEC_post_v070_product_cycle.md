@@ -1,9 +1,11 @@
 # SPEC — post-v0.7.0 product cycle (usage-examples bug-hunt burndown)
 
-**Status:** **r4** — folds the r3 consolidated re-review (0C/1I
-`reviews/spec-post-v070-fable-review-r3.md`) on top of r1+r2. r3 confirmed the spine sound and all r2
-blockers resolved; r4 closes the one third-order Important (R3-I1) + its minors. Re-review pending. Fold
-provenance tagged inline: `[G-*]`/`[T-*]` = r1; `[G2-*]`/`[T2-*]` = r2; `[R3-*]` = r3 findings.
+**Status:** **GREEN** (r4) — the r4 re-review is **0C / 0I**
+(`reviews/spec-post-v070-fable-review-r4.md`); the r4 Minors/Nits (R4-M1 banner flag spelling, R4-M3
+non-revocable-void KAT arm, the two writer-count wording nits) are folded inline here — the reviewer
+pre-approved them as one-clause fixes, no re-review needed. Review arc: r1 (0C/8I general, 2C/5I
+tax-correctness) → r2 (0C/4I, 0C/1I) → r3 (0C/1I) → r4 (0C/0I). Fold provenance tagged inline:
+`[G-*]`/`[T-*]` = r1; `[G2-*]`/`[T2-*]` = r2; `[R3-*]`/`[R4-*]` = r3/r4 findings.
 **Branch:** `feat/post-v070-product-cycle`.
 
 ## 0. Why this cycle exists
@@ -65,7 +67,7 @@ the TUI Tax tab, and the `--write-carryover` *persistence* path.
 - **Placeholder channel** (`PseudoPlaceholder`, `count == 0`, no `[PSEUDO]` rows and no verify advisory to
   point at): `⚠ [PSEUDO] These figures are estimated on a synthetic $0 placeholder profile — no tax profile`
   `or full-return inputs are stored for this year. This is an ESTIMATE, not filing-ready. Set a tax profile`
-  `('btctax tax-profile <year> …' — setting is the default; '--show' inverts), import inputs`
+  `('btctax tax-profile --year <Y> …' — setting is the default; '--show' inverts), import inputs`
   `('btctax income import'), or turn pseudo mode off ('btctax reconcile pseudo off').`
   Each clause is true for its channel; the remedy pointers are live for the channel that fires them.
 - **Channel precedence `[R3-min]`:** the two channels are **mutually exclusive** — the synthetic channel
@@ -131,9 +133,11 @@ time (`reconcile.rs:1162-1188`).
   `[T2-I1, R3-I1]`.** Do NOT hand-rebuild a subset of `applied` — reuse the resolver's pass-1c/1d/1e
   construction in a **shadow projection** with `pseudo_reconcile` forced off, so the view is
   *definitionally* whatever the resolver sees (`applied.get(target).unwrap_or(&raw.payload)`,
-  `resolve.rs:728-730/789-791`; ManualFmv pass 1d `:575-577`). `applied` has **three real writers**, all
-  before pseudo Phase A: accepted-conflict `SupersedeImport` payloads (`resolve.rs:513`), live real
-  `ClassifyRaw` rewrites (pass 1c `:543-560`), and (for existence) the raw event log. An
+  `resolve.rs:728-730/789-791`; ManualFmv pass 1d `:575-577`). Under pseudo-OFF `applied` has **two real
+  writers**, both before pseudo Phase A: accepted-conflict `SupersedeImport` payloads (`resolve.rs:513`) and
+  live real `ClassifyRaw` rewrites (pass 1c `:543-560`); for a target neither rewrote, existence/type fall
+  back to the raw event log via `.unwrap_or(&raw.payload)`. (The `:522` accept-first and `:949` Phase-A
+  inserts are both `pseudo_on`-gated → absent under pseudo-OFF.) An
   enumerate-the-writers view is fragile — the r3 draft named only `ClassifyRaw` and was one channel short of
   `SupersedeImport` `[R3-I1]`, which (i) false-refused `set-fmv`/`reclassify-income` on an accept-governed
   Income target the resolver honors, and (ii) missed refusing `classify-raw` on an accept-governed target
@@ -169,7 +173,9 @@ accept-governed `SupersedeImport` cases `[R3-I1]`), **`set-fmv <bad-ref>`** `[G2
 {valid new decision, void-then-re-decide, first real classify over a pseudo default, second `set-fmv` on a
 valid target, **`set-fmv`/`reclassify-income` on a target whose Income type comes from a live real
 `ClassifyRaw`** `[T2-I1]` **or from an accepted `SupersedeImport` conflict** `[R3-I1]`; the same target with
-that decision voided → refused wrong-type}. Mutation reds.
+that decision voided → refused wrong-type (voided arm is the **`ClassifyRaw` antecedent only** — a
+`SupersedeImport` is non-revocable, `resolve.rs:423-440`, so it has no voided counterpart) `[R4-M3]`}.
+Mutation reds.
 
 ### 3.3 UX-P4-4 + UX-P1-3 — value validation at record time (Important / Minor)
 
