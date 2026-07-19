@@ -62,9 +62,12 @@ not new machinery** — with the four constraints below made explicit (r1 review
 "J-parity" requires the SAME corpora the examples journeys use, but those are private
 `const`s (`J1_CSV … J9_CSV`) inside the bin-only `xtask` crate
 (`crates/xtask/src/examples.rs:203-291`), which neither TUI crate can depend on. So the
-first deliverable is a refactor: **hoist the nine CRLF corpus consts into a shared
-`testonly` module in `btctax-cli`** (which `xtask`, `btctax-tui`, and `btctax-tui-edit`
-all already depend on; the `btctax-forms` testonly-exposure precedent applies). `xtask`
+first deliverable is a refactor: **hoist the eleven CRLF corpus consts** (J6 and J8 each
+split into two per-exchange corpora) **plus the `J6_FULLRETURN_TOML` fixture** (which
+moves SAME-crate, retiring the cross-crate `include_str!` examples.rs flags as its M-5
+exception) **into a shared `testonly` module in `btctax-cli`** (which `xtask`,
+`btctax-tui`, and `btctax-tui-edit` all already depend on; the `btctax-forms`
+`pub mod testonly` precedent applies — a plain pub module). `xtask`
 then imports them from there (its golden must stay byte-identical), and the walkthrough
 drivers import the same consts — so parity is *structural* (one source of truth), not a
 copy. A driver writes the corpus to a tempdir and runs the real adapter ingest via the
@@ -160,9 +163,10 @@ list is refined during the plan; this is the intended shape.)
 
 ## 8. Deliverables
 
-1. **Refactor (§4.1)**: hoist the nine corpus consts + a per-journey fixture (corpus +
-   ordered decision list) into `btctax-cli::testonly`; repoint xtask's examples
-   generator at it (its golden must stay byte-identical).
+1. **Refactor (§4.1)**: hoist the eleven corpus consts + the `J6_FULLRETURN_TOML`
+   fixture + a per-journey fixture (corpus + ordered decision list) into
+   `btctax-cli::testonly`; repoint xtask's examples generator at it (its golden must
+   stay byte-identical).
 2. **Editor emit test** (`btctax-tui-edit`) capturing that crate's frames per journey,
    and **viewer emit test** (`btctax-tui`) capturing viewer-chrome frames by replaying
    the same fixture's decisions via btctax-cli (§4.2). Both pin clock + vault path +
@@ -174,7 +178,9 @@ list is refined during the plan; this is the intended shape.)
    prose, tui-wrap.awk on frames) → `btctax-tui-walkthrough.pdf`.
 6. CI wiring (per-crate golden gates in `test`; PDF-render proof in the advisory
    `examples` job).
-7. Captions + narrated preambles authored in the manifest (the tutorial voice).
+7. Captions + narrated preambles authored as **Rust literals in the xtask assembler**
+   (the source of truth, like examples.md's prose in examples.rs); the committed
+   `walkthrough.md` manifest is the byte-gated *emission*, not hand-edited.
 
 ## 9. Build staging (per owner's autonomous plan)
 
