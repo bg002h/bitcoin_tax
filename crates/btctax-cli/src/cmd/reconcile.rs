@@ -147,9 +147,22 @@ pub fn reclassify_outflow(
     let transfer_out_event = parse_event_id(out_ref)?;
     let mut session = Session::open(vault_path, pp)?;
 
+    let payload = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+        transfer_out_event: transfer_out_event.clone(),
+        as_: class,
+        principal_proceeds_or_fmv: principal,
+        fee_usd,
+        donee,
+    });
+    // UX-P4-3 × UX-P4-4(d) (whole-branch review Minor #1): run the record-time conflict guard FIRST, so a
+    // refused decision returns HERE and the "recording it as entered" `--amount` advisory below is never
+    // printed for a decision that is then refused (the contradictory message pair). The advisory is
+    // reached only once the decision is accepted.
+    guard_decision_conflict(&session, &payload, now)?;
+
     // UX-P4-4(d): a price-based sanity check on `--amount` (the USD FMV / proceeds). Emit the advisory
-    // (if any) to stderr — non-fatal; the amount is recorded as entered either way. Resolve the
-    // outflow's sats + date from its TransferOut event and the market value from the event-date close.
+    // (if any) to stderr — non-fatal; the amount is recorded as entered. Resolve the outflow's sats +
+    // date from its TransferOut event and the market value from the event-date close.
     {
         let events = load_all(session.conn())?;
         if let Some(ev) = events.iter().find(|e| e.id == transfer_out_event) {
@@ -164,14 +177,6 @@ pub fn reclassify_outflow(
         }
     }
 
-    let payload = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
-        transfer_out_event,
-        as_: class,
-        principal_proceeds_or_fmv: principal,
-        fee_usd,
-        donee,
-    });
-    guard_decision_conflict(&session, &payload, now)?;
     append_and_save(&mut session, payload, now)
 }
 

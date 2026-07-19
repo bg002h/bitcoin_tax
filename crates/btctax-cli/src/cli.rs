@@ -651,11 +651,10 @@ pub enum Reconcile {
     /// SE-completion Chunk C: flip `business` (and optionally `kind`) on an already-imported Income event.
     ///
     /// Corrects the `business: false` hard-code that River (and other adapters) emit at ingest time,
-    /// enabling SE-tax treatment for professional miners / stakers. The engine validates that the target
-    /// event exists and is an Income event — a missing or non-Income target fires a Hard DecisionConflict
-    /// blocker (decision excluded). For TransferIn rows use `classify-inbound-income` instead.
-    ///
-    /// DecisionConflict is Hard — to re-decide, `void` the prior decision first, then re-issue.
+    /// enabling SE-tax treatment for professional miners / stakers. The target is validated at RECORD
+    /// TIME (UX-P4-3): a missing or non-Income event ref is REFUSED — nothing is recorded — and a
+    /// duplicate re-decide is refused too; `void` the prior decision first, then re-issue. For TransferIn
+    /// rows use `classify-inbound-income` instead.
     ReclassifyIncome {
         /// The Income event reference (from `report` or `income_recognized.csv` 'event' column).
         income_event: String,

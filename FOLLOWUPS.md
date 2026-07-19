@@ -2186,6 +2186,29 @@ release's man-page regen); everything else is owned by the **first post-v0.7.0 p
 (UX-P4-1 first among them). Any fix that changes captured output must regen the goldens (the gate
 will red until it does).
 
+**✅ BURNDOWN — Phase 8 close (2026-07-19): ALL of UX-P4-1 … UX-P4-12 below are DONE + Fable-reviewed
+to 0C/0I on `feat/post-v070-product-cycle`**, across the cycle's phases (verbose per-item text
+retained below for the record):
+- UX-P4-1 (pseudo banner on `report --tax-year`) + UX-P4-4 (record-time value guards: negative basis /
+  acquired>receipt / non-TIN EIN) — correctness cluster #14 (`cmd/tax.rs:251`; `b2a9f7d`/`13e1704`).
+- UX-P4-2 (self-transfer modal long-term-default string) — folded (`draw_edit.rs:931-933`, comment
+  records "was backwards").
+- UX-P4-3 (record-time decision validation + unified conflict hints) — #14 (`990f786`, r1→r2).
+- UX-P4-11 (`btctax events list`) — #18 (`f338e6b`).
+- UX-P4-7/8/9 (legible payloads / path+hint IO errors / insufficient-balance) — #15 (`fa4badc`,
+  `66b4bad`, `34e9945`; r1→r2).
+- UX-P4-6/10 (holdings pending line / `report --tax-year` exit code) — #16 (`20b2a58`, `027a89d`;
+  r1→r2).
+- UX-P4-5 + UX-P4-12(b–i) (`--forms`-ignored warn + the grouped wording/affordance papercuts, incl.
+  (i) the table-less-year reassurance) — #17 (`8544621` + `981f45d`/`10331e9`/`fd60f1d`/`f80426c` +
+  `bd73968`→`c2597ad`; r1→r3).
+- UX-P4-12(a) (`--kind` valid-values list) — DONE: the runtime error enumerates them
+  (`eventref.rs:161` "bad income kind {s:?} — expected one of: mining, staking, interest, airdrop,
+  reward"), fixed in the pre-v0.7.0 wording cycle; the help lists them too (`cli.rs:533`).
+- M-1 / UX-P1-7/8/10 / UX-P2-1 / UX-P3-2 / N-R1 — #19/#20/#21 (already marked ✅ in their own entries).
+Residue (non-gating, parked with later owners): the UX-P1-* wording Nits, UX-P1-9, and the pathless-io /
+legibility-polish Nits below.
+
 - **UX-P4-1 (Important — pseudo-mode loud-flag gap).** Owning phase: **post-v0.7.0 product cycle
   (top priority)**. With `reconcile pseudo on` and a synthetic default contributing, `report
   --tax-year` prints a clean, authoritative-looking tax summary with **no `[PSEUDO]` marker or
@@ -2449,6 +2472,11 @@ rows are in ledger/import order, not by date). Filed (non-gating):
   in an already-blocked vault; Step-1c's record-time `void` refusal (refuse non-revocable/already-voided)
   makes it unreachable going forward. Burn down with 1c: mirror the resolver's revocability rule OR derive
   decided-status from resolver outputs.
+  **✅ DISPOSITION (Phase 8 whole-branch review, 2026-07-19):** the DEFECT is discharged by
+  unreachability — all three void surfaces (the guarded CLI `void`, `voidable_decisions`-filtered
+  bulk-void, `is_revocable_payload`-filtered TUI) refuse a non-revocable target, so only a vault written
+  by a ≤v0.7.0 binary could exhibit it (and there are no users yet). The cosmetic `events_list` mirror is
+  RE-OWNED (non-gating) to the events-list-M3 / legibility sweep, clearing the passed-1c ownership.
 - **M3 (Minor)** — the Income `amount` column shows the imported `usd_fmv` (else close price), ignoring a
   live `ManualFmv` override (the resolver's effective FMV, `resolve.rs:287-289`). So a just-`set-fmv`'d
   income row displays the pre-correction figure next to its `[decided: <ManualFmv>]`. The `~$` marker is
