@@ -2284,6 +2284,26 @@ will red until it does).
   export-behavior-preserving alternative — OR make the CLI import gate like the TUI). Any choice must
   honor `[T-U-P4-12]` (must not change which year's packet is exported).
 
+  **r1 review fold (2026-07-19, `reviews/ux-p4-12-impl-fable-review-r1.md`, 0C/4I → folded):**
+  - **I-1** (b `--fmv` help falsely claimed a daily-close fallback — omitting `--fmv` actually fires a
+    Hard FmvMissing blocker; there is NO auto-valuation on the single-event path): help corrected +
+    man regenerated; `help_units.rs` now pins the real behavior + the absence of the false claim.
+  - **I-2** (c a per-account SCOPED standing order was read back as vault-wide): `ElectionLine` gained
+    the `wallet` scope; config now states the vault-wide method explicitly (global order else FIFO)
+    then attributes scoped orders to their account; new scoped-order KAT.
+  - **I-3** (g suggested invalid syntax): now `reclassify-outflow <out-ref> --as-kind donate --amount
+    <usd> …`; KAT pins `--as-kind donate`.
+  - **I-4** (UX-P4-5 warning emission unpinned): new process-level KAT spawns the binary and asserts
+    the stderr warning fires with `--forms` / not without, and the written packet FILE-SET is identical.
+  - **M-1** (e missed `Hifo` sites): fixed the `main.rs` scoped-set confirmation (`attests {:?}`→label)
+    + the bulk-void MethodElection summary (`{:?}`→label); both pinned. The "(e) Hifo gone" claim is
+    now accurate vault-wide.
+  - **M-2** (f second advisory unpinned): the defaulted-acquired advisory's surface-neutral wording is
+    now asserted too.
+  - **NEW (Nit, later polish — from I-1's repro):** the `FmvMissing` blocker's remedy hint ("no local
+    price for this date — run `btctax-update-prices`", `price_cache.rs:14` via `render.rs`) is attached
+    even when a local price DOES exist for the date; misleading. Sweep with the legibility residue.
+
 ## Pre-v0.7.0 product-wording cleanup — FOLDED (2026-07-18, user-authorized before the release)
 
 A deliberate, reviewed product-fix cycle (distinct from the fence-barred docs work; the user chose "fix

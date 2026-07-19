@@ -509,6 +509,8 @@ pub struct ElectionLine {
     pub recorded: TaxDate,
     pub effective_from: TaxDate,
     pub method: LotMethod,
+    /// `None` = a VAULT-WIDE (global) election; `Some(w)` = scoped to that exchange account only.
+    pub wallet: Option<WalletId>,
     /// "in force" | "voided" | "backdated/ignored"
     pub note: &'static str,
 }
@@ -563,6 +565,7 @@ pub fn method_election_lines(
                 recorded,
                 effective_from: me.effective_from,
                 method: me.method,
+                wallet: me.wallet.clone(),
                 note,
             }
         })

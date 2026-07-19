@@ -23,6 +23,16 @@ fn classify_inbound_income_help_has_fmv_units_and_kind_values() {
         h.contains("mining") && h.contains("staking"),
         "--kind must list its valid values:\n{h}"
     );
+    // fold r1-I1: the help must NOT claim a daily-close fallback that this single-event command does
+    // not have (omitting --fmv fires a Hard FMV-missing blocker); it should point at the remedy.
+    assert!(
+        h.contains("FMV missing") || h.contains("bulk-classify-inbound-income"),
+        "--fmv help must state the real no-fmv behavior, not a phantom auto-valuation:\n{h}"
+    );
+    assert!(
+        !h.contains("bundled daily close for the receipt date is used"),
+        "the false daily-close fallback claim must be gone:\n{h}"
+    );
 }
 
 #[test]

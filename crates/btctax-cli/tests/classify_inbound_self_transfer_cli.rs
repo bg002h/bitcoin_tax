@@ -130,6 +130,24 @@ fn classify_inbound_self_transfer_defaults_creates_lot_and_fires_advisory() {
         "no bare 'press v' TUI keybind leaks into CLI advisory text: {}",
         zero_basis.detail
     );
+    // UX-P4-12(f) [fold r1-M2]: the SECOND advisory (defaulted long-term acquisition) is reworded the
+    // same way — omitting --acquired defaults the holding period to long-term and fires it.
+    let defaulted_acq = state
+        .blockers
+        .iter()
+        .find(|b| b.kind == BlockerKind::SelfTransferInboundDefaultedAcquired)
+        .expect("omitting --acquired fires the defaulted-acquisition advisory");
+    assert!(
+        defaulted_acq.detail.contains("btctax reconcile void")
+            && defaulted_acq.detail.contains("in the TUI editor"),
+        "the defaulted-acquired remedy is surface-neutral too: {}",
+        defaulted_acq.detail
+    );
+    assert!(
+        !defaulted_acq.detail.contains("press 'v', or run btctax"),
+        "no bare 'press v' in the defaulted-acquired advisory: {}",
+        defaulted_acq.detail
+    );
 }
 
 /// `--basis` + `--acquired`: real cost + old date → basis set, NO advisory, and the supplied

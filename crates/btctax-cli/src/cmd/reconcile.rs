@@ -1326,8 +1326,8 @@ pub fn set_donation_details(
             return Err(CliError::Usage(format!(
                 "not a donation / not found: {event_ref:?} does not match any removal in the \
                  projected ledger. If this is an outflow you intend to donate, first classify it: \
-                 `reconcile reclassify-outflow <out-ref> donate …` — once classified, its ref \
-                 appears in removals.csv (the 'event' column)."
+                 `reconcile reclassify-outflow <out-ref> --as-kind donate --amount <usd> …` — once \
+                 classified, its ref appears in removals.csv (the 'event' column)."
             )));
         }
         Some(r) if r.kind != RemovalKind::Donation => {
@@ -1621,11 +1621,12 @@ mod tests {
             msg.contains("not a donation") || msg.contains("not found"),
             "error must mention 'not a donation' or 'not found': {msg}"
         );
-        // UX-P4-12(g): the message names the MISSING PRIOR STEP (reclassify-outflow … donate), not just
-        // a circular pointer at removals.csv (where an unclassified outflow does not yet appear).
+        // UX-P4-12(g): the message names the MISSING PRIOR STEP with VALID syntax (reclassify-outflow
+        // --as-kind donate …), not just a circular pointer at removals.csv (where an unclassified
+        // outflow does not yet appear).
         assert!(
-            msg.contains("reclassify-outflow"),
-            "error must point at the missing prior step: {msg}"
+            msg.contains("reclassify-outflow") && msg.contains("--as-kind donate"),
+            "error must point at the missing prior step with valid syntax: {msg}"
         );
     }
 

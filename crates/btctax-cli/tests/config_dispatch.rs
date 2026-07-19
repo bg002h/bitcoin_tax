@@ -264,8 +264,8 @@ fn config_shows_forward_method_standing_order() {
     let (code, fresh) = run_config(&vault, &[]);
     assert_eq!(code, 0, "config show exits 0; stdout: {fresh}");
     assert!(
-        fresh.contains("forward_method: FIFO (default"),
-        "a fresh vault names the FIFO default:\n{fresh}"
+        fresh.contains("forward_method: FIFO (vault-wide default)"),
+        "a fresh vault names the FIFO vault-wide default:\n{fresh}"
     );
 
     // Record a forward-looking standing order (far-future effective date ⇒ deterministically in force).
@@ -282,16 +282,77 @@ fn config_shows_forward_method_standing_order() {
 
     let (_c, after) = run_config(&vault, &[]);
     assert!(
-        after.contains("forward_method: HIFO"),
-        "config echoes the recorded forward method:\n{after}"
+        after.contains("forward_method: HIFO (vault-wide standing order, effective 2099-01-01)"),
+        "config echoes the recorded vault-wide forward method:\n{after}"
     );
     assert!(
-        after.contains("in force"),
-        "…with its in-force status:\n{after}"
+        !after.contains("forward_method: FIFO (vault-wide default)"),
+        "the vault-wide default line is replaced once a GLOBAL order is in force:\n{after}"
+    );
+}
+
+/// UX-P4-12(c) fold r1-I2: a PER-ACCOUNT (scoped) standing order governs ONLY its exchange account —
+/// config must NOT report it as the vault-wide `forward_method:`, must still name the FIFO vault-wide
+/// default, and must attribute the scoped order to its account.
+#[test]
+fn config_scoped_forward_method_is_not_reported_vault_wide() {
+    use btctax_core::event::{Acquire, BasisSource, EventPayload};
+    use btctax_core::identity::{Source, SourceRef, WalletId};
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::{EventId, LedgerEvent};
+    use time::macros::datetime;
+    use time::UtcOffset;
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    let acquire = LedgerEvent {
+        id: EventId::import(Source::Coinbase, SourceRef::new("cb-buy-scope")),
+        utc_timestamp: datetime!(2025-02-01 00:00:00 UTC),
+        original_tz: UtcOffset::UTC,
+        wallet: Some(WalletId::Exchange {
+            provider: "coinbase".into(),
+            account: "main".into(),
+        }),
+        payload: EventPayload::Acquire(Acquire {
+            sat: 100_000,
+            usd_cost: rust_decimal_macros::dec!(50.00),
+            fee_usd: rust_decimal_macros::dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    };
+    {
+        let mut s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        append_import_batch(s.conn(), &[acquire]).unwrap();
+        s.save().unwrap();
+    }
+
+    let (sc, set_out) = run_config(
+        &vault,
+        &[
+            "--set-forward-method",
+            "hifo",
+            "--exchange",
+            "exchange:coinbase:main",
+            "--effective-from",
+            "2099-01-01",
+        ],
+    );
+    assert_eq!(sc, 0, "scoped election on a known account must exit 0");
+    // fold r1-M1(a): the scoped-set confirmation uses the human method label, not raw Debug `Hifo`.
+    assert!(
+        set_out.contains("attests HIFO") && !set_out.contains("Hifo"),
+        "the set confirmation reads human, not Debug:\n{set_out}"
+    );
+
+    let (_c, out) = run_config(&vault, &[]);
+    assert!(
+        out.contains("forward_method: FIFO (vault-wide default)"),
+        "the vault-wide method stays FIFO — a scoped order does not change it:\n{out}"
     );
     assert!(
-        !after.contains("forward_method: FIFO (default"),
-        "the default line is replaced once an order exists:\n{after}"
+        out.contains("forward_method for exchange:coinbase:main: HIFO"),
+        "the scoped order is attributed to its account, not reported vault-wide:\n{out}"
     );
 }
 

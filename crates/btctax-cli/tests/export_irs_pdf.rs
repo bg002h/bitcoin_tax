@@ -590,6 +590,86 @@ fn forms_slice_ignored_on_full_return_year_is_flagged_and_packet_unchanged() {
     );
 }
 
+/// UX-P4-5 fold r1-I4: the actual STDERR warning fires (process-level) when `--forms` is passed on a
+/// full-return year, and NOT otherwise; and the written packet FILE-SET is identical either way (the
+/// slice is inert). Pins the user-visible deliverable + the "packet unchanged" contract by name/set.
+#[test]
+fn forms_slice_on_full_return_year_warns_on_stderr_and_packet_is_identical() {
+    use btctax_cli::{return_inputs, Session};
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    use btctax_core::tax::types::FilingStatus;
+
+    let (_dir, vault) = make_vault(&real_events());
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        };
+        ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
+            first_name: "Pat".into(),
+            last_name: "Roe".into(),
+            ssn: "222-33-4444".into(),
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let run = |out: &std::path::Path, with_forms: bool| -> (String, Vec<String>) {
+        let mut args: Vec<String> = vec![
+            "--vault".into(),
+            vault.to_str().unwrap().into(),
+            "export-irs-pdf".into(),
+            "--out".into(),
+            out.to_str().unwrap().into(),
+            "--tax-year".into(),
+            "2024".into(),
+        ];
+        if with_forms {
+            args.push("--forms".into());
+            args.push("f8949".into());
+        }
+        let o = std::process::Command::new(bin)
+            .args(&args)
+            .env("BTCTAX_PASSPHRASE", "pw")
+            .output()
+            .expect("btctax runs");
+        assert!(
+            o.status.success(),
+            "export must succeed: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
+        let mut files: Vec<String> = std::fs::read_dir(out)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        files.sort();
+        (stderr, files)
+    };
+
+    let tmp = tempfile::tempdir().unwrap();
+    let (stderr_forms, files_forms) = run(&tmp.path().join("with"), true);
+    let (stderr_plain, files_plain) = run(&tmp.path().join("without"), false);
+
+    assert!(
+        stderr_forms.contains("--forms is ignored on a full-return year"),
+        "the warning is emitted with --forms:\n{stderr_forms}"
+    );
+    assert!(
+        !stderr_plain.contains("--forms is ignored"),
+        "no warning without --forms:\n{stderr_plain}"
+    );
+    assert_eq!(
+        files_forms, files_plain,
+        "the written packet file-set is byte-for-byte identical regardless of --forms"
+    );
+}
+
 /// ★ THE DISPATCH, direction 2 — a year with NO full-return inputs still gets the crypto slice,
 /// unchanged. Deleting the P5-C1 refusal downgraded a type-level impossibility to a branch, so the
 /// branch is pinned in BOTH directions.

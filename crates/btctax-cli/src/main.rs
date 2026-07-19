@@ -520,9 +520,9 @@ fn run() -> Result<ExitCode, CliError> {
                 let id = cmd::reconcile::set_forward_method(vault, &pp, lm, wallet, eff, now)?;
                 match &exchange {
                     Some(x) => println!(
-                        "Recorded per-account standing order (MethodElection) {} — attests {:?} for {x}",
+                        "Recorded per-account standing order (MethodElection) {} — attests {} for {x}",
                         id.canonical(),
-                        lm
+                        render::lot_method_display(lm)
                     ),
                     None => println!(
                         "Recorded standing order (MethodElection) {}",
@@ -553,27 +553,50 @@ fn run() -> Result<ExitCode, CliError> {
                 cfg.pre2025_method_attested
             );
             // UX-P4-12(c): echo the forward-method standing order(s) that `config
-            // --set-forward-method` records — previously readable only in `verify`'s block. Shows
-            // every non-voided order WITH its status (so a set-but-backdated/ignored order is not
-            // hidden behind the Fifo default).
+            // --set-forward-method` records — previously readable only in `verify`'s block. States
+            // the VAULT-WIDE method explicitly (a global standing order, else the FIFO default),
+            // then any PER-ACCOUNT (scoped) orders — a scoped order governs only its exchange account
+            // and must not be reported as the vault-wide method (r1-I2). Recorded-but-not-governing
+            // (backdated/ignored) orders are disclosed so a set-but-ineffective order is not invisible.
             let (events, _state, _cfg) =
                 btctax_cli::Session::open(vault, &pp)?.load_events_and_project()?;
             let voided = render::voided_targets(&events);
-            let orders: Vec<_> = render::method_election_lines(&events, &voided)
-                .into_iter()
-                .filter(|e| e.note != "voided")
-                .collect();
-            if orders.is_empty() {
-                println!("forward_method: FIFO (default — no standing order recorded)");
-            } else {
-                for e in &orders {
-                    println!(
-                        "forward_method: {} (standing order effective {}, {})",
-                        render::lot_method_display(e.method),
-                        e.effective_from,
-                        e.note
-                    );
-                }
+            let orders = render::method_election_lines(&events, &voided);
+            // Vault-wide = the latest in-force GLOBAL (unscoped) order, else FIFO.
+            match orders
+                .iter()
+                .rfind(|e| e.wallet.is_none() && e.note == "in force")
+            {
+                Some(e) => println!(
+                    "forward_method: {} (vault-wide standing order, effective {})",
+                    render::lot_method_display(e.method),
+                    e.effective_from
+                ),
+                None => println!("forward_method: FIFO (vault-wide default)"),
+            }
+            for e in orders
+                .iter()
+                .filter(|e| e.wallet.is_some() && e.note == "in force")
+            {
+                println!(
+                    "  forward_method for {}: {} (standing order, effective {})",
+                    render::wallet_label(e.wallet.as_ref().unwrap()),
+                    render::lot_method_display(e.method),
+                    e.effective_from
+                );
+            }
+            for e in orders.iter().filter(|e| e.note == "backdated/ignored") {
+                let scope = e
+                    .wallet
+                    .as_ref()
+                    .map(|w| format!(" for {}", render::wallet_label(w)))
+                    .unwrap_or_default();
+                println!(
+                    "  (recorded standing order{scope}: {} effective {} — {}, not governing)",
+                    render::lot_method_display(e.method),
+                    e.effective_from,
+                    e.note
+                );
             }
         }
         Command::ExportSnapshot {
@@ -2076,7 +2099,11 @@ fn bulk_void_payload_summary(p: &btctax_core::EventPayload) -> String {
         }
         EventPayload::ClassifyRaw(cr) => format!("ClassifyRaw {}", cr.target.canonical()),
         EventPayload::MethodElection(me) => {
-            format!("MethodElection {:?} from {}", me.method, me.effective_from)
+            format!(
+                "MethodElection {} from {}",
+                render::lot_method_display(me.method),
+                me.effective_from
+            )
         }
         EventPayload::LotSelection(ls) => {
             format!("LotSelection lots for {}", ls.disposal_event.canonical())
@@ -2156,6 +2183,22 @@ mod tests {
             !s.contains('{'),
             "no Debug struct braces (the mid-field truncation source): {s}"
         );
+    }
+
+    /// fold r1-M1(b): the bulk-void summary renders a `MethodElection` method HUMANLY (`HIFO`), not
+    /// the raw Debug variant name `Hifo`.
+    #[test]
+    fn bulk_void_summary_method_election_is_human() {
+        use btctax_core::{EventPayload, LotMethod, MethodElection};
+        use time::macros::date;
+        let p = EventPayload::MethodElection(MethodElection {
+            effective_from: date!(2025 - 01 - 01),
+            method: LotMethod::Hifo,
+            wallet: None,
+        });
+        let s = bulk_void_payload_summary(&p);
+        assert!(s.contains("MethodElection HIFO"), "human method label: {s}");
+        assert!(!s.contains("Hifo"), "no raw Debug variant name: {s}");
     }
 
     /// Parse a `reconcile bulk-resolve-conflict …` invocation via the real clap derivation.
