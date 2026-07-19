@@ -644,3 +644,207 @@ stderr:
 ⚠ NOT AUTHORISED FOR FILING. btctax is a mechanical calculator. No right is granted and no authorisation is given to use it, or anything it produces, to prepare or file a tax return, and NO WARRANTY is given that any figure or form it produces is accurate, complete, or fit to file. If you file any of this, you do so entirely on your own responsibility: YOU are the preparer, you must check every figure against the forms and instructions before you sign, and the authors accept no liability for the consequences. This is not tax advice. See `btctax limitations`.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (appraiser) and Part V (donee acknowledgement) — obtain both before filing.
 ```
+
+## J7 — income received off-exchange, valued by hand (`--fmv`)
+
+Frank earns staking rewards on a platform btctax has no price feed for and moves them to
+Coinbase. Imported, the deposit is an unknown-basis inbound — a **hard blocker** until you say
+what it is:
+
+```console
+$ btctax --vault v.pgp init --key-backup key-backup.asc
+Initialized vault v.pgp (key backed up to key-backup.asc)
+```
+```console
+$ btctax --vault v.pgp import coinbase.csv
+Import:
+  coinbase [coinbase.csv]: parsed 1 rows -> 1 BTC events (0 dropped no-BTC, 0 unclassified)
+  appended 1 | duplicates 0 | NEW import-conflicts 0
+```
+```console
+$ btctax --vault v.pgp verify
+Conservation (FR9): BALANCED
+  in 0 = disposed 0 + removed 0 + held 0 + fee-sats 0 + pending 0
+2025 transition: Path A (actual per-wallet reconstruction; default, no election)
+Pending reconciliation: 0 transfer(s); unknown-basis inbounds: 1
+Hard blockers (gate tax computation): 1
+  [UnknownBasisInbound] import|coinbase|in|cb-recv :: unclassified TransferIn — basis unknown
+Advisory blockers: 0
+Pre-2025 method (attested historical fact): HIFO (attested: false)
+Standing orders (MethodElection): 0
+Lot selections recorded: 0
+Per-disposal compliance (post-2025): 0
+[exit 1]
+```
+
+Classify it as staking income. On this single-event command there is no auto-valuation —
+supply the FMV at receipt (from your own records) with `--fmv`; omitting it would record a
+missing-FMV blocker instead. The blocker clears:
+
+```console
+$ btctax --vault v.pgp reconcile classify-inbound-income "import|coinbase|in|cb-recv" --kind staking --fmv 3300.00
+Recorded decision decision|1
+```
+```console
+$ btctax --vault v.pgp verify
+Conservation (FR9): BALANCED
+  in 5000000 = disposed 0 + removed 0 + held 5000000 + fee-sats 0 + pending 0
+2025 transition: Path A (actual per-wallet reconstruction; default, no election)
+Pending reconciliation: 0 transfer(s); unknown-basis inbounds: 0
+Hard blockers (gate tax computation): 0
+Advisory blockers: 0
+Pre-2025 method (attested historical fact): HIFO (attested: false)
+Standing orders (MethodElection): 0
+Lot selections recorded: 0
+Per-disposal compliance (post-2025): 0
+```
+
+With a profile set, the hand-entered FMV is the ordinary income the report attributes to
+crypto:
+
+```console
+$ btctax --vault v.pgp tax-profile --year 2024 --filing-status single --ordinary-taxable-income 90000 --magi-excluding-crypto 90000 --qualified-dividends 0
+Tax profile for 2024 saved.
+```
+```console
+$ btctax --vault v.pgp report --tax-year 2024
+Federal tax attributable to crypto — tax year 2024
+  net short-term: 0.00   net long-term: 0.00
+  crypto ordinary income (level): 3300.00
+  ordinary-rate tax (attributable): 726.00
+  LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
+  TOTAL federal tax attributable to crypto (delta): 726.00   (= ordinary-rate + LTCG + NIIT attributable)
+  §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
+  marginal rates: ordinary 0.22 / LTCG 0.15 / NIIT false
+  (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
+Schedule D (raw pre-netting part totals) — tax year 2024
+  Part I  (short-term): proceeds 0.00   cost basis 0.00   gain 0.00
+  Part II (long-term):  proceeds 0.00   cost basis 0.00   gain 0.00
+  Note: §1222/§1211/§1212 netting + carryforward are applied in the tax computation (report --tax-year); these are the raw pre-netting Form 8949/Schedule D part totals.
+```
+
+## J8 — matching a self-transfer across two exchanges
+
+Grace withdraws 0.10 BTC from River and deposits it at Coinbase. Imported, the two legs are
+**unreconciled transfers** — a hard blocker until btctax knows they are the same coins moving,
+not a disposal and a mystery deposit:
+
+```console
+$ btctax --vault v.pgp init --key-backup key-backup.asc
+Initialized vault v.pgp (key backed up to key-backup.asc)
+```
+```console
+$ btctax --vault v.pgp import river.csv
+Import:
+  river [river.csv]: parsed 2 rows -> 2 BTC events (0 dropped no-BTC, 0 unclassified)
+  appended 2 | duplicates 0 | NEW import-conflicts 0
+```
+```console
+$ btctax --vault v.pgp import coinbase.csv
+Import:
+  coinbase [coinbase.csv]: parsed 1 rows -> 1 BTC events (0 dropped no-BTC, 0 unclassified)
+  appended 1 | duplicates 0 | NEW import-conflicts 0
+```
+```console
+$ btctax --vault v.pgp verify
+Conservation (FR9): BALANCED
+  in 10000000 = disposed 0 + removed 0 + held 0 + fee-sats 0 + pending 10000000
+2025 transition: Path A (actual per-wallet reconstruction; default, no election)
+Pending reconciliation: 1 transfer(s); unknown-basis inbounds: 1
+Hard blockers (gate tax computation): 1
+  [UnknownBasisInbound] import|coinbase|in|cb-recv :: unclassified TransferIn — basis unknown
+Advisory blockers: 1
+  [UnmatchedOutflows] import|river|out|1741608000000|withdrawal|10000000#0 :: unmatched transfer out
+Pre-2025 method (attested historical fact): HIFO (attested: false)
+Standing orders (MethodElection): 0
+Lot selections recorded: 0
+Per-disposal compliance (post-2025): 0
+[exit 1]
+```
+
+With no arguments, `match-self-transfers` is read-only — it PREVIEWS the pairs it can see (an
+out-leg and an in-leg of equal size across your wallets), proposing a **RELOCATE** because the
+coins land in a different wallet:
+
+```console
+$ btctax --vault v.pgp reconcile match-self-transfers
+Self-transfer match proposals (confirm one with --in <in> --out <out>):
+  RELOCATE  in import|coinbase|in|cb-recv (2025-03-10, exchange:coinbase:default, 10000000 sat)  out import|river|out|1741608000000|withdrawal|10000000#0 (2025-03-10, exchange:river:default, 10000000 sat)  $8137.26
+```
+
+Confirm that pair by naming both legs. The relocation carries the original basis and holding
+period to Coinbase, and the ledger balances:
+
+```console
+$ btctax --vault v.pgp reconcile match-self-transfers --in "import|coinbase|in|cb-recv" --out "import|river|out|1741608000000|withdrawal|10000000#0"
+Self-transfer match proposals (confirm one with --in <in> --out <out>):
+  RELOCATE  in import|coinbase|in|cb-recv (2025-03-10, exchange:coinbase:default, 10000000 sat)  out import|river|out|1741608000000|withdrawal|10000000#0 (2025-03-10, exchange:river:default, 10000000 sat)  $8137.26
+relocated self-transfer (out import|river|out|1741608000000|withdrawal|10000000#0 → in import|coinbase|in|cb-recv); decision decision|1
+```
+```console
+$ btctax --vault v.pgp verify
+Conservation (FR9): BALANCED
+  in 10000000 = disposed 0 + removed 0 + held 10000000 + fee-sats 0 + pending 0
+2025 transition: Path A (actual per-wallet reconstruction; default, no election)
+Pending reconciliation: 0 transfer(s); unknown-basis inbounds: 0
+Hard blockers (gate tax computation): 0
+Advisory blockers: 0
+Pre-2025 method (attested historical fact): HIFO (attested: false)
+Standing orders (MethodElection): 0
+Lot selections recorded: 0
+Per-disposal compliance (post-2025): 0
+```
+
+## J9 — identifying specific lots for a disposal (`select-lots`)
+
+Heidi holds a cheap 2023 long-term lot (0.60 BTC) and a pricier 2024 lot (0.40 BTC), and sells
+0.50 — less than her holdings, so *which* lots the sale draws from is a real choice.
+`export-snapshot` writes a `disposals.csv` whose `lot` column shows the default split and the
+`<origin>#<split>` refs you would name to choose differently (each origin is the lot's acquiring
+trade, e.g. `import|coinbase|trade|lot-a`):
+
+```console
+$ btctax --vault v.pgp init --key-backup key-backup.asc
+Initialized vault v.pgp (key backed up to key-backup.asc)
+```
+```console
+$ btctax --vault v.pgp import coinbase.csv
+Import:
+  coinbase [coinbase.csv]: parsed 3 rows -> 3 BTC events (0 dropped no-BTC, 0 unclassified)
+  appended 3 | duplicates 0 | NEW import-conflicts 0
+```
+```console
+$ btctax --vault v.pgp export-snapshot --out snapshot
+Exported snapshot/snapshot.sqlite + CSVs to snapshot
+```
+
+The default split draws from both lots. Instead, identify the whole 0.50 against the cheap
+long-term lot `lot-a` — a deliberate per-disposal identification (the picks' sats must total the
+0.50 BTC / 50 000 000 sat disposal):
+
+```console
+$ btctax --vault v.pgp reconcile select-lots "import|coinbase|trade|sale" --from "import|coinbase|trade|lot-a#0:50000000"
+Recorded decision decision|1
+```
+
+Re-export: the disposal now draws entirely from `lot-a`, and the selection is recorded as
+per-disposal compliance:
+
+```console
+$ btctax --vault v.pgp export-snapshot --out snapshot2
+Exported snapshot2/snapshot.sqlite + CSVs to snapshot2
+```
+```console
+$ btctax --vault v.pgp verify
+Conservation (FR9): BALANCED
+  in 100000000 = disposed 50000000 + removed 0 + held 50000000 + fee-sats 0 + pending 0
+2025 transition: Path A (actual per-wallet reconstruction; default, no election)
+Pending reconciliation: 0 transfer(s); unknown-basis inbounds: 0
+Hard blockers (gate tax computation): 0
+Advisory blockers: 0
+Pre-2025 method (attested historical fact): HIFO (attested: false)
+Standing orders (MethodElection): 0
+Lot selections recorded: 1
+Per-disposal compliance (post-2025): 1
+  import|coinbase|trade|sale @ 2025-06-01 :: contemporaneous
+```

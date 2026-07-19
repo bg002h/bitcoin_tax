@@ -261,6 +261,35 @@ cb-donate,2024-09-01 12:00:00 UTC,Send,BTC,0.10000000,USD,60000.00,,,,,,bc1qchar
 const J6_FULLRETURN_TOML: &str =
     include_str!("../../btctax-cli/tests/fixtures/examples/fullreturn_inputs.toml");
 
+/// J7 corpus (UX-P1-7): a single 2024 Coinbase Receive of staking rewards — an unknown-basis inbound the
+/// single-event `classify-inbound-income` command values only from a hand-supplied `--fmv` (no dataset
+/// lookup on that path; the bulk command is the one that auto-values).
+const J7_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-recv,2024-06-15 12:00:00 UTC,Receive,BTC,0.05000000,USD,,,,,,,\r\n";
+
+/// J8 River corpus (UX-P1-8): a buy (to give the coins a basis) then a Withdrawal OUT of 0.10 BTC — the
+/// out-leg of a cross-exchange self-transfer whose in-leg lands on Coinbase below.
+const J8_RIVER_CSV: &str =
+    "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Tag\r\n\
+2025-01-05 12:00:00 UTC,4000.00,USD,0.10000000,BTC,,buy\r\n\
+2025-03-10 12:00:00 UTC,0.10000000,BTC,,,,withdrawal\r\n";
+
+/// J8 Coinbase corpus (UX-P1-8): the matching inbound Receive of 0.10 BTC — the SAME coins landing at a
+/// second exchange, so the pair is a cross-wallet RELOCATE (not a same-wallet DROP).
+const J8_COINBASE_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+cb-recv,2025-03-10 12:00:00 UTC,Receive,BTC,0.10000000,USD,,,,,,,\r\n";
+
+/// J9 corpus (UX-P1-10): a cheap 2023 long-term lot (0.60) + a pricier 2024 lot (0.40), then a 2025 sale of
+/// only 0.50 — smaller than either combined holding, so which lots cover it is a GENUINE choice the default
+/// method would otherwise make for you.
+const J9_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+lot-a,2023-01-01 12:00:00 UTC,Buy,BTC,0.60000000,USD,25000.00,15000.00,15000.00,0.00,,,\r\n\
+lot-b,2024-01-02 12:00:00 UTC,Buy,BTC,0.40000000,USD,60000.00,24000.00,24000.00,0.00,,,\r\n\
+sale,2025-06-01 12:00:00 UTC,Sell,BTC,0.50000000,USD,47500.00,47500.00,47500.00,0.00,,,\r\n";
+
 /// Generate the whole-file golden by running `bin` across every journey. Pure function of
 /// `(repo tree, binary, synthetic inputs)`.
 pub fn generate(bin: &Path) -> String {
@@ -277,6 +306,9 @@ pub fn generate(bin: &Path) -> String {
     journey_j4(&mut md, bin);
     journey_j5(&mut md, bin);
     journey_j6(&mut md, bin);
+    journey_j7(&mut md, bin);
+    journey_j8(&mut md, bin);
+    journey_j9(&mut md, bin);
 
     md
 }
@@ -894,6 +926,236 @@ fn journey_j6(md: &mut String, bin: &Path) {
     );
 }
 
+/// J7 — manual income FMV (UX-P1-7). An inbound deposit of coins you earned as staking rewards is an
+/// unknown-basis TransferIn: a hard blocker until classified as income. The single-event
+/// `classify-inbound-income` command does NO auto-valuation — you supply the fair-market value at receipt
+/// with `--fmv` (the bulk command is the one that reads the bundled daily close).
+fn journey_j7(md: &mut String, bin: &Path) {
+    md.push_str(
+        "\n## J7 — income received off-exchange, valued by hand (`--fmv`)\n\n\
+         Frank earns staking rewards on a platform btctax has no price feed for and moves them to\n\
+         Coinbase. Imported, the deposit is an unknown-basis inbound — a **hard blocker** until you say\n\
+         what it is:\n\n",
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J7_CSV);
+    let inbound = "import|coinbase|in|cb-recv";
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"])); // exits 1: the hard blocker
+    md.push_str(
+        "\nClassify it as staking income. On this single-event command there is no auto-valuation —\n\
+         supply the FMV at receipt (from your own records) with `--fmv`; omitting it would record a\n\
+         missing-FMV blocker instead. The blocker clears:\n\n",
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &Cmd {
+            args: &[
+                "--vault",
+                "v.pgp",
+                "reconcile",
+                "classify-inbound-income",
+                inbound,
+                "--kind",
+                "staking",
+                "--fmv",
+                "3300.00",
+            ],
+            now: Some("2024-07-01T00:00:00Z"), // decision made-date pinned (banner → stderr, not captured)
+            show_stderr: false,
+        },
+    );
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"]));
+    md.push_str(
+        "\nWith a profile set, the hand-entered FMV is the ordinary income the report attributes to\n\
+         crypto:\n\n",
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&[
+            "--vault",
+            "v.pgp",
+            "tax-profile",
+            "--year",
+            "2024",
+            "--filing-status",
+            "single",
+            "--ordinary-taxable-income",
+            "90000",
+            "--magi-excluding-crypto",
+            "90000",
+            "--qualified-dividends",
+            "0",
+        ]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "report", "--tax-year", "2024"]),
+    );
+}
+
+/// J8 — a self-transfer across two exchanges (UX-P1-8). Coins leave River (a Withdrawal → TransferOut) and
+/// land at Coinbase (a Receive → TransferIn). Unreconciled, that is a hard blocker. `match-self-transfers`
+/// with no arguments PREVIEWS the proposed pairs (read-only); confirming one with `--in`/`--out` records a
+/// cross-wallet RELOCATE (never automatic — you confirm the pairing).
+fn journey_j8(md: &mut String, bin: &Path) {
+    md.push_str(
+        "\n## J8 — matching a self-transfer across two exchanges\n\n\
+         Grace withdraws 0.10 BTC from River and deposits it at Coinbase. Imported, the two legs are\n\
+         **unreconciled transfers** — a hard blocker until btctax knows they are the same coins moving,\n\
+         not a disposal and a mystery deposit:\n\n",
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "river.csv", J8_RIVER_CSV);
+    write_corpus(cwd, "coinbase.csv", J8_COINBASE_CSV);
+    let out_leg = "import|river|out|1741608000000|withdrawal|10000000#0";
+    let in_leg = "import|coinbase|in|cb-recv";
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "river.csv"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"])); // exits 1: unreconciled transfers
+    md.push_str(
+        "\nWith no arguments, `match-self-transfers` is read-only — it PREVIEWS the pairs it can see (an\n\
+         out-leg and an in-leg of equal size across your wallets), proposing a **RELOCATE** because the\n\
+         coins land in a different wallet:\n\n",
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "reconcile", "match-self-transfers"]),
+    );
+    md.push_str(
+        "\nConfirm that pair by naming both legs. The relocation carries the original basis and holding\n\
+         period to Coinbase, and the ledger balances:\n\n",
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &Cmd {
+            args: &[
+                "--vault",
+                "v.pgp",
+                "reconcile",
+                "match-self-transfers",
+                "--in",
+                in_leg,
+                "--out",
+                out_leg,
+            ],
+            now: Some("2025-04-01T00:00:00Z"), // decision made-date pinned (banner → stderr, not captured)
+            show_stderr: false,
+        },
+    );
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"]));
+}
+
+/// J9 — choosing which lots a sale draws from (UX-P1-10). With two lots and a sale smaller than either
+/// combined holding, the default method picks the lots for you; `select-lots` lets you identify EXACTLY
+/// which ones — the picks (`<origin>#<split>:<sat>`) come from the disposal's `lot` column in
+/// export-snapshot, and their sats must sum to the disposal's size.
+fn journey_j9(md: &mut String, bin: &Path) {
+    md.push_str(
+        "\n## J9 — identifying specific lots for a disposal (`select-lots`)\n\n\
+         Heidi holds a cheap 2023 long-term lot (0.60 BTC) and a pricier 2024 lot (0.40 BTC), and sells\n\
+         0.50 — less than her holdings, so *which* lots the sale draws from is a real choice.\n\
+         `export-snapshot` writes a `disposals.csv` whose `lot` column shows the default split and the\n\
+         `<origin>#<split>` refs you would name to choose differently (each origin is the lot's acquiring\n\
+         trade, e.g. `import|coinbase|trade|lot-a`):\n\n",
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J9_CSV);
+    let disposal = "import|coinbase|trade|sale";
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "export-snapshot", "--out", "snapshot"]),
+    );
+    md.push_str(
+        "\nThe default split draws from both lots. Instead, identify the whole 0.50 against the cheap\n\
+         long-term lot `lot-a` — a deliberate per-disposal identification (the picks' sats must total the\n\
+         0.50 BTC / 50 000 000 sat disposal):\n\n",
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &Cmd {
+            args: &[
+                "--vault",
+                "v.pgp",
+                "reconcile",
+                "select-lots",
+                disposal,
+                "--from",
+                "import|coinbase|trade|lot-a#0:50000000",
+            ],
+            now: Some("2025-01-01T00:00:00Z"), // identification made before the sale → contemporaneous
+            show_stderr: false,
+        },
+    );
+    md.push_str(
+        "\nRe-export: the disposal now draws entirely from `lot-a`, and the selection is recorded as\n\
+         per-disposal compliance:\n\n",
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "export-snapshot", "--out", "snapshot2"]),
+    );
+    emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"]));
+}
+
 /// Regenerate the committed golden to stdout (`cargo run -p xtask -- examples`).
 pub fn run() {
     let bin = built_btctax();
@@ -928,13 +1190,14 @@ fn leaf_subcommands() -> Vec<Vec<String>> {
     out
 }
 
-/// Whether some `$ btctax …` line in the golden runs the leaf `path` — its subcommand-name tokens appear
-/// IN ORDER among the line's tokens (global flags like `--vault v.pgp` interspersed are skipped).
 /// Global options that appear BEFORE the subcommand on a `$ btctax …` line and CONSUME a value — the
 /// `--vault v.pgp` pair every journey opens with. Anchoring skips both tokens so `path[0]` binds to the
 /// actual subcommand, never the flag's value (UX-P2-1).
 const GLOBAL_VALUE_OPTS: &[&str] = &["--vault"];
 
+/// Whether some `$ btctax …` line in the golden runs the leaf `path`: after skipping leading global
+/// options, `path[0]` must be EXACTLY the first subcommand token, and the remaining sub-verb tokens then
+/// appear in order (UX-P2-1 — a name that shows up only as an argument does not count).
 fn is_demonstrated(golden: &str, path: &[String]) -> bool {
     golden
         .lines()
@@ -1196,5 +1459,29 @@ mod tests {
             !report.contains("): 0/"),
             "the covered count must be non-zero — 0/N ⇒ the golden scan is broken: {report}"
         );
+    }
+
+    /// UX-P1-7/8/10: the three new worked-example journeys actually EXERCISE their reconcile commands — a
+    /// fresh generation must demonstrate `classify-inbound-income` (manual FMV, J7), `match-self-transfers`
+    /// (two-exchange, J8), and `select-lots` (per-disposal, J9). This tests the CODE (a fresh generation),
+    /// not the committed file, so it reds if a journey is dropped or stops invoking its command — a silent
+    /// coverage regression the byte-golden alone would not catch (it would merely re-pin the weaker output).
+    /// Uses the UX-P2-1-anchored matcher, so a command named only as an argument would NOT satisfy it.
+    #[test]
+    fn new_journeys_demonstrate_their_reconcile_commands() {
+        let _guard = BUILD_ENV_LOCK.lock().unwrap();
+        let golden = generate(&built_btctax());
+        for leaf in [
+            ["reconcile", "classify-inbound-income"].as_slice(),
+            ["reconcile", "match-self-transfers"].as_slice(),
+            ["reconcile", "select-lots"].as_slice(),
+        ] {
+            let path: Vec<String> = leaf.iter().map(|s| s.to_string()).collect();
+            assert!(
+                is_demonstrated(&golden, &path),
+                "UX-P1-7/8/10: `btctax {}` must have a worked example in the generated golden",
+                leaf.join(" ")
+            );
+        }
     }
 }
