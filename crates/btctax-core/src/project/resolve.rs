@@ -412,8 +412,10 @@ pub fn resolve(
     // Surface-neutral by design — it works at `verify` (the conflicting decision IS recorded; the list
     // shows its `decision|N` to void) AND at record time (nothing was recorded; the list shows the
     // valid refs). Duplicate details add "; void the prior decision to re-decide" (a prior decision
-    // exists on both surfaces). Deliberately NOT "void the decision to clear this blocker" — that
-    // misreads at record time, where nothing was appended.
+    // exists on both surfaces) — EXCEPT the classify-raw arm, whose prior may be a non-revocable
+    // accepted `SupersedeImport`, so it says "if the prior decision is revocable, void it to re-decide"
+    // (review r2 M1). Deliberately NOT "void the decision to clear this blocker" — that misreads at
+    // record time, where nothing was appended.
     const CONFLICT_HINT: &str = "see `btctax events list` for event refs + decision status";
 
     // ── Pseudo-reconcile mode (sub-project 2) ────────────────────────────────────────────────────
