@@ -10,9 +10,9 @@ use btctax_core::{
     year_donation_deduction, BasisSource, Blocker, BlockerKind, ComplianceStatus,
     ConservationReport, DisposalCompliance, DisposalLeg, DisposeKind, EventId, EventPayload,
     Form8283HowAcquired, Form8283Section, Form8949Box, Form8949Part, GiftZone, HarvestReport,
-    HarvestStatus, HarvestTarget, IncomeKind, LedgerEvent, LedgerState, LotMethod, LtcgBracket,
-    RemovalKind, RemovalLeg, ScheduleDTotals, SeTaxResult, SellReport, SellStatus, Severity,
-    TaxDate, Term, WalletId,
+    HarvestStatus, HarvestTarget, InboundClass, IncomeKind, LedgerEvent, LedgerState, LotMethod,
+    LtcgBracket, OutflowClass, RemovalKind, RemovalLeg, ScheduleDTotals, SeTaxResult, SellReport,
+    SellStatus, Severity, TaxDate, Term, WalletId,
 };
 use btctax_store::fsperms;
 use csv::Writer;
@@ -81,6 +81,74 @@ fn income_kind_tag(ik: IncomeKind) -> &'static str {
         IncomeKind::Interest => "interest",
         IncomeKind::Airdrop => "airdrop",
         IncomeKind::Reward => "reward",
+    }
+}
+
+/// UX-P4-7: SCREEN-ONLY human summary of an `InboundClass` decision payload (income / received gift /
+/// self-transfer). Replaces the raw `{:?}` Debug dump (`SelfTransferMine { basis: Some(19000.00),
+/// acquired_at: Some(2026-01-01) }`) that the CLI bulk-void preview + TUI void list truncated
+/// mid-field. Like `pseudo_tag` [R0-I4], this is for the terminal ONLY — the CSV/form writers MUST
+/// NOT call it (they emit stable machine tags via `*_tag`), so no human phrasing can leak into an
+/// export file.
+pub fn describe_inbound_class(c: &InboundClass) -> String {
+    match c {
+        InboundClass::Income {
+            kind,
+            fmv,
+            business,
+        } => {
+            let mut s = format!("income {}", income_kind_tag(*kind));
+            if let Some(v) = fmv {
+                let _ = write!(s, ", fmv ${}", fmt_money(*v));
+            }
+            if *business {
+                s.push_str(", business");
+            }
+            s
+        }
+        InboundClass::GiftReceived {
+            donor_basis,
+            donor_acquired_at,
+            fmv_at_gift,
+        } => {
+            let mut s = format!("gift received, fmv ${}", fmt_money(*fmv_at_gift));
+            if let Some(b) = donor_basis {
+                let _ = write!(s, ", donor-basis ${}", fmt_money(*b));
+            }
+            if let Some(d) = donor_acquired_at {
+                let _ = write!(s, ", donor-acquired {d}");
+            }
+            s
+        }
+        InboundClass::SelfTransferMine { basis, acquired_at } => {
+            // `None` is a defaulted field (zero basis / 1yr+1day-before-receipt date), NOT the Debug
+            // `None` — name it "default" so the void preview is legible.
+            let basis_s = match basis {
+                Some(v) => format!("${}", fmt_money(*v)),
+                None => "default".to_string(),
+            };
+            let acq_s = match acquired_at {
+                Some(d) => d.to_string(),
+                None => "default".to_string(),
+            };
+            format!("self-transfer (mine), basis {basis_s}, acquired {acq_s}")
+        }
+    }
+}
+
+/// UX-P4-7: SCREEN-ONLY human summary of an `OutflowClass` decision payload. Same screen-only rule as
+/// [`describe_inbound_class`] — never called by a CSV/form writer.
+pub fn describe_outflow_class(c: &OutflowClass) -> String {
+    match c {
+        OutflowClass::Dispose { kind } => dispose_kind_tag(*kind).to_string(),
+        OutflowClass::GiftOut => "gift".to_string(),
+        OutflowClass::Donate { appraisal_required } => {
+            if *appraisal_required {
+                "donate (appraisal required)".to_string()
+            } else {
+                "donate".to_string()
+            }
+        }
     }
 }
 
@@ -3715,6 +3783,100 @@ mod events_list_render_tests {
             lines[2].contains("[decided: decision|1]"),
             "decided row: {}",
             lines[2]
+        );
+    }
+}
+
+#[cfg(test)]
+mod decision_class_tests {
+    //! UX-P4-7 — the shared SCREEN-ONLY human formatter for decision-payload class fields, replacing
+    //! the raw `{:?}` Debug dumps (`SelfTransferMine { basis: Some(19000.00), acquired_at:
+    //! Some(2026-01-01) }`) that the CLI bulk-void preview + TUI void list truncated mid-field.
+    use super::*;
+    use btctax_core::{DisposeKind, InboundClass, IncomeKind, OutflowClass};
+    use rust_decimal_macros::dec;
+    use time::macros::date;
+
+    #[test]
+    fn inbound_self_transfer_mine_is_human_no_debug_struct() {
+        let s = describe_inbound_class(&InboundClass::SelfTransferMine {
+            basis: Some(dec!(19000)),
+            acquired_at: Some(date!(2026 - 01 - 01)),
+        });
+        assert!(s.contains("self-transfer"), "{s}");
+        assert!(s.contains("$19000.00"), "names the basis in $: {s}");
+        assert!(s.contains("2026-01-01"), "names the acquired date: {s}");
+        assert!(!s.contains('{'), "no Debug struct braces: {s}");
+        assert!(!s.contains("Some("), "no Debug Option wrapper: {s}");
+    }
+
+    #[test]
+    fn inbound_self_transfer_mine_defaults_are_named_not_none() {
+        let s = describe_inbound_class(&InboundClass::SelfTransferMine {
+            basis: None,
+            acquired_at: None,
+        });
+        assert!(s.contains("self-transfer"), "{s}");
+        assert!(
+            s.matches("default").count() >= 2,
+            "None basis AND date read as 'default': {s}"
+        );
+        assert!(!s.contains("None"), "no Debug None: {s}");
+    }
+
+    #[test]
+    fn inbound_income_names_kind_fmv_business() {
+        let s = describe_inbound_class(&InboundClass::Income {
+            kind: IncomeKind::Mining,
+            fmv: Some(dec!(500)),
+            business: true,
+        });
+        assert!(s.contains("income"), "{s}");
+        assert!(s.contains("mining"), "names the income kind: {s}");
+        assert!(s.contains("$500.00"), "names the fmv: {s}");
+        assert!(s.contains("business"), "flags business: {s}");
+        assert!(!s.contains('{'), "{s}");
+    }
+
+    #[test]
+    fn inbound_gift_received_names_fmv() {
+        let s = describe_inbound_class(&InboundClass::GiftReceived {
+            donor_basis: Some(dec!(1000)),
+            donor_acquired_at: Some(date!(2024 - 05 - 05)),
+            fmv_at_gift: dec!(30000),
+        });
+        assert!(s.contains("gift"), "{s}");
+        assert!(s.contains("$30000.00"), "names the FMV at gift: {s}");
+        assert!(!s.contains('{'), "{s}");
+    }
+
+    #[test]
+    fn outflow_classes_are_human() {
+        assert_eq!(
+            describe_outflow_class(&OutflowClass::Dispose {
+                kind: DisposeKind::Sell
+            }),
+            "sell"
+        );
+        assert_eq!(
+            describe_outflow_class(&OutflowClass::Dispose {
+                kind: DisposeKind::Spend
+            }),
+            "spend"
+        );
+        assert_eq!(describe_outflow_class(&OutflowClass::GiftOut), "gift");
+        let donate = describe_outflow_class(&OutflowClass::Donate {
+            appraisal_required: true,
+        });
+        assert!(
+            donate.contains("donate") && donate.contains("appraisal"),
+            "{donate}"
+        );
+        assert_eq!(
+            describe_outflow_class(&OutflowClass::Donate {
+                appraisal_required: false
+            }),
+            "donate"
         );
     }
 }

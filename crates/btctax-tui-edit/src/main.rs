@@ -3737,13 +3737,21 @@ fn summarize_void_payload(payload: &EventPayload) -> (&'static str, String, Opti
         ),
         EventPayload::ReclassifyOutflow(ro) => (
             "ReclassifyOutflow",
-            format!("out {} as {:?}", ro.transfer_out_event.canonical(), ro.as_),
+            format!(
+                "out {} as {}",
+                ro.transfer_out_event.canonical(),
+                btctax_cli::render::describe_outflow_class(&ro.as_)
+            ),
             Some(ro.transfer_out_event.clone()),
             false,
         ),
         EventPayload::ClassifyInbound(ci) => (
             "ClassifyInbound",
-            format!("in {} as {:?}", ci.transfer_in_event.canonical(), ci.as_),
+            format!(
+                "in {} as {}",
+                ci.transfer_in_event.canonical(),
+                btctax_cli::render::describe_inbound_class(&ci.as_)
+            ),
             Some(ci.transfer_in_event.clone()),
             false,
         ),
@@ -9825,6 +9833,30 @@ mod tests {
             kind: KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         }
+    }
+
+    /// UX-P4-7 wiring: the void list / bulk-void preview summary of a `ClassifyInbound` payload is
+    /// HUMAN (via the shared `btctax_cli::render::describe_inbound_class`), so the TUI column no
+    /// longer truncates it mid-field at `{ basis: Non`.
+    #[test]
+    fn summarize_void_payload_classify_inbound_is_human() {
+        use rust_decimal_macros::dec;
+        use time::macros::date;
+        let payload = EventPayload::ClassifyInbound(ClassifyInbound {
+            transfer_in_event: EventId::decision(1),
+            as_: InboundClass::SelfTransferMine {
+                basis: Some(dec!(19000)),
+                acquired_at: Some(date!(2026 - 01 - 01)),
+            },
+        });
+        let (tag, summary, _target, _sha) = summarize_void_payload(&payload);
+        assert_eq!(tag, "ClassifyInbound");
+        assert!(summary.contains("self-transfer"), "human class: {summary}");
+        assert!(summary.contains("$19000.00"), "{summary}");
+        assert!(
+            !summary.contains('{'),
+            "no Debug struct braces (the mid-field truncation source): {summary}"
+        );
     }
 
     // ── Helper: type characters into the focused buffer ──────────────────────

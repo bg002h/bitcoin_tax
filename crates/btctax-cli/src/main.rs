@@ -2012,14 +2012,14 @@ fn bulk_void_payload_summary(p: &btctax_core::EventPayload) -> String {
             format!("TransferLink out {}", tl.out_event.canonical())
         }
         EventPayload::ReclassifyOutflow(ro) => format!(
-            "ReclassifyOutflow out {} as {:?}",
+            "ReclassifyOutflow out {} as {}",
             ro.transfer_out_event.canonical(),
-            ro.as_
+            render::describe_outflow_class(&ro.as_)
         ),
         EventPayload::ClassifyInbound(ci) => format!(
-            "ClassifyInbound in {} as {:?}",
+            "ClassifyInbound in {} as {}",
             ci.transfer_in_event.canonical(),
-            ci.as_
+            render::describe_inbound_class(&ci.as_)
         ),
         EventPayload::ManualFmv(m) => {
             format!("ManualFmv {} for {}", m.usd_fmv, m.event.canonical())
@@ -2083,6 +2083,30 @@ fn render_bulk_void_preview(plan: &btctax_cli::BulkVoidPlan) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// UX-P4-7 wiring: the bulk-void preview renders a `ClassifyInbound` payload HUMANLY (no `{:?}`
+    /// Debug struct that the column truncated mid-field at `{ basis: Non`).
+    #[test]
+    fn bulk_void_summary_classify_inbound_is_human() {
+        use btctax_core::{ClassifyInbound, EventId, EventPayload, InboundClass};
+        use rust_decimal_macros::dec;
+        use time::macros::date;
+        let p = EventPayload::ClassifyInbound(ClassifyInbound {
+            transfer_in_event: EventId::decision(1),
+            as_: InboundClass::SelfTransferMine {
+                basis: Some(dec!(19000)),
+                acquired_at: Some(date!(2026 - 01 - 01)),
+            },
+        });
+        let s = bulk_void_payload_summary(&p);
+        assert!(s.contains("ClassifyInbound in"), "{s}");
+        assert!(s.contains("self-transfer"), "human class, not Debug: {s}");
+        assert!(s.contains("$19000.00"), "{s}");
+        assert!(
+            !s.contains('{'),
+            "no Debug struct braces (the mid-field truncation source): {s}"
+        );
+    }
 
     /// Parse a `reconcile bulk-resolve-conflict …` invocation via the real clap derivation.
     fn parse_brc(args: &[&str]) -> Result<Cli, clap::Error> {
