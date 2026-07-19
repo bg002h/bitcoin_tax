@@ -197,10 +197,10 @@ optimizer and what-if use, so those read models cannot diverge from reality.
 Every unresolved question is a typed `Blocker` with a `severity()` of **Hard** or
 **Advisory**. Hard blockers (missing FMV, an uncovered disposal, an import conflict, a
 decision conflict, an unknown-basis inbound, an unclassified event, a back-dated
-method election, an invalid lot selection, a missing tax table/profile) **gate the
-tax computation** — projection-wide, not merely for the year in question. Advisories
-(an unmatched outflow, a qualified-appraisal note, a zero-basis self-transfer default,
-pseudo-mode-active) never gate; they inform.
+method election, an invalid lot selection, a missing tax table/profile, among others)
+**gate the tax computation** — projection-wide, not merely for the year in question.
+Advisories (an unmatched outflow, a qualified-appraisal note, a zero-basis
+self-transfer default, pseudo-mode-active, among others) never gate; they inform.
 
 ### Lot selection and the 2025 transition
 
@@ -499,7 +499,7 @@ into a colorized PDF.
   single-instance locked.
 - **Network boundary**: the entire tax pipeline (all six tax crates) links no HTTP
   client — machine-verified in CI by a `cargo tree` gate that must find `ureq`/`rustls`
-  *absent* from the tax crates and *present* in `btctax-update-prices` (a positive
+  *absent* from the tax crates and `ureq` *present* in `btctax-update-prices` (a positive
   control so the gate can never go vacuous). Only the opt-in updater touches the
   network, writing only a plaintext local cache the tax binaries read as a file. No
   telemetry anywhere.
@@ -577,5 +577,6 @@ For an architect picking this up, the honest tensions worth knowing:
 
 # SEE ALSO
 
-`README.md`, `NOTICE`, `LIMITATIONS.md`, `STANDARD_WORKFLOW.md`, and the per-binary man
+`README.md`, `NOTICE`, `crates/btctax-cli/LIMITATIONS.md` (the `btctax limitations`
+command), `STANDARD_WORKFLOW.md`, and the per-binary man
 pages under `docs/man/`.
