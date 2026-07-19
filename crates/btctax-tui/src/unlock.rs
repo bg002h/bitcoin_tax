@@ -248,6 +248,13 @@ fn map_open_error(e: &CliError, vault_path: &Path) -> String {
         CliError::Io(io_err) if io_err.kind() == std::io::ErrorKind::NotFound => {
             format!("no vault at {}", vault_path.display())
         }
+        // UX-P4-8: `Session::open` now enriches a pathless vault-open `io::Error` into
+        // `CliError::PathIo`. The unlock screen has its OWN concise "no vault at <path>" line and
+        // renders errors WITHOUT wrapping (`draw_unlock_screen`), so keep the short form here — the
+        // long `PathIo` string (path + hint) would clip mid-clause on a narrow terminal.
+        CliError::PathIo { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+            format!("no vault at {}", vault_path.display())
+        }
         _ => format!("vault error: {e}"),
     }
 }
@@ -258,6 +265,19 @@ fn map_open_error(e: &CliError, vault_path: &Path) -> String {
 mod tests {
     use super::*;
     use crate::app::{App, Screen};
+
+    /// UX-P4-8 (fold I1): `Session::open` on a missing vault now returns `CliError::PathIo`, but the
+    /// unlock screen must still show the CONCISE `no vault at <path>` — not the long path+hint
+    /// `PathIo` string, which `draw_unlock_screen` (no wrap) would clip mid-clause. Regression pin.
+    #[test]
+    fn missing_vault_maps_to_concise_no_vault_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("does_not_exist.pgp");
+        let err = Session::open(&vault, &Passphrase::new("pw".into()))
+            .expect_err("a missing vault must error");
+        let msg = map_open_error(&err, &vault);
+        assert_eq!(msg, format!("no vault at {}", vault.display()));
+    }
 
     // ── Masked-input buffer [R0-I2/M7] ──────────────────────────────────────
 

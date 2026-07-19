@@ -56,4 +56,27 @@ fn export_out_collision_names_path() {
         msg.contains(&out.display().to_string()),
         "names the --out path: {msg}"
     );
+    assert!(
+        msg.contains("does not already exist as a file"),
+        "carries the export-out hint (fold M2): {msg}"
+    );
+}
+
+/// UX-P4-8 (fold I2): a `backup-key --out` that cannot be written (here: `--out` is an existing
+/// directory) names the out path, not a bare `io: Is a directory`.
+#[test]
+fn backup_key_out_collision_names_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    let out = dir.path().join("outdir");
+    std::fs::create_dir(&out).unwrap(); // writing the key file onto a directory must fail
+
+    let err = cmd::admin::backup_key(&vault, &pp(), &out)
+        .expect_err("writing a key onto an existing directory must error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains(&out.display().to_string()),
+        "names the --out path: {msg}"
+    );
 }

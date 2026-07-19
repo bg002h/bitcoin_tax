@@ -2414,3 +2414,25 @@ prior). N2 folded (the already-voided refusal phrasing aligned to the `CONFLICT_
   arms, the R0-I1 overlap "void the conflicting decision", LotSelection, allocation arms) — outside
   §3.2's six-verb subject (consistent with r1 N3); a later cycle can sweep their hints + record-time
   wiring together (see the events-list M1 already filed under UX-P4-11).
+
+**UX-P4-7/8/9 (#15 Phase 2) impl review r1 residue (2026-07-19, `reviews/ux-p4-789-impl-fable-review-r1.md`):**
+r1 raised 2 Important, both FOLDED (re-review r2 pending):
+- **I1** (UX-P4-8 regressed the TUI unlock screen's missing-vault message — my `Session::open` PathIo
+  change orphaned `map_open_error`'s `no vault at <path>` arm, viewer AND editor) — FOLDED: added a
+  `CliError::PathIo`/NotFound arm to `unlock.rs::map_open_error` preserving the concise line, pinned by
+  `missing_vault_maps_to_concise_no_vault_message` (mutation-proven).
+- **I2** (UX-P4-8 missed the sibling `--out` sites) — FOLDED: new `admin::mkdir_out` choke point enriches
+  `export-irs-pdf` + `export-full-return`; `backup_key` wrapped; KATs for all three + a `mkdir_out` unit
+  test (all mutation-proven). M2 (unpinned `EXPORT_OUT_HINT`) folded by the same KATs; M1 (overclaiming
+  CSV-wrap comment) + N2 (stale `whatif.rs:16` module doc) fixed inline.
+- **N1 (Nit, later cycle)** — `store_io_with_path` at `Session::open` also enriches a NON-NotFound Io
+  (e.g. an existing vault whose `.key` sidecar is missing → `vault.rs` `read(&kp)`): the message then
+  pairs "No such file" with a `--vault` path that exists + a "run `btctax init`" hint that would refuse.
+  Strictly more info than the prior bare error; a later pass could branch the hint on `io.kind()`.
+- **N3 (Nit → new follow-up, owning phase = later polish cycle)** — `OptimizeError::NoLots` →
+  `"no lots available to sell"` (`crates/btctax-cli/src/cmd/optimize.rs:82`; raised
+  `crates/btctax-core/src/optimize.rs:1187`) has the SAME false-"no" shape UX-P4-9 just fixed for
+  `what-if sell`, when no feasible lot selection covers the target while lots exist. NOT a mechanical
+  reuse of `render::no_lots_message` (optimize's "no feasible selection" ≠ whatif's "insufficient
+  balance"), so it needs its own small analysis. Also `main.rs:2029` still Debug-prints `MethodElection
+  {:?}` — a single fieldless token, NOT the truncating-struct class UX-P4-7 targets; leave as-is.

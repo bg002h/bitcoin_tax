@@ -96,6 +96,25 @@ fn contains(hay: &[u8], needle: &[u8]) -> bool {
     hay.windows(needle.len()).any(|w| w == needle)
 }
 
+/// UX-P4-8 (fold I2): an `export-irs-pdf --out` that collides with an existing FILE (so the export
+/// directory cannot be created) names the out path — not the bare `io: File exists (os error 17)`
+/// this item exists to kill — on the flagship official-PDF export.
+#[test]
+fn export_irs_pdf_out_collision_names_path() {
+    let (_dir, vault) = make_vault(&real_events());
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("collide");
+    std::fs::write(&out, b"i am a file, not a directory").unwrap();
+
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2025, &[], None)
+        .expect_err("an --out that collides with a file must error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains(&out.display().to_string()),
+        "names the --out path: {msg}"
+    );
+}
+
 #[test]
 fn real_ledger_fills_clean_official_pdfs() {
     let (_dir, vault) = make_vault(&real_events());
@@ -472,6 +491,47 @@ fn export_dispatches_a_full_return_year_to_the_full_packet() {
         "the slice's 1040 must never appear beside the full packet"
     );
     assert!(rep.form_1040_path.is_none());
+}
+
+/// UX-P4-8 (fold I2): the FULL-RETURN export path (`export_full_return`, dispatched for a
+/// full-return year) also names the `--out` path on a collision — the same `mkdir_out` choke point
+/// as the crypto-slice path, on a distinct call site.
+#[test]
+fn export_full_return_out_collision_names_path() {
+    use btctax_cli::{return_inputs, Session};
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    use btctax_core::tax::types::FilingStatus;
+
+    let (_dir, vault) = make_vault(&real_events());
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        };
+        ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
+            first_name: "Pat".into(),
+            last_name: "Roe".into(),
+            ssn: "222-33-4444".into(),
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("collide");
+    std::fs::write(&out, b"i am a file, not a directory").unwrap();
+
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2024, &[], None)
+        .expect_err("a full-return --out that collides with a file must error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains(&out.display().to_string()),
+        "names the --out path: {msg}"
+    );
 }
 
 /// ★ THE DISPATCH, direction 2 — a year with NO full-return inputs still gets the crypto slice,

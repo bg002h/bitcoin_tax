@@ -115,8 +115,9 @@ pub fn export_snapshot(
         None => None,
     };
     let donation_details = session.donation_details()?;
-    // UX-P4-8: same path context for any CSV write that fails after the snapshot (e.g. a mid-write
-    // I/O error) — the CSV writers `?` on pathless `io::Error`.
+    // UX-P4-8: name the --out path when `write_csv_exports` fails to CREATE/OPEN a file under out_dir
+    // (its `mkdir_owner_only`/`open_owner_only` `io::Error`s). NOTE: a mid-write `csv::Error` is
+    // deliberately NOT enriched (it is a `CliError::Csv`, passed through) — it is not a path problem.
     write_csv_exports(
         out_dir,
         &state,
@@ -256,7 +257,7 @@ pub fn export_irs_pdf(
         })
     };
 
-    fsperms::mkdir_owner_only(out_dir)?;
+    mkdir_out(out_dir)?;
 
     // ── Form 8949 + Schedule D (always applicable). ──
     let f8949_path = if wants(forms, FormArg::F8949) {
@@ -407,11 +408,24 @@ fn write_bytes_owner_only(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
     Ok(())
 }
 
+/// UX-P4-8: create the export `--out` directory, NAMING the path + a one-clause hint when it cannot be
+/// created (a colliding file, a missing parent, a permission problem) — instead of the bare
+/// `io: File exists (os error 17)` the pathless `StoreError::Io` produces. The single choke point for
+/// every directory-producing export (`export-snapshot` via `write_csv_exports`, `export-irs-pdf`,
+/// `export-full-return`).
+fn mkdir_out(out_dir: &Path) -> Result<(), CliError> {
+    fsperms::mkdir_owner_only(out_dir)
+        .map_err(|e| crate::store_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))
+}
+
 /// §8: export the passphrase-protected key (escape hatch; HIGH-security write).
 pub fn backup_key(vault_path: &Path, pp: &Passphrase, out_path: &Path) -> Result<(), CliError> {
     Session::open(vault_path, pp)?
         .vault()
-        .backup_key(out_path)?;
+        .backup_key(out_path)
+        // UX-P4-8: name the --out path (and hint) when the key file cannot be written (a colliding
+        // directory, a missing parent, a permission problem), not a bare `io: …`.
+        .map_err(|e| crate::store_io_with_path(e, out_path, crate::EXPORT_OUT_HINT))?;
     Ok(())
 }
 
@@ -491,7 +505,7 @@ fn export_full_return(
     // ★ ALL-OR-NOTHING: every form fills BEFORE anything is written.
     let packet = btctax_forms::fill_full_return(&printed, tax_year)?;
 
-    fsperms::mkdir_owner_only(out_dir)?;
+    mkdir_out(out_dir)?;
     let mut manifest = String::from("# btctax full-return packet — staple in this order\n");
     let mut paths: Vec<PathBuf> = Vec::new();
     for form in &packet {
@@ -560,4 +574,33 @@ fn export_full_return(
         form_1040_filled_7a: false,
         form_1040_loss: false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// UX-P4-8 (fold I2): `mkdir_out` — the shared export-`--out` directory creator — names the
+    /// offending PATH and the remedy HINT when the directory cannot be created (here: an `--out`
+    /// that collides with a plain file), instead of a bare `io: File exists`.
+    #[test]
+    fn mkdir_out_collision_names_path_and_hint() {
+        let dir = tempfile::tempdir().unwrap();
+        let collide = dir.path().join("collide");
+        std::fs::write(&collide, b"i am a file, not a directory").unwrap();
+        let err = mkdir_out(&collide).expect_err("a file collision must error");
+        match &err {
+            CliError::PathIo { path, hint, .. } => {
+                assert!(path.contains("collide"), "names the path: {path}");
+                assert_eq!(hint, crate::EXPORT_OUT_HINT, "carries the export-out hint");
+            }
+            other => panic!("expected PathIo, got {other:?}"),
+        }
+        let msg = err.to_string();
+        assert!(msg.contains("collide"), "Display names the path: {msg}");
+        assert!(
+            msg.contains(crate::EXPORT_OUT_HINT),
+            "Display carries the hint: {msg}"
+        );
+    }
 }

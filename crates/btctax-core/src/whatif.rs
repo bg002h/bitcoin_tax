@@ -13,7 +13,8 @@
 //!
 //! **Refusals** are inherited from the engine verbatim: a Hard blocker anywhere / a missing table /
 //! a missing profile ⇒ `YearNotComputable`; a pre-2025 date ⇒ `PreTransitionYear`; a future/off-dataset
-//! date with no `--price` ⇒ `Evaluate(ProceedsRequired)`; an empty as-of pool ⇒ `NoLots`.
+//! date with no `--price` ⇒ `Evaluate(ProceedsRequired)`; an as-of pool that cannot cover the sale
+//! (empty OR merely insufficient) ⇒ `NoLots { available, requested, .. }` (UX-P4-9).
 use crate::conventions::{round_cents, Sat, TaxDate, Usd, SATS_PER_BTC, TRANSITION_DATE};
 use crate::event::{DisposeKind, LedgerEvent, LotPick};
 use crate::identity::{LotId, WalletId};
