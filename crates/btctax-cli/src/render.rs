@@ -305,6 +305,17 @@ pub fn render_report(state: &LedgerState, year: Option<i32>) -> String {
     for (w, sat) in &state.holdings_by_wallet {
         let _ = writeln!(out, "  {}: {} sat", wallet_label(w), sat);
     }
+    // UX-P4-6: surface unreconciled transfer sats in the holdings view (BTC unit) so `report` no
+    // longer hides what `verify` alone reported. Shown only when sats are actually pending.
+    if state.stats.sigma_pending > 0 {
+        let n = state.pending_reconciliation.len();
+        let plural = if n == 1 { "transfer" } else { "transfers" };
+        let _ = writeln!(
+            out,
+            "  Pending: {} BTC ({n} unreconciled {plural} — see `btctax verify`)",
+            fmt_btc(state.stats.sigma_pending),
+        );
+    }
 
     let _ = writeln!(out, "Lots:");
     if state.lots.is_empty() {
@@ -3784,6 +3795,69 @@ mod events_list_render_tests {
             "decided row: {}",
             lines[2]
         );
+    }
+}
+
+#[cfg(test)]
+mod holdings_pending_tests {
+    //! UX-P4-6 — the holdings view shows a BTC-unit pending line when sats sit unreconciled, and
+    //! hides it on a reconciled ledger. `report` otherwise never mentioned pending (only `verify` did).
+    use super::*;
+    use btctax_core::state::PendingTransfer;
+    use btctax_core::EventId;
+
+    #[test]
+    fn holdings_pending_line_shows_in_btc_and_hides_when_reconciled() {
+        let mut pending = LedgerState::default();
+        pending.stats.sigma_pending = 3_000_000; // 0.03 BTC unreconciled
+        pending.pending_reconciliation = vec![PendingTransfer {
+            event: EventId::decision(1),
+            principal_sat: 3_000_000,
+            fee_sat: None,
+            legs: vec![],
+        }];
+        let shown = render_report(&pending, None);
+        assert!(shown.contains("Pending:"), "pending line present: {shown}");
+        assert!(shown.contains("0.03000000 BTC"), "BTC unit: {shown}");
+        assert!(
+            shown.contains("1 unreconciled transfer"),
+            "names the count (singular): {shown}"
+        );
+        assert!(shown.contains("verify"), "points at `verify`: {shown}");
+
+        // Reconciled ledger: no pending sats → no pending line at all.
+        let reconciled = LedgerState::default();
+        let hidden = render_report(&reconciled, None);
+        assert!(
+            !hidden.contains("Pending:"),
+            "no pending line when reconciled: {hidden}"
+        );
+    }
+
+    #[test]
+    fn holdings_pending_line_pluralizes_multiple_transfers() {
+        let mut pending = LedgerState::default();
+        pending.stats.sigma_pending = 150_000_000; // 1.5 BTC
+        pending.pending_reconciliation = vec![
+            PendingTransfer {
+                event: EventId::decision(1),
+                principal_sat: 100_000_000,
+                fee_sat: None,
+                legs: vec![],
+            },
+            PendingTransfer {
+                event: EventId::decision(2),
+                principal_sat: 50_000_000,
+                fee_sat: None,
+                legs: vec![],
+            },
+        ];
+        let shown = render_report(&pending, None);
+        assert!(
+            shown.contains("2 unreconciled transfers"),
+            "plural: {shown}"
+        );
+        assert!(shown.contains("1.50000000 BTC"), "{shown}");
     }
 }
 
