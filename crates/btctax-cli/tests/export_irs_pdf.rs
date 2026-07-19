@@ -583,10 +583,11 @@ fn forms_slice_ignored_on_full_return_year_is_flagged_and_packet_unchanged() {
         !rep2.forms_ignored_full_return,
         "no --forms → nothing was ignored"
     );
+    // The path COUNT is unchanged (the process-level KAT below compares the full sorted file-NAME set).
     assert_eq!(
         rep.full_return_paths.len(),
         rep2.full_return_paths.len(),
-        "the packet is byte-for-byte the same set regardless of --forms (the slice is inert)"
+        "the packet path count is unchanged regardless of --forms (the slice is inert)"
     );
 }
 

@@ -23,15 +23,21 @@ fn classify_inbound_income_help_has_fmv_units_and_kind_values() {
         h.contains("mining") && h.contains("staking"),
         "--kind must list its valid values:\n{h}"
     );
-    // fold r1-I1: the help must NOT claim a daily-close fallback that this single-event command does
-    // not have (omitting --fmv fires a Hard FMV-missing blocker); it should point at the remedy.
+    // fold r1-I1: the help must NOT claim a daily-close fallback this single-event command lacks
+    // (omitting --fmv fires a Hard FMV-missing blocker).
     assert!(
-        h.contains("FMV missing") || h.contains("bulk-classify-inbound-income"),
-        "--fmv help must state the real no-fmv behavior, not a phantom auto-valuation:\n{h}"
+        h.contains("FMV missing"),
+        "--fmv help must state the real no-fmv behavior (a Hard FMV-missing blocker):\n{h}"
     );
     assert!(
         !h.contains("bundled daily close for the receipt date is used"),
         "the false daily-close fallback claim must be gone:\n{h}"
+    );
+    // fold r2-I-A: the remedy is VOID-then-reclassify (classify-inbound is first-wins, so a bare
+    // re-classify with --fmv is refused by the record-time guard). Pin the exact command.
+    assert!(
+        h.contains("reconcile void") && h.contains("first-wins"),
+        "--fmv help remedy must be `reconcile void` then re-classify (first-wins):\n{h}"
     );
 }
 

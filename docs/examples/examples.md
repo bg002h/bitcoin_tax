@@ -337,7 +337,8 @@ $ btctax --vault v.pgp config --set-forward-method fifo --effective-from 2025-01
 Recorded standing order (MethodElection) decision|1
 fee_treatment: non-taxable, basis carries (TP8 c)
 pre2025_method: HIFO (attested: false)
-forward_method: FIFO (vault-wide standing order, effective 2025-01-01)
+forward_method: FIFO (vault-wide, in force as of 2025-01-01)
+  (1 standing order(s) recorded — `btctax verify` lists them with effective dates + status)
 ```
 
 `optimize run` is read-only — it proposes, files nothing:

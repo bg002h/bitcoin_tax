@@ -552,50 +552,56 @@ fn run() -> Result<ExitCode, CliError> {
                 render::lot_method_display(cfg.pre2025_method),
                 cfg.pre2025_method_attested
             );
-            // UX-P4-12(c): echo the forward-method standing order(s) that `config
-            // --set-forward-method` records — previously readable only in `verify`'s block. States
-            // the VAULT-WIDE method explicitly (a global standing order, else the FIFO default),
-            // then any PER-ACCOUNT (scoped) orders — a scoped order governs only its exchange account
-            // and must not be reported as the vault-wide method (r1-I2). Recorded-but-not-governing
-            // (backdated/ignored) orders are disclosed so a set-but-ineffective order is not invisible.
-            let (events, _state, _cfg) =
-                btctax_cli::Session::open(vault, &pp)?.load_events_and_project()?;
+            // UX-P4-12(c): echo the CURRENTLY-GOVERNING forward method that `config
+            // --set-forward-method` records — previously readable only in `verify`. Resolved by the
+            // SHARED `project::in_force_methods` (the same resolver `fold::applicable_method` uses:
+            // scoped election → global election → HIFO default), NOT a re-implementation of the
+            // precedence [r2-I-B]. A scoped order governs only its exchange account. The full recorded
+            // history (with effective dates + future/superseded orders) is deferred to `verify`, so no
+            // in-force order is hidden and no non-governing method is claimed as current.
+            let session = btctax_cli::Session::open(vault, &pp)?;
+            let (events, _state, projcfg) = session.load_events_and_project()?;
+            let prices = session.prices();
+            let today = now.date();
             let voided = render::voided_targets(&events);
-            let orders = render::method_election_lines(&events, &voided);
-            // Vault-wide = the latest in-force GLOBAL (unscoped) order, else FIFO.
-            match orders
+            let recorded = render::method_election_lines(&events, &voided)
+                .into_iter()
+                .filter(|e| e.note != "voided")
+                .count();
+            // Known exchange accounts (scoped elections can only target these).
+            let mut exchanges: Vec<btctax_core::WalletId> = events
                 .iter()
-                .rfind(|e| e.wallet.is_none() && e.note == "in force")
-            {
-                Some(e) => println!(
-                    "forward_method: {} (vault-wide standing order, effective {})",
-                    render::lot_method_display(e.method),
-                    e.effective_from
-                ),
-                None => println!("forward_method: FIFO (vault-wide default)"),
+                .filter_map(|e| e.wallet.clone())
+                .filter(|w| matches!(w, btctax_core::WalletId::Exchange { .. }))
+                .collect();
+            exchanges.sort();
+            exchanges.dedup();
+            // Probe a generic self-custody wallet (no scoped exchange election matches it) for the
+            // vault-wide method, then each known exchange account.
+            let generic = btctax_core::WalletId::SelfCustody {
+                label: String::new(),
+            };
+            let mut probe = vec![generic];
+            probe.extend(exchanges.iter().cloned());
+            let methods =
+                btctax_core::project::in_force_methods(&events, prices, &projcfg, today, &probe);
+            println!(
+                "forward_method: {} (vault-wide, in force as of {today})",
+                render::lot_method_display(methods[0].method)
+            );
+            for (w, m) in exchanges.iter().zip(&methods[1..]) {
+                if m.scoped {
+                    println!(
+                        "  forward_method for {}: {} (per-account, in force as of {today})",
+                        render::wallet_label(w),
+                        render::lot_method_display(m.method)
+                    );
+                }
             }
-            for e in orders
-                .iter()
-                .filter(|e| e.wallet.is_some() && e.note == "in force")
-            {
+            if recorded > 0 {
                 println!(
-                    "  forward_method for {}: {} (standing order, effective {})",
-                    render::wallet_label(e.wallet.as_ref().unwrap()),
-                    render::lot_method_display(e.method),
-                    e.effective_from
-                );
-            }
-            for e in orders.iter().filter(|e| e.note == "backdated/ignored") {
-                let scope = e
-                    .wallet
-                    .as_ref()
-                    .map(|w| format!(" for {}", render::wallet_label(w)))
-                    .unwrap_or_default();
-                println!(
-                    "  (recorded standing order{scope}: {} effective {} — {}, not governing)",
-                    render::lot_method_display(e.method),
-                    e.effective_from,
-                    e.note
+                    "  ({recorded} standing order(s) recorded — `btctax verify` lists them with \
+                     effective dates + status)"
                 );
             }
         }

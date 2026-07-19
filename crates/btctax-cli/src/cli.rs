@@ -535,8 +535,9 @@ pub enum Reconcile {
         kind: String,
         /// Fair-market value of the received BTC at receipt — USD dollars, NOT sats. On this
         /// single-event command there is NO auto-valuation: omitting `--fmv` records a Hard
-        /// "FMV missing" blocker (re-classify with `--fmv` to clear it). To value automatically from
-        /// the bundled daily close, use `reconcile bulk-classify-inbound-income` instead.
+        /// "FMV missing" blocker. To supply it, `reconcile void <decision-ref>` then re-classify with
+        /// `--fmv` (classify-inbound is first-wins — re-running without voiding first is refused). To
+        /// value automatically from the bundled daily close, use `reconcile bulk-classify-inbound-income`.
         #[arg(long)]
         fmv: Option<String>,
         /// Mark this income as earned in a trade or business (routes to Schedule C / SE tax).

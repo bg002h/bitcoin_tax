@@ -39,6 +39,24 @@ fn run_config(vault: &Path, args: &[&str]) -> (i32, String) {
     (code, stdout)
 }
 
+/// `config` at a pinned clock (`BTCTAX_NOW`). Needed for forward-method tests: an election is honored
+/// only when `effective_from` is BOTH ≥ its recording date (else backdated/ignored) AND ≤ the query
+/// date — so a governing order needs the recording clock and effective date aligned.
+fn run_config_at(vault: &Path, now: &str, args: &[&str]) -> (i32, String) {
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let output = std::process::Command::new(bin)
+        .arg("--vault")
+        .arg(vault.to_str().expect("vault path is valid UTF-8"))
+        .arg("config")
+        .args(args)
+        .env("BTCTAX_PASSPHRASE", "pw")
+        .env("BTCTAX_NOW", now)
+        .output()
+        .expect("btctax binary must execute successfully");
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    (output.status.code().unwrap(), stdout)
+}
+
 /// A-M3 — apply-all: `config --set-fee-treatment b --set-pre2025-method lifo` via the real binary
 /// must apply BOTH flags (the old if/else dispatch silently dropped `--set-fee-treatment` when
 /// `--set-pre2025-method` was also provided). This test FAILS if the `Command::Config` arm reverts
@@ -252,9 +270,9 @@ fn config_set_forward_method_exchange_scoped() {
     );
 }
 
-/// UX-P4-12(c): `config` (show) echoes the forward-method standing order that
-/// `config --set-forward-method` records — previously readable only in `verify`'s Standing-orders
-/// block. A fresh vault names the Fifo default; once an order exists, config shows it with its status.
+/// UX-P4-12(c): `config` (show) echoes the CURRENTLY-GOVERNING forward method (resolved by the SAME
+/// `project::in_force_methods` the fold uses) — previously readable only in `verify`. A fresh vault
+/// names the HIFO app default (r2: NOT FIFO); a governing global order is shown resolved.
 #[test]
 fn config_shows_forward_method_standing_order() {
     let dir = tempfile::tempdir().unwrap();
@@ -264,30 +282,31 @@ fn config_shows_forward_method_standing_order() {
     let (code, fresh) = run_config(&vault, &[]);
     assert_eq!(code, 0, "config show exits 0; stdout: {fresh}");
     assert!(
-        fresh.contains("forward_method: FIFO (vault-wide default)"),
-        "a fresh vault names the FIFO vault-wide default:\n{fresh}"
+        fresh.contains("forward_method: HIFO (vault-wide, in force"),
+        "a fresh vault names the HIFO app default (the fold's applicable_method fall-through):\n{fresh}"
     );
 
-    // Record a forward-looking standing order (far-future effective date ⇒ deterministically in force).
-    let (sc, _) = run_config(
+    // A GLOBAL order effective on the recording day (so it is neither backdated nor future) governs.
+    let (sc, _) = run_config_at(
         &vault,
+        "2025-06-15T12:00:00Z",
         &[
             "--set-forward-method",
-            "hifo",
+            "lifo",
             "--effective-from",
-            "2099-01-01",
+            "2025-06-15",
         ],
     );
     assert_eq!(sc, 0, "recording a standing order must exit 0");
 
-    let (_c, after) = run_config(&vault, &[]);
+    let (_c, after) = run_config_at(&vault, "2025-06-15T12:00:00Z", &[]);
     assert!(
-        after.contains("forward_method: HIFO (vault-wide standing order, effective 2099-01-01)"),
-        "config echoes the recorded vault-wide forward method:\n{after}"
+        after.contains("forward_method: LIFO (vault-wide, in force as of 2025-06-15)"),
+        "config resolves the governing vault-wide method:\n{after}"
     );
     assert!(
-        !after.contains("forward_method: FIFO (vault-wide default)"),
-        "the vault-wide default line is replaced once a GLOBAL order is in force:\n{after}"
+        after.contains("1 standing order(s) recorded"),
+        "the recorded-orders pointer is shown:\n{after}"
     );
 }
 
@@ -327,32 +346,79 @@ fn config_scoped_forward_method_is_not_reported_vault_wide() {
         s.save().unwrap();
     }
 
-    let (sc, set_out) = run_config(
+    // A scoped LIFO order effective on the recording day governs ONLY coinbase:main.
+    let (sc, set_out) = run_config_at(
         &vault,
+        "2025-06-15T12:00:00Z",
         &[
             "--set-forward-method",
-            "hifo",
+            "lifo",
             "--exchange",
             "exchange:coinbase:main",
             "--effective-from",
-            "2099-01-01",
+            "2025-06-15",
         ],
     );
     assert_eq!(sc, 0, "scoped election on a known account must exit 0");
-    // fold r1-M1(a): the scoped-set confirmation uses the human method label, not raw Debug `Hifo`.
+    // fold r1-M1(a): the scoped-set confirmation uses the human method label, not raw Debug.
     assert!(
-        set_out.contains("attests HIFO") && !set_out.contains("Hifo"),
+        set_out.contains("attests LIFO") && !set_out.contains("Lifo"),
         "the set confirmation reads human, not Debug:\n{set_out}"
     );
 
-    let (_c, out) = run_config(&vault, &[]);
+    let (_c, out) = run_config_at(&vault, "2025-06-15T12:00:00Z", &[]);
     assert!(
-        out.contains("forward_method: FIFO (vault-wide default)"),
-        "the vault-wide method stays FIFO — a scoped order does not change it:\n{out}"
+        out.contains("forward_method: HIFO (vault-wide, in force"),
+        "the vault-wide method stays the HIFO default — a scoped order does not change it:\n{out}"
     );
     assert!(
-        out.contains("forward_method for exchange:coinbase:main: HIFO"),
+        out.contains("forward_method for exchange:coinbase:main: LIFO (per-account"),
         "the scoped order is attributed to its account, not reported vault-wide:\n{out}"
+    );
+}
+
+/// UX-P4-12(c) fold r2-I-B: with TWO in-force GLOBAL standing orders, `config` names the one the
+/// ENGINE resolves (`max_by(effective_from, decision_seq)`), NOT the last-recorded one. Recording HIFO
+/// (effective 2030) BEFORE LIFO (effective 2027), then querying in 2031 where both are effective: the
+/// engine picks HIFO (later effective_from) — the old max-`decision_seq` read-back would have said LIFO.
+#[test]
+fn config_multi_global_order_resolves_by_effective_date_not_recording_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Both recorded in 2025 (effective dates are in their future ⇒ not backdated).
+    let (a, _) = run_config_at(
+        &vault,
+        "2025-06-15T12:00:00Z",
+        &[
+            "--set-forward-method",
+            "hifo",
+            "--effective-from",
+            "2030-01-01",
+        ],
+    );
+    let (b, _) = run_config_at(
+        &vault,
+        "2025-06-16T12:00:00Z",
+        &[
+            "--set-forward-method",
+            "lifo",
+            "--effective-from",
+            "2027-01-01",
+        ],
+    );
+    assert_eq!((a, b), (0, 0), "both orders record");
+
+    // Query in 2031: both are effective; the engine resolves by max effective_from ⇒ HIFO (2030 > 2027).
+    let (_c, out) = run_config_at(&vault, "2031-01-01T00:00:00Z", &[]);
+    assert!(
+        out.contains("forward_method: HIFO (vault-wide, in force as of 2031-01-01)"),
+        "config names the engine-resolved method (later effective_from wins), not the last recorded:\n{out}"
+    );
+    assert!(
+        out.contains("2 standing order(s) recorded"),
+        "both recorded orders are disclosed (neither hidden):\n{out}"
     );
 }
 
