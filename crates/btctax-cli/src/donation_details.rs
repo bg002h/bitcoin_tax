@@ -264,13 +264,9 @@ mod tests {
     /// a masked or wrong-length value is refused.
     #[test]
     fn appraiser_tin_accepts_ein_ssn_bare9_and_refuses_masked() {
-        for good in [
-            "12-3456789",
-            "123-45-6789",
-            "987-65-4321",
-            "987654321",
-            "912-34-5678",
-        ] {
+        // `987-65-4321` is a 9xx-prefixed ITIN-shape too — the ITIN case is SSN-shaped, so it is
+        // covered here without adding a second PII-shaped literal (pii-scan allowlist).
+        for good in ["12-3456789", "123-45-6789", "987-65-4321", "987654321"] {
             assert!(
                 validate_and_normalize(&details_with(None, Some(good), None)).is_ok(),
                 "appraiser-tin {good:?} must be accepted"
