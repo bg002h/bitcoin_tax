@@ -244,7 +244,7 @@ fn run() -> Result<ExitCode, CliError> {
                 // --proceeds: explicit USD; None when --fmv or neither flag (forces dataset FMV).
                 let proceeds_usd = proceeds
                     .as_deref()
-                    .map(eventref::parse_usd_arg)
+                    .map(|s| eventref::parse_nonneg_usd_arg(s, "--proceeds"))
                     .transpose()?;
                 let report = cmd::optimize::consult(
                     vault,
@@ -320,7 +320,10 @@ fn run() -> Result<ExitCode, CliError> {
                     .map(eventref::parse_date_arg)
                     .transpose()?
                     .unwrap_or_else(|| btctax_core::conventions::tax_date(now, UtcOffset::UTC));
-                let price_usd = price.as_deref().map(eventref::parse_usd_arg).transpose()?;
+                let price_usd = price
+                    .as_deref()
+                    .map(|s| eventref::parse_nonneg_usd_arg(s, "--price"))
+                    .transpose()?;
                 let method_lm = method.map(LotMethod::from);
 
                 // Ad-hoc (non-persisted) profile: if ANY ad-hoc flag is present, --filing-status AND
@@ -347,7 +350,7 @@ fn run() -> Result<ExitCode, CliError> {
                     let magi_usd = magi.as_deref().map(eventref::parse_usd_arg).transpose()?;
                     let cf_long = carryforward_in
                         .as_deref()
-                        .map(eventref::parse_usd_arg)
+                        .map(|s| eventref::parse_nonneg_usd_arg(s, "--carryforward-in"))
                         .transpose()?
                         .unwrap_or_default();
                     Some(cmd::whatif::AdhocProfile {
@@ -396,7 +399,10 @@ fn run() -> Result<ExitCode, CliError> {
                     .map(eventref::parse_date_arg)
                     .transpose()?
                     .unwrap_or_else(|| btctax_core::conventions::tax_date(now, UtcOffset::UTC));
-                let price_usd = price.as_deref().map(eventref::parse_usd_arg).transpose()?;
+                let price_usd = price
+                    .as_deref()
+                    .map(|s| eventref::parse_nonneg_usd_arg(s, "--price"))
+                    .transpose()?;
 
                 // Ad-hoc (non-persisted) profile: identical shape to `what-if sell` (R0-M4 --magi floor).
                 let adhoc = if filing_status.is_some()
@@ -421,7 +427,7 @@ fn run() -> Result<ExitCode, CliError> {
                     let magi_usd = magi.as_deref().map(eventref::parse_usd_arg).transpose()?;
                     let cf_long = carryforward_in
                         .as_deref()
-                        .map(eventref::parse_usd_arg)
+                        .map(|s| eventref::parse_nonneg_usd_arg(s, "--carryforward-in"))
                         .transpose()?
                         .unwrap_or_default();
                     Some(cmd::whatif::AdhocProfile {
