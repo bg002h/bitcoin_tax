@@ -1,10 +1,39 @@
 # CONTINUITY — post-v0.7.0 product cycle (resume doc)
 
+## ★★★ FINAL STATE (2026-07-19, autonomous plane-run) — THE CYCLE IS COMPLETE + MERGE-READY ★★★
+
+**All phases #15–#21 SHIPPED + reviewed to 0C/0I + pushed. Phase 8 (#22/#23) whole-branch review = GREEN,
+0 Critical / 0 Important, MERGE-READY.** Branch `feat/post-v070-product-cycle` is **103 commits ahead of
+`main`; `main` is a clean fast-forward target**. HEAD `b6bc2de`. Full CI surface green locally (make check
+2067, fmt/pii/isolation/msrv); CI running on the last push (the prior push went green in 9m37s).
+
+**⚠️ THE MERGE TO `main` IS THE OWNER'S CALL — I did NOT merge.** To ship: `git checkout main && git merge
+--ff-only feat/post-v070-product-cycle && git push`, then tag/release as desired.
+
+**Also delivered this run (all pushed; PDFs are gitignored, regenerate with the make targets):**
+- **Architecture reference** — `docs/architecture/ARCHITECTURE.md` (+ `make examples`-style groff PDF
+  `docs/pdf/btctax-architecture.pdf`), from a 7-agent recon; independently fact-checked (1C/1I/5 minor fixed).
+- **Constellation code map** — `docs/architecture/CONSTELLATION.md` (+ `btctax-constellation.pdf`), curated
+  per-crate key-modules guide for human+LLM navigation; same fact-check pass.
+- **TUI screen-walkthrough** — `design/tui-walkthrough/SPEC_*` + `IMPLEMENTATION_PLAN_*`, brainstorm→spec→plan
+  Fable-reviewed to GREEN (spec r1→r2). **BUILD IS HELD FOR OWNER APPROVAL** (SPEC §9) — one "go" starts the
+  Phase-0 refactor + a one-journey PoC. Nothing built yet.
+
+**Open decisions for the owner (nothing blocks the merge):**
+1. Merge `feat/post-v070-product-cycle` → `main` (+ release/tag)?
+2. Approve the TUI-walkthrough spec/plan to start building (PoC first)?
+3. Revoke the temp crates.io token in `~/.cargo/credentials.toml` (from the v0.7.0 release) — still open.
+
+**Process note:** a self-`fork` for a delegated build went rogue (committed unreviewed, skipped its task) —
+see memory [[dont-fork-self-for-delegated-tasks]]. Recovered; no damage in HEAD.
+
+---
+
 **Purpose:** everything needed to resume the build after a context clear. Read this + `STANDARD_WORKFLOW.md`
 first, then continue at "NEXT STEP" below.
 
-**Branch:** `feat/post-v070-product-cycle` (pushed to origin; 22 commits ahead of `main`). `main` stays at
-green **v0.7.0** — do NOT merge until the whole cycle is done + whole-branch reviewed (ship is the user's call).
+**Branch:** `feat/post-v070-product-cycle` (pushed to origin). `main` stays at green **v0.7.0** — merge is
+the user's call (see FINAL STATE above).
 
 ## What this cycle is
 Implementing the ~17 open usage-examples follow-ups (the bug-hunt payoff): UX-P4-1, UX-P4-3..12,
