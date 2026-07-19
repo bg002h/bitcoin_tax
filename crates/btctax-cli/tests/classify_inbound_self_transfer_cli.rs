@@ -272,31 +272,40 @@ fn manual_classify_inbound_self_transfer_also_long_term() {
     );
 }
 
-/// Wrong target: pointing the subcommand at a NON-TransferIn event (an Acquire) surfaces the existing
-/// bad-target path — a `DecisionConflict` blocker (variant-agnostic; the CLI only appends).
+/// Wrong target: pointing the subcommand at a NON-TransferIn event (an Acquire) is now REFUSED at
+/// RECORD TIME (UX-P4-3) — the resolver would adjudicate it as a wrong-type `DecisionConflict`, so
+/// record-time mirrors that and refuses BEFORE any append (fail-closed), instead of the old
+/// accept-then-surface-at-verify behavior.
 #[test]
-fn classify_inbound_self_transfer_wrong_target_is_decision_conflict() {
+fn classify_inbound_self_transfer_wrong_target_is_refused_at_record_time() {
     let dir = tempfile::tempdir().unwrap();
     let (vault, acquire_ref) = vault_with(dir.path(), coinbase_buy_csv(dir.path()), false);
 
     let (code, stderr) = run_self_transfer(&vault, &[&acquire_ref]);
-    // The CLI append itself succeeds (exit 0) — the engine adjudicates the bad target in projection.
-    assert_eq!(code, 0, "append succeeds; stderr: {stderr}");
+    assert_ne!(
+        code, 0,
+        "a non-TransferIn target must be refused; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("non-TransferIn") && stderr.contains("events list"),
+        "the refusal must name the wrong-type conflict + the events-list remedy: {stderr}"
+    );
 
+    // Fail-closed: nothing was appended, so no DecisionConflict blocker surfaces at projection either.
     let s = Session::open(&vault, &pp()).unwrap();
     let (state, _) = s.project().unwrap();
     assert!(
         state
             .blockers
             .iter()
-            .any(|b| b.kind == BlockerKind::DecisionConflict),
-        "classifying a non-TransferIn event must raise DecisionConflict (bad-target path)"
+            .all(|b| b.kind != BlockerKind::DecisionConflict),
+        "a refused decision must append nothing (no DecisionConflict at verify)"
     );
     assert!(
-        state
-            .blockers
+        !btctax_core::persistence::load_all(s.conn())
+            .unwrap()
             .iter()
-            .all(|b| b.kind != BlockerKind::SelfTransferInboundZeroBasis),
-        "no lot / no advisory for an excluded bad-target decision"
+            .any(|e| matches!(e.payload, EventPayload::ClassifyInbound(_))),
+        "the wrong-target classify must not be recorded"
     );
 }

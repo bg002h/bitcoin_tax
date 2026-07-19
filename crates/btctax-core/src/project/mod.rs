@@ -85,6 +85,75 @@ pub fn pseudo_plan(
     resolve::resolve(events, prices, &cfg).pseudo_decisions
 }
 
+/// UX-P4-3 record-time validation, DEFINITIONALLY the resolver. Answers "would appending `incoming`
+/// (a reconcile decision payload, e.g. `ClassifyInbound`/`ManualFmv`/`VoidDecisionEvent`) introduce a
+/// NEW `DecisionConflict`?" — returning the offending blocker's `detail` if so, else `None`.
+///
+/// It does NOT hand-rebuild the resolver's `applied` map (a subset view drifts — a prior draft was one
+/// writer short and both false-refused and false-accepted). Instead it RUNS the real projection twice
+/// and diffs the `DecisionConflict` set: baseline (`events`) vs `events` + the candidate appended as
+/// the resolver would append it (the next decision seq — the highest, so it is the LOSING side of any
+/// first-wins race). A conflict present WITH the candidate but not in the baseline is one the candidate
+/// introduced. Baseline-diff (not a candidate-id match) is required because the passthrough-overlap
+/// guard keys its blocker to the EXISTING decision, not the newcomer.
+///
+/// **Pseudo is forced OFF** so the shadow is the real (non-synthetic) projection — this keeps
+/// void→re-decide and the FIRST real classify of a pseudo-defaulted target working, and honors an
+/// accepted-conflict `SupersedeImport` override the resolver sees. Every per-verb rule (first-wins for
+/// ClassifyInbound/ReclassifyOutflow/ReclassifyIncome/ClassifyRaw; `ManualFmv` last-wins so `set-fmv`
+/// is duplicate-exempt yet still existence/type-validated; wrong-type / unknown-target) falls out for
+/// free because this IS the resolver. Pure/total (NFR4); two `project` calls, cheap for infrequent
+/// record-time use. Never sees the stored pseudo cfg's taint.
+pub fn would_conflict(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    incoming: &crate::event::EventPayload,
+    now: time::OffsetDateTime,
+) -> Option<String> {
+    use crate::identity::EventId;
+    use crate::state::BlockerKind;
+    use std::collections::BTreeSet;
+
+    let mut cfg = *config;
+    cfg.pseudo_reconcile = false;
+
+    let conflicts = |evs: &[LedgerEvent]| -> Vec<(Option<EventId>, String)> {
+        project(evs, prices, &cfg)
+            .blockers
+            .into_iter()
+            .filter(|b| b.kind == BlockerKind::DecisionConflict)
+            .map(|b| (b.event, b.detail))
+            .collect()
+    };
+
+    let baseline: BTreeSet<(Option<EventId>, String)> = conflicts(events).into_iter().collect();
+
+    let next_seq = events
+        .iter()
+        .filter_map(|e| match &e.id {
+            EventId::Decision { seq } => Some(*seq),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let candidate = LedgerEvent {
+        id: EventId::decision(next_seq),
+        utc_timestamp: now,
+        original_tz: time::UtcOffset::UTC,
+        wallet: None,
+        payload: incoming.clone(),
+    };
+    let mut with_candidate = events.to_vec();
+    with_candidate.push(candidate);
+
+    conflicts(&with_candidate)
+        .into_iter()
+        .find(|c| !baseline.contains(c))
+        .map(|(_, detail)| detail)
+}
+
 /// The cost-basis method currently in force for a wallet, plus its provenance — the UI-facing answer
 /// to "what method governs this account, and is it an explicit per-account election or inherited?"
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

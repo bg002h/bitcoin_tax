@@ -35,6 +35,31 @@ fn append_and_save(
     Ok(id)
 }
 
+/// UX-P4-3: refuse — AT RECORD TIME, before any append (fail-closed) — a reconcile decision the
+/// resolver would adjudicate as a NEW `DecisionConflict`: a first-wins duplicate, a wrong-type or
+/// unknown target, or a non-revocable/unknown `void`. The predicate is `btctax_core::would_conflict`
+/// (the real projection run with pseudo forced OFF), so record-time == resolver by CONSTRUCTION — a
+/// hand-rebuilt subset would drift (SPEC §3.2 mandate). The refusal carries the resolver's own reason
+/// plus the unified discoverability pointer (`events list` + `void decision|N`). Call it from the
+/// single-verb append fns AFTER the payload is built and BEFORE `append_and_save`; the bulk `apply_*`
+/// paths are deliberately OUT of scope (plan-generated, not user-typed, refs — SPEC §3.2).
+fn guard_decision_conflict(
+    session: &Session,
+    payload: &EventPayload,
+    now: OffsetDateTime,
+) -> Result<(), CliError> {
+    let events = load_all(session.conn())?;
+    let cfg = session.config()?.to_projection();
+    if let Some(detail) = btctax_core::would_conflict(&events, session.prices(), &cfg, payload, now)
+    {
+        return Err(CliError::Usage(format!(
+            "cannot record this decision — {detail}. Run `btctax events list` to see event refs + \
+             their decision status; `btctax reconcile void decision|N` to change an existing decision."
+        )));
+    }
+    Ok(())
+}
+
 /// FR6: classify an externally-sourced inbound `TransferIn` as Income or a received Gift. For Income
 /// this supplies the FMV basis; for Gift it supplies donor basis/date + fmv_at_gift (TP11 dual-basis).
 /// This is the re-supply path for the §9.1 Swan `deposit` basis GAP.
@@ -85,6 +110,7 @@ pub fn classify_inbound(
         transfer_in_event,
         as_: class,
     });
+    guard_decision_conflict(&session, &payload, now)?;
     append_and_save(&mut session, payload, now)
 }
 
@@ -143,6 +169,7 @@ pub fn reclassify_outflow(
         fee_usd,
         donee,
     });
+    guard_decision_conflict(&session, &payload, now)?;
     append_and_save(&mut session, payload, now)
 }
 
@@ -188,11 +215,13 @@ pub fn set_fmv(
 ) -> Result<EventId, CliError> {
     let event = parse_event_id(event_ref)?;
     let mut session = Session::open(vault_path, pp)?;
-    append_and_save(
-        &mut session,
-        EventPayload::ManualFmv(ManualFmv { event, usd_fmv }),
-        now,
-    )
+    // UX-P4-3: `set-fmv` is exempt from the DUPLICATE refusal ONLY (ManualFmv is last-wins — re-pointing
+    // an FMV is a sanctioned correction, so the resolver raises no conflict on a second one) but STILL
+    // gets existence/type validation. `would_conflict` gives exactly this for free: a `set-fmv` on an
+    // unknown or non-Income target IS a new DecisionConflict the resolver excludes → refused here.
+    let payload = EventPayload::ManualFmv(ManualFmv { event, usd_fmv });
+    guard_decision_conflict(&session, &payload, now)?;
+    append_and_save(&mut session, payload, now)
 }
 
 /// FR8: void a revocable decision. Voiding a non-revocable / effective-allocation target raises
@@ -233,6 +262,29 @@ pub fn void(
             EventPayload::ReclassifyOutflow(ro) => Some(ro.transfer_out_event.clone()),
             _ => None,
         });
+
+    // UX-P4-3: refuse a void the resolver would adjudicate as a NEW DecisionConflict — a non-revocable
+    // target (SupersedeImport/RejectImport/VoidDecisionEvent) or an unknown target.
+    guard_decision_conflict(
+        &session,
+        &EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+            target_event_id: target_event_id.clone(),
+        }),
+        now,
+    )?;
+    // Plus an explicit already-voided refusal: the resolver treats a double-void of a REVOCABLE target
+    // as idempotent (no new conflict), but the SPEC refuses it at record time — a live VoidDecisionEvent
+    // already names this target.
+    if events.iter().any(|e| {
+        matches!(&e.payload,
+            EventPayload::VoidDecisionEvent(v) if v.target_event_id == target_event_id)
+    }) {
+        return Err(CliError::Usage(format!(
+            "cannot record this decision — {} is already voided. Run `btctax events list` to see event \
+             refs + their decision status.",
+            target_event_id.canonical()
+        )));
+    }
 
     // Append the VoidDecisionEvent (no save yet — we batch with the attestation clear below).
     let id = append_decision(
@@ -411,14 +463,12 @@ pub fn classify_raw(
         ));
     }
     let mut session = Session::open(vault_path, pp)?;
-    append_and_save(
-        &mut session,
-        EventPayload::ClassifyRaw(ClassifyRaw {
-            target,
-            as_: Box::new(as_),
-        }),
-        now,
-    )
+    let payload = EventPayload::ClassifyRaw(ClassifyRaw {
+        target,
+        as_: Box::new(as_),
+    });
+    guard_decision_conflict(&session, &payload, now)?;
+    append_and_save(&mut session, payload, now)
 }
 
 /// FR1/FR8: accept an `ImportConflict` (apply the new payload to the target, keeping its EventId).
@@ -1245,6 +1295,7 @@ pub fn reclassify_income(
         business,
         kind,
     });
+    guard_decision_conflict(&session, &payload, now)?;
     append_and_save(&mut session, payload, now)
 }
 
