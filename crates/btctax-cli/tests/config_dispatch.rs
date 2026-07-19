@@ -264,8 +264,8 @@ fn config_shows_forward_method_standing_order() {
     let (code, fresh) = run_config(&vault, &[]);
     assert_eq!(code, 0, "config show exits 0; stdout: {fresh}");
     assert!(
-        fresh.contains("forward_method: Fifo (default"),
-        "a fresh vault names the Fifo default:\n{fresh}"
+        fresh.contains("forward_method: FIFO (default"),
+        "a fresh vault names the FIFO default:\n{fresh}"
     );
 
     // Record a forward-looking standing order (far-future effective date ⇒ deterministically in force).
@@ -290,7 +290,30 @@ fn config_shows_forward_method_standing_order() {
         "…with its in-force status:\n{after}"
     );
     assert!(
-        !after.contains("forward_method: Fifo (default"),
+        !after.contains("forward_method: FIFO (default"),
         "the default line is replaced once an order exists:\n{after}"
+    );
+}
+
+/// UX-P4-12(e): `config` (show) uses human labels, not raw Debug enum-variant names — `TreatmentC`
+/// (→ the TP8 (c) description) and `Hifo` (→ `HIFO`) must not leak on screen.
+#[test]
+fn config_show_uses_human_labels_not_debug_enum_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    let (code, out) = run_config(&vault, &[]);
+    assert_eq!(code, 0, "config show exits 0; stdout: {out}");
+    assert!(
+        out.contains("fee_treatment: non-taxable, basis carries (TP8 c)"),
+        "fee treatment reads human:\n{out}"
+    );
+    assert!(
+        out.contains("pre2025_method: HIFO"),
+        "lot method reads human:\n{out}"
+    );
+    assert!(
+        !out.contains("TreatmentC") && !out.contains("Hifo") && !out.contains("Fifo"),
+        "no raw Debug variant names leak on screen:\n{out}"
     );
 }

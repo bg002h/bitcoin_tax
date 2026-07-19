@@ -486,6 +486,15 @@ pub fn filing_status_tag(fs: btctax_core::FilingStatus) -> &'static str {
 }
 
 /// Stable display tag for `LotMethod` (FIFO/LIFO/HIFO — uppercase, human-readable).
+/// UX-P4-12(e): a human label for the TP8 self-transfer fee treatment, instead of the raw Debug
+/// variant name (`TreatmentC`/`TreatmentB`) leaking on screen.
+pub fn fee_treatment_display(t: btctax_core::FeeTreatment) -> &'static str {
+    match t {
+        btctax_core::FeeTreatment::TreatmentC => "non-taxable, basis carries (TP8 c)",
+        btctax_core::FeeTreatment::TreatmentB => "taxable mini-disposition (TP8 b)",
+    }
+}
+
 pub fn lot_method_display(m: LotMethod) -> &'static str {
     match m {
         LotMethod::Fifo => "FIFO",

@@ -545,9 +545,12 @@ fn run() -> Result<ExitCode, CliError> {
                 cmd::admin::set_config(vault, &pp, Some(t))?;
             }
             let cfg = cmd::admin::show_config(vault, &pp)?;
+            // UX-P4-12(e): human labels, not the raw Debug variant names (TreatmentC / Hifo).
             println!(
-                "fee_treatment: {:?}\npre2025_method: {:?} (attested: {})",
-                cfg.fee_treatment, cfg.pre2025_method, cfg.pre2025_method_attested
+                "fee_treatment: {}\npre2025_method: {} (attested: {})",
+                render::fee_treatment_display(cfg.fee_treatment),
+                render::lot_method_display(cfg.pre2025_method),
+                cfg.pre2025_method_attested
             );
             // UX-P4-12(c): echo the forward-method standing order(s) that `config
             // --set-forward-method` records — previously readable only in `verify`'s block. Shows
@@ -561,7 +564,7 @@ fn run() -> Result<ExitCode, CliError> {
                 .filter(|e| e.note != "voided")
                 .collect();
             if orders.is_empty() {
-                println!("forward_method: Fifo (default — no standing order recorded)");
+                println!("forward_method: FIFO (default — no standing order recorded)");
             } else {
                 for e in &orders {
                     println!(
