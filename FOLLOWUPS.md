@@ -2134,21 +2134,24 @@ are hard: a phase-owned item burns down in/before its owning phase, never batche
   reproducibility notice, not part of a command's result." Meaning is unambiguous in context; recorded so
   it is tightened at the next mandatory golden regen (the v0.7.0 version-pin bump) rather than forcing an
   extra review round now.
-- **UX-P3-2 (Nit — P3, deferred).** Owning phase: post-v0.7.0 docs. The TUI PDF render (`make examples-tui`,
-  `docs/examples-tui/tui-wrap.awk`) is MONOCHROME — it renders the goldens' glyph grid and drops the
-  per-cell style overlay (colors), and maps box-drawing glyphs to ASCII (gropdf lacks them). SPEC §8 wants
-  "color from the style map"; the `.txt` goldens carry the full fg/bg/modifier, so a colorized groff render
-  (roff color escapes driven by the style runs) is a future enhancement. The GATED artifact (the `.txt`
-  goldens) already captures color; only the convenience PDF is monochrome.
+- **✅ UX-P3-2 DONE (`34bf318` + fold `1d762fe`, #21 Phase 7; Fable-reviewed r1 0C/2I → r2 GREEN).**
+  `tui-wrap.awk` now colorizes the TUI PDF from the goldens' style runs (per-cell `\m[fg]` + `\f[CB]` bold),
+  mapping every multi-byte glyph 1:1 to ASCII for cell-accurate coloring. r1 folded I-1 (run range is 0-based
+  end-exclusive → paint `start+1..end`, no left-bleed) and I-2 (the multi-byte bracket class broke under
+  mawk = CI's awk → per-glyph gsubs, byte-mode-proven). Makefile `\m[` guard catches a monochrome
+  regression. Also (user-reported): both `make examples`/`examples-tui` render LANDSCAPE + wrap long lines so
+  nothing runs off the page (verified by rasterizing every page). Residue: N-r2-1 (emit_pre `\e`-split,
+  latent), N-r2-2 (`unbraced_decl` peek misses `pub(crate)` vis-quals, latent) — both record-only.
 - **N-2 (P2 review) — RESOLVED in P3.** The TUI goldens (`docs/examples-tui/*.txt`) are staleness-gated
   in-process by the crates' `*_goldens_match_committed` tests (which the `test` job runs), so no git-diff
   widening of the CI `examples` job was needed; that job instead gained a `make examples-tui` PDF-build proof.
-- **N-R1 (Nit — P3 re-review residue; non-gating).** Owning phase: post-v0.7.0. The `no_direct_now_utc_in_
-  production` structural scans set `in_test` STICKILY (once a `#[cfg(test)]` line is seen, the rest of the
-  file is skipped), so production `now_utc()` placed AFTER a test module in the same file would be missed.
-  Harmless today — Rust convention places `#[cfg(test)] mod tests` at the END of every file, and no TUI
-  file has production code after a test module. Hardening: scan only the test module's brace-delimited span,
-  or reset `in_test` at the module's close. Recorded so the assumption is explicit.
+- **✅ N-R1 DONE (`41a771a` + M-1 fold `1d762fe`, #21 Phase 7; Fable-reviewed GREEN).** Both
+  `no_direct_now_utc_in_production` scans (btctax-tui + btctax-tui-edit) de-stuck: extracted a pure
+  `production_now_utc_lines` helper that bounds each `#[cfg(test)]` module by its DEDENTED (column-0) close
+  and resumes production scanning after (brace-counting was rejected — `{`/`}` in string/char literals
+  corrupt a depth count). A production `now_utc()` after a test module is now caught. r2-M1 fold: an unbraced
+  `#[cfg(test)] mod X;` no longer sticks the scan (peeks the next line). New de-stick + unbraced KATs in
+  each crate, mutation-proven. Residue N-r2-2 (vis-qualified unbraced decls) record-only.
 
 - **✅ UX-P2-1 DONE (`81d220b`, #20 Phase 6; Fable-reviewed GREEN 0C/0I).** `is_demonstrated` now skips
   leading global options (a `-`-prefixed flag + the value of value-taking `--vault`) and ANCHORS `path[0]`
