@@ -63,16 +63,21 @@ examples:
 	  || { echo "examples: groff did not emit a PDF (is groff installed with the pdf device?)"; exit 1; }
 
 ## examples-tui: render the style-aware TUI goldens (docs/examples-tui/*.txt) to a SEPARATE PDF via groff.
-## Convenience render (glyph grids, monochrome — the .txt goldens are the gated artifact, test-gated by
-## the crates' `*_goldens_match_committed` tests; NOT byte-gated here). git-ignored. Needs `groff`.
+## Convenience render (glyph grids, COLORIZED from the style runs — UX-P3-2; the .txt goldens are the gated
+## artifact, test-gated by the crates' `*_goldens_match_committed` tests; NOT byte-gated here). git-ignored.
+## Needs `groff`. Asserts the roff carries `\m[]` color escapes so a silent regression to monochrome fails.
 examples-tui:
 	@mkdir -p docs/pdf
 	@{ echo ".TH BTCTAX-TUI 7 \"\" \"btctax\" \"TUI Screens\""; \
 	   for f in docs/examples-tui/*.txt; do \
 	     awk -v name="$$(basename $$f .txt)" -f docs/examples-tui/tui-wrap.awk "$$f"; \
-	   done; } | groff -k -man -T pdf > docs/pdf/btctax-tui-screens.pdf
+	   done; } > docs/pdf/.tui-screens.roff
+	@grep -qF '\m[' docs/pdf/.tui-screens.roff \
+	  || { echo "examples-tui: colorization missing — no \\m[] escapes (UX-P3-2 regressed)"; exit 1; }
+	@groff -k -man -T pdf docs/pdf/.tui-screens.roff > docs/pdf/btctax-tui-screens.pdf
+	@rm -f docs/pdf/.tui-screens.roff
 	@head -c4 docs/pdf/btctax-tui-screens.pdf | grep -q '%PDF' \
-	  && echo "wrote docs/pdf/btctax-tui-screens.pdf" \
+	  && echo "wrote docs/pdf/btctax-tui-screens.pdf (colorized)" \
 	  || { echo "examples-tui: groff did not emit a PDF"; exit 1; }
 
 ## help: list targets
