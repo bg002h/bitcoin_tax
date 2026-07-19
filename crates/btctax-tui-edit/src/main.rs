@@ -1317,16 +1317,23 @@ fn commit_tax_inputs(app: &mut EditorApp) {
                 edit::persist::form_save_draft(app.session.as_mut().unwrap(), year, &ri).is_ok();
             if let Some(form) = app.tax_inputs_form.as_mut() {
                 form.modal = None;
+                // The draft now matches the working copy (r1-N1): clear dirty so the close hint reads
+                // as saved, mirroring `flush_tax_inputs_draft`. Only on a successful save.
+                if saved {
+                    form.dirty = false;
+                }
             }
+            // Kept ≤ ~104 chars so the whole line — including the "finalize" clause — is visible on the
+            // no-wrap NOTICE line at the flow's design width (r1-M1).
             Some(if saved {
                 format!(
-                    "{year} has no full-return tables yet (v1 supports TY2024) — your inputs are SAVED \
-                     as a draft and persist across sessions; finalize once {year}'s tables are published."
+                    "{year} has no full-return tables yet (v1: TY2024) — inputs SAVED as a draft; \
+                     finalize when tables publish."
                 )
             } else {
                 format!(
-                    "{year} has no full-return tables yet (v1 supports TY2024); finalize once they are \
-                     published. (Saving the draft failed — retry to keep your inputs.)"
+                    "{year} has no full-return tables yet (v1: TY2024); DRAFT SAVE FAILED — retry to \
+                     keep your inputs."
                 )
             })
         }
@@ -10413,6 +10420,14 @@ mod tests {
         assert!(
             rendered.contains("no full-return tables"),
             "★ I-2: the NoTables status is VISIBLE inside the flow render, not swallowed by the overlay"
+        );
+        // UX-P4-12(i) r1-M1: the reassurance must render END-TO-END. The status line does NOT wrap, so
+        // pin the LATE "finalize" clause (a too-long message clips it off the no-wrap NOTICE line, and
+        // the filer would be left reading only "no full-return tables" as rejection). The message is
+        // kept short enough that both "SAVED as a draft" and "finalize" fit at the flow's render width.
+        assert!(
+            rendered.contains("SAVED as a draft") && rendered.contains("finalize"),
+            "the full reassurance (saved as a draft … finalize) must render, not clip off the no-wrap line"
         );
     }
 
