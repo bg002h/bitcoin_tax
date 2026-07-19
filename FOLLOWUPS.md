@@ -2472,3 +2472,13 @@ r3 verified r2-I1 + r2-N2 RESOLVED and passed the gate (0C/0I). Non-gating resid
   `Store(Io)` with the wrong path/hint. One-sentence doc note.
 - **r3-N3 (process, done)** — the r2 review was persisted in the SAME commit as its fold; going forward
   persist the review in its own commit BEFORE folding (as the r3 GREEN persist does here).
+
+**UX-P4-6/10 (#16 Phase 3) impl review r1→r2 — GREEN (0C/0I), residue (2026-07-19, `reviews/ux-p4-6-10-impl-fable-review-r{1,2}.md`):**
+r1 (0C/1I) folded the plan-mandated dual-report exit-0 non-trigger KAT (I1) + hard-blocker exit-1 KAT
+(M1); r2 GREEN, independently re-ran the exact regression mutation. Non-gating Nits (both optional, later
+polish cycle):
+- **N1 (Nit)** — no vault-level (projection-through-render) test pins the UX-P4-6 pending line; both KATs
+  hand-build `LedgerState`. Held belt-and-suspenders by the `fold.rs` sigma_pending derivation invariant.
+- **N2 (Nit)** — `report_dual_report_absolute_refused_delta_computed_exits_zero` could additionally assert
+  the refusal reason substring (`TaxableIncomeNonPositiveWithCarryforward`) to pin the fixture to
+  screen_absolute case (c). Documentation-strength only — the exit-0 non-trigger is refusal-agnostic.

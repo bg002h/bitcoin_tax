@@ -93,12 +93,27 @@ UX-P1-3/7/8/10, UX-P2-1, UX-P3-2, N-R1, M-1. Full list + status in the **system 
     class (r1-N3 optimize NoLots, r2-N3 init --key-backup, r3-M1 PDF subpath, r3-N1/N2) filed for a later
     legibility-polish cycle. Full CI surface green (2039 nextest+clippy, fmt, pii, isolation, msrv@1.88).
 
-## NEXT STEP — #16, then #17–23 (per the PLAN's phase order)
-- **#16 (P4-6/10 report surfaces + exit code)** — SCOPED: UX-P4-6 holdings pending line from
-  `state.stats.sigma_pending` (BTC unit, `fmt_btc`) in `render::render_report`; UX-P4-10 exit 1 on
-  `TaxOutcome::NotComputable` in the main.rs Report arm (currently falls to `Ok(SUCCESS)` @947; verify's
-  exit-1 pattern @116), two exit-0 non-triggers (dual-report abs refused / pseudo), man page + stale
-  `tax_report.rs:828/911/948` doc-comments. #17 (P4-5 --forms warn),
+- **#16 UX-P4-6/10 (Phase 3 Report surfaces) — COMPLETE + reviewed to GREEN (r1 0C/1I → r2 0C/0I),
+  PUSHED** (`20b2a58..<r2-cert>`). Two sub-steps, each TDD + mutation-proven:
+  - **3a UX-P4-6** (`20b2a58`): BTC-unit `Pending: <btc> BTC (N unreconciled transfer(s) — see verify)`
+    line in `render_report` holdings when `state.stats.sigma_pending > 0`; hidden when reconciled.
+  - **3b UX-P4-10** (`027a89d`): `report --tax-year` exits 1 on `TaxOutcome::NotComputable`, 0 otherwise
+    (main.rs Report arm, keyed on the delta `outcome`, after printing). clap doc → --help + man page
+    (0/1/2, key on NON-ZERO); stale `tax_report.rs` exit-0 doc-comments corrected.
+  - Folded r1-I1 (the plan-mandated dual-report absolute-refused-but-delta-computed exit-0 KAT via
+    `screen_absolute` case (c)) + M1 (hard-blocker exit-1 KAT). `tests/report_exit_code.rs` = 5 KATs;
+    r2 independently re-ran the exact regression mutation (predicate ∨ "NOT COMPUTABLE" → reds only the
+    dual KAT). Reviews r{1,2}. Residue: N1 (no vault-level pending test) + N2 (assert refusal reason) —
+    optional Nits filed. Full CI surface green (2046 nextest+clippy, fmt, pii, isolation, msrv@1.88).
+
+## NEXT STEP — #17, then #18–23 (per the PLAN's phase order)
+- **#17 (Phase 4 Affordances: UX-P4-5 + UX-P4-12 b–i)** — SCOPED (4a): UX-P4-5 warn `--forms` ignored on
+  a full-return year — the dispatch (`admin.rs:237` `export_full_return`) drops the `forms` slice; add a
+  `forms_ignored` flag on `IrsPdfReport` that main.rs surfaces on stderr (mirrors `unresolved_hard`);
+  packet bytes unchanged. 4b = UX-P4-12(b–i) papercuts (FOLLOWUPS ~2255): (b) blank help/units on
+  classify-inbound-income/set-fmv, (c) config shows forward method, (d) tax-profile set-error names
+  --show, (e) internal enum names on screen, (f) TUI keybind language in CLI verify, (g) circular
+  set-donation-details pointer, (h) TUI footer dev-speak, (i) TUI editor default-year gate placement.
   #19 (P4-12 papercuts), #20 (M-1 serde preserve_order), #21 (docs journeys + P2-1), #22 (P3-2/N-R1 polish),
   #23 (phase-8 whole-branch close: full-CI-surface green, regen ALL goldens, FOLLOWUPS burndown, whole-branch
   Fable review, then it's mergeable). Each item's spec is in SPEC §3–§6.
