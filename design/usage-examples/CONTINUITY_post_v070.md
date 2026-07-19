@@ -39,35 +39,24 @@ UX-P1-3/7/8/10, UX-P2-1, UX-P3-2, N-R1, M-1. Full list + status in the **system 
   report L24/Absolute suffix + (3) TUI Tax tab `render_tax_content` `3285a55`; (4) `write_back_carryover`
   refuse on pseudo OR NotComputable `3cd735f`. Impl-review fixups `46c9eae`. `render::PseudoDisclosure`
   {None,Synthetic,Placeholder} enum; predicate `pseudo_active() OR PseudoPlaceholder` from LIVE pseudo-ON state.
-- **#13 UX-P4-4a (partial) — the full sign-policy table DONE + mutation-proven** (`4343543`, `674df3a`).
-  `eventref::parse_nonneg_usd_arg` (refuse <0) + `parse_pos_sell_arg` (refuse ≤0), applied to every
-  refuse-<0 flag (basis/fmv/fmv-at-gift/donor-basis/amount/fee/price/proceeds/carryforward-in + --sell).
-  `--income`/`--magi`/tax-profile fields keep allow-negative (NOL legitimacy). Closes the `--basis=-N`
-  clap `=`-bypass. Unit tests in `eventref.rs` + an integration KAT in `classify_inbound_self_transfer_cli.rs`.
+- **#13 UX-P4-4 (Important) — COMPLETE + reviewed to GREEN (r1 0C/3I → r2 0C/1I → r3 0C/0I), PUSHED**
+  (`af7f5cb..24f2d05`). All four sub-parts, each TDD + mutation-proven:
+  - **(a)** the sign-policy table on BOTH surfaces. CLI: `eventref::parse_nonneg_usd_arg`/`parse_pos_sell_arg`
+    (`4343543`,`674df3a`) + the `242a3d7` fmt-normalization (4a shipped without the fmt CI slice). TUI: new
+    `form.rs::parse_nonneg_usd` on all 5 money validators (`13e1704`). Wiring witnessed for all **14** guard
+    sites by `tests/value_guard_wiring.rs` (`3a7a3f0` + harvest rows `9647c7e`); `--income`/`--magi` stay
+    allow-negative (NOL) with an accept-KAT that pins the effect.
+  - **(b)** acquired-after-receipt guard on BOTH surfaces: CLI `classify_inbound` + `tz_label` (`6f2150e`);
+    TUI `form.rs::check_acquired_not_after_receipt` (receipt = `InboundListItem.date`) (`13e1704`).
+  - **(c)** Form 8283 TIN/EIN/PTIN shapes at the TRUE choke point `donation_details::set` (NOT the
+    spec-cited reconcile.rs:1162 — the TUI bypasses it via `persist_donation_details`→`set`) (`fd40dc9`,
+    `64b49c6`). bare-9 appraiser-tin accepted; donee-ein bare-9 normalized, SSN-shape refused.
+  - **(d)** `--amount` doc + price-based sats-as-dollars stderr warn (`amount_fmv_advisory`, 100× event-date
+    close; no-price NOTE; dust skip) (`a9e41c6`).
+  - Reviews persisted: `reviews/ux-p4-4-impl-fable-review-r{1,2,3}.md`. Minors/Nits folded or filed
+    (`002ee48`,`24f2d05`; FOLLOWUPS "UX-P4-4 impl review r1/r2 residue"). SPEC §3.3(c) amended to the as-built.
 
-## NEXT STEP — finish #13 (UX-P4-4), then it gets its Fable review
-Per SPEC §3.3, three sub-parts remain (all record-time, at the same reconcile/donation surfaces):
-- **(b) acquired-after-receipt guard [SPEC §3.3(b)]:** refuse `--acquired` / `--donor-acquired` strictly
-  AFTER the receive/receipt date (impossible for a self-transfer-in / gift). The two dates come from
-  different sources → the refusal message must print the receipt date + its tz basis; **same-day allowed**.
-  Sites: `main.rs` self-transfer dispatch (`--acquired`, near the `--basis` block ~line 999) +
-  classify-inbound-gift (`--donor-acquired` ~line 985). The receive/receipt date is on the TransferIn event
-  in the projected state (resolve it to compare). KAT: `--acquired=<receipt+1d>` refused; same-day OK.
-- **(c) EIN/TIN shapes [SPEC §3.3(c)]:** validate at the `set_donation_details` CHOKE POINT
-  (`crates/btctax-cli/src/cmd/reconcile.rs:~1162`) so the TUI-edit form (`tui-edit/src/edit/form.rs:1328-1420`)
-  is covered too, not just CLI arg parsing. `--appraiser-tin` accepts EIN-shape (`\d{2}-\d{7}`) OR SSN-shape
-  (`\d{3}-\d{2}-\d{4}`) — 26 CFR 301.6109-1(a)(1)(i); `--donee-ein` EIN-shape + NORMALIZE hyphenless 9-digit +
-  refuse SSN-shape (§170(c)); optional so refuse msg says "omit if the donee has none"; `--appraiser-ptin`
-  own shape `P\d{8}`. NOTE the hyphenless EIN/SSN ambiguity is inherent — do NOT "harden" it. KAT: EIN-shaped
-  appraiser-tin ACCEPTED; `--donee-ein banana` refused; hyphenless donee EIN accepted.
-- **(d) `--amount` doc + FMV warn [SPEC §3.3(d)]:** add a `--amount` clap doc-comment (unit = USD FMV; then
-  `make docs`). WARN (stderr, non-fatal) when `FMV > 100 × (outflow_sats/1e8) × close-at-the-outflow-date` —
-  price-based (26 CFR §1.170A-1(c)(1), event-date close), NOT cost-basis. No-price fallback: SKIP the warn
-  (state it). sats on the TransferOut event; prices via `session.prices()`. KAT: sats-as-USD `--amount` warns;
-  a legit high-appreciation FMV does NOT; no-price path silent.
-- Then: **independent Fable review of the whole UX-P4-4** (all of a/b/c/d) → 0C/0I → mark #13 done → push.
-
-## Then #14–23 (per the PLAN's phase order)
+## NEXT STEP — #18 `events list`, then #14–23 (per the PLAN's phase order)
 - **#18 `events list` (UX-P4-11)** must come BEFORE **#14 UX-P4-3** (P4-3's refuse-hint names the verb).
 - **#14 UX-P4-3** needs a **pseudo-OFF shadow-projection helper that MIRRORS the resolver's own `applied`
   map** (reuse resolve.rs's pass-1c/1d/1e construction; `applied` has 2 real writers under pseudo-OFF:
@@ -90,8 +79,8 @@ Per SPEC §3.3, three sub-parts remain (all record-time, at the same reconcile/d
 
 ## HOW TO RESUME (command to issue after /clear)
 > Resume the post-v0.7.0 product cycle: read `design/usage-examples/CONTINUITY_post_v070.md` and
-> `STANDARD_WORKFLOW.md`, then continue at "NEXT STEP" — finish UX-P4-4 (b) acquired>receipt, (c) EIN/TIN
-> shapes, (d) --amount doc + FMV warn, TDD + mutation-proven, then Fable-review UX-P4-4 to green. Fable for
-> reviews only.
+> `STANDARD_WORKFLOW.md`, then continue at "NEXT STEP" — UX-P4-4 is COMPLETE + pushed. Next is #18
+> `events list` (UX-P4-11), which must precede #14 UX-P4-3; then #14–23 per the PLAN phase order. Each
+> item: TDD + mutation-proven → independent Fable review to 0C/0I → push. Fable for reviews only.
 
 (The memory note [[post-v070-product-cycle]] auto-loads and points here.)
