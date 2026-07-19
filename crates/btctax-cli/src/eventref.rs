@@ -78,6 +78,34 @@ pub fn parse_usd_arg(s: &str) -> Result<Usd, CliError> {
     Decimal::from_str(s.trim()).map_err(|e| CliError::Usage(format!("bad USD {s:?}: {e}")))
 }
 
+/// Parse a USD amount that must be **>= 0** — a cost basis, FMV, proceeds, fee, or price (UX-P4-4a). A
+/// DISTINCT helper (NOT `parse_usd_arg`), so the legitimately-signed flags — MAGI, `--other-net-capital-gain`,
+/// the ad-hoc `--income`/`--magi` — keep the unguarded parser (guard per-flag, never in the shared parser;
+/// SPEC §3.3(a) `[G-I5, T-M1]`). No legitimate negative exists: §1012 basis, §1016 adjustments floor at zero,
+/// §301(c)(2)-(3)/§733 excess-of-basis is *gain* — never negative basis. Zero stays allowed (the app's
+/// conservative self-transfer default). This ALSO closes the `--basis=-N` clap `=`-form bypass, since the
+/// guard is on the parsed value, not clap's `-`-prefix detection. `field` names the flag in the refusal.
+pub fn parse_nonneg_usd_arg(s: &str, field: &str) -> Result<Usd, CliError> {
+    let v = parse_usd_arg(s)?;
+    if v < Decimal::ZERO {
+        return Err(CliError::Usage(format!(
+            "{field} must be >= 0 (got {v}); no legitimate negative cost basis / FMV / fee / price exists"
+        )));
+    }
+    Ok(v)
+}
+
+/// Parse a `--sell` sats amount that must be **> 0** (UX-P4-4a `[G2-1]`): a `<= 0` sell survives the pool
+/// coverage check and renders a fictional LOSS estimate. Wraps the core `parse_sell_arg` (no sign guard).
+pub fn parse_pos_sell_arg(s: &str, field: &str) -> Result<btctax_core::Sat, CliError> {
+    let sat = btctax_core::whatif::parse_sell_arg(s)
+        .map_err(|e| CliError::Usage(format!("bad {field} {s:?}: {e}")))?;
+    if sat <= 0 {
+        return Err(CliError::Usage(format!("{field} must be > 0 sat (got {sat})")));
+    }
+    Ok(sat)
+}
+
 pub fn parse_date_arg(s: &str) -> Result<TaxDate, CliError> {
     let fmt = format_description!("[year]-[month]-[day]");
     Date::parse(s.trim(), &fmt).map_err(|e| CliError::Usage(format!("bad date {s:?}: {e}")))
@@ -164,6 +192,33 @@ mod tests {
         let id = EventId::import(Source::Coinbase, SourceRef::new("out|cb-send"));
         let s = id.canonical(); // "import|coinbase|out|cb-send"
         assert_eq!(parse_event_id(&s).unwrap(), id);
+    }
+
+    /// UX-P4-4a: the non-negative money guard — no legitimate negative basis/FMV/fee/price exists, and the
+    /// `--basis=-N` clap `=`-form bypass is closed because the guard is on the PARSED value. Zero (the app's
+    /// conservative self-transfer default) and positive are allowed. (★ fault-inject: drop the
+    /// `< Decimal::ZERO` check and this goes RED.)
+    #[test]
+    fn parse_nonneg_usd_arg_refuses_negative_allows_zero_and_positive() {
+        assert!(parse_nonneg_usd_arg("-5000.00", "--basis").is_err());
+        assert!(parse_nonneg_usd_arg("-0.01", "--fmv").is_err());
+        assert_eq!(parse_nonneg_usd_arg("0", "--basis").unwrap(), dec!(0));
+        assert_eq!(parse_nonneg_usd_arg("42000.50", "--fmv").unwrap(), dec!(42000.50));
+        let err = format!("{:?}", parse_nonneg_usd_arg("-1", "--donor-basis").unwrap_err());
+        assert!(
+            err.contains("--donor-basis") && err.contains(">= 0"),
+            "the refusal must name the flag + the rule: {err}"
+        );
+    }
+
+    /// UX-P4-4a [G2-1]: `--sell` must be > 0 — a `<= 0` sell survives the pool-coverage check and renders a
+    /// fictional LOSS. (★ fault-inject: drop the `sat <= 0` check and this goes RED.)
+    #[test]
+    fn parse_pos_sell_arg_refuses_zero_and_negative() {
+        assert!(parse_pos_sell_arg("0", "--sell").is_err());
+        assert!(parse_pos_sell_arg("-100000000", "--sell").is_err());
+        assert!(parse_pos_sell_arg("100000000", "--sell").unwrap() > 0);
+        assert!(parse_pos_sell_arg("0.5", "--sell").unwrap() > 0); // BTC decimal form
     }
 
     #[test]

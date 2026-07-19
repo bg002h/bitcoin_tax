@@ -222,8 +222,7 @@ fn run() -> Result<ExitCode, CliError> {
             } => {
                 let pp = passphrase(false)?;
                 // Parse --sell: SMART — a sat integer, or a BTC decimal (contains `.`).
-                let sell_sat = btctax_core::whatif::parse_sell_arg(&sell)
-                    .map_err(|e| CliError::Usage(format!("bad --sell {sell:?}: {e}")))?;
+                let sell_sat = eventref::parse_pos_sell_arg(&sell, "--sell")?;
                 // --wallet is semantically required: the per-wallet pool is mandatory post-2025.
                 let wallet_id = wallet
                     .as_deref()
@@ -303,8 +302,7 @@ fn run() -> Result<ExitCode, CliError> {
             } => {
                 let pp = passphrase(false)?;
                 // Parse --sell: SMART — a sat integer, or a BTC decimal (contains `.`).
-                let sell_sat = btctax_core::whatif::parse_sell_arg(&sell)
-                    .map_err(|e| CliError::Usage(format!("bad --sell {sell:?}: {e}")))?;
+                let sell_sat = eventref::parse_pos_sell_arg(&sell, "--sell")?;
                 // --wallet is semantically required: the per-wallet pool is mandatory post-2025.
                 let wallet_id = wallet
                     .as_deref()
@@ -963,7 +961,10 @@ fn dispatch_reconcile(
             fmv,
             business,
         } => {
-            let fmv = fmv.as_deref().map(eventref::parse_usd_arg).transpose()?;
+            let fmv = fmv
+                .as_deref()
+                .map(|s| eventref::parse_nonneg_usd_arg(s, "--fmv"))
+                .transpose()?;
             let class = InboundClass::Income {
                 kind: eventref::parse_income_kind(&kind)?,
                 fmv,
@@ -980,13 +981,13 @@ fn dispatch_reconcile(
             let class = InboundClass::GiftReceived {
                 donor_basis: donor_basis
                     .as_deref()
-                    .map(eventref::parse_usd_arg)
+                    .map(|s| eventref::parse_nonneg_usd_arg(s, "--donor-basis"))
                     .transpose()?,
                 donor_acquired_at: donor_acquired
                     .as_deref()
                     .map(eventref::parse_date_arg)
                     .transpose()?,
-                fmv_at_gift: eventref::parse_usd_arg(&fmv_at_gift)?,
+                fmv_at_gift: eventref::parse_nonneg_usd_arg(&fmv_at_gift, "--fmv-at-gift")?,
             };
             cmd::reconcile::classify_inbound(vault, &pp, &in_ref, class, now)?
         }
@@ -996,7 +997,10 @@ fn dispatch_reconcile(
             acquired,
         } => {
             let class = InboundClass::SelfTransferMine {
-                basis: basis.as_deref().map(eventref::parse_usd_arg).transpose()?,
+                basis: basis
+                    .as_deref()
+                    .map(|s| eventref::parse_nonneg_usd_arg(s, "--basis"))
+                    .transpose()?,
                 acquired_at: acquired
                     .as_deref()
                     .map(eventref::parse_date_arg)
@@ -1024,12 +1028,21 @@ fn dispatch_reconcile(
                     appraisal_required: appraisal,
                 },
             };
-            let principal = eventref::parse_usd_arg(&amount)?;
-            let fee = fee.as_deref().map(eventref::parse_usd_arg).transpose()?;
+            let principal = eventref::parse_nonneg_usd_arg(&amount, "--amount")?;
+            let fee = fee
+                .as_deref()
+                .map(|s| eventref::parse_nonneg_usd_arg(s, "--fee"))
+                .transpose()?;
             cmd::reconcile::reclassify_outflow(vault, &pp, &out, class, principal, fee, donee, now)?
         }
         Reconcile::SetFmv { event, fmv } => {
-            cmd::reconcile::set_fmv(vault, &pp, &event, eventref::parse_usd_arg(&fmv)?, now)?
+            cmd::reconcile::set_fmv(
+                vault,
+                &pp,
+                &event,
+                eventref::parse_nonneg_usd_arg(&fmv, "--fmv")?,
+                now,
+            )?
         }
         Reconcile::Void { target } => cmd::reconcile::void(vault, &pp, &target, now)?,
         Reconcile::ClassifyRaw {

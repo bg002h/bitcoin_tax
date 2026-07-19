@@ -150,6 +150,36 @@ fn classify_inbound_self_transfer_with_basis_and_acquired_has_no_advisory() {
     );
 }
 
+/// UX-P4-4a: the `--basis=-N` clap `=`-form bypass is CLOSED at record time. `--basis -5000` (space form)
+/// is rejected by clap as an unknown flag, but `--basis=-5000` slips past clap's `-`-prefix detection — the
+/// value guard must catch it and refuse (nonzero, naming the flag) before anything is recorded, else a
+/// negative basis rides into gain math (gain > proceeds). (★ fault-inject: revert `--basis` to
+/// `parse_usd_arg` and this goes RED.)
+#[test]
+fn classify_inbound_self_transfer_negative_basis_equals_form_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, in_ref) = vault_with(dir.path(), coinbase_receive_csv(dir.path()), true);
+
+    let (code, stderr) = run_self_transfer(&vault, &[&in_ref, "--basis=-5000.00"]);
+    assert_ne!(
+        code, 0,
+        "a negative --basis (=-form) must be refused; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("--basis") && stderr.contains(">= 0"),
+        "the refusal must name --basis + the >= 0 rule: {stderr}"
+    );
+
+    // Fail-closed: the refuse is at record time (before append), so NO lot is written.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert!(
+        state.lots.is_empty(),
+        "a refused classify must record no lot: {:?}",
+        state.lots
+    );
+}
+
 /// [reconcile-defaults] The MANUAL `classify-inbound-self-transfer` with no `--acquired` also backdates
 /// to LONG-TERM: the created lot's acquisition date is 1yr+1day before receipt (leap-safe), and the
 /// defaulted-acquisition advisory fires.
