@@ -2452,3 +2452,23 @@ r2 verified I1+I2+M2+N2 RESOLVED, but the M1 comment fix exposed a NEW Important
 - **r2-N3 (Nit → later polish cycle)** — `init --key-backup <path>` (`cli.rs`) writes a key to a
   user-named path and is pathless on collision — same UX shape but NOT an `--out` (outside UX-P4-8's
   class term). Sweep it with the N1/N3 residue when the later legibility polish cycle runs.
+
+**UX-P4-7/8/9 (#15 Phase 2) impl re-review r3 — GREEN (0C/0I), r3 residue (2026-07-19, `reviews/ux-p4-789-impl-fable-review-r3.md`):**
+r3 verified r2-I1 + r2-N2 RESOLVED and passed the gate (0C/0I). Non-gating residue, all the SAME
+"pathless user-path I/O" class — **sweep together in a later legibility-polish cycle** (with the r1-N3
+`OptimizeError::NoLots` + r2-N3 `init --key-backup`, one owning phase, one coherent pass):
+- **r3-M1 (Minor, later polish cycle)** — the PDF `--out` exporters still surface a SUBPATH collision
+  pathless: `admin.rs::write_bytes_owner_only` (`open_owner_only(path)?` → `CliError::Store(StoreError::Io)`)
+  is unwrapped, so `export-irs-pdf --out out` with `out/f8949.pdf` an existing DIRECTORY yields
+  `io: Is a directory (os error 21)` with no path. Outside UX-P4-8's mandated site list (spec §4/§9.5 =
+  vault-open + export-snapshot's `admin.rs:82`/`render.rs:586-618`); NOT the advertised-but-dead-guard
+  shape r2-I1 gated on. One-line fix when swept: enrich inside `write_bytes_owner_only`
+  (`.map_err(|e| cli_io_with_path(e, path, EXPORT_OUT_HINT))`, names the EXACT colliding file) + a KAT.
+- **r3-N1 (Nit)** — `Csv(csv::Error)` can carry an underlying mid-write `io::Error` (a large-CSV
+  `ENOSPC`/`EIO`), which stays pathless (`csv: <io>`); the `cli_io_with_path` passthrough was blessed in
+  r1/r2. Exotic; sweep with the class.
+- **r3-N2 (Nit)** — `cli_io_with_path`'s doc should state the call-site PRECONDITION ("wrap ONLY
+  expressions whose every Io is a write under `path`") so a future caller cannot mislabel a vault-side
+  `Store(Io)` with the wrong path/hint. One-sentence doc note.
+- **r3-N3 (process, done)** — the r2 review was persisted in the SAME commit as its fold; going forward
+  persist the review in its own commit BEFORE folding (as the r3 GREEN persist does here).
