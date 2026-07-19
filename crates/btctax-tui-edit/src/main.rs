@@ -10256,6 +10256,9 @@ mod tests {
         answer_all_live_declarations(&mut ri);
         let mut form = crate::edit::form::TaxInputsFormState::fresh(2099);
         form.working = Some(ri);
+        // r2-N1: enter the commit with UNFLUSHED edits (dirty), so the arm's `saved`-gated dirty-clear is
+        // OBSERVABLE — otherwise `dirty` is already false and the assert below would be vacuous.
+        form.dirty = true;
         app.tax_inputs_form = Some(form);
 
         handle_key(&mut app, press(KeyCode::Char('s')));
@@ -10267,6 +10270,13 @@ mod tests {
             .as_ref()
             .expect("NoTables keeps the flow open");
         assert!(form.modal.is_none(), "NoTables closes the modal");
+        // r2-N1: a SUCCESSFUL NoTables draft-save clears `dirty` (the draft now matches the working copy),
+        // so the close hint reads "(autosaved)" — mirroring `flush_tax_inputs_draft`. Mutation-check:
+        // delete the `if saved { form.dirty = false }` block in the NoTables arm → this reds.
+        assert!(
+            !form.dirty,
+            "a saved NoTables draft is not dirty (close hint reads autosaved)"
+        );
         let status = app.status.as_deref().unwrap_or_default().to_string();
         assert!(
             status.contains("no full-return tables"),

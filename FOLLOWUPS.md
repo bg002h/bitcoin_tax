@@ -2282,12 +2282,26 @@ will red until it does).
   returns all year before tables publish, so authoring must not be blocked — and it isn't (drafts).
   The real defect was the blunt commit-refusal message reading as REJECTION. FIX (kept the I-11 guard,
   no poisoning risk): `commit_tax_inputs`'s `NoTables` arm now PERSISTS the working return to the draft
-  and shows a reassuring status — "{year} has no full-return tables yet (v1 supports TY2024) — your
-  inputs are SAVED as a draft and persist across sessions; finalize once {year}'s tables are published."
-  Committed `tax_inputs_commit_non_2024_...` KAT pins: committed row still absent (guard KEPT) + draft
-  PERSISTS + status reassures; both halves mutation-proven. The SPEC §4(i) "default: align to the CLI"
-  is superseded by this user decision (keep the guard; fix the message) — `[T-U-P4-12]` trivially held
+  and shows a reassuring status — "{year} has no full-return tables yet (v1: TY2024) — inputs SAVED as
+  a draft; finalize when tables publish." (kept ≤ ~104 chars so the whole line — including the "finalize"
+  clause — renders on the no-wrap NOTICE line; see (i) r1-M1 below). Committed `tax_inputs_commit_non_2024_...`
+  KAT pins: committed row still absent (guard KEPT) + draft PERSISTS + status reassures (SAVED/draft/finalize)
+  + a saved draft is not dirty; all mutation-proven. The SPEC §4(i) "default: align to the CLI" is
+  superseded by this user decision (keep the guard; fix the message) — `[T-U-P4-12]` trivially held
   (no packet-export path touched).
+
+  **(i) independent review trail (`reviews/ux-p4-12i-impl-fable-review-r{1,2}.md`, r1 0C/1I → r2 GREEN):**
+  - **I-1** (r1, Important): the persisted user-decision record (memory doc + MEMORY.md index) recorded the
+    OPPOSITE prescription (align-to-CLI / reverse I-11) vs the implemented decision — a live mandate to
+    reverse a reviewed guard. FOLDED (`c2597ad`): memory doc + index rewritten to KEEP-I-11 with the
+    align-to-CLI framing marked SUPERSEDED; r2 whole-dir grep confirms no reversal mandate survives.
+  - **M-1** (r1, Minor): the 162-char reassurance truncated on the no-wrap NOTICE line. FOLDED: shortened
+    to ~104 chars; render KAT strengthened to require BOTH "SAVED as a draft" AND the late "finalize"
+    clause on-screen; r2 re-killed the long-message mutant (clips "finalize", reds the KAT).
+  - **N-1** (r1, Nit): `form.dirty` left set after a clean draft-save. FOLDED: `saved`-gated dirty-clear +
+    (r2-N1) a non-vacuous `!form.dirty` assert (dirty precondition) — mutation-proven.
+  - r2 residue (non-gating): this stale-quote fix + the CONTINUITY "(i) DEFERRED" flip (done in this touch);
+    N-2 memory-quote fragment aligned.
 
   **r1 review fold (2026-07-19, `reviews/ux-p4-12-impl-fable-review-r1.md`, 0C/4I → folded):**
   - **I-1** (b `--fmv` help falsely claimed a daily-close fallback — omitting `--fmv` actually fires a

@@ -113,9 +113,14 @@ UX-P1-3/7/8/10, UX-P2-1, UX-P3-2, N-R1, M-1. Full list + status in the **system 
   set-error names --show, (e) config human labels + 2 missed Hifo sites, (f) surface-neutral void remedy,
   (g) valid reclassify-outflow --as-kind donate hint, (h) dropped "q: swallowed" footers. Each TDD +
   mutation-proven. Reviews r{1,2,3}. Residue = pathless-io + legibility Nits filed.
-  **(i) DEFERRED (verdict SOUND)** — "align TUI default-year gate to CLI store-then-gate" conflicts with
-  the reviewed I-11 poisoning-guard (`input_form_store::commit`); needs a design decision (re-enter
-  spec/plan, §D). ⚠️ USER INPUT NEEDED — see FOLLOWUPS UX-P4-12(i) RESOLUTION (3 options).
+  **(i) DONE (user-decided 2026-07-19) + reviewed to GREEN (r1 0C/1I → r2 GREEN), UNPUSHED**
+  (`bd73968`, r1 fold `c2597ad`). Investigation found the premise incomplete: the TUI ALREADY stores a
+  table-less-year return as a resolve-invisible DRAFT (all-year authoring works), so the reviewed I-11
+  finalize-guard was CORRECT to keep. USER DECISION: keep I-11, fix only the blunt refusal message.
+  `NoTables` arm now persists the draft + shows a reassuring, un-truncated status ("… inputs SAVED as a
+  draft; finalize when tables publish."). r1 folded I-1 (reconciled the memory record — no live mandate
+  to reverse I-11 survives), M-1 (message shortened, render-visible, mutation-proven), N-1 (dirty-clear
+  tested). See [[full-return-store-before-tables-policy]] + `reviews/ux-p4-12i-impl-fable-review-r{1,2}.md`.
 
 ## NEXT STEP — #19, then #20–23 (per the PLAN's phase order)
 - **#19 (Phase 5 Display: M-1)** — enable `serde_json` `preserve_order` for `income show`; workspace-global
