@@ -226,9 +226,9 @@ fn income_import_then_show_redacts_pii_at_the_vault_level() {
 /// `preserve_order` flip is SAFE only because every PRODUCTION `serde_json::Value` construction is
 /// DISPLAYED or PARSED, never serialized into PERSISTED/FINGERPRINTED bytes — those use typed serde
 /// (`serde_json::to_string(&<typed>)`, field-ordered regardless) and hand-rolled Decimal bytes. This
-/// scans EVERY line of `crates/*/src` for the Value-CONSTRUCTION-for-output patterns
-/// (`serde_json::to_value` / `json!` / `use serde_json::to_value`) and asserts each hit's file is in
-/// the audited enumeration; a NEW site FAILS here, forcing an audit of whether it feeds stored bytes.
+/// scans EVERY line of `crates/*/src` for the Value-CONSTRUCTION-for-output idioms
+/// (`serde_json::to_value` / `json!`) and asserts each hit's file is in the audited enumeration; a NEW
+/// site FAILS here, forcing an audit of whether it feeds stored bytes.
 /// (No `#[cfg(test)]` skip — a sticky file-level flag would blind production code after a mid-file
 /// `mod tests`; scanning all lines is correct AND stricter, and no Value-output site is outside the
 /// list today, test or otherwise.)
@@ -275,10 +275,15 @@ fn m1_preserve_order_value_output_sites_are_enumerated() {
             let text = std::fs::read_to_string(&p).unwrap();
             for (i, line) in text.lines().enumerate() {
                 let code = line.split("//").next().unwrap_or("");
-                if code.contains("serde_json::to_value")
-                    || code.contains("json!(")
-                    || code.contains("use serde_json::to_value")
-                {
+                // Best-effort backstop, not a proof: catches the two idioms every current Value-output
+                // site uses (a full-path `serde_json::to_value` call — incl. a `use serde_json::to_value;`
+                // import line — and `json!`). KNOWN residual gaps (r3-M1, grep-verified absent today, so
+                // NOT matched to avoid CI false-positives on innocent parse imports): a braced
+                // `use serde_json::{to_value, …}` followed by a bare `to_value(` call, and hand-built
+                // `Value::Object`/`Map::new`. The persisted-bytes invariant does NOT rest on this scan —
+                // it holds by construction (no persisted struct serializes a `Value`; typed serde is
+                // field-ordered); the scan just flags a NEW site for a fresh audit.
+                if code.contains("serde_json::to_value") || code.contains("json!(") {
                     hits.push(format!("{}:{}", p.display(), i + 1));
                 }
             }
