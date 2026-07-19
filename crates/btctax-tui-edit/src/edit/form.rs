@@ -660,6 +660,39 @@ pub fn income_kind_display(kind: IncomeKind) -> &'static str {
 
 // ── Classify-inbound validation ───────────────────────────────────────────────
 
+/// UX-P4-4(a) both-surfaces: parse a REQUIRED non-negative USD field. Same `Usd::from_str`
+/// (Decimal) semantics as before — plus the per-flag sign guard the CLI applies via
+/// `eventref::parse_nonneg_usd_arg`. No legitimate negative cost basis / FMV / fee / proceeds exists
+/// (§1012; §1016 floors adjustments at zero), so a `-5000` that would ride into gain math (gain >
+/// proceeds) and onto a filed form is refused HERE, at the TUI record surface, exactly as on the CLI.
+/// `s` is the already-trimmed field text; `label` names the field in the refusal.
+fn parse_nonneg_usd(label: &str, s: &str) -> Result<Usd, String> {
+    let v = Usd::from_str(s).map_err(|_| format!("bad USD {s:?}"))?;
+    if v < Usd::ZERO {
+        return Err(format!("{label} must be >= 0 (got {v})"));
+    }
+    Ok(v)
+}
+
+/// UX-P4-4(b) both-surfaces: refuse an acquisition date STRICTLY after the receipt date — coins
+/// cannot have been acquired after they arrived. Same-day is allowed (a same-day acquire→receive is
+/// legitimate). `receipt` is the TransferIn's tax-tz calendar date, carried on the flow's list item.
+fn check_acquired_not_after_receipt(
+    label: &str,
+    acquired: Option<TaxDate>,
+    receipt: TaxDate,
+) -> Result<(), String> {
+    if let Some(d) = acquired {
+        if d > receipt {
+            return Err(format!(
+                "{label} {d} is after the receipt date {receipt}; coins cannot be acquired after \
+                 they are received (same-day is allowed)"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Validate the Income variant of the classify-inbound form.
 ///
 /// `kind` is always structurally valid (picker).  `fmv_buf` is optional:
@@ -675,8 +708,7 @@ pub fn validate_classify_inbound_income(
     let fmv = if fmv_buf.is_empty() {
         None
     } else {
-        let trimmed = fmv_buf.buf.trim();
-        Some(Usd::from_str(trimmed).map_err(|_| format!("bad USD {trimmed:?}"))?)
+        Some(parse_nonneg_usd("fmv", fmv_buf.buf.trim())?)
     };
     Ok(InboundClass::Income {
         kind,
@@ -695,6 +727,7 @@ pub fn validate_classify_inbound_income(
 ///
 /// Returns the validated `InboundClass::GiftReceived` or an error string.
 pub fn validate_classify_inbound_gift(
+    receipt: TaxDate,
     fmv_at_gift_buf: &FieldBuffer,
     donor_basis_buf: &FieldBuffer,
     donor_acquired_at_buf: &FieldBuffer,
@@ -702,14 +735,12 @@ pub fn validate_classify_inbound_gift(
     if fmv_at_gift_buf.is_empty() {
         return Err("fmv-at-gift is required".to_string());
     }
-    let trimmed = fmv_at_gift_buf.buf.trim();
-    let fmv_at_gift = Usd::from_str(trimmed).map_err(|_| format!("bad USD {trimmed:?}"))?;
+    let fmv_at_gift = parse_nonneg_usd("fmv-at-gift", fmv_at_gift_buf.buf.trim())?;
 
     let donor_basis = if donor_basis_buf.is_empty() {
         None
     } else {
-        let t = donor_basis_buf.buf.trim();
-        Some(Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?)
+        Some(parse_nonneg_usd("donor-basis", donor_basis_buf.buf.trim())?)
     };
 
     let donor_acquired_at = if donor_acquired_at_buf.is_empty() {
@@ -719,6 +750,7 @@ pub fn validate_classify_inbound_gift(
         let fmt = time::macros::format_description!("[year]-[month]-[day]");
         Some(time::Date::parse(t, fmt).map_err(|e| format!("bad date {t:?}: {e}"))?)
     };
+    check_acquired_not_after_receipt("donor-acquired", donor_acquired_at, receipt)?;
 
     Ok(InboundClass::GiftReceived {
         donor_basis,
@@ -737,14 +769,14 @@ pub fn validate_classify_inbound_gift(
 ///
 /// Returns the validated `InboundClass::SelfTransferMine` or an error string.
 pub fn validate_classify_inbound_self_transfer(
+    receipt: TaxDate,
     basis_buf: &FieldBuffer,
     acquired_buf: &FieldBuffer,
 ) -> Result<InboundClass, String> {
     let basis = if basis_buf.is_empty() {
         None
     } else {
-        let t = basis_buf.buf.trim();
-        Some(Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?)
+        Some(parse_nonneg_usd("basis", basis_buf.buf.trim())?)
     };
 
     let acquired_at = if acquired_buf.is_empty() {
@@ -754,6 +786,7 @@ pub fn validate_classify_inbound_self_transfer(
         let fmt = time::macros::format_description!("[year]-[month]-[day]");
         Some(time::Date::parse(t, fmt).map_err(|e| format!("bad date {t:?}: {e}"))?)
     };
+    check_acquired_not_after_receipt("acquired", acquired_at, receipt)?;
 
     Ok(InboundClass::SelfTransferMine { basis, acquired_at })
 }
@@ -895,16 +928,13 @@ pub fn validate_reclassify_outflow(
     if amount_buf.is_empty() {
         return Err("amount is required".to_string());
     }
-    let amount_trimmed = amount_buf.buf.trim();
-    let principal_proceeds_or_fmv =
-        Usd::from_str(amount_trimmed).map_err(|_| format!("bad USD {amount_trimmed:?}"))?;
+    let principal_proceeds_or_fmv = parse_nonneg_usd("amount", amount_buf.buf.trim())?;
 
     // fee: optional
     let fee_usd = if fee_buf.is_empty() {
         None
     } else {
-        let t = fee_buf.buf.trim();
-        Some(Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?)
+        Some(parse_nonneg_usd("fee", fee_buf.buf.trim())?)
     };
 
     // donee: optional free-form; trimmed + capped at FIELD_CAP
@@ -1057,8 +1087,7 @@ pub fn validate_set_fmv(
     if usd_fmv_buf.is_empty() {
         return Err("usd-fmv is required".to_string());
     }
-    let trimmed = usd_fmv_buf.buf.trim();
-    let usd_fmv = Usd::from_str(trimmed).map_err(|_| format!("bad USD {trimmed:?}"))?;
+    let usd_fmv = parse_nonneg_usd("usd-fmv", usd_fmv_buf.buf.trim())?;
     Ok(btctax_core::EventPayload::ManualFmv(ManualFmv {
         event: item.event.clone(),
         usd_fmv,
@@ -2539,6 +2568,12 @@ mod tests {
     use super::*;
     use rust_decimal_macros::dec;
 
+    /// A receipt date safely AFTER every acquisition date used in these tests, so the UX-P4-4(b)
+    /// acquired-after-receipt guard does not fire on the pre-existing happy-path cases.
+    fn any_receipt() -> TaxDate {
+        time::Date::from_calendar_date(2025, time::Month::January, 1).unwrap()
+    }
+
     fn make_valid_form() -> ProfileFormState {
         let mut f = ProfileFormState::new(2025);
         f.fields[0].set("120000");
@@ -2805,6 +2840,7 @@ mod tests {
     #[test]
     fn kat_v_ci_5_gift_fmv_at_gift_empty_is_required_error() {
         let err = validate_classify_inbound_gift(
+            any_receipt(),
             &FieldBuffer::new(),
             &FieldBuffer::new(),
             &FieldBuffer::new(),
@@ -2823,8 +2859,13 @@ mod tests {
         use rust_decimal_macros::dec;
         let mut buf = FieldBuffer::new();
         buf.set("500.00");
-        let cls =
-            validate_classify_inbound_gift(&buf, &FieldBuffer::new(), &FieldBuffer::new()).unwrap();
+        let cls = validate_classify_inbound_gift(
+            any_receipt(),
+            &buf,
+            &FieldBuffer::new(),
+            &FieldBuffer::new(),
+        )
+        .unwrap();
         if let InboundClass::GiftReceived {
             fmv_at_gift,
             donor_basis,
@@ -2848,7 +2889,9 @@ mod tests {
         fmv_buf.set("500.00");
         let mut date_buf = FieldBuffer::new();
         date_buf.set("2022-04-01");
-        let cls = validate_classify_inbound_gift(&fmv_buf, &FieldBuffer::new(), &date_buf).unwrap();
+        let cls =
+            validate_classify_inbound_gift(any_receipt(), &fmv_buf, &FieldBuffer::new(), &date_buf)
+                .unwrap();
         if let InboundClass::GiftReceived {
             donor_acquired_at, ..
         } = cls
@@ -2868,7 +2911,8 @@ mod tests {
         let mut date_buf = FieldBuffer::new();
         date_buf.set("not-a-date");
         let err =
-            validate_classify_inbound_gift(&fmv_buf, &FieldBuffer::new(), &date_buf).unwrap_err();
+            validate_classify_inbound_gift(any_receipt(), &fmv_buf, &FieldBuffer::new(), &date_buf)
+                .unwrap_err();
         assert!(
             err.contains("bad date"),
             "bad date format must produce 'bad date' error; got: {err}"
@@ -2881,8 +2925,12 @@ mod tests {
     /// defaults path; the fold applies $0 + receipt-date and fires the honest advisory).
     #[test]
     fn kat_v_ci_st_1_both_empty_gives_none_none() {
-        let cls = validate_classify_inbound_self_transfer(&FieldBuffer::new(), &FieldBuffer::new())
-            .unwrap();
+        let cls = validate_classify_inbound_self_transfer(
+            any_receipt(),
+            &FieldBuffer::new(),
+            &FieldBuffer::new(),
+        )
+        .unwrap();
         if let InboundClass::SelfTransferMine { basis, acquired_at } = cls {
             assert!(basis.is_none(), "empty basis_buf → None");
             assert!(acquired_at.is_none(), "empty acquired_buf → None");
@@ -2900,7 +2948,7 @@ mod tests {
         basis.set("1234.56");
         let mut acq = FieldBuffer::new();
         acq.set("2015-01-02");
-        let cls = validate_classify_inbound_self_transfer(&basis, &acq).unwrap();
+        let cls = validate_classify_inbound_self_transfer(any_receipt(), &basis, &acq).unwrap();
         if let InboundClass::SelfTransferMine { basis, acquired_at } = cls {
             assert_eq!(basis, Some(dec!(1234.56)));
             assert_eq!(acquired_at, Some(date!(2015 - 01 - 02)));
@@ -2915,7 +2963,9 @@ mod tests {
         use rust_decimal_macros::dec;
         let mut basis = FieldBuffer::new();
         basis.set("0");
-        let cls = validate_classify_inbound_self_transfer(&basis, &FieldBuffer::new()).unwrap();
+        let cls =
+            validate_classify_inbound_self_transfer(any_receipt(), &basis, &FieldBuffer::new())
+                .unwrap();
         if let InboundClass::SelfTransferMine { basis, .. } = cls {
             assert_eq!(basis, Some(dec!(0)), "explicit 0 → Some(0), NOT None");
         } else {
@@ -2928,7 +2978,9 @@ mod tests {
     fn kat_v_ci_st_4_whitespace_only_basis_is_parse_error() {
         let mut basis = FieldBuffer::new();
         basis.set("   ");
-        let err = validate_classify_inbound_self_transfer(&basis, &FieldBuffer::new()).unwrap_err();
+        let err =
+            validate_classify_inbound_self_transfer(any_receipt(), &basis, &FieldBuffer::new())
+                .unwrap_err();
         assert!(
             err.contains("bad USD"),
             "whitespace basis → parse error; got: {err}"
@@ -2940,8 +2992,147 @@ mod tests {
     fn kat_v_ci_st_5_bad_date_is_error() {
         let mut acq = FieldBuffer::new();
         acq.set("not-a-date");
-        let err = validate_classify_inbound_self_transfer(&FieldBuffer::new(), &acq).unwrap_err();
+        let err = validate_classify_inbound_self_transfer(any_receipt(), &FieldBuffer::new(), &acq)
+            .unwrap_err();
         assert!(err.contains("bad date"), "bad date → error; got: {err}");
+    }
+
+    // ── UX-P4-4 folds: I1 (negative money, BOTH surfaces) + I2 (acquired>receipt, BOTH surfaces) ──
+    // The CLI refuses these at record time; these KATs prove the TUI validators — the sibling record
+    // surface named by SPEC:223 "negative basis refused on BOTH surfaces" — refuse them too. Each dies
+    // under mutation (neuter `parse_nonneg_usd` / `check_acquired_not_after_receipt`).
+
+    /// I1 — income `fmv < 0` refused.
+    #[test]
+    fn ux_p4_4_income_negative_fmv_refused() {
+        let mut fmv = FieldBuffer::new();
+        fmv.set("-5000");
+        let err = validate_classify_inbound_income(IncomeKind::Reward, &fmv, false).unwrap_err();
+        assert!(err.contains("fmv") && err.contains(">= 0"), "got: {err}");
+    }
+
+    /// I1 — gift `fmv-at-gift < 0` and `donor-basis < 0` refused.
+    #[test]
+    fn ux_p4_4_gift_negative_money_refused() {
+        let mut neg = FieldBuffer::new();
+        neg.set("-5000");
+        let mut fmv = FieldBuffer::new();
+        fmv.set("100");
+        let err = validate_classify_inbound_gift(
+            any_receipt(),
+            &neg,
+            &FieldBuffer::new(),
+            &FieldBuffer::new(),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("fmv-at-gift") && err.contains(">= 0"),
+            "got: {err}"
+        );
+        let err = validate_classify_inbound_gift(any_receipt(), &fmv, &neg, &FieldBuffer::new())
+            .unwrap_err();
+        assert!(
+            err.contains("donor-basis") && err.contains(">= 0"),
+            "got: {err}"
+        );
+    }
+
+    /// I1 — self-transfer `basis < 0` refused; `0` still allowed (attested zero-cost).
+    #[test]
+    fn ux_p4_4_self_transfer_negative_basis_refused_zero_allowed() {
+        let mut neg = FieldBuffer::new();
+        neg.set("-5000");
+        let err = validate_classify_inbound_self_transfer(any_receipt(), &neg, &FieldBuffer::new())
+            .unwrap_err();
+        assert!(err.contains("basis") && err.contains(">= 0"), "got: {err}");
+        let mut zero = FieldBuffer::new();
+        zero.set("0");
+        assert!(
+            validate_classify_inbound_self_transfer(any_receipt(), &zero, &FieldBuffer::new())
+                .is_ok(),
+            "zero basis (attested zero-cost) must still be allowed"
+        );
+    }
+
+    /// I1 — reclassify-outflow `amount < 0` and `fee < 0` refused.
+    #[test]
+    fn ux_p4_4_reclassify_outflow_negative_money_refused() {
+        let item = dummy_outflow_item();
+        let mut neg = FieldBuffer::new();
+        neg.set("-5000");
+        let mut amt = FieldBuffer::new();
+        amt.set("640");
+        let err = validate_reclassify_outflow(
+            &item,
+            OutflowKind::Sell,
+            &neg,
+            &FieldBuffer::new(),
+            false,
+            &FieldBuffer::new(),
+        )
+        .unwrap_err();
+        assert!(err.contains("amount") && err.contains(">= 0"), "got: {err}");
+        let err = validate_reclassify_outflow(
+            &item,
+            OutflowKind::Sell,
+            &amt,
+            &neg,
+            false,
+            &FieldBuffer::new(),
+        )
+        .unwrap_err();
+        assert!(err.contains("fee") && err.contains(">= 0"), "got: {err}");
+    }
+
+    /// I1 — set-fmv `usd-fmv < 0` refused.
+    #[test]
+    fn ux_p4_4_set_fmv_negative_refused() {
+        let item = dummy_fmv_item();
+        let mut neg = FieldBuffer::new();
+        neg.set("-5000");
+        let err = validate_set_fmv(&item, &neg).unwrap_err();
+        assert!(
+            err.contains("usd-fmv") && err.contains(">= 0"),
+            "got: {err}"
+        );
+    }
+
+    /// I2 — self-transfer `acquired` strictly AFTER the receipt refused; same-day allowed.
+    #[test]
+    fn ux_p4_4_self_transfer_acquired_after_receipt_refused_same_day_ok() {
+        use time::macros::date;
+        let receipt = date!(2025 - 03 - 01);
+        let mut after = FieldBuffer::new();
+        after.set("2025-03-02");
+        let err = validate_classify_inbound_self_transfer(receipt, &FieldBuffer::new(), &after)
+            .unwrap_err();
+        assert!(
+            err.contains("acquired") && err.contains("2025-03-01") && err.contains("receipt"),
+            "got: {err}"
+        );
+        let mut same = FieldBuffer::new();
+        same.set("2025-03-01");
+        assert!(
+            validate_classify_inbound_self_transfer(receipt, &FieldBuffer::new(), &same).is_ok(),
+            "same-day acquired must be allowed"
+        );
+    }
+
+    /// I2 — gift `donor-acquired` strictly AFTER the receipt refused.
+    #[test]
+    fn ux_p4_4_gift_donor_acquired_after_receipt_refused() {
+        use time::macros::date;
+        let receipt = date!(2025 - 03 - 01);
+        let mut fmv = FieldBuffer::new();
+        fmv.set("100");
+        let mut after = FieldBuffer::new();
+        after.set("2025-03-02");
+        let err =
+            validate_classify_inbound_gift(receipt, &fmv, &FieldBuffer::new(), &after).unwrap_err();
+        assert!(
+            err.contains("donor-acquired") && err.contains("2025-03-01") && err.contains("receipt"),
+            "got: {err}"
+        );
     }
 
     // ── Parse failure: non-numeric ───────────────────────────────────────────

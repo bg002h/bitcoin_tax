@@ -1887,6 +1887,7 @@ fn handle_ci_gift_form_key(app: &mut EditorApp, key: KeyEvent) {
                             donor_acquired_at_buf,
                             ..
                         } => validate_classify_inbound_gift(
+                            item.date,
                             fmv_at_gift_buf,
                             donor_basis_buf,
                             donor_acquired_at_buf,
@@ -2003,8 +2004,12 @@ fn handle_ci_self_transfer_form_key(app: &mut EditorApp, key: KeyEvent) {
                             basis_buf,
                             acquired_buf,
                             ..
-                        } => validate_classify_inbound_self_transfer(basis_buf, acquired_buf)
-                            .map(|cls| (item.clone(), cls)),
+                        } => validate_classify_inbound_self_transfer(
+                            item.date,
+                            basis_buf,
+                            acquired_buf,
+                        )
+                        .map(|cls| (item.clone(), cls)),
                         _ => return,
                     },
                     None => return,
