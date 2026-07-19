@@ -528,11 +528,16 @@ pub enum Reconcile {
     },
     /// Classify an inbound TransferIn as income.
     ClassifyInboundIncome {
+        /// The inbound TransferIn event reference to classify (see `btctax events list`).
         in_ref: String,
+        /// Income kind: one of `mining`, `staking`, `interest`, `airdrop`, `reward`.
         #[arg(long)]
         kind: String,
+        /// Fair-market value of the received BTC at receipt — USD dollars, NOT sats. When omitted,
+        /// the bundled daily close for the receipt date is used (or a Hard blocker if none exists).
         #[arg(long)]
         fmv: Option<String>,
+        /// Mark this income as earned in a trade or business (routes to Schedule C / SE tax).
         #[arg(long)]
         business: bool,
     },
@@ -579,7 +584,9 @@ pub enum Reconcile {
     },
     /// Set a manual FMV on an event.
     SetFmv {
+        /// The event reference to set the FMV on (see `btctax events list`).
         event: String,
+        /// Fair-market value of the BTC at the event date — USD dollars, NOT sats.
         #[arg(long)]
         fmv: String,
     },

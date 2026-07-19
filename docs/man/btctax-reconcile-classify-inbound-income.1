@@ -10,16 +10,16 @@ Classify an inbound TransferIn as income
 .SH OPTIONS
 .TP
 \fB\-\-kind\fR \fI<KIND>\fR
-
+Income kind: one of `mining`, `staking`, `interest`, `airdrop`, `reward`
 .TP
 \fB\-\-fmv\fR \fI<FMV>\fR
-
+Fair\-market value of the received BTC at receipt — USD dollars, NOT sats. When omitted, the bundled daily close for the receipt date is used (or a Hard blocker if none exists)
 .TP
 \fB\-\-business\fR
-
+Mark this income as earned in a trade or business (routes to Schedule C / SE tax)
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help
 .TP
 <\fIIN_REF\fR>
-
+The inbound TransferIn event reference to classify (see `btctax events list`)
