@@ -699,7 +699,7 @@ fn draw_classify_inbound_list(
         width: modal_rect.width,
         height: 1,
     };
-    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close")
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, footer_area);
@@ -731,7 +731,7 @@ fn draw_classify_inbound_form(frame: &mut Frame, area: Rect, step: &ClassifyInbo
                  \n\
                  {variant_str}\n\
                  \n\
-                 \n  Esc: back to list   q: swallowed",
+                 \n  Esc: back to list",
                 target = item.blocker_event.canonical(),
                 variant_str = variant_str,
             );
@@ -772,7 +772,7 @@ fn draw_classify_inbound_form(frame: &mut Frame, area: Rect, step: &ClassifyInbo
                  {biz_line}\
                  {err_line}\n\
                  \n\
-                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move focus   q: swallowed",
+                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move focus",
                 target = item.blocker_event.canonical(),
             );
             (" Classify Inbound — Income  [EDITOR] ", c)
@@ -818,7 +818,7 @@ fn draw_classify_inbound_form(frame: &mut Frame, area: Rect, step: &ClassifyInbo
                  {both_none_warn}\
                  {err_line}\n\
                  \n\
-                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move focus   q: swallowed",
+                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move focus",
                 target = item.blocker_event.canonical(),
             );
             (" Classify Inbound — GiftReceived  [EDITOR] ", c)
@@ -857,7 +857,7 @@ fn draw_classify_inbound_form(frame: &mut Frame, area: Rect, step: &ClassifyInbo
                  {zero_basis_note}\
                  {err_line}\n\
                  \n\
-                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move focus   q: swallowed",
+                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move focus",
                 target = item.blocker_event.canonical(),
             );
             (" Classify Inbound — SelfTransferMine  [EDITOR] ", c)
@@ -1057,7 +1057,7 @@ fn draw_reclassify_outflow_list(
         width: modal_rect.width,
         height: 1,
     };
-    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close")
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, footer_area);
@@ -1086,7 +1086,7 @@ fn draw_reclassify_outflow_form(frame: &mut Frame, area: Rect, step: &Reclassify
                  \n\
                  {sell}   {spend}   {gift}   {donate}\n\
                  \n\
-                 \n  Esc: back to list   q: swallowed",
+                 \n  Esc: back to list",
                 target = item.transfer_out_event.canonical(),
                 sell = kind_row("sell", OutflowKind::Sell),
                 spend = kind_row("spend", OutflowKind::Spend),
@@ -1147,7 +1147,7 @@ fn draw_reclassify_outflow_form(frame: &mut Frame, area: Rect, step: &Reclassify
                  {fee_line}{appraisal_line}{donee_line}\
                  {err_line}\n\
                  \n\
-                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move   q: swallowed",
+                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move",
                 target = item.transfer_out_event.canonical(),
             );
             (
@@ -1352,7 +1352,7 @@ fn draw_reclassify_income_list(
         width: modal_rect.width,
         height: 1,
     };
-    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close")
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, footer_area);
@@ -1408,7 +1408,7 @@ fn draw_reclassify_income_form(frame: &mut Frame, area: Rect, step: &ReclassifyI
          {kind_line}\
          {err_line}\n\
          \n\
-         \n  Enter: validate   Esc: back to list   ↑/↓: move focus   q: swallowed",
+         \n  Enter: validate   Esc: back to list   ↑/↓: move focus",
         target = item.income_event.canonical(),
     );
 
@@ -1543,7 +1543,7 @@ fn draw_set_fmv_list(frame: &mut Frame, area: Rect, flow: &mut SetFmvFlowState) 
         width: modal_rect.width,
         height: 1,
     };
-    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close")
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, footer_area);
@@ -1577,7 +1577,7 @@ fn draw_set_fmv_form(frame: &mut Frame, area: Rect, step: &SetFmvStep) {
          {fmv_line}\
          {err_line}\n\
          \n\
-         \n  Enter: validate   Esc: back to list   q: swallowed",
+         \n  Enter: validate   Esc: back to list",
         target = item.event.canonical(),
     );
 
@@ -1699,7 +1699,7 @@ fn draw_method_election_list(frame: &mut Frame, area: Rect, flow: &mut MethodEle
         width: modal_rect.width,
         height: 1,
     };
-    let footer = Paragraph::new("↑/↓: scroll   Enter: choose method   Esc: close   q: swallowed")
+    let footer = Paragraph::new("↑/↓: scroll   Enter: choose method   Esc: close")
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, footer_area);
@@ -1737,7 +1737,7 @@ fn draw_method_election_choose(frame: &mut Frame, area: Rect, step: &MethodElect
          {method_line}\
          {err_line}\n\
          \n\
-         \n  Enter: attest & confirm   Esc: back to list   q: swallowed",
+         \n  Enter: attest & confirm   Esc: back to list",
         account = wallet_label(&item.wallet),
         current = lot_method_label(item.current),
         src = if item.scoped { "elected" } else { "inherited" },
@@ -1855,7 +1855,7 @@ fn draw_void_list(frame: &mut Frame, area: Rect, flow: &mut VoidFlowState) {
         width: modal_rect.width,
         height: 1,
     };
-    let footer = Paragraph::new("↑/↓: scroll   Enter: select → modal   Esc: close   q: swallowed")
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select → modal   Esc: close")
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, footer_area);
@@ -3209,7 +3209,7 @@ fn draw_link_transfer_out_list(frame: &mut Frame, area: Rect, flow: &mut LinkTra
         width: modal_rect.width,
         height: 1,
     };
-    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close")
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, footer_area);
@@ -3316,7 +3316,7 @@ fn draw_link_transfer_target_pick(frame: &mut Frame, area: Rect, flow: &mut Link
         height: 1,
     };
     let footer = Paragraph::new(format!(
-        "mode: {mode_tag}   Tab: switch mode   ↑/↓: scroll   Enter: confirm   Esc: back   q: swallowed"
+        "mode: {mode_tag}   Tab: switch mode   ↑/↓: scroll   Enter: confirm   Esc: back"
     ))
     .alignment(Alignment::Center)
     .style(Style::default().fg(Color::DarkGray));
@@ -3428,7 +3428,7 @@ fn draw_classify_raw_list(frame: &mut Frame, area: Rect, flow: &mut ClassifyRawF
         width: modal_rect.width,
         height: 1,
     };
-    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close   q: swallowed")
+    let footer = Paragraph::new("↑/↓: scroll   Enter: select   Esc: close")
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, footer_area);
@@ -3457,7 +3457,7 @@ fn draw_classify_raw_form(frame: &mut Frame, area: Rect, step: &ClassifyRawStep)
                  \n\
                  {acq}   {inc}\n\
                  \n\
-                 \n  Esc: back to list   q: swallowed",
+                 \n  Esc: back to list",
                 target = item.target.canonical(),
                 raw = item.raw.chars().take(48).collect::<String>(),
                 acq = row("Acquire", ClassifyRawVariant::Acquire),
@@ -3487,7 +3487,7 @@ fn draw_classify_raw_form(frame: &mut Frame, area: Rect, step: &ClassifyRawStep)
                  \n  {c2} fee_usd (USD, optional): {fee}\
                  \n  {c3} basis_source: [{bs}]  (Tab: cycle)\
                  {err}\n\
-                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move   q: swallowed",
+                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move",
                 target = item.target.canonical(),
                 c0 = cur(0),
                 sat = sat_buf.buf,
@@ -3523,7 +3523,7 @@ fn draw_classify_raw_form(frame: &mut Frame, area: Rect, step: &ClassifyRawStep)
                  \n  {c2} kind: [{kind}]  (Tab: cycle)\
                  \n  {c3} business: {business}  (Space: toggle)\
                  {err}\n\
-                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move   q: swallowed",
+                 \n  Enter: validate   Esc: back to picker   ↑/↓/Tab: move",
                 target = item.target.canonical(),
                 c0 = cur(0),
                 sat = sat_buf.buf,
@@ -3848,7 +3848,7 @@ fn draw_resolve_conflict_choose(frame: &mut Frame, area: Rect, step: &ResolveCon
         Line::from(vec![Span::raw("  choose:  "), accept_span, reject_span]),
         Line::from(""),
         Line::from(Span::styled(
-            "  ←/→ (h/l): toggle   Enter: confirm → modal   Esc: back   q: swallowed",
+            "  ←/→ (h/l): toggle   Enter: confirm → modal   Esc: back",
             Style::default().fg(Color::Cyan),
         )),
     ];
@@ -5976,6 +5976,40 @@ mod tests {
         assert!(
             rendered.contains("writes nothing"),
             "modal must say Esc writes nothing"
+        );
+    }
+
+    /// UX-P4-12(h): a list-flow footer legend shows the exit affordance and is free of the dev-speak
+    /// "q: swallowed" (which also wrapped mid-word at narrow widths). Rendered in a tall buffer so the
+    /// footer row is not clipped.
+    #[test]
+    fn list_flow_footer_has_no_dev_speak_swallowed() {
+        use crate::edit::form::{TargetList, VoidFlowState, VoidStep};
+        let backend = TestBackend::new(80, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut flow = VoidFlowState {
+            list: TargetList::new(vec![]),
+            step: VoidStep::List,
+        };
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_void_list(f, area, &mut flow))
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .clone()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            rendered.contains("Esc: close"),
+            "the footer legend is visible:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("swallowed"),
+            "no dev-speak 'q: swallowed' in the footer legend"
         );
     }
 
