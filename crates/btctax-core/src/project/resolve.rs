@@ -157,7 +157,7 @@ pub struct ElectionRec {
 
 /// The SHARED wallet-aware election resolver (§A.5(a)) — the SOLE method-resolution path, used by BOTH
 /// `fold::applicable_method` (the fold) AND `disposal_compliance` (compliance). Returns the winning
-/// `ElectionRec` (or `None` ⇒ FIFO in the fold / no `StandingOrder` in compliance) for a disposal on
+/// `ElectionRec` (or `None` ⇒ HIFO in the fold / no `StandingOrder` in compliance) for a disposal on
 /// `wallet` at `date`, via **TWO INDEPENDENT TIERS** [R0-M2]:
 ///
 ///   tier 1 — the latest election SCOPED to `wallet` (`wallet == Some(w)`) with `effective_from ≤ date`,
@@ -202,7 +202,7 @@ pub struct Resolution {
     pub timeline: Vec<Eff>,
     pub transition: TransitionMode,
     pub blockers: Vec<Blocker>,
-    /// In-force forward method elections (§A.5(a)); empty ⇒ FIFO default for all per-wallet disposals.
+    /// In-force forward method elections (§A.5(a)); empty ⇒ HIFO default for all per-wallet disposals (fold::applicable_method fall-through).
     pub elections: Vec<ElectionRec>,
     /// Per-disposal named-lot selections (§A.4). Empty this task; populated in Task 4.
     pub selections: BTreeMap<EventId, Vec<crate::event::LotPick>>,

@@ -580,7 +580,7 @@ impl Session {
 
     /// §A.5(a): the distinct Exchange accounts in the vault, each with its currently-in-force
     /// cost-basis method and whether that method is an explicit per-account election (`true`) vs
-    /// inherited from a global election / FIFO default (`false`), as of `date`. Feeds the
+    /// inherited from a global election / the HIFO default (`false`), as of `date`. Feeds the
     /// btctax-tui-edit method-election flow's account list. Uses the SHARED resolver via
     /// `btctax_core::in_force_methods` (the sole precedence path). Sorted by `WalletId: Ord`.
     pub fn exchange_method_election_rows(

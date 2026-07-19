@@ -2304,6 +2304,23 @@ will red until it does).
     price for this date — run `btctax-update-prices`", `price_cache.rs:14` via `render.rs`) is attached
     even when a local price DOES exist for the date; misleading. Sweep with the legibility residue.
 
+  **r2+r3 review fold (2026-07-19, `reviews/ux-p4-12-impl-fable-review-r{2,3}.md`, r2 0C/2I → r3 GREEN):**
+  - **r2-I-A** (the r1-corrected `--fmv` help's remedy was ALSO wrong — a bare re-classify is refused by
+    the first-wins record-time guard): now `reconcile void <decision-ref>` then re-classify; man regen;
+    help_units pins `reconcile void` + `first-wins`. Reproduced working live by r3.
+  - **r2-I-B** (config forward-method read-back picked the vault-wide order by max `decision_seq` and
+    claimed a wrong "FIFO default"): REWRITTEN to use the shared `project::in_force_methods` resolver
+    (same as `fold::applicable_method`; HIFO is the real default); new multi-order KAT + clock-controlled
+    `run_config_at`; nothing hidden (full history deferred to `verify`).
+  - **r3-M1 (Minor, FIXED here)** — the stale "FIFO default" doc-comments in core that CAUSED r2-I-B
+    (`resolve.rs:160/205`, `session.rs:583`) corrected to HIFO (verified against `fold.rs:43`).
+  - **r3-N1 (Nit, later polish)** — config's "N standing order(s) recorded" excludes voided while
+    `verify`'s "Standing orders (MethodElection): M" includes them (labeled `[voided]`); reconcile later.
+  - **r3-N2 (Nit)** — `config` uses `now.date()` (BTCTAX_NOW's own offset) where made-dates use
+    `to_offset(UTC).date()`; a non-UTC BTCTAX_NOW could skew the displayed "as of" by a day. Unreachable
+    in shipped docs/tests (all pin `Z`).
+  - **r3-N3 (Nit)** — "1 standing order(s)" lacks plural inflection (cosmetic).
+
 ## Pre-v0.7.0 product-wording cleanup — FOLDED (2026-07-18, user-authorized before the release)
 
 A deliberate, reviewed product-fix cycle (distinct from the fence-barred docs work; the user chose "fix
