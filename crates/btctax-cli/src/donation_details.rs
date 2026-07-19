@@ -46,12 +46,98 @@ pub fn get(conn: &Connection, event: &EventId) -> Result<Option<DonationDetails>
     }
 }
 
+/// True iff every byte of `b` is an ASCII digit (and `b` is non-empty).
+fn all_digits(b: &[u8]) -> bool {
+    !b.is_empty() && b.iter().all(u8::is_ascii_digit)
+}
+/// EIN shape `##-#######` (2 digits, hyphen, 7 digits).
+fn is_ein_shape(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10 && b[2] == b'-' && all_digits(&b[..2]) && all_digits(&b[3..])
+}
+/// SSN/ITIN shape `###-##-####` (3-2-4). An ITIN (`9##-##-####`) is a subset — accepted here.
+fn is_ssn_shape(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 11
+        && b[3] == b'-'
+        && b[6] == b'-'
+        && all_digits(&b[..3])
+        && all_digits(&b[4..6])
+        && all_digits(&b[7..])
+}
+/// Exactly 9 digits, unhyphenated.
+fn is_bare9(s: &str) -> bool {
+    s.len() == 9 && all_digits(s.as_bytes())
+}
+/// PTIN shape `P########` (a `P` then exactly 8 digits).
+fn is_ptin_shape(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 9 && b[0] == b'P' && all_digits(&b[1..])
+}
+
+/// UX-P4-4(c): validate + normalize the Form 8283 Section-B taxpayer identifiers, returning a
+/// normalized copy. Called from `set` — the single side-table writer that BOTH the CLI
+/// (`reconcile::set_donation_details`) and the TUI (`persist_donation_details`) converge on — so a
+/// bad identifier can never reach a filed Form 8283 from either surface. Purely a shape check: it
+/// cannot verify a TIN is real, only that it is well-formed enough to belong on the form.
+///
+/// - `appraiser_ptin`: `P########` (§6695A PTIN) or refuse.
+/// - `appraiser_tin`: an EIN, an SSN/ITIN, or the same 9 digits unformatted (a TIN is any of
+///   SSN/ITIN/ATIN/**EIN**, 26 CFR 301.6109-1(a)(1)(i)). A masked/short value is refused.
+/// - `donee_ein`: an organization EIN — a bare 9-digit is normalized into the hyphenated form; an
+///   individual **SSN-shape is refused** (an individual is not a §170(c) donee). The bare-9 case
+///   necessarily also admits an unhyphenated SSN — inherent and ACCEPTED (refusing it would refuse
+///   real unformatted EINs); this is deliberately not "hardened" into a false refuse.
+pub(crate) fn validate_and_normalize(
+    details: &DonationDetails,
+) -> Result<DonationDetails, CliError> {
+    let mut d = details.clone();
+
+    if let Some(p) = d.appraiser_ptin.as_deref() {
+        if !is_ptin_shape(p) {
+            return Err(CliError::Usage(format!(
+                "--appraiser-ptin must be a PTIN of the form P######## (P then 8 digits); got {p:?}"
+            )));
+        }
+    }
+
+    if let Some(t) = d.appraiser_tin.as_deref() {
+        if !(is_ein_shape(t) || is_ssn_shape(t) || is_bare9(t)) {
+            return Err(CliError::Usage(format!(
+                "--appraiser-tin must be an EIN (12-3456789), an SSN/ITIN (123-45-6789), or 9 \
+                 digits; got {t:?}"
+            )));
+        }
+    }
+
+    if let Some(e) = d.donee_ein.as_deref() {
+        if is_ssn_shape(e) {
+            return Err(CliError::Usage(format!(
+                "--donee-ein must be an organization EIN (12-3456789), not an individual SSN \
+                 ({e:?}); omit --donee-ein if the donee has none"
+            )));
+        } else if is_ein_shape(e) {
+            // already canonical — keep as-is
+        } else if is_bare9(e) {
+            d.donee_ein = Some(format!("{}-{}", &e[..2], &e[2..]));
+        } else {
+            return Err(CliError::Usage(format!(
+                "--donee-ein must be an EIN (12-3456789) or 9 digits; got {e:?}; omit --donee-ein \
+                 if the donee has none"
+            )));
+        }
+    }
+
+    Ok(d)
+}
+
 /// Persist `details` for `event` (upsert — replaces any prior value; last-write-wins).
 ///
 /// Idempotent DDL guard first. JSON via serde_json (mirrors `tax_profile::set`).
 pub fn set(conn: &Connection, event: &EventId, details: &DonationDetails) -> Result<(), CliError> {
     init_table(conn)?;
-    let j = serde_json::to_string(details).map_err(|e| CliError::BadConfigValue {
+    let details = validate_and_normalize(details)?;
+    let j = serde_json::to_string(&details).map_err(|e| CliError::BadConfigValue {
         key: format!("donation_details[{}]", event.canonical()),
         value: e.to_string(),
     })?;
@@ -152,6 +238,125 @@ mod tests {
         set(&c, &e, &minimal_details()).unwrap();
         let stored = get(&c, &e).unwrap().unwrap();
         assert_eq!(stored, minimal_details());
+    }
+
+    /// UX-P4-4(c): a `DonationDetails` carrying only the three identifiers under test.
+    fn details_with(
+        donee_ein: Option<&str>,
+        appraiser_tin: Option<&str>,
+        appraiser_ptin: Option<&str>,
+    ) -> DonationDetails {
+        DonationDetails {
+            donee_name: "Test Charity".into(),
+            donee_address: None,
+            donee_ein: donee_ein.map(str::to_owned),
+            appraiser_name: "Test Appraiser".into(),
+            appraiser_address: None,
+            appraiser_tin: appraiser_tin.map(str::to_owned),
+            appraiser_ptin: appraiser_ptin.map(str::to_owned),
+            appraiser_qualifications: None,
+            appraisal_date: None,
+            fmv_method_override: None,
+        }
+    }
+
+    /// A TIN is an EIN, an SSN/ITIN, or those 9 digits unformatted (26 CFR 301.6109-1(a)(1)(i));
+    /// a masked or wrong-length value is refused.
+    #[test]
+    fn appraiser_tin_accepts_ein_ssn_bare9_and_refuses_masked() {
+        for good in [
+            "12-3456789",
+            "123-45-6789",
+            "987-65-4321",
+            "987654321",
+            "912-34-5678",
+        ] {
+            assert!(
+                validate_and_normalize(&details_with(None, Some(good), None)).is_ok(),
+                "appraiser-tin {good:?} must be accepted"
+            );
+        }
+        // ITIN (9xx-xx-xxxx) is SSN-shaped — accepted above. Masked / wrong-length refused:
+        let err =
+            validate_and_normalize(&details_with(None, Some("***-**-1234"), None)).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("--appraiser-tin"),
+            "masked appraiser-tin refusal must name the flag: {err:?}"
+        );
+        assert!(validate_and_normalize(&details_with(None, Some("12345"), None)).is_err());
+        assert!(validate_and_normalize(&details_with(None, Some("1234567890"), None)).is_err());
+    }
+
+    /// A donee EIN is an organization EIN (§170(c)) — NOT an individual SSN. A bare 9-digit is
+    /// normalized into the hyphenated EIN form; an SSN-shape or garbage is refused.
+    #[test]
+    fn donee_ein_normalizes_bare9_refuses_ssn_shape_and_garbage() {
+        let ok = validate_and_normalize(&details_with(Some("12-3456789"), None, None)).unwrap();
+        assert_eq!(
+            ok.donee_ein.as_deref(),
+            Some("12-3456789"),
+            "canonical EIN unchanged"
+        );
+
+        let norm = validate_and_normalize(&details_with(Some("123456789"), None, None)).unwrap();
+        assert_eq!(
+            norm.donee_ein.as_deref(),
+            Some("12-3456789"),
+            "a bare 9-digit donee EIN normalizes to hyphenated form"
+        );
+
+        let err =
+            validate_and_normalize(&details_with(Some("123-45-6789"), None, None)).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("--donee-ein") && msg.contains("SSN") && msg.contains("omit"),
+            "an SSN-shaped donee EIN refusal must name the flag, SSN, and the omit hint: {msg}"
+        );
+
+        assert!(validate_and_normalize(&details_with(Some("banana"), None, None)).is_err());
+    }
+
+    /// A PTIN is `P` followed by exactly 8 digits (Form 8283 Part III §6695A).
+    #[test]
+    fn appraiser_ptin_requires_p_plus_8_digits() {
+        assert!(validate_and_normalize(&details_with(None, None, Some("P01234567"))).is_ok());
+        assert!(validate_and_normalize(&details_with(None, None, Some("012345678"))).is_err());
+        assert!(validate_and_normalize(&details_with(None, None, Some("P0123456"))).is_err());
+        let err = validate_and_normalize(&details_with(None, None, Some("nope"))).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("--appraiser-ptin"),
+            "ptin refusal must name the flag: {err:?}"
+        );
+    }
+
+    /// `set` IS the choke point: normalization flows through it, and a bad identifier is refused
+    /// AT `set` — so BOTH the CLI (`reconcile::set_donation_details`) and the TUI
+    /// (`persist_donation_details`) writers, which both call `set`, are covered. Fail-closed.
+    #[test]
+    fn set_choke_point_normalizes_and_refuses_fail_closed() {
+        let c = mem();
+        let e1 = eid("out|dd-normalize");
+        set(
+            &c,
+            &e1,
+            &details_with(Some("123456789"), Some("987654321"), None),
+        )
+        .unwrap();
+        assert_eq!(
+            get(&c, &e1).unwrap().unwrap().donee_ein.as_deref(),
+            Some("12-3456789"),
+            "bare-9 donee EIN must be stored normalized"
+        );
+
+        let e2 = eid("out|dd-bad");
+        assert!(
+            set(&c, &e2, &details_with(None, Some("***-**-1234"), None)).is_err(),
+            "a masked appraiser-tin must be refused at set()"
+        );
+        assert!(
+            get(&c, &e2).unwrap().is_none(),
+            "a refused write must store nothing (fail-closed)"
+        );
     }
 
     /// A missing key returns None (not an error).

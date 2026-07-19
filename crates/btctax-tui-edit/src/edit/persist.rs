@@ -3190,6 +3190,55 @@ mod tests {
         );
     }
 
+    // ── UX-P4-4(c): the TUI donation-details writer is covered by the set() choke-point validation ──
+    // `persist_donation_details` calls `donation_details::set`, which validates the Section-B TIN/EIN/
+    // PTIN shapes. So a malformed identifier entered in the TUI edit form is refused BEFORE it can reach
+    // a filed Form 8283 — exactly as the CLI path is. Fail-closed: nothing is written.
+    #[test]
+    fn kat_persist_donation_details_refuses_bad_tin_via_choke_point() {
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::{DonationDetails, EventId};
+        use btctax_store::Passphrase;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-dd-badtin-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp_str.into()), &key).unwrap();
+
+        let event_id = EventId::import(Source::River, SourceRef::new("dd-donation"));
+        let bad = DonationDetails {
+            donee_name: "Donee".to_owned(),
+            donee_address: None,
+            donee_ein: None,
+            appraiser_name: "Appraiser".to_owned(),
+            appraiser_address: None,
+            appraiser_tin: Some("***-**-1234".to_owned()), // masked → not a well-formed TIN
+            appraiser_ptin: None,
+            appraiser_qualifications: None,
+            appraisal_date: None,
+            fmv_method_override: None,
+        };
+
+        let mut session =
+            btctax_cli::Session::open(&vault, &Passphrase::new(pp_str.into())).unwrap();
+        let result = persist_donation_details(&mut session, &event_id, &bad);
+        assert!(
+            matches!(result, Err(PersistError::NoChange(_))),
+            "a malformed TIN must be refused at the choke point (fail-closed); got: {result:?}"
+        );
+        assert!(
+            format!("{result:?}").contains("--appraiser-tin"),
+            "the TUI refusal must carry the choke-point message: {result:?}"
+        );
+        assert!(
+            btctax_cli::donation_details::get(session.conn(), &event_id)
+                .unwrap()
+                .is_none(),
+            "a refused TUI write must store nothing"
+        );
+    }
+
     // ── KAT-P2g — append-only strict prefix test (select-lots / LotSelection append) ──
     //
     // Seed: Acquire (wallet W) + TransferOut + ReclassifyOutflow(Donate) → a Donation

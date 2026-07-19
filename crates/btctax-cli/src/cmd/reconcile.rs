@@ -1377,6 +1377,36 @@ mod tests {
         assert_eq!(stored, test_details());
     }
 
+    /// UX-P4-4(c) at the CLI surface: a malformed `--donee-ein` is refused end-to-end (through the
+    /// projection check + the `donation_details::set` choke point), and nothing is stored. The
+    /// accept + normalize + other-shape cases are unit-tested on `validate_and_normalize`; this proves
+    /// the CLI path actually reaches the choke point and fails closed.
+    #[test]
+    fn set_donation_details_refuses_malformed_donee_ein() {
+        let dir = tempfile::tempdir().unwrap();
+        let (vault_path, out_id, _acq_id) = setup_donation_vault(&dir);
+
+        let mut bad = test_details();
+        bad.donee_ein = Some("banana".into());
+        let err = set_donation_details(&vault_path, &pp(), &out_id.canonical(), bad).unwrap_err();
+        assert!(
+            matches!(err, CliError::Usage(_)),
+            "expected Usage, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("--donee-ein"),
+            "the refusal must name --donee-ein: {err}"
+        );
+
+        // Fail-closed: nothing was stored for the refused donation.
+        assert!(
+            show_donation_details(&vault_path, &pp(), &out_id.canonical())
+                .unwrap()
+                .is_none(),
+            "a refused set must store no details"
+        );
+    }
+
     /// Targeting a missing ref → a clear `CliError::Usage` (not a panic).
     #[test]
     fn set_donation_details_missing_ref_is_usage_error() {
