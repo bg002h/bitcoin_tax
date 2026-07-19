@@ -192,6 +192,10 @@ pub struct IrsPdfReport {
     pub full_return_paths: Vec<PathBuf>,
     /// The full-return packet's manifest (the filer's stapling order).
     pub full_return_manifest: Option<PathBuf>,
+    /// UX-P4-5: `true` when a `--forms` SLICE was passed on a full-return year and therefore IGNORED
+    /// (the whole jointly-computed packet writes; honoring a slice of it is tax-unsound). The caller
+    /// warns on stderr. Always `false` on the crypto-slice path (there `--forms` is honored).
+    pub forms_ignored_full_return: bool,
 }
 
 /// Whether a form is included: the packet is every applicable form unless `--forms` opts in to a subset.
@@ -236,7 +240,12 @@ pub fn export_irs_pdf(
     // type-level impossibility to a branch, which is why the branch is HERE, alone, and pinned by KATs
     // in BOTH directions.
     if crate::return_inputs::exists(session.conn(), tax_year)? {
-        return export_full_return(&session, &state, out_dir, tax_year, attest);
+        let mut report = export_full_return(&session, &state, out_dir, tax_year, attest)?;
+        // UX-P4-5: a --forms slice cannot be honored on a full-return year (the 14-form packet is
+        // jointly computed; a slice of it is tax-unsound). The packet still writes in full; flag the
+        // ignored slice so the caller warns.
+        report.forms_ignored_full_return = !forms.is_empty();
+        return Ok(report);
     }
 
     // Attestation gate — no fictional tax form leaves the machine unguarded, and a refusal
@@ -382,6 +391,7 @@ pub fn export_irs_pdf(
     Ok(IrsPdfReport {
         full_return_paths: Vec::new(),
         full_return_manifest: None,
+        forms_ignored_full_return: false, // crypto-slice path honors --forms
         f8949_path,
         schedule_d_path,
         tax_year,
@@ -551,6 +561,7 @@ fn export_full_return(
         broker_reported_rows: 0,
         full_return_paths: paths,
         full_return_manifest: Some(manifest_path),
+        forms_ignored_full_return: false, // set by the dispatch (which has `forms`), not here
         // The crypto-slice PATHS are absent (the two pipelines are disjoint), but the 8283's loud
         // escalations are NOT slice-specific: the packet can contain a Section-B 8283 whose appraiser
         // declaration is unsigned, and silencing that guard on the one path that announces a "clean,

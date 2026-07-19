@@ -534,6 +534,62 @@ fn export_full_return_out_collision_names_path() {
     );
 }
 
+/// UX-P4-5: a `--forms` SLICE is ignored on a full-return year (honoring part of a jointly-computed
+/// 14-form packet is tax-unsound) — the whole packet still writes, and the report FLAGS that the
+/// slice was ignored so the caller can warn. With no `--forms`, nothing is ignored.
+#[test]
+fn forms_slice_ignored_on_full_return_year_is_flagged_and_packet_unchanged() {
+    use btctax_cli::{return_inputs, Session};
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    use btctax_core::tax::types::FilingStatus;
+
+    let (_dir, vault) = make_vault(&real_events());
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        };
+        ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
+            first_name: "Pat".into(),
+            last_name: "Roe".into(),
+            ssn: "222-33-4444".into(),
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+
+    // A --forms slice on a full-return year: ignored, but flagged; the full packet still writes.
+    let out = tempfile::tempdir().unwrap();
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[FormArg::F8949], None)
+        .expect("full-return export succeeds");
+    assert!(
+        rep.forms_ignored_full_return,
+        "a --forms slice on a full-return year is flagged as ignored"
+    );
+    assert!(
+        !rep.full_return_paths.is_empty(),
+        "the full packet still writes despite the ignored slice"
+    );
+
+    // Same year, NO --forms: nothing ignored, and the packet is identical (the slice never changed it).
+    let out2 = tempfile::tempdir().unwrap();
+    let rep2 = cmd::admin::export_irs_pdf(&vault, &pp(), out2.path(), 2024, &[], None)
+        .expect("full-return export succeeds");
+    assert!(
+        !rep2.forms_ignored_full_return,
+        "no --forms → nothing was ignored"
+    );
+    assert_eq!(
+        rep.full_return_paths.len(),
+        rep2.full_return_paths.len(),
+        "the packet is byte-for-byte the same set regardless of --forms (the slice is inert)"
+    );
+}
+
 /// ★ THE DISPATCH, direction 2 — a year with NO full-return inputs still gets the crypto slice,
 /// unchanged. Deleting the P5-C1 refusal downgraded a type-level impossibility to a branch, so the
 /// branch is pinned in BOTH directions.

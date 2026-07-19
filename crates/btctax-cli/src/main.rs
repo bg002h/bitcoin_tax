@@ -687,6 +687,16 @@ fn run() -> Result<ExitCode, CliError> {
                  figure against the forms and instructions before you sign, and the authors accept \
                  no liability for the consequences. This is not tax advice. See `btctax limitations`."
             );
+            // UX-P4-5: a --forms slice cannot be honored on a full-return year — the 14-form packet is
+            // jointly computed, so a slice of it is tax-unsound. The whole packet was written; say the
+            // slice was ignored (on STDERR — the packet listing below is the result).
+            if report.forms_ignored_full_return {
+                eprintln!(
+                    "note: --forms is ignored on a full-return year ({}); the whole jointly-computed \
+                     packet is written (a slice of a full return is not a filable subset).",
+                    report.tax_year
+                );
+            }
             // ★ The FULL-RETURN packet: list what was actually written, and DO NOT print the
             // slice-only scope notes — on this path Schedule D Part III IS filled, and telling the
             // filer to complete it by hand would have them hand-modify a correct filed form
