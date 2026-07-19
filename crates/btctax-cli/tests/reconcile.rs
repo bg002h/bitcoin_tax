@@ -1152,6 +1152,73 @@ cb-pre,2024-01-15 12:00:00 UTC,Buy,BTC,0.20000000,USD,42500.00,8500.00,8550.00,5
 /// `donor_acquired_at`) from the pre-2025 projection's residue lots into the emitted AllocLot.
 /// Under the old code the CLI dropped these fields, collapsing the lot to single-basis.
 ///
+/// UX-P4-4(b) gift arm: a `--donor-acquired` date STRICTLY AFTER the receipt date is refused by the
+/// SAME `classify_inbound` record-time guard that covers `--acquired` on a self-transfer. Receipt is
+/// 2024-06-01 (UTC); `donor_acquired_at = 2024-06-02` is refused with a message that names
+/// `--donor-acquired`, prints the receipt date + tz basis, and no decision is appended (fail-closed).
+/// (★ fault-inject: drop the `GiftReceived` arm from `acquired_override` and this goes RED.)
+#[test]
+fn classify_inbound_gift_donor_acquired_after_receipt_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // Import a Coinbase Receive (2024-06-01 UTC) — the gifted coins' receiving TransferIn.
+    let p = dir.path().join("cb_gift.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,x\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,\
+Recipient Address\r\n\
+cb-gift-recv,2024-06-01 12:00:00 UTC,Receive,BTC,0.00100000,USD,40000.00,,,,,bc1qsender,\r\n",
+    )
+    .unwrap();
+    cmd::import::run(&vault, &pp(), &[p]).unwrap();
+
+    let in_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+        events
+            .iter()
+            .find(|e| matches!(e.payload, EventPayload::TransferIn(_)))
+            .unwrap()
+            .id
+            .canonical()
+    };
+
+    let err = cmd::reconcile::classify_inbound(
+        &vault,
+        &pp(),
+        &in_ref,
+        InboundClass::GiftReceived {
+            donor_basis: Some(dec!(100.00)),
+            donor_acquired_at: Some(date!(2024 - 06 - 02)), // one day AFTER receipt → impossible
+            fmv_at_gift: dec!(40.00),
+        },
+        now(),
+    )
+    .expect_err("a donor-acquired date after the receipt must be refused");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("--donor-acquired")
+            && msg.contains("2024-06-01")
+            && msg.contains("receipt")
+            && msg.contains("UTC"),
+        "the refusal must name --donor-acquired, the receipt date + tz basis: {msg}"
+    );
+
+    // Fail-closed: nothing was appended (no ClassifyInbound decision in the log).
+    let s = Session::open(&vault, &pp()).unwrap();
+    let events = btctax_core::persistence::load_all(s.conn()).unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e.payload, EventPayload::ClassifyInbound(_))),
+        "a refused gift classify must append no decision"
+    );
+}
+
 /// Scenario: pre-2025 GiftReceived lot with donor (gain) basis = $100 and FMV-at-gift = $40
 /// (FMV < donor → dual). Expected AllocLot: usd_basis=$100, dual_loss_basis=Some($40),
 /// donor_acquired_at=Some(2021-01-01). [R0-I2: loss basis is FMV-at-gift, not donor basis.]

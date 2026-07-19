@@ -47,11 +47,58 @@ pub fn classify_inbound(
 ) -> Result<EventId, CliError> {
     let transfer_in_event = parse_event_id(in_ref)?;
     let mut session = Session::open(vault_path, pp)?;
+
+    // UX-P4-4(b): a supplied acquisition date that STRICTLY post-dates the receipt is impossible —
+    // self-transferred / gifted coins cannot have been acquired after they arrived. Refuse at record
+    // time, BEFORE any decision is appended (fail-closed). The acquisition date and the receipt come
+    // from different sources (the CLI `--acquired`/`--donor-acquired` flag vs. the imported TransferIn),
+    // so the message prints the receipt date + its tz basis. Same-day is allowed (a same-day
+    // acquire→receive is legitimate, and a tz skew can already shift the calendar day by one). The
+    // receipt lives on the referenced TransferIn event; if the ref does not resolve to a TransferIn
+    // (wrong-target), the guard is skipped and the existing DecisionConflict path adjudicates.
+    let acquired_override: Option<(&str, TaxDate)> = match &class {
+        InboundClass::SelfTransferMine { acquired_at, .. } => {
+            acquired_at.map(|d| ("--acquired", d))
+        }
+        InboundClass::GiftReceived {
+            donor_acquired_at, ..
+        } => donor_acquired_at.map(|d| ("--donor-acquired", d)),
+        InboundClass::Income { .. } => None,
+    };
+    if let Some((flag, acquired)) = acquired_override {
+        let events = load_all(session.conn())?;
+        if let Some(ev) = events.iter().find(|e| e.id == transfer_in_event) {
+            if let EventPayload::TransferIn(_) = &ev.payload {
+                let receipt = tax_date(ev.utc_timestamp, ev.original_tz);
+                if acquired > receipt {
+                    return Err(CliError::Usage(format!(
+                        "{flag} {acquired} is after the receipt date {receipt} (recorded in {tz}); \
+                         coins cannot be acquired after they are received. Same-day is allowed.",
+                        tz = tz_label(ev.original_tz),
+                    )));
+                }
+            }
+        }
+    }
+
     let payload = EventPayload::ClassifyInbound(ClassifyInbound {
         transfer_in_event,
         as_: class,
     });
     append_and_save(&mut session, payload, now)
+}
+
+/// Render a `UtcOffset` as a human tz basis for record-time messages: `UTC` for the zero offset,
+/// otherwise `UTC±HH:MM` (UX-P4-4(b)). Kept dependency-free (no `time` `formatting` feature) via
+/// `as_hms`, so it also works when the offset carries seconds (rendered at minute resolution).
+fn tz_label(tz: UtcOffset) -> String {
+    let (h, m, _s) = tz.as_hms();
+    if h == 0 && m == 0 {
+        "UTC".to_string()
+    } else {
+        let sign = if h < 0 || m < 0 { '-' } else { '+' };
+        format!("UTC{sign}{:02}:{:02}", h.unsigned_abs(), m.unsigned_abs())
+    }
 }
 
 /// FR6: reclassify a pending `TransferOut` as a Sell/Spend disposition, a Gift out, or a Donation.

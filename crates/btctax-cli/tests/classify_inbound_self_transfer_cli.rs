@@ -180,6 +180,63 @@ fn classify_inbound_self_transfer_negative_basis_equals_form_is_refused() {
     );
 }
 
+/// UX-P4-4(b): an `--acquired` date STRICTLY AFTER the receipt date is impossible (coins cannot have
+/// been acquired after they were received) and is refused at record time. The receipt is 2025-03-01
+/// (UTC), so `--acquired 2025-03-02` is refused; the message names the flag, states the receipt-post-date
+/// impossibility, and PRINTS the receipt date + its tz basis (the two dates come from different sources).
+/// Fail-closed: no lot is written. (★ fault-inject: revert the guard and this goes RED.)
+#[test]
+fn classify_inbound_self_transfer_acquired_after_receipt_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, in_ref) = vault_with(dir.path(), coinbase_receive_csv(dir.path()), true);
+
+    let (code, stderr) = run_self_transfer(&vault, &[&in_ref, "--acquired", "2025-03-02"]);
+    assert_ne!(
+        code, 0,
+        "an --acquired date after the receipt must be refused; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("--acquired") && stderr.contains("2025-03-01") && stderr.contains("receipt"),
+        "the refusal must name --acquired, the receipt date 2025-03-01, and the word receipt: {stderr}"
+    );
+    assert!(
+        stderr.contains("UTC"),
+        "the refusal must print the receipt tz basis (UTC): {stderr}"
+    );
+
+    // Fail-closed: the refuse is before append, so NO lot is written.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert!(
+        state.lots.is_empty(),
+        "a refused classify must record no lot: {:?}",
+        state.lots
+    );
+}
+
+/// UX-P4-4(b) boundary: `--acquired` EQUAL to the receipt date (same-day) is ALLOWED — a same-day
+/// acquire-then-receive is legitimate, and the two dates may already skew by a tz day. Receipt is
+/// 2025-03-01; `--acquired 2025-03-01` succeeds and rides onto the lot.
+#[test]
+fn classify_inbound_self_transfer_acquired_same_day_as_receipt_is_allowed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, in_ref) = vault_with(dir.path(), coinbase_receive_csv(dir.path()), true);
+
+    let (code, stderr) = run_self_transfer(&vault, &[&in_ref, "--acquired", "2025-03-01"]);
+    assert_eq!(
+        code, 0,
+        "same-day --acquired must be allowed; stderr: {stderr}"
+    );
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert_eq!(state.lots.len(), 1);
+    assert_eq!(
+        state.lots[0].acquired_at,
+        time::macros::date!(2025 - 03 - 01)
+    );
+}
+
 /// [reconcile-defaults] The MANUAL `classify-inbound-self-transfer` with no `--acquired` also backdates
 /// to LONG-TERM: the created lot's acquisition date is 1yr+1day before receipt (leap-safe), and the
 /// defaulted-acquisition advisory fires.
