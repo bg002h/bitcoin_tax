@@ -46,6 +46,11 @@ pub enum Command {
     /// FR9 integrity check (non-zero exit on hard blockers).
     Verify,
     /// Show holdings + realized disposals/removals/income. With --tax-year: standalone TaxResult.
+    ///
+    /// Exit code with --tax-year (UX-P4-10): 0 = a filing-ready number was rendered; 1 = ran but the
+    /// year is NOT COMPUTABLE (no filing-ready number — a missing tax profile/table or a hard blocker;
+    /// mirrors `verify`); 2 = the command failed (any error). Scripts should key on NON-ZERO. A
+    /// pseudo-active report still exits 0 — the on-screen banner is the signal, not the exit code.
     #[command(alias = "show")]
     Report {
         /// Filter realized disposals/removals/income to a specific calendar year (display path).

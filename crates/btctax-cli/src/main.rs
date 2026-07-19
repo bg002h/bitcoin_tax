@@ -190,6 +190,16 @@ fn run() -> Result<ExitCode, CliError> {
                     let summary = cmd::tax::write_back_carryover(vault, &pp, y, force)?;
                     println!("{summary}");
                 }
+                // UX-P4-10: exit 1 when the year produced NO filing-ready number (mirrors `verify`).
+                // Keyed ONLY on the delta/main `outcome`, AFTER printing — so the two deliberate
+                // exit-0 non-triggers hold: a dual-report whose ABSOLUTE total is refused but whose
+                // delta computed still has `outcome == Computed` (exit 0), and a pseudo-active report
+                // is `Computed(placeholder)` (the banner is the signal, exit 0). The
+                // `--write-carryover`-on-NotComputable case is already refused fail-closed above by
+                // `write_back_carryover` (3.1 clause 4b) before reaching here.
+                if matches!(outcome, btctax_core::TaxOutcome::NotComputable(_)) {
+                    return Ok(ExitCode::from(1));
+                }
             } else if write_carryover {
                 return Err(CliError::Usage(
                     "--write-carryover requires --tax-year (it persists a full-return carryover)"

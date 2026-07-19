@@ -6,7 +6,9 @@ report \- Show holdings + realized disposals/removals/income. With \-\-tax\-year
 .SH SYNOPSIS
 \fBreport\fR [\fB\-\-year\fR] [\fB\-\-tax\-year\fR] [\fB\-\-prior\-taxable\-gifts\fR] [\fB\-\-write\-carryover\fR] [\fB\-\-force\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
-Show holdings + realized disposals/removals/income. With \-\-tax\-year: standalone TaxResult
+Show holdings + realized disposals/removals/income. With \-\-tax\-year: standalone TaxResult.
+.PP
+Exit code with \-\-tax\-year (UX\-P4\-10): 0 = a filing\-ready number was rendered; 1 = ran but the year is NOT COMPUTABLE (no filing\-ready number — a missing tax profile/table or a hard blocker; mirrors `verify`); 2 = the command failed (any error). Scripts should key on NON\-ZERO. A pseudo\-active report still exits 0 — the on\-screen banner is the signal, not the exit code.
 .SH OPTIONS
 .TP
 \fB\-\-year\fR \fI<YEAR>\fR
@@ -25,4 +27,4 @@ Cumulative prior\-year TAXABLE gifts (post\-annual\-exclusion Form 709 amounts),
 With `\-\-write\-carryover`: overwrite a next\-year carryover\-in that was user\-entered (`income import`). Without it, a user\-entered value is left untouched and the write refuses
 .TP
 \fB\-h\fR, \fB\-\-help\fR
-Print help
+Print help (see a summary with \*(Aq\-h\*(Aq)

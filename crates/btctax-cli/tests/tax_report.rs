@@ -809,7 +809,8 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
 }
 
 /// M4 (Task 10): when the declared 2027 `carryforward_in` ≠ 2026's computed `carryforward_out`,
-/// `report --tax-year 2027` renders the advisory line and still exits 0 (non-gating).
+/// `report --tax-year 2027` renders the advisory line. (2027 is NOT COMPUTABLE, so the BINARY now
+/// exits 1 per UX-P4-10; this lib-level test asserts only that the advisory renders.)
 ///
 /// (Re-pointed from 2026→2027 after TY2026 was bundled: 2026 now COMPUTES, so it can no longer be
 /// the "unbundled → NotComputable" year. The WHOLE scenario shifts forward one year — the loss and
@@ -825,7 +826,7 @@ fn report_tax_year_with_hard_blocker_says_not_computable() {
 ///   carryforward_out TY2026 = { short: 7000, long: 0 } (2026 IS bundled, so the prior year computes).
 ///   2027 profile declares carryforward_in = { short: 0, long: 0 } (deliberately wrong).
 ///   → Advisory fires: "does not match" is in rendered output.
-///   2027 TaxTable is not bundled → main outcome is NotComputable(TaxTableMissing); exit 0.
+///   2027 TaxTable is not bundled → main outcome is NotComputable(TaxTableMissing); binary exits 1 (UX-P4-10).
 #[test]
 fn carryforward_mismatch_advisory_rendered() {
     // Synthetic Coinbase CSV: ST buy+sell in 2026 at a loss.
@@ -907,8 +908,9 @@ st-sell,2026-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
         advisory.is_some(),
         "expected Some(advisory) for mismatched carryforward chain"
     );
-    // Exit 0: report_tax_year returns Ok (no panic, no Err propagation).
-    // (The ExitCode is driven by main.rs, not tested here, but Ok(()) == exit 0 for this path.)
+    // report_tax_year returns Ok (no panic, no Err propagation).
+    // (The binary exit code is driven by main.rs: a NotComputable 2027 outcome exits 1 (UX-P4-10) —
+    // not tested here; this lib-level test asserts only the advisory. See report_exit_code.rs.)
 }
 
 /// Regression: `report --year 2025` (the existing display path) still works after adding
