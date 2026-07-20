@@ -6,7 +6,8 @@ use crate::render::write_csv_exports;
 use crate::{require_attestation, CliConfig, CliError, Session};
 use btctax_adapters::BundledTaxTables;
 use btctax_core::{
-    compute_se_tax, se_net_income, FeeTreatment, LotMethod, ScheduleDPart, Severity, TaxTables, Usd,
+    compute_se_tax, se_net_income, FeeTreatment, LotMethod, ScheduleDPart, Severity, TaxTables,
+    Usd, DIGITAL_ASSET_8949_FIRST_YEAR,
 };
 use btctax_forms::Form1040Inputs;
 use btctax_store::{fsperms, Passphrase};
@@ -153,8 +154,9 @@ pub fn export_pseudo_active(vault_path: &Path, pp: &Passphrase) -> Result<bool, 
 
 /// Outcome of `export_irs_pdf`: the written PDF paths, the unresolved-Hard-blocker count (same
 /// INFORMATIONAL disclosure as `export-snapshot`), whether the fill was watermarked (pseudo-active),
-/// the count of rows that MIGHT belong on a separate 1099-DA-reported 8949 (Box G/H/J/K — the [I5]
-/// advisory), and the SP2 packet (Schedule SE + Form 8283 + Form 1040 cap-gains) with the advisories
+/// the count of rows that MIGHT belong on a separate broker-reported 8949 (the [I5] advisory — the
+/// separate boxes are year-aware: A/B/D/E from a 1099-B pre-TY2025, G/H/J/K from a 1099-DA from
+/// TY2025), and the SP2 packet (Schedule SE + Form 8283 + Form 1040 cap-gains) with the advisories
 /// each one drives.
 #[derive(Debug, Clone)]
 pub struct IrsPdfReport {
@@ -196,6 +198,32 @@ pub struct IrsPdfReport {
     /// (the whole jointly-computed packet writes; honoring a slice of it is tax-unsound). The caller
     /// warns on stderr. Always `false` on the crypto-slice path (there `--forms` is honored).
     pub forms_ignored_full_return: bool,
+}
+
+/// The **[I5]** broker-reporting advisory line, year-aware — or `None` when no disposition may have
+/// been broker-reported (`broker_reported_rows == 0`).
+///
+/// The "separate 8949 / not-reported box" pairing depends on the form revision, exactly as the box
+/// assignment does (mirrors [`btctax_core::DIGITAL_ASSET_8949_FIRST_YEAR`]): pre-TY2025 an exchange
+/// disposal may have been reported on a **1099-B**, belongs on a separate 8949 under **Box A/B (ST) /
+/// D/E (LT)**, and this export files every row under **Box C/F**; from TY2025 it is the **1099-DA**,
+/// **Box G/H/J/K**, and every row files under **Box I/L**. Emitting the 2025 pairing on a pre-2025
+/// export would steer the filer to boxes that do not exist on that revision — hence the year gate.
+pub fn broker_reporting_advisory(tax_year: i32, broker_reported_rows: usize) -> Option<String> {
+    if broker_reported_rows == 0 {
+        return None;
+    }
+    let (broker_form, separate_boxes, filed_boxes) = if tax_year >= DIGITAL_ASSET_8949_FIRST_YEAR {
+        ("1099-DA", "Box G/H/J/K", "Box I/L")
+    } else {
+        ("1099-B", "Box A/B (ST) / D/E (LT)", "Box C/F")
+    };
+    Some(format!(
+        "⚠ [I5] {broker_reported_rows} disposition(s) occurred on an exchange that MAY have issued \
+         {broker_form} broker basis reporting — those would belong on a SEPARATE Form 8949 under \
+         {separate_boxes}. This export files EVERY Bitcoin row under {filed_boxes} (not-reported \
+         default) and says so; reclassify by hand if you received a {broker_form}."
+    ))
 }
 
 /// Whether a form is included: the packet is every applicable form unless `--forms` opts in to a subset.
@@ -592,6 +620,56 @@ fn export_full_return(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [I5] r2/NEW-IMPORTANT-1: the broker-reporting advisory is YEAR-AWARE. On the TY2025+
+    /// digital-asset revision it must cite the 1099-DA and the digital-asset boxes (G/H/J/K separate,
+    /// I/L filed) — never the securities boxes.
+    #[test]
+    fn broker_advisory_ty2025_cites_1099da_and_digital_asset_boxes() {
+        let msg = broker_reporting_advisory(2025, 3).expect("3 broker rows → an advisory");
+        assert!(msg.contains("1099-DA"), "TY2025 cites the 1099-DA: {msg}");
+        assert!(msg.contains("Box G/H/J/K"), "separate 8949 boxes: {msg}");
+        assert!(msg.contains("Box I/L"), "filed-under boxes: {msg}");
+        assert!(msg.contains('3'), "the row count: {msg}");
+        // The securities-era pairing must NOT leak onto a 2025 export.
+        assert!(
+            !msg.contains("1099-B"),
+            "no pre-2025 1099-B on TY2025: {msg}"
+        );
+        assert!(
+            !msg.contains("Box C/F"),
+            "no securities C/F on TY2025: {msg}"
+        );
+    }
+
+    /// [I5] r2/NEW-IMPORTANT-1: pre-TY2025 (the securities-box revisions — TY2024/TY2017 are shipped
+    /// export years) the advisory must cite the 1099-B and the securities boxes (A/B, D/E separate,
+    /// C/F filed) — boxes G–L do not exist on those form revisions.
+    #[test]
+    fn broker_advisory_pre_2025_cites_1099b_and_securities_boxes() {
+        let msg = broker_reporting_advisory(2024, 1).expect("1 broker row → an advisory");
+        assert!(msg.contains("1099-B"), "pre-2025 cites the 1099-B: {msg}");
+        assert!(msg.contains("Box A/B"), "separate ST securities box: {msg}");
+        assert!(msg.contains("D/E"), "separate LT securities box: {msg}");
+        assert!(
+            msg.contains("Box C/F"),
+            "filed-under securities boxes: {msg}"
+        );
+        // The digital-asset-era pairing must NOT leak onto a pre-2025 export.
+        assert!(!msg.contains("1099-DA"), "no 1099-DA pre-2025: {msg}");
+        assert!(!msg.contains("G/H/J/K"), "no digital boxes pre-2025: {msg}");
+        assert!(
+            !msg.contains("Box I/L"),
+            "no digital filed-boxes pre-2025: {msg}"
+        );
+    }
+
+    /// [I5]: no exchange disposition → no advisory, in either era.
+    #[test]
+    fn broker_advisory_is_none_without_broker_rows() {
+        assert!(broker_reporting_advisory(2025, 0).is_none());
+        assert!(broker_reporting_advisory(2024, 0).is_none());
+    }
 
     /// UX-P4-8 (fold I2): `mkdir_out` — the shared export-`--out` directory creator — names the
     /// offending PATH and the remedy HINT when the directory cannot be created (here: an `--out`

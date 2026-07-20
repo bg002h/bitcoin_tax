@@ -27,7 +27,9 @@ fn form8949_part_tag(p: Form8949Part) -> &'static str {
     }
 }
 
-/// Stable Form 8949 box tag. Values: "C" (short-term) / "F" (long-term).
+/// Stable Form 8949 box tag. Values: the pre-TY2025 securities boxes "C" (ST) / "F" (LT), and the
+/// TY2025+ digital-asset boxes "I" (ST) / "L" (LT). Which one a row carries is decided year-aware by
+/// `btctax_core::form_8949`; this fn only renders whatever box the row already holds.
 pub(super) fn form8949_box_tag(b: Form8949Box) -> &'static str {
     match b {
         Form8949Box::C => "C",

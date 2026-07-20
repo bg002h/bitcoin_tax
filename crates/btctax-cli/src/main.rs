@@ -789,15 +789,13 @@ fn run() -> Result<ExitCode, CliError> {
                      they apply."
                 );
             }
-            // [I5] loud advisory: rows that MAY belong on a separate 1099-DA-reported 8949 (Box G/H/J/K).
-            if report.broker_reported_rows > 0 {
-                eprintln!(
-                    "⚠ [I5] {} disposition(s) occurred on an exchange that MAY have issued 1099-DA \
-                     broker basis reporting — those would belong on a SEPARATE Form 8949 under Box \
-                     G/H/J/K. This export files EVERY Bitcoin row under Box I/L (not-reported default) \
-                     and says so; reclassify by hand if you received a 1099-DA.",
-                    report.broker_reported_rows
-                );
+            // [I5] loud advisory: rows that MAY belong on a separate broker-reported 8949. The box
+            // pairing is year-aware (1099-B / A/B/D/E / C/F pre-2025; 1099-DA / G/H/J/K / I/L from
+            // 2025) — see `cmd::admin::broker_reporting_advisory`.
+            if let Some(advisory) =
+                cmd::admin::broker_reporting_advisory(report.tax_year, report.broker_reported_rows)
+            {
+                eprintln!("{advisory}");
             }
             // ── Form 1040 partial-scope + loss notices (only when the 1040 was written). ──
             if report.form_1040_path.is_some() {

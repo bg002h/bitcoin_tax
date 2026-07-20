@@ -74,10 +74,10 @@ fn state(disposals: Vec<Disposal>) -> LedgerState {
 
 // ── Task 2 — Form 8949 rows ────────────────────────────────────────────────────────────────────
 
-/// ST leg → Part I / box C; LT leg → Part II / box F.
-/// TY2025+: digital-asset sales NOT reported on a 1099-DA use the DIGITAL-ASSET boxes — Part I box **I**
-/// (ST), Part II box **L** (LT). The i8949 forbids C/F for digital assets ("Do not use box C… Use box I";
-/// "Do not use box F… Use box L").
+/// TY2025+: a digital-asset sale NOT reported on a 1099-DA uses the DIGITAL-ASSET boxes — ST leg →
+/// Part I box **I**, LT leg → Part II box **L**. The i8949 forbids the securities boxes C/F for
+/// digital assets ("Do not use box C… Use box I"; "Do not use box F… Use box L"). The pre-2025
+/// securities-box mapping (C/F) is pinned by its own KAT below.
 #[test]
 fn ty2025_st_leg_is_part_i_box_i_and_lt_leg_is_part_ii_box_l() {
     let st = state(vec![

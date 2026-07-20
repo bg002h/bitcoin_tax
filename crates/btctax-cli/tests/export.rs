@@ -118,8 +118,9 @@ fn export_snapshot_writes_sqlite_and_csvs_and_backup_key() {
 
 /// P2-B Task 2/3: with `--tax-year`, export additionally writes year-scoped `form8949.csv` +
 /// `schedule_d.csv`. The `coinbase_buy_sell_send` fixture has a single ST sell of 0.02 BTC in 2025
-/// from an exchange wallet → one Form 8949 row (Part I / box C / box_needs_review true) and matching
-/// Schedule D ST part totals. Without `--tax-year` (None) the two files are omitted.
+/// from an exchange wallet → one Form 8949 row (Part I / box **I**, the TY2025 digital-asset box /
+/// box_needs_review true) and matching Schedule D ST part totals. Without `--tax-year` (None) the
+/// two files are omitted.
 #[test]
 fn export_writes_year_scoped_form8949_and_schedule_d() {
     let dir = tempfile::tempdir().unwrap();

@@ -785,9 +785,10 @@ pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> Sch
 
     // ★ Lines 3 and 10 ARE the attached Form 8949's printed column totals — the schedule's own text
     // defines them as "Totals for all transactions reported on Form(s) 8949 with Box C / Box F checked"
-    // (ARCH-P6.3a D3). Re-rounding the exact aggregate here would put Schedule D a dollar away from the
-    // 8949 stapled behind it: Σ round(row) ≠ round(Σ row). Zero when no 8949 is attached (a
-    // carryover/distribution-only Schedule D has no transactions to total).
+    // pre-2025 ("with Box C or Box I checked" / "Box F or Box L checked" on the 2025 digital-asset
+    // revision) (ARCH-P6.3a D3). Re-rounding the exact aggregate here would put Schedule D a dollar
+    // away from the 8949 stapled behind it: Σ round(row) ≠ round(Σ row). Zero when no 8949 is attached
+    // (a carryover/distribution-only Schedule D has no transactions to total).
     let st = f8949.map(|f| f.st_totals).unwrap_or_default();
     let lt = f8949.map(|f| f.lt_totals).unwrap_or_default();
 

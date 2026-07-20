@@ -351,9 +351,11 @@ pub fn fill_form_1040_capgains(
     form1040::fill_form_1040_capgains(inputs, &map)
 }
 
-/// **[I5]** How many rows might belong on a SEPARATE 1099-DA-reported Form 8949 (Box G/H/J/K) — i.e.
-/// disposals on an exchange that may have issued broker basis reporting. SP1 files EVERY Bitcoin row
-/// under Box I/L and says so; a non-zero count is a loud advisory, not a refusal.
+/// **[I5]** How many rows might belong on a SEPARATE broker-reported Form 8949 — i.e. disposals on an
+/// exchange that may have issued broker basis reporting. The separate boxes and this export's filed
+/// boxes are year-aware (see `btctax-cli`'s `broker_reporting_advisory`): a 1099-B / Box A/B/D/E, filed
+/// under C/F pre-TY2025; a 1099-DA / Box G/H/J/K, filed under I/L from TY2025. A non-zero count is a
+/// loud advisory, not a refusal.
 pub fn rows_possibly_broker_reported(rows: &[Form8949Row]) -> usize {
     rows.iter().filter(|r| r.box_needs_review).count()
 }

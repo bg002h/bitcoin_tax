@@ -1,8 +1,9 @@
 //! **Full-return** Form 8949 fill — the WHOLE-DOLLAR path (P6.3a / ARCH-P6.3a D2/D6).
 //!
 //! Form 8949 is not optional on a full return: **Schedule D lines 3 and 10 are literally "Totals for
-//! all transactions reported on Form(s) 8949 with Box C / Box F checked"**. A Schedule D with those
-//! lines filled and no 8949 behind it is an incomplete return.
+//! all transactions reported on Form(s) 8949 with Box C / Box F checked"** (pre-2025; the 2025
+//! digital-asset revision reads "with Box C or Box I checked" / "Box F or Box L checked"). A Schedule
+//! D with those lines filled and no 8949 behind it is an incomplete return.
 //!
 //! **This module does no tax arithmetic.** The rows come from core's [`Printed8949`] chain, where
 //! columns (d) and (e) are rounded at the cell and column **(h) is DERIVED, `h = d − e`** — never
