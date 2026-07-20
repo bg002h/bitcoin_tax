@@ -1,11 +1,11 @@
 # J9 — identifying specific lots for a disposal (TUI screen-walkthrough).
 # CLI setup is the EXACT captured transcript (CONSOLE); the editor select-lots flow + the viewer result
 # tabs are byte-gated frames. A Phase-2 journey (editor + viewer).
-PROSE \fBJourney 9 \(em identifying specific lots for a sale.\fP Heidi holds a cheap 2023 lot (0.60 BTC, $25,000/BTC) and a pricier 2024 lot (0.40 BTC, $60,000/BTC), and sells 0.50 \(en less than her combined holdings. Rather than leave it to the default method, she records \fIspecifically\fP which lot the sale draws from.
+PROSE \fBJourney 9 \(em identifying specific lots for a sale.\fP Heidi holds a cheap 2023 lot (0.60 BTC, $25,000/BTC) and a pricier 2024 lot (0.40 BTC, $60,000/BTC), and sells 0.50 \(en less than her combined holdings, so \fIwhich\fP lots the sale draws from is a real choice she can make and record.
 PROSE \fBSetup, at the command line.\fP She creates the vault, imports Coinbase, and verifies. The exact terminal session:
 CONSOLE 00-setup.console.md J9 - setup - init, import, verify
-PROSE \fB1. Editor \(em select lots.\fP Pressing \fBS\fP opens the select\-lots flow for the 0.50 BTC sale. Its lots form lists the lot she can identify it against \(en the long\-term \fBlot\-a\fP \(en and she assigns the whole 0.50 (50,000,000 sat) to it. (The picks' sats must total the disposal; her assignment is complete at \fIPicked 50000000 / 50000000\fP.)
-FRAME 01-select-lots.txt J9 - step 1 - editor: the select-lots form (identify against lot-a)
+PROSE \fB1. Editor \(em select lots.\fP Pressing \fBS\fP opens the select\-lots form for the 0.50 BTC sale, listing both lots she could draw from \(en the cheap 2023 \fBlot\-a\fP and the pricier 2024 \fBlot\-b\fP, each with its available amount. Instead of the default's split across both, she identifies the whole 0.50 (50,000,000 sat) against the long\-term \fBlot\-a\fP, leaving lot\-b untouched. (The picks' sats must total the disposal \(en \fIPicked 50000000 / 50000000\fP.)
+FRAME 01-select-lots.txt J9 - step 1 - editor: the select-lots form (both lots offered, 0.50 identified against lot-a)
 PROSE \fB2. Viewer \(em Disposals.\fP The sale now draws entirely from lot\-a: 0.50 BTC at a $12,500 basis against $47,500 proceeds \(en a $35,000 long\-term gain (lot\-a was held since 2023).
 FRAME 02-disposals.txt J9 - step 2 - viewer: Disposals (the sale drawn from lot-a)
 PROSE \fB3. Viewer \(em Compliance.\fP The post\-2025 per\-disposal rule is satisfied: the sale reads \fIcontemporaneous\fP \(en the specific lots were identified at the time of the sale, not left to the default method.

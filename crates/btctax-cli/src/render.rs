@@ -1253,8 +1253,14 @@ pub fn render_tax_outcome(
             );
             let _ = writeln!(
                 s,
-                "  marginal rates: ordinary {} / LTCG {} / NIIT {}",
-                r.marginal_rates.ordinary, r.marginal_rates.ltcg, r.marginal_rates.niit_applies
+                "  marginal rates: ordinary {} / LTCG {} / NIIT increased by crypto: {}",
+                r.marginal_rates.ordinary,
+                r.marginal_rates.ltcg,
+                if r.marginal_rates.niit_applies {
+                    "yes"
+                } else {
+                    "no"
+                }
             );
             let _ = writeln!(
                 s,

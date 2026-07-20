@@ -2799,7 +2799,7 @@ fn draw_lots_form(frame: &mut Frame, area: Rect, step: &mut SelectLotsStep) {
     let header = Line::from(vec![Span::styled(
         format!(
             "{:<14} {:<32} {:>12} {:>12}  Pick Sat",
-            "Acquired", "LotId", "Remaining", "Basis/Sat"
+            "Acquired", "LotId", "Remaining", "Basis USD"
         ),
         Style::default().add_modifier(Modifier::BOLD),
     )]);

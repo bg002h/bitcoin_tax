@@ -2615,21 +2615,20 @@ so a dropped tuple can't pass vacuously); r3 GREEN. One non-gating residue:
 "less than either holding" + the select-lots frame that depicted no identification; both fixed in the
 walkthrough). Non-gating residue, owned by a later polish cycle (app-side surfaces the walkthrough only
 SURFACED — not walkthrough bugs):
-- **J9 app-limit (Minor, owning phase: later)** — the editor `select-lots` LotsForm for a POST-2025
-  disposal sources candidate rows from the post-default residue (`snap.state.lots`), so on the J9 corpus
-  it offers only lot-a (the default HIFO already consumed lot-b) and "Remaining" is the post-default
-  amount, not the at-sale availability. The CLI can record lot-b picks (replay-time feasibility); the
-  editor form cannot. Fix app-side: source candidates + Remaining from at-disposal availability so a
-  genuine lot choice is representable in the TUI (matching the CLI). Until then the walkthrough honestly
-  shows identifying against the single offered lot.
-- **J9-M1 (Minor)** — the LotsForm "Basis/Sat" column (`draw_edit.rs:2801-2802`) renders the lot's
-  remaining TOTAL USD basis ($12,500), which reads as "$12,500 per sat". Relabel or render per-sat.
-- **J2-M3 / J6 (Minor)** — the Forms-tab footnote "Section A/B is per-donation" (`tabs/forms.rs:161`) is
-  stale: core `form_8283` picks the section from the §170(f)(11)(F) YEAR-AGGREGATE, uniform across the
-  year. Reword the footnote (appears in j2/03-forms + j6/04-forms).
-- **J6-M2 (Minor)** — the Tax tab prints "NIIT (attributable delta): -11.70" beside "NIIT applies:
-  false" (`tabs/tax.rs:119`); the flag is the marginal-increase semantics (crypto REDUCED NIIT), but the
-  juxtaposition misreads. Relabel (e.g. "NIIT increased by crypto: no") — core's own `whatif.rs:559`
-  calls the raw flag misreporting.
-- **J5-N3 / J1 (Nit)** — a journey whose setup `verify` shows a disposal `:: non_compliant` (J1, J5)
-  never revisits compliance after the later reconciliation; a closing note or frame would tie the beat off.
+- **J9 app-limit (Minor) — DONE 2026-07-20** — the editor `select-lots` LotsForm for a POST-2025 disposal
+  now offers the AT-DISPOSAL availability (a lot's final remaining PLUS what THIS disposal's default draw
+  consumed, reconstructing fully-consumed lots from the disposal's own legs), not the post-default residue.
+  Never over-offers (a later disposal's consumption is not added back ⇒ every offered amount ≤ the true
+  at-disposal pool ⇒ every pick the CLI accepts). J9 now offers BOTH lots (lot-a 0.60 + lot-b 0.40) — a
+  genuine choice, matching the CLI. Pinned by the J9 editor driver's `rows.len() == 2` assert.
+- **J9-M1 (Minor) — DONE 2026-07-20** — the LotsForm column header "Basis/Sat" (read as per-sat) relabeled
+  to "Basis USD" (it renders the row's total USD basis).
+- **J2-M3 / J6 (Minor) — DONE 2026-07-20** — the Forms-tab footnote reworded: the Section (A/B) is set by
+  the §170(f)(11)(F) year-aggregate, not per donation (`tabs/forms.rs`).
+- **J6-M2 (Minor) — DONE 2026-07-20** — relabeled the misnamed flag on both surfaces: TUI "NIIT applies:
+  {bool}" and CLI "NIIT {bool}" → "NIIT increased by crypto: yes/no" (`tabs/tax.rs`, `render.rs`). The
+  underlying `MarginalRates.niit_applies` field remains misnamed (core `whatif.rs:119`) — a rename is a
+  deeper, ownerless-residue refactor (13 non-test refs).
+- **J5-N3 (Nit) — DONE 2026-07-20** — J5's confirm prose now notes the accepted identification clears the
+  `non_compliant` flag the setup's verify showed. (J1's beat is already addressed by its own non_compliant
+  clause pointing to select-lots.)

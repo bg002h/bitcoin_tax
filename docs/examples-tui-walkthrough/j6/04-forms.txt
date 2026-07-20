@@ -33,7 +33,7 @@
  31││Schedule D Part II (LT): proceeds 0.00  basis 0.00  gain 0.00                                                         │
  32││Form 8283 (1 row(s)):                                                                                                 │
  33││  [§B] 0.10000000 BTC deduction 6000.00                                                                               │
- 34││NOTE: Section A/B is per-donation; §170(f)(11)(F) aggregates similar items.                                           │
+ 34││NOTE: the Section (A/B) is set by the §170(f)(11)(F) year-aggregate of similar donated items, not per donation.       │
  35││NOTE: Review box C/F — exchange disposals may require A/B/D/E (1099-B/1099-DA).                                       │
  36││                                                                                                                      │
  37││                                                                                                                      │

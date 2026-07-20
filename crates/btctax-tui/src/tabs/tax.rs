@@ -116,8 +116,14 @@ pub(crate) fn render_tax_content(snap: &Snapshot, year: i32) -> String {
             );
             let _ = writeln!(
                 s,
-                "  Marginal rates: ordinary {}  LTCG {}  NIIT applies: {}",
-                r.marginal_rates.ordinary, r.marginal_rates.ltcg, r.marginal_rates.niit_applies
+                "  Marginal rates: ordinary {}  LTCG {}  NIIT increased by crypto: {}",
+                r.marginal_rates.ordinary,
+                r.marginal_rates.ltcg,
+                if r.marginal_rates.niit_applies {
+                    "yes"
+                } else {
+                    "no"
+                }
             );
 
             // ── Charitable deduction total for the year ────────────────────────────────────────

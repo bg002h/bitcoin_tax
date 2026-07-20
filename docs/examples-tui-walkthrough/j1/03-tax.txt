@@ -9,7 +9,7 @@
   7││  LTCG tax (attributable delta): 0.00   NIIT (attributable delta): 0.00                                               │
   8││  TOTAL federal tax attributable (delta): -77.00  [= ord + LTCG + NIIT]                                               │
   9││  §1211 loss deduction: 350.00   Carryforward out: short 0.00 / long 0.00                                             │
- 10││  Marginal rates: ordinary 0.22  LTCG 0.15  NIIT applies: false                                                       │
+ 10││  Marginal rates: ordinary 0.22  LTCG 0.15  NIIT increased by crypto: no                                              │
  11││                                                                                                                      │
  12││  Charitable deduction 2025 (before §170(b) AGI limits): 0.00                                                         │
  13││                                                                                                                      │

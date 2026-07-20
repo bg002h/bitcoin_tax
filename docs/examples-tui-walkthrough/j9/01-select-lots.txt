@@ -8,10 +8,10 @@
   6││                                                                                                                      │
   7││                                                                                                                      │
   8││              ┌ Select Lots — import|coinbase|trade|sale  [Enter=submit  Esc=back] ────────────────────┐              │
-  9││              │Acquired       LotId                               Remaining    Basis/Sat  Pick Sat     │              │
- 10││              │2023-01-01     import|coinbase|trade|lot-a#0        50000000     12500.00  50000000     │              │
- 11││              │Picked: 50000000 / 50000000 sat                                                         │              │
- 12││              │                                                                                        │              │
+  9││              │Acquired       LotId                               Remaining    Basis USD  Pick Sat     │              │
+ 10││              │2023-01-01     import|coinbase|trade|lot-a#0        60000000     15000.00  50000000     │              │
+ 11││              │2024-01-02     import|coinbase|trade|lot-b#0        40000000     24000.00  0            │              │
+ 12││              │Picked: 50000000 / 50000000 sat                                                         │              │
  13││              │                                                                                        │              │
  14││              │                                                                                        │              │
  15││              │                                                                                        │              │

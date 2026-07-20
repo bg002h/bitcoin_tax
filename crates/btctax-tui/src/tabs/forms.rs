@@ -158,7 +158,7 @@ pub fn render(
     // Standing caveats (footnotes)
     let _ = writeln!(
         bottom,
-        "NOTE: Section A/B is per-donation; §170(f)(11)(F) aggregates similar items."
+        "NOTE: the Section (A/B) is set by the §170(f)(11)(F) year-aggregate of similar donated items, not per donation."
     );
     let _ = writeln!(
         bottom,

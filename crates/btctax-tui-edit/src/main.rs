@@ -4095,28 +4095,78 @@ fn handle_sl_list_key(app: &mut EditorApp, key: KeyEvent) {
                 // fallback). Path-A `ReconstructedPerWallet` lots preserve their Universal lot_ids
                 // and are feasible. Post-2025 disposals stay per-wallet (unchanged).
                 let wallet_ref = item.wallet.as_ref();
-                let rows: Vec<LotPickFormRow> = snap
-                    .state
-                    .lots
-                    .iter()
-                    .filter(|l| {
-                        if item.date < TRANSITION_DATE {
+                let rows: Vec<LotPickFormRow> = if item.date < TRANSITION_DATE {
+                    // PRE-2025: unchanged — a pre-2025 disposal consumes from the pre-boundary Universal
+                    // residue, so offer pre-2025 lots ACROSS wallets, excluding Path-B `SafeHarborAllocated`
+                    // seed lots (their lot_ids never existed in Universal → hard LotSelectionInvalid).
+                    snap.state
+                        .lots
+                        .iter()
+                        .filter(|l| {
                             l.acquired_at < TRANSITION_DATE
                                 && l.basis_source != BasisSource::SafeHarborAllocated
-                        } else {
-                            wallet_ref.is_some_and(|w| &l.wallet == w)
+                        })
+                        .map(|l| LotPickFormRow {
+                            lot_id: l.lot_id.clone(),
+                            remaining_sat: l.remaining_sat,
+                            acquired_at: l.acquired_at,
+                            usd_basis: l.usd_basis,
+                            pick_sat_buf: FieldBuffer::new(),
+                        })
+                        .collect()
+                } else {
+                    // POST-2025: offer the AT-DISPOSAL availability (same wallet, §1.1012-1(j)), NOT the
+                    // post-default RESIDUE. A lot's availability just before THIS disposal = its final
+                    // remaining PLUS what this disposal's default draw consumed from it; lots the default
+                    // fully consumed are dropped from the residue, so reconstruct them from the disposal's
+                    // own legs. This never OVER-offers (a *later* disposal's consumption is not added back,
+                    // so every offered amount ≤ the true at-disposal pool ⇒ every pick the CLI would accept),
+                    // and it restores the genuine lot choice the CLI has (walkthrough J9 review I2 / FOLLOWUP).
+                    let mut avail: std::collections::BTreeMap<btctax_core::LotId, LotPickFormRow> =
+                        Default::default();
+                    for l in &snap.state.lots {
+                        if wallet_ref.is_some_and(|w| &l.wallet == w) {
+                            avail.insert(
+                                l.lot_id.clone(),
+                                LotPickFormRow {
+                                    lot_id: l.lot_id.clone(),
+                                    remaining_sat: l.remaining_sat,
+                                    acquired_at: l.acquired_at,
+                                    usd_basis: l.usd_basis,
+                                    pick_sat_buf: FieldBuffer::new(),
+                                },
+                            );
                         }
-                    })
-                    .map(|l| LotPickFormRow {
-                        lot_id: l.lot_id.clone(),
-                        remaining_sat: l.remaining_sat,
-                        acquired_at: l.acquired_at,
-                        usd_basis: l.usd_basis,
-                        pick_sat_buf: FieldBuffer::new(),
-                    })
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .collect();
+                    }
+                    if let Some(d) = snap
+                        .state
+                        .disposals
+                        .iter()
+                        .find(|d| d.event == item.disposal_event)
+                    {
+                        for leg in &d.legs {
+                            if wallet_ref.is_some_and(|w| &leg.wallet == w) {
+                                avail
+                                    .entry(leg.lot_id.clone())
+                                    .and_modify(|r| {
+                                        r.remaining_sat += leg.sat;
+                                        r.usd_basis += leg.basis;
+                                    })
+                                    .or_insert_with(|| LotPickFormRow {
+                                        lot_id: leg.lot_id.clone(),
+                                        remaining_sat: leg.sat,
+                                        acquired_at: leg.acquired_at,
+                                        usd_basis: leg.basis,
+                                        pick_sat_buf: FieldBuffer::new(),
+                                    });
+                            }
+                        }
+                    }
+                    avail
+                        .into_values()
+                        .filter(|r| r.remaining_sat > 0)
+                        .collect()
+                };
 
                 // Sort by acquired_at ASC (oldest first — Specific-Id natural display order).
                 let mut sorted_rows = rows;
@@ -14505,9 +14555,10 @@ mod tests {
             assert!(
                 matches!(
                     app.select_lots_flow.as_ref().map(|f| &f.step),
-                    Some(SelectLotsStep::LotsForm { .. })
+                    Some(SelectLotsStep::LotsForm { rows, .. }) if rows.len() == 2
                 ),
-                "the J9 select-lots lots form must be open with the pick entered"
+                "the J9 select-lots form must offer BOTH lots (at-disposal availability, not the \
+                 post-default residue) with the 0.50 identified against lot-a"
             );
             app.vault_path = fixed_path.clone();
             capture_edit_frame(&mut app)

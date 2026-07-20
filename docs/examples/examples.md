@@ -100,7 +100,7 @@ Federal tax attributable to crypto — tax year 2025
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
   TOTAL federal tax attributable to crypto (delta): -77.00   (= ordinary-rate + LTCG + NIIT attributable)
   §1211 loss deduction (level): 350.00   carryforward out: short 0.00 / long 0.00
-  marginal rates: ordinary 0.22 / LTCG 0.15 / NIIT false
+  marginal rates: ordinary 0.22 / LTCG 0.15 / NIIT increased by crypto: no
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
 Schedule D (raw pre-netting part totals) — tax year 2025
   Part I  (short-term): proceeds 1340.00   cost basis 1690.00   gain -350.00
@@ -292,7 +292,7 @@ Federal tax attributable to crypto — tax year 2025
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
   TOTAL federal tax attributable to crypto (delta): 1721.16   (= ordinary-rate + LTCG + NIIT attributable)
   §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
-  marginal rates: ordinary 0.24 / LTCG 0.15 / NIIT false
+  marginal rates: ordinary 0.24 / LTCG 0.15 / NIIT increased by crypto: no
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
 Schedule D (raw pre-netting part totals) — tax year 2025
   Part I  (short-term): proceeds 0.00   cost basis 0.00   gain 0.00
@@ -715,7 +715,7 @@ Federal tax attributable to crypto — tax year 2024
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
   TOTAL federal tax attributable to crypto (delta): 726.00   (= ordinary-rate + LTCG + NIIT attributable)
   §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
-  marginal rates: ordinary 0.22 / LTCG 0.15 / NIIT false
+  marginal rates: ordinary 0.22 / LTCG 0.15 / NIIT increased by crypto: no
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
 Schedule D (raw pre-netting part totals) — tax year 2024
   Part I  (short-term): proceeds 0.00   cost basis 0.00   gain 0.00

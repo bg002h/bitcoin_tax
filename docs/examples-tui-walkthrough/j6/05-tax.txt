@@ -9,7 +9,7 @@
   7││  LTCG tax (attributable delta): -46.19   NIIT (attributable delta): -11.70                                           │
   8││  TOTAL federal tax attributable (delta): 767.22  [= ord + LTCG + NIIT]                                               │
   9││  §1211 loss deduction: 0.00   Carryforward out: short 0.00 / long 0.00                                               │
- 10││  Marginal rates: ordinary 0.24  LTCG 0.15  NIIT applies: false                                                       │
+ 10││  Marginal rates: ordinary 0.24  LTCG 0.15  NIIT increased by crypto: no                                              │
  11││                                                                                                                      │
  12││  Charitable deduction 2024 (before §170(b) AGI limits): 6000.00                                                      │
  13││Schedule SE (§1401 self-employment tax on business crypto income) — tax year 2024                                     │
