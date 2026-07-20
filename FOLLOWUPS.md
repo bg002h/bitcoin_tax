@@ -13,6 +13,18 @@ cluster below is listed **RECONCILED-DONE**, the scattered `OPEN` tags in its or
 **superseded by this block** (kept for record, not live work). The **GENUINELY-OPEN INDEX** is the
 live residue — grep it first.
 
+### ✅ SHIPPED-BUG FIXED (2026-07-20) — TY2025+ Form 8949 digital-asset boxes (GREEN, merge-pending)
+
+Found during the conservative-filing SPEC tax review: the shipped product (v0.7.0) emitted the
+**securities** boxes C (ST) / F (LT) for **every** year, including TY2025+, where the 1099-DA revision
+requires the **digital-asset** boxes I (ST) / L (LT) and forbids C/F. Fixed year-aware on branch
+`fix/8949-digital-asset-boxes` (off main): `Form8949Box` = `{C,F,I,L}`, `DIGITAL_ASSET_8949_FIRST_YEAR
+= 2025`; both letter emitters (CSV + TUI), the `[I5]` broker-reporting advisory, and the export
+help/man text all made year-aware. The filled-PDF layer was already correct (map-driven). Four
+independent Fable tax-lens rounds to **GREEN 0C/0I** (reviews in `design/8949-box-fix/reviews/`);
+year boundary + advisory gate + TUI mapping all mutation-verified. Suite 2088 green + all CI-only jobs.
+**NOT yet merged to main — owner's call.** Prerequisite for conservative-filing D-6.
+
 ### RECONCILED-DONE (verified implemented / superseded — original OPEN tags below are stale)
 
 - **Phase-2 tax deferrals → DONE** by the full-return (P0–P7) + `btctax-forms` crate: §170(f)(11)(F)
