@@ -403,6 +403,28 @@ impl Session {
         self.prices.as_ref()
     }
 
+    /// The lots available in `wallet` JUST BEFORE the disposal/removal/self-transfer `event` — the true
+    /// at-disposal pool the engine validates a specific-lot pick against (`btctax_core::optimize::
+    /// available_lots_before` over the current ledger). The interactive editor builds its select-lots
+    /// candidate rows from this (NOT the post-default residue), so the form offers exactly the lots — and
+    /// amounts — the engine's `selection_feasible` accepts (walkthrough J9 review C1..I3).
+    pub fn available_lots_before(
+        &self,
+        event: &btctax_core::EventId,
+        date: btctax_core::conventions::TaxDate,
+        wallet: &btctax_core::WalletId,
+    ) -> Result<Vec<btctax_core::Lot>, CliError> {
+        let (events, _state, cfg) = self.load_events_and_project()?;
+        Ok(btctax_core::optimize::available_lots_before(
+            &events,
+            self.prices(),
+            &cfg,
+            event,
+            date,
+            wallet,
+        ))
+    }
+
     /// Test / advanced seam [R0-C1/r2 I-A]: replace the price provider on an OPEN session. A KAT injects
     /// a CONTROLLED synthetic `BundledPrices::from_csv_str(...)` so its asserted FMVs are independent of
     /// the shipped dataset; a caller may also inject a pre-resolved layered/cache provider. Pure; no I/O.

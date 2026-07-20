@@ -2615,12 +2615,24 @@ so a dropped tuple can't pass vacuously); r3 GREEN. One non-gating residue:
 "less than either holding" + the select-lots frame that depicted no identification; both fixed in the
 walkthrough). Non-gating residue, owned by a later polish cycle (app-side surfaces the walkthrough only
 SURFACED — not walkthrough bugs):
-- **J9 app-limit (Minor) — DONE 2026-07-20** — the editor `select-lots` LotsForm for a POST-2025 disposal
-  now offers the AT-DISPOSAL availability (a lot's final remaining PLUS what THIS disposal's default draw
-  consumed, reconstructing fully-consumed lots from the disposal's own legs), not the post-default residue.
-  Never over-offers (a later disposal's consumption is not added back ⇒ every offered amount ≤ the true
-  at-disposal pool ⇒ every pick the CLI accepts). J9 now offers BOTH lots (lot-a 0.60 + lot-b 0.40) — a
-  genuine choice, matching the CLI. Pinned by the J9 editor driver's `rows.len() == 2` assert.
+- **J9 app-limit (Minor) — DONE 2026-07-20** — the editor `select-lots` LotsForm now builds candidates from
+  the TRUE at-disposal pool via the engine's own `Session::available_lots_before` →
+  `optimize::available_lots_before` → `fold::pools_before` — the SAME pool `selection_feasible` validates a
+  pick against. Correct in MEMBERSHIP (a lot that did not exist at the event, or was later relocated in, is
+  excluded by construction — the fold stops before the target EventId) AND amounts, for disposals, removals,
+  and self-transfers alike, so the form can never offer a pick the engine rejects. **BOTH transition arms**
+  now delegate (single code path): `pool_key(item.date, wallet)` routes a POST-2025 disposal to its own
+  wallet pool (§1.1012-1(j)) and a PRE-2025 disposal to the pre-boundary UNIVERSAL pool (cross-wallet; the
+  §7.4 seed has not fired, so Path-B `SafeHarborAllocated` seed lots are absent by construction). Supersedes
+  (i) the initial hand-rolled post-2025 add-back (bounded amounts, NOT membership — polish-batch review r1
+  C1/I1–I3) AND (ii) the pre-2025 residue arm, which offered final-state lots and could hand a doomed pick
+  against a later-acquired or later-relocated lot → `LotSelectionInvalid` → `NotComputable` (review **r2
+  NEW-1**). Correctness inherited from the tested primitive (`optimize.rs` `available_lots_before_*` KATs:
+  acquired-after excluded, cross-wallet excluded, path-A/B transition, deterministic — review r1 I4); TUI
+  integration pinned by three drivers: the J9 editor driver's `rows.len() == 2` (post-2025), the new
+  `kat_new1_pre2025_select_lots_offers_at_disposal_pool_not_residue` (pre-2025 membership + amount), and the
+  rewritten `kat_pre2025_pathb_seedlots_excluded` (pre-2025 Path-B: original pre-seed lot offered, seed lots
+  excluded, pick accepted CLEANLY end-to-end — no LotSelectionInvalid / no SafeHarborUnconservable).
 - **J9-M1 (Minor) — DONE 2026-07-20** — the LotsForm column header "Basis/Sat" (read as per-sat) relabeled
   to "Basis USD" (it renders the row's total USD basis).
 - **J2-M3 / J6 (Minor) — DONE 2026-07-20** — the Forms-tab footnote reworded: the Section (A/B) is set by
@@ -2632,3 +2644,42 @@ SURFACED — not walkthrough bugs):
 - **J5-N3 (Nit) — DONE 2026-07-20** — J5's confirm prose now notes the accepted identification clears the
   `non_compliant` flag the setup's verify showed. (J1's beat is already addressed by its own non_compliant
   clause pointing to select-lots.)
+
+**Select-lots fold — Fable r2 residue (2026-07-20, `reviews/polish-batch-selectlots-fable-review-r2.md`,
+all NON-gating; the blocking NEW-1 was folded — see "J9 app-limit — DONE" above):**
+- **(SL-r2-a) Pre-2025 Path-B specific-ID now permitted — multi-lot conservation interaction (Minor,
+  owner: post-polish / future hardening).** Unifying the select-lots arms lets the user specific-ID a
+  PRE-2025 disposal even when a Path-B `SafeHarborAllocation` is in effect (the form now offers the feasible
+  pre-seed at-disposal lot, where the old arm offered nothing). In the SINGLE pre-2025-lot case this is
+  provably harmless (specific-ID == FIFO; conservation preserved — verified end-to-end by the rewritten
+  `kat_pre2025_pathb_seedlots_excluded`). In a MULTI-lot pre-2025 Path-B world a non-FIFO pick that changes
+  the residue's Σ-BASIS breaks an `ActualPosition` attestation — but the engine SURFACES that as a HARD
+  `SafeHarborUnconservable` blocker that gates the year (`universal_snapshot` is selection-aware,
+  resolve.rs:1227-1244; state.rs:46-49/89), not a silent wrong number, so the safety invariant holds.
+  Decide whether to (a) leave it (engine-validated, honest), or (b) suppress specific-ID for pre-2025
+  disposals under an effective Path-B allocation. Add a multi-lot KAT either way.
+  - **(r3 NF-1) Refinement:** the conservation guard is TOTALS-only (Σsat, Σbasis). An **equal-totals
+    COMPOSITION drift** — two pre-2025 lots with identical per-sat basis but different `acquired_at`,
+    specific-ID'd contrary to FIFO — passes conservation while the attestation's per-lot `acquired_at` now
+    misdescribes the residue (possible LT/ST character skew on later seed-lot disposals). NOT surfaced, but
+    PRE-EXISTING engine semantics (the CLI has always accepted pre-2025 Path-B selections; the attestation's
+    per-lot dates are the filer's claim by design — resolve.rs never verifies per-lot composition even with
+    zero selections). Document as out-of-engine-scope OR give it its own decision; the multi-lot KAT should
+    cover the surfaced Σ-basis-drift → blocker case.
+  - **(r3 NF-2) Status arm:** if option (a), add a 4th `derive_select_lots_status` arm — a save whose pick
+    fires `SafeHarborUnconservable` currently lands the clean Arm-3 "Lot selection recorded …" message
+    (main.rs:4894-4922) while the year just went NotComputable (loud in Compliance, misleadingly green in
+    the status line).
+  — OPEN, owned by **post-polish / future hardening**.
+- **(SL-r2-b, M-1) `validate_select_lots` has no per-row cap (Minor, ownerless).** Σ==principal is checked
+  (form.rs:1318-1355) but a user typing MORE than a row's displayed Remaining persists a pick the engine
+  rejects → hard `LotSelectionInvalid` with guided void recovery. The FORM now only OFFERS feasible lots,
+  but the INPUT is still uncapped. Fix: enforce per-row `sat ≤ remaining_sat` at form validation + KAT.
+  — OPEN, ownerless.
+- **(SL-r2-c, M-2) `Session::available_lots_before` double-projects (Minor, ownerless).** It calls
+  `load_events_and_project` (a full projection whose `LedgerState` is discarded) then `available_lots_before`
+  re-resolves + partial-folds — per Enter keypress. Fine at personal-ledger scale; `load_all` + `config()`
+  directly would drop the wasted fold. — OPEN, ownerless.
+- **(SL-r2-d, M-3) `.unwrap_or_default()` conflates load-error with empty pool (Minor, ownerless).** On a
+  vault read failure the select-lots form shows "No lots available …" instead of a load error. Unlikely
+  (in-memory conn). Surface the error distinctly. — OPEN, ownerless.

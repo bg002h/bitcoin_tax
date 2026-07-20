@@ -248,10 +248,14 @@ pub fn score_assignment(
 /// ceiling — well inside `MAX_COMBOS`.
 const LOT_ENUM_BOUND: usize = 12;
 
-/// Lots available to `disposal` at `date` in `wallet`, computed by a clone-fold of the timeline up to
-/// (but NOT including) the disposal (NFR4: deterministic; no fold modification). Post-2025 → the
-/// disposal's own wallet pool (§1.1012-1(j) per-wallet); pre-2025 → the universal pool. Returns lots
-/// with `remaining_sat > 0`, sorted by `lot_id` (a total order).
+/// The lots available in `wallet` JUST BEFORE `disposal` — the true at-disposal pool the engine's
+/// `selection_feasible` checks a specific-lot pick against, computed by a clone-fold of the timeline up to
+/// (but NOT including) the disposal (NFR4: deterministic; no fold modification). Post-2025 → the disposal's
+/// own wallet pool (§1.1012-1(j) per-wallet); pre-2025 → the universal pool. Returns lots with
+/// `remaining_sat > 0`, sorted by `lot_id` (a total order). `pub` so the interactive editor can build its
+/// select-lots candidate rows from the SAME pool the CLI validates against, instead of the post-default
+/// residue (walkthrough J9 review): membership + at-disposal amounts are then correct, so the form can never
+/// offer a pick the engine rejects. Works for any target event kind (disposal / removal / self-transfer).
 ///
 /// **Delegates the fold to `fold::pools_before`** (which mirrors the real fold's canonical + transition
 /// ordering AND fires the §7.4 boundary seed at the correct point). This is the fix for the Task-3 review
@@ -263,7 +267,7 @@ const LOT_ENUM_BOUND: usize = 12;
 /// pre-2025 disposals (Universal), Path-A post-2025 (per-wallet relocated), and Path-B post-2025 (seeded
 /// lots) — for the FIRST 2025 disposal and every later one. R0-I1 canonical ordering is preserved inside
 /// `pools_before`; an absent disposal still yields an empty `Vec` (existence checked here first).
-fn available_lots_before(
+pub fn available_lots_before(
     events: &[LedgerEvent],
     prices: &dyn PriceProvider,
     config: &ProjectionConfig,

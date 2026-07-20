@@ -57,7 +57,6 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use btctax_core::conventions::TRANSITION_DATE;
 use btctax_core::{
     BasisSource, BlockerKind, ClassifyInbound, DisposeKind, DonationDetails, EventId, EventPayload,
     Form8283Section, InboundClass, IncomeKind, ManualFmv, MethodElection, OutflowClass,
@@ -4080,92 +4079,41 @@ fn handle_sl_list_key(app: &mut EditorApp, key: KeyEvent) {
                 .as_ref()
                 .and_then(|f| f.list.selected())
                 .cloned();
-            let snap = match app.snapshot.as_ref() {
-                Some(s) => s,
-                None => return,
-            };
+            // Precondition: the flow only opens over a built snapshot (open_select_lots_flow); guard anyway.
+            if app.snapshot.is_none() {
+                return;
+            }
 
             if let Some(item) = selected {
-                // Build lot rows and sort by acquired_at ASC.
-                //
-                // #2: feasibility-honest candidate-lot gate [R0-I1]. A PRE-2025 disposal consumes
-                // from the (pre-boundary) Universal residue, so offer pre-2025 lots ACROSS wallets,
-                // but EXCLUDE Path-B `SafeHarborAllocated` seed lots — their lot_ids never existed
-                // in Universal, so the engine raises a hard LotSelectionInvalid (no method-order
-                // fallback). Path-A `ReconstructedPerWallet` lots preserve their Universal lot_ids
-                // and are feasible. Post-2025 disposals stay per-wallet (unchanged).
+                // Build lot rows (sorted by acquired_at ASC below) from the TRUE at-disposal pool via the
+                // engine's own `Session::available_lots_before` → `optimize::available_lots_before` →
+                // `fold::pools_before` — the SAME `PoolSet` `selection_feasible` validates a pick against.
+                // ONE path for BOTH transition regimes, keyed by `pool_key(item.date, wallet)` inside the
+                // engine (pools.rs): a PRE-2025 disposal reads the pre-boundary UNIVERSAL pool (cross-wallet;
+                // the §7.4 transition seed has not fired yet, so Path-B `SafeHarborAllocated` seed lots are
+                // absent by construction — no explicit exclusion needed), a POST-2025 disposal reads its own
+                // WALLET pool (§1.1012-1(j)). Correct in MEMBERSHIP (a lot that did not exist at the event, or
+                // was relocated in by a LATER self-transfer, is excluded — the fold stops before the target
+                // EventId) AND amounts, for disposals, removals, and self-transfers alike, so the form can
+                // never offer a pick the engine rejects. Supersedes the post-default RESIDUE both arms used to
+                // offer (walkthrough J9 review C1..I3; pre-2025 arm Fable r2 NEW-1). Every eligible item has
+                // `Some(wallet)` (wallet-less events are blocker-filtered upstream); the `_` arm is defensive.
                 let wallet_ref = item.wallet.as_ref();
-                let rows: Vec<LotPickFormRow> = if item.date < TRANSITION_DATE {
-                    // PRE-2025: unchanged — a pre-2025 disposal consumes from the pre-boundary Universal
-                    // residue, so offer pre-2025 lots ACROSS wallets, excluding Path-B `SafeHarborAllocated`
-                    // seed lots (their lot_ids never existed in Universal → hard LotSelectionInvalid).
-                    snap.state
-                        .lots
-                        .iter()
-                        .filter(|l| {
-                            l.acquired_at < TRANSITION_DATE
-                                && l.basis_source != BasisSource::SafeHarborAllocated
-                        })
+                let rows: Vec<LotPickFormRow> = match (wallet_ref, app.session.as_ref()) {
+                    (Some(w), Some(sess)) => sess
+                        .available_lots_before(&item.disposal_event, item.date, w)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|l| l.remaining_sat > 0)
                         .map(|l| LotPickFormRow {
-                            lot_id: l.lot_id.clone(),
+                            lot_id: l.lot_id,
                             remaining_sat: l.remaining_sat,
                             acquired_at: l.acquired_at,
                             usd_basis: l.usd_basis,
                             pick_sat_buf: FieldBuffer::new(),
                         })
-                        .collect()
-                } else {
-                    // POST-2025: offer the AT-DISPOSAL availability (same wallet, §1.1012-1(j)), NOT the
-                    // post-default RESIDUE. A lot's availability just before THIS disposal = its final
-                    // remaining PLUS what this disposal's default draw consumed from it; lots the default
-                    // fully consumed are dropped from the residue, so reconstruct them from the disposal's
-                    // own legs. This never OVER-offers (a *later* disposal's consumption is not added back,
-                    // so every offered amount ≤ the true at-disposal pool ⇒ every pick the CLI would accept),
-                    // and it restores the genuine lot choice the CLI has (walkthrough J9 review I2 / FOLLOWUP).
-                    let mut avail: std::collections::BTreeMap<btctax_core::LotId, LotPickFormRow> =
-                        Default::default();
-                    for l in &snap.state.lots {
-                        if wallet_ref.is_some_and(|w| &l.wallet == w) {
-                            avail.insert(
-                                l.lot_id.clone(),
-                                LotPickFormRow {
-                                    lot_id: l.lot_id.clone(),
-                                    remaining_sat: l.remaining_sat,
-                                    acquired_at: l.acquired_at,
-                                    usd_basis: l.usd_basis,
-                                    pick_sat_buf: FieldBuffer::new(),
-                                },
-                            );
-                        }
-                    }
-                    if let Some(d) = snap
-                        .state
-                        .disposals
-                        .iter()
-                        .find(|d| d.event == item.disposal_event)
-                    {
-                        for leg in &d.legs {
-                            if wallet_ref.is_some_and(|w| &leg.wallet == w) {
-                                avail
-                                    .entry(leg.lot_id.clone())
-                                    .and_modify(|r| {
-                                        r.remaining_sat += leg.sat;
-                                        r.usd_basis += leg.basis;
-                                    })
-                                    .or_insert_with(|| LotPickFormRow {
-                                        lot_id: leg.lot_id.clone(),
-                                        remaining_sat: leg.sat,
-                                        acquired_at: leg.acquired_at,
-                                        usd_basis: leg.basis,
-                                        pick_sat_buf: FieldBuffer::new(),
-                                    });
-                            }
-                        }
-                    }
-                    avail
-                        .into_values()
-                        .filter(|r| r.remaining_sat > 0)
-                        .collect()
+                        .collect(),
+                    _ => Vec::new(),
                 };
 
                 // Sort by acquired_at ASC (oldest first — Specific-Id natural display order).
@@ -18657,6 +18605,175 @@ mod tests {
         (lot_a_id, lot_b_id, to_id)
     }
 
+    /// NEW-1 seed — a PRE-2025 (Universal) disposal `D` followed by a LATER pre-2025 acquire `Y`.
+    /// Timeline: Buy X 0.01 BTC @2023-01-15, Sell D 0.005 @2023-06-15 (reclassified), Buy Y 0.003 @2024-01-15.
+    /// All pre-`TRANSITION_DATE`. At D's instant only X exists (Y is acquired 7 months LATER), so the true
+    /// at-disposal Universal pool is {X: 0.01}. The post-default RESIDUE, by contrast, is {X: 0.005, Y: 0.003}
+    /// — it wrongly carries Y (acquired-after) and shows X's drained amount. Returns (x_id, y_id, d_id).
+    #[cfg(test)]
+    fn seed_pre2025_later_lot_vault(
+        vault: &std::path::Path,
+        key: &std::path::Path,
+        pp_str: &str,
+    ) -> (
+        btctax_core::EventId,
+        btctax_core::EventId,
+        btctax_core::EventId,
+    ) {
+        use btctax_core::event::{
+            Acquire, BasisSource, DisposeKind, EventPayload, LedgerEvent, OutflowClass,
+            ReclassifyOutflow, TransferOut,
+        };
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::EventId;
+        use rust_decimal_macros::dec;
+        use time::{OffsetDateTime, UtcOffset};
+
+        btctax_cli::cmd::init::run(vault, &Passphrase::new(pp_str.into()), key).unwrap();
+
+        let wallet = Some(btctax_core::WalletId::Exchange {
+            provider: "River".to_string(),
+            account: "main".to_string(),
+        });
+        let x_id = EventId::import(Source::River, SourceRef::new("lot-x-1"));
+        let y_id = EventId::import(Source::River, SourceRef::new("lot-y-1"));
+        let d_id = EventId::import(Source::River, SourceRef::new("sell-d-1"));
+
+        {
+            let mut session =
+                btctax_cli::Session::open(vault, &Passphrase::new(pp_str.into())).unwrap();
+            let tx = OffsetDateTime::from_unix_timestamp(1_673_740_800).unwrap(); // 2023-01-15 — X
+            let tdd = OffsetDateTime::from_unix_timestamp(1_686_787_200).unwrap(); // 2023-06-15 — sell D
+            let ty = OffsetDateTime::from_unix_timestamp(1_705_276_800).unwrap(); // 2024-01-15 — Y (after D)
+            let tdec = OffsetDateTime::from_unix_timestamp(1_720_000_000).unwrap(); // 2024-07 — reclassify
+            let batch = vec![
+                LedgerEvent {
+                    id: x_id.clone(),
+                    utc_timestamp: tx,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 1_000_000,
+                        usd_cost: dec!(30000),
+                        fee_usd: dec!(0),
+                        basis_source: BasisSource::ExchangeProvided,
+                    }),
+                },
+                LedgerEvent {
+                    id: d_id.clone(),
+                    utc_timestamp: tdd,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::TransferOut(TransferOut {
+                        sat: 500_000,
+                        fee_sat: None,
+                        dest_addr: None,
+                        txid: None,
+                    }),
+                },
+                LedgerEvent {
+                    id: y_id.clone(),
+                    utc_timestamp: ty,
+                    original_tz: UtcOffset::UTC,
+                    wallet: wallet.clone(),
+                    payload: EventPayload::Acquire(Acquire {
+                        sat: 300_000,
+                        usd_cost: dec!(10000),
+                        fee_usd: dec!(0),
+                        basis_source: BasisSource::ExchangeProvided,
+                    }),
+                },
+            ];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+
+            // ReclassifyOutflow D → Sell (so D projects to a Disposal eligible for select-lots).
+            let ro = EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+                transfer_out_event: d_id.clone(),
+                as_: OutflowClass::Dispose {
+                    kind: DisposeKind::Sell,
+                },
+                principal_proceeds_or_fmv: dec!(20000),
+                fee_usd: None,
+                donee: None,
+            });
+            btctax_core::persistence::append_decision(
+                session.conn(),
+                ro,
+                tdec,
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+        }
+
+        (x_id, y_id, d_id)
+    }
+
+    /// NEW-1 (Fable r2) — the editor `select-lots` form for a PRE-2025 (Universal) disposal must offer the
+    /// TRUE at-disposal pool, NOT the post-default residue. With X @2023-01 and Y @2024-01 both pre-2025 but
+    /// Y acquired AFTER disposal D @2023-06, the residue arm wrongly offered {X-drained, Y} (2 rows) — and Y
+    /// does not exist at D, so a pick against it is persisted then hard-rejected (`LotSelectionInvalid` →
+    /// tax NotComputable). The fix delegates BOTH transition arms to `Session::available_lots_before`, whose
+    /// pre-2025 `pool_key` yields the Universal pool JUST BEFORE D = {X: 0.01} — a single feasible row.
+    /// This assert kills the revert-to-residue mutation on the pre-2025 arm.
+    #[test]
+    fn kat_new1_pre2025_select_lots_offers_at_disposal_pool_not_residue() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-new1-pre2025-pass";
+
+        let (x_id, y_id, d_id) = seed_pre2025_later_lot_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+
+        // D projects to a disposal.
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            snap.state.disposals.iter().any(|d| d.event == d_id),
+            "NEW-1: the pre-2025 sell must project to a disposal"
+        );
+
+        // Drive S → list → Enter → LotsForm (D is the only eligible disposal).
+        handle_key(&mut app, press(KeyCode::Char('S')));
+        assert!(
+            app.select_lots_flow.is_some(),
+            "NEW-1: select-lots flow must open on 'S'"
+        );
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        let flow = app
+            .select_lots_flow
+            .as_ref()
+            .expect("NEW-1: select-lots flow must still be open");
+        let SelectLotsStep::LotsForm { rows, .. } = &flow.step else {
+            panic!("NEW-1: Enter must transition to LotsForm");
+        };
+
+        // The at-disposal Universal pool is {X: 0.01} — ONE row. The residue arm would show TWO (X + Y).
+        assert_eq!(
+            rows.len(),
+            1,
+            "NEW-1: form must offer only the at-disposal pool (X), not the residue (X + later-acquired Y)"
+        );
+        // Y (acquired AFTER D) must NOT be offered — a pick against it is infeasible.
+        assert!(
+            !rows.iter().any(|r| r.lot_id.origin_event_id == y_id),
+            "NEW-1: a lot acquired AFTER the disposal must be excluded (it does not exist at D)"
+        );
+        // The offered X must show its FULL at-disposal amount (0.01 BTC = 1_000_000 sat), not the drained
+        // residue (500_000 sat) — the amount the engine's `selection_feasible` validates against.
+        assert_eq!(
+            rows[0].lot_id.origin_event_id, x_id,
+            "NEW-1: the single offered lot must be X"
+        );
+        assert_eq!(
+            rows[0].remaining_sat, 1_000_000,
+            "NEW-1: X must be offered at its at-disposal amount (1_000_000 sat), not the residue (500_000)"
+        );
+    }
+
     // ── KAT-C2f — cancel-path bytes-unchanged (select-lots) ──────────────────
 
     #[test]
@@ -21869,25 +21986,64 @@ mod tests {
                 .select(Some(idx));
         }
         app.status = None;
-        handle_key(&mut app, press(KeyCode::Enter)); // → "No lots available" (all lots excluded)
-        assert!(
-            matches!(
-                app.select_lots_flow.as_ref().map(|f| &f.step),
-                Some(SelectLotsStep::List)
-            ),
-            "PATHB: the flow must stay on List (no feasible lot to offer)"
+        handle_key(&mut app, press(KeyCode::Enter)); // → LotsForm (the AT-DISPOSAL pool)
+
+        // Fable r2 NEW-1 (corrected): the form offers the TRUE at-disposal pool via
+        // `available_lots_before`, which for the pre-2025 disposal D @2024-08 reads `pools_before(D)` — the
+        // Universal pool JUST BEFORE D, i.e. the ORIGINAL 2024-06 acquire (0.01 BTC), before the 2025-01-01
+        // §7.4 seed discards that residue. The PROTECTIVE property this KAT guards is UNCHANGED: a
+        // `SafeHarborAllocated` SEED lot (installed at 2025-01-01, AFTER D) is NEVER offered — a pick against
+        // it is infeasible for D. The old arm read FINAL state (seed lots only) and over-strictly offered
+        // NOTHING; the delegation offers the feasible original lot — a strictly SAFER, more useful result
+        // (the seed lot exclusion is now by CONSTRUCTION: it is not in `pools_before(D)`).
+        let orig_acq = EventId::import(
+            btctax_core::identity::Source::River,
+            btctax_core::identity::SourceRef::new("p25-acq-0"),
         );
+        {
+            let flow = app
+                .select_lots_flow
+                .as_ref()
+                .expect("PATHB: flow must still be open");
+            let SelectLotsStep::LotsForm { rows, .. } = &flow.step else {
+                panic!(
+                    "PATHB: Enter must open the LotsForm (the original pre-seed lot is available)"
+                );
+            };
+            assert_eq!(
+                rows.len(),
+                1,
+                "PATHB: exactly the original pre-2025 lot is offered (not the seed lots, not a residue)"
+            );
+            assert_eq!(
+                rows[0].lot_id.origin_event_id, orig_acq,
+                "PATHB: the offered lot must be the original 2024-06 acquire — a SafeHarborAllocated seed \
+                 lot (origin = the allocation event) must NOT be offered (it does not exist at D)"
+            );
+            assert_eq!(
+                rows[0].remaining_sat, 1_000_000,
+                "PATHB: the original lot is offered at its at-disposal amount (1_000_000 sat, before D drew)"
+            );
+        }
+
+        // Empirically confirm the offered pick is FEASIBLE end-to-end: assign the full 500K disposal against
+        // the original lot → save → re-project. No LotSelectionInvalid (the pick is in D's true pool) and the
+        // single-lot Path-B allocation still conserves (specific-ID == FIFO here) → no SafeHarborUnconservable.
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(app.select_lots_modal.is_some(), "PATHB: modal must open");
+        handle_key(&mut app, press(KeyCode::Enter)); // save + re-project
+        let snap = app.snapshot.as_ref().unwrap();
         assert!(
-            app.select_lots_modal.is_none(),
-            "PATHB: no LotsForm/modal must open"
-        );
-        assert!(
-            app.status
-                .as_deref()
-                .unwrap_or("")
-                .contains("No lots available"),
-            "PATHB: Path-B seed lots are excluded → 'No lots available'; got: {:?}",
-            app.status
+            !snap.state.blockers.iter().any(|b| matches!(
+                b.kind,
+                BlockerKind::LotSelectionInvalid | BlockerKind::SafeHarborUnconservable
+            )),
+            "PATHB: the offered pre-seed pick must be accepted cleanly (no LotSelectionInvalid) and must not \
+             break the Path-B allocation's conservation; blockers: {:?}",
+            snap.state.blockers
         );
     }
 
