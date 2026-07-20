@@ -4,6 +4,96 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ★ STALE-SWEEP AUDIT (2026-07-20, verified against HEAD `de5e4a1`)
+
+A full audit checked every "OPEN" marker in this file against **current source** (not the
+follow-up text). The large majority were stale bookkeeping — implemented, superseded, or moot,
+never swept back after the feature landed. This block is the authoritative reconciliation: where a
+cluster below is listed **RECONCILED-DONE**, the scattered `OPEN` tags in its original section are
+**superseded by this block** (kept for record, not live work). The **GENUINELY-OPEN INDEX** is the
+live residue — grep it first.
+
+### RECONCILED-DONE (verified implemented / superseded — original OPEN tags below are stale)
+
+- **Phase-2 tax deferrals → DONE** by the full-return (P0–P7) + `btctax-forms` crate: §170(f)(11)(F)
+  year-aggregation (`forms.rs` `year_donation_deduction`), §170(b) AGI limits + carryover
+  (`tax/charitable.rs`), the SE cluster (`w2_ss_wages`/`w2_medicare_wages`, `ReclassifyIncome`,
+  `schedule_c_expenses`, §6017 $400 floor, §164(f) ½-SE), NII + **Form 8960** (`form8960.rs`), and
+  the filled **8949 / Schedule D / 8283** PDFs (`fill8949*.rs`, `schedule_d*.rs`, `form8283.rs`).
+- **"NEXT-cycle" forward-pointers → DONE** by later sections: Cycle-A `SelfTransferPassthrough` +
+  the confirmed self-transfer matcher (`MatchSelfTransfers`), the whole **bulk-*** family
+  (void/resolve-conflict/classify-inbound-income/self-transfer/reclassify-outflow/link-transfer),
+  chunk-3 follow-ups #1–#8 (tui-edit-hardening), and tui-edit-hardening FU#1 (select-lots
+  at-disposal pool, `main.rs:4102`, commits `8fd0517`/`de5e4a1`).
+- **The two 🟡 "AWAITING WHOLE-DIFF REVIEW / not merged" sections → DONE**: pseudo-reconcile mode
+  (`reconcile pseudo`) and the attest-export gate (`require_attestation`) are both live in source and
+  shipped in v0.7.0.
+- **price-data #41 → DONE** (check-isolation in CI, the real 5,800-row dataset, `btctax-update-prices`
+  crate) and **crate publishing → DONE** (v0.7.0 fully published; `btctax` name reserved).
+- **Sub-project A/B/C review nits → DONE** (recommendations adopted): Sub-A M1/Task-4/7/8/9/R0-C1 +
+  N2/N3; Sub-B F1 + `MarginalRates.niit_applies` doc; Sub-C Task-3 (`available_lots_before`),
+  Task-4, M-1, M-2.
+- **Oldest whole-branch fixes → DONE**: core I-1/I-2, adapters I-1/I-2 + `AdapterError.adapter`
+  rename + calamine Data-variant audit, store M-1/M-2 + OS-crash `repair()` + save-path zeroize +
+  crypto-rust backend, CLI M-1/M-2/N-1 + attest advisory + `*_tag()` renderers + AllocLot dual-basis.
+- **Input-form Task-2 (a/b/c) + banner (d–k) + P2-a → DONE**; **UX-P1/P2/P3/P4-\* → DONE**
+  (post-v0.7.0 cycle; no self-marked-DONE item was found still-open).
+- **MOOT (superseded)**: nettle-4.0 incompatibility + Sequoia/S2K pin (→ crypto-rust switch);
+  core Task-0 version pins + adapters version pins (→ caret ranges + `Cargo.lock` reproducibility).
+
+### ★ GENUINELY-OPEN INDEX (the live residue — verified absent in current source)
+
+**A — Tax-scope features (deferred by design; larger work):**
+- **AMT (Form 6251) compute** — only a fail-closed *screen* exists (`tax/amt.rs`; refuses if AMT
+  might apply). Computing an actual AMT liability is out of scope.
+- **NIIT model is minimal** (B-M1, disclosed) — NIIT *is* computed (`form8960.rs`) but under-states
+  for complex non-crypto NII; §1411(c)(2) active-trade lending exception not modeled.
+- **engine-B gross-vs-net `crypto_ord`** ordinary-income coordination (high blast radius) — `compute.rs`.
+- **Form 8949 Box A/B/D/E input + 1099-B / 1099-DA reconciliation** — enum is `{C,F}` only (`forms.rs`).
+- **§170(e) dealer/inventory CHARACTER detection** (investor case shipped; dealer over-flag) — `fold.rs:1247`.
+- **Donee-type §170(e)(1)(B)** private-foundation modeling — caveat text only.
+- **Gift-tax liability**: §2502 rate schedule, §2513 splitting, DSUE/portability, **Form 709 PDF** — no `form709.rs`.
+- **`TransferIn` carries no basis/date hint** side-table (cross-crate gap) — `event.rs`.
+- **Durable Path-A `Pre2025MethodDeclaration` ledger event** (attestation lives only in mutable config; R0-I2).
+- TP8 m1/m2 de-minimis holding/loss-basis edges (accepted); §1015(d), non-BTC scope (intentional won't-do).
+
+**B — Input-form store/UI polish (P2/P3 + macro/test nits):** P3-a dead `shadows`
+(`form.rs:259`) · P3-b idle-tick flush no backoff (`main.rs:9848`) · P3-c unconditional "parked full
+return" label (`main.rs:1427`) · P3-d `value_is_answered` treats `Money(0)`/`Bool(false)` as
+unanswered (`draw_edit.rs:2590`) · P3-e seed truncation through `FIELD_CAP=64` (`form.rs:19`) · P2-b
+`draft_exists` swallows DB errors (`.is_ok()`, `input_form_store.rs:99`) · P2-c `save_draft` skips
+`schema_version` on the parked path · P2-d no `restore` on post-snapshot/pre-save `Err` · P2-Nits
+(park gate `== Some(false)`; restore drops original error) · macro `(h)` near-dup
+`decl_tristate!`/`skippable_tristate!` (`registries.rs:33`) · `(l)` coverage KAT doesn't assert EXEMPT
+literals live (`coverage.rs:239`) · `(m)` NI-2 first-edit arm skips `guard_arity` (`apply.rs:31`) ·
+Task-2(d) serde-wire round-trip breadth is Money-only (`seam.rs:280`).
+
+**C — TUI/CLI Minors/Nits:** classify-raw 6-variant builder (TUI builds only Acquire+Income,
+`form.rs:1848`) · read-only viewer never got `r`-refresh / `?`-help · ProRata cross-wallet
+redistribution (core O4, `resolve.rs:1216`) · typed/sealed write-token (`export.rs`, `persist.rs:243`) ·
+`fmt_btc`/`sat_to_btc` cross-crate dedup · `try_env_passphrase` duplication · bulk-link empty-plan
+cosmetic (M1) + TUI date-RANGE filter + backport typed-dest to `l` · bulk-reclassify-outflow
+Gift/Donate targets (`eventref.rs:166`) · chunk-4a link-to-never-seen-wallet + TargetPick empty-list
+hint · chunk-4b optimize-accept `made`-date threading · chunk-5 allocate-E2E skip-guard +
+`AllocLotRow`→`TargetList` · tui-edit-hardening FU#2 (SelfTransfer reconstruction as `pub fn`) ·
+save-rollback FU (retire `attest_save_failed`) · Cycle-A `--acquired` future-date warning · bulk-sti
+colon mis-align + price-data cache-provenance marker · `export_snapshot` timestamped filenames · fs2→fd-lock
+swap · CI `cargo-audit` / `cargo-deny`.
+
+**D — Oracle-sweep test-hardening (ownerless post-ship residue):** OS-WB-1 (taxcalc-leaf perturbation) ·
+OS-WB-2 (readback parametrization) · OS-WB-3 (`compare` top-level catch-all) · OS-WB-4 (`Sign::Unsigned`
+leading-minus assert) · OS-WB-5 (doc cosmetics) · OS-WB-6 (harness `paper` closure) · OS-14.2 (8995-L12
+single-witness WEAK).
+
+**E — WATCH / externally-blocked (not actionable now):** §1091 crypto wash-sale enactment (C.5, Congress) ·
+TY2027 tables (IRS/SSA, fall 2026) · FmvMissing beyond the bundled price range (offline-reproducibility limit).
+
+**F — NEEDS-OWNER (a user decision, not a code fix):** P9(b) retire refuse-and-reimport (release gate;
+no real return entered yet) · Swan `Transaction ID` stability / `Total`-USD cost semantics · Coinbase
+internal-move default · store Windows world-readable CI assertion.
+
+---
+
 ## oracle-sweep — deferred hardening (2026-07-16)
 
 - **(OS-14.2) Derive OTS's Form 8995 line 12 from OTS's OWN Schedule-D output — Minor, owned by
