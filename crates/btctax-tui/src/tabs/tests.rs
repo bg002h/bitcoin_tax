@@ -923,6 +923,7 @@ fn tui_walkthrough_golden_dir() -> std::path::PathBuf {
 fn btctax_tui_walkthrough_frames() -> Vec<(&'static str, String)> {
     let mut frames = j8_viewer_frames();
     frames.extend(j1_viewer_frames());
+    frames.extend(j4_viewer_frames());
     frames
 }
 
@@ -986,6 +987,37 @@ fn j1_viewer_frames() -> Vec<(&'static str, String)> {
     out
 }
 
+/// J4 (mining/staking income → Schedule SE) VIEWER frames — after the editor reclassifies both receipts as
+/// a trade or business, the viewer shows Income (now business) and Tax (the self-employment tax). Seeds via
+/// `seed_j4_reclassified` (the post-reclassify state) and only opens + reads.
+fn j4_viewer_frames() -> Vec<(&'static str, String)> {
+    use btctax_store::Passphrase;
+    std::env::set_var(
+        "BTCTAX_PRICE_CACHE",
+        "/nonexistent-walkthrough-price-cache.csv",
+    );
+    let pp = Passphrase::new("golden-j4-pass".into());
+    let now = time::macros::datetime!(2025 - 08 - 01 12:00:00 UTC);
+    let dir = tempfile::tempdir().unwrap();
+    let vault = btctax_cli::testonly::seed_j4_reclassified(dir.path(), &pp);
+    let session = btctax_cli::Session::open(&vault, &pp).unwrap();
+    let (snapshot, year) = crate::unlock::build_snapshot(&session).unwrap();
+    let mut app = App::new(std::path::PathBuf::from("/vault.pgp"));
+    app.screen = Screen::Viewer;
+    app.selected_year = year;
+    app.snapshot = Some(snapshot);
+    app.clock = crate::clock::Clock::Pinned(now);
+    let mut out = Vec::new();
+    for (stem, tab) in [
+        ("j4/02-income", crate::app::Tab::Income),
+        ("j4/03-tax", crate::app::Tab::Tax),
+    ] {
+        app.tab = tab;
+        out.push((stem, crate::capture::to_golden(&render_viewer(&mut app))));
+    }
+    out
+}
+
 /// The frame stems this crate (the viewer half) is responsible for capturing. Declared EXPLICITLY so a
 /// dropped/renamed capture tuple reds the gate below (NEW-I-1): the byte-compare loop alone iterates only
 /// over what's captured, so a shrunk set passes vacuously — and the xtask manifest bijection would still
@@ -997,6 +1029,8 @@ const WALKTHROUGH_VIEWER_STEMS: &[&str] = &[
     "j1/01-holdings",
     "j1/02-disposals",
     "j1/03-tax",
+    "j4/02-income",
+    "j4/03-tax",
 ];
 
 #[cfg(unix)]

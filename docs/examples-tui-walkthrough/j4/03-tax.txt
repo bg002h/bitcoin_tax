@@ -1,0 +1,43 @@
+── glyphs ──
+  0│┌ btctax-tui — /vault.pgp ─────────────────────────────────────────────────────────────────────────────────────────────┐
+  1││ Holdings │ Disposals │ Income │ Tax │ Forms │ Compliance                                                             │
+  2│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  3│┌ Tax — 2025 ──────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  4││  ST net: 0.00   LT net: 0.00                                                                                         │
+  5││  Ordinary income from crypto: 7450.67                                                                                │
+  6││  Ordinary-rate tax (attributable delta): 1721.16                                                                     │
+  7││  LTCG tax (attributable delta): 0.00   NIIT (attributable delta): 0.00                                               │
+  8││  TOTAL federal tax attributable (delta): 1721.16  [= ord + LTCG + NIIT]                                              │
+  9││  §1211 loss deduction: 0.00   Carryforward out: short 0.00 / long 0.00                                               │
+ 10││  Marginal rates: ordinary 0.24  LTCG 0.15  NIIT applies: false                                                       │
+ 11││                                                                                                                      │
+ 12││  Charitable deduction 2025 (before §170(b) AGI limits): 0.00                                                         │
+ 13││Schedule SE (§1401 self-employment tax on business crypto income) — tax year 2025                                     │
+ 14││  net self-employment income (business crypto, Interest excluded): 7450.67                                            │
+ 15││  (Schedule C) no Schedule C expenses supplied (--schedule-c-expenses)                                                │
+ 16││  × 92.35% net-earnings factor (§1402(a)) = net SE earnings: 6880.69                                                  │
+ 17││  Social Security component (12.4%, §1401(a); capped at the SS wage base): 853.21                                     │
+ 18││  Medicare component (2.9%, §1401(b); uncapped): 199.54                                                               │
+ 19││  Additional Medicare component (0.9%, §1401(b)(2)): 0.00                                                             │
+ 20││  TOTAL self-employment tax (§1401): 1052.75                                                                          │
+ 21││  §164(f) one-half-SE-tax deduction (above-the-line; EXCLUDES Additional Medicare per §164(f)(1)): 526.38             │
+ 22││  (§164(f) advisory) The §164(f) deduction (526.38) is NOT auto-coordinated into the income-tax total above — to first│
+ 23││order, that total overstates your combined tax by your marginal ordinary rate applied to 526.38. The tax profile      │
+ 24││cannot express this deduction directly (reducing `ordinary_taxable_income` would shift BOTH legs of the               │
+ 25││crypto-attributable delta and only correct the bracket differential, not the level) — coordinate it on your actual    │
+ 26││return.                                                                                                               │
+ 27││  (W-2) assumes $0 W-2 wages (set --w2-ss-wages/--w2-medicare-wages on the tax profile if you had a wage job).        │
+ 28││  (standalone) This §1401 SE tax is a SEPARATE federal liability, NOT included in the income-tax + NIIT total above;  │
+ 29││the §164(f) one-half-SE-tax deduction is not auto-coordinated into that total.                                        │
+ 30││                                                                                                                      │
+ 31││                                                                                                                      │
+ 32││                                                                                                                      │
+ 33││                                                                                                                      │
+ 34││                                                                                                                      │
+ 35││                                                                                                                      │
+ 36││                                                                                                                      │
+ 37││                                                                                                                      │
+ 38│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ 39│Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   g/G: top/bottom   w: what-if   e: export
+── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
+  1│ 34..37 fg=Yellow mod=BOLD

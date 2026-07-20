@@ -14302,9 +14302,18 @@ mod tests {
         btctax_cli::testonly::seed_journey(dir, &pp, &btctax_cli::testonly::j8())
     }
 
-    /// `(relative-stem, captured frame)` for the J8 editor walkthrough frames.
+    /// All journeys' EDITOR frames, aggregated. Phase 2 appends one `jN_editor_frames()` per journey; the
+    /// gate + emit iterate this list, and `WALKTHROUGH_EDITOR_STEMS` declares the expected stem set.
     #[cfg(unix)]
     fn btctax_tui_edit_walkthrough_frames() -> Vec<(&'static str, String)> {
+        let mut frames = j8_editor_frames();
+        frames.extend(j4_editor_frames());
+        frames
+    }
+
+    /// `(relative-stem, captured frame)` for the J8 editor walkthrough frames.
+    #[cfg(unix)]
+    fn j8_editor_frames() -> Vec<(&'static str, String)> {
         // Determinism (walkthrough spec §7 / I-3): pin BTCTAX_PRICE_CACHE to a nonexistent file so a
         // developer's LIVE local price cache cannot perturb any market-value cell a frame might show.
         // Safe under nextest's process-per-test model (which make check / CI use).
@@ -14358,6 +14367,37 @@ mod tests {
         ]
     }
 
+    /// J4 editor frame — reclassifying imported staking income as a trade or business (Schedule SE). The
+    /// two receipts import as ordinary income (not a business, by default); pressing `r` opens the
+    /// reclassify-income flow listing them. Seeds only the raw import (the flow drives the reclassify).
+    #[cfg(unix)]
+    fn j4_editor_frames() -> Vec<(&'static str, String)> {
+        std::env::set_var(
+            "BTCTAX_PRICE_CACHE",
+            "/nonexistent-walkthrough-price-cache.csv",
+        );
+        let pinned =
+            btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2025 - 08 - 01 12:00:00 UTC));
+        let fixed_path = std::path::PathBuf::from("/edit/vault.pgp");
+        let dir = tempfile::tempdir().unwrap();
+        let pp = Passphrase::new("golden-j4-pass".into());
+        let vault =
+            btctax_cli::testonly::seed_journey(dir.path(), &pp, &btctax_cli::testonly::j4());
+        // `r` opens the reclassify-income flow: the two staking receipts, listed to move onto Schedule SE.
+        let reclassify = {
+            let mut app = open_app(&vault, "golden-j4-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('r')));
+            assert!(
+                app.reclassify_income_flow.is_some(),
+                "the J4 reclassify-income flow must open (two income receipts exist)"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+        vec![("j4/01-reclassify-income", reclassify)]
+    }
+
     /// The frame stems this crate (the editor half) is responsible for capturing. Declared EXPLICITLY so a
     /// dropped/renamed capture tuple reds the gate (NEW-I-1) — the byte-compare loop alone passes vacuously
     /// on a shrunk set, and the xtask manifest bijection would still hold (manifest⇄disk unchanged),
@@ -14368,6 +14408,7 @@ mod tests {
         "j8/01-browse-blocker",
         "j8/02-match-list",
         "j8/03-match-confirm",
+        "j4/01-reclassify-income",
     ];
 
     #[cfg(unix)]

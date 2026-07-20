@@ -1,0 +1,12 @@
+# J4 — mining/staking income and self-employment tax (TUI screen-walkthrough).
+# CLI setup is the EXACT captured transcript (CONSOLE); the editor reclassify flow + the viewer result
+# tabs are byte-gated frames captured from the real TUI. A Phase-2 journey (editor + viewer).
+PROSE \fBJourney 4 \(em staking income, and self\-employment tax.\fP Erin receives two staking rewards on River. Imported, they are ordinary income at the fair market value on the day received \(en but \fInot\fP a trade or business by default. If the activity is a business, reclassifying it moves the income onto Schedule SE.
+PROSE \fBSetup, at the command line.\fP She creates the vault, imports River (both receipts recognised at their bundled daily\-close FMV \(en $4,274.23 and $3,176.44, $7,450.67 in all), verifies (exit 0), and sets a 2025 profile. The exact terminal session:
+CONSOLE 00-setup.console.md J4 - setup - init, import, verify, tax-profile
+PROSE \fB1. Editor \(em reclassify income.\fP Pressing \fBr\fP opens the reclassify\-income flow, listing every income receipt. She marks the staking rewards as a trade or business \(en the choice that moves them onto Schedule SE.
+FRAME 01-reclassify-income.txt J4 - step 1 - editor: the reclassify-income flow (mark as a business)
+PROSE \fB2. Viewer \(em Income.\fP Both receipts now read \fIbusiness: yes\fP, kind \fIstaking\fP \(en the reclassification took.
+FRAME 02-income.txt J4 - step 2 - viewer: Income (now a business)
+PROSE \fB3. Viewer \(em Tax.\fP Because it is a business, the $7,450.67 of income flows to Schedule SE: net earnings $6,880.69 (after the 92.35% \(sc1402(a) factor), and the self\-employment tax on top of the ordinary\-income tax.
+FRAME 03-tax.txt J4 - step 3 - viewer: Tax (Schedule SE self-employment tax)

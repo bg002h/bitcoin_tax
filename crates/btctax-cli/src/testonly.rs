@@ -243,3 +243,46 @@ pub fn seed_j1_with_profile(
     crate::cmd::tax::set_profile(&vault, pp, 2025, profile, false).unwrap();
     vault
 }
+
+/// Seed J4 (two River staking receipts) with a 2025 profile AND both receipts reclassified as a trade or
+/// business (`--business true --kind staking`) — the post-reclassify state the walkthrough's VIEWER half
+/// renders (Income now on Schedule C/SE; Tax shows the self-employment tax). The editor half drives the
+/// reclassify itself, so it seeds only the raw import (`seed_journey(&j4())`). Made-date pinned for
+/// determinism. Refs embed the ms-timestamp of each receipt (not wall-clock).
+pub fn seed_j4_reclassified(
+    dir: &std::path::Path,
+    pp: &btctax_store::Passphrase,
+) -> std::path::PathBuf {
+    use btctax_core::{Carryforward, FilingStatus, IncomeKind, TaxProfile};
+    use rust_decimal::Decimal;
+    let vault = seed_journey(dir, pp, &j4());
+    let z = Decimal::ZERO;
+    let profile = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: Decimal::from(100_000),
+        magi_excluding_crypto: Decimal::from(100_000),
+        qualified_dividends_and_other_pref_income: z,
+        other_net_capital_gain: z,
+        capital_loss_carryforward_in: Carryforward { short: z, long: z },
+        w2_ss_wages: z,
+        w2_medicare_wages: z,
+        schedule_c_expenses: z,
+    };
+    crate::cmd::tax::set_profile(&vault, pp, 2025, profile, false).unwrap();
+    let now = time::macros::datetime!(2025 - 08 - 01 00:00:00 UTC);
+    for r in [
+        "import|river|in|1744718400000|income|5000000#0",
+        "import|river|in|1747742400000|income|3000000#0",
+    ] {
+        crate::cmd::reconcile::reclassify_income(
+            &vault,
+            pp,
+            r,
+            true,
+            Some(IncomeKind::Staking),
+            now,
+        )
+        .unwrap();
+    }
+    vault
+}
