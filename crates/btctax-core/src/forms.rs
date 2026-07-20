@@ -27,17 +27,32 @@ pub enum Form8949Part {
 }
 
 /// The Form 8949 "box" (the reporting category). We **only ever** emit the conservative
-/// "**not reported on a 1099-B**" default — **C** for short-term, **F** for long-term — because the
-/// model carries no 1099-B / basis-reported signal (D4). We NEVER auto-assign A/B (ST) or D/E (LT):
-/// asserting a 1099-B was issued / basis reported would fabricate an unsubstantiated box. The
-/// `box_needs_review` flag surfaces exchange dispositions that MAY carry a 1099-B/1099-DA.
+/// "**not reported to the IRS**" default, YEAR-AWARE:
+/// - **pre-TY2025** digital-asset sales used the securities boxes → **C** (ST) / **F** (LT), "not reported
+///   on a 1099-B".
+/// - **TY2025+** the 2025 Form 8949 added digital-asset-specific boxes and the i8949 states *"Do not use
+///   box C to report digital asset transactions. Use box I"* / *"Do not use box F… Use box L"* → **I** (ST)
+///   / **L** (LT), "not reported on a 1099-DA".
+///
+/// We NEVER auto-assign the 1099-reported boxes (A/B/D/E pre-2025; G/H/J/K from 2025): the model carries no
+/// 1099-B / 1099-DA signal (D4), and asserting a broker form was issued / basis reported would fabricate an
+/// unsubstantiated box. The `box_needs_review` flag surfaces exchange dispositions that MAY carry a broker
+/// form, to be reclassified on the actual return (G/H or J/K from 2025).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Form8949Box {
-    /// Box **C** — short-term, not reported on a 1099-B.
+    /// Box **C** — short-term, not reported on a 1099-B (pre-TY2025 digital-asset default).
     C,
-    /// Box **F** — long-term, not reported on a 1099-B.
+    /// Box **F** — long-term, not reported on a 1099-B (pre-TY2025 digital-asset default).
     F,
+    /// Box **I** — short-term digital-asset sale NOT reported on a 1099-DA (TY2025+ default).
+    I,
+    /// Box **L** — long-term digital-asset sale NOT reported on a 1099-DA (TY2025+ default).
+    L,
 }
+
+/// The first tax year the 2025 Form 8949 digital-asset boxes (G–L) apply; before this, the securities
+/// boxes (A–F) are used. Transactions in TY2025 are filed on the 2025 form.
+pub const DIGITAL_ASSET_8949_FIRST_YEAR: i32 = 2025;
 
 /// One Form 8949 row = one `DisposalLeg` disposed in the tax year. A pure projection of the leg;
 /// no gain/basis/term math is performed here (all of it is already on the leg from the fold).
@@ -111,9 +126,18 @@ pub fn form_8949(state: &LedgerState, year: i32) -> Vec<Form8949Row> {
         .filter(|d| d.disposed_at.year() == year)
     {
         for leg in &d.legs {
+            // Year-aware conservative "not reported to the IRS" box: pre-TY2025 uses the securities boxes
+            // C/F; TY2025+ MUST use the digital-asset boxes I/L (the i8949 forbids C/F for digital assets).
+            let da = year >= DIGITAL_ASSET_8949_FIRST_YEAR;
             let (part, box_) = match leg.term {
-                Term::ShortTerm => (Form8949Part::ShortTerm, Form8949Box::C),
-                Term::LongTerm => (Form8949Part::LongTerm, Form8949Box::F),
+                Term::ShortTerm => (
+                    Form8949Part::ShortTerm,
+                    if da { Form8949Box::I } else { Form8949Box::C },
+                ),
+                Term::LongTerm => (
+                    Form8949Part::LongTerm,
+                    if da { Form8949Box::L } else { Form8949Box::F },
+                ),
             };
             let row = Form8949Row {
                 part,

@@ -75,8 +75,11 @@ fn state(disposals: Vec<Disposal>) -> LedgerState {
 // ── Task 2 — Form 8949 rows ────────────────────────────────────────────────────────────────────
 
 /// ST leg → Part I / box C; LT leg → Part II / box F.
+/// TY2025+: digital-asset sales NOT reported on a 1099-DA use the DIGITAL-ASSET boxes — Part I box **I**
+/// (ST), Part II box **L** (LT). The i8949 forbids C/F for digital assets ("Do not use box C… Use box I";
+/// "Do not use box F… Use box L").
 #[test]
-fn st_leg_is_part_i_box_c_and_lt_leg_is_part_ii_box_f() {
+fn ty2025_st_leg_is_part_i_box_i_and_lt_leg_is_part_ii_box_l() {
     let st = state(vec![
         disposal(
             1,
@@ -99,6 +102,42 @@ fn st_leg_is_part_i_box_c_and_lt_leg_is_part_ii_box_f() {
     ]);
     let rows = form_8949(&st, 2025);
     assert_eq!(rows.len(), 2);
+    let st_row = rows
+        .iter()
+        .find(|r| r.part == Form8949Part::ShortTerm)
+        .unwrap();
+    let lt_row = rows
+        .iter()
+        .find(|r| r.part == Form8949Part::LongTerm)
+        .unwrap();
+    assert_eq!(st_row.box_, Form8949Box::I);
+    assert_eq!(lt_row.box_, Form8949Box::L);
+}
+
+/// Pre-TY2025 (securities-box era): the same sales use box **C** (ST) / **F** (LT). Year-aware.
+#[test]
+fn pre_2025_st_leg_is_box_c_and_lt_leg_is_box_f() {
+    let st = state(vec![
+        disposal(
+            1,
+            date!(2024 - 03 - 01),
+            DisposeKind::Sell,
+            vec![DisposalLeg {
+                term: Term::ShortTerm,
+                ..base_leg()
+            }],
+        ),
+        disposal(
+            2,
+            date!(2024 - 04 - 01),
+            DisposeKind::Sell,
+            vec![DisposalLeg {
+                term: Term::LongTerm,
+                ..base_leg()
+            }],
+        ),
+    ]);
+    let rows = form_8949(&st, 2024);
     let st_row = rows
         .iter()
         .find(|r| r.part == Form8949Part::ShortTerm)
@@ -286,7 +325,8 @@ fn deterministic_ordering_by_date_then_event_then_lot() {
 }
 
 /// Box needs review: an EXCHANGE-wallet disposition → `box_needs_review == true` (may carry a
-/// 1099-B/1099-DA); a self-custody disposition → `false`. Box stays the C/F default in both cases.
+/// 1099-DA); a self-custody disposition → `false`. Box stays the conservative no-1099-DA default (TY2025
+/// box I here) in both cases — never auto-assigned to a 1099-DA box (G/H) on the flag alone.
 #[test]
 fn exchange_wallet_flags_box_needs_review_self_custody_does_not() {
     let st = state(vec![
@@ -316,9 +356,9 @@ fn exchange_wallet_flags_box_needs_review_self_custody_does_not() {
     let sc = rows.iter().find(|r| r.wallet == cold()).unwrap();
     assert!(ex.box_needs_review, "exchange disposition must be flagged");
     assert!(!sc.box_needs_review, "self-custody must NOT be flagged");
-    // box is still the conservative C default (never auto-assigned to A/B) regardless of the flag.
-    assert_eq!(ex.box_, Form8949Box::C);
-    assert_eq!(sc.box_, Form8949Box::C);
+    // box is still the conservative TY2025 no-1099-DA default (box I), never auto-assigned to G/H on the flag.
+    assert_eq!(ex.box_, Form8949Box::I);
+    assert_eq!(sc.box_, Form8949Box::I);
 }
 
 // ── Task 3 — Schedule D part totals ────────────────────────────────────────────────────────────

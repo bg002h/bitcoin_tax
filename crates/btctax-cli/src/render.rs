@@ -183,12 +183,16 @@ fn form8949_part_tag(p: Form8949Part) -> &'static str {
     }
 }
 
-/// Stable Form 8949 box tag: "C" (ST) / "F" (LT) — the conservative "not reported on a 1099-B"
-/// default (D4). We never emit A/B/D/E (the model carries no 1099-B / basis-reported signal).
+/// Stable Form 8949 box tag: pre-TY2025 securities boxes "C" (ST) / "F" (LT), and from TY2025 the
+/// digital-asset boxes "I" (ST) / "L" (LT) — the conservative "not reported on a 1099-B / 1099-DA"
+/// default (D4). We never emit the 1099-reported boxes (A/B/D/E; G/H/J/K): the model carries no
+/// 1099 basis-reported signal.
 fn form8949_box_tag(b: Form8949Box) -> &'static str {
     match b {
         Form8949Box::C => "C",
         Form8949Box::F => "F",
+        Form8949Box::I => "I",
+        Form8949Box::L => "L",
     }
 }
 

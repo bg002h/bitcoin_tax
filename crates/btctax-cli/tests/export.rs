@@ -187,7 +187,11 @@ fn export_writes_year_scoped_form8949_and_schedule_d() {
     assert_eq!(recs.len(), 1, "one ST sell leg → one Form 8949 row");
     let row = &recs[0];
     assert_eq!(row.get(0), Some("ST"), "part");
-    assert_eq!(row.get(1), Some("C"), "box (conservative C default)");
+    assert_eq!(
+        row.get(1),
+        Some("I"),
+        "box (TY2025 digital-asset ST, no 1099-DA → Box I, never securities Box C)"
+    );
     assert_eq!(
         row.get(2),
         Some("true"),

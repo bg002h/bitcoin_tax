@@ -29,6 +29,8 @@ fn form8949_box_tag(b: Form8949Box) -> &'static str {
     match b {
         Form8949Box::C => "C",
         Form8949Box::F => "F",
+        Form8949Box::I => "I",
+        Form8949Box::L => "L",
     }
 }
 
