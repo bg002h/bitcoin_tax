@@ -903,7 +903,7 @@ fn emit_btctax_tui_goldens() {
     }
 }
 
-// ── TUI screen-walkthrough (design/tui-walkthrough) — J8 PoC viewer frame ─────────────────────────
+// ── TUI screen-walkthrough (design/tui-walkthrough) — viewer frames (J8, J1, …) ───────────────────
 // The VIEWER half of the J8 journey: after the editor confirms the RELOCATE, the coins land at Coinbase
 // and Holdings reads BALANCED. Re-seeds the SAME shared J8 fixture and replays the SAME decision via
 // btctax-cli (RELOCATE = link_transfer out→in), then builds the REAL snapshot — so this "after" state
@@ -1030,7 +1030,7 @@ fn btctax_tui_walkthrough_goldens_match_committed() {
 
 #[cfg(unix)]
 #[test]
-#[ignore = "regeneration helper: rewrites docs/examples-tui-walkthrough/j8/04-*.txt"]
+#[ignore = "regeneration helper: rewrites docs/examples-tui-walkthrough/{j8,j1,…}/*.txt viewer frames"]
 fn emit_btctax_tui_walkthrough_goldens() {
     for (stem, captured) in btctax_tui_walkthrough_frames() {
         let path = tui_walkthrough_golden_dir().join(format!("{stem}.txt"));

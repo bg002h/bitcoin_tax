@@ -5,7 +5,8 @@
 PROSE \fBJourney 1 \(em a single buyer, start to finish.\fP Alice buys 0.10 BTC, sells 0.02, and wants her 2025 numbers. There is nothing to reconcile \(en a buy and a sell, no transfers \(en so the whole flow is command\-line setup, then reading the result in the read\-only viewer.
 PROSE \fBSetup, at the command line.\fP She creates the encrypted vault, imports the Coinbase CSV, verifies (BALANCED, no blockers \(en exit 0), and sets a 2025 tax profile (btctax refuses to guess a bracket, so the year is not computable until one is set). This is the exact terminal session:
 CONSOLE 00-setup.console.md J1 - setup - init, import, verify, tax-profile
-PROSE \fB1. Viewer \(em Holdings.\fP After the partial sale, 0.08 BTC remains, carrying its share of the original cost basis ($6,760 of the $8,450 she paid, fees included).
+PROSE One \fBverify\fP line is worth a note: the sale reads \fInon-compliant\fP. Post\-2025 rules ask the filer to identify which lots a disposal draws from; here the default method chose them rather than Alice naming specific lots (that is what the \fBselect-lots\fP command records). It is advisory \(en the return still computes (verify exits 0).
+PROSE \fB1. Viewer \(em Holdings.\fP After the partial sale, 0.08 BTC remains, carrying $6,760 of the $8,450 she paid (fees included). The TOTAL line's \fIUSD Basis\fP column shows the average cost per BTC, not a sum.
 FRAME 01-holdings.txt J1 - step 1 - viewer: Holdings (0.08 BTC remaining)
 PROSE \fB2. Viewer \(em Disposals.\fP The 0.02 BTC sale, matched to the March lot: proceeds $1,340 against a $1,690 basis \(en a $350 short\-term capital LOSS (held under a year).
 FRAME 02-disposals.txt J1 - step 2 - viewer: Disposals (the 0.02 BTC sale, a short-term loss)
