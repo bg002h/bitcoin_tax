@@ -1,5 +1,9 @@
 # Conservative / Defensive Filing — Implementation Plan
 
+**Status:** ★ GREEN — both lenses 0 Critical / 0 Important. Tax r1 (0C/2I) → r2 (0C/1I) → r3 GREEN → r4
+GREEN; architecture r1 (0C/3I) → r2 (0C/1I) → r3 (0C/1I) → r4 GREEN. Reviews in `./reviews/`
+(`plan-tax-*`, `plan-architecture-*`). Ready to implement (execution mode is the owner's call).
+
 > **For agentic workers:** implement task-by-task in phase order. Each task is TDD (write the failing
 > test, watch it fail, minimal implementation, watch it pass, commit) and every primitive is
 > **mutation-proven** (see §"Mutation discipline"). Steps use `- [ ]` checkboxes for tracking.
@@ -846,9 +850,10 @@ fn tp8c_fee_sat_basis_can_land_on_the_last_tranche_leg_corner_b() {
 ```
 - [ ] **Step 2: Run — expect PASS** (characterization of existing engine behavior). If corner (a)/(b) instead
   showed the *estimate* driving the loss (filed basis ≠ `$0`-plus-documented-fee-sat), that IS a Critical — STOP.
-  (M-5: a `≤$0.01` pro-rata rounding remainder on a multi-leg dust sale is a THIRD, fee-free non-estimate
-  attribution — Σ-conserving, vanishes at 8949 whole-dollar rounding; add a characterization assert if a
-  fixture surfaces it, else it stays documented in SPEC §6.)
+  (M-5: a cent-scale pro-rata rounding remainder (≤ ½¢ per prior leg) on a multi-leg dust sale is a THIRD,
+  fee-free non-estimate attribution — Σ-conserving, vanishes at 8949 whole-dollar rounding; add a
+  characterization assert if a fixture surfaces it, else it stays documented in the SPEC's Invariant-KAT
+  clause.)
 - [ ] **Step 3: Mutation** — n/a (characterization); the three tests together are the discrimination (fee-free
   single-leg ≥ 0; the two negatives trace to documented fees with the estimate intact).
 - [ ] **Step 4: Commit** `test(tranche): no-loss-from-the-estimate invariant + the two documented-fee corners (tax min-7, SPEC §6 amended)`.
