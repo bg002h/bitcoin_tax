@@ -83,11 +83,13 @@ examples-tui:
 	  || { echo "examples-tui: groff did not emit a PDF"; exit 1; }
 
 ## tui-walkthrough: render the TUI screen-walkthrough PDF (design/tui-walkthrough) — prose narration
-## INTERLEAVED with the byte-gated `.txt` frame goldens, per journey manifest. Convenience render only;
-## the PDF is NOT byte-gated and is git-ignored. The GATED artifacts are: (1) the `.txt` frames, held by
-## each TUI crate's `*_walkthrough_goldens_match_committed` test; and (2) the manifests, held by xtask's
-## `walkthrough_manifests_valid_and_complete` (grammar + a FRAME⇄golden bijection) — together they pin the
-## whole artifact (SPEC §5). Currently the J8 proof-of-concept; Phase 2 adds J1..J7, J9 as more manifests.
+## INTERLEAVED with captured CLI console transcripts and the byte-gated `.txt` frame goldens, per journey
+## manifest. Convenience render only; the PDF is NOT byte-gated and is git-ignored. The GATED artifacts
+## are: (1) the `.txt` frames, held by each TUI crate's `*_walkthrough_goldens_match_committed`; (2) the
+## `.console.md` transcripts, held by xtask's `walkthrough_console_golden_matches_committed`
+## (`regen == committed`); and (3) the manifests, held by xtask's `walkthrough_manifests_valid_and_complete`
+## (grammar + FRAME⇄`.txt` and CONSOLE⇄`.console.md` bijections) — together they pin the whole artifact
+## (SPEC §5). Currently the J8 proof-of-concept; Phase 2 adds J1..J7, J9 as more manifests.
 ## Needs `groff`. Asserts the roff carries `\m[]` color escapes so a silent regression to monochrome fails.
 tui-walkthrough:
 	@mkdir -p docs/pdf

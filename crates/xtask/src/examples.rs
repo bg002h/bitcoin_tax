@@ -205,6 +205,20 @@ fn plain<'a>(args: &'a [&'a str]) -> Cmd<'a> {
     }
 }
 
+/// Like `plain`, but ALSO captures stderr (`show_stderr: true`). Used by the walkthrough console
+/// transcript (review I-1) so the golden is the WHOLE terminal session, not just stdout — the manifest
+/// claims "the exact terminal session". `emit` only appends a `stderr:` block when stderr is non-empty,
+/// so the committed transcript is unchanged while stderr stays empty (it is today), but any future stderr
+/// from `init`/`import`/`verify` enters the gated bytes instead of silently diverging from the claim.
+#[cfg(test)]
+fn plain_with_stderr<'a>(args: &'a [&'a str]) -> Cmd<'a> {
+    Cmd {
+        args,
+        now: None,
+        show_stderr: true,
+    }
+}
+
 /// Generate the whole-file golden by running `bin` across every journey. Pure function of
 /// `(repo tree, binary, synthetic inputs)`.
 pub fn generate(bin: &Path) -> String {
@@ -1015,26 +1029,32 @@ fn generate_j8_walkthrough_console(bin: &Path) -> String {
     write_corpus(cwd, "river.csv", J8_RIVER_CSV);
     write_corpus(cwd, "coinbase.csv", J8_COINBASE_CSV);
     let mut t = String::new();
+    // show_stderr:true on every step (review I-1): the transcript must be the WHOLE terminal session.
     emit(
         &mut t,
         bin,
         cwd,
-        &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+        &plain_with_stderr(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
     );
     emit(
         &mut t,
         bin,
         cwd,
-        &plain(&["--vault", "v.pgp", "import", "river.csv"]),
+        &plain_with_stderr(&["--vault", "v.pgp", "import", "river.csv"]),
     );
     emit(
         &mut t,
         bin,
         cwd,
-        &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+        &plain_with_stderr(&["--vault", "v.pgp", "import", "coinbase.csv"]),
     );
     // Exits 1: the two legs are unreconciled transfers (a hard blocker) — the lead-in to the TUI match.
-    emit(&mut t, bin, cwd, &plain(&["--vault", "v.pgp", "verify"]));
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "verify"]),
+    );
     t
 }
 
@@ -1370,19 +1390,21 @@ mod tests {
         std::fs::write(&path, generated).unwrap();
     }
 
-    /// TUI screen-walkthrough manifest gate (SPEC §5; folds PoC review C-1). Each
-    /// `docs/examples-tui-walkthrough/<journey>/manifest.txt` is hand-authored (prose + captions live
+    /// TUI screen-walkthrough manifest gate (SPEC §5; folds PoC review C-1 + the console-feature review).
+    /// Each `docs/examples-tui-walkthrough/<journey>/manifest.txt` is hand-authored (prose + captions live
     /// ONLY here — the single owner), so nothing REGENERATES it; instead this pins its INTEGRITY on every
     /// `make check`, the property the byte-gated `examples.md` gives that artifact:
-    ///   (a) grammar — every non-blank, non-`#` line is `PROSE <text>` or `FRAME <file.txt> <caption>`,
-    ///       both with non-empty payloads (mirrors, and slightly tightens, `assemble-walkthrough.sh`); and
-    ///   (b) a BIJECTION between the manifest's `FRAME` references and the frame goldens on disk — every
-    ///       reference resolves to a committed `.txt`, AND every committed `.txt` (bar `manifest.txt`) is
-    ///       referenced. (a→b) alone catches a typo'd/renamed reference; (b→a) catches a SILENTLY DROPPED
-    ///       `FRAME` line, which would otherwise leave an orphaned golden and quietly shrink the walkthrough
-    ///       with the whole validation surface still green (the exact hole the review flagged).
-    /// The frames themselves are byte-gated in the TUI crates (`*_walkthrough_goldens_match_committed`);
-    /// this + those together pin the whole artifact. Generalizes for free to Phase 2's J1..J7,J9 dirs.
+    ///   (a) grammar — every non-blank, non-`#` line is `PROSE <text>`, `CONSOLE <file.console.md>
+    ///       <caption>`, or `FRAME <file.txt> <caption>`, each with non-empty payloads (mirrors, and
+    ///       slightly tightens, `assemble-walkthrough.sh`); and
+    ///   (b) TWO BIJECTIONS — the manifest's `FRAME` references ⇄ the frame `.txt` goldens on disk, and its
+    ///       `CONSOLE` references ⇄ the `.console.md` transcripts (every non-`manifest.txt` file must be
+    ///       exactly one class). Each direction matters: a reference with no artifact is a typo/rename; an
+    ///       artifact with no reference is a SILENTLY DROPPED directive that would leave an orphan and
+    ///       quietly shrink the walkthrough with the whole validation surface still green.
+    /// The frames are byte-gated in the TUI crates (`*_walkthrough_goldens_match_committed`); the console
+    /// transcripts are `regen == committed`-gated (`walkthrough_console_golden_matches_committed`); this +
+    /// those pin the whole artifact. Generalizes for free to Phase 2's J1..J7,J9 dirs.
     #[test]
     fn walkthrough_manifests_valid_and_complete() {
         let root = workspace_root().join("docs/examples-tui-walkthrough");
@@ -1424,6 +1446,11 @@ mod tests {
                          (the `.SH` would degrade to the filename)"
                     );
                     assert!(
+                        !caption.contains('"') && !caption.contains('\\'),
+                        "{rel}/manifest.txt:{ln}: caption must not contain `\"` or `\\` \
+                         (breaks the roff `.SH` quoting) — N-1"
+                    );
+                    assert!(
                         file.ends_with(".console.md"),
                         "{rel}/manifest.txt:{ln}: CONSOLE reference `{file}` is not a `.console.md` \
                          transcript"
@@ -1438,6 +1465,11 @@ mod tests {
                         !caption.trim().is_empty(),
                         "{rel}/manifest.txt:{ln}: FRAME `{file}` has no caption \
                          (the `.SH` would degrade to the filename)"
+                    );
+                    assert!(
+                        !caption.contains('"') && !caption.contains('\\'),
+                        "{rel}/manifest.txt:{ln}: caption must not contain `\"` or `\\` \
+                         (breaks the roff `.SH` / awk -v) — N-1"
                     );
                     assert!(
                         file.ends_with(".txt") && file != "manifest.txt",

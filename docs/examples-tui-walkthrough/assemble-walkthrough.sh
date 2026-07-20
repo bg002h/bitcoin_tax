@@ -56,9 +56,11 @@ while IFS= read -r line || [ -n "$line" ]; do
         exit 1
       fi
       printf '.SH "%s"\n' "$caption"
-      # Reuse the examples PDF's proven ```console rendering (verbatim, page-wrapped, roff-escaped); drop
-      # its BEGIN `.TH` (this is a fragment inside the walkthrough doc, not its own man page).
-      awk -f "$manwrap" "$console_path" | grep -v '^\.TH '
+      # Reuse the examples PDF's proven ```console rendering (verbatim, page-wrapped, roff-escaped) in
+      # FRAGMENT mode: no BEGIN `.TH`, and the document-level front-matter/comment rules are disabled so a
+      # `---` or `<!--` line in the transcript renders verbatim instead of swallowing the block (review
+      # M-1). `grep -v '^\.TH '` is a belt-and-suspenders backstop should an older renderer be passed.
+      awk -v fragment=1 -f "$manwrap" "$console_path" | grep -v '^\.TH '
       ;;
     'FRAME '*)
       rest="${line#FRAME }"

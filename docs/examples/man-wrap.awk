@@ -4,8 +4,14 @@
 # (Task 1.5) — this only has to keep groff from choking and emit a readable page.
 #
 # Used by `make examples`:  awk -f docs/examples/man-wrap.awk docs/examples/examples.md | groff -k -man -T pdf
+# `-v fragment=1`: FRAGMENT mode (used by the TUI screen-walkthrough's CONSOLE directive, which pipes one
+# committed `.console.md` transcript through this renderer). A fragment is spliced INTO an existing roff
+# doc, so it must emit no document-level `.TH`, and it must NOT run the front-matter / HTML-comment rules
+# below — those are document-level and, because they are evaluated before the `inpre` fence check, a `---`
+# or `<!--` line INSIDE a fenced transcript would otherwise open phantom front matter and swallow the rest
+# of the block (walkthrough review M-1). In fragment mode every line is either a fence or verbatim content.
 BEGIN {
-    print ".TH BTCTAX-EXAMPLES 7 \"\" \"btctax\" \"Worked Examples\""
+    if (!fragment) print ".TH BTCTAX-EXAMPLES 7 \"\" \"btctax\" \"Worked Examples\""
     fm = 0; fmdone = 0; inpre = 0; incomment = 0
     WRAP = 118 # cols that fit the landscape page (see `make examples`); longer console lines are wrapped
 }
@@ -26,13 +32,15 @@ function emit_pre(line,   brk, seg, rest) {
     print line
 }
 # YAML front matter: the first `---` opens it, the second closes it; drop the block and the fences.
+# (Skipped entirely in `fragment` mode — see the BEGIN note; a `---` in a transcript is verbatim content.)
 /^---[ \t]*$/ {
-    if (fmdone == 0) { fm = !fm; if (fm == 0) fmdone = 1; next }
+    if (!fragment && fmdone == 0) { fm = !fm; if (fm == 0) fmdone = 1; next }
 }
 fm == 1 { next }
-# HTML comment block (the GENERATED banner) — drop it, however many lines it spans.
+# HTML comment block (the GENERATED banner) — drop it, however many lines it spans. (Skipped in `fragment`
+# mode: a transcript that happens to print `<!--` is verbatim content, not a doc comment.)
 incomment == 1 { if ($0 ~ /-->/) incomment = 0; next }
-/<!--/ { if ($0 !~ /-->/) incomment = 1; next }
+/<!--/ { if (!fragment) { if ($0 !~ /-->/) incomment = 1; next } }
 # Fenced code blocks -> no-fill + constant-width. Drop the ``` fence lines themselves. `.ft CR`/`.ft P`
 # (constant-width roman / previous font) is portable across groff devices, including gropdf (-T pdf).
 /^```/ {
