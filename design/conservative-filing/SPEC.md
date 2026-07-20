@@ -30,11 +30,26 @@ return + a **mandatory methodology disclosure**.
 ## 2. Resolved decisions (folds r1 findings; supersedes v1's D-1..D-7)
 
 - **D-1 Tranche = a first-class `EventPayload::DeclareTranche`, NOT a tagged `Acquire`** (arch I-4/I-5/min-9).
-  Fields: `{ sat, wallet, window_start, window_end }`. It **folds like an acquire** into a lot:
-  `basis_source = EstimatedConservative`, `usd_basis = 0`, `acquired_at = window_end`, `wallet = declared`.
-  This homes the **window** (P5/P6/P7 need it), the **event identity** (a Decision-id payload — `Acquire`
-  has no manual `Source`), and the **wallet** (the fold hard-requires it, `fold.rs:568`). v1 declares **$0
-  basis only** (D-7); no floor field is filed.
+  Fields: `{ sat, wallet, window_start, window_end }`. It folds into a lot: `basis_source =
+  EstimatedConservative`, `usd_basis = 0`, `acquired_at = window_end`, `wallet = declared`. This homes the
+  **window** (P5/P6/P7 need it), the **event identity** (`EventId::Decision { seq }` — `Acquire` has no
+  manual `Source`), and the **wallet** (the fold hard-requires it, `fold.rs:568`). v1 declares **$0 basis
+  only** (D-7); no floor field is filed.
+  - **D-1a Decision-event fold machinery (arch r2 New-1 — SPEC-owned, not a plan detail).** A `DeclareTranche`
+    is the FIRST decision payload folded as a primary movement; today the pass-2 timeline builder
+    (`resolve.rs:1054`) filters to `EventId::Import` only. P1 MUST extend it to admit `DeclareTranche`, and:
+    (a) **Effective date = `window_end`, decoupled from the event timestamp.** The `LedgerEvent.utc_timestamp`
+    keeps its documented CREATION-time meaning (no back-dating — preserves the events-list/audit convention);
+    the fold builds this event's `Eff` with `date = window_end`, so `pool_key` (`pools.rs:15`) and the pass-1
+    conservation snapshot (`transition.rs:44`) bucket it correctly (pre-2025 window ⇒ `PoolKey::Universal`).
+    (b) **Canonical-order surrogate:** `sort_canonical` keys on `(utc, src_priority, src_ref)` which a Decision
+    id lacks — order `DeclareTranche` Effs by `(window_end, decision_seq)` for determinism (NFR4); two
+    same-window tranches tie-break on `decision_seq`.
+    (c) **No silent skip:** `build_op`'s `_ => Op::Skip` catch-all (`resolve.rs:393`) means an omitted arm
+    vanishes the tranche silently — the new arm is REQUIRED and pinned by a KAT ("a DeclareTranche yields an
+    Op, never Skip").
+    (d) **Void/duplicate (arch r2 New-6):** voidable via the generic `VoidDecisionEvent` (revocable per the
+    `Some(_)` catch-all, `resolve.rs:464`); two tranches are legitimately additive (no duplicate-conflict).
 - **D-2 Holding period date = window END (pin it).** `acquired_at := window_end` (arch/tax min-5 — never a
   "representative"/midpoint date, which would overclaim the hold). The window END is the latest plausible
   acquisition date → conservative for the holding period (never overclaims long-term).
@@ -61,17 +76,36 @@ return + a **mandatory methodology disclosure**.
 - **D-7 v1 declares & files `$0` ONLY** (arch I-7). `DeclareTranche` carries no floor; nothing `> $0` is ever
   written to a filed 8949 by the conservative flow. The window-low reference (P5) feeds ONLY P6's
   informational delta. Filing a `> $0` floor moves to Approach B (with D-10).
-- **D-8 Transition exemption — the tag MUST survive the 2025 seed (arch C1).** Pre-2025 tranches fold into
-  `PoolKey::Universal`; at the 2025-01-01 seed, Path A currently overwrites `basis_source →
-  ReconstructedPerWallet` (`transition.rs:82`). This feature **exempts `EstimatedConservative` from the
-  Path-A overwrite** so the tag reaches 2025+ disposal legs (which is *every* disposal it serves). **Path B:**
-  declaring a pre-2025 tranche in a vault with an effective `SafeHarborAllocation` changes the Universal
-  residue → the conservation guard hard-blocks it (`SafeHarborUnconservable`). v1 **refuses** a pre-2025
-  tranche declaration when a Path-B allocation is in force, with a clear message (amend the allocation first);
-  it does not silently inert the allocation. KAT: tranche-through-transition preserves the tag + a 2025+
-  disposal leg carries `EstimatedConservative`.
+- **D-8 The tag MUST survive BOTH overwrite sites (arch C1 + r2 New-2).** The `EstimatedConservative` tag is
+  hard-overwritten at exactly two sites (assignment-site sweep): the 2025 Path-A seed
+  (`basis_source = ReconstructedPerWallet`, `transition.rs:83`) and the self-transfer RELOCATION arm
+  (`basis_source = CarriedFromTransfer`, `fold.rs:812`). This feature **exempts `EstimatedConservative` from
+  BOTH**:
+  - **Path-A seed:** exempt so the tag reaches 2025+ disposal legs (every disposal it serves). Path A keeps
+    `usd_basis`/`acquired_at` and routes to `PoolKey::Wallet(lot.wallet)`, so the exemption changes ONLY the
+    tag — the per-wallet position is identical.
+  - **Relocation (arch r2 New-2):** exempt so a tranche moved Exchange → SelfCustody — **exactly the move P8
+    recommends**, and `SelfTransfer` is lot-selectable — keeps its tag; else the disposal leg silently loses
+    P3's dip advisory and P7's MANDATORY disclosure (its own test calls a filed-tranche year without the
+    disclosure "a hard gap"). Precedent: the pseudo taint already propagates through this same relocation
+    struct (`fold.rs:818`). `usd_basis`/`acquired_at` already carry, so tax/term/HIFO are unaffected either
+    way — only the tag-keyed advisory/disclosure layer is at stake.
+  - **Path-B (allocation present when declaring a tranche):** declaring a pre-2025 tranche changes the
+    Universal residue → `SafeHarborUnconservable` (`resolve.rs:1240`). v1 **refuses** the declaration with a
+    message that HEDGES the real-world irrevocability (tax r2 N-3): "revisit the in-app safe-harbor
+    allocation; if your filed safe-harbor allocation is already final, unallocated pre-2025 units are a
+    facts-and-circumstances matter for a professional." It never silently inerts the allocation.
+  - **Reverse order (arch r2 New-3):** declaring a `SafeHarborAllocation` into a vault that ALREADY holds a
+    pre-2025 tranche is **symmetrically refused** in v1 — an allocation deliberately conserving over the
+    tranche's ($0-basis) sats would otherwise become effective and Path B would DISCARD the tranche lot with
+    no trace (`transition.rs:88`). Same hedged message.
+  - **KATs:** tranche-through-Path-A-seed preserves the tag + a 2025+ disposal leg carries
+    `EstimatedConservative`; a relocated tranche keeps the tag; both directions of the allocation/tranche
+    coexistence are refused. Scope the transition KAT to Path-A / no-effective-allocation vaults.
 - **D-9 HIFO-posture mechanism (arch I-6).** Steering is emergent ONLY under HIFO (a $0 lot sorts last,
-  `pools.rs:272`); under the FIFO default an old $0 tranche is consumed FIRST (gain-maximizing inversion).
+  `pools.rs:272`); under the FIFO default an old $0 tranche is consumed FIRST (a *gain*-maximizing inversion —
+  not necessarily *tax*-maximizing once LT character is weighed, but never an understatement: correct
+  application of the in-force method files the correct tax for that method, tax r2 N-2).
   v1 does **not** auto-emit a `MethodElection` (elections are ≥2025 + global/Exchange-scoped — heavy). Instead
   P3 is UPGRADED to fire a **method-inversion advisory** whenever the in-force method would consume a tranche
   lot while a documented lot remains available in the same wallet, and P8/product copy recommends a HIFO
@@ -89,7 +123,8 @@ return + a **mandatory methodology disclosure**.
   `BasisSource` compile-forces (scope in the plan): `forms.rs::how_acquired_from` (this is the **Form 8283**
   donor field, NOT an 8949 column — tax min-6; give it `Review`, and state §170(e): an LT tranche donation →
   FMV deduction, an ST-held tranche donation → deduction limited to basis = **$0**); `render.rs:44` CSV
-  label; `tui-edit form.rs:1756` edit-ring label (off-ring, precedent `SelfTransferInbound`).
+  label; `tui-edit form.rs:1756` edit-ring + `form.rs:1771` `basis_source_display` — all 4 sites (off-ring,
+  precedent `SelfTransferInbound`). Voidable via `VoidDecisionEvent` (D-1d).
 - **Input:** a CLI verb (quantity, wallet, window start/end); $0 basis only in v1. Forward-only vault
   compat note (new variant → older binaries can't read; no installed base, harmless).
 - **Tests:** DeclareTranche → lot (`$0`, `EstimatedConservative`, `acquired_at=window_end`, declared wallet);
@@ -115,7 +150,7 @@ return + a **mandatory methodology disclosure**.
 ### P5 — Window reference-price engine (informational only in v1)
 - `fn window_reference(prices, start, end) -> Option<Usd>` — the min **daily close** over the window from the
   bundled data (5,801 rows, 2010→2026, verified). **NOT a true floor** (tax I-3: intraday lows can be lower);
-  it is a *close-based reference*, caveated in D-2/P6 copy. Partial dataset overlap → min over the covered
+  it is a *close-based reference*, caveated here and in P6 copy. Partial dataset overlap → min over the covered
   part **with a caveat** (or `None` if no overlap). Never filed in v1 (D-7).
 - **Tests:** min-close over range; partial-overlap caveat; out-of-range → None.
 
@@ -124,15 +159,18 @@ return + a **mandatory methodology disclosure**.
   importing the records could save ~$X — at the cost of a documented basis an examiner can question." For a
   tranche the filer knows is **inherited**, the nudge additionally notes basis is reconstructable **by law**
   from date-of-death FMV with no purchase records (§1014 — the cheapest reconstruction; tax min-8a). Reuses
-  the clone-fold-discard what-if seam (`whatif.rs`); nothing `>$0` is filed.
+  the clone-fold-discard what-if seam (`whatif.rs`); nothing `>$0` is filed. **Surface (arch r2 New-4):** the
+  nudge appears in the `report --tax-year` output (below the tranche figures) and the TUI Tax tab; year-scope
+  = the tranche legs consumed in the report's year, plus a one-line note if undisposed tranche sats remain.
 - **Tests:** delta = tax($0) − tax(reference) for a fixed profile; $0 when reference is $0/absent; nudge
-  present iff a filed $0 tranche has a non-zero recoverable delta. Specify year-scoping (filed legs this year
-  + a future-consumption note).
+  present iff a filed $0 tranche has a non-zero recoverable delta (this year's consumed legs).
 
 ### P7 — Methodology disclosure (D-4; REQUIRED)
 - Emitted whenever a tranche is in the filed set (not opt-in): enumerates each tranche's window + $0 position
   + the "records unreconstructable → conservative" rationale, **provenance-neutral**, and **term-correct**
-  (states LT/ST as computed, never hard-codes "long-term"). First-class export artifact.
+  (states LT/ST as computed, never hard-codes "long-term"). **Export (arch r2 New-4):** a text file
+  (`basis_methodology.txt`) written alongside the form CSVs in the export dir, and surfaced in the TUI as a
+  required artifact whenever a tranche is filed.
 - **Tests:** present iff a filed tranche exists; enumerates each tranche; a filed-tranche year without it is a
   hard gap (assert presence); no hard-coded "long-term".
 
