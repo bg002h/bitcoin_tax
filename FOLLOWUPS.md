@@ -2603,16 +2603,12 @@ polish cycle):
 corrected a false Makefile gating claim + SPEC §5 As-built amendment) and the fail-open Makefile loop
 (I-1); r2 (0C/1I) folded NEW-I-1 (per-crate `WALKTHROUGH_{VIEWER,EDITOR}_STEMS` asserts pin disk⇄capture
 so a dropped tuple can't pass vacuously); r3 GREEN. One non-gating residue:
-- **r3-M-1 (Minor, owning phase: Phase 2 rollout)** — the crate stem consts and the manifest FRAME set
-  are two independent authorities with no automated cross-check: a PAIR-fault (drop a capture tuple AND
-  its `WALKTHROUGH_*_STEMS` entry together) leaves an orphaned, never-re-verified golden still rendering
-  into the PDF. Reachable only by a half-done DELIBERATE removal that ignores the stem assert's explicit
-  "update the const AND the manifest together" instruction; every SINGLE accidental fault reds. Phase-2
-  remedy when the consts grow per-journey: add a cross-check (e.g. the xtask gate parses the two
-  `WALKTHROUGH_*_STEMS` consts out of the crate sources and asserts their union == the union of manifest
-  FRAME refs), or record the removal protocol in the rollout checklist.
-- **r3 non-finding (Phase 2)** — SPEC §11 mentions a `make regen-walkthrough` one-command refresh target
-  that does not exist yet (future-directed, tied to the Phase-2 golden count). Provide it during rollout.
+- **r3-M-1 (Minor, owning phase: Phase 2 rollout) — DONE 2026-07-20 (cc8e885)** — closed the const⇄manifest
+  drift gap: `walkthrough_manifests_valid_and_complete` now parses the two `WALKTHROUGH_*_STEMS` consts out
+  of the crate sources and asserts their UNION == every frame golden on disk (a golden captured by no crate
+  reds). Mutation-proven. The whole chain manifest⇄disk⇄capture⇄real-TUI is pinned.
+- **r3 non-finding (Phase 2) — DONE 2026-07-20 (cc8e885)** — `make regen-walkthrough` added (regenerates all
+  frame + console goldens in one command; manifests untouched).
 
 **Phase-2 walkthrough journey reviews (J1-J9) — app-side / doc residue (2026-07-19,
 `reviews/phase2-*.md`):** all 9 journeys reviewed to GREEN (J9 folded 2 Important — the false
