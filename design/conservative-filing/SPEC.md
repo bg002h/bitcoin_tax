@@ -20,6 +20,11 @@ Guardrails (from DESIGN §2, restated as MUSTs):
   helps hide income. Conservative *over*-reporting is the defense; omission is evasion.
 - **G-2 $0 is the only unassailable basis.** $0 is the default filed basis for unprovable coins; any basis
   `> $0` is an explicit, warned opt-in (it asserts an acquisition window an examiner can question).
+- **G-3 The fairness ↔ attack-surface curve is the user's to walk (owner framing).** The product's job is
+  to let the filer decide **how much time/effort they will spend to approach fairness**, making explicit that
+  *the closer to fairness (lower tax) they get, the larger the audit attack surface they create.* v1 files
+  the safe end ($0) by default and actively quantifies the other end ("reconstruct + import records to save
+  ~$X"), so the choice is informed and theirs — never silently made for them.
 
 ## 2. Resolved decisions (DESIGN §8)
 
@@ -50,6 +55,23 @@ Guardrails (from DESIGN §2, restated as MUSTs):
   a REAL (conservative) basis. It MUST NOT set `pseudo_active()`, MUST export CLEAN (no `[PSEUDO]` banner, no
   attestation gate), and is distinct from pseudo-reconcile (synthetic-estimate, resolve-before-filing). A KAT
   pins that a tranche year exports without the pseudo banner.
+- **D-6 Form 8949 mapping (O-1, verified against IRS i8949 — sources in-thread).** A conservative-tranche
+  disposal reports on **Part II (long-term)** with **date acquired = "VARIOUS"** (col b — explicitly permitted
+  for units "acquired through several different purchases," reported on one row). Box: **F** when the disposal
+  is NOT on a 1099-B/DA (private/P2P or pre-reporting self-custody — "you didn't receive a Form 1099-B or
+  1099-DA"); **E** when a broker 1099-DA reports proceeds but not basis (Exchange disposal of pre-2026 coins).
+  This E-vs-F split is ALREADY driven by `forms.rs`'s Exchange-vs-SelfCustody logic (`box_needs_review`) — P1
+  reuses it, adds no new box logic. Basis (col e) = the conservative $0/floor. **No** adjustment code (f)/(g)
+  — you supply a missing basis, you don't correct a broker-reported one (code B is only for correcting a
+  reported basis). ★ **The i8949 mandates: "If you don't use the actual cost, attach an explanation of your
+  basis." — so P7 (methodology disclosure) is a COMPLIANCE REQUIREMENT, not optional** (see P7).
+- **D-7 O-2 resolved — v1 files `$0`; the floor is an ACTIVE, quantified nudge, never a v1 filed position.**
+  Per G-3: v1 files `$0` for every unprovable tranche and P6 surfaces "reconstruct this <window> tranche +
+  import the records to save ~$X (at the cost of a documented basis an examiner can question)." The filer
+  acts on it OUTSIDE the conservative flow — by importing real lots (ordinary documented-lot path), which
+  then steer ahead of the shrinking $0 tranche (P2). Promoting a *floor* to a filed position stays in B. So
+  P5/P6 are informational in v1 (compute + display the delta), and no `> $0` value is ever written to a
+  filed 8949 by the conservative flow itself.
 
 ## 3. Primitives (P1–P8)
 
@@ -83,14 +105,22 @@ Guardrails (from DESIGN §2, restated as MUSTs):
   window is outside the dataset (→ fall back to $0 + surface "no price data for that window").
 - **Tests:** window-low is the min close in range; boundary/out-of-range cases.
 
-### P6 — Overpayment-delta (informational)
-- For a tranche, compute the tax difference between the $0 position and the window-low floor position
-  ("reconstructing this tranche could save ~$X"). Reuses the report/optimize engine (no persisted change).
-- **Tests:** delta = tax($0) − tax(floor) for a fixed profile; zero when window-low is $0/absent.
+### P6 — Overpayment-delta nudge (informational; the G-3 lever)
+- For each tranche, compute the tax difference between its filed `$0` position and the window-low floor
+  position, and surface it as an ACTIVE call-to-action: "reconstructing this <window> tranche and importing
+  the records could save ~$X — at the cost of a documented basis an examiner can question." Reuses the
+  report/optimize engine (no persisted change; nothing `> $0` is filed — D-7). This is how the filer sees,
+  and chooses, their point on the fairness ↔ attack-surface curve (G-3).
+- **Tests:** delta = tax($0) − tax(window-low) for a fixed profile; $0 when the window-low is $0/absent; the
+  nudge is present iff a filed `$0` tranche has a non-zero recoverable delta.
 
-### P7 — Methodology disclosure output (D-4)
-- Generate the text statement from the tranches present (windows, positions taken). Exportable.
-- **Tests:** statement enumerates each tranche's window + position; present iff a tranche exists.
+### P7 — Methodology disclosure output (D-4, D-6 — REQUIRED, not optional)
+- The IRS i8949 REQUIRES an attached basis explanation whenever actual cost isn't used (D-6). So whenever a
+  conservative tranche is present in a filed year, generate the methodology statement (each tranche's window,
+  the position taken = $0/floor, and the "records unreconstructable → conservative" rationale) and make it a
+  first-class export artifact alongside the 8949/Sch D — NOT an opt-in.
+- **Tests:** the statement enumerates each tranche's window + position; it is emitted whenever a tranche is
+  in the filed set (a filed-tranche year without the disclosure is a hard gap — assert its presence).
 
 ### P8 — Self-custody nudge (advisory)
 - Advisory suggesting the oldest/no-records tranches be held in SelfCustody (own-books specific-ID never
@@ -101,12 +131,12 @@ Guardrails (from DESIGN §2, restated as MUSTs):
 The guided wizard (B); ProRata auto cross-wallet split; AMT computation; non-BTC assets; broker
 transfer-statement/covered-lot provenance modeling (D-3); Form 8275 generation (D-4).
 
-## 5. Owner decisions still needed (flag before/at review)
-- **O-1 The 8949 character/box** for an `EstimatedConservative` tranche disposal (e.g., "various" acquired +
-  which box) — a tax-form-correctness detail to confirm against the 8949 instructions.
-- **O-2 Whether the documented-floor opt-in is in v1 at all**, or v1 ships **$0-only** (simplest, purest
-  defense) with the floor engine (P5/P6) as informational-only and the *filed* floor deferred to B. (Leaning
-  v1 = $0 filed + floor shown as what-if; promote-to-filed in B.)
+## 5. Owner decisions — RESOLVED
+- **O-1 → D-6.** Researched against IRS i8949: Part II / "VARIOUS" / Box F (no 1099) or E (broker, no basis,
+  reuses `forms.rs`) / conservative basis in col (e) / no adjustment code — and the disclosure is MANDATED,
+  which elevates P7.
+- **O-2 → D-7 + G-3.** v1 files `$0`; the floor is an active quantified nudge (P6), never a v1 filed
+  position; promote-to-filed stays in B. The filer walks the fairness↔attack-surface curve themselves.
 
 ## 6. Test / green definition
 Per STANDARD_WORKFLOW: every primitive TDD + mutation-proven; full suite + CI green; the SPEC and each
