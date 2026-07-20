@@ -118,10 +118,12 @@ Each TDD + mutation-verified (cp-backup/restore experiments, never `git checkout
   NOT auto-computed (you attest the same per-wallet actuals; the tag sets only the timebar rule). Decision:
   attest-only — the auto pro-rata (Rev. Proc. 2024-28 "global allocation") split is a separate feature, and
   specific-unit (`ActualPosition`) dominates for tax minimization anyway.
-- **cargo-deny (supply-chain CI) — WIRED, UNVERIFIED LOCALLY.** `deny.toml` + a `supply-chain` CI job
-  (advisories + licenses + bans + sources; cargo-deny subsumes cargo-audit). No tool/network in the sandbox,
-  so its FIRST real run is on GitHub CI and MAY surface advisories/licenses to address (the gate working).
-  Tighten `bans` → `deny` after the first clean run.
+- **cargo-deny (supply-chain CI) — PULLED from this batch (owner-directed 2026-07-20); re-filed as a
+  standalone security project (§ below).** It was wired (`deny.toml` + a `supply-chain` CI job) but couldn't
+  run in the sandbox; its FIRST real CI run RED'd on real, **pre-existing** findings (LGPL license + 6 RUSTSEC
+  advisories — recorded below). Rather than half-ship a gate that reds `main`, the job + `deny.toml` were
+  reverted; cargo-deny lands later with proper per-advisory triage + owner sign-off. **The guardrail worked:
+  main was NOT merged red.**
 
 **P3-d — DEFERRED (NOT a cheap fix).** `value_is_answered` treating `Money(0)`/`Bool(false)` as unanswered
 (`draw_edit.rs:2590`, section-completeness glyph) is a facet of the answered-ness invariant: plain-value
@@ -137,6 +139,35 @@ render KAT; a `begin_edit` integration KAT, mutation-verified). r2 GREEN 0C/0I. 
 the ProRata modal note still clips at terminal widths **≤63 cols** — a degenerate width where the modal's
 ~84-col residue table is unusable anyway, and strictly better than the pre-fix all-widths clip; revisit only
 if a TUI min-size guard is ever added.
+
+---
+
+## ★ supply-chain security gate (cargo-deny) — DEFERRED as its own project (findings recorded 2026-07-20)
+
+Wiring cargo-deny into CI red'd on its first real GitHub run — surfacing **pre-existing** dependency issues
+(none introduced by any recent work). Owner directed pulling it out of the polish-batch merge; it returns as
+a scoped security project with per-advisory triage + owner sign-off. Starting point (verified in CI run
+`29770240057`, `advisories FAILED, licenses FAILED, bans ok, sources ok`):
+
+**License:** `LGPL-2.0-or-later` — `buffered-reader` + `sequoia-openpgp` (the vault's PGP crypto, a deliberate
+dep). Resolution: **allow LGPL** (copyleft-but-linkable; project is source-available). No code change.
+
+**Advisories (6), with in-context triage (btctax = local CLI, trusted bundled PDF templates, passphrase/S2K
+vault — NOT RSA, parses the user's own files):**
+- **RUSTSEC-2026-0187** — `lopdf` stack-overflow parsing deeply-nested PDFs. **Low** (fills bundled TRUSTED
+  AcroForms; no untrusted-PDF parse). Check for a patched lopdf.
+- **RUSTSEC-2026-0194 / -0195** — `quick-xml` (via `calamine`/xlsx) XML DoS. **Low–moderate** (a malicious
+  `.xlsx` import could resource-exhaust the LOCAL CLI; self-inflicted DoS, no RCE). Check calamine/quick-xml bump.
+- **RUSTSEC-2023-0071** — `rsa` (via sequoia) Marvin timing key-recovery. **Low** (vault is passphrase/S2K,
+  no RSA-decryption oracle exposed). No upstream fix — likely `ignore`-with-justification.
+- **RUSTSEC-2025-0136** — AES key-unwrap underflow (PGP stack). **Low** (same posture); assess the exact crate.
+- **RUSTSEC-2024-0436** — `paste` unmaintained (proc-macro). **No runtime risk**; transitive/unremovable →
+  `ignore`-with-justification.
+
+**Plan when resumed:** (1) allow LGPL; (2) update deps where a patched version exists (lopdf, quick-xml via
+calamine); (3) `ignore`-with-justification the rest (rsa-Marvin not-applicable, paste unmaintained, AES-kw
+assessed); (4) re-add the `supply-chain` job + `deny.toml`; (5) blocking once green. — OPEN, owned by a
+**dedicated security-hardening project** (owner-scheduled).
 
 ---
 
