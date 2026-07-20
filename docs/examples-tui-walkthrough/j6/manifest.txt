@@ -1,7 +1,7 @@
 # J6 — a complete Form 1040 (the kitchen-sink MFJ household) (TUI screen-walkthrough).
 # CLI setup is the EXACT captured transcript (CONSOLE); the editor tax-inputs authoring form + the viewer
 # result tabs are byte-gated frames. The richest Phase-2 journey (editor + viewer).
-PROSE \fBJourney 6 \(em a complete Form 1040.\fP John and Jane Doe file jointly and have a full tax life, not just crypto: two W\-2 jobs, interest and dividends, a mortgage and other itemized deductions \(en \fIand\fP a year of Bitcoin activity (a little mining, a small sale, and a charitable gift). btctax merges the non\-crypto household with the reconciled ledger into one return.
+PROSE \fBJourney 6 \(em a complete Form 1040.\fP John and Jane Doe file jointly and have a full tax life, not just crypto: two W\-2 jobs, interest and dividends, a mortgage and other itemized deductions \(en \fIand\fP a year of Bitcoin activity (a little mining, a small sale, and a charitable donation). btctax merges the non\-crypto household with the reconciled ledger into one return.
 PROSE \fBSetup, at the command line.\fP The crypto side is reconciled first (the mining receipt becomes a trade or business; the 0.10 BTC Send becomes a \(sc170(e) donation with its Form 8283 details), then the non\-crypto household is imported from an offline TOML. The exact terminal session:
 CONSOLE 00-setup.console.md J6 - setup - reconcile crypto, then import the household
 PROSE \fB1. Editor \(em author the return.\fP Pressing \fBT\fP opens the tax\-inputs form over the imported inputs. The left pane is the section index (Return options, Taxpayer, Spouse, W\-2s, Schedule A, ...); the right shows the selected section \(en here filing status \fIMFJ\fP and an \fIauto\fP itemize\-vs\-standard election.

@@ -1915,6 +1915,8 @@ mod tests {
             "docs/examples-tui-walkthrough is missing — the PoC J8 manifest should be present"
         );
         let mut journeys_checked = 0;
+        // r3-M-1 cross-check: every frame golden on disk, across all journeys, as `<journey>/<name>.txt`.
+        let mut all_frames: std::collections::BTreeSet<String> = Default::default();
         for entry in std::fs::read_dir(&root).expect("read docs/examples-tui-walkthrough") {
             let dir = entry.expect("dir entry").path();
             let manifest = dir.join("manifest.txt");
@@ -2018,12 +2020,72 @@ mod tests {
                 "{rel}: the manifest's CONSOLE references and the committed console transcripts must be \
                  a bijection. referenced={console_refs:?} on_disk={consoles_on_disk:?}"
             );
+            for name in &frames_on_disk {
+                all_frames.insert(format!("{rel}/{name}"));
+            }
         }
         assert!(
             journeys_checked >= 1,
             "no walkthrough manifests found under docs/examples-tui-walkthrough — the PoC J8 manifest \
              should be present"
         );
+
+        // r3-M-1: close the const⇄manifest drift gap. The per-crate `WALKTHROUGH_{EDITOR,VIEWER}_STEMS`
+        // consts pin disk⇄capture (a frame is byte-verified against the real TUI only if some crate's const
+        // lists it); the manifest bijection above pins manifest⇄disk. Neither alone catches a golden that is
+        // on disk + referenced by a manifest but captured by NO crate (a coordinated const+tuple removal that
+        // leaves the manifest ref + golden) — it would render, never re-verified. Assert the UNION of the two
+        // crates' stem consts (parsed from source) equals every frame golden on disk. Together with the
+        // per-crate stem asserts + the manifest bijection, the whole chain manifest⇄disk⇄capture⇄real-TUI is
+        // pinned. Parsing the source (not importing the test-only consts) is the only cross-crate option.
+        let mut union: std::collections::BTreeSet<String> = stems_from_source(
+            "crates/btctax-tui-edit/src/main.rs",
+            "WALKTHROUGH_EDITOR_STEMS",
+        );
+        union.extend(stems_from_source(
+            "crates/btctax-tui/src/tabs/tests.rs",
+            "WALKTHROUGH_VIEWER_STEMS",
+        ));
+        assert_eq!(
+            union, all_frames,
+            "the union of the crates' WALKTHROUGH_*_STEMS must equal every frame golden on disk — a golden \
+             in one but not the other is captured-by-no-crate (never re-verified) or listed-but-absent. \
+             stems={union:?} disk={all_frames:?}"
+        );
+    }
+
+    /// Parse the `<journey>/<name>.txt` stems out of a `const WALKTHROUGH_*_STEMS: &[&str] = &[ … ];` array
+    /// in a crate source file (r3-M-1 cross-check). The consts are `#[cfg(test)]`-only, so xtask cannot
+    /// import their values across crates; a text scan of the string literals between `&[` and `];` is the
+    /// only option. Returns the stems with `.txt` appended, to match the on-disk golden filenames.
+    fn stems_from_source(rel_path: &str, const_name: &str) -> std::collections::BTreeSet<String> {
+        let src = std::fs::read_to_string(workspace_root().join(rel_path))
+            .unwrap_or_else(|e| panic!("read {rel_path}: {e}"));
+        let start = src
+            .find(const_name)
+            .unwrap_or_else(|| panic!("`{const_name}` not found in {rel_path}"));
+        let after = &src[start..];
+        let arr_start = after.find("&[").expect("`&[` after const");
+        let arr_end = after[arr_start..]
+            .find("];")
+            .expect("`];` closing the array")
+            + arr_start;
+        let body = &after[arr_start..arr_end];
+        let mut out: std::collections::BTreeSet<String> = Default::default();
+        let mut rest = body;
+        while let Some(q1) = rest.find('"') {
+            let after_q1 = &rest[q1 + 1..];
+            let q2 = after_q1
+                .find('"')
+                .expect("closing quote for a stem literal");
+            out.insert(format!("{}.txt", &after_q1[..q2]));
+            rest = &after_q1[q2 + 1..];
+        }
+        assert!(
+            !out.is_empty(),
+            "no stem literals parsed from `{const_name}` in {rel_path}"
+        );
+        out
     }
 
     /// Captures a set of env vars and restores them on Drop — so a panic inside `generate()` cannot leave

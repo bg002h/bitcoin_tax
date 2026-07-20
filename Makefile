@@ -1,6 +1,6 @@
 # btctax — developer convenience targets.
 
-.PHONY: check test lint docs docs-man examples examples-tui tui-walkthrough bundles help
+.PHONY: check test lint docs docs-man examples examples-tui tui-walkthrough regen-walkthrough bundles help
 
 ## check: the validation gate — the full test suite AND clippy, run CONCURRENTLY (~6s warm)
 ##
@@ -106,6 +106,16 @@ tui-walkthrough:
 	@head -c4 docs/pdf/btctax-tui-walkthrough.pdf | grep -q '%PDF' \
 	  && echo "wrote docs/pdf/btctax-tui-walkthrough.pdf (colorized, landscape)" \
 	  || { echo "tui-walkthrough: groff did not emit a PDF"; exit 1; }
+
+## regen-walkthrough: regenerate ALL committed TUI screen-walkthrough goldens in one command (SPEC §11) —
+## the byte-gated frame `.txt`s (editor + viewer) AND the `.console.md` CLI transcripts. Run after an
+## intentional TUI/CLI-output change, review the diff, then commit; `make check`'s gates then re-verify.
+## (The manifests are hand-authored — this does NOT touch them.)
+regen-walkthrough:
+	cargo test -p btctax-tui-edit emit_btctax_tui_edit_walkthrough_goldens -- --ignored
+	cargo test -p btctax-tui --lib emit_btctax_tui_walkthrough_goldens -- --ignored
+	cargo test -p xtask --bins emit_walkthrough_console_golden -- --ignored
+	@echo "regenerated all walkthrough frame + console goldens (manifests untouched)"
 
 ## help: list targets
 help:
