@@ -1711,7 +1711,7 @@ fn handle_ci_list_key(app: &mut EditorApp, key: KeyEvent) {
     }
 }
 
-/// Variant-picker step: Income ↔ GiftReceived via Tab.
+/// Variant-picker step: Tab cycles Income → GiftReceived → SelfTransferMine.
 fn handle_ci_picker_key(app: &mut EditorApp, key: KeyEvent) {
     match key.code {
         KeyCode::Tab => {

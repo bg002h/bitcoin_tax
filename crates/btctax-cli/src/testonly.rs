@@ -332,7 +332,7 @@ pub fn seed_j7_income(
 
 /// Seed J3 (an unknown-basis inbound Receive → a hard blocker) classified as a SELF-TRANSFER of the
 /// filer's own coins returning — non-taxable, carrying a supplied basis ($19,000) and acquisition date
-/// (2024-11-01, long-term). The post-classify state the walkthrough's VIEWER renders (Holdings, balanced).
+/// (2024-11-01, so the holding period runs from then). The post-classify state the VIEWER renders (Holdings).
 /// The editor half seeds only the raw import and drives the classify. Made-date threaded from the caller.
 pub fn seed_j3_self_transfer(
     dir: &std::path::Path,
