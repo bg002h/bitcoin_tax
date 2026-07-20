@@ -1275,6 +1275,58 @@ fn generate_j9_walkthrough_console(bin: &Path) -> String {
     t
 }
 
+/// J2 CLI setup transcript — an appreciated-BTC charitable donation: `init`, `import`, `verify` (exit 0 —
+/// the unmatched outbound Send is only an ADVISORY blocker, not a hard one, so btctax won't guess what the
+/// Send was), `tax-profile` (2025 — the viewer's Tax tab charitable-deduction line needs it). The editor
+/// half reclassifies the Send as a donation + records the Form 8283 details. Committed to
+/// `docs/examples-tui-walkthrough/j2/00-setup.console.md`.
+#[cfg(all(test, unix))]
+fn generate_j2_walkthrough_console(bin: &Path) -> String {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J2_CSV);
+    let mut t = String::new();
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "verify"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&[
+            "--vault",
+            "v.pgp",
+            "tax-profile",
+            "--year",
+            "2025",
+            "--filing-status",
+            "single",
+            "--ordinary-taxable-income",
+            "100000",
+            "--magi-excluding-crypto",
+            "100000",
+            "--qualified-dividends",
+            "0",
+        ]),
+    );
+    t
+}
+
 /// J9 — choosing which lots a sale draws from (UX-P1-10). With two lots and a sale smaller than either
 /// combined holding, the default method picks the lots for you; `select-lots` lets you identify EXACTLY
 /// which ones — the picks (`<origin>#<split>:<sat>`) come from the disposal's `lot` column in
@@ -1602,6 +1654,10 @@ mod tests {
             (
                 "j9/00-setup.console.md",
                 generate_j9_walkthrough_console(bin),
+            ),
+            (
+                "j2/00-setup.console.md",
+                generate_j2_walkthrough_console(bin),
             ),
         ]
     }

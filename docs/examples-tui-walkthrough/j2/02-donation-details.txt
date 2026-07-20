@@ -1,0 +1,44 @@
+── glyphs ──
+  0│┌ btctax-tui-edit [EDITOR] — /edit/vault.pgp ──────────────────────────────────────────────────────────────────────────┐
+  1││ Holdings │ Disposals │ Income │ Tax │ Forms │ Compliance                                                             │
+  2│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  3│┌ Holdings ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  4││no holdings                                                                                                           │
+  5││                                                                                                                      │
+  6││                                                                                                                      │
+  7││                                                                                                                      │
+  8││                                                                                                                      │
+  9││                                                                                                                      │
+ 10││                   ┌ Set Donation Details — field form ───────────────────────────────────────────┐                   │
+ 11││                   │  event: import|coinbase|out|cb-donate  (Donation)                            │                   │
+ 12││                   │  donee_name (REQUIRED)                                                       │                   │
+ 13││                   │  donee_address                                                               │                   │
+ 14││                   │  donee_ein                                                                   │                   │
+ 15││                   │  appraiser_name (REQUIRED)                                                   │                   │
+ 16││                   │  appraiser_address                                                           │                   │
+ 17││                   │  appraiser_tin                                                               │                   │
+ 18││                   │  appraiser_ptin                                                              │                   │
+ 19││                   │  appraiser_qualifications                                                    │                   │
+ 20││                   │  appraisal_date (YYYY-MM-DD)                                                 │                   │
+ 21││                   │  fmv_method_override                                                         │                   │
+ 22││                   │  [Enter] Confirm → modal   [Esc] Back   [↑/↓] Move focus                     │                   │
+ 23││                   │                                                                              │                   │
+ 24││                   │                                                                              │                   │
+ 25││                   │                                                                              │                   │
+ 26││                   │                                                                              │                   │
+ 27││                   │                                                                              │                   │
+ 28││                   │                                                                              │                   │
+ 29││                   └──────────────────────────────────────────────────────────────────────────────┘                   │
+ 30││                                                                                                                      │
+ 31││                                                                                                                      │
+ 32││                                                                                                                      │
+ 33││                                                                                                                      │
+ 34││                                                                                                                      │
+ 35││                                                                                                                      │
+ 36││                                                                                                                      │
+ 37││                                                                                                                      │
+ 38│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ 39│Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   g/G: top/bottom   p: profile   ?: help
+── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
+  1│ 2..10 fg=Red mod=BOLD|REVERSED
+ 12│ 21..54 fg=Black bg=Cyan

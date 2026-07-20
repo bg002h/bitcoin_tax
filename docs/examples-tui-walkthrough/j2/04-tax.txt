@@ -1,0 +1,43 @@
+── glyphs ──
+  0│┌ btctax-tui — /vault.pgp ─────────────────────────────────────────────────────────────────────────────────────────────┐
+  1││ Holdings │ Disposals │ Income │ Tax │ Forms │ Compliance                                                             │
+  2│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  3│┌ Tax — 2025 ──────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  4││  ST net: 0.00   LT net: 0.00                                                                                         │
+  5││  Ordinary income from crypto: 0.00                                                                                   │
+  6││  Ordinary-rate tax (attributable delta): 0.00                                                                        │
+  7││  LTCG tax (attributable delta): 0.00   NIIT (attributable delta): 0.00                                               │
+  8││  TOTAL federal tax attributable (delta): 0.00  [= ord + LTCG + NIIT]                                                 │
+  9││  §1211 loss deduction: 0.00   Carryforward out: short 0.00 / long 0.00                                               │
+ 10││  Marginal rates: ordinary 0.22  LTCG 0.15  NIIT applies: false                                                       │
+ 11││                                                                                                                      │
+ 12││  Charitable deduction 2025 (before §170(b) AGI limits): 110996.17                                                    │
+ 13││                                                                                                                      │
+ 14││  Advisory blockers (1):                                                                                              │
+ 15││    [QualifiedAppraisalNote] Claimed deduction $110996.17 exceeds the §170(f)(11)(C) $5,000 threshold. Qualified      │
+ 16││appraisal likely required: CCA 202302012 — a crypto donation with a claimed deduction >$5,000 requires a qualified    │
+ 17││appraisal; the exchange-price/readily-valued exception does NOT apply to crypto. This is the exact §170(e) deduction  │
+ 18││for a non-dealer individual investor donating a capital asset (LT→FMV; ST→min(FMV,basis)). Caveat (a)                 │
+ 19││dealer/inventory: crypto held as inventory/for sale in a trade or business (§1221(a)(1)) or other ordinary-income     │
+ 20││property deducts at basis under §170(e) REGARDLESS of holding period — this figure assumes capital-asset (investor)   │
+ 21││status and would OVER-STATE for a dealer; verify. Caveat (b) donee type: LT→FMV assumes a public charity (50%-limit   │
+ 22││org); a non-operating private foundation reduces appreciated LT crypto to basis (§170(e)(1)(B)(ii); crypto is not     │
+ 23││qualified appreciated stock) — donee type is not modeled; would OVER-STATE for a private-foundation gift; verify.     │
+ 24││§170(f)(11)(F) aggregation: this flags a single donation; the $5,000 test also aggregates similar donated items across│
+ 25││the tax year — cross-donation aggregation is not considered here.                                                     │
+ 26││                                                                                                                      │
+ 27││                                                                                                                      │
+ 28││                                                                                                                      │
+ 29││                                                                                                                      │
+ 30││                                                                                                                      │
+ 31││                                                                                                                      │
+ 32││                                                                                                                      │
+ 33││                                                                                                                      │
+ 34││                                                                                                                      │
+ 35││                                                                                                                      │
+ 36││                                                                                                                      │
+ 37││                                                                                                                      │
+ 38│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ 39│Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   g/G: top/bottom   w: what-if   e: export
+── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
+  1│ 34..37 fg=Yellow mod=BOLD

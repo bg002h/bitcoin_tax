@@ -374,3 +374,77 @@ pub fn seed_j9_selected(
         .unwrap();
     vault
 }
+
+/// Seed J2 with the outbound Send reclassified as a §170(e) charitable DONATION (FMV $217,992.34 = 2 BTC
+/// × the contribution-date close, donee "Habitat for Humanity") — but WITHOUT the Form 8283 appraiser/donee
+/// details yet. This is the state the walkthrough's `d` (set-donation-details) EDITOR frame drives from
+/// (the details form still empty). Made-date threaded from the caller.
+pub fn seed_j2_reclassified(
+    dir: &std::path::Path,
+    pp: &btctax_store::Passphrase,
+    now: time::OffsetDateTime,
+) -> std::path::PathBuf {
+    use btctax_core::OutflowClass;
+    let vault = seed_journey(dir, pp, &j2());
+    let principal: rust_decimal::Decimal = "217992.34".parse().unwrap();
+    crate::cmd::reconcile::reclassify_outflow(
+        &vault,
+        pp,
+        "import|coinbase|out|cb-donate",
+        OutflowClass::Donate {
+            appraisal_required: false,
+        },
+        principal,
+        None,
+        Some("Habitat for Humanity".to_string()),
+        now,
+    )
+    .unwrap();
+    vault
+}
+
+/// Seed J2's fully post-decision state — the outbound reclassified as a donation, the Form 8283
+/// appraiser/donee details recorded (Section B complete), and a 2025 profile so the viewer's Tax tab
+/// computes the charitable-deduction line. The walkthrough's VIEWER renders Forms (the two 8283 rows) +
+/// Tax. Made-date threaded from the caller.
+pub fn seed_j2_donated(
+    dir: &std::path::Path,
+    pp: &btctax_store::Passphrase,
+    now: time::OffsetDateTime,
+) -> std::path::PathBuf {
+    use btctax_core::{Carryforward, DonationDetails, FilingStatus, TaxProfile};
+    use rust_decimal::Decimal;
+    let vault = seed_j2_reclassified(dir, pp, now);
+    let z = Decimal::ZERO;
+    let profile = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: Decimal::from(100_000),
+        magi_excluding_crypto: Decimal::from(100_000),
+        qualified_dividends_and_other_pref_income: z,
+        other_net_capital_gain: z,
+        capital_loss_carryforward_in: Carryforward { short: z, long: z },
+        w2_ss_wages: z,
+        w2_medicare_wages: z,
+        schedule_c_expenses: z,
+    };
+    crate::cmd::tax::set_profile(&vault, pp, 2025, profile, false).unwrap();
+    crate::cmd::reconcile::set_donation_details(
+        &vault,
+        pp,
+        "import|coinbase|out|cb-donate",
+        DonationDetails {
+            donee_name: "Habitat for Humanity".into(),
+            donee_address: None,
+            donee_ein: Some("98-7654321".into()),
+            appraiser_name: "Jane Appraiser".into(),
+            appraiser_address: None,
+            appraiser_tin: Some("12-3456789".into()),
+            appraiser_ptin: None,
+            appraiser_qualifications: Some("ASA-accredited digital-asset appraiser, 8 yrs".into()),
+            appraisal_date: Some(time::macros::date!(2025 - 09 - 15)),
+            fmv_method_override: None,
+        },
+    )
+    .unwrap();
+    vault
+}

@@ -1,0 +1,77 @@
+── glyphs ──
+  0│┌ btctax-tui-edit [EDITOR] — /edit/vault.pgp ──────────────────────────────────────────────────────────────────────────┐
+  1││ Holdings │ Disposals │ Income │ Tax │ Forms │ Compliance                                                             │
+  2│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  3│┌ Holdings ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  4││no holdings                                                                                                           │
+  5││                                                                                                                      │
+  6││                                                                                                                      │
+  7││                                                                                                                      │
+  8││                                                                                                                      │
+  9││                                                                                                                      │
+ 10││                                                                                                                      │
+ 11││                       ┌ Reclassify Outflow — kind picker  [EDITOR] ──────────────────────────┐                       │
+ 12││                       │  target: import|coinbase|out|cb-donate                               │                       │
+ 13││                       │                                                                      │                       │
+ 14││                       │Select kind (Tab to cycle, Enter to confirm):                         │                       │
+ 15││                       │                                                                      │                       │
+ 16││                       │  sell     spend     gift   > donate                                  │                       │
+ 17││                       │                                                                      │                       │
+ 18││                       │                                                                      │                       │
+ 19││                       │  Esc: back to list                                                   │                       │
+ 20││                       │                                                                      │                       │
+ 21││                       │                                                                      │                       │
+ 22││                       │                                                                      │                       │
+ 23││                       │                                                                      │                       │
+ 24││                       │                                                                      │                       │
+ 25││                       │                                                                      │                       │
+ 26││                       │                                                                      │                       │
+ 27││                       │                                                                      │                       │
+ 28││                       └──────────────────────────────────────────────────────────────────────┘                       │
+ 29││                                                                                                                      │
+ 30││                                                                                                                      │
+ 31││                                                                                                                      │
+ 32││                                                                                                                      │
+ 33││                                                                                                                      │
+ 34││                                                                                                                      │
+ 35││                                                                                                                      │
+ 36││                                                                                                                      │
+ 37││                                                                                                                      │
+ 38│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ 39│Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   g/G: top/bottom   p: profile   ?: help
+── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
+  1│ 2..10 fg=Red mod=BOLD|REVERSED
+ 11│ 24..96 fg=Cyan
+ 12│ 24..25 fg=Cyan
+ 12│ 95..96 fg=Cyan
+ 13│ 24..25 fg=Cyan
+ 13│ 95..96 fg=Cyan
+ 14│ 24..25 fg=Cyan
+ 14│ 95..96 fg=Cyan
+ 15│ 24..25 fg=Cyan
+ 15│ 95..96 fg=Cyan
+ 16│ 24..25 fg=Cyan
+ 16│ 95..96 fg=Cyan
+ 17│ 24..25 fg=Cyan
+ 17│ 95..96 fg=Cyan
+ 18│ 24..25 fg=Cyan
+ 18│ 95..96 fg=Cyan
+ 19│ 24..25 fg=Cyan
+ 19│ 95..96 fg=Cyan
+ 20│ 24..25 fg=Cyan
+ 20│ 95..96 fg=Cyan
+ 21│ 24..25 fg=Cyan
+ 21│ 95..96 fg=Cyan
+ 22│ 24..25 fg=Cyan
+ 22│ 95..96 fg=Cyan
+ 23│ 24..25 fg=Cyan
+ 23│ 95..96 fg=Cyan
+ 24│ 24..25 fg=Cyan
+ 24│ 95..96 fg=Cyan
+ 25│ 24..25 fg=Cyan
+ 25│ 95..96 fg=Cyan
+ 26│ 24..25 fg=Cyan
+ 26│ 95..96 fg=Cyan
+ 27│ 24..25 fg=Cyan
+ 27│ 95..96 fg=Cyan
+ 28│ 24..96 fg=Cyan

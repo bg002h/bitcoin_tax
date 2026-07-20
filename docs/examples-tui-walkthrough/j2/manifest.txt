@@ -1,0 +1,14 @@
+# J2 — donating appreciated Bitcoin (§170(e) / Form 8283) (TUI screen-walkthrough).
+# CLI setup is the EXACT captured transcript (CONSOLE); the editor donation flow + the viewer result tabs
+# are byte-gated frames. A Phase-2 journey (editor + viewer).
+PROSE \fBJourney 2 \(em donating appreciated Bitcoin (\(sc170(e) / Form 8283).\fP Bob donates 2 BTC to a public charity \(en a long\-held 2023 lot and a lot bought this year. Imported, the outbound Send is just an unexplained transfer; btctax will not guess it was a gift, so Bob tells it.
+PROSE \fBSetup, at the command line.\fP He creates the vault, imports Coinbase, and verifies. The Send shows only as an \fIadvisory\fP unmatched outflow (not a hard blocker \(en verify still exits 0); he sets a 2025 profile so the deduction computes. The exact terminal session:
+CONSOLE 00-setup.console.md J2 - setup - init, import, verify, tax-profile
+PROSE \fB1. Editor \(em classify the Send as a donation.\fP Pressing \fBo\fP opens the reclassify\-outflow flow; after picking the Send, he cycles the kind picker to \fBDonate\fP. The amount he records is the gift's \fIfair market value\fP \(en 2 BTC at the $108,996.17 contribution\-date close, $217,992.34.
+FRAME 01-reclassify-donate.txt J2 - step 1 - editor: reclassify-outflow kind picker (Donate)
+PROSE \fB2. Editor \(em record the Form 8283 details.\fP Because the deduction exceeds $5,000, \(sc170(f)(11) requires a qualified appraisal. Pressing \fBd\fP opens the Form 8283 Section\-B form for the donee (EIN) and the appraiser (TIN, qualifications, appraisal date).
+FRAME 02-donation-details.txt J2 - step 2 - editor: the Form 8283 appraiser/donee details form
+PROSE \fB3. Viewer \(em Forms.\fP Form 8283 shows two rows, one per donated lot. The deduction is \fB$110,996.17\fP: the long\-term lot is deducted at its full $108,996.17 FMV (its appreciation is never taxed), while the lot held under a year is reduced to its $2,000 basis under \(sc170(e)(1)(A). No gain is recognised on either \(en a donation is not a sale.
+FRAME 03-forms.txt J2 - step 3 - viewer: Forms (the two Form 8283 rows)
+PROSE \fB4. Viewer \(em Tax.\fP The charitable deduction flows to the return at $110,996.17 (before the \(sc170(b) AGI limits), and btctax flags the qualified\-appraisal requirement it has satisfied.
+FRAME 04-tax.txt J2 - step 4 - viewer: Tax (the charitable deduction)

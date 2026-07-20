@@ -14311,6 +14311,7 @@ mod tests {
         frames.extend(j7_editor_frames());
         frames.extend(j3_editor_frames());
         frames.extend(j9_editor_frames());
+        frames.extend(j2_editor_frames());
         frames
     }
 
@@ -14504,6 +14505,71 @@ mod tests {
         vec![("j9/01-select-lots", select)]
     }
 
+    /// J2 editor frames — a §170(e) charitable donation of appreciated BTC (two steps). Frame 1: `o` opens
+    /// the reclassify-outflow flow; Enter picks the Send → its kind picker; three Tabs cycle
+    /// Sell→Spend→Gift→Donate, so the frame depicts choosing DONATE. Frame 2 (on a pre-reclassified seed —
+    /// the `d` flow lists only events already classified as donations): `d` → Enter opens the Form 8283
+    /// appraiser/donee details form. The viewer then shows the resulting 8283 + the charitable deduction.
+    #[cfg(unix)]
+    fn j2_editor_frames() -> Vec<(&'static str, String)> {
+        std::env::set_var(
+            "BTCTAX_PRICE_CACHE",
+            "/nonexistent-walkthrough-price-cache.csv",
+        );
+        let pinned =
+            btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2025 - 09 - 15 12:00:00 UTC));
+        let now = time::macros::datetime!(2025 - 09 - 15 12:00:00 UTC);
+        let fixed_path = std::path::PathBuf::from("/edit/vault.pgp");
+        let pp = Passphrase::new("golden-j2-pass".into());
+
+        // Frame 1 — choose DONATE (raw import seeds the pending Send).
+        let reclassify = {
+            let dir = tempfile::tempdir().unwrap();
+            let vault =
+                btctax_cli::testonly::seed_journey(dir.path(), &pp, &btctax_cli::testonly::j2());
+            let mut app = open_app(&vault, "golden-j2-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('o')));
+            handle_key(&mut app, press(KeyCode::Enter));
+            handle_key(&mut app, press(KeyCode::Tab));
+            handle_key(&mut app, press(KeyCode::Tab));
+            handle_key(&mut app, press(KeyCode::Tab));
+            assert!(
+                matches!(
+                    app.reclassify_outflow_flow.as_ref().map(|f| &f.step),
+                    Some(ReclassifyOutflowStep::KindPicker {
+                        kind: OutflowKind::Donate,
+                        ..
+                    })
+                ),
+                "the J2 reclassify-outflow kind picker must be on Donate"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+
+        // Frame 2 — the Form 8283 details form (needs the Send already classified as a donation).
+        let details = {
+            let dir = tempfile::tempdir().unwrap();
+            let vault = btctax_cli::testonly::seed_j2_reclassified(dir.path(), &pp, now);
+            let mut app = open_app(&vault, "golden-j2-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('d')));
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.set_donation_details_flow.is_some(),
+                "the J2 set-donation-details form must be open"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+
+        vec![
+            ("j2/01-reclassify-donate", reclassify),
+            ("j2/02-donation-details", details),
+        ]
+    }
+
     /// The frame stems this crate (the editor half) is responsible for capturing. Declared EXPLICITLY so a
     /// dropped/renamed capture tuple reds the gate (NEW-I-1) — the byte-compare loop alone passes vacuously
     /// on a shrunk set, and the xtask manifest bijection would still hold (manifest⇄disk unchanged),
@@ -14518,6 +14584,8 @@ mod tests {
         "j7/01-classify-income",
         "j3/01-classify-self-transfer",
         "j9/01-select-lots",
+        "j2/01-reclassify-donate",
+        "j2/02-donation-details",
     ];
 
     #[cfg(unix)]
