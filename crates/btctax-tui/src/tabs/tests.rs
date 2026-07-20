@@ -944,10 +944,27 @@ fn btctax_tui_walkthrough_frames() -> Vec<(&'static str, String)> {
     vec![("j8/04-holdings-balanced", holdings)]
 }
 
+/// The frame stems this crate (the viewer half) is responsible for capturing. Declared EXPLICITLY so a
+/// dropped/renamed capture tuple reds the gate below (NEW-I-1): the byte-compare loop alone iterates only
+/// over what's captured, so a shrunk set passes vacuously — and the xtask manifest bijection would still
+/// hold (manifest⇄disk unchanged), leaving an orphaned golden that keeps rendering a never-re-verified,
+/// silently stale screen. This const pins disk⇄capture; Phase 2 extends it per journey, on purpose.
+#[cfg(unix)]
+const WALKTHROUGH_VIEWER_STEMS: &[&str] = &["j8/04-holdings-balanced"];
+
 #[cfg(unix)]
 #[test]
 fn btctax_tui_walkthrough_goldens_match_committed() {
-    for (stem, captured) in btctax_tui_walkthrough_frames() {
+    let frames = btctax_tui_walkthrough_frames();
+    let got: std::collections::BTreeSet<&str> = frames.iter().map(|(s, _)| *s).collect();
+    let expected: std::collections::BTreeSet<&str> =
+        WALKTHROUGH_VIEWER_STEMS.iter().copied().collect();
+    assert_eq!(
+        got, expected,
+        "the viewer walkthrough capture set changed — a dropped/renamed frame would ship a stale \
+         screen (NEW-I-1). If intentional, update WALKTHROUGH_VIEWER_STEMS and the manifest together."
+    );
+    for (stem, captured) in frames {
         let path = tui_walkthrough_golden_dir().join(format!("{stem}.txt"));
         let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
             panic!(

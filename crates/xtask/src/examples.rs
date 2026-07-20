@@ -1316,9 +1316,12 @@ mod tests {
     #[test]
     fn walkthrough_manifests_valid_and_complete() {
         let root = workspace_root().join("docs/examples-tui-walkthrough");
-        if !root.is_dir() {
-            return; // no walkthrough authored yet — nothing to gate
-        }
+        // NEW-N-1: assert (don't `return`) when the dir is absent, so this can never pass vacuously —
+        // the `journeys_checked >= 1` floor below only bites if we actually reach it.
+        assert!(
+            root.is_dir(),
+            "docs/examples-tui-walkthrough is missing — the PoC J8 manifest should be present"
+        );
         let mut journeys_checked = 0;
         for entry in std::fs::read_dir(&root).expect("read docs/examples-tui-walkthrough") {
             let dir = entry.expect("dir entry").path();

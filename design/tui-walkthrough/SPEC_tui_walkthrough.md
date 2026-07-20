@@ -195,15 +195,21 @@ list is refined during the plan; this is the intended shape.)
    the same fixture's decisions via btctax-cli (§4.2). Both pin clock + vault path +
    `BTCTAX_PRICE_CACHE`.
 3. Committed frame goldens under `docs/examples-tui-walkthrough/<journey>/`.
-4. **xtask `tui-walkthrough`** subcommand: the manifest assembler + the committed
-   `walkthrough.md` manifest + its `regen == committed` test.
-5. **`make tui-walkthrough`** + the manifest-walking interleave glue (man-wrap.awk on
-   prose, tui-wrap.awk on frames) → `btctax-tui-walkthrough.pdf`.
-6. CI wiring (per-crate golden gates in `test`; PDF-render proof in the advisory
-   `examples` job).
-7. Captions + narrated preambles authored as **Rust literals in the xtask assembler**
-   (the source of truth, like examples.md's prose in examples.rs); the committed
-   `walkthrough.md` manifest is the byte-gated *emission*, not hand-edited.
+4. **The committed manifest + its integrity gate.** _(As-built, per §5's amendment — this
+   supersedes the original "xtask `tui-walkthrough` subcommand emitting `walkthrough.md`
+   + `regen == committed`" wording.)_ A hand-authored per-journey
+   `docs/examples-tui-walkthrough/<journey>/manifest.txt`, pinned by xtask's
+   `walkthrough_manifests_valid_and_complete` (grammar + a FRAME⇄golden bijection). No xtask
+   subcommand.
+5. **`make tui-walkthrough`** + the manifest-walking interleave glue
+   (`assemble-walkthrough.sh`: `.PP` prose emitted directly, tui-wrap.awk on frames) →
+   `btctax-tui-walkthrough.pdf`.
+6. CI wiring (per-crate golden gates + the xtask manifest gate in `test`; PDF-render proof
+   in the advisory `examples` job).
+7. Captions + narrated preambles are **the single source of truth, hand-authored in each
+   journey's `manifest.txt`** _(As-built — supersedes the original "Rust literals in the xtask
+   assembler, emitted to `walkthrough.md`" wording; see §5)_. A wording edit still touches
+   exactly one file per journey and never a TUI crate.
 
 ## 9. Build staging (per owner's autonomous plan)
 
@@ -211,9 +217,9 @@ A **one-journey proof-of-concept** first — a TUI-rich journey (proposed **J8**
 match-self-transfers, or **J3** self-transfer) end-to-end, exercising the WHOLE
 architecture so it validates the hard parts, not just the easy ones: the corpora hoist
 (§4.1), BOTH the editor emit test and the viewer emit test converging on the one shared
-fixture (§4.2), the xtask manifest + `make tui-walkthrough` interleave glue (§5), and a
-one-journey PDF — reviewed to green. The remaining eight journeys are then a mechanical
-rollout of the same pattern.
+fixture (§4.2), the hand-authored manifest + its xtask bijection gate + `make
+tui-walkthrough` interleave glue (§5, As-built), and a one-journey PDF — reviewed to
+green. The remaining eight journeys are then a mechanical rollout of the same pattern.
 
 **Gate (brainstorming discipline):** the owner is travelling; this spec + the
 implementation plan are the autonomous deliverable. The build (even the PoC) is **held
@@ -235,10 +241,10 @@ before code is written. One "go" unblocks the PoC; the PoC then unblocks the rol
 ## 11. Risks
 
 - **Golden count & regen (r1 M-3).** ~4–8 frames × 9 journeys ≈ 40–70 goldens (10–20×
-  today's four); any real UI change reds them (by design — that is the point). Regen now
-  spans TWO `#[ignore]` emit tests (editor + viewer crates) + the xtask manifest — so
-  provide a SINGLE documented `make regen-walkthrough` target that runs all three in
-  order, keeping the "one-command refresh" claim true.
+  today's four); any real UI change reds them (by design — that is the point). Regen spans
+  TWO `#[ignore]` emit tests (editor + viewer crates); the manifest is hand-authored (edited,
+  not regenerated) — so provide a SINGLE documented `make regen-walkthrough` target that runs
+  both emit tests, keeping the "one-command refresh" claim true. (As-built, §5.)
 - **Monolith growth.** The editor emit test lives in `btctax-tui-edit`'s existing
   `#[cfg(test)]` module (as today's goldens do) — it grows the TEST surface, not
   production; drivers must not leak into production code.

@@ -14358,10 +14358,31 @@ mod tests {
         ]
     }
 
+    /// The frame stems this crate (the editor half) is responsible for capturing. Declared EXPLICITLY so a
+    /// dropped/renamed capture tuple reds the gate (NEW-I-1) — the byte-compare loop alone passes vacuously
+    /// on a shrunk set, and the xtask manifest bijection would still hold (manifest⇄disk unchanged),
+    /// leaving an orphaned golden rendering a never-re-verified, silently stale screen. Pins disk⇄capture;
+    /// Phase 2 extends it per journey, on purpose.
+    #[cfg(unix)]
+    const WALKTHROUGH_EDITOR_STEMS: &[&str] = &[
+        "j8/01-browse-blocker",
+        "j8/02-match-list",
+        "j8/03-match-confirm",
+    ];
+
     #[cfg(unix)]
     #[test]
     fn btctax_tui_edit_walkthrough_goldens_match_committed() {
-        for (stem, captured) in btctax_tui_edit_walkthrough_frames() {
+        let frames = btctax_tui_edit_walkthrough_frames();
+        let got: std::collections::BTreeSet<&str> = frames.iter().map(|(s, _)| *s).collect();
+        let expected: std::collections::BTreeSet<&str> =
+            WALKTHROUGH_EDITOR_STEMS.iter().copied().collect();
+        assert_eq!(
+            got, expected,
+            "the editor walkthrough capture set changed — a dropped/renamed frame would ship a stale \
+             screen (NEW-I-1). If intentional, update WALKTHROUGH_EDITOR_STEMS and the manifest together."
+        );
+        for (stem, captured) in frames {
             let path = tui_walkthrough_golden_dir().join(format!("{stem}.txt"));
             let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
                 panic!(
