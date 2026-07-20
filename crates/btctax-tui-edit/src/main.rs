@@ -14313,6 +14313,7 @@ mod tests {
         frames.extend(j9_editor_frames());
         frames.extend(j2_editor_frames());
         frames.extend(j5_editor_frames());
+        frames.extend(j6_editor_frames());
         frames
     }
 
@@ -14621,6 +14622,74 @@ mod tests {
         ]
     }
 
+    /// J6 editor frames — authoring the complete 1040 in the TUI. `T` opens the tax-inputs form over the
+    /// committed full-return inputs (the kitchen-sink MFJ household). Frame 1: the 10-section index +
+    /// Return-options pane. Frame 2: Tab to the W-2 section + Enter into W-2 #1 (ACME, $200k wages). Frame
+    /// 3: `s` opens the commit confirmation (pre-persist — the SPEC's "→ commit"). Navigation only, no text
+    /// entry (deterministic). Seeds the full J6 state; the form is a pure projection of the committed inputs.
+    #[cfg(unix)]
+    fn j6_editor_frames() -> Vec<(&'static str, String)> {
+        std::env::set_var(
+            "BTCTAX_PRICE_CACHE",
+            "/nonexistent-walkthrough-price-cache.csv",
+        );
+        let pinned =
+            btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2025 - 02 - 01 12:00:00 UTC));
+        let now = time::macros::datetime!(2025 - 02 - 01 12:00:00 UTC);
+        let fixed_path = std::path::PathBuf::from("/edit/vault.pgp");
+        let pp = Passphrase::new("golden-j6-pass".into());
+        let dir = tempfile::tempdir().unwrap();
+        let vault = btctax_cli::testonly::seed_j6_full(dir.path(), &pp, now);
+
+        // 01 — `T` opens the tax-inputs form: the section index + Return options.
+        let sections = {
+            let mut app = open_app(&vault, "golden-j6-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('T')));
+            assert!(
+                app.tax_inputs_form.is_some(),
+                "the J6 tax-inputs form must open over the committed full-return inputs"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+        // 02 — Tab to the W-2 section, Enter into W-2 #1 (ACME).
+        let w2 = {
+            let mut app = open_app(&vault, "golden-j6-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('T')));
+            for _ in 0..5 {
+                handle_key(&mut app, press(KeyCode::Tab));
+            }
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.tax_inputs_form.is_some(),
+                "the J6 W-2 section must be reachable"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+        // 03 — `s` opens the commit confirmation (pre-persist).
+        let commit = {
+            let mut app = open_app(&vault, "golden-j6-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('T')));
+            handle_key(&mut app, press(KeyCode::Char('s')));
+            assert!(
+                app.tax_inputs_form.is_some(),
+                "the J6 tax-inputs commit modal must be reachable"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+
+        vec![
+            ("j6/01-tax-inputs-sections", sections),
+            ("j6/02-tax-inputs-w2", w2),
+            ("j6/03-tax-inputs-commit", commit),
+        ]
+    }
+
     /// The frame stems this crate (the editor half) is responsible for capturing. Declared EXPLICITLY so a
     /// dropped/renamed capture tuple reds the gate (NEW-I-1) — the byte-compare loop alone passes vacuously
     /// on a shrunk set, and the xtask manifest bijection would still hold (manifest⇄disk unchanged),
@@ -14639,6 +14708,9 @@ mod tests {
         "j2/02-donation-details",
         "j5/01-optimize-list",
         "j5/02-optimize-confirm",
+        "j6/01-tax-inputs-sections",
+        "j6/02-tax-inputs-w2",
+        "j6/03-tax-inputs-commit",
     ];
 
     #[cfg(unix)]

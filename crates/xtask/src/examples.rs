@@ -1397,6 +1397,115 @@ fn generate_j5_walkthrough_console(bin: &Path) -> String {
     t
 }
 
+/// J6 CLI setup transcript — a COMPLETE Form 1040. `init`; `import` both exchanges; reconcile the crypto
+/// (mining → a trade or business; the Send → a §170(e) donation + Form 8283 details); `verify` (exit 0;
+/// advisory pre-2025-method + qualified-appraisal notes); and `income import` the non-crypto household TOML.
+/// The editor half then opens the tax-inputs authoring form over these committed inputs. No `BTCTAX_NOW`
+/// pin (its banner would leak into a `show_stderr` step). Committed to `docs/…/j6/00-setup.console.md`.
+#[cfg(all(test, unix))]
+fn generate_j6_walkthrough_console(bin: &Path) -> String {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J6_COINBASE_CSV);
+    write_corpus(cwd, "river.csv", J6_RIVER_CSV);
+    std::fs::write(cwd.join("fullreturn.toml"), J6_FULLRETURN_TOML).expect("write toml");
+    let income = "import|river|in|1710504000000|income|5000000#0";
+    let donation = "import|coinbase|out|cb-donate";
+    let mut t = String::new();
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "import", "coinbase.csv", "river.csv"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&[
+            "--vault",
+            "v.pgp",
+            "reconcile",
+            "reclassify-income",
+            income,
+            "--business",
+            "true",
+            "--kind",
+            "mining",
+        ]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&[
+            "--vault",
+            "v.pgp",
+            "reconcile",
+            "reclassify-outflow",
+            donation,
+            "--as-kind",
+            "donate",
+            "--amount",
+            "6000.00",
+            "--donee",
+            "Habitat for Humanity",
+        ]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&[
+            "--vault",
+            "v.pgp",
+            "reconcile",
+            "set-donation-details",
+            donation,
+            "--donee-name",
+            "Habitat for Humanity",
+            "--donee-ein",
+            "98-7654321",
+            "--appraiser-name",
+            "Jane Appraiser",
+            "--appraiser-tin",
+            "12-3456789",
+            "--appraiser-qualifications",
+            "ASA-accredited digital-asset appraiser, 8 yrs",
+            "--appraisal-date",
+            "2024-09-15",
+        ]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "verify"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&[
+            "--vault",
+            "v.pgp",
+            "income",
+            "import",
+            "--year",
+            "2024",
+            "--file",
+            "fullreturn.toml",
+        ]),
+    );
+    t
+}
+
 /// J9 — choosing which lots a sale draws from (UX-P1-10). With two lots and a sale smaller than either
 /// combined holding, the default method picks the lots for you; `select-lots` lets you identify EXACTLY
 /// which ones — the picks (`<origin>#<split>:<sat>`) come from the disposal's `lot` column in
@@ -1732,6 +1841,10 @@ mod tests {
             (
                 "j5/00-setup.console.md",
                 generate_j5_walkthrough_console(bin),
+            ),
+            (
+                "j6/00-setup.console.md",
+                generate_j6_walkthrough_console(bin),
             ),
         ]
     }

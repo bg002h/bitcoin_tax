@@ -929,6 +929,7 @@ fn btctax_tui_walkthrough_frames() -> Vec<(&'static str, String)> {
     frames.extend(j9_viewer_frames());
     frames.extend(j2_viewer_frames());
     frames.extend(j5_viewer_frames());
+    frames.extend(j6_viewer_frames());
     frames
 }
 
@@ -1180,6 +1181,39 @@ fn j5_viewer_frames() -> Vec<(&'static str, String)> {
     out
 }
 
+/// J6 (a complete Form 1040) VIEWER frames — the payoff of the kitchen-sink MFJ household merged with the
+/// crypto ledger. Forms shows the CRYPTO forms (Form 8949 for the BTC sale, Schedule D totals, Form 8283
+/// for the donation — NOT the whole 14-form packet, which lives in `export-irs-pdf`); Tax shows the return
+/// computed from the full-return-derived MFJ profile (capital gains, the charitable deduction, Schedule
+/// SE on the mining income). Seeds via `seed_j6_full` and only reads.
+fn j6_viewer_frames() -> Vec<(&'static str, String)> {
+    use btctax_store::Passphrase;
+    std::env::set_var(
+        "BTCTAX_PRICE_CACHE",
+        "/nonexistent-walkthrough-price-cache.csv",
+    );
+    let pp = Passphrase::new("golden-j6-pass".into());
+    let now = time::macros::datetime!(2025 - 02 - 01 12:00:00 UTC);
+    let dir = tempfile::tempdir().unwrap();
+    let vault = btctax_cli::testonly::seed_j6_full(dir.path(), &pp, now);
+    let session = btctax_cli::Session::open(&vault, &pp).unwrap();
+    let (snapshot, year) = crate::unlock::build_snapshot(&session).unwrap();
+    let mut app = App::new(std::path::PathBuf::from("/vault.pgp"));
+    app.screen = Screen::Viewer;
+    app.selected_year = year;
+    app.snapshot = Some(snapshot);
+    app.clock = crate::clock::Clock::Pinned(now);
+    let mut out = Vec::new();
+    for (stem, tab) in [
+        ("j6/04-forms", crate::app::Tab::Forms),
+        ("j6/05-tax", crate::app::Tab::Tax),
+    ] {
+        app.tab = tab;
+        out.push((stem, crate::capture::to_golden(&render_viewer(&mut app))));
+    }
+    out
+}
+
 /// The frame stems this crate (the viewer half) is responsible for capturing. Declared EXPLICITLY so a
 /// dropped/renamed capture tuple reds the gate below (NEW-I-1): the byte-compare loop alone iterates only
 /// over what's captured, so a shrunk set passes vacuously — and the xtask manifest bijection would still
@@ -1202,6 +1236,8 @@ const WALKTHROUGH_VIEWER_STEMS: &[&str] = &[
     "j2/04-tax",
     "j5/03-disposals",
     "j5/04-tax",
+    "j6/04-forms",
+    "j6/05-tax",
 ];
 
 #[cfg(unix)]

@@ -497,3 +497,68 @@ pub fn seed_j5_optimized(
     crate::cmd::optimize::accept(&vault, pp, 2025, None, None, now).unwrap();
     vault
 }
+
+/// Seed J6 — a COMPLETE Form 1040 (the kitchen-sink MFJ household). Combines the crypto reconciliation
+/// (mining income → a trade or business; the 0.10 BTC Send → a §170(e) donation with Form 8283 details)
+/// with the non-crypto household imported from the committed `kitchen_sink_household()` TOML. This is the
+/// state BOTH walkthrough halves render: the editor half opens the tax-inputs authoring form (`T`) over
+/// these committed inputs; the viewer shows Forms (the crypto forms) + Tax (the merged MFJ return). No raw
+/// tax-profile — the full-return inputs take precedence and `build_snapshot` derives the MFJ profile from
+/// them. Made-date threaded from the caller.
+pub fn seed_j6_full(
+    dir: &std::path::Path,
+    pp: &btctax_store::Passphrase,
+    now: time::OffsetDateTime,
+) -> std::path::PathBuf {
+    use btctax_core::{DonationDetails, IncomeKind, OutflowClass};
+    let vault = seed_journey(dir, pp, &j6());
+    // 1. mining income → a trade or business (Schedule C/SE).
+    crate::cmd::reconcile::reclassify_income(
+        &vault,
+        pp,
+        "import|river|in|1710504000000|income|5000000#0",
+        true,
+        Some(IncomeKind::Mining),
+        now,
+    )
+    .unwrap();
+    // 2. the 0.10 BTC Send → a §170(e) charitable donation, FMV $6,000.
+    let fmv: rust_decimal::Decimal = "6000.00".parse().unwrap();
+    crate::cmd::reconcile::reclassify_outflow(
+        &vault,
+        pp,
+        "import|coinbase|out|cb-donate",
+        OutflowClass::Donate {
+            appraisal_required: false,
+        },
+        fmv,
+        None,
+        Some("Habitat for Humanity".to_string()),
+        now,
+    )
+    .unwrap();
+    // 3. the Form 8283 Section-B appraiser/donee details.
+    crate::cmd::reconcile::set_donation_details(
+        &vault,
+        pp,
+        "import|coinbase|out|cb-donate",
+        DonationDetails {
+            donee_name: "Habitat for Humanity".into(),
+            donee_address: None,
+            donee_ein: Some("98-7654321".into()),
+            appraiser_name: "Jane Appraiser".into(),
+            appraiser_address: None,
+            appraiser_tin: Some("12-3456789".into()),
+            appraiser_ptin: None,
+            appraiser_qualifications: Some("ASA-accredited digital-asset appraiser, 8 yrs".into()),
+            appraisal_date: Some(time::macros::date!(2024 - 09 - 15)),
+            fmv_method_override: None,
+        },
+    )
+    .unwrap();
+    // 4. the non-crypto household — a programmatic `income import` (reads a file, so materialize the TOML).
+    let toml = dir.join("fullreturn.toml");
+    std::fs::write(&toml, J6_FULLRETURN_TOML).unwrap();
+    crate::cmd::tax::import_return_inputs(&vault, pp, 2024, &toml).unwrap();
+    vault
+}

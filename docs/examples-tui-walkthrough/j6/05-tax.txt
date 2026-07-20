@@ -1,0 +1,43 @@
+── glyphs ──
+  0│┌ btctax-tui — /vault.pgp ─────────────────────────────────────────────────────────────────────────────────────────────┐
+  1││ Holdings │ Disposals │ Income │ Tax │ Forms │ Compliance                                                             │
+  2│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  3│┌ Tax — 2024 ──────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  4││  ST net: -307.95   LT net: 500.00                                                                                    │
+  5││  Ordinary income from crypto: 3437.95                                                                                │
+  6││  Ordinary-rate tax (attributable delta): 825.11                                                                      │
+  7││  LTCG tax (attributable delta): -46.19   NIIT (attributable delta): -11.70                                           │
+  8││  TOTAL federal tax attributable (delta): 767.22  [= ord + LTCG + NIIT]                                               │
+  9││  §1211 loss deduction: 0.00   Carryforward out: short 0.00 / long 0.00                                               │
+ 10││  Marginal rates: ordinary 0.24  LTCG 0.15  NIIT applies: false                                                       │
+ 11││                                                                                                                      │
+ 12││  Charitable deduction 2024 (before §170(b) AGI limits): 6000.00                                                      │
+ 13││Schedule SE (§1401 self-employment tax on business crypto income) — tax year 2024                                     │
+ 14││  gross business income 3437.95 − Schedule C expenses 1000.00 = net SE earnings 2437.95                               │
+ 15││  (Schedule C advisory) Schedule C expenses also reduce your ORDINARY taxable income, but the income-tax total above  │
+ 16││uses GROSS crypto income — to first order it OVERSTATES your tax by your marginal ordinary rate applied to 1000.00.   │
+ 17││The tax profile cannot express this (an `ordinary_taxable_income` edit would shift both legs of the                   │
+ 18││crypto-attributable delta); the engine-side coordination is deferred — coordinate it on your actual return.           │
+ 19││  × 92.35% net-earnings factor (§1402(a)) = net SE earnings: 2251.45                                                  │
+ 20││  Social Security component (12.4%, §1401(a); capped at the SS wage base): 0.00                                       │
+ 21││  Medicare component (2.9%, §1401(b); uncapped): 65.29                                                                │
+ 22││  Additional Medicare component (0.9%, §1401(b)(2)): 20.26                                                            │
+ 23││  TOTAL self-employment tax (§1401): 85.55                                                                            │
+ 24││  §164(f) one-half-SE-tax deduction (above-the-line; EXCLUDES Additional Medicare per §164(f)(1)): 32.64              │
+ 25││  (§164(f) advisory) The §164(f) deduction (32.64) is NOT auto-coordinated into the income-tax total above — to first │
+ 26││order, that total overstates your combined tax by your marginal ordinary rate applied to 32.64. The tax profile cannot│
+ 27││express this deduction directly (reducing `ordinary_taxable_income` would shift BOTH legs of the crypto-attributable  │
+ 28││delta and only correct the bracket differential, not the level) — coordinate it on your actual return.                │
+ 29││  (W-2 coordination applied) SS cap = max(0, wage base − 168600.00) (Box 3+7); Additional-Medicare threshold reduced  │
+ 30││(not below 0) by 290000.00 (Box 5, §1401(b)(2)(B)/Form 8959 Part II).                                                 │
+ 31││  (standalone) This §1401 SE tax is a SEPARATE federal liability, NOT included in the income-tax + NIIT total above;  │
+ 32││the §164(f) one-half-SE-tax deduction is not auto-coordinated into that total.                                        │
+ 33││                                                                                                                      │
+ 34││  Advisory blockers (2):                                                                                              │
+ 35││    [Pre2025MethodNote] pre-2025 lots reconstructed under HIFO (FIFO is the §7.4 legal default); you have NOT declared│
+ 36││your filed pre-2025 lot method — if your filed pre-2025 returns used a different method your carryforward basis may   │
+ 37││differ. Declare it: config --set-pre2025-method <m> --attest-pre2025-method                                           │
+ 38│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ 39│Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   g/G: top/bottom   w: what-if   e: export
+── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
+  1│ 34..37 fg=Yellow mod=BOLD

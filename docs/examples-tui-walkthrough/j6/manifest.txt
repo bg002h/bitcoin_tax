@@ -1,0 +1,16 @@
+# J6 — a complete Form 1040 (the kitchen-sink MFJ household) (TUI screen-walkthrough).
+# CLI setup is the EXACT captured transcript (CONSOLE); the editor tax-inputs authoring form + the viewer
+# result tabs are byte-gated frames. The richest Phase-2 journey (editor + viewer).
+PROSE \fBJourney 6 \(em a complete Form 1040.\fP John and Jane Doe file jointly and have a full tax life, not just crypto: two W\-2 jobs, interest and dividends, a mortgage and other itemized deductions \(en \fIand\fP a year of Bitcoin activity (a little mining, a small sale, and a charitable gift). btctax merges the non\-crypto household with the reconciled ledger into one return.
+PROSE \fBSetup, at the command line.\fP The crypto side is reconciled first (the mining receipt becomes a trade or business; the 0.10 BTC Send becomes a \(sc170(e) donation with its Form 8283 details), then the non\-crypto household is imported from an offline TOML. The exact terminal session:
+CONSOLE 00-setup.console.md J6 - setup - reconcile crypto, then import the household
+PROSE \fB1. Editor \(em author the return.\fP Pressing \fBT\fP opens the tax\-inputs form over the imported inputs. The left pane is the section index (Return options, Taxpayer, Spouse, W\-2s, Schedule A, ...); the right shows the selected section \(en here filing status \fIMFJ\fP and an \fIauto\fP itemize\-vs\-standard election.
+FRAME 01-tax-inputs-sections.txt J6 - step 1 - editor: the tax-inputs section index (full return)
+PROSE \fB2. Editor \(em a section up close.\fP Tabbing to \fBW\-2s\fP and opening the first row shows the couple's wage income \(en employer ACME, $200,000 of Box\-1 wages \(en exactly as authored.
+FRAME 02-tax-inputs-w2.txt J6 - step 2 - editor: the W-2 section (ACME, $200,000)
+PROSE \fB3. Editor \(em commit.\fP Pressing \fBs\fP opens the commit confirmation \(en filing status, the count of W\-2s, Schedule A, and dependents \(en the informed\-consent point before the inputs are written.
+FRAME 03-tax-inputs-commit.txt J6 - step 3 - editor: the commit confirmation
+PROSE \fB4. Viewer \(em Forms (the crypto forms).\fP The Forms tab shows what the crypto activity contributes to the return: Form 8949 and Schedule D for the sale, and Form 8283 for the $6,000 donation. (The full 14\-form federal packet is produced by \fBexport-irs-pdf\fP, not shown here.)
+FRAME 04-forms.txt J6 - step 4 - viewer: Forms (Form 8949, Schedule D, Form 8283)
+PROSE \fB5. Viewer \(em Tax (the whole return).\fP Everything merges: the $6,000 charitable deduction, Schedule SE on the $3,437.95 of business mining income (net SE earnings $2,251.45), and the capital gains \(en including a small $307.95 short\-term loss on the sale (drawn under HIFO from the just\-mined coins) against a $500 dividend capital\-gain distribution.
+FRAME 05-tax.txt J6 - step 5 - viewer: Tax (the merged MFJ return)
