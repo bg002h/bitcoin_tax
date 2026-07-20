@@ -1,0 +1,13 @@
+# J1 — a single buyer, start to finish (TUI screen-walkthrough).
+# CLI setup is the EXACT captured transcript (CONSOLE, never hand-typed); the viewer result tabs are
+# byte-gated frames captured from the real TUI. J1 has no editor half (a buy + a sell, nothing to
+# reconcile). Same manifest shape as J8; one of the Phase-2 journeys.
+PROSE \fBJourney 1 \(em a single buyer, start to finish.\fP Alice buys 0.10 BTC, sells 0.02, and wants her 2025 numbers. There is nothing to reconcile \(en a buy and a sell, no transfers \(en so the whole flow is command\-line setup, then reading the result in the read\-only viewer.
+PROSE \fBSetup, at the command line.\fP She creates the encrypted vault, imports the Coinbase CSV, verifies (BALANCED, no blockers \(en exit 0), and sets a 2025 tax profile (btctax refuses to guess a bracket, so the year is not computable until one is set). This is the exact terminal session:
+CONSOLE 00-setup.console.md J1 - setup - init, import, verify, tax-profile
+PROSE \fB1. Viewer \(em Holdings.\fP After the partial sale, 0.08 BTC remains, carrying its share of the original cost basis ($6,760 of the $8,450 she paid, fees included).
+FRAME 01-holdings.txt J1 - step 1 - viewer: Holdings (0.08 BTC remaining)
+PROSE \fB2. Viewer \(em Disposals.\fP The 0.02 BTC sale, matched to the March lot: proceeds $1,340 against a $1,690 basis \(en a $350 short\-term capital LOSS (held under a year).
+FRAME 02-disposals.txt J1 - step 2 - viewer: Disposals (the 0.02 BTC sale, a short-term loss)
+PROSE \fB3. Viewer \(em Tax.\fP The 2025 result: the $350 short\-term loss offsets ordinary income, lowering the attributable federal tax by $77.
+FRAME 03-tax.txt J1 - step 3 - viewer: Tax (the 2025 numbers)

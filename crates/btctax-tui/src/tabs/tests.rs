@@ -918,7 +918,15 @@ fn tui_walkthrough_golden_dir() -> std::path::PathBuf {
 }
 
 #[cfg(unix)]
+/// All journeys' VIEWER frames, aggregated. Phase 2 appends one `jN_viewer_frames()` per journey; the
+/// gate + emit iterate this one list, and `WALKTHROUGH_VIEWER_STEMS` declares the expected stem set.
 fn btctax_tui_walkthrough_frames() -> Vec<(&'static str, String)> {
+    let mut frames = j8_viewer_frames();
+    frames.extend(j1_viewer_frames());
+    frames
+}
+
+fn j8_viewer_frames() -> Vec<(&'static str, String)> {
     use btctax_store::Passphrase;
     // Determinism (walkthrough spec §7 / I-3): pin the price cache so a dev's live cache can't perturb the
     // frame. Safe under nextest's process-per-test model.
@@ -944,13 +952,52 @@ fn btctax_tui_walkthrough_frames() -> Vec<(&'static str, String)> {
     vec![("j8/04-holdings-balanced", holdings)]
 }
 
+/// J1 (single buyer) VIEWER frames — J1 has NO editor half (a buy + a sell, no transfers to reconcile), so
+/// its CLI setup (`init`/`import`/`verify`/`tax-profile`) is the console transcript and the viewer shows
+/// the result tabs: Holdings (the 0.08 BTC left), Disposals (the 0.02 BTC sale), Tax (the 2025 numbers —
+/// needs the seeded profile). Seeds via `seed_j1_with_profile` and only OPENS + reads (e10: no write path
+/// in this crate's source).
+fn j1_viewer_frames() -> Vec<(&'static str, String)> {
+    use btctax_store::Passphrase;
+    std::env::set_var(
+        "BTCTAX_PRICE_CACHE",
+        "/nonexistent-walkthrough-price-cache.csv",
+    );
+    let pp = Passphrase::new("golden-j1-pass".into());
+    let now = time::macros::datetime!(2025 - 07 - 01 12:00:00 UTC);
+    let dir = tempfile::tempdir().unwrap();
+    let vault = btctax_cli::testonly::seed_j1_with_profile(dir.path(), &pp);
+    let session = btctax_cli::Session::open(&vault, &pp).unwrap();
+    let (snapshot, year) = crate::unlock::build_snapshot(&session).unwrap();
+    let mut app = App::new(std::path::PathBuf::from("/vault.pgp"));
+    app.screen = Screen::Viewer;
+    app.selected_year = year;
+    app.snapshot = Some(snapshot);
+    app.clock = crate::clock::Clock::Pinned(now);
+    let mut out = Vec::new();
+    for (stem, tab) in [
+        ("j1/01-holdings", crate::app::Tab::Holdings),
+        ("j1/02-disposals", crate::app::Tab::Disposals),
+        ("j1/03-tax", crate::app::Tab::Tax),
+    ] {
+        app.tab = tab;
+        out.push((stem, crate::capture::to_golden(&render_viewer(&mut app))));
+    }
+    out
+}
+
 /// The frame stems this crate (the viewer half) is responsible for capturing. Declared EXPLICITLY so a
 /// dropped/renamed capture tuple reds the gate below (NEW-I-1): the byte-compare loop alone iterates only
 /// over what's captured, so a shrunk set passes vacuously — and the xtask manifest bijection would still
 /// hold (manifest⇄disk unchanged), leaving an orphaned golden that keeps rendering a never-re-verified,
 /// silently stale screen. This const pins disk⇄capture; Phase 2 extends it per journey, on purpose.
 #[cfg(unix)]
-const WALKTHROUGH_VIEWER_STEMS: &[&str] = &["j8/04-holdings-balanced"];
+const WALKTHROUGH_VIEWER_STEMS: &[&str] = &[
+    "j8/04-holdings-balanced",
+    "j1/01-holdings",
+    "j1/02-disposals",
+    "j1/03-tax",
+];
 
 #[cfg(unix)]
 #[test]

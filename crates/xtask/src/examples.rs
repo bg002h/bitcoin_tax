@@ -210,7 +210,7 @@ fn plain<'a>(args: &'a [&'a str]) -> Cmd<'a> {
 /// claims "the exact terminal session". `emit` only appends a `stderr:` block when stderr is non-empty,
 /// so the committed transcript is unchanged while stderr stays empty (it is today), but any future stderr
 /// from `init`/`import`/`verify` enters the gated bytes instead of silently diverging from the claim.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn plain_with_stderr<'a>(args: &'a [&'a str]) -> Cmd<'a> {
     Cmd {
         args,
@@ -1021,8 +1021,10 @@ fn journey_j8(md: &mut String, bin: &Path) {
 /// env, same fenced ```console rendering), so the walkthrough's CLI half is a CAPTURED artifact held to
 /// the same discipline as its frame goldens — never hand-typed. The CLI *reconcile* is deliberately NOT
 /// captured here: in the walkthrough the TUI editor frames replace it (SPEC §6, the hybrid). Committed to
-/// `docs/examples-tui-walkthrough/j8/00-setup.console.md`; gated `regen == committed`.
-#[cfg(test)]
+/// `docs/examples-tui-walkthrough/j8/00-setup.console.md`; gated `regen == committed`. (`cfg(all(test,
+/// unix))` matches its only consumers, the unix-gated tests module — no Windows dead-code; the pattern
+/// for every Phase-2 `generate_jN_walkthrough_console`.)
+#[cfg(all(test, unix))]
 fn generate_j8_walkthrough_console(bin: &Path) -> String {
     let dir = tempfile::tempdir().expect("tempdir");
     let cwd = dir.path();
@@ -1054,6 +1056,58 @@ fn generate_j8_walkthrough_console(bin: &Path) -> String {
         bin,
         cwd,
         &plain_with_stderr(&["--vault", "v.pgp", "verify"]),
+    );
+    t
+}
+
+/// Capture the J1 TUI-walkthrough's CLI SETUP transcript — the verbatim `$ btctax …` + output for the
+/// single-buyer journey's command-line setup before the read-only VIEWER takes over: `init`, `import`,
+/// `verify` (exit 0 — a buy + a sell balance, no blockers), and `tax-profile` (the year is not computable
+/// until a profile is set; the viewer's Tax tab needs it). Same captured-not-typed discipline + gate as
+/// J8. Committed to `docs/examples-tui-walkthrough/j1/00-setup.console.md`.
+#[cfg(all(test, unix))]
+fn generate_j1_walkthrough_console(bin: &Path) -> String {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J1_CSV);
+    let mut t = String::new();
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "verify"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&[
+            "--vault",
+            "v.pgp",
+            "tax-profile",
+            "--year",
+            "2025",
+            "--filing-status",
+            "single",
+            "--ordinary-taxable-income",
+            "100000",
+            "--magi-excluding-crypto",
+            "100000",
+            "--qualified-dividends",
+            "0",
+        ]),
     );
     t
 }
@@ -1358,36 +1412,60 @@ mod tests {
         );
     }
 
-    /// The J8 walkthrough's CLI SETUP transcript matches a fresh capture, byte-for-byte — reds when a
-    /// code change alters `init`/`import`/`verify` output that the committed console golden hasn't caught
-    /// (SPEC §5; the walkthrough's CLI half held to the frames' discipline — captured, never hand-typed).
+    /// Every journey's CLI-setup console transcript, freshly captured: `(committed-relative-path,
+    /// generated)`. Phase 2 appends one line per journey; the gate + emit below iterate this single list.
+    fn walkthrough_console_goldens(bin: &Path) -> Vec<(&'static str, String)> {
+        vec![
+            (
+                "j8/00-setup.console.md",
+                generate_j8_walkthrough_console(bin),
+            ),
+            (
+                "j1/00-setup.console.md",
+                generate_j1_walkthrough_console(bin),
+            ),
+        ]
+    }
+
+    /// Every walkthrough CLI-setup transcript matches a fresh capture, byte-for-byte — reds when a code
+    /// change alters the captured `init`/`import`/`verify`/`tax-profile` output that a committed console
+    /// golden hasn't caught (SPEC §5; the CLI half held to the frames' discipline — captured, never typed).
     #[test]
     fn walkthrough_console_golden_matches_committed() {
         let _guard = BUILD_ENV_LOCK.lock().unwrap();
-        let generated = generate_j8_walkthrough_console(&built_btctax());
-        let path = workspace_root().join("docs/examples-tui-walkthrough/j8/00-setup.console.md");
-        let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-            panic!(
-                "committed {} missing ({e}); regenerate with the ignored \
-                 `emit_walkthrough_console_golden` test",
+        let bin = built_btctax();
+        for (rel, generated) in walkthrough_console_goldens(&bin) {
+            let path = workspace_root()
+                .join("docs/examples-tui-walkthrough")
+                .join(rel);
+            let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "committed {} missing ({e}); regenerate with the ignored \
+                     `emit_walkthrough_console_golden` test",
+                    path.display()
+                )
+            });
+            assert_eq!(
+                generated,
+                committed,
+                "{} is STALE; regenerate with the ignored `emit_walkthrough_console_golden` test",
                 path.display()
-            )
-        });
-        assert_eq!(
-            generated, committed,
-            "docs/examples-tui-walkthrough/j8/00-setup.console.md is STALE; regenerate with the \
-             ignored `emit_walkthrough_console_golden` test"
-        );
+            );
+        }
     }
 
-    /// Regeneration helper for the console golden (mirrors the frame crates' `#[ignore]` emit tests).
+    /// Regeneration helper for the console goldens (mirrors the frame crates' `#[ignore]` emit tests).
     #[test]
-    #[ignore = "regeneration helper: rewrites docs/examples-tui-walkthrough/j8/00-setup.console.md"]
+    #[ignore = "regeneration helper: rewrites docs/examples-tui-walkthrough/*/00-setup.console.md"]
     fn emit_walkthrough_console_golden() {
         let _guard = BUILD_ENV_LOCK.lock().unwrap();
-        let generated = generate_j8_walkthrough_console(&built_btctax());
-        let path = workspace_root().join("docs/examples-tui-walkthrough/j8/00-setup.console.md");
-        std::fs::write(&path, generated).unwrap();
+        let bin = built_btctax();
+        for (rel, generated) in walkthrough_console_goldens(&bin) {
+            let path = workspace_root()
+                .join("docs/examples-tui-walkthrough")
+                .join(rel);
+            std::fs::write(&path, generated).unwrap();
+        }
     }
 
     /// TUI screen-walkthrough manifest gate (SPEC §5; folds PoC review C-1 + the console-feature review).

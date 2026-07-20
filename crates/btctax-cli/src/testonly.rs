@@ -217,3 +217,29 @@ pub fn seed_j8_relocated(
     .unwrap();
     vault
 }
+
+/// Seed J1 (single buyer: one Buy + one partial Sell, no transfers → no reconciliation) and set the 2025
+/// tax profile its walkthrough VIEWER needs for the Tax tab to compute — single filer, $100k ordinary
+/// income, mirroring the J1 worked example's `tax-profile` step. The viewer half then only opens + reads.
+pub fn seed_j1_with_profile(
+    dir: &std::path::Path,
+    pp: &btctax_store::Passphrase,
+) -> std::path::PathBuf {
+    use btctax_core::{Carryforward, FilingStatus, TaxProfile};
+    use rust_decimal::Decimal;
+    let vault = seed_journey(dir, pp, &j1());
+    let z = Decimal::ZERO;
+    let profile = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: Decimal::from(100_000),
+        magi_excluding_crypto: Decimal::from(100_000),
+        qualified_dividends_and_other_pref_income: z,
+        other_net_capital_gain: z,
+        capital_loss_carryforward_in: Carryforward { short: z, long: z },
+        w2_ss_wages: z,
+        w2_medicare_wages: z,
+        schedule_c_expenses: z,
+    };
+    crate::cmd::tax::set_profile(&vault, pp, 2025, profile, false).unwrap();
+    vault
+}
