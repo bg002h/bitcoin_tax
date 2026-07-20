@@ -1,6 +1,6 @@
 # btctax — developer convenience targets.
 
-.PHONY: check test lint docs docs-man examples examples-tui bundles help
+.PHONY: check test lint docs docs-man examples examples-tui tui-walkthrough bundles help
 
 ## check: the validation gate — the full test suite AND clippy, run CONCURRENTLY (~6s warm)
 ##
@@ -81,6 +81,28 @@ examples-tui:
 	@head -c4 docs/pdf/btctax-tui-screens.pdf | grep -q '%PDF' \
 	  && echo "wrote docs/pdf/btctax-tui-screens.pdf (colorized, landscape)" \
 	  || { echo "examples-tui: groff did not emit a PDF"; exit 1; }
+
+## tui-walkthrough: render the TUI screen-walkthrough PDF (design/tui-walkthrough) — prose narration
+## INTERLEAVED with the byte-gated `.txt` frame goldens, per journey manifest. Convenience render only
+## (the `.txt` frames + manifests are the gated artifacts, held by each crate's
+## `*_walkthrough_goldens_match_committed` test); the PDF is NOT byte-gated and is git-ignored. Currently
+## the J8 proof-of-concept; Phase 2 adds J1..J7, J9 as more manifests under docs/examples-tui-walkthrough/.
+## Needs `groff`. Asserts the roff carries `\m[]` color escapes so a silent regression to monochrome fails.
+tui-walkthrough:
+	@mkdir -p docs/pdf
+	@{ echo ".TH BTCTAX-TUI-WALKTHROUGH 7 \"\" \"btctax\" \"TUI Walkthrough\""; \
+	   for m in docs/examples-tui-walkthrough/*/manifest.txt; do \
+	     bash docs/examples-tui-walkthrough/assemble-walkthrough.sh \
+	       "$$m" "$$(dirname $$m)" docs/examples-tui/tui-wrap.awk; \
+	   done; } > docs/pdf/.tui-walkthrough.roff
+	@grep -qF '\m[' docs/pdf/.tui-walkthrough.roff \
+	  || { echo "tui-walkthrough: colorization missing — no \\m[] escapes (frame render regressed)"; exit 1; }
+	@groff -k -man -T pdf -dpaper=letterl -P-pletterl -rLL=10i -rPO=0.4i \
+	   docs/pdf/.tui-walkthrough.roff > docs/pdf/btctax-tui-walkthrough.pdf
+	@rm -f docs/pdf/.tui-walkthrough.roff
+	@head -c4 docs/pdf/btctax-tui-walkthrough.pdf | grep -q '%PDF' \
+	  && echo "wrote docs/pdf/btctax-tui-walkthrough.pdf (colorized, landscape)" \
+	  || { echo "tui-walkthrough: groff did not emit a PDF"; exit 1; }
 
 ## help: list targets
 help:
