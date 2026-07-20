@@ -18,7 +18,15 @@
 # — would render plain, as nofill roff in the constant-width family has no faithful underline / reverse-
 # video). Background color is dropped. The gated `.txt` golden retains the full fg/bg/modifier truth.
 
-BEGIN { print ".SH \"" name "\""; sec = ""; maxrow = -1 }
+# `dim` is a READABLE dark gray for de-emphasized text (the editor dims modal-background content as
+# `DarkGray`, which gropdf renders as CSS #A9A9A9 — a LIGHT gray that is hard to read on the white PDF
+# page). Remapping DarkGray → this defined color keeps the de-emphasis while staying legible. Emitted per
+# fragment (harmless redefinition); the gated `.txt` golden keeps the true `DarkGray`.
+BEGIN {
+    print ".defcolor dim rgb 0.40 0.40 0.40"
+    print ".SH \"" name "\""
+    sec = ""; maxrow = -1
+}
 
 /^── glyphs ──/ { sec = "glyphs"; next }
 /^── styles/    { sec = "styles"; next }
@@ -83,6 +91,7 @@ END {
         gsub(/←/, "<", line); gsub(/↑/, "^", line); gsub(/→/, ">", line); gsub(/↓/, "v", line)
         gsub(/▲/, "^", line); gsub(/▼/, "v", line)
         gsub(/Δ/, "D", line) # U+0394 (the optimizer's "Δtax" banner) — groff -Tpdf has no u0394 glyph
+        gsub(/≤/, "<", line) # U+2264 (the optimizer's "(≤ 0)" banner) — 3 bytes would shift color columns under mawk
         out = ""; curfg = ""; curb = 0
         L = length(line)
         for (c = 1; c <= L; c++) {
@@ -93,7 +102,11 @@ END {
             if (f != curfg || b != curb) {
                 if (curb)        out = out "\\f[CR]" # close bold
                 if (curfg != "") out = out "\\m[]"   # close color
-                if (f != "")     out = out "\\m[" tolower(f) "]"
+                if (f != "") {
+                    fc = tolower(f)
+                    if (fc == "darkgray" || fc == "gray" || fc == "grey") fc = "dim" # legible on white
+                    out = out "\\m[" fc "]"
+                }
                 if (b)           out = out "\\f[CB]"
                 curfg = f; curb = b
             }
