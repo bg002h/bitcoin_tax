@@ -183,6 +183,26 @@ list is refined during the plan; this is the intended shape.)
 | J8 match-self-transfers | init, import both, verify | editor: match-self-transfers preview → confirm (RELOCATE); viewer: Holdings (BALANCED) | **rich** |
 | J9 select-lots | init, import | editor: select-lots flow (pick lots) → confirm; viewer: Disposals (per-disposal) / Compliance | **rich** |
 
+**As-built (all 9 shipped + reviewed 0C/0I).** Final per-journey frame set (§10 grants
+frame-granularity latitude; each was tuned to what its flow can *honestly* depict, and
+the numbers were verified against the captured frames / the CLI):
+- **J1** (viewer-only): CONSOLE (init/import/verify/tax-profile) + Holdings, Disposals, Tax.
+- **J2**: CONSOLE + editor reclassify-outflow→Donate picker + Form-8283 details form;
+  viewer Forms (two 8283 rows) + Tax (charitable deduction).
+- **J3**: CONSOLE (verify blocker) + editor classify-inbound variant-picker (SelfTransferMine);
+  viewer Holdings.
+- **J4**: CONSOLE + editor reclassify-income business/kind form; viewer Income + Tax (SE).
+- **J5**: CONSOLE (+ FIFO election) + editor optimize-accept list + confirm modal; viewer
+  Disposals (ST loss) + Tax (§1211 / carryforward).
+- **J6**: CONSOLE (crypto reconcile + `income import`) + editor `T` tax-inputs section index,
+  W-2 section, commit modal; viewer Forms (crypto forms) + Tax (merged MFJ).
+- **J7**: CONSOLE (verify blocker) + editor classify-inbound variant-picker (Income); viewer
+  Income + Tax.
+- **J8** (PoC): CONSOLE + editor Browse-blocker, match preview, confirm modal; viewer Holdings.
+- **J9**: CONSOLE + editor select-lots form (pick typed); viewer Disposals + Compliance.
+  Note (FOLLOWUPS): the post-2025 select-lots form offers only the post-default-residue lot on
+  this corpus, so J9 depicts identifying against the single offered lot, not a multi-lot menu.
+
 ## 7. Determinism & reproducibility
 
 - Pinned `Clock::Pinned` per driver; fixed displayed vault path; fixed 120×40 backend.
