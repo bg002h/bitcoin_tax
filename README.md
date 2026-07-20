@@ -226,7 +226,7 @@ This writes a whole packet, each form only when it applies, populated from btcta
   `export-snapshot` **and** stamps a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` on every page.
 - **Scope.** Schedule D lines **17–22** (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. the
   line-21 loss limit) are out of scope and left blank — a notice is printed. Rows on an exchange
-  that may carry 1099-DA broker reporting are flagged on stderr.
+  that may carry broker reporting (a 1099-DA from TY2025; a 1099-B before) are flagged on stderr.
 
 > ⚠️ **These files contain your unencrypted tax data and are _not_ git-ignored.** Write `--out` to a
 > directory **outside** any git repository.

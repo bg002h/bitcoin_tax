@@ -49,7 +49,15 @@ live residue — grep it first.
 - **NIIT model is minimal** (B-M1, disclosed) — NIIT *is* computed (`form8960.rs`) but under-states
   for complex non-crypto NII; §1411(c)(2) active-trade lending exception not modeled.
 - **engine-B gross-vs-net `crypto_ord`** ordinary-income coordination (high blast radius) — `compute.rs`.
-- **Form 8949 Box A/B/D/E input + 1099-B / 1099-DA reconciliation** — enum is `{C,F}` only (`forms.rs`).
+- **Form 8949 broker-reported-box input + 1099-B / 1099-DA reconciliation** — the not-reported boxes
+  are shipped year-aware (`Form8949Box` = `{C,F,I,L}`, `forms.rs`); this feature adds the *reported*
+  boxes, which are also year-aware — A/B (ST) / D/E (LT) from a 1099-B pre-TY2025, G/H (ST) / J/K (LT)
+  from a 1099-DA from TY2025.
+- **Full-return export never emits the [I5] broker-reporting advisory** — `admin.rs` hardcodes
+  `broker_reported_rows: 0` on the full-return packet path, so a full return with exchange disposals
+  gets no [I5] flag (the crypto-slice path does). Pre-existing, era-independent; owning phase: a
+  future export-parity pass. Wire `rows_possibly_broker_reported` through the full-return path (and
+  emit the year-aware `broker_reporting_advisory`) or document the omission at the construction site.
 - **§170(e) dealer/inventory CHARACTER detection** (investor case shipped; dealer over-flag) — `fold.rs:1247`.
 - **Donee-type §170(e)(1)(B)** private-foundation modeling — caveat text only.
 - **Gift-tax liability**: §2502 rate schedule, §2513 splitting, DSUE/portability, **Form 709 PDF** — no `form709.rs`.

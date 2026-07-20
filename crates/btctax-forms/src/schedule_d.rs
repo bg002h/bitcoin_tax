@@ -5,8 +5,10 @@
 //! **Scope-out:** lines 17-22 (the 28%-rate / unrecaptured-§1250 / QDI worksheet path) are NOT filled
 //! — the CLI prints a notice. Line 21 (the §1211 loss limit) lives inside that scoped-out block.
 //!
-//! Schedule D line 3 reads "Box C **or Box I**" and line 10 "Box F **or Box L**", so the Box I/L
-//! digital-asset totals from Form 8949 flow straight onto these lines.
+//! On the 2025 revision Schedule D line 3 reads "Box C **or Box I**" and line 10 "Box F **or Box L**",
+//! so the digital-asset Box I/L totals from Form 8949 flow straight onto these lines; on the pre-2025
+//! revisions the same lines read "Box C checked" / "Box F checked" and carry the securities-box
+//! totals. This module fills all three revisions (2017/2024/2025).
 
 use crate::error::FormsError;
 use crate::map::{AmountCols, ScheduleDMap};

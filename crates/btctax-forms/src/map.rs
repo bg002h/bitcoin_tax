@@ -101,7 +101,9 @@ pub struct PartMap {
     pub term: String,
     /// 0-based page index of this part within the bundled 2-page PDF.
     pub page: usize,
-    /// The digital-asset box checkbox field — **Box I** (ST) / **Box L** (LT), NOT C/F.
+    /// The "not reported to the IRS" box checkbox field for this part's revision: the digital-asset
+    /// **Box I** (ST) / **Box L** (LT) on the 2025 map, and the securities **Box C** / **Box F** on
+    /// the pre-2025 (2024/2017) maps. Which one this is depends on the year the map was loaded for.
     pub box_field: String,
     /// The checkbox on-state (a PDF name without the leading `/`), e.g. `"6"`.
     pub box_on: String,

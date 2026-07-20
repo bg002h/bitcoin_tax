@@ -75,9 +75,11 @@ pub(crate) fn fmt_money(d: Usd) -> String {
 }
 
 /// Fill **Form 8949** (Part I + Part II) for `year` from the projection rows and return the PDF
-/// bytes. Bitcoin is filed under Box I/L. Parts with > 11 rows paginate: ⌈rows/11⌉ page copies per
-/// part, each with its own totals; the copies are merged with per-copy field renaming so no two share
-/// a value. Every copy is geometry-verified before merge.
+/// bytes. The box is year-aware: Bitcoin is filed under the digital-asset Box I/L from TY2025, and
+/// the securities Box C/F on the pre-2025 revisions. Parts that overflow the revision's grid (11 rows
+/// per part on the 2025 form, 14 on 2024/2017) paginate: ⌈rows/grid⌉ page copies per part, each with
+/// its own totals; the copies are merged with per-copy field renaming so no two share a value. Every
+/// copy is geometry-verified before merge.
 pub fn fill_form_8949(rows: &[Form8949Row], year: i32) -> Result<Vec<u8>, FormsError> {
     let map = Form8949Map::for_year(year)?;
     let cap = map.rows_per_page;

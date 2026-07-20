@@ -174,7 +174,8 @@ pub enum Command {
     /// the forms' XFA layer (else Acrobat opens them blank) and sets NeedAppearances so a viewer
     /// regenerates the visible values. Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI
     /// worksheet, incl. the line-21 loss limit) are OUT OF SCOPE. Rows on an exchange that MAY carry
-    /// 1099-DA broker reporting are flagged on stderr (btctax files them all under Box I/L and says so).
+    /// broker reporting (a 1099-DA from TY2025; a 1099-B before) are flagged on stderr — btctax files
+    /// every row under the year's not-reported box (I/L from TY2025, C/F before) and says so.
     ///
     /// A tax year that has FULL-RETURN inputs (`income import`) DISPATCHES to the complete return packet —
     /// the 1040 and every schedule/attachment it cites, in Attachment-Sequence order, plus a manifest

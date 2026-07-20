@@ -1890,8 +1890,9 @@ mod tests {
     }
 
     /// ★ Schedule D lines 3(d)/(e)/(h) ARE the 8949's printed column totals — the form's own text says
-    /// "Totals for all transactions reported on Form(s) 8949 with Box C checked". Re-rounding the exact
-    /// aggregate instead would put Schedule D a dollar away from the 8949 stapled behind it.
+    /// "Totals for all transactions reported on Form(s) 8949 with Box C checked" (pre-2025; "Box C or
+    /// Box I checked" on the 2025 digital-asset revision). Re-rounding the exact aggregate instead
+    /// would put Schedule D a dollar away from the 8949 stapled behind it.
     #[test]
     fn schedule_d_line3_takes_the_printed_8949_totals_not_a_re_rounded_aggregate() {
         let rows = vec![
