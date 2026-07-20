@@ -89,7 +89,7 @@ examples-tui:
 ## `.console.md` transcripts, held by xtask's `walkthrough_console_golden_matches_committed`
 ## (`regen == committed`); and (3) the manifests, held by xtask's `walkthrough_manifests_valid_and_complete`
 ## (grammar + FRAME⇄`.txt` and CONSOLE⇄`.console.md` bijections) — together they pin the whole artifact
-## (SPEC §5). Currently the J8 proof-of-concept; Phase 2 adds J1..J7, J9 as more manifests.
+## (SPEC §5). Journeys live under docs/examples-tui-walkthrough/*/; Phase 2 is adding them incrementally.
 ## Needs `groff`. Asserts the roff carries `\m[]` color escapes so a silent regression to monochrome fails.
 tui-walkthrough:
 	@mkdir -p docs/pdf

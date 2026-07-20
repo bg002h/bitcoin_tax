@@ -14279,7 +14279,7 @@ mod tests {
         }
     }
 
-    // ── TUI screen-walkthrough (design/tui-walkthrough) — J8 PoC editor frames ───────────────────────
+    // ── TUI screen-walkthrough (design/tui-walkthrough) — editor frames (J8, J4, …) ──────────────────
     // These capture the EDITOR half of the J8 journey (a cross-exchange self-transfer) for the visual
     // walkthrough PDF. Goldens live under docs/examples-tui-walkthrough/<journey>/ (a separate tree from the
     // 4 existing docs/examples-tui/*.txt render goldens). The VIEWER half (the BALANCED Holdings result) is
@@ -14383,14 +14383,19 @@ mod tests {
         let pp = Passphrase::new("golden-j4-pass".into());
         let vault =
             btctax_cli::testonly::seed_journey(dir.path(), &pp, &btctax_cli::testonly::j4());
-        // `r` opens the reclassify-income flow: the two staking receipts, listed to move onto Schedule SE.
+        // `r` opens the reclassify-income flow (the two staking receipts); Enter selects one → its
+        // business/kind form; Tab toggles Business None→yes — the frame DEPICTS the marking (J4 review
+        // Minor 1), not just the list. `cycle_business_optional(None) == Some(true)`, so one Tab suffices;
+        // kind stays "keep original" (already staking). The committed golden (business=yes) byte-gates it.
         let reclassify = {
             let mut app = open_app(&vault, "golden-j4-pass");
             app.clock = pinned;
             handle_key(&mut app, press(KeyCode::Char('r')));
+            handle_key(&mut app, press(KeyCode::Enter));
+            handle_key(&mut app, press(KeyCode::Tab));
             assert!(
                 app.reclassify_income_flow.is_some(),
-                "the J4 reclassify-income flow must open (two income receipts exist)"
+                "the J4 reclassify-income business/kind form must be open"
             );
             app.vault_path = fixed_path.clone();
             capture_edit_frame(&mut app)
@@ -14442,7 +14447,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    #[ignore = "regeneration helper: rewrites docs/examples-tui-walkthrough/j8/*.txt"]
+    #[ignore = "regeneration helper: rewrites docs/examples-tui-walkthrough/{j8,j4,…}/*.txt editor frames"]
     fn emit_btctax_tui_edit_walkthrough_goldens() {
         for (stem, captured) in btctax_tui_edit_walkthrough_frames() {
             let path = tui_walkthrough_golden_dir().join(format!("{stem}.txt"));

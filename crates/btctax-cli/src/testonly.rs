@@ -252,6 +252,7 @@ pub fn seed_j1_with_profile(
 pub fn seed_j4_reclassified(
     dir: &std::path::Path,
     pp: &btctax_store::Passphrase,
+    now: time::OffsetDateTime,
 ) -> std::path::PathBuf {
     use btctax_core::{Carryforward, FilingStatus, IncomeKind, TaxProfile};
     use rust_decimal::Decimal;
@@ -269,7 +270,8 @@ pub fn seed_j4_reclassified(
         schedule_c_expenses: z,
     };
     crate::cmd::tax::set_profile(&vault, pp, 2025, profile, false).unwrap();
-    let now = time::macros::datetime!(2025 - 08 - 01 00:00:00 UTC);
+    // Made-date threaded from the caller so it matches the depicted editor session's pinned clock (J4
+    // review Minor 2 — the J8 `seed_j8_relocated(…, now)` pattern), not a divergent hardcoded literal.
     for r in [
         "import|river|in|1744718400000|income|5000000#0",
         "import|river|in|1747742400000|income|3000000#0",

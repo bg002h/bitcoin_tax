@@ -12,20 +12,20 @@
  10││                                                                                                                      │
  11││                                                                                                                      │
  12││                                                                                                                      │
- 13││                                                                                                                      │
- 14││                                                                                                                      │
- 15││                                                                                                                      │
- 16││         ┌ Reclassify Income — select Income event target  [EDITOR] ────────────────────────────────────────┐         │
- 17││         │  Date         Sat          Kind       Business   FMV            EventId                          │         │
- 18││         │> 2025-04-15   5000000      reward     false      4274.23        import|river|in|1744718400000|inc│         │
- 19││         │  2025-05-20   3000000      reward     false      3176.44        import|river|in|1747742400000|inc│         │
- 20││         │                                                                                                  │         │
- 21││         │                                                                                                  │         │
- 22││         │                                                                                                  │         │
- 23││         └─────────────────────────────↑/↓: scroll   Enter: select   Esc: close─────────────────────────────┘         │
- 24││                                                                                                                      │
- 25││                                                                                                                      │
- 26││                                                                                                                      │
+ 13││                       ┌ Reclassify Income — field form  [EDITOR] ────────────────────────────┐                       │
+ 14││                       │  target: import|river|in|1744718400000|income|5000000#0              │                       │
+ 15││                       │                                                                      │                       │
+ 16││                       │  > business: true  (Tab: cycle true/false/---)                       │                       │
+ 17││                       │    kind:     keep original  (Tab: cycle                              │                       │
+ 18││                       │None/Mining/Staking/Interest/Airdrop/Reward)                          │                       │
+ 19││                       │                                                                      │                       │
+ 20││                       │                                                                      │                       │
+ 21││                       │  Enter: validate   Esc: back to list   ↑/↓: move focus               │                       │
+ 22││                       │                                                                      │                       │
+ 23││                       │                                                                      │                       │
+ 24││                       │                                                                      │                       │
+ 25││                       │                                                                      │                       │
+ 26││                       └──────────────────────────────────────────────────────────────────────┘                       │
  27││                                                                                                                      │
  28││                                                                                                                      │
  29││                                                                                                                      │
@@ -47,20 +47,30 @@
   4│ 68..84 mod=BOLD
   4│ 85..105 mod=BOLD
   4│ 106..118 mod=BOLD
- 16│ 10..110 fg=Cyan
- 17│ 10..11 fg=Cyan
- 17│ 11..109 mod=BOLD|UNDERLINED
- 17│ 109..110 fg=Cyan
- 18│ 10..11 fg=Cyan
- 18│ 11..109 fg=Yellow mod=BOLD|REVERSED
- 18│ 109..110 fg=Cyan
- 19│ 10..11 fg=Cyan
- 19│ 109..110 fg=Cyan
- 20│ 10..11 fg=Cyan
- 20│ 109..110 fg=Cyan
- 21│ 10..11 fg=Cyan
- 21│ 109..110 fg=Cyan
- 22│ 10..11 fg=Cyan
- 22│ 109..110 fg=Cyan
- 23│ 10..110 fg=DarkGray
+ 13│ 24..96 fg=Cyan
+ 14│ 24..25 fg=Cyan
+ 14│ 95..96 fg=Cyan
+ 15│ 24..25 fg=Cyan
+ 15│ 95..96 fg=Cyan
+ 16│ 24..25 fg=Cyan
+ 16│ 95..96 fg=Cyan
+ 17│ 24..25 fg=Cyan
+ 17│ 95..96 fg=Cyan
+ 18│ 24..25 fg=Cyan
+ 18│ 95..96 fg=Cyan
+ 19│ 24..25 fg=Cyan
+ 19│ 95..96 fg=Cyan
+ 20│ 24..25 fg=Cyan
+ 20│ 95..96 fg=Cyan
+ 21│ 24..25 fg=Cyan
+ 21│ 95..96 fg=Cyan
+ 22│ 24..25 fg=Cyan
+ 22│ 95..96 fg=Cyan
+ 23│ 24..25 fg=Cyan
+ 23│ 95..96 fg=Cyan
+ 24│ 24..25 fg=Cyan
+ 24│ 95..96 fg=Cyan
+ 25│ 24..25 fg=Cyan
+ 25│ 95..96 fg=Cyan
+ 26│ 24..96 fg=Cyan
  37│ 1..119 mod=BOLD

@@ -987,7 +987,7 @@ fn j1_viewer_frames() -> Vec<(&'static str, String)> {
     out
 }
 
-/// J4 (mining/staking income → Schedule SE) VIEWER frames — after the editor reclassifies both receipts as
+/// J4 (staking income → Schedule SE) VIEWER frames — after the editor reclassifies both receipts as
 /// a trade or business, the viewer shows Income (now business) and Tax (the self-employment tax). Seeds via
 /// `seed_j4_reclassified` (the post-reclassify state) and only opens + reads.
 fn j4_viewer_frames() -> Vec<(&'static str, String)> {
@@ -999,7 +999,7 @@ fn j4_viewer_frames() -> Vec<(&'static str, String)> {
     let pp = Passphrase::new("golden-j4-pass".into());
     let now = time::macros::datetime!(2025 - 08 - 01 12:00:00 UTC);
     let dir = tempfile::tempdir().unwrap();
-    let vault = btctax_cli::testonly::seed_j4_reclassified(dir.path(), &pp);
+    let vault = btctax_cli::testonly::seed_j4_reclassified(dir.path(), &pp, now);
     let session = btctax_cli::Session::open(&vault, &pp).unwrap();
     let (snapshot, year) = crate::unlock::build_snapshot(&session).unwrap();
     let mut app = App::new(std::path::PathBuf::from("/vault.pgp"));
