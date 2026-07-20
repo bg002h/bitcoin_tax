@@ -309,18 +309,21 @@ fn a_tranche_is_listed_as_a_voidable_decision_on_the_product_surface() {
 }
 #[test]
 fn two_same_window_tranches_are_ordered_by_seq_in_the_canonical_timeline() {
-    // ★ D-1a-b / arch r1 I-1 + r2 NEW-1: assert on resolve()'s TIMELINE, NOT st.lots. `finalize` re-sorts
-    // st.lots by (wallet, acquired_at, lot_id) and LotId Ord compares origin_event_id (Decision{seq}) as
-    // u64 — so st.lots would show 2-before-10 REGARDLESS of the sort fix, making an st.lots assertion blind
-    // to the mutation. sort_canonical is only observable on the timeline itself: reverting either the
-    // constant src_ref OR the `.then(a.id.cmp(&b.id))` key misorders the two Decision Effs here → RED.
+    // ★ D-1a-b / arch r1 I-1 + r2 NEW-1 + r3 NEW-I-1: canonical order is what `sort_canonical` produces,
+    // applied by the fold pipeline at `fold.rs:381`. `resolve()` returns the timeline UNSORTED (raw input
+    // order), so the KAT must COMPOSE `sort_canonical` explicitly to observe the fix. Asserting on st.lots
+    // instead would be blind — `finalize` re-sorts lots by (wallet, acquired_at, lot_id) and LotId Ord
+    // compares origin_event_id (Decision{seq}) as u64, so st.lots shows 2-before-10 regardless of the fix.
     let w = exchange_wallet();
     let a = decision_event(2,  EventPayload::DeclareTranche(sample_tranche_in(&w)));  // same window
     let b = decision_event(10, EventPayload::DeclareTranche(sample_tranche_in(&w)));  // same window
-    let res = btctax_core::project::resolve(&[b, a], /* prices/config as resolve needs */);  // pub-export if needed
+    let mut res = btctax_core::project::resolve::resolve(&[b, a], &prices(), &config());  // returns UNSORTED
+    btctax_core::project::resolve::sort_canonical(&mut res.timeline);                     // pub fn; project+resolve are pub mods
     let seqs: Vec<u64> = res.timeline.iter()
         .filter_map(|e| match &e.id { EventId::Decision { seq } => Some(*seq), _ => None })
         .collect();
+    // Discrimination (all verified against code): revert constant src_ref → "10" < "2" (String-Ord) → [10,2] RED;
+    // remove `.then(a.id.cmp(&b.id))` → all keys tie, stable sort preserves push order [10,2] RED; correct → [2,10].
     assert_eq!(seqs, vec![2, 10], "same-window tranche Effs are canonically ordered by numeric seq (D-1a-b)");
 }
 #[test]
@@ -831,8 +834,11 @@ fn tp8c_fee_sat_basis_can_land_on_the_last_tranche_leg_corner_b() {
     // (resolve.rs:1122/:1172), re-homing that DOCUMENTED fee-sat basis onto the (last) tranche leg → its
     // filed cost basis > $0. Real documented basis (§1011), never the estimate. Pins that P3/P7 state
     // basis AS FILED. (Alternate staging: FIFO with pool [D_old, T, D_new] and principal = D_old+T exactly.)
+    // Fixture footnote (tax r3 N-6): name the FULL tranche (or make the documented lot FIFO-FIRST in the
+    // post-selection remainder) — else a partial naming leaving older-dated $0 tranche sats FIFO-ahead would
+    // draw the fee at $0 and the assert would go RED (loud, never a false pass).
     let st = project(&[documented_buy(&w), tranche(&w),
-                       specific_id_sell_naming_the_tranche(&w /* documented lot remains */)],
+                       specific_id_sell_naming_the_full_tranche(&w /* documented lot remains, FIFO-first */)],
                      &prices(), &config());
     let tranche_leg = only_disposal_leg_from(&st, BasisSource::EstimatedConservative);
     assert!(tranche_leg.cost_basis > Usd::ZERO, "documented fee-sat basis re-homed onto the tranche leg (TP8c)");

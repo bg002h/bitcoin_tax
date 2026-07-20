@@ -209,17 +209,18 @@ return + a **mandatory methodology disclosure**.
   The engine can still put a negative gain (or a `>$0` basis) on a tranche row through **documented, real**
   amounts — never the estimate: (a) USD-fee netting when `fee_usd > proceeds` (`fold.rs` `net = proceeds −
   fee_usd`) reduces the amount realized per §1001(b); (b) the shipped TP8(c) fee-sat flow re-homes a
-  **documented** fee-sat basis onto the last disposal leg — which is the tranche leg when the in-force order
-  (or a specific-ID selection) exhausts the documented lots into the principal *while a documented lot
-  remains for the FIFO fee draw* (NB: under a pure-HIFO principal this can't happen — HIFO consumes every
-  `>$0` lot before the `$0` tranche, so nothing documented is left to draw the fee from; the reachable
-  stagings are FIFO exact-exhaustion or a named-lot sale — plan-tax r2 NEW-1); and (c) sub-cent pro-rata
-  remainder rounding — `make_disposal_legs` gives the last leg `net − Σ round_cents(shares)`, which can be
-  `−$0.01` on a multi-leg dust allocation with no fees at all (Σ-conserving, shared by every multi-leg
-  disposal, vanishes at 8949 whole-dollar rounding). All three are correct (§1001(b)/§1011) and none
-  understates tax. So the invariant is scoped: *any negative tranche-leg gain is attributable solely to
-  documented `fee_usd`/fee-sat basis or ≤$0.01 pro-rata rounding, never to the estimate.* Assert the core
-  (fee-free + single-leg ⇒ `≥ 0`) and characterize the corners. (For B's floor path: never claim a loss off
+  **documented** fee-sat basis onto the last disposal leg — which is the tranche leg when the tranche leg is
+  last (the in-force order exhausts the documented lots ahead of it, or a specific-ID selection names it)
+  *while a documented lot remains for the FIFO fee draw* (NB: under a pure-HIFO principal this can't happen —
+  HIFO consumes every `>$0` lot before the `$0` tranche, so nothing documented is left to draw the fee from;
+  the reachable stagings are FIFO exact-exhaustion or a named-lot sale — plan-tax r2 NEW-1); and (c) sub-cent
+  pro-rata remainder rounding — `make_disposal_legs` gives the last leg `net − Σ round_cents(shares)`, which
+  can be negative at **cent scale** on a multi-leg dust allocation with no fees at all (bounded by ≤ ½¢ per
+  prior leg — plan-tax r3 N-5; Σ-conserving, shared by every multi-leg disposal, vanishes at 8949 whole-dollar
+  rounding). All three are correct (§1001(b)/§1011) and none understates tax. So the invariant is scoped:
+  *any negative tranche-leg gain is attributable solely to documented `fee_usd`/fee-sat basis or cent-scale
+  pro-rata rounding, never to the estimate.* Assert the core (fee-free + single-leg ⇒ `≥ 0`) and characterize
+  the corners. (For B's floor path: never claim a loss off
   an estimated basis — a disallowed estimate flips a claimed loss into a gain.)
 
 ## 4. Non-goals (v1)
