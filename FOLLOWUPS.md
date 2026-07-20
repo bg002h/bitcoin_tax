@@ -2596,3 +2596,20 @@ polish cycle):
 - **N2 (Nit)** — `report_dual_report_absolute_refused_delta_computed_exits_zero` could additionally assert
   the refusal reason substring (`TaxableIncomeNonPositiveWithCarryforward`) to pin the fixture to
   screen_absolute case (c). Documentation-strength only — the exit-0 non-trigger is refusal-agnostic.
+
+**TUI screen-walkthrough PoC (design/tui-walkthrough) impl review r1→r2→r3 — GREEN (0C/0I) (2026-07-19,
+`reviews/poc-impl-fable-review-r{1,2,3}.md`):** r1 (1C/1I/4M/3N) folded the ungated-manifest Critical
+(new xtask `walkthrough_manifests_valid_and_complete` grammar + FRAME⇄golden bijection gate + CI %PDF +
+corrected a false Makefile gating claim + SPEC §5 As-built amendment) and the fail-open Makefile loop
+(I-1); r2 (0C/1I) folded NEW-I-1 (per-crate `WALKTHROUGH_{VIEWER,EDITOR}_STEMS` asserts pin disk⇄capture
+so a dropped tuple can't pass vacuously); r3 GREEN. One non-gating residue:
+- **r3-M-1 (Minor, owning phase: Phase 2 rollout)** — the crate stem consts and the manifest FRAME set
+  are two independent authorities with no automated cross-check: a PAIR-fault (drop a capture tuple AND
+  its `WALKTHROUGH_*_STEMS` entry together) leaves an orphaned, never-re-verified golden still rendering
+  into the PDF. Reachable only by a half-done DELIBERATE removal that ignores the stem assert's explicit
+  "update the const AND the manifest together" instruction; every SINGLE accidental fault reds. Phase-2
+  remedy when the consts grow per-journey: add a cross-check (e.g. the xtask gate parses the two
+  `WALKTHROUGH_*_STEMS` consts out of the crate sources and asserts their union == the union of manifest
+  FRAME refs), or record the removal protocol in the rollout checklist.
+- **r3 non-finding (Phase 2)** — SPEC §11 mentions a `make regen-walkthrough` one-command refresh target
+  that does not exist yet (future-directed, tied to the Phase-2 golden count). Provide it during rollout.
