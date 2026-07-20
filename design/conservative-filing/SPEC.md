@@ -1,7 +1,8 @@
-# SPEC — Conservative / Defensive Filing (Approach C: primitives first) — v2
+# SPEC — Conservative / Defensive Filing (Approach C: primitives first) — v4
 
-**Status:** v4 DRAFT — folds all review rounds in `./reviews/`: tax r1 (2C+2I) → r2 GREEN; architecture r1
-(1C+6I) → r2 (2I) → r3 (1I). Awaiting the architecture re-review to 0C/0I, then a plan.
+**Status:** ★ GREEN — both lenses 0 Critical / 0 Important. Tax r1 (2C+2I) → r2 GREEN; architecture r1
+(1C+6I) → r2 (2I) → r3 (1I) → r4 GREEN (5 cosmetic nits folded). Reviews in `./reviews/`. Next: the
+implementation plan.
 **Branch:** `feat/conservative-filing` (off `main`). **Design of record:** `./DESIGN.md` (approved).
 **Sequencing note:** the shipped **8949-box bug** (FOLLOWUPS ⚠) is fixed AFTER this SPEC greens; D-6 below
 depends on that fix landing (it inherits the corrected box logic, does not reimplement it).
@@ -46,13 +47,13 @@ return + a **mandatory methodology disclosure**.
     id lacks — order `DeclareTranche` Effs by `(window_end, decision_seq)` for determinism (NFR4); two
     same-window tranches tie-break on `decision_seq`. ★ Compare `decision_seq` **numerically** (it rides on
     `Eff.id`) — NOT lexicographically via a `src_ref` string, which would misorder seq 2 vs 10 (arch r3 N-4).
-    (e) **Σ-conservation (FR9):** the new fold arm MUST bump `stats.sigma_in` like `Op::Acquire`
-    (`fold.rs:596`) or the conservation KATs go red (arch r3 N-5).
     (c) **No silent skip:** `build_op`'s `_ => Op::Skip` catch-all (`resolve.rs:393`) means an omitted arm
     vanishes the tranche silently — the new arm is REQUIRED and pinned by a KAT ("a DeclareTranche yields an
     Op, never Skip").
     (d) **Void/duplicate (arch r2 New-6):** voidable via the generic `VoidDecisionEvent` (revocable per the
     `Some(_)` catch-all, `resolve.rs:464`); two tranches are legitimately additive (no duplicate-conflict).
+    (e) **Σ-conservation (FR9):** the new fold arm MUST bump `stats.sigma_in` like `Op::Acquire`
+    (`fold.rs:596`) or the conservation KATs go red (arch r3 N-5).
 - **D-2 Holding period date = window END (pin it).** `acquired_at := window_end` (arch/tax min-5 — never a
   "representative"/midpoint date, which would overclaim the hold). The window END is the latest plausible
   acquisition date → conservative for the holding period (never overclaims long-term).
@@ -106,9 +107,18 @@ return + a **mandatory methodology disclosure**.
   - **Projection-time invariant backstop (the real guarantee).** Independent of declaration order, a
     `SafeHarborAllocation` is **denied effectiveness** (kept inert → Path A → the tag survives via the seed
     exemption), via a loud `SafeHarborUnconservable`-class blocker, whenever the pre-2025 Universal residue
-    contains an `EstimatedConservative` lot. This makes "a tranche and an EFFECTIVE Path-B allocation can
-    never coexist" a construction — no ordering (incl. inert-then-declare) can reach the silent discard. The
-    record-time refusal is then just the friendly early error; this guard is the correctness invariant.
+    contains an `EstimatedConservative` lot **with `remaining_sat > 0`** (a fully-consumed tranche leaves
+    nothing to discard — arch r4 Nit-2; the plan extends `UniversalSnapshot`, today totals-only, by one
+    field). This makes "a tranche and an EFFECTIVE Path-B allocation can never coexist" a construction — no
+    ordering (incl. inert-then-declare) reaches the silent discard. The record-time refusal is the friendly
+    early error; this guard is the correctness invariant.
+  - **Consequence (stated, not accidental — arch r4 Nit-4):** a filer with BOTH documented pre-2025 lots and
+    $0 tranches forgoes Rev. Proc. 2024-28 *reallocation flexibility* (Path B), but loses NO basis — Path A
+    carries documented lots' basis + `acquired_at` per-wallet unchanged (`transition.rs:80-85`). Coexistence
+    (an allocation that itself accounts for tranche sats at $0) is a deliberate v1 **non-goal** (see §4), a B
+    refinement. The reverse event-scan refusal is knowingly over-broad in one corner (it also refuses when a
+    tranche was fully consumed pre-2025, a vault with no hazard) — acceptable for a "friendly early error"
+    (arch r4 Nit-3).
   - **KATs:** tranche-through-Path-A-seed preserves the tag + a 2025+ disposal leg carries
     `EstimatedConservative`; a relocated tranche keeps the tag; the record-time refusal fires for ANY
     in-force allocation (effective OR inert) in BOTH directions; and the **projection-time backstop** — an
@@ -201,7 +211,10 @@ return + a **mandatory methodology disclosure**.
 ## 4. Non-goals (v1)
 The guided wizard (B); filing a `>$0` floor + its Form 8275 (B, D-10); VARIOUS multi-date rows; the
 shipped-box fix (its own project — a **prerequisite** for D-6's compliant output); ProRata auto-split; AMT
-compute; non-BTC assets; broker transfer-statement/covered-lot modeling.
+compute; non-BTC assets; broker transfer-statement/covered-lot modeling. **Tranche ⇄ Path-B safe-harbor
+allocation coexistence** — an allocation that itself accounts for the tranche's sats at $0 (D-8) — is a
+deliberate v1 non-goal: v1 makes them mutually exclusive (Path A serves the mixed-records filer with no
+basis loss); coexistence is a B refinement.
 
 ## 5. Owner decisions — RESOLVED
 - **O-1 → D-6 (corrected).** 8949 is term-aware + year-aware (G–L from TY2025), inherited from the box fix,

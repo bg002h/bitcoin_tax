@@ -1,0 +1,20 @@
+# Conservative-filing SPEC v4 — architecture lens review r4 — GREEN (0C/0I)
+
+_Fable, independent, architecture lens, round 4, SPEC v4 at 915d5d4. The r3 Important is resolved by a
+genuinely structural fix; residue is 5 cosmetic Nits._
+
+VERDICT: GREEN
+
+**r3-New-1: RESOLVED** — v4 D-8 closes the ordering both ways, mechanism verified airtight against source. (a) Deny-effectiveness works: effectiveness is a per-allocation push into `effective` (`resolve.rs:1200-1277`); a blocker + `continue` (the existing `SafeHarborUnconservable` pattern, `resolve.rs:1238-1245`) keeps it out, and `effective.len()==0 → PathA` (`resolve.rs:1293-1294`); Path A moves every surviving Universal lot to its wallet pool with basis/`acquired_at` kept (`transition.rs:80-86`), where the seed exemption (`transition.rs:83`) preserves the tag. The discard is Path-B-only (`transition.rs:77,88-94`) and Path B requires exactly one effective allocation — so denied-effectiveness structurally cannot reach it. (b) The predicate is computable at the decision point: the snapshot is computed per-allocation where effectiveness is decided (`resolve.rs:1227-1234`), residue lots exist inside `universal_snapshot` (`transition.rs:63-67`); a pre-2025-window tranche passes `e.date() < TRANSITION_DATE` (`transition.rs:44-48`) and buckets Universal (`pools.rs:15`). (`UniversalSnapshot` exposes only totals, `transition.rs:19-22` — a one-field extension, Nit-2.) (c) Ordering sweep — none reaches the discard: declare-then-allocate (record-time refuses; a slipped allocation listing the tranche's sats at $0 conserves → backstop denies); allocate-inert-then-declare (record-time refuses; slipped → backstop denies); allocate-effective-then-declare (record-time refuses; slipped → sat-conservation breaks loudly OR the tranche completes totals → backstop denies). The rejected-void-of-effective-allocation corner (a void of an effective allocation is a conflict; it stays in force, `resolve.rs:1280-1290`) is caught because the spec demotes record-time to "friendly early error" and makes the backstop the invariant. (d) Legitimate-allocation interaction is intended + stated (mutually exclusive; hedge covers filed-final; Path A carries documented basis unchanged — Nit-4 asks for one sentence). KAT pins the exact r3 scenario.
+
+**r3-New-2: RESOLVED** — the voided-tranche KAT is in P1 (`SPEC.md:146`); `voided` is built at `resolve.rs:439-465` (a DeclareTranche void routes the `Some(_)` catch-all) before the timeline build at `resolve.rs:1055`, so it is in scope at the admit point.
+
+**r3-New-3: RESOLVED (cosmetic residue → Nit-1)** — Status + fold-provenance corrected; H1 title still "— v2".
+**r3-New-4: RESOLVED** — numeric `decision_seq` compare pinned (D-1a-b). **r3-New-5: RESOLVED** — D-1a(e) mandates the `stats.sigma_in` bump citing `fold.rs:596` (verified).
+
+## New findings
+No Critical. No Important. No Minor.
+
+**Nit-1** Title token stale ("— v2" while Status says v4). **Nit-2** pin the backstop predicate to `remaining_sat > 0` (a fully-consumed tranche leaves nothing to discard) + name the `UniversalSnapshot` one-field extension. **Nit-3** the reverse record-time refusal is knowingly over-broad in one corner (also refuses a fully-consumed pre-2025 tranche) — one clause or scope-to-undisposed. **Nit-4** state the mixed-records filer's fallback in one sentence (Path A serves it; only Rev. Proc. 2024-28 reallocation flexibility is forgone). **Nit-5** D-1a bullet lettering out of order.
+
+Scope: the v4 fix is the stronger of the two remedies r3 offered — it implements BOTH (record-time ANY-in-force both directions + the projection-time invariant) and correctly assigns the invariant role to the projection-time guard, which survives every record-time blind spot I could construct (incl. the rejected-void-of-effective corner). D-1a and D-8 are buildable without an implementer inventing any load-bearing mechanism; remaining inventions (Op-variant shape, which layer hosts the record-time check, the snapshot field) are ordinary plan details fully constrained by specified outcomes. GREEN — 0C/0I; the five Nits are recorded and do not gate.
