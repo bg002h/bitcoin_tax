@@ -138,6 +138,7 @@ fn pre_2025_st_leg_is_box_c_and_lt_leg_is_box_f() {
         ),
     ]);
     let rows = form_8949(&st, 2024);
+    assert_eq!(rows.len(), 2);
     let st_row = rows
         .iter()
         .find(|r| r.part == Form8949Part::ShortTerm)
@@ -148,6 +149,44 @@ fn pre_2025_st_leg_is_box_c_and_lt_leg_is_box_f() {
         .unwrap();
     assert_eq!(st_row.box_, Form8949Box::C);
     assert_eq!(lt_row.box_, Form8949Box::F);
+}
+
+/// The digital-asset boxes are "TY2025 **and later**" — a TY2026 disposal still uses I (ST) / L (LT).
+/// Pins the `>=` half of the boundary so a future author can't narrow it to an equality on 2025.
+#[test]
+fn post_2025_st_leg_is_box_i_and_lt_leg_is_box_l() {
+    let st = state(vec![
+        disposal(
+            1,
+            date!(2026 - 03 - 01),
+            DisposeKind::Sell,
+            vec![DisposalLeg {
+                term: Term::ShortTerm,
+                ..base_leg()
+            }],
+        ),
+        disposal(
+            2,
+            date!(2026 - 04 - 01),
+            DisposeKind::Sell,
+            vec![DisposalLeg {
+                term: Term::LongTerm,
+                ..base_leg()
+            }],
+        ),
+    ]);
+    let rows = form_8949(&st, 2026);
+    assert_eq!(rows.len(), 2);
+    let st_row = rows
+        .iter()
+        .find(|r| r.part == Form8949Part::ShortTerm)
+        .unwrap();
+    let lt_row = rows
+        .iter()
+        .find(|r| r.part == Form8949Part::LongTerm)
+        .unwrap();
+    assert_eq!(st_row.box_, Form8949Box::I);
+    assert_eq!(lt_row.box_, Form8949Box::L);
 }
 
 /// Column (a) description is the EXACT BTC amount, 8dp + " BTC" — "0.53000000 BTC" (never a float).

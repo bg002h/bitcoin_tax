@@ -1,9 +1,10 @@
 //! Form 8949 fill: format the tax data into grid cells, authorize each write against the per-year
 //! map, fill the bundled PDF, and READ BACK the serialized bytes through the geometric verifier.
 //!
-//! **Digital-asset box:** Bitcoin is filed under **Box I** (short-term) / **Box L** (long-term) —
-//! the 2025 1099-DA revision — NEVER Box C/F ("other than digital asset transactions"). The box is
-//! chosen by the part's on-state in the map, so the core `Form8949Box::{C,F}` taxonomy is not reused.
+//! **Digital-asset box:** on the 2025 1099-DA revision Bitcoin is filed under **Box I** (short-term)
+//! / **Box L** (long-term) — NEVER Box C/F ("other than digital asset transactions"); the pre-2025
+//! revisions use Box C/F. The box is chosen by the part's on-state in the per-year map, so the core
+//! `Form8949Box` taxonomy (`{C,F,I,L}`, itself year-aware) is not reused here.
 
 use crate::error::FormsError;
 use crate::map::{Form8949Map, PartMap};

@@ -57,9 +57,11 @@ pub struct Printed8949Totals {
     pub gain_h: Usd,
 }
 
-/// The printed Form 8949: Part I (short-term, Box C) and Part II (long-term, Box F), each with its rows
-/// and its totals row. These totals ARE Schedule D lines 3 and 10 — the schedule's own text defines them
-/// as "Totals for all transactions reported on Form(s) 8949 with Box C/F checked".
+/// The printed Form 8949: Part I (short-term) and Part II (long-term), each with its rows and its
+/// totals row. The conservative "not reported" box is year-aware (C/F pre-TY2025; the digital-asset
+/// I/L from TY2025). These totals ARE Schedule D lines 3 and 10 — the schedule's own text defines
+/// them as "Totals for all transactions reported on Form(s) 8949 with Box C/F checked" pre-2025, and
+/// "with Box C or Box I checked" (line 3) / "Box F or Box L checked" (line 10) on the 2025 revision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Printed8949 {
     pub short_term: Vec<Printed8949Row>,

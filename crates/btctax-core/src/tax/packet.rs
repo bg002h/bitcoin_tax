@@ -429,8 +429,9 @@ pub struct PrintedForms {
     /// Schedule D always files on a full return (the crypto engine's whole point), so it is not optional.
     pub sch_d: ScheduleDLines,
     /// Form 8949 — the transaction detail Schedule D lines 3 and 10 CITE as their source ("Totals for
-    /// all transactions reported on Form(s) 8949 with Box C/F checked"). `None` when the year has no
-    /// disposals: a carryover/distribution-only Schedule D files with lines 3/10 blank and no 8949.
+    /// all transactions reported on Form(s) 8949 with Box C/F checked" pre-2025; "with Box C or Box I
+    /// checked" / "Box F or Box L checked" on the 2025 digital-asset revision). `None` when the year
+    /// has no disposals: a carryover/distribution-only Schedule D files with lines 3/10 blank and no 8949.
     pub f8949: Option<Printed8949>,
     /// Schedule SE — the form Schedule 2 line 4 CITES ("Self-employment tax. **Attach Schedule SE**").
     /// `None` below the §6017 $400 floor, where no SE tax is owed and none is filed.

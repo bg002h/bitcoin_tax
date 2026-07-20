@@ -26,7 +26,11 @@ pub fn row(
 ) -> Form8949Row {
     Form8949Row {
         part,
-        // The core taxonomy is C/F; the forms crate must map to Box I/L regardless.
+        // `box_` is INERT for the fill layer: `fill8949` checks the box from the per-year map by the
+        // part's on-state, never from `row.box_`, so a fixture value here does not affect the filled
+        // PDF. (The core `form_8949` is year-aware — C/F pre-TY2025, I/L from TY2025 — but that value
+        // is not what drives the checkbox.) We set the pre-2025 securities boxes purely as a stable,
+        // recognizable fixture default.
         box_: if part == Form8949Part::ShortTerm {
             Form8949Box::C
         } else {

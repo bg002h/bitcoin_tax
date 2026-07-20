@@ -5,7 +5,10 @@
 //! No float (NFR5 / [R0-M5]): all amounts are exact `Decimal`.
 
 use crate::app::{App, Snapshot};
-use btctax_core::{form_8283, form_8949, schedule_d, Form8283Section, Form8949Box, Form8949Part};
+use btctax_core::{
+    form_8283, form_8949, schedule_d, Form8283Section, Form8949Box, Form8949Part,
+    DIGITAL_ASSET_8949_FIRST_YEAR,
+};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
@@ -25,7 +28,7 @@ fn form8949_part_tag(p: Form8949Part) -> &'static str {
 }
 
 /// Stable Form 8949 box tag. Values: "C" (short-term) / "F" (long-term).
-fn form8949_box_tag(b: Form8949Box) -> &'static str {
+pub(super) fn form8949_box_tag(b: Form8949Box) -> &'static str {
     match b {
         Form8949Box::C => "C",
         Form8949Box::F => "F",
@@ -162,10 +165,21 @@ pub fn render(
         bottom,
         "NOTE: the Section (A/B) is set by the §170(f)(11)(F) year-aggregate of similar donated items, not per donation."
     );
-    let _ = writeln!(
-        bottom,
-        "NOTE: Review box C/F — exchange disposals may require A/B/D/E (1099-B/1099-DA)."
-    );
+    // Year-aware box-review caveat, mirroring the core box predicate: pre-TY2025 the securities
+    // boxes (C/F ↔ A/B/D/E, 1099-B); from TY2025 the digital-asset boxes (I/L ↔ G/H/J/K, 1099-DA).
+    // The securities boxes are forbidden for digital assets on the 2025 revision, so never steer a
+    // 2025 filer to A/B/D/E.
+    if year >= DIGITAL_ASSET_8949_FIRST_YEAR {
+        let _ = writeln!(
+            bottom,
+            "NOTE: Review box I/L — exchange disposals may require G/H/J/K (1099-DA)."
+        );
+    } else {
+        let _ = writeln!(
+            bottom,
+            "NOTE: Review box C/F — exchange disposals may require A/B/D/E (1099-B)."
+        );
+    }
 
     let p = Paragraph::new(bottom)
         .block(

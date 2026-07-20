@@ -9,7 +9,7 @@ use btctax_core::{
     event::{BasisSource, DisposeKind, IncomeKind},
     identity::{EventId, LotId, Source, SourceRef, WalletId},
     state::{BlockerKind, Disposal, DisposalLeg, IncomeRecord, LedgerState, Lot, Severity, Term},
-    Carryforward, FilingStatus, TaxProfile,
+    Carryforward, FilingStatus, Form8949Box, TaxProfile,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
@@ -74,16 +74,22 @@ fn press(code: KeyCode) -> KeyEvent {
 
 /// Scan every row of the buffer; return true if any row's text contains `needle`.
 fn buffer_has(buf: &ratatui::buffer::Buffer, needle: &str) -> bool {
+    buffer_row_containing(buf, needle).is_some()
+}
+
+/// Return the first buffer row whose whole-row text contains `needle` (so a caller can assert on
+/// the *rest* of that row — e.g. which box letter renders in an 8949 data row).
+fn buffer_row_containing(buf: &ratatui::buffer::Buffer, needle: &str) -> Option<String> {
     let area = buf.area();
     for y in 0..area.height {
         let row: String = (0..area.width)
             .map(|x| buf.cell((x, y)).map_or(" ", |c| c.symbol()))
             .collect();
         if row.contains(needle) {
-            return true;
+            return Some(row);
         }
     }
-    false
+    None
 }
 
 fn render_holdings(app: &mut App) -> ratatui::buffer::Buffer {
@@ -1547,10 +1553,24 @@ fn tax_tab_year_change_updates_figures() {
 
 // ── Forms tab tests ───────────────────────────────────────────────────────────
 
+/// F0. The TUI's `form8949_box_tag` (a duplicate of the CLI mapping) pins every box letter — so a
+/// silent revert of the TY2025 I/L arms back to the securities C/F is caught here, not vacuously
+/// passed by a whole-buffer substring search.
+#[test]
+fn form8949_box_tag_maps_every_box_letter() {
+    assert_eq!(super::forms::form8949_box_tag(Form8949Box::C), "C");
+    assert_eq!(super::forms::form8949_box_tag(Form8949Box::F), "F");
+    assert_eq!(super::forms::form8949_box_tag(Form8949Box::I), "I");
+    assert_eq!(super::forms::form8949_box_tag(Form8949Box::L), "L");
+}
+
 /// F1. Forms tab shows a known 8949 row (part + box) and Schedule D totals.
 ///
 /// Fixture: 1 LT disposal in 2025 with proceeds=$30,000, basis=$20,000, gain=$10,000.
-/// Expected: 8949 Part "LT" + Box "F" appear; Schedule D Part II proceeds=$30,000.
+/// Expected: the 8949 data row shows Part "LT" + the TY2025 digital-asset Box "L" — and NEVER the
+/// securities Box "F" (forbidden for digital assets on the 2025 revision); Schedule D Part II
+/// proceeds=$30,000. Asserted on the *data row itself* (found by its BTC description), not a bare
+/// whole-buffer substring — "F" would otherwise match "Forms"/"Form 8283" and pass vacuously.
 #[test]
 fn forms_tab_shows_known_8949_row_and_schedule_d_totals() {
     let mut state = LedgerState::default();
@@ -1561,14 +1581,23 @@ fn forms_tab_shows_known_8949_row_and_schedule_d_totals() {
 
     let buf = render_forms(&mut app);
 
-    // Form 8949 table must show the part and box for the LT disposal
+    // The 8949 data row is uniquely identified by its BTC description (0.5 BTC = 50_000_000 sat).
+    let row_8949 = buffer_row_containing(&buf, "0.50000000 BTC")
+        .expect("Forms tab must render the 8949 data row for the LT disposal");
+    // Part II (LT) long-term.
     assert!(
-        buffer_has(&buf, "LT"),
-        "Forms tab must show Part II (LT) for long-term disposal"
+        row_8949.contains("LT"),
+        "8949 data row must show Part II (LT); row was: {row_8949:?}"
     );
+    // TY2025 long-term digital-asset box is L — and the securities box F must NOT appear on it.
     assert!(
-        buffer_has(&buf, "F"),
-        "Forms tab must show Box F for long-term disposal"
+        !row_8949.contains('F'),
+        "TY2025 digital-asset row must NOT show the forbidden securities Box F; row was: {row_8949:?}"
+    );
+    assert_eq!(
+        super::forms::form8949_box_tag(Form8949Box::L),
+        "L",
+        "TY2025 long-term digital-asset disposal → Box L"
     );
     // Proceeds $30,000 must appear in the 8949 table
     assert!(

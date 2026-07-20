@@ -34,7 +34,7 @@
  32││Form 8283 (1 row(s)):                                                                                                 │
  33││  [§B] 0.10000000 BTC deduction 6000.00                                                                               │
  34││NOTE: the Section (A/B) is set by the §170(f)(11)(F) year-aggregate of similar donated items, not per donation.       │
- 35││NOTE: Review box C/F — exchange disposals may require A/B/D/E (1099-B/1099-DA).                                       │
+ 35││NOTE: Review box C/F — exchange disposals may require A/B/D/E (1099-B).                                               │
  36││                                                                                                                      │
  37││                                                                                                                      │
  38│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

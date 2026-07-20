@@ -60,12 +60,16 @@ pub const DIGITAL_ASSET_8949_FIRST_YEAR: i32 = 2025;
 pub struct Form8949Row {
     /// Part I (ST) or Part II (LT), from `leg.term`.
     pub part: Form8949Part,
-    /// The conservative C (ST) / F (LT) "not reported on a 1099-B" default (D4).
+    /// The conservative "not reported to the IRS" box, chosen year-aware by [`form_8949`]:
+    /// pre-TY2025 the securities boxes C (ST) / F (LT); from TY2025 the digital-asset boxes I (ST) /
+    /// L (LT) — the securities boxes are forbidden for digital assets on the 2025 revision (D4).
     pub box_: Form8949Box,
     /// `true` iff the disposing wallet is an **Exchange** (`matches!(leg.wallet, Exchange { .. })`)
-    /// — such a disposition MAY have been reported on a 1099-B/1099-DA (2025+ broker reporting), so
-    /// the C/F default should be reviewed and reclassified to A/B (ST) or D/E (LT) if a 1099-B was
-    /// issued. Direct match on `leg.wallet` (D4/[R0-M2]) — never the private `optimize.rs::is_broker`.
+    /// — such a disposition MAY have been reported to the IRS by the broker (1099-DA from TY2025;
+    /// 1099-B before), so the conservative default should be reviewed and reclassified: pre-TY2025
+    /// to A/B (ST) or D/E (LT) if a 1099-B was issued; from TY2025 to G/H (ST) or J/K (LT) if a
+    /// 1099-DA was issued. Direct match on `leg.wallet` (D4/[R0-M2]) — never the private
+    /// `optimize.rs::is_broker`.
     pub box_needs_review: bool,
     /// Column (a): the BTC amount, 8dp + `" BTC"` (e.g. `"0.53000000 BTC"`). Computed as EXACT
     /// `Decimal` (`Decimal::from(sat) / SATS_PER_BTC`) — NEVER `sat as f64 / 1e8` [R0-M5].

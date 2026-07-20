@@ -35,7 +35,7 @@
  33││  [§B] 1.00000000 BTC deduction 110996.17                                                                             │
  34││  [§] 1.00000000 BTC [review]                                                                                         │
  35││NOTE: the Section (A/B) is set by the §170(f)(11)(F) year-aggregate of similar donated items, not per donation.       │
- 36││NOTE: Review box C/F — exchange disposals may require A/B/D/E (1099-B/1099-DA).                                       │
+ 36││NOTE: Review box I/L — exchange disposals may require G/H/J/K (1099-DA).                                              │
  37││                                                                                                                      │
  38│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
  39│Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   g/G: top/bottom   w: what-if   e: export
