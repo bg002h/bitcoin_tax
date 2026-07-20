@@ -14308,6 +14308,8 @@ mod tests {
     fn btctax_tui_edit_walkthrough_frames() -> Vec<(&'static str, String)> {
         let mut frames = j8_editor_frames();
         frames.extend(j4_editor_frames());
+        frames.extend(j7_editor_frames());
+        frames.extend(j3_editor_frames());
         frames
     }
 
@@ -14403,6 +14405,72 @@ mod tests {
         vec![("j4/01-reclassify-income", reclassify)]
     }
 
+    /// J7 editor frame — classifying an off-exchange Receive (no market price) as staking INCOME. `c` opens
+    /// the classify-inbound flow; Enter picks the receipt → the variant picker, which starts on
+    /// `Income` (the default), so the frame depicts choosing income. The viewer then shows the hand-supplied
+    /// FMV as ordinary income. Seeds only the raw import; the flow drives the classify.
+    #[cfg(unix)]
+    fn j7_editor_frames() -> Vec<(&'static str, String)> {
+        std::env::set_var(
+            "BTCTAX_PRICE_CACHE",
+            "/nonexistent-walkthrough-price-cache.csv",
+        );
+        let pinned =
+            btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2024 - 07 - 01 12:00:00 UTC));
+        let fixed_path = std::path::PathBuf::from("/edit/vault.pgp");
+        let dir = tempfile::tempdir().unwrap();
+        let pp = Passphrase::new("golden-j7-pass".into());
+        let vault =
+            btctax_cli::testonly::seed_journey(dir.path(), &pp, &btctax_cli::testonly::j7());
+        let classify = {
+            let mut app = open_app(&vault, "golden-j7-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('c')));
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.classify_inbound_flow.is_some(),
+                "the J7 classify-inbound variant picker must be open"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+        vec![("j7/01-classify-income", classify)]
+    }
+
+    /// J3 editor frame — classifying an unknown-basis inbound as the filer's OWN coins returning (a
+    /// non-taxable self-transfer). `c` opens the flow; Enter picks the receipt → the variant picker (starts
+    /// on Income); two Tabs cycle Income → Gift → SelfTransferMine, so the frame depicts choosing
+    /// "self-transfer". The viewer then shows the coins landed with their carried basis.
+    #[cfg(unix)]
+    fn j3_editor_frames() -> Vec<(&'static str, String)> {
+        std::env::set_var(
+            "BTCTAX_PRICE_CACHE",
+            "/nonexistent-walkthrough-price-cache.csv",
+        );
+        let pinned =
+            btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2025 - 08 - 02 12:00:00 UTC));
+        let fixed_path = std::path::PathBuf::from("/edit/vault.pgp");
+        let dir = tempfile::tempdir().unwrap();
+        let pp = Passphrase::new("golden-j3-pass".into());
+        let vault =
+            btctax_cli::testonly::seed_journey(dir.path(), &pp, &btctax_cli::testonly::j3());
+        let classify = {
+            let mut app = open_app(&vault, "golden-j3-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('c')));
+            handle_key(&mut app, press(KeyCode::Enter));
+            handle_key(&mut app, press(KeyCode::Tab));
+            handle_key(&mut app, press(KeyCode::Tab));
+            assert!(
+                app.classify_inbound_flow.is_some(),
+                "the J3 classify-inbound variant picker must be open"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+        vec![("j3/01-classify-self-transfer", classify)]
+    }
+
     /// The frame stems this crate (the editor half) is responsible for capturing. Declared EXPLICITLY so a
     /// dropped/renamed capture tuple reds the gate (NEW-I-1) — the byte-compare loop alone passes vacuously
     /// on a shrunk set, and the xtask manifest bijection would still hold (manifest⇄disk unchanged),
@@ -14414,6 +14482,8 @@ mod tests {
         "j8/02-match-list",
         "j8/03-match-confirm",
         "j4/01-reclassify-income",
+        "j7/01-classify-income",
+        "j3/01-classify-self-transfer",
     ];
 
     #[cfg(unix)]

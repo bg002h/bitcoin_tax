@@ -924,6 +924,8 @@ fn btctax_tui_walkthrough_frames() -> Vec<(&'static str, String)> {
     let mut frames = j8_viewer_frames();
     frames.extend(j1_viewer_frames());
     frames.extend(j4_viewer_frames());
+    frames.extend(j7_viewer_frames());
+    frames.extend(j3_viewer_frames());
     frames
 }
 
@@ -1018,6 +1020,64 @@ fn j4_viewer_frames() -> Vec<(&'static str, String)> {
     out
 }
 
+/// J7 (off-exchange income valued by hand) VIEWER frames — after the editor classifies the Receive as
+/// staking income with a supplied FMV, the viewer shows Income (the $3,300 FMV as ordinary income) + Tax.
+/// Seeds via `seed_j7_income` (2024) and only reads.
+fn j7_viewer_frames() -> Vec<(&'static str, String)> {
+    use btctax_store::Passphrase;
+    std::env::set_var(
+        "BTCTAX_PRICE_CACHE",
+        "/nonexistent-walkthrough-price-cache.csv",
+    );
+    let pp = Passphrase::new("golden-j7-pass".into());
+    let now = time::macros::datetime!(2024 - 07 - 01 12:00:00 UTC);
+    let dir = tempfile::tempdir().unwrap();
+    let vault = btctax_cli::testonly::seed_j7_income(dir.path(), &pp, now);
+    let session = btctax_cli::Session::open(&vault, &pp).unwrap();
+    let (snapshot, year) = crate::unlock::build_snapshot(&session).unwrap();
+    let mut app = App::new(std::path::PathBuf::from("/vault.pgp"));
+    app.screen = Screen::Viewer;
+    app.selected_year = year;
+    app.snapshot = Some(snapshot);
+    app.clock = crate::clock::Clock::Pinned(now);
+    let mut out = Vec::new();
+    for (stem, tab) in [
+        ("j7/02-income", crate::app::Tab::Income),
+        ("j7/03-tax", crate::app::Tab::Tax),
+    ] {
+        app.tab = tab;
+        out.push((stem, crate::capture::to_golden(&render_viewer(&mut app))));
+    }
+    out
+}
+
+/// J3 (self-transfer, unknown-basis inbound) VIEWER frame — after the editor classifies the Receive as the
+/// filer's own coins returning, Holdings shows both lots (the original buy + the returned coins carrying
+/// their supplied $19,000 basis / 2024-11-01 date). Seeds via `seed_j3_self_transfer` and only reads.
+fn j3_viewer_frames() -> Vec<(&'static str, String)> {
+    use btctax_store::Passphrase;
+    std::env::set_var(
+        "BTCTAX_PRICE_CACHE",
+        "/nonexistent-walkthrough-price-cache.csv",
+    );
+    let pp = Passphrase::new("golden-j3-pass".into());
+    let now = time::macros::datetime!(2025 - 08 - 02 12:00:00 UTC);
+    let dir = tempfile::tempdir().unwrap();
+    let vault = btctax_cli::testonly::seed_j3_self_transfer(dir.path(), &pp, now);
+    let session = btctax_cli::Session::open(&vault, &pp).unwrap();
+    let (snapshot, year) = crate::unlock::build_snapshot(&session).unwrap();
+    let mut app = App::new(std::path::PathBuf::from("/vault.pgp"));
+    app.screen = Screen::Viewer;
+    app.selected_year = year;
+    app.snapshot = Some(snapshot);
+    app.clock = crate::clock::Clock::Pinned(now);
+    app.tab = crate::app::Tab::Holdings;
+    vec![(
+        "j3/02-holdings",
+        crate::capture::to_golden(&render_viewer(&mut app)),
+    )]
+}
+
 /// The frame stems this crate (the viewer half) is responsible for capturing. Declared EXPLICITLY so a
 /// dropped/renamed capture tuple reds the gate below (NEW-I-1): the byte-compare loop alone iterates only
 /// over what's captured, so a shrunk set passes vacuously — and the xtask manifest bijection would still
@@ -1031,6 +1091,9 @@ const WALKTHROUGH_VIEWER_STEMS: &[&str] = &[
     "j1/03-tax",
     "j4/02-income",
     "j4/03-tax",
+    "j7/02-income",
+    "j7/03-tax",
+    "j3/02-holdings",
 ];
 
 #[cfg(unix)]

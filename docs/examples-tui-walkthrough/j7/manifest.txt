@@ -1,0 +1,12 @@
+# J7 — income received off-exchange, valued by hand (TUI screen-walkthrough).
+# CLI setup is the EXACT captured transcript (CONSOLE); the editor classify flow + the viewer result tabs
+# are byte-gated frames. A Phase-2 journey (editor + viewer).
+PROSE \fBJourney 7 \(em income received off\-exchange, valued by hand.\fP A staking reward arrives as a bare Receive with no market price attached. Imported, it is an unknown\-basis inbound \(en a hard blocker \(en until it is classified. Because there is no on\-exchange price, its fair market value is supplied by hand.
+PROSE \fBSetup, at the command line.\fP She creates the vault, imports Coinbase, and verifies \(en which exits non\-zero, flagging the receipt as an unknown\-basis blocker \(en then sets a 2024 profile. The exact terminal session:
+CONSOLE 00-setup.console.md J7 - setup - init, import, verify (blocker), tax-profile
+PROSE \fB1. Editor \(em classify the inbound.\fP Pressing \fBc\fP opens the classify\-inbound flow; after picking the receipt, the variant picker offers \fIIncome\fP, \fIGiftReceived\fP, or \fISelfTransferMine\fP. She chooses \fBIncome\fP (the income form then takes the hand\-entered FMV, $3,300).
+FRAME 01-classify-income.txt J7 - step 1 - editor: classify-inbound variant picker (Income)
+PROSE \fB2. Viewer \(em Income.\fP The receipt now reads as staking income at the $3,300 FMV she supplied.
+FRAME 02-income.txt J7 - step 2 - viewer: Income (the hand-valued receipt)
+PROSE \fB3. Viewer \(em Tax.\fP That $3,300 is ordinary income; on top of her $100,000 base it straddles the 22%/24% bracket line, adding $781.50 of tax.
+FRAME 03-tax.txt J7 - step 3 - viewer: Tax (the 2024 numbers)

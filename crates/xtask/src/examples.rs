@@ -1164,6 +1164,87 @@ fn generate_j4_walkthrough_console(bin: &Path) -> String {
     t
 }
 
+/// J7 CLI setup transcript — a single off-exchange Receive (no market price): `init`, `import`, `verify`
+/// (exit 1 — the unknown-basis inbound is a hard blocker), `tax-profile` (2024). The editor half classifies
+/// it as income with a hand-supplied FMV. Committed to `docs/examples-tui-walkthrough/j7/00-setup.console.md`.
+#[cfg(all(test, unix))]
+fn generate_j7_walkthrough_console(bin: &Path) -> String {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J7_CSV);
+    let mut t = String::new();
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "verify"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&[
+            "--vault",
+            "v.pgp",
+            "tax-profile",
+            "--year",
+            "2024",
+            "--filing-status",
+            "single",
+            "--ordinary-taxable-income",
+            "100000",
+            "--magi-excluding-crypto",
+            "100000",
+            "--qualified-dividends",
+            "0",
+        ]),
+    );
+    t
+}
+
+/// J3 CLI setup transcript — an unknown-basis inbound: `init`, `import`, `verify` (exit 1 — the hard
+/// blocker). The editor half classifies it as the filer's own coins returning (a non-taxable self-transfer),
+/// after which the viewer shows Holdings. No tax-profile (J3's viewer is Holdings, not Tax). Committed to
+/// `docs/examples-tui-walkthrough/j3/00-setup.console.md`.
+#[cfg(all(test, unix))]
+fn generate_j3_walkthrough_console(bin: &Path) -> String {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J3_CSV);
+    let mut t = String::new();
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "verify"]),
+    );
+    t
+}
+
 /// J9 — choosing which lots a sale draws from (UX-P1-10). With two lots and a sale smaller than either
 /// combined holding, the default method picks the lots for you; `select-lots` lets you identify EXACTLY
 /// which ones — the picks (`<origin>#<split>:<sat>`) come from the disposal's `lot` column in
@@ -1479,6 +1560,14 @@ mod tests {
             (
                 "j4/00-setup.console.md",
                 generate_j4_walkthrough_console(bin),
+            ),
+            (
+                "j7/00-setup.console.md",
+                generate_j7_walkthrough_console(bin),
+            ),
+            (
+                "j3/00-setup.console.md",
+                generate_j3_walkthrough_console(bin),
             ),
         ]
     }

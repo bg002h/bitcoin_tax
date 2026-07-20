@@ -1,0 +1,10 @@
+# J3 — reconciling a self-transfer (unknown-basis inbound) (TUI screen-walkthrough).
+# CLI setup is the EXACT captured transcript (CONSOLE); the editor classify flow + the viewer Holdings tab
+# are byte-gated frames. A Phase-2 journey (editor + viewer).
+PROSE \fBJourney 3 \(em reconciling a self\-transfer.\fP Coins arrive from a wallet btctax never saw, so it cannot know their basis \(en an unclassified inbound transfer is a hard blocker that gates the tax computation until she says what it is.
+PROSE \fBSetup, at the command line.\fP She creates the vault, imports Coinbase, and verifies \(en which exits non\-zero, flagging the 0.20 BTC receipt as an unknown\-basis blocker. The exact terminal session:
+CONSOLE 00-setup.console.md J3 - setup - init, import, verify (blocker)
+PROSE \fB1. Editor \(em classify the inbound.\fP Pressing \fBc\fP opens the classify\-inbound flow; after picking the receipt, she cycles the variant picker to \fBSelfTransferMine\fP \(en her own coins returning. Non\-taxable, it carries the basis and acquisition date she supplies ($19,000, 2024\-11\-01).
+FRAME 01-classify-self-transfer.txt J3 - step 1 - editor: classify-inbound variant picker (SelfTransferMine)
+PROSE \fB2. Viewer \(em Holdings.\fP The blocker clears: the 0.20 BTC lands (acquired 2024\-11\-01, basis $19,000, long\-term) alongside her original 0.50 BTC buy \(en 0.70 BTC held, no gain recognised on the transfer.
+FRAME 02-holdings.txt J3 - step 2 - viewer: Holdings (the self-transferred coins landed)

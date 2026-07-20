@@ -288,3 +288,71 @@ pub fn seed_j4_reclassified(
     }
     vault
 }
+
+/// Seed J7 (a single off-exchange Receive with no market price → a hard unknown-basis blocker) classified
+/// as staking INCOME with a hand-supplied FMV ($3,300), plus a 2024 profile — the post-classify state the
+/// walkthrough's VIEWER renders (Income + Tax). The editor half seeds only the raw import and drives the
+/// classify. Made-date threaded from the caller (matches the depicted editor session's clock).
+pub fn seed_j7_income(
+    dir: &std::path::Path,
+    pp: &btctax_store::Passphrase,
+    now: time::OffsetDateTime,
+) -> std::path::PathBuf {
+    use btctax_core::{Carryforward, FilingStatus, InboundClass, IncomeKind, TaxProfile};
+    use rust_decimal::Decimal;
+    let vault = seed_journey(dir, pp, &j7());
+    let z = Decimal::ZERO;
+    let profile = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: Decimal::from(100_000),
+        magi_excluding_crypto: Decimal::from(100_000),
+        qualified_dividends_and_other_pref_income: z,
+        other_net_capital_gain: z,
+        capital_loss_carryforward_in: Carryforward { short: z, long: z },
+        w2_ss_wages: z,
+        w2_medicare_wages: z,
+        schedule_c_expenses: z,
+    };
+    crate::cmd::tax::set_profile(&vault, pp, 2024, profile, false).unwrap();
+    let fmv: Decimal = "3300.00".parse().unwrap();
+    crate::cmd::reconcile::classify_inbound(
+        &vault,
+        pp,
+        "import|coinbase|in|cb-recv",
+        InboundClass::Income {
+            kind: IncomeKind::Staking,
+            fmv: Some(fmv),
+            business: false,
+        },
+        now,
+    )
+    .unwrap();
+    vault
+}
+
+/// Seed J3 (an unknown-basis inbound Receive → a hard blocker) classified as a SELF-TRANSFER of the
+/// filer's own coins returning — non-taxable, carrying a supplied basis ($19,000) and acquisition date
+/// (2024-11-01, long-term). The post-classify state the walkthrough's VIEWER renders (Holdings, balanced).
+/// The editor half seeds only the raw import and drives the classify. Made-date threaded from the caller.
+pub fn seed_j3_self_transfer(
+    dir: &std::path::Path,
+    pp: &btctax_store::Passphrase,
+    now: time::OffsetDateTime,
+) -> std::path::PathBuf {
+    use btctax_core::InboundClass;
+    use rust_decimal::Decimal;
+    let vault = seed_journey(dir, pp, &j3());
+    let basis: Decimal = "19000.00".parse().unwrap();
+    crate::cmd::reconcile::classify_inbound(
+        &vault,
+        pp,
+        "import|coinbase|in|cb-recv",
+        InboundClass::SelfTransferMine {
+            basis: Some(basis),
+            acquired_at: Some(time::macros::date!(2024 - 11 - 01)),
+        },
+        now,
+    )
+    .unwrap();
+    vault
+}

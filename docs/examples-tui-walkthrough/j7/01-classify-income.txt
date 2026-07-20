@@ -1,0 +1,73 @@
+── glyphs ──
+  0│┌ btctax-tui-edit [EDITOR] — /edit/vault.pgp ──────────────────────────────────────────────────────────────────────────┐
+  1││ Holdings │ Disposals │ Income │ Tax │ Forms │ Compliance                                                             │
+  2│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  3│┌ Holdings ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  4││no holdings                                                                                                           │
+  5││                                                                                                                      │
+  6││                                                                                                                      │
+  7││                                                                                                                      │
+  8││                                                                                                                      │
+  9││                                                                                                                      │
+ 10││                                                                                                                      │
+ 11││                                                                                                                      │
+ 12││                        ┌ Classify Inbound — variant picker  [EDITOR] ───────────────────────┐                        │
+ 13││                        │  target: import|coinbase|in|cb-recv                                │                        │
+ 14││                        │                                                                    │                        │
+ 15││                        │Select variant (Tab to cycle, Enter to confirm):                    │                        │
+ 16││                        │                                                                    │                        │
+ 17││                        │> Income    GiftReceived    SelfTransferMine                        │                        │
+ 18││                        │                                                                    │                        │
+ 19││                        │                                                                    │                        │
+ 20││                        │  Esc: back to list                                                 │                        │
+ 21││                        │                                                                    │                        │
+ 22││                        │                                                                    │                        │
+ 23││                        │                                                                    │                        │
+ 24││                        │                                                                    │                        │
+ 25││                        │                                                                    │                        │
+ 26││                        │                                                                    │                        │
+ 27││                        └────────────────────────────────────────────────────────────────────┘                        │
+ 28││                                                                                                                      │
+ 29││                                                                                                                      │
+ 30││                                                                                                                      │
+ 31││                                                                                                                      │
+ 32││                                                                                                                      │
+ 33││                                                                                                                      │
+ 34││                                                                                                                      │
+ 35││                                                                                                                      │
+ 36││                                                                                                                      │
+ 37││                                                                                                                      │
+ 38│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ 39│Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   g/G: top/bottom   p: profile   ?: help
+── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
+  1│ 2..10 fg=Red mod=BOLD|REVERSED
+ 12│ 25..95 fg=Cyan
+ 13│ 25..26 fg=Cyan
+ 13│ 94..95 fg=Cyan
+ 14│ 25..26 fg=Cyan
+ 14│ 94..95 fg=Cyan
+ 15│ 25..26 fg=Cyan
+ 15│ 94..95 fg=Cyan
+ 16│ 25..26 fg=Cyan
+ 16│ 94..95 fg=Cyan
+ 17│ 25..26 fg=Cyan
+ 17│ 94..95 fg=Cyan
+ 18│ 25..26 fg=Cyan
+ 18│ 94..95 fg=Cyan
+ 19│ 25..26 fg=Cyan
+ 19│ 94..95 fg=Cyan
+ 20│ 25..26 fg=Cyan
+ 20│ 94..95 fg=Cyan
+ 21│ 25..26 fg=Cyan
+ 21│ 94..95 fg=Cyan
+ 22│ 25..26 fg=Cyan
+ 22│ 94..95 fg=Cyan
+ 23│ 25..26 fg=Cyan
+ 23│ 94..95 fg=Cyan
+ 24│ 25..26 fg=Cyan
+ 24│ 94..95 fg=Cyan
+ 25│ 25..26 fg=Cyan
+ 25│ 94..95 fg=Cyan
+ 26│ 25..26 fg=Cyan
+ 26│ 94..95 fg=Cyan
+ 27│ 25..95 fg=Cyan
