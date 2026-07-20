@@ -1,0 +1,25 @@
+# Phase 2 — J4 (staking income → Schedule SE) walkthrough review r1 — GREEN
+
+_Reviewer: Fable (independent). Scope: J4 (commit `6214b1f`), the first editor-flow rollout journey (the
+template for J2/J3/J5/J7/J9). Persisted verbatim before folding, per STANDARD_WORKFLOW §2._
+
+VERDICT: **GREEN — 0 Critical / 0 Important** (2 Minor, 4 Nit)
+
+## Verification evidence
+
+- **Determinism (attack 1):** All three regens run (`emit_btctax_tui_edit_walkthrough_goldens`, `emit_btctax_tui_walkthrough_goldens`, `emit_walkthrough_console_golden`) → `git status --porcelain` empty. Editor list order is pinned by `items.sort_by_key(|i| i.date)` (`crates/btctax-tui-edit/src/main.rs:3615`) with distinct dates; event refs embed CSV ms-timestamps (1744718400000 = 2025-04-15T12:00Z, 1747742400000 = +35d), not wall-clock; price cache pinned; clocks pinned; tempdir masked via `fixed_path` before capture. Tree left clean.
+- **Editor↔viewer coherence (attack 2):** The editor's confirm modal persists the identical `EventPayload::ReclassifyIncome{income_event, business, kind}` (main.rs:2493–2497) that CLI `reclassify_income` writes (`crates/btctax-cli/src/cmd/reconcile.rs:1290–1307`), which `seed_j4_reclassified` calls with `business=true, kind=Some(Staking)` for both refs (`testonly.rs:273–286`) — the exact two receipts the flow lists (sats 5000000/3000000 visible in frame 01) and the exact CLI shipped in `docs/examples/examples.md` J4. The field form supports both business and kind (main.rs:2938–2950), so the depicted flow can reproduce the seeded state.
+- **Tax facts (attack 3):** Recomputed independently from the bundled dataset (`btctax-adapters/data/btc_usd_daily_close.csv`: 85,484.60 / 105,881.32): 0.05×85,484.60 = 4,274.23; 0.03×105,881.32 = 3,176.44; sum 7,450.67; ×0.9235 = 6,880.69; SS 853.21 + Medicare 199.54 = 1,052.75; §164(f) half = 526.38; ordinary delta across the 22%→24% boundary at 103,350 = 3,350×.22 + 4,100.67×.24 = 1,721.16, marginal 0.24. Every manifest figure matches the frames; frames match shipped examples.md J4 verbatim. §1402(a)/§1401 citations and the 92.35% factor are correct; "not a business by default → if a business, Schedule SE" is properly conditional; Addl-Medicare 0 and NIIT 0 both correct (MAGI < 200k; SE income excluded from NII). Bonus: `emit` only prints `[exit N]` on nonzero exit, so the manifest's "verifies (exit 0)" claim is held by the gated transcript bytes — can't go stale-but-green.
+- **Aggregation regression (attack 4):** Full regen rewrote all J8/J1/J4 artifacts → clean tree ⇒ prior frames byte-identical. Both `*_match_committed` gates, the manifest bijection gate, and the console gate all green; the stems asserts are BTreeSet equality (drop-one reds either direction). Captions contain no `"`/`\`; `\(sc` renders as § (verified via groff, zero warnings); `make tui-walkthrough` emits a valid PDF.
+
+## Findings
+
+**Minor**
+1. **Editor half narrates an undepicted action.** `docs/examples-tui-walkthrough/j4/manifest.txt:7` — "She marks the staking rewards as a trade or business" — but the only editor frame (`j4/01-reclassify-income.txt`) shows the List step (Business still `false`, footer "Enter: select"); the FieldForm (business/kind toggle) and confirm modal are never shown. SPEC §6's sketch for J4 was "reclassify-income flow → **confirm**" (SPEC_tui_walkthrough.md:179; the table is expressly non-normative, and step-2 prose honestly bridges with "the reclassification took", so this is not a false claim). Since J4 is the template for J2/J3/J5/J7/J9, prefer adding one FieldForm-or-confirm frame (the J8 03 precedent, main.rs:14374) or rewording step 1 to "Selecting a receipt opens the business/kind form; confirming records the decision — the viewer shows the result."
+2. **Made-date divergence between the seed and the depicted editor session.** `testonly.rs:272` hardcodes decision `now` = 2025-08-01 **00:00** UTC while both frame halves pin the clock at **12:00** (main.rs:14380, tests.rs:1000). Invisible in today's frames (Income/Tax render no made-dates), but it's an ungated coherence hole: if a viewer tab ever renders decision made-dates, the walkthrough would show a timestamp the depicted editor session could not produce, and no gate compares the two. J8 threads one `now` through both halves (`seed_j8_relocated(dir, pp, now)`); do the same here.
+
+**Nit**
+1. `main.rs:14445` — `#[ignore = "...rewrites docs/examples-tui-walkthrough/j8/*.txt"]` is stale; the emit now also writes `j4/`.
+2. `main.rs:14282` — section banner still reads "J8 PoC editor frames"; the section now aggregates J4 (the viewer crate updated its banner to "(J8, J1, …)").
+3. `Makefile:92` — "Currently the J8 proof-of-concept; Phase 2 adds J1..J7, J9" was already stale when J1 landed; still stale.
+4. `j4/manifest.txt:1` and `tests.rs:990` say "mining/staking income" for a staking-only journey (echoes the shipped examples.md J4 title, so arguably deliberate; comment/doc-only, never rendered as prose — the rendered headline correctly says "staking income").
