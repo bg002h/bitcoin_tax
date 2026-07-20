@@ -204,16 +204,23 @@ return + a **mandatory methodology disclosure**.
   recommends a HIFO election (D-9). **Tests:** present for an Exchange tranche; absent for SelfCustody.
 
 ### Invariant KAT (tax min-7)
-- **No-loss-from-the-estimate (amended, plan-tax r1 I-1):** a tranche leg can never file a loss
-  *attributable to the $0 estimate*. Absent fees, `gain = proceeds − $0 ≥ 0`. The engine can still put a
-  negative gain (or a `>$0` basis) on a tranche row through **documented, real** amounts — never the
-  estimate: (a) USD-fee netting when `fee_usd > proceeds` (`fold.rs` `net = proceeds − fee_usd`) reduces
-  the amount realized per §1001(b); (b) the shipped TP8(c) fee-sat flow re-homes a **documented** fee-sat
-  basis onto the last disposal leg, which under HIFO is the `$0` tranche fragment. Both are correct
-  (§1001(b)/§1011) and neither understates tax. So the invariant is scoped: *any negative tranche-leg gain
-  is attributable solely to documented `fee_usd`/fee-sat basis, never to the estimate.* Assert both halves
-  (fee-free ⇒ `≥ 0`; the two fee corners characterized). (For B's floor path: never claim a loss off an
-  estimated basis — a disallowed estimate flips a claimed loss into a gain.)
+- **No-loss-from-the-estimate (amended, plan-tax r1 I-1 + r2 NEW-1/M-5):** a tranche leg can never file a
+  loss *attributable to the $0 estimate*. Absent fees and sub-cent rounding, `gain = proceeds − $0 ≥ 0`.
+  The engine can still put a negative gain (or a `>$0` basis) on a tranche row through **documented, real**
+  amounts — never the estimate: (a) USD-fee netting when `fee_usd > proceeds` (`fold.rs` `net = proceeds −
+  fee_usd`) reduces the amount realized per §1001(b); (b) the shipped TP8(c) fee-sat flow re-homes a
+  **documented** fee-sat basis onto the last disposal leg — which is the tranche leg when the in-force order
+  (or a specific-ID selection) exhausts the documented lots into the principal *while a documented lot
+  remains for the FIFO fee draw* (NB: under a pure-HIFO principal this can't happen — HIFO consumes every
+  `>$0` lot before the `$0` tranche, so nothing documented is left to draw the fee from; the reachable
+  stagings are FIFO exact-exhaustion or a named-lot sale — plan-tax r2 NEW-1); and (c) sub-cent pro-rata
+  remainder rounding — `make_disposal_legs` gives the last leg `net − Σ round_cents(shares)`, which can be
+  `−$0.01` on a multi-leg dust allocation with no fees at all (Σ-conserving, shared by every multi-leg
+  disposal, vanishes at 8949 whole-dollar rounding). All three are correct (§1001(b)/§1011) and none
+  understates tax. So the invariant is scoped: *any negative tranche-leg gain is attributable solely to
+  documented `fee_usd`/fee-sat basis or ≤$0.01 pro-rata rounding, never to the estimate.* Assert the core
+  (fee-free + single-leg ⇒ `≥ 0`) and characterize the corners. (For B's floor path: never claim a loss off
+  an estimated basis — a disallowed estimate flips a claimed loss into a gain.)
 
 ## 4. Non-goals (v1)
 The guided wizard (B); filing a `>$0` floor + its Form 8275 (B, D-10); VARIOUS multi-date rows; the

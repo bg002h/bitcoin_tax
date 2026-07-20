@@ -1,0 +1,44 @@
+# Plan Architecture Review — Conservative/Defensive Filing IMPLEMENTATION_PLAN.md (r2, post-fold)
+
+Verification basis: every fold re-checked against live source on `feat/conservative-filing` (plan commit 3dc86c2) — `identity.rs` (full), `void.rs` (full), `resolve.rs` (Eff/build_op/timeline builder/sort_canonical/safe-harbor evaluation), `fold.rs` (Acquire arm :567-597, relocation :812, `applicable_method` :33-45, `finalize` :1285-1310), `pools.rs` (full consumption machinery), `transition.rs` (full), `session.rs:680-709`, `reconcile.rs`, tui-edit `persist.rs`/`form.rs`/`main.rs`, `cmd/tax.rs`, `tags.rs`, `render.rs`, `main.rs:2085-2134`, `optimize.rs` (:455-490, :1263-1301), `price.rs`, `forms.rs`.
+
+## Disposition of r1 findings
+
+**I-1 (dead-code tie-break) — RESOLVED at the mechanism; the fold's *verification* of it is unsound (see NEW-I-1).**
+Mechanism verified sound against real code: `SourceRef` derives `Ord` on its inner `String` (`identity.rs:35-36`), so a constant `SourceRef::new("")` makes key 3 compare equal across all tranche Effs; `EventId` derives `Ord` (`identity.rs:55-70`) and `Decision { seq: u64 }` compares `seq` numerically — `Decision{2} < Decision{10}` as u64, so the final `.then(a.id.cmp(&b.id))` breaks the tie numerically. The plan's replacement sort preserves the existing three keys exactly (`resolve.rs:1376-1383`). No regression for existing timelines: two distinct import events can never share `(utc, src_priority, src_ref)` (same source + same src_ref ⇒ the same `EventId`), and the synthetic optimizer Eff (`optimize.rs:1277-1295`) is unaffected. **However**, the ordering KAT and both mutation claims the fold added to prove this fix are vacuous — filed as NEW-I-1.
+
+**I-2 (`is_revocable_payload` sweep) — RESOLVED.**
+Task 1 adds `| EventPayload::DeclareTranche(_)` to the `matches!` list, correctly flagged NOT compile-forced. Verified: `is_revocable_payload` (`void.rs:20-34`) is filter #3 of `voidable_decisions` (`void.rs:86`), the documented single source of truth for bulk-void + both TUI void flows; the #4 `effective_alloc` filter passes a tranche through. Task 3's product-surface KAT + mutation (b) pin it; the real signature is `voidable_decisions(&[LedgerEvent], &[Blocker]) -> Vec<&LedgerEvent>` — the sketch elides the blockers arg, covered by the illustrative-sketch note + the `tests/voidable.rs` pointer. The cosmetic sibling is real: `bulk_void_payload_summary` falls to a `Debug` wildcard at `main.rs:2132`.
+
+**I-3 (append-site inventory + `safe_harbor_residue`) — RESOLVED, and I independently confirmed the inventory is now COMPLETE.**
+A workspace-wide sweep of `EventPayload::SafeHarborAllocation(` construction sites finds exactly four product append sites — `reconcile.rs:984` (CLI allocate), `:1273` (CLI attest), `persist.rs:1031` (TUI allocate), `:1114` (TUI attest); every other hit is `#[cfg(test)]` or a match/filter. Task 6 names all four + the chokepoint alternative, adds the TUI-persist KAT and mutation (c). The `safe_harbor_residue` fix is right: verified at `session.rs:686-691` the projection keeps every non-`SafeHarborAllocation` decision, and the `AllocLot` build (:695-707) takes all lots with `remaining_sat > 0` — so an un-excluded `DeclareTranche` would be listed as allocatable. Excluding `DeclareTranche` cannot break existing authoring (the variant is new).
+
+**M-1 — RESOLVED.** Both tags.rs sites verified exhaustive with no wildcard (`basis_source_rank` :29-41, `basis_source_tag` :54-66); the plan names 6 sites and the build line includes `-p btctax-tui`.
+**M-2 — RESOLVED.** The staging note matches `applicable_method` (`fold.rs:33-45`) exactly; both P2 fixtures pinned to the pre-2025 Universal pool (or a forward `MethodElection(Fifo)`).
+**M-3 — RESOLVED.** Task 9 pins the real seam: `TaxYearReport` scalar `Option<String>` fields (`cmd/tax.rs:235-256`), rendered via `render_tax_outcome` (`render.rs:1204`), + a REQUIRED stdout surfacing KAT + drop-the-wiring mutation.
+**M-4 — RESOLVED.** Task 12 names the basis-replacement mechanism + corrects the signature to `events + prices + config`. Verified implementable: `synthetic_state` (`optimize.rs:1263-1301`) is the precedent, and `resolve()` returns `pub timeline: Vec<Eff>` (:202), so the op swap works.
+**M-5 — RESOLVED.** Do-NOT-edit `void.rs`; "in-force" is a NEW record-time predicate; File Structure scopes the only void.rs edit to `is_revocable_payload`.
+**M-6 — RESOLVED.** `Option<WindowRef>` with `{min, coverage}`; `PriceProvider::usd_per_btc(date)` verified (`price.rs:5-8`); Partial caveat carried into copy.
+**M-7 — RESOLVED.** §1014 note unconditional + provenance-neutral; no provenance field.
+**N-1..N-5 — RESOLVED** (API-note block; `is_imported` doc; additivity assertion; tuple guard honoring `voided`; File Structure additions incl. `cmd/mod.rs`).
+
+## New-issue sweep (fold-introduced)
+- `t.window_end.midnight().assume_utc()` is a real in-repo idiom — verified verbatim at `optimize.rs:1278-1279`.
+- The admit guard is correct and honors `voided`; `src_priority: u8::MAX` correctly sorts after import priorities 0-3.
+- `overpayment_delta(events, prices, config, …)` genuinely enables the re-fold.
+- All anchors re-verified accurate.
+- Task 5's backstop placement re-verified: the timeline (with admitted tranche Effs) is built before the safe-harbor evaluation consumes it; `universal_snapshot` sums the post-consumption Universal residue; the new check reuses the blocker+`continue` path, keeping the denied allocation voidable.
+
+### NEW FINDINGS
+
+**NEW-I-1 — IMPORTANT — Tasks 2/3 (D-1a-b): the same-window ordering KAT cannot observe `sort_canonical`, and both "must go RED" mutation claims for the constant-src_ref fix are false.**
+The KAT (`two_same_window_tranches_fold_in_seq_order_2_before_10`) asserts on `st.lots` order. But `finalize` (`fold.rs:1296-1301`) re-sorts `st.lots` by `(wallet, acquired_at, lot_id)`, and `LotId`'s derived Ord compares `origin_event_id` — i.e. `Decision{seq}` numerically — so with equal wallet and equal `acquired_at` (same `window_end`), `lots[0]`=seq 2 / `lots[1]`=seq 10 holds **regardless of fold order**. Likewise every consumption path ties on `lot_id` (`method_order`, `pools.rs:255-267`; `hifo_cmp` :286), so the fold order of two same-window *Acquires* is completely unobservable end-to-end. Consequence: Task 2 Step 5(c) and Task 3 Step 5(c) — "revert `src_ref: SourceRef::new("")` to `format!("{seq}")` → the seq-order KAT must go RED" — are guaranteed to stay GREEN (under the mutation the *timeline* misorders 10-before-2, but `finalize` re-sorts the output), stranding an implementer whose global gate is "the mutation dies," and the KAT's comment attributes the observed order to a mechanism it does not test.
+**Fix (small, contained):** keep the mechanism exactly as planned (it is right). Re-point the verification at the timeline itself: `resolve()` is `pub` and returns `pub timeline: Vec<Eff>` (`resolve.rs:202,402`), so the KAT should call `resolve(&[b, a], …)` and assert the two `Decision` Effs appear seq-2-before-seq-10 in `res.timeline` (this discriminates BOTH the builder's constant src_ref AND the `.then(a.id.cmp(&b.id))` key: reverting either turns it RED). Keep the existing `st.lots` assertions but re-caption them as pinning the *observable* seq-order guarantee (delivered by `lot_id` tie-breaks) + D-1a-d additivity. Update both Step-5(c) mutations to target the timeline KAT.
+
+**NEW-N-1 — NIT — Task 6 Step 1: the inert-allocation fixture is implied but never enumerated.** Mutation 5(b) requires a test whose fixture allocation is INERT (e.g. timebarred), but the Step-1 list only says "an in-force allocation." Enumerate it explicitly (e.g. (a2): pre-2025 tranche refused under an *inert* allocation).
+
+**NEW-N-2 — NIT — Task 2: the admit reads the payload through `applied.get(&e.id).unwrap_or(&e.payload)`.** Pass 1c inserts into `applied` with no target-id-type validation (`resolve.rs:563-577`), so a hand-crafted `ClassifyRaw` could suppress a real tranche or forge one. Hand-crafted-vault-only, hence Nit — but the admit needs nothing from `applied`: match on `&e.payload` directly and both doors close.
+
+## Verdict
+
+**NOT-GREEN — 0 Critical / 1 Important** (NEW-I-1: the D-1a-b ordering KAT is vacuous and two mutation steps are guaranteed to fail their RED expectation — the fix mechanism itself is verified correct; only the verification layer must be re-pointed at `resolve()`'s timeline). All three r1 IMPORTANTs and all seven Minors/five Nits are genuinely resolved against real code, and my independent append-site sweep confirms the Task-6 inventory is complete. The remaining fix is a test-target correction in two tasks, not a redesign.

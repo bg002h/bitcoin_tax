@@ -221,8 +221,10 @@ fn declare_tranche_folds_to_zero_basis_estimated_conservative_lot_homed_at_windo
 // pass-1c ClassifyRaw does NO payload-type validation of `as_`, so a hand-crafted vault could map an
 // IMPORT id to a DeclareTranche payload; without the id guard it would enter here with seq semantics
 // it doesn't have.
-if let (EventId::Decision { seq }, EventPayload::DeclareTranche(t)) =
-    (&e.id, applied.get(&e.id).unwrap_or(&e.payload))
+// arch r2 NEW-N-2: match on `&e.payload` DIRECTLY, not `applied.get(&e.id)`. ClassifyRaw's contract
+// (resolve.rs:557) scopes overrides to Unclassified imports; decisions are never legitimately overridden,
+// and reading through `applied` would let a hand-crafted ClassifyRaw suppress a real tranche or forge one.
+if let (EventId::Decision { seq }, EventPayload::DeclareTranche(t)) = (&e.id, &e.payload)
 {
     if voided.contains(&e.id) { continue; }               // D-1a-d / arch r3 N-2: a voided tranche folds nothing
     // Effective date = window_end, DECOUPLED from creation utc (D-1a-a): build a projection utc at
@@ -239,7 +241,7 @@ if let (EventId::Decision { seq }, EventPayload::DeclareTranche(t)) =
         //   failure the SPEC ★-forbids). A constant lets ties fall through to the numeric id key below.
         src_ref: SourceRef::new(""),
         wallet: Some(t.wallet.clone()),
-        op: build_op(&e.id, applied.get(&e.id).unwrap_or(&e.payload), /* … */),
+        op: build_op(&e.id, &e.payload, /* … */),         // &e.payload, not `applied` (arch r2 NEW-N-2)
         pseudo: false,                                    // D-5
     });
     let _ = seq; // (seq is the tie-break key, applied in sort_canonical via EventId::Ord)
@@ -264,7 +266,9 @@ Add the `t.window_end.midnight().assume_utc()` inline (no helper needed).
 - [ ] **Step 4: Run — expect PASS.**
 - [ ] **Step 5: Mutation** — (a) change `usd_cost: Usd::ZERO` to non-zero → the lot test RED; (b) delete the
   timeline-admit block → RED; (c) revert `src_ref: SourceRef::new("")` back to `format!("{seq}")` → the
-  Task-3 same-window ordering KAT (seqs 2 vs 10) must go RED, proving the constant-src_ref fix is load-bearing.
+  Task-3 **timeline** ordering KAT (`…canonical_timeline`, seqs 2 vs 10) must go RED. (This ONLY discriminates
+  because the KAT asserts on `res.timeline`; an `st.lots` assertion would stay GREEN — `finalize` re-sorts
+  lots by `lot_id` which already encodes seq numerically — arch r2 NEW-1.)
   Restore each.
 - [ ] **Step 6: Commit** `feat(tranche): fold DeclareTranche via Op::Acquire — $0 EstimatedConservative lot at window_end (numeric-seq ordering, id-guarded admit)`.
 
@@ -304,28 +308,45 @@ fn a_tranche_is_listed_as_a_voidable_decision_on_the_product_surface() {
     assert!(voidable.iter().any(|id| *id == EventId::Decision { seq: 1 }), "a tranche is sweep-voidable (D-1a-d)");
 }
 #[test]
-fn two_same_window_tranches_fold_in_seq_order_2_before_10() {
-    // ★ D-1a-b / arch r1 I-1 + N-3: two legitimately-additive same-window tranches (seqs 2 and 10) must
-    // fold deterministically in NUMERIC seq order — the constant-src_ref + EventId::Ord tie-break, NOT a
-    // lexicographic src_ref string (which would put 10 before 2).
+fn two_same_window_tranches_are_ordered_by_seq_in_the_canonical_timeline() {
+    // ★ D-1a-b / arch r1 I-1 + r2 NEW-1: assert on resolve()'s TIMELINE, NOT st.lots. `finalize` re-sorts
+    // st.lots by (wallet, acquired_at, lot_id) and LotId Ord compares origin_event_id (Decision{seq}) as
+    // u64 — so st.lots would show 2-before-10 REGARDLESS of the sort fix, making an st.lots assertion blind
+    // to the mutation. sort_canonical is only observable on the timeline itself: reverting either the
+    // constant src_ref OR the `.then(a.id.cmp(&b.id))` key misorders the two Decision Effs here → RED.
     let w = exchange_wallet();
     let a = decision_event(2,  EventPayload::DeclareTranche(sample_tranche_in(&w)));  // same window
     let b = decision_event(10, EventPayload::DeclareTranche(sample_tranche_in(&w)));  // same window
-    let st = project(&[b, a], &prices(), &config());  // note: pushed out of seq order
+    let res = btctax_core::project::resolve(&[b, a], /* prices/config as resolve needs */);  // pub-export if needed
+    let seqs: Vec<u64> = res.timeline.iter()
+        .filter_map(|e| match &e.id { EventId::Decision { seq } => Some(*seq), _ => None })
+        .collect();
+    assert_eq!(seqs, vec![2, 10], "same-window tranche Effs are canonically ordered by numeric seq (D-1a-b)");
+}
+#[test]
+fn two_same_window_tranches_are_additive_not_a_duplicate_conflict() {
+    // D-1a-d: two same-window tranches yield TWO lots (no duplicate-conflict). (Observable seq order on the
+    // OUTPUT lots is delivered by LotId tie-breaks in finalize/consumption — not by sort_canonical — so
+    // this half is captioned as the additivity + observable-order guarantee, not the sort-fix pin.)
+    let w = exchange_wallet();
+    let a = decision_event(2,  EventPayload::DeclareTranche(sample_tranche_in(&w)));
+    let b = decision_event(10, EventPayload::DeclareTranche(sample_tranche_in(&w)));
+    let st = project(&[b, a], &prices(), &config());
     let lots: Vec<_> = st.lots.iter().filter(|l| l.wallet == w).collect();
-    assert_eq!(lots.len(), 2, "two same-window tranches are additive, not a duplicate-conflict (D-1a-d)");
-    // The origin ids carry the seq; the earlier-seq lot must sort first in the canonical timeline.
+    assert_eq!(lots.len(), 2, "two same-window tranches are additive (D-1a-d)");
     assert_eq!(lots[0].lot_id.origin_event_id, EventId::Decision { seq: 2 });
     assert_eq!(lots[1].lot_id.origin_event_id, EventId::Decision { seq: 10 });
 }
 ```
-(If `build_op`/`voidable_decisions` need extra resolve inputs, mirror the existing `void.rs` tests, e.g.
-`crates/btctax-core/tests/voidable.rs`.)
-- [ ] **Step 2–4:** Task 1 + Task 2 satisfy all four; run to confirm GREEN. If any is RED, that finding wasn't folded — fix it.
+(Real signature: `voidable_decisions(&[LedgerEvent], &[Blocker]) -> Vec<&LedgerEvent>` — the sketch elides
+the `blockers` arg; mirror `crates/btctax-core/tests/voidable.rs`. `build_op` may need a `#[cfg(test)]`
+shim.)
+- [ ] **Step 2–4:** Task 1 + Task 2 satisfy all five; run to confirm GREEN. If any is RED, that finding wasn't folded — fix it.
 - [ ] **Step 5: Mutation** — (a) remove the `voided.contains` guard → `voided_…` RED; (b) revert the Task-1
-  `is_revocable_payload` arm → `…voidable_decision…` RED; (c) revert Task-2's constant src_ref → the seq-order
-  KAT RED. Restore each.
-- [ ] **Step 6: Commit** `test(tranche): pin no-Skip + voided-folds-nothing + product-voidable + same-window seq order`.
+  `is_revocable_payload` arm → `…voidable_decision…` RED; (c) revert Task-2's constant src_ref → the
+  **timeline** seq-order KAT (`…canonical_timeline`) RED (NOT the `st.lots` additivity KAT, which `finalize`
+  keeps GREEN — arch r2 NEW-1). Restore each.
+- [ ] **Step 6: Commit** `test(tranche): pin no-Skip + voided-folds-nothing + product-voidable + timeline seq order + additivity`.
 
 ### Task 4: The `EstimatedConservative` tag survives BOTH overwrite sites (D-8, term-derived)
 
@@ -393,6 +414,20 @@ fn holding_period_boundary_is_iff_exactly_one_year() {
                            &prices(), &config_hifo());
     assert_eq!(st_plus1.disposals.iter().flat_map(|d| &d.legs).find(|l| l.wallet == w).unwrap().term,
                Term::LongTerm, "one day past a year is LONG-term");
+}
+
+#[test]
+fn a_pre_2025_tranche_disposal_files_the_securities_boxes_c_f() {
+    // tax r2 N-2 (adopted): D-6 is year-aware in BOTH directions. A tranche disposed in a pre-2025 tax
+    // year files the securities Box C (ST) / F (LT), not the digital-asset I/L. (The year-awareness itself
+    // is held by the merged box fix; this pins it end-to-end through the tranche wiring for a back year.)
+    let w = exchange_wallet();
+    let t = decision_event(1, EventPayload::DeclareTranche(DeclareTranche {
+        sat: 100_000_000, wallet: w.clone(), window_start: date!(2015-01-01), window_end: date!(2015-12-31) }));
+    let sell = import_sell(&w, date!(2020-06-01), 100_000_000, usd(40_000)); // pre-2025, > 1yr → LT
+    let st = project(&[t, sell], &prices(), &config_hifo());
+    let row = btctax_core::form_8949(&st, 2020).into_iter().find(|r| r.cost_basis == Usd::ZERO).unwrap();
+    assert_eq!(row.box_, Form8949Box::F, "pre-2025 LT tranche → securities Box F, not digital-asset L");
 }
 #[test]
 fn tranche_tag_survives_self_transfer_relocation() {
@@ -515,10 +550,12 @@ interaction. So:
   your filed allocation is already final, unallocated pre-2025 units are a facts-and-circumstances matter
   for a professional."*
 
-- [ ] **Step 1: Failing tests** — (a) pre-2025 tranche refused under an in-force allocation (CLI); (b) same
-  refused via the TUI persist path; (c) allocation refused under a pre-2025 tranche; (d) **a ≥2025-window
-  tranche records CLEANLY alongside an effective allocation** (tax r1 I-2 — the foreclosure guard); (e) each
-  refusal appends NO event; (f) `safe_harbor_residue` does not list tranche sats as allocatable.
+- [ ] **Step 1: Failing tests** — (a) pre-2025 tranche refused under an **effective** allocation (CLI);
+  (a2) pre-2025 tranche refused under an **inert** allocation (e.g. timebarred — arch r2 NEW-N-1; needed so
+  Step-5(b)'s effective-only mutation can go RED); (b) same refused via the TUI persist path; (c) allocation
+  refused under a pre-2025 tranche; (d) **a ≥2025-window tranche records CLEANLY alongside an effective
+  allocation** (tax r1 I-2 — the foreclosure guard); (e) each refusal appends NO event; (f)
+  `safe_harbor_residue` does not list tranche sats as allocatable.
 - [ ] **Step 2: Run — expect FAIL.**
 - [ ] **Step 3: Implement** the record-time guards at all four append sites + the `safe_harbor_residue` exclusion.
 - [ ] **Step 4: Run — expect PASS.**
@@ -614,9 +651,11 @@ fn under_fifo_the_old_zero_basis_tranche_is_consumed_first_inversion() {
 
 **Interfaces:**
 - Produces: `fn tranche_dip_advisory(disposal) -> Option<String>` (Some iff a matched leg is
-  `EstimatedConservative`; names the window, the basis **AS FILED** — `$0` in the fee-free case, or the
-  documented fee-sat basis when the TP8(c) carry lands on the tranche leg (tax r1 I-1) — and the resulting
-  gain; **provenance-neutral** — never asserts "purchases"). `fn method_inversion_advisory(state, wallet,
+  `EstimatedConservative`; names the window, the basis **AS FILED** — `$0` when no fee-sat carry lands on the
+  leg (this includes corner-(a) USD-fee disposals, which still file `$0` basis — tax r2 N-4), or the
+  documented fee-sat basis when the TP8(c) carry lands on the tranche leg (tax r1 I-1); print `leg.cost_basis`
+  directly, do NOT hand-branch on "fee-free" — and the resulting gain; **provenance-neutral** — never asserts
+  "purchases"). `fn method_inversion_advisory(state, wallet,
   method) -> Option<String>` (Some iff a non-HIFO in-force method would consume a tranche lot while a
   documented lot remains in the same wallet; recommends a HIFO election).
 
@@ -786,18 +825,26 @@ fn negative_tranche_gain_comes_only_from_documented_fees_corner_a_usd_fee() {
 }
 #[test]
 fn tp8c_fee_sat_basis_can_land_on_the_last_tranche_leg_corner_b() {
-    // Corner (b): under HIFO the $0 tranche is consumed LAST, so the TP8(c) fee-sat basis re-home lands the
-    // DOCUMENTED fee-sat basis onto the tranche leg → its filed cost basis > $0 (and gain can go negative).
-    // Real documented basis (§1011), never the estimate. Pins that P3/P7 must state basis AS FILED.
-    let st = project(&[documented_buy(&w), tranche(&w), sell_with_onchain_fee(&w)], &prices(), &config_hifo());
+    // Corner (b), reachable staging (plan-tax r2 NEW-1 — NOT under pure HIFO, where the $0 tranche is
+    // consumed LAST so NO documented lot remains for the fee draw). Use a SPECIFIC-ID sale that names the
+    // tranche while a documented lot remains: the on-chain fee then consumes FIFO from the remainder
+    // (resolve.rs:1122/:1172), re-homing that DOCUMENTED fee-sat basis onto the (last) tranche leg → its
+    // filed cost basis > $0. Real documented basis (§1011), never the estimate. Pins that P3/P7 state
+    // basis AS FILED. (Alternate staging: FIFO with pool [D_old, T, D_new] and principal = D_old+T exactly.)
+    let st = project(&[documented_buy(&w), tranche(&w),
+                       specific_id_sell_naming_the_tranche(&w /* documented lot remains */)],
+                     &prices(), &config());
     let tranche_leg = only_disposal_leg_from(&st, BasisSource::EstimatedConservative);
     assert!(tranche_leg.cost_basis > Usd::ZERO, "documented fee-sat basis re-homed onto the tranche leg (TP8c)");
 }
 ```
 - [ ] **Step 2: Run — expect PASS** (characterization of existing engine behavior). If corner (a)/(b) instead
-  showed the *estimate* driving the loss (basis ≠ $0-plus-documented-fee), that IS a Critical — STOP.
+  showed the *estimate* driving the loss (filed basis ≠ `$0`-plus-documented-fee-sat), that IS a Critical — STOP.
+  (M-5: a `≤$0.01` pro-rata rounding remainder on a multi-leg dust sale is a THIRD, fee-free non-estimate
+  attribution — Σ-conserving, vanishes at 8949 whole-dollar rounding; add a characterization assert if a
+  fixture surfaces it, else it stays documented in SPEC §6.)
 - [ ] **Step 3: Mutation** — n/a (characterization); the three tests together are the discrimination (fee-free
-  ≥ 0; the two negatives trace to documented fees with the estimate intact).
+  single-leg ≥ 0; the two negatives trace to documented fees with the estimate intact).
 - [ ] **Step 4: Commit** `test(tranche): no-loss-from-the-estimate invariant + the two documented-fee corners (tax min-7, SPEC §6 amended)`.
 
 ### Task 16: Whole-diff review to green + merge
