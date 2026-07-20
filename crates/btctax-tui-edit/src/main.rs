@@ -14497,9 +14497,17 @@ mod tests {
             app.clock = pinned;
             handle_key(&mut app, press(KeyCode::Char('S')));
             handle_key(&mut app, press(KeyCode::Enter));
+            // Type the pick so the frame DEPICTS the identification (not an empty form): assign the whole
+            // 0.50 BTC = 50,000,000 sat against the offered long-term lot-a (review I2).
+            for c in "50000000".chars() {
+                handle_key(&mut app, press(KeyCode::Char(c)));
+            }
             assert!(
-                app.select_lots_flow.is_some(),
-                "the J9 select-lots lots form must be open"
+                matches!(
+                    app.select_lots_flow.as_ref().map(|f| &f.step),
+                    Some(SelectLotsStep::LotsForm { .. })
+                ),
+                "the J9 select-lots lots form must be open with the pick entered"
             );
             app.vault_path = fixed_path.clone();
             capture_edit_frame(&mut app)

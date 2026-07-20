@@ -6,7 +6,7 @@ PROSE \fBSetup, at the command line.\fP The crypto side is reconciled first (the
 CONSOLE 00-setup.console.md J6 - setup - reconcile crypto, then import the household
 PROSE \fB1. Editor \(em author the return.\fP Pressing \fBT\fP opens the tax\-inputs form over the imported inputs. The left pane is the section index (Return options, Taxpayer, Spouse, W\-2s, Schedule A, ...); the right shows the selected section \(en here filing status \fIMFJ\fP and an \fIauto\fP itemize\-vs\-standard election.
 FRAME 01-tax-inputs-sections.txt J6 - step 1 - editor: the tax-inputs section index (full return)
-PROSE \fB2. Editor \(em a section up close.\fP Tabbing to \fBW\-2s\fP and opening the first row shows the couple's wage income \(en employer ACME, $200,000 of Box\-1 wages \(en exactly as authored.
+PROSE \fB2. Editor \(em a section up close.\fP Tabbing to \fBW\-2s\fP and opening the first row shows the taxpayer's W\-2 \(en employer ACME, $200,000 of Box\-1 wages \(en exactly as authored (the spouse's GLOBEX W\-2 is the second row).
 FRAME 02-tax-inputs-w2.txt J6 - step 2 - editor: the W-2 section (ACME, $200,000)
 PROSE \fB3. Editor \(em commit.\fP Pressing \fBs\fP opens the commit confirmation \(en filing status, the count of W\-2s, Schedule A, and dependents \(en the informed\-consent point before the inputs are written.
 FRAME 03-tax-inputs-commit.txt J6 - step 3 - editor: the commit confirmation

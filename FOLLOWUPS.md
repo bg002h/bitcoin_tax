@@ -2613,3 +2613,27 @@ so a dropped tuple can't pass vacuously); r3 GREEN. One non-gating residue:
   FRAME refs), or record the removal protocol in the rollout checklist.
 - **r3 non-finding (Phase 2)** — SPEC §11 mentions a `make regen-walkthrough` one-command refresh target
   that does not exist yet (future-directed, tied to the Phase-2 golden count). Provide it during rollout.
+
+**Phase-2 walkthrough journey reviews (J1-J9) — app-side / doc residue (2026-07-19,
+`reviews/phase2-*.md`):** all 9 journeys reviewed to GREEN (J9 folded 2 Important — the false
+"less than either holding" + the select-lots frame that depicted no identification; both fixed in the
+walkthrough). Non-gating residue, owned by a later polish cycle (app-side surfaces the walkthrough only
+SURFACED — not walkthrough bugs):
+- **J9 app-limit (Minor, owning phase: later)** — the editor `select-lots` LotsForm for a POST-2025
+  disposal sources candidate rows from the post-default residue (`snap.state.lots`), so on the J9 corpus
+  it offers only lot-a (the default HIFO already consumed lot-b) and "Remaining" is the post-default
+  amount, not the at-sale availability. The CLI can record lot-b picks (replay-time feasibility); the
+  editor form cannot. Fix app-side: source candidates + Remaining from at-disposal availability so a
+  genuine lot choice is representable in the TUI (matching the CLI). Until then the walkthrough honestly
+  shows identifying against the single offered lot.
+- **J9-M1 (Minor)** — the LotsForm "Basis/Sat" column (`draw_edit.rs:2801-2802`) renders the lot's
+  remaining TOTAL USD basis ($12,500), which reads as "$12,500 per sat". Relabel or render per-sat.
+- **J2-M3 / J6 (Minor)** — the Forms-tab footnote "Section A/B is per-donation" (`tabs/forms.rs:161`) is
+  stale: core `form_8283` picks the section from the §170(f)(11)(F) YEAR-AGGREGATE, uniform across the
+  year. Reword the footnote (appears in j2/03-forms + j6/04-forms).
+- **J6-M2 (Minor)** — the Tax tab prints "NIIT (attributable delta): -11.70" beside "NIIT applies:
+  false" (`tabs/tax.rs:119`); the flag is the marginal-increase semantics (crypto REDUCED NIIT), but the
+  juxtaposition misreads. Relabel (e.g. "NIIT increased by crypto: no") — core's own `whatif.rs:559`
+  calls the raw flag misreporting.
+- **J5-N3 / J1 (Nit)** — a journey whose setup `verify` shows a disposal `:: non_compliant` (J1, J5)
+  never revisits compliance after the later reconciliation; a closing note or frame would tie the beat off.

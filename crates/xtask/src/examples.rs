@@ -1245,7 +1245,7 @@ fn generate_j3_walkthrough_console(bin: &Path) -> String {
     t
 }
 
-/// J9 CLI setup transcript — two lots + a sale smaller than either: `init`, `import`, `verify`. No
+/// J9 CLI setup transcript — two lots + a sale less than the combined holdings: `init`, `import`, `verify`. No
 /// tax-profile (J9's viewer is Disposals + Compliance, not Tax). The editor half drives the select-lots
 /// flow to identify the specific lots. Committed to `docs/examples-tui-walkthrough/j9/00-setup.console.md`.
 #[cfg(all(test, unix))]
@@ -1328,7 +1328,7 @@ fn generate_j2_walkthrough_console(bin: &Path) -> String {
 }
 
 /// J5 CLI setup transcript — two lots + a 2025 sale where the lot method matters: `init`, `import`,
-/// `verify` (exit 0; advisory pre-2025-method note on the 2023 lot), `tax-profile` (2025), and a standing
+/// `verify` (exit 0; informational pre-2025-method note on the 2023 lot), `tax-profile` (2025), and a standing
 /// FIFO election (`config --set-forward-method fifo --effective-from 2025-01-01`, `BTCTAX_NOW`-pinned so
 /// the override banner stays off the gated transcript). The editor half then shows the optimizer proposing
 /// a tax-saving alternative. Committed to `docs/examples-tui-walkthrough/j5/00-setup.console.md`.
@@ -1506,8 +1506,8 @@ fn generate_j6_walkthrough_console(bin: &Path) -> String {
     t
 }
 
-/// J9 — choosing which lots a sale draws from (UX-P1-10). With two lots and a sale smaller than either
-/// combined holding, the default method picks the lots for you; `select-lots` lets you identify EXACTLY
+/// J9 — choosing which lots a sale draws from (UX-P1-10). With two lots and a sale less than the combined
+/// holdings, the default method picks the lots for you; `select-lots` lets you identify EXACTLY
 /// which ones — the picks (`<origin>#<split>:<sat>`) come from the disposal's `lot` column in
 /// export-snapshot, and their sats must sum to the disposal's size.
 fn journey_j9(md: &mut String, bin: &Path) {

@@ -1,10 +1,10 @@
 # J9 — identifying specific lots for a disposal (TUI screen-walkthrough).
 # CLI setup is the EXACT captured transcript (CONSOLE); the editor select-lots flow + the viewer result
 # tabs are byte-gated frames. A Phase-2 journey (editor + viewer).
-PROSE \fBJourney 9 \(em identifying specific lots for a sale.\fP Heidi holds a cheap 2023 lot (0.60 BTC, $25,000/BTC) and a pricier 2024 lot (0.40 BTC, $60,000/BTC), and sells 0.50 \(en less than either holding, so \fIwhich\fP lots the sale draws from is a real choice she can make and record.
+PROSE \fBJourney 9 \(em identifying specific lots for a sale.\fP Heidi holds a cheap 2023 lot (0.60 BTC, $25,000/BTC) and a pricier 2024 lot (0.40 BTC, $60,000/BTC), and sells 0.50 \(en less than her combined holdings. Rather than leave it to the default method, she records \fIspecifically\fP which lot the sale draws from.
 PROSE \fBSetup, at the command line.\fP She creates the vault, imports Coinbase, and verifies. The exact terminal session:
 CONSOLE 00-setup.console.md J9 - setup - init, import, verify
-PROSE \fB1. Editor \(em select lots.\fP Pressing \fBS\fP opens the select\-lots flow; picking the 0.50 BTC sale opens its lots form, where she names which lots cover it \(en here, the whole 0.50 against the cheap long\-term \fBlot\-a\fP (the pick's sats must total the disposal).
+PROSE \fB1. Editor \(em select lots.\fP Pressing \fBS\fP opens the select\-lots flow for the 0.50 BTC sale. Its lots form lists the lot she can identify it against \(en the long\-term \fBlot\-a\fP \(en and she assigns the whole 0.50 (50,000,000 sat) to it. (The picks' sats must total the disposal; her assignment is complete at \fIPicked 50000000 / 50000000\fP.)
 FRAME 01-select-lots.txt J9 - step 1 - editor: the select-lots form (identify against lot-a)
 PROSE \fB2. Viewer \(em Disposals.\fP The sale now draws entirely from lot\-a: 0.50 BTC at a $12,500 basis against $47,500 proceeds \(en a $35,000 long\-term gain (lot\-a was held since 2023).
 FRAME 02-disposals.txt J9 - step 2 - viewer: Disposals (the sale drawn from lot-a)

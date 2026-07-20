@@ -53,8 +53,9 @@ pub const J6_RIVER_CSV: &str =
     "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Tag\r\n\
 2024-03-15 12:00:00 UTC,,,0.05000000,BTC,,income\r\n";
 
-/// J6 Coinbase corpus: a cheap 2020 long-term lot, a small 2024 long-term sale (Schedule D Part II / Form
-/// 8949), and a 2024 charitable Send of 0.1 BTC (§170(e) donation ⇒ Form 8283). Amounts kept small so the
+/// J6 Coinbase corpus: a cheap 2020 long-term lot, a small 2024 sale, and a 2024 charitable Send of 0.1
+/// BTC (§170(e) donation ⇒ Form 8283). NOTE: HIFO reconstruction draws the 2024 sale from the higher-basis
+/// 2024 mining lot (not this 2020 lot) ⇒ it is SHORT-term (Schedule D Part I). Amounts kept small so the
 /// return stays under the AMT screen.
 pub const J6_COINBASE_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
 ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
@@ -88,7 +89,7 @@ ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at 
 cb-recv,2025-03-10 12:00:00 UTC,Receive,BTC,0.10000000,USD,,,,,,,\r\n";
 
 /// J9 corpus (UX-P1-10): a cheap 2023 long-term lot (0.60) + a pricier 2024 lot (0.40), then a 2025 sale of
-/// only 0.50 — smaller than either combined holding, so which lots cover it is a GENUINE choice.
+/// only 0.50 — less than the combined holdings, so specific-lot identification is meaningful.
 pub const J9_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
 ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
 lot-a,2023-01-01 12:00:00 UTC,Buy,BTC,0.60000000,USD,25000.00,15000.00,15000.00,0.00,,,\r\n\
@@ -357,8 +358,8 @@ pub fn seed_j3_self_transfer(
     vault
 }
 
-/// Seed J9 (a cheap 2023 LT lot 0.60 + a pricier 2024 lot 0.40, then a 2025 sale of 0.50 — less than
-/// either holding, so which lots cover it is a genuine choice) with the whole 0.50 IDENTIFIED against the
+/// Seed J9 (a cheap 2023 LT lot 0.60 + a pricier 2024 lot 0.40, then a 2025 sale of 0.50 — less than the
+/// combined holdings, so specific-lot identification is meaningful) with the whole 0.50 IDENTIFIED against the
 /// cheap long-term `lot-a` (a deliberate per-disposal specific identification). The post-selection state
 /// the walkthrough's VIEWER renders (Disposals drawing from lot-a; Compliance now satisfied). The editor
 /// half seeds only the raw import and drives the select-lots flow. Made-date threaded from the caller

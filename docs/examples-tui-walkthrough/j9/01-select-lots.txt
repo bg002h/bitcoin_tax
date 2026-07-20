@@ -9,8 +9,8 @@
   7││                                                                                                                      │
   8││              ┌ Select Lots — import|coinbase|trade|sale  [Enter=submit  Esc=back] ────────────────────┐              │
   9││              │Acquired       LotId                               Remaining    Basis/Sat  Pick Sat     │              │
- 10││              │2023-01-01     import|coinbase|trade|lot-a#0        50000000     12500.00  0            │              │
- 11││              │Picked: 0 / 50000000 sat                                                                │              │
+ 10││              │2023-01-01     import|coinbase|trade|lot-a#0        50000000     12500.00  50000000     │              │
+ 11││              │Picked: 50000000 / 50000000 sat                                                         │              │
  12││              │                                                                                        │              │
  13││              │                                                                                        │              │
  14││              │                                                                                        │              │
@@ -48,5 +48,5 @@
   4│ 85..105 mod=BOLD
   4│ 106..118 mod=BOLD
   9│ 16..99 mod=BOLD
- 10│ 16..92 fg=Black bg=Cyan
+ 10│ 16..99 fg=Black bg=Cyan
  37│ 1..119 mod=BOLD

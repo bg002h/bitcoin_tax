@@ -1115,8 +1115,8 @@ fn j9_viewer_frames() -> Vec<(&'static str, String)> {
 }
 
 /// J2 (§170(e) charitable donation) VIEWER frames — after the editor reclassifies the Send as a donation
-/// and records the Form 8283 details, the viewer shows Forms (the two 8283 rows: the carrier leg at FMV,
-/// the second leg flagged for the paper form) + Tax (the charitable deduction, before §170(b) AGI limits).
+/// and records the Form 8283 details, the viewer shows Forms (the two 8283 rows: the carrier leg's §170(e)
+/// claimed deduction, the second leg flagged for the paper form) + Tax (the charitable deduction, before §170(b) AGI limits).
 /// Seeds via `seed_j2_donated` and only reads.
 fn j2_viewer_frames() -> Vec<(&'static str, String)> {
     use btctax_store::Passphrase;

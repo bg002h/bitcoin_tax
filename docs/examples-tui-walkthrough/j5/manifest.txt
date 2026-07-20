@@ -5,7 +5,7 @@ PROSE \fBJourney 5 \(em optimizing which lots a sale draws from.\fP Dana holds a
 PROSE \fBSetup, at the command line.\fP She creates the vault, imports, sets a 2025 profile, and records the FIFO baseline election. The exact terminal session:
 CONSOLE 00-setup.console.md J5 - setup - init, import, verify, tax-profile, FIFO election
 PROSE \fB1. Editor \(em the optimizer's proposal.\fP Pressing \fBz\fP opens the optimize\-accept flow. Instead of FIFO's cheap\-lot gain, it proposes drawing the sale from the \fIshort\-term\fP lot \(en realizing a loss. The banner shows the whole\-year effect: \fB$3,660 less tax\fP.
-FRAME 01-optimize-list.txt J5 - step 1 - editor: the optimizer proposal (year tax -3660)
+FRAME 01-optimize-list.txt J5 - step 1 - editor: the optimizer proposal (year tax delta -3660)
 PROSE \fB2. Editor \(em confirm.\fP Enter opens the confirmation: the sale identified against the short\-term lot (100,000,000 sat). Made before the sale, the identification is recorded \fIcontemporaneous\fP \(en the standard a specific\-lot election must meet.
 FRAME 02-optimize-confirm.txt J5 - step 2 - editor: confirm the lot swap (contemporaneous)
 PROSE \fB3. Viewer \(em Disposals.\fP The sale now draws from the $80,000 short\-term lot: $50,000 proceeds against $80,000 basis \(en a $30,000 short\-term \fIloss\fP.
