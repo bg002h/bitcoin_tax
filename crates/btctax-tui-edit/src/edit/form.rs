@@ -1319,11 +1319,20 @@ pub fn validate_select_lots(
     item: &DisposalListItem,
     rows: &[LotPickFormRow],
 ) -> Result<btctax_core::EventPayload, String> {
-    // Step 1: parse every buffer.
+    // Step 1: parse every buffer, capping each pick at its row's at-disposal Remaining.
     let mut total: Sat = 0;
     let mut picks: Vec<btctax_core::LotPick> = Vec::new();
     for row in rows {
         let sat = row.pick_sat()?;
+        // Step 1b [SL-r2-b / review r2 M-1]: per-row cap. `remaining_sat` IS the at-disposal availability
+        // (the form is built from `available_lots_before`), so a pick above it is a lot the engine would
+        // reject — refuse it here rather than persist a doomed selection that fails `selection_feasible`.
+        if sat > row.remaining_sat {
+            return Err(format!(
+                "picked {sat} sat on a lot with only {} sat available; reduce it",
+                row.remaining_sat
+            ));
+        }
         if sat > 0 {
             total += sat;
             picks.push(btctax_core::LotPick {
@@ -3728,6 +3737,29 @@ mod tests {
             }
             other => panic!("expected LotSelection, got {other:?}"),
         }
+    }
+
+    /// KAT-V-SL-4 (SL-r2-b / review r2 M-1): a per-row pick exceeding that row's Remaining must be rejected
+    /// AT FORM VALIDATION — even when Σ still equals the principal. Without a per-row cap the form persists a
+    /// pick the engine rejects (`selection_feasible` → hard `LotSelectionInvalid` → tax NotComputable). Here
+    /// row-A has 30k available but is picked for 80k; row-B (70k avail) picks 20k; Σ = 100k = principal, so
+    /// the principal-conservation check alone would (wrongly) pass.
+    #[test]
+    fn kat_v_sl_4_per_row_overdraw_is_rejected_even_when_sum_matches() {
+        let item = dummy_disposal_item(100_000);
+        let rows = vec![
+            dummy_lot_row(30_000, "80000"), // 80k picked > 30k available — infeasible
+            dummy_lot_row(70_000, "20000"), // 20k ≤ 70k — fine
+        ];
+        let err = validate_select_lots(&item, &rows).unwrap_err();
+        assert!(
+            err.contains("80000") && err.contains("30000"),
+            "the per-row cap error must name the over-picked amount and the row's Remaining; got: {err}"
+        );
+        assert!(
+            !err.contains("pick at least"),
+            "must NOT be the all-zero error; got: {err}"
+        );
     }
 
     // ── KAT-V-DD-1..3 — set-donation-details validation ──────────────────────

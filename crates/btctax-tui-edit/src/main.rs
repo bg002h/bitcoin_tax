@@ -3973,6 +3973,24 @@ fn handle_select_lots_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 });
             let now = app.clock.now();
 
+            // [SL-r2-a / NF-2 + review-r1 NEW-2] The set of allocation ids that ALREADY carry a
+            // SafeHarborUnconservable in the CURRENT (pre-save) projection. `derive_select_lots_status` fires
+            // its break-warning only for an id NOT in this set — so a pre-existing break neither false-fires
+            // the arm NOR masks a NEW break on a *different* allocation (a broken inert alloc can legally
+            // coexist with an effective one). A set (not a bool) makes the attribution exact.
+            let unconservable_before: std::collections::BTreeSet<btctax_core::EventId> = app
+                .snapshot
+                .as_ref()
+                .map(|s| {
+                    s.state
+                        .blockers
+                        .iter()
+                        .filter(|b| b.kind == BlockerKind::SafeHarborUnconservable)
+                        .filter_map(|b| b.event.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+
             let save_result = {
                 let session = match app.session.as_mut() {
                     Some(s) => s,
@@ -3998,6 +4016,7 @@ fn handle_select_lots_modal_key(app: &mut EditorApp, key: KeyEvent) {
                                 &decision_id,
                                 pick_count,
                                 total_sat,
+                                &unconservable_before,
                             );
                             app.snapshot = Some(snap);
                             app.status = Some(status);
@@ -4100,19 +4119,30 @@ fn handle_sl_list_key(app: &mut EditorApp, key: KeyEvent) {
                 // `Some(wallet)` (wallet-less events are blocker-filtered upstream); the `_` arm is defensive.
                 let wallet_ref = item.wallet.as_ref();
                 let rows: Vec<LotPickFormRow> = match (wallet_ref, app.session.as_ref()) {
-                    (Some(w), Some(sess)) => sess
-                        .available_lots_before(&item.disposal_event, item.date, w)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter(|l| l.remaining_sat > 0)
-                        .map(|l| LotPickFormRow {
-                            lot_id: l.lot_id,
-                            remaining_sat: l.remaining_sat,
-                            acquired_at: l.acquired_at,
-                            usd_basis: l.usd_basis,
-                            pick_sat_buf: FieldBuffer::new(),
-                        })
-                        .collect(),
+                    (Some(w), Some(sess)) => {
+                        match sess.available_lots_before(&item.disposal_event, item.date, w) {
+                            Ok(lots) => lots
+                                .into_iter()
+                                .filter(|l| l.remaining_sat > 0)
+                                .map(|l| LotPickFormRow {
+                                    lot_id: l.lot_id,
+                                    remaining_sat: l.remaining_sat,
+                                    acquired_at: l.acquired_at,
+                                    usd_basis: l.usd_basis,
+                                    pick_sat_buf: FieldBuffer::new(),
+                                })
+                                .collect(),
+                            // SL-r2-d / review r2 M-3: a vault READ failure is NOT an empty pool. Surface it
+                            // distinctly and stay on List, rather than the misleading "No lots available".
+                            Err(e) => {
+                                app.status = Some(format!(
+                                    "Couldn't read the vault to list lots ({e}); try again, or \
+                                     restart the editor"
+                                ));
+                                return;
+                            }
+                        }
+                    }
                     _ => Vec::new(),
                 };
 
@@ -4880,17 +4910,28 @@ fn open_set_donation_details_flow(app: &mut EditorApp) {
 
 /// Derive the status string from RE-PROJECTED state after a select-lots save.
 ///
-/// Three arms (spec D1):
+/// Four arms (spec D1 + SL-r2-a NF-2):
 /// 1. `DecisionConflict` attributed to `decision_id` → NEITHER applies; method-order fallback.
 ///    Status ends with `"(see Compliance)"` [R0-N3 nit sweep].
 /// 2. `LotSelectionInvalid` with `event == disposal_event` → engine rejected the selection.
-/// 3. Clean → success summary with pick_count and total_sat.
+/// 3. This save NEWLY fired `SafeHarborUnconservable` on some allocation → a pre-2025 specific-ID pick
+///    changed the Universal residue's Σ-basis and broke an in-force Path-B allocation's conservation (the
+///    allocation is now inert and the year is gated). `unconservable_before` (the alloc ids already broken
+///    pre-save) distinguishes "this pick broke it" from a pre-existing break (which the user already saw)
+///    AND, being a set, avoids masking a NEW break on one allocation behind a pre-existing break on another
+///    (review-r1 NEW-2). NOTE: the engine's conservation check is TOTALS-only (Σsat, Σbasis) — an
+///    equal-totals COMPOSITION drift (same per-sat basis, different acquired_at) is NOT detected here or
+///    anywhere (the attestation's per-lot dates are the filer's claim by design, verified nowhere even with
+///    zero selections); see FOLLOWUPS SL-r2-a / review r3 NF-1 (a future decision would scope it to
+///    `AllocMethod::ActualPosition`, the one mode that claims to mirror actual position).
+/// 4. Clean → success summary with pick_count and total_sat.
 fn derive_select_lots_status(
     snap: &btctax_tui::app::Snapshot,
     disposal_event: &EventId,
     decision_id: &EventId,
     pick_count: usize,
     total_sat: btctax_core::Sat,
+    unconservable_before: &std::collections::BTreeSet<EventId>,
 ) -> String {
     // Arm 1: DecisionConflict attributed to the SECOND selection's decision_id.
     for b in &snap.state.blockers {
@@ -4913,7 +4954,26 @@ fn derive_select_lots_status(
         }
     }
 
-    // Arm 3: clean.
+    // Arm 3 [SL-r2-a / review r3 NF-2 + r1 NEW-2]: this save NEWLY broke an in-force Path-B safe-harbor
+    // allocation's conservation (a pre-2025 specific-ID pick that changed the Universal residue's Σ-basis).
+    // Fire only for an allocation id NOT already broken pre-save (set-delta) — so neither a pre-existing
+    // break false-fires this, nor a break on one allocation masks a new break on another. The Hard
+    // `SafeHarborUnconservable` gates the year — do NOT report a clean save.
+    if snap.state.blockers.iter().any(|b| {
+        b.kind == BlockerKind::SafeHarborUnconservable
+            && b.event
+                .as_ref()
+                .is_some_and(|id| !unconservable_before.contains(id))
+    }) {
+        return format!(
+            "Lot selection recorded for {}, BUT it broke your safe-harbor allocation's conservation \
+             (SafeHarborUnconservable) — the allocation is now inert and the year will not compute. \
+             See Compliance; Void this selection (press 'v') to restore it.",
+            disposal_event.canonical()
+        );
+    }
+
+    // Arm 4: clean.
     format!(
         "Lot selection recorded for {} — {pick_count} lot(s), {total_sat} sat; \
          check Compliance for §1.1012-1(j) contemporaneity.",
@@ -18774,6 +18834,53 @@ mod tests {
         );
     }
 
+    /// SL-r2-d (review r2 M-3) — a vault READ failure while building the select-lots form must surface as a
+    /// distinct error, NOT the "No lots available" empty-pool message (which would mislead the user into
+    /// thinking the disposal has no lots). Force it by dropping the `events` table AFTER the flow opens (its
+    /// list is built from the in-memory snapshot) but BEFORE Enter (which re-reads the conn via
+    /// `available_lots_before` → `load_all`).
+    #[test]
+    fn kat_sl_r2d_load_error_is_distinct_from_empty_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-sl-r2d-pass";
+
+        let (_lot_a, _lot_b, _to) = seed_two_lot_sell_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        handle_key(&mut app, press(KeyCode::Char('S')));
+        assert!(app.select_lots_flow.is_some(), "flow must open");
+
+        // Corrupt the load path: drop the events table on the live conn.
+        app.session
+            .as_ref()
+            .unwrap()
+            .conn()
+            .execute_batch("DROP TABLE events")
+            .unwrap();
+        app.status = None;
+
+        handle_key(&mut app, press(KeyCode::Enter)); // available_lots_before → load_all → Err
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.contains("read the vault") || status.contains("Couldn't read"),
+            "a load failure must surface as a read error; got: {status:?}"
+        );
+        assert!(
+            !status.contains("No lots available"),
+            "a load failure must NOT masquerade as an empty pool; got: {status:?}"
+        );
+        // The flow stays on List (no LotsForm opened over a failed read).
+        assert!(
+            matches!(
+                app.select_lots_flow.as_ref().map(|f| &f.step),
+                Some(SelectLotsStep::List)
+            ),
+            "the flow must not advance to LotsForm on a load failure"
+        );
+    }
+
     // ── KAT-C2f — cancel-path bytes-unchanged (select-lots) ──────────────────
 
     #[test]
@@ -21625,9 +21732,15 @@ mod tests {
             "ST-SEL: a clean save must close the flow"
         );
         let status = app.status.as_deref().unwrap_or("");
+        // Pin the CLEAN arm distinctly from the NF-2 break arm (both open "Lot selection recorded …"):
+        // the clean arm ends with the contemporaneity note and never carries the break attribution.
         assert!(
-            status.contains("Lot selection recorded"),
-            "ST-SEL: clean save must yield the arm-3 status; got: {status}"
+            status.contains("Lot selection recorded") && status.contains("contemporaneity"),
+            "ST-SEL: clean save must yield the clean arm status; got: {status}"
+        );
+        assert!(
+            !status.contains("BUT it broke"),
+            "ST-SEL: a clean save (no allocation involved) must NOT report a conservation break; got: {status}"
         );
         let snap = app.snapshot.as_ref().unwrap();
         assert!(
@@ -22044,6 +22157,344 @@ mod tests {
             "PATHB: the offered pre-seed pick must be accepted cleanly (no LotSelectionInvalid) and must not \
              break the Path-B allocation's conservation; blockers: {:?}",
             snap.state.blockers
+        );
+    }
+
+    // ── KAT-PRE2025-PATHB-MULTILOT-CONSERVATION (SL-r2-a / NF-2) ──────────────
+    /// The DECISION on SL-r2-a is LEAVE (permit pre-2025 specific-ID under an in-force Path-B allocation;
+    /// the engine validates conservation). This KAT proves the safety net + the NF-2 status arm: with TWO
+    /// pre-2025 lots of different basis, a specific-ID pick that changes the Universal residue's Σ-basis
+    /// breaks the allocation's conservation → a HARD `SafeHarborUnconservable` (year-gating), surfaced in the
+    /// select-lots status (NOT the clean "recorded" message). Under the config-default HIFO, disposal D
+    /// draws the EXPENSIVE lot Z (residue = cheap X); the allocation attests X; overriding D to draw X
+    /// instead flips the residue to Z ($50k vs $10k) → Σ-basis mismatch.
+    #[test]
+    fn kat_pre2025_pathb_multilot_specificid_breaks_conservation_and_status_surfaces_it() {
+        use btctax_core::event::{AllocLot, AllocMethod, SafeHarborAllocation};
+        use btctax_core::LotMethod;
+        use rust_decimal::Decimal;
+        use time::macros::date;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p25-multilot-pass";
+
+        // Config-default pre2025_method is HIFO → D draws the highest-basis lot Z ($50k); residue = X ($10k).
+        // The allocation attests THAT residue (X) under HIFO so it conserves at seed (Path B effective).
+        let alloc = SafeHarborAllocation {
+            lots: vec![AllocLot {
+                wallet: river_wallet(),
+                sat: 500_000,
+                usd_basis: Decimal::from(10000),
+                acquired_at: date!(2023 - 01 - 15),
+                dual_loss_basis: None,
+                donor_acquired_at: None,
+            }],
+            as_of_date: date!(2025 - 01 - 01),
+            method: AllocMethod::ActualPosition,
+            timely_allocation_attested: true,
+            pre2025_method: LotMethod::Hifo,
+        };
+        let (to_id, alloc_id) = seed_pre2025_disposal_vault(
+            &vault,
+            &key,
+            pp_str,
+            &[
+                (river_wallet(), 1_673_740_800, 500_000, 10000), // X @2023-01-15, cheap
+                (river_wallet(), 1_676_419_200, 500_000, 50000), // Z @2023-02-15, expensive
+            ],
+            Some((100_000, 6000)), // post-2025 trigger fires the §7.4 seed
+            Some(alloc),
+        );
+        let alloc_id = alloc_id.unwrap();
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Baseline: the allocation is EFFECTIVE (Path B) — no conservation/mismatch blocker yet.
+        {
+            let snap = app.snapshot.as_ref().unwrap();
+            let on_alloc = |k: BlockerKind| {
+                snap.state
+                    .blockers
+                    .iter()
+                    .any(|b| b.kind == k && b.event.as_ref() == Some(&alloc_id))
+            };
+            assert!(
+                !on_alloc(BlockerKind::SafeHarborUnconservable)
+                    && !on_alloc(BlockerKind::SafeHarborTimebar),
+                "baseline: the HIFO-attested allocation must conserve (Path B effective); blockers: {:?}",
+                snap.state.blockers
+            );
+        }
+
+        // Open select-lots for D and pick the CHEAP lot X (row 0, oldest) — overriding HIFO's Z draw.
+        handle_key(&mut app, press(KeyCode::Char('S')));
+        {
+            let idx = app
+                .select_lots_flow
+                .as_ref()
+                .expect("flow must open")
+                .list
+                .items
+                .iter()
+                .position(|i| i.disposal_event == to_id)
+                .expect("D must be listed");
+            app.select_lots_flow
+                .as_mut()
+                .unwrap()
+                .list
+                .table_state
+                .select(Some(idx));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → LotsForm (X row 0, Z row 1)
+        {
+            let flow = app.select_lots_flow.as_ref().expect("flow open");
+            let SelectLotsStep::LotsForm { rows, .. } = &flow.step else {
+                panic!("must reach LotsForm");
+            };
+            assert_eq!(rows.len(), 2, "both pre-2025 lots offered at-disposal");
+        }
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c))); // 500k on X (cursor at row 0)
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        assert!(app.select_lots_modal.is_some(), "modal must open");
+        handle_key(&mut app, press(KeyCode::Enter)); // save + re-project
+
+        // The pick flipped the residue to Z ($50k) while the allocation attested X ($10k) → Σ-basis break.
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::SafeHarborUnconservable),
+            "the residue-basis change must break the allocation's conservation; blockers: {:?}",
+            snap.state.blockers
+        );
+        // NF-2: the status must SURFACE the break, not report a clean "recorded" save.
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.contains("SafeHarborUnconservable") || status.contains("safe-harbor"),
+            "NF-2: the status must name the conservation break; got: {status:?}"
+        );
+        assert!(
+            status.contains("will not compute") || status.contains("inert"),
+            "NF-2: the status must warn the year is gated; got: {status:?}"
+        );
+    }
+
+    // ── KAT-PRE2025-PATHB-PREEXISTING-BREAK (SL-r2-a / review-r1 NEW-1 Mutant A) ──
+    /// The NF-2 arm must fire ONLY for a break THIS save introduced. A filer whose allocation is ALREADY
+    /// unconservable (here: attests a wrong Σ-basis) and then records a feasible, un-breaking selection must
+    /// see the CLEAN status — not a false "BUT it broke … Void this selection to restore it" (voiding would
+    /// restore nothing). This kills the guard-dropped mutant (`any(SafeHarborUnconservable)` without the
+    /// set-delta), which the multilot KAT alone does not.
+    #[test]
+    fn kat_pre2025_pathb_preexisting_break_does_not_false_attribute_to_a_clean_pick() {
+        use btctax_core::event::{AllocLot, AllocMethod, SafeHarborAllocation};
+        use btctax_core::LotMethod;
+        use rust_decimal::Decimal;
+        use time::macros::date;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p25-prebreak-pass";
+
+        // One pre-2025 lot (1M/$30000 @2024-06) → HIFO residue after the 500K disposal = 500K/$15000. The
+        // allocation attests a WRONG Σ-basis ($29999) → baseline `SafeHarborUnconservable` (already broken).
+        let alloc = SafeHarborAllocation {
+            lots: vec![AllocLot {
+                wallet: river_wallet(),
+                sat: 500_000,
+                usd_basis: Decimal::from(29999), // wrong: actual residue basis is 15000
+                acquired_at: date!(2024 - 06 - 01),
+                dual_loss_basis: None,
+                donor_acquired_at: None,
+            }],
+            as_of_date: date!(2025 - 01 - 01),
+            method: AllocMethod::ActualPosition,
+            timely_allocation_attested: true,
+            pre2025_method: LotMethod::Hifo,
+        };
+        let (to_id, alloc_id) = seed_pre2025_disposal_vault(
+            &vault,
+            &key,
+            pp_str,
+            &[(river_wallet(), 1_717_200_000, 1_000_000, 30000)],
+            Some((100_000, 6000)),
+            Some(alloc),
+        );
+        let alloc_id = alloc_id.unwrap();
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Baseline: the allocation is ALREADY unconservable (broken before any select-lots save).
+        assert!(
+            app.snapshot
+                .as_ref()
+                .unwrap()
+                .state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::SafeHarborUnconservable
+                    && b.event.as_ref() == Some(&alloc_id)),
+            "baseline: the wrong-basis allocation must already be SafeHarborUnconservable"
+        );
+
+        // Record a feasible pick on the pre-2025 disposal (single lot → same as the default draw; it does
+        // NOT change the residue, so it introduces no NEW break).
+        handle_key(&mut app, press(KeyCode::Char('S')));
+        {
+            let idx = app
+                .select_lots_flow
+                .as_ref()
+                .expect("flow must open")
+                .list
+                .items
+                .iter()
+                .position(|i| i.disposal_event == to_id)
+                .expect("D must be listed");
+            app.select_lots_flow
+                .as_mut()
+                .unwrap()
+                .list
+                .table_state
+                .select(Some(idx));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → LotsForm
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        handle_key(&mut app, press(KeyCode::Enter)); // save
+
+        // The pre-existing break must NOT be attributed to this save.
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            !status.contains("BUT it broke"),
+            "NEW-1 Mutant A: a pre-existing break must NOT be blamed on a clean pick; got: {status:?}"
+        );
+        assert!(
+            status.contains("Lot selection recorded"),
+            "the feasible pick must still record cleanly; got: {status:?}"
+        );
+    }
+
+    // ── KAT-PRE2025-PATHB-TIMEBAR-BREAK (SL-r2-a / review-r2 NEW-3) ───────────
+    /// The pre-save `unconservable_before` set is KIND-FILTERED to `SafeHarborUnconservable`. A pre-existing
+    /// ADVISORY blocker on the same allocation must NOT land its id in that set — else a NEW conservation
+    /// break would be masked. Here an unattested ProRata allocation is TIMEBARRED (Advisory, resolve.rs:1246)
+    /// but CONSERVES at baseline (so no `SafeHarborUnconservable` yet); a specific-ID pick flips the residue
+    /// basis → a NEW Hard `SafeHarborUnconservable` (checked before the timebar) — which MUST be attributed
+    /// ("BUT it broke"), not swallowed. Kills the drop-the-kind-filter capture mutant (review-r2 NEW-3).
+    #[test]
+    fn kat_pre2025_pathb_timebar_advisory_does_not_mask_a_new_break() {
+        use btctax_core::event::{AllocLot, AllocMethod, SafeHarborAllocation};
+        use btctax_core::LotMethod;
+        use rust_decimal::Decimal;
+        use time::macros::date;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-p25-timebar-pass";
+
+        // Unattested ProRata → TIMEBARRED regardless of made-date (resolve.rs:1220-1221), but it still
+        // conserves at baseline: HIFO residue after D = the cheap lot X (500k/$10000), which is what it
+        // attests. So baseline carries the Advisory SafeHarborTimebar, NOT SafeHarborUnconservable.
+        let alloc = SafeHarborAllocation {
+            lots: vec![AllocLot {
+                wallet: river_wallet(),
+                sat: 500_000,
+                usd_basis: Decimal::from(10000),
+                acquired_at: date!(2023 - 01 - 15),
+                dual_loss_basis: None,
+                donor_acquired_at: None,
+            }],
+            as_of_date: date!(2025 - 01 - 01),
+            method: AllocMethod::ProRata,
+            timely_allocation_attested: false, // unattested ProRata ⇒ timebarred (advisory)
+            pre2025_method: LotMethod::Hifo,
+        };
+        let (to_id, alloc_id) = seed_pre2025_disposal_vault(
+            &vault,
+            &key,
+            pp_str,
+            &[
+                (river_wallet(), 1_673_740_800, 500_000, 10000), // X @2023-01-15, cheap
+                (river_wallet(), 1_676_419_200, 500_000, 50000), // Z @2023-02-15, expensive
+            ],
+            Some((100_000, 6000)),
+            Some(alloc),
+        );
+        let alloc_id = alloc_id.unwrap();
+
+        let mut app = open_app(&vault, pp_str);
+
+        // Baseline: the ADVISORY timebar is present on the allocation, but NOT a conservation break.
+        {
+            let snap = app.snapshot.as_ref().unwrap();
+            let on_alloc = |k: BlockerKind| {
+                snap.state
+                    .blockers
+                    .iter()
+                    .any(|b| b.kind == k && b.event.as_ref() == Some(&alloc_id))
+            };
+            assert!(
+                on_alloc(BlockerKind::SafeHarborTimebar),
+                "baseline: unattested ProRata must be timebarred (advisory); blockers: {:?}",
+                snap.state.blockers
+            );
+            assert!(
+                !on_alloc(BlockerKind::SafeHarborUnconservable),
+                "baseline: it must still CONSERVE (no Unconservable yet); blockers: {:?}",
+                snap.state.blockers
+            );
+        }
+
+        // Pick the cheap lot X for D (overriding HIFO's expensive-Z draw) → residue flips to Z → break.
+        handle_key(&mut app, press(KeyCode::Char('S')));
+        {
+            let idx = app
+                .select_lots_flow
+                .as_ref()
+                .expect("flow must open")
+                .list
+                .items
+                .iter()
+                .position(|i| i.disposal_event == to_id)
+                .expect("D must be listed");
+            app.select_lots_flow
+                .as_mut()
+                .unwrap()
+                .list
+                .table_state
+                .select(Some(idx));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → LotsForm (X row 0, Z row 1)
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c))); // 500k on X (cursor row 0)
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // → modal
+        handle_key(&mut app, press(KeyCode::Enter)); // save
+
+        // The NEW break must be attributed even though the alloc already carried the Advisory timebar.
+        assert!(
+            app.snapshot
+                .as_ref()
+                .unwrap()
+                .state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::SafeHarborUnconservable),
+            "the pick must newly break conservation"
+        );
+        let status = app.status.as_deref().unwrap_or("");
+        assert!(
+            status.contains("BUT it broke"),
+            "NEW-3: an Advisory pre-existing blocker must NOT mask a new break; got: {status:?}"
         );
     }
 

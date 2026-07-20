@@ -414,7 +414,11 @@ impl Session {
         date: btctax_core::conventions::TaxDate,
         wallet: &btctax_core::WalletId,
     ) -> Result<Vec<btctax_core::Lot>, CliError> {
-        let (events, _state, cfg) = self.load_events_and_project()?;
+        // Load events + config only — NOT a full projection. `optimize::available_lots_before` runs its own
+        // `resolve` + `pools_before` clone-fold internally, so projecting here (and discarding the state)
+        // would just double the fold on every interactive keypress (SL-r2-c / review r2 M-2).
+        let events = load_all(self.conn())?;
+        let cfg = self.config()?.to_projection();
         Ok(btctax_core::optimize::available_lots_before(
             &events,
             self.prices(),

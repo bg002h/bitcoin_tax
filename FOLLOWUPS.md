@@ -2645,41 +2645,43 @@ SURFACED — not walkthrough bugs):
   `non_compliant` flag the setup's verify showed. (J1's beat is already addressed by its own non_compliant
   clause pointing to select-lots.)
 
-**Select-lots fold — Fable r2 residue (2026-07-20, `reviews/polish-batch-selectlots-fable-review-r2.md`,
-all NON-gating; the blocking NEW-1 was folded — see "J9 app-limit — DONE" above):**
-- **(SL-r2-a) Pre-2025 Path-B specific-ID now permitted — multi-lot conservation interaction (Minor,
-  owner: post-polish / future hardening).** Unifying the select-lots arms lets the user specific-ID a
-  PRE-2025 disposal even when a Path-B `SafeHarborAllocation` is in effect (the form now offers the feasible
-  pre-seed at-disposal lot, where the old arm offered nothing). In the SINGLE pre-2025-lot case this is
-  provably harmless (specific-ID == FIFO; conservation preserved — verified end-to-end by the rewritten
-  `kat_pre2025_pathb_seedlots_excluded`). In a MULTI-lot pre-2025 Path-B world a non-FIFO pick that changes
-  the residue's Σ-BASIS breaks an `ActualPosition` attestation — but the engine SURFACES that as a HARD
-  `SafeHarborUnconservable` blocker that gates the year (`universal_snapshot` is selection-aware,
-  resolve.rs:1227-1244; state.rs:46-49/89), not a silent wrong number, so the safety invariant holds.
-  Decide whether to (a) leave it (engine-validated, honest), or (b) suppress specific-ID for pre-2025
-  disposals under an effective Path-B allocation. Add a multi-lot KAT either way.
-  - **(r3 NF-1) Refinement:** the conservation guard is TOTALS-only (Σsat, Σbasis). An **equal-totals
-    COMPOSITION drift** — two pre-2025 lots with identical per-sat basis but different `acquired_at`,
-    specific-ID'd contrary to FIFO — passes conservation while the attestation's per-lot `acquired_at` now
-    misdescribes the residue (possible LT/ST character skew on later seed-lot disposals). NOT surfaced, but
-    PRE-EXISTING engine semantics (the CLI has always accepted pre-2025 Path-B selections; the attestation's
-    per-lot dates are the filer's claim by design — resolve.rs never verifies per-lot composition even with
-    zero selections). Document as out-of-engine-scope OR give it its own decision; the multi-lot KAT should
-    cover the surfaced Σ-basis-drift → blocker case.
-  - **(r3 NF-2) Status arm:** if option (a), add a 4th `derive_select_lots_status` arm — a save whose pick
-    fires `SafeHarborUnconservable` currently lands the clean Arm-3 "Lot selection recorded …" message
-    (main.rs:4894-4922) while the year just went NotComputable (loud in Compliance, misleadingly green in
-    the status line).
-  — OPEN, owned by **post-polish / future hardening**.
-- **(SL-r2-b, M-1) `validate_select_lots` has no per-row cap (Minor, ownerless).** Σ==principal is checked
-  (form.rs:1318-1355) but a user typing MORE than a row's displayed Remaining persists a pick the engine
-  rejects → hard `LotSelectionInvalid` with guided void recovery. The FORM now only OFFERS feasible lots,
-  but the INPUT is still uncapped. Fix: enforce per-row `sat ≤ remaining_sat` at form validation + KAT.
-  — OPEN, ownerless.
-- **(SL-r2-c, M-2) `Session::available_lots_before` double-projects (Minor, ownerless).** It calls
-  `load_events_and_project` (a full projection whose `LedgerState` is discarded) then `available_lots_before`
-  re-resolves + partial-folds — per Enter keypress. Fine at personal-ledger scale; `load_all` + `config()`
-  directly would drop the wasted fold. — OPEN, ownerless.
-- **(SL-r2-d, M-3) `.unwrap_or_default()` conflates load-error with empty pool (Minor, ownerless).** On a
-  vault read failure the select-lots form shows "No lots available …" instead of a load error. Unlikely
-  (in-memory conn). Surface the error distinctly. — OPEN, ownerless.
+**Select-lots fold — Fable r2/r3 residue — ALL 4 DONE + reviewed (2026-07-20, HEAD `<this batch>`,
+`reviews/polish-batch-selectlots-fable-review-r2.md`/`-r3.md`):**
+- **(SL-r2-a) Pre-2025 Path-B specific-ID — DECIDED: LEAVE (engine-validated) + NF-2 status arm + multi-lot
+  KAT. DONE 2026-07-20.** Unifying the select-lots arms lets the user specific-ID a PRE-2025 disposal under
+  an in-force Path-B `SafeHarborAllocation`. **Decision = option (a) LEAVE** — it is architecturally clean
+  (re-introducing a suppress-branch would undo the NEW-1 unification), permits a legitimate filer action,
+  and is safe: a non-FIFO pick that changes the Universal residue's Σ-BASIS breaks conservation, and the
+  engine surfaces that as a HARD, year-gating `SafeHarborUnconservable` (`universal_snapshot` is
+  selection-aware, resolve.rs:1227-1244; state.rs:46-49/89) — never a silent wrong number. **NF-2 FOLDED:**
+  `derive_select_lots_status` gained a 4th arm that fires only when THIS save NEWLY introduces
+  `SafeHarborUnconservable` on an allocation, so the status warns "broke your safe-harbor allocation … the
+  year will not compute" instead of the clean "recorded" message. The attribution is a **SET-DELTA** on the
+  allocation ids already broken pre-save (`unconservable_before`), NOT a boolean — this (a) resolves the
+  review-r1 **NEW-2** masking false-negative inline (a break on one allocation can't hide behind a
+  pre-existing break on another), and (b) is fully mutation-held — the CONDITION by `kat_pre2025_pathb_
+  multilot_…` (HIFO default → D draws expensive Z, alloc attests cheap X, specific-ID X flips the residue →
+  break → NF-2 status; kills polarity/arm-off) + `kat_pre2025_pathb_preexisting_break_…` (wrong-basis alloc
+  broken AT BASELINE → a feasible pick must NOT be blamed → kills guard-dropped) + the tightened `ST-SEL`
+  clean-save assert (`contains("contemporaneity") && !contains("BUT it broke")` → kills the always-fire
+  shape); and the CAPTURE-side kind filter (**review-r2 NEW-3, closed inline**) by `kat_pre2025_pathb_timebar_
+  advisory_does_not_mask_a_new_break` (an unattested-ProRata TIMEBARRED-but-conserving alloc → a new break
+  must still be attributed despite the pre-existing Advisory blocker → kills the drop-the-kind-filter
+  mutant). All mutants verified RED under the mutation before landing. **NF-1 (composition drift) = out-of-engine-scope,
+  documented, NOT code:** the conservation guard is TOTALS-only (Σsat, Σbasis); an equal-totals composition
+  drift (same per-sat basis, different `acquired_at`) is not detected — but that is PRE-EXISTING semantics
+  (the CLI has always accepted pre-2025 Path-B selections; the attestation's per-lot dates are the filer's
+  claim, verified nowhere even with zero selections). A future decision on it would scope to
+  `AllocMethod::ActualPosition` (the one mode that claims to mirror actual position). Recorded in the
+  `derive_select_lots_status` doc-comment (arm 3 note). — **DONE (incl. NEW-2).**
+- **(SL-r2-b, M-1) per-row cap in `validate_select_lots` — DONE 2026-07-20.** Enforces per-row
+  `sat ≤ remaining_sat` at form validation (the form only OFFERS feasible lots, but the INPUT was uncapped —
+  the last way to reach `LotSelectionInvalid` from this form). KAT `kat_v_sl_4_per_row_overdraw_is_rejected_
+  even_when_sum_matches` (RED→GREEN: 80k on a 30k row while Σ==principal). — **DONE.**
+- **(SL-r2-c, M-2) drop the double-projection in `Session::available_lots_before` — DONE 2026-07-20.** Now
+  loads events + config directly (no discarded full projection); `optimize::available_lots_before` runs its
+  own resolve+fold. Behavior held by the existing select-lots KATs (byte-identical rows). — **DONE.**
+- **(SL-r2-d, M-3) distinguish load-error from empty pool — DONE 2026-07-20.** The row build now matches on
+  `available_lots_before`'s `Result`: an `Err` surfaces "Couldn't read the vault to list lots …" and stays
+  on List, no longer masquerading as "No lots available". KAT `kat_sl_r2d_load_error_is_distinct_from_empty_
+  pool` (drops the `events` table after the flow opens to force the read failure). — **DONE.**
