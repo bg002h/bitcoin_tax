@@ -14295,28 +14295,19 @@ mod tests {
 
     /// Seed a vault from the SHARED J8 corpus (`btctax_cli::testonly::j8`) via the REAL adapter ingest — so
     /// the editor's states are exactly the examples-J8 journey's, and the event refs match the viewer half.
+    /// Delegates to the ONE shared seeder `btctax_cli::testonly::seed_journey` (N-2: no init/import copy).
     #[cfg(unix)]
     fn seed_j8_vault(dir: &std::path::Path, pp_str: &str) -> std::path::PathBuf {
-        let vault = dir.join("vault.pgp");
-        let key = dir.join("key.asc");
         let pp = Passphrase::new(pp_str.into());
-        btctax_cli::cmd::init::run(&vault, &pp, &key).unwrap();
-        let mut files: Vec<std::path::PathBuf> = Vec::new();
-        for (name, content) in btctax_cli::testonly::j8().corpus {
-            let p = dir.join(name);
-            std::fs::write(&p, content).unwrap();
-            files.push(p);
-        }
-        btctax_cli::cmd::import::run(&vault, &pp, &files).unwrap();
-        vault
+        btctax_cli::testonly::seed_journey(dir, &pp, &btctax_cli::testonly::j8())
     }
 
     /// `(relative-stem, captured frame)` for the J8 editor walkthrough frames.
     #[cfg(unix)]
     fn btctax_tui_edit_walkthrough_frames() -> Vec<(&'static str, String)> {
-        // Determinism (walkthrough spec §7 / I-3): pin BTCTAX_PRICE_CACHE to a nonexistent file so the
-        // developer's LIVE local price cache cannot perturb the displayed market value ($8137.26 from the
-        // BUNDLED dataset). Safe under nextest's process-per-test model (which make check / CI use).
+        // Determinism (walkthrough spec §7 / I-3): pin BTCTAX_PRICE_CACHE to a nonexistent file so a
+        // developer's LIVE local price cache cannot perturb any market-value cell a frame might show.
+        // Safe under nextest's process-per-test model (which make check / CI use).
         std::env::set_var(
             "BTCTAX_PRICE_CACHE",
             "/nonexistent-walkthrough-price-cache.csv",

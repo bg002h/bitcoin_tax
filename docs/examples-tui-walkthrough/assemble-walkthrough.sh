@@ -2,9 +2,10 @@
 #
 # assemble-walkthrough.sh — interleave a journey's PROSE narration with its captured TUI FRAMES into a
 # single roff -man stream for `groff -man -T pdf` (the TUI screen-walkthrough PDF; design/tui-walkthrough
-# SPEC §4.4 / I-4). Convenience render ONLY — the gated artifacts are the `.txt` frame goldens (held by
-# each crate's `*_walkthrough_goldens_match_committed` test) and this committed manifest; the PDF is NOT
-# byte-gated and is git-ignored (docs/pdf/).
+# SPEC §5). Convenience render ONLY — the gated artifacts are the `.txt` frame goldens (held by each TUI
+# crate's `*_walkthrough_goldens_match_committed` test) and the manifest (grammar + a FRAME⇄golden
+# bijection, held by xtask's `walkthrough_manifests_valid_and_complete`); the PDF is NOT byte-gated and is
+# git-ignored (docs/pdf/).
 #
 # Usage: assemble-walkthrough.sh <manifest> <frames-dir> <tui-wrap.awk>
 #
@@ -31,7 +32,14 @@ while IFS= read -r line || [ -n "$line" ]; do
     'FRAME '*)
       rest="${line#FRAME }"
       file="${rest%% *}"
-      caption="${rest#* }"
+      # A FRAME line MUST carry a caption after the filename (M-4): `${rest#* }` degrades to the filename
+      # itself when the caption is absent, which would silently render the `.SH` as the golden's path.
+      # Trim surrounding whitespace and fail closed on an empty caption.
+      caption="$(printf '%s' "${rest#"$file"}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+      if [ -z "$caption" ]; then
+        echo "assemble-walkthrough: FRAME '$file' has no caption (the .SH would read as the path)" >&2
+        exit 1
+      fi
       frame_path="$framedir/$file"
       if [ ! -f "$frame_path" ]; then
         echo "assemble-walkthrough: no such frame: $frame_path" >&2

@@ -1300,6 +1300,91 @@ mod tests {
         );
     }
 
+    /// TUI screen-walkthrough manifest gate (SPEC §5; folds PoC review C-1). Each
+    /// `docs/examples-tui-walkthrough/<journey>/manifest.txt` is hand-authored (prose + captions live
+    /// ONLY here — the single owner), so nothing REGENERATES it; instead this pins its INTEGRITY on every
+    /// `make check`, the property the byte-gated `examples.md` gives that artifact:
+    ///   (a) grammar — every non-blank, non-`#` line is `PROSE <text>` or `FRAME <file.txt> <caption>`,
+    ///       both with non-empty payloads (mirrors, and slightly tightens, `assemble-walkthrough.sh`); and
+    ///   (b) a BIJECTION between the manifest's `FRAME` references and the frame goldens on disk — every
+    ///       reference resolves to a committed `.txt`, AND every committed `.txt` (bar `manifest.txt`) is
+    ///       referenced. (a→b) alone catches a typo'd/renamed reference; (b→a) catches a SILENTLY DROPPED
+    ///       `FRAME` line, which would otherwise leave an orphaned golden and quietly shrink the walkthrough
+    ///       with the whole validation surface still green (the exact hole the review flagged).
+    /// The frames themselves are byte-gated in the TUI crates (`*_walkthrough_goldens_match_committed`);
+    /// this + those together pin the whole artifact. Generalizes for free to Phase 2's J1..J7,J9 dirs.
+    #[test]
+    fn walkthrough_manifests_valid_and_complete() {
+        let root = workspace_root().join("docs/examples-tui-walkthrough");
+        if !root.is_dir() {
+            return; // no walkthrough authored yet — nothing to gate
+        }
+        let mut journeys_checked = 0;
+        for entry in std::fs::read_dir(&root).expect("read docs/examples-tui-walkthrough") {
+            let dir = entry.expect("dir entry").path();
+            let manifest = dir.join("manifest.txt");
+            if !manifest.is_file() {
+                continue; // a non-journey subdir (none today) — skip
+            }
+            journeys_checked += 1;
+            let rel = dir.file_name().unwrap().to_string_lossy().to_string();
+
+            // (a) grammar — collect the FRAME references.
+            let text = std::fs::read_to_string(&manifest).unwrap();
+            let mut referenced: std::collections::BTreeSet<String> = Default::default();
+            for (i, line) in text.lines().enumerate() {
+                let ln = i + 1;
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if let Some(rest) = line.strip_prefix("PROSE ") {
+                    assert!(
+                        !rest.trim().is_empty(),
+                        "{rel}/manifest.txt:{ln}: empty PROSE line"
+                    );
+                } else if let Some(rest) = line.strip_prefix("FRAME ") {
+                    let (file, caption) = rest.split_once(' ').unwrap_or((rest, ""));
+                    assert!(
+                        !caption.trim().is_empty(),
+                        "{rel}/manifest.txt:{ln}: FRAME `{file}` has no caption \
+                         (the `.SH` would degrade to the filename)"
+                    );
+                    assert!(
+                        file.ends_with(".txt") && file != "manifest.txt",
+                        "{rel}/manifest.txt:{ln}: FRAME reference `{file}` is not a frame `.txt`"
+                    );
+                    assert!(
+                        referenced.insert(file.to_string()),
+                        "{rel}/manifest.txt:{ln}: FRAME `{file}` referenced twice"
+                    );
+                } else {
+                    panic!("{rel}/manifest.txt:{ln}: not PROSE/FRAME/#comment/blank: {line:?}");
+                }
+            }
+
+            // (b) bijection — the on-disk frame goldens (every `*.txt` except the manifest itself).
+            let mut on_disk: std::collections::BTreeSet<String> = Default::default();
+            for e in std::fs::read_dir(&dir).unwrap() {
+                let name = e.unwrap().file_name().to_string_lossy().to_string();
+                if name.ends_with(".txt") && name != "manifest.txt" {
+                    on_disk.insert(name);
+                }
+            }
+            assert_eq!(
+                referenced, on_disk,
+                "{rel}: the manifest's FRAME references and the committed frame goldens must be a \
+                 bijection — a reference with no golden is a typo/rename; a golden with no reference is \
+                 a silently dropped FRAME line (a shrunk walkthrough). referenced={referenced:?} \
+                 on_disk={on_disk:?}"
+            );
+        }
+        assert!(
+            journeys_checked >= 1,
+            "no walkthrough manifests found under docs/examples-tui-walkthrough — the PoC J8 manifest \
+             should be present"
+        );
+    }
+
     /// Captures a set of env vars and restores them on Drop — so a panic inside `generate()` cannot leave
     /// the process env dirty for a sibling test under threaded `cargo test` (N-1). Held with BUILD_ENV_LOCK.
     struct EnvRestore(Vec<(&'static str, Option<std::ffi::OsString>)>);

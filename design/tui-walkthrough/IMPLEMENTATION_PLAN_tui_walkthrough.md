@@ -71,6 +71,32 @@ match-self-transfers: editor mutation + viewer BALANCED result). Validates §4.2
    one-journey PDF + the machinery, and can redirect format/caption/frame-granularity
    cheaply before the 8× rollout.
 
+### As-built deviations (recorded at the PoC review, folding r1)
+
+The PoC was built and reviewed; three deliberate deviations from the steps above are
+recorded here so the owner's gate sees choices, not omissions (PoC review M-3, C-1, and the
+reviewer's non-finding note):
+
+- **Step 1 — three editor frames, not four.** The "post-relocate Browse" frame was dropped:
+  the confirmed result is shown once, authoritatively, by the **viewer** Holdings frame
+  (step 4), and the editor-side post-confirm write is already held by the e2e
+  `kat_e2e_match_self_transfers_relocate_lands_coins_in_dest`. A second post-confirm editor
+  screen would narrate the same beat twice. (SPEC §10 grants frame-granularity latitude.)
+- **Step 2 — RELOCATE replayed via `link_transfer`, not `apply_self_transfer_passthrough`.**
+  The plan's cited fn is the DROP action; `apply_self_transfer_passthrough` would not land the
+  coins at the destination. The impl uses `btctax_cli::testonly::seed_j8_relocated` →
+  `cmd::reconcile::link_transfer` (out→`InEvent(in)`), the byte-same payload the editor's
+  confirm writes (per G-RELOCATE-REUSE). The deviation is toward correctness.
+- **Steps 3–4 — hand-authored per-journey manifest + bijection gate, not an xtask-emitted
+  `walkthrough.md` with Rust-literal captions + a `regen == committed` gate.** See the SPEC §5
+  "As-built" note: prose+captions live in `docs/examples-tui-walkthrough/<journey>/manifest.txt`
+  (still a single owner; a wording edit never touches a TUI crate). Because nothing regenerates
+  a hand-authored file, the integrity gate is instead xtask's
+  `walkthrough_manifests_valid_and_complete` — grammar + a FRAME⇄golden **bijection** that reds
+  on a dangling reference *and* on a silently dropped `FRAME` line (a shrunk walkthrough). The
+  prose is already roff, so the assembler emits `.PP` directly rather than routing through
+  `man-wrap.awk`. The CI `%PDF` proof (step 5) is unchanged.
+
 ## Phase 2 — Rollout: the remaining eight journeys
 
 Only after PoC approval. Mechanical repeat of Phase 1's two-emit-test pattern per journey,

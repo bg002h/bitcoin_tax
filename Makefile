@@ -83,17 +83,18 @@ examples-tui:
 	  || { echo "examples-tui: groff did not emit a PDF"; exit 1; }
 
 ## tui-walkthrough: render the TUI screen-walkthrough PDF (design/tui-walkthrough) — prose narration
-## INTERLEAVED with the byte-gated `.txt` frame goldens, per journey manifest. Convenience render only
-## (the `.txt` frames + manifests are the gated artifacts, held by each crate's
-## `*_walkthrough_goldens_match_committed` test); the PDF is NOT byte-gated and is git-ignored. Currently
-## the J8 proof-of-concept; Phase 2 adds J1..J7, J9 as more manifests under docs/examples-tui-walkthrough/.
+## INTERLEAVED with the byte-gated `.txt` frame goldens, per journey manifest. Convenience render only;
+## the PDF is NOT byte-gated and is git-ignored. The GATED artifacts are: (1) the `.txt` frames, held by
+## each TUI crate's `*_walkthrough_goldens_match_committed` test; and (2) the manifests, held by xtask's
+## `walkthrough_manifests_valid_and_complete` (grammar + a FRAME⇄golden bijection) — together they pin the
+## whole artifact (SPEC §5). Currently the J8 proof-of-concept; Phase 2 adds J1..J7, J9 as more manifests.
 ## Needs `groff`. Asserts the roff carries `\m[]` color escapes so a silent regression to monochrome fails.
 tui-walkthrough:
 	@mkdir -p docs/pdf
 	@{ echo ".TH BTCTAX-TUI-WALKTHROUGH 7 \"\" \"btctax\" \"TUI Walkthrough\""; \
 	   for m in docs/examples-tui-walkthrough/*/manifest.txt; do \
 	     bash docs/examples-tui-walkthrough/assemble-walkthrough.sh \
-	       "$$m" "$$(dirname $$m)" docs/examples-tui/tui-wrap.awk; \
+	       "$$m" "$$(dirname $$m)" docs/examples-tui/tui-wrap.awk || exit 1; \
 	   done; } > docs/pdf/.tui-walkthrough.roff
 	@grep -qF '\m[' docs/pdf/.tui-walkthrough.roff \
 	  || { echo "tui-walkthrough: colorization missing — no \\m[] escapes (frame render regressed)"; exit 1; }

@@ -128,6 +128,29 @@ which neither does alone — so it needs a thin new assembler + a manifest:
   golden gates in the TUI crates together pin the whole artifact; the advisory CI
   `examples` job proves `make tui-walkthrough` emits a `%PDF`.
 
+**As-built (amended folding PoC review C-1).** The PoC implemented this contract with two
+deliberate simplifications, kept because they preserve the property this section exists to
+guarantee — *no screen silently drops out of, or dangles in, the walkthrough* — with less
+machinery:
+
+- **The manifest is hand-authored, per journey**, at
+  `docs/examples-tui-walkthrough/<journey>/manifest.txt` (grammar: `PROSE <roff>` /
+  `FRAME <file.txt> <caption>`), rather than a single xtask-emitted `walkthrough.md` built
+  from Rust-literal captions. The single-owner property (M-2) is unchanged: prose + captions
+  still live in exactly one place per journey, and a wording edit still never touches a TUI
+  crate. Prose is authored as roff, so `make tui-walkthrough` (via
+  `docs/examples-tui-walkthrough/assemble-walkthrough.sh`) emits `.PP` directly instead of
+  routing prose through `man-wrap.awk`.
+- **Because nothing regenerates a hand-authored file, the manifest gate is an INTEGRITY test,
+  not a `regen == committed` test:** xtask's `walkthrough_manifests_valid_and_complete`
+  (`crates/xtask/src/examples.rs`) validates the grammar AND asserts a **bijection** between
+  each manifest's `FRAME` references and the frame goldens on disk. A reference with no golden
+  (a typo/rename) reds it; a golden with no reference — the residue of a silently dropped
+  `FRAME` line — also reds it. Combined with the per-frame `*_walkthrough_goldens_match_committed`
+  gates (which pin each frame to the real TUI) and the CI `%PDF` proof, the whole artifact is
+  pinned, as this section requires. No `cargo run -p xtask -- tui-walkthrough` subcommand is
+  needed under this design and none was added.
+
 ## 6. Journey → screen mapping (all nine; hybrid)
 
 For each journey: the narrated CLI setup, then the TUI screens captured. (Exact frame

@@ -7,7 +7,7 @@ PROSE \fB1. Editor \(em Browse.\fP The Holdings tab reads \fIno holdings\fP: the
 FRAME 01-browse-blocker.txt J8 - step 1 - editor: coins in transit, Holdings empty
 PROSE \fB2. Propose the match.\fP Pressing \fBm\fP surfaces the matching pair \(en a cross\-wallet RELOCATE: the same 0.10 BTC leaving River and arriving at Coinbase, recognised as one movement rather than a sale plus a buy.
 FRAME 02-match-list.txt J8 - step 2 - editor: the RELOCATE proposal
-PROSE \fB3. Confirm.\fP Enter opens the confirmation modal \(en the informed\-consent point, and the moment the vault is written. Nothing before this has changed the ledger.
-FRAME 03-match-confirm.txt J8 - step 3 - editor: confirm (writes the vault)
+PROSE \fB3. Confirm.\fP Enter opens this confirmation modal \(en the informed\-consent point. Opening it changes nothing (Esc still cancels, writing nothing, as the footer says); the vault is written only when you confirm here. Nothing before this has touched the ledger.
+FRAME 03-match-confirm.txt J8 - step 3 - editor: the confirm modal (confirming writes the vault)
 PROSE \fB4. Viewer \(em Holdings, balanced.\fP Reopening in the read\-only viewer, the 0.10 BTC now shows at Coinbase, carrying its original $4,000 cost basis and 2025\-01\-05 acquisition date across the transfer \(en no gain, no loss. The TOTAL row reads the weighted\-average cost, $40,000 per BTC.
-FRAME 04-holdings-balanced.txt J8 - step 4 - viewer: Holdings, BALANCED
+FRAME 04-holdings-balanced.txt J8 - step 4 - viewer: Holdings, the 0.10 BTC has landed at Coinbase

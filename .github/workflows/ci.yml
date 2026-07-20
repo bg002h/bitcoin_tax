@@ -131,3 +131,9 @@ jobs:
         # crates' `*_goldens_match_committed` tests (they regenerate + compare in-process), so no git-diff
         # widening is needed here (P2 review N-2); this step only proves the separate TUI PDF renders.
         run: make examples-tui
+      - name: Prove the TUI screen-walkthrough PDF builds
+        # The walkthrough frames are staleness-gated in the `test` job (each crate's
+        # `*_walkthrough_goldens_match_committed`) and the manifests by xtask's
+        # `walkthrough_manifests_valid_and_complete`; this step only proves the interleaved PDF renders
+        # (a %PDF backstop, SPEC §5 / PoC review C-1).
+        run: make tui-walkthrough
