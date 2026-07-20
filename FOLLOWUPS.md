@@ -94,6 +94,52 @@ internal-move default · store Windows world-readable CI assertion.
 
 ---
 
+## ★ POLISH BATCH — DONE (2026-07-20; the "5 that matter + cheap hardening" from the OPEN INDEX §B/§C)
+
+Each TDD + mutation-verified (cp-backup/restore experiments, never `git checkout`):
+- **P2-d (data integrity) — DONE.** `input_form_store.rs` commit/park/discard route through a new
+  `mutate_and_save` helper that restores the pre-write snapshot on ANY error (mutate OR save) — previously
+  only a `save()` failure restored, leaving the long-lived in-memory Session partially mutated on a mid-write
+  `set`/`delete` error. KAT `mutate_and_save_rolls_back_the_in_memory_write_on_a_mutate_error` (RED without
+  the restore).
+- **P2-b — DONE.** `draft_exists` distinguishes `QueryReturnedNoRows` (→ false) from a real DB error (→
+  propagate); `.is_ok()` swallowed the latter (parity with `parked_flag`).
+- **P3-e (data loss) — DONE.** `FieldBuffer::seed` (grows cap to `FIELD_CAP.max(len)`) preserves an
+  already-accepted stored value; `begin_edit` uses it instead of `set`, which capped at 64 and silently
+  truncated a CLI/imported long Text value on TUI re-edit. KAT
+  `field_buffer_seed_preserves_a_value_longer_than_field_cap`.
+- **(m) — DONE.** `apply.rs` NI-2 first-edit arm now calls `guard_arity` (parity with `apply_to`; a depth-0
+  `set` otherwise ignored a junk addr and materialized). KAT `m_first_edit_rejects_a_malformed_arity_addr`.
+- **(l) — DONE.** The coverage KAT now asserts every `EXEMPT_LEAVES`/`EXEMPT_PREFIXES` entry is LIVE (matches
+  ≥1 fixture leaf) — a stale entry silently over-exempts. Mutation-verified (fires on a dead prefix).
+- **Task-2(d) — DONE.** `edit_roundtrips_through_json` broadened from Money-only to all 8 `FieldValue` kinds
+  across `SetField` + `ClearField` (the four structural `Edit` variants are trivial derives, not re-exercised).
+- **ProRata note — DONE (minimum-honest).** The safe-harbor-allocate preview states plainly that ProRata is
+  NOT auto-computed (you attest the same per-wallet actuals; the tag sets only the timebar rule). Decision:
+  attest-only — the auto pro-rata (Rev. Proc. 2024-28 "global allocation") split is a separate feature, and
+  specific-unit (`ActualPosition`) dominates for tax minimization anyway.
+- **cargo-deny (supply-chain CI) — WIRED, UNVERIFIED LOCALLY.** `deny.toml` + a `supply-chain` CI job
+  (advisories + licenses + bans + sources; cargo-deny subsumes cargo-audit). No tool/network in the sandbox,
+  so its FIRST real run is on GitHub CI and MAY surface advisories/licenses to address (the gate working).
+  Tighten `bans` → `deny` after the first clean run.
+
+**P3-d — DEFERRED (NOT a cheap fix).** `value_is_answered` treating `Money(0)`/`Bool(false)` as unanswered
+(`draw_edit.rs:2590`, section-completeness glyph) is a facet of the answered-ness invariant: plain-value
+fields (`payments.*`, `presidential_fund`) default to 0/false and their `get` ALWAYS returns `Some`, so a
+naive "any set value = answered" would mark UNSET payments/checkboxes complete (worse). The correct fix is
+structural (Option-ize those leaves, or a field-aware answered predicate) — answered-ness-refactor territory,
+tracked with the answered-ness invariant. Not force-fixed.
+
+**Review r1→r2 (`design/polish-batch/reviews/`):** r1 NOT-GREEN found the ProRata note UNRENDERABLE (a
+225-char line clipped mid-word in a `Length(3)`/96-col modal) + the P3-e `begin_edit` wiring UNTESTED (the
+untested-guard pattern again) — both folded (note split into short lines + `Length(6)` + wrap + an 80-col
+render KAT; a `begin_edit` integration KAT, mutation-verified). r2 GREEN 0C/0I. **Nit-B (ownerless residue):**
+the ProRata modal note still clips at terminal widths **≤63 cols** — a degenerate width where the modal's
+~84-col residue table is unusable anyway, and strictly better than the pre-fix all-widths clip; revisit only
+if a TUI min-size guard is ever added.
+
+---
+
 ## oracle-sweep — deferred hardening (2026-07-16)
 
 - **(OS-14.2) Derive OTS's Form 8995 line 12 from OTS's OWN Schedule-D output — Minor, owned by

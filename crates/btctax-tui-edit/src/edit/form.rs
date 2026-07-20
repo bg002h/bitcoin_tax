@@ -71,6 +71,23 @@ impl FieldBuffer {
         }
     }
 
+    /// Seed the buffer from an ALREADY-ACCEPTED stored value (P3-e). A stored value may exceed the default
+    /// `FIELD_CAP` — the CLI / import accept unbounded `Option<String>`; only TUI keystrokes are capped — so
+    /// seeding it for re-edit must NOT silently truncate (that would re-commit a shortened value and lose the
+    /// tail). Sets `cap = FIELD_CAP.max(len)` so the full value fits; later keystrokes respect that cap.
+    /// Unlike `set` (char-by-char capped), `seed` preserves the full stored string.
+    ///
+    /// NOTE: `cap` is RESET each call (to `FIELD_CAP.max(len)`), deliberately — the shared `form.buf` is
+    /// reused across fields and must not inherit a prior field's grown cap. A buffer constructed with a
+    /// LARGER explicit cap (e.g. `FREETEXT_CAP`) would therefore be reset DOWN; `seed` is intended for the
+    /// `FIELD_CAP` `form.buf` and has no larger-cap caller today.
+    pub fn seed(&mut self, s: &str) {
+        self.cap = FIELD_CAP.max(s.len());
+        self.buf.clear();
+        self.buf.reserve(self.cap);
+        self.buf.push_str(s);
+    }
+
     /// True when byte-length is 0.
     ///
     /// [R0-M4] "empty" = len==0, checked BEFORE any trimming. Whitespace-only is NOT empty.
@@ -2576,6 +2593,29 @@ pub fn filter_optimize_candidates(
 mod tests {
     use super::*;
     use rust_decimal_macros::dec;
+
+    /// P3-e: `seed` (unlike `set`) must NOT truncate an already-accepted stored value that exceeds
+    /// `FIELD_CAP` — otherwise re-editing a CLI/imported long value and re-committing silently loses the
+    /// tail. `set` (the old begin_edit path) caps at `FIELD_CAP`; `seed` grows to fit.
+    #[test]
+    fn field_buffer_seed_preserves_a_value_longer_than_field_cap() {
+        let long = "A".repeat(FIELD_CAP + 40); // 104 chars > 64
+        let mut b = FieldBuffer::new();
+        b.seed(&long);
+        assert_eq!(
+            b.as_str(),
+            long,
+            "seed must preserve the full stored value, not truncate to FIELD_CAP"
+        );
+        // Contrast: `set` DOES cap (documents the difference the fix relies on).
+        let mut c = FieldBuffer::new();
+        c.set(&long);
+        assert_eq!(
+            c.as_str().len(),
+            FIELD_CAP,
+            "set caps at FIELD_CAP by design"
+        );
+    }
 
     /// A receipt date safely AFTER every acquisition date used in these tests, so the UX-P4-4(b)
     /// acquired-after-receipt guard does not fire on the pre-existing happy-path cases.

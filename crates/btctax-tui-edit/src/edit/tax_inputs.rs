@@ -181,7 +181,7 @@ pub fn begin_edit(form: &mut TaxInputsFormState) {
         return;
     };
     let seed = seed_string(field, form.working.as_ref(), &form.addr);
-    form.buf.set(&seed);
+    form.buf.seed(&seed); // ★ P3-e: never truncate an already-accepted stored value on re-edit
     form.editing = true;
     form.error = None;
 }
@@ -1127,6 +1127,40 @@ mod tests {
         assert!(leave_row(&mut form));
         assert!(form.addr.0.is_empty());
         assert_eq!(form.field_focus, 0);
+    }
+
+    /// P3-e (integration): `begin_edit` seeds the FULL stored value into `form.buf`, even when it exceeds
+    /// `FIELD_CAP`. A CLI/imported occupation can be > 64 chars (Text parse is unbounded); re-opening its
+    /// edit buffer must NOT truncate it — truncation would silently re-commit the shortened value. Kills the
+    /// `seed`→`set` WIRING mutant (under `set` the buffer caps at 64); the unit KAT alone did not.
+    #[test]
+    fn begin_edit_seeds_a_long_stored_text_without_truncating_it() {
+        let mut form = TaxInputsFormState::fresh(2024);
+        assert!(tax_inputs_apply_edit(&mut form, "Single"));
+
+        // Focus the taxpayer occupation (a Text field) and store a > 64-char value, as CLI/import can.
+        focus_section(&mut form, SectionId::Taxpayer);
+        form.field_focus = {
+            let ri = form.working.as_ref().unwrap();
+            let sec = live_sections(ri)
+                .into_iter()
+                .find(|s| s.id == SectionId::Taxpayer)
+                .unwrap();
+            live_fields(sec, ri)
+                .iter()
+                .position(|f| f.id == FieldId::TpOccupation)
+                .unwrap()
+        };
+        let long = "Consultant, ".repeat(8); // 96 chars > FIELD_CAP (64)
+        assert!(tax_inputs_apply_edit(&mut form, &long));
+
+        // Re-open the edit buffer on that field — it must seed the FULL stored value.
+        begin_edit(&mut form);
+        assert_eq!(
+            form.buf.as_str(),
+            long,
+            "P3-e: begin_edit must seed the full stored value; `set` would truncate the tail at FIELD_CAP"
+        );
     }
 
     /// (Task 5) The field-cursor fold: the navigable count matches the DRAWN pane — a repeating row list

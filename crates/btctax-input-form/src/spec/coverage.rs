@@ -259,6 +259,27 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
             })
     };
 
+    // ── (l): keep the EXEMPT lists LIVE. A stale entry (a renamed/removed leaf or struct) silently
+    // over-exempts — it could mask a genuine coverage gap the moment some in-scope leaf starts matching a
+    // dead prefix. Assert every EXEMPT_LEAF is a real fixture leaf and every EXEMPT_PREFIX matches ≥1 leaf.
+    for leaf in EXEMPT_LEAVES {
+        assert!(
+            before.contains_key(*leaf),
+            "EXEMPT_LEAVES entry {leaf:?} matches no fixture leaf — stale exemption (would mask a gap)"
+        );
+    }
+    for prefix in EXEMPT_PREFIXES {
+        let matches = before.keys().any(|p| {
+            p == prefix
+                || p.starts_with(&format!("{prefix}."))
+                || p.starts_with(&format!("{prefix}["))
+        });
+        assert!(
+            matches,
+            "EXEMPT_PREFIXES entry {prefix:?} matches no fixture leaf — stale exemption (would mask a gap)"
+        );
+    }
+
     // ── 3. THE ASSERTION: {all in-scope leaves} == {covered} ∪ {exempt}, and nothing is both. ──
     let uncovered: Vec<&String> = before
         .keys()

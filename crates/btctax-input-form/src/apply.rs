@@ -34,8 +34,11 @@ pub fn apply(w: &mut Working, e: Edit) -> Result<(), ApplyError> {
                 addr,
                 value: value @ FieldValue::Choice(_),
             } => {
-                let (field, _) =
+                let (field, depth) =
                     locate_field(FieldId::FilingStatus).ok_or(ApplyError::NoSuchSection)?;
+                // ★ (m): reject a malformed-arity addr on the FIRST edit too — parity with `apply_to`, which
+                // guards. Without this, an over-long addr was accepted here but rejected post-materialization.
+                guard_arity(&addr, depth)?;
                 // Set the status on an otherwise-pure default; only assign `*w` on success, so a bad choice
                 // (e.g. an unknown status string) leaves `*w` as `None` — nothing laundered.
                 let mut ri = ReturnInputs::default();
@@ -196,6 +199,31 @@ mod tests {
             FilingStatus::HoH => "HoH",
             FilingStatus::Qss => "Qss",
         }
+    }
+
+    /// (m): a malformed-arity addr must be rejected on the FIRST (materializing) edit too — parity with
+    /// `apply_to`. FilingStatus is depth-0, so ANY index is malformed; a depth-0 `set` would otherwise ignore
+    /// the junk addr and materialize, so this kills the missing-guard mutant. The rejection materializes
+    /// nothing.
+    #[test]
+    fn m_first_edit_rejects_a_malformed_arity_addr() {
+        let mut w: Working = None;
+        let r = apply(
+            &mut w,
+            Edit::SetField {
+                id: FieldId::FilingStatus,
+                addr: RowAddr(vec![0]),
+                value: FieldValue::Choice("Single".into()),
+            },
+        );
+        assert!(
+            matches!(r, Err(ApplyError::SetError(SetError::NoSuchRow))),
+            "(m): first-edit malformed arity must be rejected; got {r:?}"
+        );
+        assert!(
+            w.is_none(),
+            "(m): a rejected first edit materializes nothing"
+        );
     }
 
     /// The brief's Step-1 test: a fresh working accepts only the filing-status choice first, then materializes.

@@ -275,17 +275,48 @@ pub enum ApplyError {
 mod tests {
     use super::*;
 
-    /// The Edit/FieldValue seam serializes losslessly (the web wire, spec §4/M-5).
+    /// The Edit/FieldValue seam serializes losslessly (the web wire, spec §4/M-5). Task-2(d): exercise
+    /// EVERY `FieldValue` kind (not just Money), across `SetField` + `ClearField` — a kind whose serde broke
+    /// would otherwise slip through. (`SecretEntry` masks only its Debug, not its serde: the inbound digits
+    /// do go over the wire by design; only get-side `Secret` is presence-only.) The four structural `Edit`
+    /// variants (AddRow/RemoveRow/CreateSection/DeleteSection) are trivial derives, not re-exercised here.
     #[test]
     fn edit_roundtrips_through_json() {
-        let e = Edit::SetField {
+        use rust_decimal_macros::dec;
+        use time::macros::date;
+        let values = [
+            FieldValue::Money(dec!(50000)),
+            FieldValue::Text("123 Main St, Anytown".into()),
+            FieldValue::Bool(true),
+            FieldValue::Bool(false),
+            FieldValue::TriState(Some(true)),
+            FieldValue::TriState(None),
+            FieldValue::Date(Some(date!(2025 - 01 - 02))),
+            FieldValue::Date(None),
+            FieldValue::Choice("Single".into()),
+            FieldValue::Secret(SecretView::Empty),
+            FieldValue::Secret(SecretView::Set {
+                masked: "***-**-6789".into(),
+            }),
+            FieldValue::SecretEntry("123456789".into()),
+        ];
+        for value in values {
+            let e = Edit::SetField {
+                id: FieldId::Box1Wages,
+                addr: RowAddr(vec![0]),
+                value: value.clone(),
+            };
+            let j = serde_json::to_string(&e).unwrap();
+            let back: Edit = serde_json::from_str(&j).unwrap();
+            assert_eq!(e, back, "SetField round-trip lost data for {value:?}");
+        }
+        // The other Edit variant + a multi-index addr also round-trip losslessly.
+        let clear = Edit::ClearField {
             id: FieldId::Box1Wages,
-            addr: RowAddr(vec![0]),
-            value: FieldValue::Money(rust_decimal_macros::dec!(50000)),
+            addr: RowAddr(vec![2, 1]),
         };
-        let j = serde_json::to_string(&e).unwrap();
-        let back: Edit = serde_json::from_str(&j).unwrap();
-        assert_eq!(e, back);
+        let j = serde_json::to_string(&clear).unwrap();
+        assert_eq!(clear, serde_json::from_str::<Edit>(&j).unwrap());
     }
 
     /// A SecretView never carries digits; SecretEntry is inbound-only and masks its Debug.

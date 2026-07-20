@@ -4153,13 +4153,17 @@ fn draw_safe_harbor_allocate_preview(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(6),
             Constraint::Min(0),
             Constraint::Length(4),
         ])
         .split(inner);
 
     // ── Banner: method (live toggle) + recorded pre-2025 method ───────────────
+    // The NOTE is split into SHORT lines (≤ ~62 cols) so it renders in full inside the ≤96-col modal on an
+    // 80-col terminal — a single long line was clipped mid-word and the actionable sentence never showed
+    // (review r1 Important-1). `.wrap()` is belt-and-suspenders for narrower terminals.
+    let note_style = Style::default().fg(Color::DarkGray);
     let banner_lines = vec![
         Line::from(vec![
             Span::raw("Method (Tab to change): "),
@@ -4172,15 +4176,25 @@ fn draw_safe_harbor_allocate_preview(
         ]),
         Line::from(Span::styled(
             format!("pre-2025 method (recorded): {:?}", flow.pre2025_method),
-            Style::default().fg(Color::DarkGray),
+            note_style,
         )),
         Line::from(Span::styled(
-            "(both methods seed from the same per-wallet actuals; the tag sets only the \
-             timebar rule — the lots below are identical)",
-            Style::default().fg(Color::DarkGray),
+            "NOTE: ProRata is NOT auto-computed here (both methods attest",
+            note_style,
+        )),
+        Line::from(Span::styled(
+            "the SAME per-wallet lots; the tag sets only the timebar rule).",
+            note_style,
+        )),
+        Line::from(Span::styled(
+            "For a true pro-rata global split, compute + attest it yourself.",
+            note_style,
         )),
     ];
-    frame.render_widget(Paragraph::new(banner_lines), chunks[0]);
+    frame.render_widget(
+        Paragraph::new(banner_lines).wrap(Wrap { trim: false }),
+        chunks[0],
+    );
 
     // ── Residue-lot table ─────────────────────────────────────────────────────
     let header_cells = [
@@ -6076,6 +6090,40 @@ mod tests {
         assert!(
             !r.contains("W-2"),
             "no other section is offered until filing status is chosen (NI-2)"
+        );
+    }
+
+    /// Review r1 Important-1: the ProRata attest-only NOTE must render IN FULL inside the ≤96-col modal on
+    /// an 80-col terminal. The old single 225-char line clipped mid-word so the actionable sentence never
+    /// showed. Pins that BOTH the "NOT auto-computed" warning and the "attest it yourself" instruction render.
+    #[test]
+    fn safe_harbor_allocate_prorata_note_renders_in_full_on_80_cols() {
+        use crate::edit::form::{SafeHarborAllocateFlowState, SafeHarborAllocateStep, TargetList};
+        use btctax_core::event::AllocMethod;
+        use btctax_core::{LotMethod, Usd};
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut flow = SafeHarborAllocateFlowState {
+            lots: vec![],
+            total_sat: 0,
+            total_basis: Usd::ZERO,
+            method: AllocMethod::ProRata,
+            pre2025_method: LotMethod::Fifo,
+            list: TargetList::new(vec![]),
+            step: SafeHarborAllocateStep::Preview,
+        };
+        let area = terminal.get_frame().area();
+        terminal
+            .draw(|f| draw_safe_harbor_allocate_preview(f, area, &mut flow))
+            .unwrap();
+        let r = flatten(terminal.backend().buffer());
+        assert!(
+            r.contains("NOT auto-computed"),
+            "the attest-only warning must render on 80 cols; got: {r}"
+        );
+        assert!(
+            r.contains("attest it yourself"),
+            "the actionable instruction must render in full (it was clipped before the fix)"
         );
     }
 

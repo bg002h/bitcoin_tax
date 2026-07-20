@@ -90,13 +90,17 @@ pub(crate) fn delete_draft(conn: &Connection, year: i32) -> Result<bool, CliErro
 
 pub fn draft_exists(conn: &Connection, year: i32) -> Result<bool, CliError> {
     init_draft_table(conn)?;
-    Ok(conn
-        .query_row(
-            "SELECT 1 FROM return_inputs_draft WHERE year=?1",
-            [year],
-            |_| Ok(()),
-        )
-        .is_ok())
+    // ★ P2-b: distinguish "no row" (→ false) from a real DB error (→ propagate). `.is_ok()` swallowed the
+    // latter as "no draft"; mirror `parked_flag`'s correct QueryReturnedNoRows-vs-Err split.
+    match conn.query_row(
+        "SELECT 1 FROM return_inputs_draft WHERE year=?1",
+        [year],
+        |_| Ok(()),
+    ) {
+        Ok(()) => Ok(true),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub(crate) fn parked_flag(conn: &Connection, year: i32) -> Result<Option<bool>, CliError> {
@@ -263,6 +267,24 @@ pub enum CommitOutcome {
     NoTables,
 }
 
+/// Run in-memory `mutate` writes then `save()`, rolling the WHOLE session back to the pre-write image on
+/// ANY failure — a `mutate` error OR a `save` error (P2-d). Previously only a `save` failure restored, so a
+/// mid-write `set`/`delete` error returned early leaving the long-lived in-memory `Session` partially
+/// mutated (and diverged from disk). The snapshot is taken here, before `mutate` touches the conn.
+fn mutate_and_save(
+    sess: &mut Session,
+    mutate: impl FnOnce(&Connection) -> Result<(), CliError>,
+) -> Result<(), CliError> {
+    let snap = sess.snapshot()?;
+    let mutated = mutate(sess.conn());
+    let outcome = mutated.and_then(|()| sess.save());
+    if let Err(e) = outcome {
+        sess.restore(&snap)?; // atomic: never leave an in-memory/disk split or a partial in-memory write
+        return Err(e);
+    }
+    Ok(())
+}
+
 /// Screen `ri`, and ONLY if it passes write the committed row and delete the draft (SPEC §5.7).
 ///
 /// The write is all-or-nothing:
@@ -272,7 +294,7 @@ pub enum CommitOutcome {
 /// - [`screen_inputs`] returns `Some(refusal)` → [`CommitOutcome::Refused`] — writes nothing, so a refused
 ///   commit never poisons the year at `resolve` and the draft remains for the user to fix.
 /// - Clean → snapshot the in-memory DB, `return_inputs::set` the committed row, `delete_draft`, then
-///   `sess.save()` to reach disk. If the save fails, RESTORE the snapshot so there is never an
+///   `sess.save()` via `mutate_and_save` (which rolls back on ANY failure) so there is never an
 ///   in-memory/disk split (the committed row + draft-deletion are rolled back together, I-7).
 ///
 /// Takes `&mut Session` for `save()`; reads through the SAME session's `conn()` — never opens a second
@@ -295,13 +317,11 @@ pub fn commit(
     if let Some(refusal) = screen_inputs(ri, table, params) {
         return Ok(CommitOutcome::Refused(refusal)); // fail-closed: writes nothing
     }
-    let snap = sess.snapshot()?;
-    crate::return_inputs::set(sess.conn(), year, ri)?;
-    delete_draft(sess.conn(), year)?;
-    if let Err(e) = sess.save() {
-        sess.restore(&snap)?; // atomic: never leave an in-memory/disk split
-        return Err(e);
-    }
+    mutate_and_save(sess, |conn| {
+        crate::return_inputs::set(conn, year, ri)?;
+        delete_draft(conn, year)?;
+        Ok(())
+    })?;
     Ok(CommitOutcome::Committed)
 }
 
@@ -337,14 +357,11 @@ pub fn park_to_profile(sess: &mut Session, year: i32) -> Result<(), CliError> {
             "year {year} has a work-in-progress draft; finish or discard it before switching to the tax-profile"
         )));
     }
-    let snap = sess.snapshot()?;
-    set_draft_row(sess.conn(), year, &ri, true)?; // ★ stash FIRST (parked=1)
-    crate::return_inputs::delete(sess.conn(), year)?; // ★ N-1: in-session delete, NOT `income clear`
-    if let Err(e) = sess.save() {
-        sess.restore(&snap)?; // ★ atomic (D-6): a failed park never loses the committed row
-        return Err(e);
-    }
-    Ok(())
+    mutate_and_save(sess, |conn| {
+        set_draft_row(conn, year, &ri, true)?; // ★ stash FIRST (parked=1)
+        crate::return_inputs::delete(conn, year)?; // ★ N-1: in-session delete, NOT `income clear`
+        Ok(())
+    }) // ★ atomic (D-6): a failed park (mutate OR save) never loses the committed row
 }
 
 /// The source the input form is CURRENTLY displaying/editing for `year` — the toggle's read side.
@@ -392,8 +409,9 @@ pub fn shadows_profile(conn: &Connection, year: i32) -> Result<bool, CliError> {
 /// work-in-progress draft (or a year with no draft at all) behind a "discard parked draft" affordance —
 /// the parked check is the entire safety property of this function.
 ///
-/// Snapshots before the delete and restores on a failed `sess.save()` (mirrors `park_to_profile`'s
-/// atomicity), so a failed discard never leaves an in-memory/disk split.
+/// Runs the delete + save through `mutate_and_save`, which restores the pre-write snapshot on ANY failure
+/// (the delete OR the save; mirrors `park_to_profile`'s atomicity), so a failed discard never leaves an
+/// in-memory/disk split or a partial in-memory delete.
 pub fn discard_parked_draft(sess: &mut Session, year: i32) -> Result<(), CliError> {
     if parked_flag(sess.conn(), year)? != Some(true) {
         // never delete a WIP draft (or a non-existent one) behind this affordance
@@ -401,13 +419,10 @@ pub fn discard_parked_draft(sess: &mut Session, year: i32) -> Result<(), CliErro
             "year {year} has no parked draft to discard"
         )));
     }
-    let snap = sess.snapshot()?;
-    delete_draft(sess.conn(), year)?;
-    if let Err(e) = sess.save() {
-        sess.restore(&snap)?;
-        return Err(e);
-    }
-    Ok(())
+    mutate_and_save(sess, |conn| {
+        delete_draft(conn, year)?;
+        Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -471,6 +486,35 @@ mod tests {
         let mut sess = Session::open(&path, &pp).unwrap();
         save_draft(&mut sess, 2024, &ReturnInputs::default()).unwrap();
         assert_eq!(parked_flag(sess.conn(), 2024).unwrap(), Some(false));
+    }
+
+    /// P2-d: a `mutate` error (not only a `save` error) must roll the in-memory DB back. The closure writes
+    /// a draft row, THEN fails before save; after `mutate_and_save` returns Err, that write must be GONE —
+    /// restored, not left partially applied in the long-lived session. (Kills the restore-only-on-save
+    /// mutant: without the fix the draft write survives the mutate error.)
+    #[test]
+    fn mutate_and_save_rolls_back_the_in_memory_write_on_a_mutate_error() {
+        let (_dir, path, pp) = tmp_vault();
+        let mut sess = Session::open(&path, &pp).unwrap();
+        assert!(
+            !draft_exists(sess.conn(), 2024).unwrap(),
+            "precondition: no draft yet"
+        );
+
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        let r = mutate_and_save(&mut sess, |conn| {
+            set_draft_row(conn, 2024, &ri, false)?; // in-memory write ...
+            Err(CliError::Usage("boom".to_string())) // ... then fail BEFORE save
+        });
+        assert!(r.is_err(), "the mutate error must propagate");
+
+        assert!(
+            !draft_exists(sess.conn(), 2024).unwrap(),
+            "P2-d: a mutate error must restore the pre-write image; the draft write must NOT survive"
+        );
     }
 
     #[test]
