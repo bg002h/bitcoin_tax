@@ -1,7 +1,7 @@
 # SPEC — Conservative / Defensive Filing (Approach C: primitives first) — v2
 
-**Status:** v2 DRAFT — folds the r1 tax + architecture reviews (`./reviews/spec-*-fable-review-r1.md`,
-combined 3 Critical + 8 Important). Awaiting re-review to 0C/0I, then a plan.
+**Status:** v4 DRAFT — folds all review rounds in `./reviews/`: tax r1 (2C+2I) → r2 GREEN; architecture r1
+(1C+6I) → r2 (2I) → r3 (1I). Awaiting the architecture re-review to 0C/0I, then a plan.
 **Branch:** `feat/conservative-filing` (off `main`). **Design of record:** `./DESIGN.md` (approved).
 **Sequencing note:** the shipped **8949-box bug** (FOLLOWUPS ⚠) is fixed AFTER this SPEC greens; D-6 below
 depends on that fix landing (it inherits the corrected box logic, does not reimplement it).
@@ -44,7 +44,10 @@ return + a **mandatory methodology disclosure**.
     conservation snapshot (`transition.rs:44`) bucket it correctly (pre-2025 window ⇒ `PoolKey::Universal`).
     (b) **Canonical-order surrogate:** `sort_canonical` keys on `(utc, src_priority, src_ref)` which a Decision
     id lacks — order `DeclareTranche` Effs by `(window_end, decision_seq)` for determinism (NFR4); two
-    same-window tranches tie-break on `decision_seq`.
+    same-window tranches tie-break on `decision_seq`. ★ Compare `decision_seq` **numerically** (it rides on
+    `Eff.id`) — NOT lexicographically via a `src_ref` string, which would misorder seq 2 vs 10 (arch r3 N-4).
+    (e) **Σ-conservation (FR9):** the new fold arm MUST bump `stats.sigma_in` like `Op::Acquire`
+    (`fold.rs:596`) or the conservation KATs go red (arch r3 N-5).
     (c) **No silent skip:** `build_op`'s `_ => Op::Skip` catch-all (`resolve.rs:393`) means an omitted arm
     vanishes the tranche silently — the new arm is REQUIRED and pinned by a KAT ("a DeclareTranche yields an
     Op, never Skip").
@@ -90,18 +93,28 @@ return + a **mandatory methodology disclosure**.
     disclosure "a hard gap"). Precedent: the pseudo taint already propagates through this same relocation
     struct (`fold.rs:818`). `usd_basis`/`acquired_at` already carry, so tax/term/HIFO are unaffected either
     way — only the tag-keyed advisory/disclosure layer is at stake.
-  - **Path-B (allocation present when declaring a tranche):** declaring a pre-2025 tranche changes the
-    Universal residue → `SafeHarborUnconservable` (`resolve.rs:1240`). v1 **refuses** the declaration with a
-    message that HEDGES the real-world irrevocability (tax r2 N-3): "revisit the in-app safe-harbor
-    allocation; if your filed safe-harbor allocation is already final, unallocated pre-2025 units are a
-    facts-and-circumstances matter for a professional." It never silently inerts the allocation.
-  - **Reverse order (arch r2 New-3):** declaring a `SafeHarborAllocation` into a vault that ALREADY holds a
-    pre-2025 tranche is **symmetrically refused** in v1 — an allocation deliberately conserving over the
-    tranche's ($0-basis) sats would otherwise become effective and Path B would DISCARD the tranche lot with
-    no trace (`transition.rs:88`). Same hedged message.
+  - **Tranche ⇄ Path-B allocation are MUTUALLY EXCLUSIVE — enforced structurally, not by record-time
+    convention (arch r2 New-3 + r3 New-1).** A record-time refusal fires in BOTH directions (declaring a
+    tranche when an allocation is present; declaring an allocation when a pre-2025 tranche is present),
+    scoped to ANY **in-force (non-voided)** `SafeHarborAllocation` — effective OR **inert**. Scoping to
+    "effective" alone is a bug: an inert (unconservable) allocation can be flipped effective by a
+    later-declared tranche whose $0-basis sats complete its sat total (basis unchanged), at which point
+    Path B silently discards the tranche (`transition.rs:88`) — the ordering r3-New-1 found. The friendly
+    refusal HEDGES real-world irrevocability (tax r2 N-3): "revisit the in-app safe-harbor allocation; if
+    your filed allocation is already final, unallocated pre-2025 units are a facts-and-circumstances matter
+    for a professional."
+  - **Projection-time invariant backstop (the real guarantee).** Independent of declaration order, a
+    `SafeHarborAllocation` is **denied effectiveness** (kept inert → Path A → the tag survives via the seed
+    exemption), via a loud `SafeHarborUnconservable`-class blocker, whenever the pre-2025 Universal residue
+    contains an `EstimatedConservative` lot. This makes "a tranche and an EFFECTIVE Path-B allocation can
+    never coexist" a construction — no ordering (incl. inert-then-declare) can reach the silent discard. The
+    record-time refusal is then just the friendly early error; this guard is the correctness invariant.
   - **KATs:** tranche-through-Path-A-seed preserves the tag + a 2025+ disposal leg carries
-    `EstimatedConservative`; a relocated tranche keeps the tag; both directions of the allocation/tranche
-    coexistence are refused. Scope the transition KAT to Path-A / no-effective-allocation vaults.
+    `EstimatedConservative`; a relocated tranche keeps the tag; the record-time refusal fires for ANY
+    in-force allocation (effective OR inert) in BOTH directions; and the **projection-time backstop** — an
+    allocation that WOULD conserve over a residue containing an `EstimatedConservative` lot is kept inert
+    (Path A, tag survives), pinning the inert-then-declare ordering r3-New-1 found. Scope the plain
+    transition KAT to Path-A / no-in-force-allocation vaults.
 - **D-9 HIFO-posture mechanism (arch I-6).** Steering is emergent ONLY under HIFO (a $0 lot sorts last,
   `pools.rs:272`); under the FIFO default an old $0 tranche is consumed FIRST (a *gain*-maximizing inversion —
   not necessarily *tax*-maximizing once LT character is weighed, but never an understatement: correct
@@ -129,7 +142,9 @@ return + a **mandatory methodology disclosure**.
   compat note (new variant → older binaries can't read; no installed base, harmless).
 - **Tests:** DeclareTranche → lot (`$0`, `EstimatedConservative`, `acquired_at=window_end`, declared wallet);
   disposal leg carries the tag (through the 2025 transition — D-8); **term derived** (LT iff window_end >1yr
-  before disposal); refuses a pre-2025 declaration under an effective Path-B allocation.
+  before disposal); refuses a pre-2025 declaration under ANY in-force Path-B allocation (effective OR inert —
+  D-8); a DeclareTranche yields an `Op`, never `Op::Skip` (D-1a-c); and a **VOIDED** DeclareTranche folds
+  nothing — the new timeline admit must honor `voided` (arch r3 N-2).
 
 ### P2 — Steered matching (EMERGENT under HIFO — verify + state dependence; D-9)
 - No new matching code; HIFO sorts `$0` lots last (`pools.rs:272`, verified). **P2 explicitly states this
