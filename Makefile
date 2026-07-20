@@ -94,7 +94,7 @@ tui-walkthrough:
 	@{ echo ".TH BTCTAX-TUI-WALKTHROUGH 7 \"\" \"btctax\" \"TUI Walkthrough\""; \
 	   for m in docs/examples-tui-walkthrough/*/manifest.txt; do \
 	     bash docs/examples-tui-walkthrough/assemble-walkthrough.sh \
-	       "$$m" "$$(dirname $$m)" docs/examples-tui/tui-wrap.awk || exit 1; \
+	       "$$m" "$$(dirname $$m)" docs/examples-tui/tui-wrap.awk docs/examples/man-wrap.awk || exit 1; \
 	   done; } > docs/pdf/.tui-walkthrough.roff
 	@grep -qF '\m[' docs/pdf/.tui-walkthrough.roff \
 	  || { echo "tui-walkthrough: colorization missing — no \\m[] escapes (frame render regressed)"; exit 1; }

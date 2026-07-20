@@ -1000,6 +1000,44 @@ fn journey_j8(md: &mut String, bin: &Path) {
     emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"]));
 }
 
+/// Capture the J8 TUI-walkthrough's CLI SETUP transcript — the exact `$ btctax …` command + verbatim
+/// output for the steps a reader runs BEFORE switching to the interactive TUI: `init` (with key backup),
+/// `import` both legs, and `verify` (which exits 1 on the unreconciled blocker — the same blocker the TUI
+/// Browse frame then shows). Reuses the examples `emit`/`capture`/`plain` machinery verbatim (same pinned
+/// env, same fenced ```console rendering), so the walkthrough's CLI half is a CAPTURED artifact held to
+/// the same discipline as its frame goldens — never hand-typed. The CLI *reconcile* is deliberately NOT
+/// captured here: in the walkthrough the TUI editor frames replace it (SPEC §6, the hybrid). Committed to
+/// `docs/examples-tui-walkthrough/j8/00-setup.console.md`; gated `regen == committed`.
+#[cfg(test)]
+fn generate_j8_walkthrough_console(bin: &Path) -> String {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "river.csv", J8_RIVER_CSV);
+    write_corpus(cwd, "coinbase.csv", J8_COINBASE_CSV);
+    let mut t = String::new();
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "river.csv"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    // Exits 1: the two legs are unreconciled transfers (a hard blocker) — the lead-in to the TUI match.
+    emit(&mut t, bin, cwd, &plain(&["--vault", "v.pgp", "verify"]));
+    t
+}
+
 /// J9 — choosing which lots a sale draws from (UX-P1-10). With two lots and a sale smaller than either
 /// combined holding, the default method picks the lots for you; `select-lots` lets you identify EXACTLY
 /// which ones — the picks (`<origin>#<split>:<sat>`) come from the disposal's `lot` column in
@@ -1300,6 +1338,38 @@ mod tests {
         );
     }
 
+    /// The J8 walkthrough's CLI SETUP transcript matches a fresh capture, byte-for-byte — reds when a
+    /// code change alters `init`/`import`/`verify` output that the committed console golden hasn't caught
+    /// (SPEC §5; the walkthrough's CLI half held to the frames' discipline — captured, never hand-typed).
+    #[test]
+    fn walkthrough_console_golden_matches_committed() {
+        let _guard = BUILD_ENV_LOCK.lock().unwrap();
+        let generated = generate_j8_walkthrough_console(&built_btctax());
+        let path = workspace_root().join("docs/examples-tui-walkthrough/j8/00-setup.console.md");
+        let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "committed {} missing ({e}); regenerate with the ignored \
+                 `emit_walkthrough_console_golden` test",
+                path.display()
+            )
+        });
+        assert_eq!(
+            generated, committed,
+            "docs/examples-tui-walkthrough/j8/00-setup.console.md is STALE; regenerate with the \
+             ignored `emit_walkthrough_console_golden` test"
+        );
+    }
+
+    /// Regeneration helper for the console golden (mirrors the frame crates' `#[ignore]` emit tests).
+    #[test]
+    #[ignore = "regeneration helper: rewrites docs/examples-tui-walkthrough/j8/00-setup.console.md"]
+    fn emit_walkthrough_console_golden() {
+        let _guard = BUILD_ENV_LOCK.lock().unwrap();
+        let generated = generate_j8_walkthrough_console(&built_btctax());
+        let path = workspace_root().join("docs/examples-tui-walkthrough/j8/00-setup.console.md");
+        std::fs::write(&path, generated).unwrap();
+    }
+
     /// TUI screen-walkthrough manifest gate (SPEC §5; folds PoC review C-1). Each
     /// `docs/examples-tui-walkthrough/<journey>/manifest.txt` is hand-authored (prose + captions live
     /// ONLY here — the single owner), so nothing REGENERATES it; instead this pins its INTEGRITY on every
@@ -1332,9 +1402,10 @@ mod tests {
             journeys_checked += 1;
             let rel = dir.file_name().unwrap().to_string_lossy().to_string();
 
-            // (a) grammar — collect the FRAME references.
+            // (a) grammar — collect the FRAME and CONSOLE references (each a distinct artifact class).
             let text = std::fs::read_to_string(&manifest).unwrap();
-            let mut referenced: std::collections::BTreeSet<String> = Default::default();
+            let mut frame_refs: std::collections::BTreeSet<String> = Default::default();
+            let mut console_refs: std::collections::BTreeSet<String> = Default::default();
             for (i, line) in text.lines().enumerate() {
                 let ln = i + 1;
                 if line.is_empty() || line.starts_with('#') {
@@ -1344,6 +1415,22 @@ mod tests {
                     assert!(
                         !rest.trim().is_empty(),
                         "{rel}/manifest.txt:{ln}: empty PROSE line"
+                    );
+                } else if let Some(rest) = line.strip_prefix("CONSOLE ") {
+                    let (file, caption) = rest.split_once(' ').unwrap_or((rest, ""));
+                    assert!(
+                        !caption.trim().is_empty(),
+                        "{rel}/manifest.txt:{ln}: CONSOLE `{file}` has no caption \
+                         (the `.SH` would degrade to the filename)"
+                    );
+                    assert!(
+                        file.ends_with(".console.md"),
+                        "{rel}/manifest.txt:{ln}: CONSOLE reference `{file}` is not a `.console.md` \
+                         transcript"
+                    );
+                    assert!(
+                        console_refs.insert(file.to_string()),
+                        "{rel}/manifest.txt:{ln}: CONSOLE `{file}` referenced twice"
                     );
                 } else if let Some(rest) = line.strip_prefix("FRAME ") {
                     let (file, caption) = rest.split_once(' ').unwrap_or((rest, ""));
@@ -1357,28 +1444,47 @@ mod tests {
                         "{rel}/manifest.txt:{ln}: FRAME reference `{file}` is not a frame `.txt`"
                     );
                     assert!(
-                        referenced.insert(file.to_string()),
+                        frame_refs.insert(file.to_string()),
                         "{rel}/manifest.txt:{ln}: FRAME `{file}` referenced twice"
                     );
                 } else {
-                    panic!("{rel}/manifest.txt:{ln}: not PROSE/FRAME/#comment/blank: {line:?}");
+                    panic!(
+                        "{rel}/manifest.txt:{ln}: not PROSE/CONSOLE/FRAME/#comment/blank: {line:?}"
+                    );
                 }
             }
 
-            // (b) bijection — the on-disk frame goldens (every `*.txt` except the manifest itself).
-            let mut on_disk: std::collections::BTreeSet<String> = Default::default();
+            // (b) bijections — partition the on-disk artifacts by class (frame `.txt` goldens vs
+            // `.console.md` transcripts) and match EACH class to its references. Every non-manifest file
+            // must be exactly one class (a mis-extensioned golden is caught here). Each direction matters:
+            // a reference with no artifact is a typo/rename; an artifact with no reference is a silently
+            // dropped directive (a shrunk walkthrough).
+            let mut frames_on_disk: std::collections::BTreeSet<String> = Default::default();
+            let mut consoles_on_disk: std::collections::BTreeSet<String> = Default::default();
             for e in std::fs::read_dir(&dir).unwrap() {
                 let name = e.unwrap().file_name().to_string_lossy().to_string();
-                if name.ends_with(".txt") && name != "manifest.txt" {
-                    on_disk.insert(name);
+                if name == "manifest.txt" {
+                    continue;
+                } else if name.ends_with(".console.md") {
+                    consoles_on_disk.insert(name);
+                } else if name.ends_with(".txt") {
+                    frames_on_disk.insert(name);
+                } else {
+                    panic!(
+                        "{rel}: unexpected file `{name}` (not manifest.txt / a `.txt` frame / a \
+                         `.console.md` transcript)"
+                    );
                 }
             }
             assert_eq!(
-                referenced, on_disk,
+                frame_refs, frames_on_disk,
                 "{rel}: the manifest's FRAME references and the committed frame goldens must be a \
-                 bijection — a reference with no golden is a typo/rename; a golden with no reference is \
-                 a silently dropped FRAME line (a shrunk walkthrough). referenced={referenced:?} \
-                 on_disk={on_disk:?}"
+                 bijection. referenced={frame_refs:?} on_disk={frames_on_disk:?}"
+            );
+            assert_eq!(
+                console_refs, consoles_on_disk,
+                "{rel}: the manifest's CONSOLE references and the committed console transcripts must be \
+                 a bijection. referenced={console_refs:?} on_disk={consoles_on_disk:?}"
             );
         }
         assert!(

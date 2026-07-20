@@ -1,9 +1,12 @@
 # J8 — matching a self-transfer across two exchanges (the TUI screen-walkthrough PoC).
-# Prose narrates; each FRAME is a byte-gated `.txt` golden captured from the real TUI (editor + viewer).
-# One journey here; the other eight (J1..J7, J9) follow the same manifest shape in Phase 2.
-PROSE \fBJourney 8 \(em matching a self\-transfer across two exchanges.\fP Grace moves 0.10 BTC from River to Coinbase. The two legs import as an unmatched pair; below she links them in the interactive editor, then confirms the result in the read\-only viewer. The screens are captured verbatim from the running TUI.
-PROSE \fBSetup (command line).\fP \fBbtctax init\fP creates the encrypted vault; \fBbtctax import river.csv coinbase.csv\fP ingests both exchanges. Everything after this happens on screen.
-PROSE \fB1. Editor \(em Browse.\fP The Holdings tab reads \fIno holdings\fP: the coins are mid\-transfer \(en an unreconciled blocker until the withdrawal and the deposit are matched to each other.
+# Prose narrates; CONSOLE blocks are the EXACT captured command + output (a real terminal transcript, not
+# prose); each FRAME is a byte-gated `.txt` golden captured from the real TUI (editor + viewer). Both the
+# console transcript and the screens are captured artifacts, never hand-typed. One journey here; the other
+# eight (J1..J7, J9) follow the same manifest shape in Phase 2.
+PROSE \fBJourney 8 \(em matching a self\-transfer across two exchanges.\fP Grace moves 0.10 BTC from River to Coinbase. The two legs import as an unmatched pair; below she links them in the interactive editor, then confirms the result in the read\-only viewer.
+PROSE \fBSetup, at the command line.\fP She creates the encrypted vault, imports both exchanges, and verifies \(en which exits non\-zero, flagging the two legs as an unreconciled blocker (basis unknown, transfer unmatched). This is the exact terminal session:
+CONSOLE 00-setup.console.md J8 - setup - at the command line (init, import, verify)
+PROSE \fB1. Editor \(em Browse.\fP The same blocker, now on screen: the editor's Holdings tab reads \fIno holdings\fP \(en the coins are mid\-transfer until the withdrawal and the deposit are matched to each other.
 FRAME 01-browse-blocker.txt J8 - step 1 - editor: coins in transit, Holdings empty
 PROSE \fB2. Propose the match.\fP Pressing \fBm\fP surfaces the matching pair \(en a cross\-wallet RELOCATE: the same 0.10 BTC leaving River and arriving at Coinbase, recognised as one movement rather than a sale plus a buy.
 FRAME 02-match-list.txt J8 - step 2 - editor: the RELOCATE proposal
