@@ -16,6 +16,7 @@ pub mod resolve;
 pub mod return_inputs;
 pub mod session;
 pub mod tax_profile;
+pub mod testonly;
 
 pub use cli::Cli;
 pub use config::CliConfig;
