@@ -903,6 +903,78 @@ fn emit_btctax_tui_goldens() {
     }
 }
 
+// ── TUI screen-walkthrough (design/tui-walkthrough) — J8 PoC viewer frame ─────────────────────────
+// The VIEWER half of the J8 journey: after the editor confirms the RELOCATE, the coins land at Coinbase
+// and Holdings reads BALANCED. Re-seeds the SAME shared J8 fixture and replays the SAME decision via
+// btctax-cli (RELOCATE = link_transfer out→in), then builds the REAL snapshot — so this "after" state
+// provably matches the editor's mutation (walkthrough spec §4.2). Goldens live under the walkthrough tree.
+
+#[cfg(unix)]
+fn tui_walkthrough_golden_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/examples-tui-walkthrough"
+    ))
+}
+
+#[cfg(unix)]
+fn btctax_tui_walkthrough_frames() -> Vec<(&'static str, String)> {
+    use btctax_store::Passphrase;
+    // Determinism (walkthrough spec §7 / I-3): pin the price cache so a dev's live cache can't perturb the
+    // frame. Safe under nextest's process-per-test model.
+    std::env::set_var(
+        "BTCTAX_PRICE_CACHE",
+        "/nonexistent-walkthrough-price-cache.csv",
+    );
+    let pp = Passphrase::new("golden-j8-pass".into());
+    let now = time::macros::datetime!(2025 - 04 - 01 12:00:00 UTC);
+    let dir = tempfile::tempdir().unwrap();
+    // Seed + apply the RELOCATE INSIDE btctax-cli (the read-only viewer forbids the write path in its own
+    // source — the e10 gate); the viewer half then only OPENS + reads the resulting vault (spec §4.2).
+    let vault = btctax_cli::testonly::seed_j8_relocated(dir.path(), &pp, now);
+    // Build the REAL snapshot + render the full viewer frame (Holdings tab) — now BALANCED.
+    let session = btctax_cli::Session::open(&vault, &pp).unwrap();
+    let (snapshot, year) = crate::unlock::build_snapshot(&session).unwrap();
+    let mut app = App::new(std::path::PathBuf::from("/vault.pgp"));
+    app.screen = Screen::Viewer;
+    app.selected_year = year;
+    app.snapshot = Some(snapshot);
+    app.clock = crate::clock::Clock::Pinned(now);
+    let holdings = crate::capture::to_golden(&render_viewer(&mut app));
+    vec![("j8/04-holdings-balanced", holdings)]
+}
+
+#[cfg(unix)]
+#[test]
+fn btctax_tui_walkthrough_goldens_match_committed() {
+    for (stem, captured) in btctax_tui_walkthrough_frames() {
+        let path = tui_walkthrough_golden_dir().join(format!("{stem}.txt"));
+        let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "committed {} missing ({e}); regenerate with \
+                 `cargo test -p btctax-tui --lib emit_btctax_tui_walkthrough_goldens -- --ignored`",
+                path.display()
+            )
+        });
+        assert_eq!(
+            captured, committed,
+            "docs/examples-tui-walkthrough/{stem}.txt is STALE; regenerate via the ignored \
+             emit_btctax_tui_walkthrough_goldens test"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "regeneration helper: rewrites docs/examples-tui-walkthrough/j8/04-*.txt"]
+fn emit_btctax_tui_walkthrough_goldens() {
+    for (stem, captured) in btctax_tui_walkthrough_frames() {
+        let path = tui_walkthrough_golden_dir().join(format!("{stem}.txt"));
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create walkthrough golden dir");
+        std::fs::write(&path, captured).expect("write walkthrough golden");
+    }
+}
+
 /// 15. `[`/`]` year change via handle_key updates the filtered rows rendered by a year-scoped tab.
 ///     Covers the brief requirement "changes selected_year AND updates the filtered rows".
 #[test]

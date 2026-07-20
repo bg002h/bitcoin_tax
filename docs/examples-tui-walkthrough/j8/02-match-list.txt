@@ -1,0 +1,46 @@
+── glyphs ──
+  0│┌ btctax-tui-edit [EDITOR] — /edit/vault.pgp ──────────────────────────────────────────────────────────────────────────┐
+  1││ Holdings │ Disposals │ Income │ Tax │ Forms │ Compliance                                                             │
+  2│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  3│┌ Holdings ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  4││no holdings                                                                                                           │
+  5││                                                                                                                      │
+  6││                                                                                                                      │
+  7││                                                                                                                      │
+  8││          ┌ MATCH SELF-TRANSFERS — confirm a matched in/out pair (Enter); never automatic ─────────────────┐          │
+  9││          │proposed pairs — k/j move, Enter confirm (choose DROP/RELOCATE), Esc cancel                     │          │
+ 10││          │RELOCATE in 2025-03-10 coinbase/default 10000000 sat  →  out 2025-03-10 river/default 10000000 s│          │
+ 11││          │                                                                                                │          │
+ 12││          │                                                                                                │          │
+ 13││          │                                                                                                │          │
+ 14││          │                                                                                                │          │
+ 15││          │                                                                                                │          │
+ 16││          │                                                                                                │          │
+ 17││          │                                                                                                │          │
+ 18││          │                                                                                                │          │
+ 19││          │                                                                                                │          │
+ 20││          │                                                                                                │          │
+ 21││          │                                                                                                │          │
+ 22││          │                                                                                                │          │
+ 23││          │                                                                                                │          │
+ 24││          │                                                                                                │          │
+ 25││          │                                                                                                │          │
+ 26││          │                                                                                                │          │
+ 27││          │                                                                                                │          │
+ 28││          │                                                                                                │          │
+ 29││          │  A coincidental amount match of a real income + a real sale must NOT be dropped — confirm only │          │
+ 30││          │                                                                                                │          │
+ 31││          └────────────────────────────────────────────────────────────────────────────────────────────────┘          │
+ 32││                                                                                                                      │
+ 33││                                                                                                                      │
+ 34││                                                                                                                      │
+ 35││                                                                                                                      │
+ 36││                                                                                                                      │
+ 37││                                                                                                                      │
+ 38│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ 39│Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   g/G: top/bottom   p: profile   ?: help
+── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
+  1│ 2..10 fg=Red mod=BOLD|REVERSED
+  9│ 12..108 mod=BOLD
+ 10│ 12..108 fg=Black bg=Cyan mod=BOLD
+ 29│ 12..108 fg=Yellow mod=BOLD

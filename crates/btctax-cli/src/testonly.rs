@@ -170,3 +170,50 @@ pub fn j9() -> JourneyFixture {
         corpus: &[("coinbase.csv", J9_CSV)],
     }
 }
+
+// ── Seeders (shared so a journey's editor + viewer walkthrough halves converge on ONE vault state) ──
+// These live HERE (btctax-cli) rather than in the TUI crates because the read-only viewer (btctax-tui)
+// forbids the write-path `cmd::`/`save(` tokens even in its tests (its e10 source gate) — so the viewer
+// half calls a testonly seeder to reach the post-decision state, then only Session::open + build_snapshot
+// (read-only) + render.
+
+/// Init a vault at `dir/vault.pgp` and import the journey `fx`'s corpus via the REAL adapter ingest.
+pub fn seed_journey(
+    dir: &std::path::Path,
+    pp: &btctax_store::Passphrase,
+    fx: &JourneyFixture,
+) -> std::path::PathBuf {
+    let vault = dir.join("vault.pgp");
+    let key = dir.join("key.asc");
+    crate::cmd::init::run(&vault, pp, &key).unwrap();
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    for (name, content) in fx.corpus {
+        let p = dir.join(name);
+        std::fs::write(&p, content).unwrap();
+        files.push(p);
+    }
+    crate::cmd::import::run(&vault, pp, &files).unwrap();
+    vault
+}
+
+/// Seed J8 and apply its RELOCATE self-transfer (river out → coinbase in) — the post-match state the
+/// walkthrough's VIEWER half renders (BALANCED). Refs are J8's deterministic event refs; RELOCATE routes
+/// to `link_transfer` (out → in), the same decision the editor's confirm modal makes.
+pub fn seed_j8_relocated(
+    dir: &std::path::Path,
+    pp: &btctax_store::Passphrase,
+    now: time::OffsetDateTime,
+) -> std::path::PathBuf {
+    use btctax_core::event::TransferTarget;
+    let vault = seed_journey(dir, pp, &j8());
+    let in_id = crate::eventref::parse_event_id("import|coinbase|in|cb-recv").unwrap();
+    crate::cmd::reconcile::link_transfer(
+        &vault,
+        pp,
+        "import|river|out|1741608000000|withdrawal|10000000#0",
+        TransferTarget::InEvent(in_id),
+        now,
+    )
+    .unwrap();
+    vault
+}

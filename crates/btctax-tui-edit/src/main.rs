@@ -14279,6 +14279,125 @@ mod tests {
         }
     }
 
+    // ── TUI screen-walkthrough (design/tui-walkthrough) — J8 PoC editor frames ───────────────────────
+    // These capture the EDITOR half of the J8 journey (a cross-exchange self-transfer) for the visual
+    // walkthrough PDF. Goldens live under docs/examples-tui-walkthrough/<journey>/ (a separate tree from the
+    // 4 existing docs/examples-tui/*.txt render goldens). The VIEWER half (the BALANCED Holdings result) is
+    // captured in btctax-tui, replaying the same shared J8 fixture — walkthrough spec §4.2.
+
+    #[cfg(unix)]
+    fn tui_walkthrough_golden_dir() -> std::path::PathBuf {
+        std::path::PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/examples-tui-walkthrough"
+        ))
+    }
+
+    /// Seed a vault from the SHARED J8 corpus (`btctax_cli::testonly::j8`) via the REAL adapter ingest — so
+    /// the editor's states are exactly the examples-J8 journey's, and the event refs match the viewer half.
+    #[cfg(unix)]
+    fn seed_j8_vault(dir: &std::path::Path, pp_str: &str) -> std::path::PathBuf {
+        let vault = dir.join("vault.pgp");
+        let key = dir.join("key.asc");
+        let pp = Passphrase::new(pp_str.into());
+        btctax_cli::cmd::init::run(&vault, &pp, &key).unwrap();
+        let mut files: Vec<std::path::PathBuf> = Vec::new();
+        for (name, content) in btctax_cli::testonly::j8().corpus {
+            let p = dir.join(name);
+            std::fs::write(&p, content).unwrap();
+            files.push(p);
+        }
+        btctax_cli::cmd::import::run(&vault, &pp, &files).unwrap();
+        vault
+    }
+
+    /// `(relative-stem, captured frame)` for the J8 editor walkthrough frames.
+    #[cfg(unix)]
+    fn btctax_tui_edit_walkthrough_frames() -> Vec<(&'static str, String)> {
+        // Determinism (walkthrough spec §7 / I-3): pin BTCTAX_PRICE_CACHE to a nonexistent file so the
+        // developer's LIVE local price cache cannot perturb the displayed market value ($8137.26 from the
+        // BUNDLED dataset). Safe under nextest's process-per-test model (which make check / CI use).
+        std::env::set_var(
+            "BTCTAX_PRICE_CACHE",
+            "/nonexistent-walkthrough-price-cache.csv",
+        );
+        let pinned =
+            btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2025 - 04 - 01 12:00:00 UTC));
+        let fixed_path = std::path::PathBuf::from("/edit/vault.pgp");
+        let dir = tempfile::tempdir().unwrap();
+        let vault = seed_j8_vault(dir.path(), "golden-j8-pass");
+
+        // 01 — Browse: the two imported legs are unreconciled (a hard blocker gates the tax computation).
+        let browse_blocker = {
+            let mut app = open_app(&vault, "golden-j8-pass");
+            app.clock = pinned;
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+        // 02 — `m` opens the match-self-transfers flow: the RELOCATE proposal pairing the out- and in-legs.
+        let match_list = {
+            let mut app = open_app(&vault, "golden-j8-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('m')));
+            assert!(
+                app.match_self_transfers_flow.is_some(),
+                "the J8 match-self-transfers flow must open (a RELOCATE proposal exists)"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+        // 03 — Enter opens the confirm modal over the selected pair (pre-persist).
+        let match_confirm = {
+            let mut app = open_app(&vault, "golden-j8-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('m')));
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.match_self_transfers_modal.is_some(),
+                "the RELOCATE confirm modal must be open for the golden"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+
+        vec![
+            ("j8/01-browse-blocker", browse_blocker),
+            ("j8/02-match-list", match_list),
+            ("j8/03-match-confirm", match_confirm),
+        ]
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn btctax_tui_edit_walkthrough_goldens_match_committed() {
+        for (stem, captured) in btctax_tui_edit_walkthrough_frames() {
+            let path = tui_walkthrough_golden_dir().join(format!("{stem}.txt"));
+            let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "committed {} missing ({e}); regenerate with \
+                     `cargo test -p btctax-tui-edit emit_btctax_tui_edit_walkthrough_goldens -- --ignored`",
+                    path.display()
+                )
+            });
+            assert_eq!(
+                captured, committed,
+                "docs/examples-tui-walkthrough/{stem}.txt is STALE; regenerate via the ignored \
+                 emit_btctax_tui_edit_walkthrough_goldens test"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "regeneration helper: rewrites docs/examples-tui-walkthrough/j8/*.txt"]
+    fn emit_btctax_tui_edit_walkthrough_goldens() {
+        for (stem, captured) in btctax_tui_edit_walkthrough_frames() {
+            let path = tui_walkthrough_golden_dir().join(format!("{stem}.txt"));
+            std::fs::create_dir_all(path.parent().unwrap()).expect("create walkthrough golden dir");
+            std::fs::write(&path, captured).expect("write walkthrough golden");
+        }
+    }
+
     // ── KAT-E2E-FMV-MISSING — classify-inbound Income without FMV ────────────
 
     #[test]
