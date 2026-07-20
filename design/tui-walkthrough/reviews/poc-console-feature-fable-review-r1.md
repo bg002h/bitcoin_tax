@@ -1,0 +1,29 @@
+# Review r1 — walkthrough exact-CLI-I/O feature (captured console transcript + CONSOLE directive)
+
+_Reviewer: Fable (independent). Scope: the exact-CLI-I/O feature (commit `eedb445`) — the walkthrough's
+CLI-setup steps rendered from a captured+gated console transcript instead of prose. Persisted verbatim
+before folding, per STANDARD_WORKFLOW §2._
+
+VERDICT: 0 Critical / 1 Important / 2 Minor / 1 Nit — NOT GREEN until I-1 is folded.
+
+Verified before reporting (tree left clean, `git status --porcelain` empty):
+- Gate is live: `cargo nextest list -p xtask` shows `walkthrough_console_golden_matches_committed` and `walkthrough_manifests_valid_and_complete` in the bin target, so `make check` (`cargo nextest run --workspace`, Makefile:26) runs them. The gate is a genuine fresh capture+compare: `built_btctax()` rebuilds from source each run.
+- Fidelity: the gate passed against a just-captured run — the committed transcript is byte-identical to what today's binary prints, including `[exit 1]` on `verify`. Not hand-edited.
+- Determinism: env pinned (TZ/LC_ALL/LANG, `HOME`=tempdir, dead `BTCTAX_PRICE_CACHE`, `BTCTAX_NOW` removed — examples.rs:93-109). I re-ran `verify` with `BTCTAX_NOW` pinned to 2024 and 2030: stdout byte-identical, so no wall-clock dependence. No tempdir path leaks (a leak would fail regen==committed structurally).
+- Bijection gate: four mutation drills each RED with the right message — dropped CONSOLE line (orphan), dangling CONSOLE ref, stray `00-setup.md` (unexpected-file panic, examples.rs:1473), transcript renamed `.txt` (lands in the frame class and reds the FRAME bijection). Classes cannot overlap (`.console.md` ≠ `*.txt` suffix); `manifest.txt` excluded from both; `FRAME manifest.txt` rejected at examples.rs:1443.
+- Render: assemble output correct — one `.SH` caption, fences → `.nf/.ft CR`, zero `.TH` leaked (content lines starting `.` are `\&`-escaped by man-wrap.awk:51 before the `grep -v '^\.TH '`, so a transcript line starting `.TH ` could not be wrongly stripped). Empty caption fails closed for CONSOLE via the shared `caption_of`. `make tui-walkthrough` emits the PDF; CI uses the make target (ci.yml:139), so the 4-arg change is consistent. `examples_golden_matches_committed` still green; the `WALKTHROUGH_*_STEMS` asserts pin capture-set⇄const, not directory contents — unaffected.
+- Manifest prose is accurate: "exits non-zero" is true; "(basis unknown, transfer unmatched)" matches the hard `UnknownBasisInbound` + advisory `UnmatchedOutflows` lines.
+
+## Important
+
+**I-1 — stderr is structurally invisible to the console gate, while the manifest claims "This is the exact terminal session".** `generate_j8_walkthrough_console` (crates/xtask/src/examples.rs:1012-1038) uses `plain` → `show_stderr: false` (examples.rs:200-206), and `emit` discards stderr entirely unless that flag is set (examples.rs:158). I verified all four commands emit **0 bytes** of stderr under the pinned env today (`BTCTAX_NOW` is removed, so no banner either) — the committed transcript is currently exact. But any future btctax change that adds a stderr warning/advisory to `init`/`import`/`verify` keeps the gate green while docs/examples-tui-walkthrough/j8/manifest.txt:7 ("This is the exact terminal session:") silently becomes false — precisely the stale-but-green channel, on the one output stream the gate can't see. examples.md defends the same selectivity with an explicit front-matter disclosure (examples.rs:183-190); the walkthrough has no disclosure and a stronger claim. Fix costs zero committed bytes today: pass `show_stderr: true` for all four steps (the `stderr:` block is only emitted when stderr is non-empty, so the golden is unchanged now, and any future stderr enters the gated bytes) — or assert stderr emptiness inside the generator.
+
+## Minor
+
+**M-1 — man-wrap.awk's document-level state rules misbehave in the fragment context (verified empirically).** Its front-matter and HTML-comment rules (docs/examples/man-wrap.awk:29-35) run even inside fenced blocks; in examples.md the real front matter sets `fmdone=1` early, but a CONSOLE fragment has none, so the first transcript line matching `^---[ \t]*$` opens phantom front matter, silently swallows the remainder of the transcript, and leaves the `.nf` unclosed (mangling the rest of the assembled doc) — with every gate green (the PDF is only `%PDF`+`\m[`-checked). I reproduced this with a synthetic fragment: output truncates after the line before `---`. Unreachable with the committed transcript (byte-gated; contains no such line); bites a future journey's transcript. Fix: a `-v fragment=1` mode in man-wrap.awk that disables fm/comment handling (BEGIN currently hard-resets `fm/fmdone`, so `-v fmdone=1` alone won't work), or a gate assert that transcripts contain no `^---[ \t]*$` / `<!--` lines.
+
+**M-2 — stale comments contradict the as-built gate story.** (a) The `walkthrough_manifests_valid_and_complete` doc comment (crates/xtask/src/examples.rs:1373-1385) still describes the grammar as `PROSE`/`FRAME` only and "a BIJECTION" singular — no CONSOLE, no second bijection. (b) The Makefile `tui-walkthrough` header (Makefile:85-91) still lists only the frames + manifest as the gated artifacts ("grammar + a FRAME⇄golden bijection"), omitting the `.console.md` transcripts and their `regen == committed` gate. The script header and SPEC §5 were updated; these two were missed. Doc drift only.
+
+## Nit
+
+**N-1 — caption roff-injection.** assemble-walkthrough.sh:58 `printf '.SH "%s"' "$caption"` — a caption containing `"` breaks the `.SH` argument quoting (and the FRAME path's `awk -v name="$caption"` interprets `\` escape sequences per awk's `-v` semantics). Hand-authored, trusted manifest + non-gated convenience render; the xtask grammar doesn't constrain caption characters. Pre-existing for FRAME; CONSOLE merely inherits it.
