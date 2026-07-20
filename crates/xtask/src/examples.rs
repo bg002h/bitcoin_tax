@@ -1245,6 +1245,36 @@ fn generate_j3_walkthrough_console(bin: &Path) -> String {
     t
 }
 
+/// J9 CLI setup transcript — two lots + a sale smaller than either: `init`, `import`, `verify`. No
+/// tax-profile (J9's viewer is Disposals + Compliance, not Tax). The editor half drives the select-lots
+/// flow to identify the specific lots. Committed to `docs/examples-tui-walkthrough/j9/00-setup.console.md`.
+#[cfg(all(test, unix))]
+fn generate_j9_walkthrough_console(bin: &Path) -> String {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J9_CSV);
+    let mut t = String::new();
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "verify"]),
+    );
+    t
+}
+
 /// J9 — choosing which lots a sale draws from (UX-P1-10). With two lots and a sale smaller than either
 /// combined holding, the default method picks the lots for you; `select-lots` lets you identify EXACTLY
 /// which ones — the picks (`<origin>#<split>:<sat>`) come from the disposal's `lot` column in
@@ -1568,6 +1598,10 @@ mod tests {
             (
                 "j3/00-setup.console.md",
                 generate_j3_walkthrough_console(bin),
+            ),
+            (
+                "j9/00-setup.console.md",
+                generate_j9_walkthrough_console(bin),
             ),
         ]
     }

@@ -1,0 +1,43 @@
+── glyphs ──
+  0│┌ btctax-tui — /vault.pgp ─────────────────────────────────────────────────────────────────────────────────────────────┐
+  1││ Holdings │ Disposals │ Income │ Tax │ Forms │ Compliance                                                             │
+  2│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  3│┌ Compliance (whole-ledger) ───────────────────────────────────────────────────────────────────────────────────────────┐
+  4││  Conservation: BALANCED(in: 100000000  disposed: 50000000  removed: 0  held: 50000000  fee: 0  pending: 0)           │
+  5││  Pre-2025 method: HIFO  attested: false                                                                              │
+  6││  Safe-harbor: Path A (actual per-wallet reconstruction; default, no election)                                        │
+  7││  Pending transfers (unreconciled): 0                                                                                 │
+  8││  Disposals using estimated FMV proceeds: 0                                                                           │
+  9││                                                                                                                      │
+ 10││  Hard blockers (0):                                                                                                  │
+ 11││    none                                                                                                              │
+ 12││                                                                                                                      │
+ 13││  Advisory blockers (0):                                                                                              │
+ 14││    none                                                                                                              │
+ 15││                                                                                                                      │
+ 16││  Per-disposal compliance (1 post-2025 disposal(s)):                                                                  │
+ 17││    import|coinbase|trade|sale @ 2025-06-01 :: contemporaneous                                                        │
+ 18││                                                                                                                      │
+ 19││                                                                                                                      │
+ 20││                                                                                                                      │
+ 21││                                                                                                                      │
+ 22││                                                                                                                      │
+ 23││                                                                                                                      │
+ 24││                                                                                                                      │
+ 25││                                                                                                                      │
+ 26││                                                                                                                      │
+ 27││                                                                                                                      │
+ 28││                                                                                                                      │
+ 29││                                                                                                                      │
+ 30││                                                                                                                      │
+ 31││                                                                                                                      │
+ 32││                                                                                                                      │
+ 33││                                                                                                                      │
+ 34││                                                                                                                      │
+ 35││                                                                                                                      │
+ 36││                                                                                                                      │
+ 37││                                                                                                                      │
+ 38│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ 39│Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   g/G: top/bottom   w: what-if   e: export
+── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
+  1│ 48..58 fg=Yellow mod=BOLD

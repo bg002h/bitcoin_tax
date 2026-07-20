@@ -356,3 +356,21 @@ pub fn seed_j3_self_transfer(
     .unwrap();
     vault
 }
+
+/// Seed J9 (a cheap 2023 LT lot 0.60 + a pricier 2024 lot 0.40, then a 2025 sale of 0.50 — less than
+/// either holding, so which lots cover it is a genuine choice) with the whole 0.50 IDENTIFIED against the
+/// cheap long-term `lot-a` (a deliberate per-disposal specific identification). The post-selection state
+/// the walkthrough's VIEWER renders (Disposals drawing from lot-a; Compliance now satisfied). The editor
+/// half seeds only the raw import and drives the select-lots flow. Made-date threaded from the caller
+/// (the identification is contemporaneous — before/at the sale).
+pub fn seed_j9_selected(
+    dir: &std::path::Path,
+    pp: &btctax_store::Passphrase,
+    now: time::OffsetDateTime,
+) -> std::path::PathBuf {
+    let vault = seed_journey(dir, pp, &j9());
+    let pick = crate::eventref::parse_lot_pick("import|coinbase|trade|lot-a#0:50000000").unwrap();
+    crate::cmd::reconcile::select_lots(&vault, pp, "import|coinbase|trade|sale", vec![pick], now)
+        .unwrap();
+    vault
+}

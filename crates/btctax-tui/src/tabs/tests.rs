@@ -926,6 +926,7 @@ fn btctax_tui_walkthrough_frames() -> Vec<(&'static str, String)> {
     frames.extend(j4_viewer_frames());
     frames.extend(j7_viewer_frames());
     frames.extend(j3_viewer_frames());
+    frames.extend(j9_viewer_frames());
     frames
 }
 
@@ -1078,6 +1079,38 @@ fn j3_viewer_frames() -> Vec<(&'static str, String)> {
     )]
 }
 
+/// J9 (select-lots) VIEWER frames — after the editor identifies the 0.50 BTC sale against the cheap
+/// long-term lot-a, Disposals shows the sale drawing from lot-a (a long-term gain), and Compliance shows
+/// the post-2025 per-disposal requirement now satisfied (specific lots identified). Seeds via
+/// `seed_j9_selected` and only reads.
+fn j9_viewer_frames() -> Vec<(&'static str, String)> {
+    use btctax_store::Passphrase;
+    std::env::set_var(
+        "BTCTAX_PRICE_CACHE",
+        "/nonexistent-walkthrough-price-cache.csv",
+    );
+    let pp = Passphrase::new("golden-j9-pass".into());
+    let now = time::macros::datetime!(2025 - 06 - 01 12:00:00 UTC);
+    let dir = tempfile::tempdir().unwrap();
+    let vault = btctax_cli::testonly::seed_j9_selected(dir.path(), &pp, now);
+    let session = btctax_cli::Session::open(&vault, &pp).unwrap();
+    let (snapshot, year) = crate::unlock::build_snapshot(&session).unwrap();
+    let mut app = App::new(std::path::PathBuf::from("/vault.pgp"));
+    app.screen = Screen::Viewer;
+    app.selected_year = year;
+    app.snapshot = Some(snapshot);
+    app.clock = crate::clock::Clock::Pinned(now);
+    let mut out = Vec::new();
+    for (stem, tab) in [
+        ("j9/02-disposals", crate::app::Tab::Disposals),
+        ("j9/03-compliance", crate::app::Tab::Compliance),
+    ] {
+        app.tab = tab;
+        out.push((stem, crate::capture::to_golden(&render_viewer(&mut app))));
+    }
+    out
+}
+
 /// The frame stems this crate (the viewer half) is responsible for capturing. Declared EXPLICITLY so a
 /// dropped/renamed capture tuple reds the gate below (NEW-I-1): the byte-compare loop alone iterates only
 /// over what's captured, so a shrunk set passes vacuously — and the xtask manifest bijection would still
@@ -1094,6 +1127,8 @@ const WALKTHROUGH_VIEWER_STEMS: &[&str] = &[
     "j7/02-income",
     "j7/03-tax",
     "j3/02-holdings",
+    "j9/02-disposals",
+    "j9/03-compliance",
 ];
 
 #[cfg(unix)]

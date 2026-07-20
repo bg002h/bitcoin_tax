@@ -14310,6 +14310,7 @@ mod tests {
         frames.extend(j4_editor_frames());
         frames.extend(j7_editor_frames());
         frames.extend(j3_editor_frames());
+        frames.extend(j9_editor_frames());
         frames
     }
 
@@ -14471,6 +14472,38 @@ mod tests {
         vec![("j3/01-classify-self-transfer", classify)]
     }
 
+    /// J9 editor frame — identifying the specific lots a sale draws from. `S` opens the select-lots flow
+    /// (the disposals that can be identified); Enter picks the 0.50 BTC sale → its lots form, where the
+    /// filer names which lots cover it (here, the cheap long-term lot-a). Seeds only the raw import; the
+    /// flow drives the selection. The viewer then shows the disposal drawing from lot-a + Compliance clear.
+    #[cfg(unix)]
+    fn j9_editor_frames() -> Vec<(&'static str, String)> {
+        std::env::set_var(
+            "BTCTAX_PRICE_CACHE",
+            "/nonexistent-walkthrough-price-cache.csv",
+        );
+        let pinned =
+            btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2025 - 06 - 01 12:00:00 UTC));
+        let fixed_path = std::path::PathBuf::from("/edit/vault.pgp");
+        let dir = tempfile::tempdir().unwrap();
+        let pp = Passphrase::new("golden-j9-pass".into());
+        let vault =
+            btctax_cli::testonly::seed_journey(dir.path(), &pp, &btctax_cli::testonly::j9());
+        let select = {
+            let mut app = open_app(&vault, "golden-j9-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('S')));
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.select_lots_flow.is_some(),
+                "the J9 select-lots lots form must be open"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+        vec![("j9/01-select-lots", select)]
+    }
+
     /// The frame stems this crate (the editor half) is responsible for capturing. Declared EXPLICITLY so a
     /// dropped/renamed capture tuple reds the gate (NEW-I-1) — the byte-compare loop alone passes vacuously
     /// on a shrunk set, and the xtask manifest bijection would still hold (manifest⇄disk unchanged),
@@ -14484,6 +14517,7 @@ mod tests {
         "j4/01-reclassify-income",
         "j7/01-classify-income",
         "j3/01-classify-self-transfer",
+        "j9/01-select-lots",
     ];
 
     #[cfg(unix)]
