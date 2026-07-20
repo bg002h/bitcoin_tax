@@ -14312,6 +14312,7 @@ mod tests {
         frames.extend(j3_editor_frames());
         frames.extend(j9_editor_frames());
         frames.extend(j2_editor_frames());
+        frames.extend(j5_editor_frames());
         frames
     }
 
@@ -14570,6 +14571,56 @@ mod tests {
         ]
     }
 
+    /// J5 editor frames — accepting the optimizer's tax-saving lot pick. The seed carries a standing FIFO
+    /// election but no accept. `z` opens the optimize-accept flow: a proposal list with the whole-year Δtax
+    /// banner (FIFO sells the cheap 2023 lot for a gain; the optimizer proposes the short-term lot instead
+    /// to realize a loss, saving tax). Enter opens the confirm modal (pre-persist). Clock pinned ≤ the sale
+    /// date so the selection is contemporaneous (Enter goes straight to the modal, no attestation detour).
+    #[cfg(unix)]
+    fn j5_editor_frames() -> Vec<(&'static str, String)> {
+        std::env::set_var(
+            "BTCTAX_PRICE_CACHE",
+            "/nonexistent-walkthrough-price-cache.csv",
+        );
+        let pinned =
+            btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2025 - 04 - 01 12:00:00 UTC));
+        let fixed_path = std::path::PathBuf::from("/edit/vault.pgp");
+        let dir = tempfile::tempdir().unwrap();
+        let pp = Passphrase::new("golden-j5-pass".into());
+        let vault = btctax_cli::testonly::seed_j5_elected(dir.path(), &pp);
+
+        // 01 — `z` opens the optimize-accept flow: the proposal + whole-year Δtax banner.
+        let list = {
+            let mut app = open_app(&vault, "golden-j5-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('z')));
+            assert!(
+                app.optimize_accept_flow.is_some(),
+                "the J5 optimize-accept flow must open (a tax-saving proposal exists)"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+        // 02 — Enter opens the confirm modal (pre-persist): the proposed lot swap.
+        let confirm = {
+            let mut app = open_app(&vault, "golden-j5-pass");
+            app.clock = pinned;
+            handle_key(&mut app, press(KeyCode::Char('z')));
+            handle_key(&mut app, press(KeyCode::Enter));
+            assert!(
+                app.optimize_accept_modal.is_some(),
+                "the J5 optimize-accept confirm modal must be open"
+            );
+            app.vault_path = fixed_path.clone();
+            capture_edit_frame(&mut app)
+        };
+
+        vec![
+            ("j5/01-optimize-list", list),
+            ("j5/02-optimize-confirm", confirm),
+        ]
+    }
+
     /// The frame stems this crate (the editor half) is responsible for capturing. Declared EXPLICITLY so a
     /// dropped/renamed capture tuple reds the gate (NEW-I-1) — the byte-compare loop alone passes vacuously
     /// on a shrunk set, and the xtask manifest bijection would still hold (manifest⇄disk unchanged),
@@ -14586,6 +14637,8 @@ mod tests {
         "j9/01-select-lots",
         "j2/01-reclassify-donate",
         "j2/02-donation-details",
+        "j5/01-optimize-list",
+        "j5/02-optimize-confirm",
     ];
 
     #[cfg(unix)]

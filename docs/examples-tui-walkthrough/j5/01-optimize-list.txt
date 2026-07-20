@@ -1,0 +1,60 @@
+── glyphs ──
+  0│┌ btctax-tui-edit [EDITOR] — /edit/vault.pgp ──────────────────────────────────────────────────────────────────────────┐
+  1││ Holdings │ Disposals │ Income │ Tax │ Forms │ Compliance                                                             │
+  2│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  3│┌ Holdings ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  4││Wallet                         Acquired ▲        BTC               USD Basis        Source               Pending      │
+  5││exchange:coinbase:default      2025-01-02        1.00000000        80000.00         exchange                          │
+  6││                                                                                                                      │
+  7││                                                                                                                      │
+  8││                                                                                                                      │
+  9││           ┌ Optimize — accept a proposed lot selection ──────────────────────────────────────────────────┐           │
+ 10││           │Expected year Δtax if the FULL proposal is accepted: -3660.00 (≤ 0)                           │           │
+ 11││           │(per-row dollar figures are not shown — the delta is a whole-year figure)                     │           │
+ 12││           │                                                                                              │           │
+ 13││           │Date         Wallet                 Persistability     Disposal EventId                       │           │
+ 14││           │2025-06-01   coinbase/default       contemporaneous    import|coinbase|trade|opt-sell         │           │
+ 15││           │                                                                                              │           │
+ 16││           │                                                                                              │           │
+ 17││           │                                                                                              │           │
+ 18││           │                                                                                              │           │
+ 19││           │                                                                                              │           │
+ 20││           │                                                                                              │           │
+ 21││           │                                                                                              │           │
+ 22││           │                                                                                              │           │
+ 23││           │                                                                                              │           │
+ 24││           │                                                                                              │           │
+ 25││           │                                                                                              │           │
+ 26││           │                                                                                              │           │
+ 27││           │                                                                                              │           │
+ 28││           │                                                                                              │           │
+ 29││           │                                                                                              │           │
+ 30││           └──────────────────────────────────────────────────────────────────────────────────────────────┘           │
+ 31││                                                                                                                      │
+ 32││                                                                                                                      │
+ 33││                                                                                                                      │
+ 34││                                                                                                                      │
+ 35││                                                                                                                      │
+ 36││                                                                                                                      │
+ 37││TOTAL                                            1.00000000        80000.00                                           │
+ 38│└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ 39│Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   g/G: top/bottom   p: profile   ?: help
+── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
+  1│ 2..10 fg=Red mod=BOLD|REVERSED
+  4│ 1..31 mod=BOLD
+  4│ 32..49 fg=Cyan mod=BOLD|UNDERLINED
+  4│ 50..67 mod=BOLD
+  4│ 68..84 mod=BOLD
+  4│ 85..105 mod=BOLD
+  4│ 106..118 mod=BOLD
+ 10│ 13..80 mod=BOLD
+ 11│ 13..86 fg=DarkGray
+ 13│ 13..25 mod=BOLD
+ 13│ 26..48 mod=BOLD
+ 13│ 49..67 mod=BOLD
+ 13│ 68..107 mod=BOLD
+ 14│ 13..25 fg=Black bg=Cyan mod=BOLD
+ 14│ 26..48 fg=Black bg=Cyan mod=BOLD
+ 14│ 49..67 fg=Black bg=Cyan mod=BOLD
+ 14│ 68..107 fg=Black bg=Cyan mod=BOLD
+ 37│ 1..119 mod=BOLD

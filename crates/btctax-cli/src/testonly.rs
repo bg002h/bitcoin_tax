@@ -448,3 +448,52 @@ pub fn seed_j2_donated(
     .unwrap();
     vault
 }
+
+/// Seed J5 (an LT lot $30k + a higher-basis ST lot $80k + a 2025 sale $50k) with a 2025 profile AND a
+/// standing FIFO election — but NOT the optimizer's accept. This is the state the walkthrough's `z`
+/// (optimize-accept) EDITOR frames drive from: the optimizer proposes swapping to the ST lot to realize a
+/// loss. The election made-date is hardcoded 2025-01-01 (the engine blocks effective_from before the
+/// made-date, so a later threaded `now` would trip MethodElectionBackdated).
+pub fn seed_j5_elected(dir: &std::path::Path, pp: &btctax_store::Passphrase) -> std::path::PathBuf {
+    use btctax_core::{Carryforward, FilingStatus, LotMethod, TaxProfile};
+    use rust_decimal::Decimal;
+    let vault = seed_journey(dir, pp, &j5());
+    let z = Decimal::ZERO;
+    let profile = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: Decimal::from(100_000),
+        magi_excluding_crypto: Decimal::from(100_000),
+        qualified_dividends_and_other_pref_income: z,
+        other_net_capital_gain: z,
+        capital_loss_carryforward_in: Carryforward { short: z, long: z },
+        w2_ss_wages: z,
+        w2_medicare_wages: z,
+        schedule_c_expenses: z,
+    };
+    crate::cmd::tax::set_profile(&vault, pp, 2025, profile, false).unwrap();
+    crate::cmd::reconcile::set_forward_method(
+        &vault,
+        pp,
+        LotMethod::Fifo,
+        None,
+        Some(time::macros::date!(2025 - 01 - 01)),
+        time::macros::datetime!(2025 - 01 - 01 00:00:00 UTC),
+    )
+    .unwrap();
+    vault
+}
+
+/// Seed J5's post-accept state — the FIFO election PLUS the optimizer's proposed lot pick accepted (the
+/// whole sale moved onto the short-term `opt-buy-st` lot to realize a loss). The walkthrough's VIEWER
+/// renders the resulting Disposals (ST loss) + Tax (§1211 deduction + carryforward). `now` is the accept
+/// made-date — MUST be ≤ the 2025-06-01 sale so the selection is Contemporaneous; the caller passes the
+/// same instant the editor frames pin.
+pub fn seed_j5_optimized(
+    dir: &std::path::Path,
+    pp: &btctax_store::Passphrase,
+    now: time::OffsetDateTime,
+) -> std::path::PathBuf {
+    let vault = seed_j5_elected(dir, pp);
+    crate::cmd::optimize::accept(&vault, pp, 2025, None, None, now).unwrap();
+    vault
+}

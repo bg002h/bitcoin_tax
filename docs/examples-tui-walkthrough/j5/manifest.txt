@@ -1,0 +1,14 @@
+# J5 — optimizing lot selection (TUI screen-walkthrough).
+# CLI setup is the EXACT captured transcript (CONSOLE); the editor optimize-accept flow + the viewer
+# result tabs are byte-gated frames. A Phase-2 journey (editor + viewer).
+PROSE \fBJourney 5 \(em optimizing which lots a sale draws from.\fP Dana holds a cheap long\-term lot ($30,000 basis) and an expensive short\-term one ($80,000 basis), and sells 1 BTC for $50,000. Under her standing FIFO election the sale draws the cheap lot \(en a $20,000 long\-term gain. The optimizer looks for a better identification.
+PROSE \fBSetup, at the command line.\fP She creates the vault, imports, sets a 2025 profile, and records the FIFO baseline election. The exact terminal session:
+CONSOLE 00-setup.console.md J5 - setup - init, import, verify, tax-profile, FIFO election
+PROSE \fB1. Editor \(em the optimizer's proposal.\fP Pressing \fBz\fP opens the optimize\-accept flow. Instead of FIFO's cheap\-lot gain, it proposes drawing the sale from the \fIshort\-term\fP lot \(en realizing a loss. The banner shows the whole\-year effect: \fB$3,660 less tax\fP.
+FRAME 01-optimize-list.txt J5 - step 1 - editor: the optimizer proposal (year tax -3660)
+PROSE \fB2. Editor \(em confirm.\fP Enter opens the confirmation: the sale identified against the short\-term lot (100,000,000 sat). Made before the sale, the identification is recorded \fIcontemporaneous\fP \(en the standard a specific\-lot election must meet.
+FRAME 02-optimize-confirm.txt J5 - step 2 - editor: confirm the lot swap (contemporaneous)
+PROSE \fB3. Viewer \(em Disposals.\fP The sale now draws from the $80,000 short\-term lot: $50,000 proceeds against $80,000 basis \(en a $30,000 short\-term \fIloss\fP.
+FRAME 03-disposals.txt J5 - step 3 - viewer: Disposals (the sale drawn from the short-term lot)
+PROSE \fB4. Viewer \(em Tax.\fP The loss pays off: \(sc1211 deducts $3,000 against ordinary income this year (worth $660 at her 22% rate) and carries the remaining $27,000 short\-term loss forward \(en $3,660 less tax than the FIFO baseline.
+FRAME 04-tax.txt J5 - step 4 - viewer: Tax (the loss deduction + carryforward)

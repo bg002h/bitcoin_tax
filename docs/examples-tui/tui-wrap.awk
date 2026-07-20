@@ -82,6 +82,7 @@ END {
         gsub(/—/, "-", line)
         gsub(/←/, "<", line); gsub(/↑/, "^", line); gsub(/→/, ">", line); gsub(/↓/, "v", line)
         gsub(/▲/, "^", line); gsub(/▼/, "v", line)
+        gsub(/Δ/, "D", line) # U+0394 (the optimizer's "Δtax" banner) — groff -Tpdf has no u0394 glyph
         out = ""; curfg = ""; curb = 0
         L = length(line)
         for (c = 1; c <= L; c++) {

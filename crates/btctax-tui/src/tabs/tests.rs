@@ -928,6 +928,7 @@ fn btctax_tui_walkthrough_frames() -> Vec<(&'static str, String)> {
     frames.extend(j3_viewer_frames());
     frames.extend(j9_viewer_frames());
     frames.extend(j2_viewer_frames());
+    frames.extend(j5_viewer_frames());
     frames
 }
 
@@ -1144,6 +1145,41 @@ fn j2_viewer_frames() -> Vec<(&'static str, String)> {
     out
 }
 
+/// J5 (lot-selection optimization) VIEWER frames — after the editor accepts the optimizer's pick (the sale
+/// moved onto the short-term lot to realize a loss), the viewer shows Disposals (the sale now drawing from
+/// the $80k ST lot → a $30,000 short-term loss) and Tax (the §1211 $3,000 loss deduction, the $27,000
+/// short carryforward, and the −$660 attributable). Seeds via `seed_j5_optimized`. The accept made-date
+/// (2025-04-01, ≤ the sale) is DELIBERATELY earlier than the review display clock (2025-07-01) — the
+/// identification is made before the sale, reviewed after; neither Disposals nor Tax renders that made-date.
+fn j5_viewer_frames() -> Vec<(&'static str, String)> {
+    use btctax_store::Passphrase;
+    std::env::set_var(
+        "BTCTAX_PRICE_CACHE",
+        "/nonexistent-walkthrough-price-cache.csv",
+    );
+    let pp = Passphrase::new("golden-j5-pass".into());
+    let accept_now = time::macros::datetime!(2025 - 04 - 01 12:00:00 UTC);
+    let display_now = time::macros::datetime!(2025 - 07 - 01 12:00:00 UTC);
+    let dir = tempfile::tempdir().unwrap();
+    let vault = btctax_cli::testonly::seed_j5_optimized(dir.path(), &pp, accept_now);
+    let session = btctax_cli::Session::open(&vault, &pp).unwrap();
+    let (snapshot, year) = crate::unlock::build_snapshot(&session).unwrap();
+    let mut app = App::new(std::path::PathBuf::from("/vault.pgp"));
+    app.screen = Screen::Viewer;
+    app.selected_year = year;
+    app.snapshot = Some(snapshot);
+    app.clock = crate::clock::Clock::Pinned(display_now);
+    let mut out = Vec::new();
+    for (stem, tab) in [
+        ("j5/03-disposals", crate::app::Tab::Disposals),
+        ("j5/04-tax", crate::app::Tab::Tax),
+    ] {
+        app.tab = tab;
+        out.push((stem, crate::capture::to_golden(&render_viewer(&mut app))));
+    }
+    out
+}
+
 /// The frame stems this crate (the viewer half) is responsible for capturing. Declared EXPLICITLY so a
 /// dropped/renamed capture tuple reds the gate below (NEW-I-1): the byte-compare loop alone iterates only
 /// over what's captured, so a shrunk set passes vacuously — and the xtask manifest bijection would still
@@ -1164,6 +1200,8 @@ const WALKTHROUGH_VIEWER_STEMS: &[&str] = &[
     "j9/03-compliance",
     "j2/03-forms",
     "j2/04-tax",
+    "j5/03-disposals",
+    "j5/04-tax",
 ];
 
 #[cfg(unix)]

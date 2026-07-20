@@ -1327,6 +1327,76 @@ fn generate_j2_walkthrough_console(bin: &Path) -> String {
     t
 }
 
+/// J5 CLI setup transcript — two lots + a 2025 sale where the lot method matters: `init`, `import`,
+/// `verify` (exit 0; advisory pre-2025-method note on the 2023 lot), `tax-profile` (2025), and a standing
+/// FIFO election (`config --set-forward-method fifo --effective-from 2025-01-01`, `BTCTAX_NOW`-pinned so
+/// the override banner stays off the gated transcript). The editor half then shows the optimizer proposing
+/// a tax-saving alternative. Committed to `docs/examples-tui-walkthrough/j5/00-setup.console.md`.
+#[cfg(all(test, unix))]
+fn generate_j5_walkthrough_console(bin: &Path) -> String {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J5_CSV);
+    let mut t = String::new();
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&["--vault", "v.pgp", "verify"]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &plain_with_stderr(&[
+            "--vault",
+            "v.pgp",
+            "tax-profile",
+            "--year",
+            "2025",
+            "--filing-status",
+            "single",
+            "--ordinary-taxable-income",
+            "100000",
+            "--magi-excluding-crypto",
+            "100000",
+            "--qualified-dividends",
+            "0",
+        ]),
+    );
+    emit(
+        &mut t,
+        bin,
+        cwd,
+        &Cmd {
+            args: &[
+                "--vault",
+                "v.pgp",
+                "config",
+                "--set-forward-method",
+                "fifo",
+                "--effective-from",
+                "2025-01-01",
+            ],
+            now: Some("2025-01-01T00:00:00Z"), // election made-date pinned (banner → stderr, elided here)
+            show_stderr: false,
+        },
+    );
+    t
+}
+
 /// J9 — choosing which lots a sale draws from (UX-P1-10). With two lots and a sale smaller than either
 /// combined holding, the default method picks the lots for you; `select-lots` lets you identify EXACTLY
 /// which ones — the picks (`<origin>#<split>:<sat>`) come from the disposal's `lot` column in
@@ -1658,6 +1728,10 @@ mod tests {
             (
                 "j2/00-setup.console.md",
                 generate_j2_walkthrough_console(bin),
+            ),
+            (
+                "j5/00-setup.console.md",
+                generate_j5_walkthrough_console(bin),
             ),
         ]
     }
